@@ -59,4 +59,10 @@ public class ProjectController {
         projectService.updateStatus(id, req);
         return R.ok();
     }
+
+    @DeleteMapping("/{id}")
+    public R<Void> delete(@PathVariable Long id) {
+        projectService.delete(id);
+        return R.ok();
+    }
 }

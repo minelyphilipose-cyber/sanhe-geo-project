@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="sidebar" :class="{ 'sidebar--collapsed': collapsed }">
     <div class="sidebar__logo">
       <div class="sidebar__logo-icon">
@@ -52,6 +52,7 @@ interface MenuItem {
   title: string
   icon?: string
   roles?: RoleType[]
+  permissions?: string[]
 }
 
 const props = defineProps<{
@@ -78,8 +79,9 @@ const activeMenu = computed(() => {
 
 const visibleMenus = computed(() =>
   props.menus.filter((m) => {
-    if (!m.roles || m.roles.length === 0) return true
-    return userStore.hasRole(m.roles)
+    const rolePass = !m.roles || m.roles.length === 0 || userStore.hasRole(m.roles)
+    const permPass = !m.permissions || m.permissions.length === 0 || userStore.hasPermission(m.permissions)
+    return rolePass && permPass
   }),
 )
 </script>

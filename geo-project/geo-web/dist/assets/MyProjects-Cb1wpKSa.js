@@ -1,0 +1,1 @@
+import{P as e}from"./PagePlaceholder-SbFam7TI.js";import{d as o,z as r,o as t}from"./index-BY8DVcs-.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=o({__name:"MyProjects",setup(a){return(c,s)=>(t(),r(e,{title:"我的项目",description:"项目状态、阶段进度、报表生成",icon:"Folder",phase:5}))}});export{m as default};

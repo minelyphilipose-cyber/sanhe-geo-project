@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <header class="topbar">
     <div class="topbar__left">
       <el-breadcrumb separator="/">
@@ -26,9 +26,7 @@
             <el-dropdown-item disabled>
               <span class="text-xs text-gray-400">{{ roleLabel }}</span>
             </el-dropdown-item>
-            <el-dropdown-item divided command="logout">
-              退出登录
-            </el-dropdown-item>
+            <el-dropdown-item divided command="logout">退出登录</el-dropdown-item>
           </el-dropdown-menu>
         </template>
       </el-dropdown>
@@ -78,9 +76,9 @@ const breadcrumbs = computed(() => {
     }))
 })
 
-function handleCommand(cmd: string) {
+async function handleCommand(cmd: string) {
   if (cmd === 'logout') {
-    userStore.logout()
+    await userStore.logout()
     router.push('/login')
   }
 }
@@ -146,4 +144,3 @@ function handleCommand(cmd: string) {
   color: #1e293b;
 }
 </style>
-

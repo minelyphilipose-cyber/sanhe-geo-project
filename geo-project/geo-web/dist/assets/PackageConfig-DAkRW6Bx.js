@@ -1,1 +1,0 @@
-import{P as e}from"./PagePlaceholder-CHUxhP8d.js";import{d as o,z as t,o as a}from"./index-DrNrTPe0.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=o({__name:"PackageConfig",setup(r){return(n,c)=>(a(),t(e,{title:"套餐配置",description:"套餐价格、交付强度、服务周期",icon:"Setting",phase:1}))}});export{m as default};

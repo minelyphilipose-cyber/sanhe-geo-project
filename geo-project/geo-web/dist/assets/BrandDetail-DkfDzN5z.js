@@ -1,0 +1,1 @@
+import{P as e}from"./PagePlaceholder-SbFam7TI.js";import{d as o,z as t,o as a}from"./index-BY8DVcs-.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=o({__name:"BrandDetail",setup(r){return(n,p)=>(a(),t(e,{title:"品牌详情",description:"品牌基本信息、项目关联、资产概览",icon:"Shop",phase:1}))}});export{m as default};

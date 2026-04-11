@@ -17,6 +17,7 @@ public class SysUser {
     private String phone;
     private String email;
     private Boolean isActive;
+    private Integer tokenVersion;
     private LocalDateTime lastLoginAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

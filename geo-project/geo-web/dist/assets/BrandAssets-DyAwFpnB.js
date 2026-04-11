@@ -1,0 +1,1 @@
+import{P as e}from"./PagePlaceholder-SbFam7TI.js";import{d as s,z as t,o}from"./index-BY8DVcs-.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=s({__name:"BrandAssets",setup(a){return(r,n)=>(o(),t(e,{title:"品牌资产",description:"文件上传、版本管理、素材分类 (迁移自 assets.html)",icon:"Files",phase:6}))}});export{m as default};

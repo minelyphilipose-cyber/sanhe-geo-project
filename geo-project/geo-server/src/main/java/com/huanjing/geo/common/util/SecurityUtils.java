@@ -25,4 +25,9 @@ public final class SecurityUtils {
         LoginUser user = getCurrentUser();
         return user != null ? user.getRole() : null;
     }
+
+    public static Integer getCurrentTokenVersion() {
+        LoginUser user = getCurrentUser();
+        return user != null ? user.getTokenVersion() : null;
+    }
 }

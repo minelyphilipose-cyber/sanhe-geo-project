@@ -26,8 +26,8 @@
         <div class="flex items-center justify-between">
           <span>虚拟账户</span>
           <div class="space-x-2">
-            <el-button type="primary" @click="rechargeVisible = true">充值录入</el-button>
-            <el-button @click="adjustVisible = true">手工调整</el-button>
+            <el-button v-if="canWritePartner" type="primary" @click="rechargeVisible = true">充值录入</el-button>
+            <el-button v-if="canWritePartner" @click="adjustVisible = true">手工调整</el-button>
           </div>
         </div>
       </template>
@@ -99,9 +99,10 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { computed, reactive, ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useUserStore } from '@/stores/user'
 import {
   adjustPartnerAccount,
   getPartnerAccount,
@@ -115,6 +116,8 @@ import {
 import DataState from '@/components/ui/DataState.vue'
 
 const route = useRoute()
+const userStore = useUserStore()
+const canWritePartner = computed(() => userStore.hasPermission('partner.write'))
 const partnerId = Number(route.params.id)
 const hasValidId = Number.isFinite(partnerId) && partnerId > 0
 

@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router'
+﻿import { createRouter, createWebHistory } from 'vue-router'
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
 import { useUserStore } from '@/stores/user'
@@ -16,6 +16,12 @@ const router = createRouter({
       name: 'Login',
       component: () => import('@/views/login/LoginView.vue'),
       meta: { title: '登录' },
+    },
+    {
+      path: '/403',
+      name: 'Forbidden',
+      component: () => import('@/views/system/ForbiddenView.vue'),
+      meta: { title: '无权限' },
     },
     {
       path: '/r/:token',
@@ -38,13 +44,13 @@ const router = createRouter({
   ],
 })
 
-const PUBLIC_PATHS = ['/login', '/r/']
+const PUBLIC_PATHS = ['/login', '/r/', '/403']
 
 function isPublicPath(path: string): boolean {
   return PUBLIC_PATHS.some((p) => path.startsWith(p))
 }
 
-router.beforeEach((to, _from, next) => {
+router.beforeEach(async (to, _from, next) => {
   NProgress.start()
   document.title = `${to.meta?.title ?? ''} | 幻境AI GEO`
 
@@ -62,12 +68,23 @@ router.beforeEach((to, _from, next) => {
     return next(`/login?redirect=${encodeURIComponent(to.fullPath)}`)
   }
 
-  const requiredRoles = to.meta?.roles as RoleType[] | undefined
-  if (requiredRoles && requiredRoles.length > 0) {
-    if (!userStore.hasRole(requiredRoles)) {
-      const home = userStore.isPartner ? '/partner/home' : '/admin/overview'
-      return next(home)
+  if (!userStore.permissions.length) {
+    try {
+      await userStore.syncProfile()
+    } catch {
+      await userStore.logout()
+      return next('/login')
     }
+  }
+
+  const requiredRoles = to.meta?.roles as RoleType[] | undefined
+  if (requiredRoles && requiredRoles.length > 0 && !userStore.hasRole(requiredRoles)) {
+    return next('/403')
+  }
+
+  const requiredPerms = (to.meta?.permissions as string[] | undefined) || []
+  if (requiredPerms.length > 0 && !userStore.hasPermission(requiredPerms)) {
+    return next('/403')
   }
 
   if (userStore.isPartner && to.path.startsWith('/admin')) {
@@ -85,4 +102,3 @@ router.afterEach(() => {
 })
 
 export default router
-

@@ -12,3 +12,15 @@ export function refreshTokenApi(refreshToken: string) {
 export function logoutApi() {
   return request.post<R<void>>('/auth/logout')
 }
+
+export function meApi() {
+  return request.get<R<{
+    id: number
+    username: string
+    displayName: string
+    role: string
+    partnerId: number | null
+    isActive: boolean
+    permissions: string[]
+  }>>('/me')
+}

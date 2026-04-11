@@ -7,6 +7,7 @@ import com.huanjing.geo.module.auth.dto.LoginRequest;
 import com.huanjing.geo.module.auth.dto.LoginResponse;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysUserMapper;
+import com.huanjing.geo.module.system.service.PermissionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -25,6 +26,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final RedisTemplate<String, Object> redisTemplate;
+    private final PermissionService permissionService;
 
     public LoginResponse login(LoginRequest req) {
         SysUser user = userMapper.selectOne(
@@ -38,9 +40,10 @@ public class AuthService {
             throw new BizException(401, "Invalid username or password");
         }
 
+        Integer tokenVersion = user.getTokenVersion() == null ? 0 : user.getTokenVersion();
         String accessToken = jwtTokenProvider.createAccessToken(
-                user.getId(), user.getUsername(), user.getRole());
-        String refreshToken = jwtTokenProvider.createRefreshToken(user.getId());
+                user.getId(), user.getUsername(), user.getRole(), tokenVersion);
+        String refreshToken = jwtTokenProvider.createRefreshToken(user.getId(), tokenVersion);
 
         redisTemplate.opsForValue().set(
                 REFRESH_KEY_PREFIX + user.getId(),
@@ -61,6 +64,7 @@ public class AuthService {
                         .displayName(user.getDisplayName())
                         .role(user.getRole())
                         .partnerId(user.getPartnerId())
+                        .permissions(permissionService.listPermKeys(user))
                         .build())
                 .build();
     }
@@ -84,8 +88,17 @@ public class AuthService {
             throw new BizException(401, "User not found or inactive");
         }
 
+        Integer tokenVersion = user.getTokenVersion() == null ? 0 : user.getTokenVersion();
+        Integer refreshTokenVersion = jwtTokenProvider.parseToken(refreshToken).get("tokenVersion", Integer.class);
+        if (refreshTokenVersion == null) {
+            refreshTokenVersion = 0;
+        }
+        if (!tokenVersion.equals(refreshTokenVersion)) {
+            throw new BizException(401, "Refresh token invalidated");
+        }
+
         return jwtTokenProvider.createAccessToken(
-                user.getId(), user.getUsername(), user.getRole());
+                user.getId(), user.getUsername(), user.getRole(), tokenVersion);
     }
 
     public void logout(Long userId) {

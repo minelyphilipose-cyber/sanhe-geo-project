@@ -31,23 +31,25 @@ public class JwtTokenProvider {
         this.refreshTokenExpire = refreshExpire * 1000;
     }
 
-    public String createAccessToken(Long userId, String username, String role) {
+    public String createAccessToken(Long userId, String username, String role, Integer tokenVersion) {
         Date now = new Date();
         return Jwts.builder()
                 .subject(String.valueOf(userId))
                 .claim("username", username)
                 .claim("role", role)
+                .claim("tokenVersion", tokenVersion == null ? 0 : tokenVersion)
                 .issuedAt(now)
                 .expiration(new Date(now.getTime() + accessTokenExpire))
                 .signWith(key)
                 .compact();
     }
 
-    public String createRefreshToken(Long userId) {
+    public String createRefreshToken(Long userId, Integer tokenVersion) {
         Date now = new Date();
         return Jwts.builder()
                 .subject(String.valueOf(userId))
                 .claim("type", "refresh")
+                .claim("tokenVersion", tokenVersion == null ? 0 : tokenVersion)
                 .issuedAt(now)
                 .expiration(new Date(now.getTime() + refreshTokenExpire))
                 .signWith(key)

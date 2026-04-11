@@ -1,1 +1,0 @@
-import{P as e}from"./PagePlaceholder-CHUxhP8d.js";import{d as o,z as t,o as a}from"./index-DrNrTPe0.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=o({__name:"UserManage",setup(r){return(n,s)=>(a(),t(e,{title:"用户管理",description:"内部用户、角色分配、账号管理",icon:"Setting",phase:1}))}});export{m as default};

@@ -12,4 +12,5 @@ public class LoginUser {
     private Long userId;
     private String username;
     private String role;
+    private Integer tokenVersion;
 }

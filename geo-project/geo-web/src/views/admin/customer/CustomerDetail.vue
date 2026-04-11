@@ -6,7 +6,10 @@
       <template #header>
         <div class="flex items-center justify-between">
           <span>公司信息</span>
-          <el-button type="primary" link @click="editVisible = true">编辑</el-button>
+          <div class="space-x-2">
+            <el-button v-if="canWriteCompany" type="primary" link @click="editVisible = true">编辑</el-button>
+            <el-button v-if="canWriteCompany" type="danger" link @click="removeCurrentCompany">删除客户</el-button>
+          </div>
         </div>
       </template>
       <el-descriptions :column="3" border>
@@ -23,7 +26,7 @@
       <template #header>
         <div class="flex items-center justify-between">
           <span>品牌列表</span>
-          <el-button type="primary" @click="openBrandCreate">新增品牌</el-button>
+          <el-button v-if="canWriteCompany" type="primary" @click="openBrandCreate">新增品牌</el-button>
         </div>
       </template>
       <DataState :loading="brandLoading" :empty="!brandLoading && brands.length === 0" empty-text="暂无品牌数据">
@@ -35,8 +38,9 @@
           <el-table-column prop="status" label="状态" width="110" />
           <el-table-column label="操作" width="220" fixed="right">
             <template #default="scope">
-              <el-button link type="primary" @click="openBrandEdit(scope.row)">编辑</el-button>
-              <el-button link type="primary" @click="goCreateProject(scope.row.id)">基于该品牌建项目</el-button>
+              <el-button v-if="canWriteCompany" link type="primary" @click="openBrandEdit(scope.row)">编辑</el-button>
+              <el-button v-if="canWriteCompany" link type="danger" @click="removeBrand(scope.row)">删除</el-button>
+              <el-button v-if="canWriteProject" link type="primary" @click="goCreateProject(scope.row.id)">基于该品牌建项目</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -101,11 +105,14 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { computed, reactive, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { useUserStore } from '@/stores/user'
 import {
   createBrand,
+  deleteBrand,
+  deleteCompany,
   getBrandList,
   getCompanyDetail,
   updateBrand,
@@ -116,6 +123,9 @@ import DataState from '@/components/ui/DataState.vue'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
+const canWriteCompany = computed(() => userStore.hasPermission('company.write'))
+const canWriteProject = computed(() => userStore.hasPermission('project.write'))
 const companyId = Number(route.params.id)
 const hasValidId = Number.isFinite(companyId) && companyId > 0
 
@@ -204,6 +214,22 @@ async function loadCompany() {
     company.value = null
   } finally {
     loading.value = false
+  }
+}
+
+async function removeCurrentCompany() {
+  if (!company.value) return
+  try {
+    await ElMessageBox.confirm(
+      `确认删除客户「${company.value.companyName}」？该操作不可撤销。`,
+      '删除确认',
+      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' },
+    )
+    await deleteCompany(companyId)
+    ElMessage.success('删除成功')
+    router.push('/admin/customers')
+  } catch {
+    // canceled
   }
 }
 
@@ -305,6 +331,21 @@ async function submitBrand() {
     await loadBrands()
   } finally {
     brandSaving.value = false
+  }
+}
+
+async function removeBrand(row: Brand) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除品牌「${row.brandName}」？该操作不可撤销。`,
+      '删除确认',
+      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' },
+    )
+    await deleteBrand(row.id)
+    ElMessage.success('删除成功')
+    await loadBrands()
+  } catch {
+    // canceled
   }
 }
 

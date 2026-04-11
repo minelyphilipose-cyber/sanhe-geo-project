@@ -11,7 +11,7 @@
         </el-select>
         <el-button @click="load">查询</el-button>
       </div>
-      <el-button type="primary" @click="openCreate">新建项目</el-button>
+      <el-button v-if="canWriteProject" type="primary" @click="openCreate">新建项目</el-button>
     </div>
 
     <el-card>
@@ -31,7 +31,8 @@
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="goDetail(scope.row.id)">详情</el-button>
-            <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
+            <el-button v-if="canWriteProject" link type="primary" @click="openEdit(scope.row)">编辑</el-button>
+            <el-button v-if="canWriteProject" link type="danger" @click="removeProject(scope.row)">删除</el-button>
           </template>
         </el-table-column>
         </el-table>
@@ -91,16 +92,19 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { computed, reactive, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { getProjectList, createProject, updateProject } from '@/api/project'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { useUserStore } from '@/stores/user'
+import { getProjectList, createProject, deleteProject, updateProject } from '@/api/project'
 import { getBrandList } from '@/api/customer'
 import type { Brand, Project } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
+const canWriteProject = computed(() => userStore.hasPermission('project.write'))
 
 const PACKAGE_PRESET: Record<string, { price: number; months: number }> = {
   trial_6980: { price: 6980, months: 3 },
@@ -286,6 +290,21 @@ async function submit() {
 
 function goDetail(id: number) {
   router.push(`/admin/projects/${id}`)
+}
+
+async function removeProject(row: Project) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除项目「${row.projectName}」？该操作不可撤销。`,
+      '删除确认',
+      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' },
+    )
+    await deleteProject(row.id)
+    ElMessage.success('删除成功')
+    await load()
+  } catch {
+    // canceled
+  }
 }
 
 onMounted(async () => {

@@ -43,4 +43,10 @@ public class BrandController {
     public R<Brand> update(@PathVariable Long id, @Valid @RequestBody BrandUpdateRequest req) {
         return R.ok(brandService.update(id, req));
     }
+
+    @DeleteMapping("/{id}")
+    public R<Void> delete(@PathVariable Long id) {
+        brandService.delete(id);
+        return R.ok();
+    }
 }

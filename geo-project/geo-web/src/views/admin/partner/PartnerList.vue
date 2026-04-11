@@ -10,7 +10,7 @@
         </el-select>
         <el-button @click="load">查询</el-button>
       </div>
-      <el-button type="primary" @click="openCreate">新建合伙人</el-button>
+      <el-button v-if="canWritePartner" type="primary" @click="openCreate">新建合伙人</el-button>
     </div>
 
     <el-card>
@@ -29,8 +29,8 @@
         <el-table-column label="操作" width="260" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="goDetail(scope.row.id)">详情</el-button>
-            <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
-            <el-dropdown @command="(v: string) => changeStatus(scope.row.id, v)">
+            <el-button v-if="canWritePartner" link type="primary" @click="openEdit(scope.row)">编辑</el-button>
+            <el-dropdown v-if="canWritePartner" @command="(v: string) => changeStatus(scope.row.id, v)">
               <span class="el-dropdown-link">改状态</span>
               <template #dropdown>
                 <el-dropdown-menu>
@@ -95,9 +95,10 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { computed, reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { useUserStore } from '@/stores/user'
 import {
   createPartner,
   getPartnerList,
@@ -108,6 +109,8 @@ import {
 import DataState from '@/components/ui/DataState.vue'
 
 const router = useRouter()
+const userStore = useUserStore()
+const canWritePartner = computed(() => userStore.hasPermission('partner.write'))
 
 const loading = ref(false)
 const saving = ref(false)

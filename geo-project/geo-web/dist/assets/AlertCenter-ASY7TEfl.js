@@ -1,1 +1,0 @@
-import{P as e}from"./PagePlaceholder-CHUxhP8d.js";import{d as o,z as t,o as r}from"./index-DrNrTPe0.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const l=o({__name:"AlertCenter",setup(a){return(n,c)=>(r(),t(e,{title:"异常中心",description:"系统告警列表、严重程度筛选、处理记录",icon:"Bell",phase:6}))}});export{l as default};

@@ -1,1 +1,0 @@
-import{P as e}from"./PagePlaceholder-CHUxhP8d.js";import{d as o,z as t,o as a}from"./index-DrNrTPe0.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=o({__name:"TaskList",setup(r){return(s,c)=>(a(),t(e,{title:"监测任务",description:"任务列表、状态跟踪、手动触发",icon:"List",phase:2}))}});export{m as default};

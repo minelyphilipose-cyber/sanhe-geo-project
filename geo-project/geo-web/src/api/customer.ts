@@ -23,6 +23,10 @@ export function updateCompany(id: number, data: Record<string, any>) {
   return request.put<R<Company>>(`/companies/${id}`, data)
 }
 
+export function deleteCompany(id: number) {
+  return request.delete<R<void>>(`/companies/${id}`)
+}
+
 export function getBrandList(params: {
   current?: number
   size?: number
@@ -42,5 +46,9 @@ export function createBrand(data: Record<string, any>) {
 
 export function updateBrand(id: number, data: Record<string, any>) {
   return request.put<R<Brand>>(`/brands/${id}`, data)
+}
+
+export function deleteBrand(id: number) {
+  return request.delete<R<void>>(`/brands/${id}`)
 }
 

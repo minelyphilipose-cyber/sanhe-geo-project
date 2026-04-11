@@ -1,1 +1,0 @@
-import{P as o}from"./PagePlaceholder-CHUxhP8d.js";import{d as e,z as r,o as t}from"./index-DrNrTPe0.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=e({__name:"MonitoringDashboard",setup(a){return(n,i)=>(t(),r(o,{title:"监测中心",description:"任务队列、今日跑批、结果概览",icon:"Monitor",phase:2}))}});export{m as default};

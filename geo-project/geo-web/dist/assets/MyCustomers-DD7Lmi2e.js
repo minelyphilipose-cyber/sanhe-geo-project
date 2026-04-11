@@ -1,1 +1,0 @@
-import{P as e}from"./PagePlaceholder-CHUxhP8d.js";import{d as o,z as r,o as t}from"./index-DrNrTPe0.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=o({__name:"MyCustomers",setup(s){return(a,c)=>(t(),r(e,{title:"我的客户",description:"签约客户列表（仅自己名下）",icon:"User",phase:5}))}});export{m as default};

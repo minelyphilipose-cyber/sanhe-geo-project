@@ -27,17 +27,17 @@
       <!-- 快捷入口 -->
       <div class="glass-card-sm p-5">
         <h3 class="section-title">快捷操作</h3>
-        <div class="space-y-2">
-          <el-button class="w-full" @click="$router.push('/admin/customers')">
+        <div class="flex flex-col gap-2">
+          <el-button class="w-full" @click="$router.push('/admin/customers')" style="margin-left: 0 !important">
             新建客户
           </el-button>
-          <el-button class="w-full" @click="$router.push('/admin/projects')">
+          <el-button class="w-full" @click="$router.push('/admin/projects')" style="margin-left: 0 !important">
             新建项目
           </el-button>
-          <el-button class="w-full" @click="$router.push('/admin/monitoring')">
+          <el-button class="w-full" @click="$router.push('/admin/monitoring')" style="margin-left: 0 !important">
             监测中心
           </el-button>
-          <el-button class="w-full" @click="$router.push('/admin/alerts')">
+          <el-button class="w-full" @click="$router.push('/admin/alerts')" style="margin-left: 0 !important">
             异常中心
           </el-button>
         </div>

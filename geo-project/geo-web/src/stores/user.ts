@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { loginApi, refreshTokenApi, logoutApi } from '@/api/auth'
+import { loginApi, refreshTokenApi, logoutApi, meApi } from '@/api/auth'
 import { isPartnerRole } from '@/utils/constants'
 import type { UserInfo, RoleType, LoginRequest } from '@/types'
 
@@ -39,6 +39,7 @@ export const useUserStore = defineStore('user', () => {
   const role = computed<RoleType | null>(() => userInfo.value?.role ?? null)
   const isPartner = computed(() => role.value ? isPartnerRole(role.value) : false)
   const displayName = computed(() => userInfo.value?.displayName ?? '')
+  const permissions = computed(() => userInfo.value?.permissions ?? [])
 
   function persistAuth() {
     const payload: PersistedAuth = {
@@ -59,6 +60,9 @@ export const useUserStore = defineStore('user', () => {
     accessToken.value = res.accessToken
     refreshToken.value = res.refreshToken
     userInfo.value = res.user
+    if (!userInfo.value.permissions) {
+      userInfo.value.permissions = []
+    }
     persistAuth()
   }
 
@@ -71,6 +75,24 @@ export const useUserStore = defineStore('user', () => {
     accessToken.value = newToken
     persistAuth()
     return newToken
+  }
+
+  async function syncProfile() {
+    if (!accessToken.value) {
+      return
+    }
+    const { data } = await meApi()
+    const profile = data.data
+    userInfo.value = {
+      id: profile.id,
+      username: profile.username,
+      displayName: profile.displayName,
+      role: profile.role as RoleType,
+      partnerId: profile.partnerId,
+      phone: null,
+      permissions: profile.permissions || [],
+    }
+    persistAuth()
   }
 
   async function logout() {
@@ -91,6 +113,14 @@ export const useUserStore = defineStore('user', () => {
     return allowed.includes(role.value)
   }
 
+  function hasPermission(required: string | string[]): boolean {
+    const requiredList = Array.isArray(required) ? required : [required]
+    if (requiredList.length === 0) return true
+    if (role.value === 'super_admin') return true
+    const userPerms = permissions.value
+    return requiredList.some((perm) => userPerms.includes(perm))
+  }
+
   return {
     accessToken,
     refreshToken,
@@ -99,9 +129,12 @@ export const useUserStore = defineStore('user', () => {
     role,
     isPartner,
     displayName,
+    permissions,
     login,
     refreshAccessToken,
+    syncProfile,
     logout,
     hasRole,
+    hasPermission,
   }
 })

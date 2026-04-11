@@ -10,7 +10,7 @@
         </el-select>
         <el-button @click="load">查询</el-button>
       </div>
-      <el-button type="primary" @click="openCreate">新建客户</el-button>
+      <el-button v-if="canWriteCompany" type="primary" @click="openCreate">新建客户</el-button>
     </div>
 
     <el-card>
@@ -25,7 +25,8 @@
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="goDetail(scope.row.id)">详情</el-button>
-            <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
+            <el-button v-if="canWriteCompany" link type="primary" @click="openEdit(scope.row)">编辑</el-button>
+            <el-button v-if="canWriteCompany" link type="danger" @click="removeCompany(scope.row)">删除</el-button>
           </template>
         </el-table-column>
         </el-table>
@@ -77,14 +78,17 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
+import { computed, reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { createCompany, getCompanyList, updateCompany } from '@/api/customer'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { useUserStore } from '@/stores/user'
+import { createCompany, deleteCompany, getCompanyList, updateCompany } from '@/api/customer'
 import type { Company } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 
 const router = useRouter()
+const userStore = useUserStore()
+const canWriteCompany = computed(() => userStore.hasPermission('company.write'))
 
 const loading = ref(false)
 const saving = ref(false)
@@ -212,6 +216,21 @@ async function submit() {
 
 function goDetail(id: number) {
   router.push(`/admin/customers/${id}`)
+}
+
+async function removeCompany(row: Company) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除客户「${row.companyName}」？该操作不可撤销。`,
+      '删除确认',
+      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' },
+    )
+    await deleteCompany(row.id)
+    ElMessage.success('删除成功')
+    await load()
+  } catch {
+    // canceled
+  }
 }
 
 onMounted(load)

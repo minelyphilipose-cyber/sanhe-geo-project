@@ -31,10 +31,16 @@ public class PartnerService {
     private final CurrentUserService currentUserService;
 
     public Page<Partner> page(long current, long size, String keyword, String status) {
-        currentUserService.ensureInternalOperator();
+        currentUserService.ensurePermission("partner.read");
 
         LambdaQueryWrapper<Partner> wrapper = new LambdaQueryWrapper<Partner>()
                 .orderByDesc(Partner::getCreatedAt);
+
+        SysUser user = currentUserService.requireCurrentUser();
+        Long scopePartnerId = currentUserService.requirePartnerScope(user);
+        if (scopePartnerId != null) {
+            wrapper.eq(Partner::getId, scopePartnerId);
+        }
 
         if (StringUtils.hasText(keyword)) {
             wrapper.and(w -> w.like(Partner::getPartnerName, keyword)
@@ -50,17 +56,15 @@ public class PartnerService {
 
     public Partner detail(Long id) {
         SysUser user = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission("partner.read");
         Partner partner = requirePartner(id);
-
-        if (currentUserService.isPartnerUser(user) && !id.equals(user.getPartnerId())) {
-            throw new BizException(403, "No permission to access other partner data");
-        }
+        currentUserService.ensurePartnerResourceAccess(user, id, "partner");
         return partner;
     }
 
     @Transactional
     public Partner create(PartnerCreateRequest req) {
-        currentUserService.ensureInternalOperator();
+        currentUserService.ensurePermission("partner.write");
 
         Partner existed = partnerMapper.selectOne(
                 new LambdaQueryWrapper<Partner>().eq(Partner::getPartnerCode, req.getPartnerCode())
@@ -94,7 +98,7 @@ public class PartnerService {
     }
 
     public Partner update(Long id, PartnerUpdateRequest req) {
-        currentUserService.ensureInternalOperator();
+        currentUserService.ensurePermission("partner.write");
 
         Partner partner = requirePartner(id);
         partner.setPartnerName(req.getPartnerName());
@@ -110,7 +114,7 @@ public class PartnerService {
     }
 
     public void updateStatus(Long id, String status) {
-        currentUserService.ensureInternalOperator();
+        currentUserService.ensurePermission("partner.write");
         Partner partner = requirePartner(id);
         partner.setStatus(status);
         partnerMapper.updateById(partner);
@@ -139,7 +143,7 @@ public class PartnerService {
 
     @Transactional
     public PartnerAccountTxn recharge(Long partnerId, PartnerRechargeRequest req) {
-        currentUserService.ensureInternalOperator();
+        currentUserService.ensurePermission("partner.write");
         detail(partnerId);
 
         PartnerAccount account = ensureAccount(partnerId);
@@ -168,7 +172,7 @@ public class PartnerService {
 
     @Transactional
     public PartnerAccountTxn adjust(Long partnerId, PartnerAdjustRequest req) {
-        currentUserService.ensureInternalOperator();
+        currentUserService.ensurePermission("partner.write");
         detail(partnerId);
 
         PartnerAccount account = ensureAccount(partnerId);

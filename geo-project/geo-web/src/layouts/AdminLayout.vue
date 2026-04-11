@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="admin-layout">
     <Sidebar
       :collapsed="appStore.sidebarCollapsed"
@@ -35,19 +35,22 @@ interface MenuItem {
   title: string
   icon?: string
   roles?: RoleType[]
+  permissions?: string[]
 }
 
 const appStore = useAppStore()
 
 const sidebarMenus: MenuItem[] = [
-  { path: '/admin/overview', name: 'Overview', title: '工作台', icon: 'Odometer' },
-  { path: '/admin/customers', name: 'CustomerList', title: '客户管理', icon: 'User' },
-  { path: '/admin/projects', name: 'ProjectList', title: '项目管理', icon: 'Folder' },
-  { path: '/admin/monitoring', name: 'Monitoring', title: '监测中心', icon: 'Monitor' },
+  { path: '/admin/overview', name: 'Overview', title: '工作台', icon: 'Odometer', permissions: ['company.read'] },
+  { path: '/admin/customers', name: 'CustomerList', title: '客户管理', icon: 'User', permissions: ['company.read'] },
+  { path: '/admin/projects', name: 'ProjectList', title: '项目管理', icon: 'Folder', permissions: ['project.read'] },
+  { path: '/admin/monitoring', name: 'Monitoring', title: '监测中心', icon: 'Monitor', roles: ['delivery_manager', 'manager', 'super_admin'] },
   { path: '/admin/reports', name: 'ReportManage', title: '报表管理', icon: 'DataAnalysis', roles: ['delivery_manager', 'manager', 'super_admin'] },
-  { path: '/admin/partners', name: 'PartnerList', title: '合伙人管理', icon: 'Coordinate', roles: ['manager', 'super_admin'] },
-  { path: '/admin/alerts', name: 'AlertCenter', title: '异常中心', icon: 'Bell' },
+  { path: '/admin/partners', name: 'PartnerList', title: '合伙人管理', icon: 'Coordinate', permissions: ['partner.read'] },
+  { path: '/admin/alerts', name: 'AlertCenter', title: '异常中心', icon: 'Bell', roles: ['delivery_manager', 'manager', 'super_admin'] },
+  { path: '/admin/activity-logs', name: 'ActivityLogs', title: '操作日志', icon: 'Document', permissions: ['user.manage'] },
   { path: '/admin/settings/platforms', name: 'Settings', title: '平台配置', icon: 'Setting', roles: ['super_admin'] },
+  { path: '/admin/settings/users', name: 'UserManage', title: '用户管理', icon: 'Setting', permissions: ['user.manage'] },
 ]
 </script>
 

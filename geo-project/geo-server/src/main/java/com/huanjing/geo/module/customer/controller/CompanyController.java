@@ -44,4 +44,10 @@ public class CompanyController {
     public R<Company> update(@PathVariable Long id, @Valid @RequestBody CompanyUpdateRequest req) {
         return R.ok(companyService.update(id, req));
     }
+
+    @DeleteMapping("/{id}")
+    public R<Void> delete(@PathVariable Long id) {
+        companyService.delete(id);
+        return R.ok();
+    }
 }

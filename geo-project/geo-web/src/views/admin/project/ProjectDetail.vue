@@ -9,6 +9,7 @@
           <div class="space-x-2">
             <el-tag>{{ project?.status || '-' }}</el-tag>
             <el-tag type="info">{{ project?.stage || '-' }}</el-tag>
+            <el-button v-if="canWriteProject" type="danger" link @click="removeCurrentProject">删除项目</el-button>
           </div>
         </div>
       </template>
@@ -31,15 +32,15 @@
       <el-form :model="progressForm" label-width="120px" style="max-width: 540px">
         <el-form-item label="项目状态">
           <el-select v-model="progressForm.status" style="width: 100%">
-            <el-option v-for="v in statusOptions" :key="v" :label="v" :value="v" />
+            <el-option v-for="v in statusOptions" :key="v" :label="v" :value="v" :disabled="isStatusDisabled(v)" />
           </el-select>
         </el-form-item>
         <el-form-item label="项目阶段">
-          <el-select v-model="progressForm.stage" style="width: 100%">
-            <el-option v-for="v in stageOptions" :key="v" :label="v" :value="v" />
+          <el-select v-model="progressForm.stage" style="width: 100%" :disabled="isArchivedStatus">
+            <el-option v-for="v in availableStageOptions" :key="v" :label="v" :value="v" />
           </el-select>
         </el-form-item>
-        <el-form-item>
+        <el-form-item v-if="canWriteProject">
           <el-button type="primary" :loading="saving" @click="submitProgress">保存推进状态</el-button>
         </el-form-item>
       </el-form>
@@ -48,13 +49,17 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, ref, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, reactive, ref, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getProjectDetail, updateProjectStage, updateProjectStatus } from '@/api/project'
+import { useUserStore } from '@/stores/user'
+import { deleteProject, getProjectDetail, updateProjectStage, updateProjectStatus } from '@/api/project'
 import type { Project } from '@/types'
 
 const route = useRoute()
+const router = useRouter()
+const userStore = useUserStore()
+const canWriteProject = computed(() => userStore.hasPermission('project.write'))
 const projectId = Number(route.params.id)
 const hasValidId = Number.isFinite(projectId) && projectId > 0
 
@@ -77,8 +82,33 @@ const stageOptions = [
   'dispute_handling',
   'completed',
 ]
+const draftAllowedStages = ['pending_start', 'collecting_materials']
+const statusTransitionMap: Record<string, string[]> = {
+  draft: ['active', 'archived'],
+  active: ['paused', 'dispute', 'completed', 'archived'],
+  paused: ['active', 'dispute', 'archived'],
+  dispute: ['active', 'paused', 'archived'],
+  completed: ['archived'],
+  archived: [],
+}
 
 const progressForm = reactive({ status: 'draft', stage: 'pending_start' })
+const isArchivedStatus = computed(() => progressForm.status === 'archived')
+const availableStageOptions = computed(() => {
+  if (progressForm.status === 'draft') {
+    return draftAllowedStages
+  }
+  return stageOptions
+})
+
+watch(
+  () => progressForm.status,
+  (value) => {
+    if (value === 'draft' && !draftAllowedStages.includes(progressForm.stage)) {
+      progressForm.stage = 'pending_start'
+    }
+  },
+)
 
 function centsToYuan(v?: number | null) {
   if (v == null) return '-'
@@ -111,16 +141,45 @@ async function submitProgress() {
       '状态变更确认',
       { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' },
     )
-    await Promise.all([
-      updateProjectStatus(projectId, progressForm.status),
-      updateProjectStage(projectId, progressForm.stage),
-    ])
+    const current = project.value
+    if (!current) {
+      ElMessage.error('项目信息不存在')
+      return
+    }
+    if (progressForm.status !== current.status) {
+      await updateProjectStatus(projectId, progressForm.status)
+    }
+    if (progressForm.stage !== current.stage) {
+      await updateProjectStage(projectId, progressForm.stage)
+    }
     ElMessage.success('状态已更新')
     await load()
-  } catch {
-    // user canceled
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return
   } finally {
     saving.value = false
+  }
+}
+
+function isStatusDisabled(target: string) {
+  const currentStatus = project.value?.status
+  if (!currentStatus || target === currentStatus) return false
+  return !(statusTransitionMap[currentStatus] || []).includes(target)
+}
+
+async function removeCurrentProject() {
+  if (!project.value) return
+  try {
+    await ElMessageBox.confirm(
+      `确认删除项目「${project.value.projectName}」？该操作不可撤销。`,
+      '删除确认',
+      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' },
+    )
+    await deleteProject(projectId)
+    ElMessage.success('删除成功')
+    router.push('/admin/projects')
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return
   }
 }
 

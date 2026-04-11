@@ -32,3 +32,7 @@ export function updateProjectStatus(id: number, status: string) {
   return request.put<R<void>>(`/projects/${id}/status`, { status })
 }
 
+export function deleteProject(id: number) {
+  return request.delete<R<void>>(`/projects/${id}`)
+}
+

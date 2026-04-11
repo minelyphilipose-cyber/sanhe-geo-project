@@ -35,6 +35,7 @@ export interface UserInfo {
   role: RoleType
   partnerId: number | null
   phone: string | null
+  permissions?: string[]
 }
 
 /* ====================================================
@@ -233,10 +234,11 @@ export interface SystemAlert {
 export interface ActivityLog {
   id: number
   userId: number | null
+  operatorName: string
   action: string
   targetType: string
-  targetId: number
-  detail: any
+  targetId: number | null
+  detailJson: string | null
   ipAddress: string | null
   createdAt: string
 }
@@ -247,6 +249,7 @@ export interface ActivityLog {
 export interface RouteMeta {
   title?: string
   roles?: RoleType[]
+  permissions?: string[]
   requiresAuth?: boolean
   icon?: string
   hidden?: boolean
