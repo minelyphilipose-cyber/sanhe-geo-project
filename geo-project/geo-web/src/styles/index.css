@@ -1,0 +1,162 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ====================================================
+   全局 CSS 变量 — 从 8 个旧 HTML 统一提取
+   ==================================================== */
+:root {
+  /* 品牌色 */
+  --color-brand-50: #EFF6FF;
+  --color-brand-100: #DBEAFE;
+  --color-brand-500: #3B82F6;
+  --color-brand-600: #2563EB;
+  --color-brand-700: #1D4ED8;
+  --color-brand-800: #1E40AF;
+  --color-brand-950: #172554;
+
+  /* 深色背景 */
+  --color-dark-900: #020617;
+  --color-dark-800: #0F172A;
+
+  /* 中性色 */
+  --color-slate-50: #F8FAFC;
+  --color-slate-100: #F1F5F9;
+  --color-slate-200: #E2E8F0;
+  --color-slate-300: #CBD5E1;
+  --color-slate-600: #475569;
+  --color-slate-800: #1E293B;
+
+  /* 布局 */
+  --sidebar-width: 240px;
+  --sidebar-collapsed-width: 64px;
+  --header-height: 56px;
+
+  /* 页面背景 — 旧代码的 #FAFAFA */
+  --page-bg: #F8FAFC;
+}
+
+/* ====================================================
+   全局基础
+   ==================================================== */
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--page-bg);
+  color: var(--color-slate-800);
+  font-family: 'PingFang SC', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ====================================================
+   毛玻璃卡片 — 从旧代码 .glass-card 提取
+   ==================================================== */
+.glass-card {
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  box-shadow:
+    0 10px 30px -10px rgba(15, 23, 42, 0.05),
+    0 0 0 1px rgba(255, 255, 255, 0.5) inset;
+  border-radius: 16px;
+}
+
+.glass-card-sm {
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  border-radius: 12px;
+}
+
+/* ====================================================
+   NProgress 自定义 — 品牌蓝
+   ==================================================== */
+#nprogress .bar {
+  background: var(--color-brand-600) !important;
+  height: 2px !important;
+}
+#nprogress .peg {
+  box-shadow: 0 0 10px var(--color-brand-600), 0 0 5px var(--color-brand-600) !important;
+}
+
+/* ====================================================
+   滚动条
+   ==================================================== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-slate-300);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-slate-600);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ====================================================
+   Element Plus 覆盖 — 让它融入品牌色系
+   ==================================================== */
+:root {
+  --el-color-primary: #2563EB;
+  --el-color-primary-light-3: #60A5FA;
+  --el-color-primary-light-5: #93C5FD;
+  --el-color-primary-light-7: #BFDBFE;
+  --el-color-primary-light-9: #EFF6FF;
+  --el-color-primary-dark-2: #1D4ED8;
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
+  --el-font-size-base: 14px;
+}
+
+/* 让 Element Plus 弹框不被侧边栏遮挡 */
+.el-overlay {
+  z-index: 2000 !important;
+}
+
+/* ====================================================
+   页面过渡动画
+   ==================================================== */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: all 0.25s ease-out;
+}
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateY(12px);
+}
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+/* ====================================================
+   实用类
+   ==================================================== */
+.page-container {
+  padding: 20px 24px;
+  min-height: calc(100vh - var(--header-height) - 40px);
+}
+
+.page-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-dark-800);
+  margin-bottom: 20px;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-slate-800);
+  margin-bottom: 12px;
+}

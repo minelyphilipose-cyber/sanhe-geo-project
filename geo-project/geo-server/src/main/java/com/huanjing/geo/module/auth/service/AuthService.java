@@ -1,0 +1,93 @@
+package com.huanjing.geo.module.auth.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.security.JwtTokenProvider;
+import com.huanjing.geo.module.auth.dto.LoginRequest;
+import com.huanjing.geo.module.auth.dto.LoginResponse;
+import com.huanjing.geo.module.system.entity.SysUser;
+import com.huanjing.geo.module.system.mapper.SysUserMapper;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.util.concurrent.TimeUnit;
+
+@Service
+@RequiredArgsConstructor
+public class AuthService {
+
+    private final SysUserMapper userMapper;
+    private final PasswordEncoder passwordEncoder;
+    private final JwtTokenProvider jwtTokenProvider;
+    private final RedisTemplate<String, Object> redisTemplate;
+
+    private static final String REFRESH_KEY_PREFIX = "refresh:";
+
+    public LoginResponse login(LoginRequest req) {
+        SysUser user = userMapper.selectOne(
+                new LambdaQueryWrapper<SysUser>()
+                        .eq(SysUser::getUsername, req.getUsername())
+        );
+        if (user == null || !user.getIsActive()) {
+            throw new BizException(401, "用户名或密码错误");
+        }
+        if (!passwordEncoder.matches(req.getPassword(), user.getPasswordHash())) {
+            throw new BizException(401, "用户名或密码错误");
+        }
+
+        String accessToken = jwtTokenProvider.createAccessToken(
+                user.getId(), user.getUsername(), user.getRole());
+        String refreshToken = jwtTokenProvider.createRefreshToken(user.getId());
+
+        // refresh token 存入 Redis
+        redisTemplate.opsForValue().set(
+                REFRESH_KEY_PREFIX + user.getId(),
+                refreshToken,
+                jwtTokenProvider.getRefreshTokenExpireSeconds(),
+                TimeUnit.SECONDS
+        );
+
+        // 更新最后登录时间
+        user.setLastLoginAt(LocalDateTime.now());
+        userMapper.updateById(user);
+
+        return LoginResponse.builder()
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .user(LoginResponse.UserVO.builder()
+                        .id(user.getId())
+                        .username(user.getUsername())
+                        .displayName(user.getDisplayName())
+                        .role(user.getRole())
+                        .partnerId(user.getPartnerId())
+                        .build())
+                .build();
+    }
+
+    public String refresh(String refreshToken) {
+        if (!jwtTokenProvider.validateToken(refreshToken)) {
+            throw new BizException(401, "刷新令牌无效");
+        }
+        Long userId = jwtTokenProvider.getUserIdFromToken(refreshToken);
+
+        String stored = (String) redisTemplate.opsForValue().get(REFRESH_KEY_PREFIX + userId);
+        if (stored == null || !stored.equals(refreshToken)) {
+            throw new BizException(401, "刷新令牌已失效");
+        }
+
+        SysUser user = userMapper.selectById(userId);
+        if (user == null || !user.getIsActive()) {
+            throw new BizException(401, "用户不存在或已禁用");
+        }
+
+        return jwtTokenProvider.createAccessToken(
+                user.getId(), user.getUsername(), user.getRole());
+    }
+
+    public void logout(Long userId) {
+        redisTemplate.delete(REFRESH_KEY_PREFIX + userId);
+    }
+}
