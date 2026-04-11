@@ -1,23 +1,18 @@
 <template>
-  <div
-    class="sidebar"
-    :class="{ 'sidebar--collapsed': collapsed }"
-  >
-    <!-- Logo 区域 -->
+  <div class="sidebar" :class="{ 'sidebar--collapsed': collapsed }">
     <div class="sidebar__logo">
       <div class="sidebar__logo-icon">
         <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect width="32" height="32" rx="8" fill="#2563EB"/>
-          <path d="M8 16L14 10L20 16L14 22Z" fill="white" opacity="0.9"/>
-          <path d="M14 16L20 10L26 16L20 22Z" fill="white" opacity="0.6"/>
+          <rect width="32" height="32" rx="8" fill="#2563EB" />
+          <path d="M8 16L14 10L20 16L14 22Z" fill="white" opacity="0.9" />
+          <path d="M14 16L20 10L26 16L20 22Z" fill="white" opacity="0.6" />
         </svg>
       </div>
       <transition name="fade">
-        <span v-show="!collapsed" class="sidebar__logo-text">幻境AI · GEO</span>
+        <span v-show="!collapsed" class="sidebar__logo-text">幻境AI | GEO</span>
       </transition>
     </div>
 
-    <!-- 导航菜单 -->
     <el-scrollbar class="sidebar__menu-wrap">
       <el-menu
         :default-active="activeMenu"
@@ -37,7 +32,6 @@
       </el-menu>
     </el-scrollbar>
 
-    <!-- 底部折叠按钮 -->
     <div class="sidebar__footer" @click="$emit('toggle')">
       <el-icon :size="18">
         <component :is="collapsed ? 'Expand' : 'Fold'" />
@@ -73,7 +67,6 @@ const route = useRoute()
 const userStore = useUserStore()
 
 const activeMenu = computed(() => {
-  // 匹配当前路由到一级菜单
   const matched = route.matched
   for (let i = matched.length - 1; i >= 0; i--) {
     const path = matched[i].path
@@ -87,7 +80,7 @@ const visibleMenus = computed(() =>
   props.menus.filter((m) => {
     if (!m.roles || m.roles.length === 0) return true
     return userStore.hasRole(m.roles)
-  })
+  }),
 )
 </script>
 
@@ -95,7 +88,7 @@ const visibleMenus = computed(() =>
 .sidebar {
   width: var(--sidebar-width);
   height: 100vh;
-  background: linear-gradient(180deg, #0F172A 0%, #020617 100%);
+  background: linear-gradient(180deg, #0f172a 0%, #020617 100%);
   display: flex;
   flex-direction: column;
   transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -110,7 +103,6 @@ const visibleMenus = computed(() =>
   width: var(--sidebar-collapsed-width);
 }
 
-/* Logo */
 .sidebar__logo {
   height: var(--header-height);
   display: flex;
@@ -130,12 +122,11 @@ const visibleMenus = computed(() =>
 .sidebar__logo-text {
   font-size: 15px;
   font-weight: 700;
-  color: #F1F5F9;
+  color: #f1f5f9;
   white-space: nowrap;
   letter-spacing: -0.02em;
 }
 
-/* 菜单 */
 .sidebar__menu-wrap {
   flex: 1;
   overflow: hidden;
@@ -162,10 +153,9 @@ const visibleMenus = computed(() =>
 
 :deep(.el-menu-item.is-active) {
   background: rgba(37, 99, 235, 0.25) !important;
-  color: #FFFFFF !important;
+  color: #ffffff !important;
 }
 
-/* 折叠按钮 */
 .sidebar__footer {
   height: 44px;
   display: flex;
@@ -173,20 +163,22 @@ const visibleMenus = computed(() =>
   justify-content: center;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   cursor: pointer;
-  color: #64748B;
+  color: #64748b;
   transition: color 0.2s;
   flex-shrink: 0;
 }
 
 .sidebar__footer:hover {
-  color: #E2E8F0;
+  color: #e2e8f0;
 }
 
-/* fade */
-.fade-enter-active, .fade-leave-active {
+.fade-enter-active,
+.fade-leave-active {
   transition: opacity 0.2s;
 }
-.fade-enter-from, .fade-leave-to {
+.fade-enter-from,
+.fade-leave-to {
   opacity: 0;
 }
 </style>
+

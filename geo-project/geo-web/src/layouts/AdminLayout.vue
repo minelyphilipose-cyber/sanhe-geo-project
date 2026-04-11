@@ -27,22 +27,27 @@
 import Sidebar from './components/Sidebar.vue'
 import TopBar from './components/TopBar.vue'
 import { useAppStore } from '@/stores/app'
+import type { RoleType } from '@/types'
+
+interface MenuItem {
+  path: string
+  name: string
+  title: string
+  icon?: string
+  roles?: RoleType[]
+}
 
 const appStore = useAppStore()
 
-/**
- * 侧边栏一级菜单
- * 只显示非 hidden 的路由，hidden 的路由（详情页等）不出现在菜单
- */
-const sidebarMenus = [
-  { path: '/admin/overview',              name: 'Overview',     title: '工作台',     icon: 'Odometer'     },
-  { path: '/admin/customers',             name: 'CustomerList', title: '客户管理',   icon: 'User'         },
-  { path: '/admin/projects',              name: 'ProjectList',  title: '项目管理',   icon: 'Folder'       },
-  { path: '/admin/monitoring',            name: 'Monitoring',   title: '监测中心',   icon: 'Monitor'      },
-  { path: '/admin/reports',               name: 'ReportManage', title: '报表管理',   icon: 'DataAnalysis', roles: ['delivery_manager', 'manager', 'super_admin'] },
-  { path: '/admin/partners',              name: 'PartnerList',  title: '合伙人管理', icon: 'Coordinate',   roles: ['manager', 'super_admin'] },
-  { path: '/admin/alerts',                name: 'AlertCenter',  title: '异常中心',   icon: 'Bell'         },
-  { path: '/admin/settings/platforms',    name: 'Settings',     title: '系统设置',   icon: 'Setting',      roles: ['super_admin'] },
+const sidebarMenus: MenuItem[] = [
+  { path: '/admin/overview', name: 'Overview', title: '工作台', icon: 'Odometer' },
+  { path: '/admin/customers', name: 'CustomerList', title: '客户管理', icon: 'User' },
+  { path: '/admin/projects', name: 'ProjectList', title: '项目管理', icon: 'Folder' },
+  { path: '/admin/monitoring', name: 'Monitoring', title: '监测中心', icon: 'Monitor' },
+  { path: '/admin/reports', name: 'ReportManage', title: '报表管理', icon: 'DataAnalysis', roles: ['delivery_manager', 'manager', 'super_admin'] },
+  { path: '/admin/partners', name: 'PartnerList', title: '合伙人管理', icon: 'Coordinate', roles: ['manager', 'super_admin'] },
+  { path: '/admin/alerts', name: 'AlertCenter', title: '异常中心', icon: 'Bell' },
+  { path: '/admin/settings/platforms', name: 'Settings', title: '平台配置', icon: 'Setting', roles: ['super_admin'] },
 ]
 </script>
 

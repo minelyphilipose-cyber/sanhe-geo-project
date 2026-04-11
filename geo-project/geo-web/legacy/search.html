@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>星轨GEO - 让AI成为专属推荐官 | 智能级联选择器</title>
+    <link rel="icon" type="image/png" href="xgai.png">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background-color: #FAFAFA; color: #0F172A; font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow-x: hidden; -webkit-font-smoothing: antialiased; }
+        .tech-grid { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-image: radial-gradient(#CBD5E1 1px, transparent 1px); background-size: 32px 32px; opacity: 0.4; z-index: -2; mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 80%); pointer-events: none; }
+        .ambient-glow-blue { position: absolute; top: -10%; left: 30%; width: 600px; height: 600px; background: radial-gradient(circle, rgba(37,99,235,0.08) 0%, rgba(255,255,255,0) 70%); border-radius: 50%; z-index: -1; filter: blur(60px); animation: float 10s ease-in-out infinite alternate; }
+        .ambient-glow-purple { position: absolute; top: 10%; right: 20%; width: 500px; height: 500px; background: radial-gradient(circle, rgba(139,92,246,0.06) 0%, rgba(255,255,255,0) 70%); border-radius: 50%; z-index: -1; filter: blur(60px); animation: float 12s ease-in-out infinite alternate-reverse; }
+        @keyframes float { 0% { transform: translate(0, 0); } 100% { transform: translate(30px, 50px); } }
+        .top-banner { background-color: #020617; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+        .v-ticker-wrap { height: 18px; overflow: hidden; display: inline-block; vertical-align: middle; }
+        .v-ticker-track { display: flex; flex-direction: column; animation: vScroll 9s cubic-bezier(0.25, 0.8, 0.25, 1) infinite; }
+        .v-ticker-track span { height: 18px; line-height: 18px; white-space: nowrap; }
+        .top-banner:hover .v-ticker-track { animation-play-state: paused; }
+        @keyframes vScroll { 0%, 22% { transform: translateY(0); } 33%, 55% { transform: translateY(-18px); } 66%, 88% { transform: translateY(-36px); } 100% { transform: translateY(-54px); } }
+        .header-bar { transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1); background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(16px); }
+        .header-bar:hover { background-color: rgba(255, 255, 255, 0.98); }
+        .nav-link { color: #334155; transition: all 0.3s ease; position: relative; font-weight: 700; }
+        .nav-link:hover { color: #2563EB; transform: translateY(-2px); }
+        .nav-link.active { color: #1D4ED8; font-weight: 800; } 
+        .hero-title { font-size: clamp(2.5rem, 5vw, 4.5rem); line-height: 1.2; letter-spacing: -0.04em; font-weight: 900; color: #020617; filter: drop-shadow(0 4px 6px rgba(37, 99, 235, 0.12)) drop-shadow(0 12px 16px rgba(37, 99, 235, 0.08)); }
+        .hero-title-blue { background-image: linear-gradient(110deg, #60A5FA 0%, #60A5FA 30%, #1D4ED8 40%, #172554 45%, #172554 55%, #1D4ED8 60%, #60A5FA 70%, #60A5FA 100%); background-size: 200% auto; color: transparent; -webkit-background-clip: text; background-clip: text; animation: slowSweep 5s linear infinite; }
+        @keyframes slowSweep { 0% { background-position: 200% center; } 100% { background-position: 0% center; } }
+        .search-pill { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(20px); border: 1px solid rgba(226, 232, 240, 0.8); box-shadow: 0 20px 40px -15px rgba(15, 23, 42, 0.08), 0 0 0 1px rgba(255, 255, 255, 0.5) inset; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        .search-pill:focus-within { box-shadow: 0 30px 60px -15px rgba(37, 99, 235, 0.15), 0 0 0 2px rgba(37, 99, 235, 0.2); transform: translateY(-2px); background: #FFFFFF; }
+        .ai-logo-row a { transition: all 0.4s ease; cursor: pointer; display: inline-block; }
+        .ai-logo-row a:hover { transform: translateY(-3px) scale(1.05); }
+        
+        /* 级联选择器样式 (Cascader 风格，类似图片的现代级联) */
+        .cascader-wrapper {
+            position: relative;
+            display: inline-block;
+            width: auto;
+            min-width: 220px;
+        }
+        .cascader-trigger {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 9999px;
+            padding: 0.5rem 1.5rem 0.5rem 1rem;
+            font-size: 0.875rem;
+            color: #1e293b;
+            outline: none;
+            transition: all 0.2s;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            cursor: pointer;
+            white-space: nowrap;
+            min-width: 220px;
+        }
+        .cascader-trigger:hover {
+            border-color: #94a3b8;
+            background-color: #fefefe;
+        }
+        .cascader-trigger.active {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59,130,246,0.2);
+        }
+        .cascader-placeholder {
+            color: #94a3b8;
+            font-weight: 450;
+        }
+        .cascader-selected-text {
+            color: #0f172a;
+            font-weight: 500;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .cascader-arrow {
+            transition: transform 0.2s ease;
+            font-size: 12px;
+            color: #64748b;
+        }
+        .cascader-panel {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 0;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 35px -12px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(0,0,0,0.02);
+            z-index: 1000;
+            display: flex;
+            backdrop-filter: blur(2px);
+            background: rgba(255,255,255,0.98);
+            border: 1px solid #eef2ff;
+            overflow: hidden;
+            width: 560px;
+            max-width: 85vw;
+            transition: all 0.2s;
+        }
+        .cascader-column {
+            flex: 1;
+            min-width: 160px;
+            max-height: 320px;
+            overflow-y: auto;
+            border-right: 1px solid #f1f5f9;
+            background: white;
+        }
+        .cascader-column:last-child {
+            border-right: none;
+        }
+        .cascader-item {
+            padding: 10px 16px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: #1e293b;
+            cursor: pointer;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .cascader-item:hover {
+            background-color: #f1f5f9;
+            color: #1d4ed8;
+        }
+        .cascader-item.active {
+            background: #eef2ff;
+            color: #2563eb;
+            font-weight: 600;
+            position: relative;
+        }
+        .cascader-item.disabled {
+            color: #cbd5e1;
+            cursor: not-allowed;
+            background: transparent;
+        }
+        .cascader-item.disabled:hover {
+            background: transparent;
+            color: #cbd5e1;
+        }
+        .cascader-empty {
+            padding: 20px 16px;
+            font-size: 0.75rem;
+            color: #94a3b8;
+            text-align: center;
+        }
+        @media (max-width: 640px) {
+            .cascader-panel { width: 300px; flex-direction: column; max-height: 380px; }
+            .cascader-column { border-right: none; border-bottom: 1px solid #f1f5f9; max-height: 200px; }
+            .cascader-trigger { min-width: 160px; }
+        }
+        .industry-input {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 9999px;
+            padding: 0.5rem 1rem;
+            font-size: 0.875rem;
+            color: #1e293b;
+            outline: none;
+            transition: all 0.2s;
+            width: 180px;
+        }
+        .industry-input:focus {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 2px rgba(59,130,246,0.2);
+        }
+        @media (max-width: 640px) {
+            .cascader-trigger, .industry-input { width: 100%; }
+            .flex-wrap.gap-3 { flex-direction: column; align-items: stretch; }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col relative">
+
+<div class="tech-grid"></div>
+<div class="ambient-glow-blue"></div>
+<div class="ambient-glow-purple"></div>
+
+<!-- 顶部通栏保持不变 -->
+<div class="fixed top-0 left-0 right-0 w-full z-[100] shadow-sm">
+    <div class="top-banner text-white text-xs font-medium py-2 flex justify-center items-center cursor-pointer hover:bg-gray-900 transition-colors" onclick="alert('活动链接即将开放，敬请期待！')">
+        <span class="flex items-center gap-2 tracking-wide text-gray-200">
+            <span class="flex h-2 w-2 relative shrink-0"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span></span>
+            <div class="v-ticker-wrap">
+                <div class="v-ticker-track">
+                    <span>[系统通知] 2026年重磅发布《LLM-Native GEO 品牌增长白皮书》，点击立即免费领取！</span>
+                    <span>[限时服务] 开通【增长进阶版】即送 3 个月重点问答场景优化方案！</span>
+                    <span>[核心优势] 星轨 GEO，帮助品牌在 AI 场景中获得更清晰的表达与展示！</span>
+                    <span aria-hidden="true">[系统通知] 2026年重磅发布《LLM-Native GEO 品牌增长白皮书》，点击立即免费领取！</span>
+                </div>
+            </div>
+        </span>
+    </div>
+    <header class="header-bar w-full px-6 py-3 flex justify-between items-center border-b border-gray-200/60">
+        <a href="index.html" class="flex items-center transition-transform hover:scale-105 shrink-0"><img src="logo.png" alt="星轨GEO" class="h-8 md:h-10 w-auto object-contain"></a>
+        <button class="md:hidden text-gray-700 p-1" onclick="openMobileNav()"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+        <nav class="hidden md:flex items-center gap-8 text-[15px] font-bold text-gray-700">
+            <a href="index.html" class="nav-link active">首页</a>
+            <div class="relative group">
+                <a href="console.html" class="nav-link flex items-center gap-1 py-2">GEO智能体引擎<svg class="w-4 h-4 text-blue-600 transition-transform duration-300 group-hover:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"></path></svg></a>
+                <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1 w-44 bg-white border border-gray-100 shadow-xl rounded-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 transform translate-y-2 group-hover:translate-y-0 overflow-hidden z-50">
+                    <div class="py-2"><a href="console.html" class="block px-5 py-2.5 text-[14px] text-gray-600 hover:bg-blue-50 hover:text-blue-600 font-bold transition-colors">全网AI收录大盘</a><a href="profile.html" class="block px-5 py-2.5 text-[14px] text-gray-600 hover:bg-blue-50 hover:text-blue-600 font-bold transition-colors">品牌 AI 知识库构建</a><a href="keyword.html" class="block px-5 py-2.5 text-[14px] text-gray-600 hover:bg-blue-50 hover:text-blue-600 font-bold transition-colors">用户提问词预测</a><a href="answer.html" class="block px-5 py-2.5 text-[14px] text-gray-600 hover:bg-blue-50 hover:text-blue-600 font-bold transition-colors">大模型专属答案</a><a href="deploy.html" class="block px-5 py-2.5 text-[14px] text-gray-600 hover:bg-blue-50 hover:text-blue-600 font-bold transition-colors">全域信源分发引擎</a></div>
+                </div>
+            </div>
+            <a href="assets.html" class="nav-link">品牌数字资产库</a>
+            <a href="javascript:void(0)" onclick="alert('该页面正在建设中，敬请期待！')" class="nav-link flex items-center gap-1">解决方案</a>
+            <a href="javascript:void(0)" onclick="alert('该页面正在建设中，敬请期待！')" class="nav-link">关于我们</a>
+        </nav>
+        <div class="flex items-center gap-6 text-[15px] font-bold">
+            <button class="hidden md:block nav-link">联系客服</button>
+            <button class="hidden md:block nav-link" onclick="openModal('login')">登录</button>
+            <button onclick="openModal('register')" class="px-5 py-1.5 bg-blue-600 text-white rounded-full hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-300 transition-all">免费注册</button>
+        </div>
+    </header>
+</div>
+
+<div id="mobileNav" class="fixed inset-0 z-[150] hidden">
+    <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onclick="closeMobileNav()"></div>
+    <div class="absolute right-0 top-0 h-full w-[280px] bg-white shadow-2xl p-6 flex flex-col">
+        <div class="flex justify-between items-center mb-8"><span class="text-lg font-black text-gray-900">导航菜单</span><button onclick="closeMobileNav()" class="text-gray-400 hover:text-gray-900"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>
+        <nav class="flex flex-col gap-1 text-[15px] font-bold text-gray-700">
+            <a href="index.html" class="py-3 border-b border-gray-100 text-blue-600">首页</a><a href="console.html" class="py-3 border-b border-gray-100">全网AI收录大盘</a><a href="profile.html" class="py-3 border-b border-gray-100">品牌 AI 知识库构建</a><a href="keyword.html" class="py-3 border-b border-gray-100">用户提问词预测</a><a href="answer.html" class="py-3 border-b border-gray-100">大模型专属答案</a><a href="deploy.html" class="py-3 border-b border-gray-100">全域信源分发引擎</a><a href="assets.html" class="py-3 border-b border-gray-100">品牌数字资产库</a>
+        </nav>
+    </div>
+</div>
+
+<main class="flex-1 flex flex-col items-center justify-center px-4 mt-40 mb-32 relative z-10">
+    <h1 class="hero-title text-center mb-12">让 AI 成为您的<span class="hero-title-blue">专属推荐官</span></h1>
+    <p class="text-slate-500 text-base md:text-lg mb-12 text-center font-medium tracking-normal leading-relaxed max-w-4xl">您的潜在客户，正在被AI优先推荐给竞争对手。<br class="hidden md:block">当客户向大模型提问时，别让您的品牌处于"查无此人"的失语状态。</p>
+    <p class="text-[11px] text-gray-400 text-center max-w-3xl leading-relaxed -mt-6 mb-10 px-4">本系统基于品牌公开信息建设、问答场景分析、内容优化与多平台分发协同，提升品牌在 AI 场景中的信息可见度与表达一致性，不承诺对第三方平台推荐、排序、引用或审核结果进行控制。</p>
+    
+    <div class="w-full max-w-3xl search-pill rounded-full p-2 flex items-center relative z-20 mb-6" >
+        <div class="pl-4 text-blue-600"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg></div>
+        <input type="text" id="brandInput" placeholder="输入企业/品牌名称，一键生成 AI 品牌可见度检测报告..." class="flex-1 bg-transparent border-none text-gray-900 px-4 py-3 md:py-4 focus:outline-none placeholder-gray-500 text-base font-medium" >
+    </div>
+
+    <!-- 级联选择器 + 行业输入框 区域，替换掉原有的原生select -->
+    <div class="w-full max-w-3xl mx-auto mt-2 mb-8 flex flex-wrap justify-center gap-3 items-center" style="margin-top: 30px;">
+        <!-- 级联选择器组件容器 (原下拉框升级版) -->
+        <div id="cascaderContainer" class="cascader-wrapper" style="margin-left: -10px;">
+            <div class="cascader-trigger" id="cascaderTrigger" style="width:370px" >
+                <span id="cascaderDisplayText" class="cascader-placeholder" >请选择地区（省/市/区县）</span>
+                <span class="cascader-arrow">▼</span>
+            </div>
+            <!-- 级联面板动态渲染 -->
+            <div id="cascaderPanel" class="cascader-panel" style="display: none;"></div>
+        </div>
+        
+        <input type="text" id="industryInput" class="industry-input" placeholder="请输入所属行业" autocomplete="off" style="width:370px">
+    </div>
+    
+    <button onclick="startScan()" id="scanBtn" class="bg-gray-900 text-white font-bold py-7 md:py-4 px-8 md:px-10 rounded-full transition-all duration-300 flex items-center gap-2 shadow-lg shadow-gray-400/50 hover:bg-black hover:-translate-y-1 hover:scale-105 hover:shadow-2xl hover:shadow-blue-500/50" style="margin-top: 30px;">生成专属报告</button>
+   <p class="text-[11px] text-gray-400 text-center max-w-3xl leading-relaxed -mt-6 mb-10 px-4" style="margin-top: 30px;">本系统基于品牌公开信息建设、问答场景分析、内容优化与多平台分发协同，提升品牌在 AI 场景中的信息可见度与表达一致性，不承诺对第三方平台推荐、排序、引用或审核结果进行控制。</p>
+    
+    <div style="margin-left: -600px;margin-top: 250px;background-color: #FAFAFA;"></div>
+    
+    <p class="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-10 mt-16">Supported Domestic AI Networks</p>
+    <div class="ai-logo-row flex flex-wrap justify-center items-center gap-x-10 gap-y-8 max-w-4xl">
+        <a href="https://www.doubao.com/" target="_blank"><img src="doubao.png" alt="豆包" class="h-9 md:h-11 object-contain"></a>
+        <a href="https://kimi.moonshot.cn/" target="_blank"><img src="kimi.png" alt="Kimi" class="h-8 md:h-10 object-contain"></a>
+        <a href="https://chat.deepseek.com/" target="_blank"><img src="deepseek.png" alt="DeepSeek" class="h-8 md:h-10 object-contain"></a>
+        <a href="https://tongyi.aliyun.com/" target="_blank"><img src="qianwen.png" alt="通义千问" class="h-8 md:h-10 object-contain"></a>
+        <a href="https://yuanbao.tencent.com/" target="_blank"><img src="yb.png" alt="腾讯元宝" class="h-8 md:h-10 object-contain"></a>
+        <a href="https://yiyan.baidu.com/" target="_blank"><img src="wxyy.png" alt="文心一言" class="h-8 md:h-10 object-contain"></a>
+        <a href="https://chatglm.cn/" target="_blank"><img src="zpqy.png" alt="智谱清言" class="h-8 md:h-10 object-contain"></a>
+        <a href="https://xinghuo.xfyun.cn/" target="_blank"><img src="xfxh.png" alt="讯飞星火" class="h-8 md:h-10 object-contain"></a>
+        <a href="https://metaso.cn/" target="_blank"><img src="mt.png" alt="秘塔AI" class="h-8 md:h-10 object-contain"></a>
+        <a href="https://hailuoai.com/" target="_blank"><img src="hl.png" alt="海螺AI" class="h-8 md:h-10 object-contain"></a>
+    </div>
+</main>
+
+<footer class="w-full border-t border-gray-200 bg-white/80 backdrop-blur-sm py-6 relative z-10">
+    <div class="max-w-[1400px] mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-3 text-[11px] text-gray-400">
+        <div class="flex flex-col md:flex-row items-center gap-2 md:gap-4"><span>© 2024-2026 星轨 GEO 版权所有</span><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener" class="hover:text-blue-600 transition-colors">皖ICP备XXXXXXXX号</a></div>
+        <div class="flex items-center gap-4"><a href="terms.html" target="_blank" class="hover:text-blue-600 transition-colors">用户服务协议</a><a href="privacy.html" target="_blank" class="hover:text-blue-600 transition-colors">隐私政策</a></div>
+    </div>
+</footer>
+
+<div id="authModal" class="fixed inset-0 z-[200] hidden items-center justify-center">
+    <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onclick="closeModal()"></div>
+    <div class="bg-white w-full max-w-[400px] rounded-2xl p-8 relative z-10 shadow-2xl mx-4">
+        <button onclick="closeModal()" class="absolute top-5 right-5 text-gray-400 hover:text-gray-900"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+        <div class="text-center mb-6"><h3 id="modalTitle" class="text-2xl font-extrabold text-gray-900 tracking-tight">获取专属诊断报告</h3><p id="modalSubtitle" class="text-sm text-gray-500 mt-2">首次验证手机号，立即为您生成全域数据</p></div>
+        <div class="space-y-4">
+            <div><input type="tel" id="phoneInput" placeholder="请输入您的手机号码" class="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-4 py-3.5 focus:outline-none focus:ring-1 focus:ring-blue-500"></div>
+            <div class="flex gap-3"><input type="text" id="codeInput" placeholder="短信验证码" class="w-full bg-gray-50 border border-gray-200 text-gray-900 rounded-xl px-4 py-3.5 focus:outline-none"><button id="smsBtn" onclick="alert('系统提示：验证码发送成功')" class="shrink-0 whitespace-nowrap px-4 py-3.5 bg-white border border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50">获取验证码</button></div>
+            <label class="flex items-center gap-2 mt-2 cursor-pointer"><input type="checkbox" id="agreeCheck" class="w-4 h-4 text-blue-600 border-gray-300 rounded"><span class="text-xs text-gray-500">我已阅读并同意 <a href="terms.html" target="_blank" class="text-blue-600 hover:underline">《用户服务协议》</a> 与 <a href="privacy.html" target="_blank" class="text-blue-600 hover:underline">《隐私政策》</a></span></label>
+            <p class="text-[11px] text-gray-400 leading-relaxed">当前报告基于品牌公开信息样本与系统规则生成，部分演示环境数据仅供参考。</p>
+            <button id="modalSubmitBtn" onclick="submitLogin()" class="w-full mt-2 bg-blue-600 text-white font-bold py-3.5 rounded-xl hover:bg-blue-700 transition-all flex items-center justify-center gap-2 shadow-lg shadow-blue-600/30">登录并查看报告</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ---------- 省市区原始数据 (与之前一致) ----------
+    const regionData = {
+        "北京市": { "北京市": ["东城区", "西城区", "朝阳区", "丰台区", "石景山区", "海淀区", "门头沟区", "房山区", "通州区", "顺义区", "昌平区", "大兴区", "怀柔区", "平谷区", "密云区", "延庆区"] },
+        "上海市": { "上海市": ["黄浦区", "徐汇区", "长宁区", "静安区", "普陀区", "虹口区", "杨浦区", "闵行区", "宝山区", "嘉定区", "浦东新区", "金山区", "松江区", "青浦区", "奉贤区", "崇明区"] },
+        "天津市": { "天津市": ["和平区", "河东区", "河西区", "南开区", "河北区", "红桥区", "东丽区", "西青区", "津南区", "北辰区", "武清区", "宝坻区", "滨海新区", "宁河区", "静海区", "蓟州区"] },
+        "重庆市": { "重庆市": ["万州区", "涪陵区", "渝中区", "大渡口区", "江北区", "沙坪坝区", "九龙坡区", "南岸区", "北碚区", "綦江区", "大足区", "渝北区", "巴南区", "黔江区", "长寿区", "江津区", "合川区", "永川区", "南川区", "璧山区", "铜梁区", "潼南区", "荣昌区", "开州区", "梁平区", "武隆区"] },
+        "广东省": { "广州市": ["越秀区", "海珠区", "荔湾区", "天河区", "白云区", "黄埔区", "番禺区", "花都区", "南沙区", "从化区", "增城区"], "深圳市": ["罗湖区", "福田区", "南山区", "宝安区", "龙岗区", "盐田区", "龙华区", "坪山区", "光明区"], "珠海市": ["香洲区", "斗门区", "金湾区"], "汕头市": ["龙湖区", "金平区", "濠江区", "潮阳区", "潮南区", "澄海区"], "佛山市": ["禅城区", "南海区", "顺德区", "三水区", "高明区"], "东莞市": ["莞城街道", "东城街道", "南城街道", "万江街道", "石龙镇", "虎门镇", "厚街镇", "长安镇", "常平镇", "塘厦镇"], "中山市": ["石岐街道", "东区街道", "西区街道", "南区街道", "火炬开发区", "小榄镇", "古镇镇", "三乡镇"] },
+        "江苏省": { "南京市": ["玄武区", "秦淮区", "建邺区", "鼓楼区", "浦口区", "栖霞区", "雨花台区", "江宁区", "六合区", "溧水区", "高淳区"], "苏州市": ["虎丘区", "吴中区", "相城区", "姑苏区", "吴江区", "常熟市", "张家港市", "昆山市", "太仓市"], "无锡市": ["锡山区", "惠山区", "滨湖区", "梁溪区", "新吴区", "江阴市", "宜兴市"], "常州市": ["天宁区", "钟楼区", "新北区", "武进区", "金坛区", "溧阳市"], "扬州市": ["广陵区", "邗江区", "江都区", "宝应县", "仪征市", "高邮市"] },
+        "浙江省": { "杭州市": ["上城区", "拱墅区", "西湖区", "滨江区", "萧山区", "余杭区", "富阳区", "临安区", "桐庐县", "淳安县", "建德市"], "宁波市": ["海曙区", "江北区", "北仑区", "镇海区", "鄞州区", "奉化区", "余姚市", "慈溪市", "象山县", "宁海县"], "温州市": ["鹿城区", "龙湾区", "瓯海区", "洞头区", "乐清市", "瑞安市", "永嘉县", "平阳县", "苍南县", "文成县", "泰顺县"], "嘉兴市": ["南湖区", "秀洲区", "嘉善县", "海盐县", "海宁市", "平湖市", "桐乡市"], "绍兴市": ["越城区", "柯桥区", "上虞区", "诸暨市", "嵊州市", "新昌县"] },
+        "四川省": { "成都市": ["锦江区", "青羊区", "金牛区", "武侯区", "成华区", "龙泉驿区", "青白江区", "新都区", "温江区", "双流区", "郫都区", "新津区", "都江堰市", "彭州市", "邛崃市", "崇州市", "简阳市"], "绵阳市": ["涪城区", "游仙区", "安州区", "江油市", "三台县", "盐亭县", "梓潼县", "北川羌族自治县", "平武县"], "宜宾市": ["翠屏区", "南溪区", "叙州区", "江安县", "长宁县", "高县", "珙县", "筠连县", "兴文县", "屏山县"] },
+        "湖北省": { "武汉市": ["江岸区", "江汉区", "硚口区", "汉阳区", "武昌区", "青山区", "洪山区", "东西湖区", "汉南区", "蔡甸区", "江夏区", "黄陂区", "新洲区"], "宜昌市": ["西陵区", "伍家岗区", "点军区", "猇亭区", "夷陵区", "宜都市", "当阳市", "枝江市", "远安县", "兴山县", "秭归县", "长阳土家族自治县", "五峰土家族自治县"] },
+        "湖南省": { "长沙市": ["芙蓉区", "天心区", "岳麓区", "开福区", "雨花区", "望城区", "长沙县", "浏阳市", "宁乡市"], "株洲市": ["荷塘区", "芦淞区", "石峰区", "天元区", "渌口区", "攸县", "茶陵县", "炎陵县", "醴陵市"] },
+        "福建省": { "福州市": ["鼓楼区", "台江区", "仓山区", "马尾区", "晋安区", "长乐区", "闽侯县", "连江县", "罗源县", "闽清县", "永泰县", "平潭县", "福清市"], "厦门市": ["思明区", "海沧区", "湖里区", "集美区", "同安区", "翔安区"] },
+        "山东省": { "济南市": ["历下区", "市中区", "槐荫区", "天桥区", "历城区", "长清区", "章丘区", "济阳区", "莱芜区", "钢城区", "平阴县", "商河县"], "青岛市": ["市南区", "市北区", "黄岛区", "崂山区", "李沧区", "城阳区", "即墨区", "胶州市", "平度市", "莱西市"] },
+        "陕西省": { "西安市": ["新城区", "碑林区", "莲湖区", "灞桥区", "未央区", "雁塔区", "阎良区", "临潼区", "长安区", "高陵区", "鄠邑区", "蓝田县", "周至县"] }
+    };
+
+    // 级联选择器状态
+    let cascaderState = {
+        selectedProvince: '',
+        selectedCity: '',
+        selectedDistrict: '',
+        fullText: '',
+        panelVisible: false,
+        currentProvinceList: [],
+        currentCityList: [],
+        currentDistrictList: []
+    };
+
+    const triggerEl = document.getElementById('cascaderTrigger');
+    const panelEl = document.getElementById('cascaderPanel');
+    const displaySpan = document.getElementById('cascaderDisplayText');
+
+    // 获取所有省份列表
+    function getProvinceList() { return Object.keys(regionData); }
+    // 根据省份获取城市列表
+    function getCityList(province) { return regionData[province] ? Object.keys(regionData[province]) : []; }
+    // 根据省份+城市获取区县列表
+    function getDistrictList(province, city) { return regionData[province]?.[city] || []; }
+
+    // 更新面板渲染 (三级联动)
+    function renderPanel() {
+        if (!panelEl) return;
+        const provinces = getProvinceList();
+        const currentProvince = cascaderState.selectedProvince;
+        const currentCity = cascaderState.selectedCity;
+        let cities = currentProvince ? getCityList(currentProvince) : [];
+        let districts = (currentProvince && currentCity) ? getDistrictList(currentProvince, currentCity) : [];
+        
+        // 省份列
+        const provinceCol = document.createElement('div');
+        provinceCol.className = 'cascader-column';
+        provinces.forEach(prov => {
+            const div = document.createElement('div');
+            div.className = `cascader-item ${cascaderState.selectedProvince === prov ? 'active' : ''}`;
+            div.textContent = prov;
+            div.onclick = (e) => {
+                e.stopPropagation();
+                cascaderState.selectedProvince = prov;
+                cascaderState.selectedCity = '';
+                cascaderState.selectedDistrict = '';
+                renderPanel();
+            };
+            provinceCol.appendChild(div);
+        });
+        // 城市列
+        const cityCol = document.createElement('div');
+        cityCol.className = 'cascader-column';
+        if (cities.length) {
+            cities.forEach(city => {
+                const div = document.createElement('div');
+                div.className = `cascader-item ${cascaderState.selectedCity === city ? 'active' : ''}`;
+                div.textContent = city;
+                div.onclick = (e) => {
+                    e.stopPropagation();
+                    cascaderState.selectedCity = city;
+                    cascaderState.selectedDistrict = '';
+                    renderPanel();
+                };
+                cityCol.appendChild(div);
+            });
+        } else { cityCol.innerHTML = '<div class="cascader-empty">请先选择省份</div>'; }
+        // 区县列
+        const districtCol = document.createElement('div');
+        districtCol.className = 'cascader-column';
+        if (districts.length) {
+            districts.forEach(dist => {
+                const div = document.createElement('div');
+                div.className = `cascader-item ${cascaderState.selectedDistrict === dist ? 'active' : ''}`;
+                div.textContent = dist;
+                div.onclick = (e) => {
+                    e.stopPropagation();
+                    cascaderState.selectedDistrict = dist;
+                    // 完成选择，更新显示并关闭面板
+                    updateSelectedDisplay();
+                    hidePanel();
+                };
+                districtCol.appendChild(div);
+            });
+        } else if (cascaderState.selectedCity && cascaderState.selectedProvince) {
+            districtCol.innerHTML = '<div class="cascader-empty">暂无区县数据</div>';
+        } else { districtCol.innerHTML = '<div class="cascader-empty">请先选择城市</div>'; }
+        
+        panelEl.innerHTML = '';
+        panelEl.appendChild(provinceCol);
+        panelEl.appendChild(cityCol);
+        panelEl.appendChild(districtCol);
+    }
+
+    function updateSelectedDisplay() {
+        const { selectedProvince, selectedCity, selectedDistrict } = cascaderState;
+        if (selectedProvince && selectedCity && selectedDistrict) {
+            let display = '';
+            if (selectedProvince === selectedCity) display = `${selectedProvince} · ${selectedDistrict}`;
+            else display = `${selectedProvince} · ${selectedCity} · ${selectedDistrict}`;
+            cascaderState.fullText = display;
+            displaySpan.textContent = display;
+            displaySpan.classList.remove('cascader-placeholder');
+            displaySpan.classList.add('cascader-selected-text');
+        } else {
+            displaySpan.textContent = '请选择地区（省/市/区县）';
+            displaySpan.classList.add('cascader-placeholder');
+            displaySpan.classList.remove('cascader-selected-text');
+            cascaderState.fullText = '';
+        }
+    }
+
+    function showPanel() {
+        if (!panelEl) return;
+        renderPanel();
+        panelEl.style.display = 'flex';
+        cascaderState.panelVisible = true;
+        triggerEl.classList.add('active');
+    }
+    function hidePanel() {
+        if (panelEl) panelEl.style.display = 'none';
+        cascaderState.panelVisible = false;
+        triggerEl.classList.remove('active');
+    }
+    function togglePanel() {
+        cascaderState.panelVisible ? hidePanel() : showPanel();
+    }
+
+    // 获取当前选中的地区对象 (供外部调用，和原getSelectedRegion行为一致)
+    function getSelectedRegion() {
+        const { selectedProvince, selectedCity, selectedDistrict, fullText } = cascaderState;
+        if (!selectedProvince || !selectedCity || !selectedDistrict) {
+            return { province: '', city: '', district: '', fullText: '' };
+        }
+        return { province: selectedProvince, city: selectedCity, district: selectedDistrict, fullText: fullText || `${selectedProvince} · ${selectedCity} · ${selectedDistrict}` };
+    }
+
+    // 全局点击关闭面板
+    document.addEventListener('click', function(e) {
+        const container = document.getElementById('cascaderContainer');
+        if (container && !container.contains(e.target) && cascaderState.panelVisible) {
+            hidePanel();
+        }
+    });
+    if (triggerEl) triggerEl.addEventListener('click', (e) => { e.stopPropagation(); togglePanel(); });
+
+    // 生成报告逻辑 (整合级联地区)
+    window.startScan = function() {
+        const brand = document.getElementById('brandInput').value.trim();
+        if (!brand) { alert("请输入需要检测的品牌或企业名称！"); document.getElementById('brandInput').focus(); return; }
+        const region = getSelectedRegion();
+        const industry = document.getElementById('industryInput').value.trim();
+        if (!region.province) { alert("请完整选择省/市/区县地区！"); return; }
+        
+        const regionText = region.fullText;
+        console.log(`[报告生成] 品牌: ${brand}, 地区: ${regionText}, 行业: ${industry}`);
+        sessionStorage.setItem('reportBrand', brand);
+        sessionStorage.setItem('reportRegion', regionText);
+        sessionStorage.setItem('reportIndustry', industry);
+        sessionStorage.setItem('reportProvince', region.province);
+        sessionStorage.setItem('reportCity', region.city);
+        sessionStorage.setItem('reportDistrict', region.district);
+        
+        const btn = document.getElementById('scanBtn');
+        btn.innerHTML = '<svg class="animate-spin w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> 扫描信源中...';
+        setTimeout(() => {
+            btn.innerHTML = '生成专属报告';
+            openModal('report');
+        }, 1200);
+    };
+
+    // 手机验证弹窗原有函数
+    function openMobileNav() { document.getElementById('mobileNav').classList.remove('hidden'); }
+    function closeMobileNav() { document.getElementById('mobileNav').classList.add('hidden'); }
+    function openModal(type) {
+        const titleEl = document.getElementById('modalTitle');
+        const subtitleEl = document.getElementById('modalSubtitle');
+        if (type === 'login') { titleEl.innerText = '欢迎回到星轨 GEO'; subtitleEl.innerHTML = '输入手机号，一键安全登录控制台'; }
+        else if (type === 'require_login') { titleEl.innerText = '访问受限，请先登录'; subtitleEl.innerHTML = '您需要先验证手机号，才能进入控制台'; }
+        else { titleEl.innerText = '获取品牌检测报告'; subtitleEl.innerHTML = '首次验证手机号即可免费查看 AI 品牌可见度分析'; }
+        document.getElementById('authModal').classList.remove('hidden');
+        document.getElementById('authModal').classList.add('flex');
+    }
+    function closeModal() { document.getElementById('authModal').classList.add('hidden'); document.getElementById('authModal').classList.remove('flex'); }
+    function submitLogin() {
+        const phone = document.getElementById('phoneInput').value.trim();
+        const code = document.getElementById('codeInput').value.trim();
+        if(!phone || !/^1[3-9]\d{9}$/.test(phone)) { alert('请输入正确的 11 位手机号码'); return; }
+        if(!code || code.length < 4) { alert('请输入正确的短信验证码'); return; }
+        if(!document.getElementById('agreeCheck').checked) { alert('请先阅读并勾选底部协议'); return; }
+        const brand = document.getElementById('brandInput').value || '未命名品牌';
+        const region = getSelectedRegion();
+        const industry = document.getElementById('industryInput').value.trim();
+        let regionParam = '';
+        if(region.province) regionParam += region.province;
+        if(region.city) regionParam += '-' + region.city;
+        if(region.district) regionParam += '-' + region.district;
+        window.location.href = `console.html?brand=${encodeURIComponent(brand)}&region=${encodeURIComponent(regionParam)}&industry=${encodeURIComponent(industry)}&vip=free`;
+    }
+</script>
+</body>
+</html>

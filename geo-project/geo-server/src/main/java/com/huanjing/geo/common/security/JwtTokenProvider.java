@@ -1,6 +1,9 @@
 package com.huanjing.geo.common.security;
 
-import io.jsonwebtoken.*;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -64,9 +67,9 @@ public class JwtTokenProvider {
             parseToken(token);
             return true;
         } catch (ExpiredJwtException e) {
-            log.debug("Token已过期");
+            log.debug("Token expired");
         } catch (JwtException e) {
-            log.debug("Token无效: {}", e.getMessage());
+            log.debug("Token invalid: {}", e.getMessage());
         }
         return false;
     }

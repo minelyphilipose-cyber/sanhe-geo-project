@@ -6,15 +6,12 @@ const adminRoutes: RouteRecordRaw = {
   redirect: '/admin/overview',
   meta: { requiresAuth: true },
   children: [
-    /* ---- 工作台 ---- */
     {
       path: 'overview',
       name: 'Overview',
       component: () => import('@/views/admin/overview/OverviewView.vue'),
       meta: { title: '工作台', icon: 'Odometer' },
     },
-
-    /* ---- 客户管理 ---- */
     {
       path: 'customers',
       name: 'CustomerList',
@@ -27,8 +24,6 @@ const adminRoutes: RouteRecordRaw = {
       component: () => import('@/views/admin/customer/CustomerDetail.vue'),
       meta: { title: '客户详情', hidden: true },
     },
-
-    /* ---- 品牌管理 ---- */
     {
       path: 'brands/:id',
       name: 'BrandDetail',
@@ -47,8 +42,6 @@ const adminRoutes: RouteRecordRaw = {
       component: () => import('@/views/admin/brand/BrandAssets.vue'),
       meta: { title: '品牌资产', hidden: true },
     },
-
-    /* ---- 项目管理 ---- */
     {
       path: 'projects',
       name: 'ProjectList',
@@ -85,8 +78,6 @@ const adminRoutes: RouteRecordRaw = {
       component: () => import('@/views/admin/project/ReviewPanel.vue'),
       meta: { title: '达标评估', hidden: true },
     },
-
-    /* ---- 监测中心 ---- */
     {
       path: 'monitoring',
       name: 'Monitoring',
@@ -99,8 +90,6 @@ const adminRoutes: RouteRecordRaw = {
       component: () => import('@/views/admin/monitoring/PlatformHealth.vue'),
       meta: { title: '平台健康', hidden: true },
     },
-
-    /* ---- 报表管理 ---- */
     {
       path: 'reports',
       name: 'ReportManage',
@@ -117,8 +106,6 @@ const adminRoutes: RouteRecordRaw = {
       component: () => import('@/views/admin/report/ReportPreview.vue'),
       meta: { title: '报表预览', hidden: true },
     },
-
-    /* ---- 合伙人管理 ---- */
     {
       path: 'partners',
       name: 'PartnerList',
@@ -135,16 +122,12 @@ const adminRoutes: RouteRecordRaw = {
       component: () => import('@/views/admin/partner/PartnerDetail.vue'),
       meta: { title: '合伙人详情', hidden: true, roles: ['manager', 'super_admin'] },
     },
-
-    /* ---- 异常中心 ---- */
     {
       path: 'alerts',
       name: 'AlertCenter',
       component: () => import('@/views/admin/alert/AlertCenter.vue'),
       meta: { title: '异常中心', icon: 'Bell' },
     },
-
-    /* ---- 系统设置 ---- */
     {
       path: 'settings/platforms',
       name: 'PlatformConfig',
@@ -167,3 +150,4 @@ const adminRoutes: RouteRecordRaw = {
 }
 
 export default adminRoutes
+

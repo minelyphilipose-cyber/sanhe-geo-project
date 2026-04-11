@@ -19,30 +19,29 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class AuthService {
 
+    private static final String REFRESH_KEY_PREFIX = "refresh:";
+
     private final SysUserMapper userMapper;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final RedisTemplate<String, Object> redisTemplate;
-
-    private static final String REFRESH_KEY_PREFIX = "refresh:";
 
     public LoginResponse login(LoginRequest req) {
         SysUser user = userMapper.selectOne(
                 new LambdaQueryWrapper<SysUser>()
                         .eq(SysUser::getUsername, req.getUsername())
         );
-        if (user == null || !user.getIsActive()) {
-            throw new BizException(401, "用户名或密码错误");
+        if (user == null || Boolean.FALSE.equals(user.getIsActive())) {
+            throw new BizException(401, "Invalid username or password");
         }
         if (!passwordEncoder.matches(req.getPassword(), user.getPasswordHash())) {
-            throw new BizException(401, "用户名或密码错误");
+            throw new BizException(401, "Invalid username or password");
         }
 
         String accessToken = jwtTokenProvider.createAccessToken(
                 user.getId(), user.getUsername(), user.getRole());
         String refreshToken = jwtTokenProvider.createRefreshToken(user.getId());
 
-        // refresh token 存入 Redis
         redisTemplate.opsForValue().set(
                 REFRESH_KEY_PREFIX + user.getId(),
                 refreshToken,
@@ -50,7 +49,6 @@ public class AuthService {
                 TimeUnit.SECONDS
         );
 
-        // 更新最后登录时间
         user.setLastLoginAt(LocalDateTime.now());
         userMapper.updateById(user);
 
@@ -68,19 +66,22 @@ public class AuthService {
     }
 
     public String refresh(String refreshToken) {
-        if (!jwtTokenProvider.validateToken(refreshToken)) {
-            throw new BizException(401, "刷新令牌无效");
+        if (refreshToken == null || refreshToken.isBlank()) {
+            throw new BizException(401, "Refresh token is required");
         }
-        Long userId = jwtTokenProvider.getUserIdFromToken(refreshToken);
+        if (!jwtTokenProvider.validateToken(refreshToken)) {
+            throw new BizException(401, "Refresh token is invalid");
+        }
 
+        Long userId = jwtTokenProvider.getUserIdFromToken(refreshToken);
         String stored = (String) redisTemplate.opsForValue().get(REFRESH_KEY_PREFIX + userId);
         if (stored == null || !stored.equals(refreshToken)) {
-            throw new BizException(401, "刷新令牌已失效");
+            throw new BizException(401, "Refresh token expired");
         }
 
         SysUser user = userMapper.selectById(userId);
-        if (user == null || !user.getIsActive()) {
-            throw new BizException(401, "用户不存在或已禁用");
+        if (user == null || Boolean.FALSE.equals(user.getIsActive())) {
+            throw new BizException(401, "User not found or inactive");
         }
 
         return jwtTokenProvider.createAccessToken(

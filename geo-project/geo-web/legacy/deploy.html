@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>星轨 GEO - 全域信源分发引擎</title>
+    <style>@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');</style>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+        body { margin: 0; background-color: #FAFAFA; color: #0F172A; font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow-x: hidden; -webkit-font-smoothing: antialiased; }
+        .tech-grid { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background-image: radial-gradient(#CBD5E1 1px, transparent 1px); background-size: 32px 32px; opacity: 0.4; z-index: -2; mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 80%); -webkit-mask-image: linear-gradient(to bottom, rgba(0,0,0,1) 0%, rgba(0,0,0,0) 80%); pointer-events: none; }
+        .ambient-glow-blue { position: absolute; top: -10%; left: 10%; width: 600px; height: 600px; background: radial-gradient(circle, rgba(37,99,235,0.06) 0%, rgba(255,255,255,0) 70%); border-radius: 50%; z-index: -1; filter: blur(60px); animation: float 10s ease-in-out infinite alternate; }
+        @keyframes float { 0% { transform: translate(0, 0); } 100% { transform: translate(30px, 50px); } }
+        .top-banner { background-color: #020617; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+        .v-ticker-wrap { height: 18px; overflow: hidden; display: inline-block; vertical-align: middle; }
+        .v-ticker-track { display: flex; flex-direction: column; animation: vScroll 9s cubic-bezier(0.25, 0.8, 0.25, 1) infinite; }
+        .v-ticker-track span { height: 18px; line-height: 18px; white-space: nowrap; }
+        .top-banner:hover .v-ticker-track { animation-play-state: paused; }
+        @keyframes vScroll { 0%, 22% { transform: translateY(0); } 33%, 55% { transform: translateY(-18px); } 66%, 88% { transform: translateY(-36px); } 100% { transform: translateY(-54px); } }
+        .header-bar { transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1); background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+        .header-bar:hover { background-color: rgba(255, 255, 255, 0.98); }
+        .nav-link { color: #334155; transition: all 0.3s ease; position: relative; display: inline-block; font-weight: 700; }
+        .nav-link:hover { color: #2563EB; transform: translateY(-2px); }
+        .nav-link.active { color: #1D4ED8; font-weight: 800; } 
+        .hero-title-blue-once { background-image: linear-gradient(110deg, #0F172A 0%, #0F172A 40%, #1D4ED8 50%, #3B82F6 55%, #1D4ED8 60%, #0F172A 100%); background-size: 250% auto; color: transparent; -webkit-background-clip: text; background-clip: text; background-position: 100% center; animation: sweepOnce 6s cubic-bezier(0.25, 0.8, 0.25, 1) forwards; filter: drop-shadow(0 0 12px rgba(37, 99, 235, 0.2)); }
+        @keyframes sweepOnce { 0% { background-position: 100% center; } 100% { background-position: 0% center; } }
+        .glass-card { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(24px); border: 1px solid rgba(226, 232, 240, 0.8); box-shadow: 0 10px 30px -10px rgba(15, 23, 42, 0.05), 0 0 0 1px rgba(255, 255, 255, 0.5) inset; border-radius: 20px; }
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; } .custom-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 5px; }
+        .platform-checkbox input:checked + div { border-color: #2563EB; background-color: #EFF6FF; box-shadow: 0 0 0 1px #2563EB inset; }
+        .platform-checkbox input:checked + div .platform-name { color: #1D4ED8; }
+        .terminal { font-family: 'JetBrains Mono', monospace; background: #020617; border: 1px solid #1E293B; border-radius: 12px; padding: 20px; color: #64748B; font-size: 13px; overflow-y: auto; height: 100%; box-shadow: inset 0 0 20px rgba(0,0,0,0.5); }
+        .term-green { color: #10B981; } .term-red { color: #EF4444; } .term-blue { color: #3B82F6; } .term-white { color: #F8FAFC; } .term-yellow { color: #F59E0B; }
+        .vip-radio input:checked + div { border-color: #3B82F6; background-color: #EFF6FF; box-shadow: 0 0 0 1px #3B82F6 inset; }
+        .modal-overlay { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px); transition: opacity 0.3s ease; }
+        .modal-active .modal-content { transform: scale(1); }
+        .step-done { background-color: #2563EB; color: white; }
+        .step-current { background-color: #2563EB; color: white; box-shadow: 0 0 0 4px rgba(37,99,235,0.2); }
+        .step-pending { background-color: #E2E8F0; color: #94A3B8; }
+    </style>
+</head>
+<body class="relative pb-40">
+    <div class="tech-grid"></div>
+    <div class="ambient-glow-blue"></div>
+
+    <div class="fixed top-0 left-0 right-0 w-full z-[100] shadow-sm">
+        <div class="top-banner text-white text-xs font-medium py-2 flex justify-center items-center">
+            <span class="flex items-center gap-2 tracking-wide text-gray-200">
+                <span class="flex h-2 w-2 relative shrink-0"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span></span>
+                <div class="v-ticker-wrap">
+                    <div class="v-ticker-track">
+                        <span>[系统通知] 《LLM-Native GEO 品牌可见度白皮书》已更新，点击免费查看。</span>
+                        <span>[服务提示] 开通【钻石VIP】可获得更多分发节点与人工支持服务。</span>
+                        <span>[核心优势] 星轨 GEO，帮助品牌提升在 AI 场景中的内容可见度。</span>
+                        <span aria-hidden="true">[系统通知] 《LLM-Native GEO 品牌可见度白皮书》已更新，点击免费查看。</span>
+                    </div>
+                </div>
+            </span>
+        </div>
+
+        <header class="header-bar w-full px-6 py-3 flex justify-between items-center border-b border-gray-200/60">
+            <a href="index.html" class="flex items-center transition-transform hover:scale-105 shrink-0"><img src="logo.png" alt="星轨GEO" class="h-8 md:h-10 w-auto object-contain"></a>
+            <button class="md:hidden text-gray-700 p-1" onclick="openMobileNav()"><svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+            <nav class="hidden md:flex items-center gap-8 text-[15px] font-bold text-gray-700">
+                <a href="index.html" class="nav-link">首页</a>
+                <div class="relative group">
+                    <a href="console.html" class="nav-link active flex items-center gap-1 py-2">
+                        GEO智能体引擎
+                        <svg class="w-4 h-4 text-gray-400 group-hover:text-blue-600 transition-transform duration-300 group-hover:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"></path></svg>
+                    </a>
+                    <div class="absolute top-full left-1/2 -translate-x-1/2 mt-1 w-44 bg-white border border-gray-100 shadow-xl rounded-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 transform translate-y-2 group-hover:translate-y-0 overflow-hidden z-50">
+                        <div class="py-2">
+                            <a href="console.html" class="block px-5 py-2.5 text-[14px] text-gray-600 hover:bg-blue-50 hover:text-blue-600 font-bold transition-colors">全网AI收录大盘</a>
+                            <a href="profile.html" class="block px-5 py-2.5 text-[14px] text-gray-600 hover:bg-blue-50 hover:text-blue-600 font-bold transition-colors">品牌 AI 知识库构建</a>
+                            <a href="keyword.html" class="block px-5 py-2.5 text-[14px] text-gray-600 hover:bg-blue-50 hover:text-blue-600 font-bold transition-colors">用户提问词预测</a>
+                            <a href="answer.html" class="block px-5 py-2.5 text-[14px] text-gray-600 hover:bg-blue-50 hover:text-blue-600 font-bold transition-colors">大模型专属答案</a>
+                            <a href="deploy.html" class="block px-5 py-2.5 text-[14px] text-blue-600 bg-blue-50 font-bold transition-colors">全域信源分发引擎</a>
+                        </div>
+                    </div>
+                </div>
+                <a href="assets.html" class="nav-link">品牌数字资产库</a>
+                <a href="javascript:void(0)" onclick="alert('该页面正在建设中，敬请期待！')" class="nav-link">解决方案</a>
+                <a href="javascript:void(0)" onclick="alert('该页面正在建设中，敬请期待！')" class="nav-link">关于我们</a>
+            </nav>
+            <div class="flex items-center gap-4 text-[14px] font-bold shrink-0">
+                <div id="vipBadge" class="hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-700 rounded-full border border-gray-200 text-xs font-black cursor-pointer hover:bg-gray-200" onclick="openPricingModal()">正在读取权限...</div>
+            </div>
+        </header>
+    </div>
+
+    <div id="mobileNav" class="fixed inset-0 z-[150] hidden">
+        <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onclick="closeMobileNav()"></div>
+        <div class="absolute right-0 top-0 h-full w-[280px] bg-white shadow-2xl p-6 flex flex-col">
+            <div class="flex justify-between items-center mb-8"><span class="text-lg font-black text-gray-900">导航菜单</span><button onclick="closeMobileNav()" class="text-gray-400 hover:text-gray-900"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button></div>
+            <nav class="flex flex-col gap-1 text-[15px] font-bold text-gray-700" id="mobileNavLinks">
+                <a href="index.html" class="py-3 border-b border-gray-100">首页</a>
+                <a href="console.html" class="py-3 border-b border-gray-100">全网AI收录大盘</a>
+                <a href="profile.html" class="py-3 border-b border-gray-100">品牌 AI 知识库构建</a>
+                <a href="keyword.html" class="py-3 border-b border-gray-100">用户提问词预测</a>
+                <a href="answer.html" class="py-3 border-b border-gray-100">大模型专属答案</a>
+                <a href="deploy.html" class="py-3 border-b border-gray-100 text-blue-600">全域信源分发引擎</a>
+                <a href="assets.html" class="py-3 border-b border-gray-100">品牌数字资产库</a>
+            </nav>
+        </div>
+    </div>
+
+    <main class="max-w-[1400px] mx-auto px-6 py-6 mt-32 bg-[#FAFAFA]/50 rounded-3xl relative z-10">
+        <div class="mb-6 flex items-center justify-center gap-0">
+            <div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-black step-done">✓</div><span class="text-[11px] font-bold text-blue-700 hidden md:inline">知识库构建</span></div>
+            <div class="w-8 md:w-16 h-px bg-blue-400 mx-1"></div>
+            <div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-black step-done">✓</div><span class="text-[11px] font-bold text-blue-700 hidden md:inline">提问词预测</span></div>
+            <div class="w-8 md:w-16 h-px bg-blue-400 mx-1"></div>
+            <div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-black step-done">✓</div><span class="text-[11px] font-bold text-blue-700 hidden md:inline">母版生成</span></div>
+            <div class="w-8 md:w-16 h-px bg-blue-400 mx-1"></div>
+            <div class="flex items-center gap-2"><div class="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-black step-current">4</div><span class="text-[11px] font-bold text-blue-700 hidden md:inline">合规分发</span></div>
+        </div>
+
+        <div class="mb-4 flex flex-col md:flex-row md:items-end justify-between gap-2">
+            <div>
+                <h1 class="text-[26px] font-extrabold text-gray-900 tracking-tight">全网信源<span class="hero-title-blue-once">定向分发</span>部署</h1>
+                <p class="text-xs text-gray-500 mt-1 font-medium">您可以为每一篇原创母版单独指定分发平台，系统将基于平台规范进行内容适配与格式处理，便于稳定发布。</p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 h-auto lg:h-[780px]">
+            <div class="lg:col-span-4 glass-card flex flex-col h-[420px] lg:h-full overflow-hidden border-t-4 border-t-blue-600">
+                <div class="px-5 py-3 border-b border-gray-100 flex justify-between items-center bg-blue-50/30 rounded-t-[20px] shrink-0">
+                    <h3 class="text-[13px] font-extrabold text-gray-900">1. 待分发内容源文件</h3>
+                </div>
+                <div class="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-3" id="articleListContainer">
+                    <div class="text-center text-gray-400 text-[11px] mt-10">暂无待分发内容，请返回上一步生成。</div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-5 flex flex-col h-auto lg:h-full relative">
+                <div class="flex flex-col gap-4 overflow-y-auto custom-scrollbar pr-2 h-full">
+                    <div class="glass-card flex flex-col shrink-0 border-t-4 border-t-indigo-600">
+                        <div class="px-5 py-3 border-b border-gray-100 flex flex-col justify-center bg-indigo-50/30 rounded-t-[20px] gap-2">
+                            <div class="flex items-center justify-between">
+                                <h3 class="text-[13px] font-extrabold text-gray-900">2. 为选中母版配置分发渠道 <span id="ownedLimitText" class="text-[10px] font-bold text-gray-400 ml-1"></span></h3>
+                                <button id="selectAllBtn" onclick="selectAll('owned')" class="text-[10px] font-bold text-blue-600 bg-blue-100 px-2.5 py-1 rounded hover:bg-blue-200 transition-colors">一键全选</button>
+                            </div>
+                            <div id="upgradeBanner" class="hidden items-center gap-2 bg-red-50 border border-red-100 px-2 py-1 rounded-lg w-fit mt-1">
+                                <div class="text-[10px] text-gray-700 flex items-center gap-1"><span class="font-bold text-red-500">算力受限：</span>体验版仅限3个自媒体。</div>
+                                <button onclick="openPricingModal()" class="bg-red-500 hover:bg-red-600 text-white text-[10px] px-2.5 py-1 rounded font-bold shadow-sm transition-colors whitespace-nowrap">升级</button>
+                            </div>
+                        </div>
+                        <div class="p-3 grid grid-cols-2 md:grid-cols-4 gap-2" id="ownedMediaContainer"></div>
+                    </div>
+
+                    <div class="glass-card border-t-4 border-t-sky-600 p-4">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="text-[13px] font-extrabold text-gray-900">3. 发送策略设置</h3>
+                            <span class="text-[10px] text-gray-400 font-bold">新增增强功能</span>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+                            <label class="cursor-pointer">
+                                <input type="radio" name="sendMode" value="immediate" class="sr-only peer" checked onchange="toggleScheduleFields()">
+                                <div class="border border-gray-200 rounded-xl px-3 py-3 bg-white peer-checked:border-blue-500 peer-checked:bg-blue-50 transition-all">
+                                    <div class="text-[12px] font-bold text-gray-900">立即发送</div>
+                                    <div class="text-[10px] text-gray-500 mt-1">确认后立即执行分发</div>
+                                </div>
+                            </label>
+                            <label class="cursor-pointer">
+                                <input type="radio" name="sendMode" value="scheduled" class="sr-only peer" onchange="toggleScheduleFields()">
+                                <div class="border border-gray-200 rounded-xl px-3 py-3 bg-white peer-checked:border-blue-500 peer-checked:bg-blue-50 transition-all">
+                                    <div class="text-[12px] font-bold text-gray-900">定时发送</div>
+                                    <div class="text-[10px] text-gray-500 mt-1">到指定时间再启动任务</div>
+                                </div>
+                            </label>
+                            <label class="cursor-pointer">
+                                <input type="radio" name="sendMode" value="interval" class="sr-only peer" onchange="toggleScheduleFields()">
+                                <div class="border border-gray-200 rounded-xl px-3 py-3 bg-white peer-checked:border-blue-500 peer-checked:bg-blue-50 transition-all">
+                                    <div class="text-[12px] font-bold text-gray-900">间隔发送</div>
+                                    <div class="text-[10px] text-gray-500 mt-1">按固定间隔分批提交</div>
+                                </div>
+                            </label>
+                        </div>
+
+                        <div id="scheduledFieldWrap" class="hidden">
+                            <label class="block text-[11px] font-bold text-gray-700 mb-1">定时发送时间</label>
+                            <input id="scheduledTimeInput" type="datetime-local" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-[12px] bg-white">
+                        </div>
+
+                        <div id="intervalFieldWrap" class="hidden">
+                            <label class="block text-[11px] font-bold text-gray-700 mb-1">发送间隔（分钟）</label>
+                            <input id="intervalMinutesInput" type="number" min="1" value="30" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-[12px] bg-white">
+                        </div>
+                    </div>
+
+                    <div class="glass-card flex flex-col shrink-0 border-t-4 border-t-purple-600 mb-4">
+                        <div class="px-5 py-3 border-b border-gray-100 flex justify-between items-center bg-purple-50/30 rounded-t-[20px]">
+                            <div class="flex items-center gap-2">
+                                <h3 class="text-[13px] font-extrabold text-gray-900">权威媒体发布服务 API (向所有用户开放)</h3>
+                                <span class="bg-purple-100 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded text-[9px] font-black tracking-wide">增值服务</span>
+                            </div>
+                        </div>
+                        <div class="p-3 grid grid-cols-1 gap-2" id="paidMediaContainer"></div>
+                        <div class="px-4 pb-3">
+                            <p class="text-[9px] text-gray-400 leading-relaxed">* 媒体发布服务通过合作媒介机构执行，内容须符合各平台审核规范及相关法律法规；平台仅提供技术对接与流程管理服务，不承诺发布结果。</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-3 glass-card flex flex-col h-[420px] lg:h-full overflow-hidden border-t-4 border-t-gray-900">
+                <div class="px-4 py-3 border-b border-gray-100 bg-gray-900 rounded-t-[20px] flex items-center justify-between shrink-0">
+                    <div class="flex gap-2">
+                        <div class="w-2.5 h-2.5 rounded-full bg-red-500"></div><div class="w-2.5 h-2.5 rounded-full bg-yellow-500"></div><div class="w-2.5 h-2.5 rounded-full bg-green-500"></div>
+                    </div>
+                    <button onclick="openPreviewModal()" class="text-[11px] font-bold text-blue-400 bg-blue-900/40 hover:bg-blue-800/60 px-3 py-1 rounded-md border border-blue-700/50 transition-colors flex items-center gap-1.5 shadow-sm">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                        调阅内容矩阵预览
+                    </button>
+                </div>
+                <div class="bg-gray-800 px-4 py-2.5 border-b border-gray-700 flex justify-between items-center shrink-0">
+                    <div class="flex flex-col">
+                        <span class="text-[9px] text-gray-400 font-bold uppercase tracking-wider">全局选定平台数</span>
+                        <span class="text-xs font-black text-white"><span id="ownedCount">0</span> 个</span>
+                    </div>
+                    <div class="h-6 w-px bg-gray-700"></div>
+                    <div class="flex flex-col text-right">
+                        <span class="text-[9px] text-gray-400 font-bold uppercase tracking-wider">媒体服务费总计</span>
+                        <span class="text-xs font-black text-indigo-400">￥<span id="paidCost">0.00</span></span>
+                    </div>
+                </div>
+                <div class="flex-1 terminal custom-scrollbar" id="terminalBox">
+                    <div id="termContent"><div>> [SYSTEM] 请在左侧选择一篇母版，并在中间为其勾选分发平台。</div></div>
+                    <div class="animate-pulse inline-block w-2 h-3.5 bg-gray-400 mt-2" id="cursor"></div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="w-full border-t border-gray-200 bg-white/80 backdrop-blur-sm py-6 relative z-10 mb-32">
+        <div class="max-w-[1400px] mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-3 text-[11px] text-gray-400">
+            <div class="flex flex-col md:flex-row items-center gap-2 md:gap-4"><span>© 2024-2026 星轨 GEO 版权所有</span><a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener" class="hover:text-blue-600 transition-colors">皖ICP备XXXXXXXX号</a></div>
+            <div class="flex items-center gap-4"><a href="terms.html" target="_blank" class="hover:text-blue-600 transition-colors">用户服务协议</a><a href="privacy.html" target="_blank" class="hover:text-blue-600 transition-colors">隐私政策</a></div>
+        </div>
+    </footer>
+
+    <div class="fixed bottom-6 left-1/2 -translate-x-1/2 bg-[#0F172A]/95 backdrop-blur-xl rounded-full py-2.5 pl-4 md:pl-6 pr-2.5 shadow-[0_20px_50px_rgba(0,0,0,0.4)] z-[150] flex items-center justify-between w-[calc(100%-2rem)] max-w-[720px] border border-gray-700/50">
+        <div class="flex items-center gap-3 md:gap-4">
+            <div class="w-9 h-9 rounded-full bg-blue-500/20 flex items-center justify-center border border-blue-500/30 shrink-0">
+                <svg class="w-4 h-4 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            </div>
+            <div class="flex flex-col justify-center">
+                <p class="text-[10px] md:text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">多平台智能分发系统</p>
+                <p class="text-sm md:text-base font-black text-white leading-none" id="mainStatusText">节点就绪，等待确认部署</p>
+            </div>
+        </div>
+        <button id="executeBtn" onclick="startDeployment()" class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold py-2.5 px-4 md:px-8 rounded-full shadow-[0_0_15px_rgba(59,130,246,0.4)] hover:shadow-[0_0_25px_rgba(59,130,246,0.6)] transition-all transform hover:-translate-y-0.5 flex items-center gap-2 text-[12px] md:text-[14px] tracking-wide shrink-0">
+            支付并启动分发 (<span id="btnTotalCost">￥0.00</span>)
+        </button>
+    </div>
+
+    <div id="previewModal" class="fixed inset-0 z-[200] hidden items-center justify-center">
+        <div class="absolute inset-0 bg-slate-900/70 backdrop-blur-sm" onclick="closePreviewModal()"></div>
+        <div class="bg-white w-full max-w-[800px] h-[80vh] rounded-[20px] p-0 relative z-10 shadow-2xl mx-4 flex flex-col overflow-hidden">
+            <div class="bg-gradient-to-r from-gray-900 to-blue-900 px-6 py-4 flex justify-between items-center shrink-0">
+                <h3 class="text-[15px] font-extrabold text-white tracking-widest flex items-center gap-2" id="previewTitle">预览文章</h3>
+                <button onclick="closePreviewModal()" class="text-gray-300 hover:text-white transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+            </div>
+            <div id="previewPlatformHint" class="bg-indigo-50/80 border-b border-indigo-100 px-6 py-3 text-[11px] text-indigo-700 font-bold hidden flex items-start gap-2 shrink-0"></div>
+            <div id="previewContentArea" class="flex-1 p-8 overflow-y-auto custom-scrollbar bg-white text-[14px] leading-loose text-gray-800"></div>
+        </div>
+    </div>
+
+    <div id="pricingModal" class="fixed inset-0 z-[200] hidden items-center justify-center">
+        <div class="absolute inset-0 modal-overlay" onclick="closePricingModal()"></div>
+        <div class="modal-content relative w-full max-w-[750px] mx-4 z-10 glass-card p-0 overflow-hidden flex flex-col md:flex-row">
+            <div class="w-full md:w-[35%] bg-gray-900 p-6 text-white relative flex flex-col justify-center">
+                 <div class="absolute top-0 right-0 w-24 h-24 bg-blue-600 rounded-full filter blur-[50px] opacity-40"></div>
+                <h3 class="text-lg font-black mb-1.5 relative z-10">提升 AI 时代<br><span class="text-blue-400">品牌内容可见度</span></h3>
+                <p class="text-[11px] text-gray-400 mb-5 relative z-10 leading-relaxed">通过星轨技术与算力配置，帮助您的品牌内容更规范地进入多平台信息生态。</p>
+            </div>
+            <div class="w-full md:w-[65%] p-6 bg-white relative">
+                <button onclick="closePricingModal()" class="absolute top-3 right-3 text-gray-400 hover:text-gray-800 transition-colors"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+                <h4 class="text-[14px] font-bold text-gray-900 mb-3">请选择大模型优化算力配置</h4>
+                <div class="grid grid-cols-2 gap-3">
+                    <label class="vip-radio relative cursor-pointer block"><input type="radio" name="vip_tier" value="free" class="sr-only"><div class="p-3 border border-gray-200 rounded-lg bg-white hover:border-gray-300 transition-all h-full"><div class="font-black text-gray-700 text-[12px] mb-1">基础体验版</div><div class="text-[9px] text-gray-500 leading-snug h-8">限制提问词量，仅限普通分发</div><div class="text-sm font-black text-gray-500 mt-2">￥0</div></div></label>
+                    <label class="vip-radio relative cursor-pointer block"><input type="radio" name="vip_tier" value="gold" class="sr-only" checked><div class="p-3 border border-gray-200 rounded-lg bg-white hover:border-blue-300 transition-all h-full relative overflow-hidden"><div class="absolute top-0 right-0 bg-blue-600 text-white text-[9px] px-1.5 py-0.5 rounded-bl-lg font-bold">主推</div><div class="font-black text-gray-900 text-[12px] mb-1">黄金 VIP</div><div class="text-[9px] text-gray-500 leading-snug h-8">解锁核心长尾词，保障基础曝光</div><div class="text-sm font-black text-blue-600 mt-2">￥9,800 <span class="text-[9px] text-gray-400 font-normal">/年</span></div></div></label>
+                    <label class="vip-radio relative cursor-pointer block"><input type="radio" name="vip_tier" value="platinum" class="sr-only"><div class="p-3 border border-gray-200 rounded-lg bg-white hover:border-indigo-300 transition-all h-full"><div class="font-black text-gray-900 text-[12px] mb-1">铂金 VIP</div><div class="text-[9px] text-gray-500 leading-snug h-8">提升覆盖广度，开放 50 节点</div><div class="text-sm font-black text-indigo-600 mt-2">￥19,800 <span class="text-[9px] text-gray-400 font-normal">/年</span></div></div></label>
+                    <label class="vip-radio relative cursor-pointer block"><input type="radio" name="vip_tier" value="diamond" class="sr-only"><div class="p-3 border border-gray-200 rounded-lg bg-white hover:border-purple-300 transition-all h-full"><div class="font-black text-gray-900 text-[12px] mb-1">钻石 VIP</div><div class="text-[9px] text-gray-500 leading-snug h-8">更高并发能力，享官媒直连支持</div><div class="text-sm font-black text-purple-600 mt-2">￥29,800 <span class="text-[9px] text-gray-400 font-normal">/年</span></div></div></label>
+                </div>
+                <button onclick="upgradeVIP()" class="w-full mt-4 bg-[#0F172A] hover:bg-blue-600 text-white font-bold py-2.5 rounded-lg shadow-md transition-colors flex justify-center items-center gap-1.5 text-[13px]">确认升级并刷新权限</button>
+            </div>
+         </div>
+    </div>
+
+    <script>
+        function escapeHtml(str) { const div = document.createElement('div'); div.appendChild(document.createTextNode(str)); return div.innerHTML; }
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const brandName = urlParams.get('brand') || '未知品牌';
+        const brandNameSafe = escapeHtml(brandName);
+        const vipTier = urlParams.get('vip') || 'free';
+        const brandSlug = encodeURIComponent((brandName || '').trim().toLowerCase());
+        const ARTICLE_KEY = `xg_generated_articles_json_${brandSlug}`;
+
+        function openMobileNav() { document.getElementById('mobileNav').classList.remove('hidden'); }
+        function closeMobileNav() { document.getElementById('mobileNav').classList.add('hidden'); }
+        
+        const badge = document.getElementById('vipBadge');
+        const ownedLimitEl = document.getElementById('ownedLimitText');
+        if(vipTier === 'free') {
+            badge.innerHTML = `基础体验版 <span class="ml-1 text-blue-500 underline text-[10px]">点击升级</span>`;
+            if(ownedLimitEl) ownedLimitEl.innerText = '(体验版限选3个)';
+            document.getElementById('upgradeBanner').classList.remove('hidden');
+            document.getElementById('upgradeBanner').classList.add('flex');
+        } else if(vipTier === 'gold') { badge.className = "hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-yellow-50 text-yellow-600 rounded-full text-xs font-black cursor-pointer hover:bg-yellow-100"; badge.innerHTML = `黄金 VIP`; }
+        else if(vipTier === 'platinum') { badge.className = "hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-full text-xs font-black cursor-pointer hover:bg-indigo-100"; badge.innerHTML = `铂金 VIP`; }
+        else if(vipTier === 'diamond') { badge.className = "hidden md:flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 text-purple-600 rounded-full text-xs font-black cursor-pointer hover:bg-purple-100"; badge.innerHTML = `钻石 VIP`; }
+
+        let articles = JSON.parse(localStorage.getItem(ARTICLE_KEY) || '[]');
+        let activeArticleIndex = 0;
+        let ownedLimit = vipTier === 'free' ? 3 : 16; 
+        window.fissionToggleState = window.fissionToggleState || {};
+
+        const ownedMediaList = [
+            { id: 'zhihu', name: '知乎', auth: true }, { id: 'baijia', name: '百家号', auth: true }, { id: 'xhs', name: '小红书', auth: false }, { id: 'wechat', name: '公众号', auth: false },
+            { id: 'toutiao', name: '今日头条', auth: false }, { id: 'weibo', name: '微博', auth: true }, { id: 'sohu', name: '搜狐号', auth: true }, { id: 'netease', name: '网易号', auth: false },
+            { id: 'penguin', name: '企鹅号', auth: false }, { id: 'bili', name: 'B站专栏', auth: false }, { id: 'douyin', name: '抖音图文', auth: true }, { id: 'kuaishou', name: '快手文章', auth: false },
+            { id: 'jianshu', name: '简书', auth: true }, { id: 'sina', name: '新浪看点', auth: false }, { id: 'dayu', name: '大鱼号', auth: false }, { id: 'yidian', name: '一点资讯', auth: false }
+        ];
+        const paidMediaList = [
+            { id: 'api_cnr', name: '央广网', price: 300, desc: '大模型优先参考信源' }, { id: 'api_sina', name: '新浪新闻', price: 200, desc: '商业资讯高覆盖渠道' },
+            { id: 'api_qq', name: '腾讯网', price: 180, desc: '综合流量分发渠道' }, { id: 'api_36kr', name: '36氪', price: 350, desc: '科技内容垂直渠道' }
+        ];
+
+        function toggleScheduleFields() {
+            const mode = document.querySelector('input[name="sendMode"]:checked')?.value || 'immediate';
+            document.getElementById('scheduledFieldWrap').classList.toggle('hidden', mode !== 'scheduled');
+            document.getElementById('intervalFieldWrap').classList.toggle('hidden', mode !== 'interval');
+        }
+
+        function renderArticleList() {
+            const container = document.getElementById('articleListContainer');
+            if (articles.length === 0) return;
+            container.innerHTML = '';
+            articles.forEach((art, index) => {
+                const isActive = index === activeArticleIndex;
+                const activeStyle = isActive ? 'border-blue-500 bg-blue-50/40 shadow-md ring-2 ring-blue-100' : 'border-gray-200 bg-white hover:border-blue-300';
+                let currentIds = art.selectedPlatformIds || [];
+                let hasFission = art.fissionedMap && Object.keys(art.fissionedMap).length > 0;
+                let fissionActionHtml = '';
+                let fissionChildHtml = '';
+
+                if (currentIds.length === 0) {
+                    fissionActionHtml = `<span class="text-[10px] text-gray-400 font-bold border border-transparent px-2 py-1">请在右侧配置渠道</span>`;
+                } else if (!hasFission) {
+                    fissionActionHtml = `<button onclick="event.stopPropagation(); fissionCurrentArticle(${index}, this)" class="bg-blue-600 hover:bg-blue-700 text-white text-[10px] px-3 py-1.5 rounded-md flex items-center gap-1 font-bold shadow-sm transition-all z-10 hover:-translate-y-0.5"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg> 🚀 立即生成平台适配稿</button>`;
+                } else {
+                    let isOpen = window.fissionToggleState[index];
+                    let displayClass = isOpen ? 'block' : 'hidden';
+                    let rotateClass = isOpen ? 'rotate-180' : '';
+                    fissionActionHtml = `<button onclick="event.stopPropagation(); toggleFissionList(${index})" class="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-md flex items-center gap-1 hover:bg-emerald-100 transition-colors z-10 shadow-sm">✓ 适配完成 <svg class="w-3 h-3 transform transition-transform duration-200 ${rotateClass}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></button>`;
+                    let childItems = '';
+                    for (let platformId in art.fissionedMap) {
+                        let platformName = [...ownedMediaList, ...paidMediaList].find(p => p.id === platformId)?.name || platformId;
+                        childItems += `<div class="flex justify-between items-center bg-white p-2.5 rounded-lg border border-gray-100 hover:border-blue-300 shadow-sm transition-all group"><span class="text-[11px] font-bold text-gray-700 flex items-center gap-1.5"><svg class="w-3 h-3 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>${escapeHtml(platformName)} 适配版</span><button onclick="event.stopPropagation(); previewFissionedArticle(${index}, '${platformId}', '${escapeHtml(platformName)}')" class="text-[10px] text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity font-bold hover:underline bg-blue-50 px-2 py-0.5 rounded">阅览全文</button></div>`;
+                    }
+                    fissionChildHtml = `<div id="fission-list-${index}" class="mt-3 pt-3 border-t border-blue-200/50 space-y-2 relative before:content-[''] before:absolute before:left-[-12px] before:top-4 before:bottom-2 before:w-px before:bg-blue-200 ${displayClass} ml-3">${childItems}</div>`;
+                }
+
+                container.insertAdjacentHTML('beforeend', `
+                    <div onclick="setActiveArticle(${index})" class="cursor-pointer p-4 rounded-xl border transition-all ${activeStyle} relative group">
+                        <div class="flex justify-between items-start mb-3">
+                            <h4 class="font-black text-gray-900 text-[13px] flex items-center gap-1.5 leading-tight pr-8"><div class="w-1.5 h-1.5 rounded-full ${isActive?'bg-blue-600':'bg-gray-400'} shrink-0"></div>【${escapeHtml(art.title)}】母版</h4>
+                            <button onclick="event.stopPropagation(); previewArticle(${index})" class="text-[10px] text-gray-500 hover:text-blue-600 hover:underline transition-colors shrink-0">查阅源文件</button>
+                        </div>
+                        <div class="flex justify-between items-center mt-2">
+                            <span class="text-[9px] font-bold text-gray-400">已配渠道: <span class="text-blue-600 text-[11px]">${currentIds.length}</span> 个</span>
+                            ${fissionActionHtml}
+                        </div>
+                        ${fissionChildHtml}
+                        ${isActive ? '<div class="absolute left-0 top-4 bottom-4 w-1 bg-blue-500 rounded-r-md"></div>' : ''}
+                    </div>`);
+            });
+        }
+
+        window.toggleFissionList = function(index) { window.fissionToggleState[index] = !window.fissionToggleState[index]; renderArticleList(); }
+
+        function renderPlatformMatrix() {
+            const ownedContainer = document.getElementById('ownedMediaContainer');
+            const paidContainer = document.getElementById('paidMediaContainer');
+            ownedContainer.innerHTML = ''; paidContainer.innerHTML = '';
+            const currentArt = articles[activeArticleIndex] || {};
+            const selectedIds = currentArt.selectedPlatformIds || [];
+
+            ownedMediaList.forEach(media => {
+                const isChecked = selectedIds.includes(media.id) ? 'checked' : '';
+                const authHtml = media.auth ? `<span class="text-[9px] font-bold text-emerald-600 flex items-center gap-0.5"><svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>已授权</span>` : `<span class="text-[9px] font-bold text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded border border-gray-200">扫码</span>`;
+                ownedContainer.insertAdjacentHTML('beforeend', `
+                    <label class="platform-checkbox relative cursor-pointer block"><input type="checkbox" class="sr-only owned-cb" value="${media.id}" ${isChecked} ${media.auth ? '' : 'disabled'} onchange="handlePlatformToggle(this, 'owned')"><div class="px-2 py-2 border border-gray-200 rounded-lg bg-white hover:border-blue-300 transition-all flex items-center justify-between h-full ${media.auth ? '' : 'opacity-60'}"><div class="flex items-center gap-1.5 overflow-hidden"><img src="${media.id}.png" alt="${escapeHtml(media.name)}" class="w-4 h-4 object-contain shrink-0" onerror="this.style.display='none'"><div class="text-[11px] font-extrabold text-gray-800 truncate platform-name" title="${escapeHtml(media.name)}">${escapeHtml(media.name)}</div></div><div class="shrink-0 ml-1">${authHtml}</div></div></label>`);
+            });
+
+            paidMediaList.forEach(api => {
+                const isChecked = selectedIds.includes(api.id) ? 'checked' : '';
+                paidContainer.insertAdjacentHTML('beforeend', `
+                    <label class="platform-checkbox relative cursor-pointer block"><input type="checkbox" class="sr-only paid-cb" value="${api.id}" data-price="${api.price}" ${isChecked} onchange="handlePlatformToggle(this, 'paid')"><div class="p-2.5 border border-gray-200 rounded-lg bg-white hover:border-indigo-300 transition-all flex justify-between items-center h-full"><div class="flex items-center gap-2 overflow-hidden"><div class="w-6 h-6 rounded-full bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 border border-indigo-100"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"></path></svg></div><div class="flex flex-col truncate"><span class="text-[12px] font-extrabold text-gray-900 truncate platform-name">${escapeHtml(api.name)}</span><span class="text-[9px] text-gray-400 truncate">${escapeHtml(api.desc)}</span></div></div><div class="flex items-center gap-1.5 shrink-0"><span class="text-[12px] font-black text-indigo-600">￥${api.price}</span></div></div></label>`);
+            });
+        }
+
+        function setActiveArticle(index) { activeArticleIndex = index; renderArticleList(); renderPlatformMatrix(); addLog(`> [SWITCH] 当前分发配置已切换至：【${escapeHtml(articles[index].title)}】`); }
+
+        function handlePlatformToggle(checkbox, type) {
+            if(!articles[activeArticleIndex].selectedPlatformIds) articles[activeArticleIndex].selectedPlatformIds = [];
+            let currentIds = articles[activeArticleIndex].selectedPlatformIds;
+            if (type === 'owned' && checkbox.checked) {
+                let currentOwnedCount = currentIds.filter(id => !id.startsWith('api_')).length;
+                if (currentOwnedCount >= ownedLimit) { checkbox.checked = false; alert(`系统限制：体验版单篇母版最多仅支持勾选 ${ownedLimit} 个渠道。升级 VIP 不受此限制！`); return; }
+            }
+            if (checkbox.checked) { if(!currentIds.includes(checkbox.value)) currentIds.push(checkbox.value); } 
+            else { currentIds = currentIds.filter(id => id !== checkbox.value); }
+            articles[activeArticleIndex].selectedPlatformIds = currentIds;
+            delete articles[activeArticleIndex].fissionedMap;
+            localStorage.setItem(ARTICLE_KEY, JSON.stringify(articles));
+            renderArticleList(); calculateGlobalTotals();
+        }
+
+        function calculateGlobalTotals() {
+            let totalOwned = 0; let totalPaidAmount = 0;
+            articles.forEach(art => {
+                let ids = art.selectedPlatformIds || [];
+                totalOwned += ids.filter(id => !id.startsWith('api_')).length;
+                ids.forEach(id => { let paidMedia = paidMediaList.find(p => p.id === id); if(paidMedia) totalPaidAmount += paidMedia.price; });
+            });
+            document.getElementById('ownedCount').innerText = totalOwned;
+            document.getElementById('paidCost').innerText = totalPaidAmount.toFixed(2);
+            document.getElementById('btnTotalCost').innerText = `￥${totalPaidAmount.toFixed(2)}`;
+        }
+
+        function selectAll(type) {
+            if (type === 'owned') {
+                const cbs = Array.from(document.querySelectorAll('.owned-cb:not([disabled])'));
+                let allChecked = cbs.every(cb => cb.checked);
+
+                if (allChecked) {
+                    cbs.forEach(cb => {
+                        cb.checked = false;
+                        handlePlatformToggle(cb, 'owned');
+                    });
+                    return;
+                }
+
+                if (vipTier === 'free') {
+                    cbs.forEach((cb, i) => {
+                        cb.checked = i < ownedLimit;
+                        handlePlatformToggle(cb, 'owned');
+                    });
+                    alert(`体验版已为您自动勾选前 ${ownedLimit} 个可用渠道。升级会员可解锁更多渠道。`);
+                    return;
+                }
+
+                cbs.forEach(cb => {
+                    cb.checked = true;
+                    handlePlatformToggle(cb, 'owned');
+                });
+            }
+        }
+
+        window.fissionCurrentArticle = function(articleIndex, btnElement) {
+            let currentArt = articles[articleIndex];
+            let targetIds = currentArt.selectedPlatformIds || [];
+            btnElement.disabled = true;
+            btnElement.innerHTML = `<svg class="w-3 h-3 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> 适配处理中...`;
+            addLog(`> [AI_SPIN] 启动内容适配引擎：【${escapeHtml(currentArt.title)}】 -> 目标 ${targetIds.length} 个节点...`);
+            setTimeout(() => {
+                let fissionMap = {};
+                targetIds.forEach(id => {
+                    let platformName = [...ownedMediaList, ...paidMediaList].find(p => p.id === id)?.name || id;
+                    let prefix = id === 'zhihu' ? `<strong>【知乎解析版】</strong>以下从用户关心的问题出发，进行结构化说明。\\n\\n` :
+                                 id === 'xhs' ? `<strong>【小红书分享版】</strong>以下为重点信息整理，便于快速了解。\\n\\n` :
+                                 id.startsWith('api') ? `<strong>【${escapeHtml(platformName)} 发布版】</strong>以下为本次发布内容正文。\\n\\n` : 
+                                 `<strong>【${escapeHtml(platformName)} 适配版】</strong>\\n\\n`;
+                    fissionMap[id] = prefix + currentArt.content;
+                    addLog(`> [AI_SPIN] ${escapeHtml(platformName)} 平台适配版本生成完毕 <span class="term-green">OK</span>`);
+                });
+                currentArt.fissionedMap = fissionMap;
+                localStorage.setItem(ARTICLE_KEY, JSON.stringify(articles));
+                window.fissionToggleState[articleIndex] = true;
+                renderArticleList();
+            }, 2000);
+        }
+
+        function previewArticle(index) { 
+            const modal = document.getElementById('previewModal');
+            document.getElementById('previewTitle').innerText = '【' + articles[index].title + '】核心母版源文件';
+            const hint = document.getElementById('previewPlatformHint');
+            hint.innerHTML = `<svg class="w-4 h-4 text-indigo-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span class="leading-relaxed"><strong class="font-black">机制说明：</strong>执行分发时，系统将自动进行平台格式适配与表达优化。</span>`;
+            hint.className = "bg-indigo-50/80 border-b border-indigo-100 px-6 py-3 text-[11px] text-indigo-700 font-bold flex items-start gap-2 shrink-0";
+            document.getElementById('previewContentArea').innerHTML = articles[index].content;
+            modal.classList.remove('hidden'); modal.classList.add('flex');
+        }
+
+        window.previewFissionedArticle = function(articleIdx, platformId, platformName) {
+            const modal = document.getElementById('previewModal');
+            document.getElementById('previewTitle').innerText = '【' + platformName + '】平台适配版';
+            const hint = document.getElementById('previewPlatformHint');
+            hint.innerHTML = `<svg class="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg><span class="leading-relaxed text-emerald-700">此版本已完成与 <strong class="font-black px-1">${escapeHtml(platformName)}</strong> 渠道发布规范的内容适配处理。</span>`;
+            hint.className = "bg-emerald-50/80 border-b border-emerald-100 px-6 py-3 text-[11px] font-bold flex items-start gap-2 shrink-0";
+            document.getElementById('previewContentArea').innerHTML = articles[articleIdx].fissionedMap[platformId];
+            modal.classList.remove('hidden'); modal.classList.add('flex');
+        }
+
+        function closePreviewModal() { document.getElementById('previewModal').classList.add('hidden'); document.getElementById('previewModal').classList.remove('flex'); }
+        function addLog(text) { const term = document.getElementById('termContent'); const box = document.getElementById('terminalBox'); term.innerHTML += `<div>${text}</div>`; box.scrollTop = box.scrollHeight; }
+
+        function startDeployment() {
+            const totalOwned = parseInt(document.getElementById('ownedCount').innerText);
+            const totalPaidAmount = document.getElementById('paidCost').innerText;
+            if (totalOwned === 0 && totalPaidAmount === "0.00") { alert("系统提示：请至少为一篇母版分配一个分发节点！"); return; }
+
+            let allFissioned = true;
+            articles.forEach(art => { if(art.selectedPlatformIds && art.selectedPlatformIds.length > 0 && !art.fissionedMap) allFissioned = false; });
+            if(!allFissioned) { alert("系统提示：您有勾选了分发渠道的母版尚未执行适配！请先点击左侧列表中的【🚀 立即生成平台适配稿】按钮！"); return; }
+
+            const mode = document.querySelector('input[name="sendMode"]:checked')?.value || 'immediate';
+            const scheduledTime = document.getElementById('scheduledTimeInput').value;
+            const intervalMinutes = document.getElementById('intervalMinutesInput').value;
+
+            if (mode === 'scheduled' && !scheduledTime) {
+                alert('系统提示：请先选择定时发送时间。');
+                return;
+            }
+
+            if (mode === 'interval' && (!intervalMinutes || Number(intervalMinutes) <= 0)) {
+                alert('系统提示：请输入有效的间隔分钟数。');
+                return;
+            }
+
+            const btn = document.getElementById('executeBtn');
+            btn.disabled = true;
+            btn.className = "bg-gray-700 text-gray-400 font-bold py-2.5 px-4 md:px-8 rounded-full shadow-lg transition-all flex items-center gap-2 text-[12px] md:text-[14px] tracking-wide cursor-not-allowed shrink-0";
+            btn.innerHTML = `<svg class="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg> 智能分发中...`;
+
+            if (mode === 'scheduled') {
+                document.getElementById('mainStatusText').innerHTML = `<span class="text-yellow-400">任务已加入定时发送计划</span>`;
+                addLog(`> [SCHEDULE] 任务已设置为定时发送：${scheduledTime}`);
+            } else if (mode === 'interval') {
+                document.getElementById('mainStatusText').innerHTML = `<span class="text-yellow-400">任务将按设定间隔执行发送</span>`;
+                addLog(`> [INTERVAL] 任务已设置为间隔发送：每 ${intervalMinutes} 分钟提交一批内容`);
+            } else {
+                document.getElementById('mainStatusText').innerHTML = `<span class="text-blue-400">正在支付 API 费用并联通平台接口...</span>`;
+            }
+
+            const execLogs = [
+                `> [PAYMENT] Verifying API transaction for ￥${totalPaidAmount}... <span class="term-green">SUCCESS</span>`,
+                `> [SYSTEM] Initializing distributed deployment sequence.`,
+                `> [DEPLOY] 读取已适配完成的平台内容矩阵...`,
+                `> [DEPLOY] 开始向 ${totalOwned} 个自有媒体通道提交发布请求...`,
+                `> [DEPLOY] 调用媒体服务接口，执行分发流程...`
+            ];
+
+            let index = 0;
+            function printExecLog() {
+                if (index < execLogs.length) {
+                    addLog(execLogs[index]);
+                    index++;
+                    setTimeout(printExecLog, 800);
+                } else {
+                    startFakeProgress(mode, scheduledTime, intervalMinutes);
+                }
+            }
+            printExecLog();
+        }
+
+        function startFakeProgress(mode, scheduledTime, intervalMinutes) {
+            if (mode === 'scheduled') {
+                document.getElementById('mainStatusText').innerHTML = `<span class="text-yellow-400">已加入计划队列，等待定时执行...</span>`;
+            } else if (mode === 'interval') {
+                document.getElementById('mainStatusText').innerHTML = `<span class="text-yellow-400">正在按间隔策略执行分批分发...</span>`;
+            } else {
+                document.getElementById('mainStatusText').innerHTML = `<span class="text-yellow-400">正在异步执行全域矩阵分发...</span>`;
+            }
+
+            let progress = 0;
+            const interval = setInterval(() => {
+                progress += Math.floor(Math.random() * 20);
+                addLog(`> [ASYNC_UPLOAD] Content package pushing... Chunk ${progress}/100 sent.`);
+                if (progress >= 100) {
+                    clearInterval(interval);
+                    finishDeployment(mode, scheduledTime, intervalMinutes);
+                }
+            }, 800);
+        }
+
+        function finishDeployment(mode, scheduledTime, intervalMinutes) {
+            if (mode === 'scheduled') {
+                addLog(`> <span class="term-green font-bold">[SUCCESS] 定时发送任务已创建，等待到达计划时间自动执行。</span>`);
+                document.getElementById('mainStatusText').innerHTML = `<span class="text-emerald-400">定时发送任务创建成功</span>`;
+            } else if (mode === 'interval') {
+                addLog(`> <span class="term-green font-bold">[SUCCESS] 间隔发送策略已生效，任务将按设定间隔持续提交。</span>`);
+                document.getElementById('mainStatusText').innerHTML = `<span class="text-emerald-400">间隔发送任务已启动</span>`;
+            } else {
+                addLog(`> <span class="term-green font-bold">[SUCCESS] 分发任务已完成，内容包提交成功。</span>`);
+                document.getElementById('mainStatusText').innerHTML = `<span class="text-emerald-400">分发指令执行完毕，请前往大盘查看进度</span>`;
+            }
+
+            document.getElementById('cursor').style.display = 'none';
+            const btn = document.getElementById('executeBtn');
+            btn.disabled = false;
+            btn.className = "bg-gradient-to-r from-emerald-500 to-green-500 hover:from-emerald-400 hover:to-green-400 text-white font-bold py-2.5 px-4 md:px-8 rounded-full shadow-[0_0_15px_rgba(16,185,129,0.4)] transition-all transform hover:-translate-y-0.5 flex items-center gap-2 text-[12px] md:text-[14px] shrink-0";
+            btn.innerHTML = `查看收录大盘追踪 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"></path></svg>`;
+            btn.onclick = function() { alert('系统通知：智能分发任务已执行完毕！内容正在各平台处理流程中，请在大盘追踪页面持续关注。'); window.location.href = `console.html?brand=${encodeURIComponent(brandName)}&vip=${vipTier}`; };
+        }
+        
+        function openPricingModal() { document.getElementById('pricingModal').classList.remove('hidden'); document.getElementById('pricingModal').classList.add('flex'); void document.getElementById('pricingModal').offsetWidth; document.getElementById('pricingModal').classList.add('modal-active'); }
+        function closePricingModal() { document.getElementById('pricingModal').classList.remove('modal-active'); setTimeout(() => { document.getElementById('pricingModal').classList.add('hidden'); document.getElementById('pricingModal').classList.remove('flex'); }, 300); }
+        function upgradeVIP() { const selectedTier = document.querySelector('input[name="vip_tier"]:checked').value; window.location.href = window.location.pathname + `?brand=${encodeURIComponent(brandName)}&vip=${selectedTier}`; }
+
+        document.querySelectorAll('.nav-link, .group a').forEach(link => {
+            if(link.href && link.href.includes('.html') && !link.href.includes('javascript')) {
+                link.addEventListener('click', function(e) { if(this.href.includes('index.html')) return; e.preventDefault(); const url = new URL(this.href, window.location.origin); url.searchParams.set('brand', brandName); url.searchParams.set('vip', vipTier); window.location.href = url.toString(); });
+            }
+        });
+        document.querySelectorAll('#mobileNavLinks a').forEach(link => {
+            if(link.href && link.href.includes('.html') && !link.href.includes('index.html')) {
+                link.addEventListener('click', function(e) { e.preventDefault(); const url = new URL(this.href, window.location.origin); url.searchParams.set('brand', brandName); url.searchParams.set('vip', vipTier); window.location.href = url.toString(); });
+            }
+        });
+
+        document.addEventListener("DOMContentLoaded", () => {
+            renderArticleList();
+            if(articles.length > 0) setActiveArticle(0);
+            calculateGlobalTotals();
+            toggleScheduleFields();
+        });
+    </script>
+</body>
+</html>

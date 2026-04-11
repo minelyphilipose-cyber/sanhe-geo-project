@@ -1,5 +1,5 @@
 -- ============================================================
--- V1: 系统用户表 + 默认管理员
+-- V1: system users and default admin
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS sys_user (
@@ -16,9 +16,9 @@ CREATE TABLE IF NOT EXISTS sys_user (
     updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_role (role),
     INDEX idx_partner (partner_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统用户';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='system user';
 
--- 默认管理员  密码: admin123
--- BCrypt hash 通过 new BCryptPasswordEncoder().encode("admin123") 生成
-INSERT INTO sys_user (username, password_hash, display_name, role) VALUES
-('admin', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy', '系统管理员', 'super_admin');
+-- default admin / admin123
+-- INSERT INTO sys_user (username, password_hash, display_name, role)
+-- SELECT 'admin', '$2a$10$tEiif0.NbEDSEiD3jXCFr.GZRSE/pavA4B7uNnT9La3is4aH1oDwm', 'System Admin', 'super_admin'
+-- WHERE NOT EXISTS (SELECT 1 FROM sys_user WHERE username = 'admin');

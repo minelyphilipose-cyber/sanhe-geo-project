@@ -31,11 +31,11 @@ import { useAppStore } from '@/stores/app'
 const appStore = useAppStore()
 
 const partnerMenus = [
-  { path: '/partner/home',         name: 'PartnerHome',    title: '首页',       icon: 'HomeFilled' },
-  { path: '/partner/my-customers', name: 'MyCustomers',    title: '我的客户',   icon: 'User'       },
-  { path: '/partner/my-projects',  name: 'MyProjects',     title: '我的项目',   icon: 'Folder'     },
-  { path: '/partner/balance',      name: 'PartnerBalance', title: '余额与扣款', icon: 'Wallet'     },
-  { path: '/partner/training',     name: 'TrainingCenter', title: '培训中心',   icon: 'Reading'    },
+  { path: '/partner/home', name: 'PartnerHome', title: '首页', icon: 'HomeFilled' },
+  { path: '/partner/my-customers', name: 'MyCustomers', title: '我的客户', icon: 'User' },
+  { path: '/partner/my-projects', name: 'MyProjects', title: '我的项目', icon: 'Folder' },
+  { path: '/partner/balance', name: 'PartnerBalance', title: '余额与扣款', icon: 'Wallet' },
+  { path: '/partner/training', name: 'TrainingCenter', title: '培训中心', icon: 'Reading' },
 ]
 </script>
 
@@ -55,3 +55,4 @@ const partnerMenus = [
   padding: 20px 24px;
 }
 </style>
+

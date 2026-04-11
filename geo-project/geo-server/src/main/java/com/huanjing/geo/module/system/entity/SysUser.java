@@ -15,6 +15,7 @@ public class SysUser {
     private String role;
     private Long partnerId;
     private String phone;
+    private String email;
     private Boolean isActive;
     private LocalDateTime lastLoginAt;
     private LocalDateTime createdAt;

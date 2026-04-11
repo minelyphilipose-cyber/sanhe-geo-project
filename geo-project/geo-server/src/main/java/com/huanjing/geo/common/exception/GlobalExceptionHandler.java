@@ -18,20 +18,20 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(BizException.class)
     public R<?> handleBizException(BizException e) {
-        log.warn("业务异常: {}", e.getMessage());
+        log.warn("Business exception: {}", e.getMessage());
         return R.fail(e.getCode(), e.getMessage());
     }
 
     @ExceptionHandler(BadCredentialsException.class)
     @ResponseStatus(HttpStatus.UNAUTHORIZED)
     public R<?> handleBadCredentials(BadCredentialsException e) {
-        return R.fail(401, "用户名或密码错误");
+        return R.fail(401, "Invalid username or password");
     }
 
     @ExceptionHandler(AccessDeniedException.class)
     @ResponseStatus(HttpStatus.FORBIDDEN)
     public R<?> handleAccessDenied(AccessDeniedException e) {
-        return R.fail(403, "无操作权限");
+        return R.fail(403, "Forbidden");
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -39,7 +39,7 @@ public class GlobalExceptionHandler {
         String msg = e.getBindingResult().getFieldErrors().stream()
                 .map(f -> f.getField() + ": " + f.getDefaultMessage())
                 .findFirst()
-                .orElse("参数校验失败");
+                .orElse("Request validation failed");
         return R.fail(400, msg);
     }
 
@@ -48,7 +48,7 @@ public class GlobalExceptionHandler {
         String msg = e.getFieldErrors().stream()
                 .map(f -> f.getField() + ": " + f.getDefaultMessage())
                 .findFirst()
-                .orElse("参数绑定失败");
+                .orElse("Request bind failed");
         return R.fail(400, msg);
     }
 
@@ -60,7 +60,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public R<?> handleException(Exception e) {
-        log.error("系统异常", e);
-        return R.fail(500, "系统内部错误");
+        log.error("Unhandled exception", e);
+        return R.fail(500, "Internal server error");
     }
 }

@@ -4,30 +4,72 @@ import { loginApi, refreshTokenApi, logoutApi } from '@/api/auth'
 import { isPartnerRole } from '@/utils/constants'
 import type { UserInfo, RoleType, LoginRequest } from '@/types'
 
-export const useUserStore = defineStore('user', () => {
-  /* ---- state ---- */
-  const accessToken = ref<string>('')
-  const userInfo = ref<UserInfo | null>(null)
+const AUTH_STORAGE_KEY = 'geo_auth_v1'
 
-  /* ---- getters ---- */
+interface PersistedAuth {
+  accessToken: string
+  refreshToken: string
+  userInfo: UserInfo | null
+}
+
+function loadPersistedAuth(): PersistedAuth {
+  try {
+    const raw = localStorage.getItem(AUTH_STORAGE_KEY)
+    if (!raw) {
+      return { accessToken: '', refreshToken: '', userInfo: null }
+    }
+    const data = JSON.parse(raw) as PersistedAuth
+    return {
+      accessToken: data.accessToken || '',
+      refreshToken: data.refreshToken || '',
+      userInfo: data.userInfo || null,
+    }
+  } catch {
+    return { accessToken: '', refreshToken: '', userInfo: null }
+  }
+}
+
+export const useUserStore = defineStore('user', () => {
+  const persisted = loadPersistedAuth()
+  const accessToken = ref<string>(persisted.accessToken)
+  const refreshToken = ref<string>(persisted.refreshToken)
+  const userInfo = ref<UserInfo | null>(persisted.userInfo)
+
   const isLoggedIn = computed(() => !!accessToken.value && !!userInfo.value)
   const role = computed<RoleType | null>(() => userInfo.value?.role ?? null)
   const isPartner = computed(() => role.value ? isPartnerRole(role.value) : false)
   const displayName = computed(() => userInfo.value?.displayName ?? '')
 
-  /* ---- actions ---- */
+  function persistAuth() {
+    const payload: PersistedAuth = {
+      accessToken: accessToken.value,
+      refreshToken: refreshToken.value,
+      userInfo: userInfo.value,
+    }
+    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(payload))
+  }
+
+  function clearPersistedAuth() {
+    localStorage.removeItem(AUTH_STORAGE_KEY)
+  }
+
   async function login(form: LoginRequest) {
     const { data } = await loginApi(form)
     const res = data.data
     accessToken.value = res.accessToken
+    refreshToken.value = res.refreshToken
     userInfo.value = res.user
-    // refreshToken 由后端写入 httpOnly cookie，前端不存储
+    persistAuth()
   }
 
   async function refreshAccessToken(): Promise<string> {
-    const { data } = await refreshTokenApi()
+    if (!refreshToken.value) {
+      throw new Error('refresh token missing')
+    }
+    const { data } = await refreshTokenApi(refreshToken.value)
     const newToken = data.data.accessToken
     accessToken.value = newToken
+    persistAuth()
     return newToken
   }
 
@@ -35,10 +77,12 @@ export const useUserStore = defineStore('user', () => {
     try {
       await logoutApi()
     } catch {
-      // 即使后端失败也清理本地状态
+      // ignore backend logout error and clear local state
     }
     accessToken.value = ''
+    refreshToken.value = ''
     userInfo.value = null
+    clearPersistedAuth()
   }
 
   function hasRole(allowed: RoleType[]): boolean {
@@ -49,6 +93,7 @@ export const useUserStore = defineStore('user', () => {
 
   return {
     accessToken,
+    refreshToken,
     userInfo,
     isLoggedIn,
     role,

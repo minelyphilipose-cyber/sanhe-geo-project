@@ -5,8 +5,8 @@ export function loginApi(data: LoginRequest) {
   return request.post<R<LoginResponse>>('/auth/login', data)
 }
 
-export function refreshTokenApi() {
-  return request.post<R<{ accessToken: string }>>('/auth/refresh')
+export function refreshTokenApi(refreshToken: string) {
+  return request.post<R<{ accessToken: string }>>('/auth/refresh', { refreshToken })
 }
 
 export function logoutApi() {

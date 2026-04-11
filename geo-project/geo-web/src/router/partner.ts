@@ -43,3 +43,4 @@ const partnerRoutes: RouteRecordRaw = {
 }
 
 export default partnerRoutes
+

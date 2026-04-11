@@ -107,6 +107,8 @@ export interface Company {
   partnerId: number | null
   referralSource: string | null
   salesOwnerId: number | null
+  status?: string
+  remark?: string | null
   createdAt: string
 }
 
@@ -123,15 +125,19 @@ export interface Brand {
   description: string | null
   standardBrandStatement: string | null
   forbiddenPhrases: string | null
+  status?: string
   createdAt: string
   updatedAt: string
 }
 
 export interface Project {
   id: number
+  projectCode?: string
   brandId: number
   projectName: string
   packageType: PackageType
+  packagePrice?: number
+  serviceMonths?: number
   status: ProjectStatus
   stage: ProjectStage
   startDate: string | null
@@ -140,6 +146,7 @@ export interface Project {
   ownerType: OwnerType
   partnerId: number | null
   deliveryMode: string
+  remark?: string | null
   createdAt: string
   // 关联展示字段
   brandName?: string
