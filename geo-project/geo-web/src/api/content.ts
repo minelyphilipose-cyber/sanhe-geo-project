@@ -1,5 +1,13 @@
 import request from './request'
-import type { ArticleDraft, ArticleDetailResponse, PageResult, R } from '@/types'
+import type {
+  ArticleDraft,
+  ArticleDetailResponse,
+  DistributionTask,
+  PageResult,
+  PublishQuota,
+  RecommendedSitesResponse,
+  R,
+} from '@/types'
 
 export function getContentArticles(params: {
   projectId?: number
@@ -44,3 +52,26 @@ export function publishContentArticle(articleId: number, data: {
   return request.post<R<void>>(`/content/articles/${articleId}/publish`, data)
 }
 
+export function distributeContentArticle(articleId: number, siteId: number) {
+  return request.post<R<DistributionTask>>(`/content/articles/${articleId}/distribute`, { siteId })
+}
+
+export function getArticleDistribution(articleId: number) {
+  return request.get<R<{ articleId: number; articleStatus: string; attempts: DistributionTask[] }>>(`/content/articles/${articleId}/distribution`)
+}
+
+export function retryDistributionTask(taskId: number) {
+  return request.post<R<DistributionTask>>(`/content/distribution-tasks/${taskId}/retry`)
+}
+
+export function confirmManualDistribution(taskId: number, data: { publishedUrl: string; responsePayload?: string }) {
+  return request.patch<R<DistributionTask>>(`/content/distribution-tasks/${taskId}/confirm-manual`, data)
+}
+
+export function getProjectPublishQuota(projectId: number) {
+  return request.get<R<PublishQuota>>(`/content/projects/${projectId}/publish-quota`)
+}
+
+export function getRecommendedSites(projectId: number) {
+  return request.get<R<RecommendedSitesResponse>>(`/content/projects/${projectId}/recommended-sites`)
+}

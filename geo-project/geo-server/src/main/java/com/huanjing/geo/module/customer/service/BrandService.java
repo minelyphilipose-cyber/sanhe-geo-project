@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.customer.service;
 
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
@@ -11,6 +12,8 @@ import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.system.entity.SysDictItem;
+import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
@@ -19,10 +22,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Locale;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -36,6 +42,7 @@ public class BrandService {
     private final CurrentUserService currentUserService;
     private final ActivityLogService activityLogService;
     private final BrandProfileService brandProfileService;
+    private final SysDictItemMapper sysDictItemMapper;
 
     public Page<Brand> page(long current, long size, Long companyId, String keyword) {
         SysUser user = currentUserService.requireCurrentUser();
@@ -86,6 +93,9 @@ public class BrandService {
 
         Brand brand = new Brand();
         brand.setCompanyId(req.getCompanyId());
+        String industry = normalizeIndustry(req.getIndustry());
+        validateBrandIndustry(industry, company);
+        brand.setIndustry(industry);
         brand.setBrandName(req.getBrandName());
         brand.setBrandSlug(req.getBrandSlug());
         brand.setMainBusiness(req.getMainBusiness());
@@ -142,6 +152,9 @@ public class BrandService {
 
         brand.setBrandName(req.getBrandName());
         brand.setBrandSlug(req.getBrandSlug());
+        String industry = normalizeIndustry(req.getIndustry());
+        validateBrandIndustry(industry, company);
+        brand.setIndustry(industry);
         brand.setMainBusiness(req.getMainBusiness());
         applyRegionFields(brand, req.getProvinceCode(), req.getProvinceName(), req.getCityCode(), req.getCityName(), req.getDistrictCode(), req.getDistrictName());
         brand.setServiceArea(StringUtils.hasText(req.getServiceArea())
@@ -229,6 +242,7 @@ public class BrandService {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("id", brand.getId());
         snapshot.put("companyId", brand.getCompanyId());
+        snapshot.put("industry", brand.getIndustry());
         snapshot.put("brandName", brand.getBrandName());
         snapshot.put("brandSlug", brand.getBrandSlug());
         snapshot.put("provinceCode", brand.getProvinceCode());
@@ -280,5 +294,53 @@ public class BrandService {
             return null;
         }
         return value.trim();
+    }
+
+    private void validateBrandIndustry(String industry, Company company) {
+        Set<String> validTags = queryEnabledIndustryTags();
+        if (!validTags.contains(industry)) {
+            throw new BizException(400, "品牌行业值不在行业字典范围内");
+        }
+        Set<String> companyTags = parseCompanyIndustryTags(company.getIndustryTags());
+        if (companyTags.isEmpty()) {
+            throw new BizException(400, "所属客户未配置行业，请先完善客户行业");
+        }
+        if (!companyTags.contains(industry)) {
+            throw new BizException(400, "品牌行业必须从所属客户行业中选择");
+        }
+    }
+
+    private String normalizeIndustry(String value) {
+        if (!StringUtils.hasText(value)) {
+            throw new BizException(400, "品牌行业不能为空");
+        }
+        return value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private Set<String> queryEnabledIndustryTags() {
+        return sysDictItemMapper.selectList(new LambdaQueryWrapper<SysDictItem>()
+                        .eq(SysDictItem::getDictType, "industry_tag")
+                        .eq(SysDictItem::getEnabled, true)
+                        .select(SysDictItem::getDictKey))
+                .stream()
+                .map(SysDictItem::getDictKey)
+                .filter(StringUtils::hasText)
+                .map(item -> item.trim().toLowerCase(Locale.ROOT))
+                .collect(Collectors.toSet());
+    }
+
+    private Set<String> parseCompanyIndustryTags(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return Set.of();
+        }
+        try {
+            return JSONUtil.parseArray(raw).stream()
+                    .map(String::valueOf)
+                    .filter(StringUtils::hasText)
+                    .map(item -> item.trim().toLowerCase(Locale.ROOT))
+                    .collect(Collectors.toCollection(HashSet::new));
+        } catch (Exception ex) {
+            return Set.of();
+        }
     }
 }

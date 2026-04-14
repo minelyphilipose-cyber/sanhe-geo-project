@@ -16,6 +16,7 @@ public class Company {
     private String contactName;
     private String contactPhone;
     private String industry;
+    private String industryTags;
     private String businessDirection;
     private String competitors;
     private String officialWebsite;

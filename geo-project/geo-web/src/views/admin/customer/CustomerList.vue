@@ -23,7 +23,9 @@
         <el-table-column label="联系人" min-width="160">
           <template #default="scope">{{ scope.row.contactName || '-' }}{{ scope.row.contactPhone ? ` / ${scope.row.contactPhone}` : '' }}</template>
         </el-table-column>
-        <el-table-column prop="industry" label="行业" width="120" />
+        <el-table-column label="行业" min-width="180">
+          <template #default="scope">{{ industryLabels(scope.row) }}</template>
+        </el-table-column>
         <el-table-column prop="businessDirection" label="主营方向" min-width="160" />
         <el-table-column prop="city" label="地区" min-width="220">
           <template #default="scope">{{ companyRegion(scope.row) }}</template>
@@ -65,7 +67,16 @@
         <el-form-item label="公司名称" required><el-input v-model="form.companyName" /></el-form-item>
         <el-form-item label="客户联系人"><el-input v-model="form.contactName" /></el-form-item>
         <el-form-item label="联系电话"><el-input v-model="form.contactPhone" /></el-form-item>
-        <el-form-item label="行业"><el-input v-model="form.industry" /></el-form-item>
+        <el-form-item label="行业" prop="industryTags">
+          <el-select v-model="form.industryTags" multiple filterable style="width: 100%">
+            <el-option
+              v-for="item in dictStore.options('industry_tag')"
+              :key="item.dictKey"
+              :label="item.dictValue"
+              :value="item.dictKey"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="主营方向"><el-input v-model="form.businessDirection" /></el-form-item>
         <el-form-item label="服务区域">
           <RegionCascader v-model="form.serviceAreaCodes" />
@@ -87,8 +98,8 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="客户来源" required>
-          <el-select v-model="form.sourceType" style="width: 100%">
+        <el-form-item v-if="formMode === 'edit'" label="客户来源" required>
+          <el-select v-model="form.sourceType" style="width: 100%" disabled>
             <el-option
               v-for="item in dictStore.options('company_source_type')"
               :key="item.dictKey"
@@ -96,6 +107,9 @@
               :value="item.dictKey"
             />
           </el-select>
+        </el-form-item>
+        <el-form-item v-else label="客户来源">
+          <el-input :model-value="createSourceTypeLabel" disabled />
         </el-form-item>
         <el-form-item v-if="form.sourceType === 'partner'" label="所属合伙人">
           <el-select v-model="form.partnerId" clearable filterable style="width: 100%">
@@ -159,7 +173,7 @@ const form = reactive({
   companyName: '',
   contactName: '',
   contactPhone: '',
-  industry: '',
+  industryTags: [] as string[],
   businessDirection: '',
   serviceArea: '',
   serviceAreaCodes: [] as string[],
@@ -179,15 +193,19 @@ const form = reactive({
 })
 const rules: FormRules = {
   companyName: [{ required: true, message: '请输入公司名称', trigger: 'blur' }],
+  industryTags: [{ required: true, message: '请选择至少一个行业', trigger: 'change' }],
   ownerType: [{ required: true, message: '请选择归属类型', trigger: 'change' }],
-  sourceType: [{ required: true, message: '请选择客户来源', trigger: 'change' }],
 }
+
+const isPartnerOperator = computed(() => ['partner', 'partner_staff', 'partner_viewer'].includes(userStore.role || ''))
+const createSourceType = computed<'internal' | 'partner'>(() => (isPartnerOperator.value ? 'partner' : 'internal'))
+const createSourceTypeLabel = computed(() => dictStore.label('company_source_type', createSourceType.value) || (createSourceType.value === 'partner' ? '合伙人' : '本部'))
 
 function resetForm() {
   form.companyName = ''
   form.contactName = ''
   form.contactPhone = ''
-  form.industry = ''
+  form.industryTags = []
   form.businessDirection = ''
   form.serviceArea = ''
   form.serviceAreaCodes = []
@@ -208,6 +226,23 @@ function resetForm() {
 
 function companyRegion(company: Company) {
   return regionDisplayFromPayload(company) || company.city || '-'
+}
+
+function parseIndustryTags(value?: string | string[] | null) {
+  if (Array.isArray(value)) return value
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function industryLabels(company: Company) {
+  const tags = parseIndustryTags(company.industryTags)
+  if (!tags.length) return '-'
+  return tags.map((tag) => dictStore.label('industry_tag', tag) || tag).join(' / ')
 }
 
 async function load() {
@@ -247,6 +282,7 @@ function openCreate() {
   formMode.value = 'create'
   editingId.value = null
   resetForm()
+  form.sourceType = createSourceType.value
   formVisible.value = true
 }
 
@@ -256,7 +292,7 @@ function openEdit(row: Company) {
   form.companyName = row.companyName
   form.contactName = row.contactName || ''
   form.contactPhone = row.contactPhone || ''
-  form.industry = row.industry || ''
+  form.industryTags = parseIndustryTags(row.industryTags)
   form.businessDirection = row.businessDirection || ''
   form.serviceArea = row.serviceArea || ''
   form.serviceAreaCodes = []
@@ -293,7 +329,7 @@ async function submit() {
       companyName: form.companyName,
       contactName: form.contactName || undefined,
       contactPhone: form.contactPhone || undefined,
-      industry: form.industry || undefined,
+      industryTags: form.industryTags,
       businessDirection: form.businessDirection || undefined,
       serviceArea: serviceArea || undefined,
       competitors: form.competitors || undefined,
@@ -309,7 +345,6 @@ async function submit() {
       districtCode: region.districtCode,
       districtName: region.districtName,
       ownerType: form.ownerType,
-      sourceType: form.sourceType,
       partnerId: form.partnerId || undefined,
       salesOwnerId: form.salesOwnerId || undefined,
       referralSource: form.referralSource || undefined,
@@ -323,7 +358,10 @@ async function submit() {
       await load()
       goDetail(data.data.id)
     } else if (editingId.value) {
-      await updateCompany(editingId.value, payload)
+      await updateCompany(editingId.value, {
+        ...payload,
+        sourceType: form.sourceType,
+      })
       formVisible.value = false
       ElMessage.success('保存成功')
       load()

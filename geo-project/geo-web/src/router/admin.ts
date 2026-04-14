@@ -159,6 +159,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '平台配置', icon: 'Setting', permissions: ['user.manage'] },
     },
     {
+      path: 'settings/publish-sites',
+      name: 'PublishSiteConfig',
+      component: () => import('@/views/admin/settings/PublishSiteConfig.vue'),
+      meta: { title: '发布站点配置', permissions: ['user.manage'] },
+    },
+    {
       path: 'settings/packages',
       name: 'PackageConfig',
       component: () => import('@/views/admin/settings/PackageConfig.vue'),

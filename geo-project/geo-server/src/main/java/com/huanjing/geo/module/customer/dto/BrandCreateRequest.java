@@ -9,6 +9,8 @@ public class BrandCreateRequest {
     @NotNull
     private Long companyId;
     @NotBlank
+    private String industry;
+    @NotBlank
     private String brandName;
     @NotBlank
     private String brandSlug;

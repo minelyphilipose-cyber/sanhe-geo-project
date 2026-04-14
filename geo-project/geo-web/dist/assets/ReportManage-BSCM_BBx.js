@@ -1,0 +1,1 @@
+import{P as e}from"./PagePlaceholder-BT_KV8Bs.js";import{d as a,z as o,o as t}from"./index-DpRZANQU.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=a({__name:"ReportManage",setup(r){return(n,s)=>(t(),o(e,{title:"报表管理",description:"全局报表列表、跨项目筛选、批量操作",icon:"DataAnalysis",phase:3}))}});export{m as default};

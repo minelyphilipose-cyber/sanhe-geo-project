@@ -51,6 +51,7 @@ const sidebarMenus: MenuItem[] = [
   { path: '/admin/alerts', name: 'AlertCenter', title: '异常中心', icon: 'Bell', roles: ['delivery_manager', 'manager', 'super_admin'] },
   { path: '/admin/activity-logs', name: 'ActivityLogs', title: '操作日志', icon: 'Document', permissions: ['user.manage'] },
   { path: '/admin/settings/platforms', name: 'Settings', title: '平台配置', icon: 'Setting', roles: ['super_admin'] },
+  { path: '/admin/settings/publish-sites', name: 'PublishSiteConfig', title: '发布站点配置', icon: 'Promotion', permissions: ['user.manage'] },
   { path: '/admin/settings/packages', name: 'PackageConfig', title: '套餐配置', icon: 'CollectionTag', permissions: ['user.manage'] },
   { path: '/admin/settings/dicts', name: 'DictCenter', title: '字典中心', icon: 'Tickets', permissions: ['user.manage'] },
   { path: '/admin/settings/users', name: 'UserManage', title: '用户管理', icon: 'Setting', permissions: ['user.manage'] },

@@ -29,6 +29,16 @@
             />
           </el-select>
         </el-form-item>
+        <el-form-item label="品牌行业" prop="industry" required>
+          <el-select v-model="form.industry" filterable style="width: 100%">
+            <el-option
+              v-for="tag in availableBrandIndustries"
+              :key="tag"
+              :label="dictStore.label('industry_tag', tag) || tag"
+              :value="tag"
+            />
+          </el-select>
+        </el-form-item>
 
         <el-divider content-position="left">业务介绍录入</el-divider>
         <el-form-item label="主营业务方向"><el-input v-model="form.mainBusiness" /></el-form-item>
@@ -120,7 +130,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type UploadRawFile } from 'element-plus'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
@@ -149,6 +159,7 @@ const dictStore = useDictStore()
 const companyId = Number(route.query.companyId || 0)
 const createdBrandId = ref<number | null>(null)
 const companyName = ref('')
+const companyIndustryTags = ref<string[]>([])
 const saving = ref(false)
 
 const formRef = ref<FormInstance>()
@@ -156,6 +167,7 @@ const form = reactive({
   brandName: '',
   brandSlug: '',
   status: 'active',
+  industry: '',
   mainBusiness: '',
   businessIntro: '',
   serviceAreaCodes: [] as string[],
@@ -180,7 +192,10 @@ const rules: FormRules = {
     { pattern: /^[a-z0-9][a-z0-9_-]{1,127}$/, message: '标识需小写字母数字开头，可含 _ -', trigger: 'blur' },
   ],
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
+  industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
 }
+
+const availableBrandIndustries = computed(() => companyIndustryTags.value)
 
 const materials = ref<BrandMaterial[]>([])
 const versions = ref<BrandProfileVersion[]>([])
@@ -284,8 +299,24 @@ async function loadCompany() {
   try {
     const { data } = await getCompanyDetail(companyId)
     companyName.value = data.data.companyName || ''
+    companyIndustryTags.value = parseIndustryTags((data.data as any).industryTags)
+    if (!form.industry) {
+      form.industry = companyIndustryTags.value[0] || ''
+    }
   } catch {
     companyName.value = ''
+    companyIndustryTags.value = []
+  }
+}
+
+function parseIndustryTags(value?: string | string[] | null) {
+  if (Array.isArray(value)) return value
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
   }
 }
 
@@ -304,6 +335,7 @@ async function submitBrand() {
       brandName: form.brandName,
       brandSlug: form.brandSlug,
       status: form.status,
+      industry: form.industry,
       mainBusiness: form.mainBusiness || undefined,
       businessIntro: form.businessIntro || undefined,
       serviceArea: serviceArea || undefined,

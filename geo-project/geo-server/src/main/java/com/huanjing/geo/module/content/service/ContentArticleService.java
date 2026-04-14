@@ -232,10 +232,13 @@ public class ContentArticleService {
         if ("publish".equals(action) && !Set.of("approved", "unpublished").contains(article.getStatus())) {
             throw new BizException(400, "Only approved/unpublished article can publish");
         }
-        if ("unpublish".equals(action) && !"published".equals(article.getStatus())) {
-            throw new BizException(400, "Only published article can unpublish");
+        if ("unpublish".equals(action) && !Set.of("published", "distributed").contains(article.getStatus())) {
+            throw new BizException(400, "Only published/distributed article can unpublish");
         }
         article.setStatus("publish".equals(action) ? "published" : "unpublished");
+        if ("publish".equals(action)) {
+            article.setPublishedAt(LocalDateTime.now());
+        }
         articleDraftMapper.updateById(article);
 
         ArticlePublishLog log = new ArticlePublishLog();

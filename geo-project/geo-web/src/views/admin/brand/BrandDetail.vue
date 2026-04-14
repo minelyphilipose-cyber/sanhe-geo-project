@@ -24,6 +24,7 @@
         <el-descriptions-item label="状态">{{ dictStore.label('brand_status', brand?.status) }}</el-descriptions-item>
 
         <el-descriptions-item label="所属客户">{{ companyName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="品牌行业">{{ industryLabel(brand?.industry) }}</el-descriptions-item>
         <el-descriptions-item label="主营业务">{{ brand?.mainBusiness || '-' }}</el-descriptions-item>
         <el-descriptions-item label="所在地区">{{ regionText }}</el-descriptions-item>
 
@@ -106,6 +107,16 @@
       <el-form ref="brandFormRef" :model="brandForm" :rules="brandRules" label-width="120px">
         <el-form-item label="品牌名称" required><el-input v-model="brandForm.brandName" /></el-form-item>
         <el-form-item label="品牌标识" required><el-input v-model="brandForm.brandSlug" /></el-form-item>
+        <el-form-item label="品牌行业" prop="industry" required>
+          <el-select v-model="brandForm.industry" filterable style="width: 100%">
+            <el-option
+              v-for="tag in availableBrandIndustries"
+              :key="tag"
+              :label="industryLabel(tag)"
+              :value="tag"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="主营业务"><el-input v-model="brandForm.mainBusiness" /></el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="brandForm.regionCodes" /></el-form-item>
         <el-form-item label="官网"><el-input v-model="brandForm.website" /></el-form-item>
@@ -184,11 +195,13 @@ const statementSaving = ref(false)
 const brand = ref<Brand | null>(null)
 const statement = ref<BrandStatementView | null>(null)
 const companyName = ref('')
+const companyIndustryTags = ref<string[]>([])
 const brandFormRef = ref<FormInstance>()
 
 const brandForm = reactive({
   brandName: '',
   brandSlug: '',
+  industry: '',
   mainBusiness: '',
   regionCodes: [] as string[],
   website: '',
@@ -218,6 +231,7 @@ const brandRules: FormRules = {
     { required: true, message: '请输入品牌标识', trigger: 'blur' },
     { pattern: /^[a-z0-9][a-z0-9_-]{1,127}$/, message: '标识需小写字母数字开头，可含 _ -', trigger: 'blur' },
   ],
+  industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
 }
 
@@ -241,9 +255,28 @@ const statementTagType = computed<'success' | 'warning' | 'info'>(() => {
   return 'info'
 })
 
+const availableBrandIndustries = computed(() => companyIndustryTags.value)
+
+function industryLabel(value?: string | null) {
+  if (!value) return '-'
+  return dictStore.label('industry_tag', value) || value
+}
+
+function parseIndustryTags(value?: string | string[] | null) {
+  if (Array.isArray(value)) return value
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
 function fillForm(data: Brand) {
   brandForm.brandName = data.brandName
   brandForm.brandSlug = data.brandSlug
+  brandForm.industry = data.industry || availableBrandIndustries.value[0] || ''
   brandForm.mainBusiness = data.mainBusiness || ''
   brandForm.regionCodes = regionCodesFromPayload(data)
   brandForm.website = data.website || ''
@@ -271,8 +304,13 @@ async function load() {
     if (data.data.companyId) {
       const companyRes = await getCompanyDetail(data.data.companyId)
       companyName.value = companyRes.data.data.companyName || ''
+      companyIndustryTags.value = parseIndustryTags((companyRes.data.data as any).industryTags)
+      if (!brandForm.industry) {
+        brandForm.industry = companyIndustryTags.value[0] || ''
+      }
     } else {
       companyName.value = ''
+      companyIndustryTags.value = []
     }
   } catch {
     brand.value = null
@@ -353,6 +391,7 @@ async function submitBrand() {
       companyId: brand.value?.companyId,
       brandName: brandForm.brandName,
       brandSlug: brandForm.brandSlug,
+      industry: brandForm.industry,
       mainBusiness: brandForm.mainBusiness || undefined,
       serviceArea: region.displayName,
       provinceCode: region.provinceCode,

@@ -6,6 +6,8 @@ import lombok.Data;
 @Data
 public class BrandUpdateRequest {
     @NotBlank
+    private String industry;
+    @NotBlank
     private String brandName;
     @NotBlank
     private String brandSlug;

@@ -105,6 +105,7 @@ export interface Company {
   contactName?: string | null
   contactPhone?: string | null
   industry: string | null
+  industryTags?: string | string[] | null
   businessDirection?: string | null
   competitors?: string | null
   officialWebsite?: string | null
@@ -134,6 +135,7 @@ export interface Company {
 export interface Brand {
   id: number
   companyId: number
+  industry: string
   brandName: string
   brandSlug: string
   mainBusiness: string | null
@@ -523,7 +525,7 @@ export interface ArticleDraft {
   projectId: number
   articleType: 'faq' | 'scenario_content' | 'industry_article' | 'stage_advice' | string
   title: string
-  status: 'pending_review' | 'approved' | 'rejected' | 'under_revision' | 'published' | 'unpublished' | string
+  status: 'pending_review' | 'approved' | 'rejected' | 'under_revision' | 'distributing' | 'distributed' | 'published' | 'unpublished' | string
   hasRisk: boolean
   riskSeverity: 'none' | 'warn' | 'block' | string
   riskWordsJson?: string | null
@@ -533,6 +535,7 @@ export interface ArticleDraft {
   currentVersionNo: number
   createdAt: string
   updatedAt: string
+  publishedAt?: string | null
 }
 
 export interface ArticleDraftVersion {
@@ -577,6 +580,81 @@ export interface ArticleDetailResponse {
   versions: ArticleDraftVersion[]
   reviewLogs: ArticleReviewLog[]
   publishLogs: ArticlePublishLog[]
+}
+
+export interface DistributionTask {
+  id: number
+  articleId?: number
+  projectId?: number
+  siteId: number
+  siteName?: string
+  domain?: string
+  tier?: string
+  attemptNo: number
+  status: 'pending' | 'submitting' | 'submitted' | 'failed' | 'confirmed' | string
+  integrationMethod: 'rest_api' | 'ftp' | 'email' | 'manual' | string
+  requestPayload?: string | null
+  responsePayload?: string | null
+  publishedUrl?: string | null
+  errorMessage?: string | null
+  retryCount?: number
+  operatorId?: number
+  createdAt?: string
+  finishedAt?: string | null
+}
+
+export interface PublishQuota {
+  month: string
+  monthUsed: number
+  monthLimit: number
+  weekUsed: number
+  weekLimit: number
+  allowedSiteTiers: string[]
+}
+
+export interface RecommendedSite {
+  siteId: number
+  siteName: string
+  domain: string
+  tier: 'S0' | 'S1' | 'S2' | string
+  status: string
+  integrationMethod: 'rest_api' | 'ftp' | 'email' | 'manual' | string
+  currentHealthStatus: string
+  failureRate?: number | null
+  successRate30d: number
+  matchType: 'exact' | 'general' | string
+  industryTags?: string[] | null
+  contentConstraints?: string | null
+}
+
+export interface RecommendedSitesResponse {
+  fallbackToGeneral: boolean
+  sites: RecommendedSite[]
+}
+
+export interface PublishSite {
+  id: number
+  siteName: string
+  domain: string
+  industryTags?: string | string[] | null
+  tier: 'S0' | 'S1' | 'S2' | string
+  status: 'active' | 'suspended' | 'maintenance' | string
+  integrationMethod: 'rest_api' | 'ftp' | 'email' | 'manual' | string
+  apiEndpoint?: string | null
+  httpMethod?: 'POST' | 'PUT' | string | null
+  authType?: 'api_key' | 'bearer_token' | 'basic_auth' | 'oauth2' | string | null
+  credentialRef?: string | null
+  apiCredentialEncrypted?: string | null
+  requestHeaderTemplate?: string | null
+  requestBodyTemplate?: string | null
+  responseUrlPath?: string | null
+  contentConstraints?: string | null
+  currentHealthStatus?: string | null
+  lastFailureAt?: string | null
+  failureRate?: number | null
+  remark?: string | null
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface ActivityLog {

@@ -27,5 +27,5 @@ public class ArticleDraft {
     private Integer currentVersionNo;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private LocalDateTime publishedAt;
 }
-

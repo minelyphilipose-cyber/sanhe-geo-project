@@ -13,6 +13,7 @@ public class Brand {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long companyId;
+    private String industry;
     private String brandName;
     private String brandSlug;
     private String mainBusiness;

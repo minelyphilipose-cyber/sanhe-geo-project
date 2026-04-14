@@ -14,7 +14,7 @@
       </template>
       <el-descriptions :column="3" border>
         <el-descriptions-item label="客户名称">{{ company?.companyName }}</el-descriptions-item>
-        <el-descriptions-item label="行业">{{ company?.industry || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="行业">{{ companyIndustryText }}</el-descriptions-item>
         <el-descriptions-item label="地区">{{ companyRegion(company) }}</el-descriptions-item>
         <el-descriptions-item label="归属">{{ dictStore.label('owner_type', company?.ownerType) }}</el-descriptions-item>
         <el-descriptions-item label="合伙人">{{ (company as any)?.partnerName || '-' }}</el-descriptions-item>
@@ -83,6 +83,9 @@
         <el-table :data="brands" border>
           <el-table-column prop="brandName" label="品牌名称" min-width="180" />
           <el-table-column prop="brandSlug" label="标识" min-width="150" />
+          <el-table-column label="行业" min-width="140">
+            <template #default="scope">{{ dictStore.label('industry_tag', scope.row.industry) || scope.row.industry || '-' }}</template>
+          </el-table-column>
           <el-table-column prop="mainBusiness" label="主营业务" min-width="180" />
           <el-table-column prop="serviceArea" label="地区" min-width="220">
             <template #default="scope">{{ brandRegion(scope.row) }}</template>
@@ -111,7 +114,16 @@
     <el-dialog v-model="editVisible" title="编辑客户" width="620px">
       <el-form ref="companyFormRef" :model="companyForm" :rules="companyRules" label-width="100px">
         <el-form-item label="客户名称" required><el-input v-model="companyForm.companyName" /></el-form-item>
-        <el-form-item label="行业"><el-input v-model="companyForm.industry" /></el-form-item>
+        <el-form-item label="行业" prop="industryTags">
+          <el-select v-model="companyForm.industryTags" multiple filterable style="width: 100%">
+            <el-option
+              v-for="item in dictStore.options('industry_tag')"
+              :key="item.dictKey"
+              :label="item.dictValue"
+              :value="item.dictKey"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="服务区域">
           <RegionCascader v-model="companyForm.serviceAreaCodes" />
           <div class="mt-1 text-xs text-gray-500">{{ companyServiceAreaPreview || '未选择' }}</div>
@@ -156,6 +168,16 @@
       <el-form ref="brandFormRef" :model="brandForm" :rules="brandRules" label-width="120px">
         <el-form-item label="品牌名称" required><el-input v-model="brandForm.brandName" /></el-form-item>
         <el-form-item label="品牌标识" required><el-input v-model="brandForm.brandSlug" /></el-form-item>
+        <el-form-item label="品牌行业" prop="industry" required>
+          <el-select v-model="brandForm.industry" filterable style="width: 100%">
+            <el-option
+              v-for="tag in availableBrandIndustries"
+              :key="tag"
+              :label="dictStore.label('industry_tag', tag) || tag"
+              :value="tag"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="主营业务"><el-input v-model="brandForm.mainBusiness" /></el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="brandForm.regionCodes" /></el-form-item>
         <el-form-item label="官网"><el-input v-model="brandForm.website" /></el-form-item>
@@ -264,7 +286,7 @@ const brandFormRef = ref<FormInstance>()
 const editVisible = ref(false)
 const companyForm = reactive({
   companyName: '',
-  industry: '',
+  industryTags: [] as string[],
   serviceArea: '',
   serviceAreaCodes: [] as string[],
   regionCodes: [] as string[],
@@ -277,6 +299,7 @@ const companyForm = reactive({
 })
 const companyRules: FormRules = {
   companyName: [{ required: true, message: '请输入客户名称', trigger: 'blur' }],
+  industryTags: [{ required: true, message: '请选择至少一个行业', trigger: 'change' }],
   ownerType: [{ required: true, message: '璇烽€夋嫨褰掑睘绫诲瀷', trigger: 'change' }],
 }
 
@@ -286,6 +309,7 @@ const brandEditingId = ref<number | null>(null)
 const brandForm = reactive({
   brandName: '',
   brandSlug: '',
+  industry: '',
   mainBusiness: '',
   regionCodes: [] as string[],
   website: '',
@@ -301,6 +325,7 @@ const brandRules: FormRules = {
     { required: true, message: '请输入品牌标识', trigger: 'blur' },
     { pattern: /^[a-z0-9][a-z0-9_-]{1,127}$/, message: '品牌标识仅支持字母、数字、下划线、中划线', trigger: 'blur' },
   ],
+  industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
 }
 
 const rechargeVisible = ref(false)
@@ -336,9 +361,20 @@ function brandRegion(value: Brand) {
   return regionDisplayFromPayload(value) || value.serviceArea || '-'
 }
 
+function parseIndustryTags(value?: string | string[] | null) {
+  if (Array.isArray(value)) return value
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
 function fillCompanyForm(data: Company) {
   companyForm.companyName = data.companyName
-  companyForm.industry = data.industry || ''
+  companyForm.industryTags = parseIndustryTags(data.industryTags)
   companyForm.serviceArea = (data as any).serviceArea || ''
   companyForm.serviceAreaCodes = []
   companyForm.regionCodes = regionCodesFromPayload(data)
@@ -353,6 +389,7 @@ function fillCompanyForm(data: Company) {
 function resetBrandForm() {
   brandForm.brandName = ''
   brandForm.brandSlug = ''
+  brandForm.industry = availableBrandIndustries.value[0] || ''
   brandForm.mainBusiness = ''
   brandForm.regionCodes = []
   brandForm.website = ''
@@ -441,7 +478,7 @@ async function submitCompany() {
     const serviceArea = regionPayloadFromCodes(companyForm.serviceAreaCodes).displayName || companyForm.serviceArea
     await updateCompany(companyId, {
       companyName: companyForm.companyName,
-      industry: companyForm.industry || undefined,
+      industryTags: companyForm.industryTags,
       serviceArea: serviceArea || undefined,
       city: region.displayName,
       provinceCode: region.provinceCode,
@@ -483,6 +520,7 @@ function openBrandEdit(row: Brand) {
   brandEditingId.value = row.id
   brandForm.brandName = row.brandName
   brandForm.brandSlug = row.brandSlug
+  brandForm.industry = row.industry || availableBrandIndustries.value[0] || ''
   brandForm.mainBusiness = row.mainBusiness || ''
   brandForm.regionCodes = regionCodesFromPayload(row)
   brandForm.website = row.website || ''
@@ -504,6 +542,7 @@ async function submitBrand() {
       companyId,
       brandName: brandForm.brandName,
       brandSlug: brandForm.brandSlug,
+      industry: brandForm.industry,
       mainBusiness: brandForm.mainBusiness || undefined,
       serviceArea: region.displayName,
       provinceCode: region.provinceCode,
@@ -616,6 +655,14 @@ const companyServiceAreaPreview = computed(() => {
   const selected = regionPayloadFromCodes(companyForm.serviceAreaCodes).displayName
   if (selected) return selected
   return companyForm.serviceArea
+})
+
+const availableBrandIndustries = computed(() => companyForm.industryTags || [])
+
+const companyIndustryText = computed(() => {
+  const tags = companyForm.industryTags || []
+  if (!tags.length) return '-'
+  return tags.map((tag) => dictStore.label('industry_tag', tag) || tag).join(' / ')
 })
 
 onMounted(async () => {

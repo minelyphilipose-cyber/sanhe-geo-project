@@ -3,6 +3,8 @@ package com.huanjing.geo.module.customer.dto;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
+import java.util.List;
+
 @Data
 public class CompanyUpdateRequest {
     @NotBlank
@@ -10,6 +12,7 @@ public class CompanyUpdateRequest {
     private String contactName;
     private String contactPhone;
     private String industry;
+    private List<String> industryTags;
     private String businessDirection;
     private String competitors;
     private String officialWebsite;

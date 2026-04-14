@@ -1,22 +1,16 @@
-﻿<template>
+<template>
   <div class="content-execution-page">
     <el-card shadow="never" class="mb-3">
       <div class="toolbar">
         <div class="toolbar-left">
-          <el-input-number
-            v-model="query.projectId"
-            :min="1"
-            :controls="false"
-            placeholder="项目ID"
-            style="width: 140px"
-          />
-          <el-select v-model="query.articleType" clearable placeholder="文章类型" style="width: 180px">
+          <el-input-number v-model="query.projectId" :min="1" :controls="false" placeholder="项目ID" style="width: 140px" />
+          <el-select v-model="query.articleType" clearable placeholder="文章类型" style="width: 160px">
             <el-option label="FAQ" value="faq" />
-            <el-option label="问题场景内容" value="scenario_content" />
+            <el-option label="场景内容" value="scenario_content" />
             <el-option label="行业文章" value="industry_article" />
             <el-option label="阶段建议" value="stage_advice" />
           </el-select>
-          <el-select v-model="query.status" clearable placeholder="审核状态" style="width: 170px">
+          <el-select v-model="query.status" clearable placeholder="状态" style="width: 150px">
             <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
           </el-select>
           <el-button type="primary" @click="search">查询</el-button>
@@ -30,40 +24,24 @@
         <el-table :data="rows" border>
           <el-table-column prop="id" label="文章ID" width="90" />
           <el-table-column prop="projectId" label="项目ID" width="100" />
-          <el-table-column label="文章类型" width="140">
+          <el-table-column label="文章类型" width="120">
             <template #default="scope">{{ articleTypeLabel(scope.row.articleType) }}</template>
           </el-table-column>
-          <el-table-column prop="title" label="标题" min-width="260" show-overflow-tooltip />
+          <el-table-column prop="title" label="标题" min-width="240" show-overflow-tooltip />
           <el-table-column label="状态" width="120">
             <template #default="scope">
               <el-tag :type="statusTagType(scope.row.status)">{{ statusLabel(scope.row.status) }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="风险" width="110">
-            <template #default="scope">
-              <el-tag v-if="scope.row.hasRisk" :type="scope.row.riskSeverity === 'block' ? 'danger' : 'warning'">
-                {{ scope.row.riskSeverity === 'block' ? '阻断风险' : '提醒风险' }}
-              </el-tag>
-              <span v-else>-</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="重复" width="100">
-            <template #default="scope">
-              <el-tag v-if="scope.row.isDuplicateTitle" type="warning">疑似重复</el-tag>
-              <span v-else>-</span>
-            </template>
-          </el-table-column>
-          <el-table-column prop="currentVersionNo" label="版本" width="80" />
           <el-table-column prop="createdAt" label="创建时间" width="180" />
-          <el-table-column label="操作" width="340" fixed="right">
+          <el-table-column label="操作" width="460" fixed="right">
             <template #default="scope">
               <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
               <el-button v-if="canWrite && canReview(scope.row.status)" link type="primary" @click="openReview(scope.row)">审核</el-button>
               <el-button v-if="canWrite && canEdit(scope.row.status)" link type="primary" @click="openRevision(scope.row)">修订</el-button>
               <el-button v-if="canWrite && canResubmit(scope.row.status)" link type="primary" @click="openResubmit(scope.row)">重新提交</el-button>
-              <el-button v-if="canWrite && canPublish(scope.row.status)" link type="success" @click="openPublish(scope.row)">
-                {{ scope.row.status === 'published' ? '下架' : '发布' }}
-              </el-button>
+              <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openDistribute(scope.row)">分发到站点</el-button>
+              <el-button v-if="canWrite && canPublish(scope.row.status)" link type="info" @click="openPublish(scope.row)">Legacy发布</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -100,12 +78,7 @@
         </el-table>
 
         <h4 class="detail-title">最新正文</h4>
-        <el-input
-          type="textarea"
-          :rows="14"
-          :model-value="detailData.versions?.[0]?.contentMarkdown || ''"
-          readonly
-        />
+        <el-input type="textarea" :rows="14" :model-value="detailData.versions?.[0]?.contentMarkdown || ''" readonly />
       </div>
     </el-drawer>
 
@@ -119,7 +92,7 @@
           </el-select>
         </el-form-item>
         <el-form-item v-if="selectedArticleHasRisk" label="风险覆盖">
-          <el-checkbox v-model="reviewForm.riskOverride">强制通过风险提醒（仅提醒级）</el-checkbox>
+          <el-checkbox v-model="reviewForm.riskOverride">强制通过提醒级风险</el-checkbox>
         </el-form-item>
         <el-form-item label="审核意见">
           <el-input v-model="reviewForm.comment" type="textarea" :rows="4" placeholder="驳回/退回修改时必填" />
@@ -133,15 +106,9 @@
 
     <el-dialog v-model="revisionVisible" title="修订文章" width="760px">
       <el-form :model="revisionForm" label-width="90px">
-        <el-form-item label="标题">
-          <el-input v-model="revisionForm.title" />
-        </el-form-item>
-        <el-form-item label="正文" required>
-          <el-input v-model="revisionForm.contentMarkdown" type="textarea" :rows="14" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="revisionForm.note" />
-        </el-form-item>
+        <el-form-item label="标题"><el-input v-model="revisionForm.title" /></el-form-item>
+        <el-form-item label="正文" required><el-input v-model="revisionForm.contentMarkdown" type="textarea" :rows="14" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="revisionForm.note" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="revisionVisible = false">取消</el-button>
@@ -151,9 +118,7 @@
 
     <el-dialog v-model="resubmitVisible" title="重新提交审核" width="520px">
       <el-form :model="resubmitForm" label-width="90px">
-        <el-form-item label="备注">
-          <el-input v-model="resubmitForm.comment" type="textarea" :rows="4" />
-        </el-form-item>
+        <el-form-item label="备注"><el-input v-model="resubmitForm.comment" type="textarea" :rows="4" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="resubmitVisible = false">取消</el-button>
@@ -161,7 +126,37 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="publishVisible" title="发布记录" width="560px">
+    <el-dialog v-model="distributeVisible" title="分发到站点" width="760px">
+      <div class="distribute-wrap">
+        <el-alert v-if="fallbackToGeneral" type="warning" :closable="false" show-icon title="暂无本行业专属站点，以下为综合类站点" />
+        <el-table :data="sites" border max-height="320">
+          <el-table-column width="52">
+            <template #default="scope">
+              <el-radio :model-value="distributeForm.siteId" :label="scope.row.siteId" @change="() => (distributeForm.siteId = scope.row.siteId)" />
+            </template>
+          </el-table-column>
+          <el-table-column prop="siteName" label="站点" min-width="130" />
+          <el-table-column prop="domain" label="域名" min-width="160" />
+          <el-table-column prop="tier" label="层级" width="80" />
+          <el-table-column prop="integrationMethod" label="方式" width="100" />
+          <el-table-column label="行业匹配" width="140">
+            <template #default="scope">
+              <el-tag v-if="scope.row.matchType === 'exact'" type="success">{{ firstIndustryLabel(scope.row.industryTags) }}</el-tag>
+              <el-tag v-else type="info">综合</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="近30天成功率" width="120">
+            <template #default="scope">{{ percent(scope.row.successRate30d) }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+      <template #footer>
+        <el-button @click="distributeVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitting" :disabled="!distributeForm.siteId" @click="submitDistribute">确认分发</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="publishVisible" title="Legacy发布记录" width="560px">
       <el-form :model="publishForm" label-width="100px">
         <el-form-item label="动作" required>
           <el-select v-model="publishForm.publishAction" style="width: 100%">
@@ -169,15 +164,9 @@
             <el-option label="下架" value="unpublish" />
           </el-select>
         </el-form-item>
-        <el-form-item label="渠道名称">
-          <el-input v-model="publishForm.channelName" placeholder="例如：官网、公众号、小红书" />
-        </el-form-item>
-        <el-form-item label="渠道链接">
-          <el-input v-model="publishForm.channelUrl" placeholder="发布后的页面地址" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="publishForm.note" type="textarea" :rows="3" />
-        </el-form-item>
+        <el-form-item label="渠道名称"><el-input v-model="publishForm.channelName" placeholder="例如：官网、公众号、小红书" /></el-form-item>
+        <el-form-item label="渠道链接"><el-input v-model="publishForm.channelUrl" placeholder="发布后的页面地址" /></el-form-item>
+        <el-form-item label="备注"><el-input v-model="publishForm.note" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="publishVisible = false">取消</el-button>
@@ -192,10 +181,13 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { useUserStore } from '@/stores/user'
-import type { ArticleDetailResponse, ArticleDraft } from '@/types'
+import { useDictStore } from '@/stores/dict'
+import type { ArticleDetailResponse, ArticleDraft, RecommendedSite } from '@/types'
 import {
+  distributeContentArticle,
   getContentArticleDetail,
   getContentArticles,
+  getRecommendedSites,
   publishContentArticle,
   resubmitContentArticle,
   reviewContentArticle,
@@ -203,6 +195,7 @@ import {
 } from '@/api/content'
 
 const userStore = useUserStore()
+const dictStore = useDictStore()
 const canWrite = computed(() => userStore.hasPermission('project.write'))
 
 const loading = ref(false)
@@ -237,6 +230,15 @@ const revisionForm = reactive({
 const resubmitVisible = ref(false)
 const resubmitForm = reactive({ comment: '' })
 
+const distributeVisible = ref(false)
+const fallbackToGeneral = ref(false)
+const sites = ref<RecommendedSite[]>([])
+const distributeForm = reactive({
+  articleId: 0,
+  projectId: 0,
+  siteId: 0,
+})
+
 const publishVisible = ref(false)
 const publishForm = reactive({
   publishAction: 'publish' as 'publish' | 'unpublish',
@@ -257,7 +259,7 @@ const statusOptions = [
 function articleTypeLabel(v: string) {
   const map: Record<string, string> = {
     faq: 'FAQ',
-    scenario_content: '问题场景内容',
+    scenario_content: '场景内容',
     industry_article: '行业文章',
     stage_advice: '阶段建议',
   }
@@ -287,8 +289,23 @@ function canResubmit(status: string) {
   return status === 'under_revision' || status === 'rejected'
 }
 
+function canDistribute(status: string) {
+  return status === 'approved' || status === 'unpublished'
+}
+
 function canPublish(status: string) {
   return status === 'approved' || status === 'published' || status === 'unpublished'
+}
+
+function percent(v: number | undefined) {
+  const n = Number(v || 0)
+  return `${(n * 100).toFixed(1)}%`
+}
+
+function firstIndustryLabel(tags?: string[] | null) {
+  const value = (tags || [])[0]
+  if (!value) return '-'
+  return dictStore.label('industry_tag', value) || value
 }
 
 async function load() {
@@ -376,6 +393,21 @@ function openPublish(row: ArticleDraft) {
   publishVisible.value = true
 }
 
+async function openDistribute(row: ArticleDraft) {
+  distributeForm.articleId = row.id
+  distributeForm.projectId = row.projectId
+  distributeForm.siteId = 0
+  fallbackToGeneral.value = false
+  try {
+    const { data } = await getRecommendedSites(row.projectId)
+    fallbackToGeneral.value = !!data.data.fallbackToGeneral
+    sites.value = data.data.sites || []
+    distributeVisible.value = true
+  } catch {
+    ElMessage.error('加载分发站点失败')
+  }
+}
+
 async function submitReview() {
   if (!currentArticleId.value) return
   if ((reviewForm.action === 'reject' || reviewForm.action === 'return_for_revision') && !reviewForm.comment.trim()) {
@@ -433,6 +465,19 @@ async function submitResubmit() {
   }
 }
 
+async function submitDistribute() {
+  if (!distributeForm.articleId || !distributeForm.siteId) return
+  submitting.value = true
+  try {
+    await distributeContentArticle(distributeForm.articleId, distributeForm.siteId)
+    distributeVisible.value = false
+    ElMessage.success('分发任务已触发')
+    await load()
+  } finally {
+    submitting.value = false
+  }
+}
+
 async function submitPublish() {
   if (!currentArticleId.value) return
   submitting.value = true
@@ -451,7 +496,10 @@ async function submitPublish() {
   }
 }
 
-onMounted(load)
+onMounted(async () => {
+  await dictStore.ensureLoaded()
+  await load()
+})
 </script>
 
 <style scoped>
@@ -494,5 +542,11 @@ onMounted(load)
   margin: 2px 0;
   font-size: 14px;
   font-weight: 600;
+}
+
+.distribute-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 </style>

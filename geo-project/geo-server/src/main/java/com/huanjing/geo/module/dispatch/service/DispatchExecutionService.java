@@ -6,8 +6,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.util.HttpClientUtil;
 import com.huanjing.geo.module.content.entity.ArticleBatch;
+import com.huanjing.geo.module.content.entity.ContentQuestionRotation;
 import com.huanjing.geo.module.content.entity.PackageContentConfig;
 import com.huanjing.geo.module.content.mapper.ArticleBatchMapper;
+import com.huanjing.geo.module.content.mapper.ContentQuestionRotationMapper;
 import com.huanjing.geo.module.content.mapper.PackageContentConfigMapper;
 import com.huanjing.geo.module.content.service.ContentArticleService;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -82,6 +84,7 @@ public class DispatchExecutionService {
     private final QuestionPoolVersionMapper questionPoolVersionMapper;
     private final QuestionPoolItemMapper questionPoolItemMapper;
     private final PackageContentConfigMapper packageContentConfigMapper;
+    private final ContentQuestionRotationMapper contentQuestionRotationMapper;
     private final ArticleBatchMapper articleBatchMapper;
     private final ContentArticleService contentArticleService;
     private final PollBatchMapper pollBatchMapper;
@@ -385,11 +388,11 @@ public class DispatchExecutionService {
         int total = 0;
         int completed = 0;
         int failed = 0;
-        int offset = 0;
         int platformCursor = 0;
         for (PackageContentConfig cfg : configs) {
             int articleCount = Math.max(1, Optional.ofNullable(cfg.getArticlesPerBatch()).orElse(1));
             int qpa = Math.max(1, Optional.ofNullable(cfg.getQuestionsPerArticle()).orElse(3));
+            int offset = resolveContentRotationOffset(project.getId(), cfg.getArticleType());
             for (int i = 0; i < articleCount; i++) {
                 total++;
                 List<QuestionPoolItem> selected = selectQuestionsForArticle(abQuestions, offset, qpa);
@@ -426,6 +429,7 @@ public class DispatchExecutionService {
                 );
                 completed++;
             }
+            saveContentRotationOffset(project.getId(), cfg.getArticleType(), offset);
         }
         batch.setTotalCount(total);
         batch.setCompletedCount(completed);
@@ -500,6 +504,35 @@ public class DispatchExecutionService {
             selected.add(source.get((start + i) % n));
         }
         return selected;
+    }
+
+    private int resolveContentRotationOffset(Long projectId, String articleType) {
+        ContentQuestionRotation rotation = contentQuestionRotationMapper.selectOne(
+                new LambdaQueryWrapper<ContentQuestionRotation>()
+                        .eq(ContentQuestionRotation::getProjectId, projectId)
+                        .eq(ContentQuestionRotation::getArticleType, articleType)
+                        .last("LIMIT 1")
+        );
+        return rotation == null || rotation.getCurrentOffset() == null ? 0 : Math.max(rotation.getCurrentOffset(), 0);
+    }
+
+    private void saveContentRotationOffset(Long projectId, String articleType, int newOffset) {
+        ContentQuestionRotation rotation = contentQuestionRotationMapper.selectOne(
+                new LambdaQueryWrapper<ContentQuestionRotation>()
+                        .eq(ContentQuestionRotation::getProjectId, projectId)
+                        .eq(ContentQuestionRotation::getArticleType, articleType)
+                        .last("LIMIT 1")
+        );
+        if (rotation == null) {
+            rotation = new ContentQuestionRotation();
+            rotation.setProjectId(projectId);
+            rotation.setArticleType(articleType);
+            rotation.setCurrentOffset(Math.max(newOffset, 0));
+            contentQuestionRotationMapper.insert(rotation);
+            return;
+        }
+        rotation.setCurrentOffset(Math.max(newOffset, 0));
+        contentQuestionRotationMapper.updateById(rotation);
     }
 
     private InvocationResult invokeWithOrderedPlatforms(List<AiPlatformConfig> platformConfigs, DispatchTask task, String prompt, int cursor) {

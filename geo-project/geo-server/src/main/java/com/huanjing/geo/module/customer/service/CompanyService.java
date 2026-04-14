@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.customer.service;
 
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.module.customer.dto.CompanyDeductRequest;
@@ -17,7 +18,9 @@ import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.partner.entity.Partner;
 import com.huanjing.geo.module.partner.mapper.PartnerMapper;
+import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.entity.SysUser;
+import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
@@ -27,14 +30,17 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Locale;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.format.DateTimeParseException;
+import java.util.stream.Collectors;
 import cn.hutool.core.util.RandomUtil;
 
 @Service
@@ -50,6 +56,7 @@ public class CompanyService {
     private final CompanyAccountTxnMapper companyAccountTxnMapper;
     private final BrandMapper brandMapper;
     private final PartnerMapper partnerMapper;
+    private final SysDictItemMapper sysDictItemMapper;
     private final CurrentUserService currentUserService;
     private final ActivityLogService activityLogService;
 
@@ -104,7 +111,9 @@ public class CompanyService {
         company.setCompanyName(req.getCompanyName());
         company.setContactName(req.getContactName());
         company.setContactPhone(req.getContactPhone());
-        company.setIndustry(req.getIndustry());
+        List<String> normalizedIndustries = normalizeIndustryTags(req.getIndustryTags(), req.getIndustry());
+        company.setIndustryTags(JSONUtil.toJsonStr(normalizedIndustries));
+        company.setIndustry(normalizedIndustries.get(0));
         company.setBusinessDirection(req.getBusinessDirection());
         company.setCompetitors(req.getCompetitors());
         company.setOfficialWebsite(req.getOfficialWebsite());
@@ -155,7 +164,9 @@ public class CompanyService {
         company.setCompanyName(req.getCompanyName());
         company.setContactName(req.getContactName());
         company.setContactPhone(req.getContactPhone());
-        company.setIndustry(req.getIndustry());
+        List<String> normalizedIndustries = normalizeIndustryTags(req.getIndustryTags(), req.getIndustry());
+        company.setIndustryTags(JSONUtil.toJsonStr(normalizedIndustries));
+        company.setIndustry(normalizedIndustries.get(0));
         company.setBusinessDirection(req.getBusinessDirection());
         company.setCompetitors(req.getCompetitors());
         company.setOfficialWebsite(req.getOfficialWebsite());
@@ -399,6 +410,7 @@ public class CompanyService {
         snapshot.put("contactName", company.getContactName());
         snapshot.put("contactPhone", company.getContactPhone());
         snapshot.put("industry", company.getIndustry());
+        snapshot.put("industryTags", company.getIndustryTags());
         snapshot.put("businessDirection", company.getBusinessDirection());
         snapshot.put("competitors", company.getCompetitors());
         snapshot.put("officialWebsite", company.getOfficialWebsite());
@@ -591,5 +603,45 @@ public class CompanyService {
             throw new BizException(404, "Partner not found");
         }
         return partner.getPartnerName();
+    }
+
+    private List<String> normalizeIndustryTags(List<String> industryTags, String legacyIndustry) {
+        List<String> source = industryTags == null ? new ArrayList<>() : new ArrayList<>(industryTags);
+        if (source.isEmpty() && StringUtils.hasText(legacyIndustry)) {
+            source.add(legacyIndustry);
+        }
+        if (source.isEmpty()) {
+            throw new BizException(400, "客户行业至少选择一个");
+        }
+        Set<String> validKeys = sysDictItemMapper.selectList(
+                        new LambdaQueryWrapper<SysDictItem>()
+                                .eq(SysDictItem::getDictType, "industry_tag")
+                                .eq(SysDictItem::getEnabled, true)
+                                .select(SysDictItem::getDictKey)
+                ).stream()
+                .map(SysDictItem::getDictKey)
+                .filter(StringUtils::hasText)
+                .map(item -> item.trim().toLowerCase(Locale.ROOT))
+                .collect(Collectors.toCollection(HashSet::new));
+        if (validKeys.isEmpty()) {
+            throw new BizException(500, "行业字典未配置");
+        }
+        List<String> normalized = new ArrayList<>();
+        for (String item : source) {
+            if (!StringUtils.hasText(item)) {
+                continue;
+            }
+            String key = item.trim().toLowerCase(Locale.ROOT);
+            if (!validKeys.contains(key)) {
+                throw new BizException(400, "存在无效行业标签: " + item);
+            }
+            if (!normalized.contains(key)) {
+                normalized.add(key);
+            }
+        }
+        if (normalized.isEmpty()) {
+            throw new BizException(400, "客户行业至少选择一个");
+        }
+        return normalized;
     }
 }

@@ -1,1 +1,0 @@
-import{P as e}from"./PagePlaceholder-BfpfSyCA.js";import{d as o,z as r,o as t}from"./index-DxM6WPsn.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=o({__name:"ReportPreview",setup(a){return(p,c)=>(t(),r(e,{title:"报表预览",description:"报表渲染、复核操作、PDF导出",icon:"View",phase:3}))}});export{m as default};

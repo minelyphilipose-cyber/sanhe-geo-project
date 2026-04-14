@@ -1,1 +1,0 @@
-import{P as e}from"./PagePlaceholder-BfpfSyCA.js";import{d as o,z as t,o as r}from"./index-DxM6WPsn.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=o({__name:"ReportList",setup(a){return(c,n)=>(r(),t(e,{title:"项目报表",description:"报表列表、生成、复核、发布",icon:"Document",phase:3}))}});export{m as default};

@@ -66,6 +66,14 @@ public class PlatformCredentialService {
         return decryptIfNeeded(encryptedApiKey);
     }
 
+    public String resolveCredential(String credentialRef, String encryptedValue) {
+        String byRef = resolveByRef(credentialRef);
+        if (StringUtils.hasText(byRef)) {
+            return byRef;
+        }
+        return decryptIfNeeded(encryptedValue);
+    }
+
     private String resolveByRef(String keyRef) {
         if (!StringUtils.hasText(keyRef)) {
             return null;
