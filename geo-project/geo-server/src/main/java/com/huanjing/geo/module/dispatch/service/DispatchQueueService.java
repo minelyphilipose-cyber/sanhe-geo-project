@@ -5,7 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.core.RedisCallback;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class DispatchQueueService {
 
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final StringRedisTemplate redisTemplate;
     private final DispatchProperties dispatchProperties;
 
     private static final DefaultRedisScript<Long> ENQUEUE_SCRIPT = buildEnqueueScript();
@@ -54,7 +54,7 @@ public class DispatchQueueService {
     }
 
     public Long popNextTaskId() {
-        Set<ZSetOperations.TypedTuple<Object>> tuples = redisTemplate.opsForZSet().popMin(dispatchProperties.getQueueKey(), 1);
+        Set<ZSetOperations.TypedTuple<String>> tuples = redisTemplate.opsForZSet().popMin(dispatchProperties.getQueueKey(), 1);
         if (tuples == null || tuples.isEmpty()) {
             return null;
         }

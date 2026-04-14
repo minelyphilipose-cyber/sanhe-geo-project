@@ -154,6 +154,18 @@ export interface Brand {
   businessIntro?: string | null
   standardBrandStatement: string | null
   businessStandardStatement?: string | null
+  standardStatement?: {
+    positioning?: string | null
+    selling_points?: string[] | null
+    differentiation?: string | null
+    brand_paragraph?: string | null
+  } | null
+  statementStatus?: 'pending' | 'draft' | 'locked' | string | null
+  statementGeneratedAt?: string | null
+  statementLockedAt?: string | null
+  statementLockedBy?: number | null
+  statementVersion?: number | null
+  statementHistory?: any[] | null
   forbiddenPhrases: string | null
   status?: string
   createdAt: string
@@ -302,6 +314,11 @@ export interface QuestionPoolItemVO extends QuestionPoolItemInput {
   id: number
   projectId: number
   versionId: number
+  contentStrategy?: string | null
+  strategyKeywords?: string | null
+  strategySuggestedType?: 'faq' | 'scenario_content' | 'industry_article' | string | null
+  strategyGeneratedAt?: string | null
+  strategyStatus?: 'none' | 'generated' | 'edited' | string | null
 }
 
 export interface QuestionPoolVersionVO {
@@ -441,6 +458,31 @@ export interface DispatchTaskItem {
   lastError?: string | null
   errorContext?: string | null
   createdAt: string
+}
+
+export interface BrandStatementContent {
+  positioning?: string | null
+  selling_points?: string[] | null
+  differentiation?: string | null
+  brand_paragraph?: string | null
+}
+
+export interface BrandStatementView {
+  brandId: number
+  statementStatus?: 'pending' | 'draft' | 'locked' | string | null
+  statementVersion?: number | null
+  statementGeneratedAt?: string | null
+  statementLockedAt?: string | null
+  statementLockedBy?: number | null
+  standardStatement?: BrandStatementContent | null
+  promptStatement?: BrandStatementContent | null
+  statementHistory?: Array<{
+    version: number
+    content: BrandStatementContent
+    created_at: string
+    created_by?: number | null
+    change_source: 'auto_generated' | 'manual_edit' | string
+  }>
 }
 
 export interface DispatchPlatformHealthItem {

@@ -1,1 +1,0 @@
-import{P as e}from"./PagePlaceholder-XpfvSLQh.js";import{d as o,z as t,o as a}from"./index-7y8VGajJ.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=o({__name:"ReviewPanel",setup(r){return(c,n)=>(a(),t(e,{title:"达标评估",description:"指标初算、人工裁定、处置记录",icon:"Checked",phase:6}))}});export{m as default};

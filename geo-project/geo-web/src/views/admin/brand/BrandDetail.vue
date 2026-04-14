@@ -43,12 +43,64 @@
     </el-card>
 
     <el-card>
+      <template #header>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span>品牌标准表达</span>
+            <el-tag :type="statementTagType">{{ statementStatusLabel }}</el-tag>
+            <el-tag v-if="statement?.statementVersion" type="info">v{{ statement?.statementVersion }}</el-tag>
+          </div>
+          <div class="space-x-2">
+            <el-button v-if="canEditStatement" type="primary" link @click="openStatementEditor">编辑</el-button>
+            <el-button v-if="canRegenerateStatement" type="warning" link @click="regenerateStatementNow">重新生成</el-button>
+            <el-button v-if="canLockStatement && statement?.statementStatus !== 'locked'" type="success" link @click="lockStatementNow">确认锁定</el-button>
+            <el-button v-if="canLockStatement && statement?.statementStatus === 'locked'" type="danger" link @click="unlockStatementNow">解锁</el-button>
+          </div>
+        </div>
+      </template>
+      <el-descriptions :column="2" border>
+        <el-descriptions-item label="一句话定位" :span="2">{{ statement?.standardStatement?.positioning || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="核心卖点" :span="2">
+          <div v-if="statement?.standardStatement?.selling_points?.length" class="flex flex-wrap gap-2">
+            <el-tag v-for="(point, idx) in statement?.standardStatement?.selling_points || []" :key="`${idx}-${point}`" type="info">{{ point }}</el-tag>
+          </div>
+          <span v-else>-</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="差异化表达" :span="2">{{ statement?.standardStatement?.differentiation || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="推荐品牌介绍段落" :span="2">{{ statement?.standardStatement?.brand_paragraph || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="生成时间">{{ statement?.statementGeneratedAt || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="锁定时间">{{ statement?.statementLockedAt || '-' }}</el-descriptions-item>
+      </el-descriptions>
+    </el-card>
+
+    <el-card>
       <template #header><span>扩展入口</span></template>
       <div class="flex flex-wrap gap-3">
         <el-button @click="router.push(`/admin/brands/${brandId}/profile`)">品牌画像</el-button>
         <el-button @click="router.push(`/admin/brands/${brandId}/assets`)">品牌资产</el-button>
       </div>
     </el-card>
+
+    <el-dialog v-model="statementVisible" title="编辑品牌标准表达" width="760px">
+      <el-form :model="statementForm" label-width="140px">
+        <el-form-item label="一句话定位">
+          <el-input v-model="statementForm.positioning" maxlength="20" show-word-limit />
+        </el-form-item>
+        <el-form-item label="核心卖点（每行一条）">
+          <el-input v-model="statementForm.sellingPointsText" type="textarea" :rows="4" />
+        </el-form-item>
+        <el-form-item label="差异化表达">
+          <el-input v-model="statementForm.differentiation" type="textarea" :rows="4" />
+        </el-form-item>
+        <el-form-item label="推荐品牌介绍段落">
+          <el-input v-model="statementForm.brandParagraph" type="textarea" :rows="6" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="statementVisible = false">取消</el-button>
+        <el-button type="primary" :loading="statementSaving" @click="submitStatementDraft">保存草稿</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="editVisible" title="编辑品牌" width="680px">
       <el-form ref="brandFormRef" :model="brandForm" :rules="brandRules" label-width="120px">
@@ -90,8 +142,18 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { getBrandDetail, updateBrand, deleteBrand, getCompanyDetail } from '@/api/customer'
-import type { Brand } from '@/types'
+import {
+  getBrandDetail,
+  updateBrand,
+  deleteBrand,
+  getCompanyDetail,
+  getBrandStatementDetail,
+  saveBrandStatementDraft,
+  lockBrandStatement,
+  unlockBrandStatement,
+  regenerateBrandStatement,
+} from '@/api/customer'
+import type { Brand, BrandStatementView } from '@/types'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
@@ -107,11 +169,20 @@ const hasValidId = Number.isFinite(brandId) && brandId > 0
 
 const canWriteCompany = computed(() => userStore.hasPermission('company.write'))
 const canWriteProject = computed(() => userStore.hasPermission('project.write'))
+const canLockStatement = computed(() => userStore.hasPermission('brand.statement.lock'))
+const isPartnerRole = computed(() =>
+  ['partner', 'partner_staff', 'partner_viewer'].includes(userStore.role || ''),
+)
+const canEditStatement = computed(() => canWriteCompany.value && !isPartnerRole.value)
+const canRegenerateStatement = computed(() => canEditStatement.value)
 
 const loading = ref(false)
 const saving = ref(false)
 const editVisible = ref(false)
+const statementVisible = ref(false)
+const statementSaving = ref(false)
 const brand = ref<Brand | null>(null)
+const statement = ref<BrandStatementView | null>(null)
 const companyName = ref('')
 const brandFormRef = ref<FormInstance>()
 
@@ -134,6 +205,13 @@ const brandForm = reactive({
   forbiddenPhrases: '',
 })
 
+const statementForm = reactive({
+  positioning: '',
+  sellingPointsText: '',
+  differentiation: '',
+  brandParagraph: '',
+})
+
 const brandRules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
   brandSlug: [
@@ -146,6 +224,21 @@ const brandRules: FormRules = {
 const regionText = computed(() => {
   if (!brand.value) return '-'
   return regionDisplayFromPayload(brand.value) || brand.value.serviceArea || '-'
+})
+
+const statementStatusLabel = computed(() => {
+  const status = statement.value?.statementStatus
+  if (status === 'locked') return '已锁定'
+  if (status === 'draft') return '待确认'
+  if (status === 'pending') return '生成中'
+  return '未生成'
+})
+
+const statementTagType = computed<'success' | 'warning' | 'info'>(() => {
+  const status = statement.value?.statementStatus
+  if (status === 'locked') return 'success'
+  if (status === 'draft') return 'warning'
+  return 'info'
 })
 
 function fillForm(data: Brand) {
@@ -173,6 +266,8 @@ async function load() {
     const { data } = await getBrandDetail(brandId)
     brand.value = data.data
     fillForm(data.data)
+    const statementRes = await getBrandStatementDetail(brandId)
+    statement.value = statementRes.data.data
     if (data.data.companyId) {
       const companyRes = await getCompanyDetail(data.data.companyId)
       companyName.value = companyRes.data.data.companyName || ''
@@ -181,10 +276,65 @@ async function load() {
     }
   } catch {
     brand.value = null
+    statement.value = null
     companyName.value = ''
   } finally {
     loading.value = false
   }
+}
+
+function openStatementEditor() {
+  const detail = statement.value?.standardStatement
+  statementForm.positioning = detail?.positioning || ''
+  statementForm.sellingPointsText = (detail?.selling_points || []).join('\n')
+  statementForm.differentiation = detail?.differentiation || ''
+  statementForm.brandParagraph = detail?.brand_paragraph || ''
+  statementVisible.value = true
+}
+
+async function submitStatementDraft() {
+  if (!statementForm.positioning.trim() || !statementForm.differentiation.trim() || !statementForm.brandParagraph.trim()) {
+    ElMessage.warning('请补全定位、差异化表达和品牌介绍段落')
+    return
+  }
+  statementSaving.value = true
+  try {
+    const sellingPoints = statementForm.sellingPointsText
+      .split(/\r?\n/)
+      .map((v) => v.trim())
+      .filter(Boolean)
+    const { data } = await saveBrandStatementDraft(brandId, {
+      positioning: statementForm.positioning.trim(),
+      sellingPoints,
+      differentiation: statementForm.differentiation.trim(),
+      brandParagraph: statementForm.brandParagraph.trim(),
+    })
+    statement.value = data.data
+    statementVisible.value = false
+    ElMessage.success('品牌标准表达已保存为草稿')
+  } finally {
+    statementSaving.value = false
+  }
+}
+
+async function lockStatementNow() {
+  const { data } = await lockBrandStatement(brandId)
+  statement.value = data.data
+  ElMessage.success('品牌标准表达已锁定')
+}
+
+async function unlockStatementNow() {
+  const { data } = await unlockBrandStatement(brandId)
+  statement.value = data.data
+  ElMessage.success('已解锁，可继续编辑')
+}
+
+async function regenerateStatementNow() {
+  await regenerateBrandStatement(brandId, {
+    remark: 'manual_regenerate_from_brand_detail',
+  })
+  ElMessage.success('已投递重生成任务')
+  await load()
 }
 
 function openEdit() {

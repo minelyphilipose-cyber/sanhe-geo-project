@@ -67,3 +67,19 @@ export function getQuestionPoolManagePage(params: { current?: number; size?: num
   return request.get<R<PageResult<QuestionPoolManageItemVO>>>('/question-pools', { params })
 }
 
+export function generateProjectQuestionStrategies(projectId: number) {
+  return request.post<R<any>>(`/projects/${projectId}/generate-question-strategies`)
+}
+
+export function generateSingleQuestionStrategy(questionId: number) {
+  return request.post<R<any>>(`/question-pools/questions/${questionId}/generate-strategy`)
+}
+
+export function updateQuestionStrategy(questionId: number, data: {
+  contentStrategy: string
+  strategyKeywords?: string[]
+  strategySuggestedType: 'faq' | 'scenario_content' | 'industry_article'
+}) {
+  return request.put<R<void>>(`/question-pools/questions/${questionId}/strategy`, data)
+}
+

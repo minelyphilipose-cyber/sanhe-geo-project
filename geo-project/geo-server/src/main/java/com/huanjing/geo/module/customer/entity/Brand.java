@@ -33,6 +33,13 @@ public class Brand {
     private String businessIntro;
     private String standardBrandStatement;
     private String businessStandardStatement;
+    private String standardStatement;
+    private String statementStatus;
+    private LocalDateTime statementGeneratedAt;
+    private LocalDateTime statementLockedAt;
+    private Long statementLockedBy;
+    private Integer statementVersion;
+    private String statementHistory;
     private String forbiddenPhrases;
     private String status;
     private LocalDateTime createdAt;

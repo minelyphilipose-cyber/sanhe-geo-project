@@ -1,0 +1,1 @@
+import{P as e}from"./PagePlaceholder-BfpfSyCA.js";import{d as o,z as t,o as a}from"./index-DxM6WPsn.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=o({__name:"PlatformHealth",setup(r){return(n,c)=>(a(),t(e,{title:"平台健康",description:"16平台状态、失败率、降级管理",icon:"Connection",phase:4}))}});export{m as default};

@@ -20,7 +20,6 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashMap;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -68,13 +67,35 @@ public class DispatchTaskService {
                             .last("LIMIT 1")
             );
             if (existing != null) {
-                enqueueIfNeeded(existing);
+                if (taskType == DispatchTaskType.BRAND_STATEMENT_GENERATION
+                        && List.of(
+                        DispatchTaskStatus.COMPLETED.value(),
+                        DispatchTaskStatus.FAILED.value(),
+                        DispatchTaskStatus.DEAD_LETTER.value()
+                ).contains(existing.getStatus())) {
+                    existing.setStatus(DispatchTaskStatus.PENDING.value());
+                    existing.setDueTime(dueTime);
+                    existing.setPayloadJson(task.getPayloadJson());
+                    existing.setRetryCount(0);
+                    existing.setMaxRetry(3);
+                    existing.setFirstStartedAt(null);
+                    existing.setLastStartedAt(null);
+                    existing.setNextRetryAt(null);
+                    existing.setFinishedAt(null);
+                    existing.setLastError(null);
+                    existing.setErrorContext(null);
+                    existing.setTimeoutAt(dueTime.plusMinutes(dispatchProperties.getTaskTimeoutMinutes()));
+                    dispatchTaskMapper.updateById(existing);
+                    safeEnqueue(existing);
+                    return existing;
+                }
+                safeEnqueue(existing);
                 return existing;
             }
             throw ex;
         }
 
-        enqueueIfNeeded(task);
+        safeEnqueue(task);
         return task;
     }
 
@@ -87,6 +108,16 @@ public class DispatchTaskService {
             return;
         }
         dispatchQueueService.enqueueTask(task.getId(), task.getPriorityLevel(), task.getCreatedAt() == null ? System.currentTimeMillis() : task.getCreatedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli());
+    }
+
+    private void safeEnqueue(DispatchTask task) {
+        try {
+            enqueueIfNeeded(task);
+        } catch (Exception ex) {
+            // Keep task in MySQL pending state and rely on recovery scheduler when Redis becomes healthy.
+            log.warn("Dispatch task enqueue failed, taskId={}, taskType={}, reason={}",
+                    task.getId(), task.getTaskType(), ex.getMessage());
+        }
     }
 
     @Transactional
@@ -170,7 +201,7 @@ public class DispatchTaskService {
                 || DispatchTaskType.CONTENT_GENERATION.name().equalsIgnoreCase(task.getTaskType())) {
             Map<String, Object> payload = new HashMap<>();
             if (task.getPayloadJson() != null && !task.getPayloadJson().isBlank()) {
-                payload.putAll(JSONUtil.toBean(task.getPayloadJson(), Map.class));
+                JSONUtil.parseObj(task.getPayloadJson()).forEach((k, v) -> payload.put(String.valueOf(k), v));
             }
             int oldBatchNo = 1;
             Object rawBatchNo = payload.get("batchNo");

@@ -1,5 +1,16 @@
 import request from './request'
-import type { R, PageResult, Company, Brand, BrandMaterial, BrandProfileVersion, CompanyAccount, CompanyAccountTxn } from '@/types'
+import type {
+  R,
+  PageResult,
+  Company,
+  Brand,
+  BrandMaterial,
+  BrandProfileVersion,
+  CompanyAccount,
+  CompanyAccountTxn,
+  BrandStatementView,
+  DispatchTaskItem,
+} from '@/types'
 
 export function getCompanyList(params: {
   current?: number
@@ -114,4 +125,32 @@ export function getBrandMaterialStream(brandId: number, materialId: number, down
     params: { download },
     responseType: 'blob',
   })
+}
+
+export function getBrandStatementDetail(brandId: number) {
+  return request.get<R<BrandStatementView>>(`/brands/${brandId}/statement`)
+}
+
+export function saveBrandStatementDraft(
+  brandId: number,
+  data: {
+    positioning: string
+    sellingPoints: string[]
+    differentiation: string
+    brandParagraph: string
+  },
+) {
+  return request.put<R<BrandStatementView>>(`/brands/${brandId}/statement`, data)
+}
+
+export function lockBrandStatement(brandId: number) {
+  return request.post<R<BrandStatementView>>(`/brands/${brandId}/statement/lock`)
+}
+
+export function unlockBrandStatement(brandId: number) {
+  return request.post<R<BrandStatementView>>(`/brands/${brandId}/statement/unlock`)
+}
+
+export function regenerateBrandStatement(brandId: number, data?: { projectId?: number; remark?: string }) {
+  return request.post<R<DispatchTaskItem>>(`/brands/${brandId}/statement/regenerate`, data || {})
 }

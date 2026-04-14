@@ -178,20 +178,8 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="归属类型" required>
-          <el-select v-model="form.ownerType" style="width: 100%">
-            <el-option
-              v-for="item in dictStore.options('owner_type')"
-              :key="item.dictKey"
-              :label="item.dictValue"
-              :value="item.dictKey"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="showPartnerSelector" label="所属合伙人">
-          <el-select v-model="form.partnerId" clearable filterable style="width: 100%">
-            <el-option v-for="p in partnerOptions" :key="p.id" :label="p.partnerName" :value="p.id" />
-          </el-select>
+        <el-form-item label="归属类型">
+          <el-input :value="companyOwnerTypeLabel" disabled />
         </el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="form.regionCodes" /></el-form-item>
         <el-form-item v-if="formMode === 'edit' && (canActivateProject || canCloseProject)" label="激活状态">
@@ -277,7 +265,6 @@ import {
   updateProjectStatus,
 } from '@/api/project'
 import { getBrandList, getCompanyList } from '@/api/customer'
-import { getPartnerList, type PartnerItem } from '@/api/partner'
 import { getEnabledPackagePlans } from '@/api/packagePlan'
 import type { Brand, Company, PackagePlan, Project, ProjectPlatformOption, QuestionPoolItemInput } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
@@ -293,7 +280,11 @@ const canActivateProject = computed(() => userStore.hasPermission('project.statu
 const canCloseProject = computed(() => userStore.hasPermission('project.status.close'))
 const canConfirmCoreQuestion = computed(() => userStore.hasPermission('question_pool.core.confirm'))
 const canDeleteCoreQuestion = computed(() => userStore.hasPermission('question_pool.core.delete'))
-const showPartnerSelector = computed(() => formMode.value === 'edit' || userStore.isPartner)
+const companyOwnerTypeLabel = computed(() => {
+  const company = companyOptions.value.find((c) => c.id === form.companyId)
+  const key = company?.ownerType || (company?.partnerId ? 'partner' : 'direct')
+  return dictStore.label('owner_type', key) || '-'
+})
 
 const statusOptions = computed(() => ['active', 'paused'])
 const loading = ref(false)
@@ -301,7 +292,6 @@ const saving = ref(false)
 const rows = ref<Project[]>([])
 const companyOptions = ref<Company[]>([])
 const brandOptions = ref<Brand[]>([])
-const partnerOptions = ref<PartnerItem[]>([])
 const packagePlans = ref<PackagePlan[]>([])
 const platformOptions = ref<Record<'P0' | 'P1' | 'P2', ProjectPlatformOption[]>>({
   P0: [],
@@ -332,8 +322,6 @@ const form = reactive({
   selectedPlatformCodesP0: [] as string[],
   selectedPlatformCodesP1: [] as string[],
   selectedPlatformCodesP2: [] as string[],
-  ownerType: 'direct',
-  partnerId: null as number | null,
   status: 'paused' as 'active' | 'paused',
   regionCodes: [] as string[],
   deliveryMode: 'managed',
@@ -349,7 +337,6 @@ const rules: FormRules = {
   packageType: [{ required: true, message: '请选择套餐', trigger: 'change' }],
   packagePriceYuan: [{ required: true, message: '请输入签约价', trigger: 'change' }],
   serviceMonths: [{ required: true, message: '请输入服务月数', trigger: 'change' }],
-  ownerType: [{ required: true, message: '请选择归属类型', trigger: 'change' }],
 }
 
 const packagePlanOptions = computed(() => {
@@ -428,8 +415,6 @@ function resetForm() {
   form.requiredPlatformP0Count = 0
   form.requiredPlatformP1Count = 0
   form.requiredPlatformP2Count = 0
-  form.ownerType = 'direct'
-  form.partnerId = null
   form.status = 'paused'
   form.regionCodes = []
   form.deliveryMode = 'managed'
@@ -491,15 +476,6 @@ async function loadPlatformOptions() {
   }
 }
 
-async function loadPartners() {
-  try {
-    const { data } = await getPartnerList({ current: 1, size: 500 })
-    partnerOptions.value = data.data.records || []
-  } catch {
-    partnerOptions.value = []
-  }
-}
-
 async function load() {
   loading.value = true
   try {
@@ -547,8 +523,6 @@ async function openEdit(row: Project) {
   form.selectedPlatformCodesP0 = [...(row.selectedPlatformCodesP0 || [])]
   form.selectedPlatformCodesP1 = [...(row.selectedPlatformCodesP1 || [])]
   form.selectedPlatformCodesP2 = [...(row.selectedPlatformCodesP2 || [])]
-  form.ownerType = row.ownerType
-  form.partnerId = row.partnerId
   form.status = row.status === 'active' ? 'active' : 'paused'
   originalStatus.value = form.status
   form.regionCodes = regionCodesFromPayload(row)
@@ -580,10 +554,6 @@ async function submit() {
   }
   if (!form.companyId) {
     ElMessage.warning('请先选择客户')
-    return
-  }
-  if (showPartnerSelector.value && (form.ownerType === 'partner' || form.ownerType === 'joint') && !form.partnerId) {
-    ElMessage.warning('归属为“合伙人/联合”的项目需选择所属合伙人')
     return
   }
   if (form.selectedPlatformCodesP0.length !== form.requiredPlatformP0Count) {
@@ -645,8 +615,6 @@ async function submit() {
       selectedPlatformCodesP0: form.selectedPlatformCodesP0,
       selectedPlatformCodesP1: form.selectedPlatformCodesP1,
       selectedPlatformCodesP2: form.selectedPlatformCodesP2,
-      ownerType: form.ownerType,
-      partnerId: form.partnerId || undefined,
       deliveryMode: form.deliveryMode || 'managed',
       primaryGoal: form.primaryGoal || undefined,
       remark: form.remark || undefined,
@@ -796,7 +764,6 @@ onMounted(async () => {
   await loadPackagePlans()
   await loadPlatformOptions()
   applyDefaultPackage()
-  await loadPartners()
   await loadCompanies()
   await loadBrands(form.companyId)
   await load()

@@ -1,11 +1,15 @@
 package com.huanjing.geo.module.project.service;
 
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.dispatch.entity.DispatchTask;
+import com.huanjing.geo.module.dispatch.service.QuestionStrategyDispatchService;
 import com.huanjing.geo.module.project.dto.QuestionPoolItemRequest;
 import com.huanjing.geo.module.project.dto.QuestionPoolItemVO;
 import com.huanjing.geo.module.project.dto.QuestionPoolManageItemVO;
+import com.huanjing.geo.module.project.dto.QuestionStrategyUpdateRequest;
 import com.huanjing.geo.module.project.dto.QuestionPoolVersionVO;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.entity.QuestionPoolItem;
@@ -27,6 +31,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.time.LocalDateTime;
 import java.util.stream.Collectors;
 
 @Service
@@ -42,6 +47,7 @@ public class QuestionPoolService {
     private final QuestionPoolItemMapper questionPoolItemMapper;
     private final ProjectMapper projectMapper;
     private final CurrentUserService currentUserService;
+    private final QuestionStrategyDispatchService questionStrategyDispatchService;
 
     @Transactional
     public QuestionPoolVersion createVersion(
@@ -77,10 +83,55 @@ public class QuestionPoolService {
                 item.setQuestionType(req.getQuestionType().trim());
                 item.setPriority(req.getPriority().trim());
                 item.setIsCore(req.getIsCore());
+                item.setStrategyStatus("none");
                 questionPoolItemMapper.insert(item);
             }
         }
+        questionStrategyDispatchService.enqueueBatchForProject(projectId, "question_pool_confirm", false);
         return version;
+    }
+
+    @Transactional
+    public DispatchTask triggerBatchStrategyGeneration(Long projectId, String triggerSource) {
+        Project project = requireProjectForWrite(projectId);
+        SysUser user = currentUserService.requireCurrentUser();
+        currentUserService.ensurePartnerResourceAccess(user, project.getPartnerId(), "project");
+        return questionStrategyDispatchService.enqueueBatchForProject(projectId, triggerSource, false);
+    }
+
+    @Transactional
+    public DispatchTask triggerSingleStrategyGeneration(Long questionId, String triggerSource) {
+        currentUserService.ensurePermission("project.write");
+        SysUser user = currentUserService.requireCurrentUser();
+        QuestionPoolItem item = questionPoolItemMapper.selectById(questionId);
+        if (item == null) {
+            throw new BizException(404, "Question not found");
+        }
+        Project project = requireProjectForWrite(item.getProjectId());
+        currentUserService.ensurePartnerResourceAccess(user, project.getPartnerId(), "project");
+        return questionStrategyDispatchService.enqueueSingleQuestion(item.getProjectId(), item.getId(), triggerSource);
+    }
+
+    @Transactional
+    public void updateQuestionStrategy(Long questionId, QuestionStrategyUpdateRequest req) {
+        currentUserService.ensurePermission("project.write");
+        SysUser user = currentUserService.requireCurrentUser();
+        QuestionPoolItem item = questionPoolItemMapper.selectById(questionId);
+        if (item == null) {
+            throw new BizException(404, "Question not found");
+        }
+        Project project = requireProjectForWrite(item.getProjectId());
+        currentUserService.ensurePartnerResourceAccess(user, project.getPartnerId(), "project");
+
+        String suggestedType = normalizeSuggestedType(req.getStrategySuggestedType());
+        QuestionPoolItem update = new QuestionPoolItem();
+        update.setId(item.getId());
+        update.setContentStrategy(req.getContentStrategy().trim());
+        update.setStrategyKeywords(JSONUtil.toJsonStr(normalizeKeywords(req.getStrategyKeywords())));
+        update.setStrategySuggestedType(suggestedType);
+        update.setStrategyStatus("edited");
+        update.setStrategyGeneratedAt(LocalDateTime.now());
+        questionPoolItemMapper.updateById(update);
     }
 
     public QuestionPoolVersionVO currentVersion(Long projectId) {
@@ -248,6 +299,11 @@ public class QuestionPoolService {
                 itemVO.setQuestionType(item.getQuestionType());
                 itemVO.setPriority(item.getPriority());
                 itemVO.setIsCore(item.getIsCore());
+                itemVO.setContentStrategy(item.getContentStrategy());
+                itemVO.setStrategyKeywords(item.getStrategyKeywords());
+                itemVO.setStrategySuggestedType(item.getStrategySuggestedType());
+                itemVO.setStrategyGeneratedAt(item.getStrategyGeneratedAt());
+                itemVO.setStrategyStatus(item.getStrategyStatus());
                 itemVOs.add(itemVO);
             }
             vo.setItems(itemVOs);
@@ -278,5 +334,33 @@ public class QuestionPoolService {
             throw new BizException(404, "Project not found");
         }
         return project;
+    }
+
+    private Project requireProjectForWrite(Long projectId) {
+        currentUserService.ensurePermission("project.write");
+        return requireProjectForRead(projectId);
+    }
+
+    private List<String> normalizeKeywords(List<String> keywords) {
+        if (keywords == null) {
+            return List.of();
+        }
+        return keywords.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .limit(5)
+                .collect(Collectors.toList());
+    }
+
+    private String normalizeSuggestedType(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            throw new BizException(400, "strategy_suggested_type is required");
+        }
+        String value = raw.trim().toLowerCase();
+        if (!Set.of("faq", "scenario_content", "industry_article").contains(value)) {
+            throw new BizException(400, "strategy_suggested_type must be faq/scenario_content/industry_article");
+        }
+        return value;
     }
 }

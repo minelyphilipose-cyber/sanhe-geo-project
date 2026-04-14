@@ -23,6 +23,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\mapper\ArticleReviewLogMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\entity\CompanyAccount.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\dto\UserRoleBindRequest.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\service\BrandStatementDispatchService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\common\result\R.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\entity\SysRole.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\mapper\CompanyAccountTxnMapper.java
@@ -73,6 +74,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\mapper\PollDailyStatMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\service\DispatchScheduleCalculator.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\service\BrandProfileService.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\service\BrandStatementService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\entity\BrandProfileVersion.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\mapper\ArticlePublishLogMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\mapper\ArticleDraftVersionMapper.java
@@ -100,6 +102,8 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\dto\CompanyRechargeRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\mapper\PollResultMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\mapper\PackagePlanMapper.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\dto\BrandStatementUpdateRequest.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\dto\QuestionStrategyUpdateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\dto\ArticlePublishRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\controller\CompanyController.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\GeoApplication.java
@@ -110,6 +114,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\entity\SysPermission.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\dto\ActivityLogItem.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\entity\PollResult.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\service\QuestionStrategyDispatchService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\controller\DictController.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\entity\SysRolePermission.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\common\storage\MinioStorageService.java
@@ -155,6 +160,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\dto\DictItemCreateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\config\DispatchProperties.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\entity\DispatchTask.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\dto\BrandStatementRegenerateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\dto\CompanyCreateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\mapper\CompanyMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\common\util\HttpClientUtil.java

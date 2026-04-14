@@ -3,12 +3,17 @@ package com.huanjing.geo.module.customer.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.customer.dto.BrandCreateRequest;
+import com.huanjing.geo.module.customer.dto.BrandStatementRegenerateRequest;
+import com.huanjing.geo.module.customer.dto.BrandStatementUpdateRequest;
 import com.huanjing.geo.module.customer.dto.BrandUpdateRequest;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.entity.BrandProfileVersion;
+import com.huanjing.geo.module.dispatch.entity.DispatchTask;
+import com.huanjing.geo.module.dispatch.service.BrandStatementDispatchService;
 import com.huanjing.geo.module.customer.service.BrandService;
 import com.huanjing.geo.module.customer.service.BrandProfileService;
+import com.huanjing.geo.module.customer.service.BrandStatementService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +25,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import java.util.Map;
 import java.nio.charset.StandardCharsets;
 
 @Tag(name = "Brand")
@@ -30,6 +36,8 @@ public class BrandController {
 
     private final BrandService brandService;
     private final BrandProfileService brandProfileService;
+    private final BrandStatementService brandStatementService;
+    private final BrandStatementDispatchService brandStatementDispatchService;
 
     @GetMapping
     public R<Page<Brand>> page(
@@ -60,6 +68,34 @@ public class BrandController {
     public R<Void> delete(@PathVariable Long id) {
         brandService.delete(id);
         return R.ok();
+    }
+
+    @GetMapping("/{id}/statement")
+    public R<Map<String, Object>> statementDetail(@PathVariable Long id) {
+        return R.ok(brandStatementService.detail(id));
+    }
+
+    @PutMapping("/{id}/statement")
+    public R<Map<String, Object>> saveStatementDraft(@PathVariable Long id, @Valid @RequestBody BrandStatementUpdateRequest req) {
+        return R.ok(brandStatementService.saveDraft(id, req));
+    }
+
+    @PostMapping("/{id}/statement/lock")
+    public R<Map<String, Object>> lockStatement(@PathVariable Long id) {
+        return R.ok(brandStatementService.lock(id));
+    }
+
+    @PostMapping("/{id}/statement/unlock")
+    public R<Map<String, Object>> unlockStatement(@PathVariable Long id) {
+        return R.ok(brandStatementService.unlock(id));
+    }
+
+    @PostMapping("/{id}/statement/regenerate")
+    public R<DispatchTask> regenerateStatement(@PathVariable Long id, @RequestBody(required = false) BrandStatementRegenerateRequest req) {
+        brandStatementService.ensureRegeneratePermission(id);
+        Long projectId = req == null ? null : req.getProjectId();
+        String remark = req == null ? null : req.getRemark();
+        return R.ok(brandStatementDispatchService.enqueueRegeneration(id, projectId, remark));
     }
 
     @PostMapping("/{id}/materials/upload")

@@ -1,1 +1,0 @@
-import{P as e}from"./PagePlaceholder-XpfvSLQh.js";import{d as o,z as r,o as t}from"./index-7y8VGajJ.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const l=o({__name:"BrandProfile",setup(a){return(i,n)=>(t(),r(e,{title:"品牌画像",description:"品牌资料编辑、标准表述维护 (迁移自 profile.html)",icon:"Edit",phase:6}))}});export{l as default};

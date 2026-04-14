@@ -18,14 +18,16 @@ public class PermissionService {
                     "project.status.activate", "project.status.close",
                     "question_pool.core.confirm", "question_pool.core.delete",
                     "report.review",
-                    "dispatch.alert.resolve", "dispatch.task.replay.dead_letter"
+                    "dispatch.alert.resolve", "dispatch.task.replay.dead_letter",
+                    "brand.statement.lock"
             ),
             "delivery_manager", Set.of(
                     "company.read", "company.write", "project.read", "project.write", "partner.read",
                     "project.status.activate", "project.status.close",
                     "question_pool.core.confirm", "question_pool.core.delete",
                     "report.review",
-                    "dispatch.alert.resolve"
+                    "dispatch.alert.resolve",
+                    "brand.statement.lock"
             ),
             "operator", Set.of("company.read", "company.write", "project.read", "project.write", "partner.read"),
             "sales", Set.of("company.read", "project.read", "dispatch.presale.enqueue"),

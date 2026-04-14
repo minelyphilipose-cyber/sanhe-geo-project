@@ -9,6 +9,7 @@ import com.huanjing.geo.module.project.dto.QuestionPoolVersionVO;
 import com.huanjing.geo.module.project.dto.ProjectStatusUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectStageUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectUpdateRequest;
+import com.huanjing.geo.module.dispatch.entity.DispatchTask;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.service.ProjectService;
 import com.huanjing.geo.module.project.service.QuestionPoolService;
@@ -102,5 +103,10 @@ public class ProjectController {
     @GetMapping("/{id}/question-pool/versions/{versionNo}")
     public R<QuestionPoolVersionVO> questionPoolVersionDetail(@PathVariable Long id, @PathVariable Integer versionNo) {
         return R.ok(questionPoolService.versionDetail(id, versionNo));
+    }
+
+    @PostMapping("/{id}/generate-question-strategies")
+    public R<DispatchTask> generateQuestionStrategies(@PathVariable Long id) {
+        return R.ok(questionPoolService.triggerBatchStrategyGeneration(id, "manual_api"));
     }
 }

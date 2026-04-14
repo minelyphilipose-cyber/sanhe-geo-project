@@ -80,10 +80,12 @@
           <el-input v-model="taskQuery.keyword" placeholder="项目名称关键字" clearable style="width: 220px" @keyup.enter="loadTasks" />
           <el-select v-model="taskQuery.taskType" clearable placeholder="任务类型" style="width: 180px" @change="loadTasks">
             <el-option label="双日跑批" value="BI_DAILY_POLL" />
+            <el-option label="品牌标准表达生成" value="BRAND_STATEMENT_GENERATION" />
             <el-option label="双周报" value="BIWEEKLY_REPORT" />
             <el-option label="月报" value="MONTHLY_REPORT" />
             <el-option label="季报" value="QUARTERLY_REPORT" />
             <el-option label="售前诊断" value="PRESALE_DIAGNOSIS" />
+            <el-option label="问题场景内容建议" value="QUESTION_STRATEGY_GENERATION" />
             <el-option label="内容生成" value="CONTENT_GENERATION" />
           </el-select>
           <el-select v-model="taskQuery.status" clearable placeholder="任务状态" style="width: 150px" @change="loadTasks">

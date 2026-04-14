@@ -29,12 +29,14 @@ import com.huanjing.geo.module.project.entity.ProjectPlatformBinding;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.project.mapper.ProjectPlatformBindingMapper;
+import com.huanjing.geo.module.dispatch.service.BrandStatementDispatchService;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -54,6 +56,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class ProjectService {
 
@@ -73,6 +76,7 @@ public class ProjectService {
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final CurrentUserService currentUserService;
     private final ActivityLogService activityLogService;
+    private final BrandStatementDispatchService brandStatementDispatchService;
 
     public Page<Project> page(long current, long size, String keyword, String status, String stage, Long partnerId) {
         SysUser user = currentUserService.requireCurrentUser();
@@ -151,8 +155,8 @@ public class ProjectService {
         currentUserService.ensurePermission("project.write");
         SysUser operator = currentUserService.requireCurrentUser();
         Company company = validateCompanyBrand(req.getCompanyId(), req.getBrandId());
-        String ownerType = resolveCreateOwnerType(operator);
-        Long partnerId = resolveCreatePartnerId(operator);
+        String ownerType = resolveOwnerTypeByCompany(company);
+        Long partnerId = resolvePartnerIdByCompany(company);
         validateOwnerBinding(ownerType, partnerId);
         validateProjectBase(req.getPackageType());
         validateProjectCompanyPartnerConsistency(ownerType, partnerId, company.getPartnerId());
@@ -227,12 +231,12 @@ public class ProjectService {
         SysUser operator = currentUserService.requireCurrentUser();
         Project project = requireProject(id);
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
-        String ownerType = resolveUpdateOwnerType(operator, req.getOwnerType(), project.getOwnerType());
-        Long partnerId = resolveUpdatePartnerId(operator, req.getPartnerId(), ownerType, project.getPartnerId());
+        Company company = validateCompany(project.getCompanyId());
+        String ownerType = resolveOwnerTypeByCompany(company);
+        Long partnerId = resolvePartnerIdByCompany(company);
         validateOwnerBinding(ownerType, partnerId);
         currentUserService.ensurePartnerResourceAccess(operator, partnerId, "project");
         Map<String, Object> before = snapshotProject(project);
-        Company company = validateCompany(project.getCompanyId());
         validateProjectCompanyPartnerConsistency(ownerType, partnerId, company.getPartnerId());
         validateProjectBase(req.getPackageType());
         com.huanjing.geo.module.project.entity.PackagePlan packagePlan = packagePlanService.requireEnabledByType(req.getPackageType());
@@ -319,6 +323,7 @@ public class ProjectService {
         );
     }
 
+    @Transactional
     public void updateStatus(Long id, ProjectStatusUpdateRequest req) {
         currentUserService.ensurePermission("project.write");
         SysUser operator = currentUserService.requireCurrentUser();
@@ -337,6 +342,15 @@ public class ProjectService {
         }
         project.setStatus(req.getStatus());
         projectMapper.updateById(project);
+        if (isActivating(fromStatus, req.getStatus())) {
+            try {
+                brandStatementDispatchService.maybeEnqueueOnProjectActivated(project);
+            } catch (Exception ex) {
+                // Brand statement dispatch is best-effort; project activation should not fail because Redis is unavailable.
+                log.warn("Brand statement enqueue skipped after activation, projectId={}, brandId={}, reason={}",
+                        project.getId(), project.getBrandId(), ex.getMessage());
+            }
+        }
         activityLogService.logAction(
                 operator.getId(),
                 "project.status.update",
@@ -348,6 +362,7 @@ public class ProjectService {
         );
     }
 
+    @Transactional
     public void updateFlow(Long id, ProjectFlowUpdateRequest req) {
         currentUserService.ensurePermission("project.write");
         SysUser operator = currentUserService.requireCurrentUser();
@@ -375,6 +390,15 @@ public class ProjectService {
         project.setStatus(req.getStatus());
         project.setStage(req.getStage());
         projectMapper.updateById(project);
+        if (isActivating(String.valueOf(before.get("status")), req.getStatus())) {
+            try {
+                brandStatementDispatchService.maybeEnqueueOnProjectActivated(project);
+            } catch (Exception ex) {
+                // Brand statement dispatch is best-effort; project activation should not fail because Redis is unavailable.
+                log.warn("Brand statement enqueue skipped after flow activation, projectId={}, brandId={}, reason={}",
+                        project.getId(), project.getBrandId(), ex.getMessage());
+            }
+        }
         activityLogService.logAction(
                 operator.getId(),
                 "project.flow.update",
@@ -559,35 +583,21 @@ public class ProjectService {
         }
     }
 
-    private String resolveCreateOwnerType(SysUser operator) {
-        return currentUserService.isPartnerUser(operator) ? "partner" : "direct";
+    private String resolveOwnerTypeByCompany(Company company) {
+        if (company == null) {
+            return "direct";
+        }
+        if (StringUtils.hasText(company.getOwnerType())) {
+            return company.getOwnerType().trim();
+        }
+        return company.getPartnerId() == null ? "direct" : "partner";
     }
 
-    private Long resolveCreatePartnerId(SysUser operator) {
-        if (!currentUserService.isPartnerUser(operator)) {
+    private Long resolvePartnerIdByCompany(Company company) {
+        if (company == null) {
             return null;
         }
-        return currentUserService.requirePartnerScope(operator);
-    }
-
-    private String resolveUpdateOwnerType(SysUser operator, String reqOwnerType, String currentOwnerType) {
-        if (currentUserService.isPartnerUser(operator)) {
-            return "partner";
-        }
-        return StringUtils.hasText(reqOwnerType) ? reqOwnerType.trim() : currentOwnerType;
-    }
-
-    private Long resolveUpdatePartnerId(SysUser operator, Long reqPartnerId, String ownerType, Long currentPartnerId) {
-        if (currentUserService.isPartnerUser(operator)) {
-            return currentUserService.requirePartnerScope(operator);
-        }
-        if ("direct".equals(ownerType)) {
-            return null;
-        }
-        if (reqPartnerId != null) {
-            return reqPartnerId;
-        }
-        return currentPartnerId;
+        return company.getPartnerId();
     }
 
     private String resolveProjectSourceType(SysUser operator) {
