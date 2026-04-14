@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.partner.dto.PartnerAdjustRequest;
 import com.huanjing.geo.module.partner.dto.PartnerCreateRequest;
+import com.huanjing.geo.module.partner.dto.PartnerCreateResult;
 import com.huanjing.geo.module.partner.dto.PartnerRechargeRequest;
 import com.huanjing.geo.module.partner.dto.PartnerStatusUpdateRequest;
 import com.huanjing.geo.module.partner.dto.PartnerUpdateRequest;
@@ -40,7 +41,7 @@ public class PartnerController {
     }
 
     @PostMapping
-    public R<Partner> create(@Valid @RequestBody PartnerCreateRequest req) {
+    public R<PartnerCreateResult> create(@Valid @RequestBody PartnerCreateRequest req) {
         return R.ok(partnerService.create(req));
     }
 
@@ -64,9 +65,13 @@ public class PartnerController {
     public R<Page<PartnerAccountTxn>> txns(
             @PathVariable Long id,
             @RequestParam(defaultValue = "1") long current,
-            @RequestParam(defaultValue = "20") long size
+            @RequestParam(defaultValue = "20") long size,
+            @RequestParam(required = false) String txnType,
+            @RequestParam(required = false) String bizType,
+            @RequestParam(required = false) String dateFrom,
+            @RequestParam(required = false) String dateTo
     ) {
-        return R.ok(partnerService.accountTxns(id, current, size));
+        return R.ok(partnerService.accountTxns(id, current, size, txnType, bizType, dateFrom, dateTo));
     }
 
     @PostMapping("/{id}/account/recharge")

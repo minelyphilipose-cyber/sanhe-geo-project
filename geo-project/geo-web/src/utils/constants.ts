@@ -186,6 +186,7 @@ export const TRAINING_STATUS_MAP: Record<TrainingStatus, { label: string; type: 
    ==================================================== */
 export const ALERT_SEVERITY_MAP: Record<AlertSeverity, { label: string; color: string }> = {
   info:     { label: '信息', color: '#3B82F6' },
-  warning:  { label: '警告', color: '#F59E0B' },
+  warn:     { label: '警告', color: '#F59E0B' },
+  error:    { label: '错误', color: '#FB923C' },
   critical: { label: '严重', color: '#EF4444' },
 }

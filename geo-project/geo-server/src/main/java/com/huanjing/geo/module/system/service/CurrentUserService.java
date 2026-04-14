@@ -80,6 +80,11 @@ public class CurrentUserService {
         }
     }
 
+    public boolean hasPermission(String permKey) {
+        SysUser user = requireCurrentUser();
+        return permissionService.hasPerm(user, permKey);
+    }
+
     public Long resolvePartnerQueryScope(SysUser user, Long requestedPartnerId) {
         Long selfPartnerId = requirePartnerScope(user);
         if (selfPartnerId == null) {

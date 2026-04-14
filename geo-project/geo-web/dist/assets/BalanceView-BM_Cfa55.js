@@ -1,1 +1,0 @@
-import{P as e}from"./PagePlaceholder-SbFam7TI.js";import{d as o,z as a,o as t}from"./index-BY8DVcs-.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const l=o({__name:"BalanceView",setup(r){return(c,n)=>(t(),a(e,{title:"余额与扣款",description:"充值记录、扣款明细、当前余额",icon:"Wallet",phase:5}))}});export{l as default};

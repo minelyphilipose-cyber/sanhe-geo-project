@@ -3,7 +3,11 @@ package com.huanjing.geo.module.customer.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.customer.dto.CompanyCreateRequest;
+import com.huanjing.geo.module.customer.dto.CompanyDeductRequest;
+import com.huanjing.geo.module.customer.dto.CompanyRechargeRequest;
 import com.huanjing.geo.module.customer.dto.CompanyUpdateRequest;
+import com.huanjing.geo.module.customer.entity.CompanyAccount;
+import com.huanjing.geo.module.customer.entity.CompanyAccountTxn;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.service.CompanyService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -49,5 +53,33 @@ public class CompanyController {
     public R<Void> delete(@PathVariable Long id) {
         companyService.delete(id);
         return R.ok();
+    }
+
+    @GetMapping("/{id}/account")
+    public R<CompanyAccount> account(@PathVariable Long id) {
+        return R.ok(companyService.account(id));
+    }
+
+    @GetMapping("/{id}/account/txns")
+    public R<Page<CompanyAccountTxn>> txns(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "1") long current,
+            @RequestParam(defaultValue = "20") long size,
+            @RequestParam(required = false) String txnType,
+            @RequestParam(required = false) String bizType,
+            @RequestParam(required = false) String dateFrom,
+            @RequestParam(required = false) String dateTo
+    ) {
+        return R.ok(companyService.accountTxns(id, current, size, txnType, bizType, dateFrom, dateTo));
+    }
+
+    @PostMapping("/{id}/account/recharge")
+    public R<CompanyAccountTxn> recharge(@PathVariable Long id, @Valid @RequestBody CompanyRechargeRequest req) {
+        return R.ok(companyService.recharge(id, req));
+    }
+
+    @PostMapping("/{id}/account/deduct")
+    public R<CompanyAccountTxn> deduct(@PathVariable Long id, @Valid @RequestBody CompanyDeductRequest req) {
+        return R.ok(companyService.deduct(id, req));
     }
 }

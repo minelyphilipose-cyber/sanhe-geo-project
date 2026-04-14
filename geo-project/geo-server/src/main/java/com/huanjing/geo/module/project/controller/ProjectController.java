@@ -3,15 +3,22 @@ package com.huanjing.geo.module.project.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.project.dto.ProjectCreateRequest;
+import com.huanjing.geo.module.project.dto.ProjectFlowUpdateRequest;
+import com.huanjing.geo.module.project.dto.ProjectPlatformOptionVO;
+import com.huanjing.geo.module.project.dto.QuestionPoolVersionVO;
 import com.huanjing.geo.module.project.dto.ProjectStatusUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectStageUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectUpdateRequest;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.service.ProjectService;
+import com.huanjing.geo.module.project.service.QuestionPoolService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
 
 @Tag(name = "Project")
 @RestController
@@ -20,6 +27,12 @@ import org.springframework.web.bind.annotation.*;
 public class ProjectController {
 
     private final ProjectService projectService;
+    private final QuestionPoolService questionPoolService;
+
+    @GetMapping("/platform-options")
+    public R<Map<String, List<ProjectPlatformOptionVO>>> platformOptions() {
+        return R.ok(projectService.platformOptions());
+    }
 
     @GetMapping
     public R<Page<Project>> page(
@@ -60,9 +73,34 @@ public class ProjectController {
         return R.ok();
     }
 
+    @PutMapping("/{id}/flow")
+    public R<Void> updateFlow(@PathVariable Long id, @Valid @RequestBody ProjectFlowUpdateRequest req) {
+        projectService.updateFlow(id, req);
+        return R.ok();
+    }
+
     @DeleteMapping("/{id}")
     public R<Void> delete(@PathVariable Long id) {
         projectService.delete(id);
         return R.ok();
+    }
+
+    @GetMapping("/{id}/question-pool/current")
+    public R<QuestionPoolVersionVO> currentQuestionPool(@PathVariable Long id) {
+        return R.ok(questionPoolService.currentVersion(id));
+    }
+
+    @GetMapping("/{id}/question-pool/versions")
+    public R<Page<QuestionPoolVersionVO>> pageQuestionPoolVersions(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "1") long current,
+            @RequestParam(defaultValue = "20") long size
+    ) {
+        return R.ok(questionPoolService.pageVersions(id, current, size));
+    }
+
+    @GetMapping("/{id}/question-pool/versions/{versionNo}")
+    public R<QuestionPoolVersionVO> questionPoolVersionDetail(@PathVariable Long id, @PathVariable Integer versionNo) {
+        return R.ok(questionPoolService.versionDetail(id, versionNo));
     }
 }

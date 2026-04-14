@@ -4,9 +4,12 @@
       <div class="flex items-center gap-2">
         <el-input v-model="query.keyword" placeholder="搜索合伙人名称/编号" clearable style="width: 260px" @keyup.enter="load" />
         <el-select v-model="query.status" placeholder="状态" clearable style="width: 140px" @change="load">
-          <el-option label="active" value="active" />
-          <el-option label="paused" value="paused" />
-          <el-option label="closed" value="closed" />
+          <el-option
+            v-for="item in dictStore.options('partner_status')"
+            :key="item.dictKey"
+            :label="item.dictValue"
+            :value="item.dictKey"
+          />
         </el-select>
         <el-button @click="load">查询</el-button>
       </div>
@@ -18,11 +21,15 @@
         <el-table :data="rows" border>
         <el-table-column prop="partnerCode" label="编号" width="150" />
         <el-table-column prop="partnerName" label="名称" min-width="180" />
-        <el-table-column prop="partnerLevel" label="等级" width="140" />
+        <el-table-column label="等级" width="140">
+          <template #default="scope">{{ dictStore.label('partner_level', scope.row.partnerLevel) }}</template>
+        </el-table-column>
         <el-table-column label="折扣" width="100">
           <template #default="scope">{{ (scope.row.discountRate * 100).toFixed(1) }}%</template>
         </el-table-column>
-        <el-table-column prop="status" label="状态" width="110" />
+        <el-table-column label="状态" width="110">
+          <template #default="scope">{{ dictStore.label('partner_status', scope.row.status) }}</template>
+        </el-table-column>
         <el-table-column prop="city" label="城市" width="120" />
         <el-table-column prop="contactName" label="联系人" width="120" />
         <el-table-column prop="contactPhone" label="电话" width="140" />
@@ -31,12 +38,14 @@
             <el-button link type="primary" @click="goDetail(scope.row.id)">详情</el-button>
             <el-button v-if="canWritePartner" link type="primary" @click="openEdit(scope.row)">编辑</el-button>
             <el-dropdown v-if="canWritePartner" @command="(v: string) => changeStatus(scope.row.id, v)">
-              <span class="el-dropdown-link">改状态</span>
+              <el-button link type="primary" style="margin-left: 10px;margin-top: 3px;">
+                改状态
+              </el-button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item command="active">active</el-dropdown-item>
-                  <el-dropdown-item command="paused">paused</el-dropdown-item>
-                  <el-dropdown-item command="closed">closed</el-dropdown-item>
+                  <el-dropdown-item command="active">启用</el-dropdown-item>
+                  <el-dropdown-item command="paused">暂停</el-dropdown-item>
+                  <el-dropdown-item command="closed">关闭</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -64,25 +73,53 @@
         </el-form-item>
         <el-form-item label="合伙人名称" required><el-input v-model="form.partnerName" /></el-form-item>
         <el-form-item label="等级" required>
-          <el-select v-model="form.partnerLevel" style="width: 100%">
-            <el-option label="level_29800" value="level_29800" />
-            <el-option label="level_59800" value="level_59800" />
-            <el-option label="level_99800" value="level_99800" />
+          <el-select v-model="form.partnerLevel" style="width: 100%" @change="onPartnerLevelChange">
+            <el-option
+              v-for="item in dictStore.options('partner_level')"
+              :key="item.dictKey"
+              :label="item.dictValue"
+              :value="item.dictKey"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="折扣率" required>
-          <el-input-number v-model="form.discountRate" :precision="4" :step="0.05" :min="0.0001" :max="1" style="width: 100%" />
+          <el-input-number
+            v-model="form.discountRate"
+            :precision="4"
+            :step="0.0001"
+            :min="0.0001"
+            :max="1"
+            :controls="false"
+            style="width: 100%"
+          />
+        </el-form-item>
+        <el-form-item label="金额(元)" required>
+          <el-input-number
+            v-model="form.initialAmount"
+            :precision="2"
+            :step="100"
+            :min="0"
+            :controls="false"
+            style="width: 100%"
+            :disabled="formMode === 'edit'"
+          />
         </el-form-item>
         <el-form-item v-if="formMode === 'edit'" label="状态" required>
           <el-select v-model="form.status" style="width: 100%">
-            <el-option label="active" value="active" />
-            <el-option label="paused" value="paused" />
-            <el-option label="closed" value="closed" />
+            <el-option
+              v-for="item in dictStore.options('partner_status')"
+              :key="item.dictKey"
+              :label="item.dictValue"
+              :value="item.dictKey"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="联系人"><el-input v-model="form.contactName" /></el-form-item>
         <el-form-item label="联系电话"><el-input v-model="form.contactPhone" /></el-form-item>
-        <el-form-item label="城市"><el-input v-model="form.city" /></el-form-item>
+        <el-form-item label="城市">
+          <RegionCascader v-model="form.cityCodes" />
+          <div class="mt-1 text-xs text-gray-500">{{ cityDisplayPreview || '未选择' }}</div>
+        </el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="3" /></el-form-item>
       </el-form>
 
@@ -99,17 +136,22 @@ import { computed, reactive, ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { useDictStore } from '@/stores/dict'
 import {
   createPartner,
   getPartnerList,
   updatePartner,
   updatePartnerStatus,
+  type PartnerCreateResult,
   type PartnerItem,
 } from '@/api/partner'
 import DataState from '@/components/ui/DataState.vue'
+import RegionCascader from '@/components/ui/RegionCascader.vue'
+import { chinaRegionOptions, regionPayloadFromCodes } from '@/constants/region'
 
 const router = useRouter()
 const userStore = useUserStore()
+const dictStore = useDictStore()
 const canWritePartner = computed(() => userStore.hasPermission('partner.write'))
 
 const loading = ref(false)
@@ -127,12 +169,20 @@ const form = reactive({
   partnerName: '',
   partnerLevel: 'level_29800',
   discountRate: 0.3,
+  initialAmount: 29800,
   status: 'active',
   contactName: '',
   contactPhone: '',
   city: '',
+  cityCodes: [] as string[],
   remark: '',
 })
+
+const partnerLevelProfiles: Record<string, { discountRate: number; initialAmount: number }> = {
+  level_29800: { discountRate: 0.3, initialAmount: 29800 },
+  level_59800: { discountRate: 0.25, initialAmount: 59800 },
+  level_99800: { discountRate: 0.2, initialAmount: 99800 },
+}
 const rules: FormRules = {
   partnerCode: [
     { required: true, message: '请输入合伙人编号', trigger: 'blur' },
@@ -141,6 +191,7 @@ const rules: FormRules = {
   partnerName: [{ required: true, message: '请输入合伙人名称', trigger: 'blur' }],
   partnerLevel: [{ required: true, message: '请选择等级', trigger: 'change' }],
   discountRate: [{ required: true, message: '请输入折扣率', trigger: 'change' }],
+  initialAmount: [{ required: true, message: '请输入金额', trigger: 'change' }],
   contactPhone: [{ pattern: /^[0-9-+() ]{0,20}$/, message: '联系电话格式不正确', trigger: 'blur' }],
 }
 
@@ -149,11 +200,20 @@ function resetForm() {
   form.partnerName = ''
   form.partnerLevel = 'level_29800'
   form.discountRate = 0.3
+  form.initialAmount = 29800
   form.status = 'active'
   form.contactName = ''
   form.contactPhone = ''
   form.city = ''
+  form.cityCodes = []
   form.remark = ''
+}
+
+function onPartnerLevelChange(level: string) {
+  const profile = partnerLevelProfiles[level]
+  if (!profile) return
+  form.discountRate = profile.discountRate
+  form.initialAmount = profile.initialAmount
 }
 
 async function load() {
@@ -194,12 +254,41 @@ function openEdit(row: PartnerItem) {
   form.partnerName = row.partnerName
   form.partnerLevel = row.partnerLevel
   form.discountRate = row.discountRate
+  form.initialAmount = 0
   form.status = row.status
   form.contactName = row.contactName || ''
   form.contactPhone = row.contactPhone || ''
   form.city = row.city || ''
+  form.cityCodes = parseRegionCodesByDisplay(row.city || '')
   form.remark = row.remark || ''
   formVisible.value = true
+}
+
+function parseRegionCodesByDisplay(display: string): string[] {
+  const target = (display || '').trim()
+  if (!target) return []
+  for (const province of chinaRegionOptions) {
+    const p = province.label
+    if (p === target) return [province.value]
+    for (const city of province.children || []) {
+      const pc = `${p} ${city.label}`
+      if (pc === target || city.label === target) return [province.value, city.value]
+      for (const district of city.children || []) {
+        const pcd = `${p} ${city.label} ${district.label}`
+        if (pcd === target || district.label === target) {
+          return [province.value, city.value, district.value]
+        }
+      }
+    }
+  }
+  return []
+}
+
+function resolveCityForSubmit(): string | undefined {
+  const selected = regionPayloadFromCodes(form.cityCodes).displayName
+  if (selected) return selected
+  const fallback = (form.city || '').trim()
+  return fallback || undefined
 }
 
 async function submit() {
@@ -216,12 +305,19 @@ async function submit() {
         partnerName: form.partnerName,
         partnerLevel: form.partnerLevel,
         discountRate: form.discountRate,
+        initialAmount: Number(form.initialAmount.toFixed(2)),
         contactName: form.contactName || undefined,
         contactPhone: form.contactPhone || undefined,
-        city: form.city || undefined,
+        city: resolveCityForSubmit(),
         remark: form.remark || undefined,
       })
-      createdId = data.data.id
+      const created = data.data as PartnerCreateResult
+      createdId = created.partner.id
+      await ElMessageBox.alert(
+        `合伙人账号已创建\n账号：${created.username}\n初始密码：${created.initialPassword}\n\n请保存后线下发送给合伙人。`,
+        '账号已生成',
+        { confirmButtonText: '我已记录' },
+      )
     } else if (editingId.value) {
       await updatePartner(editingId.value, {
         partnerName: form.partnerName,
@@ -230,7 +326,7 @@ async function submit() {
         status: form.status,
         contactName: form.contactName || undefined,
         contactPhone: form.contactPhone || undefined,
-        city: form.city || undefined,
+        city: resolveCityForSubmit(),
         remark: form.remark || undefined,
       })
     }
@@ -247,7 +343,7 @@ async function submit() {
 
 async function changeStatus(id: number, status: string) {
   try {
-    await ElMessageBox.confirm(`确认将合伙人状态更新为 "${status}"？`, '状态变更确认', {
+    await ElMessageBox.confirm(`确认将合伙人状态更新为 "${dictStore.label('partner_status', status)}"？`, '状态变更确认', {
       type: 'warning',
       confirmButtonText: '确认',
       cancelButtonText: '取消',
@@ -264,7 +360,13 @@ function goDetail(id: number) {
   router.push(`/admin/partners/${id}`)
 }
 
-onMounted(load)
-</script>
+onMounted(async () => {
+  await dictStore.ensureLoaded()
+  await load()
+})
 
+const cityDisplayPreview = computed(() => {
+  return regionPayloadFromCodes(form.cityCodes).displayName || form.city
+})
+</script>
 

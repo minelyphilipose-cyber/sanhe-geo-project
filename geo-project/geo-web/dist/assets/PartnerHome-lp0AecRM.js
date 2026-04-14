@@ -1,1 +1,0 @@
-import{P as e}from"./PagePlaceholder-SbFam7TI.js";import{d as o,z as r,o as t}from"./index-BY8DVcs-.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=o({__name:"PartnerHome",setup(a){return(n,c)=>(t(),r(e,{title:"合伙人首页",description:"当前余额、客户数、本月签约、待处理",icon:"HomeFilled",phase:5}))}});export{m as default};

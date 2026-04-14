@@ -26,6 +26,10 @@ let pendingQueue: Array<(token: string) => void> = []
 
 request.interceptors.response.use(
   async (response: AxiosResponse<R>) => {
+    const responseType = response.config.responseType
+    if (responseType === 'blob' || responseType === 'arraybuffer') {
+      return response
+    }
     const res = response.data
     const reqUrl = response.config.url || ''
     const isAuthApi = reqUrl.includes('/auth/login') || reqUrl.includes('/auth/refresh') || reqUrl.includes('/auth/logout')

@@ -18,6 +18,8 @@ public class PartnerCreateRequest {
     @DecimalMin("0.0001")
     @DecimalMax("1.0000")
     private BigDecimal discountRate;
+    @DecimalMin("0.00")
+    private BigDecimal initialAmount;
     private String contactName;
     private String contactPhone;
     private String city;

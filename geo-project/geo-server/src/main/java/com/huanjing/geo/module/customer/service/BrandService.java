@@ -18,7 +18,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -33,6 +35,7 @@ public class BrandService {
     private final ProjectMapper projectMapper;
     private final CurrentUserService currentUserService;
     private final ActivityLogService activityLogService;
+    private final BrandProfileService brandProfileService;
 
     public Page<Brand> page(long current, long size, Long companyId, String keyword) {
         SysUser user = currentUserService.requireCurrentUser();
@@ -86,15 +89,28 @@ public class BrandService {
         brand.setBrandName(req.getBrandName());
         brand.setBrandSlug(req.getBrandSlug());
         brand.setMainBusiness(req.getMainBusiness());
-        brand.setServiceArea(req.getServiceArea());
+        applyRegionFields(brand, req.getProvinceCode(), req.getProvinceName(), req.getCityCode(), req.getCityName(), req.getDistrictCode(), req.getDistrictName());
+        brand.setServiceArea(StringUtils.hasText(req.getServiceArea())
+                ? req.getServiceArea()
+                : buildRegionDisplay(req.getProvinceName(), req.getCityName(), req.getDistrictName()));
         brand.setWebsite(req.getWebsite());
+        brand.setOfficialAccount(req.getOfficialAccount());
+        brand.setVideoAccount(req.getVideoAccount());
+        brand.setDouyinAccount(req.getDouyinAccount());
         brand.setPhone(req.getPhone());
         brand.setWechat(req.getWechat());
         brand.setDescription(req.getDescription());
+        brand.setBusinessIntro(req.getBusinessIntro());
         brand.setStandardBrandStatement(req.getStandardBrandStatement());
+        brand.setBusinessStandardStatement(req.getBusinessStandardStatement());
         brand.setForbiddenPhrases(req.getForbiddenPhrases());
         brand.setStatus(StringUtils.hasText(req.getStatus()) ? req.getStatus() : "active");
         brandMapper.insert(brand);
+        brandProfileService.createProfileVersionSnapshot(
+                brand,
+                operator.getId(),
+                StringUtils.hasText(req.getVersionChangeReason()) ? req.getVersionChangeReason() : "brand.create"
+        );
         activityLogService.logAction(
                 operator.getId(),
                 "brand.create",
@@ -127,15 +143,28 @@ public class BrandService {
         brand.setBrandName(req.getBrandName());
         brand.setBrandSlug(req.getBrandSlug());
         brand.setMainBusiness(req.getMainBusiness());
-        brand.setServiceArea(req.getServiceArea());
+        applyRegionFields(brand, req.getProvinceCode(), req.getProvinceName(), req.getCityCode(), req.getCityName(), req.getDistrictCode(), req.getDistrictName());
+        brand.setServiceArea(StringUtils.hasText(req.getServiceArea())
+                ? req.getServiceArea()
+                : buildRegionDisplay(req.getProvinceName(), req.getCityName(), req.getDistrictName()));
         brand.setWebsite(req.getWebsite());
+        brand.setOfficialAccount(req.getOfficialAccount());
+        brand.setVideoAccount(req.getVideoAccount());
+        brand.setDouyinAccount(req.getDouyinAccount());
         brand.setPhone(req.getPhone());
         brand.setWechat(req.getWechat());
         brand.setDescription(req.getDescription());
+        brand.setBusinessIntro(req.getBusinessIntro());
         brand.setStandardBrandStatement(req.getStandardBrandStatement());
+        brand.setBusinessStandardStatement(req.getBusinessStandardStatement());
         brand.setForbiddenPhrases(req.getForbiddenPhrases());
         brand.setStatus(req.getStatus());
         brandMapper.updateById(brand);
+        brandProfileService.createProfileVersionSnapshot(
+                brand,
+                operator.getId(),
+                StringUtils.hasText(req.getVersionChangeReason()) ? req.getVersionChangeReason() : "brand.update"
+        );
         activityLogService.logAction(
                 operator.getId(),
                 "brand.update",
@@ -202,7 +231,54 @@ public class BrandService {
         snapshot.put("companyId", brand.getCompanyId());
         snapshot.put("brandName", brand.getBrandName());
         snapshot.put("brandSlug", brand.getBrandSlug());
+        snapshot.put("provinceCode", brand.getProvinceCode());
+        snapshot.put("provinceName", brand.getProvinceName());
+        snapshot.put("cityCode", brand.getCityCode());
+        snapshot.put("cityName", brand.getCityName());
+        snapshot.put("districtCode", brand.getDistrictCode());
+        snapshot.put("districtName", brand.getDistrictName());
         snapshot.put("status", brand.getStatus());
+        snapshot.put("businessIntro", brand.getBusinessIntro());
+        snapshot.put("businessStandardStatement", brand.getBusinessStandardStatement());
+        snapshot.put("officialAccount", brand.getOfficialAccount());
+        snapshot.put("videoAccount", brand.getVideoAccount());
+        snapshot.put("douyinAccount", brand.getDouyinAccount());
         return snapshot;
+    }
+
+    private void applyRegionFields(Brand brand,
+                                   String provinceCode,
+                                   String provinceName,
+                                   String cityCode,
+                                   String cityName,
+                                   String districtCode,
+                                   String districtName) {
+        brand.setProvinceCode(trimToNull(provinceCode));
+        brand.setProvinceName(trimToNull(provinceName));
+        brand.setCityCode(trimToNull(cityCode));
+        brand.setCityName(trimToNull(cityName));
+        brand.setDistrictCode(trimToNull(districtCode));
+        brand.setDistrictName(trimToNull(districtName));
+    }
+
+    private String buildRegionDisplay(String provinceName, String cityName, String districtName) {
+        List<String> parts = new ArrayList<>();
+        if (StringUtils.hasText(provinceName)) {
+            parts.add(provinceName.trim());
+        }
+        if (StringUtils.hasText(cityName)) {
+            parts.add(cityName.trim());
+        }
+        if (StringUtils.hasText(districtName)) {
+            parts.add(districtName.trim());
+        }
+        return parts.isEmpty() ? null : String.join(" ", parts);
+    }
+
+    private String trimToNull(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
     }
 }

@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.partner.dto.PartnerAdjustRequest;
 import com.huanjing.geo.module.partner.dto.PartnerCreateRequest;
+import com.huanjing.geo.module.partner.dto.PartnerCreateResult;
 import com.huanjing.geo.module.partner.dto.PartnerRechargeRequest;
 import com.huanjing.geo.module.partner.dto.PartnerUpdateRequest;
 import com.huanjing.geo.module.partner.entity.Partner;
@@ -15,11 +16,19 @@ import com.huanjing.geo.module.partner.mapper.PartnerAccountMapper;
 import com.huanjing.geo.module.partner.mapper.PartnerAccountTxnMapper;
 import com.huanjing.geo.module.partner.mapper.PartnerMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
+import com.huanjing.geo.module.system.mapper.SysUserMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.security.crypto.password.PasswordEncoder;
+
+import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.format.DateTimeParseException;
 
 @Service
 @RequiredArgsConstructor
@@ -28,6 +37,8 @@ public class PartnerService {
     private final PartnerMapper partnerMapper;
     private final PartnerAccountMapper partnerAccountMapper;
     private final PartnerAccountTxnMapper partnerAccountTxnMapper;
+    private final SysUserMapper sysUserMapper;
+    private final PasswordEncoder passwordEncoder;
     private final CurrentUserService currentUserService;
 
     public Page<Partner> page(long current, long size, String keyword, String status) {
@@ -63,7 +74,7 @@ public class PartnerService {
     }
 
     @Transactional
-    public Partner create(PartnerCreateRequest req) {
+    public PartnerCreateResult create(PartnerCreateRequest req) {
         currentUserService.ensurePermission("partner.write");
 
         Partner existed = partnerMapper.selectOne(
@@ -87,14 +98,47 @@ public class PartnerService {
 
         PartnerAccount account = new PartnerAccount();
         account.setPartnerId(partner.getId());
-        account.setCurrentBalance(0L);
-        account.setTotalRecharge(0L);
-        account.setTotalDeduction(0L);
+        account.setCurrentBalance(BigDecimal.ZERO);
+        account.setTotalRecharge(BigDecimal.ZERO);
+        account.setTotalDeduction(BigDecimal.ZERO);
         account.setCurrency("CNY");
         account.setStatus("active");
         partnerAccountMapper.insert(account);
 
-        return partner;
+        BigDecimal initialAmount = req.getInitialAmount() == null ? BigDecimal.ZERO : req.getInitialAmount();
+        if (initialAmount.compareTo(BigDecimal.ZERO) > 0) {
+            account.setCurrentBalance(initialAmount);
+            account.setTotalRecharge(initialAmount);
+            partnerAccountMapper.updateById(account);
+
+            PartnerAccountTxn txn = new PartnerAccountTxn();
+            txn.setPartnerId(partner.getId());
+            txn.setAccountId(account.getId());
+            txn.setTxnNo(buildTxnNo("R"));
+            txn.setTxnType("recharge");
+            txn.setBizType("partner_prepaid");
+            txn.setAmount(initialAmount);
+            txn.setBalanceBefore(BigDecimal.ZERO);
+            txn.setBalanceAfter(initialAmount);
+            txn.setOperatorUserId(currentUserService.requireCurrentUser().getId());
+            txn.setRemark("create partner initial prepaid");
+            partnerAccountTxnMapper.insert(txn);
+        }
+
+        String username = buildPartnerUsername(req.getPartnerCode());
+        String initialPassword = RandomUtil.randomString(10);
+        SysUser user = new SysUser();
+        user.setUsername(username);
+        user.setPasswordHash(passwordEncoder.encode(initialPassword));
+        user.setDisplayName(partner.getPartnerName());
+        user.setRole("partner");
+        user.setPartnerId(partner.getId());
+        user.setPhone(partner.getContactPhone());
+        user.setIsActive(true);
+        user.setTokenVersion(0);
+        sysUserMapper.insert(user);
+
+        return new PartnerCreateResult(partner, username, initialPassword);
     }
 
     public Partner update(Long id, PartnerUpdateRequest req) {
@@ -131,27 +175,43 @@ public class PartnerService {
         return account;
     }
 
-    public Page<PartnerAccountTxn> accountTxns(Long partnerId, long current, long size) {
+    public Page<PartnerAccountTxn> accountTxns(Long partnerId, long current, long size,
+                                               String txnType, String bizType, String dateFrom, String dateTo) {
         detail(partnerId);
-        return partnerAccountTxnMapper.selectPage(
-                new Page<>(current, size),
-                new LambdaQueryWrapper<PartnerAccountTxn>()
-                        .eq(PartnerAccountTxn::getPartnerId, partnerId)
-                        .orderByDesc(PartnerAccountTxn::getCreatedAt)
-        );
+        LambdaQueryWrapper<PartnerAccountTxn> wrapper = new LambdaQueryWrapper<PartnerAccountTxn>()
+                .eq(PartnerAccountTxn::getPartnerId, partnerId)
+                .orderByDesc(PartnerAccountTxn::getCreatedAt);
+        if (StringUtils.hasText(txnType)) {
+            wrapper.eq(PartnerAccountTxn::getTxnType, txnType.trim());
+        }
+        if (StringUtils.hasText(bizType)) {
+            wrapper.eq(PartnerAccountTxn::getBizType, bizType.trim());
+        }
+        LocalDateTime from = parseDateTimeStart(dateFrom);
+        LocalDateTime to = parseDateTimeEnd(dateTo);
+        if (from != null) {
+            wrapper.ge(PartnerAccountTxn::getCreatedAt, from);
+        }
+        if (to != null) {
+            wrapper.le(PartnerAccountTxn::getCreatedAt, to);
+        }
+        return partnerAccountTxnMapper.selectPage(new Page<>(current, size), wrapper);
     }
 
     @Transactional
     public PartnerAccountTxn recharge(Long partnerId, PartnerRechargeRequest req) {
         currentUserService.ensurePermission("partner.write");
         detail(partnerId);
+        if (req.getAmount() == null || req.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BizException(400, "Recharge amount must be positive");
+        }
 
-        PartnerAccount account = ensureAccount(partnerId);
-        long before = account.getCurrentBalance();
-        long after = before + req.getAmount();
+        PartnerAccount account = lockAccount(partnerId);
+        BigDecimal before = account.getCurrentBalance();
+        BigDecimal after = before.add(req.getAmount());
 
         account.setCurrentBalance(after);
-        account.setTotalRecharge(account.getTotalRecharge() + req.getAmount());
+        account.setTotalRecharge(account.getTotalRecharge().add(req.getAmount()));
         partnerAccountMapper.updateById(account);
 
         PartnerAccountTxn txn = new PartnerAccountTxn();
@@ -174,19 +234,22 @@ public class PartnerService {
     public PartnerAccountTxn adjust(Long partnerId, PartnerAdjustRequest req) {
         currentUserService.ensurePermission("partner.write");
         detail(partnerId);
+        if (req.getAmount() == null || req.getAmount().compareTo(BigDecimal.ZERO) == 0) {
+            throw new BizException(400, "Adjust amount cannot be zero");
+        }
 
-        PartnerAccount account = ensureAccount(partnerId);
-        long before = account.getCurrentBalance();
-        long after = before + req.getAmount();
-        if (after < 0) {
+        PartnerAccount account = lockAccount(partnerId);
+        BigDecimal before = account.getCurrentBalance();
+        BigDecimal after = before.add(req.getAmount());
+        if (after.compareTo(BigDecimal.ZERO) < 0) {
             throw new BizException(400, "Balance cannot be negative");
         }
 
         account.setCurrentBalance(after);
-        if (req.getAmount() >= 0) {
-            account.setTotalRecharge(account.getTotalRecharge() + req.getAmount());
+        if (req.getAmount().compareTo(BigDecimal.ZERO) > 0) {
+            account.setTotalRecharge(account.getTotalRecharge().add(req.getAmount()));
         } else {
-            account.setTotalDeduction(account.getTotalDeduction() + Math.abs(req.getAmount()));
+            account.setTotalDeduction(account.getTotalDeduction().add(req.getAmount().abs()));
         }
         partnerAccountMapper.updateById(account);
 
@@ -222,9 +285,9 @@ public class PartnerService {
         }
         PartnerAccount created = new PartnerAccount();
         created.setPartnerId(partnerId);
-        created.setCurrentBalance(0L);
-        created.setTotalRecharge(0L);
-        created.setTotalDeduction(0L);
+        created.setCurrentBalance(BigDecimal.ZERO);
+        created.setTotalRecharge(BigDecimal.ZERO);
+        created.setTotalDeduction(BigDecimal.ZERO);
         created.setCurrency("CNY");
         created.setStatus("active");
         partnerAccountMapper.insert(created);
@@ -233,5 +296,58 @@ public class PartnerService {
 
     private String buildTxnNo(String prefix) {
         return "PT" + prefix + System.currentTimeMillis() + RandomUtil.randomNumbers(6);
+    }
+
+    private String buildPartnerUsername(String partnerCode) {
+        String base = "partner_" + partnerCode.toLowerCase();
+        String candidate = base;
+        int attempt = 0;
+        while (sysUserMapper.selectCount(new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, candidate)) > 0) {
+            attempt++;
+            candidate = base + "_" + attempt;
+        }
+        return candidate;
+    }
+
+    private PartnerAccount lockAccount(Long partnerId) {
+        PartnerAccount account = partnerAccountMapper.selectOne(
+                new LambdaQueryWrapper<PartnerAccount>()
+                        .eq(PartnerAccount::getPartnerId, partnerId)
+                        .last("FOR UPDATE")
+        );
+        if (account != null) {
+            return account;
+        }
+        return ensureAccount(partnerId);
+    }
+
+    private LocalDateTime parseDateTimeStart(String input) {
+        if (!StringUtils.hasText(input)) {
+            return null;
+        }
+        String value = input.trim();
+        try {
+            if (value.length() <= 10) {
+                return LocalDate.parse(value).atStartOfDay();
+            }
+            return LocalDateTime.parse(value.replace(" ", "T"));
+        } catch (DateTimeParseException ex) {
+            return null;
+        }
+    }
+
+    private LocalDateTime parseDateTimeEnd(String input) {
+        if (!StringUtils.hasText(input)) {
+            return null;
+        }
+        String value = input.trim();
+        try {
+            if (value.length() <= 10) {
+                return LocalDate.parse(value).atTime(LocalTime.MAX);
+            }
+            return LocalDateTime.parse(value.replace(" ", "T"));
+        } catch (DateTimeParseException ex) {
+            return null;
+        }
     }
 }

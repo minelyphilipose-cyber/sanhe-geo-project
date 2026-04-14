@@ -6,13 +6,13 @@
       <template #header>
         <div class="flex items-center justify-between">
           <span>基础信息</span>
-          <el-tag>{{ partner?.status || '-' }}</el-tag>
+          <el-tag>{{ dictStore.label('partner_status', partner?.status) }}</el-tag>
         </div>
       </template>
       <el-descriptions :column="3" border>
         <el-descriptions-item label="编号">{{ partner?.partnerCode }}</el-descriptions-item>
         <el-descriptions-item label="名称">{{ partner?.partnerName }}</el-descriptions-item>
-        <el-descriptions-item label="等级">{{ partner?.partnerLevel }}</el-descriptions-item>
+        <el-descriptions-item label="等级">{{ dictStore.label('partner_level', partner?.partnerLevel) }}</el-descriptions-item>
         <el-descriptions-item label="折扣">{{ partner ? (partner.discountRate * 100).toFixed(1) + '%' : '-' }}</el-descriptions-item>
         <el-descriptions-item label="联系人">{{ partner?.contactName || '-' }}</el-descriptions-item>
         <el-descriptions-item label="联系电话">{{ partner?.contactPhone || '-' }}</el-descriptions-item>
@@ -35,14 +35,47 @@
         <el-descriptions-item label="当前余额">{{ centsToYuan(account?.currentBalance) }}</el-descriptions-item>
         <el-descriptions-item label="累计充值">{{ centsToYuan(account?.totalRecharge) }}</el-descriptions-item>
         <el-descriptions-item label="累计扣款">{{ centsToYuan(account?.totalDeduction) }}</el-descriptions-item>
-        <el-descriptions-item label="状态">{{ account?.status || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ dictStore.label('partner_status', account?.status) }}</el-descriptions-item>
       </el-descriptions>
+
+      <div class="mt-4 flex items-center gap-2">
+        <el-select v-model="txnQuery.txnType" clearable placeholder="流水类型" style="width: 160px" @change="reloadTxns">
+          <el-option
+            v-for="item in dictStore.options('partner_txn_type')"
+            :key="item.dictKey"
+            :label="item.dictValue"
+            :value="item.dictKey"
+          />
+        </el-select>
+        <el-select v-model="txnQuery.bizType" clearable placeholder="业务类型" style="width: 180px" @change="reloadTxns">
+          <el-option
+            v-for="item in dictStore.options('partner_biz_type')"
+            :key="item.dictKey"
+            :label="item.dictValue"
+            :value="item.dictKey"
+          />
+        </el-select>
+        <el-date-picker
+          v-model="txnQuery.dateRange"
+          type="datetimerange"
+          range-separator="to"
+          start-placeholder="Start"
+          end-placeholder="End"
+          value-format="YYYY-MM-DD HH:mm:ss"
+          style="width: 360px"
+          @change="reloadTxns"
+        />
+      </div>
 
       <DataState :loading="accountLoading" :empty="!accountLoading && txns.length === 0" empty-text="暂无账户流水">
         <el-table class="mt-4" :data="txns" border>
           <el-table-column prop="txnNo" label="流水号" min-width="220" />
-          <el-table-column prop="txnType" label="类型" width="120" />
-          <el-table-column prop="bizType" label="业务" width="140" />
+          <el-table-column label="类型" width="120">
+            <template #default="scope">{{ dictStore.label('partner_txn_type', scope.row.txnType) }}</template>
+          </el-table-column>
+          <el-table-column label="业务" width="140">
+            <template #default="scope">{{ dictStore.label('partner_biz_type', scope.row.bizType) }}</template>
+          </el-table-column>
           <el-table-column label="金额(元)" width="120">
             <template #default="scope">{{ centsToYuan(scope.row.amount) }}</template>
           </el-table-column>
@@ -103,6 +136,7 @@ import { computed, reactive, ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useUserStore } from '@/stores/user'
+import { useDictStore } from '@/stores/dict'
 import {
   adjustPartnerAccount,
   getPartnerAccount,
@@ -117,6 +151,7 @@ import DataState from '@/components/ui/DataState.vue'
 
 const route = useRoute()
 const userStore = useUserStore()
+const dictStore = useDictStore()
 const canWritePartner = computed(() => userStore.hasPermission('partner.write'))
 const partnerId = Number(route.params.id)
 const hasValidId = Number.isFinite(partnerId) && partnerId > 0
@@ -129,6 +164,11 @@ const partner = ref<PartnerItem | null>(null)
 const account = ref<PartnerAccount | null>(null)
 const txns = ref<PartnerTxn[]>([])
 const txnPage = reactive({ current: 1, size: 10, total: 0 })
+const txnQuery = reactive<{
+  txnType: string
+  bizType: string
+  dateRange: [string, string] | []
+}>({ txnType: '', bizType: '', dateRange: [] })
 
 const rechargeVisible = ref(false)
 const adjustVisible = ref(false)
@@ -137,11 +177,11 @@ const adjustForm = reactive({ amountYuan: 0, remark: '' })
 
 function centsToYuan(v?: number | null) {
   if (v == null) return '-'
-  return (v / 100).toFixed(2)
+  return Number(v).toFixed(2)
 }
 
 function yuanToCents(v: number) {
-  return Math.round(v * 100)
+  return Number(v.toFixed(2))
 }
 
 async function loadBase() {
@@ -159,9 +199,17 @@ async function loadBase() {
 async function loadAccount() {
   accountLoading.value = true
   try {
+    const [dateFrom, dateTo] = txnQuery.dateRange || []
     const [accountRes, txnRes] = await Promise.all([
       getPartnerAccount(partnerId),
-      getPartnerAccountTxns(partnerId, { current: txnPage.current, size: txnPage.size }),
+      getPartnerAccountTxns(partnerId, {
+        current: txnPage.current,
+        size: txnPage.size,
+        txnType: txnQuery.txnType || undefined,
+        bizType: txnQuery.bizType || undefined,
+        dateFrom,
+        dateTo,
+      }),
     ])
     account.value = accountRes.data.data
     txns.value = txnRes.data.data.records || []
@@ -177,6 +225,11 @@ async function loadAccount() {
 
 function onTxnPageChange(v: number) {
   txnPage.current = v
+  loadAccount()
+}
+
+function reloadTxns() {
+  txnPage.current = 1
   loadAccount()
 }
 
@@ -233,9 +286,10 @@ async function submitAdjust() {
 
 onMounted(async () => {
   if (!hasValidId) {
-    ElMessage.error('无效的合伙人ID')
+    ElMessage.error('合伙人参数无效')
     return
   }
+  await dictStore.ensureLoaded()
   await loadBase()
   await loadAccount()
 })

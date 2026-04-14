@@ -1,4 +1,4 @@
-﻿package com.huanjing.geo.module.system.controller;
+package com.huanjing.geo.module.system.controller;
 
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.system.entity.SysUser;

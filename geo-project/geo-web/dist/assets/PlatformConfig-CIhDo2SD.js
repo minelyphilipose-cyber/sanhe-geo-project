@@ -1,1 +1,0 @@
-import{P as e}from"./PagePlaceholder-SbFam7TI.js";import{d as o,z as t,o as r}from"./index-BY8DVcs-.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=o({__name:"PlatformConfig",setup(a){return(n,c)=>(r(),t(e,{title:"平台配置",description:"16个AI平台配置、API密钥、降级策略",icon:"Setting",phase:2}))}});export{m as default};

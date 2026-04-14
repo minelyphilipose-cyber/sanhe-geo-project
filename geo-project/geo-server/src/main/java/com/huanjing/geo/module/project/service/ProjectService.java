@@ -1,4 +1,4 @@
-﻿package com.huanjing.geo.module.project.service;
+package com.huanjing.geo.module.project.service;
 
 import cn.hutool.core.util.RandomUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -6,35 +6,71 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
+import com.huanjing.geo.module.customer.entity.CompanyAccount;
+import com.huanjing.geo.module.customer.entity.CompanyAccountTxn;
+import com.huanjing.geo.module.customer.mapper.CompanyAccountMapper;
+import com.huanjing.geo.module.customer.mapper.CompanyAccountTxnMapper;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
+import com.huanjing.geo.module.partner.entity.Partner;
+import com.huanjing.geo.module.partner.entity.PartnerAccount;
+import com.huanjing.geo.module.partner.entity.PartnerAccountTxn;
+import com.huanjing.geo.module.partner.mapper.PartnerAccountMapper;
+import com.huanjing.geo.module.partner.mapper.PartnerAccountTxnMapper;
+import com.huanjing.geo.module.partner.mapper.PartnerMapper;
 import com.huanjing.geo.module.project.dto.ProjectCreateRequest;
+import com.huanjing.geo.module.project.dto.ProjectFlowUpdateRequest;
+import com.huanjing.geo.module.project.dto.ProjectPlatformOptionVO;
 import com.huanjing.geo.module.project.dto.ProjectStageUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectStatusUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectUpdateRequest;
+import com.huanjing.geo.module.project.dto.QuestionPoolItemRequest;
+import com.huanjing.geo.module.project.entity.ProjectPlatformBinding;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.project.mapper.ProjectPlatformBindingMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
+import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class ProjectService {
 
     private static final Set<String> OWNER_TYPES = Set.of("direct", "partner", "joint");
-    private static final Set<String> PACKAGE_TYPES = Set.of("trial_6980", "standard_12800", "growth_26800");
 
     private final ProjectMapper projectMapper;
     private final BrandMapper brandMapper;
     private final CompanyMapper companyMapper;
+    private final CompanyAccountMapper companyAccountMapper;
+    private final CompanyAccountTxnMapper companyAccountTxnMapper;
+    private final PartnerMapper partnerMapper;
+    private final PartnerAccountMapper partnerAccountMapper;
+    private final PartnerAccountTxnMapper partnerAccountTxnMapper;
+    private final PackagePlanService packagePlanService;
+    private final QuestionPoolService questionPoolService;
+    private final ProjectPlatformBindingMapper projectPlatformBindingMapper;
+    private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final CurrentUserService currentUserService;
     private final ActivityLogService activityLogService;
 
@@ -58,8 +94,22 @@ public class ProjectService {
         if (scopePartnerId != null) {
             wrapper.eq(Project::getPartnerId, scopePartnerId);
         }
+        if ("sales".equals(user.getRole())) {
+            List<Long> signedCompanyIds = companyMapper.selectList(
+                    new LambdaQueryWrapper<Company>()
+                            .select(Company::getId)
+                            .eq(Company::getSalesOwnerId, user.getId())
+                            .eq(Company::getStatus, "signed")
+            ).stream().map(Company::getId).collect(Collectors.toList());
+            if (signedCompanyIds.isEmpty()) {
+                return new Page<>(current, size);
+            }
+            wrapper.in(Project::getCompanyId, signedCompanyIds);
+        }
 
-        return projectMapper.selectPage(new Page<>(current, size), wrapper);
+        Page<Project> page = projectMapper.selectPage(new Page<>(current, size), wrapper);
+        attachPlatformSelections(page.getRecords());
+        return page;
     }
 
     public Project detail(Long id) {
@@ -67,36 +117,88 @@ public class ProjectService {
         currentUserService.ensurePermission("project.read");
         Project project = requireProject(id);
         currentUserService.ensurePartnerResourceAccess(user, project.getPartnerId(), "project");
+        ensureSalesProjectAccess(user, project);
+        attachPlatformSelections(Collections.singletonList(project));
         return project;
     }
 
+    public Map<String, List<ProjectPlatformOptionVO>> platformOptions() {
+        currentUserService.ensurePermission("project.read");
+        List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(
+                new LambdaQueryWrapper<AiPlatformConfig>()
+                        .eq(AiPlatformConfig::getEnabled, true)
+                        .orderByAsc(AiPlatformConfig::getPriorityLevel, AiPlatformConfig::getPlatformName, AiPlatformConfig::getId)
+        );
+        Map<String, List<ProjectPlatformOptionVO>> result = new LinkedHashMap<>();
+        result.put("P0", new ArrayList<>());
+        result.put("P1", new ArrayList<>());
+        result.put("P2", new ArrayList<>());
+        for (AiPlatformConfig platform : platforms) {
+            if (!result.containsKey(platform.getPriorityLevel())) {
+                continue;
+            }
+            ProjectPlatformOptionVO vo = new ProjectPlatformOptionVO();
+            vo.setPlatformCode(platform.getPlatformCode());
+            vo.setPlatformName(platform.getPlatformName());
+            vo.setPriorityLevel(platform.getPriorityLevel());
+            result.get(platform.getPriorityLevel()).add(vo);
+        }
+        return result;
+    }
+
+    @Transactional
     public Project create(ProjectCreateRequest req) {
         currentUserService.ensurePermission("project.write");
         SysUser operator = currentUserService.requireCurrentUser();
-        Company company = validateBrand(req.getBrandId());
-        validateOwnerBinding(req.getOwnerType(), req.getPartnerId());
-        validateProjectBase(req.getPackageType(), req.getPackagePrice(), req.getServiceMonths());
-        validateProjectCompanyPartnerConsistency(req.getOwnerType(), req.getPartnerId(), company.getPartnerId());
+        Company company = validateCompanyBrand(req.getCompanyId(), req.getBrandId());
+        String ownerType = resolveCreateOwnerType(operator);
+        Long partnerId = resolveCreatePartnerId(operator);
+        validateOwnerBinding(ownerType, partnerId);
+        validateProjectBase(req.getPackageType());
+        validateProjectCompanyPartnerConsistency(ownerType, partnerId, company.getPartnerId());
+        currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "project");
+        com.huanjing.geo.module.project.entity.PackagePlan packagePlan = packagePlanService.requireEnabledByType(req.getPackageType());
 
         Project project = new Project();
+        project.setCompanyId(req.getCompanyId());
+        project.setCompanyName(company.getCompanyName());
         project.setProjectCode(buildProjectCode());
         project.setBrandId(req.getBrandId());
+        project.setBrandName(resolveBrandName(req.getBrandId()));
         project.setProjectName(req.getProjectName());
+        project.setProjectAliases(normalizeAliases(req.getProjectAliases()));
         project.setPackageType(req.getPackageType());
-        project.setPackagePrice(req.getPackagePrice());
-        project.setServiceMonths(req.getServiceMonths());
-        project.setStatus("draft");
+        project.setPackagePrice(packagePlan.getStandardPrice());
+        project.setServiceMonths(packagePlan.getServiceMonths());
+        applyPackageSnapshot(project, packagePlan);
+        project.setStatus("paused");
         project.setStage("pending_start");
-        project.setOwnerType(req.getOwnerType());
-        project.setPartnerId(req.getPartnerId());
+        project.setOwnerType(ownerType);
+        project.setSourceType(resolveProjectSourceType(operator));
+        project.setPartnerId(partnerId);
+        applyRegionFields(project, req.getProvinceCode(), req.getProvinceName(), req.getCityCode(), req.getCityName(), req.getDistrictCode(), req.getDistrictName());
+        project.setDiscountRateSnapshot(null);
+        project.setDeductionAmount(BigDecimal.ZERO);
+        project.setDeductionTxnNo(null);
         project.setDeliveryMode(StringUtils.hasText(req.getDeliveryMode()) ? req.getDeliveryMode() : "managed");
-        project.setSignedAt(req.getSignedAt());
+        project.setSignedAt(req.getSignedAt() != null ? req.getSignedAt() : LocalDateTime.now());
         project.setStartDate(req.getStartDate());
         project.setEndDate(req.getEndDate());
         project.setPrimaryGoal(req.getPrimaryGoal());
         project.setCreatedBy(operator.getId());
         project.setRemark(req.getRemark());
         projectMapper.insert(project);
+        replacePlatformSelections(
+                project.getId(),
+                project.getPlanPlatformP0Count(),
+                project.getPlanPlatformP1Count(),
+                project.getPlanPlatformP2Count(),
+                req.getSelectedPlatformCodesP0(),
+                req.getSelectedPlatformCodesP1(),
+                req.getSelectedPlatformCodesP2()
+        );
+        attachPlatformSelections(Collections.singletonList(project));
+
         activityLogService.logAction(
                 operator.getId(),
                 "project.create",
@@ -104,36 +206,46 @@ public class ProjectService {
                 project.getId(),
                 null,
                 snapshotProject(project),
-                Map.of("brandId", project.getBrandId())
+                Map.of("companyId", project.getCompanyId(), "brandId", project.getBrandId())
         );
+
+        if (req.getQuestionPoolItems() != null) {
+            questionPoolService.createVersion(
+                    project.getId(),
+                    operator.getId(),
+                    "project.create",
+                    req.getQuestionPoolItems()
+            );
+        }
 
         return project;
     }
 
+    @Transactional
     public Project update(Long id, ProjectUpdateRequest req) {
         currentUserService.ensurePermission("project.write");
         SysUser operator = currentUserService.requireCurrentUser();
-        validateOwnerBinding(req.getOwnerType(), req.getPartnerId());
-
         Project project = requireProject(id);
+        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
+        String ownerType = resolveUpdateOwnerType(operator, req.getOwnerType(), project.getOwnerType());
+        Long partnerId = resolveUpdatePartnerId(operator, req.getPartnerId(), ownerType, project.getPartnerId());
+        validateOwnerBinding(ownerType, partnerId);
+        currentUserService.ensurePartnerResourceAccess(operator, partnerId, "project");
         Map<String, Object> before = snapshotProject(project);
-        Company company = validateBrand(project.getBrandId());
-        validateProjectCompanyPartnerConsistency(req.getOwnerType(), req.getPartnerId(), company.getPartnerId());
-
-        Long targetPrice = req.getPackagePrice() == null ? project.getPackagePrice() : req.getPackagePrice();
-        Integer targetMonths = req.getServiceMonths() == null ? project.getServiceMonths() : req.getServiceMonths();
-        validateProjectBase(req.getPackageType(), targetPrice, targetMonths);
+        Company company = validateCompany(project.getCompanyId());
+        validateProjectCompanyPartnerConsistency(ownerType, partnerId, company.getPartnerId());
+        validateProjectBase(req.getPackageType());
+        com.huanjing.geo.module.project.entity.PackagePlan packagePlan = packagePlanService.requireEnabledByType(req.getPackageType());
 
         project.setProjectName(req.getProjectName());
+        project.setProjectAliases(normalizeAliases(req.getProjectAliases()));
         project.setPackageType(req.getPackageType());
-        if (req.getPackagePrice() != null) {
-            project.setPackagePrice(req.getPackagePrice());
-        }
-        if (req.getServiceMonths() != null) {
-            project.setServiceMonths(req.getServiceMonths());
-        }
-        project.setOwnerType(req.getOwnerType());
-        project.setPartnerId(req.getPartnerId());
+        project.setPackagePrice(packagePlan.getStandardPrice());
+        project.setServiceMonths(packagePlan.getServiceMonths());
+        applyPackageSnapshot(project, packagePlan);
+        project.setOwnerType(ownerType);
+        project.setPartnerId(partnerId);
+        applyRegionFields(project, req.getProvinceCode(), req.getProvinceName(), req.getCityCode(), req.getCityName(), req.getDistrictCode(), req.getDistrictName());
         project.setDeliveryMode(StringUtils.hasText(req.getDeliveryMode()) ? req.getDeliveryMode() : project.getDeliveryMode());
         project.setSignedAt(req.getSignedAt());
         project.setStartDate(req.getStartDate());
@@ -141,6 +253,16 @@ public class ProjectService {
         project.setPrimaryGoal(req.getPrimaryGoal());
         project.setRemark(req.getRemark());
         projectMapper.updateById(project);
+        replacePlatformSelections(
+                project.getId(),
+                project.getPlanPlatformP0Count(),
+                project.getPlanPlatformP1Count(),
+                project.getPlanPlatformP2Count(),
+                req.getSelectedPlatformCodesP0(),
+                req.getSelectedPlatformCodesP1(),
+                req.getSelectedPlatformCodesP2()
+        );
+        attachPlatformSelections(Collections.singletonList(project));
         activityLogService.logAction(
                 operator.getId(),
                 "project.update",
@@ -148,8 +270,27 @@ public class ProjectService {
                 project.getId(),
                 before,
                 snapshotProject(project),
-                Map.of("brandId", project.getBrandId())
+                Map.of("companyId", project.getCompanyId(), "brandId", project.getBrandId())
         );
+
+        if (req.getQuestionPoolItems() != null) {
+            ensureQuestionPoolCorePermissions(project.getId(), req.getQuestionPoolItems());
+            var version = questionPoolService.createVersion(
+                    project.getId(),
+                    operator.getId(),
+                    StringUtils.hasText(req.getQuestionPoolChangeReason()) ? req.getQuestionPoolChangeReason() : "project.update",
+                    req.getQuestionPoolItems()
+            );
+            activityLogService.logAction(
+                    operator.getId(),
+                    "project.question_pool.update",
+                    "project",
+                    project.getId(),
+                    null,
+                    Map.of("versionNo", version.getVersionNo(), "itemCount", req.getQuestionPoolItems().size()),
+                    Map.of("reason", req.getQuestionPoolChangeReason())
+            );
+        }
 
         return project;
     }
@@ -159,6 +300,7 @@ public class ProjectService {
         SysUser operator = currentUserService.requireCurrentUser();
         validateStage(req.getStage());
         Project project = requireProject(id);
+        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         ensureStageBoundary(project.getStatus(), project.getStage(), req.getStage());
         if (req.getStage().equals(project.getStage())) {
             return;
@@ -182,11 +324,17 @@ public class ProjectService {
         SysUser operator = currentUserService.requireCurrentUser();
         validateStatus(req.getStatus());
         Project project = requireProject(id);
+        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
+        ensureStatusOperatePermission(req.getStatus());
         ensureStatusTransition(project.getStatus(), req.getStatus());
         if (req.getStatus().equals(project.getStatus())) {
             return;
         }
         String fromStatus = project.getStatus();
+        if (isActivating(fromStatus, req.getStatus())) {
+            activateAndDeduct(project, operator);
+            markActivatedIfNeeded(project);
+        }
         project.setStatus(req.getStatus());
         projectMapper.updateById(project);
         activityLogService.logAction(
@@ -200,10 +348,49 @@ public class ProjectService {
         );
     }
 
+    public void updateFlow(Long id, ProjectFlowUpdateRequest req) {
+        currentUserService.ensurePermission("project.write");
+        SysUser operator = currentUserService.requireCurrentUser();
+        validateStatus(req.getStatus());
+        validateStage(req.getStage());
+
+        Project project = requireProject(id);
+        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
+        if (!req.getStatus().equals(project.getStatus())) {
+            ensureStatusOperatePermission(req.getStatus());
+        }
+
+        ensureStatusTransition(project.getStatus(), req.getStatus());
+        ensureStageBoundary(req.getStatus(), project.getStage(), req.getStage());
+
+        if (req.getStatus().equals(project.getStatus()) && req.getStage().equals(project.getStage())) {
+            return;
+        }
+
+        Map<String, Object> before = Map.of("status", project.getStatus(), "stage", project.getStage());
+        if (isActivating(project.getStatus(), req.getStatus())) {
+            activateAndDeduct(project, operator);
+            markActivatedIfNeeded(project);
+        }
+        project.setStatus(req.getStatus());
+        project.setStage(req.getStage());
+        projectMapper.updateById(project);
+        activityLogService.logAction(
+                operator.getId(),
+                "project.flow.update",
+                "project",
+                project.getId(),
+                before,
+                Map.of("status", project.getStatus(), "stage", project.getStage()),
+                Map.of("fromStatus", before.get("status"), "toStatus", req.getStatus(), "fromStage", before.get("stage"), "toStage", req.getStage())
+        );
+    }
+
     public void delete(Long id) {
         currentUserService.ensurePermission("project.write");
         SysUser operator = currentUserService.requireCurrentUser();
         Project project = requireProject(id);
+        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         projectMapper.deleteById(id);
         activityLogService.logAction(
                 operator.getId(),
@@ -224,17 +411,75 @@ public class ProjectService {
         return project;
     }
 
-    private Company validateBrand(Long brandId) {
-        Brand brand = brandMapper.selectById(brandId);
-        if (brand == null) {
-            throw new BizException(404, "Brand not found");
-        }
-
-        Company company = companyMapper.selectById(brand.getCompanyId());
+    private Company validateCompany(Long companyId) {
+        Company company = companyMapper.selectById(companyId);
         if (company == null) {
-            throw new BizException(400, "Brand has no valid company");
+            throw new BizException(404, "Company not found");
         }
         return company;
+    }
+
+    private Company validateCompanyBrand(Long companyId, Long brandId) {
+        Company company = validateCompany(companyId);
+        if (brandId != null) {
+            Brand brand = brandMapper.selectById(brandId);
+            if (brand == null) {
+                throw new BizException(404, "Brand not found");
+            }
+            if (!companyId.equals(brand.getCompanyId())) {
+                throw new BizException(400, "Brand does not belong to selected company");
+            }
+        }
+        return company;
+    }
+
+    private Partner requireActivePartner(Long partnerId) {
+        Partner partner = partnerMapper.selectById(partnerId);
+        if (partner == null) {
+            throw new BizException(404, "Partner not found");
+        }
+        if (!"active".equals(partner.getStatus())) {
+            throw new BizException(400, "Partner status is not active");
+        }
+        return partner;
+    }
+
+    private PartnerAccount lockPartnerAccount(Long partnerId) {
+        PartnerAccount account = partnerAccountMapper.selectOne(
+                new LambdaQueryWrapper<PartnerAccount>()
+                        .eq(PartnerAccount::getPartnerId, partnerId)
+                        .last("FOR UPDATE")
+        );
+        if (account == null) {
+            throw new BizException(404, "Partner account not found");
+        }
+        if (!"active".equals(account.getStatus())) {
+            throw new BizException(400, "Partner account is not active");
+        }
+        return account;
+    }
+
+    private CompanyAccount lockCompanyAccount(Long companyId) {
+        CompanyAccount account = companyAccountMapper.selectOne(
+                new LambdaQueryWrapper<CompanyAccount>()
+                        .eq(CompanyAccount::getCompanyId, companyId)
+                        .last("FOR UPDATE")
+        );
+        if (account == null) {
+            account = new CompanyAccount();
+            account.setCompanyId(companyId);
+            account.setCurrentBalance(BigDecimal.ZERO);
+            account.setTotalRecharge(BigDecimal.ZERO);
+            account.setTotalDeduction(BigDecimal.ZERO);
+            account.setCurrency("CNY");
+            account.setStatus("active");
+            companyAccountMapper.insert(account);
+            return account;
+        }
+        if (!"active".equals(account.getStatus())) {
+            throw new BizException(400, "Customer account is not active");
+        }
+        return account;
     }
 
     private void validateOwnerBinding(String ownerType, Long partnerId) {
@@ -249,16 +494,22 @@ public class ProjectService {
         }
     }
 
-    private void validateProjectBase(String packageType, Long packagePrice, Integer serviceMonths) {
-        if (!PACKAGE_TYPES.contains(packageType)) {
-            throw new BizException(400, "Invalid package_type");
+    private void validateProjectBase(String packageType) {
+        if (!StringUtils.hasText(packageType)) {
+            throw new BizException(400, "package_type is required");
         }
-        if (packagePrice == null || packagePrice <= 0) {
-            throw new BizException(400, "package_price must be positive");
+    }
+
+    private BigDecimal calcDeduction(BigDecimal packagePrice, BigDecimal discountRate) {
+        if (packagePrice == null || packagePrice.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BizException(400, "Invalid package_price for deduction");
         }
-        if (serviceMonths == null || serviceMonths <= 0) {
-            throw new BizException(400, "service_months must be positive");
+        if (discountRate == null || discountRate.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new BizException(400, "Invalid partner discount_rate");
         }
+        return packagePrice
+                .multiply(discountRate)
+                .setScale(2, RoundingMode.HALF_UP);
     }
 
     private void validateStatus(String status) {
@@ -278,6 +529,10 @@ public class ProjectService {
             return;
         }
         Set<String> allowedTargets = ProjectFlowPolicy.STATUS_TRANSITION.getOrDefault(currentStatus, Set.of());
+        if (allowedTargets.isEmpty() && ProjectFlowPolicy.STATUS_SET.contains(targetStatus)) {
+            // allow legacy status to migrate into simplified active/paused states
+            return;
+        }
         if (!allowedTargets.contains(targetStatus)) {
             throw new BizException(400, "Illegal status transition: " + currentStatus + " -> " + targetStatus);
         }
@@ -287,11 +542,8 @@ public class ProjectService {
         if (currentStage.equals(targetStage)) {
             return;
         }
-        if ("archived".equals(status)) {
-            throw new BizException(400, "Archived project cannot change stage");
-        }
-        if ("draft".equals(status) && !ProjectFlowPolicy.DRAFT_ALLOWED_STAGES.contains(targetStage)) {
-            throw new BizException(400, "Draft project only allows pending_start or collecting_materials stage");
+        if (!"active".equals(status) && !"paused".equals(status)) {
+            throw new BizException(400, "Only active/paused project can change stage");
         }
     }
 
@@ -307,23 +559,456 @@ public class ProjectService {
         }
     }
 
+    private String resolveCreateOwnerType(SysUser operator) {
+        return currentUserService.isPartnerUser(operator) ? "partner" : "direct";
+    }
+
+    private Long resolveCreatePartnerId(SysUser operator) {
+        if (!currentUserService.isPartnerUser(operator)) {
+            return null;
+        }
+        return currentUserService.requirePartnerScope(operator);
+    }
+
+    private String resolveUpdateOwnerType(SysUser operator, String reqOwnerType, String currentOwnerType) {
+        if (currentUserService.isPartnerUser(operator)) {
+            return "partner";
+        }
+        return StringUtils.hasText(reqOwnerType) ? reqOwnerType.trim() : currentOwnerType;
+    }
+
+    private Long resolveUpdatePartnerId(SysUser operator, Long reqPartnerId, String ownerType, Long currentPartnerId) {
+        if (currentUserService.isPartnerUser(operator)) {
+            return currentUserService.requirePartnerScope(operator);
+        }
+        if ("direct".equals(ownerType)) {
+            return null;
+        }
+        if (reqPartnerId != null) {
+            return reqPartnerId;
+        }
+        return currentPartnerId;
+    }
+
+    private String resolveProjectSourceType(SysUser operator) {
+        return currentUserService.isPartnerUser(operator) ? "partner" : "internal";
+    }
+
+    private void ensureStatusOperatePermission(String targetStatus) {
+        if ("active".equals(targetStatus)) {
+            currentUserService.ensurePermission("project.status.activate");
+            return;
+        }
+        if ("paused".equals(targetStatus)) {
+            currentUserService.ensurePermission("project.status.close");
+        }
+    }
+
+    private void ensureQuestionPoolCorePermissions(Long projectId, List<QuestionPoolItemRequest> requestItems) {
+        Set<String> previousCoreSet = questionPoolService.latestCoreQuestionTextSet(projectId);
+        Set<String> newCoreSet = requestItems == null
+                ? Set.of()
+                : requestItems.stream()
+                .filter(item -> item != null && Boolean.TRUE.equals(item.getIsCore()) && StringUtils.hasText(item.getQuestionText()))
+                .map(item -> item.getQuestionText().trim())
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        if (!currentUserService.hasPermission("question_pool.core.confirm")) {
+            Set<String> newlyConfirmedCore = new LinkedHashSet<>(newCoreSet);
+            newlyConfirmedCore.removeAll(previousCoreSet);
+            if (!newlyConfirmedCore.isEmpty()) {
+                throw new BizException(403, "No permission: question_pool.core.confirm");
+            }
+        }
+
+        if (!currentUserService.hasPermission("question_pool.core.delete")) {
+            Set<String> removedCore = new LinkedHashSet<>(previousCoreSet);
+            removedCore.removeAll(newCoreSet);
+            if (!removedCore.isEmpty()) {
+                throw new BizException(403, "No permission: question_pool.core.delete");
+            }
+        }
+    }
+
+    private void ensureSalesProjectAccess(SysUser user, Project project) {
+        if (!"sales".equals(user.getRole())) {
+            return;
+        }
+        Company company = companyMapper.selectById(project.getCompanyId());
+        if (company == null || company.getSalesOwnerId() == null || !company.getSalesOwnerId().equals(user.getId())) {
+            throw new BizException(403, "No permission to access this project");
+        }
+        if (!"signed".equals(company.getStatus())) {
+            throw new BizException(403, "Sales can only access projects of signed companies");
+        }
+    }
+
+    private boolean isActivating(String fromStatus, String targetStatus) {
+        return !"active".equals(fromStatus) && "active".equals(targetStatus);
+    }
+
+    private void markActivatedIfNeeded(Project project) {
+        if (project.getActivatedAt() == null) {
+            project.setActivatedAt(LocalDateTime.now());
+        }
+    }
+
+    private void activateAndDeduct(Project project, SysUser operator) {
+        if (StringUtils.hasText(project.getDeductionTxnNo())) {
+            return;
+        }
+        if ("direct".equals(project.getOwnerType())) {
+            activateDirectProject(project, operator);
+            return;
+        }
+        if ("partner".equals(project.getOwnerType()) || "joint".equals(project.getOwnerType())) {
+            activatePartnerProject(project, operator);
+        }
+    }
+
+    private void activateDirectProject(Project project, SysUser operator) {
+        CompanyAccount account = lockCompanyAccount(project.getCompanyId());
+        BigDecimal deductionAmount = project.getPackagePrice().setScale(2, RoundingMode.HALF_UP);
+        if (account.getCurrentBalance().compareTo(deductionAmount) < 0) {
+            throw new BizException(400, "客户余额不足，请先充值后再激活项目");
+        }
+
+        BigDecimal before = account.getCurrentBalance();
+        BigDecimal after = before.subtract(deductionAmount);
+        account.setCurrentBalance(after);
+        account.setTotalDeduction(account.getTotalDeduction().add(deductionAmount));
+        companyAccountMapper.updateById(account);
+
+        String txnNo = buildCustomerTxnNo("D");
+        CompanyAccountTxn txn = new CompanyAccountTxn();
+        txn.setCompanyId(project.getCompanyId());
+        txn.setAccountId(account.getId());
+        txn.setTxnNo(txnNo);
+        txn.setTxnType("deduction");
+        txn.setBizType("project_signing");
+        txn.setAmount(deductionAmount.negate());
+        txn.setBalanceBefore(before);
+        txn.setBalanceAfter(after);
+        txn.setRelatedProjectId(project.getId());
+        txn.setOperatorUserId(operator.getId());
+        txn.setReason("project activation auto deduction");
+        txn.setRemark("project activation auto deduction");
+        companyAccountTxnMapper.insert(txn);
+
+        project.setDeductionAmount(deductionAmount);
+        project.setDeductionTxnNo(txnNo);
+
+        activityLogService.logAction(
+                operator.getId(),
+                "project.sign_and_deduct",
+                "project",
+                project.getId(),
+                null,
+                Map.of("projectId", project.getId(), "deductionAmount", deductionAmount, "txnNo", txnNo),
+                Map.of("accountType", "company", "companyId", project.getCompanyId(), "balanceBefore", before, "balanceAfter", after)
+        );
+    }
+
+    private void activatePartnerProject(Project project, SysUser operator) {
+        Partner partner = requireActivePartner(project.getPartnerId());
+        PartnerAccount account = lockPartnerAccount(project.getPartnerId());
+        BigDecimal deductionAmount = calcDeduction(project.getPackagePrice(), partner.getDiscountRate());
+        if (account.getCurrentBalance().compareTo(deductionAmount) < 0) {
+            throw new BizException(400, "合伙人余额不足，请先充值后再激活项目");
+        }
+
+        BigDecimal before = account.getCurrentBalance();
+        BigDecimal after = before.subtract(deductionAmount);
+        account.setCurrentBalance(after);
+        account.setTotalDeduction(account.getTotalDeduction().add(deductionAmount));
+        partnerAccountMapper.updateById(account);
+
+        String txnNo = buildTxnNo("D");
+        PartnerAccountTxn txn = new PartnerAccountTxn();
+        txn.setPartnerId(partner.getId());
+        txn.setAccountId(account.getId());
+        txn.setTxnNo(txnNo);
+        txn.setTxnType("deduction");
+        txn.setBizType("project_signing");
+        txn.setAmount(deductionAmount.negate());
+        txn.setBalanceBefore(before);
+        txn.setBalanceAfter(after);
+        txn.setRelatedProjectId(project.getId());
+        txn.setOperatorUserId(operator.getId());
+        txn.setRemark("project activation auto deduction");
+        partnerAccountTxnMapper.insert(txn);
+
+        project.setDiscountRateSnapshot(partner.getDiscountRate());
+        project.setDeductionAmount(deductionAmount);
+        project.setDeductionTxnNo(txnNo);
+
+        activityLogService.logAction(
+                operator.getId(),
+                "project.sign_and_deduct",
+                "project",
+                project.getId(),
+                null,
+                Map.of("projectId", project.getId(), "deductionAmount", deductionAmount, "txnNo", txnNo),
+                Map.of("accountType", "partner", "partnerId", partner.getId(), "balanceBefore", before, "balanceAfter", after)
+        );
+    }
+
     private String buildProjectCode() {
         return "PRJ" + System.currentTimeMillis() + RandomUtil.randomNumbers(4);
+    }
+
+    private String buildTxnNo(String prefix) {
+        return "PT" + prefix + System.currentTimeMillis() + RandomUtil.randomNumbers(6);
+    }
+
+    private String buildCustomerTxnNo(String prefix) {
+        return "CT" + prefix + System.currentTimeMillis() + RandomUtil.randomNumbers(6);
+    }
+
+    private void attachPlatformSelections(List<Project> projects) {
+        if (projects == null || projects.isEmpty()) {
+            return;
+        }
+        List<Long> projectIds = projects.stream().map(Project::getId).collect(Collectors.toList());
+        List<ProjectPlatformBinding> bindings = projectPlatformBindingMapper.selectList(
+                new LambdaQueryWrapper<ProjectPlatformBinding>()
+                        .in(ProjectPlatformBinding::getProjectId, projectIds)
+                        .orderByAsc(ProjectPlatformBinding::getPriorityLevel, ProjectPlatformBinding::getId)
+        );
+        Map<Long, List<String>> p0 = new LinkedHashMap<>();
+        Map<Long, List<String>> p1 = new LinkedHashMap<>();
+        Map<Long, List<String>> p2 = new LinkedHashMap<>();
+        for (ProjectPlatformBinding binding : bindings) {
+            Map<Long, List<String>> bucket;
+            if ("P0".equals(binding.getPriorityLevel())) {
+                bucket = p0;
+            } else if ("P1".equals(binding.getPriorityLevel())) {
+                bucket = p1;
+            } else {
+                bucket = p2;
+            }
+            bucket.computeIfAbsent(binding.getProjectId(), k -> new ArrayList<>()).add(binding.getPlatformCode());
+        }
+        for (Project project : projects) {
+            project.setSelectedPlatformCodesP0(p0.getOrDefault(project.getId(), List.of()));
+            project.setSelectedPlatformCodesP1(p1.getOrDefault(project.getId(), List.of()));
+            project.setSelectedPlatformCodesP2(p2.getOrDefault(project.getId(), List.of()));
+        }
+    }
+
+    private void replacePlatformSelections(Long projectId,
+                                           Integer requiredP0,
+                                           Integer requiredP1,
+                                           Integer requiredP2,
+                                           List<String> selectedP0,
+                                           List<String> selectedP1,
+                                           List<String> selectedP2) {
+        List<String> normalizedP0 = normalizePlatformCodes(selectedP0);
+        List<String> normalizedP1 = normalizePlatformCodes(selectedP1);
+        List<String> normalizedP2 = normalizePlatformCodes(selectedP2);
+
+        int expectP0 = requiredP0 == null ? 0 : requiredP0;
+        int expectP1 = requiredP1 == null ? 0 : requiredP1;
+        int expectP2 = requiredP2 == null ? 0 : requiredP2;
+
+        if (normalizedP0.size() != expectP0) {
+            throw new BizException(400, "P0 platform count must be exactly " + expectP0);
+        }
+        if (normalizedP1.size() != expectP1) {
+            throw new BizException(400, "P1 platform count must be exactly " + expectP1);
+        }
+        if (normalizedP2.size() != expectP2) {
+            throw new BizException(400, "P2 platform count must be exactly " + expectP2);
+        }
+
+        Set<String> allCodes = new HashSet<>();
+        allCodes.addAll(normalizedP0);
+        allCodes.addAll(normalizedP1);
+        allCodes.addAll(normalizedP2);
+        int totalSelected = normalizedP0.size() + normalizedP1.size() + normalizedP2.size();
+        if (allCodes.size() != totalSelected) {
+            throw new BizException(400, "Selected platforms cannot duplicate across P0/P1/P2");
+        }
+
+        List<AiPlatformConfig> configs = allCodes.isEmpty() ? List.of() : aiPlatformConfigMapper.selectList(
+                new LambdaQueryWrapper<AiPlatformConfig>()
+                        .in(AiPlatformConfig::getPlatformCode, allCodes)
+                        .eq(AiPlatformConfig::getEnabled, true)
+        );
+        Map<String, AiPlatformConfig> configMap = configs.stream().collect(
+                Collectors.toMap(AiPlatformConfig::getPlatformCode, c -> c, (a, b) -> a, LinkedHashMap::new)
+        );
+        for (String code : normalizedP0) {
+            validatePlatformPriority(configMap.get(code), "P0");
+        }
+        for (String code : normalizedP1) {
+            validatePlatformPriority(configMap.get(code), "P1");
+        }
+        for (String code : normalizedP2) {
+            validatePlatformPriority(configMap.get(code), "P2");
+        }
+
+        projectPlatformBindingMapper.delete(
+                new LambdaQueryWrapper<ProjectPlatformBinding>().eq(ProjectPlatformBinding::getProjectId, projectId)
+        );
+        savePlatformBindings(projectId, normalizedP0, "P0", configMap);
+        savePlatformBindings(projectId, normalizedP1, "P1", configMap);
+        savePlatformBindings(projectId, normalizedP2, "P2", configMap);
+    }
+
+    private void savePlatformBindings(Long projectId, List<String> codes, String priorityLevel, Map<String, AiPlatformConfig> configMap) {
+        for (String code : codes) {
+            AiPlatformConfig cfg = configMap.get(code);
+            ProjectPlatformBinding binding = new ProjectPlatformBinding();
+            binding.setProjectId(projectId);
+            binding.setPlatformCode(code);
+            binding.setPlatformName(cfg.getPlatformName());
+            binding.setPriorityLevel(priorityLevel);
+            projectPlatformBindingMapper.insert(binding);
+        }
+    }
+
+    private void validatePlatformPriority(AiPlatformConfig cfg, String priorityLevel) {
+        if (cfg == null) {
+            throw new BizException(400, "Selected platform is invalid or disabled");
+        }
+        if (!priorityLevel.equals(cfg.getPriorityLevel())) {
+            throw new BizException(400, "Platform " + cfg.getPlatformCode() + " does not belong to " + priorityLevel);
+        }
+    }
+
+    private List<String> normalizePlatformCodes(List<String> selectedCodes) {
+        if (selectedCodes == null) {
+            return List.of();
+        }
+        return selectedCodes.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .collect(Collectors.toList());
     }
 
     private Map<String, Object> snapshotProject(Project project) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("id", project.getId());
         snapshot.put("projectCode", project.getProjectCode());
-        snapshot.put("projectName", project.getProjectName());
+        snapshot.put("companyId", project.getCompanyId());
+        snapshot.put("companyName", project.getCompanyName());
         snapshot.put("brandId", project.getBrandId());
+        snapshot.put("brandName", project.getBrandName());
+        snapshot.put("projectName", project.getProjectName());
+        snapshot.put("projectAliases", project.getProjectAliases());
         snapshot.put("ownerType", project.getOwnerType());
+        snapshot.put("sourceType", project.getSourceType());
+        snapshot.put("contentGenerationEnabled", project.getContentGenerationEnabled());
         snapshot.put("partnerId", project.getPartnerId());
+        snapshot.put("provinceCode", project.getProvinceCode());
+        snapshot.put("provinceName", project.getProvinceName());
+        snapshot.put("cityCode", project.getCityCode());
+        snapshot.put("cityName", project.getCityName());
+        snapshot.put("districtCode", project.getDistrictCode());
+        snapshot.put("districtName", project.getDistrictName());
         snapshot.put("status", project.getStatus());
         snapshot.put("stage", project.getStage());
+        snapshot.put("activatedAt", project.getActivatedAt());
+        snapshot.put("biweeklyAnchorDate", project.getBiweeklyAnchorDate());
+        snapshot.put("expiredAt", project.getExpiredAt());
         snapshot.put("packageType", project.getPackageType());
         snapshot.put("packagePrice", project.getPackagePrice());
         snapshot.put("serviceMonths", project.getServiceMonths());
+        snapshot.put("planQuestionPoolSize", project.getPlanQuestionPoolSize());
+        snapshot.put("planCoreQuestionCount", project.getPlanCoreQuestionCount());
+        snapshot.put("planPlatformP0Count", project.getPlanPlatformP0Count());
+        snapshot.put("planPlatformP1Count", project.getPlanPlatformP1Count());
+        snapshot.put("planPlatformP2Count", project.getPlanPlatformP2Count());
+        snapshot.put("planPerQuestionPlatformCalls", project.getPlanPerQuestionPlatformCalls());
+        snapshot.put("planPerQuestionCallsP0", project.getPlanPerQuestionCallsP0());
+        snapshot.put("planPerQuestionCallsP1", project.getPlanPerQuestionCallsP1());
+        snapshot.put("planPerQuestionCallsP2", project.getPlanPerQuestionCallsP2());
+        snapshot.put("planBiweeklyFrequency", project.getPlanBiweeklyFrequency());
+        snapshot.put("planMonthlyReportDepth", project.getPlanMonthlyReportDepth());
+        snapshot.put("planQuarterlyReportDepth", project.getPlanQuarterlyReportDepth());
+        snapshot.put("planConsultantIntensity", project.getPlanConsultantIntensity());
+        snapshot.put("planCompetitorInsightDepth", project.getPlanCompetitorInsightDepth());
+        snapshot.put("planMediaDistributionIntensity", project.getPlanMediaDistributionIntensity());
+        snapshot.put("planCommitmentTargetIntensity", project.getPlanCommitmentTargetIntensity());
+        snapshot.put("planTargetMetricType", project.getPlanTargetMetricType());
+        snapshot.put("planTargetMetricValue", project.getPlanTargetMetricValue());
+        snapshot.put("planTargetWindowDays", project.getPlanTargetWindowDays());
+        snapshot.put("selectedPlatformCodesP0", project.getSelectedPlatformCodesP0());
+        snapshot.put("selectedPlatformCodesP1", project.getSelectedPlatformCodesP1());
+        snapshot.put("selectedPlatformCodesP2", project.getSelectedPlatformCodesP2());
+        snapshot.put("discountRateSnapshot", project.getDiscountRateSnapshot());
+        snapshot.put("deductionAmount", project.getDeductionAmount());
+        snapshot.put("deductionTxnNo", project.getDeductionTxnNo());
         return snapshot;
+    }
+
+    private void applyRegionFields(Project project,
+                                   String provinceCode,
+                                   String provinceName,
+                                   String cityCode,
+                                   String cityName,
+                                   String districtCode,
+                                   String districtName) {
+        project.setProvinceCode(trimToNull(provinceCode));
+        project.setProvinceName(trimToNull(provinceName));
+        project.setCityCode(trimToNull(cityCode));
+        project.setCityName(trimToNull(cityName));
+        project.setDistrictCode(trimToNull(districtCode));
+        project.setDistrictName(trimToNull(districtName));
+    }
+
+    private String trimToNull(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
+    }
+
+    private String normalizeAliases(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String normalized = value.replace('，', ',');
+        String joined = Arrays.stream(normalized.split(","))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .collect(Collectors.joining(","));
+        return StringUtils.hasText(joined) ? joined : null;
+    }
+
+    private void applyPackageSnapshot(Project project, com.huanjing.geo.module.project.entity.PackagePlan packagePlan) {
+        project.setPlanQuestionPoolSize(packagePlan.getQuestionPoolSize());
+        project.setPlanCoreQuestionCount(packagePlan.getCoreQuestionCount());
+        project.setPlanPlatformP0Count(packagePlan.getPlatformP0Count());
+        project.setPlanPlatformP1Count(packagePlan.getPlatformP1Count());
+        project.setPlanPlatformP2Count(packagePlan.getPlatformP2Count());
+        project.setPlanPerQuestionPlatformCalls(packagePlan.getPerQuestionPlatformCalls());
+        project.setPlanPerQuestionCallsP0(packagePlan.getPerQuestionCallsP0() != null ? packagePlan.getPerQuestionCallsP0() : packagePlan.getPerQuestionPlatformCalls());
+        project.setPlanPerQuestionCallsP1(packagePlan.getPerQuestionCallsP1() != null ? packagePlan.getPerQuestionCallsP1() : packagePlan.getPerQuestionPlatformCalls());
+        project.setPlanPerQuestionCallsP2(packagePlan.getPerQuestionCallsP2() != null ? packagePlan.getPerQuestionCallsP2() : packagePlan.getPerQuestionPlatformCalls());
+        project.setPlanBiweeklyFrequency(packagePlan.getBiweeklyFrequency());
+        project.setPlanMonthlyReportDepth(packagePlan.getMonthlyReportDepth());
+        project.setPlanQuarterlyReportDepth(packagePlan.getQuarterlyReportDepth());
+        project.setPlanConsultantIntensity(packagePlan.getConsultantIntensity());
+        project.setPlanCompetitorInsightDepth(packagePlan.getCompetitorInsightDepth());
+        project.setPlanMediaDistributionIntensity(packagePlan.getMediaDistributionIntensity());
+        project.setPlanCommitmentTargetIntensity(packagePlan.getCommitmentTargetIntensity());
+        project.setPlanTargetMetricType(packagePlan.getTargetMetricType());
+        project.setPlanTargetMetricValue(packagePlan.getTargetMetricValue());
+        project.setPlanTargetWindowDays(packagePlan.getTargetWindowDays());
+    }
+
+    private String resolveBrandName(Long brandId) {
+        if (brandId == null) {
+            return null;
+        }
+        Brand brand = brandMapper.selectById(brandId);
+        if (brand == null) {
+            throw new BizException(404, "Brand not found");
+        }
+        return brand.getBrandName();
     }
 }

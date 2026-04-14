@@ -42,6 +42,12 @@ export interface PartnerTxn {
   createdAt: string
 }
 
+export interface PartnerCreateResult {
+  partner: PartnerItem
+  username: string
+  initialPassword: string
+}
+
 export function getPartnerList(params: {
   current?: number
   size?: number
@@ -60,12 +66,13 @@ export function createPartner(data: {
   partnerName: string
   partnerLevel: string
   discountRate: number
+  initialAmount?: number
   contactName?: string
   contactPhone?: string
   city?: string
   remark?: string
 }) {
-  return request.post<R<PartnerItem>>('/partners', data)
+  return request.post<R<PartnerCreateResult>>('/partners', data)
 }
 
 export function updatePartner(id: number, data: {
@@ -89,7 +96,14 @@ export function getPartnerAccount(id: number) {
   return request.get<R<PartnerAccount>>(`/partners/${id}/account`)
 }
 
-export function getPartnerAccountTxns(id: number, params: { current?: number; size?: number }) {
+export function getPartnerAccountTxns(id: number, params: {
+  current?: number
+  size?: number
+  txnType?: string
+  bizType?: string
+  dateFrom?: string
+  dateTo?: string
+}) {
   return request.get<R<PageResult<PartnerTxn>>>(`/partners/${id}/account/txns`, { params })
 }
 

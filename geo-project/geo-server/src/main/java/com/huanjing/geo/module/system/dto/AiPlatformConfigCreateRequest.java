@@ -1,0 +1,35 @@
+package com.huanjing.geo.module.system.dto;
+
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import lombok.Data;
+
+@Data
+public class AiPlatformConfigCreateRequest {
+    @NotBlank
+    private String platformCode;
+    @NotBlank
+    private String platformName;
+    @NotBlank
+    private String priorityLevel;
+    private Integer rpmLimit;
+    private Integer tpmLimit;
+    private String apiKey;
+    private String primaryKeyRef;
+    private String backupKeyRef;
+    private String backupProviderName;
+    private String backupApiUrl;
+    private String backupModelId;
+    @NotBlank
+    private String apiUrl;
+    @NotBlank
+    private String modelId;
+    @NotBlank
+    private String modelName;
+    @NotNull
+    private Boolean enabled;
+    @NotNull
+    private Boolean degraded;
+    private String degradedReason;
+    private String remark;
+}

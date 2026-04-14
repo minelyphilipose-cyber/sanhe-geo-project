@@ -1,12 +1,276 @@
-<template>
-  <PagePlaceholder
-    title="品牌详情"
-    description="品牌基本信息、项目关联、资产概览"
-    icon="Shop"
-    :phase="1"
-  />
+﻿<template>
+  <div class="space-y-4">
+    <el-page-header content="品牌详情" @back="$router.back()" />
+
+    <el-card v-loading="loading">
+      <template #header>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span>基础信息</span>
+            <el-tag>{{ dictStore.label('brand_status', brand?.status) }}</el-tag>
+          </div>
+          <div class="space-x-2">
+            <el-button v-if="brand?.companyId" link @click="goCompanyDetail">查看客户</el-button>
+            <el-button v-if="canWriteProject" type="primary" link @click="goCreateProject">基于该品牌建项目</el-button>
+            <el-button v-if="canWriteCompany" type="primary" link @click="openEdit">编辑</el-button>
+            <el-button v-if="canWriteCompany" type="danger" link @click="removeCurrentBrand">删除品牌</el-button>
+          </div>
+        </div>
+      </template>
+
+      <el-descriptions :column="3" border>
+        <el-descriptions-item label="品牌名称">{{ brand?.brandName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="品牌标识">{{ brand?.brandSlug || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="状态">{{ dictStore.label('brand_status', brand?.status) }}</el-descriptions-item>
+
+        <el-descriptions-item label="所属客户">{{ companyName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="主营业务">{{ brand?.mainBusiness || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="所在地区">{{ regionText }}</el-descriptions-item>
+
+        <el-descriptions-item label="官网">{{ brand?.website || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="公众号">{{ brand?.officialAccount || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="视频号">{{ brand?.videoAccount || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="抖音号">{{ brand?.douyinAccount || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="联系电话">{{ brand?.phone || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="微信">{{ brand?.wechat || '-' }}</el-descriptions-item>
+
+        <el-descriptions-item label="品牌标准表述" :span="3">{{ brand?.standardBrandStatement || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="业务标准表述" :span="3">{{ brand?.businessStandardStatement || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="业务介绍" :span="3">{{ brand?.businessIntro || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="品牌描述" :span="3">{{ brand?.description || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="禁用词" :span="3">{{ brand?.forbiddenPhrases || '-' }}</el-descriptions-item>
+      </el-descriptions>
+    </el-card>
+
+    <el-card>
+      <template #header><span>扩展入口</span></template>
+      <div class="flex flex-wrap gap-3">
+        <el-button @click="router.push(`/admin/brands/${brandId}/profile`)">品牌画像</el-button>
+        <el-button @click="router.push(`/admin/brands/${brandId}/assets`)">品牌资产</el-button>
+      </div>
+    </el-card>
+
+    <el-dialog v-model="editVisible" title="编辑品牌" width="680px">
+      <el-form ref="brandFormRef" :model="brandForm" :rules="brandRules" label-width="120px">
+        <el-form-item label="品牌名称" required><el-input v-model="brandForm.brandName" /></el-form-item>
+        <el-form-item label="品牌标识" required><el-input v-model="brandForm.brandSlug" /></el-form-item>
+        <el-form-item label="主营业务"><el-input v-model="brandForm.mainBusiness" /></el-form-item>
+        <el-form-item label="地区"><RegionCascader v-model="brandForm.regionCodes" /></el-form-item>
+        <el-form-item label="官网"><el-input v-model="brandForm.website" /></el-form-item>
+        <el-form-item label="公众号"><el-input v-model="brandForm.officialAccount" /></el-form-item>
+        <el-form-item label="视频号"><el-input v-model="brandForm.videoAccount" /></el-form-item>
+        <el-form-item label="抖音号"><el-input v-model="brandForm.douyinAccount" /></el-form-item>
+        <el-form-item label="联系电话"><el-input v-model="brandForm.phone" /></el-form-item>
+        <el-form-item label="微信"><el-input v-model="brandForm.wechat" /></el-form-item>
+        <el-form-item label="状态" required>
+          <el-select v-model="brandForm.status" style="width: 100%">
+            <el-option
+              v-for="item in dictStore.options('brand_status')"
+              :key="item.dictKey"
+              :label="item.dictValue"
+              :value="item.dictKey"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="品牌描述"><el-input v-model="brandForm.description" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item label="业务介绍"><el-input v-model="brandForm.businessIntro" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item label="标准口径"><el-input v-model="brandForm.standardBrandStatement" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item label="业务标准表述"><el-input v-model="brandForm.businessStandardStatement" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item label="禁用词"><el-input v-model="brandForm.forbiddenPhrases" type="textarea" :rows="3" /></el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="editVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submitBrand">保存</el-button>
+      </template>
+    </el-dialog>
+  </div>
 </template>
 
 <script setup lang="ts">
-import PagePlaceholder from '@/components/ui/PagePlaceholder.vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { getBrandDetail, updateBrand, deleteBrand, getCompanyDetail } from '@/api/customer'
+import type { Brand } from '@/types'
+import { useUserStore } from '@/stores/user'
+import { useDictStore } from '@/stores/dict'
+import RegionCascader from '@/components/ui/RegionCascader.vue'
+import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
+
+const route = useRoute()
+const router = useRouter()
+const userStore = useUserStore()
+const dictStore = useDictStore()
+
+const brandId = Number(route.params.id)
+const hasValidId = Number.isFinite(brandId) && brandId > 0
+
+const canWriteCompany = computed(() => userStore.hasPermission('company.write'))
+const canWriteProject = computed(() => userStore.hasPermission('project.write'))
+
+const loading = ref(false)
+const saving = ref(false)
+const editVisible = ref(false)
+const brand = ref<Brand | null>(null)
+const companyName = ref('')
+const brandFormRef = ref<FormInstance>()
+
+const brandForm = reactive({
+  brandName: '',
+  brandSlug: '',
+  mainBusiness: '',
+  regionCodes: [] as string[],
+  website: '',
+  officialAccount: '',
+  videoAccount: '',
+  douyinAccount: '',
+  phone: '',
+  wechat: '',
+  status: 'active',
+  description: '',
+  businessIntro: '',
+  standardBrandStatement: '',
+  businessStandardStatement: '',
+  forbiddenPhrases: '',
+})
+
+const brandRules: FormRules = {
+  brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
+  brandSlug: [
+    { required: true, message: '请输入品牌标识', trigger: 'blur' },
+    { pattern: /^[a-z0-9][a-z0-9_-]{1,127}$/, message: '标识需小写字母数字开头，可含 _ -', trigger: 'blur' },
+  ],
+  status: [{ required: true, message: '请选择状态', trigger: 'change' }],
+}
+
+const regionText = computed(() => {
+  if (!brand.value) return '-'
+  return regionDisplayFromPayload(brand.value) || brand.value.serviceArea || '-'
+})
+
+function fillForm(data: Brand) {
+  brandForm.brandName = data.brandName
+  brandForm.brandSlug = data.brandSlug
+  brandForm.mainBusiness = data.mainBusiness || ''
+  brandForm.regionCodes = regionCodesFromPayload(data)
+  brandForm.website = data.website || ''
+  brandForm.officialAccount = data.officialAccount || ''
+  brandForm.videoAccount = data.videoAccount || ''
+  brandForm.douyinAccount = data.douyinAccount || ''
+  brandForm.phone = data.phone || ''
+  brandForm.wechat = data.wechat || ''
+  brandForm.status = data.status || 'active'
+  brandForm.description = data.description || ''
+  brandForm.businessIntro = data.businessIntro || ''
+  brandForm.standardBrandStatement = data.standardBrandStatement || ''
+  brandForm.businessStandardStatement = data.businessStandardStatement || ''
+  brandForm.forbiddenPhrases = data.forbiddenPhrases || ''
+}
+
+async function load() {
+  loading.value = true
+  try {
+    const { data } = await getBrandDetail(brandId)
+    brand.value = data.data
+    fillForm(data.data)
+    if (data.data.companyId) {
+      const companyRes = await getCompanyDetail(data.data.companyId)
+      companyName.value = companyRes.data.data.companyName || ''
+    } else {
+      companyName.value = ''
+    }
+  } catch {
+    brand.value = null
+    companyName.value = ''
+  } finally {
+    loading.value = false
+  }
+}
+
+function openEdit() {
+  if (!brand.value) return
+  fillForm(brand.value)
+  editVisible.value = true
+}
+
+async function submitBrand() {
+  const valid = await brandFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+  saving.value = true
+  try {
+    const region = regionPayloadFromCodes(brandForm.regionCodes)
+    await updateBrand(brandId, {
+      companyId: brand.value?.companyId,
+      brandName: brandForm.brandName,
+      brandSlug: brandForm.brandSlug,
+      mainBusiness: brandForm.mainBusiness || undefined,
+      serviceArea: region.displayName,
+      provinceCode: region.provinceCode,
+      provinceName: region.provinceName,
+      cityCode: region.cityCode,
+      cityName: region.cityName,
+      districtCode: region.districtCode,
+      districtName: region.districtName,
+      website: brandForm.website || undefined,
+      officialAccount: brandForm.officialAccount || undefined,
+      videoAccount: brandForm.videoAccount || undefined,
+      douyinAccount: brandForm.douyinAccount || undefined,
+      phone: brandForm.phone || undefined,
+      wechat: brandForm.wechat || undefined,
+      status: brandForm.status,
+      description: brandForm.description || undefined,
+      businessIntro: brandForm.businessIntro || undefined,
+      standardBrandStatement: brandForm.standardBrandStatement || undefined,
+      businessStandardStatement: brandForm.businessStandardStatement || undefined,
+      forbiddenPhrases: brandForm.forbiddenPhrases || undefined,
+    })
+    ElMessage.success('品牌信息已更新')
+    editVisible.value = false
+    await load()
+  } finally {
+    saving.value = false
+  }
+}
+
+async function removeCurrentBrand() {
+  if (!brand.value) return
+  try {
+    await ElMessageBox.confirm(`确认删除品牌「${brand.value.brandName}」？该操作不可撤销。`, '删除确认', {
+      type: 'warning',
+      confirmButtonText: '确认删除',
+      cancelButtonText: '取消',
+    })
+    await deleteBrand(brandId)
+    ElMessage.success('删除成功')
+    if (brand.value.companyId) {
+      router.push(`/admin/customers/${brand.value.companyId}`)
+    } else {
+      router.push('/admin/customers')
+    }
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return
+  }
+}
+
+function goCreateProject() {
+  if (!brand.value?.companyId) {
+    ElMessage.warning('未找到所属客户，无法创建项目')
+    return
+  }
+  router.push({ path: '/admin/projects', query: { companyId: String(brand.value.companyId), brandId: String(brandId) } })
+}
+
+function goCompanyDetail() {
+  if (!brand.value?.companyId) return
+  router.push(`/admin/customers/${brand.value.companyId}`)
+}
+
+onMounted(async () => {
+  if (!hasValidId) {
+    ElMessage.error('品牌参数无效')
+    return
+  }
+  await dictStore.ensureLoaded()
+  await load()
+})
 </script>

@@ -1,1 +1,0 @@
-import{P as e}from"./PagePlaceholder-SbFam7TI.js";import{d as o,z as t,o as r}from"./index-BY8DVcs-.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=o({__name:"QuestionPool",setup(a){return(n,s)=>(r(),t(e,{title:"问题池管理",description:"问题分类、优先级、版本管理 (迁移自 keyword.html)",icon:"ChatDotSquare",phase:2}))}});export{m as default};

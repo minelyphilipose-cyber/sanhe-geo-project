@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
@@ -17,9 +18,9 @@ public class PartnerAccountTxn {
     private String txnNo;
     private String txnType;
     private String bizType;
-    private Long amount;
-    private Long balanceBefore;
-    private Long balanceAfter;
+    private BigDecimal amount;
+    private BigDecimal balanceBefore;
+    private BigDecimal balanceAfter;
     private Long relatedProjectId;
     private Long operatorUserId;
     private String offlineReference;

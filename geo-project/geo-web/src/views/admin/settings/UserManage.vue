@@ -4,7 +4,7 @@
       <div class="flex items-center gap-2">
         <el-input v-model="query.keyword" placeholder="搜索用户名/姓名/手机号" clearable style="width: 280px" @keyup.enter="load" />
         <el-select v-model="query.roleKey" placeholder="角色" clearable style="width: 200px" @change="load">
-          <el-option v-for="r in roles" :key="r.roleKey" :label="`${r.roleName} (${r.roleKey})`" :value="r.roleKey" />
+          <el-option v-for="r in roles" :key="r.roleKey" :label="dictStore.label('role', r.roleKey)" :value="r.roleKey" />
         </el-select>
         <el-select v-model="query.isActive" placeholder="状态" clearable style="width: 130px" @change="load">
           <el-option label="启用" :value="true" />
@@ -21,9 +21,13 @@
           <el-table-column prop="username" label="用户名" min-width="140" />
           <el-table-column prop="displayName" label="姓名" min-width="140" />
           <el-table-column label="角色" min-width="200">
-            <template #default="scope">{{ scope.row.roleKeys?.join(', ') || scope.row.primaryRole }}</template>
+            <template #default="scope">
+              {{ (scope.row.roleKeys || [scope.row.primaryRole]).map((item: string) => dictStore.label('role', item)).join(', ') }}
+            </template>
           </el-table-column>
-          <el-table-column prop="partnerId" label="合伙人ID" width="110" />
+          <el-table-column label="所属合伙人" min-width="160">
+            <template #default="scope">{{ partnerName(scope.row.partnerId) }}</template>
+          </el-table-column>
           <el-table-column prop="phone" label="手机" width="140" />
           <el-table-column prop="email" label="邮箱" min-width="180" />
           <el-table-column label="状态" width="100">
@@ -67,10 +71,14 @@
         <el-form-item label="姓名" prop="displayName" required><el-input v-model="form.displayName" /></el-form-item>
         <el-form-item v-if="formMode === 'create'" label="角色" prop="roleKey" required>
           <el-select v-model="form.roleKey" style="width: 100%">
-            <el-option v-for="r in roles" :key="r.roleKey" :label="`${r.roleName} (${r.roleKey})`" :value="r.roleKey" />
+            <el-option v-for="r in roles" :key="r.roleKey" :label="dictStore.label('role', r.roleKey)" :value="r.roleKey" />
           </el-select>
         </el-form-item>
-        <el-form-item label="合伙人ID"><el-input-number v-model="form.partnerId" :min="1" style="width: 100%" /></el-form-item>
+        <el-form-item label="所属合伙人">
+          <el-select v-model="form.partnerId" clearable filterable style="width: 100%" placeholder="可不选">
+            <el-option v-for="p in partnerOptions" :key="p.id" :label="p.partnerName" :value="p.id" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="手机号"><el-input v-model="form.phone" /></el-form-item>
         <el-form-item label="邮箱"><el-input v-model="form.email" /></el-form-item>
       </el-form>
@@ -84,7 +92,7 @@
       <el-form :model="roleForm" label-width="100px">
         <el-form-item label="角色" required>
           <el-select v-model="roleForm.roleKey" style="width: 100%">
-            <el-option v-for="r in roles" :key="r.roleKey" :label="`${r.roleName} (${r.roleKey})`" :value="r.roleKey" />
+            <el-option v-for="r in roles" :key="r.roleKey" :label="dictStore.label('role', r.roleKey)" :value="r.roleKey" />
           </el-select>
         </el-form-item>
       </el-form>
@@ -112,6 +120,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
+import { useDictStore } from '@/stores/dict'
 import {
   bindAdminUserRole,
   createAdminUser,
@@ -123,11 +132,14 @@ import {
   type AdminUserItem,
   type RoleOption,
 } from '@/api/system'
+import { getPartnerList, type PartnerItem } from '@/api/partner'
 
+const dictStore = useDictStore()
 const loading = ref(false)
 const saving = ref(false)
 const rows = ref<AdminUserItem[]>([])
 const roles = ref<RoleOption[]>([])
+const partnerOptions = ref<PartnerItem[]>([])
 const page = reactive({ current: 1, size: 10, total: 0 })
 const query = reactive<{ keyword: string; roleKey: string; isActive: boolean | undefined }>({
   keyword: '',
@@ -176,6 +188,20 @@ function resetForm() {
 async function loadRoles() {
   const { data } = await getRoleOptions()
   roles.value = data.data || []
+}
+
+async function loadPartners() {
+  try {
+    const { data } = await getPartnerList({ current: 1, size: 500 })
+    partnerOptions.value = data.data.records || []
+  } catch {
+    partnerOptions.value = []
+  }
+}
+
+function partnerName(partnerId?: number | null) {
+  if (!partnerId) return '-'
+  return partnerOptions.value.find((x) => x.id === partnerId)?.partnerName || '-'
 }
 
 async function load() {
@@ -313,7 +339,9 @@ async function toggleStatus(row: AdminUserItem) {
 }
 
 onMounted(async () => {
+  await dictStore.ensureLoaded()
   await loadRoles()
+  await loadPartners()
   await load()
 })
 </script>

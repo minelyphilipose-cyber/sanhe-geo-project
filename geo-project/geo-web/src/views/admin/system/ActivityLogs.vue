@@ -2,13 +2,18 @@
   <div>
     <div class="mb-4 flex items-center justify-between gap-3">
       <div class="flex items-center gap-2">
-        <el-select v-model="query.action" clearable placeholder="Action" style="width: 220px" @change="onSearch">
-          <el-option v-for="v in actionOptions" :key="v" :label="v" :value="v" />
+        <el-select v-model="query.action" clearable placeholder="操作类型" style="width: 220px" @change="onSearch">
+          <el-option
+            v-for="item in dictStore.options('activity_action')"
+            :key="item.dictKey"
+            :label="item.dictValue"
+            :value="item.dictKey"
+          />
         </el-select>
-        <el-select v-model="query.targetType" clearable placeholder="Target Type" style="width: 140px" @change="onSearch">
-          <el-option label="company" value="company" />
-          <el-option label="brand" value="brand" />
-          <el-option label="project" value="project" />
+        <el-select v-model="query.targetType" clearable placeholder="目标类型" style="width: 140px" @change="onSearch">
+          <el-option label="客户" value="company" />
+          <el-option label="品牌" value="brand" />
+          <el-option label="项目" value="project" />
         </el-select>
         <el-date-picker
           v-model="query.dateRange"
@@ -20,27 +25,30 @@
           style="width: 360px"
           @change="onSearch"
         />
-        <el-input v-model.number="query.targetId" clearable placeholder="Target ID" style="width: 120px" @keyup.enter="onSearch" />
-        <el-button @click="onSearch">Search</el-button>
+        <el-input v-model.number="query.targetId" clearable placeholder="目标编号" style="width: 120px" @keyup.enter="onSearch" />
+        <el-button @click="onSearch">查询</el-button>
       </div>
     </div>
 
     <el-card>
-      <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="No activity logs">
+      <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无操作日志">
         <el-table :data="rows" border>
-          <el-table-column label="Time" min-width="160">
+          <el-table-column label="时间" min-width="160">
             <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
           </el-table-column>
-          <el-table-column prop="operatorName" label="Operator" width="140" />
-          <el-table-column prop="action" label="action" min-width="180" />
-          <el-table-column prop="targetType" label="Target Type" width="120" />
-          <el-table-column prop="targetId" label="Target ID" width="100" />
-          <el-table-column label="Summary" min-width="260">
+          <el-table-column prop="operatorName" label="操作人" width="140" />
+          <el-table-column label="操作" min-width="180">
+            <template #default="{ row }">{{ dictStore.label('activity_action', row.action) }}</template>
+          </el-table-column>
+          <el-table-column label="目标类型" width="120">
+            <template #default="{ row }">{{ targetTypeLabel(row.targetType) }}</template>
+          </el-table-column>
+          <el-table-column label="摘要" min-width="260">
             <template #default="{ row }">{{ summaryText(row.detailJson) }}</template>
           </el-table-column>
-          <el-table-column label="Action" width="120" fixed="right">
+          <el-table-column label="操作" width="120" fixed="right">
             <template #default="{ row }">
-              <el-button type="primary" link @click="openDetail(row)">Detail</el-button>
+              <el-button type="primary" link @click="openDetail(row)">详情</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -58,10 +66,10 @@
       </DataState>
     </el-card>
 
-    <el-dialog v-model="detailVisible" title="Activity Detail" width="760px">
+    <el-dialog v-model="detailVisible" title="日志详情" width="760px">
       <pre class="detail-json">{{ selectedDetail }}</pre>
       <template #footer>
-        <el-button @click="detailVisible = false">Close</el-button>
+        <el-button @click="detailVisible = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
@@ -71,9 +79,11 @@
 import { onMounted, reactive, ref } from 'vue'
 import type { ActivityLog } from '@/types'
 import { getActivityLogs } from '@/api/system'
+import { useDictStore } from '@/stores/dict'
 import DataState from '@/components/ui/DataState.vue'
 import { formatDateTime } from '@/utils/format'
 
+const dictStore = useDictStore()
 const loading = ref(false)
 const detailVisible = ref(false)
 const selectedDetail = ref('{}')
@@ -90,20 +100,6 @@ const query = reactive<{
   targetId: undefined,
   dateRange: [],
 })
-
-const actionOptions = [
-  'company.create',
-  'company.update',
-  'company.delete',
-  'brand.create',
-  'brand.update',
-  'brand.delete',
-  'project.create',
-  'project.update',
-  'project.delete',
-  'project.status.update',
-  'project.stage.update',
-]
 
 async function load() {
   loading.value = true
@@ -126,6 +122,13 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+function targetTypeLabel(type?: string) {
+  if (type === 'company') return '客户'
+  if (type === 'brand') return '品牌'
+  if (type === 'project') return '项目'
+  return type || '-'
 }
 
 function onSearch() {
@@ -159,7 +162,7 @@ function summaryText(raw: string | null | undefined) {
     const from = parsed?.extra?.from
     const to = parsed?.extra?.to
     if (from && to) {
-      return `from ${from} -> to ${to}`
+      return `由 ${from} 变更为 ${to}`
     }
     const after = parsed?.after
     if (after && typeof after === 'object') {
@@ -174,7 +177,10 @@ function summaryText(raw: string | null | undefined) {
   return '-'
 }
 
-onMounted(load)
+onMounted(async () => {
+  await dictStore.ensureLoaded()
+  await load()
+})
 </script>
 
 <style scoped>

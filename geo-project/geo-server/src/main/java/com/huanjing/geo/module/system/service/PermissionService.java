@@ -13,12 +13,24 @@ public class PermissionService {
 
     private static final Map<String, Set<String>> LEGACY_ROLE_PERMS = Map.of(
             "super_admin", Set.of("*"),
-            "manager", Set.of("user.manage", "partner.read", "partner.write", "company.read", "company.write", "project.read", "project.write"),
-            "delivery_manager", Set.of("company.read", "company.write", "project.read", "project.write", "partner.read"),
+            "manager", Set.of(
+                    "user.manage", "partner.read", "partner.write", "company.read", "company.write", "project.read", "project.write",
+                    "project.status.activate", "project.status.close",
+                    "question_pool.core.confirm", "question_pool.core.delete",
+                    "report.review",
+                    "dispatch.alert.resolve", "dispatch.task.replay.dead_letter"
+            ),
+            "delivery_manager", Set.of(
+                    "company.read", "company.write", "project.read", "project.write", "partner.read",
+                    "project.status.activate", "project.status.close",
+                    "question_pool.core.confirm", "question_pool.core.delete",
+                    "report.review",
+                    "dispatch.alert.resolve"
+            ),
             "operator", Set.of("company.read", "company.write", "project.read", "project.write", "partner.read"),
-            "sales", Set.of("company.read", "company.write", "project.read"),
-            "partner", Set.of("partner.read", "company.read", "project.read"),
-            "partner_staff", Set.of("partner.read", "company.read", "project.read"),
+            "sales", Set.of("company.read", "project.read", "dispatch.presale.enqueue"),
+            "partner", Set.of("partner.read", "company.read", "company.write", "project.read", "project.write"),
+            "partner_staff", Set.of("partner.read", "company.read", "company.write", "project.read"),
             "partner_viewer", Set.of("partner.read", "company.read", "project.read")
     );
 

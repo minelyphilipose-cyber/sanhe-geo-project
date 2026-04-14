@@ -3,9 +3,11 @@ package com.huanjing.geo.module.partner.dto;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
+import java.math.BigDecimal;
+
 @Data
 public class PartnerAdjustRequest {
     @NotNull
-    private Long amount;
+    private BigDecimal amount;
     private String remark;
 }
