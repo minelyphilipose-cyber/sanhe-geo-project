@@ -16,8 +16,9 @@ public class PackageContentConfig {
     private String articleType;
     private Integer articlesPerBatch;
     private Integer questionsPerArticle;
+    private String publishSiteTier;
+    private Integer publishSiteCount;
     private Boolean isActive;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
-

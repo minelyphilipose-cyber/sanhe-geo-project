@@ -23,11 +23,24 @@
         active-text-color="#FFFFFF"
         router
       >
-        <template v-for="item in visibleMenus" :key="item.name">
-          <el-menu-item :index="item.path">
-            <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
-            <template #title>{{ item.title }}</template>
-          </el-menu-item>
+        <template v-for="group in visibleGroups" :key="group.key">
+          <li v-if="group.title && !collapsed" class="sidebar__group-title">{{ group.title }}</li>
+          <template v-for="item in group.menus" :key="item.name">
+            <el-menu-item :index="item.path">
+              <el-icon v-if="item.icon"><component :is="item.icon" /></el-icon>
+              <template #title>
+                <div class="sidebar__menu-title">
+                  <span>{{ item.title }}</span>
+                  <span
+                    v-if="item.badgeCount && item.badgeCount > 0"
+                    class="sidebar__badge"
+                  >
+                    {{ item.badgeCount > 99 ? '99+' : item.badgeCount }}
+                  </span>
+                </div>
+              </template>
+            </el-menu-item>
+          </template>
         </template>
       </el-menu>
     </el-scrollbar>
@@ -53,11 +66,18 @@ interface MenuItem {
   icon?: string
   roles?: RoleType[]
   permissions?: string[]
+  badgeCount?: number
+}
+
+interface MenuGroup {
+  key: string
+  title?: string
+  menus: MenuItem[]
 }
 
 const props = defineProps<{
   collapsed: boolean
-  menus: MenuItem[]
+  groups: MenuGroup[]
 }>()
 
 defineEmits<{
@@ -67,22 +87,32 @@ defineEmits<{
 const route = useRoute()
 const userStore = useUserStore()
 
+const flattenMenus = computed(() => props.groups.flatMap((g) => g.menus))
+
 const activeMenu = computed(() => {
   const matched = route.matched
   for (let i = matched.length - 1; i >= 0; i--) {
     const path = matched[i].path
-    const found = props.menus.find((m) => path.startsWith(m.path))
+    const found = flattenMenus.value.find((m) => {
+      const purePath = m.path.split('?')[0]
+      return path.startsWith(purePath)
+    })
     if (found) return found.path
   }
   return route.path
 })
 
-const visibleMenus = computed(() =>
-  props.menus.filter((m) => {
-    const rolePass = !m.roles || m.roles.length === 0 || userStore.hasRole(m.roles)
-    const permPass = !m.permissions || m.permissions.length === 0 || userStore.hasPermission(m.permissions)
-    return rolePass && permPass
-  }),
+const visibleGroups = computed(() =>
+  props.groups
+    .map((group) => ({
+      ...group,
+      menus: group.menus.filter((m) => {
+        const rolePass = !m.roles || m.roles.length === 0 || userStore.hasRole(m.roles)
+        const permPass = !m.permissions || m.permissions.length === 0 || userStore.hasPermission(m.permissions)
+        return rolePass && permPass
+      }),
+    }))
+    .filter((group) => group.menus.length > 0),
 )
 </script>
 
@@ -135,6 +165,40 @@ const visibleMenus = computed(() =>
   padding-top: 8px;
 }
 
+.sidebar__group-title {
+  margin: 10px 12px 6px;
+  padding: 0 10px;
+  list-style: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.sidebar__menu-title {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.sidebar__badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #f87171;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: center;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
 :deep(.el-menu) {
   border-right: none !important;
   padding: 0 8px;
@@ -183,4 +247,3 @@ const visibleMenus = computed(() =>
   opacity: 0;
 }
 </style>
-

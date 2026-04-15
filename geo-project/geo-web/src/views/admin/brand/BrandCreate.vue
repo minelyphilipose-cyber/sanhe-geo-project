@@ -77,6 +77,7 @@
         <el-upload :show-file-list="false" :before-upload="beforeUpload" :disabled="!createdBrandId">
           <el-button type="primary" :disabled="!createdBrandId">上传素材</el-button>
         </el-upload>
+        <span class="text-xs text-gray-500">单文件不超过 10MB</span>
         <span v-if="!createdBrandId" class="text-xs text-gray-500">请先保存品牌后再上传素材</span>
       </div>
 
@@ -200,6 +201,7 @@ const availableBrandIndustries = computed(() => companyIndustryTags.value)
 const materials = ref<BrandMaterial[]>([])
 const versions = ref<BrandProfileVersion[]>([])
 const uploadCategory = ref('brand_image')
+const MAX_UPLOAD_SIZE = 10 * 1024 * 1024
 
 const previewableExtSet = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg', 'tif', 'tiff'])
 const imageExtSet = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg', 'tif', 'tiff'])
@@ -374,6 +376,10 @@ async function submitBrand() {
 
 async function beforeUpload(file: UploadRawFile) {
   if (!createdBrandId.value) return false
+  if (file.size > MAX_UPLOAD_SIZE) {
+    ElMessage.error(`文件「${file.name}」超过 10MB，已拒绝上传`)
+    return false
+  }
   try {
     await uploadBrandMaterial(createdBrandId.value, uploadCategory.value, file as File)
     ElMessage.success('上传成功')

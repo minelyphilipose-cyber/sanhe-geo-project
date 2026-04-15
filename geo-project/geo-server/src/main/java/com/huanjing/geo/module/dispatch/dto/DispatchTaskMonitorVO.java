@@ -20,9 +20,9 @@ public class DispatchTaskMonitorVO {
     private LocalDate windowEnd;
     private LocalDateTime dueTime;
     private Integer retryCount;
+    private LocalDateTime firstStartedAt;
     private LocalDateTime finishedAt;
     private String lastError;
     private String errorContext;
     private LocalDateTime createdAt;
 }
-

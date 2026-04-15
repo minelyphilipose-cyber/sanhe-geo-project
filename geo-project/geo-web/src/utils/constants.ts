@@ -117,6 +117,7 @@ export const PLATFORM_MAP = Object.fromEntries(
    报表类型
    ==================================================== */
 export const REPORT_TYPE_MAP: Record<ReportType, { label: string; icon: string }> = {
+  presale:           { label: '售前诊断报告', icon: 'Document' },
   presale_diagnosis: { label: '售前诊断报告', icon: 'Document' },
   biweekly:          { label: '双周简报',     icon: 'Calendar' },
   monthly:           { label: '月度报表',     icon: 'DataLine' },
@@ -125,13 +126,12 @@ export const REPORT_TYPE_MAP: Record<ReportType, { label: string; icon: string }
 }
 
 export const REPORT_STATUS_MAP: Record<ReportStatus, { label: string; type: string }> = {
-  generating:        { label: '生成中',   type: 'info' },
-  pending_review:    { label: '待复核',   type: 'warning' },
-  auto_approved:     { label: '自动通过', type: 'success' },
-  manually_approved: { label: '人工通过', type: 'success' },
-  intercepted:       { label: '已拦截',   type: 'danger' },
-  published:         { label: '已发布',   type: 'success' },
-  archived:          { label: '已归档',   type: 'info' },
+  generating:  { label: '生成中', type: 'info' },
+  draft:       { label: '草稿',   type: 'warning' },
+  intercepted: { label: '已拦截', type: 'danger' },
+  published:   { label: '已发布', type: 'success' },
+  superseded:  { label: '已替代', type: 'info' },
+  archived:    { label: '已归档', type: 'info' },
 }
 
 /* ====================================================

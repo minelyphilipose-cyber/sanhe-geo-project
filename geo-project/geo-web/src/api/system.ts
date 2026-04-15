@@ -1,5 +1,5 @@
 import request from './request'
-import type { ActivityLog, PageResult, R } from '@/types'
+import type { ActivityLog, PageResult, R, KeywordAffixWord, KeywordAffixWordOptionResult } from '@/types'
 
 export interface AdminUserItem {
   id: number
@@ -75,4 +75,44 @@ export interface ActivityLogQuery {
 
 export function getActivityLogs(params: ActivityLogQuery) {
   return request.get<R<PageResult<ActivityLog>>>('/admin/activity-logs', { params })
+}
+
+export interface KeywordAffixWordQuery {
+  current?: number
+  size?: number
+  type?: string
+  affixKind?: 'prefix' | 'suffix'
+  keyword?: string
+  enabled?: boolean
+}
+
+export function getAdminKeywordAffixWords(params: KeywordAffixWordQuery) {
+  return request.get<R<PageResult<KeywordAffixWord>>>('/admin/keyword-affix-words', { params })
+}
+
+export function createAdminKeywordAffixWord(payload: {
+  type?: string
+  affixKind: 'prefix' | 'suffix'
+  wordText: string
+  sortOrder: number
+  enabled?: boolean
+}) {
+  return request.post<R<KeywordAffixWord>>('/admin/keyword-affix-words', payload)
+}
+
+export function updateAdminKeywordAffixWord(id: number, payload: {
+  type?: string
+  affixKind: 'prefix' | 'suffix'
+  wordText: string
+  sortOrder: number
+}) {
+  return request.put<R<KeywordAffixWord>>(`/admin/keyword-affix-words/${id}`, payload)
+}
+
+export function updateAdminKeywordAffixWordStatus(id: number, enabled: boolean) {
+  return request.put<R<void>>(`/admin/keyword-affix-words/${id}/status`, { enabled })
+}
+
+export function getKeywordAffixWordOptions(type?: string) {
+  return request.get<R<KeywordAffixWordOptionResult>>('/keyword-affix-words/options', { params: { type: type || undefined } })
 }

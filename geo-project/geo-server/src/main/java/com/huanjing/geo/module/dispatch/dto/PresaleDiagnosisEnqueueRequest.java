@@ -7,5 +7,6 @@ import lombok.Data;
 public class PresaleDiagnosisEnqueueRequest {
     @NotNull
     private Long projectId;
+    private Long questionSetId;
     private String remark;
 }

@@ -6,6 +6,7 @@ import lombok.Data;
 public class DispatchDashboardVO {
     private Long activeProjectCount;
     private Long dueTaskCount;
+    private Long runningTaskCount;
     private Long completedTaskCount;
     private Long failedTaskCount;
     private Long deadLetterPendingCount;
@@ -13,4 +14,3 @@ public class DispatchDashboardVO {
     private Long avgTaskDurationMs;
     private String rangeLabel;
 }
-

@@ -12,6 +12,8 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 
 @Slf4j
 @RestControllerAdvice
@@ -72,6 +74,24 @@ public class GlobalExceptionHandler {
         log.warn("Constraint failed path={} method={} ip={} msg={}",
                 request.getRequestURI(), request.getMethod(), request.getRemoteAddr(), e.getMessage());
         return R.fail(400, e.getMessage());
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public R<?> handleMaxUploadSize(MaxUploadSizeExceededException e, HttpServletRequest request) {
+        log.warn("Upload size exceeded path={} method={} ip={} msg={}",
+                request.getRequestURI(), request.getMethod(), request.getRemoteAddr(), e.getMessage());
+        return R.fail(400, "Upload file exceeds 10MB limit");
+    }
+
+    @ExceptionHandler(MultipartException.class)
+    public R<?> handleMultipart(MultipartException e, HttpServletRequest request) {
+        Throwable cause = e.getCause();
+        if (cause instanceof MaxUploadSizeExceededException) {
+            return handleMaxUploadSize((MaxUploadSizeExceededException) cause, request);
+        }
+        log.warn("Multipart failed path={} method={} ip={} msg={}",
+                request.getRequestURI(), request.getMethod(), request.getRemoteAddr(), e.getMessage());
+        return R.fail(400, "Invalid upload request");
     }
 
     @ExceptionHandler(Exception.class)

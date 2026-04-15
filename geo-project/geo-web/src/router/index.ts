@@ -5,6 +5,7 @@ import { useUserStore } from '@/stores/user'
 import adminRoutes from './admin'
 import partnerRoutes from './partner'
 import type { RoleType } from '@/types'
+import { resolvePostLoginPath } from '@/utils/navigation'
 
 NProgress.configure({ showSpinner: false })
 
@@ -58,8 +59,20 @@ router.beforeEach(async (to, _from, next) => {
 
   if (isPublicPath(to.path)) {
     if (to.path === '/login' && userStore.isLoggedIn) {
-      const target = userStore.isPartner ? '/partner/home' : '/admin/overview'
-      return next(target)
+      try {
+        await userStore.syncProfile()
+      } catch {
+        await userStore.logout()
+        return next()
+      }
+      const target = resolvePostLoginPath({
+        isPartner: userStore.isPartner,
+        hasPermission: userStore.hasPermission,
+        hasRole: userStore.hasRole,
+      })
+      if (target && target !== '/login') {
+        return next(target)
+      }
     }
     return next()
   }
@@ -73,7 +86,7 @@ router.beforeEach(async (to, _from, next) => {
       await userStore.syncProfile()
     } catch {
       await userStore.logout()
-      return next('/login')
+      return next('/403?reason=session_expired')
     }
   }
 

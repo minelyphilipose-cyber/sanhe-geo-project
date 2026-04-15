@@ -10,10 +10,22 @@ const request = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+function syncAccessTokenFromResponse(response: AxiosResponse<any>) {
+  const token = response.headers?.['x-access-token']
+  if (!token) return
+  const userStore = useUserStore()
+  userStore.updateAccessToken(token)
+}
+
+function isAuthRequest(url?: string): boolean {
+  if (!url) return false
+  return url.includes('/auth/login') || url.includes('/auth/refresh') || url.includes('/auth/logout')
+}
+
 request.interceptors.request.use(
   (config) => {
     const userStore = useUserStore()
-    if (userStore.accessToken) {
+    if (userStore.accessToken && !isAuthRequest(config.url)) {
       config.headers.Authorization = `Bearer ${userStore.accessToken}`
     }
     return config
@@ -26,19 +38,21 @@ let pendingQueue: Array<(token: string) => void> = []
 
 request.interceptors.response.use(
   async (response: AxiosResponse<R>) => {
+    syncAccessTokenFromResponse(response)
+
     const responseType = response.config.responseType
     if (responseType === 'blob' || responseType === 'arraybuffer') {
       return response
     }
     const res = response.data
     const reqUrl = response.config.url || ''
-    const isAuthApi = reqUrl.includes('/auth/login') || reqUrl.includes('/auth/refresh') || reqUrl.includes('/auth/logout')
+    const isAuthApi = isAuthRequest(reqUrl)
 
     if (res.code !== 0) {
       const userStore = useUserStore()
       if (res.code === 401 && !isAuthApi) {
         await userStore.logout()
-        router.push('/login')
+        router.push('/403?reason=session_expired')
         return Promise.reject(new Error(res.message || '登录状态已失效'))
       }
       if (res.code === 403) {
@@ -54,8 +68,9 @@ request.interceptors.response.use(
 
   async (error) => {
     const originalRequest = error.config as AxiosRequestConfig & { _retry?: boolean }
+    const isAuthApi = isAuthRequest(originalRequest?.url)
 
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (error.response?.status === 401 && !isAuthApi && !originalRequest._retry) {
       originalRequest._retry = true
 
       if (!isRefreshing) {
@@ -73,7 +88,7 @@ request.interceptors.response.use(
         } catch {
           const userStore = useUserStore()
           await userStore.logout()
-          router.push('/login')
+          router.push('/403?reason=session_expired')
           return Promise.reject(error)
         } finally {
           isRefreshing = false
@@ -90,6 +105,12 @@ request.interceptors.response.use(
     }
 
     if (error.response?.status === 403) {
+      if (isAuthApi) {
+        const userStore = useUserStore()
+        await userStore.logout()
+        router.push('/403?reason=session_expired')
+        return Promise.reject(error)
+      }
       router.push('/403')
       return Promise.reject(error)
     }

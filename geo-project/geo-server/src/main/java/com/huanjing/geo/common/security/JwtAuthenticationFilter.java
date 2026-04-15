@@ -23,6 +23,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
+    public static final String ACCESS_TOKEN_HEADER = "X-Access-Token";
+
     private final JwtTokenProvider jwtTokenProvider;
 
     @Override
@@ -50,8 +52,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                         );
                 SecurityContextHolder.getContext().setAuthentication(auth);
                 MDC.put("userId", String.valueOf(userId));
+
+                // Sliding expiration: renew access token on every valid authenticated request.
+                String renewedAccessToken = jwtTokenProvider.createAccessToken(userId, username, role, tokenVersion);
+                response.setHeader(ACCESS_TOKEN_HEADER, renewedAccessToken);
             } catch (Exception e) {
-                log.debug("Token解析失败: {}", e.getMessage());
+                log.debug("Token parsing failed: {}", e.getMessage());
             }
         }
 

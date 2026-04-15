@@ -67,6 +67,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '问题池', hidden: true, permissions: ['project.read'] },
     },
     {
+      path: 'projects/:id/presale',
+      name: 'PresaleDiagnosis',
+      component: () => import('@/views/admin/project/PresaleDiagnosis.vue'),
+      meta: { title: '售前诊断', hidden: true, permissions: ['project.read'] },
+    },
+    {
       path: 'question-pools',
       name: 'QuestionPoolManage',
       component: () => import('@/views/admin/project/QuestionPoolManage.vue'),
@@ -76,7 +82,7 @@ const adminRoutes: RouteRecordRaw = {
       path: 'projects/:id/tasks',
       name: 'TaskList',
       component: () => import('@/views/admin/project/TaskList.vue'),
-      meta: { title: '监测任务', hidden: true, permissions: ['project.read'] },
+      meta: { title: '监测任务', hidden: true, roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
     },
     {
       path: 'projects/:id/reports',
@@ -92,9 +98,14 @@ const adminRoutes: RouteRecordRaw = {
     },
     {
       path: 'monitoring',
-      name: 'Monitoring',
+      redirect: '/admin/monitoring/tasks',
+      meta: { hidden: true, roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
+    },
+    {
+      path: 'monitoring/tasks',
+      name: 'MonitoringTasks',
       component: () => import('@/views/admin/monitoring/MonitoringDashboard.vue'),
-      meta: { title: '监测中心', icon: 'Monitor', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
+      meta: { title: '调度监控', icon: 'Monitor', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
     },
     {
       path: 'content/execution',
@@ -103,10 +114,16 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '内容与执行', icon: 'Memo', permissions: ['project.read'] },
     },
     {
+      path: 'keyword-groups',
+      name: 'KeywordGroupManage',
+      component: () => import('@/views/admin/project/KeywordGroupManage.vue'),
+      meta: { title: '拓词管理', icon: 'MagicStick', permissions: ['keyword_group.read'] },
+    },
+    {
       path: 'monitoring/platforms',
       name: 'PlatformHealth',
       component: () => import('@/views/admin/monitoring/PlatformHealth.vue'),
-      meta: { title: '平台健康', hidden: true, roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
+      meta: { title: '平台健康', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
     },
     {
       path: 'reports',
@@ -144,7 +161,7 @@ const adminRoutes: RouteRecordRaw = {
       path: 'alerts',
       name: 'AlertCenter',
       component: () => import('@/views/admin/alert/AlertCenter.vue'),
-      meta: { title: '异常中心', icon: 'Bell', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
+      meta: { title: '告警中心', icon: 'Bell', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
     },
     {
       path: 'activity-logs',
@@ -156,7 +173,7 @@ const adminRoutes: RouteRecordRaw = {
       path: 'settings/platforms',
       name: 'PlatformConfig',
       component: () => import('@/views/admin/settings/PlatformConfig.vue'),
-      meta: { title: '平台配置', icon: 'Setting', permissions: ['user.manage'] },
+      meta: { title: 'AI平台配置', icon: 'Setting', permissions: ['user.manage'] },
     },
     {
       path: 'settings/publish-sites',
@@ -177,10 +194,16 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '字典中心', permissions: ['user.manage'] },
     },
     {
+      path: 'settings/affix-words',
+      name: 'KeywordAffixWordManage',
+      component: () => import('@/views/admin/settings/KeywordAffixWordManage.vue'),
+      meta: { title: '拓词信息维护', permissions: ['keyword_affix.manage'] },
+    },
+    {
       path: 'settings/users',
       name: 'UserManage',
       component: () => import('@/views/admin/settings/UserManage.vue'),
-      meta: { title: '用户管理', hidden: true, permissions: ['user.manage'] },
+      meta: { title: '用户与权限', hidden: true, permissions: ['user.manage'] },
     },
   ],
 }

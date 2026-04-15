@@ -86,20 +86,19 @@
             filterable
             style="width: 100%"
             placeholder="先选择客户"
-            :disabled="formMode === 'edit'"
+            :disabled="formMode === 'edit' || lockCompanyBrandSelection"
             @change="onCompanyChange"
           >
             <el-option v-for="c in companyOptions" :key="c.id" :label="c.companyName" :value="c.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="品牌">
+        <el-form-item label="品牌" required>
           <el-select
             v-model="form.brandId"
             filterable
-            clearable
             style="width: 100%"
-            placeholder="可不选；选品牌前需先选客户"
-            :disabled="!form.companyId || formMode === 'edit'"
+            placeholder="请选择品牌；选品牌前需先选客户"
+            :disabled="!form.companyId || formMode === 'edit' || lockCompanyBrandSelection"
           >
             <el-option v-for="b in brandOptions" :key="b.id" :label="b.brandName" :value="b.id" />
           </el-select>
@@ -280,6 +279,18 @@ const canActivateProject = computed(() => userStore.hasPermission('project.statu
 const canCloseProject = computed(() => userStore.hasPermission('project.status.close'))
 const canConfirmCoreQuestion = computed(() => userStore.hasPermission('question_pool.core.confirm'))
 const canDeleteCoreQuestion = computed(() => userStore.hasPermission('question_pool.core.delete'))
+const presetCompanyId = computed(() => {
+  const raw = Number(route.query.companyId)
+  return Number.isFinite(raw) && raw > 0 ? raw : null
+})
+const presetBrandId = computed(() => {
+  const raw = Number(route.query.brandId)
+  return Number.isFinite(raw) && raw > 0 ? raw : null
+})
+const fromCustomerBrandPath = computed(() => {
+  return route.query.source === 'customer_brand' && !!presetCompanyId.value && !!presetBrandId.value
+})
+const lockCompanyBrandSelection = computed(() => formMode.value === 'create' && fromCustomerBrandPath.value)
 const companyOwnerTypeLabel = computed(() => {
   const company = companyOptions.value.find((c) => c.id === form.companyId)
   const key = company?.ownerType || (company?.partnerId ? 'partner' : 'direct')
@@ -334,6 +345,7 @@ const form = reactive({
 const rules: FormRules = {
   projectName: [{ required: true, message: '请输入项目名称', trigger: 'blur' }],
   companyId: [{ required: true, message: '请选择客户', trigger: 'change' }],
+  brandId: [{ required: true, message: '请选择品牌', trigger: 'change' }],
   packageType: [{ required: true, message: '请选择套餐', trigger: 'change' }],
   packagePriceYuan: [{ required: true, message: '请输入签约价', trigger: 'change' }],
   serviceMonths: [{ required: true, message: '请输入服务月数', trigger: 'change' }],
@@ -406,15 +418,12 @@ function applyDefaultPackage() {
 function resetForm() {
   form.projectName = ''
   form.projectAliases = ''
-  form.companyId = route.query.companyId ? Number(route.query.companyId) : null
-  form.brandId = route.query.brandId ? Number(route.query.brandId) : null
+  form.companyId = fromCustomerBrandPath.value ? presetCompanyId.value : null
+  form.brandId = fromCustomerBrandPath.value ? presetBrandId.value : null
   applyDefaultPackage()
   form.selectedPlatformCodesP0 = []
   form.selectedPlatformCodesP1 = []
   form.selectedPlatformCodesP2 = []
-  form.requiredPlatformP0Count = 0
-  form.requiredPlatformP1Count = 0
-  form.requiredPlatformP2Count = 0
   form.status = 'paused'
   form.regionCodes = []
   form.deliveryMode = 'managed'
@@ -425,6 +434,11 @@ function resetForm() {
 }
 
 function onCompanyChange() {
+  if (lockCompanyBrandSelection.value) {
+    form.companyId = presetCompanyId.value
+    form.brandId = presetBrandId.value
+    return
+  }
   if (!form.companyId) {
     brandOptions.value = []
     form.brandId = null
@@ -500,10 +514,23 @@ function onPageChange(v: number) {
   load()
 }
 
-function openCreate() {
+async function openCreate() {
   formMode.value = 'create'
   editingId.value = null
   resetForm()
+  if (form.companyId) {
+    await loadBrands(form.companyId)
+    if (lockCompanyBrandSelection.value) {
+      const hasPresetBrand = brandOptions.value.some((b) => b.id === presetBrandId.value)
+      if (!hasPresetBrand) {
+        ElMessage.warning('当前客户下未找到预设品牌，请返回客户详情页重新发起')
+      } else {
+        form.brandId = presetBrandId.value
+      }
+    }
+  } else {
+    brandOptions.value = []
+  }
   formVisible.value = true
 }
 
@@ -554,6 +581,10 @@ async function submit() {
   }
   if (!form.companyId) {
     ElMessage.warning('请先选择客户')
+    return
+  }
+  if (formMode.value === 'create' && !form.brandId) {
+    ElMessage.warning('新增项目时品牌为必填项')
     return
   }
   if (form.selectedPlatformCodesP0.length !== form.requiredPlatformP0Count) {
@@ -618,6 +649,10 @@ async function submit() {
       deliveryMode: form.deliveryMode || 'managed',
       primaryGoal: form.primaryGoal || undefined,
       remark: form.remark || undefined,
+    }
+    if (lockCompanyBrandSelection.value) {
+      payload.companyId = presetCompanyId.value
+      payload.brandId = presetBrandId.value
     }
     if (formMode.value === 'create') {
       payload.questionPoolItems = normalizedQuestionItems
@@ -767,6 +802,9 @@ onMounted(async () => {
   await loadCompanies()
   await loadBrands(form.companyId)
   await load()
+  if (fromCustomerBrandPath.value && canWriteProject.value) {
+    await openCreate()
+  }
 })
 </script>
 

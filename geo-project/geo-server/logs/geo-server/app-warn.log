@@ -1,0 +1,1 @@
+2026-04-14 19:00:49.217 [main] WARN  [] o.f.c.i.s.DefaultSqlScriptExecutor - DB: Integer display width is deprecated and will be removed in a future release. (SQL State: HY000 - Error Code: 1681)

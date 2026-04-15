@@ -29,9 +29,10 @@ public class DispatchMonitorController {
     public R<DispatchDashboardVO> dashboard(
             @RequestParam(defaultValue = "today") String rangeType,
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate startDate,
-            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate endDate
+            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate endDate,
+            @RequestParam(required = false) Long projectId
     ) {
-        return R.ok(dispatchMonitorService.dashboard(rangeType, startDate, endDate));
+        return R.ok(dispatchMonitorService.dashboard(rangeType, startDate, endDate, projectId));
     }
 
     @GetMapping("/tasks")
@@ -41,11 +42,12 @@ public class DispatchMonitorController {
             @RequestParam(defaultValue = "today") String rangeType,
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate startDate,
             @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM-dd") LocalDate endDate,
+            @RequestParam(required = false) Long projectId,
             @RequestParam(required = false) String taskType,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String keyword
     ) {
-        return R.ok(dispatchMonitorService.taskPage(current, size, rangeType, startDate, endDate, taskType, status, keyword));
+        return R.ok(dispatchMonitorService.taskPage(current, size, rangeType, startDate, endDate, projectId, taskType, status, keyword));
     }
 
     @GetMapping("/platforms")
@@ -76,4 +78,3 @@ public class DispatchMonitorController {
         return R.ok();
     }
 }
-

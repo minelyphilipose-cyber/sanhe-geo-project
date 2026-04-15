@@ -7,6 +7,8 @@
         <div class="flex items-center justify-between">
           <span>基础信息</span>
           <div class="space-x-2">
+            <el-button size="small" @click="goPresale">售前诊断</el-button>
+            <el-button size="small" @click="goReports">项目报表</el-button>
             <el-tag>{{ dictStore.label('project_status', project?.status) }}</el-tag>
             <el-tag type="info">{{ dictStore.label('project_stage', project?.stage) }}</el-tag>
           </div>
@@ -129,6 +131,14 @@ function formatMetricValue(v?: number | null) {
 function regionText(p?: Project | null) {
   if (!p) return '-'
   return regionDisplayFromPayload(p) || '-'
+}
+
+function goPresale() {
+  router.push(`/admin/projects/${projectId}/presale`)
+}
+
+function goReports() {
+  router.push(`/admin/projects/${projectId}/reports`)
 }
 
 async function load() {

@@ -644,7 +644,14 @@ async function submitDeduct() {
 }
 
 function goCreateProject(brandId: number) {
-  router.push({ path: '/admin/projects', query: { brandId: String(brandId), companyId: String(companyId) } })
+  router.push({
+    path: '/admin/projects',
+    query: {
+      brandId: String(brandId),
+      companyId: String(companyId),
+      source: 'customer_brand',
+    },
+  })
 }
 
 function goBrandDetail(brandId: number) {

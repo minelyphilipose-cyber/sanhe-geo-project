@@ -43,6 +43,9 @@
           <el-table-column label="目标指标" min-width="180">
             <template #default="scope">{{ targetMetricLabel(scope.row.targetMetricType) }}: {{ formatMetricValue(scope.row.targetMetricValue) }}</template>
           </el-table-column>
+          <el-table-column label="发布站点(默认)" min-width="150">
+            <template #default="scope">{{ contentPublishSummary(scope.row.contentConfigs) }}</template>
+          </el-table-column>
           <el-table-column prop="sortOrder" label="排序" width="90" />
           <el-table-column label="状态" width="100">
             <template #default="scope">
@@ -260,6 +263,27 @@
         </el-row>
 
         <el-divider content-position="left">内容生成规则</el-divider>
+        <el-row :gutter="12" class="mb-2">
+          <el-col :xs="24" :sm="12" :lg="8">
+            <el-form-item label="发布站点等级（默认）" required>
+              <el-select v-model="form.defaultPublishSiteTier" style="width: 100%">
+                <el-option label="S0" value="S0" />
+                <el-option label="S1" value="S1" />
+                <el-option label="S2" value="S2" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12" :lg="8">
+            <el-form-item label="发布站点数量（默认）" required>
+              <el-input-number v-model="form.defaultPublishSiteCount" :min="1" :step="1" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="24" :lg="8" class="action-col">
+            <el-form-item label="批量操作">
+              <el-button type="primary" class="apply-all-btn" @click="applyPublishSiteDefaults">应用到全部文章类型</el-button>
+            </el-form-item>
+          </el-col>
+        </el-row>
         <el-form-item label="文章类型规则">
           <el-table :data="form.contentConfigs" border>
             <el-table-column label="文章类型" min-width="180">
@@ -277,6 +301,20 @@
             <el-table-column label="每篇问题数" min-width="140">
               <template #default="scope">
                 <el-input-number v-model="scope.row.questionsPerArticle" :min="1" :step="1" style="width: 100%" />
+              </template>
+            </el-table-column>
+            <el-table-column label="发布站点等级" min-width="150">
+              <template #default="scope">
+                <el-select v-model="scope.row.publishSiteTier" style="width: 100%">
+                  <el-option label="S0" value="S0" />
+                  <el-option label="S1" value="S1" />
+                  <el-option label="S2" value="S2" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="发布站点数量" min-width="150">
+              <template #default="scope">
+                <el-input-number v-model="scope.row.publishSiteCount" :min="1" :step="1" style="width: 100%" />
               </template>
             </el-table-column>
             <el-table-column label="是否启用" width="120">
@@ -349,6 +387,8 @@ const form = reactive({
   targetMetricType: 'brand_mention_rate',
   targetMetricValue: 0.05,
   targetWindowDays: 90,
+  defaultPublishSiteTier: 'S1',
+  defaultPublishSiteCount: 1,
   enabled: true,
   sortOrder: 10,
   remark: '',
@@ -423,6 +463,12 @@ function articleTypeLabel(v?: string | null) {
   return matched?.label || v || '-'
 }
 
+function contentPublishSummary(configs?: PackageContentConfig[] | null) {
+  const first = (configs || [])[0]
+  if (!first) return '-'
+  return `${first.publishSiteTier || '-'} / ${first.publishSiteCount || '-'}`
+}
+
 function formatMetricValue(v?: number | null) {
   if (v == null) return '-'
   if (v <= 1) {
@@ -455,6 +501,8 @@ function resetForm() {
   form.targetMetricType = 'brand_mention_rate'
   form.targetMetricValue = 0.05
   form.targetWindowDays = 90
+  form.defaultPublishSiteTier = 'S1'
+  form.defaultPublishSiteCount = 1
   form.enabled = true
   form.sortOrder = 10
   form.remark = ''
@@ -466,6 +514,8 @@ function defaultContentConfigs(): PackageContentConfig[] {
     articleType: item.value,
     articlesPerBatch: 1,
     questionsPerArticle: 3,
+    publishSiteTier: 'S1',
+    publishSiteCount: 1,
     isActive: true,
   }))
 }
@@ -527,6 +577,8 @@ async function openEdit(row: PackagePlan) {
   form.targetMetricType = row.targetMetricType
   form.targetMetricValue = row.targetMetricValue
   form.targetWindowDays = row.targetWindowDays
+  form.defaultPublishSiteTier = 'S1'
+  form.defaultPublishSiteCount = 1
   form.enabled = row.enabled
   form.sortOrder = row.sortOrder
   form.remark = row.remark || ''
@@ -539,6 +591,10 @@ async function openEdit(row: PackagePlan) {
       form.contentConfigs = defaultContentConfigs()
     }
   }
+  if (form.contentConfigs.length > 0) {
+    form.defaultPublishSiteTier = form.contentConfigs[0].publishSiteTier || 'S1'
+    form.defaultPublishSiteCount = Number(form.contentConfigs[0].publishSiteCount || 1)
+  }
   formVisible.value = true
 }
 
@@ -550,6 +606,8 @@ function normalizeContentConfigs(input: PackageContentConfig[]) {
       articleType: item.articleType,
       articlesPerBatch: Number(item.articlesPerBatch || 1),
       questionsPerArticle: Number(item.questionsPerArticle || 3),
+      publishSiteTier: item.publishSiteTier || 'S1',
+      publishSiteCount: Number(item.publishSiteCount || 1),
       isActive: !!item.isActive,
     })
   }
@@ -557,6 +615,8 @@ function normalizeContentConfigs(input: PackageContentConfig[]) {
     articleType: opt.value,
     articlesPerBatch: 1,
     questionsPerArticle: 3,
+    publishSiteTier: 'S1',
+    publishSiteCount: 1,
     isActive: true,
   })
 }
@@ -584,8 +644,33 @@ function validateContentConfigs() {
       ElMessage.warning('每篇问题数必须大于0')
       return false
     }
+    if (!item.publishSiteTier) {
+      ElMessage.warning('请选择发布站点等级')
+      return false
+    }
+    if (!Number.isFinite(item.publishSiteCount) || item.publishSiteCount <= 0) {
+      ElMessage.warning('发布站点数量必须大于0')
+      return false
+    }
   }
   return true
+}
+
+function applyPublishSiteDefaults() {
+  if (!form.defaultPublishSiteTier) {
+    ElMessage.warning('请选择发布站点等级')
+    return
+  }
+  if (!Number.isFinite(form.defaultPublishSiteCount) || form.defaultPublishSiteCount <= 0) {
+    ElMessage.warning('发布站点数量必须大于0')
+    return
+  }
+  form.contentConfigs = form.contentConfigs.map((item) => ({
+    ...item,
+    publishSiteTier: form.defaultPublishSiteTier,
+    publishSiteCount: form.defaultPublishSiteCount,
+  }))
+  ElMessage.success('已应用到全部文章类型')
 }
 
 async function submit() {
@@ -633,6 +718,8 @@ async function submit() {
         articleType: item.articleType,
         articlesPerBatch: item.articlesPerBatch,
         questionsPerArticle: item.questionsPerArticle,
+        publishSiteTier: item.publishSiteTier,
+        publishSiteCount: item.publishSiteCount,
         isActive: item.isActive,
       })),
     }
@@ -694,6 +781,18 @@ onMounted(async () => {
 <style scoped>
 :deep(.package-plan-dialog .el-dialog) {
   max-width: calc(100vw - 24px);
+}
+
+:deep(.package-plan-dialog .apply-all-btn.el-button) {
+  min-width: 180px;
+  height: 32px;
+  border-radius: 8px;
+  font-weight: 500;
+  padding: 0 16px;
+}
+
+:deep(.package-plan-dialog .action-col .el-form-item__content) {
+  justify-content: flex-start;
 }
 
 </style>

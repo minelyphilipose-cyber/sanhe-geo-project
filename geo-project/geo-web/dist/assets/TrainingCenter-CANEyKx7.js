@@ -1,0 +1,1 @@
+import{P as e}from"./PagePlaceholder-DGBdcZMs.js";import{d as o,n,o as r}from"./index-dBMnVL6Y.js";import"./_plugin-vue_export-helper-DlAUqK2U.js";const m=o({__name:"TrainingCenter",setup(t){return(a,i)=>(r(),n(e,{title:"培训中心",description:"操作教程、交付SOP、模板下载",icon:"Reading",phase:5}))}});export{m as default};

@@ -42,38 +42,53 @@ public class DispatchMonitorService {
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final DispatchAlertService dispatchAlertService;
 
-    public DispatchDashboardVO dashboard(String rangeType, LocalDate startDate, LocalDate endDate) {
+    public DispatchDashboardVO dashboard(String rangeType, LocalDate startDate, LocalDate endDate, Long projectId) {
         ensureMonitorAccess();
         DispatchDateRange range = resolveDateRange(rangeType, startDate, endDate);
+        ensureProjectExists(projectId);
 
         DispatchDashboardVO vo = new DispatchDashboardVO();
         vo.setRangeLabel(range.getStartDate() + " ~ " + range.getEndDate());
         vo.setActiveProjectCount(projectMapper.selectCount(
-                new LambdaQueryWrapper<Project>().eq(Project::getStatus, "active")
+                new LambdaQueryWrapper<Project>()
+                        .eq(Project::getStatus, "active")
+                        .eq(projectId != null, Project::getId, projectId)
         ));
         vo.setDueTaskCount(dispatchTaskMapper.selectCount(
                 new LambdaQueryWrapper<DispatchTask>()
+                        .eq(projectId != null, DispatchTask::getProjectId, projectId)
+                        .ge(DispatchTask::getDueTime, range.getStartAt())
+                        .lt(DispatchTask::getDueTime, range.getEndAtExclusive())
+        ));
+        vo.setRunningTaskCount(dispatchTaskMapper.selectCount(
+                new LambdaQueryWrapper<DispatchTask>()
+                        .eq(projectId != null, DispatchTask::getProjectId, projectId)
+                        .eq(DispatchTask::getStatus, "running")
                         .ge(DispatchTask::getDueTime, range.getStartAt())
                         .lt(DispatchTask::getDueTime, range.getEndAtExclusive())
         ));
         vo.setCompletedTaskCount(dispatchTaskMapper.selectCount(
                 new LambdaQueryWrapper<DispatchTask>()
+                        .eq(projectId != null, DispatchTask::getProjectId, projectId)
                         .eq(DispatchTask::getStatus, "completed")
                         .ge(DispatchTask::getFinishedAt, range.getStartAt())
                         .lt(DispatchTask::getFinishedAt, range.getEndAtExclusive())
         ));
         vo.setFailedTaskCount(dispatchTaskMapper.selectCount(
                 new LambdaQueryWrapper<DispatchTask>()
+                        .eq(projectId != null, DispatchTask::getProjectId, projectId)
                         .isNotNull(DispatchTask::getLastError)
                         .ge(DispatchTask::getUpdatedAt, range.getStartAt())
                         .lt(DispatchTask::getUpdatedAt, range.getEndAtExclusive())
         ));
         vo.setDeadLetterPendingCount(dispatchTaskMapper.selectCount(
                 new LambdaQueryWrapper<DispatchTask>()
+                        .eq(projectId != null, DispatchTask::getProjectId, projectId)
                         .eq(DispatchTask::getStatus, "dead_letter")
         ));
         vo.setPlatformExceptionCount(dispatchTaskMapper.selectCount(
                 new LambdaQueryWrapper<DispatchTask>()
+                        .eq(projectId != null, DispatchTask::getProjectId, projectId)
                         .isNotNull(DispatchTask::getPlatformCode)
                         .isNotNull(DispatchTask::getLastError)
                         .ge(DispatchTask::getUpdatedAt, range.getStartAt())
@@ -82,6 +97,7 @@ public class DispatchMonitorService {
 
         List<DispatchTask> completed = dispatchTaskMapper.selectList(
                 new LambdaQueryWrapper<DispatchTask>()
+                        .eq(projectId != null, DispatchTask::getProjectId, projectId)
                         .eq(DispatchTask::getStatus, "completed")
                         .isNotNull(DispatchTask::getFirstStartedAt)
                         .isNotNull(DispatchTask::getFinishedAt)
@@ -103,15 +119,18 @@ public class DispatchMonitorService {
                                                 String rangeType,
                                                 LocalDate startDate,
                                                 LocalDate endDate,
+                                                Long projectId,
                                                 String taskType,
                                                 String status,
                                                 String keyword) {
         ensureMonitorAccess();
         DispatchDateRange range = resolveDateRange(rangeType, startDate, endDate);
+        ensureProjectExists(projectId);
 
         LambdaQueryWrapper<DispatchTask> wrapper = new LambdaQueryWrapper<DispatchTask>()
                 .ge(DispatchTask::getDueTime, range.getStartAt())
                 .lt(DispatchTask::getDueTime, range.getEndAtExclusive())
+                .eq(projectId != null, DispatchTask::getProjectId, projectId)
                 .eq(StringUtils.hasText(taskType), DispatchTask::getTaskType, taskType)
                 .eq(StringUtils.hasText(status), DispatchTask::getStatus, status)
                 .orderByDesc(DispatchTask::getCreatedAt);
@@ -146,6 +165,7 @@ public class DispatchMonitorService {
             vo.setWindowEnd(task.getWindowEnd());
             vo.setDueTime(task.getDueTime());
             vo.setRetryCount(task.getRetryCount());
+            vo.setFirstStartedAt(task.getFirstStartedAt());
             vo.setFinishedAt(task.getFinishedAt());
             vo.setLastError(task.getLastError());
             vo.setErrorContext(task.getErrorContext());
@@ -305,5 +325,15 @@ public class DispatchMonitorService {
                                 .in(Project::getId, ids)
                 ).stream()
                 .collect(Collectors.toMap(Project::getId, Project::getProjectName, (a, b) -> a, LinkedHashMap::new));
+    }
+
+    private void ensureProjectExists(Long projectId) {
+        if (projectId == null) {
+            return;
+        }
+        Project project = projectMapper.selectById(projectId);
+        if (project == null) {
+            throw new BizException(404, "Project not found");
+        }
     }
 }

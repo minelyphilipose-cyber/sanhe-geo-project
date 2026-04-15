@@ -64,6 +64,7 @@ import { ref, reactive } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import type { FormInstance, FormRules } from 'element-plus'
+import { resolvePostLoginPath } from '@/utils/navigation'
 
 const router = useRouter()
 const route = useRoute()
@@ -94,10 +95,13 @@ async function handleLogin() {
     const redirect = route.query.redirect as string
     if (redirect) {
       router.push(redirect)
-    } else if (userStore.isPartner) {
-      router.push('/partner/home')
     } else {
-      router.push('/admin/overview')
+      const target = resolvePostLoginPath({
+        isPartner: userStore.isPartner,
+        hasPermission: userStore.hasPermission,
+        hasRole: userStore.hasRole,
+      })
+      router.push(target || '/login')
     }
   } catch {
     // error 已在 axios 拦截器中处理

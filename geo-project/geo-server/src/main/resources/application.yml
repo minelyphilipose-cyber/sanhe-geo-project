@@ -8,6 +8,10 @@ spring:
     active: dev
   application:
     name: geo-server
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 10MB
 
   # Jackson
   jackson:
@@ -54,6 +58,9 @@ logging:
     org.flywaydb: info
 
 geo:
+  report:
+    web-base-url: ${REPORT_WEB_BASE_URL:http://127.0.0.1:3000}
+    render-timeout-ms: ${REPORT_RENDER_TIMEOUT_MS:30000}
   dispatch:
     cron: "0 5 0 * * *"
     timezone: "Asia/Shanghai"

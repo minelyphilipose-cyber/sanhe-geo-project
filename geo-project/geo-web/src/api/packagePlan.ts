@@ -86,6 +86,8 @@ export function updatePackageContentConfigs(id: number, data: Array<{
   articleType: string
   articlesPerBatch: number
   questionsPerArticle: number
+  publishSiteTier: string
+  publishSiteCount: number
   isActive: boolean
 }>) {
   return request.put<R<PackageContentConfig[]>>(`/admin/package-plans/${id}/content-configs`, data)

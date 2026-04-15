@@ -29,6 +29,7 @@ import java.util.*;
 @RequiredArgsConstructor
 public class BrandProfileService {
 
+    private static final long MAX_UPLOAD_FILE_SIZE = 10L * 1024 * 1024;
     private static final Set<String> MATERIAL_CATEGORIES = Set.of("brand_image", "case", "qualification", "other");
 
     private final BrandMapper brandMapper;
@@ -76,6 +77,9 @@ public class BrandProfileService {
         validateCategory(category);
         if (file == null || file.isEmpty()) {
             throw new BizException(400, "Upload file is empty");
+        }
+        if (file.getSize() > MAX_UPLOAD_FILE_SIZE) {
+            throw new BizException(400, "Upload file exceeds 10MB limit");
         }
 
         String originalName = StringUtils.hasText(file.getOriginalFilename()) ? file.getOriginalFilename() : "unknown";

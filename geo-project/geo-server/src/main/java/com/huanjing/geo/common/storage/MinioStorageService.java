@@ -44,6 +44,26 @@ public class MinioStorageService {
         }
     }
 
+    public String uploadBytes(byte[] bytes, String objectKey, String contentType) {
+        try {
+            ensureBucket();
+            try (InputStream in = new java.io.ByteArrayInputStream(bytes)) {
+                minioClient.putObject(
+                        PutObjectArgs.builder()
+                                .bucket(bucket)
+                                .object(objectKey)
+                                .stream(in, bytes.length, -1)
+                                .contentType(StringUtils.hasText(contentType) ? contentType : "application/octet-stream")
+                                .build()
+                );
+            }
+            return buildFileUrl(objectKey);
+        } catch (Exception ex) {
+            log.error("Upload bytes to minio failed, objectKey={}, err={}", objectKey, ex.getMessage(), ex);
+            throw new BizException(500, "Upload file failed");
+        }
+    }
+
     public void remove(String objectKey) {
         try {
             minioClient.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(objectKey).build());

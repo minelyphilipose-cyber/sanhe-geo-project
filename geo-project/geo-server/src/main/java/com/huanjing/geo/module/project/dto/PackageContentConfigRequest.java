@@ -15,6 +15,11 @@ public class PackageContentConfigRequest {
     @NotNull
     @Min(1)
     private Integer questionsPerArticle;
+    @NotBlank
+    private String publishSiteTier;
+    @NotNull
+    @Min(1)
+    private Integer publishSiteCount;
     @NotNull
     private Boolean isActive;
 }

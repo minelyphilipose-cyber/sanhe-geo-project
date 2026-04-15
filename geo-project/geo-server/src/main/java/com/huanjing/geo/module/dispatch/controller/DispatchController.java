@@ -22,7 +22,7 @@ public class DispatchController {
 
     @PostMapping("/presale-diagnosis/enqueue")
     public R<DispatchTask> enqueuePresaleDiagnosis(@Valid @RequestBody PresaleDiagnosisEnqueueRequest req) {
-        return R.ok(dispatchFacadeService.enqueuePresaleDiagnosis(req.getProjectId(), req.getRemark()));
+        return R.ok(dispatchFacadeService.enqueuePresaleDiagnosis(req.getProjectId(), req.getQuestionSetId(), req.getRemark()));
     }
 
     @PostMapping("/tasks/replay")
@@ -37,5 +37,10 @@ public class DispatchController {
             @RequestParam(defaultValue = "20") Integer size
     ) {
         return R.ok(dispatchFacadeService.listReplayableTasks(projectId, size));
+    }
+
+    @GetMapping("/tasks/{taskId}")
+    public R<DispatchTask> getTaskStatus(@PathVariable Long taskId) {
+        return R.ok(dispatchFacadeService.getTaskStatus(taskId));
     }
 }

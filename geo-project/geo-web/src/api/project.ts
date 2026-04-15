@@ -6,6 +6,9 @@ import type {
   ProjectPlatformOption,
   QuestionPoolManageItemVO,
   QuestionPoolVersionVO,
+  KeywordGroup,
+  KeywordGroupPayload,
+  KeywordPreviewResult,
 } from '@/types'
 
 export function getProjectList(params: {
@@ -81,5 +84,29 @@ export function updateQuestionStrategy(questionId: number, data: {
   strategySuggestedType: 'faq' | 'scenario_content' | 'industry_article'
 }) {
   return request.put<R<void>>(`/question-pools/questions/${questionId}/strategy`, data)
+}
+
+export function getKeywordGroupPage(params: { current?: number; size?: number; keyword?: string; type?: string }) {
+  return request.get<R<PageResult<KeywordGroup>>>('/keyword-groups', { params })
+}
+
+export function getKeywordGroupDetail(id: number) {
+  return request.get<R<KeywordGroup>>(`/keyword-groups/${id}`)
+}
+
+export function createKeywordGroup(data: KeywordGroupPayload) {
+  return request.post<R<KeywordGroup>>('/keyword-groups', data)
+}
+
+export function updateKeywordGroup(id: number, data: KeywordGroupPayload) {
+  return request.put<R<KeywordGroup>>(`/keyword-groups/${id}`, data)
+}
+
+export function deleteKeywordGroup(id: number) {
+  return request.delete<R<void>>(`/keyword-groups/${id}`)
+}
+
+export function previewKeywordGroup(data: KeywordGroupPayload) {
+  return request.post<R<KeywordPreviewResult>>('/keyword-groups/preview', data)
 }
 

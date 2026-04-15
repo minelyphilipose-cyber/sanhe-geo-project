@@ -77,6 +77,14 @@ export const useUserStore = defineStore('user', () => {
     return newToken
   }
 
+  function updateAccessToken(token: string) {
+    if (!token || token === accessToken.value) {
+      return
+    }
+    accessToken.value = token
+    persistAuth()
+  }
+
   async function syncProfile() {
     if (!accessToken.value) {
       return
@@ -132,6 +140,7 @@ export const useUserStore = defineStore('user', () => {
     permissions,
     login,
     refreshAccessToken,
+    updateAccessToken,
     syncProfile,
     logout,
     hasRole,

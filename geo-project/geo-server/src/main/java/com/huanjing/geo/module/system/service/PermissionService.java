@@ -19,7 +19,8 @@ public class PermissionService {
                     "question_pool.core.confirm", "question_pool.core.delete",
                     "report.review",
                     "dispatch.alert.resolve", "dispatch.task.replay.dead_letter",
-                    "brand.statement.lock"
+                    "brand.statement.lock",
+                    "keyword_group.read", "keyword_group.write", "keyword_affix.manage"
             ),
             "delivery_manager", Set.of(
                     "company.read", "company.write", "project.read", "project.write", "partner.read",
@@ -27,10 +28,11 @@ public class PermissionService {
                     "question_pool.core.confirm", "question_pool.core.delete",
                     "report.review",
                     "dispatch.alert.resolve",
-                    "brand.statement.lock"
+                    "brand.statement.lock",
+                    "keyword_group.read", "keyword_group.write"
             ),
-            "operator", Set.of("company.read", "company.write", "project.read", "project.write", "partner.read"),
-            "sales", Set.of("company.read", "project.read", "dispatch.presale.enqueue"),
+            "operator", Set.of("company.read", "company.write", "project.read", "project.write", "partner.read", "keyword_group.read", "keyword_group.write"),
+            "sales", Set.of("company.read", "project.read", "dispatch.presale.enqueue", "keyword_group.read"),
             "partner", Set.of("partner.read", "company.read", "company.write", "project.read", "project.write"),
             "partner_staff", Set.of("partner.read", "company.read", "company.write", "project.read"),
             "partner_viewer", Set.of("partner.read", "company.read", "project.read")

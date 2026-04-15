@@ -67,7 +67,8 @@ public class DispatchTaskService {
                             .last("LIMIT 1")
             );
             if (existing != null) {
-                if (taskType == DispatchTaskType.BRAND_STATEMENT_GENERATION
+                if ((taskType == DispatchTaskType.BRAND_STATEMENT_GENERATION
+                        || taskType == DispatchTaskType.PRESALE_DIAGNOSIS)
                         && List.of(
                         DispatchTaskStatus.COMPLETED.value(),
                         DispatchTaskStatus.FAILED.value(),

@@ -34,6 +34,7 @@ public class PackagePlanService {
     private static final Set<String> INTENSITY_LEVELS = Set.of("L1", "L2", "L3");
     private static final Set<Integer> BIWEEKLY_FREQUENCY_VALUES = Set.of(1, 2);
     private static final Set<String> CONTENT_ARTICLE_TYPES = Set.of("faq", "scenario_content", "industry_article", "stage_advice");
+    private static final Set<String> PUBLISH_SITE_TIERS = Set.of("S0", "S1", "S2");
     private static final List<String> DEFAULT_CONTENT_ARTICLE_TYPE_ORDER = List.of("faq", "scenario_content", "industry_article", "stage_advice");
 
     private final PackagePlanMapper packagePlanMapper;
@@ -307,6 +308,16 @@ public class PackagePlanService {
             if (cfg.getQuestionsPerArticle() == null || cfg.getQuestionsPerArticle() <= 0) {
                 throw new BizException(400, "questions_per_article must be positive");
             }
+            if (!StringUtils.hasText(cfg.getPublishSiteTier())) {
+                throw new BizException(400, "publish_site_tier is required");
+            }
+            String publishSiteTier = cfg.getPublishSiteTier().trim().toUpperCase(Locale.ROOT);
+            if (!PUBLISH_SITE_TIERS.contains(publishSiteTier)) {
+                throw new BizException(400, "Unsupported publish_site_tier: " + cfg.getPublishSiteTier());
+            }
+            if (cfg.getPublishSiteCount() == null || cfg.getPublishSiteCount() <= 0) {
+                throw new BizException(400, "publish_site_count must be positive");
+            }
             if (cfg.getIsActive() == null) {
                 throw new BizException(400, "is_active is required");
             }
@@ -333,6 +344,8 @@ public class PackagePlanService {
             entity.setArticleType(req.getArticleType().trim().toLowerCase(Locale.ROOT));
             entity.setArticlesPerBatch(req.getArticlesPerBatch());
             entity.setQuestionsPerArticle(req.getQuestionsPerArticle());
+            entity.setPublishSiteTier(req.getPublishSiteTier().trim().toUpperCase(Locale.ROOT));
+            entity.setPublishSiteCount(req.getPublishSiteCount());
             entity.setIsActive(req.getIsActive());
             packageContentConfigMapper.insert(entity);
         }
@@ -348,6 +361,8 @@ public class PackagePlanService {
             req.setArticleType(articleType);
             req.setArticlesPerBatch(1);
             req.setQuestionsPerArticle(3);
+            req.setPublishSiteTier("S1");
+            req.setPublishSiteCount(1);
             req.setIsActive(true);
             defaults.add(req);
         }

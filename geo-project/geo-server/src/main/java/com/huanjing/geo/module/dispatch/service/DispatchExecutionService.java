@@ -35,6 +35,15 @@ import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.project.mapper.ProjectPlatformBindingMapper;
 import com.huanjing.geo.module.project.mapper.QuestionPoolItemMapper;
 import com.huanjing.geo.module.project.mapper.QuestionPoolVersionMapper;
+import com.huanjing.geo.module.report.entity.PresaleDiagnosisBatch;
+import com.huanjing.geo.module.report.entity.PresaleDiagnosisResult;
+import com.huanjing.geo.module.report.entity.PresaleQuestionItem;
+import com.huanjing.geo.module.report.entity.PresaleQuestionSet;
+import com.huanjing.geo.module.report.mapper.PresaleDiagnosisBatchMapper;
+import com.huanjing.geo.module.report.mapper.PresaleDiagnosisResultMapper;
+import com.huanjing.geo.module.report.mapper.PresaleQuestionItemMapper;
+import com.huanjing.geo.module.report.mapper.PresaleQuestionSetMapper;
+import com.huanjing.geo.module.report.service.ReportService;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
@@ -83,6 +92,10 @@ public class DispatchExecutionService {
     private final ProjectMapper projectMapper;
     private final QuestionPoolVersionMapper questionPoolVersionMapper;
     private final QuestionPoolItemMapper questionPoolItemMapper;
+    private final PresaleQuestionSetMapper presaleQuestionSetMapper;
+    private final PresaleQuestionItemMapper presaleQuestionItemMapper;
+    private final PresaleDiagnosisBatchMapper presaleDiagnosisBatchMapper;
+    private final PresaleDiagnosisResultMapper presaleDiagnosisResultMapper;
     private final PackageContentConfigMapper packageContentConfigMapper;
     private final ContentQuestionRotationMapper contentQuestionRotationMapper;
     private final ArticleBatchMapper articleBatchMapper;
@@ -94,6 +107,7 @@ public class DispatchExecutionService {
     private final CompanyMapper companyMapper;
     private final BrandMapper brandMapper;
     private final BrandStatementService brandStatementService;
+    private final ReportService reportService;
     private final SysDictItemMapper sysDictItemMapper;
     private final DispatchProperties dispatchProperties;
 
@@ -105,6 +119,16 @@ public class DispatchExecutionService {
         }
         if (type == DispatchTaskType.BI_DAILY_POLL) {
             executeBiDailyPoll(task, platformConfigs);
+            return;
+        }
+        if (type == DispatchTaskType.PRESALE_DIAGNOSIS) {
+            executePresaleDiagnosis(task, platformConfigs);
+            return;
+        }
+        if (type == DispatchTaskType.BIWEEKLY_REPORT
+                || type == DispatchTaskType.MONTHLY_REPORT
+                || type == DispatchTaskType.QUARTERLY_REPORT) {
+            executePostsaleReport(task, type);
             return;
         }
         if (type == DispatchTaskType.CONTENT_GENERATION) {
@@ -133,6 +157,21 @@ public class DispatchExecutionService {
             throw new BizException(500, "All provider paths failed: " + lastError.getMessage());
         }
         throw new BizException(500, "All provider paths failed");
+    }
+
+    private void executePostsaleReport(DispatchTask task, DispatchTaskType type) {
+        LocalDate start = task.getWindowStart();
+        LocalDate end = task.getWindowEnd();
+        if (start == null || end == null) {
+            throw new BizException(400, "Invalid report period window");
+        }
+        String reportType = switch (type) {
+            case BIWEEKLY_REPORT -> "biweekly";
+            case MONTHLY_REPORT -> "monthly";
+            case QUARTERLY_REPORT -> "quarterly";
+            default -> throw new BizException(400, "Unsupported report type");
+        };
+        reportService.generatePostsaleDraftPair(task.getProjectId(), reportType, start, end, null, false);
     }
 
     private void executeBiDailyPoll(DispatchTask task, List<AiPlatformConfig> platformConfigs) {
@@ -269,6 +308,94 @@ public class DispatchExecutionService {
         batch.setOverallHitRate(overallHitRate);
         batch.setFinishedAt(LocalDateTime.now());
         pollBatchMapper.updateById(batch);
+    }
+
+    private void executePresaleDiagnosis(DispatchTask task, List<AiPlatformConfig> platformConfigs) {
+        Project project = projectMapper.selectById(task.getProjectId());
+        if (project == null) {
+            throw new BizException(404, "Project not found");
+        }
+        if (!isPendingStatus(project.getStatus())) {
+            throw new BizException(400, "Presale diagnosis only allowed when project status is pending");
+        }
+        Long questionSetId = parseQuestionSetId(task.getPayloadJson());
+        if (questionSetId == null) {
+            throw new BizException(400, "Missing questionSetId in payload");
+        }
+        PresaleQuestionSet questionSet = presaleQuestionSetMapper.selectById(questionSetId);
+        if (questionSet == null || !project.getId().equals(questionSet.getProjectId())) {
+            throw new BizException(404, "Question set not found");
+        }
+        if (!"locked".equals(questionSet.getStatus())) {
+            throw new BizException(400, "Question set is not locked");
+        }
+
+        List<PresaleQuestionItem> questions = presaleQuestionItemMapper.selectList(
+                new LambdaQueryWrapper<PresaleQuestionItem>()
+                        .eq(PresaleQuestionItem::getSetId, questionSetId)
+                        .eq(PresaleQuestionItem::getIsActive, true)
+                        .orderByAsc(PresaleQuestionItem::getSortOrder, PresaleQuestionItem::getId)
+        );
+        if (questions.isEmpty()) {
+            throw new BizException(400, "No active presale questions");
+        }
+
+        PresaleDiagnosisBatch batch = ensurePresaleBatch(task, questionSetId);
+        Set<String> projectNames = resolveProjectNameSet(project);
+        Set<String> siteDomains = resolveSiteDomains(project);
+        Set<String> normalizedPhones = resolvePhones(project);
+
+        int completed = 0;
+        int failed = 0;
+        int total = 0;
+        for (AiPlatformConfig platform : platformConfigs) {
+            for (PresaleQuestionItem question : questions) {
+                InvocationResult invokeResult = invokeWithFallback(platform, task, question.getContent());
+                MatchInfo match = invokeResult.success
+                        ? analyzeMatch(projectNames, siteDomains, normalizedPhones, invokeResult.responseText)
+                        : MatchInfo.empty();
+
+                PresaleDiagnosisResult row = new PresaleDiagnosisResult();
+                row.setBatchId(batch.getId());
+                row.setProjectId(project.getId());
+                row.setQuestionSetId(questionSetId);
+                row.setQuestionItemId(question.getId());
+                row.setPlatformId(platform.getId());
+                row.setPlatformCode(platform.getPlatformCode());
+                row.setStatus(invokeResult.success ? "completed" : "failed");
+                row.setRequestCount(invokeResult.requestCount);
+                row.setResponseTimeMs((int) invokeResult.responseTimeMs);
+                row.setBrandHit(match.hit);
+                row.setSiteMentioned(match.siteMentioned);
+                row.setContactMentioned(match.contactMentioned);
+                row.setErrorMessage(invokeResult.errorMessage);
+                Map<String, Object> detail = new LinkedHashMap<>();
+                detail.put("questionContent", redactSensitive(question.getContent()));
+                detail.put("responseText", redactSensitive(invokeResult.responseText));
+                detail.put("channel", invokeResult.channel);
+                detail.put("matchType", match.matchType);
+                detail.put("errorCode", invokeResult.errorCode);
+                row.setDetailJson(JSONUtil.toJsonStr(detail));
+                upsertPresaleResult(row);
+
+                total++;
+                if (invokeResult.success) {
+                    completed++;
+                } else {
+                    failed++;
+                }
+            }
+        }
+
+        batch.setStatus("completed");
+        batch.setTotalRequests(total);
+        batch.setCompletedCount(completed);
+        batch.setFailedCount(failed);
+        batch.setFinishedAt(LocalDateTime.now());
+        presaleDiagnosisBatchMapper.updateById(batch);
+
+        Long creatorId = parseLong(parsePayloadMap(task.getPayloadJson()).get("operatorId"));
+        reportService.generatePresaleDraftFromBatch(batch.getId(), creatorId);
     }
 
     private PollResult buildPollResult(PollBatch batch,
@@ -1218,6 +1345,69 @@ public class DispatchExecutionService {
         } catch (Exception ex) {
             return null;
         }
+    }
+
+    private PresaleDiagnosisBatch ensurePresaleBatch(DispatchTask task, Long questionSetId) {
+        PresaleDiagnosisBatch existing = presaleDiagnosisBatchMapper.selectOne(
+                new LambdaQueryWrapper<PresaleDiagnosisBatch>()
+                        .eq(PresaleDiagnosisBatch::getDispatchTaskId, task.getId())
+                        .last("LIMIT 1")
+        );
+        if (existing != null) {
+            return existing;
+        }
+        PresaleDiagnosisBatch batch = new PresaleDiagnosisBatch();
+        batch.setProjectId(task.getProjectId());
+        batch.setQuestionSetId(questionSetId);
+        batch.setDispatchTaskId(task.getId());
+        batch.setStatus("running");
+        batch.setTotalRequests(0);
+        batch.setCompletedCount(0);
+        batch.setFailedCount(0);
+        batch.setCreatedBy(parseLong(parsePayloadMap(task.getPayloadJson()).get("operatorId")));
+        presaleDiagnosisBatchMapper.insert(batch);
+        return batch;
+    }
+
+    private void upsertPresaleResult(PresaleDiagnosisResult row) {
+        PresaleDiagnosisResult exists = presaleDiagnosisResultMapper.selectOne(
+                new LambdaQueryWrapper<PresaleDiagnosisResult>()
+                        .eq(PresaleDiagnosisResult::getBatchId, row.getBatchId())
+                        .eq(PresaleDiagnosisResult::getQuestionItemId, row.getQuestionItemId())
+                        .eq(PresaleDiagnosisResult::getPlatformId, row.getPlatformId())
+                        .last("LIMIT 1")
+        );
+        if (exists == null) {
+            presaleDiagnosisResultMapper.insert(row);
+            return;
+        }
+        row.setId(exists.getId());
+        presaleDiagnosisResultMapper.updateById(row);
+    }
+
+    private Long parseQuestionSetId(String payloadJson) {
+        return parseLong(parsePayloadMap(payloadJson).get("questionSetId"));
+    }
+
+    private Map<String, Object> parsePayloadMap(String payloadJson) {
+        if (!StringUtils.hasText(payloadJson)) {
+            return Map.of();
+        }
+        try {
+            Map<String, Object> map = new LinkedHashMap<>();
+            JSONUtil.parseObj(payloadJson).forEach((k, v) -> map.put(String.valueOf(k), v));
+            return map;
+        } catch (Exception ex) {
+            return Map.of();
+        }
+    }
+
+    private boolean isPendingStatus(String status) {
+        if (!StringUtils.hasText(status)) {
+            return false;
+        }
+        String v = status.trim().toLowerCase(Locale.ROOT);
+        return "pending".equals(v) || "draft".equals(v) || "not_started".equals(v) || "paused".equals(v);
     }
 
     private List<AiPlatformConfig> resolvePlatformCandidates(Long projectId, DispatchTaskType type) {

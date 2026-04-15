@@ -84,11 +84,10 @@ export type PlatformHealth =
   | 'degraded' | 'manual_takeover' | 'maintenance'
 
 export type ReportType =
-  | 'presale_diagnosis' | 'biweekly' | 'monthly' | 'quarterly' | 'management'
+  | 'presale' | 'presale_diagnosis' | 'biweekly' | 'monthly' | 'quarterly' | 'management'
 
 export type ReportStatus =
-  | 'generating' | 'pending_review' | 'auto_approved'
-  | 'manually_approved' | 'intercepted' | 'published' | 'archived'
+  | 'generating' | 'draft' | 'intercepted' | 'published' | 'superseded' | 'archived'
 
 export type PartnerLevel = 'level_29800' | 'level_59800' | 'level_99800'
 
@@ -388,19 +387,69 @@ export interface Report {
   id: number
   projectId: number
   reportType: ReportType
+  versionNo?: number
   periodStart: string | null
   periodEnd: string | null
-  shareToken: string
+  shareToken: string | null
+  shareExpiresAt?: string | null
   pdfUrl: string | null
+  pdfGeneratedAt?: string | null
   visibility: string
+  pairReportId?: number | null
+  isLatest?: boolean
   status: ReportStatus
-  autoPublish: boolean
-  interceptReason: string | null
+  stageAdvice?: string | null
+  supersededBy?: number | null
   publishedAt: string | null
+  publishedBy?: number | null
+  createdBy?: number | null
   createdAt: string
+  updatedAt?: string
   // 鍏宠仈
   projectName?: string
   brandName?: string
+}
+
+export interface PresaleQuestionSet {
+  id: number
+  projectId: number
+  versionNo: number
+  status: 'draft' | 'locked' | 'archived' | string
+  questionCount: number
+  generatedAt?: string
+  lockedAt?: string | null
+  lockedBy?: number | null
+  archivedAt?: string | null
+  createdBy?: number | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface PresaleQuestionItem {
+  id: number
+  setId: number
+  projectId: number
+  content: string
+  questionType: string
+  source: 'auto' | 'manual' | string
+  sortOrder: number
+  isActive: boolean
+}
+
+export interface PresaleQuestionSetDetail {
+  set: PresaleQuestionSet
+  items: PresaleQuestionItem[]
+}
+
+export interface PresaleReportSnapshot {
+  id: number
+  reportId: number
+  diagnosisBatchId: number
+  snapshotData: string
+  diagnosisSummary?: string | null
+  actionRecommendations?: string | null
+  brandCompletenessChecks?: string | null
+  questionMatrix?: string | null
 }
 
 export interface Partner {
@@ -434,6 +483,7 @@ export interface SystemAlert {
 export interface DispatchDashboardMetrics {
   activeProjectCount: number
   dueTaskCount: number
+  runningTaskCount: number
   completedTaskCount: number
   failedTaskCount: number
   deadLetterPendingCount: number
@@ -456,10 +506,73 @@ export interface DispatchTaskItem {
   windowEnd: string
   dueTime: string
   retryCount: number
+  firstStartedAt?: string | null
   finishedAt?: string | null
   lastError?: string | null
   errorContext?: string | null
   createdAt: string
+}
+
+export interface KeywordWordItem {
+  id?: number
+  wordText: string
+  source?: 'system' | 'custom' | string
+  sortOrder?: number
+}
+
+export interface KeywordGroupColumns {
+  regionWords: KeywordWordItem[]
+  prefixWords: KeywordWordItem[]
+  coreWords: KeywordWordItem[]
+  industryWords: KeywordWordItem[]
+  suffixWords: KeywordWordItem[]
+}
+
+export interface KeywordGroupPayload {
+  name?: string
+  type: string
+  remark?: string
+  count?: number
+  columns: KeywordGroupColumns
+}
+
+export interface KeywordGroup {
+  id: number
+  name: string
+  type: string
+  remark?: string | null
+  columns?: KeywordGroupColumns
+  createdAt: string
+  updatedAt: string
+}
+
+export interface KeywordPreviewResult {
+  totalEstimated: number
+  totalGenerated: number
+  keywords: string[]
+}
+
+export interface KeywordAffixWord {
+  id: number
+  type: string
+  affixKind: 'prefix' | 'suffix' | 'industry' | 'type' | string
+  wordText: string
+  sortOrder: number
+  enabled: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface KeywordTypeOption {
+  value: string
+  label: string
+}
+
+export interface KeywordAffixWordOptionResult {
+  prefixWords: KeywordAffixWord[]
+  suffixWords: KeywordAffixWord[]
+  industryWords: KeywordAffixWord[]
+  typeOptions: KeywordTypeOption[]
 }
 
 export interface BrandStatementContent {
@@ -708,6 +821,8 @@ export interface PackageContentConfig {
   articleType: 'faq' | 'scenario_content' | 'industry_article' | 'stage_advice' | string
   articlesPerBatch: number
   questionsPerArticle: number
+  publishSiteTier: 'S0' | 'S1' | 'S2' | string
+  publishSiteCount: number
   isActive: boolean
   createdAt?: string
   updatedAt?: string

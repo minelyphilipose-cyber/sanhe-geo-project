@@ -12,11 +12,13 @@ export interface DispatchRangeParams {
   rangeType?: 'today' | 'last7' | 'last30' | 'custom'
   startDate?: string
   endDate?: string
+  projectId?: number
 }
 
 export interface DispatchTaskQuery extends DispatchRangeParams {
   current?: number
   size?: number
+  projectId?: number
   taskType?: string
   status?: string
   keyword?: string
@@ -51,4 +53,8 @@ export function resolveDispatchAlert(id: number, note?: string) {
 
 export function replayDispatchTask(taskId: number) {
   return request.post<R<void>>('/dispatch/tasks/replay', { taskId })
+}
+
+export function getDispatchTask(taskId: number) {
+  return request.get<R<DispatchTaskItem>>(`/dispatch/tasks/${taskId}`)
 }

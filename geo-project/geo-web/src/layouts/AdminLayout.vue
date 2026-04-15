@@ -2,7 +2,7 @@
   <div class="admin-layout">
     <Sidebar
       :collapsed="appStore.sidebarCollapsed"
-      :menus="sidebarMenus"
+      :groups="sidebarGroupsWithBadge"
       @toggle="appStore.toggleSidebar"
     />
 
@@ -24,9 +24,12 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted, onBeforeUnmount, ref, computed } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import TopBar from './components/TopBar.vue'
 import { useAppStore } from '@/stores/app'
+import { useUserStore } from '@/stores/user'
+import { getDispatchAlerts } from '@/api/dispatch'
 import type { RoleType } from '@/types'
 
 interface MenuItem {
@@ -36,26 +39,107 @@ interface MenuItem {
   icon?: string
   roles?: RoleType[]
   permissions?: string[]
+  badgeCount?: number
+}
+
+interface MenuGroup {
+  key: string
+  title?: string
+  menus: MenuItem[]
 }
 
 const appStore = useAppStore()
+const userStore = useUserStore()
+const openAlertCount = ref(0)
+let badgeTimer: number | null = null
 
-const sidebarMenus: MenuItem[] = [
-  { path: '/admin/overview', name: 'Overview', title: '工作台', icon: 'Odometer', permissions: ['company.read'] },
-  { path: '/admin/customers', name: 'CustomerList', title: '客户管理', icon: 'User', permissions: ['company.read'] },
-  { path: '/admin/projects', name: 'ProjectList', title: '项目管理', icon: 'Folder', permissions: ['project.read'] },
-  { path: '/admin/monitoring', name: 'Monitoring', title: '监测中心', icon: 'Monitor', roles: ['delivery_manager', 'manager', 'super_admin'] },
-  { path: '/admin/content/execution', name: 'ContentExecution', title: '内容与执行', icon: 'Memo', permissions: ['project.read'] },
-  { path: '/admin/reports', name: 'ReportManage', title: '报表管理', icon: 'DataAnalysis', permissions: ['report.review'] },
-  { path: '/admin/partners', name: 'PartnerList', title: '合伙人管理', icon: 'Coordinate', permissions: ['partner.read'] },
-  { path: '/admin/alerts', name: 'AlertCenter', title: '异常中心', icon: 'Bell', roles: ['delivery_manager', 'manager', 'super_admin'] },
-  { path: '/admin/activity-logs', name: 'ActivityLogs', title: '操作日志', icon: 'Document', permissions: ['user.manage'] },
-  { path: '/admin/settings/platforms', name: 'Settings', title: '平台配置', icon: 'Setting', roles: ['super_admin'] },
-  { path: '/admin/settings/publish-sites', name: 'PublishSiteConfig', title: '发布站点配置', icon: 'Promotion', permissions: ['user.manage'] },
-  { path: '/admin/settings/packages', name: 'PackageConfig', title: '套餐配置', icon: 'CollectionTag', permissions: ['user.manage'] },
-  { path: '/admin/settings/dicts', name: 'DictCenter', title: '字典中心', icon: 'Tickets', permissions: ['user.manage'] },
-  { path: '/admin/settings/users', name: 'UserManage', title: '用户管理', icon: 'Setting', permissions: ['user.manage'] },
+const sidebarGroups: MenuGroup[] = [
+  {
+    key: 'workspace',
+    menus: [
+      { path: '/admin/overview', name: 'Overview', title: '工作台', icon: 'Odometer', permissions: ['company.read'] },
+    ],
+  },
+  {
+    key: 'business',
+    title: '业务操作',
+    menus: [
+      { path: '/admin/customers', name: 'CustomerList', title: '客户管理', icon: 'User', roles: ['sales', 'operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['company.read'] },
+      { path: '/admin/projects', name: 'ProjectList', title: '项目管理', icon: 'Folder', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['project.read'] },
+      { path: '/admin/content/execution', name: 'ContentExecution', title: '内容与执行', icon: 'Memo', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['project.read'] },
+      { path: '/admin/keyword-groups', name: 'KeywordGroupManage', title: '拓词管理', icon: 'MagicStick', roles: ['sales', 'operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['keyword_group.read'] },
+      { path: '/admin/reports', name: 'ReportManage', title: '报表管理', icon: 'DataAnalysis', roles: ['sales', 'operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['report.review'] },
+    ],
+  },
+  {
+    key: 'monitoring',
+    title: '监控中心',
+    menus: [
+      { path: '/admin/monitoring/tasks', name: 'MonitoringTasks', title: '调度监控', icon: 'Monitor', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
+      { path: '/admin/monitoring/platforms', name: 'PlatformHealth', title: '平台健康', icon: 'Cpu', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
+      { path: '/admin/alerts', name: 'AlertCenter', title: '告警中心', icon: 'Bell', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], badgeCount: 0 },
+      { path: '/admin/activity-logs', name: 'ActivityLogs', title: '操作日志', icon: 'Document', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['user.manage'] },
+    ],
+  },
+  {
+    key: 'partner',
+    title: '合伙人',
+    menus: [
+      { path: '/admin/partners', name: 'PartnerList', title: '合伙人管理', icon: 'Coordinate', permissions: ['partner.read'] },
+    ],
+  },
+  {
+    key: 'settings',
+    title: '系统配置',
+    menus: [
+      { path: '/admin/settings/platforms', name: 'PlatformConfig', title: 'AI平台配置', icon: 'Setting', permissions: ['user.manage'] },
+      { path: '/admin/settings/publish-sites', name: 'PublishSiteConfig', title: '发布站点配置', icon: 'Promotion', permissions: ['user.manage'] },
+      { path: '/admin/settings/packages', name: 'PackageConfig', title: '套餐配置', icon: 'CollectionTag', permissions: ['user.manage'] },
+      { path: '/admin/settings/dicts', name: 'DictCenter', title: '字典中心', icon: 'Tickets', permissions: ['user.manage'] },
+      { path: '/admin/settings/affix-words', name: 'KeywordAffixWordManage', title: '拓词信息维护', icon: 'EditPen', permissions: ['keyword_affix.manage'] },
+      { path: '/admin/settings/users', name: 'UserManage', title: '用户与权限', icon: 'Setting', permissions: ['user.manage'] },
+    ],
+  },
 ]
+
+const sidebarGroupsWithBadge = computed<MenuGroup[]>(() =>
+  sidebarGroups.map((group) => ({
+    ...group,
+    menus: group.menus.map((menu) =>
+      menu.name === 'AlertCenter'
+        ? { ...menu, badgeCount: openAlertCount.value }
+        : menu,
+    ),
+  })),
+)
+
+async function loadOpenAlertCount() {
+  if (!userStore.hasRole(['operator', 'delivery_manager', 'manager', 'super_admin'])) {
+    openAlertCount.value = 0
+    return
+  }
+  try {
+    const { data } = await getDispatchAlerts({ current: 1, size: 1, rangeType: 'last7', status: 'open' })
+    openAlertCount.value = Number(data.data?.total || 0)
+  } catch {
+    openAlertCount.value = 0
+  }
+}
+
+onMounted(async () => {
+  await loadOpenAlertCount()
+  badgeTimer = window.setInterval(() => {
+    if (document.hidden) return
+    loadOpenAlertCount()
+  }, 60000)
+})
+
+onBeforeUnmount(() => {
+  if (badgeTimer) {
+    window.clearInterval(badgeTimer)
+    badgeTimer = null
+  }
+})
 </script>
 
 <style scoped>

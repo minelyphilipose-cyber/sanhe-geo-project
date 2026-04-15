@@ -20,14 +20,14 @@
             @change="onFilterChange"
           />
           <el-select v-model="filters.severity" clearable placeholder="严重级别" style="width: 130px" @change="onFilterChange">
-            <el-option label="info" value="info" />
-            <el-option label="warn" value="warn" />
-            <el-option label="error" value="error" />
-            <el-option label="critical" value="critical" />
+            <el-option label="信息" value="info" />
+            <el-option label="警告" value="warn" />
+            <el-option label="错误" value="error" />
+            <el-option label="严重" value="critical" />
           </el-select>
           <el-select v-model="filters.status" clearable placeholder="处理状态" style="width: 130px" @change="onFilterChange">
-            <el-option label="open" value="open" />
-            <el-option label="resolved" value="resolved" />
+            <el-option label="待处理" value="open" />
+            <el-option label="已处理" value="resolved" />
           </el-select>
           <el-button :loading="loading" @click="loadAlerts">刷新</el-button>
         </div>
@@ -41,10 +41,12 @@
           <el-table-column prop="createdAt" label="时间" min-width="170" />
           <el-table-column prop="severity" label="级别" width="110">
             <template #default="scope">
-              <el-tag :type="severityTagType(scope.row.severity)">{{ scope.row.severity }}</el-tag>
+              <el-tag :type="severityTagType(scope.row.severity)">{{ severityLabel(scope.row.severity) }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="status" label="状态" width="110" />
+          <el-table-column label="状态" width="110">
+            <template #default="scope">{{ statusLabel(scope.row.status) }}</template>
+          </el-table-column>
           <el-table-column prop="projectName" label="项目" min-width="150" />
           <el-table-column prop="title" label="标题" min-width="210" />
           <el-table-column prop="retryCount" label="重试次数" width="100" />
@@ -139,6 +141,24 @@ function severityTagType(severity: string) {
   if (severity === 'error') return 'warning'
   if (severity === 'warn') return 'info'
   return 'success'
+}
+
+function severityLabel(severity?: string) {
+  const map: Record<string, string> = {
+    info: '信息',
+    warn: '警告',
+    error: '错误',
+    critical: '严重',
+  }
+  return map[severity || ''] || severity || '-'
+}
+
+function statusLabel(status?: string) {
+  const map: Record<string, string> = {
+    open: '待处理',
+    resolved: '已处理',
+  }
+  return map[status || ''] || status || '-'
 }
 
 async function loadAlerts() {

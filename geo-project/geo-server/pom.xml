@@ -120,6 +120,13 @@
             <version>${mapstruct.version}</version>
         </dependency>
 
+        <!-- Browser Render PDF -->
+        <dependency>
+            <groupId>com.microsoft.playwright</groupId>
+            <artifactId>playwright</artifactId>
+            <version>1.53.0</version>
+        </dependency>
+
         <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>
