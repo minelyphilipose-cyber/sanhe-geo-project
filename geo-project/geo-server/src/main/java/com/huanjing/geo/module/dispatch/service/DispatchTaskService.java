@@ -256,12 +256,12 @@ public class DispatchTaskService {
         int nextRetryCount = (task.getRetryCount() == null ? 0 : task.getRetryCount()) + 1;
         task.setRetryCount(nextRetryCount);
         task.setLastError(trimError(ex.getMessage()));
-        task.setErrorContext(JSONUtil.toJsonStr(Map.of(
-                "error", trimError(ex.getMessage()),
-                "exception", ex.getClass().getName(),
-                "channel", task.getCurrentChannel(),
-                "platformCode", task.getPlatformCode(),
-                "at", now.toString()
+        task.setErrorContext(JSONUtil.toJsonStr(buildErrorContext(
+                trimError(ex.getMessage()),
+                ex.getClass().getName(),
+                task.getCurrentChannel(),
+                task.getPlatformCode(),
+                now
         )));
 
         if (task.getTimeoutAt() != null && now.isAfter(task.getTimeoutAt())) {
@@ -295,11 +295,12 @@ public class DispatchTaskService {
         task.setFinishedAt(LocalDateTime.now());
         task.setLastError(trimError(reason));
         if (task.getErrorContext() == null) {
-            task.setErrorContext(JSONUtil.toJsonStr(Map.of(
-                    "error", trimError(reason),
-                    "channel", task.getCurrentChannel(),
-                    "platformCode", task.getPlatformCode(),
-                    "at", LocalDateTime.now().toString()
+            task.setErrorContext(JSONUtil.toJsonStr(buildErrorContext(
+                    trimError(reason),
+                    null,
+                    task.getCurrentChannel(),
+                    task.getPlatformCode(),
+                    LocalDateTime.now()
             )));
         }
         dispatchTaskMapper.updateById(task);
@@ -336,5 +337,25 @@ public class DispatchTaskService {
             return "unknown error";
         }
         return message.length() <= 900 ? message : message.substring(0, 900);
+    }
+
+    private Map<String, Object> buildErrorContext(String error,
+                                                  String exception,
+                                                  String channel,
+                                                  String platformCode,
+                                                  LocalDateTime at) {
+        Map<String, Object> context = new HashMap<>();
+        context.put("error", error);
+        context.put("at", at == null ? null : at.toString());
+        if (exception != null) {
+            context.put("exception", exception);
+        }
+        if (channel != null) {
+            context.put("channel", channel);
+        }
+        if (platformCode != null) {
+            context.put("platformCode", platformCode);
+        }
+        return context;
     }
 }

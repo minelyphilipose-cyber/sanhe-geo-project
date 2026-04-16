@@ -61,9 +61,6 @@ export type ProjectStage =
   | 'baseline_diagnosis'
   | 'building_questions'
   | 'executing'
-  | 'biweekly_feedback'
-  | 'monthly_report'
-  | 'quarterly_report'
   | 'needs_renewal'
   | 'high_risk'
   | 'dispute_handling'
@@ -84,7 +81,7 @@ export type PlatformHealth =
   | 'degraded' | 'manual_takeover' | 'maintenance'
 
 export type ReportType =
-  | 'presale' | 'presale_diagnosis' | 'biweekly' | 'monthly' | 'quarterly' | 'management'
+  | 'presale' | 'presale_diagnosis' | 'management'
 
 export type ReportStatus =
   | 'generating' | 'draft' | 'intercepted' | 'published' | 'superseded' | 'archived'
@@ -653,6 +650,7 @@ export interface ArticleDraft {
   id: number
   batchId: number
   projectId: number
+  projectName?: string
   articleType: 'faq' | 'scenario_content' | 'industry_article' | 'stage_advice' | string
   title: string
   status: 'pending_review' | 'approved' | 'rejected' | 'under_revision' | 'distributing' | 'distributed' | 'published' | 'unpublished' | string

@@ -54,6 +54,8 @@ import java.util.stream.Collectors;
 public class ReportService {
 
     private static final BCryptPasswordEncoder BCRYPT = new BCryptPasswordEncoder();
+    private static final Set<String> DISABLED_POSTSALE_TYPES = Set.of("biweekly", "monthly", "quarterly");
+    private static final String REPORT_DISABLED_MESSAGE = "report generation disabled by product policy";
 
     private final ReportMapper reportMapper;
     private final PresaleReportSnapshotMapper presaleSnapshotMapper;
@@ -81,12 +83,17 @@ public class ReportService {
     public Page<Report> page(long current, long size, Long projectId, String reportType, String status) {
         currentUserService.ensurePermission("project.read");
         LambdaQueryWrapper<Report> wrapper = new LambdaQueryWrapper<Report>()
-                .orderByDesc(Report::getCreatedAt);
+                .orderByDesc(Report::getCreatedAt)
+                .notIn(Report::getReportType, DISABLED_POSTSALE_TYPES);
         if (projectId != null) {
             wrapper.eq(Report::getProjectId, projectId);
         }
         if (StringUtils.hasText(reportType)) {
-            wrapper.eq(Report::getReportType, reportType.trim());
+            String normalizedReportType = reportType.trim();
+            if (isDisabledPostsaleType(normalizedReportType)) {
+                return new Page<>(current, size);
+            }
+            wrapper.eq(Report::getReportType, normalizedReportType);
         }
         if (StringUtils.hasText(status)) {
             wrapper.eq(Report::getStatus, status.trim());
@@ -97,6 +104,7 @@ public class ReportService {
     public Map<String, Object> detail(Long reportId) {
         currentUserService.ensurePermission("project.read");
         Report report = requireReport(reportId);
+        ensureReportTypeActive(report.getReportType());
         ensureProjectReadable(report.getProjectId());
 
         Map<String, Object> data = new LinkedHashMap<>();
@@ -181,9 +189,10 @@ public class ReportService {
                                                          LocalDate periodEnd,
                                                          Long creatorId,
                                                          boolean forceNewVersion) {
-        if (!List.of("biweekly", "monthly", "quarterly").contains(reportType)) {
+        if (!isPostsaleType(reportType)) {
             throw new BizException(400, "Unsupported postsale report type");
         }
+        ensurePostsaleEnabled(reportType);
         Project project = projectMapper.selectById(projectId);
         if (project == null) {
             throw new BizException(404, "Project not found");
@@ -285,6 +294,7 @@ public class ReportService {
     public Report regeneratePdf(Long reportId) {
         currentUserService.ensurePermission("report.review");
         Report report = requireReport(reportId);
+        ensureReportTypeActive(report.getReportType());
         if (!StringUtils.hasText(report.getShareToken())) {
             report.setShareToken("tmp_" + RandomUtil.randomString(24));
             reportMapper.updateById(report);
@@ -303,6 +313,7 @@ public class ReportService {
         if (!isPostsaleType(report.getReportType())) {
             throw new BizException(400, "Only postsale reports support regenerate");
         }
+        ensurePostsaleEnabled(report.getReportType());
         return generatePostsaleDraftPair(
                 report.getProjectId(),
                 report.getReportType(),
@@ -320,6 +331,7 @@ public class ReportService {
             throw new BizException(403, "No permission to publish report");
         }
         Report report = requireReport(reportId);
+        ensureReportTypeActive(report.getReportType());
         if (!"draft".equals(report.getStatus())) {
             throw new BizException(400, "Only draft report can be published");
         }
@@ -369,10 +381,13 @@ public class ReportService {
         return report;
     }
 
-        public Map<String, Object> getShareReport(String token, HttpServletRequest request) {
+    public Map<String, Object> getShareReport(String token, HttpServletRequest request) {
         Report tokenReport = findReportByToken(token);
         if (tokenReport == null || !"client".equalsIgnoreCase(tokenReport.getVisibility())) {
             return Map.of("bizCode", "NOT_FOUND", "message", "Share report not found");
+        }
+        if (isDisabledPostsaleType(tokenReport.getReportType())) {
+            return Map.of("bizCode", "DISABLED", "message", "该报表类型已停用");
         }
         if ("draft".equals(tokenReport.getStatus()) || "generating".equals(tokenReport.getStatus())) {
             return Map.of("bizCode", "NOT_PUBLISHED", "message", "Report is not published yet");
@@ -397,11 +412,12 @@ public class ReportService {
         logAccess(tokenReport, token, request, true);
         return payload;
     }
-        public Map<String, Object> verifySharePassword(String token, String password, HttpServletRequest request) {
+    public Map<String, Object> verifySharePassword(String token, String password, HttpServletRequest request) {
         Report report = findReportByToken(token);
         if (report == null || !"published".equals(report.getStatus()) || isExpired(report)) {
             throw new BizException(400, "Share link has expired");
         }
+        ensureReportTypeActive(report.getReportType());
         String lockKey = "share:lock:" + token;
         String raw = stringRedisTemplate.opsForValue().get(lockKey);
         int failures = raw == null ? 0 : Integer.parseInt(raw);
@@ -431,6 +447,7 @@ public class ReportService {
         if (report == null || !"published".equals(report.getStatus()) || !"client".equalsIgnoreCase(report.getVisibility())) {
             throw new BizException(404, "Report not found");
         }
+        ensureReportTypeActive(report.getReportType());
         if (isExpired(report)) {
             throw new BizException(400, "Link expired");
         }
@@ -452,6 +469,7 @@ public class ReportService {
     }
 
     private Map<String, Object> buildSharePayload(Report report) {
+        ensureReportTypeActive(report.getReportType());
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("status", "loaded");
         data.put("report", report);
@@ -1148,7 +1166,23 @@ public class ReportService {
     }
 
     private boolean isPostsaleType(String reportType) {
-        return "biweekly".equals(reportType) || "monthly".equals(reportType) || "quarterly".equals(reportType);
+        return isDisabledPostsaleType(reportType);
+    }
+
+    private boolean isDisabledPostsaleType(String reportType) {
+        return DISABLED_POSTSALE_TYPES.contains(reportType);
+    }
+
+    private void ensurePostsaleEnabled(String reportType) {
+        if (isDisabledPostsaleType(reportType)) {
+            throw new BizException(410, REPORT_DISABLED_MESSAGE);
+        }
+    }
+
+    private void ensureReportTypeActive(String reportType) {
+        if (isDisabledPostsaleType(reportType)) {
+            throw new BizException(404, "Report not found");
+        }
     }
 
     private void ensurePostsaleRegenerateAllowed(SysUser user) {

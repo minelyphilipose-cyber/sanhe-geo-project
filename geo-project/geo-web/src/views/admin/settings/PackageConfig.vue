@@ -34,12 +34,6 @@
               {{ scope.row.perQuestionCallsP0 ?? scope.row.perQuestionPlatformCalls }}/{{ scope.row.perQuestionCallsP1 ?? scope.row.perQuestionPlatformCalls }}/{{ scope.row.perQuestionCallsP2 ?? scope.row.perQuestionPlatformCalls }}
             </template>
           </el-table-column>
-          <el-table-column label="双周简报" width="120">
-            <template #default="scope">{{ biweeklyLabel(scope.row.biweeklyFrequency) }}</template>
-          </el-table-column>
-          <el-table-column label="月报/季报" width="140">
-            <template #default="scope">{{ intensityLabel(scope.row.monthlyReportDepth) }}/{{ intensityLabel(scope.row.quarterlyReportDepth) }}</template>
-          </el-table-column>
           <el-table-column label="目标指标" min-width="180">
             <template #default="scope">{{ targetMetricLabel(scope.row.targetMetricType) }}: {{ formatMetricValue(scope.row.targetMetricValue) }}</template>
           </el-table-column>
@@ -172,35 +166,7 @@
           </el-col>
         </el-row>
 
-        <el-divider content-position="left">报表与顾问强度</el-divider>
-        <el-row :gutter="12">
-          <el-col :xs="24" :sm="12" :lg="8">
-            <el-form-item label="双周简报频率" prop="biweeklyFrequency" required>
-              <el-select v-model="form.biweeklyFrequency" style="width: 100%">
-                <el-option
-                  v-for="item in biweeklyOptions"
-                  :key="item.dictKey"
-                  :label="item.dictValue"
-                  :value="Number(item.dictKey)"
-                />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :lg="8">
-            <el-form-item label="月报深度" prop="monthlyReportDepth" required>
-              <el-select v-model="form.monthlyReportDepth" style="width: 100%">
-                <el-option v-for="item in intensityOptions" :key="item.dictKey" :label="item.dictValue" :value="item.dictKey" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :lg="8">
-            <el-form-item label="季报深度" prop="quarterlyReportDepth" required>
-              <el-select v-model="form.quarterlyReportDepth" style="width: 100%">
-                <el-option v-for="item in intensityOptions" :key="item.dictKey" :label="item.dictValue" :value="item.dictKey" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
+        <el-divider content-position="left">顾问与投放强度</el-divider>
 
         <el-row :gutter="12">
           <el-col :xs="24" :sm="12" :lg="8">
@@ -403,7 +369,6 @@ const articleTypeOptions = [
 ]
 
 const intensityOptions = computed(() => dictStore.options('intensity_level'))
-const biweeklyOptions = computed(() => dictStore.options('biweekly_frequency'))
 const metricOptions = computed(() => dictStore.options('target_metric_type'))
 const normalQuestionCount = computed(() => Math.max(form.questionPoolSize - form.coreQuestionCount, 0))
 
@@ -423,9 +388,6 @@ const rules: FormRules = {
   perQuestionCallsP0: [{ required: true, message: '请输入每问题P0调用数', trigger: 'change' }],
   perQuestionCallsP1: [{ required: true, message: '请输入每问题P1调用数', trigger: 'change' }],
   perQuestionCallsP2: [{ required: true, message: '请输入每问题P2调用数', trigger: 'change' }],
-  biweeklyFrequency: [{ required: true, message: '请选择双周简报频率', trigger: 'change' }],
-  monthlyReportDepth: [{ required: true, message: '请选择月报深度', trigger: 'change' }],
-  quarterlyReportDepth: [{ required: true, message: '请选择季报深度', trigger: 'change' }],
   consultantIntensity: [{ required: true, message: '请选择顾问参与强度', trigger: 'change' }],
   competitorInsightDepth: [{ required: true, message: '请选择竞品观察深度', trigger: 'change' }],
   mediaDistributionIntensity: [{ required: true, message: '请选择媒体分发强度', trigger: 'change' }],
@@ -447,11 +409,6 @@ function yuanToCents(v: number) {
 
 function intensityLabel(v?: string | null) {
   return dictStore.label('intensity_level', v)
-}
-
-function biweeklyLabel(v?: number | null) {
-  if (v == null) return '-'
-  return dictStore.label('biweekly_frequency', String(v))
 }
 
 function targetMetricLabel(v?: string | null) {
@@ -769,9 +726,6 @@ onMounted(async () => {
   }
   if (metricOptions.value.length > 0) {
     form.targetMetricType = metricOptions.value[0].dictKey
-  }
-  if (biweeklyOptions.value.length > 0) {
-    form.biweeklyFrequency = Number(biweeklyOptions.value[0].dictKey)
   }
   form.contentConfigs = defaultContentConfigs()
   await load()

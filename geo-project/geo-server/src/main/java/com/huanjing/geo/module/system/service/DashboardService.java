@@ -37,9 +37,6 @@ public class DashboardService {
             "baseline_diagnosis",
             "building_questions",
             "executing",
-            "biweekly_feedback",
-            "monthly_report",
-            "quarterly_report",
             "needs_renewal",
             "high_risk",
             "dispute_handling"
@@ -51,9 +48,6 @@ public class DashboardService {
             "baseline_diagnosis",
             "building_questions",
             "executing",
-            "biweekly_feedback",
-            "monthly_report",
-            "quarterly_report",
             "needs_renewal",
             "high_risk",
             "dispute_handling",
@@ -110,7 +104,8 @@ public class DashboardService {
         vo.setTotalProjects(projectMapper.selectCount(allProjectWrapper));
 
         LambdaQueryWrapper<Report> reportWrapper = new LambdaQueryWrapper<Report>()
-                .ge(Report::getCreatedAt, monthStart);
+                .ge(Report::getCreatedAt, monthStart)
+                .notIn(Report::getReportType, List.of("biweekly", "monthly", "quarterly"));
         if (scopePartnerId != null) {
             List<Long> projectIds = loadProjectIdsByPartner(scopePartnerId);
             if (projectIds.isEmpty()) {
@@ -166,6 +161,7 @@ public class DashboardService {
 
         LambdaQueryWrapper<Report> draftReportWrapper = new LambdaQueryWrapper<Report>()
                 .eq(Report::getStatus, "draft")
+                .notIn(Report::getReportType, List.of("biweekly", "monthly", "quarterly"))
                 .orderByDesc(Report::getCreatedAt)
                 .last("LIMIT " + safeLimit);
         if (scopePartnerId != null) {
@@ -296,7 +292,8 @@ public class DashboardService {
 
         LambdaQueryWrapper<Report> wrapper = new LambdaQueryWrapper<Report>()
                 .ge(Report::getCreatedAt, startDate.atStartOfDay())
-                .le(Report::getCreatedAt, today.atTime(LocalTime.MAX));
+                .le(Report::getCreatedAt, today.atTime(LocalTime.MAX))
+                .notIn(Report::getReportType, List.of("biweekly", "monthly", "quarterly"));
         if (scopePartnerId != null) {
             List<Long> projectIds = loadProjectIdsByPartner(scopePartnerId);
             if (projectIds.isEmpty()) {

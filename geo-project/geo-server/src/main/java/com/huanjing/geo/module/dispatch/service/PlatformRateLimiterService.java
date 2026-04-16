@@ -2,7 +2,7 @@ package com.huanjing.geo.module.dispatch.service;
 
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 
@@ -30,7 +30,7 @@ public class PlatformRateLimiterService {
             Long.class
     );
 
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final StringRedisTemplate redisTemplate;
 
     public boolean tryAcquire(AiPlatformConfig config, int tokenCost) {
         int rpmLimit = config.getRpmLimit() == null || config.getRpmLimit() <= 0 ? 60 : config.getRpmLimit();

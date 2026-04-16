@@ -75,5 +75,5 @@ geo:
     recover-batch-size: 500
     task-retention-days: 90
     model-connect-timeout-ms: 10000
-    model-request-timeout-ms: 45000
+    model-request-timeout-ms: 180000
     api-key-aes-secret: ${DISPATCH_API_KEY_AES_SECRET:geo-dispatch-key}

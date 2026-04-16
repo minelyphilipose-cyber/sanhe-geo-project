@@ -38,9 +38,6 @@ public class DispatchPlannerService {
             }
             planBiDaily(project, today);
             planContentGeneration(project, today);
-            planBiWeekly(project, today);
-            planMonthly(project, today);
-            planQuarterly(project, today);
         }
     }
 

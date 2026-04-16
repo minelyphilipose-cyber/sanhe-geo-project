@@ -70,7 +70,9 @@ public class ContentArticleService {
         if (StringUtils.hasText(articleType)) {
             wrapper.eq(ArticleDraft::getArticleType, articleType.trim());
         }
-        return articleDraftMapper.selectPage(new Page<>(current, size), wrapper);
+        Page<ArticleDraft> pageData = articleDraftMapper.selectPage(new Page<>(current, size), wrapper);
+        fillProjectNames(pageData.getRecords());
+        return pageData;
     }
 
     public Map<String, Object> detail(Long articleId) {
@@ -323,6 +325,29 @@ public class ContentArticleService {
             throw new BizException(404, "Project not found");
         }
         return project;
+    }
+
+    private void fillProjectNames(List<ArticleDraft> articles) {
+        if (articles == null || articles.isEmpty()) {
+            return;
+        }
+        List<Long> projectIds = articles.stream()
+                .map(ArticleDraft::getProjectId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (projectIds.isEmpty()) {
+            return;
+        }
+        Map<Long, String> projectNameMap = projectMapper.selectList(
+                        new LambdaQueryWrapper<Project>()
+                                .in(Project::getId, projectIds)
+                                .select(Project::getId, Project::getProjectName)
+                ).stream()
+                .collect(Collectors.toMap(Project::getId, Project::getProjectName, (a, b) -> a));
+        for (ArticleDraft article : articles) {
+            article.setProjectName(projectNameMap.getOrDefault(article.getProjectId(), "-"));
+        }
     }
 
     private void ensureProjectAccess(SysUser operator, Project project, boolean write) {

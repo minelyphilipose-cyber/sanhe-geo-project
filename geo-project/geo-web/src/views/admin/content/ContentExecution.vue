@@ -23,7 +23,9 @@
       <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无文章数据">
         <el-table :data="rows" border>
           <el-table-column prop="id" label="文章ID" width="90" />
-          <el-table-column prop="projectId" label="项目ID" width="100" />
+          <el-table-column label="项目" min-width="180" show-overflow-tooltip>
+            <template #default="scope">{{ scope.row.projectName || `#${scope.row.projectId}` }}</template>
+          </el-table-column>
           <el-table-column label="文章类型" width="120">
             <template #default="scope">{{ articleTypeLabel(scope.row.articleType) }}</template>
           </el-table-column>

@@ -6,12 +6,15 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.util.HttpClientUtil;
 import com.huanjing.geo.module.content.entity.ArticleBatch;
+import com.huanjing.geo.module.content.entity.ArticleGenerationLog;
 import com.huanjing.geo.module.content.entity.ContentQuestionRotation;
 import com.huanjing.geo.module.content.entity.PackageContentConfig;
 import com.huanjing.geo.module.content.mapper.ArticleBatchMapper;
+import com.huanjing.geo.module.content.mapper.ArticleGenerationLogMapper;
 import com.huanjing.geo.module.content.mapper.ContentQuestionRotationMapper;
 import com.huanjing.geo.module.content.mapper.PackageContentConfigMapper;
 import com.huanjing.geo.module.content.service.ContentArticleService;
+import com.huanjing.geo.module.content.service.GeoPromptBuilder;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
@@ -99,7 +102,9 @@ public class DispatchExecutionService {
     private final PackageContentConfigMapper packageContentConfigMapper;
     private final ContentQuestionRotationMapper contentQuestionRotationMapper;
     private final ArticleBatchMapper articleBatchMapper;
+    private final ArticleGenerationLogMapper articleGenerationLogMapper;
     private final ContentArticleService contentArticleService;
+    private final GeoPromptBuilder geoPromptBuilder;
     private final PollBatchMapper pollBatchMapper;
     private final PollResultMapper pollResultMapper;
     private final PollDailyStatMapper pollDailyStatMapper;
@@ -113,6 +118,11 @@ public class DispatchExecutionService {
 
     public void execute(DispatchTask task) {
         DispatchTaskType type = DispatchTaskType.fromValue(task.getTaskType());
+        if (type == DispatchTaskType.BIWEEKLY_REPORT
+                || type == DispatchTaskType.MONTHLY_REPORT
+                || type == DispatchTaskType.QUARTERLY_REPORT) {
+            throw new BizException(410, "report generation disabled by product policy");
+        }
         List<AiPlatformConfig> platformConfigs = resolvePlatformCandidates(task.getProjectId(), type);
         if (platformConfigs.isEmpty()) {
             throw new BizException(400, "No enabled platform configured for task type " + task.getTaskType());
@@ -123,12 +133,6 @@ public class DispatchExecutionService {
         }
         if (type == DispatchTaskType.PRESALE_DIAGNOSIS) {
             executePresaleDiagnosis(task, platformConfigs);
-            return;
-        }
-        if (type == DispatchTaskType.BIWEEKLY_REPORT
-                || type == DispatchTaskType.MONTHLY_REPORT
-                || type == DispatchTaskType.QUARTERLY_REPORT) {
-            executePostsaleReport(task, type);
             return;
         }
         if (type == DispatchTaskType.CONTENT_GENERATION) {
@@ -157,21 +161,6 @@ public class DispatchExecutionService {
             throw new BizException(500, "All provider paths failed: " + lastError.getMessage());
         }
         throw new BizException(500, "All provider paths failed");
-    }
-
-    private void executePostsaleReport(DispatchTask task, DispatchTaskType type) {
-        LocalDate start = task.getWindowStart();
-        LocalDate end = task.getWindowEnd();
-        if (start == null || end == null) {
-            throw new BizException(400, "Invalid report period window");
-        }
-        String reportType = switch (type) {
-            case BIWEEKLY_REPORT -> "biweekly";
-            case MONTHLY_REPORT -> "monthly";
-            case QUARTERLY_REPORT -> "quarterly";
-            default -> throw new BizException(400, "Unsupported report type");
-        };
-        reportService.generatePostsaleDraftPair(task.getProjectId(), reportType, start, end, null, false);
     }
 
     private void executeBiDailyPoll(DispatchTask task, List<AiPlatformConfig> platformConfigs) {
@@ -482,51 +471,36 @@ public class DispatchExecutionService {
             log.info("Skip CONTENT_GENERATION task {}, no config for package {}", task.getId(), project.getPackageType());
             return;
         }
-
-        QuestionPoolVersion latestVersion = questionPoolVersionMapper.selectOne(
-                new LambdaQueryWrapper<QuestionPoolVersion>()
-                        .eq(QuestionPoolVersion::getProjectId, project.getId())
-                        .orderByDesc(QuestionPoolVersion::getVersionNo)
-                        .last("LIMIT 1")
-        );
-        if (latestVersion == null) {
-            log.info("Skip CONTENT_GENERATION task {}, no question pool", task.getId());
-            return;
-        }
-        List<QuestionPoolItem> abQuestions = questionPoolItemMapper.selectList(
-                new LambdaQueryWrapper<QuestionPoolItem>()
-                        .eq(QuestionPoolItem::getProjectId, project.getId())
-                        .eq(QuestionPoolItem::getVersionId, latestVersion.getId())
-                        .in(QuestionPoolItem::getPriority, List.of("A", "B", "a", "b"))
-                        .orderByAsc(QuestionPoolItem::getPriority, QuestionPoolItem::getId)
-        );
-        if (abQuestions.isEmpty()) {
-            log.info("Skip CONTENT_GENERATION task {}, no A/B questions", task.getId());
-            return;
-        }
+        geoPromptBuilder.ensureHasSavedKeywords(project.getId());
 
         LocalDate batchDate = resolveBatchDate(task);
         int batchNo = resolveBatchNo(task);
         ArticleBatch batch = ensureArticleBatch(task, project, batchDate, batchNo);
 
         Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
-        String brandInfo = buildBrandInfo(project, brand);
 
         int total = 0;
         int completed = 0;
         int failed = 0;
         int platformCursor = 0;
+        int globalArticleIndex = 0;
         for (PackageContentConfig cfg : configs) {
             int articleCount = Math.max(1, Optional.ofNullable(cfg.getArticlesPerBatch()).orElse(1));
-            int qpa = Math.max(1, Optional.ofNullable(cfg.getQuestionsPerArticle()).orElse(3));
-            int offset = resolveContentRotationOffset(project.getId(), cfg.getArticleType());
             for (int i = 0; i < articleCount; i++) {
                 total++;
-                List<QuestionPoolItem> selected = selectQuestionsForArticle(abQuestions, offset, qpa);
-                offset = offset + qpa;
-                String prompt = buildContentPrompt(cfg.getArticleType(), brandInfo, selected);
-                InvocationResult result = invokeWithOrderedPlatforms(platformConfigs, task, prompt, platformCursor);
+                GeoPromptBuilder.PromptPair prompt = geoPromptBuilder.buildContentPrompt(
+                        project, brand, cfg.getArticleType(), globalArticleIndex
+                );
+                String articleAngle = geoPromptBuilder.resolveArticleAngle(project, globalArticleIndex);
+                InvocationResult result = invokeContentWithOrderedPlatforms(
+                        platformConfigs,
+                        task,
+                        prompt.systemPrompt(),
+                        prompt.userPrompt(),
+                        platformCursor
+                );
                 platformCursor++;
+                globalArticleIndex++;
                 if (!result.success) {
                     failed++;
                     log.warn("CONTENT_GENERATION failed task={}, type={}, err={}", task.getId(), cfg.getArticleType(), result.errorMessage);
@@ -536,12 +510,12 @@ public class DispatchExecutionService {
                 String title = extractGeneratedTitle(content, cfg.getArticleType(), project.getProjectName());
                 Map<String, Object> promptSnapshot = new LinkedHashMap<>();
                 promptSnapshot.put("articleType", cfg.getArticleType());
-                promptSnapshot.put("prompt", prompt);
+                promptSnapshot.put("systemPrompt", prompt.systemPrompt());
+                promptSnapshot.put("userPrompt", prompt.userPrompt());
                 Map<String, Object> inputSnapshot = new LinkedHashMap<>();
                 inputSnapshot.put("projectName", project.getProjectName());
                 inputSnapshot.put("packageType", project.getPackageType());
-                inputSnapshot.put("questionIds", selected.stream().map(QuestionPoolItem::getId).collect(Collectors.toList()));
-                inputSnapshot.put("questionTexts", selected.stream().map(QuestionPoolItem::getQuestionText).collect(Collectors.toList()));
+                inputSnapshot.put("source", "keyword_group");
                 contentArticleService.createGeneratedDraft(
                         batch.getId(),
                         project,
@@ -552,11 +526,11 @@ public class DispatchExecutionService {
                         JSONUtil.toJsonStr(inputSnapshot),
                         result.platformCode,
                         resolveModelIdByPlatform(result.platformCode),
-                        selected
+                        List.of()
                 );
+                logArticleGeneration(project.getId(), cfg.getArticleType(), articleAngle, title, result.platformCode);
                 completed++;
             }
-            saveContentRotationOffset(project.getId(), cfg.getArticleType(), offset);
         }
         batch.setTotalCount(total);
         batch.setCompletedCount(completed);
@@ -667,6 +641,23 @@ public class DispatchExecutionService {
         for (int i = 0; i < platformConfigs.size(); i++) {
             AiPlatformConfig cfg = platformConfigs.get((cursor + i) % platformConfigs.size());
             InvocationResult result = invokeWithFallback(cfg, task, prompt);
+            if (result.success) {
+                return result;
+            }
+            lastError = result.error;
+        }
+        return InvocationResult.failure("ALL_FAILED", lastError == null ? "all failed" : lastError.getMessage(), 0, lastError);
+    }
+
+    private InvocationResult invokeContentWithOrderedPlatforms(List<AiPlatformConfig> platformConfigs,
+                                                               DispatchTask task,
+                                                               String systemPrompt,
+                                                               String userPrompt,
+                                                               int cursor) {
+        Exception lastError = null;
+        for (int i = 0; i < platformConfigs.size(); i++) {
+            AiPlatformConfig cfg = platformConfigs.get((cursor + i) % platformConfigs.size());
+            InvocationResult result = invokeContentWithFallback(cfg, task, systemPrompt, userPrompt);
             if (result.success) {
                 return result;
             }
@@ -1023,26 +1014,37 @@ public class DispatchExecutionService {
                         .eq(ArticleBatch::getBatchNo, batchNo)
                         .last("LIMIT 1")
         );
+        int actualBatchNo = batchNo;
         if (existing != null) {
-            existing.setDispatchTaskId(task.getId());
-            existing.setStatus("running");
-            existing.setTotalCount(0);
-            existing.setCompletedCount(0);
-            existing.setFailedCount(0);
+            existing.setStatus("superseded");
             articleBatchMapper.updateById(existing);
-            return existing;
+            actualBatchNo = resolveNextArticleBatchNo(project.getId(), batchDate);
         }
         ArticleBatch batch = new ArticleBatch();
         batch.setDispatchTaskId(task.getId());
         batch.setProjectId(project.getId());
         batch.setBatchDate(batchDate);
-        batch.setBatchNo(batchNo);
+        batch.setBatchNo(actualBatchNo);
         batch.setStatus("running");
         batch.setTotalCount(0);
         batch.setCompletedCount(0);
         batch.setFailedCount(0);
         articleBatchMapper.insert(batch);
         return batch;
+    }
+
+    private int resolveNextArticleBatchNo(Long projectId, LocalDate batchDate) {
+        Integer maxBatchNo = articleBatchMapper.selectList(
+                new LambdaQueryWrapper<ArticleBatch>()
+                        .eq(ArticleBatch::getProjectId, projectId)
+                        .eq(ArticleBatch::getBatchDate, batchDate)
+                        .select(ArticleBatch::getBatchNo)
+        ).stream()
+                .map(ArticleBatch::getBatchNo)
+                .filter(java.util.Objects::nonNull)
+                .max(Integer::compareTo)
+                .orElse(0);
+        return Math.max(maxBatchNo, 0) + 1;
     }
 
     private void upsertPollResult(PollResult result) {
@@ -1507,6 +1509,48 @@ public class DispatchExecutionService {
         return InvocationResult.failure(lastErrorCode, lastErrorMessage, requestCount, lastError);
     }
 
+    private InvocationResult invokeContentWithFallback(AiPlatformConfig config,
+                                                       DispatchTask task,
+                                                       String systemPrompt,
+                                                       String userPrompt) {
+        Exception lastError = null;
+        String lastErrorCode = "UNKNOWN";
+        String lastErrorMessage = null;
+        int requestCount = 0;
+
+        try {
+            requestCount++;
+            return invokePrimaryContent(config, task, systemPrompt, userPrompt, requestCount);
+        } catch (Exception ex) {
+            lastError = ex;
+            lastErrorCode = resolveErrorCode(ex);
+            lastErrorMessage = ex.getMessage();
+            log.warn("Primary content invocation failed for platform {}", config.getPlatformCode(), ex);
+        }
+
+        try {
+            requestCount++;
+            return invokeBackupKeyContent(config, task, systemPrompt, userPrompt, requestCount);
+        } catch (Exception ex) {
+            lastError = ex;
+            lastErrorCode = resolveErrorCode(ex);
+            lastErrorMessage = ex.getMessage();
+            log.warn("Backup key content invocation failed for platform {}", config.getPlatformCode(), ex);
+        }
+
+        try {
+            requestCount++;
+            return invokeBackupProviderContent(config, task, systemPrompt, userPrompt, requestCount);
+        } catch (Exception ex) {
+            lastError = ex;
+            lastErrorCode = resolveErrorCode(ex);
+            lastErrorMessage = ex.getMessage();
+            log.warn("Backup provider content invocation failed for platform {}", config.getPlatformCode(), ex);
+        }
+
+        return InvocationResult.failure(lastErrorCode, lastErrorMessage, requestCount, lastError);
+    }
+
     private InvocationResult invokePrimary(AiPlatformConfig config, DispatchTask task, String questionText, int requestCount) {
         String apiKey = platformCredentialService.resolveApiKey(config.getPlatformCode(), config.getPrimaryKeyRef(), config.getApiKey());
         if (!StringUtils.hasText(apiKey)) {
@@ -1515,6 +1559,20 @@ public class DispatchExecutionService {
         task.setPlatformCode(config.getPlatformCode());
         task.setCurrentChannel("primary");
         return invokePlatform(config, config.getPlatformCode(), config.getApiUrl(), config.getModelId(), apiKey, task, questionText, "primary", requestCount);
+    }
+
+    private InvocationResult invokePrimaryContent(AiPlatformConfig config,
+                                                  DispatchTask task,
+                                                  String systemPrompt,
+                                                  String userPrompt,
+                                                  int requestCount) {
+        String apiKey = platformCredentialService.resolveApiKey(config.getPlatformCode(), config.getPrimaryKeyRef(), config.getApiKey());
+        if (!StringUtils.hasText(apiKey)) {
+            throw new BizException(500, "Missing primary api key");
+        }
+        task.setPlatformCode(config.getPlatformCode());
+        task.setCurrentChannel("primary");
+        return invokeContentPlatform(config, config.getPlatformCode(), config.getApiUrl(), config.getModelId(), apiKey, task, systemPrompt, userPrompt, "primary", requestCount);
     }
 
     private InvocationResult invokeBackupKey(AiPlatformConfig config, DispatchTask task, String questionText, int requestCount) {
@@ -1526,6 +1584,21 @@ public class DispatchExecutionService {
         task.setPlatformCode(config.getPlatformCode());
         task.setCurrentChannel("backup_key");
         return invokePlatform(config, config.getPlatformCode(), config.getApiUrl(), config.getModelId(), apiKey, task, questionText, "backup_key", requestCount);
+    }
+
+    private InvocationResult invokeBackupKeyContent(AiPlatformConfig config,
+                                                    DispatchTask task,
+                                                    String systemPrompt,
+                                                    String userPrompt,
+                                                    int requestCount) {
+        String backupRef = config.getBackupKeyRef();
+        String apiKey = platformCredentialService.resolveApiKey(config.getPlatformCode(), backupRef, null);
+        if (!StringUtils.hasText(apiKey)) {
+            throw new BizException(500, "Missing backup api key");
+        }
+        task.setPlatformCode(config.getPlatformCode());
+        task.setCurrentChannel("backup_key");
+        return invokeContentPlatform(config, config.getPlatformCode(), config.getApiUrl(), config.getModelId(), apiKey, task, systemPrompt, userPrompt, "backup_key", requestCount);
     }
 
     private InvocationResult invokeBackupProvider(AiPlatformConfig config, DispatchTask task, String questionText, int requestCount) {
@@ -1550,6 +1623,34 @@ public class DispatchExecutionService {
         task.setPlatformCode(backup.getPlatformCode());
         task.setCurrentChannel("backup_provider");
         return invokePlatform(backup, backup.getPlatformCode(), apiUrl, modelId, apiKey, task, questionText, "backup_provider", requestCount);
+    }
+
+    private InvocationResult invokeBackupProviderContent(AiPlatformConfig config,
+                                                         DispatchTask task,
+                                                         String systemPrompt,
+                                                         String userPrompt,
+                                                         int requestCount) {
+        if (!StringUtils.hasText(config.getBackupProviderName())) {
+            throw new BizException(500, "Missing backup provider");
+        }
+        AiPlatformConfig backup = aiPlatformConfigMapper.selectOne(
+                new LambdaQueryWrapper<AiPlatformConfig>()
+                        .eq(AiPlatformConfig::getPlatformCode, config.getBackupProviderName().trim())
+                        .eq(AiPlatformConfig::getEnabled, true)
+                        .last("LIMIT 1")
+        );
+        if (backup == null) {
+            throw new BizException(500, "Backup provider not found");
+        }
+        String apiUrl = StringUtils.hasText(config.getBackupApiUrl()) ? config.getBackupApiUrl().trim() : backup.getApiUrl();
+        String modelId = StringUtils.hasText(config.getBackupModelId()) ? config.getBackupModelId().trim() : backup.getModelId();
+        String apiKey = platformCredentialService.resolveApiKey(backup.getPlatformCode(), backup.getPrimaryKeyRef(), backup.getApiKey());
+        if (!StringUtils.hasText(apiKey)) {
+            throw new BizException(500, "Missing backup provider api key");
+        }
+        task.setPlatformCode(backup.getPlatformCode());
+        task.setCurrentChannel("backup_provider");
+        return invokeContentPlatform(backup, backup.getPlatformCode(), apiUrl, modelId, apiKey, task, systemPrompt, userPrompt, "backup_provider", requestCount);
     }
 
     private InvocationResult invokePlatform(AiPlatformConfig config,
@@ -1578,6 +1679,32 @@ public class DispatchExecutionService {
         return InvocationResult.success(platformCode, channel, response, Math.max(durationMs, 1L), requestCount);
     }
 
+    private InvocationResult invokeContentPlatform(AiPlatformConfig config,
+                                                   String platformCode,
+                                                   String apiUrl,
+                                                   String modelId,
+                                                   String apiKey,
+                                                   DispatchTask task,
+                                                   String systemPrompt,
+                                                   String userPrompt,
+                                                   String channel,
+                                                   int requestCount) {
+        if (!StringUtils.hasText(apiUrl) || !StringUtils.hasText(modelId) || !StringUtils.hasText(apiKey)) {
+            throw new BizException(500, "Invalid platform invocation params");
+        }
+        boolean pass = platformRateLimiterService.tryAcquire(config, 1000);
+        if (!pass) {
+            throw new BizException(429, "Platform limited: " + platformCode);
+        }
+
+        long started = System.currentTimeMillis();
+        String response = invokeModelApi(apiUrl, modelId, apiKey, systemPrompt, userPrompt);
+        long durationMs = Math.max(1L, System.currentTimeMillis() - started);
+        log.info("Content generation task {} executed by platform={}, model={}, channel={}",
+                task.getId(), platformCode, modelId, channel);
+        return InvocationResult.success(platformCode, channel, response, Math.max(durationMs, 1L), requestCount);
+    }
+
     private String buildPrompt(DispatchTask task, String questionText) {
         if (StringUtils.hasText(questionText)) {
             return questionText;
@@ -1586,6 +1713,19 @@ public class DispatchExecutionService {
     }
 
     private String invokeModelApi(String apiUrl, String modelId, String apiKey, String prompt) {
+        return invokeModelApi(apiUrl, modelId, apiKey, "You are a GEO monitoring assistant.", prompt, 0D);
+    }
+
+    private String invokeModelApi(String apiUrl, String modelId, String apiKey, String systemPrompt, String userPrompt) {
+        return invokeModelApi(apiUrl, modelId, apiKey, systemPrompt, userPrompt, 0.7D);
+    }
+
+    private String invokeModelApi(String apiUrl,
+                                  String modelId,
+                                  String apiKey,
+                                  String systemPrompt,
+                                  String userPrompt,
+                                  double temperature) {
         String targetUrl = apiUrl.trim();
         if (!targetUrl.endsWith("/chat/completions")) {
             targetUrl = targetUrl.endsWith("/") ? targetUrl + "chat/completions" : targetUrl + "/chat/completions";
@@ -1593,11 +1733,13 @@ public class DispatchExecutionService {
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("model", modelId);
-        payload.put("temperature", 0);
-        payload.put("messages", List.of(
-                Map.of("role", "system", "content", "You are a GEO monitoring assistant."),
-                Map.of("role", "user", "content", prompt)
-        ));
+        payload.put("temperature", temperature);
+        List<Map<String, String>> messages = new ArrayList<>();
+        if (StringUtils.hasText(systemPrompt)) {
+            messages.add(Map.of("role", "system", "content", systemPrompt));
+        }
+        messages.add(Map.of("role", "user", "content", userPrompt));
+        payload.put("messages", messages);
 
         String requestJson = JSONUtil.toJsonStr(payload);
         Map<String, String> headers = new LinkedHashMap<>();
@@ -1676,6 +1818,20 @@ public class DispatchExecutionService {
             return "";
         }
         return text.length() <= 300 ? text : text.substring(0, 300);
+    }
+
+    private void logArticleGeneration(Long projectId,
+                                      String articleType,
+                                      String articleAngle,
+                                      String generatedTitle,
+                                      String modelCode) {
+        ArticleGenerationLog row = new ArticleGenerationLog();
+        row.setProjectId(projectId);
+        row.setArticleType(articleType);
+        row.setArticleAngle(articleAngle);
+        row.setGeneratedTitle(generatedTitle);
+        row.setModelCode(modelCode);
+        articleGenerationLogMapper.insert(row);
     }
 
     private String resolveErrorCode(Exception ex) {
