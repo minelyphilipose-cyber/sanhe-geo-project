@@ -355,9 +355,15 @@ public class ContentArticleService {
         String lower = Optional.ofNullable(content).orElse("").toLowerCase(Locale.ROOT);
 
         Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
-        for (String phrase : splitPhrases(brand == null ? null : brand.getForbiddenPhrases())) {
+        for (String phrase : parseStringList(brand == null ? null : brand.getForbiddenPhrases())) {
             if (lower.contains(phrase.toLowerCase(Locale.ROOT))) {
                 hits.add(Map.of("word", phrase, "severity", "block", "source", "brand"));
+                hasBlock = true;
+            }
+        }
+        for (String phrase : parseStringList(project.getExtraForbiddenPhrases())) {
+            if (lower.contains(phrase.toLowerCase(Locale.ROOT))) {
+                hits.add(Map.of("word", phrase, "severity", "block", "source", "project"));
                 hasBlock = true;
             }
         }
@@ -388,15 +394,21 @@ public class ContentArticleService {
         return new RiskResult(true, hasBlock ? "block" : (hasWarn ? "warn" : "none"), JSONUtil.toJsonStr(hits));
     }
 
-    private List<String> splitPhrases(String raw) {
+    private List<String> parseStringList(String raw) {
         if (!StringUtils.hasText(raw)) {
             return List.of();
         }
-        return Arrays.stream(raw.split("[,，、;；\\n\\r]+"))
-                .map(String::trim)
-                .filter(StringUtils::hasText)
-                .distinct()
-                .collect(Collectors.toList());
+        try {
+            List<String> result = new ArrayList<>();
+            JSONUtil.parseArray(raw).forEach(item -> {
+                if (item != null && StringUtils.hasText(String.valueOf(item))) {
+                    result.add(String.valueOf(item).trim());
+                }
+            });
+            return result.stream().distinct().collect(Collectors.toList());
+        } catch (Exception ex) {
+            return List.of();
+        }
     }
 
     private DuplicateResult checkDuplicate(ArticleDraft article, String newTitle) {

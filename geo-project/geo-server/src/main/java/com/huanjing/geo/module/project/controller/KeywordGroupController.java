@@ -24,9 +24,10 @@ public class KeywordGroupController {
             @RequestParam(defaultValue = "1") long current,
             @RequestParam(defaultValue = "20") long size,
             @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) Long companyId,
             @RequestParam(required = false) String type
     ) {
-        return R.ok(keywordGroupService.page(current, size, keyword, type));
+        return R.ok(keywordGroupService.page(current, size, keyword, companyId, type));
     }
 
     @GetMapping("/{id}")

@@ -20,6 +20,11 @@
           <el-table-column prop="brandName" label="品牌名称" min-width="180">
             <template #default="scope">{{ scope.row.brandName || '-' }}</template>
           </el-table-column>
+          <el-table-column label="已选拓词组" width="240">
+            <template #default="scope">
+              已选 {{ scope.row.selectedKeywordGroupCount || 0 }} 个拓词组，已入库 {{ scope.row.selectedKeywordSavedKeywords || 0 }} 条关键词
+            </template>
+          </el-table-column>
           <el-table-column label="套餐" width="150">
             <template #default="scope">{{ dictStore.label('package_type', scope.row.packageType) }}</template>
           </el-table-column>
@@ -38,7 +43,7 @@
           <el-table-column label="阶段" width="170">
             <template #default="scope">{{ dictStore.label('project_stage', scope.row.stage) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="180" fixed="right">
+          <el-table-column label="操作" width="160" fixed="right">
             <template #default="scope">
               <div class="op-actions">
                 <el-button link type="primary" @click="goDetail(scope.row.id)">详情</el-button>
@@ -49,7 +54,6 @@
                   <el-button link type="primary">更多</el-button>
                   <template #dropdown>
                     <el-dropdown-menu>
-                      <el-dropdown-item command="questionPool">问题池</el-dropdown-item>
                       <el-dropdown-item v-if="scope.row.status === 'paused' && canActivateProject" command="activate">去激活</el-dropdown-item>
                       <el-dropdown-item v-if="canWriteProject" command="edit">编辑</el-dropdown-item>
                       <el-dropdown-item v-if="canWriteProject" command="delete">删除</el-dropdown-item>
@@ -86,7 +90,7 @@
             filterable
             style="width: 100%"
             placeholder="先选择客户"
-            :disabled="formMode === 'edit' || lockCompanyBrandSelection"
+            :disabled="lockCompanyBrandSelection"
             @change="onCompanyChange"
           >
             <el-option v-for="c in companyOptions" :key="c.id" :label="c.companyName" :value="c.id" />
@@ -98,10 +102,32 @@
             filterable
             style="width: 100%"
             placeholder="请选择品牌；选品牌前需先选客户"
-            :disabled="!form.companyId || formMode === 'edit' || lockCompanyBrandSelection"
+            :disabled="!form.companyId || lockCompanyBrandSelection"
           >
             <el-option v-for="b in brandOptions" :key="b.id" :label="b.brandName" :value="b.id" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="拓词组" required>
+          <div class="w-full">
+            <el-select
+              v-model="form.keywordGroupIds"
+              style="width: 100%"
+              multiple
+              filterable
+              collapse-tags
+              collapse-tags-tooltip
+              :multiple-limit="10"
+              placeholder="请选择该客户下的拓词组（最多10组）"
+            >
+              <el-option
+                v-for="kg in keywordGroupOptions"
+                :key="kg.id"
+                :label="`${kg.name}（已入库${kg.savedKeywordCount || 0}条）`"
+                :value="kg.id"
+              />
+            </el-select>
+            <div class="keyword-summary">{{ keywordGroupSummary }}</div>
+          </div>
         </el-form-item>
         <el-form-item label="套餐" required>
           <el-select v-model="form.packageType" style="width: 100%" @change="onPackageChange">
@@ -188,56 +214,67 @@
           </el-select>
         </el-form-item>
         <el-form-item label="交付模式"><el-input v-model="form.deliveryMode" /></el-form-item>
-        <el-divider content-position="left">问题池录入</el-divider>
-        <el-form-item label="问题列表">
+        <el-form-item label="主目标"><el-input v-model="form.primaryGoal" type="textarea" :rows="3" /></el-form-item>
+        <el-divider content-position="left">内容策略配置（选填）</el-divider>
+        <el-form-item label="目标区域词">
+          <el-select
+            v-model="form.targetRegions"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            style="width: 100%"
+            placeholder="输入并回车，例如：北京、上海、广州"
+          />
+        </el-form-item>
+        <el-form-item label="目标受众">
+          <el-input v-model="form.targetAudience" placeholder="例如：装修业主、二手房翻新用户" />
+        </el-form-item>
+        <el-form-item label="品牌基准表述">
+          <el-input :model-value="brandBaseStatement" type="textarea" :rows="4" readonly placeholder="当前品牌未配置基准表述" />
+        </el-form-item>
+        <el-form-item label="项目定制表述">
           <div class="w-full">
-            <div class="mb-2 flex justify-end">
-              <el-button type="primary" @click="addQuestionItem">新增问题</el-button>
-            </div>
-            <el-table :data="form.questionPoolItems" border>
-              <el-table-column label="问题内容" min-width="240">
-                <template #default="scope">
-                  <el-input v-model="scope.row.questionText" placeholder="输入问题内容" />
-                </template>
-              </el-table-column>
-              <el-table-column label="分类" width="130">
-                <template #default="scope">
-                  <el-select v-model="scope.row.questionType" style="width: 100%">
-                    <el-option
-                      v-for="item in dictStore.options('question_type')"
-                      :key="item.dictKey"
-                      :label="item.dictValue"
-                      :value="item.dictKey"
-                    />
-                  </el-select>
-                </template>
-              </el-table-column>
-              <el-table-column label="等级" width="110">
-                <template #default="scope">
-                  <el-select v-model="scope.row.priority" style="width: 100%">
-                    <el-option
-                      v-for="item in dictStore.options('question_priority')"
-                      :key="item.dictKey"
-                      :label="item.dictValue"
-                      :value="item.dictKey"
-                    />
-                  </el-select>
-                </template>
-              </el-table-column>
-              <el-table-column label="核心问题" width="100">
-                <template #default="scope">
-                  <el-switch v-model="scope.row.isCore" :disabled="!canToggleCoreFlag(scope.row)" />
-                </template>
-              </el-table-column>
-              <el-table-column label="操作" width="90">
-                <template #default="scope">
-                  <el-button link type="danger" :disabled="!canRemoveQuestionAt(scope.$index)" @click="removeQuestionItem(scope.$index)">删除</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
+            <el-input v-model="form.customStatement" type="textarea" :rows="4" placeholder="留空时生成内容将使用上方品牌基准表述" />
+            <div class="form-tip">留空时生成内容将使用上方品牌基准表述</div>
           </div>
         </el-form-item>
-        <el-form-item label="主目标"><el-input v-model="form.primaryGoal" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item label="内容调性">
+          <el-input v-model="form.contentTone" placeholder="例如：专业务实，强调可执行性" />
+        </el-form-item>
+        <el-form-item label="优先写作角度">
+          <el-select
+            v-model="form.preferredAngles"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            style="width: 100%"
+            placeholder="输入并回车，例如：指南、成本、避坑"
+          />
+        </el-form-item>
+        <el-form-item label="品牌禁用词">
+          <div class="w-full">
+            <div v-if="brandForbiddenPhraseList.length" class="tag-list">
+              <el-tag v-for="item in brandForbiddenPhraseList" :key="item" type="info">{{ item }}</el-tag>
+            </div>
+            <div v-else class="form-tip">当前品牌未配置禁用词</div>
+          </div>
+        </el-form-item>
+        <el-form-item label="补充禁用词">
+          <el-select
+            v-model="form.extraForbiddenPhrases"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            style="width: 100%"
+            placeholder="输入并回车，作为项目级补充禁用词"
+          />
+        </el-form-item>
+        <el-form-item label="内容备注">
+          <el-input v-model="form.contentNote" type="textarea" :rows="3" placeholder="补充说明内容生成时需要强调或避免的点" />
+        </el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer>
@@ -258,14 +295,14 @@ import {
   getProjectList,
   createProject,
   deleteProject,
-  getCurrentQuestionPool,
   getProjectPlatformOptions,
+  getKeywordGroupPage,
   updateProject,
   updateProjectStatus,
 } from '@/api/project'
 import { getBrandList, getCompanyList } from '@/api/customer'
 import { getEnabledPackagePlans } from '@/api/packagePlan'
-import type { Brand, Company, PackagePlan, Project, ProjectPlatformOption, QuestionPoolItemInput } from '@/types'
+import type { Brand, Company, KeywordGroup, PackagePlan, Project, ProjectPlatformOption } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
@@ -277,8 +314,6 @@ const dictStore = useDictStore()
 const canWriteProject = computed(() => userStore.hasPermission('project.write'))
 const canActivateProject = computed(() => userStore.hasPermission('project.status.activate'))
 const canCloseProject = computed(() => userStore.hasPermission('project.status.close'))
-const canConfirmCoreQuestion = computed(() => userStore.hasPermission('question_pool.core.confirm'))
-const canDeleteCoreQuestion = computed(() => userStore.hasPermission('question_pool.core.delete'))
 const presetCompanyId = computed(() => {
   const raw = Number(route.query.companyId)
   return Number.isFinite(raw) && raw > 0 ? raw : null
@@ -296,6 +331,9 @@ const companyOwnerTypeLabel = computed(() => {
   const key = company?.ownerType || (company?.partnerId ? 'partner' : 'direct')
   return dictStore.label('owner_type', key) || '-'
 })
+const selectedBrand = computed(() => brandOptions.value.find((item) => item.id === form.brandId) || null)
+const brandBaseStatement = computed(() => extractBrandBaseStatement(selectedBrand.value))
+const brandForbiddenPhraseList = computed(() => parseStringArray(selectedBrand.value?.forbiddenPhrases))
 
 const statusOptions = computed(() => ['active', 'paused'])
 const loading = ref(false)
@@ -303,6 +341,7 @@ const saving = ref(false)
 const rows = ref<Project[]>([])
 const companyOptions = ref<Company[]>([])
 const brandOptions = ref<Brand[]>([])
+const keywordGroupOptions = ref<KeywordGroup[]>([])
 const packagePlans = ref<PackagePlan[]>([])
 const platformOptions = ref<Record<'P0' | 'P1' | 'P2', ProjectPlatformOption[]>>({
   P0: [],
@@ -316,7 +355,6 @@ const formVisible = ref(false)
 const formRef = ref<FormInstance>()
 const formMode = ref<'create' | 'edit'>('create')
 const editingId = ref<number | null>(null)
-const originalQuestionPoolSignature = ref('')
 const originalStatus = ref<'active' | 'paused'>('paused')
 
 const form = reactive({
@@ -324,6 +362,7 @@ const form = reactive({
   projectAliases: '',
   companyId: null as number | null,
   brandId: null as number | null,
+  keywordGroupIds: [] as number[],
   packageType: '',
   packagePriceYuan: 0,
   serviceMonths: 0,
@@ -336,16 +375,33 @@ const form = reactive({
   status: 'paused' as 'active' | 'paused',
   regionCodes: [] as string[],
   deliveryMode: 'managed',
-  questionPoolItems: [] as QuestionPoolItemInput[],
   primaryGoal: '',
+  targetRegions: [] as string[],
+  targetAudience: '',
+  customStatement: '',
+  contentTone: '',
+  preferredAngles: [] as string[],
+  extraForbiddenPhrases: [] as string[],
+  contentNote: '',
   remark: '',
 })
 
+const keywordGroupSummary = computed(() => {
+  const selected = new Set(form.keywordGroupIds)
+  let saved = 0
+  for (const group of keywordGroupOptions.value) {
+    if (selected.has(group.id)) {
+      saved += group.savedKeywordCount || 0
+    }
+  }
+  return `已选 ${form.keywordGroupIds.length} 个拓词组，已入库 ${saved} 条关键词`
+})
 
 const rules: FormRules = {
   projectName: [{ required: true, message: '请输入项目名称', trigger: 'blur' }],
   companyId: [{ required: true, message: '请选择客户', trigger: 'change' }],
   brandId: [{ required: true, message: '请选择品牌', trigger: 'change' }],
+  keywordGroupIds: [{ required: true, type: 'array', min: 1, message: '至少选择 1 个拓词组', trigger: 'change' }],
   packageType: [{ required: true, message: '请选择套餐', trigger: 'change' }],
   packagePriceYuan: [{ required: true, message: '请输入签约价', trigger: 'change' }],
   serviceMonths: [{ required: true, message: '请输入服务月数', trigger: 'change' }],
@@ -380,6 +436,54 @@ function centsToYuan(v?: number | null) {
 
 function regionDisplay(project: Project) {
   return regionDisplayFromPayload(project)
+}
+
+function parseStringArray(value?: string | string[] | null) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter((item, index, arr) => item.length > 0 && arr.indexOf(item) === index)
+  }
+  if (!value) {
+    return [] as string[]
+  }
+  try {
+    const parsed = JSON.parse(value)
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item) => String(item).trim())
+        .filter((item, index, arr) => item.length > 0 && arr.indexOf(item) === index)
+    }
+  } catch {
+    return String(value)
+      .split(/[,，、;；\n\r]+/)
+      .map((item) => item.trim())
+      .filter((item, index, arr) => item.length > 0 && arr.indexOf(item) === index)
+  }
+  return []
+}
+
+function extractBrandBaseStatement(brand: Brand | null) {
+  if (!brand) {
+    return ''
+  }
+  const statement = brand.standardStatement
+  if (statement && typeof statement === 'object') {
+    const brandParagraph = statement.brand_paragraph?.trim()
+    if (brandParagraph) {
+      return brandParagraph
+    }
+  }
+  if (typeof statement === 'string' && statement.trim()) {
+    try {
+      const parsed = JSON.parse(statement)
+      const brandParagraph = typeof parsed?.brand_paragraph === 'string' ? parsed.brand_paragraph.trim() : ''
+      if (brandParagraph) {
+        return brandParagraph
+      }
+    } catch {
+      return statement.trim()
+    }
+  }
+  return brand.standardBrandStatement || brand.businessStandardStatement || ''
 }
 
 function yuanToCents(v: number) {
@@ -420,6 +524,7 @@ function resetForm() {
   form.projectAliases = ''
   form.companyId = fromCustomerBrandPath.value ? presetCompanyId.value : null
   form.brandId = fromCustomerBrandPath.value ? presetBrandId.value : null
+  form.keywordGroupIds = []
   applyDefaultPackage()
   form.selectedPlatformCodesP0 = []
   form.selectedPlatformCodesP1 = []
@@ -427,27 +532,15 @@ function resetForm() {
   form.status = 'paused'
   form.regionCodes = []
   form.deliveryMode = 'managed'
-  form.questionPoolItems = []
-  originalQuestionPoolSignature.value = ''
   form.primaryGoal = ''
+  form.targetRegions = []
+  form.targetAudience = ''
+  form.customStatement = ''
+  form.contentTone = ''
+  form.preferredAngles = []
+  form.extraForbiddenPhrases = []
+  form.contentNote = ''
   form.remark = ''
-}
-
-function onCompanyChange() {
-  if (lockCompanyBrandSelection.value) {
-    form.companyId = presetCompanyId.value
-    form.brandId = presetBrandId.value
-    return
-  }
-  if (!form.companyId) {
-    brandOptions.value = []
-    form.brandId = null
-    return
-  }
-  if (formMode.value === 'create') {
-    form.brandId = null
-  }
-  loadBrands(form.companyId)
 }
 
 async function loadCompanies() {
@@ -466,6 +559,47 @@ async function loadBrands(companyId?: number | null) {
   } catch {
     brandOptions.value = []
   }
+}
+
+async function loadKeywordGroups(companyId?: number | null) {
+  if (!companyId) {
+    keywordGroupOptions.value = []
+    form.keywordGroupIds = []
+    return
+  }
+  try {
+    const { data } = await getKeywordGroupPage({ current: 1, size: 500, companyId })
+    keywordGroupOptions.value = data.data.records || []
+    const validIds = new Set(keywordGroupOptions.value.map((item) => item.id))
+    form.keywordGroupIds = form.keywordGroupIds.filter((id) => validIds.has(id))
+  } catch {
+    keywordGroupOptions.value = []
+    form.keywordGroupIds = []
+  }
+}
+
+async function onCompanyChange(nextCompanyId: number) {
+  if (lockCompanyBrandSelection.value) {
+    form.companyId = presetCompanyId.value
+    form.brandId = presetBrandId.value
+    return
+  }
+  const hasSelectedGroups = form.keywordGroupIds.length > 0
+  if (hasSelectedGroups) {
+    try {
+      await ElMessageBox.confirm(
+        '切换客户后，已选拓词组将被清空，是否继续？',
+        '切换客户确认',
+        { type: 'warning', confirmButtonText: '继续', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+  }
+  form.companyId = nextCompanyId
+  form.brandId = null
+  form.keywordGroupIds = []
+  await Promise.all([loadBrands(nextCompanyId), loadKeywordGroups(nextCompanyId)])
 }
 
 async function loadPackagePlans() {
@@ -519,7 +653,7 @@ async function openCreate() {
   editingId.value = null
   resetForm()
   if (form.companyId) {
-    await loadBrands(form.companyId)
+    await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId)])
     if (lockCompanyBrandSelection.value) {
       const hasPresetBrand = brandOptions.value.some((b) => b.id === presetBrandId.value)
       if (!hasPresetBrand) {
@@ -530,6 +664,7 @@ async function openCreate() {
     }
   } else {
     brandOptions.value = []
+    keywordGroupOptions.value = []
   }
   formVisible.value = true
 }
@@ -541,6 +676,7 @@ async function openEdit(row: Project) {
   form.projectAliases = row.projectAliases || ''
   form.companyId = row.companyId || null
   form.brandId = row.brandId
+  form.keywordGroupIds = [...(row.selectedKeywordGroupIds || [])]
   form.packageType = row.packageType
   form.packagePriceYuan = Number(row.packagePrice || 0)
   form.serviceMonths = row.serviceMonths || 1
@@ -554,23 +690,16 @@ async function openEdit(row: Project) {
   originalStatus.value = form.status
   form.regionCodes = regionCodesFromPayload(row)
   form.deliveryMode = row.deliveryMode || 'managed'
-  form.questionPoolItems = []
   form.primaryGoal = row.primaryGoal || ''
+  form.targetRegions = parseStringArray(row.targetRegions)
+  form.targetAudience = row.targetAudience || ''
+  form.customStatement = row.customStatement || ''
+  form.contentTone = row.contentTone || ''
+  form.preferredAngles = parseStringArray(row.preferredAngles)
+  form.extraForbiddenPhrases = parseStringArray(row.extraForbiddenPhrases)
+  form.contentNote = row.contentNote || ''
   form.remark = (row as any).remark || ''
-  await loadBrands(form.companyId)
-  try {
-    const { data } = await getCurrentQuestionPool(row.id)
-    const current = data.data
-    form.questionPoolItems = (current?.items || []).map((item) => ({
-      questionText: item.questionText,
-      questionType: item.questionType,
-      priority: item.priority as 'A' | 'B' | 'C',
-      isCore: !!item.isCore,
-    }))
-  } catch {
-    form.questionPoolItems = []
-  }
-  originalQuestionPoolSignature.value = buildQuestionPoolSignature(form.questionPoolItems)
+  await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId)])
   formVisible.value = true
 }
 
@@ -583,8 +712,16 @@ async function submit() {
     ElMessage.warning('请先选择客户')
     return
   }
-  if (formMode.value === 'create' && !form.brandId) {
-    ElMessage.warning('新增项目时品牌为必填项')
+  if (!form.brandId) {
+    ElMessage.warning('请选择品牌')
+    return
+  }
+  if (form.keywordGroupIds.length < 1) {
+    ElMessage.warning('至少选择 1 个拓词组')
+    return
+  }
+  if (form.keywordGroupIds.length > 10) {
+    ElMessage.warning('拓词组最多选择 10 个')
     return
   }
   if (form.selectedPlatformCodesP0.length !== form.requiredPlatformP0Count) {
@@ -610,21 +747,6 @@ async function submit() {
     ElMessage.warning('同一平台不能同时出现在 P0/P1/P2')
     return
   }
-  const normalizedQuestionItems = form.questionPoolItems
-    .map((item) => ({
-      questionText: (item.questionText || '').trim(),
-      questionType: item.questionType,
-      priority: item.priority,
-      isCore: !!item.isCore,
-    }))
-    .filter((item) => item.questionText.length > 0)
-
-  for (const item of normalizedQuestionItems) {
-    if (!item.questionType || !item.priority) {
-      ElMessage.warning('问题池条目需选择分类和等级')
-      return
-    }
-  }
 
   saving.value = true
   try {
@@ -640,6 +762,7 @@ async function submit() {
       projectAliases: form.projectAliases || undefined,
       companyId: form.companyId,
       brandId: form.brandId,
+      keywordGroupIds: form.keywordGroupIds,
       packageType: form.packageType,
       packagePrice: yuanToCents(form.packagePriceYuan),
       serviceMonths: form.serviceMonths,
@@ -648,33 +771,18 @@ async function submit() {
       selectedPlatformCodesP2: form.selectedPlatformCodesP2,
       deliveryMode: form.deliveryMode || 'managed',
       primaryGoal: form.primaryGoal || undefined,
+      targetRegions: form.targetRegions,
+      targetAudience: form.targetAudience || undefined,
+      customStatement: form.customStatement || undefined,
+      contentTone: form.contentTone || undefined,
+      preferredAngles: form.preferredAngles,
+      extraForbiddenPhrases: form.extraForbiddenPhrases,
+      contentNote: form.contentNote || undefined,
       remark: form.remark || undefined,
     }
     if (lockCompanyBrandSelection.value) {
       payload.companyId = presetCompanyId.value
       payload.brandId = presetBrandId.value
-    }
-    if (formMode.value === 'create') {
-      payload.questionPoolItems = normalizedQuestionItems
-    } else {
-      const newSignature = buildQuestionPoolSignature(normalizedQuestionItems)
-      const questionPoolChanged = newSignature !== originalQuestionPoolSignature.value
-      if (questionPoolChanged) {
-        const { value } = await ElMessageBox.prompt(
-          '检测到问题池内容有变化，请填写调整原因',
-          '问题池调整原因',
-          {
-            inputPlaceholder: '例如：客户反馈调整、策略优化',
-            inputValidator: (val) => !!(val && val.trim()),
-            inputErrorMessage: '请填写调整原因',
-            confirmButtonText: '确认保存',
-            cancelButtonText: '取消',
-            closeOnClickModal: false,
-          },
-        )
-        payload.questionPoolChangeReason = value.trim()
-        payload.questionPoolItems = normalizedQuestionItems
-      }
     }
 
     if (formMode.value === 'create') {
@@ -700,53 +808,9 @@ async function submit() {
       formVisible.value = false
       load()
     }
-  } catch (err: any) {
-    if (err === 'cancel' || err === 'close') return
   } finally {
     saving.value = false
   }
-}
-
-function addQuestionItem() {
-  form.questionPoolItems.push({
-    questionText: '',
-    questionType: dictStore.options('question_type')[0]?.dictKey || 'brand',
-    priority: (dictStore.options('question_priority')[0]?.dictKey as 'A' | 'B' | 'C') || 'A',
-    isCore: false,
-  })
-}
-
-function removeQuestionItem(index: number) {
-  if (!canRemoveQuestionAt(index)) {
-    ElMessage.warning('当前账号无删除A类核心问题权限')
-    return
-  }
-  form.questionPoolItems.splice(index, 1)
-}
-
-function canToggleCoreFlag(item: QuestionPoolItemInput) {
-  if (item.isCore) {
-    return canDeleteCoreQuestion.value
-  }
-  return canConfirmCoreQuestion.value
-}
-
-function canRemoveQuestionAt(index: number) {
-  const item = form.questionPoolItems[index]
-  if (!item) return false
-  if (!item.isCore) return true
-  return canDeleteCoreQuestion.value
-}
-
-function buildQuestionPoolSignature(items: QuestionPoolItemInput[]) {
-  return JSON.stringify(
-    items.map((item) => ({
-      questionText: (item.questionText || '').trim(),
-      questionType: item.questionType,
-      priority: item.priority,
-      isCore: !!item.isCore,
-    })),
-  )
 }
 
 function goDetail(id: number) {
@@ -758,10 +822,6 @@ function goActivate(id: number) {
 }
 
 function onMoreCommand(row: Project, command: string) {
-  if (command === 'questionPool') {
-    goQuestionPool(row.id)
-    return
-  }
   if (command === 'activate') {
     goActivate(row.id)
     return
@@ -773,10 +833,6 @@ function onMoreCommand(row: Project, command: string) {
   if (command === 'delete') {
     removeProject(row)
   }
-}
-
-function goQuestionPool(id: number) {
-  router.push(`/admin/projects/${id}/questions`)
 }
 
 async function removeProject(row: Project) {
@@ -801,6 +857,7 @@ onMounted(async () => {
   applyDefaultPackage()
   await loadCompanies()
   await loadBrands(form.companyId)
+  await loadKeywordGroups(form.companyId)
   await load()
   if (fromCustomerBrandPath.value && canWriteProject.value) {
     await openCreate()
@@ -813,6 +870,21 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
+}
+.keyword-summary {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #606266;
+}
+.form-tip {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #909399;
+}
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 </style>

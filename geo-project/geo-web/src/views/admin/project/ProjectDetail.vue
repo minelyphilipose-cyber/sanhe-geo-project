@@ -20,6 +20,7 @@
         <el-descriptions-item label="项目别名">{{ project?.projectAliases || '-' }}</el-descriptions-item>
         <el-descriptions-item label="客户名称">{{ project?.companyName || '-' }}</el-descriptions-item>
         <el-descriptions-item label="品牌名称">{{ project?.brandName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="拓词组">{{ `已选 ${project?.selectedKeywordGroupCount || 0} 个，已入库 ${project?.selectedKeywordSavedKeywords || 0} 条关键词` }}</el-descriptions-item>
         <el-descriptions-item label="套餐">{{ dictStore.label('package_type', project?.packageType) }}</el-descriptions-item>
         <el-descriptions-item label="签约价(元)">{{ centsToYuan(project?.packagePrice) }}</el-descriptions-item>
         <el-descriptions-item label="服务月数">{{ project?.serviceMonths }}</el-descriptions-item>
@@ -32,6 +33,19 @@
         <el-descriptions-item label="折扣快照">{{ project?.discountRateSnapshot != null ? (project.discountRateSnapshot * 100).toFixed(2) + '%' : '-' }}</el-descriptions-item>
         <el-descriptions-item label="扣款流水号">{{ project?.deductionTxnNo || '-' }}</el-descriptions-item>
         <el-descriptions-item label="主目标" :span="3">{{ project?.primaryGoal || '-' }}</el-descriptions-item>
+      </el-descriptions>
+    </el-card>
+
+    <el-card v-if="project">
+      <template #header><span>内容策略配置</span></template>
+      <el-descriptions :column="2" border>
+        <el-descriptions-item label="目标区域词">{{ joinArray(project.targetRegions) }}</el-descriptions-item>
+        <el-descriptions-item label="目标受众">{{ project.targetAudience || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="内容调性">{{ project.contentTone || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="优先写作角度">{{ joinArray(project.preferredAngles) }}</el-descriptions-item>
+        <el-descriptions-item label="项目定制表述" :span="2">{{ project.customStatement || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="补充禁用词" :span="2">{{ joinArray(project.extraForbiddenPhrases) }}</el-descriptions-item>
+        <el-descriptions-item label="内容备注" :span="2">{{ project.contentNote || '-' }}</el-descriptions-item>
       </el-descriptions>
     </el-card>
 
@@ -131,6 +145,21 @@ function formatMetricValue(v?: number | null) {
 function regionText(p?: Project | null) {
   if (!p) return '-'
   return regionDisplayFromPayload(p) || '-'
+}
+
+function joinArray(value?: string | string[] | null) {
+  if (Array.isArray(value)) {
+    return value.length ? value.join('、') : '-'
+  }
+  if (!value) {
+    return '-'
+  }
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) && parsed.length ? parsed.join('、') : '-'
+  } catch {
+    return value
+  }
 }
 
 function goPresale() {

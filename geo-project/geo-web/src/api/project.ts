@@ -86,7 +86,7 @@ export function updateQuestionStrategy(questionId: number, data: {
   return request.put<R<void>>(`/question-pools/questions/${questionId}/strategy`, data)
 }
 
-export function getKeywordGroupPage(params: { current?: number; size?: number; keyword?: string; type?: string }) {
+export function getKeywordGroupPage(params: { current?: number; size?: number; keyword?: string; companyId?: number; type?: string }) {
   return request.get<R<PageResult<KeywordGroup>>>('/keyword-groups', { params })
 }
 

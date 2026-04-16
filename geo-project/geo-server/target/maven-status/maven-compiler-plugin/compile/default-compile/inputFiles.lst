@@ -190,6 +190,8 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\partner\dto\PartnerCreateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\service\KeywordAffixWordService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\service\CompanyService.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\entity\ProjectKeywordGroupRel.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\entity\KeywordGroupResult.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\report\mapper\ReportAccessLogMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\service\CurrentUserService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\entity\KeywordGroup.java
@@ -226,6 +228,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\report\dto\PresaleQuestionSetSaveRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\report\entity\PresaleQuestionSet.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\mapper\ActivityLogMapper.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\mapper\ProjectKeywordGroupRelMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\dto\UserStatusUpdateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\entity\PollDailyStat.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\entity\KeywordGroupWord.java
@@ -256,6 +259,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\common\config\SecurityConfig.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\mapper\SysUserRoleMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\dto\ProjectFlowUpdateRequest.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\mapper\KeywordGroupResultMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\service\DispatchAlertService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\dto\ReportTrendVO.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\mapper\SysRoleMapper.java

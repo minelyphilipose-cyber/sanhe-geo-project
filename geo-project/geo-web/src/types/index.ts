@@ -160,14 +160,14 @@ export interface Brand {
     selling_points?: string[] | null
     differentiation?: string | null
     brand_paragraph?: string | null
-  } | null
+  } | string | null
   statementStatus?: 'pending' | 'draft' | 'locked' | string | null
   statementGeneratedAt?: string | null
   statementLockedAt?: string | null
   statementLockedBy?: number | null
   statementVersion?: number | null
   statementHistory?: any[] | null
-  forbiddenPhrases: string | null
+  forbiddenPhrases: string | string[] | null
   status?: string
   createdAt: string
   updatedAt: string
@@ -241,6 +241,13 @@ export interface Project {
   cityName?: string | null
   districtCode?: string | null
   districtName?: string | null
+  targetRegions?: string | string[] | null
+  targetAudience?: string | null
+  customStatement?: string | null
+  contentTone?: string | null
+  preferredAngles?: string | string[] | null
+  extraForbiddenPhrases?: string | string[] | null
+  contentNote?: string | null
   discountRateSnapshot?: number | null
   deductionAmount?: number | null
   deductionTxnNo?: string | null
@@ -250,6 +257,9 @@ export interface Project {
   selectedPlatformCodesP0?: string[]
   selectedPlatformCodesP1?: string[]
   selectedPlatformCodesP2?: string[]
+  selectedKeywordGroupIds?: number[]
+  selectedKeywordGroupCount?: number
+  selectedKeywordSavedKeywords?: number
   // 鍏宠仈灞曠ず瀛楁
   brandName?: string
   companyName?: string
@@ -529,18 +539,24 @@ export interface KeywordGroupColumns {
 }
 
 export interface KeywordGroupPayload {
+  companyId: number
   name?: string
   type: string
   remark?: string
   count?: number
+  resultKeywords?: string[]
   columns: KeywordGroupColumns
 }
 
 export interface KeywordGroup {
   id: number
+  companyId: number
+  companyName?: string | null
   name: string
   type: string
   remark?: string | null
+  estimatedKeywordCount?: number
+  savedKeywordCount?: number
   columns?: KeywordGroupColumns
   createdAt: string
   updatedAt: string
@@ -548,6 +564,7 @@ export interface KeywordGroup {
 
 export interface KeywordPreviewResult {
   totalEstimated: number
+  totalAvailable: number
   totalGenerated: number
   keywords: string[]
 }

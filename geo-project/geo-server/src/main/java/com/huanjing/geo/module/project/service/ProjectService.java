@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.project.service;
 
 import cn.hutool.core.util.RandomUtil;
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
@@ -25,9 +26,13 @@ import com.huanjing.geo.module.project.dto.ProjectStageUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectStatusUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectUpdateRequest;
 import com.huanjing.geo.module.project.dto.QuestionPoolItemRequest;
+import com.huanjing.geo.module.project.entity.KeywordGroup;
 import com.huanjing.geo.module.project.entity.ProjectPlatformBinding;
+import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
 import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectPlatformBindingMapper;
 import com.huanjing.geo.module.dispatch.service.BrandStatementDispatchService;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -50,6 +55,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -72,7 +78,10 @@ public class ProjectService {
     private final PartnerAccountTxnMapper partnerAccountTxnMapper;
     private final PackagePlanService packagePlanService;
     private final QuestionPoolService questionPoolService;
+    private final KeywordGroupService keywordGroupService;
+    private final KeywordGroupMapper keywordGroupMapper;
     private final ProjectPlatformBindingMapper projectPlatformBindingMapper;
+    private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final CurrentUserService currentUserService;
     private final ActivityLogService activityLogService;
@@ -113,6 +122,7 @@ public class ProjectService {
 
         Page<Project> page = projectMapper.selectPage(new Page<>(current, size), wrapper);
         attachPlatformSelections(page.getRecords());
+        attachKeywordGroupSelections(page.getRecords());
         return page;
     }
 
@@ -123,6 +133,7 @@ public class ProjectService {
         currentUserService.ensurePartnerResourceAccess(user, project.getPartnerId(), "project");
         ensureSalesProjectAccess(user, project);
         attachPlatformSelections(Collections.singletonList(project));
+        attachKeywordGroupSelections(Collections.singletonList(project));
         return project;
     }
 
@@ -189,6 +200,16 @@ public class ProjectService {
         project.setStartDate(req.getStartDate());
         project.setEndDate(req.getEndDate());
         project.setPrimaryGoal(req.getPrimaryGoal());
+        applyContentStrategyFields(
+                project,
+                req.getTargetRegions(),
+                req.getTargetAudience(),
+                req.getCustomStatement(),
+                req.getContentTone(),
+                req.getPreferredAngles(),
+                req.getExtraForbiddenPhrases(),
+                req.getContentNote()
+        );
         project.setCreatedBy(operator.getId());
         project.setRemark(req.getRemark());
         projectMapper.insert(project);
@@ -201,7 +222,9 @@ public class ProjectService {
                 req.getSelectedPlatformCodesP1(),
                 req.getSelectedPlatformCodesP2()
         );
+        replaceKeywordGroupSelections(project.getId(), project.getCompanyId(), req.getKeywordGroupIds());
         attachPlatformSelections(Collections.singletonList(project));
+        attachKeywordGroupSelections(Collections.singletonList(project));
 
         activityLogService.logAction(
                 operator.getId(),
@@ -231,7 +254,7 @@ public class ProjectService {
         SysUser operator = currentUserService.requireCurrentUser();
         Project project = requireProject(id);
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
-        Company company = validateCompany(project.getCompanyId());
+        Company company = validateCompanyBrand(req.getCompanyId(), req.getBrandId());
         String ownerType = resolveOwnerTypeByCompany(company);
         Long partnerId = resolvePartnerIdByCompany(company);
         validateOwnerBinding(ownerType, partnerId);
@@ -241,6 +264,10 @@ public class ProjectService {
         validateProjectBase(req.getPackageType());
         com.huanjing.geo.module.project.entity.PackagePlan packagePlan = packagePlanService.requireEnabledByType(req.getPackageType());
 
+        project.setCompanyId(company.getId());
+        project.setCompanyName(company.getCompanyName());
+        project.setBrandId(req.getBrandId());
+        project.setBrandName(resolveBrandName(req.getBrandId()));
         project.setProjectName(req.getProjectName());
         project.setProjectAliases(normalizeAliases(req.getProjectAliases()));
         project.setPackageType(req.getPackageType());
@@ -255,6 +282,16 @@ public class ProjectService {
         project.setStartDate(req.getStartDate());
         project.setEndDate(req.getEndDate());
         project.setPrimaryGoal(req.getPrimaryGoal());
+        applyContentStrategyFields(
+                project,
+                req.getTargetRegions(),
+                req.getTargetAudience(),
+                req.getCustomStatement(),
+                req.getContentTone(),
+                req.getPreferredAngles(),
+                req.getExtraForbiddenPhrases(),
+                req.getContentNote()
+        );
         project.setRemark(req.getRemark());
         projectMapper.updateById(project);
         replacePlatformSelections(
@@ -266,7 +303,9 @@ public class ProjectService {
                 req.getSelectedPlatformCodesP1(),
                 req.getSelectedPlatformCodesP2()
         );
+        replaceKeywordGroupSelections(project.getId(), project.getCompanyId(), req.getKeywordGroupIds());
         attachPlatformSelections(Collections.singletonList(project));
+        attachKeywordGroupSelections(Collections.singletonList(project));
         activityLogService.logAction(
                 operator.getId(),
                 "project.update",
@@ -878,6 +917,36 @@ public class ProjectService {
         }
     }
 
+    private void replaceKeywordGroupSelections(Long projectId, Long companyId, List<Long> selectedKeywordGroupIds) {
+        List<Long> normalizedIds = normalizeKeywordGroupIds(selectedKeywordGroupIds);
+        if (normalizedIds.isEmpty()) {
+            throw new BizException(400, "At least one keyword group is required");
+        }
+        if (normalizedIds.size() > 10) {
+            throw new BizException(400, "Keyword group count must be <= 10");
+        }
+
+        List<KeywordGroup> groups = keywordGroupMapper.selectList(
+                new LambdaQueryWrapper<KeywordGroup>()
+                        .in(KeywordGroup::getId, normalizedIds)
+                        .eq(KeywordGroup::getCompanyId, companyId)
+        );
+        if (groups.size() != normalizedIds.size()) {
+            throw new BizException(400, "Selected keyword groups must belong to project company");
+        }
+
+        projectKeywordGroupRelMapper.delete(
+                new LambdaQueryWrapper<ProjectKeywordGroupRel>()
+                        .eq(ProjectKeywordGroupRel::getProjectId, projectId)
+        );
+        for (Long groupId : normalizedIds) {
+            ProjectKeywordGroupRel rel = new ProjectKeywordGroupRel();
+            rel.setProjectId(projectId);
+            rel.setKeywordGroupId(groupId);
+            projectKeywordGroupRelMapper.insert(rel);
+        }
+    }
+
     private void validatePlatformPriority(AiPlatformConfig cfg, String priorityLevel) {
         if (cfg == null) {
             throw new BizException(400, "Selected platform is invalid or disabled");
@@ -896,6 +965,45 @@ public class ProjectService {
                 .map(String::trim)
                 .distinct()
                 .collect(Collectors.toList());
+    }
+
+    private List<Long> normalizeKeywordGroupIds(List<Long> selectedIds) {
+        if (selectedIds == null) {
+            return List.of();
+        }
+        return selectedIds.stream()
+                .filter(id -> id != null && id > 0)
+                .distinct()
+                .collect(Collectors.toCollection(LinkedList::new));
+    }
+
+    private void attachKeywordGroupSelections(List<Project> projects) {
+        if (projects == null || projects.isEmpty()) {
+            return;
+        }
+        List<Long> projectIds = projects.stream().map(Project::getId).collect(Collectors.toList());
+        List<ProjectKeywordGroupRel> rels = projectKeywordGroupRelMapper.selectList(
+                new LambdaQueryWrapper<ProjectKeywordGroupRel>()
+                        .in(ProjectKeywordGroupRel::getProjectId, projectIds)
+                        .orderByAsc(ProjectKeywordGroupRel::getId)
+        );
+        Map<Long, List<Long>> projectGroupIdMap = new LinkedHashMap<>();
+        Set<Long> allGroupIds = new LinkedHashSet<>();
+        for (ProjectKeywordGroupRel rel : rels) {
+            projectGroupIdMap.computeIfAbsent(rel.getProjectId(), k -> new ArrayList<>()).add(rel.getKeywordGroupId());
+            allGroupIds.add(rel.getKeywordGroupId());
+        }
+        Map<Long, Long> savedCountMap = keywordGroupService.calcSavedCountsByGroupIds(new ArrayList<>(allGroupIds));
+        for (Project project : projects) {
+            List<Long> groupIds = projectGroupIdMap.getOrDefault(project.getId(), List.of());
+            long totalSaved = 0L;
+            for (Long groupId : groupIds) {
+                totalSaved += savedCountMap.getOrDefault(groupId, 0L);
+            }
+            project.setSelectedKeywordGroupIds(groupIds);
+            project.setSelectedKeywordGroupCount(groupIds.size());
+            project.setSelectedKeywordSavedKeywords(totalSaved);
+        }
     }
 
     private Map<String, Object> snapshotProject(Project project) {
@@ -918,6 +1026,13 @@ public class ProjectService {
         snapshot.put("cityName", project.getCityName());
         snapshot.put("districtCode", project.getDistrictCode());
         snapshot.put("districtName", project.getDistrictName());
+        snapshot.put("targetRegions", project.getTargetRegions());
+        snapshot.put("targetAudience", project.getTargetAudience());
+        snapshot.put("customStatement", project.getCustomStatement());
+        snapshot.put("contentTone", project.getContentTone());
+        snapshot.put("preferredAngles", project.getPreferredAngles());
+        snapshot.put("extraForbiddenPhrases", project.getExtraForbiddenPhrases());
+        snapshot.put("contentNote", project.getContentNote());
         snapshot.put("status", project.getStatus());
         snapshot.put("stage", project.getStage());
         snapshot.put("activatedAt", project.getActivatedAt());
@@ -948,6 +1063,9 @@ public class ProjectService {
         snapshot.put("selectedPlatformCodesP0", project.getSelectedPlatformCodesP0());
         snapshot.put("selectedPlatformCodesP1", project.getSelectedPlatformCodesP1());
         snapshot.put("selectedPlatformCodesP2", project.getSelectedPlatformCodesP2());
+        snapshot.put("selectedKeywordGroupIds", project.getSelectedKeywordGroupIds());
+        snapshot.put("selectedKeywordGroupCount", project.getSelectedKeywordGroupCount());
+        snapshot.put("selectedKeywordSavedKeywords", project.getSelectedKeywordSavedKeywords());
         snapshot.put("discountRateSnapshot", project.getDiscountRateSnapshot());
         snapshot.put("deductionAmount", project.getDeductionAmount());
         snapshot.put("deductionTxnNo", project.getDeductionTxnNo());
@@ -969,11 +1087,44 @@ public class ProjectService {
         project.setDistrictName(trimToNull(districtName));
     }
 
+    private void applyContentStrategyFields(Project project,
+                                            List<String> targetRegions,
+                                            String targetAudience,
+                                            String customStatement,
+                                            String contentTone,
+                                            List<String> preferredAngles,
+                                            List<String> extraForbiddenPhrases,
+                                            String contentNote) {
+        project.setTargetRegions(normalizeJsonStringList(targetRegions));
+        project.setTargetAudience(trimToNull(targetAudience));
+        project.setCustomStatement(trimToNull(customStatement));
+        project.setContentTone(trimToNull(contentTone));
+        project.setPreferredAngles(normalizeJsonStringList(preferredAngles));
+        project.setExtraForbiddenPhrases(normalizeJsonStringList(extraForbiddenPhrases));
+        project.setContentNote(trimToNull(contentNote));
+    }
+
     private String trimToNull(String value) {
         if (!StringUtils.hasText(value)) {
             return null;
         }
         return value.trim();
+    }
+
+    private String normalizeJsonStringList(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        List<String> normalized = values.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .collect(Collectors.toList());
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        return JSONUtil.toJsonStr(normalized);
     }
 
     private String normalizeAliases(String value) {

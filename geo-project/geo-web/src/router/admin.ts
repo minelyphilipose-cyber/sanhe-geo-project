@@ -61,22 +61,10 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '项目详情', hidden: true, permissions: ['project.read'] },
     },
     {
-      path: 'projects/:id/questions',
-      name: 'QuestionPool',
-      component: () => import('@/views/admin/project/QuestionPool.vue'),
-      meta: { title: '问题池', hidden: true, permissions: ['project.read'] },
-    },
-    {
       path: 'projects/:id/presale',
       name: 'PresaleDiagnosis',
       component: () => import('@/views/admin/project/PresaleDiagnosis.vue'),
       meta: { title: '售前诊断', hidden: true, permissions: ['project.read'] },
-    },
-    {
-      path: 'question-pools',
-      name: 'QuestionPoolManage',
-      component: () => import('@/views/admin/project/QuestionPoolManage.vue'),
-      meta: { title: '问题池管理', icon: 'ChatDotSquare', permissions: ['project.read'] },
     },
     {
       path: 'projects/:id/tasks',

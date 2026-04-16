@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 public class KeywordGroup {
     @TableId(type = IdType.AUTO)
     private Long id;
+    private Long companyId;
     private String name;
     private String type;
     private String remark;

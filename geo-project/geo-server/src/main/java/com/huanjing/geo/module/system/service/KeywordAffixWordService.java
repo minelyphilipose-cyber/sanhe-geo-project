@@ -25,6 +25,7 @@ import java.util.Set;
 public class KeywordAffixWordService {
 
     private static final Set<String> AFFIX_KIND_SET = Set.of("prefix", "suffix");
+    private static final Set<String> FUNCTIONAL_TYPE_SET = Set.of("search");
     private static final String DICT_TYPE_QUESTION_TYPE = "question_type";
     private static final String DICT_TYPE_INDUSTRY_TAG = "industry_tag";
 
@@ -154,6 +155,9 @@ public class KeywordAffixWordService {
 
     public void ensureTypeExists(String rawType, boolean enabledOnly) {
         String type = normalizeTypeCode(rawType);
+        if (FUNCTIONAL_TYPE_SET.contains(type)) {
+            return;
+        }
         LambdaQueryWrapper<SysDictItem> wrapper = new LambdaQueryWrapper<SysDictItem>()
                 .eq(SysDictItem::getDictType, DICT_TYPE_QUESTION_TYPE)
                 .eq(SysDictItem::getDictKey, type);

@@ -57,6 +57,13 @@ public class Project {
     private String cityName;
     private String districtCode;
     private String districtName;
+    private String targetRegions;
+    private String targetAudience;
+    private String customStatement;
+    private String contentTone;
+    private String preferredAngles;
+    private String extraForbiddenPhrases;
+    private String contentNote;
     private BigDecimal discountRateSnapshot;
     private BigDecimal deductionAmount;
     private String deductionTxnNo;
@@ -78,4 +85,10 @@ public class Project {
     private List<String> selectedPlatformCodesP1;
     @TableField(exist = false)
     private List<String> selectedPlatformCodesP2;
+    @TableField(exist = false)
+    private List<Long> selectedKeywordGroupIds;
+    @TableField(exist = false)
+    private Integer selectedKeywordGroupCount;
+    @TableField(exist = false)
+    private Long selectedKeywordSavedKeywords;
 }

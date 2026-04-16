@@ -290,7 +290,9 @@ function fillForm(data: Brand) {
   brandForm.businessIntro = data.businessIntro || ''
   brandForm.standardBrandStatement = data.standardBrandStatement || ''
   brandForm.businessStandardStatement = data.businessStandardStatement || ''
-  brandForm.forbiddenPhrases = data.forbiddenPhrases || ''
+  brandForm.forbiddenPhrases = Array.isArray(data.forbiddenPhrases)
+    ? data.forbiddenPhrases.join('，')
+    : (data.forbiddenPhrases || '')
 }
 
 async function load() {

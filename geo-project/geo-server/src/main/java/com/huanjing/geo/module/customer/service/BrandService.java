@@ -113,7 +113,7 @@ public class BrandService {
         brand.setBusinessIntro(req.getBusinessIntro());
         brand.setStandardBrandStatement(req.getStandardBrandStatement());
         brand.setBusinessStandardStatement(req.getBusinessStandardStatement());
-        brand.setForbiddenPhrases(req.getForbiddenPhrases());
+        brand.setForbiddenPhrases(normalizeForbiddenPhrases(req.getForbiddenPhrases()));
         brand.setStatus(StringUtils.hasText(req.getStatus()) ? req.getStatus() : "active");
         brandMapper.insert(brand);
         brandProfileService.createProfileVersionSnapshot(
@@ -170,7 +170,7 @@ public class BrandService {
         brand.setBusinessIntro(req.getBusinessIntro());
         brand.setStandardBrandStatement(req.getStandardBrandStatement());
         brand.setBusinessStandardStatement(req.getBusinessStandardStatement());
-        brand.setForbiddenPhrases(req.getForbiddenPhrases());
+        brand.setForbiddenPhrases(normalizeForbiddenPhrases(req.getForbiddenPhrases()));
         brand.setStatus(req.getStatus());
         brandMapper.updateById(brand);
         brandProfileService.createProfileVersionSnapshot(
@@ -315,6 +315,36 @@ public class BrandService {
             throw new BizException(400, "品牌行业不能为空");
         }
         return value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String normalizeForbiddenPhrases(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return null;
+        }
+        List<String> values = new ArrayList<>();
+        try {
+            JSONUtil.parseArray(raw).forEach(item -> {
+                if (item != null && StringUtils.hasText(String.valueOf(item))) {
+                    values.add(String.valueOf(item).trim());
+                }
+            });
+        } catch (Exception ex) {
+            for (String item : raw.split("[,，、;；\\n\\r]+")) {
+                if (StringUtils.hasText(item)) {
+                    values.add(item.trim());
+                }
+            }
+        }
+        List<String> normalized = values.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .collect(Collectors.toList());
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        return JSONUtil.toJsonStr(normalized);
     }
 
     private Set<String> queryEnabledIndustryTags() {

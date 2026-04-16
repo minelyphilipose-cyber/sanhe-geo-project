@@ -1,8 +1,8 @@
-<template>
+﻿<template>
   <div class="keyword-expander-page">
     <div class="page-header">
       <div class="header-left">
-        <h2 class="page-title">关键词</h2>
+        <h2 class="page-title">关键词拓词管理</h2>
       </div>
       <div class="header-right">
         <span v-if="editingId" class="editing-tip">当前编辑：{{ form.name || '未命名' }}</span>
@@ -10,7 +10,14 @@
     </div>
 
     <div class="form-section">
-      <label class="form-label required">关键词组名</label>
+      <label class="form-label required">客户</label>
+      <el-select v-model="form.companyId" class="form-input" filterable placeholder="请选择客户">
+        <el-option v-for="item in companyOptions" :key="item.id" :label="item.companyName" :value="item.id" />
+      </el-select>
+    </div>
+
+    <div class="form-section">
+      <label class="form-label required">关键词组名称</label>
       <input v-model="form.name" class="form-input" type="text" maxlength="64" placeholder="请输入词组名称，支持中文与英文" />
     </div>
 
@@ -28,8 +35,7 @@
     <div class="column-builder">
       <div class="preview-bar">
         <div class="estimate-text">
-          预计生成 <strong>{{ estimatedCount }}</strong> 条
-          <span v-if="estimatedCount > limit" class="over-limit">超过上限 {{ limit }} 条，请减少选词</span>
+          预计生成 <strong>{{ estimatedCount }}</strong> 条          <span v-if="estimatedCount > limit" class="over-limit">超过上限 {{ limit }} 条，请减少选词</span>
         </div>
         <div class="preview-actions-inline">
           <el-input-number v-model="form.previewCount" :min="1" :max="1000" size="small" />
@@ -67,14 +73,14 @@
         </div>
 
         <div class="word-column">
-          <div class="column-header"><div class="column-step"><span class="step-number">3</span><span class="step-label">核心词(必填)</span></div></div>
+          <div class="column-header"><div class="column-step"><span class="step-number">3</span><span class="step-label">核心词（必填）</span></div></div>
           <div class="column-body">
             <textarea v-model="form.coreText" class="core-textarea" rows="10" placeholder="请填写核心词，每行一个"></textarea>
           </div>
         </div>
 
         <div class="word-column">
-          <div class="column-header"><div class="column-step"><span class="step-number">4</span><span class="step-label">行业词(必填)</span></div></div>
+          <div class="column-header"><div class="column-step"><span class="step-number">4</span><span class="step-label">行业词（必填）</span></div></div>
           <div class="column-body">
             <label v-for="item in industryOptions" :key="item.id" class="word-item" :class="{ checked: form.industryWords.includes(item.wordText) }">
               <input v-model="form.industryWords" type="checkbox" :value="item.wordText" class="word-checkbox" />
@@ -103,6 +109,9 @@
     <el-card class="group-list-card mt-4">
       <div class="list-toolbar">
         <el-input v-model="query.keyword" clearable placeholder="搜索拓词组" style="width: 240px" @keyup.enter="onSearch" />
+        <el-select v-model="query.companyId" clearable filterable placeholder="客户" style="width: 200px" @change="onSearch">
+          <el-option v-for="item in companyOptions" :key="item.id" :label="item.companyName" :value="item.id" />
+        </el-select>
         <el-select v-model="query.type" clearable placeholder="类型" style="width: 160px" @change="onSearch">
           <el-option v-for="item in typeOptions" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
@@ -112,6 +121,7 @@
       <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无拓词组">
         <el-table :data="rows" border>
           <el-table-column prop="name" label="拓词组名称" min-width="220" />
+          <el-table-column prop="companyName" label="客户" min-width="180" />
           <el-table-column label="类型" width="160">
             <template #default="scope">{{ typeLabel(scope.row.type) }}</template>
           </el-table-column>
@@ -135,9 +145,12 @@
       <div v-if="previewVisible" class="preview-panel">
         <div class="preview-header">
           <h3 class="preview-title">拓词预览</h3>
-          <div class="preview-meta">共 <strong>{{ previewKeywords.length }}</strong> 条</div>
+          <div class="preview-meta">本次入库 <strong>{{ previewKeywords.length }}</strong> 条，候选池共 {{ previewTotalAvailable }} 条</div>
         </div>
         <div class="preview-body">
+          <div v-if="previewTotalAvailable < form.previewCount" class="preview-tip">
+            当前组合可生成 {{ previewTotalAvailable }} 条关键词，少于设定的 {{ form.previewCount }} 条，请增加选词后再预览。
+          </div>
           <div class="keyword-tags"><span v-for="(kw, idx) in displayKeywords" :key="`${idx}_${kw}`" class="keyword-tag">{{ kw }}</span></div>
           <div v-if="previewKeywords.length > maxDisplay" class="show-more">
             <button class="btn-show-more" @click="showAll = !showAll">{{ showAll ? '收起' : `展开全部 ${previewKeywords.length} 条` }}</button>
@@ -158,8 +171,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { createKeywordGroup, deleteKeywordGroup, getKeywordGroupDetail, getKeywordGroupPage, previewKeywordGroup, updateKeywordGroup } from '@/api/project'
 import { getKeywordAffixWordOptions } from '@/api/system'
+import { getCompanyList } from '@/api/customer'
 import { useDictStore } from '@/stores/dict'
-import type { KeywordAffixWord, KeywordGroup, KeywordGroupPayload, KeywordTypeOption, KeywordWordItem } from '@/types'
+import type { Company, KeywordAffixWord, KeywordGroup, KeywordGroupPayload, KeywordTypeOption, KeywordWordItem } from '@/types'
 
 const limit = 1000
 const maxDisplay = 50
@@ -171,9 +185,11 @@ const previewing = ref(false)
 const saving = ref(false)
 const rows = ref<KeywordGroup[]>([])
 const previewKeywords = ref<string[]>([])
+const previewTotalAvailable = ref(0)
+const companyOptions = ref<Company[]>([])
 
 const page = reactive({ current: 1, size: 20, total: 0 })
-const query = reactive<{ keyword: string; type: string }>({ keyword: '', type: '' })
+const query = reactive<{ keyword: string; companyId?: number; type: string }>({ keyword: '', companyId: undefined, type: '' })
 
 const editingId = ref<number | null>(null)
 const typeOptions = ref<KeywordTypeOption[]>([])
@@ -183,6 +199,7 @@ const industryOptions = ref<KeywordAffixWord[]>([])
 const dictStore = useDictStore()
 
 const form = reactive({
+  companyId: null as number | null,
   name: '',
   type: '',
   remark: '',
@@ -240,6 +257,7 @@ function buildColumns() {
 
 function buildPayload(): KeywordGroupPayload {
   return {
+    companyId: Number(form.companyId),
     name: form.name.trim(),
     type: form.type,
     remark: form.remark.trim() || undefined,
@@ -250,6 +268,7 @@ function buildPayload(): KeywordGroupPayload {
 
 function resetForm() {
   editingId.value = null
+  form.companyId = null
   form.name = ''
   form.type = typeOptions.value[0]?.value || ''
   form.remark = ''
@@ -262,10 +281,19 @@ function resetForm() {
   form.suffixSystemWords = []
   form.suffixCustomText = ''
   previewKeywords.value = []
+  previewTotalAvailable.value = 0
   showAll.value = false
   previewVisible.value = false
 }
 
+async function loadCompanies() {
+  try {
+    const { data } = await getCompanyList({ current: 1, size: 500 })
+    companyOptions.value = data.data.records || []
+  } catch {
+    companyOptions.value = []
+  }
+}
 async function loadTypeAndIndustryOptions() {
   await dictStore.ensureLoaded()
   typeOptions.value = (dictStore.options('question_type') || []).map((item) => ({
@@ -306,6 +334,10 @@ async function onTypeChanged() {
 }
 
 async function doPreview() {
+  if (!form.companyId) {
+    ElMessage.warning('请选择客户')
+    return
+  }
   if (!form.name.trim()) {
     ElMessage.warning('请输入关键词组名')
     return
@@ -331,14 +363,22 @@ async function doPreview() {
   try {
     const { data } = await previewKeywordGroup(buildPayload())
     previewKeywords.value = data.data.keywords || []
+    previewTotalAvailable.value = data.data.totalAvailable || 0
     showAll.value = false
     previewVisible.value = true
+    if ((data.data.totalAvailable || 0) < form.previewCount) {
+      ElMessage.warning(`当前组合仅可生成 ${data.data.totalAvailable || 0} 条关键词，少于设定的 ${form.previewCount} 条`)
+    }
   } finally {
     previewing.value = false
   }
 }
 
 async function submit() {
+  if (!form.companyId) {
+    ElMessage.warning('请选择客户')
+    return
+  }
   if (!form.name.trim()) {
     ElMessage.warning('请输入关键词组名')
     return
@@ -359,10 +399,17 @@ async function submit() {
     ElMessage.warning(`预计生成 ${estimatedCount.value} 条，超过上限 ${limit} 条，请减少选词`)
     return
   }
+  if (!previewKeywords.value.length) {
+    ElMessage.warning('请先预览并确认当前入库关键词')
+    return
+  }
 
   saving.value = true
   try {
-    const payload = buildPayload()
+    const payload = {
+      ...buildPayload(),
+      resultKeywords: [...previewKeywords.value],
+    }
     if (editingId.value) {
       await updateKeywordGroup(editingId.value, payload)
     } else {
@@ -379,7 +426,7 @@ async function submit() {
 async function load() {
   loading.value = true
   try {
-    const { data } = await getKeywordGroupPage({ current: page.current, size: page.size, keyword: query.keyword || undefined, type: query.type || undefined })
+    const { data } = await getKeywordGroupPage({ current: page.current, size: page.size, keyword: query.keyword || undefined, companyId: query.companyId, type: query.type || undefined })
     rows.value = data.data.records || []
     page.total = data.data.total || 0
   } finally {
@@ -413,6 +460,7 @@ async function openEdit(id: number) {
   const detail = data.data
   resetForm()
   editingId.value = id
+  form.companyId = detail.companyId
   form.name = detail.name
   form.type = detail.type
   form.remark = detail.remark || ''
@@ -447,6 +495,7 @@ async function remove(row: KeywordGroup) {
 }
 
 onMounted(async () => {
+  await loadCompanies()
   await loadTypeAndIndustryOptions()
   await loadPrefixSuffixOptions(form.type)
   await load()
@@ -503,6 +552,7 @@ onMounted(async () => {
 .preview-title { margin: 0; font-size: 15px; }
 .preview-meta { font-size: 13px; color: #64748b; }
 .preview-body { padding: 16px 18px; overflow: auto; }
+.preview-tip { margin-bottom: 12px; font-size: 13px; color: #b45309; background: #fff7ed; border: 1px solid #fdba74; border-radius: 8px; padding: 10px 12px; }
 .keyword-tags { display: flex; flex-wrap: wrap; gap: 8px; }
 .keyword-tag { font-size: 13px; color: #4361ee; background: #eef1ff; border-radius: 16px; padding: 5px 12px; }
 .show-more { margin-top: 12px; }

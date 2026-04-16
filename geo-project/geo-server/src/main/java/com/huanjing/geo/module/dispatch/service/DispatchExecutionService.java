@@ -679,12 +679,31 @@ public class DispatchExecutionService {
         StringBuilder sb = new StringBuilder();
         sb.append("Project Name: ").append(Optional.ofNullable(project.getProjectName()).orElse("")).append("\n");
         sb.append("Project Aliases: ").append(Optional.ofNullable(project.getProjectAliases()).orElse("")).append("\n");
+        List<String> targetRegions = parseStringList(project.getTargetRegions());
+        if (!targetRegions.isEmpty()) {
+            sb.append("Target Regions: ").append(String.join(", ", targetRegions)).append("\n");
+        }
+        if (StringUtils.hasText(project.getTargetAudience())) {
+            sb.append("Target Audience: ").append(project.getTargetAudience().trim()).append("\n");
+        }
+        if (StringUtils.hasText(project.getContentTone())) {
+            sb.append("Content Tone: ").append(project.getContentTone().trim()).append("\n");
+        }
+        List<String> preferredAngles = parseStringList(project.getPreferredAngles());
+        if (!preferredAngles.isEmpty()) {
+            sb.append("Preferred Angles: ").append(String.join(", ", preferredAngles)).append("\n");
+        }
+        if (StringUtils.hasText(project.getContentNote())) {
+            sb.append("Content Note: ").append(project.getContentNote().trim()).append("\n");
+        }
         if (brand != null) {
             sb.append("Brand Name: ").append(Optional.ofNullable(brand.getBrandName()).orElse("")).append("\n");
             sb.append("Main Business: ").append(Optional.ofNullable(brand.getMainBusiness()).orElse("")).append("\n");
-            String promptStatement = brandStatementService.resolvePromptStatement(brand);
+            String promptStatement = StringUtils.hasText(project.getCustomStatement())
+                    ? project.getCustomStatement().trim()
+                    : brandStatementService.resolvePromptStatement(brand);
             if (StringUtils.hasText(promptStatement)) {
-                sb.append("Locked Brand Statement: ").append(promptStatement).append("\n");
+                sb.append("Brand Statement: ").append(promptStatement).append("\n");
             }
             sb.append("Brand Description: ").append(Optional.ofNullable(brand.getDescription()).orElse("")).append("\n");
         }

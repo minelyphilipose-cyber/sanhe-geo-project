@@ -318,7 +318,9 @@ function fillInfoForm(data: Brand) {
   infoForm.status = data.status || 'active'
   infoForm.description = data.description || ''
   infoForm.businessIntro = data.businessIntro || ''
-  infoForm.forbiddenPhrases = data.forbiddenPhrases || ''
+  infoForm.forbiddenPhrases = Array.isArray(data.forbiddenPhrases)
+    ? data.forbiddenPhrases.join('，')
+    : (data.forbiddenPhrases || '')
 }
 
 function startEditInfo() {

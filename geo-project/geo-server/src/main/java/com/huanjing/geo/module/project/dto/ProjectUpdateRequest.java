@@ -1,6 +1,9 @@
 package com.huanjing.geo.module.project.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -10,6 +13,9 @@ import java.util.List;
 
 @Data
 public class ProjectUpdateRequest {
+    @NotNull
+    private Long companyId;
+    private Long brandId;
     @NotBlank
     private String projectName;
     private String projectAliases;
@@ -30,10 +36,20 @@ public class ProjectUpdateRequest {
     private LocalDate startDate;
     private LocalDate endDate;
     private String primaryGoal;
+    private List<String> targetRegions;
+    private String targetAudience;
+    private String customStatement;
+    private String contentTone;
+    private List<String> preferredAngles;
+    private List<String> extraForbiddenPhrases;
+    private String contentNote;
     private String remark;
     private List<String> selectedPlatformCodesP0;
     private List<String> selectedPlatformCodesP1;
     private List<String> selectedPlatformCodesP2;
+    @NotEmpty
+    @Size(max = 10)
+    private List<Long> keywordGroupIds;
     private String questionPoolChangeReason;
     private List<QuestionPoolItemRequest> questionPoolItems;
 }
