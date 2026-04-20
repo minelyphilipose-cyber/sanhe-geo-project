@@ -22,15 +22,10 @@ import com.huanjing.geo.module.dispatch.entity.PollDailyStat;
 import com.huanjing.geo.module.dispatch.entity.PollResult;
 import com.huanjing.geo.module.dispatch.mapper.PollDailyStatMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
-import com.huanjing.geo.module.report.dto.PresaleSnapshotUpdateRequest;
 import com.huanjing.geo.module.report.dto.ReportPublishRequest;
 import com.huanjing.geo.module.report.entity.*;
 import com.huanjing.geo.module.report.mapper.*;
-import com.huanjing.geo.module.system.entity.AiPlatformConfig;
-import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.entity.SysUser;
-import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
-import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.PermissionService;
 import lombok.RequiredArgsConstructor;
@@ -55,19 +50,14 @@ public class ReportService {
 
     private static final BCryptPasswordEncoder BCRYPT = new BCryptPasswordEncoder();
     private static final Set<String> DISABLED_POSTSALE_TYPES = Set.of("biweekly", "monthly", "quarterly");
+    private static final Set<String> LEGACY_PRESALE_TYPES = Set.of("presale", "presale_diagnosis");
     private static final String REPORT_DISABLED_MESSAGE = "report generation disabled by product policy";
 
     private final ReportMapper reportMapper;
-    private final PresaleReportSnapshotMapper presaleSnapshotMapper;
-    private final PresaleDiagnosisBatchMapper diagnosisBatchMapper;
-    private final PresaleDiagnosisResultMapper diagnosisResultMapper;
-    private final PresaleQuestionItemMapper questionItemMapper;
     private final ReportAccessLogMapper reportAccessLogMapper;
     private final ProjectMapper projectMapper;
     private final BrandMapper brandMapper;
     private final CompanyMapper companyMapper;
-    private final AiPlatformConfigMapper platformConfigMapper;
-    private final SysDictItemMapper dictItemMapper;
     private final CurrentUserService currentUserService;
     private final PermissionService permissionService;
     private final StringRedisTemplate stringRedisTemplate;
@@ -80,25 +70,38 @@ public class ReportService {
     private final DistributionTaskMapper distributionTaskMapper;
     private final QuestionPoolItemMapper questionPoolItemMapper;
 
-    public Page<Report> page(long current, long size, Long projectId, String reportType, String status) {
+    public Page<Report> page(long current, long size, Long projectId, String keyword, String status) {
         currentUserService.ensurePermission("project.read");
         LambdaQueryWrapper<Report> wrapper = new LambdaQueryWrapper<Report>()
                 .orderByDesc(Report::getCreatedAt)
-                .notIn(Report::getReportType, DISABLED_POSTSALE_TYPES);
+                .notIn(Report::getReportType, DISABLED_POSTSALE_TYPES)
+                .notIn(Report::getReportType, LEGACY_PRESALE_TYPES);
         if (projectId != null) {
             wrapper.eq(Report::getProjectId, projectId);
         }
-        if (StringUtils.hasText(reportType)) {
-            String normalizedReportType = reportType.trim();
-            if (isDisabledPostsaleType(normalizedReportType)) {
+        if (StringUtils.hasText(keyword)) {
+            List<Long> projectIds = projectMapper.selectList(
+                    new LambdaQueryWrapper<Project>()
+                            .like(Project::getProjectName, keyword.trim())
+                            .select(Project::getId)
+            ).stream().map(Project::getId).toList();
+            if (projectIds.isEmpty()) {
                 return new Page<>(current, size);
             }
-            wrapper.eq(Report::getReportType, normalizedReportType);
+            if (projectId != null) {
+                if (!projectIds.contains(projectId)) {
+                    return new Page<>(current, size);
+                }
+            } else {
+                wrapper.in(Report::getProjectId, projectIds);
+            }
         }
         if (StringUtils.hasText(status)) {
             wrapper.eq(Report::getStatus, status.trim());
         }
-        return reportMapper.selectPage(new Page<>(current, size), wrapper);
+        Page<Report> pageData = reportMapper.selectPage(new Page<>(current, size), wrapper);
+        fillProjectNames(pageData.getRecords());
+        return pageData;
     }
 
     public Map<String, Object> detail(Long reportId) {
@@ -110,76 +113,13 @@ public class ReportService {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("report", report);
         data.put("subject", buildReportSubject(report.getProjectId()));
-        if ("presale".equals(report.getReportType())) {
-            PresaleReportSnapshot snapshot = presaleSnapshotMapper.selectOne(
-                    new LambdaQueryWrapper<PresaleReportSnapshot>().eq(PresaleReportSnapshot::getReportId, reportId)
-            );
-            data.put("presaleSnapshot", snapshot);
-        } else if (isPostsaleType(report.getReportType())) {
+        if (isPostsaleType(report.getReportType())) {
             PostsaleReportSnapshot snapshot = postsaleSnapshotMapper.selectOne(
                     new LambdaQueryWrapper<PostsaleReportSnapshot>().eq(PostsaleReportSnapshot::getReportId, reportId)
             );
             data.put("postsaleSnapshot", snapshot);
         }
         return data;
-    }
-
-    @Transactional
-    public Report generatePresaleDraftByLatestBatch(Long projectId, Long creatorId) {
-        PresaleDiagnosisBatch batch = diagnosisBatchMapper.selectOne(
-                new LambdaQueryWrapper<PresaleDiagnosisBatch>()
-                        .eq(PresaleDiagnosisBatch::getProjectId, projectId)
-                        .eq(PresaleDiagnosisBatch::getStatus, "completed")
-                        .orderByDesc(PresaleDiagnosisBatch::getFinishedAt, PresaleDiagnosisBatch::getId)
-                        .last("LIMIT 1")
-        );
-        if (batch == null) {
-            throw new BizException(400, "No completed presale diagnosis batch");
-        }
-        return generatePresaleDraftFromBatch(batch.getId(), creatorId);
-    }
-
-    @Transactional
-    public Report generatePresaleDraftFromBatch(Long batchId, Long creatorId) {
-        PresaleDiagnosisBatch batch = diagnosisBatchMapper.selectById(batchId);
-        if (batch == null) {
-            throw new BizException(404, "Diagnosis batch not found");
-        }
-        Project project = projectMapper.selectById(batch.getProjectId());
-        if (project == null) {
-            throw new BizException(404, "Project not found");
-        }
-
-        Integer maxVersion = Optional.ofNullable(reportMapper.selectOne(
-                new LambdaQueryWrapper<Report>()
-                        .eq(Report::getProjectId, project.getId())
-                        .eq(Report::getReportType, "presale")
-                        .orderByDesc(Report::getVersionNo)
-                        .last("LIMIT 1")
-        )).map(Report::getVersionNo).orElse(0);
-
-        Report report = new Report();
-        report.setProjectId(project.getId());
-        report.setReportType("presale");
-        report.setVersionNo(maxVersion + 1);
-        report.setStatus("draft");
-        report.setVisibility("client");
-        report.setIsLatest(true);
-        report.setCreatedBy(creatorId);
-        reportMapper.insert(report);
-
-        Map<String, Object> metrics = calculatePresaleSnapshot(batch, project);
-        PresaleReportSnapshot snapshot = new PresaleReportSnapshot();
-        snapshot.setReportId(report.getId());
-        snapshot.setDiagnosisBatchId(batch.getId());
-        snapshot.setSnapshotData(JSONUtil.toJsonStr(metrics));
-        snapshot.setDiagnosisSummary(defaultDiagnosisSummary(metrics));
-        snapshot.setActionRecommendations(defaultActionRecommendations(metrics));
-        snapshot.setBrandCompletenessChecks(JSONUtil.toJsonStr(metrics.get("brandCompletenessChecks")));
-        snapshot.setQuestionMatrix(JSONUtil.toJsonStr(metrics.get("questionMatrix")));
-        presaleSnapshotMapper.insert(snapshot);
-
-        return report;
     }
 
     @Transactional
@@ -262,32 +202,6 @@ public class ReportService {
         reportMapper.updateById(client);
 
         return Map.of("client", client, "internal", internal);
-    }
-
-    @Transactional
-    public Report updatePresaleSnapshot(Long reportId, PresaleSnapshotUpdateRequest req) {
-        currentUserService.ensurePermission("report.review");
-        Report report = requireReport(reportId);
-        if (!"presale".equals(report.getReportType())) {
-            throw new BizException(400, "Only presale report supports this operation");
-        }
-        if (!"draft".equals(report.getStatus())) {
-            throw new BizException(400, "Only draft report can be edited");
-        }
-        PresaleReportSnapshot snapshot = presaleSnapshotMapper.selectOne(
-                new LambdaQueryWrapper<PresaleReportSnapshot>().eq(PresaleReportSnapshot::getReportId, reportId)
-        );
-        if (snapshot == null) {
-            throw new BizException(404, "Snapshot not found");
-        }
-        if (req.getDiagnosisSummary() != null) {
-            snapshot.setDiagnosisSummary(req.getDiagnosisSummary());
-        }
-        if (req.getActionRecommendations() != null) {
-            snapshot.setActionRecommendations(req.getActionRecommendations());
-        }
-        presaleSnapshotMapper.updateById(snapshot);
-        return report;
     }
 
     @Transactional
@@ -474,143 +388,13 @@ public class ReportService {
         data.put("status", "loaded");
         data.put("report", report);
         data.put("subject", buildReportSubject(report.getProjectId()));
-        if ("presale".equals(report.getReportType())) {
-            PresaleReportSnapshot snapshot = presaleSnapshotMapper.selectOne(
-                    new LambdaQueryWrapper<PresaleReportSnapshot>().eq(PresaleReportSnapshot::getReportId, report.getId())
-            );
-            data.put("snapshot", snapshot);
-        } else if (isPostsaleType(report.getReportType())) {
+        if (isPostsaleType(report.getReportType())) {
             PostsaleReportSnapshot snapshot = postsaleSnapshotMapper.selectOne(
                     new LambdaQueryWrapper<PostsaleReportSnapshot>().eq(PostsaleReportSnapshot::getReportId, report.getId())
             );
             data.put("snapshot", snapshot);
         }
         return data;
-    }
-
-    private Map<String, Object> calculatePresaleSnapshot(PresaleDiagnosisBatch batch, Project project) {
-        List<PresaleDiagnosisResult> results = diagnosisResultMapper.selectList(
-                new LambdaQueryWrapper<PresaleDiagnosisResult>()
-                        .eq(PresaleDiagnosisResult::getBatchId, batch.getId())
-        );
-        if (results.isEmpty()) {
-            throw new BizException(400, "Diagnosis result is empty");
-        }
-        List<PresaleQuestionItem> items = questionItemMapper.selectList(
-                new LambdaQueryWrapper<PresaleQuestionItem>()
-                        .eq(PresaleQuestionItem::getSetId, batch.getQuestionSetId())
-                        .orderByAsc(PresaleQuestionItem::getSortOrder, PresaleQuestionItem::getId)
-        );
-        Map<Long, PresaleQuestionItem> itemMap = items.stream().collect(Collectors.toMap(PresaleQuestionItem::getId, i -> i, (a, b) -> a, LinkedHashMap::new));
-        Map<String, Integer> weightByPlatformCode = resolvePlatformWeights(results.stream().map(PresaleDiagnosisResult::getPlatformCode).collect(Collectors.toSet()));
-
-        long completed = results.stream().filter(r -> "completed".equals(r.getStatus())).count();
-        long brandHits = results.stream().filter(r -> "completed".equals(r.getStatus()) && Boolean.TRUE.equals(r.getBrandHit())).count();
-        long siteHits = results.stream().filter(r -> "completed".equals(r.getStatus()) && Boolean.TRUE.equals(r.getSiteMentioned())).count();
-        long contactHits = results.stream().filter(r -> "completed".equals(r.getStatus()) && Boolean.TRUE.equals(r.getContactMentioned())).count();
-
-        BigDecimal brandMentionRate = ratio(brandHits, completed);
-        BigDecimal siteMentionRate = ratio(siteHits, completed);
-        BigDecimal contactMentionRate = ratio(contactHits, completed);
-
-        Map<String, Map<String, Object>> platformStats = new LinkedHashMap<>();
-        BigDecimal weightedHitNumerator = BigDecimal.ZERO;
-        BigDecimal weightedHitDenominator = BigDecimal.ZERO;
-        for (String platformCode : results.stream().map(PresaleDiagnosisResult::getPlatformCode).collect(Collectors.toCollection(LinkedHashSet::new))) {
-            List<PresaleDiagnosisResult> rows = results.stream().filter(r -> platformCode.equals(r.getPlatformCode())).toList();
-            long c = rows.stream().filter(r -> "completed".equals(r.getStatus())).count();
-            long h = rows.stream().filter(r -> "completed".equals(r.getStatus()) && Boolean.TRUE.equals(r.getBrandHit())).count();
-            BigDecimal hitRate = ratio(h, c);
-            int w = weightByPlatformCode.getOrDefault(platformCode, 1);
-            weightedHitNumerator = weightedHitNumerator.add(BigDecimal.valueOf(h * w));
-            weightedHitDenominator = weightedHitDenominator.add(BigDecimal.valueOf(c * w));
-
-            Map<String, Object> stat = new LinkedHashMap<>();
-            stat.put("platformCode", platformCode);
-            stat.put("completed", c);
-            stat.put("brandHits", h);
-            stat.put("brandMentionRate", toPercent(hitRate));
-            stat.put("weight", w);
-            platformStats.put(platformCode, stat);
-        }
-
-        BigDecimal weightedMentionRate = weightedHitDenominator.signum() <= 0
-                ? BigDecimal.ZERO
-                : weightedHitNumerator.divide(weightedHitDenominator, 6, RoundingMode.HALF_UP);
-
-        long platformCovered = platformStats.values().stream()
-                .filter(m -> ((Number) m.get("brandHits")).longValue() > 0)
-                .count();
-        BigDecimal platformCoverage = ratio(platformCovered, platformStats.size());
-
-        BigDecimal visibilityScore = brandMentionRate.multiply(BigDecimal.valueOf(40))
-                .add(siteMentionRate.multiply(BigDecimal.valueOf(25)))
-                .add(contactMentionRate.multiply(BigDecimal.valueOf(15)))
-                .add(platformCoverage.multiply(BigDecimal.valueOf(20)))
-                .setScale(2, RoundingMode.HALF_UP);
-
-        Map<Long, List<PresaleDiagnosisResult>> byQuestion = results.stream().collect(Collectors.groupingBy(PresaleDiagnosisResult::getQuestionItemId, LinkedHashMap::new, Collectors.toList()));
-        List<Map<String, Object>> weakestQuestions = new ArrayList<>();
-        List<Map<String, Object>> matrix = new ArrayList<>();
-        for (Map.Entry<Long, List<PresaleDiagnosisResult>> e : byQuestion.entrySet()) {
-            PresaleQuestionItem item = itemMap.get(e.getKey());
-            if (item == null) {
-                continue;
-            }
-            List<PresaleDiagnosisResult> rows = e.getValue();
-            long c = rows.stream().filter(r -> "completed".equals(r.getStatus())).count();
-            long h = rows.stream().filter(r -> "completed".equals(r.getStatus()) && Boolean.TRUE.equals(r.getBrandHit())).count();
-            BigDecimal hitRate = ratio(h, c);
-            List<String> missPlatforms = rows.stream()
-                    .filter(r -> "completed".equals(r.getStatus()) && !Boolean.TRUE.equals(r.getBrandHit()))
-                    .map(PresaleDiagnosisResult::getPlatformCode)
-                    .distinct()
-                    .toList();
-
-            Map<String, Object> q = new LinkedHashMap<>();
-            q.put("questionItemId", item.getId());
-            q.put("content", item.getContent());
-            q.put("hitRate", toPercent(hitRate));
-            q.put("missPlatforms", missPlatforms);
-            weakestQuestions.add(q);
-
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("questionItemId", item.getId());
-            row.put("content", item.getContent());
-            Map<String, Object> hits = new LinkedHashMap<>();
-            for (PresaleDiagnosisResult r : rows) {
-                hits.put(r.getPlatformCode(), Boolean.TRUE.equals(r.getBrandHit()));
-            }
-            row.put("hits", hits);
-            matrix.add(row);
-        }
-        weakestQuestions.sort(Comparator.comparing(m -> BigDecimal.valueOf(Double.parseDouble(String.valueOf(m.get("hitRate"))))));
-        if (weakestQuestions.size() > 8) {
-            weakestQuestions = weakestQuestions.subList(0, 8);
-        }
-
-        Map<String, Object> completeness = buildBrandCompletenessChecks(project);
-
-        double coef = industryCoefficient(project);
-        long missed = Math.max(0, completed - brandHits);
-        BigDecimal missedOpportunity = BigDecimal.valueOf(missed).multiply(BigDecimal.valueOf(coef)).setScale(2, RoundingMode.HALF_UP);
-
-        Map<String, Object> snapshot = new LinkedHashMap<>();
-        snapshot.put("diagnosisBatchId", batch.getId());
-        snapshot.put("brandMentionRate", toPercent(brandMentionRate));
-        snapshot.put("siteMentionRate", toPercent(siteMentionRate));
-        snapshot.put("contactMentionRate", toPercent(contactMentionRate));
-        snapshot.put("weightedBrandMentionRate", toPercent(weightedMentionRate));
-        snapshot.put("platformCoverage", toPercent(platformCoverage));
-        snapshot.put("visibilityScore", visibilityScore);
-        snapshot.put("missedInquiryOpportunity", missedOpportunity);
-        snapshot.put("platformStats", platformStats.values());
-        snapshot.put("weakestQuestions", weakestQuestions);
-        snapshot.put("brandCompletenessChecks", completeness);
-        snapshot.put("questionMatrix", matrix);
-        snapshot.put("completedCount", completed);
-        snapshot.put("failedCount", results.size() - completed);
-        return snapshot;
     }
 
     private Report findLatestByPeriod(Long projectId, String reportType, LocalDate start, LocalDate end, String visibility) {
@@ -985,105 +769,6 @@ public class ReportService {
         private int platformTotalCount;
         private BigDecimal coreCoverageRate = BigDecimal.ZERO;
     }
-    private String defaultDiagnosisSummary(Map<String, Object> metrics) {
-        return "Brand mention rate " + metrics.get("brandMentionRate") + "%, visibility score "
-                + metrics.get("visibilityScore")
-                + ". Overall exposure should be improved through focused platform and topic optimization.";
-    }
-
-    private String defaultActionRecommendations(Map<String, Object> metrics) {
-        return "1) Fill high-value topic coverage and unify brand expression; "
-                + "2) Increase publishing frequency and stability on core platforms; "
-                + "3) Create a focused backlog for low-visibility topics and track improvements; "
-                + "4) Review key indicators weekly and iterate continuously.";
-    }
-
-    private Map<String, Integer> resolvePlatformWeights(Set<String> platformCodes) {
-        if (platformCodes.isEmpty()) {
-            return Map.of();
-        }
-        List<AiPlatformConfig> configs = platformConfigMapper.selectList(
-                new LambdaQueryWrapper<AiPlatformConfig>().in(AiPlatformConfig::getPlatformCode, platformCodes)
-        );
-        Map<String, Integer> weights = new HashMap<>();
-        for (AiPlatformConfig cfg : configs) {
-            int w = switch (String.valueOf(cfg.getPriorityLevel())) {
-                case "P0" -> 3;
-                case "P1" -> 2;
-                default -> 1;
-            };
-            weights.put(cfg.getPlatformCode(), w);
-        }
-        return weights;
-    }
-    private Map<String, Object> buildBrandCompletenessChecks(Project project) {
-        Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
-        Company company = project.getCompanyId() == null ? null : companyMapper.selectById(project.getCompanyId());
-        List<String> reminders = new ArrayList<>();
-        if (brand == null || !StringUtils.hasText(brand.getWebsite())) {
-            reminders.add("Brand website is missing");
-        }
-        if (brand == null || (!StringUtils.hasText(brand.getPhone()) && !StringUtils.hasText(brand.getWechat()))) {
-            reminders.add("Primary contact information is missing");
-        }
-        if (brand == null || !StringUtils.hasText(brand.getDescription())) {
-            reminders.add("Brand description is missing");
-        }
-        if (company == null || !StringUtils.hasText(company.getCompetitors())) {
-            reminders.add("Competitor information is missing");
-        }
-        if (brand != null && brand.getUpdatedAt() != null && brand.getUpdatedAt().isBefore(LocalDateTime.now().minusDays(180))) {
-            reminders.add("Brand profile has not been updated for more than 180 days");
-        }
-        Map<String, Object> checks = new LinkedHashMap<>();
-        checks.put("complete", reminders.isEmpty());
-        checks.put("reminders", reminders);
-        return checks;
-    }
-
-    private double industryCoefficient(Project project) {
-        Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
-        String industry = brand == null ? null : brand.getIndustry();
-        if (!StringUtils.hasText(industry)) {
-            return 0.25;
-        }
-        SysDictItem item = dictItemMapper.selectOne(
-                new LambdaQueryWrapper<SysDictItem>()
-                        .eq(SysDictItem::getDictType, "industry_conversion_rate")
-                        .eq(SysDictItem::getDictKey, industry)
-                        .eq(SysDictItem::getEnabled, true)
-                        .last("LIMIT 1")
-        );
-        String value = item == null ? "0.25" : item.getDictValue();
-        try {
-            double v = Double.parseDouble(value);
-            if (v < 0.05 || v > 1.0) {
-                return 0.25;
-            }
-            return v;
-        } catch (Exception ex) {
-            return 0.25;
-        }
-    }
-
-    private BigDecimal ratio(long numerator, long denominator) {
-        if (denominator <= 0) {
-            return BigDecimal.ZERO;
-        }
-        return BigDecimal.valueOf(numerator).divide(BigDecimal.valueOf(denominator), 6, RoundingMode.HALF_UP);
-    }
-
-    private BigDecimal ratio(long numerator, int denominator) {
-        if (denominator <= 0) {
-            return BigDecimal.ZERO;
-        }
-        return BigDecimal.valueOf(numerator).divide(BigDecimal.valueOf(denominator), 6, RoundingMode.HALF_UP);
-    }
-
-    private BigDecimal toPercent(BigDecimal ratio) {
-        return ratio.multiply(BigDecimal.valueOf(100)).setScale(2, RoundingMode.HALF_UP);
-    }
-
     private Report requireReport(Long reportId) {
         Report report = reportMapper.selectById(reportId);
         if (report == null) {
@@ -1169,6 +854,28 @@ public class ReportService {
         return isDisabledPostsaleType(reportType);
     }
 
+    private void fillProjectNames(List<Report> reports) {
+        if (reports == null || reports.isEmpty()) {
+            return;
+        }
+        List<Long> projectIds = reports.stream()
+                .map(Report::getProjectId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (projectIds.isEmpty()) {
+            return;
+        }
+        Map<Long, String> projectNameMap = projectMapper.selectList(
+                new LambdaQueryWrapper<Project>()
+                        .in(Project::getId, projectIds)
+                        .select(Project::getId, Project::getProjectName)
+        ).stream().collect(Collectors.toMap(Project::getId, Project::getProjectName, (a, b) -> a));
+        for (Report report : reports) {
+            report.setProjectName(projectNameMap.getOrDefault(report.getProjectId(), "-"));
+        }
+    }
+
     private boolean isDisabledPostsaleType(String reportType) {
         return DISABLED_POSTSALE_TYPES.contains(reportType);
     }
@@ -1180,7 +887,7 @@ public class ReportService {
     }
 
     private void ensureReportTypeActive(String reportType) {
-        if (isDisabledPostsaleType(reportType)) {
+        if (isDisabledPostsaleType(reportType) || LEGACY_PRESALE_TYPES.contains(reportType)) {
             throw new BizException(404, "Report not found");
         }
     }

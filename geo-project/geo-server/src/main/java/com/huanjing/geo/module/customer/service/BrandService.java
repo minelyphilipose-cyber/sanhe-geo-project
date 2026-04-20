@@ -7,8 +7,12 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.dto.BrandCreateRequest;
 import com.huanjing.geo.module.customer.dto.BrandUpdateRequest;
 import com.huanjing.geo.module.customer.entity.Brand;
+import com.huanjing.geo.module.customer.entity.BrandMaterial;
+import com.huanjing.geo.module.customer.entity.BrandProfileVersion;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
+import com.huanjing.geo.module.customer.mapper.BrandProfileVersionMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
@@ -19,6 +23,7 @@ import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
@@ -37,6 +42,8 @@ public class BrandService {
     private static final Set<String> BRAND_STATUS = Set.of("draft", "active", "archived");
 
     private final BrandMapper brandMapper;
+    private final BrandMaterialMapper brandMaterialMapper;
+    private final BrandProfileVersionMapper brandProfileVersionMapper;
     private final CompanyMapper companyMapper;
     private final ProjectMapper projectMapper;
     private final CurrentUserService currentUserService;
@@ -190,6 +197,7 @@ public class BrandService {
         return brand;
     }
 
+    @Transactional
     public void delete(Long id) {
         currentUserService.ensurePermission("company.write");
         SysUser operator = currentUserService.requireCurrentUser();
@@ -197,13 +205,19 @@ public class BrandService {
         Company company = requireCompany(brand.getCompanyId());
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "brand");
 
-        Long projectCount = projectMapper.selectCount(
-                new LambdaQueryWrapper<Project>().eq(Project::getBrandId, id)
-        );
-        if (projectCount != null && projectCount > 0) {
+        List<Long> projectIds = projectMapper.selectList(
+                new LambdaQueryWrapper<Project>()
+                        .eq(Project::getBrandId, id)
+                        .select(Project::getId)
+        ).stream().map(Project::getId).toList();
+        if (!projectIds.isEmpty()) {
             throw new BizException(400, "Brand has projects, cannot delete");
         }
 
+        brandMaterialMapper.delete(new LambdaQueryWrapper<BrandMaterial>()
+                .eq(BrandMaterial::getBrandId, id));
+        brandProfileVersionMapper.delete(new LambdaQueryWrapper<BrandProfileVersion>()
+                .eq(BrandProfileVersion::getBrandId, id));
         brandMapper.deleteById(id);
         activityLogService.logAction(
                 operator.getId(),

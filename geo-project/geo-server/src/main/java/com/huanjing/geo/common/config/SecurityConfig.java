@@ -1,10 +1,15 @@
 package com.huanjing.geo.common.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.common.security.JwtAuthenticationFilter;
+import com.huanjing.geo.common.security.PublicDashboardRateLimitFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
@@ -24,26 +29,39 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtFilter;
+    private final PublicDashboardRateLimitFilter publicDashboardRateLimitFilter;
+    private final ObjectMapper objectMapper;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
             .csrf(AbstractHttpConfigurer::disable)
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .exceptionHandling(ex -> ex
+                .authenticationEntryPoint((request, response, authException) -> {
+                    response.setStatus(HttpStatus.UNAUTHORIZED.value());
+                    response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                    response.setCharacterEncoding("UTF-8");
+                    objectMapper.writeValue(response.getWriter(), R.fail(401, "Unauthorized"));
+                })
+                .accessDeniedHandler((request, response, accessDeniedException) -> {
+                    response.setStatus(HttpStatus.FORBIDDEN.value());
+                    response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                    response.setCharacterEncoding("UTF-8");
+                    objectMapper.writeValue(response.getWriter(), R.fail(403, "Forbidden"));
+                })
+            )
             .authorizeHttpRequests(auth -> auth
-                // 公开接口白名单
                 .requestMatchers("/api/auth/login", "/api/auth/refresh").permitAll()
                 .requestMatchers("/api/health").permitAll()
                 .requestMatchers("/api/share/**").permitAll()
-                // Knife4j / Swagger
+                .requestMatchers("/api/public/dashboard/**").permitAll()
                 .requestMatchers("/doc.html", "/swagger-ui/**", "/v3/api-docs/**", "/webjars/**").permitAll()
-                // 健康检查
                 .requestMatchers("/actuator/**").permitAll()
-                // OPTIONS 预检
                 .requestMatchers(HttpMethod.OPTIONS).permitAll()
-                // 其余全部需要认证
                 .anyRequest().authenticated()
             )
+            .addFilterBefore(publicDashboardRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

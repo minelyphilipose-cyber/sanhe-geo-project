@@ -3,6 +3,7 @@ package com.huanjing.geo.module.auth.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.security.JwtTokenProvider;
+import com.huanjing.geo.common.storage.MinioStorageService;
 import com.huanjing.geo.module.auth.dto.LoginRequest;
 import com.huanjing.geo.module.auth.dto.LoginResponse;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -27,6 +28,7 @@ public class AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final RedisTemplate<String, Object> redisTemplate;
     private final PermissionService permissionService;
+    private final MinioStorageService minioStorageService;
 
     public LoginResponse login(LoginRequest req) {
         SysUser user = userMapper.selectOne(
@@ -64,6 +66,13 @@ public class AuthService {
                         .displayName(user.getDisplayName())
                         .role(user.getRole())
                         .partnerId(user.getPartnerId())
+                        .phone(user.getPhone())
+                        .email(user.getEmail())
+                        .avatarUrl(minioStorageService.resolveAccessibleUrl(
+                                user.getAvatarObjectKey(),
+                                user.getAvatarUrl(),
+                                86400
+                        ))
                         .permissions(permissionService.listPermKeys(user))
                         .build())
                 .build();
@@ -102,6 +111,12 @@ public class AuthService {
     }
 
     public void logout(Long userId) {
+        SysUser user = userMapper.selectById(userId);
+        if (user != null) {
+            int current = user.getTokenVersion() == null ? 0 : user.getTokenVersion();
+            user.setTokenVersion(current + 1);
+            userMapper.updateById(user);
+        }
         redisTemplate.delete(REFRESH_KEY_PREFIX + userId);
     }
 }

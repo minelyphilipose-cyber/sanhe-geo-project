@@ -82,7 +82,7 @@
         <div class="word-column">
           <div class="column-header"><div class="column-step"><span class="step-number">4</span><span class="step-label">行业词（必填）</span></div></div>
           <div class="column-body">
-            <label v-for="item in industryOptions" :key="item.id" class="word-item" :class="{ checked: form.industryWords.includes(item.wordText) }">
+            <label v-for="item in displayIndustryOptions" :key="`${item.id}_${item.wordText}`" class="word-item" :class="{ checked: form.industryWords.includes(item.wordText) }">
               <input v-model="form.industryWords" type="checkbox" :value="item.wordText" class="word-checkbox" />
               <span class="checkmark"></span>
               <span class="word-text">{{ item.wordText }}</span>
@@ -214,6 +214,26 @@ const form = reactive({
 })
 
 const displayKeywords = computed(() => (showAll.value ? previewKeywords.value : previewKeywords.value.slice(0, maxDisplay)))
+const displayIndustryOptions = computed(() => {
+  const options = [...industryOptions.value]
+  const existed = new Set(options.map((item) => item.wordText))
+  for (const wordText of form.industryWords) {
+    if (existed.has(wordText)) {
+      continue
+    }
+    options.push({
+      id: -options.length - 1,
+      type: form.type,
+      affixKind: 'industry',
+      wordText,
+      sortOrder: 9999,
+      enabled: true,
+      createdAt: '',
+      updatedAt: '',
+    })
+  }
+  return options
+})
 
 const estimatedCount = computed(() => {
   const columns = buildColumns()
@@ -300,16 +320,6 @@ async function loadTypeAndIndustryOptions() {
     value: item.dictKey,
     label: item.dictValue,
   }))
-  industryOptions.value = (dictStore.options('org_suffix') || []).map((item) => ({
-    id: Number(item.sortOrder || 0),
-    type: item.dictKey,
-    affixKind: 'industry',
-    wordText: item.dictValue,
-    sortOrder: item.sortOrder || 0,
-    enabled: true,
-    createdAt: '',
-    updatedAt: '',
-  }))
   if (!form.type && typeOptions.value.length > 0) {
     form.type = typeOptions.value[0].value
   }
@@ -319,18 +329,22 @@ async function loadPrefixSuffixOptions(type: string) {
   if (!type) {
     prefixOptions.value = []
     suffixOptions.value = []
+    industryOptions.value = []
     return
   }
   const { data } = await getKeywordAffixWordOptions(type)
   prefixOptions.value = data.data.prefixWords || []
   suffixOptions.value = data.data.suffixWords || []
+  industryOptions.value = data.data.industryWords || []
 }
 
 async function onTypeChanged() {
   await loadPrefixSuffixOptions(form.type)
   form.prefixSystemWords = []
+  form.industryWords = []
   form.suffixSystemWords = []
   previewKeywords.value = []
+  previewTotalAvailable.value = 0
 }
 
 async function doPreview() {

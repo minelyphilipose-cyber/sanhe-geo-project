@@ -81,7 +81,7 @@ export interface KeywordAffixWordQuery {
   current?: number
   size?: number
   type?: string
-  affixKind?: 'prefix' | 'suffix'
+  affixKind?: 'prefix' | 'suffix' | 'industry'
   keyword?: string
   enabled?: boolean
 }
@@ -92,7 +92,7 @@ export function getAdminKeywordAffixWords(params: KeywordAffixWordQuery) {
 
 export function createAdminKeywordAffixWord(payload: {
   type?: string
-  affixKind: 'prefix' | 'suffix'
+  affixKind: 'prefix' | 'suffix' | 'industry'
   wordText: string
   sortOrder: number
   enabled?: boolean
@@ -102,7 +102,7 @@ export function createAdminKeywordAffixWord(payload: {
 
 export function updateAdminKeywordAffixWord(id: number, payload: {
   type?: string
-  affixKind: 'prefix' | 'suffix'
+  affixKind: 'prefix' | 'suffix' | 'industry'
   wordText: string
   sortOrder: number
 }) {

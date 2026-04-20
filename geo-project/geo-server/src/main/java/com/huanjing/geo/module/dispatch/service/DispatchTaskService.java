@@ -31,8 +31,8 @@ public class DispatchTaskService {
     private final DispatchTaskMapper dispatchTaskMapper;
     private final DispatchQueueService dispatchQueueService;
     private final DispatchExecutionService dispatchExecutionService;
-    private final DispatchAlertService dispatchAlertService;
     private final DispatchProperties dispatchProperties;
+    private final DispatchTaskStateService dispatchTaskStateService;
 
     @Transactional
     public DispatchTask createTaskAndEnqueue(Long projectId,
@@ -67,8 +67,7 @@ public class DispatchTaskService {
                             .last("LIMIT 1")
             );
             if (existing != null) {
-                if ((taskType == DispatchTaskType.BRAND_STATEMENT_GENERATION
-                        || taskType == DispatchTaskType.PRESALE_DIAGNOSIS)
+                if (taskType == DispatchTaskType.BRAND_STATEMENT_GENERATION
                         && List.of(
                         DispatchTaskStatus.COMPLETED.value(),
                         DispatchTaskStatus.FAILED.value(),
@@ -139,23 +138,14 @@ public class DispatchTaskService {
             return;
         }
 
-        task.setStatus(DispatchTaskStatus.RUNNING.value());
-        task.setLastStartedAt(now);
-        if (task.getFirstStartedAt() == null) {
-            task.setFirstStartedAt(now);
+        task = dispatchTaskStateService.markRunning(taskId, dispatchProperties.getTaskTimeoutMinutes());
+        if (task == null) {
+            return;
         }
-        if (task.getTimeoutAt() == null) {
-            task.setTimeoutAt(now.plusMinutes(dispatchProperties.getTaskTimeoutMinutes()));
-        }
-        dispatchTaskMapper.updateById(task);
 
         try {
             dispatchExecutionService.execute(task);
-            task.setStatus(DispatchTaskStatus.COMPLETED.value());
-            task.setFinishedAt(LocalDateTime.now());
-            task.setLastError(null);
-            dispatchTaskMapper.updateById(task);
-            dispatchQueueService.clearQueueMark(taskId);
+            dispatchTaskStateService.markCompleted(taskId);
         } catch (Exception ex) {
             handleFailure(task, ex);
         }
@@ -251,6 +241,10 @@ public class DispatchTaskService {
         );
     }
 
+    public void reclaimTimedOutRunningTasks() {
+        dispatchTaskStateService.reclaimTimedOutRunningTasks(dispatchProperties.getRecoverBatchSize());
+    }
+
     private void handleFailure(DispatchTask task, Exception ex) {
         LocalDateTime now = LocalDateTime.now();
         int nextRetryCount = (task.getRetryCount() == null ? 0 : task.getRetryCount()) + 1;
@@ -274,45 +268,38 @@ public class DispatchTaskService {
             return;
         }
 
-        task.setStatus(DispatchTaskStatus.RETRY_PENDING.value());
-        task.setNextRetryAt(now.plus(resolveRetryDelay(nextRetryCount)));
-        dispatchTaskMapper.updateById(task);
-        dispatchQueueService.clearQueueMark(task.getId());
-        dispatchAlertService.createAlert(
+        dispatchTaskStateService.markRetryPending(
                 task.getId(),
-                task.getProjectId(),
-                DispatchAlertSeverity.WARN,
-                "Dispatch task failed and will retry",
-                trimError(ex.getMessage()),
                 nextRetryCount,
-                task.getPayloadJson()
+                now.plus(resolveRetryDelay(nextRetryCount)),
+                task.getLastError(),
+                task.getErrorContext(),
+                task.getPayloadJson(),
+                task.getProjectId(),
+                ex
         );
         log.warn("Task {} failed, retry count={}", task.getId(), nextRetryCount, ex);
     }
 
     private void markDeadLetter(DispatchTask task, String reason) {
-        task.setStatus(DispatchTaskStatus.DEAD_LETTER.value());
-        task.setFinishedAt(LocalDateTime.now());
-        task.setLastError(trimError(reason));
-        if (task.getErrorContext() == null) {
-            task.setErrorContext(JSONUtil.toJsonStr(buildErrorContext(
-                    trimError(reason),
+        String normalizedReason = trimError(reason);
+        String errorContext = task.getErrorContext();
+        if (errorContext == null) {
+            errorContext = JSONUtil.toJsonStr(buildErrorContext(
+                    normalizedReason,
                     null,
                     task.getCurrentChannel(),
                     task.getPlatformCode(),
                     LocalDateTime.now()
-            )));
+            ));
         }
-        dispatchTaskMapper.updateById(task);
-        dispatchQueueService.clearQueueMark(task.getId());
-        dispatchAlertService.createAlert(
+        dispatchTaskStateService.markDeadLetter(
                 task.getId(),
-                task.getProjectId(),
-                DispatchAlertSeverity.ERROR,
-                "Dispatch task entered dead letter",
-                task.getLastError(),
+                normalizedReason,
+                errorContext,
                 task.getRetryCount(),
-                task.getPayloadJson()
+                task.getPayloadJson(),
+                task.getProjectId()
         );
     }
 

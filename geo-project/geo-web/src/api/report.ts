@@ -1,11 +1,11 @@
 import request from './request'
-import type { PresaleReportSnapshot, R, PageResult, Report } from '@/types'
+import type { R, PageResult, Report } from '@/types'
 
 export function getReportList(params: {
   current?: number
   size?: number
   projectId?: number
-  reportType?: string
+  keyword?: string
   status?: string
 }) {
   return request.get<R<PageResult<Report>>>('/reports', { params })
@@ -14,7 +14,6 @@ export function getReportList(params: {
 export function getReportDetail(id: number) {
   return request.get<R<{
     report: Report
-    presaleSnapshot?: PresaleReportSnapshot
     postsaleSnapshot?: any
     subject?: {
       customerName?: string
@@ -22,17 +21,6 @@ export function getReportDetail(id: number) {
       projectName?: string
     }
   }>>(`/reports/${id}`)
-}
-
-export function generateReport(data: { projectId: number; reportType: string }) {
-  return request.post<R<Report>>('/reports/generate', data)
-}
-
-export function updatePresaleSnapshot(id: number, data: {
-  diagnosisSummary?: string
-  actionRecommendations?: string
-}) {
-  return request.put<R<Report>>(`/reports/${id}/presale-snapshot`, data)
 }
 
 export function publishReport(id: number, data?: { sharePassword?: string; shareExpiresAt?: string }) {

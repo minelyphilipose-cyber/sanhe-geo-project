@@ -56,5 +56,5 @@ export function replayDispatchTask(taskId: number) {
 }
 
 export function getDispatchTask(taskId: number) {
-  return request.get<R<DispatchTaskItem>>(`/dispatch/tasks/${taskId}`)
+  return request.get<R<DispatchTaskItem>>(`/dispatch/monitor/tasks/${taskId}`)
 }

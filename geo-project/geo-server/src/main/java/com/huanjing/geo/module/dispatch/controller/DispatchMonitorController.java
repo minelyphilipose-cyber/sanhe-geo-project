@@ -50,6 +50,11 @@ public class DispatchMonitorController {
         return R.ok(dispatchMonitorService.taskPage(current, size, rangeType, startDate, endDate, projectId, taskType, status, keyword));
     }
 
+    @GetMapping("/tasks/{taskId}")
+    public R<DispatchTaskMonitorVO> taskDetail(@PathVariable Long taskId) {
+        return R.ok(dispatchMonitorService.taskDetail(taskId));
+    }
+
     @GetMapping("/platforms")
     public R<List<DispatchPlatformHealthVO>> platformHealth(
             @RequestParam(defaultValue = "today") String rangeType,

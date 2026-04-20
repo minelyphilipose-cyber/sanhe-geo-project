@@ -2,12 +2,13 @@
   <div class="space-y-4">
     <el-card>
       <div class="flex items-center gap-2">
-        <el-input-number v-model="query.projectId" :min="1" :controls="false" placeholder="项目ID" style="width: 140px" />
-        <el-select v-model="query.reportType" clearable placeholder="类型" style="width: 160px">
-          <el-option label="售前诊断" value="presale" />
-          <el-option label="售前诊断报告" value="presale_diagnosis" />
-          <el-option label="管理汇总" value="management" />
-        </el-select>
+        <el-input
+          v-model="query.keyword"
+          clearable
+          placeholder="项目名称"
+          style="width: 220px"
+          @keyup.enter="search"
+        />
         <el-select v-model="query.status" clearable placeholder="状态" style="width: 140px">
           <el-option label="草稿" value="draft" />
           <el-option label="已发布" value="published" />
@@ -22,7 +23,7 @@
       <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无报告">
         <el-table :data="rows" border>
           <el-table-column prop="id" label="报告ID" width="90" />
-          <el-table-column prop="projectId" label="项目ID" width="100" />
+          <el-table-column prop="projectName" label="项目名称" min-width="180" show-overflow-tooltip />
           <el-table-column label="类型" width="160">
             <template #default="scope">{{ reportTypeLabel(scope.row.reportType) }}</template>
           </el-table-column>
@@ -44,7 +45,7 @@
           <el-table-column label="操作" width="220" fixed="right">
             <template #default="scope">
               <el-button link type="primary" @click="preview(scope.row.id)">预览</el-button>
-              <el-button v-if="canShare(scope.row)" link type="success" @click="copyShare(scope.row.shareToken)">复制链接</el-button>
+              <el-button v-if="canShare(scope.row)" link type="success" @click="copyShare(scope.row.shareToken!)">复制链接</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -79,8 +80,7 @@ const loading = ref(false)
 const rows = ref<Report[]>([])
 const page = reactive({ current: 1, size: 20, total: 0 })
 const query = reactive({
-  projectId: undefined as number | undefined,
-  reportType: '',
+  keyword: '',
   status: '',
 })
 
@@ -90,8 +90,7 @@ async function load() {
     const { data } = await getReportList({
       current: page.current,
       size: page.size,
-      projectId: query.projectId,
-      reportType: query.reportType || undefined,
+      keyword: query.keyword || undefined,
       status: query.status || undefined,
     })
     rows.value = data.data.records || []
@@ -103,12 +102,12 @@ async function load() {
 
 function search() {
   page.current = 1
-  load()
+  void load()
 }
 
 function onPageChange(v: number) {
   page.current = v
-  load()
+  void load()
 }
 
 function preview(id: number) {
@@ -132,5 +131,5 @@ function reportStatusLabel(v?: string) {
   return REPORT_STATUS_MAP[v as keyof typeof REPORT_STATUS_MAP]?.label || v || '-'
 }
 
-load()
+void load()
 </script>

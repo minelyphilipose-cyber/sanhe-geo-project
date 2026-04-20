@@ -20,9 +20,9 @@
           <el-table-column prop="brandName" label="品牌名称" min-width="180">
             <template #default="scope">{{ scope.row.brandName || '-' }}</template>
           </el-table-column>
-          <el-table-column label="已选拓词组" width="240">
+          <el-table-column label="拓词组" width="160">
             <template #default="scope">
-              已选 {{ scope.row.selectedKeywordGroupCount || 0 }} 个拓词组，已入库 {{ scope.row.selectedKeywordSavedKeywords || 0 }} 条关键词
+              {{ scope.row.selectedKeywordGroupCount || 0 }}组/{{ scope.row.selectedKeywordSavedKeywords || 0 }}条
             </template>
           </el-table-column>
           <el-table-column label="套餐" width="150">

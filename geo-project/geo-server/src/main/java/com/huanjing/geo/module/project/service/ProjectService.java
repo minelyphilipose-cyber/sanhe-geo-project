@@ -5,6 +5,26 @@ import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.entity.ArticleBatch;
+import com.huanjing.geo.module.content.entity.ArticleDraft;
+import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
+import com.huanjing.geo.module.content.entity.ArticleGenerationLog;
+import com.huanjing.geo.module.content.entity.ArticlePublishLog;
+import com.huanjing.geo.module.content.entity.ArticleQuestionRel;
+import com.huanjing.geo.module.content.entity.ArticleReviewLog;
+import com.huanjing.geo.module.content.entity.ContentQuestionRotation;
+import com.huanjing.geo.module.content.entity.DistributionTask;
+import com.huanjing.geo.module.content.entity.ProjectPublishQuota;
+import com.huanjing.geo.module.content.mapper.ArticleBatchMapper;
+import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
+import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
+import com.huanjing.geo.module.content.mapper.ArticleGenerationLogMapper;
+import com.huanjing.geo.module.content.mapper.ArticlePublishLogMapper;
+import com.huanjing.geo.module.content.mapper.ArticleQuestionRelMapper;
+import com.huanjing.geo.module.content.mapper.ArticleReviewLogMapper;
+import com.huanjing.geo.module.content.mapper.ContentQuestionRotationMapper;
+import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
+import com.huanjing.geo.module.content.mapper.ProjectPublishQuotaMapper;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.entity.CompanyAccount;
@@ -13,6 +33,22 @@ import com.huanjing.geo.module.customer.mapper.CompanyAccountMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyAccountTxnMapper;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
+import com.huanjing.geo.module.dashboard.entity.ProjectDashboardShare;
+import com.huanjing.geo.module.dashboard.entity.ProjectDashboardSnapshot;
+import com.huanjing.geo.module.dashboard.mapper.ProjectDashboardShareMapper;
+import com.huanjing.geo.module.dashboard.mapper.ProjectDashboardSnapshotMapper;
+import com.huanjing.geo.module.dispatch.entity.DispatchAlert;
+import com.huanjing.geo.module.dispatch.entity.DispatchTask;
+import com.huanjing.geo.module.dispatch.entity.PollBatch;
+import com.huanjing.geo.module.dispatch.entity.PollDailyStat;
+import com.huanjing.geo.module.dispatch.entity.PollResult;
+import com.huanjing.geo.module.dispatch.entity.ProjectPollRotation;
+import com.huanjing.geo.module.dispatch.mapper.DispatchAlertMapper;
+import com.huanjing.geo.module.dispatch.mapper.DispatchTaskMapper;
+import com.huanjing.geo.module.dispatch.mapper.PollBatchMapper;
+import com.huanjing.geo.module.dispatch.mapper.PollDailyStatMapper;
+import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
+import com.huanjing.geo.module.dispatch.mapper.ProjectPollRotationMapper;
 import com.huanjing.geo.module.partner.entity.Partner;
 import com.huanjing.geo.module.partner.entity.PartnerAccount;
 import com.huanjing.geo.module.partner.entity.PartnerAccountTxn;
@@ -35,6 +71,12 @@ import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectPlatformBindingMapper;
 import com.huanjing.geo.module.dispatch.service.BrandStatementDispatchService;
+import com.huanjing.geo.module.report.entity.PostsaleReportSnapshot;
+import com.huanjing.geo.module.report.entity.Report;
+import com.huanjing.geo.module.report.entity.ReportAccessLog;
+import com.huanjing.geo.module.report.mapper.PostsaleReportSnapshotMapper;
+import com.huanjing.geo.module.report.mapper.ReportAccessLogMapper;
+import com.huanjing.geo.module.report.mapper.ReportMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
@@ -79,9 +121,30 @@ public class ProjectService {
     private final PackagePlanService packagePlanService;
     private final QuestionPoolService questionPoolService;
     private final KeywordGroupService keywordGroupService;
+    private final ArticleBatchMapper articleBatchMapper;
+    private final ArticleDraftMapper articleDraftMapper;
+    private final ArticleDraftVersionMapper articleDraftVersionMapper;
+    private final ArticleGenerationLogMapper articleGenerationLogMapper;
+    private final ArticlePublishLogMapper articlePublishLogMapper;
+    private final ArticleQuestionRelMapper articleQuestionRelMapper;
+    private final ArticleReviewLogMapper articleReviewLogMapper;
+    private final ContentQuestionRotationMapper contentQuestionRotationMapper;
+    private final DistributionTaskMapper distributionTaskMapper;
+    private final ProjectPublishQuotaMapper projectPublishQuotaMapper;
+    private final ProjectDashboardShareMapper projectDashboardShareMapper;
+    private final ProjectDashboardSnapshotMapper projectDashboardSnapshotMapper;
+    private final DispatchAlertMapper dispatchAlertMapper;
+    private final DispatchTaskMapper dispatchTaskMapper;
+    private final PollBatchMapper pollBatchMapper;
+    private final PollDailyStatMapper pollDailyStatMapper;
+    private final PollResultMapper pollResultMapper;
+    private final ProjectPollRotationMapper projectPollRotationMapper;
     private final KeywordGroupMapper keywordGroupMapper;
     private final ProjectPlatformBindingMapper projectPlatformBindingMapper;
     private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
+    private final PostsaleReportSnapshotMapper postsaleReportSnapshotMapper;
+    private final ReportAccessLogMapper reportAccessLogMapper;
+    private final ReportMapper reportMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final CurrentUserService currentUserService;
     private final ActivityLogService activityLogService;
@@ -449,11 +512,13 @@ public class ProjectService {
         );
     }
 
+    @Transactional
     public void delete(Long id) {
         currentUserService.ensurePermission("project.write");
         SysUser operator = currentUserService.requireCurrentUser();
         Project project = requireProject(id);
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
+        purgeProjectRelations(id);
         projectMapper.deleteById(id);
         activityLogService.logAction(
                 operator.getId(),
@@ -464,6 +529,89 @@ public class ProjectService {
                 null,
                 null
         );
+    }
+
+    private void purgeProjectRelations(Long projectId) {
+        List<Long> articleIds = articleDraftMapper.selectList(
+                new LambdaQueryWrapper<ArticleDraft>()
+                        .eq(ArticleDraft::getProjectId, projectId)
+                        .select(ArticleDraft::getId)
+        ).stream().map(ArticleDraft::getId).toList();
+
+        List<Long> taskIds = dispatchTaskMapper.selectList(
+                new LambdaQueryWrapper<DispatchTask>()
+                        .eq(DispatchTask::getProjectId, projectId)
+                        .select(DispatchTask::getId)
+        ).stream().map(DispatchTask::getId).toList();
+
+        List<Long> reportIds = reportMapper.selectList(
+                new LambdaQueryWrapper<Report>()
+                        .eq(Report::getProjectId, projectId)
+                        .select(Report::getId)
+        ).stream().map(Report::getId).toList();
+
+        if (!articleIds.isEmpty()) {
+            articleDraftVersionMapper.delete(new LambdaQueryWrapper<ArticleDraftVersion>()
+                    .in(ArticleDraftVersion::getArticleId, articleIds));
+            articlePublishLogMapper.delete(new LambdaQueryWrapper<ArticlePublishLog>()
+                    .in(ArticlePublishLog::getArticleId, articleIds));
+            articleQuestionRelMapper.delete(new LambdaQueryWrapper<ArticleQuestionRel>()
+                    .in(ArticleQuestionRel::getArticleId, articleIds));
+            articleReviewLogMapper.delete(new LambdaQueryWrapper<ArticleReviewLog>()
+                    .in(ArticleReviewLog::getArticleId, articleIds));
+            distributionTaskMapper.delete(new LambdaQueryWrapper<DistributionTask>()
+                    .in(DistributionTask::getArticleId, articleIds));
+        }
+
+        articleGenerationLogMapper.delete(new LambdaQueryWrapper<ArticleGenerationLog>()
+                .eq(ArticleGenerationLog::getProjectId, projectId));
+        contentQuestionRotationMapper.delete(new LambdaQueryWrapper<ContentQuestionRotation>()
+                .eq(ContentQuestionRotation::getProjectId, projectId));
+        projectPublishQuotaMapper.delete(new LambdaQueryWrapper<ProjectPublishQuota>()
+                .eq(ProjectPublishQuota::getProjectId, projectId));
+
+        projectDashboardSnapshotMapper.delete(new LambdaQueryWrapper<ProjectDashboardSnapshot>()
+                .eq(ProjectDashboardSnapshot::getProjectId, projectId));
+        projectDashboardShareMapper.delete(new LambdaQueryWrapper<ProjectDashboardShare>()
+                .eq(ProjectDashboardShare::getProjectId, projectId));
+        projectKeywordGroupRelMapper.delete(new LambdaQueryWrapper<ProjectKeywordGroupRel>()
+                .eq(ProjectKeywordGroupRel::getProjectId, projectId));
+        projectPlatformBindingMapper.delete(new LambdaQueryWrapper<ProjectPlatformBinding>()
+                .eq(ProjectPlatformBinding::getProjectId, projectId));
+        projectPollRotationMapper.delete(new LambdaQueryWrapper<ProjectPollRotation>()
+                .eq(ProjectPollRotation::getProjectId, projectId));
+
+        if (!taskIds.isEmpty()) {
+            dispatchAlertMapper.delete(new LambdaQueryWrapper<DispatchAlert>()
+                    .in(DispatchAlert::getTaskId, taskIds));
+        }
+        dispatchAlertMapper.delete(new LambdaQueryWrapper<DispatchAlert>()
+                .eq(DispatchAlert::getProjectId, projectId));
+
+        pollResultMapper.delete(new LambdaQueryWrapper<PollResult>()
+                .eq(PollResult::getProjectId, projectId));
+        pollDailyStatMapper.delete(new LambdaQueryWrapper<PollDailyStat>()
+                .eq(PollDailyStat::getProjectId, projectId));
+        pollBatchMapper.delete(new LambdaQueryWrapper<PollBatch>()
+                .eq(PollBatch::getProjectId, projectId));
+
+        if (!reportIds.isEmpty()) {
+            postsaleReportSnapshotMapper.delete(new LambdaQueryWrapper<PostsaleReportSnapshot>()
+                    .in(PostsaleReportSnapshot::getReportId, reportIds));
+            reportAccessLogMapper.delete(new LambdaQueryWrapper<ReportAccessLog>()
+                    .in(ReportAccessLog::getReportId, reportIds));
+        }
+        reportMapper.delete(new LambdaQueryWrapper<Report>()
+                .eq(Report::getProjectId, projectId));
+
+        distributionTaskMapper.delete(new LambdaQueryWrapper<DistributionTask>()
+                .eq(DistributionTask::getProjectId, projectId));
+        articleDraftMapper.delete(new LambdaQueryWrapper<ArticleDraft>()
+                .eq(ArticleDraft::getProjectId, projectId));
+        articleBatchMapper.delete(new LambdaQueryWrapper<ArticleBatch>()
+                .eq(ArticleBatch::getProjectId, projectId));
+        dispatchTaskMapper.delete(new LambdaQueryWrapper<DispatchTask>()
+                .eq(DispatchTask::getProjectId, projectId));
     }
 
     private Project requireProject(Long id) {

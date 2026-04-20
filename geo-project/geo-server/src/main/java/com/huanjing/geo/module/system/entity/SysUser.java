@@ -16,6 +16,8 @@ public class SysUser {
     private Long partnerId;
     private String phone;
     private String email;
+    private String avatarUrl;
+    private String avatarObjectKey;
     private Boolean isActive;
     private Integer tokenVersion;
     private LocalDateTime lastLoginAt;

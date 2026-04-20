@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="monitoring-page">
     <el-card shadow="never" class="topbar-card">
       <div class="topbar">
@@ -79,7 +79,6 @@
           <el-select v-model="taskQuery.taskType" clearable placeholder="任务类型" style="width: 180px" @change="loadTasks">
             <el-option label="双日跑批" value="BI_DAILY_POLL" />
             <el-option label="品牌标准表达生成" value="BRAND_STATEMENT_GENERATION" />
-            <el-option label="售前诊断" value="PRESALE_DIAGNOSIS" />
             <el-option label="问题场景内容建议" value="QUESTION_STRATEGY_GENERATION" />
             <el-option label="内容生成" value="CONTENT_GENERATION" />
           </el-select>
@@ -114,6 +113,12 @@
             <el-table-column label="耗时" width="120">
               <template #default="scope">{{ taskDuration(scope.row) }}</template>
             </el-table-column>
+            <el-table-column label="新增时间" width="170">
+              <template #default="scope">{{ formatDateTime(scope.row.createdAt) }}</template>
+            </el-table-column>
+            <el-table-column label="更新时间" width="170">
+              <template #default="scope">{{ formatDateTime(scope.row.updatedAt) }}</template>
+            </el-table-column>
             <el-table-column label="最近错误" min-width="280">
               <template #default="scope">
                 <el-tooltip v-if="scope.row.lastError" :content="scope.row.lastError" placement="top">
@@ -122,8 +127,9 @@
                 <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="100" fixed="right">
+            <el-table-column label="操作" width="160" fixed="right">
               <template #default="scope">
+                <el-button link type="primary" @click="openTaskDetail(scope.row.id)">详情</el-button>
                 <el-button
                   v-if="scope.row.status === 'failed' || scope.row.status === 'dead_letter'"
                   link
@@ -149,6 +155,38 @@
         </div>
       </el-card>
     </div>
+
+    <el-dialog v-model="taskDetailVisible" title="调度详情" width="760px">
+      <div v-loading="taskDetailLoading">
+        <el-descriptions v-if="taskDetail" :column="2" border>
+          <el-descriptions-item label="任务编号">{{ taskDetail.taskNo || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="项目名称">{{ taskDetail.projectName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="任务类型">{{ taskTypeLabel(taskDetail.taskType) }}</el-descriptions-item>
+          <el-descriptions-item label="任务状态">{{ taskStatusLabel(taskDetail.status) }}</el-descriptions-item>
+          <el-descriptions-item label="优先级">P{{ taskDetail.priorityLevel }}</el-descriptions-item>
+          <el-descriptions-item label="执行通道">{{ channelLabel(taskDetail.currentChannel) }}</el-descriptions-item>
+          <el-descriptions-item label="平台编码">{{ taskDetail.platformCode || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="重试次数">{{ taskDetail.retryCount ?? 0 }} / {{ taskDetail.maxRetry ?? '-' }}</el-descriptions-item>
+          <el-descriptions-item label="窗口开始">{{ taskDetail.windowStart || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="窗口结束">{{ taskDetail.windowEnd || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="应执行时间">{{ formatDateTime(taskDetail.dueTime) }}</el-descriptions-item>
+          <el-descriptions-item label="首次启动时间">{{ formatDateTime(taskDetail.firstStartedAt) }}</el-descriptions-item>
+          <el-descriptions-item label="最近启动时间">{{ formatDateTime(taskDetail.lastStartedAt) }}</el-descriptions-item>
+          <el-descriptions-item label="下次重试时间">{{ formatDateTime(taskDetail.nextRetryAt) }}</el-descriptions-item>
+          <el-descriptions-item label="超时时间">{{ formatDateTime(taskDetail.timeoutAt) }}</el-descriptions-item>
+          <el-descriptions-item label="完成时间">{{ formatDateTime(taskDetail.finishedAt) }}</el-descriptions-item>
+          <el-descriptions-item label="新增时间">{{ formatDateTime(taskDetail.createdAt) }}</el-descriptions-item>
+          <el-descriptions-item label="更新时间">{{ formatDateTime(taskDetail.updatedAt) }}</el-descriptions-item>
+          <el-descriptions-item label="最近错误" :span="2">{{ taskDetail.lastError || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="错误上下文" :span="2">
+            <pre class="detail-pre">{{ taskDetail.errorContext || '-' }}</pre>
+          </el-descriptions-item>
+          <el-descriptions-item label="任务载荷" :span="2">
+            <pre class="detail-pre">{{ taskDetail.payloadJson || '-' }}</pre>
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -158,6 +196,7 @@ import { ElMessage } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import {
   getDispatchDashboard,
+  getDispatchTask,
   getDispatchTasks,
   replayDispatchTask,
   type DispatchRangeParams,
@@ -188,6 +227,9 @@ const dashboard = reactive<DispatchDashboardMetrics>({
 })
 
 const tasks = ref<DispatchTaskItem[]>([])
+const taskDetailVisible = ref(false)
+const taskDetailLoading = ref(false)
+const taskDetail = ref<DispatchTaskItem | null>(null)
 const taskPage = reactive({ current: 1, size: 20, total: 0 })
 const taskQuery = reactive({
   keyword: '',
@@ -241,11 +283,24 @@ function formatDurationMs(ms?: number | null) {
 }
 
 function taskDuration(task: DispatchTaskItem) {
-  if (!task.finishedAt || !task.createdAt) return '-'
+  if (!task.finishedAt || !(task.firstStartedAt || task.createdAt)) return '-'
   const end = new Date(task.finishedAt).getTime()
-  const start = new Date(task.createdAt).getTime()
+  const start = new Date(task.firstStartedAt || task.createdAt).getTime()
   if (!Number.isFinite(end) || !Number.isFinite(start) || end <= start) return '-'
   return formatDurationMs(end - start)
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return value
+  const yyyy = date.getFullYear()
+  const mm = `${date.getMonth() + 1}`.padStart(2, '0')
+  const dd = `${date.getDate()}`.padStart(2, '0')
+  const hh = `${date.getHours()}`.padStart(2, '0')
+  const mi = `${date.getMinutes()}`.padStart(2, '0')
+  const ss = `${date.getSeconds()}`.padStart(2, '0')
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`
 }
 
 function taskStatusLabel(status: string) {
@@ -263,7 +318,6 @@ function taskTypeLabel(taskType?: string) {
   const map: Record<string, string> = {
     BI_DAILY_POLL: '双日跑批',
     BRAND_STATEMENT_GENERATION: '品牌标准表达生成',
-    PRESALE_DIAGNOSIS: '售前诊断',
     QUESTION_STRATEGY_GENERATION: '问题场景内容建议',
     CONTENT_GENERATION: '内容生成',
   }
@@ -309,6 +363,18 @@ async function replay(taskId: number) {
   await replayDispatchTask(taskId)
   ElMessage.success('任务已重新入队')
   await loadTasks()
+}
+
+async function openTaskDetail(taskId: number) {
+  taskDetailVisible.value = true
+  taskDetailLoading.value = true
+  taskDetail.value = null
+  try {
+    const { data } = await getDispatchTask(taskId)
+    taskDetail.value = data.data
+  } finally {
+    taskDetailLoading.value = false
+  }
 }
 
 async function reloadActiveTab() {
@@ -506,5 +572,12 @@ onBeforeUnmount(() => {
   height: 32px;
   line-height: 32px;
   padding: 0 14px;
+}
+
+.detail-pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-family: Consolas, Monaco, monospace;
 }
 </style>

@@ -4,14 +4,14 @@
 
     <div v-if="state === 'loading'" class="share-page__center">
       <el-icon :size="32" class="is-loading" color="#2563EB"><Loading /></el-icon>
-      <p class="mt-4 text-gray-500">加载报表中...</p>
+      <p class="mt-4 text-gray-500">加载报告中...</p>
     </div>
 
     <div v-else-if="state === 'need_password'" class="share-page__center">
       <div class="glass-card p-8 w-[360px] text-center">
         <el-icon :size="40" color="#2563EB"><Lock /></el-icon>
         <h2 class="text-lg font-bold text-gray-800 mt-4 mb-2">访问需要密码</h2>
-        <p class="text-sm text-gray-500 mb-4">此报表已设置访问密码</p>
+        <p class="text-sm text-gray-500 mb-4">此报告已设置访问密码</p>
         <el-input v-model="password" type="password" placeholder="请输入访问密码" size="large" show-password @keyup.enter="verifyPassword" />
         <el-button type="primary" class="w-full mt-4" size="large" :loading="verifying" @click="verifyPassword">确认</el-button>
       </div>
@@ -21,32 +21,32 @@
       <div class="glass-card p-8 w-[360px] text-center">
         <el-icon :size="40" color="#EF4444"><CircleClose /></el-icon>
         <h2 class="text-lg font-bold text-gray-800 mt-4 mb-2">链接已失效</h2>
-        <p class="text-sm text-gray-500">此报表分享链接已过有效期，请联系服务方获取新链接</p>
+        <p class="text-sm text-gray-500">此报告分享链接已过有效期，请联系服务方获取新链接。</p>
       </div>
     </div>
 
     <div v-else-if="state === 'not_published'" class="share-page__center">
       <div class="glass-card p-8 w-[380px] text-center">
         <el-icon :size="40" color="#F59E0B"><Warning /></el-icon>
-        <h2 class="text-lg font-bold text-gray-800 mt-4 mb-2">报表尚未发布</h2>
-        <p class="text-sm text-gray-500">{{ stateMessage || '报表尚未发布，请联系服务团队' }}</p>
+        <h2 class="text-lg font-bold text-gray-800 mt-4 mb-2">报告尚未发布</h2>
+        <p class="text-sm text-gray-500">{{ stateMessage || '报告尚未发布，请联系服务团队。' }}</p>
       </div>
     </div>
 
     <div v-else-if="state === 'superseded_waiting'" class="share-page__center">
       <div class="glass-card p-8 w-[420px] text-center">
         <el-icon :size="40" color="#2563EB"><Loading /></el-icon>
-        <h2 class="text-lg font-bold text-gray-800 mt-4 mb-2">报表版本已更新</h2>
-        <p class="text-sm text-gray-500">{{ stateMessage || '新版本正在准备中，请稍后再试' }}</p>
+        <h2 class="text-lg font-bold text-gray-800 mt-4 mb-2">报告版本已更新</h2>
+        <p class="text-sm text-gray-500">{{ stateMessage || '新版本正在准备中，请稍后再试。' }}</p>
       </div>
     </div>
 
     <div v-else-if="state === 'loaded'" class="share-page__report">
       <div class="glass-card p-8 max-w-[1000px] mx-auto">
         <div class="report-header">
-          <h1 class="text-xl font-bold">{{ isPresale ? '售前诊断报告' : `${reportTypeLabel(reportData?.report?.reportType)}报告` }}</h1>
+          <h1 class="text-xl font-bold">{{ reportTypeLabel(reportData?.report?.reportType) }}报告</h1>
           <el-button v-if="!isPrintMode" type="primary" plain @click="downloadPdf">
-            <el-icon class="mr-1"><Download /></el-icon>导出PDF
+            <el-icon class="mr-1"><Download /></el-icon>导出 PDF
           </el-button>
         </div>
 
@@ -56,80 +56,71 @@
           <el-descriptions-item label="项目名称">{{ reportData?.subject?.projectName || '-' }}</el-descriptions-item>
         </el-descriptions>
 
-        <template v-if="isPresale">
-          <el-row :gutter="12">
-            <el-col :xs="24" :sm="12" :md="6"><el-statistic title="品牌提及率" :value="num(presaleData.brandMentionRate)" suffix="%" /></el-col>
-            <el-col :xs="24" :sm="12" :md="6"><el-statistic title="官网提及率" :value="num(presaleData.siteMentionRate)" suffix="%" /></el-col>
-            <el-col :xs="24" :sm="12" :md="6"><el-statistic title="联系方式提及率" :value="num(presaleData.contactMentionRate)" suffix="%" /></el-col>
-            <el-col :xs="24" :sm="12" :md="6"><el-statistic title="可见度评分" :value="num(presaleData.visibilityScore)" /></el-col>
-          </el-row>
-          <el-divider />
-          <h3 class="font-bold mb-2">智能诊断建议</h3>
-          <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ reportData?.snapshot?.diagnosisSummary || '-' }}</p>
-          <h3 class="font-bold mt-4 mb-2">行动建议</h3>
-          <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ reportData?.snapshot?.actionRecommendations || '-' }}</p>
-        </template>
+        <el-row :gutter="12">
+          <el-col :xs="24" :sm="12" :md="6"><el-statistic title="命中率" :value="num(summary.hit_rate)" suffix="%" /></el-col>
+          <el-col :xs="24" :sm="12" :md="6"><el-statistic title="命中数" :value="num(summary.total_hit_count)" /></el-col>
+          <el-col :xs="24" :sm="12" :md="6"><el-statistic title="完成请求数" :value="num(summary.total_completed_count)" /></el-col>
+          <el-col :xs="24" :sm="12" :md="6"><el-statistic title="平台覆盖数" :value="`${num(summary.platform_coverage_count)}/${num(summary.platform_total_count)}`" /></el-col>
+        </el-row>
 
-        <template v-else>
-          <el-row :gutter="12">
-            <el-col :xs="24" :sm="12" :md="6"><el-statistic title="命中率" :value="num(summary.hit_rate)" suffix="%" /></el-col>
-            <el-col :xs="24" :sm="12" :md="6"><el-statistic title="命中数" :value="num(summary.total_hit_count)" /></el-col>
-            <el-col :xs="24" :sm="12" :md="6"><el-statistic title="完成请求数" :value="num(summary.total_completed_count)" /></el-col>
-            <el-col :xs="24" :sm="12" :md="6"><el-statistic title="平台覆盖数" :value="`${num(summary.platform_coverage_count)}/${num(summary.platform_total_count)}`" /></el-col>
-          </el-row>
-          <el-row :gutter="12" class="mt-3">
-            <el-col :xs="24" :sm="12" :md="6"><el-statistic title="官网提及数" :value="num(summary.site_mention_count)" /></el-col>
-            <el-col :xs="24" :sm="12" :md="6"><el-statistic title="联系方式提及数" :value="num(summary.contact_mention_count)" /></el-col>
-            <el-col :xs="24" :sm="12" :md="6"><el-statistic title="核心问题覆盖率" :value="num(summary.core_question_coverage_rate)" suffix="%" /></el-col>
-            <el-col :xs="24" :sm="12" :md="6"><el-statistic :title="compareLabel + '命中率变化'" :value="num(summaryVs.hit_rate_change)" suffix="%" /></el-col>
-          </el-row>
+        <el-row :gutter="12" class="mt-3">
+          <el-col :xs="24" :sm="12" :md="6"><el-statistic title="官网提及数" :value="num(summary.site_mention_count)" /></el-col>
+          <el-col :xs="24" :sm="12" :md="6"><el-statistic title="联系方式提及数" :value="num(summary.contact_mention_count)" /></el-col>
+          <el-col :xs="24" :sm="12" :md="6"><el-statistic title="核心问题覆盖率" :value="num(summary.core_question_coverage_rate)" suffix="%" /></el-col>
+          <el-col :xs="24" :sm="12" :md="6"><el-statistic :title="compareLabel + '命中率变化'" :value="num(summaryVs.hit_rate_change)" suffix="%" /></el-col>
+        </el-row>
 
-          <el-divider />
-          <h3 class="font-bold mb-2">{{ trendTitle }}</h3>
-          <el-table :data="trendPoints" border>
-            <el-table-column prop="date" label="日期" width="140" />
-            <el-table-column prop="hit_rate" label="命中率(%)" width="120" />
-            <el-table-column prop="site_rate" label="官网提及率(%)" width="130" />
-            <el-table-column prop="contact_rate" label="联系方式提及率(%)" width="150" />
-          </el-table>
+        <el-divider />
+        <h3 class="font-bold mb-2">{{ trendTitle }}</h3>
+        <el-table :data="trendPoints" border>
+          <el-table-column prop="date" label="日期" width="140" />
+          <el-table-column prop="hit_rate" label="命中率(%)" width="120" />
+          <el-table-column prop="site_rate" label="官网提及率(%)" width="130" />
+          <el-table-column prop="contact_rate" label="联系方式提及率(%)" width="150" />
+        </el-table>
 
-          <h3 class="font-bold mt-4 mb-2">问题覆盖汇总</h3>
-          <el-table :data="detailItems" border max-height="420">
-            <el-table-column prop="question_content" label="问题" min-width="280" />
-            <el-table-column prop="question_type" label="类型" width="120" />
-            <el-table-column label="平台命中" width="120"><template #default="scope">{{ num(scope.row.platforms_hit) }}/{{ num(scope.row.platforms_total) }}</template></el-table-column>
-            <el-table-column label="官网提及" width="100"><template #default="scope"><el-tag :type="scope.row.site_mentioned ? 'success' : 'info'">{{ scope.row.site_mentioned ? '是' : '否' }}</el-tag></template></el-table-column>
-            <el-table-column label="联系方式提及" width="120"><template #default="scope"><el-tag :type="scope.row.contact_mentioned ? 'success' : 'info'">{{ scope.row.contact_mentioned ? '是' : '否' }}</el-tag></template></el-table-column>
-          </el-table>
+        <h3 class="font-bold mt-4 mb-2">问题覆盖汇总</h3>
+        <el-table :data="detailItems" border max-height="420">
+          <el-table-column prop="question_content" label="问题" min-width="280" />
+          <el-table-column prop="question_type" label="类型" width="120" />
+          <el-table-column label="平台命中" width="120">
+            <template #default="scope">{{ num(scope.row.platforms_hit) }}/{{ num(scope.row.platforms_total) }}</template>
+          </el-table-column>
+          <el-table-column label="官网提及" width="100">
+            <template #default="scope"><el-tag :type="scope.row.site_mentioned ? 'success' : 'info'">{{ scope.row.site_mentioned ? '是' : '否' }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="联系方式提及" width="120">
+            <template #default="scope"><el-tag :type="scope.row.contact_mentioned ? 'success' : 'info'">{{ scope.row.contact_mentioned ? '是' : '否' }}</el-tag></template>
+          </el-table-column>
+        </el-table>
 
-          <h3 class="font-bold mt-4 mb-2">平台拆分</h3>
-          <el-table :data="platformItems" border>
-            <el-table-column prop="platform_name" label="平台" min-width="160" />
-            <el-table-column prop="hit_rate" label="命中率(%)" width="120" />
-            <el-table-column prop="completed_count" label="完成请求数" width="120" />
-            <el-table-column prop="hit_count" label="命中数" width="100" />
-          </el-table>
+        <h3 class="font-bold mt-4 mb-2">平台拆分</h3>
+        <el-table :data="platformItems" border>
+          <el-table-column prop="platform_name" label="平台" min-width="160" />
+          <el-table-column prop="hit_rate" label="命中率(%)" width="120" />
+          <el-table-column prop="completed_count" label="完成请求数" width="120" />
+          <el-table-column prop="hit_count" label="命中数" width="100" />
+        </el-table>
 
-          <h3 class="font-bold mt-4 mb-2">内容执行情况</h3>
-          <el-row :gutter="12">
-            <el-col :xs="24" :sm="8"><el-statistic title="生成文章数" :value="num(contentSummary.articles_generated)" /></el-col>
-            <el-col :xs="24" :sm="8"><el-statistic title="审核通过数" :value="num(contentSummary.articles_approved)" /></el-col>
-            <el-col :xs="24" :sm="8"><el-statistic title="分发完成数" :value="num(contentSummary.articles_distributed)" /></el-col>
-          </el-row>
+        <h3 class="font-bold mt-4 mb-2">内容执行情况</h3>
+        <el-row :gutter="12">
+          <el-col :xs="24" :sm="8"><el-statistic title="生成文章数" :value="num(contentSummary.articles_generated)" /></el-col>
+          <el-col :xs="24" :sm="8"><el-statistic title="审核通过数" :value="num(contentSummary.articles_approved)" /></el-col>
+          <el-col :xs="24" :sm="8"><el-statistic title="分发完成数" :value="num(contentSummary.articles_distributed)" /></el-col>
+        </el-row>
 
-          <h3 class="font-bold mt-4 mb-2">口径说明</h3>
-          <p class="text-sm text-gray-600">{{ methodologyNote || '-' }}</p>
-          <h3 v-if="stageAdvice" class="font-bold mt-4 mb-2">阶段建议</h3>
-          <p v-if="stageAdvice" class="text-sm text-gray-700 whitespace-pre-wrap">{{ stageAdvice }}</p>
-        </template>
+        <h3 class="font-bold mt-4 mb-2">口径说明</h3>
+        <p class="text-sm text-gray-600">{{ methodologyNote || '-' }}</p>
+        <h3 v-if="stageAdvice" class="font-bold mt-4 mb-2">阶段建议</h3>
+        <p v-if="stageAdvice" class="text-sm text-gray-700 whitespace-pre-wrap">{{ stageAdvice }}</p>
       </div>
     </div>
 
     <div v-else-if="state === 'not_found'" class="share-page__center">
       <div class="glass-card p-8 w-[360px] text-center">
         <el-icon :size="40" color="#94A3B8"><Warning /></el-icon>
-        <h2 class="text-lg font-bold text-gray-800 mt-4 mb-2">报表不存在</h2>
-        <p class="text-sm text-gray-500">请确认链接是否正确</p>
+        <h2 class="text-lg font-bold text-gray-800 mt-4 mb-2">报告不存在</h2>
+        <p class="text-sm text-gray-500">请确认链接是否正确。</p>
       </div>
     </div>
   </div>
@@ -149,13 +140,11 @@ const isPrintMode = computed(() => String(route.query.print || '') === '1')
 type PageState = 'loading' | 'need_password' | 'expired' | 'loaded' | 'not_found' | 'not_published' | 'superseded_waiting'
 const state = ref<PageState>('loading')
 const reportData = ref<any>(null)
-const presaleData = ref<Record<string, any>>({})
 const password = ref('')
 const verifying = ref(false)
 const stateMessage = ref('')
 const passwordCacheKey = computed(() => `share_pwd:${token}`)
 
-const isPresale = computed(() => reportData.value?.report?.reportType === 'presale')
 const postsaleSnapshot = computed(() => reportData.value?.snapshot || {})
 const summary = computed(() => parseJsonObject(postsaleSnapshot.value?.summaryData))
 const summaryVs = computed(() => parseJsonObject(summary.value.vs_previous))
@@ -177,14 +166,14 @@ const compareLabel = computed(() => {
 })
 const trendTitle = computed(() => {
   const type = String(reportData.value?.report?.reportType || '')
-  if (type === 'monthly') return '月度趋势（30天）'
+  if (type === 'monthly') return '月度趋势（30 天）'
   if (type === 'quarterly') return '季度趋势'
-  return '双周趋势（14天）'
+  return '双周趋势（14 天）'
 })
 
 function reportTypeLabel(reportType?: string) {
-  const map: Record<string, string> = { biweekly: '双周报', monthly: '月报', quarterly: '季报', presale: '售前诊断' }
-  return map[String(reportType || '')] || '售后报表'
+  const map: Record<string, string> = { biweekly: '双周报', monthly: '月报', quarterly: '季报', management: '管理层汇总' }
+  return map[String(reportType || '')] || '售后报告'
 }
 function parseJsonObject(v: any): Record<string, any> {
   if (!v) return {}
@@ -225,7 +214,7 @@ async function loadShareReport() {
     }
     if (res?.bizCode === 'NOT_PUBLISHED') {
       state.value = 'not_published'
-      stateMessage.value = res?.message || '报表尚未发布，请联系服务团队'
+      stateMessage.value = res?.message || '报告尚未发布，请联系服务团队。'
       return
     }
     if (res?.bizCode === 'VERSION_SUPERSEDED') {
@@ -233,7 +222,7 @@ async function loadShareReport() {
       if (latestToken) router.replace(`/r/${latestToken}`)
       else {
         state.value = 'superseded_waiting'
-        stateMessage.value = res?.message || '新版本正在准备中，请稍后再试'
+        stateMessage.value = res?.message || '新版本正在准备中，请稍后再试。'
       }
       return
     }
@@ -275,7 +264,6 @@ async function verifyPassword(silent = false) {
 
 function applyLoadedData(res: any) {
   reportData.value = res
-  presaleData.value = parseJsonObject(res?.snapshot?.snapshotData)
   state.value = 'loaded'
   stateMessage.value = ''
 }

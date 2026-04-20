@@ -95,8 +95,9 @@ export const PLATFORM_MAP = Object.fromEntries(
 ) as Record<string, PlatformMeta>
 
 export const REPORT_TYPE_MAP: Record<ReportType, { label: string; icon: string }> = {
-  presale: { label: '售前诊断报告', icon: 'Document' },
-  presale_diagnosis: { label: '售前诊断报告', icon: 'Document' },
+  biweekly: { label: '双周报', icon: 'DataAnalysis' },
+  monthly: { label: '月报', icon: 'DataAnalysis' },
+  quarterly: { label: '季报', icon: 'DataAnalysis' },
   management: { label: '管理层汇总', icon: 'PieChart' },
 }
 

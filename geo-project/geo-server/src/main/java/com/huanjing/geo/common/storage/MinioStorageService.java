@@ -104,6 +104,13 @@ public class MinioStorageService {
         }
     }
 
+    public String resolveAccessibleUrl(String objectKey, String fallbackUrl, int expireSeconds) {
+        if (StringUtils.hasText(objectKey)) {
+            return buildPresignedDownloadUrl(objectKey, expireSeconds);
+        }
+        return fallbackUrl;
+    }
+
     private void ensureBucket() throws Exception {
         boolean exists = minioClient.bucketExists(BucketExistsArgs.builder().bucket(bucket).build());
         if (!exists) {

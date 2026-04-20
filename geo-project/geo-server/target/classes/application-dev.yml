@@ -7,7 +7,7 @@ spring:
 
   data:
     redis:
-      host: 192.168.112.145
+      host: 192.168.112.175
       port: 6379
       password: 123456
       database: 0
@@ -21,7 +21,7 @@ geo:
 
   # MinIO
   minio:
-    endpoint: http://192.168.112.145:9000
+    endpoint: http://192.168.112.175:9000
     access-key: admin
     secret-key: admin123
     bucket: geo-files

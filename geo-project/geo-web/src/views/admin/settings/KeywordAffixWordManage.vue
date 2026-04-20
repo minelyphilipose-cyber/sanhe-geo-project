@@ -8,6 +8,7 @@
         <el-select v-model="query.affixKind" clearable placeholder="词位" style="width: 160px" @change="onSearch">
           <el-option label="前缀词" value="prefix" />
           <el-option label="后缀词" value="suffix" />
+          <el-option label="行业词" value="industry" />
         </el-select>
         <el-select v-model="query.enabled" clearable placeholder="状态" style="width: 120px" @change="onSearch">
           <el-option label="启用" :value="true" />
@@ -26,7 +27,7 @@
             <template #default="{ row }">{{ typeCodeLabel(row.type) }}</template>
           </el-table-column>
           <el-table-column label="词位" width="120">
-            <template #default="{ row }">{{ row.affixKind === 'prefix' ? '前缀词' : '后缀词' }}</template>
+            <template #default="{ row }">{{ affixKindLabel(row.affixKind) }}</template>
           </el-table-column>
           <el-table-column prop="wordText" label="词文本" min-width="220" />
           <el-table-column prop="sortOrder" label="排序" width="100" />
@@ -65,6 +66,7 @@
           <el-select v-model="form.affixKind" style="width: 100%">
             <el-option label="前缀词" value="prefix" />
             <el-option label="后缀词" value="suffix" />
+            <el-option label="行业词" value="industry" />
           </el-select>
         </el-form-item>
         <el-form-item label="类型编码" prop="type" required>
@@ -112,7 +114,7 @@ const dictStore = useDictStore()
 const page = reactive({ current: 1, size: 20, total: 0 })
 const query = reactive<{
   type: string
-  affixKind: '' | 'prefix' | 'suffix'
+  affixKind: '' | 'prefix' | 'suffix' | 'industry'
   keyword: string
   enabled: boolean | undefined
 }>({
@@ -128,7 +130,7 @@ const editingId = ref<number | null>(null)
 const formRef = ref<FormInstance>()
 const form = reactive<{
   type: string
-  affixKind: 'prefix' | 'suffix'
+  affixKind: 'prefix' | 'suffix' | 'industry'
   wordText: string
   sortOrder: number
   enabled: boolean
@@ -149,6 +151,13 @@ const rules: FormRules = {
 function typeCodeLabel(type: string) {
   const option = typeOptions.value.find((item) => item.value === type)
   return option ? `${option.label} (${type})` : type
+}
+
+function affixKindLabel(affixKind: string) {
+  if (affixKind === 'prefix') return '前缀词'
+  if (affixKind === 'suffix') return '后缀词'
+  if (affixKind === 'industry') return '行业词'
+  return affixKind
 }
 
 async function loadTypeOptions() {
@@ -206,7 +215,7 @@ function openEdit(row: KeywordAffixWord) {
   formMode.value = 'edit'
   editingId.value = row.id
   form.type = row.type
-  form.affixKind = row.affixKind as 'prefix' | 'suffix'
+  form.affixKind = row.affixKind as 'prefix' | 'suffix' | 'industry'
   form.wordText = row.wordText
   form.sortOrder = row.sortOrder
   form.enabled = row.enabled

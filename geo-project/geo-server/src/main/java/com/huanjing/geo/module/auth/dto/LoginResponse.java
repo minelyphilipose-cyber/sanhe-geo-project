@@ -20,6 +20,9 @@ public class LoginResponse {
         private String displayName;
         private String role;
         private Long partnerId;
+        private String phone;
+        private String email;
+        private String avatarUrl;
         private Set<String> permissions;
     }
 }

@@ -15,6 +15,7 @@ import com.huanjing.geo.module.content.mapper.ContentQuestionRotationMapper;
 import com.huanjing.geo.module.content.mapper.PackageContentConfigMapper;
 import com.huanjing.geo.module.content.service.ContentArticleService;
 import com.huanjing.geo.module.content.service.GeoPromptBuilder;
+import com.huanjing.geo.module.content.service.ArticleGenerationPersistenceService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
@@ -30,23 +31,18 @@ import com.huanjing.geo.module.dispatch.mapper.PollBatchMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollDailyStatMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.dispatch.mapper.ProjectPollRotationMapper;
+import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
 import com.huanjing.geo.module.project.entity.ProjectPlatformBinding;
 import com.huanjing.geo.module.project.entity.QuestionPoolItem;
 import com.huanjing.geo.module.project.entity.QuestionPoolVersion;
+import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectPlatformBindingMapper;
 import com.huanjing.geo.module.project.mapper.QuestionPoolItemMapper;
 import com.huanjing.geo.module.project.mapper.QuestionPoolVersionMapper;
-import com.huanjing.geo.module.report.entity.PresaleDiagnosisBatch;
-import com.huanjing.geo.module.report.entity.PresaleDiagnosisResult;
-import com.huanjing.geo.module.report.entity.PresaleQuestionItem;
-import com.huanjing.geo.module.report.entity.PresaleQuestionSet;
-import com.huanjing.geo.module.report.mapper.PresaleDiagnosisBatchMapper;
-import com.huanjing.geo.module.report.mapper.PresaleDiagnosisResultMapper;
-import com.huanjing.geo.module.report.mapper.PresaleQuestionItemMapper;
-import com.huanjing.geo.module.report.mapper.PresaleQuestionSetMapper;
-import com.huanjing.geo.module.report.service.ReportService;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
@@ -73,6 +69,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -93,18 +90,17 @@ public class DispatchExecutionService {
     private final PlatformCredentialService platformCredentialService;
     private final PlatformRateLimiterService platformRateLimiterService;
     private final ProjectMapper projectMapper;
+    private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
+    private final KeywordGroupResultMapper keywordGroupResultMapper;
     private final QuestionPoolVersionMapper questionPoolVersionMapper;
     private final QuestionPoolItemMapper questionPoolItemMapper;
-    private final PresaleQuestionSetMapper presaleQuestionSetMapper;
-    private final PresaleQuestionItemMapper presaleQuestionItemMapper;
-    private final PresaleDiagnosisBatchMapper presaleDiagnosisBatchMapper;
-    private final PresaleDiagnosisResultMapper presaleDiagnosisResultMapper;
     private final PackageContentConfigMapper packageContentConfigMapper;
     private final ContentQuestionRotationMapper contentQuestionRotationMapper;
     private final ArticleBatchMapper articleBatchMapper;
     private final ArticleGenerationLogMapper articleGenerationLogMapper;
     private final ContentArticleService contentArticleService;
     private final GeoPromptBuilder geoPromptBuilder;
+    private final ArticleGenerationPersistenceService articleGenerationPersistenceService;
     private final PollBatchMapper pollBatchMapper;
     private final PollResultMapper pollResultMapper;
     private final PollDailyStatMapper pollDailyStatMapper;
@@ -112,7 +108,6 @@ public class DispatchExecutionService {
     private final CompanyMapper companyMapper;
     private final BrandMapper brandMapper;
     private final BrandStatementService brandStatementService;
-    private final ReportService reportService;
     private final SysDictItemMapper sysDictItemMapper;
     private final DispatchProperties dispatchProperties;
 
@@ -129,10 +124,6 @@ public class DispatchExecutionService {
         }
         if (type == DispatchTaskType.BI_DAILY_POLL) {
             executeBiDailyPoll(task, platformConfigs);
-            return;
-        }
-        if (type == DispatchTaskType.PRESALE_DIAGNOSIS) {
-            executePresaleDiagnosis(task, platformConfigs);
             return;
         }
         if (type == DispatchTaskType.CONTENT_GENERATION) {
@@ -168,57 +159,15 @@ public class DispatchExecutionService {
         if (project == null) {
             throw new BizException(404, "Project not found");
         }
-        QuestionPoolVersion latestVersion = questionPoolVersionMapper.selectOne(
-                new LambdaQueryWrapper<QuestionPoolVersion>()
-                        .eq(QuestionPoolVersion::getProjectId, project.getId())
-                        .orderByDesc(QuestionPoolVersion::getVersionNo)
-                        .last("LIMIT 1")
-        );
-        if (latestVersion == null) {
-            log.info("Skip BI_DAILY_POLL task {} because no question pool version for project {}", task.getId(), task.getProjectId());
+        List<PollKeywordCandidate> allKeywords = loadProjectPollKeywords(project.getId());
+        if (allKeywords.isEmpty()) {
+            log.info("Skip BI_DAILY_POLL task {} because no saved keywords for project {}", task.getId(), task.getProjectId());
             return;
         }
-
-        List<QuestionPoolItem> allItems = questionPoolItemMapper.selectList(
-                new LambdaQueryWrapper<QuestionPoolItem>()
-                        .eq(QuestionPoolItem::getProjectId, project.getId())
-                        .eq(QuestionPoolItem::getVersionId, latestVersion.getId())
-        );
-        if (allItems.isEmpty()) {
-            log.info("Skip BI_DAILY_POLL task {} because no question items for version {}", task.getId(), latestVersion.getId());
-            return;
-        }
-
-        allItems = allItems.stream()
-                .sorted(Comparator
-                        .comparingInt((QuestionPoolItem item) -> priorityRank(item.getPriority()))
-                        .thenComparing(QuestionPoolItem::getId))
-                .collect(Collectors.toList());
 
         int planCap = project.getPlanQuestionPoolSize() == null ? 0 : project.getPlanQuestionPoolSize();
-        if (planCap > 0 && allItems.size() > planCap) {
-            allItems = new ArrayList<>(allItems.subList(0, planCap));
-        }
-
-        Map<String, List<QuestionPoolItem>> layered = allItems.stream()
-                .collect(Collectors.groupingBy(
-                        item -> normalizePriority(item.getPriority()),
-                        LinkedHashMap::new,
-                        Collectors.toList()
-                ));
-
-        List<QuestionPoolItem> selected = new ArrayList<>();
-        selected.addAll(selectLayerQuestions(project.getId(), "A", layered.getOrDefault("A", List.of()), 1.0));
-        selected.addAll(selectLayerQuestions(project.getId(), "B", layered.getOrDefault("B", List.of()), 0.5));
-        selected.addAll(selectLayerQuestions(project.getId(), "C", layered.getOrDefault("C", List.of()), 0.2));
-
-        Map<Long, QuestionPoolItem> deduplicated = new LinkedHashMap<>();
-        for (QuestionPoolItem item : selected) {
-            deduplicated.put(item.getId(), item);
-        }
-        selected = deduplicated.values().stream()
-                .sorted(Comparator.comparing(QuestionPoolItem::getId))
-                .collect(Collectors.toList());
+        int takeCount = planCap > 0 ? Math.min(planCap, allKeywords.size()) : allKeywords.size();
+        List<PollKeywordCandidate> selected = selectRotatedKeywords(project.getId(), "KW", allKeywords, takeCount);
 
         LocalDate batchDate = resolveBatchDate(task);
         int batchNo = resolveBatchNo(task);
@@ -235,9 +184,9 @@ public class DispatchExecutionService {
 
         for (AiPlatformConfig platform : platformConfigs) {
             PlatformAgg agg = aggByPlatform.get(platform.getId());
-            for (QuestionPoolItem question : selected) {
-                InvocationResult invokeResult = invokeWithFallback(platform, task, question.getQuestionText());
-                PollResult detail = buildPollResult(batch, task, project, platform, question, invokeResult, projectNames, siteDomains, normalizedPhones);
+            for (PollKeywordCandidate keyword : selected) {
+                InvocationResult invokeResult = invokeWithFallback(platform, task, keyword.keywordText());
+                PollResult detail = buildPollResult(batch, task, project, platform, keyword, invokeResult, projectNames, siteDomains, normalizedPhones);
                 upsertPollResult(detail);
                 agg.questionCount += 1;
                 agg.requestCount += Math.max(detail.getRequestCount() == null ? 0 : detail.getRequestCount(), 0);
@@ -299,99 +248,11 @@ public class DispatchExecutionService {
         pollBatchMapper.updateById(batch);
     }
 
-    private void executePresaleDiagnosis(DispatchTask task, List<AiPlatformConfig> platformConfigs) {
-        Project project = projectMapper.selectById(task.getProjectId());
-        if (project == null) {
-            throw new BizException(404, "Project not found");
-        }
-        if (!isPendingStatus(project.getStatus())) {
-            throw new BizException(400, "Presale diagnosis only allowed when project status is pending");
-        }
-        Long questionSetId = parseQuestionSetId(task.getPayloadJson());
-        if (questionSetId == null) {
-            throw new BizException(400, "Missing questionSetId in payload");
-        }
-        PresaleQuestionSet questionSet = presaleQuestionSetMapper.selectById(questionSetId);
-        if (questionSet == null || !project.getId().equals(questionSet.getProjectId())) {
-            throw new BizException(404, "Question set not found");
-        }
-        if (!"locked".equals(questionSet.getStatus())) {
-            throw new BizException(400, "Question set is not locked");
-        }
-
-        List<PresaleQuestionItem> questions = presaleQuestionItemMapper.selectList(
-                new LambdaQueryWrapper<PresaleQuestionItem>()
-                        .eq(PresaleQuestionItem::getSetId, questionSetId)
-                        .eq(PresaleQuestionItem::getIsActive, true)
-                        .orderByAsc(PresaleQuestionItem::getSortOrder, PresaleQuestionItem::getId)
-        );
-        if (questions.isEmpty()) {
-            throw new BizException(400, "No active presale questions");
-        }
-
-        PresaleDiagnosisBatch batch = ensurePresaleBatch(task, questionSetId);
-        Set<String> projectNames = resolveProjectNameSet(project);
-        Set<String> siteDomains = resolveSiteDomains(project);
-        Set<String> normalizedPhones = resolvePhones(project);
-
-        int completed = 0;
-        int failed = 0;
-        int total = 0;
-        for (AiPlatformConfig platform : platformConfigs) {
-            for (PresaleQuestionItem question : questions) {
-                InvocationResult invokeResult = invokeWithFallback(platform, task, question.getContent());
-                MatchInfo match = invokeResult.success
-                        ? analyzeMatch(projectNames, siteDomains, normalizedPhones, invokeResult.responseText)
-                        : MatchInfo.empty();
-
-                PresaleDiagnosisResult row = new PresaleDiagnosisResult();
-                row.setBatchId(batch.getId());
-                row.setProjectId(project.getId());
-                row.setQuestionSetId(questionSetId);
-                row.setQuestionItemId(question.getId());
-                row.setPlatformId(platform.getId());
-                row.setPlatformCode(platform.getPlatformCode());
-                row.setStatus(invokeResult.success ? "completed" : "failed");
-                row.setRequestCount(invokeResult.requestCount);
-                row.setResponseTimeMs((int) invokeResult.responseTimeMs);
-                row.setBrandHit(match.hit);
-                row.setSiteMentioned(match.siteMentioned);
-                row.setContactMentioned(match.contactMentioned);
-                row.setErrorMessage(invokeResult.errorMessage);
-                Map<String, Object> detail = new LinkedHashMap<>();
-                detail.put("questionContent", redactSensitive(question.getContent()));
-                detail.put("responseText", redactSensitive(invokeResult.responseText));
-                detail.put("channel", invokeResult.channel);
-                detail.put("matchType", match.matchType);
-                detail.put("errorCode", invokeResult.errorCode);
-                row.setDetailJson(JSONUtil.toJsonStr(detail));
-                upsertPresaleResult(row);
-
-                total++;
-                if (invokeResult.success) {
-                    completed++;
-                } else {
-                    failed++;
-                }
-            }
-        }
-
-        batch.setStatus("completed");
-        batch.setTotalRequests(total);
-        batch.setCompletedCount(completed);
-        batch.setFailedCount(failed);
-        batch.setFinishedAt(LocalDateTime.now());
-        presaleDiagnosisBatchMapper.updateById(batch);
-
-        Long creatorId = parseLong(parsePayloadMap(task.getPayloadJson()).get("operatorId"));
-        reportService.generatePresaleDraftFromBatch(batch.getId(), creatorId);
-    }
-
     private PollResult buildPollResult(PollBatch batch,
                                        DispatchTask task,
                                        Project project,
                                        AiPlatformConfig platform,
-                                       QuestionPoolItem question,
+                                       PollKeywordCandidate keyword,
                                        InvocationResult invokeResult,
                                        Set<String> projectNames,
                                        Set<String> siteDomains,
@@ -410,7 +271,7 @@ public class DispatchExecutionService {
         }
 
         Map<String, Object> detail = new LinkedHashMap<>();
-        detail.put("question_content", redactSensitive(question.getQuestionText()));
+        detail.put("keyword_text", redactSensitive(keyword.keywordText()));
         detail.put("response_time_ms", invokeResult.responseTimeMs);
         detail.put("platform_code", platform.getPlatformCode());
         detail.put("channel", invokeResult.channel);
@@ -434,7 +295,9 @@ public class DispatchExecutionService {
         result.setBatchId(batch.getId());
         result.setDispatchTaskId(task.getId());
         result.setProjectId(project.getId());
-        result.setQuestionId(question.getId());
+        result.setQuestionId(null);
+        result.setKeywordResultId(keyword.keywordResultId());
+        result.setKeywordTextSnapshot(keyword.keywordText());
         result.setPlatformId(platform.getId());
         result.setPlatformCode(platform.getPlatformCode());
         result.setBatchDate(batch.getBatchDate());
@@ -475,7 +338,7 @@ public class DispatchExecutionService {
 
         LocalDate batchDate = resolveBatchDate(task);
         int batchNo = resolveBatchNo(task);
-        ArticleBatch batch = ensureArticleBatch(task, project, batchDate, batchNo);
+        ArticleBatch batch = articleGenerationPersistenceService.ensureArticleBatch(task.getId(), project.getId(), batchDate, batchNo);
 
         Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
 
@@ -488,55 +351,62 @@ public class DispatchExecutionService {
             int articleCount = Math.max(1, Optional.ofNullable(cfg.getArticlesPerBatch()).orElse(1));
             for (int i = 0; i < articleCount; i++) {
                 total++;
-                GeoPromptBuilder.PromptPair prompt = geoPromptBuilder.buildContentPrompt(
-                        project, brand, cfg.getArticleType(), globalArticleIndex
-                );
-                String articleAngle = geoPromptBuilder.resolveArticleAngle(project, globalArticleIndex);
-                InvocationResult result = invokeContentWithOrderedPlatforms(
-                        platformConfigs,
-                        task,
-                        prompt.systemPrompt(),
-                        prompt.userPrompt(),
-                        platformCursor
-                );
                 platformCursor++;
                 globalArticleIndex++;
-                if (!result.success) {
+                int articleIndex = globalArticleIndex - 1;
+                int platformIndex = platformCursor - 1;
+                try {
+                    GeoPromptBuilder.PromptPair prompt = geoPromptBuilder.buildContentPrompt(
+                            project, brand, cfg.getArticleType(), articleIndex
+                    );
+                    String articleAngle = geoPromptBuilder.resolveArticleAngle(project, articleIndex);
+                    InvocationResult result = invokeContentWithOrderedPlatforms(
+                            platformConfigs,
+                            task,
+                            prompt.systemPrompt(),
+                            prompt.userPrompt(),
+                            platformIndex
+                    );
+                    if (!result.success) {
+                        failed++;
+                        log.warn("CONTENT_GENERATION failed task={}, type={}, err={}", task.getId(), cfg.getArticleType(), result.errorMessage);
+                        continue;
+                    }
+                    String content = normalizeGeneratedContent(result.responseText);
+                    String title = extractGeneratedTitle(content, cfg.getArticleType(), project.getProjectName());
+                    Map<String, Object> promptSnapshot = new LinkedHashMap<>();
+                    promptSnapshot.put("articleType", cfg.getArticleType());
+                    promptSnapshot.put("systemPrompt", prompt.systemPrompt());
+                    promptSnapshot.put("userPrompt", prompt.userPrompt());
+                    Map<String, Object> inputSnapshot = new LinkedHashMap<>();
+                    inputSnapshot.put("projectName", project.getProjectName());
+                    inputSnapshot.put("packageType", project.getPackageType());
+                    inputSnapshot.put("source", "keyword_group");
+                    articleGenerationPersistenceService.persistGeneratedArticle(
+                            batch.getId(),
+                            project,
+                            cfg.getArticleType(),
+                            title,
+                            content,
+                            JSONUtil.toJsonStr(promptSnapshot),
+                            JSONUtil.toJsonStr(inputSnapshot),
+                            result.platformCode,
+                            resolveModelIdByPlatform(result.platformCode),
+                            articleAngle,
+                            List.of()
+                    );
+                    completed++;
+                } catch (Exception ex) {
                     failed++;
-                    log.warn("CONTENT_GENERATION failed task={}, type={}, err={}", task.getId(), cfg.getArticleType(), result.errorMessage);
-                    continue;
+                    log.warn("CONTENT_GENERATION article failed task={}, type={}, articleIndex={}, err={}",
+                            task.getId(), cfg.getArticleType(), articleIndex, ex.getMessage(), ex);
                 }
-                String content = normalizeGeneratedContent(result.responseText);
-                String title = extractGeneratedTitle(content, cfg.getArticleType(), project.getProjectName());
-                Map<String, Object> promptSnapshot = new LinkedHashMap<>();
-                promptSnapshot.put("articleType", cfg.getArticleType());
-                promptSnapshot.put("systemPrompt", prompt.systemPrompt());
-                promptSnapshot.put("userPrompt", prompt.userPrompt());
-                Map<String, Object> inputSnapshot = new LinkedHashMap<>();
-                inputSnapshot.put("projectName", project.getProjectName());
-                inputSnapshot.put("packageType", project.getPackageType());
-                inputSnapshot.put("source", "keyword_group");
-                contentArticleService.createGeneratedDraft(
-                        batch.getId(),
-                        project,
-                        cfg.getArticleType(),
-                        title,
-                        content,
-                        JSONUtil.toJsonStr(promptSnapshot),
-                        JSONUtil.toJsonStr(inputSnapshot),
-                        result.platformCode,
-                        resolveModelIdByPlatform(result.platformCode),
-                        List.of()
-                );
-                logArticleGeneration(project.getId(), cfg.getArticleType(), articleAngle, title, result.platformCode);
-                completed++;
             }
         }
-        batch.setTotalCount(total);
-        batch.setCompletedCount(completed);
-        batch.setFailedCount(failed);
-        batch.setStatus(failed > 0 ? "completed_with_failure" : "completed");
-        articleBatchMapper.updateById(batch);
+        articleGenerationPersistenceService.completeBatch(batch.getId(), total, completed, failed);
+        if (completed <= 0 && failed > 0) {
+            throw new BizException(500, "Content generation failed for all articles");
+        }
     }
 
     private void executeBrandStatementGeneration(DispatchTask task, List<AiPlatformConfig> platformConfigs) {
@@ -1006,57 +876,19 @@ public class DispatchExecutionService {
         return config == null ? null : config.getModelId();
     }
 
-    private ArticleBatch ensureArticleBatch(DispatchTask task, Project project, LocalDate batchDate, int batchNo) {
-        ArticleBatch existing = articleBatchMapper.selectOne(
-                new LambdaQueryWrapper<ArticleBatch>()
-                        .eq(ArticleBatch::getProjectId, project.getId())
-                        .eq(ArticleBatch::getBatchDate, batchDate)
-                        .eq(ArticleBatch::getBatchNo, batchNo)
-                        .last("LIMIT 1")
-        );
-        int actualBatchNo = batchNo;
-        if (existing != null) {
-            existing.setStatus("superseded");
-            articleBatchMapper.updateById(existing);
-            actualBatchNo = resolveNextArticleBatchNo(project.getId(), batchDate);
-        }
-        ArticleBatch batch = new ArticleBatch();
-        batch.setDispatchTaskId(task.getId());
-        batch.setProjectId(project.getId());
-        batch.setBatchDate(batchDate);
-        batch.setBatchNo(actualBatchNo);
-        batch.setStatus("running");
-        batch.setTotalCount(0);
-        batch.setCompletedCount(0);
-        batch.setFailedCount(0);
-        articleBatchMapper.insert(batch);
-        return batch;
-    }
-
-    private int resolveNextArticleBatchNo(Long projectId, LocalDate batchDate) {
-        Integer maxBatchNo = articleBatchMapper.selectList(
-                new LambdaQueryWrapper<ArticleBatch>()
-                        .eq(ArticleBatch::getProjectId, projectId)
-                        .eq(ArticleBatch::getBatchDate, batchDate)
-                        .select(ArticleBatch::getBatchNo)
-        ).stream()
-                .map(ArticleBatch::getBatchNo)
-                .filter(java.util.Objects::nonNull)
-                .max(Integer::compareTo)
-                .orElse(0);
-        return Math.max(maxBatchNo, 0) + 1;
-    }
-
     private void upsertPollResult(PollResult result) {
-        PollResult existing = pollResultMapper.selectOne(
-                new LambdaQueryWrapper<PollResult>()
-                        .eq(PollResult::getProjectId, result.getProjectId())
-                        .eq(PollResult::getQuestionId, result.getQuestionId())
-                        .eq(PollResult::getPlatformId, result.getPlatformId())
-                        .eq(PollResult::getBatchDate, result.getBatchDate())
-                        .eq(PollResult::getBatchNo, result.getBatchNo())
-                        .last("LIMIT 1")
-        );
+        LambdaQueryWrapper<PollResult> wrapper = new LambdaQueryWrapper<PollResult>()
+                .eq(PollResult::getProjectId, result.getProjectId())
+                .eq(PollResult::getPlatformId, result.getPlatformId())
+                .eq(PollResult::getBatchDate, result.getBatchDate())
+                .eq(PollResult::getBatchNo, result.getBatchNo())
+                .last("LIMIT 1");
+        if (result.getKeywordResultId() != null) {
+            wrapper.eq(PollResult::getKeywordResultId, result.getKeywordResultId());
+        } else {
+            wrapper.eq(PollResult::getQuestionId, result.getQuestionId());
+        }
+        PollResult existing = pollResultMapper.selectOne(wrapper);
         if (existing == null) {
             pollResultMapper.insert(result);
             return;
@@ -1181,6 +1013,66 @@ public class DispatchExecutionService {
         rotation.setRotationOffset((normalizedOffset + takeCount) % size);
         projectPollRotationMapper.updateById(rotation);
         return picked;
+    }
+
+    private List<PollKeywordCandidate> loadProjectPollKeywords(Long projectId) {
+        List<Long> groupIds = projectKeywordGroupRelMapper.selectList(
+                new LambdaQueryWrapper<ProjectKeywordGroupRel>()
+                        .eq(ProjectKeywordGroupRel::getProjectId, projectId)
+                        .select(ProjectKeywordGroupRel::getKeywordGroupId)
+        ).stream().map(ProjectKeywordGroupRel::getKeywordGroupId).filter(Objects::nonNull).distinct().toList();
+        if (groupIds.isEmpty()) {
+            return List.of();
+        }
+
+        List<KeywordGroupResult> results = keywordGroupResultMapper.selectList(
+                new LambdaQueryWrapper<KeywordGroupResult>()
+                        .in(KeywordGroupResult::getGroupId, groupIds)
+                        .orderByAsc(KeywordGroupResult::getId)
+        );
+        if (results.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, PollKeywordCandidate> deduplicated = new LinkedHashMap<>();
+        for (KeywordGroupResult result : results) {
+            String keywordText = normalizeKeywordText(result.getKeywordText());
+            if (!StringUtils.hasText(keywordText)) {
+                continue;
+            }
+            deduplicated.putIfAbsent(normalizeKeywordKey(keywordText), new PollKeywordCandidate(result.getId(), keywordText));
+        }
+        return new ArrayList<>(deduplicated.values());
+    }
+
+    private List<PollKeywordCandidate> selectRotatedKeywords(Long projectId,
+                                                             String layer,
+                                                             List<PollKeywordCandidate> source,
+                                                             int takeCount) {
+        if (source == null || source.isEmpty()) {
+            return List.of();
+        }
+        ProjectPollRotation rotation = ensureRotation(projectId, layer);
+        int size = source.size();
+        int offset = rotation.getRotationOffset() == null ? 0 : rotation.getRotationOffset();
+        int normalizedOffset = Math.floorMod(offset, size);
+        int normalizedTakeCount = Math.max(1, Math.min(takeCount, size));
+
+        List<PollKeywordCandidate> picked = new ArrayList<>();
+        for (int i = 0; i < normalizedTakeCount; i++) {
+            picked.add(source.get((normalizedOffset + i) % size));
+        }
+        rotation.setRotationOffset((normalizedOffset + normalizedTakeCount) % size);
+        projectPollRotationMapper.updateById(rotation);
+        return picked;
+    }
+
+    private String normalizeKeywordText(String keywordText) {
+        return keywordText == null ? null : keywordText.trim();
+    }
+
+    private String normalizeKeywordKey(String keywordText) {
+        return normalizeKeywordText(keywordText).toLowerCase(Locale.ROOT);
     }
 
     private ProjectPollRotation ensureRotation(Long projectId, String layer) {
@@ -1368,48 +1260,6 @@ public class DispatchExecutionService {
         }
     }
 
-    private PresaleDiagnosisBatch ensurePresaleBatch(DispatchTask task, Long questionSetId) {
-        PresaleDiagnosisBatch existing = presaleDiagnosisBatchMapper.selectOne(
-                new LambdaQueryWrapper<PresaleDiagnosisBatch>()
-                        .eq(PresaleDiagnosisBatch::getDispatchTaskId, task.getId())
-                        .last("LIMIT 1")
-        );
-        if (existing != null) {
-            return existing;
-        }
-        PresaleDiagnosisBatch batch = new PresaleDiagnosisBatch();
-        batch.setProjectId(task.getProjectId());
-        batch.setQuestionSetId(questionSetId);
-        batch.setDispatchTaskId(task.getId());
-        batch.setStatus("running");
-        batch.setTotalRequests(0);
-        batch.setCompletedCount(0);
-        batch.setFailedCount(0);
-        batch.setCreatedBy(parseLong(parsePayloadMap(task.getPayloadJson()).get("operatorId")));
-        presaleDiagnosisBatchMapper.insert(batch);
-        return batch;
-    }
-
-    private void upsertPresaleResult(PresaleDiagnosisResult row) {
-        PresaleDiagnosisResult exists = presaleDiagnosisResultMapper.selectOne(
-                new LambdaQueryWrapper<PresaleDiagnosisResult>()
-                        .eq(PresaleDiagnosisResult::getBatchId, row.getBatchId())
-                        .eq(PresaleDiagnosisResult::getQuestionItemId, row.getQuestionItemId())
-                        .eq(PresaleDiagnosisResult::getPlatformId, row.getPlatformId())
-                        .last("LIMIT 1")
-        );
-        if (exists == null) {
-            presaleDiagnosisResultMapper.insert(row);
-            return;
-        }
-        row.setId(exists.getId());
-        presaleDiagnosisResultMapper.updateById(row);
-    }
-
-    private Long parseQuestionSetId(String payloadJson) {
-        return parseLong(parsePayloadMap(payloadJson).get("questionSetId"));
-    }
-
     private Map<String, Object> parsePayloadMap(String payloadJson) {
         if (!StringUtils.hasText(payloadJson)) {
             return Map.of();
@@ -1460,7 +1310,6 @@ public class DispatchExecutionService {
             return List.of("P0", "P1", "P2");
         }
         if (type == DispatchTaskType.MONTHLY_REPORT
-                || type == DispatchTaskType.PRESALE_DIAGNOSIS
                 || type == DispatchTaskType.BRAND_STATEMENT_GENERATION) {
             return List.of("P1", "P0", "P2");
         }
@@ -1820,20 +1669,6 @@ public class DispatchExecutionService {
         return text.length() <= 300 ? text : text.substring(0, 300);
     }
 
-    private void logArticleGeneration(Long projectId,
-                                      String articleType,
-                                      String articleAngle,
-                                      String generatedTitle,
-                                      String modelCode) {
-        ArticleGenerationLog row = new ArticleGenerationLog();
-        row.setProjectId(projectId);
-        row.setArticleType(articleType);
-        row.setArticleAngle(articleAngle);
-        row.setGeneratedTitle(generatedTitle);
-        row.setModelCode(modelCode);
-        articleGenerationLogMapper.insert(row);
-    }
-
     private String resolveErrorCode(Exception ex) {
         if (ex instanceof BizException biz) {
             return "BIZ_" + biz.getCode();
@@ -1912,5 +1747,8 @@ public class DispatchExecutionService {
         private PlatformAgg(AiPlatformConfig platform) {
             this.platform = platform;
         }
+    }
+
+    private record PollKeywordCandidate(Long keywordResultId, String keywordText) {
     }
 }

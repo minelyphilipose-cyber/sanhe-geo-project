@@ -5,8 +5,6 @@ import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.report.dto.*;
 import com.huanjing.geo.module.report.entity.Report;
 import com.huanjing.geo.module.report.service.ReportService;
-import com.huanjing.geo.module.system.entity.SysUser;
-import com.huanjing.geo.module.system.service.CurrentUserService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -21,34 +19,19 @@ import java.util.Map;
 public class ReportController {
 
     private final ReportService reportService;
-    private final CurrentUserService currentUserService;
 
     @GetMapping
     public R<Page<Report>> page(@RequestParam(defaultValue = "1") Long current,
                                 @RequestParam(defaultValue = "10") Long size,
                                 @RequestParam(required = false) Long projectId,
-                                @RequestParam(required = false) String reportType,
+                                @RequestParam(required = false) String keyword,
                                 @RequestParam(required = false) String status) {
-        return R.ok(reportService.page(current, size, projectId, reportType, status));
+        return R.ok(reportService.page(current, size, projectId, keyword, status));
     }
 
     @GetMapping("/{id}")
     public R<Map<String, Object>> detail(@PathVariable Long id) {
         return R.ok(reportService.detail(id));
-    }
-
-    @PostMapping("/generate")
-    public R<Report> generate(@Valid @RequestBody ReportGenerateRequest req) {
-        if (!"presale".equalsIgnoreCase(req.getReportType()) && !"presale_diagnosis".equalsIgnoreCase(req.getReportType())) {
-            throw new com.huanjing.geo.common.exception.BizException(400, "Only presale report generation is supported in this phase");
-        }
-        SysUser user = currentUserService.requireCurrentUser();
-        return R.ok(reportService.generatePresaleDraftByLatestBatch(req.getProjectId(), user.getId()));
-    }
-
-    @PutMapping("/{id}/presale-snapshot")
-    public R<Report> updatePresaleSnapshot(@PathVariable Long id, @RequestBody PresaleSnapshotUpdateRequest req) {
-        return R.ok(reportService.updatePresaleSnapshot(id, req));
     }
 
     @PutMapping("/{id}/publish")

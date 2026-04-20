@@ -25,6 +25,7 @@
         <hutool.version>5.8.27</hutool.version>
         <knife4j.version>4.4.0</knife4j.version>
         <mapstruct.version>1.5.5.Final</mapstruct.version>
+        <lombok.version>1.18.32</lombok.version>
         <flyway.version>9.22.3</flyway.version>
     </properties>
 

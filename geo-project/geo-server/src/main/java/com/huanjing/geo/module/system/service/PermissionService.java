@@ -32,7 +32,7 @@ public class PermissionService {
                     "keyword_group.read", "keyword_group.write"
             ),
             "operator", Set.of("company.read", "company.write", "project.read", "project.write", "partner.read", "keyword_group.read", "keyword_group.write"),
-            "sales", Set.of("company.read", "project.read", "dispatch.presale.enqueue", "keyword_group.read"),
+            "sales", Set.of("company.read", "project.read", "keyword_group.read"),
             "partner", Set.of("partner.read", "company.read", "company.write", "project.read", "project.write"),
             "partner_staff", Set.of("partner.read", "company.read", "company.write", "project.read"),
             "partner_viewer", Set.of("partner.read", "company.read", "project.read")

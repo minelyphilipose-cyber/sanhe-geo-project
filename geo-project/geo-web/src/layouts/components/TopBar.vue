@@ -17,7 +17,18 @@
 
       <el-dropdown trigger="click" @command="handleCommand">
         <div class="topbar__user">
-          <div class="topbar__avatar">{{ avatarLetter }}</div>
+          <div class="topbar__avatar">
+            <img
+              v-if="showAvatarImage"
+              :key="userStore.avatarUrl"
+              :src="userStore.avatarUrl"
+              alt=""
+              class="topbar__avatar-image"
+              @load="avatarLoadFailed = false"
+              @error="avatarLoadFailed = true"
+            />
+            <span v-else>{{ avatarLetter }}</span>
+          </div>
           <span class="topbar__name">{{ userStore.displayName }}</span>
           <el-icon><ArrowDown /></el-icon>
         </div>
@@ -26,6 +37,7 @@
             <el-dropdown-item disabled>
               <span class="text-xs text-gray-400">{{ roleLabel }}</span>
             </el-dropdown-item>
+            <el-dropdown-item command="profile">个人中心</el-dropdown-item>
             <el-dropdown-item divided command="logout">退出登录</el-dropdown-item>
           </el-dropdown-menu>
         </template>
@@ -35,7 +47,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { Bell, ArrowDown } from '@element-plus/icons-vue'
@@ -57,10 +69,12 @@ const router = useRouter()
 const userStore = useUserStore()
 
 const alertCount = ref(0)
+const avatarLoadFailed = ref(false)
 
 const avatarLetter = computed(() =>
   (userStore.displayName || 'U').charAt(0).toUpperCase(),
 )
+const showAvatarImage = computed(() => !!userStore.avatarUrl && !avatarLoadFailed.value)
 
 const roleLabel = computed(() => {
   const r = userStore.role
@@ -76,10 +90,21 @@ const breadcrumbs = computed(() => {
     }))
 })
 
+watch(() => userStore.avatarUrl, () => {
+  avatarLoadFailed.value = false
+})
+
 async function handleCommand(cmd: string) {
+  if (cmd === 'profile') {
+    await router.push(userStore.isPartner ? '/partner/profile' : '/admin/profile')
+    return
+  }
   if (cmd === 'logout') {
     await userStore.logout()
-    router.push('/login')
+    await router.replace('/login')
+    if (router.currentRoute.value.path !== '/login') {
+      window.location.assign('/login')
+    }
   }
 }
 </script>
@@ -136,6 +161,13 @@ async function handleCommand(cmd: string) {
   justify-content: center;
   font-size: 13px;
   font-weight: 700;
+  overflow: hidden;
+}
+
+.topbar__avatar-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .topbar__name {

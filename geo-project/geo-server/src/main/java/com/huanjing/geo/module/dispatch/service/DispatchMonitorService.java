@@ -150,29 +150,20 @@ public class DispatchMonitorService {
         Page<DispatchTask> page = dispatchTaskMapper.selectPage(new Page<>(current, size), wrapper);
         Map<Long, String> projectNameMap = projectNameMap(page.getRecords().stream().map(DispatchTask::getProjectId).toList());
         Page<DispatchTaskMonitorVO> result = new Page<>(current, size, page.getTotal());
-        result.setRecords(page.getRecords().stream().map(task -> {
-            DispatchTaskMonitorVO vo = new DispatchTaskMonitorVO();
-            vo.setId(task.getId());
-            vo.setTaskNo(task.getTaskNo());
-            vo.setProjectId(task.getProjectId());
-            vo.setProjectName(projectNameMap.getOrDefault(task.getProjectId(), "-"));
-            vo.setPlatformCode(task.getPlatformCode());
-            vo.setCurrentChannel(task.getCurrentChannel());
-            vo.setTaskType(task.getTaskType());
-            vo.setPriorityLevel(task.getPriorityLevel());
-            vo.setStatus(task.getStatus());
-            vo.setWindowStart(task.getWindowStart());
-            vo.setWindowEnd(task.getWindowEnd());
-            vo.setDueTime(task.getDueTime());
-            vo.setRetryCount(task.getRetryCount());
-            vo.setFirstStartedAt(task.getFirstStartedAt());
-            vo.setFinishedAt(task.getFinishedAt());
-            vo.setLastError(task.getLastError());
-            vo.setErrorContext(task.getErrorContext());
-            vo.setCreatedAt(task.getCreatedAt());
-            return vo;
-        }).toList());
+        result.setRecords(page.getRecords().stream()
+                .map(task -> toTaskMonitorVO(task, projectNameMap.getOrDefault(task.getProjectId(), "-")))
+                .toList());
         return result;
+    }
+
+    public DispatchTaskMonitorVO taskDetail(Long taskId) {
+        ensureMonitorAccess();
+        DispatchTask task = dispatchTaskMapper.selectById(taskId);
+        if (task == null) {
+            throw new BizException(404, "Dispatch task not found");
+        }
+        Map<Long, String> projectNameMap = projectNameMap(List.of(task.getProjectId()));
+        return toTaskMonitorVO(task, projectNameMap.getOrDefault(task.getProjectId(), "-"));
     }
 
     public List<DispatchPlatformHealthVO> platformHealth(String rangeType, LocalDate startDate, LocalDate endDate) {
@@ -335,5 +326,34 @@ public class DispatchMonitorService {
         if (project == null) {
             throw new BizException(404, "Project not found");
         }
+    }
+
+    private DispatchTaskMonitorVO toTaskMonitorVO(DispatchTask task, String projectName) {
+        DispatchTaskMonitorVO vo = new DispatchTaskMonitorVO();
+        vo.setId(task.getId());
+        vo.setTaskNo(task.getTaskNo());
+        vo.setProjectId(task.getProjectId());
+        vo.setProjectName(projectName);
+        vo.setPlatformCode(task.getPlatformCode());
+        vo.setCurrentChannel(task.getCurrentChannel());
+        vo.setTaskType(task.getTaskType());
+        vo.setPriorityLevel(task.getPriorityLevel());
+        vo.setStatus(task.getStatus());
+        vo.setWindowStart(task.getWindowStart());
+        vo.setWindowEnd(task.getWindowEnd());
+        vo.setDueTime(task.getDueTime());
+        vo.setRetryCount(task.getRetryCount());
+        vo.setMaxRetry(task.getMaxRetry());
+        vo.setFirstStartedAt(task.getFirstStartedAt());
+        vo.setLastStartedAt(task.getLastStartedAt());
+        vo.setNextRetryAt(task.getNextRetryAt());
+        vo.setTimeoutAt(task.getTimeoutAt());
+        vo.setFinishedAt(task.getFinishedAt());
+        vo.setLastError(task.getLastError());
+        vo.setErrorContext(task.getErrorContext());
+        vo.setPayloadJson(task.getPayloadJson());
+        vo.setCreatedAt(task.getCreatedAt());
+        vo.setUpdatedAt(task.getUpdatedAt());
+        return vo;
     }
 }

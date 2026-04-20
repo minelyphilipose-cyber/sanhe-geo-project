@@ -13,6 +13,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '工作台', icon: 'Odometer', permissions: ['company.read'] },
     },
     {
+      path: 'profile',
+      name: 'AdminProfile',
+      component: () => import('@/views/profile/ProfileCenter.vue'),
+      meta: { title: '个人中心', hidden: true, requiresAuth: true },
+    },
+    {
       path: 'customers',
       name: 'CustomerList',
       component: () => import('@/views/admin/customer/CustomerList.vue'),
@@ -59,12 +65,6 @@ const adminRoutes: RouteRecordRaw = {
       name: 'ProjectDetail',
       component: () => import('@/views/admin/project/ProjectDetail.vue'),
       meta: { title: '项目详情', hidden: true, permissions: ['project.read'] },
-    },
-    {
-      path: 'projects/:id/presale',
-      name: 'PresaleDiagnosis',
-      component: () => import('@/views/admin/project/PresaleDiagnosis.vue'),
-      meta: { title: '售前诊断', hidden: true, permissions: ['project.read'] },
     },
     {
       path: 'projects/:id/tasks',

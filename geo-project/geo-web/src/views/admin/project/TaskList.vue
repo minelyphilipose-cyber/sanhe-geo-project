@@ -53,7 +53,6 @@
             />
             <el-select v-model="filters.taskType" clearable placeholder="任务类型" size="small" style="width: 170px" @change="onFilterChange">
               <el-option label="双日跑批" value="BI_DAILY_POLL" />
-              <el-option label="售前诊断" value="PRESALE_DIAGNOSIS" />
               <el-option label="双周报" value="BIWEEKLY_REPORT" />
               <el-option label="月报" value="MONTHLY_REPORT" />
               <el-option label="季报" value="QUARTERLY_REPORT" />
@@ -237,7 +236,6 @@ function taskTypeLabel(type?: string) {
     BIWEEKLY_REPORT: '双周报',
     MONTHLY_REPORT: '月报',
     QUARTERLY_REPORT: '季报',
-    PRESALE_DIAGNOSIS: '售前诊断',
     QUESTION_STRATEGY_GENERATION: '问题内容建议',
     CONTENT_GENERATION: '内容生成',
   }

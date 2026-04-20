@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.dispatch.service;
 
+import com.huanjing.geo.module.dashboard.service.ProjectDashboardSnapshotService;
 import com.huanjing.geo.module.dispatch.enums.DispatchAlertSeverity;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -18,6 +19,7 @@ public class DispatchScheduler {
     private final DispatchPlannerService dispatchPlannerService;
     private final DispatchTaskService dispatchTaskService;
     private final DispatchAlertService dispatchAlertService;
+    private final ProjectDashboardSnapshotService projectDashboardSnapshotService;
 
     @Scheduled(cron = "${geo.dispatch.cron:0 5 0 * * *}", zone = "${geo.dispatch.timezone:Asia/Shanghai}")
     public void dailyScan() {
@@ -51,8 +53,18 @@ public class DispatchScheduler {
     public void retryRecoveryScan() {
         try {
             dispatchTaskService.enqueueRecoveryTasks();
+            dispatchTaskService.reclaimTimedOutRunningTasks();
         } catch (Exception ex) {
             log.error("Retry recovery scan failed", ex);
+        }
+    }
+
+    @Scheduled(cron = "${geo.dashboard.snapshot-cron:0 5 * * * *}", zone = "${geo.dispatch.timezone:Asia/Shanghai}")
+    public void refreshDashboardSnapshots() {
+        try {
+            projectDashboardSnapshotService.refreshAllActive();
+        } catch (Exception ex) {
+            log.error("Project dashboard snapshot refresh failed", ex);
         }
     }
 }

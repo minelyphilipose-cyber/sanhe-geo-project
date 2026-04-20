@@ -24,5 +24,11 @@ public class DispatchTaskMonitorVO {
     private LocalDateTime finishedAt;
     private String lastError;
     private String errorContext;
+    private Integer maxRetry;
+    private LocalDateTime lastStartedAt;
+    private LocalDateTime nextRetryAt;
+    private LocalDateTime timeoutAt;
+    private String payloadJson;
     private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
 }

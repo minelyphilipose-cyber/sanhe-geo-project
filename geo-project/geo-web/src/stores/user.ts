@@ -39,6 +39,7 @@ export const useUserStore = defineStore('user', () => {
   const role = computed<RoleType | null>(() => userInfo.value?.role ?? null)
   const isPartner = computed(() => role.value ? isPartnerRole(role.value) : false)
   const displayName = computed(() => userInfo.value?.displayName ?? '')
+  const avatarUrl = computed(() => userInfo.value?.avatarUrl ?? '')
   const permissions = computed(() => userInfo.value?.permissions ?? [])
 
   function persistAuth() {
@@ -97,7 +98,9 @@ export const useUserStore = defineStore('user', () => {
       displayName: profile.displayName,
       role: profile.role as RoleType,
       partnerId: profile.partnerId,
-      phone: null,
+      phone: profile.phone,
+      email: profile.email,
+      avatarUrl: profile.avatarUrl,
       permissions: profile.permissions || [],
     }
     persistAuth()
@@ -108,11 +111,12 @@ export const useUserStore = defineStore('user', () => {
       await logoutApi()
     } catch {
       // ignore backend logout error and clear local state
+    } finally {
+      accessToken.value = ''
+      refreshToken.value = ''
+      userInfo.value = null
+      clearPersistedAuth()
     }
-    accessToken.value = ''
-    refreshToken.value = ''
-    userInfo.value = null
-    clearPersistedAuth()
   }
 
   function hasRole(allowed: RoleType[]): boolean {
@@ -137,6 +141,7 @@ export const useUserStore = defineStore('user', () => {
     role,
     isPartner,
     displayName,
+    avatarUrl,
     permissions,
     login,
     refreshAccessToken,

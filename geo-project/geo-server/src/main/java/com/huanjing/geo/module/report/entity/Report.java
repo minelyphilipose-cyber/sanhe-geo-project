@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.report.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -35,4 +36,6 @@ public class Report {
     private Long createdBy;
     private LocalDateTime publishedAt;
     private Long publishedBy;
+    @TableField(exist = false)
+    private String projectName;
 }

@@ -19,7 +19,7 @@ function syncAccessTokenFromResponse(response: AxiosResponse<any>) {
 
 function isAuthRequest(url?: string): boolean {
   if (!url) return false
-  return url.includes('/auth/login') || url.includes('/auth/refresh') || url.includes('/auth/logout')
+  return url.includes('/auth/login') || url.includes('/auth/refresh')
 }
 
 request.interceptors.request.use(
@@ -35,6 +35,22 @@ request.interceptors.request.use(
 
 let isRefreshing = false
 let pendingQueue: Array<(token: string) => void> = []
+const AUTH_STORAGE_KEY = 'geo_auth_v1'
+
+function buildSessionExpiredUrl() {
+  const current = router.currentRoute.value
+  const currentPath = current?.fullPath || ''
+  const isAuthPage = currentPath.startsWith('/login') || currentPath.startsWith('/session-expired')
+  const redirect = currentPath && !isAuthPage ? currentPath : '/admin/overview'
+  return `/session-expired?redirect=${encodeURIComponent(redirect)}`
+}
+
+async function redirectToSessionExpired() {
+  const userStore = useUserStore()
+  await userStore.logout()
+  localStorage.removeItem(AUTH_STORAGE_KEY)
+  router.replace(buildSessionExpiredUrl())
+}
 
 request.interceptors.response.use(
   async (response: AxiosResponse<R>) => {
@@ -49,10 +65,8 @@ request.interceptors.response.use(
     const isAuthApi = isAuthRequest(reqUrl)
 
     if (res.code !== 0) {
-      const userStore = useUserStore()
       if (res.code === 401 && !isAuthApi) {
-        await userStore.logout()
-        router.push('/403?reason=session_expired')
+        await redirectToSessionExpired()
         return Promise.reject(new Error(res.message || '登录状态已失效'))
       }
       if (res.code === 403) {
@@ -86,9 +100,7 @@ request.interceptors.response.use(
           originalRequest.headers.Authorization = `Bearer ${newToken}`
           return request(originalRequest)
         } catch {
-          const userStore = useUserStore()
-          await userStore.logout()
-          router.push('/403?reason=session_expired')
+          await redirectToSessionExpired()
           return Promise.reject(error)
         } finally {
           isRefreshing = false
@@ -106,11 +118,42 @@ request.interceptors.response.use(
 
     if (error.response?.status === 403) {
       if (isAuthApi) {
-        const userStore = useUserStore()
-        await userStore.logout()
-        router.push('/403?reason=session_expired')
+        await redirectToSessionExpired()
         return Promise.reject(error)
       }
+
+      if (!originalRequest._retry) {
+        originalRequest._retry = true
+
+        if (!isRefreshing) {
+          isRefreshing = true
+          try {
+            const userStore = useUserStore()
+            const newToken = await userStore.refreshAccessToken()
+
+            pendingQueue.forEach((cb) => cb(newToken))
+            pendingQueue = []
+
+            originalRequest.headers = originalRequest.headers || {}
+            originalRequest.headers.Authorization = `Bearer ${newToken}`
+            return request(originalRequest)
+          } catch {
+            await redirectToSessionExpired()
+            return Promise.reject(error)
+          } finally {
+            isRefreshing = false
+          }
+        }
+
+        return new Promise((resolve) => {
+          pendingQueue.push((token: string) => {
+            originalRequest.headers = originalRequest.headers || {}
+            originalRequest.headers.Authorization = `Bearer ${token}`
+            resolve(request(originalRequest))
+          })
+        })
+      }
+
       router.push('/403')
       return Promise.reject(error)
     }

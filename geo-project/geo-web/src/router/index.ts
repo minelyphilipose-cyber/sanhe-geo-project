@@ -25,10 +25,22 @@ const router = createRouter({
       meta: { title: '无权限' },
     },
     {
+      path: '/session-expired',
+      name: 'SessionExpired',
+      component: () => import('@/views/system/SessionExpiredView.vue'),
+      meta: { title: '登录已过期' },
+    },
+    {
       path: '/r/:token',
       name: 'ShareReport',
       component: () => import('@/views/share/ShareReport.vue'),
       meta: { title: '报表查看' },
+    },
+    {
+      path: '/dashboard/:shareCode',
+      name: 'ProjectDashboard',
+      component: () => import('@/views/share/ProjectDashboard.vue'),
+      meta: { title: '项目统计看板' },
     },
     adminRoutes,
     partnerRoutes,
@@ -45,7 +57,7 @@ const router = createRouter({
   ],
 })
 
-const PUBLIC_PATHS = ['/login', '/r/', '/403']
+const PUBLIC_PATHS = ['/login', '/r/', '/dashboard/', '/403', '/session-expired']
 
 function isPublicPath(path: string): boolean {
   return PUBLIC_PATHS.some((p) => path.startsWith(p))
@@ -86,7 +98,8 @@ router.beforeEach(async (to, _from, next) => {
       await userStore.syncProfile()
     } catch {
       await userStore.logout()
-      return next('/403?reason=session_expired')
+      localStorage.removeItem('geo_auth_v1')
+      return next(`/session-expired?redirect=${encodeURIComponent(to.fullPath)}`)
     }
   }
 

@@ -16,6 +16,12 @@ const partnerRoutes: RouteRecordRaw = {
       meta: { title: '合伙人首页', icon: 'HomeFilled', permissions: ['partner.read'] },
     },
     {
+      path: 'profile',
+      name: 'PartnerProfile',
+      component: () => import('@/views/profile/ProfileCenter.vue'),
+      meta: { title: '个人中心', hidden: true, requiresAuth: true },
+    },
+    {
       path: 'my-customers',
       name: 'MyCustomers',
       component: () => import('@/views/partner/MyCustomers.vue'),

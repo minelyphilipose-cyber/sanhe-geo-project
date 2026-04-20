@@ -24,10 +24,9 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class KeywordAffixWordService {
 
-    private static final Set<String> AFFIX_KIND_SET = Set.of("prefix", "suffix");
+    private static final Set<String> AFFIX_KIND_SET = Set.of("prefix", "suffix", "industry");
     private static final Set<String> FUNCTIONAL_TYPE_SET = Set.of("search");
     private static final String DICT_TYPE_QUESTION_TYPE = "question_type";
-    private static final String DICT_TYPE_INDUSTRY_TAG = "industry_tag";
 
     private final CurrentUserService currentUserService;
     private final KeywordAffixWordMapper keywordAffixWordMapper;
@@ -61,16 +60,18 @@ public class KeywordAffixWordService {
         if (StringUtils.hasText(normalizedType)) {
             ensureTypeExists(normalizedType, true);
         }
-        List<KeywordAffixWord> enabledAffixWords = keywordAffixWordMapper.selectList(
-            new LambdaQueryWrapper<KeywordAffixWord>()
-                .eq(KeywordAffixWord::getEnabled, true)
-                .in(KeywordAffixWord::getAffixKind, AFFIX_KIND_SET)
-                .orderByAsc(KeywordAffixWord::getAffixKind)
-                .orderByAsc(KeywordAffixWord::getSortOrder)
-                .orderByAsc(KeywordAffixWord::getId)
-        );
+        List<KeywordAffixWord> enabledAffixWords = StringUtils.hasText(normalizedType)
+                ? keywordAffixWordMapper.selectList(
+                new LambdaQueryWrapper<KeywordAffixWord>()
+                        .eq(KeywordAffixWord::getEnabled, true)
+                        .eq(KeywordAffixWord::getType, normalizedType)
+                        .in(KeywordAffixWord::getAffixKind, AFFIX_KIND_SET)
+                        .orderByAsc(KeywordAffixWord::getAffixKind)
+                        .orderByAsc(KeywordAffixWord::getSortOrder)
+                        .orderByAsc(KeywordAffixWord::getId)
+        )
+                : List.of();
         List<SysDictItem> enabledTypeItems = listEnabledDictItems(DICT_TYPE_QUESTION_TYPE);
-        List<SysDictItem> enabledIndustryItems = listEnabledDictItems(DICT_TYPE_INDUSTRY_TAG);
 
         KeywordAffixWordOptionVO vo = new KeywordAffixWordOptionVO();
         if (StringUtils.hasText(normalizedType)) {
@@ -80,11 +81,14 @@ public class KeywordAffixWordService {
             vo.setSuffixWords(enabledAffixWords.stream()
                     .filter(w -> "suffix".equals(w.getAffixKind()) && normalizedType.equals(w.getType()))
                     .toList());
+            vo.setIndustryWords(enabledAffixWords.stream()
+                    .filter(w -> "industry".equals(w.getAffixKind()) && normalizedType.equals(w.getType()))
+                    .toList());
         } else {
             vo.setPrefixWords(List.of());
             vo.setSuffixWords(List.of());
+            vo.setIndustryWords(List.of());
         }
-        vo.setIndustryWords(enabledIndustryItems.stream().map(this::toIndustryOption).toList());
         vo.setTypeOptions(enabledTypeItems.stream().map(this::toTypeOption).toList());
         return vo;
     }
@@ -192,7 +196,7 @@ public class KeywordAffixWordService {
         }
         String kind = raw.trim().toLowerCase(Locale.ROOT);
         if (!AFFIX_KIND_SET.contains(kind)) {
-            throw new BizException(400, "affixKind must be prefix/suffix");
+            throw new BizException(400, "affixKind must be prefix/suffix/industry");
         }
         return kind;
     }
@@ -218,17 +222,6 @@ public class KeywordAffixWordService {
                 .eq(SysDictItem::getEnabled, true)
                 .orderByAsc(SysDictItem::getSortOrder)
                 .orderByAsc(SysDictItem::getId));
-    }
-
-    private KeywordAffixWord toIndustryOption(SysDictItem item) {
-        KeywordAffixWord industry = new KeywordAffixWord();
-        industry.setId(item.getId());
-        industry.setType(item.getDictKey());
-        industry.setAffixKind("industry");
-        industry.setWordText(item.getDictValue());
-        industry.setSortOrder(item.getSortOrder());
-        industry.setEnabled(item.getEnabled());
-        return industry;
     }
 
     private KeywordTypeOptionVO toTypeOption(SysDictItem item) {

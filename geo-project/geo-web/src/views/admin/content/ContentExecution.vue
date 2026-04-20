@@ -79,8 +79,15 @@
           <el-table-column prop="createdAt" label="时间" width="180" />
         </el-table>
 
-        <h4 class="detail-title">最新正文</h4>
-        <el-input type="textarea" :rows="14" :model-value="detailData.versions?.[0]?.contentMarkdown || ''" readonly />
+        <div class="detail-header">
+          <h4 class="detail-title">内容预览</h4>
+          <el-radio-group v-model="detailViewMode" size="small">
+            <el-radio-button label="preview">预览</el-radio-button>
+            <el-radio-button label="markdown">Markdown</el-radio-button>
+          </el-radio-group>
+        </div>
+        <el-input v-if="detailViewMode === 'markdown'" type="textarea" :rows="14" :model-value="detailMarkdown" readonly />
+        <div v-else class="markdown-preview" v-html="detailHtml"></div>
       </div>
     </el-drawer>
 
@@ -97,7 +104,7 @@
           <el-checkbox v-model="reviewForm.riskOverride">强制通过提醒级风险</el-checkbox>
         </el-form-item>
         <el-form-item label="审核意见">
-          <el-input v-model="reviewForm.comment" type="textarea" :rows="4" placeholder="驳回/退回修改时必填" />
+          <el-input v-model="reviewForm.comment" type="textarea" :rows="4" placeholder="驳回或退回修改时必填" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -108,9 +115,25 @@
 
     <el-dialog v-model="revisionVisible" title="修订文章" width="760px">
       <el-form :model="revisionForm" label-width="90px">
-        <el-form-item label="标题"><el-input v-model="revisionForm.title" /></el-form-item>
-        <el-form-item label="正文" required><el-input v-model="revisionForm.contentMarkdown" type="textarea" :rows="14" /></el-form-item>
-        <el-form-item label="备注"><el-input v-model="revisionForm.note" /></el-form-item>
+        <el-form-item label="标题">
+          <el-input v-model="revisionForm.title" />
+        </el-form-item>
+        <el-form-item label="正文" required>
+          <div class="editor-wrap">
+            <div class="detail-header editor-header">
+              <span class="editor-title">内容编辑</span>
+              <el-radio-group v-model="revisionViewMode" size="small">
+                <el-radio-button label="markdown">Markdown</el-radio-button>
+                <el-radio-button label="preview">预览</el-radio-button>
+              </el-radio-group>
+            </div>
+            <el-input v-if="revisionViewMode === 'markdown'" v-model="revisionForm.contentMarkdown" type="textarea" :rows="14" />
+            <div v-else class="markdown-preview editor-preview" v-html="revisionHtml"></div>
+          </div>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="revisionForm.note" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="revisionVisible = false">取消</el-button>
@@ -120,7 +143,9 @@
 
     <el-dialog v-model="resubmitVisible" title="重新提交审核" width="520px">
       <el-form :model="resubmitForm" label-width="90px">
-        <el-form-item label="备注"><el-input v-model="resubmitForm.comment" type="textarea" :rows="4" /></el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="resubmitForm.comment" type="textarea" :rows="4" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="resubmitVisible = false">取消</el-button>
@@ -166,9 +191,15 @@
             <el-option label="下架" value="unpublish" />
           </el-select>
         </el-form-item>
-        <el-form-item label="渠道名称"><el-input v-model="publishForm.channelName" placeholder="例如：官网、公众号、小红书" /></el-form-item>
-        <el-form-item label="渠道链接"><el-input v-model="publishForm.channelUrl" placeholder="发布后的页面地址" /></el-form-item>
-        <el-form-item label="备注"><el-input v-model="publishForm.note" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item label="渠道名称">
+          <el-input v-model="publishForm.channelName" placeholder="例如：官网、公众号、小红书" />
+        </el-form-item>
+        <el-form-item label="渠道链接">
+          <el-input v-model="publishForm.channelUrl" placeholder="发布后的页面地址" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input v-model="publishForm.note" type="textarea" :rows="3" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="publishVisible = false">取消</el-button>
@@ -180,6 +211,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import MarkdownIt from 'markdown-it'
 import { ElMessage } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { useUserStore } from '@/stores/user'
@@ -212,6 +244,7 @@ const query = reactive({
 
 const detailVisible = ref(false)
 const detailData = ref<ArticleDetailResponse | null>(null)
+const detailViewMode = ref<'preview' | 'markdown'>('preview')
 const currentArticleId = ref<number | null>(null)
 const selectedArticleHasRisk = ref(false)
 
@@ -223,6 +256,7 @@ const reviewForm = reactive({
 })
 
 const revisionVisible = ref(false)
+const revisionViewMode = ref<'preview' | 'markdown'>('markdown')
 const revisionForm = reactive({
   title: '',
   contentMarkdown: '',
@@ -248,6 +282,16 @@ const publishForm = reactive({
   channelUrl: '',
   note: '',
 })
+
+const markdown = new MarkdownIt({
+  html: false,
+  linkify: true,
+  breaks: true,
+})
+
+const detailMarkdown = computed(() => detailData.value?.versions?.[0]?.contentMarkdown || '')
+const detailHtml = computed(() => markdown.render(detailMarkdown.value || ''))
+const revisionHtml = computed(() => markdown.render(revisionForm.contentMarkdown || ''))
 
 const statusOptions = [
   { label: '待审核', value: 'pending_review' },
@@ -352,6 +396,7 @@ async function openDetail(articleId: number) {
   try {
     const { data } = await getContentArticleDetail(articleId)
     detailData.value = data.data
+    detailViewMode.value = 'preview'
     detailVisible.value = true
   } catch {
     ElMessage.error('加载详情失败')
@@ -371,6 +416,7 @@ async function openRevision(row: ArticleDraft) {
   currentArticleId.value = row.id
   revisionForm.title = row.title
   revisionForm.note = ''
+  revisionViewMode.value = 'markdown'
   try {
     const { data } = await getContentArticleDetail(row.id)
     revisionForm.contentMarkdown = data.data.versions?.[0]?.contentMarkdown || ''
@@ -540,10 +586,107 @@ onMounted(async () => {
   gap: 14px;
 }
 
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .detail-title {
   margin: 2px 0;
   font-size: 14px;
   font-weight: 600;
+}
+
+.markdown-preview {
+  min-height: 360px;
+  padding: 16px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  background: #fff;
+  overflow: auto;
+  line-height: 1.75;
+  color: var(--el-text-color-primary);
+}
+
+.markdown-preview :deep(h1),
+.markdown-preview :deep(h2),
+.markdown-preview :deep(h3),
+.markdown-preview :deep(h4) {
+  margin: 1.1em 0 0.6em;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.markdown-preview :deep(p),
+.markdown-preview :deep(ul),
+.markdown-preview :deep(ol),
+.markdown-preview :deep(blockquote) {
+  margin: 0 0 0.9em;
+}
+
+.markdown-preview :deep(ul),
+.markdown-preview :deep(ol) {
+  padding-left: 1.4em;
+}
+
+.markdown-preview :deep(code) {
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  background: #f5f7fa;
+  font-size: 0.92em;
+}
+
+.markdown-preview :deep(pre) {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  overflow: auto;
+}
+
+.markdown-preview :deep(pre code) {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.markdown-preview :deep(blockquote) {
+  margin-left: 0;
+  padding-left: 12px;
+  border-left: 4px solid #cbd5e1;
+  color: #475569;
+}
+
+.markdown-preview :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1em;
+}
+
+.markdown-preview :deep(th),
+.markdown-preview :deep(td) {
+  padding: 8px 10px;
+  border: 1px solid #e5e7eb;
+  text-align: left;
+}
+
+.editor-wrap {
+  width: 100%;
+}
+
+.editor-header {
+  margin-bottom: 8px;
+}
+
+.editor-title {
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+
+.editor-preview {
+  min-height: 360px;
 }
 
 .distribute-wrap {

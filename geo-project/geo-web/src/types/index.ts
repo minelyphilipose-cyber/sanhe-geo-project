@@ -35,6 +35,8 @@ export interface UserInfo {
   role: RoleType
   partnerId: number | null
   phone: string | null
+  email: string | null
+  avatarUrl: string | null
   permissions?: string[]
 }
 
@@ -81,7 +83,7 @@ export type PlatformHealth =
   | 'degraded' | 'manual_takeover' | 'maintenance'
 
 export type ReportType =
-  | 'presale' | 'presale_diagnosis' | 'management'
+  | 'biweekly' | 'monthly' | 'quarterly' | 'management'
 
 export type ReportStatus =
   | 'generating' | 'draft' | 'intercepted' | 'published' | 'superseded' | 'archived'
@@ -271,7 +273,7 @@ export interface ProjectPlatformOption {
 
 export interface Question {
   id: number
-  questionSetId: number
+  versionId: number
   content: string
   questionType: QuestionType
   priority: QuestionPriority
@@ -417,46 +419,75 @@ export interface Report {
   brandName?: string
 }
 
-export interface PresaleQuestionSet {
+export interface ProjectDashboardShare {
   id: number
   projectId: number
-  versionNo: number
-  status: 'draft' | 'locked' | 'archived' | string
-  questionCount: number
-  generatedAt?: string
-  lockedAt?: string | null
-  lockedBy?: number | null
-  archivedAt?: string | null
+  shareCode: string
+  status: 'active' | 'disabled' | string
   createdBy?: number | null
-  createdAt?: string
-  updatedAt?: string
+  createdAt: string
+  disabledAt?: string | null
 }
 
-export interface PresaleQuestionItem {
+export interface ProjectDashboardSummary {
+  hitTotal: number
+  hitToday: number
+  platformCount: number
+  contactTotal: number
+  contactToday: number
+  siteTotal: number
+  siteToday: number
+}
+
+export interface ProjectDashboardPlatformItem {
+  platformCode: string
+  platformName: string
+  hitCount: number
+  contactCount: number
+  siteCount: number
+}
+
+export interface ProjectDashboardWordItem {
+  word: string
+  frequency: number
+}
+
+export interface ProjectDashboardTrendItem {
+  date: string
+  articleCreated: number
+  articlePublished: number
+  hitCount: number
+}
+
+export interface ProjectDashboardDetailItem {
   id: number
-  setId: number
-  projectId: number
-  content: string
-  questionType: string
-  source: 'auto' | 'manual' | string
-  sortOrder: number
-  isActive: boolean
+  questionText: string
+  platformCode: string
+  platformName: string
+  batchDate: string
+  hasSnapshot: boolean
+  platformUrl?: string | null
 }
 
-export interface PresaleQuestionSetDetail {
-  set: PresaleQuestionSet
-  items: PresaleQuestionItem[]
+export interface ProjectDashboardSummaryResponse {
+  projectName: string
+  brandName?: string | null
+  summary: ProjectDashboardSummary
+  platforms: ProjectDashboardPlatformItem[]
+  wordCloud: ProjectDashboardWordItem[]
+  refreshedAt?: string | null
 }
 
-export interface PresaleReportSnapshot {
-  id: number
-  reportId: number
-  diagnosisBatchId: number
-  snapshotData: string
-  diagnosisSummary?: string | null
-  actionRecommendations?: string | null
-  brandCompletenessChecks?: string | null
-  questionMatrix?: string | null
+export interface ProjectDashboardTrendResponse {
+  items: ProjectDashboardTrendItem[]
+}
+
+export interface ProjectDashboardDetailResponse {
+  total: number
+  page: number
+  size: number
+  maxViewable: number
+  items: ProjectDashboardDetailItem[]
 }
 
 export interface Partner {
@@ -513,11 +544,17 @@ export interface DispatchTaskItem {
   windowEnd: string
   dueTime: string
   retryCount: number
+  maxRetry?: number | null
   firstStartedAt?: string | null
+  lastStartedAt?: string | null
+  nextRetryAt?: string | null
+  timeoutAt?: string | null
   finishedAt?: string | null
   lastError?: string | null
   errorContext?: string | null
+  payloadJson?: string | null
   createdAt: string
+  updatedAt?: string | null
 }
 
 export interface KeywordWordItem {
