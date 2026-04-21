@@ -63,6 +63,7 @@ public class AiPlatformConfigService {
                 req.getApiUrl(),
                 req.getModelId(),
                 req.getModelName(),
+                req.getConcurrencyLimit(),
                 req.getDegraded(),
                 req.getDegradedReason()
         );
@@ -98,6 +99,7 @@ public class AiPlatformConfigService {
                 req.getApiUrl(),
                 req.getModelId(),
                 req.getModelName(),
+                req.getConcurrencyLimit(),
                 req.getDegraded(),
                 req.getDegradedReason()
         );
@@ -156,6 +158,7 @@ public class AiPlatformConfigService {
             String apiUrl,
             String modelId,
             String modelName,
+            Integer concurrencyLimit,
             Boolean degraded,
             String degradedReason
     ) {
@@ -185,6 +188,9 @@ public class AiPlatformConfigService {
         }
         if (!StringUtils.hasText(modelName)) {
             throw new BizException(400, "model_name is required");
+        }
+        if (concurrencyLimit != null && concurrencyLimit <= 0) {
+            throw new BizException(400, "concurrency_limit must be > 0");
         }
         if (Boolean.TRUE.equals(degraded) && !StringUtils.hasText(degradedReason)) {
             throw new BizException(400, "degraded_reason is required when degraded=true");
@@ -217,7 +223,9 @@ public class AiPlatformConfigService {
         entity.setBackupModelId(StringUtils.hasText(req.getBackupModelId()) ? req.getBackupModelId().trim() : null);
         entity.setApiUrl(req.getApiUrl().trim());
         entity.setModelId(req.getModelId().trim());
+        entity.setLowModelId(StringUtils.hasText(req.getLowModelId()) ? req.getLowModelId().trim() : null);
         entity.setModelName(req.getModelName().trim());
+        entity.setConcurrencyLimit(req.getConcurrencyLimit() != null ? req.getConcurrencyLimit() : 1);
         entity.setEnabled(req.getEnabled());
         entity.setDegraded(req.getDegraded());
         entity.setDegradedReason(StringUtils.hasText(req.getDegradedReason()) ? req.getDegradedReason().trim() : null);
@@ -239,7 +247,9 @@ public class AiPlatformConfigService {
         entity.setBackupModelId(StringUtils.hasText(req.getBackupModelId()) ? req.getBackupModelId().trim() : null);
         entity.setApiUrl(req.getApiUrl().trim());
         entity.setModelId(req.getModelId().trim());
+        entity.setLowModelId(StringUtils.hasText(req.getLowModelId()) ? req.getLowModelId().trim() : null);
         entity.setModelName(req.getModelName().trim());
+        entity.setConcurrencyLimit(req.getConcurrencyLimit() != null ? req.getConcurrencyLimit() : entity.getConcurrencyLimit());
         entity.setEnabled(req.getEnabled());
         entity.setDegraded(req.getDegraded());
         entity.setDegradedReason(StringUtils.hasText(req.getDegradedReason()) ? req.getDegradedReason().trim() : null);
@@ -258,7 +268,9 @@ public class AiPlatformConfigService {
         snapshot.put("backupProviderName", entity.getBackupProviderName());
         snapshot.put("apiUrl", entity.getApiUrl());
         snapshot.put("modelId", entity.getModelId());
+        snapshot.put("lowModelId", entity.getLowModelId());
         snapshot.put("modelName", entity.getModelName());
+        snapshot.put("concurrencyLimit", entity.getConcurrencyLimit());
         snapshot.put("enabled", entity.getEnabled());
         snapshot.put("degraded", entity.getDegraded());
         snapshot.put("degradedReason", entity.getDegradedReason());

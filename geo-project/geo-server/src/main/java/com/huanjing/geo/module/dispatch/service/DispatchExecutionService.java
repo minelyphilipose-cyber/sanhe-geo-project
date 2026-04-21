@@ -89,6 +89,7 @@ public class DispatchExecutionService {
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
     private final PlatformRateLimiterService platformRateLimiterService;
+    private final PlatformConcurrencyLimiterService platformConcurrencyLimiterService;
     private final ProjectMapper projectMapper;
     private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
     private final KeywordGroupResultMapper keywordGroupResultMapper;
@@ -1520,8 +1521,11 @@ public class DispatchExecutionService {
         }
 
         long started = System.currentTimeMillis();
-        String prompt = buildPrompt(task, questionText);
-        String response = invokeModelApi(apiUrl, modelId, apiKey, prompt);
+        String response;
+        try (PlatformConcurrencyLimiterService.Permit ignored = platformConcurrencyLimiterService.acquire(config)) {
+            String prompt = buildPrompt(task, questionText);
+            response = invokeModelApi(apiUrl, modelId, apiKey, prompt);
+        }
         long durationMs = Math.max(1L, System.currentTimeMillis() - started);
         log.info("Dispatch task {} executed by platform={}, model={}, channel={}, questionPresent={}",
                 task.getId(), platformCode, modelId, channel, StringUtils.hasText(questionText));
@@ -1547,7 +1551,10 @@ public class DispatchExecutionService {
         }
 
         long started = System.currentTimeMillis();
-        String response = invokeModelApi(apiUrl, modelId, apiKey, systemPrompt, userPrompt);
+        String response;
+        try (PlatformConcurrencyLimiterService.Permit ignored = platformConcurrencyLimiterService.acquire(config)) {
+            response = invokeModelApi(apiUrl, modelId, apiKey, systemPrompt, userPrompt);
+        }
         long durationMs = Math.max(1L, System.currentTimeMillis() - started);
         log.info("Content generation task {} executed by platform={}, model={}, channel={}",
                 task.getId(), platformCode, modelId, channel);

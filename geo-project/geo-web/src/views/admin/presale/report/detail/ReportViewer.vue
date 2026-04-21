@@ -27,19 +27,51 @@
 
     <!-- ═══ 18 页渲染 ═══ -->
     <!--
-      β·1 阶段:Page01(封面)和 Page02(诊断对象)用真实 SFC,其余 16 页仍占位。
-      β·2 / β·3 / γ 依次替换剩余页面。
+      β·1 阶段:Page01(封面)和 Page02(诊断对象)用真实 SFC。
+      β·2 阶段:Page03(执行摘要)、Page04(可见度评分,radar)、
+               Page06(平台详细数据,bar) 真实 SFC;
+               Page05(多平台热力图 5×8)**保持占位**,
+               等后端补 platform_intent_breakdown 交叉数据契约。
+      β·3 阶段:Page07(竞品对标总览,bar)、Page08(竞品场景差异)、
+               Page09(情感倾向,doughnut) 真实 SFC。
+      γ 将补 Page10~Page18(9 页)。
       每页的外层结构约定:<section :id="page-XX"><div class="page [cover]">...</div></section>,
       Sidebar 锚点依赖此 id。
     -->
     <template v-if="isDone && mergedView">
-      <!-- P01 封面(β·1 真实实现) -->
+      <!-- P01 封面(β·1) -->
       <Page01Cover />
 
-      <!-- P02 诊断对象(β·1 真实实现) -->
+      <!-- P02 诊断对象(β·1) -->
       <Page02Target />
 
-      <!-- P03~P18 占位(β·2 / β·3 / γ 将逐步替换) -->
+      <!-- P03 执行摘要(β·2) -->
+      <Page03ExecutiveSummary />
+
+      <!-- P04 可见度评分详情(β·2,radar chart) -->
+      <Page04Scores />
+
+      <!-- P05 多平台热力图 —— 占位,等后端 platform_intent_breakdown 契约 -->
+      <PagePlaceholder
+        anchor-id="page-05"
+        page-num="05"
+        page-title="多平台热力图(待后端补 platform_intent_breakdown 契约)"
+        :cover="false"
+      />
+
+      <!-- P06 平台详细数据(β·2,bar chart) -->
+      <Page06PlatformDetail />
+
+      <!-- P07 竞品对标总览(β·3,bar chart) -->
+      <Page07CompetitorOverview />
+
+      <!-- P08 竞品场景差异(β·3) -->
+      <Page08CompetitorScene />
+
+      <!-- P09 情感倾向(β·3,doughnut chart) -->
+      <Page09Sentiment />
+
+      <!-- P10~P18 占位(γ 将逐步替换) -->
       <PagePlaceholder
         v-for="p in PLACEHOLDER_PAGES"
         :key="p.id"
@@ -63,6 +95,12 @@ import { useMergedView } from '@/composables/presale/useMergedView'
 import PagePlaceholder from './PagePlaceholder.vue'
 import Page01Cover from './Page01Cover.vue'
 import Page02Target from './Page02Target.vue'
+import Page03ExecutiveSummary from './Page03ExecutiveSummary.vue'
+import Page04Scores from './Page04Scores.vue'
+import Page06PlatformDetail from './Page06PlatformDetail.vue'
+import Page07CompetitorOverview from './Page07CompetitorOverview.vue'
+import Page08CompetitorScene from './Page08CompetitorScene.vue'
+import Page09Sentiment from './Page09Sentiment.vue'
 
 const { mergedView } = useMergedView()
 
@@ -72,22 +110,18 @@ const matchLevel = computed(() => meta.value?.match_level)
 const degradedPlatforms = computed(() => meta.value?.degraded_platforms ?? [])
 
 /**
- * P03~P18 占位规格(与 DetailSidebar.PAGE_ANCHORS 的 P03~P18 一一对应)。
- * cover=true 对应原型里的 `.page.cover`(仅 P18 关于我们)。
+ * P10~P18 占位规格(与 DetailSidebar.PAGE_ANCHORS 的 P10~P18 一一对应)。
  *
- * β·1:P01/P02 用真实 SFC,不在本数组里;数组只含仍需占位的 16 页。
- * β·2 将把 P03/P04/P05/P06 从本数组移除并替换为真实 SFC。
- * β·3 将把 P07/P08/P09 移除并替换。
- * γ 将把 P10~P18 移除并替换,此时数组清空,PagePlaceholder import 亦可删除。
+ * 注:P05 虽未实现,但不放在此数组里,因为它有特殊的 pageTitle(标注"待后端补契约"),
+ *     统一在 template 里单独占位(见 Viewer template 中 P05 那块)。
+ *
+ * β·1:P01/P02 用真实 SFC,P03~P18 占位
+ * β·2:P03/P04/P06 用真实 SFC,P05 单独占位(带后端需求标注),P07~P18 仍占位
+ * β·3:P07/P08/P09 用真实 SFC,P10~P18 仍占位
+ * γ:  将 P10~P18 逐步替换为真实 SFC,此时数组清空,PagePlaceholder import 亦可删除
+ *      (但 P05 占位可能仍保留,取决于后端契约是否补上)
  */
 const PLACEHOLDER_PAGES = [
-  { id: 'page-03', num: '03', title: '执行摘要(关键一页)', cover: false },
-  { id: 'page-04', num: '04', title: '可见度评分详情', cover: false },
-  { id: 'page-05', num: '05', title: '多平台热力图', cover: false },
-  { id: 'page-06', num: '06', title: '平台详细数据', cover: false },
-  { id: 'page-07', num: '07', title: '竞品对标总览', cover: false },
-  { id: 'page-08', num: '08', title: '竞品场景差异', cover: false },
-  { id: 'page-09', num: '09', title: '情感倾向', cover: false },
   { id: 'page-10', num: '10', title: '覆盖度总览', cover: false },
   { id: 'page-11', num: '11', title: '覆盖度详情', cover: false },
   { id: 'page-12', num: '12', title: '优化机会(高优先级)', cover: false },

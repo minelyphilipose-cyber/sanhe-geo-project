@@ -24,8 +24,10 @@ public class AiPlatformConfigUpdateRequest {
     private String apiUrl;
     @NotBlank
     private String modelId;
+    private String lowModelId;
     @NotBlank
     private String modelName;
+    private Integer concurrencyLimit;
     @NotNull
     private Boolean enabled;
     @NotNull

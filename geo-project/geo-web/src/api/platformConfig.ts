@@ -23,7 +23,9 @@ export function createPlatformConfig(data: {
   backupModelId?: string
   apiUrl: string
   modelId: string
+  lowModelId?: string
   modelName: string
+  concurrencyLimit?: number
   enabled: boolean
   degraded: boolean
   degradedReason?: string
@@ -44,7 +46,9 @@ export function updatePlatformConfig(id: number, data: {
   backupModelId?: string
   apiUrl: string
   modelId: string
+  lowModelId?: string
   modelName: string
+  concurrencyLimit?: number
   enabled: boolean
   degraded: boolean
   degradedReason?: string

@@ -18,7 +18,7 @@ import java.util.List;
  * 评分公式或规则库变更需派生新版本回填。
  * </p>
  * <p><b>存储:</b>MySQL {@code presale_report_version.computed_snapshot_json}(JSON 列)。</p>
- * <p><b>必填:</b>schema 要求所有 5 个子字段 required。</p>
+ * <p><b>必填:</b>schema 要求所有 6 个子字段 required。</p>
  */
 @Data
 @Builder
@@ -33,6 +33,10 @@ public class ComputedSnapshotDTO {
     /** 按意图类型的覆盖度聚合。 */
     @JsonProperty("intent_breakdown")
     private List<IntentBreakdown> intentBreakdown;
+
+    /** 按平台 × 意图的二维交叉聚合(固定 平台数×5 条)。 */
+    @JsonProperty("platform_intent_breakdown")
+    private List<PlatformIntentCell> platformIntentBreakdown;
 
     /** 按业务价值分档的场景覆盖度。 */
     @JsonProperty("scene_coverage")

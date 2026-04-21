@@ -1,0 +1,310 @@
+﻿{
+    "meta":  {
+                 "report_id":  1001,
+                 "version_no":  2,
+                 "generated_at":  "2026-04-18T14:05:00+08:00",
+                 "generation_duration_seconds":  268,
+                 "formula_version":  "v1.0"
+             },
+    "client_info":  {
+                        "brand_name":  "海底捞",
+                        "industry":  "餐饮",
+                        "industry_role":  "连锁品牌",
+                        "region":  "北京市",
+                        "user_demand":  "了解我们品牌在 AI 推荐中的真实表现,以及和巴奴的差距"
+                    },
+    "test_summary":  {
+                         "total_prompts":  25,
+                         "total_platforms":  11,
+                         "total_calls":  660,
+                         "successful_calls":  612,
+                         "failed_calls":  48,
+                         "excluded_count":  3,
+                         "rounds":  2,
+                         "is_degraded":  false,
+                         "degraded_platforms":  [
+
+                                                ]
+                     },
+    "platform_breakdown":  [
+                               {
+                                   "platform_code":  "kimi",
+                                   "platform_name":  "Kimi",
+                                   "total_tests":  25,
+                                   "mention_count":  16,
+                                   "mention_rate":  64,
+                                   "avg_ranking":  2.1,
+                                   "primary_recommendation_count":  5,
+                                   "sentiment_distribution":  {
+                                                                  "positive":  14,
+                                                                  "neutral":  2,
+                                                                  "negative":  0
+                                                              },
+                                   "is_degraded":  false
+                               },
+                               {
+                                   "platform_code":  "deepseek",
+                                   "platform_name":  "DeepSeek",
+                                   "total_tests":  25,
+                                   "mention_count":  12,
+                                   "mention_rate":  48,
+                                   "avg_ranking":  2.6,
+                                   "primary_recommendation_count":  2,
+                                   "sentiment_distribution":  {
+                                                                  "positive":  10,
+                                                                  "neutral":  2,
+                                                                  "negative":  0
+                                                              },
+                                   "is_degraded":  false
+                               },
+                               {
+                                   "platform_code":  "doubao",
+                                   "platform_name":  "豆包",
+                                   "total_tests":  25,
+                                   "mention_count":  10,
+                                   "mention_rate":  42,
+                                   "avg_ranking":  2.8,
+                                   "primary_recommendation_count":  1,
+                                   "sentiment_distribution":  {
+                                                                  "positive":  8,
+                                                                  "neutral":  1,
+                                                                  "negative":  1
+                                                              },
+                                   "is_degraded":  false
+                               },
+                               {
+                                   "platform_code":  "qwen",
+                                   "platform_name":  "通义千问",
+                                   "total_tests":  25,
+                                   "mention_count":  11,
+                                   "mention_rate":  44,
+                                   "avg_ranking":  2.7,
+                                   "primary_recommendation_count":  1,
+                                   "sentiment_distribution":  {
+                                                                  "positive":  9,
+                                                                  "neutral":  2,
+                                                                  "negative":  0
+                                                              },
+                                   "is_degraded":  false
+                               },
+                               {
+                                   "platform_code":  "wenxin",
+                                   "platform_name":  "文心一言",
+                                   "total_tests":  25,
+                                   "mention_count":  9,
+                                   "mention_rate":  35,
+                                   "avg_ranking":  3.2,
+                                   "primary_recommendation_count":  0,
+                                   "sentiment_distribution":  {
+                                                                  "positive":  7,
+                                                                  "neutral":  2,
+                                                                  "negative":  0
+                                                              },
+                                   "is_degraded":  false
+                               },
+                               {
+                                   "platform_code":  "zhipu",
+                                   "platform_name":  "智谱清言",
+                                   "total_tests":  25,
+                                   "mention_count":  8,
+                                   "mention_rate":  32,
+                                   "avg_ranking":  3.0,
+                                   "primary_recommendation_count":  0,
+                                   "sentiment_distribution":  {
+                                                                  "positive":  6,
+                                                                  "neutral":  2,
+                                                                  "negative":  0
+                                                              },
+                                   "is_degraded":  false
+                               },
+                               {
+                                   "platform_code":  "yuanbao",
+                                   "platform_name":  "腾讯元宝",
+                                   "total_tests":  25,
+                                   "mention_count":  8,
+                                   "mention_rate":  32,
+                                   "avg_ranking":  3.1,
+                                   "primary_recommendation_count":  0,
+                                   "sentiment_distribution":  {
+                                                                  "positive":  6,
+                                                                  "neutral":  1,
+                                                                  "negative":  1
+                                                              },
+                                   "is_degraded":  false
+                               },
+                               {
+                                   "platform_code":  "xinghuo",
+                                   "platform_name":  "讯飞星火",
+                                   "total_tests":  25,
+                                   "mention_count":  7,
+                                   "mention_rate":  28,
+                                   "avg_ranking":  3.4,
+                                   "primary_recommendation_count":  0,
+                                   "sentiment_distribution":  {
+                                                                  "positive":  5,
+                                                                  "neutral":  2,
+                                                                  "negative":  0
+                                                              },
+                                   "is_degraded":  false
+                               },
+                               {
+                                   "platform_code":  "chatgpt",
+                                   "platform_name":  "ChatGPT",
+                                   "total_tests":  25,
+                                   "mention_count":  7,
+                                   "mention_rate":  28,
+                                   "avg_ranking":  3.5,
+                                   "primary_recommendation_count":  0,
+                                   "sentiment_distribution":  {
+                                                                  "positive":  4,
+                                                                  "neutral":  1,
+                                                                  "negative":  2
+                                                              },
+                                   "is_degraded":  false
+                               },
+                               {
+                                   "platform_code":  "gemini",
+                                   "platform_name":  "Gemini",
+                                   "total_tests":  25,
+                                   "mention_count":  5,
+                                   "mention_rate":  20,
+                                   "avg_ranking":  3.9,
+                                   "primary_recommendation_count":  0,
+                                   "sentiment_distribution":  {
+                                                                  "positive":  3,
+                                                                  "neutral":  2,
+                                                                  "negative":  0
+                                                              },
+                                   "is_degraded":  false
+                               },
+                               {
+                                   "platform_code":  "claude",
+                                   "platform_name":  "Claude",
+                                   "total_tests":  25,
+                                   "mention_count":  4,
+                                   "mention_rate":  18,
+                                   "avg_ranking":  4.1,
+                                   "primary_recommendation_count":  0,
+                                   "sentiment_distribution":  {
+                                                                  "positive":  2,
+                                                                  "neutral":  2,
+                                                                  "negative":  0
+                                                              },
+                                   "is_degraded":  false
+                               }
+                           ],
+    "competitors":  [
+                        {
+                            "rank":  1,
+                            "name":  "巴奴毛肚火锅",
+                            "mention_count":  175,
+                            "mention_rate":  70,
+                            "avg_ranking":  1.5,
+                            "scene_advantages_raw":  [
+                                                         "北京最正宗的火锅店",
+                                                         "北京约会吃火锅去哪",
+                                                         "北京人均 200 左右的火锅"
+                                                     ]
+                        },
+                        {
+                            "rank":  2,
+                            "name":  "呷哺呷哺",
+                            "mention_count":  138,
+                            "mention_rate":  55,
+                            "avg_ranking":  2.3,
+                            "scene_advantages_raw":  [
+                                                         "北京火锅店哪家最好吃",
+                                                         "巴奴和其他火锅店对比"
+                                                     ]
+                        },
+                        {
+                            "rank":  3,
+                            "name":  "小龙坎",
+                            "mention_count":  113,
+                            "mention_rate":  45,
+                            "avg_ranking":  2.8,
+                            "scene_advantages_raw":  [
+                                                         "北京最正宗的火锅店"
+                                                     ]
+                        }
+                    ],
+    "sentiment_detail":  {
+                             "positive_count":  123,
+                             "neutral_count":  21,
+                             "negative_count":  6,
+                             "top_keywords":  [
+                                                  {
+                                                      "keyword":  "服务好",
+                                                      "frequency":  38,
+                                                      "sentiment":  "POSITIVE",
+                                                      "font_size":  18
+                                                  },
+                                                  {
+                                                      "keyword":  "食材新鲜",
+                                                      "frequency":  25,
+                                                      "sentiment":  "POSITIVE",
+                                                      "font_size":  16
+                                                  },
+                                                  {
+                                                      "keyword":  "环境好",
+                                                      "frequency":  20,
+                                                      "sentiment":  "POSITIVE",
+                                                      "font_size":  15
+                                                  },
+                                                  {
+                                                      "keyword":  "菜品丰富",
+                                                      "frequency":  15,
+                                                      "sentiment":  "POSITIVE",
+                                                      "font_size":  14
+                                                  },
+                                                  {
+                                                      "keyword":  "连锁品牌靠谱",
+                                                      "frequency":  12,
+                                                      "sentiment":  "POSITIVE",
+                                                      "font_size":  13
+                                                  },
+                                                  {
+                                                      "keyword":  "体验好",
+                                                      "frequency":  10,
+                                                      "sentiment":  "POSITIVE",
+                                                      "font_size":  13
+                                                  }
+                                              ],
+                             "negative_evidence":  [
+                                                       {
+                                                           "platform_code":  "doubao",
+                                                           "platform_name":  "豆包",
+                                                           "query":  "海底捞怎么样",
+                                                           "snippet":  "海底捞在近期有部分用户反映服务质量有所下降,尤其是在一些连锁分店的就餐体验上。",
+                                                           "tested_at":  "2026-04-18T10:25:00+08:00"
+                                                       }
+                                                   ]
+                         },
+    "benchmarks_frozen":  {
+                              "industry":  "餐饮",
+                              "industry_role":  "连锁品牌",
+                              "match_level":  "EXACT",
+                              "industry_avg":  {
+                                                   "overall":  58,
+                                                   "mention":  58,
+                                                   "ranking":  55,
+                                                   "sentiment":  65,
+                                                   "coverage":  52
+                                               },
+                              "top1":  {
+                                           "overall":  85,
+                                           "mention":  90,
+                                           "ranking":  88,
+                                           "sentiment":  92,
+                                           "coverage":  82
+                                       },
+                              "top10_score":  80,
+                              "confidence_level":  "LOW",
+                              "source":  "MANUAL",
+                              "sample_size":  8,
+                              "industry_ranking":  {
+                                                       "position":  23,
+                                                       "total":  87
+                                                   }
+                          }
+}

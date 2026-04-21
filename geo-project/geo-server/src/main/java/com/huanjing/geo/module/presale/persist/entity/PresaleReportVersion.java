@@ -1,6 +1,5 @@
 package com.huanjing.geo.module.presale.persist.entity;
 
-import com.baomidou.mybatisplus.annotation.FieldFill;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
@@ -84,12 +83,9 @@ public class PresaleReportVersion {
     /** 最近导出时间。 */
     private LocalDateTime exportSuccessAt;
 
-    @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 
-    @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
 
-    @TableField(fill = FieldFill.INSERT)
     private Long createdBy;
 }

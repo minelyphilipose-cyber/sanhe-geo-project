@@ -28,7 +28,13 @@
           <el-table-column label="等级" width="120">
             <template #default="scope">{{ dictStore.label('platform_priority', scope.row.priorityLevel) }}</template>
           </el-table-column>
-          <el-table-column prop="modelName" label="Model名称" min-width="140" />
+          <el-table-column prop="modelName" label="高性能版本" min-width="140" />
+          <el-table-column prop="lowModelId" label="低性能版本" min-width="140">
+            <template #default="scope">{{ scope.row.lowModelId || '-' }}</template>
+          </el-table-column>
+          <el-table-column prop="concurrencyLimit" label="并发上限" width="100">
+            <template #default="scope">{{ scope.row.concurrencyLimit ?? 1 }}</template>
+          </el-table-column>
           <el-table-column label="降级处理" width="100">
             <template #default="scope">
               <el-tag :type="scope.row.degraded ? 'warning' : 'info'">{{ scope.row.degraded ? '是' : '否' }}</el-tag>
@@ -139,13 +145,26 @@
 
         <el-row :gutter="12">
           <el-col :xs="24" :md="12">
-            <el-form-item label="Model ID" prop="modelId">
-              <el-input v-model="form.modelId" placeholder="如: deepseek-chat" />
+            <el-form-item label="高性能版本(Model ID)" prop="modelId">
+              <el-input v-model="form.modelId" placeholder="如: gpt-5.4" />
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="12">
             <el-form-item label="Model名称" prop="modelName">
               <el-input v-model="form.modelName" placeholder="如: DeepSeek Chat" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-row :gutter="12">
+          <el-col :xs="24" :md="12">
+            <el-form-item label="低性能版本(Model ID)" prop="lowModelId">
+              <el-input v-model="form.lowModelId" placeholder="如: gpt-5.3" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="并发上限" prop="concurrencyLimit">
+              <el-input-number v-model="form.concurrencyLimit" :min="1" :max="10000" :step="1" style="width: 100%" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -219,7 +238,9 @@ const form = reactive({
   backupModelId: '',
   apiUrl: '',
   modelId: '',
+  lowModelId: '',
   modelName: '',
+  concurrencyLimit: 1,
   enabled: true,
   degraded: false,
   degradedReason: '',
@@ -247,6 +268,7 @@ const rules: FormRules = {
   apiUrl: [{ required: true, message: '请输入API URL', trigger: 'blur' }],
   modelId: [{ required: true, message: '请输入Model ID', trigger: 'blur' }],
   modelName: [{ required: true, message: '请输入Model名称', trigger: 'blur' }],
+  concurrencyLimit: [{ required: true, type: 'number', min: 1, message: '并发上限必须大于0', trigger: 'change' }],
 }
 
 watch(
@@ -270,7 +292,9 @@ function resetForm() {
   form.backupModelId = ''
   form.apiUrl = ''
   form.modelId = ''
+  form.lowModelId = ''
   form.modelName = ''
+  form.concurrencyLimit = 1
   form.enabled = true
   form.degraded = false
   form.degradedReason = ''
@@ -323,7 +347,9 @@ function openEdit(row: AIPlatformConfigItem) {
   form.backupModelId = row.backupModelId || ''
   form.apiUrl = row.apiUrl
   form.modelId = row.modelId
+  form.lowModelId = row.lowModelId || ''
   form.modelName = row.modelName
+  form.concurrencyLimit = row.concurrencyLimit || 1
   form.enabled = row.enabled
   form.degraded = row.degraded
   form.degradedReason = row.degradedReason || ''
@@ -352,7 +378,9 @@ async function submit() {
       backupModelId: form.backupModelId.trim() || undefined,
       apiUrl: form.apiUrl.trim(),
       modelId: form.modelId.trim(),
+      lowModelId: form.lowModelId.trim() || undefined,
       modelName: form.modelName.trim(),
+      concurrencyLimit: form.concurrencyLimit,
       enabled: form.enabled,
       degraded: form.degraded,
       degradedReason: form.degraded ? form.degradedReason.trim() : undefined,

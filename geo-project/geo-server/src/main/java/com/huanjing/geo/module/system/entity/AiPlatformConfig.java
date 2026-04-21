@@ -25,7 +25,9 @@ public class AiPlatformConfig {
     private String backupModelId;
     private String apiUrl;
     private String modelId;
+    private String lowModelId;
     private String modelName;
+    private Integer concurrencyLimit;
     private Boolean enabled;
     private Boolean degraded;
     private String degradedReason;

@@ -290,6 +290,7 @@ com\huanjing\geo\common\util\HttpClientUtil.class
 com\huanjing\geo\module\report\mapper\PostsaleReportSnapshotMapper.class
 com\huanjing\geo\module\content\entity\ArticleBatch.class
 com\huanjing\geo\module\project\entity\Project.class
+com\huanjing\geo\module\presale\ruleengine\PresaleRuleEngineExecutor$1.class
 com\huanjing\geo\module\project\dto\KeywordGroupPayloadRequest.class
 com\huanjing\geo\module\system\controller\ActivityLogController.class
 com\huanjing\geo\common\log\RequestResponseLoggingFilter.class

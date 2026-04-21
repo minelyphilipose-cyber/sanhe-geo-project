@@ -12,9 +12,11 @@ import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
+import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -40,13 +42,16 @@ public class PresaleReportService {
     private final PresaleReportMapper reportMapper;
     private final PresaleReportVersionMapper versionMapper;
     private final PresaleGenerateOrchestrator orchestrator;
+    private final CurrentUserService currentUserService;
 
     public PresaleReportService(PresaleReportMapper reportMapper,
                                 PresaleReportVersionMapper versionMapper,
-                                PresaleGenerateOrchestrator orchestrator) {
+                                PresaleGenerateOrchestrator orchestrator,
+                                CurrentUserService currentUserService) {
         this.reportMapper = reportMapper;
         this.versionMapper = versionMapper;
         this.orchestrator = orchestrator;
+        this.currentUserService = currentUserService;
     }
 
     /**
@@ -56,12 +61,18 @@ public class PresaleReportService {
      */
     @Transactional
     public Long createReport(CreateReportRequest req) {
+        Long userId = currentUserService.requireCurrentUser().getId();
+        LocalDateTime now = LocalDateTime.now();
+
         PresaleReport report = new PresaleReport();
         report.setBrandName(req.getBrandName());
         report.setIndustry(req.getIndustry());
         report.setIndustryRole(req.getIndustryRole());
         report.setRegion(req.getRegion());
         report.setUserDemand(req.getUserDemand());
+        report.setCreatedAt(now);
+        report.setUpdatedAt(now);
+        report.setCreatedBy(userId);
         reportMapper.insert(report);
 
         PresaleReportVersion version = new PresaleReportVersion();
@@ -72,6 +83,9 @@ public class PresaleReportService {
         version.setCompletedLlmCalls(0);
         version.setIsDegraded(false);
         version.setExportSuccessCount(0);
+        version.setCreatedAt(now);
+        version.setUpdatedAt(now);
+        version.setCreatedBy(userId);
         versionMapper.insert(version);
 
         // 回填 latest_version_id

@@ -383,7 +383,9 @@ export interface AIPlatformConfigItem {
   backupModelId?: string | null
   apiUrl: string
   modelId: string
+  lowModelId?: string | null
   modelName: string
+  concurrencyLimit?: number | null
   enabled: boolean
   degraded: boolean
   degradedReason?: string | null

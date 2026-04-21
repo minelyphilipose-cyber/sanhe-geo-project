@@ -123,6 +123,7 @@ public class PresaleReportVersionActionService {
                                         DeriveVersionRequest req) {
         currentUserService.ensurePermission(PERM_EDIT);
         SysUser user = currentUserService.requireCurrentUser();
+        LocalDateTime now = LocalDateTime.now();
 
         PresaleReport report = requireReport(reportId);
         PresaleReportVersion source = requireVersion(report.getId(), versionNo);
@@ -166,7 +167,8 @@ public class PresaleReportVersionActionService {
         // 新版本自有字段
         next.setExportSuccessCount(0);
         next.setCreatedBy(user.getId());
-        // createdAt/updatedAt 由 MyBatis-Plus 自动填充
+        next.setCreatedAt(now);
+        next.setUpdatedAt(now);
 
         versionMapper.insert(next);
 

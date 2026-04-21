@@ -31,6 +31,7 @@ public class PresaleGenerateOrchestrator {
     private static final Logger log = LoggerFactory.getLogger(PresaleGenerateOrchestrator.class);
 
     private final PresaleReportVersionMapper versionMapper;
+    private final PresaleComputedSnapshotEnricher computedSnapshotEnricher;
 
     @Value("${presale.generate.mock:true}")
     private boolean mockEnabled;
@@ -42,8 +43,10 @@ public class PresaleGenerateOrchestrator {
     @Value("${presale.generate.mock-fixture-path:fixtures/01-mock-sample-v1.2.json}")
     private String mockFixturePath;
 
-    public PresaleGenerateOrchestrator(PresaleReportVersionMapper versionMapper) {
+    public PresaleGenerateOrchestrator(PresaleReportVersionMapper versionMapper,
+                                       PresaleComputedSnapshotEnricher computedSnapshotEnricher) {
         this.versionMapper = versionMapper;
+        this.computedSnapshotEnricher = computedSnapshotEnricher;
     }
 
     /**
@@ -77,14 +80,14 @@ public class PresaleGenerateOrchestrator {
         String editableJson;
         try {
             // 从 classpath 加载 fixture 作为 mock 结果
-            // v1 简化处理:整个 fixture 塞入 raw_snapshot_json,computed/editable 留空
-            // 真实场景:fixture 应已是 v1.2 merged_view 结构,Service 需拆成三层
             rawJson = loadFixture();
-            computedJson = "{}";
+            // 统一注入点:mock/real 在写库前都走 enrich + validate。
+            computedJson = computedSnapshotEnricher.enrichAndValidate(
+                    versionId, rawJson, "{}", true);
             editableJson = "{}";
-        } catch (IOException e) {
-            log.error("Failed to load mock fixture: {}", mockFixturePath, e);
-            markFailed(versionId, "Mock fixture load failed: " + e.getMessage());
+        } catch (Exception e) {
+            log.error("Failed to build presale snapshot, fixturePath={}", mockFixturePath, e);
+            markFailed(versionId, "Snapshot build failed: " + e.getMessage());
             return;
         }
 
@@ -97,6 +100,7 @@ public class PresaleGenerateOrchestrator {
         update.setRawSnapshotJson(rawJson);
         update.setComputedSnapshotJson(computedJson);
         update.setEditableContentJson(editableJson);
+        update.setUpdatedAt(LocalDateTime.now());
         versionMapper.updateById(update);
 
         log.info("Presale mock generate done, versionId={}", versionId);
@@ -108,6 +112,7 @@ public class PresaleGenerateOrchestrator {
         update.setGenerationStatus(PresaleGenerateStatus.RUNNING.name());
         update.setCompletedLlmCalls(0);
         update.setTotalLlmCalls(660);
+        update.setUpdatedAt(LocalDateTime.now());
         versionMapper.updateById(update);
     }
 
@@ -116,6 +121,7 @@ public class PresaleGenerateOrchestrator {
         update.setId(versionId);
         update.setGenerationStatus(PresaleGenerateStatus.FAILED.name());
         update.setFailureReason(reason);
+        update.setUpdatedAt(LocalDateTime.now());
         versionMapper.updateById(update);
     }
 
