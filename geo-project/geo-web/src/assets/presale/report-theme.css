@@ -1,0 +1,444 @@
+/**
+ * presale 售前报告详情页主题样式
+ * ────────────────────────────────────────────────────────────────
+ * 职责:
+ *   1. 声明 --presale-* 系列 CSS 变量(色板 + 辅助值)
+ *   2. 声明详情页专用字体作用域(仅在 .ps-page-scope 内生效)
+ *   3. 封装 18 页 Page SFC 共用的原型 CSS class
+ *      (.page / .section-title / .data-matrix / .competitor-card / ...)
+ *   4. 所有共用 class 仅在 .ps-page-scope 后代里生效,避免全局污染
+ *
+ * 使用方式:
+ *   在 main.ts 里 import '@/assets/presale/report-theme.css'
+ *   在 ReportViewer.vue 的根元素上加 class="ps-page-scope" (β·1 已加)
+ *   各 Page SFC 的模板里 class 名可直接照抄原型(section-title / data-matrix 等),
+ *   不需要加前缀
+ *
+ * 命名约定:
+ *   - CSS 变量:--presale-{token},对齐原型 :root 变量名去掉非必要差异
+ *   - 作用域根 class:.ps-page-scope
+ *   - 共用业务 class:原型原名(.page / .section-title / ...),不加前缀,
+ *     通过作用域根限制避免冲突
+ *
+ * 字体:
+ *   fontsource 包已在 main.ts 引入(Playfair Display 400/900,
+ *   Noto Serif SC 400/500/700,Noto Sans SC 400/500/700,JetBrains Mono 400),
+ *   本文件只负责把字体挂到 .ps-page-scope 的 .page 上,不改全局 body 字体
+ *   (严格对齐决策:"字体作用域限制在详情页 .page 体系内")
+ *
+ * 对齐原型:GEO诊断报告_PDF内容原型_v1_0.html 的 <style> 段
+ *   (P1F-1b-handoff.md 方案 B:保留 CSS)
+ */
+
+/* ─────────────────────────────────────────────────────────
+ * 1. CSS 变量(--presale-* 前缀,避免与 Element Plus / 仓库其他主题冲突)
+ * ───────────────────────────────────────────────────────── */
+:root {
+  --presale-ink: #0b1426;
+  --presale-ink-soft: #1a2942;
+  --presale-primary: #1e3a8a;
+  --presale-primary-light: #3b5fc9;
+  --presale-accent: #d97706;
+  --presale-accent-red: #b91c1c;
+  --presale-accent-green: #047857;
+  --presale-paper: #fefcf7;
+  --presale-paper-alt: #f7f3ea;
+  --presale-line: #c8bfa8;
+  --presale-muted: #6b6456;
+  --presale-bg: #2d2a26;
+}
+
+/* ─────────────────────────────────────────────────────────
+ * 2. 作用域容器 —— 所有后续 class 都加 .ps-page-scope 前缀
+ *    避免污染全局 / Element Plus / 仓库其他模块
+ * ───────────────────────────────────────────────────────── */
+
+.ps-page-scope {
+  font-family: 'Noto Sans SC', sans-serif;
+  color: var(--presale-ink);
+  background: var(--presale-bg);
+}
+
+/* 字体工具类(仅在 scope 内生效) */
+.ps-page-scope .display-serif {
+  font-family: 'Playfair Display', 'Noto Serif SC', serif;
+}
+.ps-page-scope .chinese-serif {
+  font-family: 'Noto Serif SC', serif;
+}
+.ps-page-scope .mono {
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ─────────────────────────────────────────────────────────
+ * 3. A4 纸张容器 —— 18 页共用的外层卡片
+ * ───────────────────────────────────────────────────────── */
+
+.ps-page-scope .page {
+  width: 794px;
+  min-height: 1123px;
+  background: var(--presale-paper);
+  margin: 0 auto 32px auto;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  position: relative;
+  overflow: hidden;
+  padding: 60px 64px;
+  /* 字体显式声明一次,避免浏览器 user agent stylesheet 干扰 */
+  font-family: 'Noto Sans SC', sans-serif;
+  color: var(--presale-ink);
+}
+
+.ps-page-scope .page-label {
+  position: absolute;
+  bottom: 24px;
+  right: 32px;
+  font-size: 10px;
+  color: var(--presale-muted);
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 2px;
+}
+
+.ps-page-scope .page-footer-brand {
+  position: absolute;
+  bottom: 24px;
+  left: 32px;
+  font-size: 10px;
+  color: var(--presale-muted);
+  letter-spacing: 2px;
+}
+
+.ps-page-scope .page-topbar {
+  position: absolute;
+  top: 24px;
+  left: 64px;
+  right: 64px;
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--presale-muted);
+  letter-spacing: 1px;
+  border-bottom: 1px solid var(--presale-line);
+  padding-bottom: 12px;
+  text-transform: uppercase;
+}
+
+/* ─────────────────────────────────────────────────────────
+ * 4. 封面页(P01 / P18)
+ * ───────────────────────────────────────────────────────── */
+
+.ps-page-scope .page.cover {
+  background: linear-gradient(135deg, #0b1426 0%, #1e3a8a 100%);
+  color: var(--presale-paper);
+  padding: 60px 64px;
+}
+.ps-page-scope .cover-pattern {
+  position: absolute;
+  inset: 0;
+  opacity: 0.08;
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 20px,
+    #fff 20px,
+    #fff 21px
+  );
+  pointer-events: none;
+}
+.ps-page-scope .cover-pattern-2 {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, rgba(217, 119, 6, 0.15), transparent 70%);
+  pointer-events: none;
+}
+
+/* ─────────────────────────────────────────────────────────
+ * 5. 章节标题 —— P02~P17 大多数页都用
+ * ───────────────────────────────────────────────────────── */
+
+.ps-page-scope .section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 24px;
+  margin-bottom: 36px;
+  padding-bottom: 20px;
+  border-bottom: 2px solid var(--presale-ink);
+}
+.ps-page-scope .section-number {
+  font-family: 'Playfair Display', serif;
+  font-size: 72px;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--presale-primary);
+  font-style: italic;
+}
+.ps-page-scope .section-label {
+  font-size: 11px;
+  letter-spacing: 4px;
+  color: var(--presale-muted);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.ps-page-scope .section-heading {
+  font-family: 'Noto Serif SC', serif;
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--presale-ink);
+  letter-spacing: -0.5px;
+}
+
+/* ─────────────────────────────────────────────────────────
+ * 6. 大数字展示
+ * ───────────────────────────────────────────────────────── */
+
+.ps-page-scope .metric-hero {
+  font-family: 'Playfair Display', serif;
+  font-weight: 900;
+  line-height: 0.9;
+  letter-spacing: -3px;
+}
+
+/* ─────────────────────────────────────────────────────────
+ * 7. 引用块
+ * ───────────────────────────────────────────────────────── */
+
+.ps-page-scope .pull-quote {
+  border-left: 3px solid var(--presale-accent);
+  padding: 20px 24px;
+  background: rgba(217, 119, 6, 0.06);
+  font-family: 'Noto Serif SC', serif;
+  font-style: italic;
+  font-size: 15px;
+  line-height: 1.8;
+  color: var(--presale-ink-soft);
+  position: relative;
+}
+.ps-page-scope .pull-quote::before {
+  content: '→';
+  position: absolute;
+  left: -1px;
+  top: 18px;
+  background: var(--presale-accent);
+  color: white;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-style: normal;
+  transform: translateX(-50%);
+}
+
+/* ─────────────────────────────────────────────────────────
+ * 8. 证据引用框
+ * ───────────────────────────────────────────────────────── */
+
+.ps-page-scope .evidence-box {
+  border: 1px solid var(--presale-line);
+  background: var(--presale-paper-alt);
+  padding: 18px 20px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: var(--presale-ink-soft);
+}
+.ps-page-scope .evidence-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--presale-primary);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+/* ─────────────────────────────────────────────────────────
+ * 9. 数据矩阵(P02 诊断对象用 + 其他数据罗列页)
+ * ───────────────────────────────────────────────────────── */
+
+.ps-page-scope .data-matrix {
+  border-top: 2px solid var(--presale-ink);
+  border-bottom: 2px solid var(--presale-ink);
+}
+.ps-page-scope .data-matrix-row {
+  display: grid;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--presale-line);
+  align-items: center;
+}
+.ps-page-scope .data-matrix-row:last-child {
+  border-bottom: none;
+}
+
+/* ─────────────────────────────────────────────────────────
+ * 10. 热力图单元(P05 用)
+ * ───────────────────────────────────────────────────────── */
+
+.ps-page-scope .heat-cell {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+}
+.ps-page-scope .heat-0 {
+  background: #fefcf7;
+  color: #9b9486;
+  border: 1px solid var(--presale-line);
+}
+.ps-page-scope .heat-1 {
+  background: #fde4c4;
+  color: #7c4a06;
+}
+.ps-page-scope .heat-2 {
+  background: #f9c284;
+  color: #5e3304;
+}
+.ps-page-scope .heat-3 {
+  background: #d97706;
+  color: white;
+}
+.ps-page-scope .heat-4 {
+  background: #92400e;
+  color: white;
+}
+
+/* ─────────────────────────────────────────────────────────
+ * 11. 竞品卡片(P07/P08 用)
+ * ───────────────────────────────────────────────────────── */
+
+.ps-page-scope .competitor-card {
+  border: 1px solid var(--presale-line);
+  padding: 16px 18px;
+  background: var(--presale-paper);
+}
+.ps-page-scope .competitor-rank {
+  font-family: 'Playfair Display', serif;
+  font-size: 42px;
+  font-weight: 900;
+  font-style: italic;
+  line-height: 1;
+}
+.ps-page-scope .competitor-card.top1 .competitor-rank {
+  color: var(--presale-accent);
+}
+.ps-page-scope .competitor-card.top2 .competitor-rank {
+  color: var(--presale-primary);
+}
+.ps-page-scope .competitor-card.top3 .competitor-rank {
+  color: var(--presale-muted);
+}
+.ps-page-scope .competitor-card.self {
+  background: var(--presale-ink);
+  color: var(--presale-paper);
+  border-color: var(--presale-ink);
+}
+.ps-page-scope .competitor-card.self .competitor-rank {
+  color: var(--presale-accent);
+}
+
+/* ─────────────────────────────────────────────────────────
+ * 12. 优先级标签(P12~P14 用)
+ * ───────────────────────────────────────────────────────── */
+
+.ps-page-scope .priority-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  font-family: 'JetBrains Mono', monospace;
+}
+.ps-page-scope .priority-high {
+  background: var(--presale-accent-red);
+  color: white;
+}
+.ps-page-scope .priority-mid {
+  background: var(--presale-accent);
+  color: white;
+}
+.ps-page-scope .priority-low {
+  background: var(--presale-muted);
+  color: white;
+}
+.ps-page-scope .priority-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  display: inline-block;
+}
+
+/* ─────────────────────────────────────────────────────────
+ * 13. 时间轴(P16 分阶段路径用)
+ * ───────────────────────────────────────────────────────── */
+
+.ps-page-scope .timeline-step {
+  position: relative;
+  padding-left: 40px;
+  padding-bottom: 32px;
+}
+.ps-page-scope .timeline-step::before {
+  content: '';
+  position: absolute;
+  left: 13px;
+  top: 26px;
+  bottom: 0;
+  width: 2px;
+  background: var(--presale-line);
+}
+.ps-page-scope .timeline-step:last-child::before {
+  display: none;
+}
+.ps-page-scope .timeline-dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--presale-paper);
+  border: 2px solid var(--presale-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Playfair Display', serif;
+  font-weight: 700;
+  color: var(--presale-primary);
+  font-size: 13px;
+}
+
+/* ─────────────────────────────────────────────────────────
+ * 14. 对错标记
+ * ───────────────────────────────────────────────────────── */
+
+.ps-page-scope .tick {
+  color: var(--presale-accent-green);
+  font-weight: 700;
+}
+.ps-page-scope .cross {
+  color: var(--presale-accent-red);
+  font-weight: 700;
+}
+
+/* ─────────────────────────────────────────────────────────
+ * 15. 打印(可选,未来导出 PDF 时用得上;不影响 β·1 渲染)
+ * ───────────────────────────────────────────────────────── */
+
+@media print {
+  .ps-page-scope {
+    background: white !important;
+  }
+  .ps-page-scope .page {
+    box-shadow: none !important;
+    margin: 0 !important;
+    page-break-after: always;
+  }
+}

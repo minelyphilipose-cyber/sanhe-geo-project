@@ -130,6 +130,46 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '报表预览', hidden: true, permissions: ['report.review'] },
     },
     {
+      path: 'presale/report',
+      name: 'PresaleReportList',
+      component: () => import('@/views/admin/presale/report/PresaleReportList.vue'),
+      meta: {
+        title: '售前报告',
+        icon: 'Document',
+        permissions: ['presale.report.edit_content', 'presale.report.manage'],
+      },
+    },
+    {
+      path: 'presale/report/create',
+      name: 'PresaleReportCreate',
+      component: () => import('@/views/admin/presale/report/PresaleReportCreate.vue'),
+      meta: {
+        title: '新建报告',
+        hidden: true,
+        permissions: ['presale.report.edit_content', 'presale.report.manage'],
+      },
+    },
+    {
+      path: 'presale/report/:id/progress',
+      name: 'PresaleReportProgress',
+      component: () => import('@/views/admin/presale/report/PresaleReportProgress.vue'),
+      meta: {
+        title: '生成进度',
+        hidden: true,
+        permissions: ['presale.report.edit_content', 'presale.report.manage'],
+      },
+    },
+    {
+      path: 'presale/report/:id/detail',
+      name: 'PresaleReportDetail',
+      component: () => import('@/views/admin/presale/report/PresaleReportDetail.vue'),
+      meta: {
+        title: '报告详情',
+        hidden: true,
+        permissions: ['presale.report.edit_content', 'presale.report.manage'],
+      },
+    },
+    {
       path: 'partners',
       name: 'PartnerList',
       component: () => import('@/views/admin/partner/PartnerList.vue'),

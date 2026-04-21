@@ -43,3 +43,33 @@ Caused by: io.lettuce.core.RedisCommandTimeoutException: Command timed out after
 	at io.netty.util.internal.ThreadExecutorMap$2.run(ThreadExecutorMap.java:74)
 	at io.netty.util.concurrent.FastThreadLocalRunnable.run(FastThreadLocalRunnable.java:30)
 	... 1 common frames omitted
+2026-04-21 12:11:44.431 [main] ERROR [] o.s.b.d.LoggingFailureAnalysisReporter - 
+
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Parameter 0 of constructor in com.huanjing.geo.module.presale.ruleengine.persist.PresaleOptimizationRuleService required a bean of type 'com.huanjing.geo.module.presale.ruleengine.persist.PresaleOptimizationRuleMapper' that could not be found.
+
+
+Action:
+
+Consider defining a bean of type 'com.huanjing.geo.module.presale.ruleengine.persist.PresaleOptimizationRuleMapper' in your configuration.
+
+2026-04-21 14:34:43.421 [main] ERROR [] o.s.b.d.LoggingFailureAnalysisReporter - 
+
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Parameter 0 of constructor in com.huanjing.geo.module.presale.service.PresaleReportService required a bean of type 'com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper' that could not be found.
+
+
+Action:
+
+Consider defining a bean of type 'com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper' in your configuration.
+

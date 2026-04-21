@@ -25,3 +25,9 @@ geo:
     access-key: admin
     secret-key: admin123
     bucket: geo-files
+
+presale:
+  security:
+    # dev/demo 阶段允许角色覆盖，避免在 sys_user_role 接入前触发 fail-safe 异常
+    role-override: true
+    role-override-target: manager

@@ -55,3 +55,35 @@ Caused by: io.lettuce.core.RedisCommandTimeoutException: Command timed out after
 2026-04-21 09:27:21.376 [main] WARN  [] o.f.c.i.s.DefaultSqlScriptExecutor - DB: Integer display width is deprecated and will be removed in a future release. (SQL State: HY000 - Error Code: 1681)
 2026-04-21 09:27:21.402 [main] WARN  [] o.f.c.i.s.DefaultSqlScriptExecutor - DB: Integer display width is deprecated and will be removed in a future release. (SQL State: HY000 - Error Code: 1681)
 2026-04-21 09:27:21.403 [main] WARN  [] o.f.c.i.s.DefaultSqlScriptExecutor - DB: Integer display width is deprecated and will be removed in a future release. (SQL State: HY000 - Error Code: 1681)
+2026-04-21 12:11:44.393 [main] WARN  [] o.s.b.w.s.c.AnnotationConfigServletWebServerApplicationContext - Exception encountered during context initialization - cancelling refresh attempt: org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'presaleOptimizationRuleService' defined in file [D:\code\sanhe-geo-project\geo-project\geo-server\target\classes\com\huanjing\geo\module\presale\ruleengine\persist\PresaleOptimizationRuleService.class]: Unsatisfied dependency expressed through constructor parameter 0: No qualifying bean of type 'com.huanjing.geo.module.presale.ruleengine.persist.PresaleOptimizationRuleMapper' available: expected at least 1 bean which qualifies as autowire candidate. Dependency annotations: {}
+2026-04-21 12:11:44.431 [main] ERROR [] o.s.b.d.LoggingFailureAnalysisReporter - 
+
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Parameter 0 of constructor in com.huanjing.geo.module.presale.ruleengine.persist.PresaleOptimizationRuleService required a bean of type 'com.huanjing.geo.module.presale.ruleengine.persist.PresaleOptimizationRuleMapper' that could not be found.
+
+
+Action:
+
+Consider defining a bean of type 'com.huanjing.geo.module.presale.ruleengine.persist.PresaleOptimizationRuleMapper' in your configuration.
+
+2026-04-21 14:34:43.371 [main] WARN  [] o.s.b.w.s.c.AnnotationConfigServletWebServerApplicationContext - Exception encountered during context initialization - cancelling refresh attempt: org.springframework.beans.factory.UnsatisfiedDependencyException: Error creating bean with name 'presaleReportController' defined in file [D:\code\sanhe-geo-project\geo-project\geo-server\target\classes\com\huanjing\geo\module\presale\controller\PresaleReportController.class]: Unsatisfied dependency expressed through constructor parameter 0: Error creating bean with name 'presaleReportService' defined in file [D:\code\sanhe-geo-project\geo-project\geo-server\target\classes\com\huanjing\geo\module\presale\service\PresaleReportService.class]: Unsatisfied dependency expressed through constructor parameter 0: No qualifying bean of type 'com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper' available: expected at least 1 bean which qualifies as autowire candidate. Dependency annotations: {}
+2026-04-21 14:34:43.421 [main] ERROR [] o.s.b.d.LoggingFailureAnalysisReporter - 
+
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Parameter 0 of constructor in com.huanjing.geo.module.presale.service.PresaleReportService required a bean of type 'com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper' that could not be found.
+
+
+Action:
+
+Consider defining a bean of type 'com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper' in your configuration.
+
