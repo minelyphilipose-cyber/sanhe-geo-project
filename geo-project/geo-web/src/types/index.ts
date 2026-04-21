@@ -891,3 +891,5 @@ export interface RouteMeta {
   icon?: string
   hidden?: boolean
 }
+
+export * from './presale'

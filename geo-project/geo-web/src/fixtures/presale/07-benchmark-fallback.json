@@ -1,0 +1,1314 @@
+{
+  "_description": "benchmarks_frozen.match_level=FALLBACK_INDUSTRY + industry_role=_ALL_,验证基准值兜底场景。expected.meta.match_level 应正确提升为 FALLBACK_INDUSTRY(前端据此展示回退警示条)。",
+  "input": {
+    "raw": {
+      "meta": {
+        "report_id": 1001,
+        "version_no": 2,
+        "generated_at": "2026-04-18T14:05:00+08:00",
+        "generation_duration_seconds": 268,
+        "formula_version": "v1.0"
+      },
+      "client_info": {
+        "brand_name": "海底捞",
+        "industry": "餐饮",
+        "industry_role": "连锁品牌",
+        "region": "北京市",
+        "user_demand": "了解我们品牌在 AI 推荐中的真实表现,以及和巴奴的差距"
+      },
+      "test_summary": {
+        "total_prompts": 25,
+        "total_platforms": 11,
+        "total_calls": 660,
+        "successful_calls": 612,
+        "failed_calls": 48,
+        "excluded_count": 3,
+        "rounds": 2,
+        "is_degraded": false,
+        "degraded_platforms": []
+      },
+      "platform_breakdown": [
+        {
+          "platform_code": "kimi",
+          "platform_name": "Kimi",
+          "total_tests": 25,
+          "mention_count": 16,
+          "mention_rate": 64,
+          "avg_ranking": 2.1,
+          "primary_recommendation_count": 5,
+          "sentiment_distribution": {
+            "positive": 14,
+            "neutral": 2,
+            "negative": 0
+          },
+          "is_degraded": false
+        },
+        {
+          "platform_code": "deepseek",
+          "platform_name": "DeepSeek",
+          "total_tests": 25,
+          "mention_count": 12,
+          "mention_rate": 48,
+          "avg_ranking": 2.6,
+          "primary_recommendation_count": 2,
+          "sentiment_distribution": {
+            "positive": 10,
+            "neutral": 2,
+            "negative": 0
+          },
+          "is_degraded": false
+        },
+        {
+          "platform_code": "doubao",
+          "platform_name": "豆包",
+          "total_tests": 25,
+          "mention_count": 10,
+          "mention_rate": 42,
+          "avg_ranking": 2.8,
+          "primary_recommendation_count": 1,
+          "sentiment_distribution": {
+            "positive": 8,
+            "neutral": 1,
+            "negative": 1
+          },
+          "is_degraded": false
+        },
+        {
+          "platform_code": "qwen",
+          "platform_name": "通义千问",
+          "total_tests": 25,
+          "mention_count": 11,
+          "mention_rate": 44,
+          "avg_ranking": 2.7,
+          "primary_recommendation_count": 1,
+          "sentiment_distribution": {
+            "positive": 9,
+            "neutral": 2,
+            "negative": 0
+          },
+          "is_degraded": false
+        },
+        {
+          "platform_code": "wenxin",
+          "platform_name": "文心一言",
+          "total_tests": 25,
+          "mention_count": 9,
+          "mention_rate": 35,
+          "avg_ranking": 3.2,
+          "primary_recommendation_count": 0,
+          "sentiment_distribution": {
+            "positive": 7,
+            "neutral": 2,
+            "negative": 0
+          },
+          "is_degraded": false
+        },
+        {
+          "platform_code": "zhipu",
+          "platform_name": "智谱清言",
+          "total_tests": 25,
+          "mention_count": 8,
+          "mention_rate": 32,
+          "avg_ranking": 3.0,
+          "primary_recommendation_count": 0,
+          "sentiment_distribution": {
+            "positive": 6,
+            "neutral": 2,
+            "negative": 0
+          },
+          "is_degraded": false
+        },
+        {
+          "platform_code": "yuanbao",
+          "platform_name": "腾讯元宝",
+          "total_tests": 25,
+          "mention_count": 8,
+          "mention_rate": 32,
+          "avg_ranking": 3.1,
+          "primary_recommendation_count": 0,
+          "sentiment_distribution": {
+            "positive": 6,
+            "neutral": 1,
+            "negative": 1
+          },
+          "is_degraded": false
+        },
+        {
+          "platform_code": "xinghuo",
+          "platform_name": "讯飞星火",
+          "total_tests": 25,
+          "mention_count": 7,
+          "mention_rate": 28,
+          "avg_ranking": 3.4,
+          "primary_recommendation_count": 0,
+          "sentiment_distribution": {
+            "positive": 5,
+            "neutral": 2,
+            "negative": 0
+          },
+          "is_degraded": false
+        },
+        {
+          "platform_code": "chatgpt",
+          "platform_name": "ChatGPT",
+          "total_tests": 25,
+          "mention_count": 7,
+          "mention_rate": 28,
+          "avg_ranking": 3.5,
+          "primary_recommendation_count": 0,
+          "sentiment_distribution": {
+            "positive": 4,
+            "neutral": 1,
+            "negative": 2
+          },
+          "is_degraded": false
+        },
+        {
+          "platform_code": "gemini",
+          "platform_name": "Gemini",
+          "total_tests": 25,
+          "mention_count": 5,
+          "mention_rate": 20,
+          "avg_ranking": 3.9,
+          "primary_recommendation_count": 0,
+          "sentiment_distribution": {
+            "positive": 3,
+            "neutral": 2,
+            "negative": 0
+          },
+          "is_degraded": false
+        },
+        {
+          "platform_code": "claude",
+          "platform_name": "Claude",
+          "total_tests": 25,
+          "mention_count": 4,
+          "mention_rate": 18,
+          "avg_ranking": 4.1,
+          "primary_recommendation_count": 0,
+          "sentiment_distribution": {
+            "positive": 2,
+            "neutral": 2,
+            "negative": 0
+          },
+          "is_degraded": false
+        }
+      ],
+      "competitors": [
+        {
+          "rank": 1,
+          "name": "巴奴毛肚火锅",
+          "mention_count": 175,
+          "mention_rate": 70,
+          "avg_ranking": 1.5,
+          "scene_advantages_raw": [
+            "北京最正宗的火锅店",
+            "北京约会吃火锅去哪",
+            "北京人均 200 左右的火锅"
+          ]
+        },
+        {
+          "rank": 2,
+          "name": "呷哺呷哺",
+          "mention_count": 138,
+          "mention_rate": 55,
+          "avg_ranking": 2.3,
+          "scene_advantages_raw": [
+            "北京火锅店哪家最好吃",
+            "巴奴和其他火锅店对比"
+          ]
+        },
+        {
+          "rank": 3,
+          "name": "小龙坎",
+          "mention_count": 113,
+          "mention_rate": 45,
+          "avg_ranking": 2.8,
+          "scene_advantages_raw": [
+            "北京最正宗的火锅店"
+          ]
+        }
+      ],
+      "sentiment_detail": {
+        "positive_count": 123,
+        "neutral_count": 21,
+        "negative_count": 6,
+        "top_keywords": [
+          {
+            "keyword": "服务好",
+            "frequency": 38,
+            "sentiment": "POSITIVE",
+            "font_size": 18
+          },
+          {
+            "keyword": "食材新鲜",
+            "frequency": 25,
+            "sentiment": "POSITIVE",
+            "font_size": 16
+          },
+          {
+            "keyword": "环境好",
+            "frequency": 20,
+            "sentiment": "POSITIVE",
+            "font_size": 15
+          },
+          {
+            "keyword": "菜品丰富",
+            "frequency": 15,
+            "sentiment": "POSITIVE",
+            "font_size": 14
+          },
+          {
+            "keyword": "连锁品牌靠谱",
+            "frequency": 12,
+            "sentiment": "POSITIVE",
+            "font_size": 13
+          },
+          {
+            "keyword": "体验好",
+            "frequency": 10,
+            "sentiment": "POSITIVE",
+            "font_size": 13
+          }
+        ],
+        "negative_evidence": [
+          {
+            "platform_code": "doubao",
+            "platform_name": "豆包",
+            "query": "海底捞怎么样",
+            "snippet": "海底捞在近期有部分用户反映服务质量有所下降,尤其是在一些连锁分店的就餐体验上。",
+            "tested_at": "2026-04-18T10:25:00+08:00"
+          }
+        ]
+      },
+      "benchmarks_frozen": {
+        "industry": "餐饮",
+        "industry_role": "_ALL_",
+        "match_level": "FALLBACK_INDUSTRY",
+        "industry_avg": {
+          "overall": 58,
+          "mention": 58,
+          "ranking": 55,
+          "sentiment": 65,
+          "coverage": 52
+        },
+        "top1": {
+          "overall": 85,
+          "mention": 90,
+          "ranking": 88,
+          "sentiment": 92,
+          "coverage": 82
+        },
+        "top10_score": 80,
+        "confidence_level": "LOW",
+        "source": "MANUAL",
+        "sample_size": 32,
+        "industry_ranking": {
+          "position": 23,
+          "total": 87
+        }
+      }
+    },
+    "computed": {
+      "scores": {
+        "overall": 68,
+        "mention": 72,
+        "ranking": 65,
+        "sentiment": 82,
+        "coverage": 75,
+        "weights": {
+          "mention": 0.4,
+          "ranking": 0.25,
+          "sentiment": 0.15,
+          "coverage": 0.2
+        }
+      },
+      "intent_breakdown": [
+        {
+          "category": "推荐型",
+          "business_value": "高",
+          "total_prompts": 10,
+          "covered_prompts": 7,
+          "coverage_rate": 70,
+          "avg_ranking": 2.1
+        },
+        {
+          "category": "对比型",
+          "business_value": "高",
+          "total_prompts": 5,
+          "covered_prompts": 2,
+          "coverage_rate": 40,
+          "avg_ranking": 2.5
+        },
+        {
+          "category": "问题型",
+          "business_value": "中",
+          "total_prompts": 3,
+          "covered_prompts": 1,
+          "coverage_rate": 33,
+          "avg_ranking": 3.0
+        },
+        {
+          "category": "认知型",
+          "business_value": "中",
+          "total_prompts": 4,
+          "covered_prompts": 4,
+          "coverage_rate": 100,
+          "avg_ranking": 1.8
+        },
+        {
+          "category": "场景型",
+          "business_value": "中",
+          "total_prompts": 3,
+          "covered_prompts": 1,
+          "coverage_rate": 33,
+          "avg_ranking": 3.5
+        }
+      ],
+      "scene_coverage": {
+        "high_value": {
+          "total": 12,
+          "covered": 9,
+          "coverage_rate": 75,
+          "covered_queries": [
+            {
+              "prompt_code": "REC_REST_001",
+              "prompt_content": "北京火锅店推荐",
+              "category": "推荐型"
+            },
+            {
+              "prompt_code": "REC_REST_005",
+              "prompt_content": "北京火锅加盟品牌",
+              "category": "推荐型"
+            }
+          ],
+          "missing_queries": [
+            {
+              "prompt_code": "REC_REST_002",
+              "prompt_content": "北京最正宗的火锅店",
+              "category": "推荐型",
+              "top_competitor_coverage": [
+                "巴奴毛肚火锅",
+                "小龙坎"
+              ]
+            },
+            {
+              "prompt_code": "REC_REST_003",
+              "prompt_content": "北京最好吃的火锅店",
+              "category": "推荐型",
+              "top_competitor_coverage": [
+                "巴奴毛肚火锅",
+                "呷哺呷哺"
+              ]
+            },
+            {
+              "prompt_code": "SCN_REST_001",
+              "prompt_content": "北京约会吃火锅推荐",
+              "category": "场景型",
+              "top_competitor_coverage": [
+                "巴奴毛肚火锅"
+              ]
+            }
+          ]
+        },
+        "mid_value": {
+          "total": 10,
+          "covered": 6,
+          "coverage_rate": 60,
+          "covered_queries": [],
+          "missing_queries": []
+        },
+        "low_value": {
+          "total": 3,
+          "covered": 2,
+          "coverage_rate": 67,
+          "covered_queries": [],
+          "missing_queries": []
+        }
+      },
+      "optimization_findings": [
+        {
+          "finding_id": "F001",
+          "rule_code": "RULE_COVERAGE_LOW_RECOMMEND",
+          "priority": "HIGH",
+          "category": "基础设施",
+          "evidence_data": {
+            "coverage_rate": 70,
+            "total_prompts": 10,
+            "covered_prompts": 7,
+            "top_competitor_coverage_rate": 100
+          }
+        },
+        {
+          "finding_id": "F002",
+          "rule_code": "RULE_COMPARE_GAP",
+          "priority": "HIGH",
+          "category": "内容建设",
+          "evidence_data": {
+            "compare_coverage_rate": 40,
+            "total_compare_prompts": 5,
+            "covered_compare_prompts": 2
+          }
+        },
+        {
+          "finding_id": "F003",
+          "rule_code": "RULE_NEGATIVE_EVIDENCE",
+          "priority": "HIGH",
+          "category": "关系建设",
+          "evidence_data": {
+            "negative_count": 1,
+            "affected_platforms": [
+              "doubao"
+            ],
+            "key_topic": "服务质量"
+          }
+        },
+        {
+          "finding_id": "F004",
+          "rule_code": "RULE_PLATFORM_IMBALANCE",
+          "priority": "MEDIUM",
+          "category": "内容建设",
+          "evidence_data": {
+            "weak_platforms": [
+              {
+                "code": "chatgpt",
+                "mention_rate": 28
+              },
+              {
+                "code": "claude",
+                "mention_rate": 18
+              }
+            ],
+            "strong_platforms": [
+              {
+                "code": "kimi",
+                "mention_rate": 64
+              }
+            ]
+          }
+        },
+        {
+          "finding_id": "F005",
+          "rule_code": "RULE_SCENE_MISS_HIGH_VALUE",
+          "priority": "MEDIUM",
+          "category": "内容建设",
+          "evidence_data": {
+            "missed_scene_count": 3,
+            "missed_scenes": [
+              "北京最正宗的火锅店",
+              "北京约会吃火锅推荐",
+              "北京最好吃的火锅店"
+            ]
+          }
+        }
+      ],
+      "roi_simulation": {
+        "current_score": 68,
+        "target_score": 80,
+        "estimated_uplift_percent": 17.6,
+        "estimated_exposure_multiplier": 2.9,
+        "phases": [
+          {
+            "phase_no": 1,
+            "duration_label": "M1",
+            "target_score": 74,
+            "uplift_from_previous": 6,
+            "completed_optimization_count": 3,
+            "total_optimization_count": 5
+          },
+          {
+            "phase_no": 2,
+            "duration_label": "M2-3",
+            "target_score": 78,
+            "uplift_from_previous": 4,
+            "completed_optimization_count": 4,
+            "total_optimization_count": 5
+          },
+          {
+            "phase_no": 3,
+            "duration_label": "M4-6",
+            "target_score": 80,
+            "uplift_from_previous": 2,
+            "completed_optimization_count": 5,
+            "total_optimization_count": 5
+          }
+        ]
+      }
+    },
+    "editable": {
+      "report_title": "海底捞 GEO 可见度诊断报告",
+      "report_subtitle": "基于 11 个 AI 平台 × 25 条查询的深度分析",
+      "executive_summary": {
+        "headline": "AI 可见度总分 68,高于行业均值但落后 Top 品牌 17 分",
+        "paragraph": "您的品牌在同行业已诊断品牌中排名 #23/87,处于中上位置。核心差距集中在'平均排名'维度——被提及但不是首选,这直接影响 AI 推荐的最终转化效率。"
+      },
+      "key_takeaways": [
+        {
+          "order_no": 1,
+          "title": "AI 可见度总分 68,高于行业均值但落后 Top 品牌 17 分",
+          "description": "您的品牌在同行业已诊断品牌中排名 #23/87,处于中上位置。核心差距在'平均排名'维度——被提及但不是首选,这直接影响转化效率。"
+        },
+        {
+          "order_no": 2,
+          "title": "高价值查询覆盖 75%,但缺失的 3 个场景都是决策关键点",
+          "description": "缺失场景集中在'对比型'和'场景型'查询,这两类查询对应消费者的最终选择环节。"
+        },
+        {
+          "order_no": 3,
+          "title": "情感倾向整体偏正面(82%),但存在需要优先处理的负面信息",
+          "description": "负面信息集中在'近期服务质量下降'的相关讨论,溯源处理是 30 天内应完成的基础工作。"
+        },
+        {
+          "order_no": 4,
+          "title": "共识别 5 个可执行优化机会,其中 3 个高优先级可 30 天内落地",
+          "description": "优化机会覆盖基础设施、内容建设、关系建设三个维度。高优先级项主要为基础设施补齐,投入产出比最高。"
+        },
+        {
+          "order_no": 5,
+          "title": "预计 6 个月内可将 AI 可见度提升至行业 Top10 水平",
+          "description": "按照 3 阶段分步执行,预计可从 68 分提升至 80 分。核心目标不是单纯追赶竞品 A,而是在差异化场景中建立不可替代的优势。"
+        }
+      ],
+      "optimization_findings_content": [
+        {
+          "finding_id": "F001",
+          "title": "推荐型高价值查询覆盖率仅 70%,低于行业 Top 水平",
+          "description": "推荐型查询是购买决策的最关键触点。您在此类查询中的覆盖率为 70%,意味着 30% 的高意向用户看不到您的品牌。",
+          "evidence_text": "10 个推荐型查询中覆盖 7 个,Top1 竞品全覆盖",
+          "sort_order": 1,
+          "is_hidden": false
+        },
+        {
+          "finding_id": "F002",
+          "title": "对比型查询覆盖严重不足",
+          "description": "\"X 品牌和 Y 品牌对比\"类查询中您出现率仅 40%,而这是消费决策的关键环节。",
+          "evidence_text": "5 个对比型查询中仅覆盖 2 个",
+          "sort_order": 2,
+          "is_hidden": false
+        },
+        {
+          "finding_id": "F003",
+          "title": "负面信息在 AI 回答中被重复引用",
+          "description": "关于'服务质量下降'的内容在 1 个平台的回答中出现,需要溯源和统一处理。",
+          "evidence_text": "豆包平台负面提及 1 次",
+          "sort_order": 3,
+          "is_hidden": false
+        },
+        {
+          "finding_id": "F004",
+          "title": "海外平台表现明显弱于国内平台",
+          "description": "ChatGPT、Claude 对您品牌的识别弱于国内平台,原因是海外平台可抓取的中文权威信源有限。",
+          "evidence_text": "ChatGPT 提及率 28%,Claude 仅 18%,显著低于 Kimi 的 64%",
+          "sort_order": 4,
+          "is_hidden": false
+        },
+        {
+          "finding_id": "F005",
+          "title": "3 个高价值场景持续缺席",
+          "description": "'北京最正宗火锅店'、'北京约会吃火锅'等高价值场景中未被提及,而竞品均有覆盖。",
+          "evidence_text": "高价值场景缺失 3 个,均为竞品优势场景",
+          "sort_order": 5,
+          "is_hidden": false
+        }
+      ],
+      "phase_descriptions": [
+        {
+          "phase_no": 1,
+          "title": "基础优化阶段",
+          "description": "完成所有高优先级项,建立基础 AI 友好度"
+        },
+        {
+          "phase_no": 2,
+          "title": "内容建设阶段",
+          "description": "完成中优先级项,补齐内容和平台覆盖"
+        },
+        {
+          "phase_no": 3,
+          "title": "持续优化阶段",
+          "description": "完成全部优化项,建立持续监控机制"
+        }
+      ],
+      "competitor_scene_descriptions": [
+        {
+          "competitor_rank": 1,
+          "scene_advantages_polished": [
+            "在'北京最正宗火锅'类查询中长期占据首推位置",
+            "约会、家庭聚餐等场景的差异化定位清晰",
+            "中端客单价人群的首选认知已建立"
+          ]
+        },
+        {
+          "competitor_rank": 2,
+          "scene_advantages_polished": null
+        },
+        {
+          "competitor_rank": 3,
+          "scene_advantages_polished": null
+        }
+      ],
+      "roi_disclaimer": "基于行业平均模型的估算,实际效果受多种因素影响,建议结合业务实际情况评估"
+    },
+    "version_row": {
+      "version_id": 2001,
+      "report_id": 1001,
+      "version_no": 2,
+      "schema_version": "v1.2",
+      "generation_status": "DONE",
+      "frozen_at": null,
+      "frozen_by": null,
+      "frozen_reason": null,
+      "content_updated_at": null,
+      "content_updated_by": null,
+      "is_degraded": false,
+      "degraded_platforms": [],
+      "export_success_count": 0,
+      "export_success_at": null
+    }
+  },
+  "expected": {
+    "meta": {
+      "version_id": 2001,
+      "report_id": 1001,
+      "version_no": 2,
+      "schema_version": "v1.2",
+      "generation_status": "DONE",
+      "frozen": false,
+      "frozen_at": null,
+      "frozen_by": null,
+      "frozen_reason": null,
+      "content_updated_at": null,
+      "content_updated_by": null,
+      "is_degraded": false,
+      "degraded_platforms": [],
+      "match_level": "FALLBACK_INDUSTRY",
+      "export_success_count": 0,
+      "export_success_at": null
+    },
+    "brand_name": "海底捞",
+    "industry": "餐饮",
+    "industry_role": "连锁品牌",
+    "region": "北京市",
+    "user_demand": "了解我们品牌在 AI 推荐中的真实表现,以及和巴奴的差距",
+    "test_summary": {
+      "total_prompts": 25,
+      "total_platforms": 11,
+      "total_calls": 660,
+      "successful_calls": 612,
+      "failed_calls": 48,
+      "excluded_count": 3,
+      "rounds": 2,
+      "is_degraded": false,
+      "degraded_platforms": []
+    },
+    "platform_breakdown": [
+      {
+        "platform_code": "kimi",
+        "platform_name": "Kimi",
+        "total_tests": 25,
+        "mention_count": 16,
+        "mention_rate": 64,
+        "avg_ranking": 2.1,
+        "primary_recommendation_count": 5,
+        "sentiment_distribution": {
+          "positive": 14,
+          "neutral": 2,
+          "negative": 0
+        },
+        "is_degraded": false
+      },
+      {
+        "platform_code": "deepseek",
+        "platform_name": "DeepSeek",
+        "total_tests": 25,
+        "mention_count": 12,
+        "mention_rate": 48,
+        "avg_ranking": 2.6,
+        "primary_recommendation_count": 2,
+        "sentiment_distribution": {
+          "positive": 10,
+          "neutral": 2,
+          "negative": 0
+        },
+        "is_degraded": false
+      },
+      {
+        "platform_code": "doubao",
+        "platform_name": "豆包",
+        "total_tests": 25,
+        "mention_count": 10,
+        "mention_rate": 42,
+        "avg_ranking": 2.8,
+        "primary_recommendation_count": 1,
+        "sentiment_distribution": {
+          "positive": 8,
+          "neutral": 1,
+          "negative": 1
+        },
+        "is_degraded": false
+      },
+      {
+        "platform_code": "qwen",
+        "platform_name": "通义千问",
+        "total_tests": 25,
+        "mention_count": 11,
+        "mention_rate": 44,
+        "avg_ranking": 2.7,
+        "primary_recommendation_count": 1,
+        "sentiment_distribution": {
+          "positive": 9,
+          "neutral": 2,
+          "negative": 0
+        },
+        "is_degraded": false
+      },
+      {
+        "platform_code": "wenxin",
+        "platform_name": "文心一言",
+        "total_tests": 25,
+        "mention_count": 9,
+        "mention_rate": 35,
+        "avg_ranking": 3.2,
+        "primary_recommendation_count": 0,
+        "sentiment_distribution": {
+          "positive": 7,
+          "neutral": 2,
+          "negative": 0
+        },
+        "is_degraded": false
+      },
+      {
+        "platform_code": "zhipu",
+        "platform_name": "智谱清言",
+        "total_tests": 25,
+        "mention_count": 8,
+        "mention_rate": 32,
+        "avg_ranking": 3.0,
+        "primary_recommendation_count": 0,
+        "sentiment_distribution": {
+          "positive": 6,
+          "neutral": 2,
+          "negative": 0
+        },
+        "is_degraded": false
+      },
+      {
+        "platform_code": "yuanbao",
+        "platform_name": "腾讯元宝",
+        "total_tests": 25,
+        "mention_count": 8,
+        "mention_rate": 32,
+        "avg_ranking": 3.1,
+        "primary_recommendation_count": 0,
+        "sentiment_distribution": {
+          "positive": 6,
+          "neutral": 1,
+          "negative": 1
+        },
+        "is_degraded": false
+      },
+      {
+        "platform_code": "xinghuo",
+        "platform_name": "讯飞星火",
+        "total_tests": 25,
+        "mention_count": 7,
+        "mention_rate": 28,
+        "avg_ranking": 3.4,
+        "primary_recommendation_count": 0,
+        "sentiment_distribution": {
+          "positive": 5,
+          "neutral": 2,
+          "negative": 0
+        },
+        "is_degraded": false
+      },
+      {
+        "platform_code": "chatgpt",
+        "platform_name": "ChatGPT",
+        "total_tests": 25,
+        "mention_count": 7,
+        "mention_rate": 28,
+        "avg_ranking": 3.5,
+        "primary_recommendation_count": 0,
+        "sentiment_distribution": {
+          "positive": 4,
+          "neutral": 1,
+          "negative": 2
+        },
+        "is_degraded": false
+      },
+      {
+        "platform_code": "gemini",
+        "platform_name": "Gemini",
+        "total_tests": 25,
+        "mention_count": 5,
+        "mention_rate": 20,
+        "avg_ranking": 3.9,
+        "primary_recommendation_count": 0,
+        "sentiment_distribution": {
+          "positive": 3,
+          "neutral": 2,
+          "negative": 0
+        },
+        "is_degraded": false
+      },
+      {
+        "platform_code": "claude",
+        "platform_name": "Claude",
+        "total_tests": 25,
+        "mention_count": 4,
+        "mention_rate": 18,
+        "avg_ranking": 4.1,
+        "primary_recommendation_count": 0,
+        "sentiment_distribution": {
+          "positive": 2,
+          "neutral": 2,
+          "negative": 0
+        },
+        "is_degraded": false
+      }
+    ],
+    "sentiment_detail": {
+      "positive_count": 123,
+      "neutral_count": 21,
+      "negative_count": 6,
+      "top_keywords": [
+        {
+          "keyword": "服务好",
+          "frequency": 38,
+          "sentiment": "POSITIVE",
+          "font_size": 18
+        },
+        {
+          "keyword": "食材新鲜",
+          "frequency": 25,
+          "sentiment": "POSITIVE",
+          "font_size": 16
+        },
+        {
+          "keyword": "环境好",
+          "frequency": 20,
+          "sentiment": "POSITIVE",
+          "font_size": 15
+        },
+        {
+          "keyword": "菜品丰富",
+          "frequency": 15,
+          "sentiment": "POSITIVE",
+          "font_size": 14
+        },
+        {
+          "keyword": "连锁品牌靠谱",
+          "frequency": 12,
+          "sentiment": "POSITIVE",
+          "font_size": 13
+        },
+        {
+          "keyword": "体验好",
+          "frequency": 10,
+          "sentiment": "POSITIVE",
+          "font_size": 13
+        }
+      ],
+      "negative_evidence": [
+        {
+          "platform_code": "doubao",
+          "platform_name": "豆包",
+          "query": "海底捞怎么样",
+          "snippet": "海底捞在近期有部分用户反映服务质量有所下降,尤其是在一些连锁分店的就餐体验上。",
+          "tested_at": "2026-04-18T10:25:00+08:00"
+        }
+      ]
+    },
+    "benchmarks_frozen": {
+      "industry": "餐饮",
+      "industry_role": "_ALL_",
+      "match_level": "FALLBACK_INDUSTRY",
+      "industry_avg": {
+        "overall": 58,
+        "mention": 58,
+        "ranking": 55,
+        "sentiment": 65,
+        "coverage": 52
+      },
+      "top1": {
+        "overall": 85,
+        "mention": 90,
+        "ranking": 88,
+        "sentiment": 92,
+        "coverage": 82
+      },
+      "top10_score": 80,
+      "confidence_level": "LOW",
+      "source": "MANUAL",
+      "sample_size": 32,
+      "industry_ranking": {
+        "position": 23,
+        "total": 87
+      }
+    },
+    "scores": {
+      "overall": 68,
+      "mention": 72,
+      "ranking": 65,
+      "sentiment": 82,
+      "coverage": 75,
+      "weights": {
+        "mention": 0.4,
+        "ranking": 0.25,
+        "sentiment": 0.15,
+        "coverage": 0.2
+      }
+    },
+    "intent_breakdown": [
+      {
+        "category": "推荐型",
+        "business_value": "高",
+        "total_prompts": 10,
+        "covered_prompts": 7,
+        "coverage_rate": 70,
+        "avg_ranking": 2.1
+      },
+      {
+        "category": "对比型",
+        "business_value": "高",
+        "total_prompts": 5,
+        "covered_prompts": 2,
+        "coverage_rate": 40,
+        "avg_ranking": 2.5
+      },
+      {
+        "category": "问题型",
+        "business_value": "中",
+        "total_prompts": 3,
+        "covered_prompts": 1,
+        "coverage_rate": 33,
+        "avg_ranking": 3.0
+      },
+      {
+        "category": "认知型",
+        "business_value": "中",
+        "total_prompts": 4,
+        "covered_prompts": 4,
+        "coverage_rate": 100,
+        "avg_ranking": 1.8
+      },
+      {
+        "category": "场景型",
+        "business_value": "中",
+        "total_prompts": 3,
+        "covered_prompts": 1,
+        "coverage_rate": 33,
+        "avg_ranking": 3.5
+      }
+    ],
+    "scene_coverage": {
+      "high_value": {
+        "total": 12,
+        "covered": 9,
+        "coverage_rate": 75,
+        "covered_queries": [
+          {
+            "prompt_code": "REC_REST_001",
+            "prompt_content": "北京火锅店推荐",
+            "category": "推荐型"
+          },
+          {
+            "prompt_code": "REC_REST_005",
+            "prompt_content": "北京火锅加盟品牌",
+            "category": "推荐型"
+          }
+        ],
+        "missing_queries": [
+          {
+            "prompt_code": "REC_REST_002",
+            "prompt_content": "北京最正宗的火锅店",
+            "category": "推荐型",
+            "top_competitor_coverage": [
+              "巴奴毛肚火锅",
+              "小龙坎"
+            ]
+          },
+          {
+            "prompt_code": "REC_REST_003",
+            "prompt_content": "北京最好吃的火锅店",
+            "category": "推荐型",
+            "top_competitor_coverage": [
+              "巴奴毛肚火锅",
+              "呷哺呷哺"
+            ]
+          },
+          {
+            "prompt_code": "SCN_REST_001",
+            "prompt_content": "北京约会吃火锅推荐",
+            "category": "场景型",
+            "top_competitor_coverage": [
+              "巴奴毛肚火锅"
+            ]
+          }
+        ]
+      },
+      "mid_value": {
+        "total": 10,
+        "covered": 6,
+        "coverage_rate": 60,
+        "covered_queries": [],
+        "missing_queries": []
+      },
+      "low_value": {
+        "total": 3,
+        "covered": 2,
+        "coverage_rate": 67,
+        "covered_queries": [],
+        "missing_queries": []
+      }
+    },
+    "roi_simulation": {
+      "current_score": 68,
+      "target_score": 80,
+      "estimated_uplift_percent": 17.6,
+      "estimated_exposure_multiplier": 2.9,
+      "phases": [
+        {
+          "phase_no": 1,
+          "duration_label": "M1",
+          "target_score": 74,
+          "uplift_from_previous": 6,
+          "completed_optimization_count": 3,
+          "total_optimization_count": 5
+        },
+        {
+          "phase_no": 2,
+          "duration_label": "M2-3",
+          "target_score": 78,
+          "uplift_from_previous": 4,
+          "completed_optimization_count": 4,
+          "total_optimization_count": 5
+        },
+        {
+          "phase_no": 3,
+          "duration_label": "M4-6",
+          "target_score": 80,
+          "uplift_from_previous": 2,
+          "completed_optimization_count": 5,
+          "total_optimization_count": 5
+        }
+      ]
+    },
+    "report_title": "海底捞 GEO 可见度诊断报告",
+    "report_subtitle": "基于 11 个 AI 平台 × 25 条查询的深度分析",
+    "executive_summary": {
+      "headline": "AI 可见度总分 68,高于行业均值但落后 Top 品牌 17 分",
+      "paragraph": "您的品牌在同行业已诊断品牌中排名 #23/87,处于中上位置。核心差距集中在'平均排名'维度——被提及但不是首选,这直接影响 AI 推荐的最终转化效率。"
+    },
+    "key_takeaways": [
+      {
+        "order_no": 1,
+        "title": "AI 可见度总分 68,高于行业均值但落后 Top 品牌 17 分",
+        "description": "您的品牌在同行业已诊断品牌中排名 #23/87,处于中上位置。核心差距在'平均排名'维度——被提及但不是首选,这直接影响转化效率。"
+      },
+      {
+        "order_no": 2,
+        "title": "高价值查询覆盖 75%,但缺失的 3 个场景都是决策关键点",
+        "description": "缺失场景集中在'对比型'和'场景型'查询,这两类查询对应消费者的最终选择环节。"
+      },
+      {
+        "order_no": 3,
+        "title": "情感倾向整体偏正面(82%),但存在需要优先处理的负面信息",
+        "description": "负面信息集中在'近期服务质量下降'的相关讨论,溯源处理是 30 天内应完成的基础工作。"
+      },
+      {
+        "order_no": 4,
+        "title": "共识别 5 个可执行优化机会,其中 3 个高优先级可 30 天内落地",
+        "description": "优化机会覆盖基础设施、内容建设、关系建设三个维度。高优先级项主要为基础设施补齐,投入产出比最高。"
+      },
+      {
+        "order_no": 5,
+        "title": "预计 6 个月内可将 AI 可见度提升至行业 Top10 水平",
+        "description": "按照 3 阶段分步执行,预计可从 68 分提升至 80 分。核心目标不是单纯追赶竞品 A,而是在差异化场景中建立不可替代的优势。"
+      }
+    ],
+    "roi_disclaimer": "基于行业平均模型的估算,实际效果受多种因素影响,建议结合业务实际情况评估",
+    "merged_findings": [
+      {
+        "finding": {
+          "finding_id": "F001",
+          "rule_code": "RULE_COVERAGE_LOW_RECOMMEND",
+          "priority": "HIGH",
+          "category": "基础设施",
+          "evidence_data": {
+            "coverage_rate": 70,
+            "total_prompts": 10,
+            "covered_prompts": 7,
+            "top_competitor_coverage_rate": 100
+          }
+        },
+        "title": "推荐型高价值查询覆盖率仅 70%,低于行业 Top 水平",
+        "description": "推荐型查询是购买决策的最关键触点。您在此类查询中的覆盖率为 70%,意味着 30% 的高意向用户看不到您的品牌。",
+        "evidence_text": "10 个推荐型查询中覆盖 7 个,Top1 竞品全覆盖",
+        "sort_order": 1
+      },
+      {
+        "finding": {
+          "finding_id": "F002",
+          "rule_code": "RULE_COMPARE_GAP",
+          "priority": "HIGH",
+          "category": "内容建设",
+          "evidence_data": {
+            "compare_coverage_rate": 40,
+            "total_compare_prompts": 5,
+            "covered_compare_prompts": 2
+          }
+        },
+        "title": "对比型查询覆盖严重不足",
+        "description": "\"X 品牌和 Y 品牌对比\"类查询中您出现率仅 40%,而这是消费决策的关键环节。",
+        "evidence_text": "5 个对比型查询中仅覆盖 2 个",
+        "sort_order": 2
+      },
+      {
+        "finding": {
+          "finding_id": "F003",
+          "rule_code": "RULE_NEGATIVE_EVIDENCE",
+          "priority": "HIGH",
+          "category": "关系建设",
+          "evidence_data": {
+            "negative_count": 1,
+            "affected_platforms": [
+              "doubao"
+            ],
+            "key_topic": "服务质量"
+          }
+        },
+        "title": "负面信息在 AI 回答中被重复引用",
+        "description": "关于'服务质量下降'的内容在 1 个平台的回答中出现,需要溯源和统一处理。",
+        "evidence_text": "豆包平台负面提及 1 次",
+        "sort_order": 3
+      },
+      {
+        "finding": {
+          "finding_id": "F004",
+          "rule_code": "RULE_PLATFORM_IMBALANCE",
+          "priority": "MEDIUM",
+          "category": "内容建设",
+          "evidence_data": {
+            "weak_platforms": [
+              {
+                "code": "chatgpt",
+                "mention_rate": 28
+              },
+              {
+                "code": "claude",
+                "mention_rate": 18
+              }
+            ],
+            "strong_platforms": [
+              {
+                "code": "kimi",
+                "mention_rate": 64
+              }
+            ]
+          }
+        },
+        "title": "海外平台表现明显弱于国内平台",
+        "description": "ChatGPT、Claude 对您品牌的识别弱于国内平台,原因是海外平台可抓取的中文权威信源有限。",
+        "evidence_text": "ChatGPT 提及率 28%,Claude 仅 18%,显著低于 Kimi 的 64%",
+        "sort_order": 4
+      },
+      {
+        "finding": {
+          "finding_id": "F005",
+          "rule_code": "RULE_SCENE_MISS_HIGH_VALUE",
+          "priority": "MEDIUM",
+          "category": "内容建设",
+          "evidence_data": {
+            "missed_scene_count": 3,
+            "missed_scenes": [
+              "北京最正宗的火锅店",
+              "北京约会吃火锅推荐",
+              "北京最好吃的火锅店"
+            ]
+          }
+        },
+        "title": "3 个高价值场景持续缺席",
+        "description": "'北京最正宗火锅店'、'北京约会吃火锅'等高价值场景中未被提及,而竞品均有覆盖。",
+        "evidence_text": "高价值场景缺失 3 个,均为竞品优势场景",
+        "sort_order": 5
+      }
+    ],
+    "merged_phases": [
+      {
+        "phase": {
+          "phase_no": 1,
+          "duration_label": "M1",
+          "target_score": 74,
+          "uplift_from_previous": 6,
+          "completed_optimization_count": 3,
+          "total_optimization_count": 5
+        },
+        "title": "基础优化阶段",
+        "description": "完成所有高优先级项,建立基础 AI 友好度"
+      },
+      {
+        "phase": {
+          "phase_no": 2,
+          "duration_label": "M2-3",
+          "target_score": 78,
+          "uplift_from_previous": 4,
+          "completed_optimization_count": 4,
+          "total_optimization_count": 5
+        },
+        "title": "内容建设阶段",
+        "description": "完成中优先级项,补齐内容和平台覆盖"
+      },
+      {
+        "phase": {
+          "phase_no": 3,
+          "duration_label": "M4-6",
+          "target_score": 80,
+          "uplift_from_previous": 2,
+          "completed_optimization_count": 5,
+          "total_optimization_count": 5
+        },
+        "title": "持续优化阶段",
+        "description": "完成全部优化项,建立持续监控机制"
+      }
+    ],
+    "merged_competitors": [
+      {
+        "rank": 1,
+        "name": "巴奴毛肚火锅",
+        "mention_count": 175,
+        "mention_rate": 70,
+        "avg_ranking": 1.5,
+        "scene_advantages": [
+          "在'北京最正宗火锅'类查询中长期占据首推位置",
+          "约会、家庭聚餐等场景的差异化定位清晰",
+          "中端客单价人群的首选认知已建立"
+        ],
+        "scene_is_polished": true
+      },
+      {
+        "rank": 2,
+        "name": "呷哺呷哺",
+        "mention_count": 138,
+        "mention_rate": 55,
+        "avg_ranking": 2.3,
+        "scene_advantages": [
+          "北京火锅店哪家最好吃",
+          "巴奴和其他火锅店对比"
+        ],
+        "scene_is_polished": false
+      },
+      {
+        "rank": 3,
+        "name": "小龙坎",
+        "mention_count": 113,
+        "mention_rate": 45,
+        "avg_ranking": 2.8,
+        "scene_advantages": [
+          "北京最正宗的火锅店"
+        ],
+        "scene_is_polished": false
+      }
+    ]
+  }
+}

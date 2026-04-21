@@ -5,7 +5,9 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\dto\PublishQuotaVO.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\dto\QuestionPoolManageItemVO.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\mapper\SysPermissionMapper.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\editable\FindingContent.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\service\DictAdminService.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\editable\ExecutiveSummary.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\controller\ContentArticleController.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\service\PlatformCredentialService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\entity\PackageContentConfig.java
@@ -23,6 +25,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\dto\PackageContentConfigRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\dto\QuestionPoolItemVO.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\controller\DispatchController.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\raw\ClientInfo.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\report\entity\PostsaleReportSnapshot.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\service\DispatchWorkerService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\report\entity\Report.java
@@ -35,12 +38,15 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\service\adapter\EmailSiteAdapter.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\mapper\ArticleReviewLogMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\entity\CompanyAccount.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\raw\RawMeta.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\dto\UserRoleBindRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\mapper\ContentQuestionRotationMapper.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\json\PresaleDateTimeJson.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\dto\ArticleDistributeRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\service\BrandStatementDispatchService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\common\result\R.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\entity\PublishSite.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\computed\IntentBreakdown.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\entity\SysRole.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\mapper\CompanyAccountTxnMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\entity\ArticleQuestionRel.java
@@ -48,6 +54,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\dto\DispatchDashboardVO.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\service\DispatchMonitorService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\common\log\HttpLogSanitizer.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\raw\SentimentDetail.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\dto\PackagePlanUpdateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\entity\ArticleReviewLog.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\report\controller\ShareReportController.java
@@ -63,21 +70,27 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\service\PermissionService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\common\config\RedisConfig.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\partner\mapper\PartnerAccountTxnMapper.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\editable\EditableContentDTO.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\mapper\ProjectPublishQuotaMapper.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\common\SceneQueryMissing.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\service\adapter\ValidationResult.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\dto\ProjectStatusUpdateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\report\controller\ReportController.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\entity\SysDictItem.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\controller\KeywordAffixWordController.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\service\ContentArticleService.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\raw\Competitor.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\controller\PackagePlanAdminController.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\mapper\SystemAlertMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\auth\dto\LoginRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\mapper\ArticleGenerationLogMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\report\dto\ReportInterceptRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\mapper\ArticleQuestionRelMapper.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\editable\PhaseDescription.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\common\config\InitPasswordRunner.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\common\util\SecurityUtils.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\raw\TestSummary.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\merged\MergedViewMeta.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\mapper\ProjectMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\dto\KeywordAffixWordOptionVO.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\service\adapter\SubmitResult.java
@@ -85,6 +98,8 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\mapper\PackageContentConfigMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\dto\ArticleReviewRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\partner\dto\PartnerAdjustRequest.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\common\SceneQueryItem.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\computed\ComputedSnapshotDTO.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\mapper\BrandMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\dto\DispatchTaskReplayRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\service\ProjectService.java
@@ -97,6 +112,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\mapper\DispatchAlertMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\dto\ResetPasswordRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\controller\BrandController.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\raw\PlatformBreakdown.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\dto\UserAdminVO.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\entity\ArticlePublishLog.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\partner\dto\PartnerRechargeRequest.java
@@ -140,6 +156,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\dto\BrandUpdateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\mapper\KeywordAffixWordMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\service\DispatchQueueService.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\common\ScoreSet.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\dto\KeywordAffixWordCreateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\controller\PackagePlanController.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\mapper\BrandProfileVersionMapper.java
@@ -159,6 +176,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\report\mapper\PostsaleReportSnapshotMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dashboard\mapper\ProjectDashboardShareMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\dto\DispatchDateRange.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\merged\MergedViewDTO.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\entity\Brand.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\mapper\SysRolePermissionMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\controller\ProjectController.java
@@ -172,6 +190,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\controller\DictController.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\entity\SysRolePermission.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\dto\DistributionManualConfirmRequest.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\raw\RawSnapshotDTO.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\common\storage\MinioStorageService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\service\GeoPromptBuilder.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\entity\PollBatch.java
@@ -187,6 +206,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\dto\UserUpdateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\dto\CurrentUserProfileVO.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\dto\DispatchAlertVO.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\common\MatchLevel.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\partner\dto\PartnerCreateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\service\KeywordAffixWordService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\service\CompanyService.java
@@ -197,10 +217,13 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\service\CurrentUserService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\entity\KeywordGroup.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\partner\service\PartnerService.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\raw\BenchmarksFrozen.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\common\SceneCoverageGroup.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\report\mapper\ReportMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\dto\QuestionPoolItemRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\controller\HealthController.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\entity\QuestionPoolItem.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\computed\RoiSimulation.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\mapper\DispatchTaskMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\entity\BrandMaterial.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\service\PackagePlanService.java
@@ -208,6 +231,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\dto\BrandCreateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\service\ProjectFlowPolicy.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\dto\DispatchAlertResolveRequest.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\ReportSnapshotDTO.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\controller\KeywordAffixWordAdminController.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\entity\Company.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\partner\controller\PartnerController.java
@@ -225,6 +249,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\mapper\ArticleBatchMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\controller\QuestionPoolController.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\service\KeywordGroupService.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\computed\OptimizationFinding.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\mapper\ActivityLogMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\mapper\ProjectKeywordGroupRelMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\dto\UserStatusUpdateRequest.java
@@ -254,6 +279,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\common\config\MinioConfig.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\dto\AiPlatformConfigUpdateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\service\DispatchFacadeService.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\computed\Scores.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\report\entity\ReportAccessLog.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\service\DispatchTaskStateService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\common\config\SecurityConfig.java
@@ -272,6 +298,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\dto\KeywordGroupColumnsVO.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\dto\CompanyDeductRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\partner\mapper\PartnerMapper.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\editable\KeyTakeaway.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dashboard\service\ProjectDashboardService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\dto\ProjectStageUpdateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\controller\UserAdminController.java
@@ -280,6 +307,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\mapper\QuestionPoolItemMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\dto\KeywordGroupPayloadRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\entity\SysUserRole.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\editable\CompetitorSceneDescription.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\mapper\CompanyAccountMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\partner\entity\PartnerAccountTxn.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\service\ArticleGenerationPersistenceService.java
