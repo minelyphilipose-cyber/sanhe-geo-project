@@ -8,10 +8,16 @@ import com.huanjing.geo.module.presale.dto.response.ReportListItemVO;
 import com.huanjing.geo.module.presale.dto.response.ReportVersionMetaVO;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateStatus;
+import com.huanjing.geo.module.presale.generate.PromptTemplateIntentStatRow;
+import com.huanjing.geo.module.presale.access.AccessScope;
+import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
+import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,20 +44,31 @@ import java.util.stream.Collectors;
  */
 @Service
 public class PresaleReportService {
+    private static final String PERM_LIST = "presale.report.list";
+    private static final String PERM_CREATE = "presale.report.create";
 
     private final PresaleReportMapper reportMapper;
     private final PresaleReportVersionMapper versionMapper;
     private final PresaleGenerateOrchestrator orchestrator;
     private final CurrentUserService currentUserService;
+    private final PresaleAccessService accessService;
+    private final AiPlatformConfigMapper aiPlatformConfigMapper;
+    private final PresaleAiPromptResultMapper aiPromptResultMapper;
 
     public PresaleReportService(PresaleReportMapper reportMapper,
                                 PresaleReportVersionMapper versionMapper,
                                 PresaleGenerateOrchestrator orchestrator,
-                                CurrentUserService currentUserService) {
+                                CurrentUserService currentUserService,
+                                PresaleAccessService accessService,
+                                AiPlatformConfigMapper aiPlatformConfigMapper,
+                                PresaleAiPromptResultMapper aiPromptResultMapper) {
         this.reportMapper = reportMapper;
         this.versionMapper = versionMapper;
         this.orchestrator = orchestrator;
         this.currentUserService = currentUserService;
+        this.accessService = accessService;
+        this.aiPlatformConfigMapper = aiPlatformConfigMapper;
+        this.aiPromptResultMapper = aiPromptResultMapper;
     }
 
     /**
@@ -61,6 +78,7 @@ public class PresaleReportService {
      */
     @Transactional
     public Long createReport(CreateReportRequest req) {
+        currentUserService.ensurePermission(PERM_CREATE);
         Long userId = currentUserService.requireCurrentUser().getId();
         LocalDateTime now = LocalDateTime.now();
 
@@ -76,11 +94,20 @@ public class PresaleReportService {
         reportMapper.insert(report);
 
         PresaleReportVersion version = new PresaleReportVersion();
+        int platformCount = countEnabledPlatforms();
+        int genericPromptCount = countPromptTemplates(0);
+        int competitorPromptCount = countPromptTemplates(1);
+        int batch1Total = platformCount * genericPromptCount * 2;
+        int totalUpperBound = batch1Total + (platformCount * competitorPromptCount * 3 * 2);
         version.setReportId(report.getId());
         version.setVersionNo(1);
         version.setGenerationStatus(PresaleGenerateStatus.QUEUED.name());
-        version.setTotalLlmCalls(660);
+        version.setTotalLlmCalls(totalUpperBound);
         version.setCompletedLlmCalls(0);
+        version.setBatch1TotalCalls(batch1Total);
+        version.setBatch1CompletedCalls(0);
+        version.setBatch2TotalCalls(null);
+        version.setBatch2CompletedCalls(0);
         version.setIsDegraded(false);
         version.setExportSuccessCount(0);
         version.setCreatedAt(now);
@@ -93,7 +120,7 @@ public class PresaleReportService {
         reportMapper.updateById(report);
 
         // 异步触发生成
-        orchestrator.triggerGenerate(version.getId());
+        orchestrator.triggerGenerate(version.getId(), userId, accessService.canManageCurrentUser());
 
         return report.getId();
     }
@@ -102,6 +129,7 @@ public class PresaleReportService {
      * 列表查询。返回 MyBatis-Plus Page,Controller 直接包进 R。
      */
     public Page<ReportListItemVO> listReports(ReportListQueryRequest req) {
+        currentUserService.ensurePermission(PERM_LIST);
         Page<PresaleReport> page = Page.of(
                 req.getPage() == null ? 1 : req.getPage(),
                 req.getPageSize() == null ? 20 : req.getPageSize()
@@ -159,6 +187,10 @@ public class PresaleReportService {
 
     private LambdaQueryWrapper<PresaleReport> buildQueryWrapper(ReportListQueryRequest req) {
         LambdaQueryWrapper<PresaleReport> q = new LambdaQueryWrapper<>();
+        Long currentUserId = accessService.currentUserId();
+        if (accessService.getAccessScope() == AccessScope.OWN_ONLY) {
+            q.eq(PresaleReport::getCreatedBy, currentUserId);
+        }
 
         if (req.getKeyword() != null && !req.getKeyword().isBlank()) {
             q.like(PresaleReport::getBrandName, req.getKeyword().trim());
@@ -206,8 +238,14 @@ public class PresaleReportService {
                 .versionId(v.getId())
                 .versionNo(v.getVersionNo())
                 .generationStatus(v.getGenerationStatus())
+                .generationStage(v.getGenerationStage())
                 .totalLlmCalls(v.getTotalLlmCalls())
                 .completedLlmCalls(v.getCompletedLlmCalls())
+                .batch1TotalCalls(v.getBatch1TotalCalls())
+                .batch1CompletedCalls(v.getBatch1CompletedCalls())
+                .batch2TotalCalls(v.getBatch2TotalCalls())
+                .batch2CompletedCalls(v.getBatch2CompletedCalls())
+                .extractedCompetitorCount(v.getExtractedCompetitorCount())
                 .isDegraded(v.getIsDegraded())
                 .degradedPlatforms(degradedPlatforms)
                 .failureReason(v.getFailureReason())
@@ -235,5 +273,24 @@ public class PresaleReportService {
             if (!trimmed.isEmpty()) result.add(trimmed);
         }
         return result;
+    }
+
+    private int countEnabledPlatforms() {
+        LambdaQueryWrapper<AiPlatformConfig> query = new LambdaQueryWrapper<>();
+        query.eq(AiPlatformConfig::getEnabled, true);
+        Long count = aiPlatformConfigMapper.selectCount(query);
+        return count == null ? 0 : count.intValue();
+    }
+
+    private int countPromptTemplates(int hasCompetitorVar) {
+        List<PromptTemplateIntentStatRow> stats = aiPromptResultMapper.selectTemplateIntentStats();
+        if (stats == null || stats.isEmpty()) {
+            return 0;
+        }
+        return stats.stream()
+                .filter(row -> row != null && row.getHasCompetitorVar() != null
+                        && row.getHasCompetitorVar() == hasCompetitorVar)
+                .mapToInt(row -> row.getTemplateCount() == null ? 0 : row.getTemplateCount())
+                .sum();
     }
 }

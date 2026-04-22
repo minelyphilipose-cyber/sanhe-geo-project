@@ -34,12 +34,19 @@ public class PresaleReportVersion {
      * 对应 {@link com.huanjing.geo.module.presale.generate.PresaleGenerateStatus}。
      */
     private String generationStatus;
+    /** 生成子阶段(BATCH1/COMPETITOR_EXTRACT/BATCH2/L1_AGGREGATE/L2_COMPUTE/L3_INIT)。 */
+    private String generationStage;
 
     /** 总 LLM 调用数,v1.2 契约 11×30×2 = 660。 */
     private Integer totalLlmCalls;
 
     /** 已完成 LLM 调用数,进度页展示。 */
     private Integer completedLlmCalls;
+    private Integer batch1TotalCalls;
+    private Integer batch1CompletedCalls;
+    private Integer batch2TotalCalls;
+    private Integer batch2CompletedCalls;
+    private Integer extractedCompetitorCount;
 
     /** 是否降级(部分平台失败)。 */
     private Boolean isDegraded;
@@ -55,6 +62,8 @@ public class PresaleReportVersion {
 
     /** 失败原因,FAILED 状态时填。 */
     private String failureReason;
+    /** 失败类别(枚举编码),FAILED 状态时填。 */
+    private String failureCategory;
 
     /** L1 原始快照 JSON(v1.2 raw_snapshot_json)。 */
     private String rawSnapshotJson;

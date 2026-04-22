@@ -49,7 +49,7 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
         when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
                 .thenThrow(new RuntimeException("temporary timeout"))
                 .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
-                        "{\"choices\":[{\"message\":{\"content\":\"query ok\"}}]}"));
+                        "{\"choices\":[{\"message\":{\"content\":\"query ok\"}}],\"usage\":{\"prompt_tokens\":12,\"completion_tokens\":34}}"));
 
         PlatformCallContext ctx = new PlatformCallContext(
                 1L, 1, "kimi", 1001L, "", "Acme", 11L, false
@@ -60,6 +60,8 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
         assertEquals(1, result.retryCount());
         assertTrue(result.isRetriedSuccess());
         assertEquals("query ok", result.rawResponse());
+        assertEquals(12, result.promptTokens());
+        assertEquals(34, result.completionTokens());
     }
 
     @Test
@@ -69,7 +71,7 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
         when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
         when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
                 .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
-                        "{\"choices\":[{\"message\":{\"content\":\"```json\\n{\\\"is_mentioned\\\":true,\\\"ranking\\\":1,\\\"sentiment\\\":\\\"POSITIVE\\\",\\\"mentioned_competitors\\\":[],\\\"scene_advantages\\\":[]}\\n```\"}}]}"));
+                        "{\"choices\":[{\"message\":{\"content\":\"```json\\n{\\\"is_mentioned\\\":true,\\\"ranking\\\":1,\\\"sentiment\\\":\\\"POSITIVE\\\",\\\"mentioned_competitors\\\":[],\\\"scene_advantages\\\":[]}\\n```\"}}],\"usage\":{\"prompt_tokens\":22,\"completion_tokens\":18}}"));
 
         PlatformCallContext ctx = new PlatformCallContext(
                 1L, 1, "kimi", 1002L, "", "Acme", 11L, false
@@ -79,6 +81,8 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
         assertEquals(CallStatus.SUCCESS, result.callStatus());
         assertEquals(0, result.retryCount());
         assertTrue(result.rawResponse().contains("\"is_mentioned\":true"));
+        assertEquals(22, result.promptTokens());
+        assertEquals(18, result.completionTokens());
     }
 
     private PresaleLlmPlatformConfigRow row() {
@@ -95,4 +99,3 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
         return row;
     }
 }
-

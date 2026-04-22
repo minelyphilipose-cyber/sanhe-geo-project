@@ -89,6 +89,19 @@ export function mergeSnapshot(
   versionRow: VersionRowMeta
 ): MergedViewDTO {
   const meta = buildMeta(raw, versionRow);
+  const l2Findings = asArray<OptimizationFinding>(computed?.optimization_findings);
+  const l3FindingContent = asArray<FindingContent>(
+    editable?.optimization_findings_content
+  );
+  const l2Phases = asArray<RoiPhase>(computed?.roi_simulation?.phases);
+  const l3PhaseDescriptions = asArray<PhaseDescription>(
+    editable?.phase_descriptions
+  );
+  const l1Competitors = asArray<Competitor>(raw?.competitors);
+  const l3CompetitorDescriptions = asArray<CompetitorSceneDescription>(
+    editable?.competitor_scene_descriptions
+  );
+  const keyTakeaways = asArray<KeyTakeaway>(editable?.key_takeaways);
 
   return {
     meta,
@@ -124,21 +137,21 @@ export function mergeSnapshot(
       raw.test_summary
     ),
     executive_summary: resolveExecutiveSummary(editable.executive_summary),
-    key_takeaways: editable.key_takeaways,
+    key_takeaways: keyTakeaways,
     roi_disclaimer: resolveRoiDisclaimer(editable.roi_disclaimer),
 
     // 合并产物
     merged_findings: mergeFindings(
-      computed.optimization_findings,
-      editable.optimization_findings_content
+      l2Findings,
+      l3FindingContent
     ),
     merged_phases: mergePhases(
-      computed.roi_simulation.phases,
-      editable.phase_descriptions
+      l2Phases,
+      l3PhaseDescriptions
     ),
     merged_competitors: mergeCompetitors(
-      raw.competitors,
-      editable.competitor_scene_descriptions
+      l1Competitors,
+      l3CompetitorDescriptions
     ),
   };
 }
@@ -149,6 +162,7 @@ function buildMeta(
   raw: RawSnapshotDTO,
   row: VersionRowMeta
 ): MergedViewMeta {
+  const matchLevel = raw?.benchmarks_frozen?.match_level ?? 'EXACT';
   return {
     version_id: row.version_id,
     report_id: row.report_id,
@@ -166,10 +180,14 @@ function buildMeta(
     // DB 可为 null,前端契约永远是数组,此处归一
     degraded_platforms: row.degraded_platforms ?? [],
     // match_level 从 L1 提升到 meta,便于前端警示条一处读取
-    match_level: raw.benchmarks_frozen.match_level,
+    match_level: matchLevel,
     export_success_count: row.export_success_count,
     export_success_at: row.export_success_at ?? null,
   };
+}
+
+function asArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
 }
 
 // ─────────────────────── 文案默认模板 + 变量插值 ───────────────────────

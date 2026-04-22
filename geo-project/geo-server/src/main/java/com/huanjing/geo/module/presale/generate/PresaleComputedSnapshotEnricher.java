@@ -6,12 +6,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.ComputedSnapshotDTO;
+import com.huanjing.geo.module.presale.dto.snapshot.computed.IntentBreakdown;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.PlatformIntentCell;
+import com.huanjing.geo.module.presale.dto.snapshot.computed.PresaleIntentCode;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 统一 computed_snapshot 增强/校验入口。
@@ -35,21 +40,25 @@ public class PresaleComputedSnapshotEnricher {
                                     String computedSnapshotJson,
                                     boolean allowSyntheticFallback) {
         try {
-            JsonNode rawRoot = objectMapper.readTree(rawSnapshotJson);
-            RawSnapshotDTO rawSnapshot = objectMapper.treeToValue(extractRawNode(rawRoot), RawSnapshotDTO.class);
+            JsonNode rawRoot = objectMapper.readTree(stripBom(rawSnapshotJson));
+            JsonNode effectiveRoot = unwrapInputNode(rawRoot);
+            RawSnapshotDTO rawSnapshot = objectMapper.treeToValue(extractRawNode(effectiveRoot), RawSnapshotDTO.class);
             if (rawSnapshot == null) {
                 throw new BizException(500, "platform_intent_breakdown integrity violated: raw_snapshot is null");
             }
 
-            ObjectNode computedNode = extractComputedNode(rawRoot, computedSnapshotJson);
+            ObjectNode computedNode = extractComputedNode(effectiveRoot, computedSnapshotJson);
             ComputedSnapshotDTO computedSnapshot = objectMapper.treeToValue(computedNode, ComputedSnapshotDTO.class);
             if (computedSnapshot == null) {
                 throw new BizException(500, "platform_intent_breakdown integrity violated: computed_snapshot is null");
             }
 
-            List<PlatformIntentCell> cells = builder.build(
+            PlatformIntentBreakdownBuilder.BuildResult buildResult = builder.build(
                     versionId, rawSnapshot, computedSnapshot, allowSyntheticFallback);
+            List<PlatformIntentCell> cells = buildResult.cells();
             computedSnapshot.setPlatformIntentBreakdown(cells);
+            computedSnapshot.setIntentBreakdown(mergeIntentBreakdown(computedSnapshot.getIntentBreakdown(),
+                    buildResult.intentTotalPrompts()));
 
             validator.validate(rawSnapshot.getPlatformBreakdown(), computedSnapshot.getIntentBreakdown(), cells);
             return objectMapper.writeValueAsString(computedSnapshot);
@@ -58,6 +67,20 @@ public class PresaleComputedSnapshotEnricher {
         } catch (JsonProcessingException e) {
             throw new BizException(500, "platform_intent_breakdown integrity violated: json parse failed - " + e.getMessage());
         }
+    }
+
+    private String stripBom(String json) {
+        if (json != null && !json.isEmpty() && json.charAt(0) == '\uFEFF') {
+            return json.substring(1);
+        }
+        return json;
+    }
+
+    private JsonNode unwrapInputNode(JsonNode root) {
+        if (root != null && root.has("input") && root.get("input").isObject()) {
+            return root.get("input");
+        }
+        return root;
     }
 
     private JsonNode extractRawNode(JsonNode root) {
@@ -83,7 +106,55 @@ public class PresaleComputedSnapshotEnricher {
                 out.set(key, rawRoot.get(key));
             }
         }
+        if (!out.has("intent_breakdown") && rawRoot != null
+                && rawRoot.has("computed") && rawRoot.get("computed").isObject()
+                && rawRoot.get("computed").has("intent_breakdown")) {
+            out.set("intent_breakdown", rawRoot.get("computed").get("intent_breakdown"));
+        }
+        for (String key : COMPUTED_KEYS) {
+            if (!out.has(key) && rawRoot != null
+                    && rawRoot.has("computed") && rawRoot.get("computed").isObject()
+                    && rawRoot.get("computed").has(key)) {
+                out.set(key, rawRoot.get("computed").get(key));
+            }
+        }
         return out;
     }
-}
 
+    private List<IntentBreakdown> mergeIntentBreakdown(List<IntentBreakdown> existing,
+                                                       Map<String, Integer> intentTotals) {
+        Map<String, IntentBreakdown> byCode = new HashMap<>();
+        List<IntentBreakdown> source = existing == null ? List.of() : existing;
+        for (IntentBreakdown item : source) {
+            if (item == null || item.getCategory() == null) {
+                continue;
+            }
+            PresaleIntentCode intentCode = PresaleIntentCode.fromLabel(item.getCategory());
+            byCode.put(intentCode.getCode(), item);
+        }
+
+        List<IntentBreakdown> merged = new ArrayList<>();
+        for (PresaleIntentCode intentCode : PresaleIntentCode.allInOrder()) {
+            IntentBreakdown item = byCode.get(intentCode.getCode());
+            if (item == null) {
+                item = new IntentBreakdown();
+                item.setCategory(intentCode.getLabel());
+                item.setBusinessValue(defaultBusinessValue(intentCode));
+                item.setCoveredPrompts(0);
+                item.setCoverageRate(0D);
+                item.setAvgRanking(null);
+            }
+            item.setTotalPrompts(intentTotals.getOrDefault(intentCode.getCode(), 0));
+            merged.add(item);
+        }
+        return merged;
+    }
+
+    private String defaultBusinessValue(PresaleIntentCode intentCode) {
+        return switch (intentCode) {
+            case RECOMMENDATION, COMPARISON -> "高";
+            case INQUIRY, COGNITIVE -> "中";
+            case SCENARIO -> "低";
+        };
+    }
+}

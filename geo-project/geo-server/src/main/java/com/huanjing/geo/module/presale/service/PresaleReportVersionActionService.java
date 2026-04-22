@@ -9,6 +9,7 @@ import com.huanjing.geo.module.presale.dto.EditVersionContentRequest;
 import com.huanjing.geo.module.presale.dto.FreezeVersionRequest;
 import com.huanjing.geo.module.presale.dto.RetryVersionResponse;
 import com.huanjing.geo.module.presale.dto.VersionActionResponse;
+import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateStatus;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
@@ -64,12 +65,10 @@ public class PresaleReportVersionActionService {
      */
     private static final String PERM_MANAGE = "presale.report.manage";
 
-    /** L1/L2/L3 契约总调用数,v1.2 契约 11x30x2 = 660,retry 时保持不变。 */
-    private static final int TOTAL_LLM_CALLS = 660;
-
     private final PresaleReportMapper reportMapper;
     private final PresaleReportVersionMapper versionMapper;
     private final CurrentUserService currentUserService;
+    private final PresaleAccessService accessService;
 
     /**
      * P1·F·1·a 已存在的 Mock Orchestrator,retry 时重新触发生成。
@@ -87,8 +86,8 @@ public class PresaleReportVersionActionService {
                                              EditVersionContentRequest req) {
         currentUserService.ensurePermission(PERM_EDIT);
 
-        PresaleReport report = requireReport(reportId);
-        PresaleReportVersion version = requireVersion(report.getId(), versionNo);
+        PresaleReport report = accessService.requireReportWithAccess(reportId);
+        PresaleReportVersion version = accessService.requireVersionWithAccess(report.getId(), versionNo);
 
         if (version.getFrozenAt() != null) {
             throw new BizException(409, "Version is frozen, cannot edit");
@@ -125,8 +124,8 @@ public class PresaleReportVersionActionService {
         SysUser user = currentUserService.requireCurrentUser();
         LocalDateTime now = LocalDateTime.now();
 
-        PresaleReport report = requireReport(reportId);
-        PresaleReportVersion source = requireVersion(report.getId(), versionNo);
+        PresaleReport report = accessService.requireReportWithAccess(reportId);
+        PresaleReportVersion source = accessService.requireVersionWithAccess(report.getId(), versionNo);
 
         if (!PresaleGenerateStatus.DONE.name().equals(source.getGenerationStatus())) {
             throw new BizException(409, "Only DONE version can be derived");
@@ -201,8 +200,8 @@ public class PresaleReportVersionActionService {
         currentUserService.ensurePermission(PERM_EDIT);
         SysUser user = currentUserService.requireCurrentUser();
 
-        PresaleReport report = requireReport(reportId);
-        PresaleReportVersion version = requireVersion(report.getId(), versionNo);
+        PresaleReport report = accessService.requireReportWithAccess(reportId);
+        PresaleReportVersion version = accessService.requireVersionWithAccess(report.getId(), versionNo);
 
         if (version.getFrozenAt() != null) {
             throw new BizException(409, "Version already frozen");
@@ -242,8 +241,8 @@ public class PresaleReportVersionActionService {
         currentUserService.ensurePermission(PERM_MANAGE);
         SysUser user = currentUserService.requireCurrentUser();
 
-        PresaleReport report = requireReport(reportId);
-        PresaleReportVersion version = requireVersion(report.getId(), versionNo);
+        PresaleReport report = accessService.requireReportWithAccess(reportId);
+        PresaleReportVersion version = accessService.requireVersionWithAccess(report.getId(), versionNo);
 
         if (version.getFrozenAt() == null) {
             throw new BizException(409, "Version not frozen");
@@ -278,8 +277,8 @@ public class PresaleReportVersionActionService {
         currentUserService.ensurePermission(PERM_MANAGE);
         SysUser user = currentUserService.requireCurrentUser();
 
-        PresaleReport report = requireReport(reportId);
-        PresaleReportVersion version = requireVersion(report.getId(), versionNo);
+        PresaleReport report = accessService.requireReportWithAccess(reportId);
+        PresaleReportVersion version = accessService.requireVersionWithAccess(report.getId(), versionNo);
 
         // 已导出过的版本禁删(定稿条款)
         Integer exportedCount = version.getExportSuccessCount();
@@ -325,8 +324,8 @@ public class PresaleReportVersionActionService {
         currentUserService.ensurePermission(PERM_EDIT);
         SysUser user = currentUserService.requireCurrentUser();
 
-        PresaleReport report = requireReport(reportId);
-        PresaleReportVersion version = requireVersion(report.getId(), versionNo);
+        PresaleReport report = accessService.requireReportWithAccess(reportId);
+        PresaleReportVersion version = accessService.requireVersionWithAccess(report.getId(), versionNo);
 
         if (!PresaleGenerateStatus.FAILED.name().equals(version.getGenerationStatus())) {
             throw new BizException(409, "Only FAILED version can be retried");
@@ -336,15 +335,20 @@ public class PresaleReportVersionActionService {
         LambdaUpdateWrapper<PresaleReportVersion> update = new LambdaUpdateWrapper<PresaleReportVersion>()
                 .eq(PresaleReportVersion::getId, version.getId())
                 .set(PresaleReportVersion::getGenerationStatus, PresaleGenerateStatus.QUEUED.name())
-                .set(PresaleReportVersion::getTotalLlmCalls, TOTAL_LLM_CALLS)
+                .set(PresaleReportVersion::getGenerationStage, null)
+                .set(PresaleReportVersion::getTotalLlmCalls, version.getTotalLlmCalls() == null ? 0 : version.getTotalLlmCalls())
                 .set(PresaleReportVersion::getCompletedLlmCalls, 0)
+                .set(PresaleReportVersion::getBatch1CompletedCalls, 0)
+                .set(PresaleReportVersion::getBatch2CompletedCalls, 0)
+                .set(PresaleReportVersion::getBatch2TotalCalls, null)
+                .set(PresaleReportVersion::getExtractedCompetitorCount, null)
                 .set(PresaleReportVersion::getIsDegraded, false)
                 .set(PresaleReportVersion::getDegradedPlatforms, null)
                 .set(PresaleReportVersion::getFailureReason, null);
         versionMapper.update(null, update);
 
         // 触发 orchestrator 重跑
-        generateOrchestrator.triggerGenerate(version.getId());
+        generateOrchestrator.triggerGenerate(version.getId(), user.getId(), accessService.canManageCurrentUser());
 
         log.info("presale.retry report={} version={} by user={}",
                 report.getId(), versionNo, user.getId());
@@ -356,31 +360,42 @@ public class PresaleReportVersionActionService {
                 .build();
     }
 
-    // ---------------------------------------------------------------
-    // helpers
-    // ---------------------------------------------------------------
+    @Transactional
+    public RetryVersionResponse regenerate(Long reportId, Integer versionNo) {
+        currentUserService.ensurePermission(PERM_EDIT);
+        SysUser user = currentUserService.requireCurrentUser();
 
-    private PresaleReport requireReport(Long reportId) {
-        PresaleReport report = reportMapper.selectById(reportId);
-        if (report == null) {
-            throw new BizException(404, "Report not found: " + reportId);
+        PresaleReport report = accessService.requireReportWithAccess(reportId);
+        PresaleReportVersion version = accessService.requireVersionWithAccess(report.getId(), versionNo);
+        if (!PresaleGenerateStatus.DONE.name().equals(version.getGenerationStatus())
+                && !PresaleGenerateStatus.FAILED.name().equals(version.getGenerationStatus())) {
+            throw new BizException(409, "Only DONE or FAILED version can be regenerated");
         }
-        return report;
+        if (version.getFrozenAt() != null) {
+            throw new BizException(409, "Frozen version cannot be regenerated");
+        }
+
+        LambdaUpdateWrapper<PresaleReportVersion> update = new LambdaUpdateWrapper<PresaleReportVersion>()
+                .eq(PresaleReportVersion::getId, version.getId())
+                .set(PresaleReportVersion::getGenerationStatus, PresaleGenerateStatus.QUEUED.name())
+                .set(PresaleReportVersion::getGenerationStage, null)
+                .set(PresaleReportVersion::getCompletedLlmCalls, 0)
+                .set(PresaleReportVersion::getBatch1CompletedCalls, 0)
+                .set(PresaleReportVersion::getBatch2CompletedCalls, 0)
+                .set(PresaleReportVersion::getBatch2TotalCalls, null)
+                .set(PresaleReportVersion::getExtractedCompetitorCount, null)
+                .set(PresaleReportVersion::getFailureReason, null)
+                .set(PresaleReportVersion::getIsDegraded, false)
+                .set(PresaleReportVersion::getDegradedPlatforms, null);
+        versionMapper.update(null, update);
+
+        generateOrchestrator.triggerGenerate(version.getId(), user.getId(), accessService.canManageCurrentUser());
+
+        return RetryVersionResponse.builder()
+                .versionId(version.getId())
+                .versionNo(version.getVersionNo())
+                .generationStatus(PresaleGenerateStatus.QUEUED.name())
+                .build();
     }
 
-    private PresaleReportVersion requireVersion(Long reportId, Integer versionNo) {
-        if (versionNo == null || versionNo <= 0) {
-            throw new BizException(400, "Invalid versionNo");
-        }
-        PresaleReportVersion version = versionMapper.selectOne(
-                new LambdaQueryWrapper<PresaleReportVersion>()
-                        .eq(PresaleReportVersion::getReportId, reportId)
-                        .eq(PresaleReportVersion::getVersionNo, versionNo)
-        );
-        if (version == null) {
-            throw new BizException(404,
-                    "Version not found: report=" + reportId + " versionNo=" + versionNo);
-        }
-        return version;
-    }
 }

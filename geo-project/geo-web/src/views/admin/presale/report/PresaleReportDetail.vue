@@ -110,7 +110,7 @@ function toVersionRowMeta(d: ReportDetailVO): VersionRowMeta {
     frozen_reason: null,
     content_updated_at: v.contentUpdatedAt,
     content_updated_by: null,
-    is_degraded: v.isDegraded,
+    is_degraded: v.isDegraded ?? false,
     degraded_platforms: v.degradedPlatforms ?? null,
     export_success_count: v.exportSuccessCount,
     export_success_at: v.exportSuccessAt
@@ -170,7 +170,7 @@ function buildMetaOnlyView(d: ReportDetailVO): MergedViewDTO {
       frozen_reason: null,
       content_updated_at: v.contentUpdatedAt,
       content_updated_by: null,
-      is_degraded: v.isDegraded,
+      is_degraded: v.isDegraded ?? false,
       degraded_platforms: v.degradedPlatforms ?? [],
       match_level: 'EXACT',
       export_success_count: v.exportSuccessCount,

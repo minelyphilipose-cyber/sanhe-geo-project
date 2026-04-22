@@ -9,7 +9,6 @@ import com.huanjing.geo.module.presale.dto.response.ReportListItemVO;
 import com.huanjing.geo.module.presale.dto.response.ReportVersionMetaVO;
 import com.huanjing.geo.module.presale.service.PresaleReportService;
 import com.huanjing.geo.module.presale.service.PresaleReportVersionService;
-import com.huanjing.geo.module.presale.service.PresaleRoleResolver;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
@@ -39,14 +38,11 @@ public class PresaleReportController {
 
     private final PresaleReportService reportService;
     private final PresaleReportVersionService versionService;
-    private final PresaleRoleResolver roleResolver;
 
     public PresaleReportController(PresaleReportService reportService,
-                                   PresaleReportVersionService versionService,
-                                   PresaleRoleResolver roleResolver) {
+                                   PresaleReportVersionService versionService) {
         this.reportService = reportService;
         this.versionService = versionService;
-        this.roleResolver = roleResolver;
     }
 
     /**
@@ -55,9 +51,6 @@ public class PresaleReportController {
      */
     @GetMapping
     public R<Page<ReportListItemVO>> list(@ModelAttribute ReportListQueryRequest req) {
-        if (!roleResolver.canView()) {
-            return R.fail("无权限查看报告列表");
-        }
         return R.ok(reportService.listReports(req));
     }
 
@@ -66,9 +59,6 @@ public class PresaleReportController {
      */
     @PostMapping
     public R<Long> create(@RequestBody @Valid CreateReportRequest req) {
-        if (!roleResolver.canCreate()) {
-            return R.fail("无权限新建报告");
-        }
         Long reportId = reportService.createReport(req);
         return R.ok(reportId);
     }
@@ -79,9 +69,6 @@ public class PresaleReportController {
      */
     @GetMapping("/{id}/versions/latest")
     public R<ReportDetailVO> getLatestDetail(@PathVariable("id") Long id) {
-        if (!roleResolver.canView()) {
-            return R.fail("无权限查看报告");
-        }
         return R.ok(versionService.getDetail(id, null));
     }
 
@@ -91,9 +78,6 @@ public class PresaleReportController {
     @GetMapping("/{id}/versions/{versionNo}")
     public R<ReportDetailVO> getVersionDetail(@PathVariable("id") Long id,
                                               @PathVariable("versionNo") Integer versionNo) {
-        if (!roleResolver.canView()) {
-            return R.fail("无权限查看报告");
-        }
         return R.ok(versionService.getDetail(id, versionNo));
     }
 
@@ -103,9 +87,6 @@ public class PresaleReportController {
      */
     @GetMapping("/{id}/versions/latest/meta")
     public R<ReportVersionMetaVO> getLatestVersionMeta(@PathVariable("id") Long id) {
-        if (!roleResolver.canView()) {
-            return R.fail("无权限查看报告");
-        }
         return R.ok(versionService.getLatestVersionMeta(id));
     }
 }

@@ -2,12 +2,11 @@ package com.huanjing.geo.module.presale.generate;
 
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.ComputedSnapshotDTO;
-import com.huanjing.geo.module.presale.dto.snapshot.computed.IntentBreakdown;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.PlatformIntentCell;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.PresaleIntentCode;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.PlatformBreakdown;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
-import com.huanjing.geo.module.presale.persist.mapper.PresaleAiTestResultMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -24,19 +23,15 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class PlatformIntentBreakdownBuilder {
 
-    private final PresaleAiTestResultMapper aiTestResultMapper;
+    private final PresaleAiPromptResultMapper aiPromptResultMapper;
 
-    public List<PlatformIntentCell> build(Long versionId,
-                                          RawSnapshotDTO rawSnapshot,
-                                          ComputedSnapshotDTO computedSnapshot,
-                                          boolean allowSyntheticFallback) {
+    public BuildResult build(Long versionId,
+                             RawSnapshotDTO rawSnapshot,
+                             ComputedSnapshotDTO computedSnapshot,
+                             boolean allowSyntheticFallback) {
         if (rawSnapshot == null || rawSnapshot.getPlatformBreakdown() == null || rawSnapshot.getPlatformBreakdown().isEmpty()) {
             throw new BizException(500, "platform_intent_breakdown integrity violated: platform_breakdown is empty");
         }
-        if (computedSnapshot == null || computedSnapshot.getIntentBreakdown() == null || computedSnapshot.getIntentBreakdown().isEmpty()) {
-            throw new BizException(500, "platform_intent_breakdown integrity violated: intent_breakdown is empty");
-        }
-
         List<PlatformBreakdown> platforms = rawSnapshot.getPlatformBreakdown();
         Map<String, PlatformBreakdown> platformByCode = new HashMap<>();
         for (PlatformBreakdown platform : platforms) {
@@ -45,10 +40,12 @@ public class PlatformIntentBreakdownBuilder {
             }
         }
 
-        Map<String, Integer> intentTotalPrompts = resolveIntentTotalPrompts(computedSnapshot.getIntentBreakdown());
-        List<PlatformIntentSampleRow> rows = aiTestResultMapper.selectIntentSamplesByVersionId(versionId);
+        int competitorCount = rawSnapshot.getCompetitors() == null ? 0 : rawSnapshot.getCompetitors().size();
+        Map<String, Integer> intentTotalPrompts = resolveIntentTotalPromptsFromTemplate(competitorCount);
+        List<PlatformIntentSampleRow> rows = aiPromptResultMapper.selectIntentSamplesByVersionId(versionId);
         if ((rows == null || rows.isEmpty()) && allowSyntheticFallback) {
-            return buildSyntheticFallback(platforms, intentTotalPrompts);
+            List<PlatformIntentCell> cells = buildSyntheticFallback(platforms, intentTotalPrompts);
+            return new BuildResult(cells, intentTotalPrompts);
         }
 
         Map<String, Stat> statByKey = new HashMap<>();
@@ -110,22 +107,29 @@ public class PlatformIntentBreakdownBuilder {
                         .build());
             }
         }
-        return result;
+        return new BuildResult(result, intentTotalPrompts);
     }
 
-    private Map<String, Integer> resolveIntentTotalPrompts(List<IntentBreakdown> intentBreakdownList) {
+    private Map<String, Integer> resolveIntentTotalPromptsFromTemplate(int competitorCount) {
         Map<String, Integer> map = new HashMap<>();
-        for (IntentBreakdown intentBreakdown : intentBreakdownList) {
-            if (intentBreakdown == null || intentBreakdown.getCategory() == null) {
-                continue;
+        List<PromptTemplateIntentStatRow> rows = aiPromptResultMapper.selectTemplateIntentStats();
+        if (rows != null) {
+            for (PromptTemplateIntentStatRow row : rows) {
+                if (row == null || row.getIntentLabel() == null) {
+                    continue;
+                }
+                PresaleIntentCode intentCode = resolveIntentByLabel(row.getIntentLabel());
+                int base = safeInt(row.getTemplateCount());
+                if (safeInt(row.getHasCompetitorVar()) == 1) {
+                    base = base * Math.max(competitorCount, 0);
+                }
+                map.merge(intentCode.getCode(), base, Integer::sum);
             }
-            PresaleIntentCode intentCode = resolveIntentByLabel(intentBreakdown.getCategory());
-            map.put(intentCode.getCode(), safeInt(intentBreakdown.getTotalPrompts()));
         }
 
         for (PresaleIntentCode intentCode : PresaleIntentCode.allInOrder()) {
             if (!map.containsKey(intentCode.getCode())) {
-                throw new BizException(500, "platform_intent_breakdown integrity violated: intent_breakdown missing category=" + intentCode.getLabel());
+                throw new BizException(500, "platform_intent_breakdown integrity violated: template stats missing category=" + intentCode.getLabel());
             }
         }
         return map;
@@ -140,7 +144,7 @@ public class PlatformIntentBreakdownBuilder {
     }
 
     /**
-     * mock 兼容兜底:如果当前环境未写入 presale_ai_test_result,按平台提及总量比例分配到各意图。
+     * mock 兼容兜底:如果当前环境未写入 presale_ai_prompt_result,按平台提及总量比例分配到各意图。
      */
     private List<PlatformIntentCell> buildSyntheticFallback(List<PlatformBreakdown> platforms,
                                                             Map<String, Integer> intentTotalPrompts) {
@@ -221,6 +225,10 @@ public class PlatformIntentBreakdownBuilder {
         int totalRows;
         int includedRows;
         int mentionedRows;
+    }
+
+    public record BuildResult(List<PlatformIntentCell> cells,
+                              Map<String, Integer> intentTotalPrompts) {
     }
 
     private record Remainder(String code, double fraction) {

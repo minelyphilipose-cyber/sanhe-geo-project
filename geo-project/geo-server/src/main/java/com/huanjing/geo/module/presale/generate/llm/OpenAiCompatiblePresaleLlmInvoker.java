@@ -48,11 +48,17 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
     @Override
     public LlmCallResult analyze(PlatformCallContext ctx, String originalPrompt, String queryAnswer)
             throws LlmInvokeException, AnalyzeParseException {
-        String userPrompt = AnalyzePromptTemplates.SYSTEM_PROMPT
+        String userPrompt = AnalyzePromptTemplates.USER_TEMPLATE
                 .replace("{{originalPrompt}}", safe(originalPrompt))
                 .replace("{{queryAnswer}}", safe(queryAnswer))
                 .replace("{{brandName}}", safe(ctx.brandName()));
-        LlmCallResult result = invokeWithRetry(ctx, "", userPrompt, 0D, true);
+        LlmCallResult result = invokeWithRetry(
+                ctx,
+                AnalyzePromptTemplates.SYSTEM_INSTRUCTION,
+                userPrompt,
+                0D,
+                true
+        );
         validateAnalyzeJson(result.rawResponse());
         return result;
     }
@@ -74,20 +80,26 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         int timeoutMs = normalize(config.getTimeoutMs(), 60_000);
         int qps = Math.max(1, normalize(config.getRateLimitQps(), 1));
 
-        long started = System.currentTimeMillis();
         Exception lastError = null;
         for (int attempt = 0; attempt <= maxRetry; attempt++) {
+            long started = System.currentTimeMillis();
             try {
                 throttle(config.getPlatformCode(), qps);
-                String responseText = invokeOnce(config, apiKey, systemPrompt, userPrompt, temperature, timeoutMs);
+                InvocationResponse response = invokeOnce(config, apiKey, systemPrompt, userPrompt, temperature, timeoutMs);
+                String responseText = response.text();
                 if (normalizeJsonOutput) {
                     responseText = normalizeJsonText(responseText);
                 }
-                long durationMs = Math.max(1L, System.currentTimeMillis() - started);
+                long durationMs = System.currentTimeMillis() - started;
+                if (durationMs <= 0) {
+                    log.warn("Non-positive LLM duration detected, platformCode={}, durationMs={}",
+                            config.getPlatformCode(), durationMs);
+                    durationMs = 1L;
+                }
                 return new LlmCallResult(
                         responseText,
-                        null,
-                        null,
+                        response.promptTokens(),
+                        response.completionTokens(),
                         durationMs,
                         attempt,
                         CallStatus.SUCCESS
@@ -103,12 +115,12 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         throw new LlmInvokeException("LLM invoke failed after retries: " + reason, lastError);
     }
 
-    private String invokeOnce(PresaleLlmPlatformConfigRow config,
-                              String apiKey,
-                              String systemPrompt,
-                              String userPrompt,
-                              double temperature,
-                              int timeoutMs) throws Exception {
+    private InvocationResponse invokeOnce(PresaleLlmPlatformConfigRow config,
+                                          String apiKey,
+                                          String systemPrompt,
+                                          String userPrompt,
+                                          double temperature,
+                                          int timeoutMs) throws Exception {
         String targetUrl = normalizeChatCompletionsUrl(config.getApiUrl());
         String requestBody = buildRequestBody(config.getModelId(), systemPrompt, userPrompt, temperature);
         Map<String, String> headers = new LinkedHashMap<>();
@@ -127,11 +139,12 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
             throw new LlmInvokeException("HTTP " + response.statusCode() + ": " + safeSnippet(response.body()));
         }
-        String text = extractResponseText(response.body());
+        InvocationResponse invocation = extractResponse(response.body());
+        String text = invocation.text();
         if (!StringUtils.hasText(text)) {
             throw new LlmInvokeException("Empty model response text");
         }
-        return text;
+        return invocation;
     }
 
     private void validateAnalyzeJson(String responseText) throws AnalyzeParseException {
@@ -175,32 +188,41 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         }
     }
 
-    private String extractResponseText(String body) {
+    private InvocationResponse extractResponse(String body) {
         if (!StringUtils.hasText(body)) {
-            return null;
+            return new InvocationResponse(null, null, null);
         }
         try {
             JsonNode root = objectMapper.readTree(body);
+            Integer promptTokens = extractNullableInt(root.path("usage").path("prompt_tokens"));
+            Integer completionTokens = extractNullableInt(root.path("usage").path("completion_tokens"));
             JsonNode choices = root.get("choices");
             if (choices != null && choices.isArray() && !choices.isEmpty()) {
                 JsonNode first = choices.get(0);
                 JsonNode message = first.get("message");
                 if (message != null && message.get("content") != null && message.get("content").isTextual()) {
-                    return message.get("content").asText();
+                    return new InvocationResponse(message.get("content").asText(), promptTokens, completionTokens);
                 }
                 JsonNode text = first.get("text");
                 if (text != null && text.isTextual()) {
-                    return text.asText();
+                    return new InvocationResponse(text.asText(), promptTokens, completionTokens);
                 }
             }
             JsonNode outputText = root.get("output_text");
             if (outputText != null && outputText.isTextual()) {
-                return outputText.asText();
+                return new InvocationResponse(outputText.asText(), promptTokens, completionTokens);
             }
-            return body;
+            return new InvocationResponse(body, promptTokens, completionTokens);
         } catch (Exception ex) {
-            return body;
+            return new InvocationResponse(body, null, null);
         }
+    }
+
+    private Integer extractNullableInt(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull() || !node.isNumber()) {
+            return null;
+        }
+        return node.asInt();
     }
 
     private String stripMarkdownCodeFence(String text) {
@@ -290,5 +312,7 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
             lastInvokeAtByPlatform.put(platformCode, System.currentTimeMillis());
         }
     }
-}
 
+    private record InvocationResponse(String text, Integer promptTokens, Integer completionTokens) {
+    }
+}

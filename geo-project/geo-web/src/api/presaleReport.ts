@@ -13,11 +13,17 @@ export interface ReportVersionMetaVO {
   versionId: number
   versionNo: number
   generationStatus: 'INIT' | 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED'
-  totalLlmCalls: number
-  completedLlmCalls: number
-  isDegraded: boolean
-  degradedPlatforms: string[]
-  failureReason: string | null
+  generationStage?: 'BATCH1' | 'COMPETITOR_EXTRACT' | 'BATCH2' | 'L1_AGGREGATE' | 'L2_COMPUTE' | 'L3_INIT' | null
+  totalLlmCalls?: number
+  completedLlmCalls?: number
+  batch1TotalCalls?: number | null
+  batch1CompletedCalls?: number | null
+  batch2TotalCalls?: number | null
+  batch2CompletedCalls?: number | null
+  extractedCompetitorCount?: number | null
+  isDegraded?: boolean
+  degradedPlatforms?: string[]
+  failureReason?: string | null
   frozen: boolean
   frozenAt: string | null
   contentUpdatedAt: string | null
@@ -293,6 +299,17 @@ export function retryVersion(reportId: number, versionNo: number) {
   return unwrap(
     request.post<R<RetryVersionResponseVO>>(
       `/presale/reports/${reportId}/versions/${versionNo}/retry`
+    )
+  )
+}
+
+/**
+ * POST:重跑 DONE/FAILED 版本(同版本重跑)。
+ */
+export function regenerateVersion(reportId: number, versionNo: number) {
+  return unwrap(
+    request.post<R<RetryVersionResponseVO>>(
+      `/presale/reports/${reportId}/versions/${versionNo}/regenerate`
     )
   )
 }

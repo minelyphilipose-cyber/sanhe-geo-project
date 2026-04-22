@@ -6,7 +6,7 @@ import com.huanjing.geo.module.presale.dto.snapshot.computed.PlatformIntentCell;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.PresaleIntentCode;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.PlatformBreakdown;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
-import com.huanjing.geo.module.presale.persist.mapper.PresaleAiTestResultMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
@@ -21,14 +21,15 @@ class PlatformIntentBreakdownBuilderTest {
 
     @Test
     void build_returnsFullMatrixInStableOrderAndUniqueKeys() {
-        PresaleAiTestResultMapper mapper = Mockito.mock(PresaleAiTestResultMapper.class);
+        PresaleAiPromptResultMapper mapper = Mockito.mock(PresaleAiPromptResultMapper.class);
         Mockito.when(mapper.selectIntentSamplesByVersionId(1L)).thenReturn(List.of(
                 row("P1", "推荐型", "SUCCESS", 0, 1),
                 row("P2", "对比型", "SUCCESS", 0, 1)
         ));
+        Mockito.when(mapper.selectTemplateIntentStats()).thenReturn(templateStats());
         PlatformIntentBreakdownBuilder builder = new PlatformIntentBreakdownBuilder(mapper);
 
-        List<PlatformIntentCell> cells = builder.build(1L, raw("P1", "P2", 1, 1), computed(), false);
+        List<PlatformIntentCell> cells = builder.build(1L, raw("P1", "P2", 1, 1), computed(), false).cells();
 
         assertThat(cells).hasSize(10);
         assertThat(cells.subList(0, 5).stream().map(PlatformIntentCell::getPlatformCode).distinct())
@@ -47,15 +48,16 @@ class PlatformIntentBreakdownBuilderTest {
 
     @Test
     void build_distinguishesNullVsZeroPlatformPromptCount() {
-        PresaleAiTestResultMapper mapper = Mockito.mock(PresaleAiTestResultMapper.class);
+        PresaleAiPromptResultMapper mapper = Mockito.mock(PresaleAiPromptResultMapper.class);
         Mockito.when(mapper.selectIntentSamplesByVersionId(1L)).thenReturn(List.of(
                 // 有记录但全 excluded -> platform_prompt_count = 0
                 row("P1", "推荐型", "SUCCESS", 1, 1)
                 // 对比型无记录 -> platform_prompt_count = null
         ));
+        Mockito.when(mapper.selectTemplateIntentStats()).thenReturn(templateStats());
         PlatformIntentBreakdownBuilder builder = new PlatformIntentBreakdownBuilder(mapper);
 
-        List<PlatformIntentCell> cells = builder.build(1L, raw("P1", 0), computed(), false);
+        List<PlatformIntentCell> cells = builder.build(1L, raw("P1", 0), computed(), false).cells();
 
         PlatformIntentCell recommendation = findCell(cells, "P1", "RECOMMENDATION");
         PlatformIntentCell comparison = findCell(cells, "P1", "COMPARISON");
@@ -71,7 +73,7 @@ class PlatformIntentBreakdownBuilderTest {
 
     @Test
     void build_usesHalfUpRoundingForMentionRate() {
-        PresaleAiTestResultMapper mapper = Mockito.mock(PresaleAiTestResultMapper.class);
+        PresaleAiPromptResultMapper mapper = Mockito.mock(PresaleAiPromptResultMapper.class);
         List<PlatformIntentSampleRow> rows = new ArrayList<>();
         // 1/8 = 12.5 -> 13
         rows.add(row("P1", "推荐型", "SUCCESS", 0, 1));
@@ -79,9 +81,10 @@ class PlatformIntentBreakdownBuilderTest {
             rows.add(row("P1", "推荐型", "SUCCESS", 0, 0));
         }
         Mockito.when(mapper.selectIntentSamplesByVersionId(1L)).thenReturn(rows);
+        Mockito.when(mapper.selectTemplateIntentStats()).thenReturn(templateStats());
         PlatformIntentBreakdownBuilder builder = new PlatformIntentBreakdownBuilder(mapper);
 
-        List<PlatformIntentCell> cells = builder.build(1L, raw("P1", 1), computed(), false);
+        List<PlatformIntentCell> cells = builder.build(1L, raw("P1", 1), computed(), false).cells();
         PlatformIntentCell recommendation = findCell(cells, "P1", "RECOMMENDATION");
 
         assertThat(recommendation.getPlatformPromptCount()).isEqualTo(8);
@@ -141,5 +144,16 @@ class PlatformIntentBreakdownBuilderTest {
                 .findFirst()
                 .orElseThrow();
     }
-}
 
+    private List<PromptTemplateIntentStatRow> templateStats() {
+        List<PromptTemplateIntentStatRow> rows = new ArrayList<>();
+        for (PresaleIntentCode code : PresaleIntentCode.allInOrder()) {
+            PromptTemplateIntentStatRow row = new PromptTemplateIntentStatRow();
+            row.setIntentLabel(code.getLabel());
+            row.setHasCompetitorVar(0);
+            row.setTemplateCount(10);
+            rows.add(row);
+        }
+        return rows;
+    }
+}

@@ -17,9 +17,15 @@ public class ReportVersionMetaVO {
 
     /** INIT / QUEUED / RUNNING / DONE / FAILED。 */
     private String generationStatus;
+    private String generationStage;
 
     private Integer totalLlmCalls;
     private Integer completedLlmCalls;
+    private Integer batch1TotalCalls;
+    private Integer batch1CompletedCalls;
+    private Integer batch2TotalCalls;
+    private Integer batch2CompletedCalls;
+    private Integer extractedCompetitorCount;
 
     private Boolean isDegraded;
     private List<String> degradedPlatforms;

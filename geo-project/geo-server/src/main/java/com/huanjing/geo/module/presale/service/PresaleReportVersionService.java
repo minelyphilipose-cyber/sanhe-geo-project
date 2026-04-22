@@ -1,12 +1,13 @@
 package com.huanjing.geo.module.presale.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.dto.response.ReportDetailVO;
 import com.huanjing.geo.module.presale.dto.response.ReportVersionMetaVO;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
-import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
+import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.springframework.stereotype.Service;
 
 /**
@@ -14,24 +15,26 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class PresaleReportVersionService {
+    private static final String PERM_VIEW = "presale.report.view";
 
-    private final PresaleReportMapper reportMapper;
     private final PresaleReportVersionMapper versionMapper;
+    private final PresaleAccessService accessService;
+    private final CurrentUserService currentUserService;
 
-    public PresaleReportVersionService(PresaleReportMapper reportMapper,
-                                       PresaleReportVersionMapper versionMapper) {
-        this.reportMapper = reportMapper;
+    public PresaleReportVersionService(PresaleReportVersionMapper versionMapper,
+                                       PresaleAccessService accessService,
+                                       CurrentUserService currentUserService) {
         this.versionMapper = versionMapper;
+        this.accessService = accessService;
+        this.currentUserService = currentUserService;
     }
 
     /**
      * 按 reportId + versionNo 取详情。versionNo 为 null 时取 latest。
      */
     public ReportDetailVO getDetail(Long reportId, Integer versionNo) {
-        PresaleReport report = reportMapper.selectById(reportId);
-        if (report == null) {
-            throw new IllegalArgumentException("Report not found: " + reportId);
-        }
+        currentUserService.ensurePermission(PERM_VIEW);
+        PresaleReport report = accessService.requireReportWithAccess(reportId);
 
         PresaleReportVersion version;
         if (versionNo == null) {
@@ -67,7 +70,8 @@ public class PresaleReportVersionService {
      * 进度页轮询:只取最新版本元信息,不返回快照 JSON(减小响应体积)。
      */
     public ReportVersionMetaVO getLatestVersionMeta(Long reportId) {
-        PresaleReport report = reportMapper.selectById(reportId);
+        currentUserService.ensurePermission(PERM_VIEW);
+        PresaleReport report = accessService.requireReportWithAccess(reportId);
         if (report == null || report.getLatestVersionId() == null) {
             throw new IllegalArgumentException("Report or latest version not found: " + reportId);
         }

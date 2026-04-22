@@ -102,4 +102,13 @@ public class PresaleReportVersionController {
     ) {
         return R.ok(actionService.retry(id, versionNo));
     }
+
+    @Operation(summary = "Regenerate a DONE/FAILED version in place")
+    @PostMapping("/{id}/versions/{versionNo}/regenerate")
+    public R<RetryVersionResponse> regenerate(
+            @PathVariable Long id,
+            @PathVariable Integer versionNo
+    ) {
+        return R.ok(actionService.regenerate(id, versionNo));
+    }
 }

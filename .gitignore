@@ -4,3 +4,4 @@ dist/
 geo-server/target/**
 geo-web/tsconfig.tsbuildinfo
 logs/**
+geo-project/logs/**

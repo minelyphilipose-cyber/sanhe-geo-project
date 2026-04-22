@@ -17,7 +17,7 @@
       class="degrade-alert"
     >
       <template #title>
-        本次生成已降级,以下平台未能返回结果:{{ version.degradedPlatforms.join('、') }}
+        本次生成已降级,以下平台未能返回结果:{{ (version.degradedPlatforms ?? []).join('、') }}
       </template>
     </el-alert>
 
@@ -32,7 +32,7 @@
         <div class="status-text">
           <div class="status-main">{{ statusText }}</div>
           <div v-if="version" class="status-sub">
-            已完成 {{ version.completedLlmCalls }} / {{ version.totalLlmCalls }} 次 LLM 调用
+            已完成 {{ version.completedLlmCalls ?? 0 }} / {{ version.totalLlmCalls ?? 0 }} 次 LLM 调用
           </div>
         </div>
       </div>
@@ -119,27 +119,74 @@ const statusText = computed(() => {
 
 const percentage = computed(() => {
   if (!version.value) return 0
-  if (version.value.totalLlmCalls === 0) return 0
+  const total = version.value.totalLlmCalls ?? 0
+  const completed = version.value.completedLlmCalls ?? 0
+  if (total <= 0) return 0
   return Math.min(
     100,
-    Math.round((version.value.completedLlmCalls / version.value.totalLlmCalls) * 100)
+    Math.round((completed / total) * 100)
   )
 })
 
-// v1 静态阶段列表,真实推进靠 completedLlmCalls 推算
-const stages = computed(() => {
+const stageOrder = [
+  'BATCH1',
+  'COMPETITOR_EXTRACT',
+  'BATCH2',
+  'L1_AGGREGATE',
+  'L2_COMPUTE',
+  'L3_INIT'
+] as const
+const stageSet = new Set(stageOrder)
+
+function resolveKnownStage():
+  | (typeof stageOrder)[number]
+  | null {
+  const raw = version.value?.generationStage
+  if (!raw || typeof raw !== 'string') return null
+  return stageSet.has(raw as (typeof stageOrder)[number])
+    ? (raw as (typeof stageOrder)[number])
+    : null
+}
+
+function stageState(stageCode: (typeof stageOrder)[number]): 'done' | 'running' | 'pending' {
+  const current = resolveKnownStage()
+  if (!current) return 'pending'
+  const currentIndex = stageOrder.indexOf(current)
+  const targetIndex = stageOrder.indexOf(stageCode)
+  if (currentIndex > targetIndex) return 'done'
+  if (currentIndex === targetIndex) return 'running'
+  return 'pending'
+}
+
+// 兼容回退:若后端未返回 stage,仍按总进度百分比估算
+function legacyState(start: number, end: number): 'done' | 'running' | 'pending' {
   const pct = percentage.value
-  function state(start: number, end: number): 'done' | 'running' | 'pending' {
-    if (pct >= end) return 'done'
-    if (pct > start) return 'running'
-    return 'pending'
-  }
+  if (pct >= end) return 'done'
+  if (pct > start) return 'running'
+  return 'pending'
+}
+
+const stages = computed(() => {
+  const useStage = resolveKnownStage() !== null
   return [
-    { name: '初始化 prompt 库', desc: '< 1 秒', state: state(0, 1) },
-    { name: '第一轮测试', desc: '30×11 = 330 次调用', state: state(1, 50) },
-    { name: '第二轮测试', desc: '30×11 = 330 次调用', state: state(50, 83) },
-    { name: '竞品识别与分析', desc: '识别 Top3 竞品', state: state(83, 92) },
-    { name: '评分计算与规则引擎', desc: '5 维度评分 + 10 规则命中', state: state(92, 100) }
+    {
+      name: '第一批调用',
+      desc: `${version.value?.batch1CompletedCalls ?? 0} / ${version.value?.batch1TotalCalls ?? 0}`,
+      state: useStage ? stageState('BATCH1') : legacyState(0, 45)
+    },
+    {
+      name: '竞品抽取',
+      desc: `已抽取 ${version.value?.extractedCompetitorCount ?? 0} 个竞品`,
+      state: useStage ? stageState('COMPETITOR_EXTRACT') : legacyState(45, 55)
+    },
+    {
+      name: '第二批调用',
+      desc: `${version.value?.batch2CompletedCalls ?? 0} / ${version.value?.batch2TotalCalls ?? 0}`,
+      state: useStage ? stageState('BATCH2') : legacyState(55, 90)
+    },
+    { name: 'L1 聚合', desc: '写入 raw snapshot', state: useStage ? stageState('L1_AGGREGATE') : legacyState(90, 94) },
+    { name: 'L2 计算', desc: '评分与规则命中', state: useStage ? stageState('L2_COMPUTE') : legacyState(94, 98) },
+    { name: 'L3 初始化', desc: '生成可编辑内容', state: useStage ? stageState('L3_INIT') : legacyState(98, 100) }
   ]
 })
 
