@@ -46,6 +46,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\partner\mapper\PartnerAccountTxnMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\editable\EditableContentDTO.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\dto\snapshot\common\SceneQueryMissing.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\generate\ReuseDecision.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\dto\ProjectStatusUpdateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\service\PresaleReportService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\report\controller\ReportController.java
@@ -66,6 +67,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\common\log\RequestResponseLoggingFilter.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\service\ContentDistributionService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\content\mapper\ArticleDraftMapper.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\generate\ReuseDecisionService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\service\DispatchPlannerService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\entity\ActivityLog.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\generate\llm\OpenAiCompatiblePresaleLlmInvoker.java
@@ -96,6 +98,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\persist\entity\PresaleReport.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\mapper\ProjectPollRotationMapper.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\service\BrandService.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\generate\ReuseSnapshot.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\dto\DictItemStatusUpdateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\dto\BrandUpdateRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\service\DispatchQueueService.java
@@ -104,6 +107,7 @@ D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\controller\PackagePlanController.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\dispatch\dto\DispatchTaskMonitorVO.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\project\mapper\QuestionPoolVersionMapper.java
+D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\generate\PresaleReusePersistenceService.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\customer\dto\CompanyRechargeRequest.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\system\entity\SystemAlert.java
 D:\code\sanhe-geo-project\geo-project\geo-server\src\main\java\com\huanjing\geo\module\presale\generate\llm\PromptTemplateRenderer.java
