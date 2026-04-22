@@ -20,6 +20,7 @@ import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
@@ -31,14 +32,17 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -60,6 +64,10 @@ class PresaleGenerateOrchestratorTest {
     @Mock
     private PresaleAiPromptResultMapper aiPromptResultMapper;
     @Mock
+    private ReuseDecisionService reuseDecisionService;
+    @Mock
+    private PresaleReusePersistenceService reusePersistenceService;
+    @Mock
     private PresaleLlmInvoker llmInvoker;
     @Mock
     private PromptTemplateRenderer promptTemplateRenderer;
@@ -73,6 +81,13 @@ class PresaleGenerateOrchestratorTest {
 
     @InjectMocks
     private PresaleGenerateOrchestrator orchestrator;
+
+    @BeforeEach
+    void setupReuseDefaults() {
+        lenient().when(reuseDecisionService.preloadByVersionAndBatch(any(), anyInt())).thenReturn(Map.of());
+        lenient().when(reuseDecisionService.decide(any(), any())).thenReturn(ReuseDecision.RUN_FULL);
+        lenient().when(reuseDecisionService.snapshotOf(any(), any())).thenReturn(null);
+    }
 
     @Test
     void triggerGenerate_realModePreflightFail_marksFailedWithoutRunning() {
@@ -169,6 +184,90 @@ class PresaleGenerateOrchestratorTest {
         assertEquals(450, runningUpdate.getBatch1TotalCalls());
         assertEquals(720, runningUpdate.getTotalLlmCalls());
         assertEquals(0, runningUpdate.getCompletedLlmCalls());
+    }
+
+    @Test
+    void retry_analyzeSuccessExists_skipsWholeCombo_noLlmInvoke() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        setupBasePreflightSuccess(9601L, 8601L, 1, 1, 1);
+
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("kimi")));
+        when(promptTemplateMapper.selectList(any())).thenReturn(
+                List.of(promptTemplate(701L, "G1", "batch1 {brand}")),
+                List.of(promptTemplate(702L, "C1", "batch2 {competitor}"))
+        );
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), anyString()))
+                .thenAnswer(inv -> inv.getArgument(0, String.class));
+        when(reuseDecisionService.decide(any(), any())).thenReturn(ReuseDecision.SKIP_ALL);
+
+        orchestrator.triggerGenerate(9601L, 601L, false);
+
+        verify(llmInvoker, never()).query(any(), anyString());
+        verify(llmInvoker, never()).analyze(any(), anyString(), anyString());
+        ArgumentCaptor<PresaleReportVersion> versionCaptor = ArgumentCaptor.forClass(PresaleReportVersion.class);
+        verify(versionMapper, atLeastOnce()).updateById(versionCaptor.capture());
+        int maxBatch1Completed = versionCaptor.getAllValues().stream()
+                .map(PresaleReportVersion::getBatch1CompletedCalls)
+                .filter(v -> v != null)
+                .max(Integer::compareTo)
+                .orElse(0);
+        assertEquals(2, maxBatch1Completed);
+    }
+
+    @Test
+    void retry_querySuccess_analyzeFailed_reuseQuery_onlyAnalyzeCalled_replaceFailedRows() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        setupBasePreflightSuccess(9602L, 8602L, 1, 1, 1);
+
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("kimi")));
+        when(promptTemplateMapper.selectList(any())).thenReturn(
+                List.of(promptTemplate(711L, "G1", "batch1 {brand}")),
+                List.of(promptTemplate(712L, "C1", "batch2 {competitor}"))
+        );
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), anyString()))
+                .thenAnswer(inv -> inv.getArgument(0, String.class));
+
+        PresaleAiCall reusedQuery = new PresaleAiCall();
+        reusedQuery.setId(999L);
+        reusedQuery.setRawResponse("reused-query-answer");
+        when(reuseDecisionService.decide(any(), any())).thenReturn(ReuseDecision.REUSE_QUERY_ONLY);
+        when(reuseDecisionService.snapshotOf(any(), any())).thenReturn(new ReuseSnapshot(false, reusedQuery));
+
+        when(llmInvoker.analyze(any(), anyString(), anyString()))
+                .thenReturn(successResult("{\"is_mentioned\":true,\"ranking\":1,\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[],\"scene_advantages\":[]}"));
+
+        orchestrator.triggerGenerate(9602L, 602L, false);
+
+        verify(llmInvoker, never()).query(any(), anyString());
+        verify(llmInvoker, times(1)).analyze(any(), anyString(), anyString());
+        verify(reusePersistenceService, times(1))
+                .replaceFailedAnalyzeAndResult(any(), any(), any(), any());
+    }
+
+    @Test
+    void retry_queryFailed_rerunQueryAndAnalyze() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        setupBasePreflightSuccess(9603L, 8603L, 1, 1, 1);
+
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("kimi")));
+        when(promptTemplateMapper.selectList(any())).thenReturn(
+                List.of(promptTemplate(721L, "G1", "batch1 {brand}")),
+                List.of(promptTemplate(722L, "C1", "batch2 {competitor}"))
+        );
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), anyString()))
+                .thenAnswer(inv -> inv.getArgument(0, String.class));
+        when(reuseDecisionService.decide(any(), any())).thenReturn(ReuseDecision.RUN_FULL);
+        when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
+        when(llmInvoker.analyze(any(), anyString(), anyString()))
+                .thenReturn(successResult("{\"is_mentioned\":true,\"ranking\":1,\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[],\"scene_advantages\":[]}"));
+
+        orchestrator.triggerGenerate(9603L, 603L, false);
+
+        verify(llmInvoker, times(1)).query(any(), anyString());
+        verify(llmInvoker, times(1)).analyze(any(), anyString(), anyString());
     }
 
     @Test

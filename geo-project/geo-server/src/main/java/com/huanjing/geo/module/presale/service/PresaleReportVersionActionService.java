@@ -336,15 +336,16 @@ public class PresaleReportVersionActionService {
                 .eq(PresaleReportVersion::getId, version.getId())
                 .set(PresaleReportVersion::getGenerationStatus, PresaleGenerateStatus.QUEUED.name())
                 .set(PresaleReportVersion::getGenerationStage, null)
-                .set(PresaleReportVersion::getTotalLlmCalls, version.getTotalLlmCalls() == null ? 0 : version.getTotalLlmCalls())
+                .set(PresaleReportVersion::getTotalLlmCalls, version.getTotalLlmCalls())
                 .set(PresaleReportVersion::getCompletedLlmCalls, 0)
                 .set(PresaleReportVersion::getBatch1CompletedCalls, 0)
                 .set(PresaleReportVersion::getBatch2CompletedCalls, 0)
-                .set(PresaleReportVersion::getBatch2TotalCalls, null)
+                .set(PresaleReportVersion::getBatch2TotalCalls, version.getBatch2TotalCalls())
                 .set(PresaleReportVersion::getExtractedCompetitorCount, null)
                 .set(PresaleReportVersion::getIsDegraded, false)
                 .set(PresaleReportVersion::getDegradedPlatforms, null)
-                .set(PresaleReportVersion::getFailureReason, null);
+                .set(PresaleReportVersion::getFailureReason, null)
+                .set(PresaleReportVersion::getFailureCategory, null);
         versionMapper.update(null, update);
 
         // 触发 orchestrator 重跑
@@ -379,12 +380,14 @@ public class PresaleReportVersionActionService {
                 .eq(PresaleReportVersion::getId, version.getId())
                 .set(PresaleReportVersion::getGenerationStatus, PresaleGenerateStatus.QUEUED.name())
                 .set(PresaleReportVersion::getGenerationStage, null)
+                .set(PresaleReportVersion::getTotalLlmCalls, version.getTotalLlmCalls())
                 .set(PresaleReportVersion::getCompletedLlmCalls, 0)
                 .set(PresaleReportVersion::getBatch1CompletedCalls, 0)
                 .set(PresaleReportVersion::getBatch2CompletedCalls, 0)
-                .set(PresaleReportVersion::getBatch2TotalCalls, null)
+                .set(PresaleReportVersion::getBatch2TotalCalls, version.getBatch2TotalCalls())
                 .set(PresaleReportVersion::getExtractedCompetitorCount, null)
                 .set(PresaleReportVersion::getFailureReason, null)
+                .set(PresaleReportVersion::getFailureCategory, null)
                 .set(PresaleReportVersion::getIsDegraded, false)
                 .set(PresaleReportVersion::getDegradedPlatforms, null);
         versionMapper.update(null, update);
