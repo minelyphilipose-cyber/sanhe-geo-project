@@ -111,6 +111,11 @@ export function mergeSnapshot(
     intent_breakdown: computed.intent_breakdown,
     scene_coverage: computed.scene_coverage,
     roi_simulation: computed.roi_simulation,
+    // β·2·补 新增:平台 × 意图交叉矩阵(P05 热力图消费)。
+    // `?? []` 兼容历史报告(spec v3 §7.2):新生成 DONE 报告此字段 required,
+    // 历史快照可能缺失,此处归一为空数组,Page05 会显示降级提示。
+    // 6 个月后评估是否移除此兜底(见 spec §7.4)。
+    platform_intent_breakdown: computed.platform_intent_breakdown ?? [],
 
     // L3 文案 + 默认模板回退
     report_title: resolveReportTitle(editable.report_title, raw.client_info),

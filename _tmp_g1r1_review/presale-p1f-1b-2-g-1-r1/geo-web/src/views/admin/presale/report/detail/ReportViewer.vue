@@ -30,11 +30,8 @@
       β·1 阶段:Page01(封面)和 Page02(诊断对象)用真实 SFC。
       β·2 阶段:Page03(执行摘要)、Page04(可见度评分,radar)、
                Page06(平台详细数据,bar) 真实 SFC;
-               Page05(多平台热力图 5×N)保持占位,
+               Page05(多平台热力图 5×8)**保持占位**,
                等后端补 platform_intent_breakdown 交叉数据契约。
-      β·2·补:Page05 真实 SFC 落地,后端 platform_intent_breakdown 已合入。
-               历史报告 platform_intent_breakdown 为空时,Page05 内部走降级态,
-               显示"早于功能上线"提示。
       β·3 阶段:Page07(竞品对标总览,bar)、Page08(竞品场景差异)、
                Page09(情感倾向,doughnut) 真实 SFC。
       γ·1 阶段:Page10(覆盖度总览)、Page11(覆盖度详情)、
@@ -57,8 +54,13 @@
       <!-- P04 可见度评分详情(β·2,radar chart) -->
       <Page04Scores />
 
-      <!-- P05 多平台热力图(β·2·补,5×N CSS grid 热力图) -->
-      <Page05PlatformHeatmap />
+      <!-- P05 多平台热力图 —— 占位,等后端 platform_intent_breakdown 契约 -->
+      <PagePlaceholder
+        anchor-id="page-05"
+        page-num="05"
+        page-title="多平台热力图(待后端补 platform_intent_breakdown 契约)"
+        :cover="false"
+      />
 
       <!-- P06 平台详细数据(β·2,bar chart) -->
       <Page06PlatformDetail />
@@ -113,7 +115,6 @@ import Page01Cover from './Page01Cover.vue'
 import Page02Target from './Page02Target.vue'
 import Page03ExecutiveSummary from './Page03ExecutiveSummary.vue'
 import Page04Scores from './Page04Scores.vue'
-import Page05PlatformHeatmap from './Page05PlatformHeatmap.vue'
 import Page06PlatformDetail from './Page06PlatformDetail.vue'
 import Page07CompetitorOverview from './Page07CompetitorOverview.vue'
 import Page08CompetitorScene from './Page08CompetitorScene.vue'
@@ -134,12 +135,15 @@ const degradedPlatforms = computed(() => meta.value?.degraded_platforms ?? [])
 /**
  * P15~P18 占位规格(与 DetailSidebar.PAGE_ANCHORS 的 P15~P18 一一对应)。
  *
+ * 注:P05 虽未实现,但不放在此数组里,因为它有特殊的 pageTitle(标注"待后端补契约"),
+ *     统一在 template 里单独占位(见 Viewer template 中 P05 那块)。
+ *
  * β·1:P01/P02 用真实 SFC,P03~P18 占位
  * β·2:P03/P04/P06 用真实 SFC,P05 单独占位(带后端需求标注),P07~P18 仍占位
- * β·2·补:P05 用真实 SFC(Page05PlatformHeatmap),占位数组保持 P15~P18
  * β·3:P07/P08/P09 用真实 SFC,P10~P18 仍占位
  * γ·1:P10/P11/P12/P13/P14 用真实 SFC,P15~P18 仍占位
  * γ·2:将 P15~P18 替换为真实 SFC,届时数组清空,PagePlaceholder import 亦可删除
+ *      (但 P05 占位可能仍保留,取决于后端契约是否补上)
  */
 const PLACEHOLDER_PAGES = [
   { id: 'page-15', num: '15', title: '预期收益', cover: false },

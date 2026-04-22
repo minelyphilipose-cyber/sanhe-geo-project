@@ -4,7 +4,7 @@
  * 对应 Java 包:com.huanjing.geo.module.presale.dto.snapshot.merged
  *
  * 方案 A(扁平化):按前端消费视角重新组织,前端不感知三层。
- * 权威实现:后端 /api/presale/versions/{versionNo}/merged-view。
+ * 权威实现:后端 /api/presale/versions/{versionNo}/merged-view(当前未落地,运行时仍走前端 mergeSnapshot)。
  * 前端 mergeSnapshot 仅 P1 mock 期作为非权威镜像,联调后标记 deprecated。
  */
 
@@ -18,6 +18,7 @@ import type {
 import type {
   IntentBreakdown,
   OptimizationFinding,
+  PlatformIntentCell,
   RoiPhase,
   RoiSimulation,
   SceneCoverage,
@@ -90,6 +91,15 @@ export interface MergedViewDTO {
   intent_breakdown: IntentBreakdown[];
   scene_coverage: SceneCoverage;
   roi_simulation: RoiSimulation;
+  /**
+   * β·2·补 新增:平台 × 意图交叉提及率矩阵(P05 热力图消费)。
+   *
+   * 契约:全量输出 `平台数 × 5` 条(spec v3 §2.4 硬约束)。
+   * 历史报告可能为空数组(mergeSnapshot 使用 `?? []` 兜底);Page05 会显示降级提示。
+   *
+   * 注:未来 6 个月后,若历史报告基本过期,可考虑改为 required 并移除兜底(见 spec v3 §7.4)。
+   */
+  platform_intent_breakdown: PlatformIntentCell[];
 
   // ─── L3 文案(已应用默认回退) ───
   report_title: string;
