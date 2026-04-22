@@ -1,0 +1,188 @@
+2026-04-22 08:46:17.309 [http-nio-8080-exec-1] INFO  [] o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-04-22 08:46:17.314 [http-nio-8080-exec-1] INFO  [] o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-04-22 08:46:17.336 [http-nio-8080-exec-1] INFO  [] o.s.web.servlet.DispatcherServlet - Completed initialization in 9 ms
+2026-04-22 09:29:03.780 [background-preinit] INFO  [] o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-04-22 09:29:03.812 [main] INFO  [] com.huanjing.geo.GeoApplication - Starting GeoApplication using Java 21.0.10 with PID 24760 (D:\code\sanhe-geo-project\geo-project\geo-server\target\classes started by Administrator in D:\code\sanhe-geo-project\geo-project)
+2026-04-22 09:29:03.813 [main] INFO  [] com.huanjing.geo.GeoApplication - The following 1 profile is active: "dev"
+2026-04-22 09:29:04.665 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Multiple Spring Data modules found, entering strict repository configuration mode
+2026-04-22 09:29:04.667 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data Redis repositories in DEFAULT mode.
+2026-04-22 09:29:04.700 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 23 ms. Found 0 Redis repository interfaces.
+2026-04-22 09:29:05.386 [main] INFO  [] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-04-22 09:29:05.395 [main] INFO  [] o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-04-22 09:29:05.397 [main] INFO  [] o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-04-22 09:29:05.397 [main] INFO  [] o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.20]
+2026-04-22 09:29:05.456 [main] INFO  [] o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring embedded WebApplicationContext
+2026-04-22 09:29:05.456 [main] INFO  [] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 1610 ms
+2026-04-22 09:29:05.965 [main] INFO  [] com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-04-22 09:29:06.079 [main] INFO  [] com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@7296fe0b
+2026-04-22 09:29:06.080 [main] INFO  [] com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-04-22 09:29:06.135 [main] INFO  [] o.f.c.i.license.VersionPrinter - Flyway Community Edition 9.22.3 by Redgate
+2026-04-22 09:29:06.135 [main] INFO  [] o.f.c.i.license.VersionPrinter - See release notes here: https://rd.gt/416ObMi
+2026-04-22 09:29:06.135 [main] INFO  [] o.f.c.i.license.VersionPrinter - 
+2026-04-22 09:29:06.154 [main] INFO  [] org.flywaydb.core.FlywayExecutor - Database: jdbc:mysql://localhost:3306/geo (MySQL 8.0)
+2026-04-22 09:29:06.222 [main] INFO  [] o.f.core.internal.command.DbValidate - Successfully validated 68 migrations (execution time 00:00.054s)
+2026-04-22 09:29:06.233 [main] INFO  [] o.f.core.internal.command.DbMigrate - Current version of schema `geo`: 67
+2026-04-22 09:29:06.236 [main] INFO  [] o.f.core.internal.command.DbMigrate - Schema `geo` is up to date. No migration necessary.
+2026-04-22 09:29:08.026 [main] INFO  [] o.s.s.web.DefaultSecurityFilterChain - Will secure any request with [org.springframework.security.web.session.DisableEncodeUrlFilter@32d8e58d, org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter@4c941d19, org.springframework.security.web.context.SecurityContextHolderFilter@aca2a0b, org.springframework.security.web.header.HeaderWriterFilter@1dae9e61, org.springframework.web.filter.CorsFilter@24eecabf, org.springframework.security.web.authentication.logout.LogoutFilter@3ef7fb04, com.huanjing.geo.common.security.PublicDashboardRateLimitFilter@280d5a82, com.huanjing.geo.common.security.JwtAuthenticationFilter@6a6da47a, org.springframework.security.web.savedrequest.RequestCacheAwareFilter@2cdb53d6, org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter@62ba3045, org.springframework.security.web.authentication.AnonymousAuthenticationFilter@5248c05a, org.springframework.security.web.session.SessionManagementFilter@7c31e01f, org.springframework.security.web.access.ExceptionTranslationFilter@4144d4a, org.springframework.security.web.access.intercept.AuthorizationFilter@6892d403]
+2026-04-22 09:29:08.300 [main] INFO  [] o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-04-22 09:29:08.317 [main] INFO  [] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path ''
+2026-04-22 09:29:08.328 [main] INFO  [] com.huanjing.geo.GeoApplication - Started GeoApplication in 4.94 seconds (process running for 5.214)
+2026-04-22 09:29:08.451 [main] INFO  [] c.h.g.c.config.InitPasswordRunner - admin 密码验证通过
+2026-04-22 09:29:38.234 [http-nio-8080-exec-1] INFO  [] o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-04-22 09:29:38.234 [http-nio-8080-exec-1] INFO  [] o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-04-22 09:29:38.236 [http-nio-8080-exec-1] INFO  [] o.s.web.servlet.DispatcherServlet - Completed initialization in 1 ms
+2026-04-22 09:30:16.460 [http-nio-8080-exec-5] INFO  [8a0b2c8d9ea74592ba9fd2729faf56bc] c.h.g.m.p.g.PresaleGenerateOrchestrator - Presale mock generate start, versionId=7, delay=5000ms
+2026-04-22 09:34:35.746 [background-preinit] INFO  [] o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-04-22 09:34:35.772 [main] INFO  [] com.huanjing.geo.GeoApplication - Starting GeoApplication using Java 21.0.10 with PID 1192 (D:\code\sanhe-geo-project\geo-project\geo-server\target\classes started by Administrator in D:\code\sanhe-geo-project\geo-project)
+2026-04-22 09:34:35.773 [main] INFO  [] com.huanjing.geo.GeoApplication - The following 1 profile is active: "dev"
+2026-04-22 09:34:36.613 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Multiple Spring Data modules found, entering strict repository configuration mode
+2026-04-22 09:34:36.614 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data Redis repositories in DEFAULT mode.
+2026-04-22 09:34:36.643 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 20 ms. Found 0 Redis repository interfaces.
+2026-04-22 09:34:37.284 [main] INFO  [] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-04-22 09:34:37.302 [main] INFO  [] o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-04-22 09:34:37.304 [main] INFO  [] o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-04-22 09:34:37.305 [main] INFO  [] o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.20]
+2026-04-22 09:34:37.379 [main] INFO  [] o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring embedded WebApplicationContext
+2026-04-22 09:34:37.380 [main] INFO  [] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 1576 ms
+2026-04-22 09:34:37.877 [main] INFO  [] com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-04-22 09:34:37.993 [main] INFO  [] com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@7296fe0b
+2026-04-22 09:34:37.994 [main] INFO  [] com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-04-22 09:34:38.059 [main] INFO  [] o.f.c.i.license.VersionPrinter - Flyway Community Edition 9.22.3 by Redgate
+2026-04-22 09:34:38.060 [main] INFO  [] o.f.c.i.license.VersionPrinter - See release notes here: https://rd.gt/416ObMi
+2026-04-22 09:34:38.060 [main] INFO  [] o.f.c.i.license.VersionPrinter - 
+2026-04-22 09:34:38.075 [main] INFO  [] org.flywaydb.core.FlywayExecutor - Database: jdbc:mysql://localhost:3306/geo (MySQL 8.0)
+2026-04-22 09:34:38.141 [main] INFO  [] o.f.core.internal.command.DbValidate - Successfully validated 68 migrations (execution time 00:00.048s)
+2026-04-22 09:34:38.152 [main] INFO  [] o.f.core.internal.command.DbMigrate - Current version of schema `geo`: 67
+2026-04-22 09:34:38.154 [main] INFO  [] o.f.core.internal.command.DbMigrate - Schema `geo` is up to date. No migration necessary.
+2026-04-22 09:34:39.859 [main] INFO  [] o.s.s.web.DefaultSecurityFilterChain - Will secure any request with [org.springframework.security.web.session.DisableEncodeUrlFilter@32d8e58d, org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter@4c941d19, org.springframework.security.web.context.SecurityContextHolderFilter@aca2a0b, org.springframework.security.web.header.HeaderWriterFilter@1dae9e61, org.springframework.web.filter.CorsFilter@24eecabf, org.springframework.security.web.authentication.logout.LogoutFilter@3ef7fb04, com.huanjing.geo.common.security.PublicDashboardRateLimitFilter@280d5a82, com.huanjing.geo.common.security.JwtAuthenticationFilter@6a6da47a, org.springframework.security.web.savedrequest.RequestCacheAwareFilter@2cdb53d6, org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter@62ba3045, org.springframework.security.web.authentication.AnonymousAuthenticationFilter@5248c05a, org.springframework.security.web.session.SessionManagementFilter@7c31e01f, org.springframework.security.web.access.ExceptionTranslationFilter@4144d4a, org.springframework.security.web.access.intercept.AuthorizationFilter@6892d403]
+2026-04-22 09:34:40.116 [main] INFO  [] o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-04-22 09:34:40.130 [main] INFO  [] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path ''
+2026-04-22 09:34:40.144 [main] INFO  [] com.huanjing.geo.GeoApplication - Started GeoApplication in 4.763 seconds (process running for 5.022)
+2026-04-22 09:34:40.275 [main] INFO  [] c.h.g.c.config.InitPasswordRunner - admin 密码验证通过
+2026-04-22 09:34:45.576 [http-nio-8080-exec-2] INFO  [] o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-04-22 09:34:45.576 [http-nio-8080-exec-2] INFO  [] o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-04-22 09:34:45.577 [http-nio-8080-exec-2] INFO  [] o.s.web.servlet.DispatcherServlet - Completed initialization in 1 ms
+2026-04-22 09:35:11.268 [http-nio-8080-exec-1] INFO  [2da59d7cf0fc45c79e5acb0c6cbd3188] c.h.g.m.p.g.PresaleGenerateOrchestrator - Presale mock generate start, versionId=8, delay=5000ms
+2026-04-22 09:35:16.430 [http-nio-8080-exec-1] INFO  [2da59d7cf0fc45c79e5acb0c6cbd3188] c.h.g.m.p.g.PresaleGenerateOrchestrator - Presale mock generate done, versionId=8
+2026-04-22 09:38:38.298 [background-preinit] INFO  [] o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-04-22 09:38:38.323 [main] INFO  [] com.huanjing.geo.GeoApplication - Starting GeoApplication using Java 21.0.10 with PID 32340 (D:\code\sanhe-geo-project\geo-project\geo-server\target\classes started by Administrator in D:\code\sanhe-geo-project\geo-project)
+2026-04-22 09:38:38.324 [main] INFO  [] com.huanjing.geo.GeoApplication - The following 1 profile is active: "dev"
+2026-04-22 09:38:39.187 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Multiple Spring Data modules found, entering strict repository configuration mode
+2026-04-22 09:38:39.188 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data Redis repositories in DEFAULT mode.
+2026-04-22 09:38:39.218 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 20 ms. Found 0 Redis repository interfaces.
+2026-04-22 09:38:39.845 [main] INFO  [] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-04-22 09:38:39.857 [main] INFO  [] o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-04-22 09:38:39.859 [main] INFO  [] o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-04-22 09:38:39.859 [main] INFO  [] o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.20]
+2026-04-22 09:38:39.913 [main] INFO  [] o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring embedded WebApplicationContext
+2026-04-22 09:38:39.913 [main] INFO  [] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 1557 ms
+2026-04-22 09:38:40.381 [main] INFO  [] com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-04-22 09:38:40.499 [main] INFO  [] com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@be1c08a
+2026-04-22 09:38:40.500 [main] INFO  [] com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-04-22 09:38:40.555 [main] INFO  [] o.f.c.i.license.VersionPrinter - Flyway Community Edition 9.22.3 by Redgate
+2026-04-22 09:38:40.555 [main] INFO  [] o.f.c.i.license.VersionPrinter - See release notes here: https://rd.gt/416ObMi
+2026-04-22 09:38:40.556 [main] INFO  [] o.f.c.i.license.VersionPrinter - 
+2026-04-22 09:38:40.571 [main] INFO  [] org.flywaydb.core.FlywayExecutor - Database: jdbc:mysql://localhost:3306/geo (MySQL 8.0)
+2026-04-22 09:38:40.631 [main] INFO  [] o.f.core.internal.command.DbValidate - Successfully validated 68 migrations (execution time 00:00.048s)
+2026-04-22 09:38:40.644 [main] INFO  [] o.f.core.internal.command.DbMigrate - Current version of schema `geo`: 67
+2026-04-22 09:38:40.646 [main] INFO  [] o.f.core.internal.command.DbMigrate - Schema `geo` is up to date. No migration necessary.
+2026-04-22 09:38:42.251 [main] INFO  [] o.s.s.web.DefaultSecurityFilterChain - Will secure any request with [org.springframework.security.web.session.DisableEncodeUrlFilter@5f596a1a, org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter@62977afb, org.springframework.security.web.context.SecurityContextHolderFilter@30a1b2ad, org.springframework.security.web.header.HeaderWriterFilter@6cd65042, org.springframework.web.filter.CorsFilter@709d6de5, org.springframework.security.web.authentication.logout.LogoutFilter@7be86438, com.huanjing.geo.common.security.PublicDashboardRateLimitFilter@1ad1b737, com.huanjing.geo.common.security.JwtAuthenticationFilter@5b14f482, org.springframework.security.web.savedrequest.RequestCacheAwareFilter@4144d4a, org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter@20276412, org.springframework.security.web.authentication.AnonymousAuthenticationFilter@13edc1bc, org.springframework.security.web.session.SessionManagementFilter@22ba30b0, org.springframework.security.web.access.ExceptionTranslationFilter@46df794e, org.springframework.security.web.access.intercept.AuthorizationFilter@1a34f8e2]
+2026-04-22 09:38:42.503 [main] INFO  [] o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-04-22 09:38:42.517 [main] INFO  [] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path ''
+2026-04-22 09:38:42.528 [main] INFO  [] com.huanjing.geo.GeoApplication - Started GeoApplication in 4.603 seconds (process running for 4.878)
+2026-04-22 09:38:42.662 [main] INFO  [] c.h.g.c.config.InitPasswordRunner - admin 密码验证通过
+2026-04-22 09:38:47.952 [http-nio-8080-exec-1] INFO  [] o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-04-22 09:38:47.952 [http-nio-8080-exec-1] INFO  [] o.s.web.servlet.DispatcherServlet - Initializing Servlet 'dispatcherServlet'
+2026-04-22 09:38:47.953 [http-nio-8080-exec-1] INFO  [] o.s.web.servlet.DispatcherServlet - Completed initialization in 1 ms
+2026-04-22 12:11:24.327 [background-preinit] INFO  [] o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-04-22 12:11:24.355 [main] INFO  [] com.huanjing.geo.GeoApplication - Starting GeoApplication using Java 21.0.10 with PID 26836 (D:\code\sanhe-geo-project\geo-project\geo-server\target\classes started by Administrator in D:\code\sanhe-geo-project\geo-project)
+2026-04-22 12:11:24.356 [main] INFO  [] com.huanjing.geo.GeoApplication - The following 1 profile is active: "dev"
+2026-04-22 12:11:25.227 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Multiple Spring Data modules found, entering strict repository configuration mode
+2026-04-22 12:11:25.229 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data Redis repositories in DEFAULT mode.
+2026-04-22 12:11:25.257 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 19 ms. Found 0 Redis repository interfaces.
+2026-04-22 12:11:25.958 [main] INFO  [] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-04-22 12:11:25.976 [main] INFO  [] o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-04-22 12:11:25.979 [main] INFO  [] o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-04-22 12:11:25.980 [main] INFO  [] o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.20]
+2026-04-22 12:11:26.057 [main] INFO  [] o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring embedded WebApplicationContext
+2026-04-22 12:11:26.058 [main] INFO  [] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 1666 ms
+2026-04-22 12:11:26.576 [main] INFO  [] com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-04-22 12:11:26.737 [main] INFO  [] com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@5e7e7a7e
+2026-04-22 12:11:26.740 [main] INFO  [] com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-04-22 12:11:26.812 [main] INFO  [] o.f.c.i.license.VersionPrinter - Flyway Community Edition 9.22.3 by Redgate
+2026-04-22 12:11:26.812 [main] INFO  [] o.f.c.i.license.VersionPrinter - See release notes here: https://rd.gt/416ObMi
+2026-04-22 12:11:26.812 [main] INFO  [] o.f.c.i.license.VersionPrinter - 
+2026-04-22 12:11:26.827 [main] INFO  [] org.flywaydb.core.FlywayExecutor - Database: jdbc:mysql://localhost:3306/geo (MySQL 8.0)
+2026-04-22 12:11:26.897 [main] INFO  [] o.f.core.internal.command.DbValidate - Successfully validated 72 migrations (execution time 00:00.054s)
+2026-04-22 12:11:26.908 [main] INFO  [] o.f.core.internal.command.DbMigrate - Current version of schema `geo`: 67
+2026-04-22 12:11:26.924 [main] INFO  [] o.f.core.internal.command.DbMigrate - Migrating schema `geo` to version "68 - presale version add pipeline progress fields"
+2026-04-22 12:11:27.039 [main] INFO  [] o.f.core.internal.command.DbMigrate - Migrating schema `geo` to version "69 - presale ai call create"
+2026-04-22 12:11:27.069 [main] INFO  [] o.f.core.internal.command.DbMigrate - Migrating schema `geo` to version "70 - presale ai prompt result create"
+2026-04-22 12:11:27.102 [main] INFO  [] o.f.core.internal.command.DbMigrate - Migrating schema `geo` to version "71 - presale ai test result drop"
+2026-04-22 12:11:27.127 [main] INFO  [] o.f.core.internal.command.DbMigrate - Successfully applied 4 migrations to schema `geo`, now at version v71 (execution time 00:00.152s)
+2026-04-22 12:11:28.867 [main] INFO  [] o.s.s.web.DefaultSecurityFilterChain - Will secure any request with [org.springframework.security.web.session.DisableEncodeUrlFilter@45a05350, org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter@7d6a9d5e, org.springframework.security.web.context.SecurityContextHolderFilter@64745270, org.springframework.security.web.header.HeaderWriterFilter@7f9b851c, org.springframework.web.filter.CorsFilter@1a4930cf, org.springframework.security.web.authentication.logout.LogoutFilter@129348e8, com.huanjing.geo.common.security.PublicDashboardRateLimitFilter@1e5aacd9, com.huanjing.geo.common.security.JwtAuthenticationFilter@6b9697ae, org.springframework.security.web.savedrequest.RequestCacheAwareFilter@35a2ea5a, org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter@18ab513d, org.springframework.security.web.authentication.AnonymousAuthenticationFilter@74ed7111, org.springframework.security.web.session.SessionManagementFilter@630bd5e7, org.springframework.security.web.access.ExceptionTranslationFilter@4afdb05e, org.springframework.security.web.access.intercept.AuthorizationFilter@ad6448e]
+2026-04-22 12:11:29.207 [main] INFO  [] o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-04-22 12:11:29.233 [main] INFO  [] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path ''
+2026-04-22 12:11:29.247 [main] INFO  [] com.huanjing.geo.GeoApplication - Started GeoApplication in 5.319 seconds (process running for 5.601)
+2026-04-22 12:11:29.400 [main] INFO  [] c.h.g.c.config.InitPasswordRunner - admin 密码验证通过
+2026-04-22 14:32:46.806 [background-preinit] INFO  [] o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-04-22 14:32:46.834 [main] INFO  [] com.huanjing.geo.GeoApplication - Starting GeoApplication using Java 21.0.10 with PID 33036 (D:\code\sanhe-geo-project\geo-project\geo-server\target\classes started by Administrator in D:\code\sanhe-geo-project\geo-project)
+2026-04-22 14:32:46.835 [main] INFO  [] com.huanjing.geo.GeoApplication - The following 1 profile is active: "dev"
+2026-04-22 14:32:47.703 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Multiple Spring Data modules found, entering strict repository configuration mode
+2026-04-22 14:32:47.706 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data Redis repositories in DEFAULT mode.
+2026-04-22 14:32:47.739 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 22 ms. Found 0 Redis repository interfaces.
+2026-04-22 14:32:48.394 [main] INFO  [] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-04-22 14:32:48.412 [main] INFO  [] o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-04-22 14:32:48.415 [main] INFO  [] o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-04-22 14:32:48.416 [main] INFO  [] o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.20]
+2026-04-22 14:32:48.499 [main] INFO  [] o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring embedded WebApplicationContext
+2026-04-22 14:32:48.499 [main] INFO  [] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 1630 ms
+2026-04-22 14:32:48.994 [main] INFO  [] com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-04-22 14:32:49.103 [main] INFO  [] com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@774c5e5c
+2026-04-22 14:32:49.105 [main] INFO  [] com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-04-22 14:32:49.158 [main] INFO  [] o.f.c.i.license.VersionPrinter - Flyway Community Edition 9.22.3 by Redgate
+2026-04-22 14:32:49.158 [main] INFO  [] o.f.c.i.license.VersionPrinter - See release notes here: https://rd.gt/416ObMi
+2026-04-22 14:32:49.158 [main] INFO  [] o.f.c.i.license.VersionPrinter - 
+2026-04-22 14:32:49.172 [main] INFO  [] org.flywaydb.core.FlywayExecutor - Database: jdbc:mysql://localhost:3306/geo (MySQL 8.0)
+2026-04-22 14:32:49.242 [main] INFO  [] o.f.core.internal.command.DbValidate - Successfully validated 73 migrations (execution time 00:00.054s)
+2026-04-22 14:32:49.250 [main] INFO  [] o.f.core.internal.command.DbMigrate - Current version of schema `geo`: 71
+2026-04-22 14:32:49.259 [main] INFO  [] o.f.core.internal.command.DbMigrate - Migrating schema `geo` to version "72 - presale version add failure category"
+2026-04-22 14:32:49.265 [main] INFO  [] o.f.c.i.s.DefaultSqlScriptExecutor - +---+
+| 1 |
++---+
+| 1 |
++---+
+
+2026-04-22 14:32:49.279 [main] INFO  [] o.f.core.internal.command.DbMigrate - Successfully applied 1 migration to schema `geo`, now at version v72 (execution time 00:00.007s)
+2026-04-22 14:32:51.044 [main] INFO  [] o.s.s.web.DefaultSecurityFilterChain - Will secure any request with [org.springframework.security.web.session.DisableEncodeUrlFilter@4db45d, org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter@89178b4, org.springframework.security.web.context.SecurityContextHolderFilter@2b625e82, org.springframework.security.web.header.HeaderWriterFilter@c3a1d7f, org.springframework.web.filter.CorsFilter@238ad211, org.springframework.security.web.authentication.logout.LogoutFilter@7b9b6a56, com.huanjing.geo.common.security.PublicDashboardRateLimitFilter@21a5b599, com.huanjing.geo.common.security.JwtAuthenticationFilter@75ed125a, org.springframework.security.web.savedrequest.RequestCacheAwareFilter@58b30e3e, org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter@5325674a, org.springframework.security.web.authentication.AnonymousAuthenticationFilter@5c7d675c, org.springframework.security.web.session.SessionManagementFilter@610d0067, org.springframework.security.web.access.ExceptionTranslationFilter@6dc5e857, org.springframework.security.web.access.intercept.AuthorizationFilter@129348e8]
+2026-04-22 14:32:51.346 [main] INFO  [] o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-04-22 14:32:51.369 [main] INFO  [] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path ''
+2026-04-22 14:32:51.380 [main] INFO  [] com.huanjing.geo.GeoApplication - Started GeoApplication in 4.941 seconds (process running for 5.198)
+2026-04-22 14:32:51.504 [main] INFO  [] c.h.g.c.config.InitPasswordRunner - admin 密码验证通过
+2026-04-22 14:47:34.832 [background-preinit] INFO  [] o.h.validator.internal.util.Version - HV000001: Hibernate Validator 8.0.1.Final
+2026-04-22 14:47:34.858 [main] INFO  [] com.huanjing.geo.GeoApplication - Starting GeoApplication using Java 21.0.10 with PID 33496 (D:\code\sanhe-geo-project\geo-project\geo-server\target\classes started by Administrator in D:\code\sanhe-geo-project\geo-project)
+2026-04-22 14:47:34.859 [main] INFO  [] com.huanjing.geo.GeoApplication - The following 1 profile is active: "dev"
+2026-04-22 14:47:35.704 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Multiple Spring Data modules found, entering strict repository configuration mode
+2026-04-22 14:47:35.706 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Bootstrapping Spring Data Redis repositories in DEFAULT mode.
+2026-04-22 14:47:35.738 [main] INFO  [] o.s.d.r.c.RepositoryConfigurationDelegate - Finished Spring Data repository scanning in 22 ms. Found 0 Redis repository interfaces.
+2026-04-22 14:47:36.340 [main] INFO  [] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat initialized with port 8080 (http)
+2026-04-22 14:47:36.358 [main] INFO  [] o.a.coyote.http11.Http11NioProtocol - Initializing ProtocolHandler ["http-nio-8080"]
+2026-04-22 14:47:36.362 [main] INFO  [] o.a.catalina.core.StandardService - Starting service [Tomcat]
+2026-04-22 14:47:36.363 [main] INFO  [] o.a.catalina.core.StandardEngine - Starting Servlet engine: [Apache Tomcat/10.1.20]
+2026-04-22 14:47:36.441 [main] INFO  [] o.a.c.c.C.[Tomcat].[localhost].[/] - Initializing Spring embedded WebApplicationContext
+2026-04-22 14:47:36.441 [main] INFO  [] o.s.b.w.s.c.ServletWebServerApplicationContext - Root WebApplicationContext: initialization completed in 1549 ms
+2026-04-22 14:47:36.910 [main] INFO  [] com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Starting...
+2026-04-22 14:47:37.029 [main] INFO  [] com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Added connection com.mysql.cj.jdbc.ConnectionImpl@6ff8e744
+2026-04-22 14:47:37.031 [main] INFO  [] com.zaxxer.hikari.HikariDataSource - HikariPool-1 - Start completed.
+2026-04-22 14:47:37.104 [main] INFO  [] o.f.c.i.license.VersionPrinter - Flyway Community Edition 9.22.3 by Redgate
+2026-04-22 14:47:37.105 [main] INFO  [] o.f.c.i.license.VersionPrinter - See release notes here: https://rd.gt/416ObMi
+2026-04-22 14:47:37.105 [main] INFO  [] o.f.c.i.license.VersionPrinter - 
+2026-04-22 14:47:37.120 [main] INFO  [] org.flywaydb.core.FlywayExecutor - Database: jdbc:mysql://localhost:3306/geo (MySQL 8.0)
+2026-04-22 14:47:37.190 [main] INFO  [] o.f.core.internal.command.DbValidate - Successfully validated 73 migrations (execution time 00:00.054s)
+2026-04-22 14:47:37.200 [main] INFO  [] o.f.core.internal.command.DbMigrate - Current version of schema `geo`: 72
+2026-04-22 14:47:37.202 [main] INFO  [] o.f.core.internal.command.DbMigrate - Schema `geo` is up to date. No migration necessary.
+2026-04-22 14:47:38.983 [main] INFO  [] o.s.s.web.DefaultSecurityFilterChain - Will secure any request with [org.springframework.security.web.session.DisableEncodeUrlFilter@41092c8, org.springframework.security.web.context.request.async.WebAsyncManagerIntegrationFilter@2e590e36, org.springframework.security.web.context.SecurityContextHolderFilter@3751baf6, org.springframework.security.web.header.HeaderWriterFilter@601e7c97, org.springframework.web.filter.CorsFilter@59f7c106, org.springframework.security.web.authentication.logout.LogoutFilter@4c89c98a, com.huanjing.geo.common.security.PublicDashboardRateLimitFilter@3bf5911d, com.huanjing.geo.common.security.JwtAuthenticationFilter@23ea8830, org.springframework.security.web.savedrequest.RequestCacheAwareFilter@3cfab56d, org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter@6b6fde93, org.springframework.security.web.authentication.AnonymousAuthenticationFilter@3fc2a1d1, org.springframework.security.web.session.SessionManagementFilter@438a65a7, org.springframework.security.web.access.ExceptionTranslationFilter@5248c05a, org.springframework.security.web.access.intercept.AuthorizationFilter@71db6703]
+2026-04-22 14:47:39.362 [main] INFO  [] o.a.coyote.http11.Http11NioProtocol - Starting ProtocolHandler ["http-nio-8080"]
+2026-04-22 14:47:39.377 [main] INFO  [] o.s.b.w.e.tomcat.TomcatWebServer - Tomcat started on port 8080 (http) with context path ''
+2026-04-22 14:47:39.387 [main] INFO  [] com.huanjing.geo.GeoApplication - Started GeoApplication in 4.92 seconds (process running for 5.172)
+2026-04-22 14:47:39.513 [main] INFO  [] c.h.g.c.config.InitPasswordRunner - admin 密码验证通过

@@ -1,0 +1,364 @@
+﻿   1: <template>
+   2:   <div class="presale-report-progress">
+   3:     <div class="page-header">
+   4:       <el-breadcrumb separator="/">
+   5:         <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">售前报告</el-breadcrumb-item>
+   6:         <el-breadcrumb-item>生成中</el-breadcrumb-item>
+   7:       </el-breadcrumb>
+   8:       <h2 class="page-title">报告生成进度</h2>
+   9:     </div>
+  10: 
+  11:     <!-- 降级提示 -->
+  12:     <el-alert
+  13:       v-if="version?.isDegraded && (version.degradedPlatforms?.length ?? 0) > 0"
+  14:       type="warning"
+  15:       :closable="false"
+  16:       show-icon
+  17:       class="degrade-alert"
+  18:     >
+  19:       <template #title>
+  20:         本次生成已降级,以下平台未能返回结果:{{ (version.degradedPlatforms ?? []).join('、') }}
+  21:       </template>
+  22:     </el-alert>
+  23: 
+  24:     <!-- 主状态卡片 -->
+  25:     <el-card shadow="never" class="status-card">
+  26:       <div class="status-header">
+  27:         <el-icon v-if="isRunning" class="status-icon running"><Loading /></el-icon>
+  28:         <el-icon v-else-if="isDone" class="status-icon done"><CircleCheckFilled /></el-icon>
+  29:         <el-icon v-else-if="isFailed" class="status-icon failed"><CircleCloseFilled /></el-icon>
+  30:         <el-icon v-else class="status-icon"><Clock /></el-icon>
+  31: 
+  32:         <div class="status-text">
+  33:           <div class="status-main">{{ statusText }}</div>
+  34:           <div v-if="version" class="status-sub">
+  35:             已完成 {{ version.completedLlmCalls ?? 0 }} / {{ version.totalLlmCalls ?? 0 }} 次 LLM 调用
+  36:           </div>
+  37:         </div>
+  38:       </div>
+  39: 
+  40:       <el-progress
+  41:         v-if="version"
+  42:         :percentage="percentage"
+  43:         :status="isFailed ? 'exception' : isDone ? 'success' : undefined"
+  44:         :stroke-width="12"
+  45:         class="progress-bar"
+  46:       />
+  47: 
+  48:       <div v-if="isFailed && version?.failureReason" class="failure-reason">
+  49:         失败原因:{{ version.failureReason }}
+  50:       </div>
+  51:     </el-card>
+  52: 
+  53:     <!-- 阶段清单(v1 静态展示,P2 后端返回真实阶段) -->
+  54:     <el-card shadow="never" class="stages-card">
+  55:       <div class="stages-title">生成阶段</div>
+  56:       <ul class="stages-list">
+  57:         <li v-for="(stage, i) in stages" :key="i" :class="stage.state">
+  58:           <el-icon v-if="stage.state === 'done'" class="stage-icon done"><Check /></el-icon>
+  59:           <el-icon v-else-if="stage.state === 'running'" class="stage-icon running is-loading">
+  60:             <Loading />
+  61:           </el-icon>
+  62:           <el-icon v-else class="stage-icon pending"><Clock /></el-icon>
+  63:           <span class="stage-name">{{ stage.name }}</span>
+  64:           <span class="stage-desc">{{ stage.desc }}</span>
+  65:         </li>
+  66:       </ul>
+  67:     </el-card>
+  68: 
+  69:     <div class="action-bar">
+  70:       <el-button @click="goList">返回列表</el-button>
+  71:       <el-button v-if="isDone" type="primary" @click="goDetail">查看报告</el-button>
+  72:       <el-button v-if="isFailed" type="primary" @click="onRetry" disabled>
+  73:         重试(v1 暂未开放)
+  74:       </el-button>
+  75:     </div>
+  76:   </div>
+  77: </template>
+  78: 
+  79: <script setup lang="ts">
+  80: import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+  81: import { useRoute, useRouter } from 'vue-router'
+  82: import {
+  83:   Loading,
+  84:   Clock,
+  85:   Check,
+  86:   CircleCheckFilled,
+  87:   CircleCloseFilled
+  88: } from '@element-plus/icons-vue'
+  89: import { ElMessage } from 'element-plus'
+  90: import { getLatestVersionMeta, type ReportVersionMetaVO } from '@/api/presaleReport'
+  91: import { isTerminal } from '@/utils/presale/statusMeta'
+  92: 
+  93: const route = useRoute()
+  94: const router = useRouter()
+  95: 
+  96: const reportId = Number(route.params.id)
+  97: const version = ref<ReportVersionMetaVO | null>(null)
+  98: const pollTimer = ref<number | null>(null)
+  99: 
+ 100: const POLL_INTERVAL_MS = 3000
+ 101: const AUTO_JUMP_DELAY_MS = 2000
+ 102: 
+ 103: const isRunning = computed(
+ 104:   () =>
+ 105:     version.value?.generationStatus === 'RUNNING' ||
+ 106:     version.value?.generationStatus === 'QUEUED' ||
+ 107:     version.value?.generationStatus === 'INIT'
+ 108: )
+ 109: const isDone = computed(() => version.value?.generationStatus === 'DONE')
+ 110: const isFailed = computed(() => version.value?.generationStatus === 'FAILED')
+ 111: 
+ 112: const statusText = computed(() => {
+ 113:   if (!version.value) return '加载中...'
+ 114:   if (isRunning.value) return '正在生成 AI 可见度诊断报告'
+ 115:   if (isDone.value) return '生成完成,即将跳转详情页'
+ 116:   if (isFailed.value) return '生成失败'
+ 117:   return '未知状态'
+ 118: })
+ 119: 
+ 120: const percentage = computed(() => {
+ 121:   if (!version.value) return 0
+ 122:   const total = version.value.totalLlmCalls ?? 0
+ 123:   const completed = version.value.completedLlmCalls ?? 0
+ 124:   if (total <= 0) return 0
+ 125:   return Math.min(
+ 126:     100,
+ 127:     Math.round((completed / total) * 100)
+ 128:   )
+ 129: })
+ 130: 
+ 131: const stageOrder = [
+ 132:   'BATCH1',
+ 133:   'COMPETITOR_EXTRACT',
+ 134:   'BATCH2',
+ 135:   'L1_AGGREGATE',
+ 136:   'L2_COMPUTE',
+ 137:   'L3_INIT'
+ 138: ] as const
+ 139: const stageSet = new Set(stageOrder)
+ 140: 
+ 141: function resolveKnownStage():
+ 142:   | (typeof stageOrder)[number]
+ 143:   | null {
+ 144:   const raw = version.value?.generationStage
+ 145:   if (!raw || typeof raw !== 'string') return null
+ 146:   return stageSet.has(raw as (typeof stageOrder)[number])
+ 147:     ? (raw as (typeof stageOrder)[number])
+ 148:     : null
+ 149: }
+ 150: 
+ 151: function stageState(stageCode: (typeof stageOrder)[number]): 'done' | 'running' | 'pending' {
+ 152:   const current = resolveKnownStage()
+ 153:   if (!current) return 'pending'
+ 154:   const currentIndex = stageOrder.indexOf(current)
+ 155:   const targetIndex = stageOrder.indexOf(stageCode)
+ 156:   if (currentIndex > targetIndex) return 'done'
+ 157:   if (currentIndex === targetIndex) return 'running'
+ 158:   return 'pending'
+ 159: }
+ 160: 
+ 161: // 兼容回退:若后端未返回 stage,仍按总进度百分比估算
+ 162: function legacyState(start: number, end: number): 'done' | 'running' | 'pending' {
+ 163:   const pct = percentage.value
+ 164:   if (pct >= end) return 'done'
+ 165:   if (pct > start) return 'running'
+ 166:   return 'pending'
+ 167: }
+ 168: 
+ 169: const stages = computed(() => {
+ 170:   const useStage = resolveKnownStage() !== null
+ 171:   return [
+ 172:     {
+ 173:       name: '第一批调用',
+ 174:       desc: `${version.value?.batch1CompletedCalls ?? 0} / ${version.value?.batch1TotalCalls ?? 0}`,
+ 175:       state: useStage ? stageState('BATCH1') : legacyState(0, 45)
+ 176:     },
+ 177:     {
+ 178:       name: '竞品抽取',
+ 179:       desc: `已抽取 ${version.value?.extractedCompetitorCount ?? 0} 个竞品`,
+ 180:       state: useStage ? stageState('COMPETITOR_EXTRACT') : legacyState(45, 55)
+ 181:     },
+ 182:     {
+ 183:       name: '第二批调用',
+ 184:       desc: `${version.value?.batch2CompletedCalls ?? 0} / ${version.value?.batch2TotalCalls ?? 0}`,
+ 185:       state: useStage ? stageState('BATCH2') : legacyState(55, 90)
+ 186:     },
+ 187:     { name: 'L1 聚合', desc: '写入 raw snapshot', state: useStage ? stageState('L1_AGGREGATE') : legacyState(90, 94) },
+ 188:     { name: 'L2 计算', desc: '评分与规则命中', state: useStage ? stageState('L2_COMPUTE') : legacyState(94, 98) },
+ 189:     { name: 'L3 初始化', desc: '生成可编辑内容', state: useStage ? stageState('L3_INIT') : legacyState(98, 100) }
+ 190:   ]
+ 191: })
+ 192: 
+ 193: async function fetchOnce() {
+ 194:   try {
+ 195:     const meta = await getLatestVersionMeta(reportId)
+ 196:     version.value = meta
+ 197:     if (isTerminal(meta.generationStatus)) {
+ 198:       stopPolling()
+ 199:       if (isDone.value) {
+ 200:         setTimeout(() => {
+ 201:           router.push(`/admin/presale/report/${reportId}/detail`)
+ 202:         }, AUTO_JUMP_DELAY_MS)
+ 203:       }
+ 204:     }
+ 205:   } catch (err: any) {
+ 206:     ElMessage.error(err?.message || '获取生成进度失败')
+ 207:     stopPolling()
+ 208:   }
+ 209: }
+ 210: 
+ 211: function startPolling() {
+ 212:   if (pollTimer.value !== null) return
+ 213:   pollTimer.value = window.setInterval(fetchOnce, POLL_INTERVAL_MS)
+ 214: }
+ 215: 
+ 216: function stopPolling() {
+ 217:   if (pollTimer.value !== null) {
+ 218:     clearInterval(pollTimer.value)
+ 219:     pollTimer.value = null
+ 220:   }
+ 221: }
+ 222: 
+ 223: function goList() {
+ 224:   router.push('/admin/presale/report')
+ 225: }
+ 226: 
+ 227: function goDetail() {
+ 228:   router.push(`/admin/presale/report/${reportId}/detail`)
+ 229: }
+ 230: 
+ 231: function onRetry() {
+ 232:   ElMessage.info('重试功能 v1 暂未开放,将在 P1·F·1·b 中实现')
+ 233: }
+ 234: 
+ 235: onMounted(async () => {
+ 236:   await fetchOnce()
+ 237:   if (!isTerminal(version.value?.generationStatus ?? '')) {
+ 238:     startPolling()
+ 239:   }
+ 240: })
+ 241: 
+ 242: onBeforeUnmount(stopPolling)
+ 243: </script>
+ 244: 
+ 245: <style scoped>
+ 246: .presale-report-progress {
+ 247:   padding: 16px 24px;
+ 248:   max-width: 920px;
+ 249: }
+ 250: .page-header {
+ 251:   margin-bottom: 16px;
+ 252: }
+ 253: .page-title {
+ 254:   margin: 8px 0 0 0;
+ 255:   font-size: 22px;
+ 256:   font-weight: 600;
+ 257: }
+ 258: .degrade-alert {
+ 259:   margin-bottom: 16px;
+ 260: }
+ 261: .status-card,
+ 262: .stages-card {
+ 263:   margin-bottom: 16px;
+ 264: }
+ 265: .status-header {
+ 266:   display: flex;
+ 267:   align-items: center;
+ 268:   gap: 16px;
+ 269:   margin-bottom: 20px;
+ 270: }
+ 271: .status-icon {
+ 272:   font-size: 36px;
+ 273: }
+ 274: .status-icon.running {
+ 275:   color: #409eff;
+ 276:   animation: spin 2s linear infinite;
+ 277: }
+ 278: .status-icon.done {
+ 279:   color: #67c23a;
+ 280: }
+ 281: .status-icon.failed {
+ 282:   color: #f56c6c;
+ 283: }
+ 284: @keyframes spin {
+ 285:   to {
+ 286:     transform: rotate(360deg);
+ 287:   }
+ 288: }
+ 289: .status-main {
+ 290:   font-size: 18px;
+ 291:   font-weight: 500;
+ 292: }
+ 293: .status-sub {
+ 294:   font-size: 13px;
+ 295:   color: #909399;
+ 296:   margin-top: 4px;
+ 297:   font-family: 'JetBrains Mono', Consolas, monospace;
+ 298: }
+ 299: .progress-bar {
+ 300:   margin-top: 12px;
+ 301: }
+ 302: .failure-reason {
+ 303:   margin-top: 16px;
+ 304:   padding: 12px 16px;
+ 305:   background: #fef0f0;
+ 306:   color: #f56c6c;
+ 307:   border-radius: 4px;
+ 308:   font-size: 13px;
+ 309: }
+ 310: .stages-title {
+ 311:   font-size: 14px;
+ 312:   font-weight: 500;
+ 313:   margin-bottom: 12px;
+ 314: }
+ 315: .stages-list {
+ 316:   list-style: none;
+ 317:   padding: 0;
+ 318:   margin: 0;
+ 319: }
+ 320: .stages-list li {
+ 321:   display: flex;
+ 322:   align-items: center;
+ 323:   gap: 12px;
+ 324:   padding: 10px 0;
+ 325:   border-bottom: 1px solid #f0f0f0;
+ 326: }
+ 327: .stages-list li:last-child {
+ 328:   border-bottom: none;
+ 329: }
+ 330: .stages-list li.pending {
+ 331:   color: #909399;
+ 332: }
+ 333: .stage-icon {
+ 334:   font-size: 16px;
+ 335: }
+ 336: .stage-icon.done {
+ 337:   color: #67c23a;
+ 338: }
+ 339: .stage-icon.running {
+ 340:   color: #409eff;
+ 341: }
+ 342: .stage-icon.pending {
+ 343:   color: #c0c4cc;
+ 344: }
+ 345: .stage-name {
+ 346:   flex: 1;
+ 347:   font-size: 14px;
+ 348: }
+ 349: .stage-desc {
+ 350:   font-size: 12px;
+ 351:   color: #909399;
+ 352:   font-family: 'JetBrains Mono', Consolas, monospace;
+ 353: }
+ 354: .action-bar {
+ 355:   text-align: right;
+ 356:   margin-top: 16px;
+ 357: }
+ 358: .action-bar .el-button + .el-button {
+ 359:   margin-left: 12px;
+ 360: }
+ 361: .is-loading {
+ 362:   animation: spin 2s linear infinite;
+ 363: }
+ 364: </style>

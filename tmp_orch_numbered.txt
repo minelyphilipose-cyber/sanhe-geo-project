@@ -1,0 +1,1110 @@
+﻿   1: package com.huanjing.geo.module.presale.generate;
+   2: 
+   3: import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+   4: import com.fasterxml.jackson.databind.JsonNode;
+   5: import com.fasterxml.jackson.databind.ObjectMapper;
+   6: import com.huanjing.geo.module.presale.generate.llm.AnalyzeParseException;
+   7: import com.huanjing.geo.module.presale.generate.llm.CallStatus;
+   8: import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
+   9: import com.huanjing.geo.module.presale.generate.llm.LlmInvokeException;
+  10: import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
+  11: import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
+  12: import com.huanjing.geo.module.presale.generate.llm.PromptTemplateRenderer;
+  13: import com.huanjing.geo.module.presale.generate.l3.PresaleL3InitService;
+  14: import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
+  15: import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
+  16: import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
+  17: import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
+  18: import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
+  19: import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
+  20: import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
+  21: import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
+  22: import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
+  23: import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
+  24: import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+  25: import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
+  26: import org.slf4j.Logger;
+  27: import org.slf4j.LoggerFactory;
+  28: import org.springframework.beans.factory.annotation.Value;
+  29: import org.springframework.scheduling.annotation.Async;
+  30: import org.springframework.stereotype.Component;
+  31: 
+  32: import java.io.IOException;
+  33: import java.io.InputStream;
+  34: import java.nio.charset.StandardCharsets;
+  35: import java.time.LocalDateTime;
+  36: import java.util.ArrayList;
+  37: import java.util.Comparator;
+  38: import java.util.HashMap;
+  39: import java.util.HashSet;
+  40: import java.util.LinkedHashSet;
+  41: import java.util.List;
+  42: import java.util.Locale;
+  43: import java.util.Map;
+  44: import java.util.Set;
+  45: import java.util.concurrent.ConcurrentHashMap;
+  46: 
+  47: /**
+  48:  * Presale generation orchestrator.
+  49:  * mockEnabled=true: fixture flow.
+  50:  * mockEnabled=false: PR-3 real pipeline (stage C skeleton in this commit).
+  51:  */
+  52: @Component
+  53: public class PresaleGenerateOrchestrator {
+  54: 
+  55:     private static final Logger log = LoggerFactory.getLogger(PresaleGenerateOrchestrator.class);
+  56:     private static final int FAILURE_REASON_MAX_LEN = 500;
+  57:     private static final long PROGRESS_UPDATE_THROTTLE_MS = 1000L;
+  58: 
+  59:     private static final String STAGE_BATCH1 = "BATCH1";
+  60:     private static final String STAGE_COMPETITOR_EXTRACT = "COMPETITOR_EXTRACT";
+  61:     private static final String STAGE_BATCH2 = "BATCH2";
+  62:     private static final String STAGE_L1_AGGREGATE = "L1_AGGREGATE";
+  63:     private static final String STAGE_L2_COMPUTE = "L2_COMPUTE";
+  64:     private static final String STAGE_L3_INIT = "L3_INIT";
+  65:     private static final String FAILURE_CATEGORY_CONFIG_MISSING = "CONFIG_MISSING";
+  66:     private static final String FAILURE_CATEGORY_TOO_MANY_DEGRADED = "TOO_MANY_DEGRADED_PLATFORMS";
+  67:     private static final String FAILURE_CATEGORY_UNEXPECTED_ERROR = "UNEXPECTED_ERROR";
+  68:     private static final String FAILURE_CATEGORY_SNAPSHOT_BUILD_ERROR = "SNAPSHOT_BUILD_ERROR";
+  69:     private static final String FAILURE_CATEGORY_STAGE_D_CHECKPOINT = "STAGE_D_CHECKPOINT";
+  70:     private static final String FAILURE_CATEGORY_COMPETITOR_EXTRACT_EMPTY = "COMPETITOR_EXTRACT_EMPTY";
+  71: 
+  72:     private final PresaleReportVersionMapper versionMapper;
+  73:     private final PresaleReportMapper reportMapper;
+  74:     private final AiPlatformConfigMapper aiPlatformConfigMapper;
+  75:     private final PresalePromptTemplateMapper promptTemplateMapper;
+  76:     private final PresaleAiCallMapper aiCallMapper;
+  77:     private final PresaleAiPromptResultMapper aiPromptResultMapper;
+  78:     private final PresaleLlmInvoker llmInvoker;
+  79:     private final PromptTemplateRenderer promptTemplateRenderer;
+  80:     private final PresaleComputedSnapshotEnricher computedSnapshotEnricher;
+  81:     private final PresaleL3InitService l3InitService;
+  82:     private final ObjectMapper objectMapper;
+  83:     private final Map<Long, Long> lastProgressUpdateAtByVersion = new ConcurrentHashMap<>();
+  84: 
+  85:     @Value("${presale.generate.mock:true}")
+  86:     private boolean mockEnabled;
+  87: 
+  88:     @Value("${presale.generate.mock-delay-ms:5000}")
+  89:     private long mockDelayMs;
+  90: 
+  91:     @Value("${presale.generate.mock-fixture-path:fixtures/01-mock-sample-v1.2.json}")
+  92:     private String mockFixturePath;
+  93: 
+  94:     @Value("${presale.generate.allow-synthetic-fallback.mock:true}")
+  95:     private boolean allowSyntheticFallbackMock;
+  96: 
+  97:     @Value("${presale.generate.allow-synthetic-fallback.real:false}")
+  98:     private boolean allowSyntheticFallbackReal;
+  99: 
+ 100:     public PresaleGenerateOrchestrator(PresaleReportVersionMapper versionMapper,
+ 101:                                        PresaleReportMapper reportMapper,
+ 102:                                        AiPlatformConfigMapper aiPlatformConfigMapper,
+ 103:                                        PresalePromptTemplateMapper promptTemplateMapper,
+ 104:                                        PresaleAiCallMapper aiCallMapper,
+ 105:                                        PresaleAiPromptResultMapper aiPromptResultMapper,
+ 106:                                        PresaleLlmInvoker llmInvoker,
+ 107:                                        PromptTemplateRenderer promptTemplateRenderer,
+ 108:                                        PresaleComputedSnapshotEnricher computedSnapshotEnricher,
+ 109:                                        PresaleL3InitService l3InitService,
+ 110:                                        ObjectMapper objectMapper) {
+ 111:         this.versionMapper = versionMapper;
+ 112:         this.reportMapper = reportMapper;
+ 113:         this.aiPlatformConfigMapper = aiPlatformConfigMapper;
+ 114:         this.promptTemplateMapper = promptTemplateMapper;
+ 115:         this.aiCallMapper = aiCallMapper;
+ 116:         this.aiPromptResultMapper = aiPromptResultMapper;
+ 117:         this.llmInvoker = llmInvoker;
+ 118:         this.promptTemplateRenderer = promptTemplateRenderer;
+ 119:         this.computedSnapshotEnricher = computedSnapshotEnricher;
+ 120:         this.l3InitService = l3InitService;
+ 121:         this.objectMapper = objectMapper;
+ 122:     }
+ 123: 
+ 124:     @Async("presaleGenerateExecutor")
+ 125:     public void triggerGenerate(Long versionId, Long operatorUserId, boolean isManager) {
+ 126:         try {
+ 127:             doTriggerGenerate(versionId, operatorUserId, isManager);
+ 128:         } catch (Throwable t) {
+ 129:             log.error("Presale generate fatal error, versionId={}", versionId, t);
+ 130:             try {
+ 131:                 markFailed(versionId, FAILURE_CATEGORY_UNEXPECTED_ERROR,
+ 132:                         truncateReason("Unexpected error: " + t.getClass().getSimpleName()));
+ 133:             } catch (Throwable markFailedError) {
+ 134:                 log.error("Failed to mark presale version FAILED after fatal error, versionId={}", versionId, markFailedError);
+ 135:             }
+ 136:         }
+ 137:     }
+ 138: 
+ 139:     private void doTriggerGenerate(Long versionId, Long operatorUserId, boolean isManager) {
+ 140:         if (mockEnabled) {
+ 141:             runMockFlow(versionId);
+ 142:             return;
+ 143:         }
+ 144:         runRealSkeletonFlow(versionId, operatorUserId, isManager);
+ 145:     }
+ 146: 
+ 147:     private void runMockFlow(Long versionId) {
+ 148:         log.info("Presale mock generate start, versionId={}, delay={}ms", versionId, mockDelayMs);
+ 149:         markRunningForMock(versionId);
+ 150: 
+ 151:         try {
+ 152:             Thread.sleep(mockDelayMs);
+ 153:         } catch (InterruptedException e) {
+ 154:             Thread.currentThread().interrupt();
+ 155:             markFailed(versionId, FAILURE_CATEGORY_UNEXPECTED_ERROR, truncateReason("Generation interrupted"));
+ 156:             return;
+ 157:         }
+ 158: 
+ 159:         String rawJson;
+ 160:         String computedJson;
+ 161:         String editableJson;
+ 162:         try {
+ 163:             FixturePayload payload = loadFixturePayload();
+ 164:             rawJson = payload.rawJson();
+ 165:             computedJson = computedSnapshotEnricher.enrichAndValidate(
+ 166:                     versionId, rawJson, payload.computedJson(), resolveAllowSyntheticFallback()
+ 167:             );
+ 168:             editableJson = l3InitService.derive(rawJson, computedJson);
+ 169:         } catch (Exception e) {
+ 170:             log.error("Failed to build presale snapshot, fixturePath={}", mockFixturePath, e);
+ 171:             markFailed(versionId, FAILURE_CATEGORY_SNAPSHOT_BUILD_ERROR,
+ 172:                     truncateReason("Snapshot build failed: " + e.getMessage()));
+ 173:             return;
+ 174:         }
+ 175: 
+ 176:         PresaleReportVersion current = versionMapper.selectById(versionId);
+ 177:         int totalCalls = current == null || current.getTotalLlmCalls() == null
+ 178:                 ? 0 : current.getTotalLlmCalls();
+ 179: 
+ 180:         PresaleReportVersion update = new PresaleReportVersion();
+ 181:         update.setId(versionId);
+ 182:         update.setGenerationStatus(PresaleGenerateStatus.DONE.name());
+ 183:         update.setGenerationStage(null);
+ 184:         update.setCompletedLlmCalls(totalCalls);
+ 185:         update.setTotalLlmCalls(totalCalls);
+ 186:         update.setBatch1CompletedCalls(current == null ? null : current.getBatch1TotalCalls());
+ 187:         update.setBatch2CompletedCalls(current == null ? null : current.getBatch2TotalCalls());
+ 188:         update.setIsDegraded(false);
+ 189:         update.setRawSnapshotJson(rawJson);
+ 190:         update.setComputedSnapshotJson(computedJson);
+ 191:         update.setEditableContentJson(editableJson);
+ 192:         update.setUpdatedAt(LocalDateTime.now());
+ 193:         versionMapper.updateById(update);
+ 194: 
+ 195:         log.info("Presale mock generate done, versionId={}", versionId);
+ 196:     }
+ 197: 
+ 198:     private void runRealSkeletonFlow(Long versionId, Long operatorUserId, boolean isManager) {
+ 199:         PreflightResult preflight = preflight(versionId);
+ 200:         if (!preflight.success()) {
+ 201:             markFailed(versionId, FAILURE_CATEGORY_CONFIG_MISSING,
+ 202:                     truncateReason("CONFIG_MISSING: " + preflight.failureReason()));
+ 203:             return;
+ 204:         }
+ 205: 
+ 206:         markRunning(versionId, preflight.totalUpperBoundCalls(), preflight.batch1TotalCalls());
+ 207:         PresaleReportVersion version = versionMapper.selectById(versionId);
+ 208:         PresaleReport report = version == null ? null : reportMapper.selectById(version.getReportId());
+ 209:         if (version == null || report == null) {
+ 210:             markFailed(versionId, FAILURE_CATEGORY_CONFIG_MISSING, "CONFIG_MISSING: report/version not found during batch1");
+ 211:             return;
+ 212:         }
+ 213:         Batch1ExecutionResult batch1Result = executeBatch1(version, report, operatorUserId, isManager, preflight);
+ 214:         if (batch1Result.stopPipeline) {
+ 215:             return;
+ 216:         }
+ 217: 
+ 218:         enterStage(versionId, STAGE_COMPETITOR_EXTRACT, "skeleton only");
+ 219: 
+ 220:         List<String> extractedCompetitors = extractTopCompetitorsFromBatch1(versionId, report.getBrandName());
+ 221:         int extractedCompetitorCount = extractedCompetitors.size();
+ 222:         int batch2TotalCalls = preflight.platformCount() * preflight.competitorPromptCount() * extractedCompetitorCount * 2;
+ 223:         updateAfterCompetitorExtract(
+ 224:                 versionId,
+ 225:                 extractedCompetitorCount,
+ 226:                 batch2TotalCalls,
+ 227:                 preflight.batch1TotalCalls() + batch2TotalCalls
+ 228:         );
+ 229: 
+ 230:         if (extractedCompetitorCount > 0) {
+ 231:             Batch2ExecutionResult batch2Result = executeBatch2(
+ 232:                     versionId,
+ 233:                     report,
+ 234:                     operatorUserId,
+ 235:                     isManager,
+ 236:                     extractedCompetitors,
+ 237:                     preflight.competitorPromptCount()
+ 238:             );
+ 239:             if (batch2Result.stopPipeline) {
+ 240:                 return;
+ 241:             }
+ 242:         } else {
+ 243:             markCompetitorExtractEmpty(versionId);
+ 244:             log.info("PR-3 stage C skeleton skip batch2 because extracted competitors is 0, versionId={}", versionId);
+ 245:         }
+ 246: 
+ 247:         enterStage(versionId, STAGE_L1_AGGREGATE, "skeleton only");
+ 248:         enterStage(versionId, STAGE_L2_COMPUTE, "skeleton only");
+ 249:         enterStage(versionId, STAGE_L3_INIT, "skeleton only");
+ 250: 
+ 251:         markFailed(versionId, FAILURE_CATEGORY_STAGE_D_CHECKPOINT,
+ 252:                 "PR-3 stage D checkpoint: batch2/l1/l2/l3 not implemented yet");
+ 253:         log.info("PR-3 stage C skeleton finished with placeholder failure, versionId={}, operatorUserId={}, isManager={}",
+ 254:                 versionId, operatorUserId, isManager);
+ 255:     }
+ 256: 
+ 257:     private PreflightResult preflight(Long versionId) {
+ 258:         PresaleReportVersion version = versionMapper.selectById(versionId);
+ 259:         if (version == null) {
+ 260:             return PreflightResult.fail("version not found: " + versionId);
+ 261:         }
+ 262:         PresaleReport report = reportMapper.selectById(version.getReportId());
+ 263:         if (report == null) {
+ 264:             return PreflightResult.fail("report not found: " + version.getReportId());
+ 265:         }
+ 266:         if (report.getBrandName() == null || report.getBrandName().isBlank()) {
+ 267:             return PreflightResult.fail("report.brand_name is blank");
+ 268:         }
+ 269: 
+ 270:         int platformCount = countEnabledPlatforms();
+ 271:         if (platformCount < 1) {
+ 272:             return PreflightResult.fail("enabled platform count is 0");
+ 273:         }
+ 274: 
+ 275:         int genericPromptCount = countPromptTemplates(0);
+ 276:         if (genericPromptCount < 1) {
+ 277:             return PreflightResult.fail("generic prompt count is 0");
+ 278:         }
+ 279: 
+ 280:         int competitorPromptCount = countPromptTemplates(1);
+ 281:         int batch1TotalCalls = platformCount * genericPromptCount * 2;
+ 282:         int totalUpperBoundCalls = batch1TotalCalls + (platformCount * competitorPromptCount * 3 * 2);
+ 283:         return PreflightResult.success(platformCount, competitorPromptCount, batch1TotalCalls, totalUpperBoundCalls);
+ 284:     }
+ 285: 
+ 286:     private Batch1ExecutionResult executeBatch1(PresaleReportVersion version,
+ 287:                                                 PresaleReport report,
+ 288:                                                 Long operatorUserId,
+ 289:                                                 boolean isManager,
+ 290:                                                 PreflightResult preflight) {
+ 291:         Long versionId = version.getId();
+ 292:         enterStage(versionId, STAGE_BATCH1, "batch1 executing");
+ 293: 
+ 294:         List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(
+ 295:                 new LambdaQueryWrapper<AiPlatformConfig>()
+ 296:                         .eq(AiPlatformConfig::getEnabled, true)
+ 297:                         .orderByAsc(AiPlatformConfig::getPlatformCode)
+ 298:         );
+ 299:         List<PresalePromptTemplate> templates = promptTemplateMapper.selectList(
+ 300:                 new LambdaQueryWrapper<PresalePromptTemplate>()
+ 301:                         .eq(PresalePromptTemplate::getEnabled, 1)
+ 302:                         .eq(PresalePromptTemplate::getHasCompetitorVar, 0)
+ 303:                         .orderByAsc(PresalePromptTemplate::getSortOrder)
+ 304:                         .orderByAsc(PresalePromptTemplate::getId)
+ 305:         );
+ 306: 
+ 307:         int qGen = templates.size();
+ 308:         int batch1CompletedCalls = 0;
+ 309:         int batch2CompletedCalls = 0;
+ 310:         Set<String> degradedPlatforms = new LinkedHashSet<>();
+ 311:         List<PlatformBatchState> platformStates = new ArrayList<>();
+ 312: 
+ 313:         for (AiPlatformConfig platform : platforms) {
+ 314:             PlatformBatchState state = new PlatformBatchState(platform.getPlatformCode(), qGen);
+ 315:             platformStates.add(state);
+ 316: 
+ 317:             for (PresalePromptTemplate template : templates) {
+ 318:                 if (state.degraded) {
+ 319:                     insertSkippedCall(versionId, 1, platform.getPlatformCode(), template.getId(), "",
+ 320:                             "QUERY");
+ 321:                     insertSkippedCall(versionId, 1, platform.getPlatformCode(), template.getId(), "",
+ 322:                             "ANALYZE");
+ 323:                     batch1CompletedCalls += 2;
+ 324:                     updateBatchProgress(versionId, batch1CompletedCalls, batch2CompletedCalls, degradedPlatforms, false);
+ 325:                     continue;
+ 326:                 }
+ 327: 
+ 328:                 String renderedPrompt = promptTemplateRenderer.render(
+ 329:                         template.getPromptContent(),
+ 330:                         template.getPromptCode(),
+ 331:                         1,
+ 332:                         report.getBrandName(),
+ 333:                         report.getIndustry(),
+ 334:                         report.getIndustryRole(),
+ 335:                         report.getRegion(),
+ 336:                         ""
+ 337:                 );
+ 338: 
+ 339:                 PlatformCallContext ctx = new PlatformCallContext(
+ 340:                         versionId,
+ 341:                         1,
+ 342:                         platform.getPlatformCode(),
+ 343:                         template.getId(),
+ 344:                         "",
+ 345:                         report.getBrandName(),
+ 346:                         operatorUserId,
+ 347:                         isManager
+ 348:                 );
+ 349: 
+ 350:                 PresaleAiCall queryCall;
+ 351:                 LlmCallResult queryResult;
+ 352:                 try {
+ 353:                     queryResult = llmInvoker.query(ctx, renderedPrompt);
+ 354:                     queryCall = insertCall(
+ 355:                             versionId, 1, platform.getPlatformCode(), template.getId(), "",
+ 356:                             "QUERY", null, queryResult, null
+ 357:                     );
+ 358:                 } catch (LlmInvokeException ex) {
+ 359:                     insertFailedCall(versionId, 1, platform.getPlatformCode(), template.getId(), "",
+ 360:                             "QUERY", null, ex.getMessage());
+ 361:                     state.processedPrompts++;
+ 362:                     state.failedPrompts++;
+ 363:                     batch1CompletedCalls += 1;
+ 364:                     if (shouldDegrade(state)) {
+ 365:                         state.degraded = true;
+ 366:                         degradedPlatforms.add(state.platformCode);
+ 367:                     }
+ 368:                     updateBatchProgress(versionId, batch1CompletedCalls, batch2CompletedCalls, degradedPlatforms, false);
+ 369:                     if (degradedPlatforms.size() >= 4) {
+ 370:                         updateBatchProgress(versionId, batch1CompletedCalls, batch2CompletedCalls, degradedPlatforms, true);
+ 371:                         markTooManyDegradedFailed(versionId, degradedPlatforms);
+ 372:                         return Batch1ExecutionResult.stop();
+ 373:                     }
+ 374:                     continue;
+ 375:                 }
+ 376: 
+ 377:                 batch1CompletedCalls += 1;
+ 378:                 updateBatchProgress(versionId, batch1CompletedCalls, batch2CompletedCalls, degradedPlatforms, false);
+ 379: 
+ 380:                 try {
+ 381:                     LlmCallResult analyzeResult = llmInvoker.analyze(ctx, renderedPrompt, queryResult.rawResponse());
+ 382:                     PresaleAiCall analyzeCall = insertCall(
+ 383:                             versionId, 1, platform.getPlatformCode(), template.getId(), "",
+ 384:                             "ANALYZE", queryCall.getId(), analyzeResult, null
+ 385:                     );
+ 386:                     insertPromptResultSuccess(versionId, 1, platform.getPlatformCode(), template.getId(), "",
+ 387:                             queryCall.getId(), analyzeCall.getId(), analyzeResult.rawResponse());
+ 388:                 } catch (LlmInvokeException | AnalyzeParseException ex) {
+ 389:                     PresaleAiCall analyzeCall = insertFailedCall(versionId, 1, platform.getPlatformCode(), template.getId(), "",
+ 390:                             "ANALYZE", queryCall.getId(), ex.getMessage());
+ 391:                     insertPromptResultAnalyzeFailed(versionId, 1, platform.getPlatformCode(), template.getId(), "",
+ 392:                             queryCall.getId(), analyzeCall.getId());
+ 393:                     state.failedPrompts++;
+ 394:                 }
+ 395: 
+ 396:                 state.processedPrompts++;
+ 397:                 batch1CompletedCalls += 1;
+ 398:                 if (shouldDegrade(state)) {
+ 399:                     state.degraded = true;
+ 400:                     degradedPlatforms.add(state.platformCode);
+ 401:                 }
+ 402:                 updateBatchProgress(versionId, batch1CompletedCalls, batch2CompletedCalls, degradedPlatforms, false);
+ 403: 
+ 404:                 if (degradedPlatforms.size() >= 4) {
+ 405:                     updateBatchProgress(versionId, batch1CompletedCalls, batch2CompletedCalls, degradedPlatforms, true);
+ 406:                     markTooManyDegradedFailed(versionId, degradedPlatforms);
+ 407:                     return Batch1ExecutionResult.stop();
+ 408:                 }
+ 409:             }
+ 410:         }
+ 411:         updateBatchProgress(versionId, batch1CompletedCalls, batch2CompletedCalls, degradedPlatforms, true);
+ 412:         return Batch1ExecutionResult.continuePipeline();
+ 413:     }
+ 414: 
+ 415:     private Batch2ExecutionResult executeBatch2(Long versionId,
+ 416:                                                 PresaleReport report,
+ 417:                                                 Long operatorUserId,
+ 418:                                                 boolean isManager,
+ 419:                                                 List<String> competitors,
+ 420:                                                 int competitorPromptCount) {
+ 421:         enterStage(versionId, STAGE_BATCH2, "batch2 executing");
+ 422: 
+ 423:         List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(
+ 424:                 new LambdaQueryWrapper<AiPlatformConfig>()
+ 425:                         .eq(AiPlatformConfig::getEnabled, true)
+ 426:                         .orderByAsc(AiPlatformConfig::getPlatformCode)
+ 427:         );
+ 428:         List<PresalePromptTemplate> templates = promptTemplateMapper.selectList(
+ 429:                 new LambdaQueryWrapper<PresalePromptTemplate>()
+ 430:                         .eq(PresalePromptTemplate::getEnabled, 1)
+ 431:                         .eq(PresalePromptTemplate::getHasCompetitorVar, 1)
+ 432:                         .orderByAsc(PresalePromptTemplate::getSortOrder)
+ 433:                         .orderByAsc(PresalePromptTemplate::getId)
+ 434:         );
+ 435: 
+ 436:         int c = competitors.size();
+ 437:         int qCmp = competitorPromptCount > 0 ? competitorPromptCount : templates.size();
+ 438:         int batch2TotalPromptsPerPlatform = qCmp * c;
+ 439:         PresaleReportVersion current = versionMapper.selectById(versionId);
+ 440:         int batch1CompletedCalls = current != null && current.getBatch1CompletedCalls() != null
+ 441:                 ? current.getBatch1CompletedCalls() : 0;
+ 442:         int batch2CompletedCalls = current != null && current.getBatch2CompletedCalls() != null
+ 443:                 ? current.getBatch2CompletedCalls() : 0;
+ 444: 
+ 445:         Set<String> batch2DegradedPlatforms = new LinkedHashSet<>();
+ 446:         Set<String> displayDegradedPlatforms = new LinkedHashSet<>(parseJsonArray(current == null ? null : current.getDegradedPlatforms()));
+ 447: 
+ 448:         for (AiPlatformConfig platform : platforms) {
+ 449:             PlatformBatchState state = new PlatformBatchState(platform.getPlatformCode(), batch2TotalPromptsPerPlatform);
+ 450: 
+ 451:             for (PresalePromptTemplate template : templates) {
+ 452:                 for (String competitorName : competitors) {
+ 453:                     if (state.degraded) {
+ 454:                         insertSkippedCall(versionId, 2, platform.getPlatformCode(), template.getId(), competitorName,
+ 455:                                 "QUERY");
+ 456:                         insertSkippedCall(versionId, 2, platform.getPlatformCode(), template.getId(), competitorName,
+ 457:                                 "ANALYZE");
+ 458:                         batch2CompletedCalls += 2;
+ 459:                         updateBatchProgress(versionId, batch1CompletedCalls, batch2CompletedCalls, displayDegradedPlatforms, false);
+ 460:                         continue;
+ 461:                     }
+ 462: 
+ 463:                     String renderedPrompt = promptTemplateRenderer.render(
+ 464:                             template.getPromptContent(),
+ 465:                             template.getPromptCode(),
+ 466:                             2,
+ 467:                             report.getBrandName(),
+ 468:                             report.getIndustry(),
+ 469:                             report.getIndustryRole(),
+ 470:                             report.getRegion(),
+ 471:                             competitorName
+ 472:                     );
+ 473:                     PlatformCallContext ctx = new PlatformCallContext(
+ 474:                             versionId,
+ 475:                             2,
+ 476:                             platform.getPlatformCode(),
+ 477:                             template.getId(),
+ 478:                             competitorName,
+ 479:                             report.getBrandName(),
+ 480:                             operatorUserId,
+ 481:                             isManager
+ 482:                     );
+ 483: 
+ 484:                     PresaleAiCall queryCall;
+ 485:                     LlmCallResult queryResult;
+ 486:                     try {
+ 487:                         queryResult = llmInvoker.query(ctx, renderedPrompt);
+ 488:                         queryCall = insertCall(
+ 489:                                 versionId, 2, platform.getPlatformCode(), template.getId(), competitorName,
+ 490:                                 "QUERY", null, queryResult, null
+ 491:                         );
+ 492:                     } catch (LlmInvokeException ex) {
+ 493:                         insertFailedCall(versionId, 2, platform.getPlatformCode(), template.getId(), competitorName,
+ 494:                                 "QUERY", null, ex.getMessage());
+ 495:                         state.processedPrompts++;
+ 496:                         state.failedPrompts++;
+ 497:                         batch2CompletedCalls += 1;
+ 498:                         if (shouldDegrade(state)) {
+ 499:                             state.degraded = true;
+ 500:                             batch2DegradedPlatforms.add(state.platformCode);
+ 501:                             displayDegradedPlatforms.add(state.platformCode);
+ 502:                         }
+ 503:                         updateBatchProgress(versionId, batch1CompletedCalls, batch2CompletedCalls, displayDegradedPlatforms, false);
+ 504:                         if (batch2DegradedPlatforms.size() >= 4) {
+ 505:                             updateBatchProgress(versionId, batch1CompletedCalls, batch2CompletedCalls, displayDegradedPlatforms, true);
+ 506:                             markTooManyDegradedFailed(versionId, displayDegradedPlatforms);
+ 507:                             return Batch2ExecutionResult.stop();
+ 508:                         }
+ 509:                         continue;
+ 510:                     }
+ 511: 
+ 512:                     batch2CompletedCalls += 1;
+ 513:                     updateBatchProgress(versionId, batch1CompletedCalls, batch2CompletedCalls, displayDegradedPlatforms, false);
+ 514: 
+ 515:                     try {
+ 516:                         LlmCallResult analyzeResult = llmInvoker.analyze(ctx, renderedPrompt, queryResult.rawResponse());
+ 517:                         PresaleAiCall analyzeCall = insertCall(
+ 518:                                 versionId, 2, platform.getPlatformCode(), template.getId(), competitorName,
+ 519:                                 "ANALYZE", queryCall.getId(), analyzeResult, null
+ 520:                         );
+ 521:                         insertPromptResultSuccess(versionId, 2, platform.getPlatformCode(), template.getId(), competitorName,
+ 522:                                 queryCall.getId(), analyzeCall.getId(), analyzeResult.rawResponse());
+ 523:                     } catch (LlmInvokeException | AnalyzeParseException ex) {
+ 524:                         PresaleAiCall analyzeCall = insertFailedCall(versionId, 2, platform.getPlatformCode(), template.getId(), competitorName,
+ 525:                                 "ANALYZE", queryCall.getId(), ex.getMessage());
+ 526:                         insertPromptResultAnalyzeFailed(versionId, 2, platform.getPlatformCode(), template.getId(), competitorName,
+ 527:                                 queryCall.getId(), analyzeCall.getId());
+ 528:                         state.failedPrompts++;
+ 529:                     }
+ 530: 
+ 531:                     state.processedPrompts++;
+ 532:                     batch2CompletedCalls += 1;
+ 533:                     if (shouldDegrade(state)) {
+ 534:                         state.degraded = true;
+ 535:                         batch2DegradedPlatforms.add(state.platformCode);
+ 536:                         displayDegradedPlatforms.add(state.platformCode);
+ 537:                     }
+ 538:                     updateBatchProgress(versionId, batch1CompletedCalls, batch2CompletedCalls, displayDegradedPlatforms, false);
+ 539: 
+ 540:                     if (batch2DegradedPlatforms.size() >= 4) {
+ 541:                         updateBatchProgress(versionId, batch1CompletedCalls, batch2CompletedCalls, displayDegradedPlatforms, true);
+ 542:                         markTooManyDegradedFailed(versionId, displayDegradedPlatforms);
+ 543:                         return Batch2ExecutionResult.stop();
+ 544:                     }
+ 545:                 }
+ 546:             }
+ 547:         }
+ 548:         updateBatchProgress(versionId, batch1CompletedCalls, batch2CompletedCalls, displayDegradedPlatforms, true);
+ 549:         return Batch2ExecutionResult.continuePipeline();
+ 550:     }
+ 551: 
+ 552:     private void markRunningForMock(Long versionId) {
+ 553:         PresaleReportVersion current = versionMapper.selectById(versionId);
+ 554:         int totalCalls = current == null || current.getTotalLlmCalls() == null
+ 555:                 ? 0 : current.getTotalLlmCalls();
+ 556: 
+ 557:         PresaleReportVersion update = new PresaleReportVersion();
+ 558:         update.setId(versionId);
+ 559:         update.setGenerationStatus(PresaleGenerateStatus.RUNNING.name());
+ 560:         update.setGenerationStage(STAGE_BATCH1);
+ 561:         update.setCompletedLlmCalls(0);
+ 562:         update.setTotalLlmCalls(totalCalls);
+ 563:         update.setBatch1CompletedCalls(0);
+ 564:         update.setBatch2CompletedCalls(0);
+ 565:         update.setFailureReason(null);
+ 566:         update.setFailureCategory(null);
+ 567:         update.setUpdatedAt(LocalDateTime.now());
+ 568:         versionMapper.updateById(update);
+ 569:     }
+ 570: 
+ 571:     private void markRunning(Long versionId, int totalLlmCalls, int batch1TotalCalls) {
+ 572:         PresaleReportVersion update = new PresaleReportVersion();
+ 573:         update.setId(versionId);
+ 574:         update.setGenerationStatus(PresaleGenerateStatus.RUNNING.name());
+ 575:         update.setGenerationStage(STAGE_BATCH1);
+ 576:         update.setCompletedLlmCalls(0);
+ 577:         update.setTotalLlmCalls(totalLlmCalls);
+ 578:         update.setBatch1TotalCalls(batch1TotalCalls);
+ 579:         update.setBatch1CompletedCalls(0);
+ 580:         update.setBatch2TotalCalls(null);
+ 581:         update.setBatch2CompletedCalls(0);
+ 582:         update.setExtractedCompetitorCount(null);
+ 583:         update.setFailureReason(null);
+ 584:         update.setFailureCategory(null);
+ 585:         update.setUpdatedAt(LocalDateTime.now());
+ 586:         versionMapper.updateById(update);
+ 587:     }
+ 588: 
+ 589:     private void enterStage(Long versionId, String stage, String note) {
+ 590:         PresaleReportVersion update = new PresaleReportVersion();
+ 591:         update.setId(versionId);
+ 592:         update.setGenerationStage(stage);
+ 593:         update.setUpdatedAt(LocalDateTime.now());
+ 594:         versionMapper.updateById(update);
+ 595:         log.info("Presale generation stage entered, versionId={}, stage={}, note={}", versionId, stage, note);
+ 596:     }
+ 597: 
+ 598:     private void updateAfterCompetitorExtract(Long versionId,
+ 599:                                               int extractedCompetitorCount,
+ 600:                                               int batch2TotalCalls,
+ 601:                                               int totalCalls) {
+ 602:         PresaleReportVersion update = new PresaleReportVersion();
+ 603:         update.setId(versionId);
+ 604:         update.setExtractedCompetitorCount(extractedCompetitorCount);
+ 605:         update.setBatch2TotalCalls(batch2TotalCalls);
+ 606:         update.setTotalLlmCalls(totalCalls);
+ 607:         update.setUpdatedAt(LocalDateTime.now());
+ 608:         versionMapper.updateById(update);
+ 609:     }
+ 610: 
+ 611:     private void markFailed(Long versionId, String failureCategory, String reason) {
+ 612:         PresaleReportVersion update = new PresaleReportVersion();
+ 613:         update.setId(versionId);
+ 614:         update.setGenerationStatus(PresaleGenerateStatus.FAILED.name());
+ 615:         update.setGenerationStage(null);
+ 616:         update.setFailureCategory(failureCategory);
+ 617:         update.setFailureReason(truncateReason(reason));
+ 618:         update.setUpdatedAt(LocalDateTime.now());
+ 619:         versionMapper.updateById(update);
+ 620:         lastProgressUpdateAtByVersion.remove(versionId);
+ 621:     }
+ 622: 
+ 623:     @Async("presaleGenerateExecutor")
+ 624:     public void triggerGenerate(Long versionId) {
+ 625:         triggerGenerate(versionId, null, false);
+ 626:     }
+ 627: 
+ 628:     private FixturePayload loadFixturePayload() throws IOException {
+ 629:         try (InputStream is = getClass().getClassLoader().getResourceAsStream(mockFixturePath)) {
+ 630:             if (is == null) {
+ 631:                 throw new IOException("Mock fixture not found on classpath: " + mockFixturePath);
+ 632:             }
+ 633:             String content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+ 634:             if (!content.isEmpty() && content.charAt(0) == '\uFEFF') {
+ 635:                 content = content.substring(1);
+ 636:             }
+ 637: 
+ 638:             JsonNode root = objectMapper.readTree(content);
+ 639:             JsonNode effective = (root != null && root.has("input") && root.get("input").isObject())
+ 640:                     ? root.get("input")
+ 641:                     : root;
+ 642: 
+ 643:             JsonNode rawNode = (effective != null && effective.has("raw") && effective.get("raw").isObject())
+ 644:                     ? effective.get("raw")
+ 645:                     : effective;
+ 646:             String rawJson = objectMapper.writeValueAsString(rawNode);
+ 647: 
+ 648:             JsonNode computedNode = (effective != null && effective.has("computed") && effective.get("computed").isObject())
+ 649:                     ? effective.get("computed")
+ 650:                     : objectMapper.createObjectNode();
+ 651:             String computedJson = objectMapper.writeValueAsString(computedNode);
+ 652: 
+ 653:             JsonNode editableNode = (effective != null && effective.has("editable") && effective.get("editable").isObject())
+ 654:                     ? effective.get("editable")
+ 655:                     : objectMapper.createObjectNode();
+ 656:             String editableJson = objectMapper.writeValueAsString(editableNode);
+ 657: 
+ 658:             return new FixturePayload(rawJson, computedJson, editableJson);
+ 659:         }
+ 660:     }
+ 661: 
+ 662:     private int countEnabledPlatforms() {
+ 663:         Long count = aiPlatformConfigMapper.selectCount(
+ 664:                 new LambdaQueryWrapper<AiPlatformConfig>().eq(AiPlatformConfig::getEnabled, true)
+ 665:         );
+ 666:         return count == null ? 0 : count.intValue();
+ 667:     }
+ 668: 
+ 669:     private int countPromptTemplates(int hasCompetitorVar) {
+ 670:         Long count = promptTemplateMapper.selectCount(
+ 671:                 new LambdaQueryWrapper<PresalePromptTemplate>()
+ 672:                         .eq(PresalePromptTemplate::getEnabled, 1)
+ 673:                         .eq(PresalePromptTemplate::getHasCompetitorVar, hasCompetitorVar)
+ 674:         );
+ 675:         return count == null ? 0 : count.intValue();
+ 676:     }
+ 677: 
+ 678:     private void updateBatchProgress(Long versionId,
+ 679:                                      int batch1CompletedCalls,
+ 680:                                      int batch2CompletedCalls,
+ 681:                                      Set<String> degradedPlatforms) {
+ 682:         updateBatchProgress(versionId, batch1CompletedCalls, batch2CompletedCalls, degradedPlatforms, false);
+ 683:     }
+ 684: 
+ 685:     private void updateBatchProgress(Long versionId,
+ 686:                                      int batch1CompletedCalls,
+ 687:                                      int batch2CompletedCalls,
+ 688:                                      Set<String> degradedPlatforms,
+ 689:                                      boolean forceFlush) {
+ 690:         if (!forceFlush) {
+ 691:             long now = System.currentTimeMillis();
+ 692:             long lastAt = lastProgressUpdateAtByVersion.getOrDefault(versionId, 0L);
+ 693:             if (now - lastAt < PROGRESS_UPDATE_THROTTLE_MS) {
+ 694:                 return;
+ 695:             }
+ 696:             lastProgressUpdateAtByVersion.put(versionId, now);
+ 697:         } else {
+ 698:             lastProgressUpdateAtByVersion.put(versionId, System.currentTimeMillis());
+ 699:         }
+ 700: 
+ 701:         PresaleReportVersion update = new PresaleReportVersion();
+ 702:         update.setId(versionId);
+ 703:         update.setBatch1CompletedCalls(batch1CompletedCalls);
+ 704:         update.setBatch2CompletedCalls(batch2CompletedCalls);
+ 705:         update.setCompletedLlmCalls(batch1CompletedCalls + batch2CompletedCalls);
+ 706:         update.setIsDegraded(!degradedPlatforms.isEmpty());
+ 707:         update.setDegradedPlatforms(toJsonArray(degradedPlatforms));
+ 708:         update.setUpdatedAt(LocalDateTime.now());
+ 709:         versionMapper.updateById(update);
+ 710:     }
+ 711: 
+ 712:     private void markTooManyDegradedFailed(Long versionId, Set<String> degradedPlatforms) {
+ 713:         PresaleReportVersion update = new PresaleReportVersion();
+ 714:         update.setId(versionId);
+ 715:         update.setGenerationStatus(PresaleGenerateStatus.FAILED.name());
+ 716:         update.setGenerationStage(null);
+ 717:         update.setFailureCategory(FAILURE_CATEGORY_TOO_MANY_DEGRADED);
+ 718:         update.setIsDegraded(true);
+ 719:         update.setDegradedPlatforms(toJsonArray(degradedPlatforms));
+ 720:         update.setFailureReason(truncateReason(FAILURE_CATEGORY_TOO_MANY_DEGRADED));
+ 721:         update.setUpdatedAt(LocalDateTime.now());
+ 722:         versionMapper.updateById(update);
+ 723:         lastProgressUpdateAtByVersion.remove(versionId);
+ 724:     }
+ 725: 
+ 726:     private List<String> extractTopCompetitorsFromBatch1(Long versionId, String brandName) {
+ 727:         List<PresaleAiPromptResult> rows = aiPromptResultMapper.selectList(
+ 728:                 new LambdaQueryWrapper<PresaleAiPromptResult>()
+ 729:                         .eq(PresaleAiPromptResult::getVersionId, versionId)
+ 730:                         .eq(PresaleAiPromptResult::getBatchNo, 1)
+ 731:                         .isNotNull(PresaleAiPromptResult::getIsMentioned)
+ 732:         );
+ 733:         if (rows == null || rows.isEmpty()) {
+ 734:             return List.of();
+ 735:         }
+ 736: 
+ 737:         String normalizedBrand = normalizeName(brandName);
+ 738:         Map<String, Integer> countByNormalized = new HashMap<>();
+ 739:         Map<String, String> displayByNormalized = new HashMap<>();
+ 740:         for (PresaleAiPromptResult row : rows) {
+ 741:             String mentionedCompetitors = row.getMentionedCompetitors();
+ 742:             if (mentionedCompetitors == null || mentionedCompetitors.isBlank()) {
+ 743:                 continue;
+ 744:             }
+ 745: 
+ 746:             try {
+ 747:                 JsonNode node = objectMapper.readTree(mentionedCompetitors);
+ 748:                 if (!node.isArray()) {
+ 749:                     continue;
+ 750:                 }
+ 751: 
+ 752:                 Set<String> rowDedup = new HashSet<>();
+ 753:                 for (JsonNode item : node) {
+ 754:                     if (!item.isTextual()) {
+ 755:                         continue;
+ 756:                     }
+ 757:                     String display = item.asText() == null ? "" : item.asText().trim();
+ 758:                     if (display.isEmpty()) {
+ 759:                         continue;
+ 760:                     }
+ 761:                     String normalized = normalizeName(display);
+ 762:                     if (normalized.isEmpty() || normalized.equals(normalizedBrand)) {
+ 763:                         continue;
+ 764:                     }
+ 765:                     if (!rowDedup.add(normalized)) {
+ 766:                         continue;
+ 767:                     }
+ 768:                     countByNormalized.merge(normalized, 1, Integer::sum);
+ 769:                     displayByNormalized.putIfAbsent(normalized, display);
+ 770:                 }
+ 771:             } catch (Exception ex) {
+ 772:                 log.warn("Skip invalid mentioned_competitors json, versionId={}, promptResultId={}",
+ 773:                         versionId, row.getId(), ex);
+ 774:             }
+ 775:         }
+ 776: 
+ 777:         return countByNormalized.entrySet().stream()
+ 778:                 .sorted(Comparator
+ 779:                         .comparing(Map.Entry<String, Integer>::getValue, Comparator.reverseOrder())
+ 780:                         .thenComparing(Map.Entry::getKey))
+ 781:                 .limit(3)
+ 782:                 .map(entry -> displayByNormalized.getOrDefault(entry.getKey(), entry.getKey()))
+ 783:                 .toList();
+ 784:     }
+ 785: 
+ 786:     private String normalizeName(String input) {
+ 787:         if (input == null) {
+ 788:             return "";
+ 789:         }
+ 790:         return input.trim().replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+ 791:     }
+ 792: 
+ 793:     private void markCompetitorExtractEmpty(Long versionId) {
+ 794:         PresaleReportVersion update = new PresaleReportVersion();
+ 795:         update.setId(versionId);
+ 796:         update.setFailureCategory(FAILURE_CATEGORY_COMPETITOR_EXTRACT_EMPTY);
+ 797:         update.setFailureReason("batch1 yielded 0 usable competitors, skip BATCH2");
+ 798:         update.setUpdatedAt(LocalDateTime.now());
+ 799:         versionMapper.updateById(update);
+ 800:     }
+ 801: 
+ 802:     private PresaleAiCall insertCall(Long versionId,
+ 803:                                      int batchNo,
+ 804:                                      String platformCode,
+ 805:                                      Long promptTemplateId,
+ 806:                                      String competitorName,
+ 807:                                      String stage,
+ 808:                                      Long parentCallId,
+ 809:                                      LlmCallResult result,
+ 810:                                      String failureReason) {
+ 811:         PresaleAiCall row = new PresaleAiCall();
+ 812:         row.setVersionId(versionId);
+ 813:         row.setBatchNo(batchNo);
+ 814:         row.setPlatformCode(platformCode);
+ 815:         row.setPromptTemplateId(promptTemplateId);
+ 816:         row.setCompetitorName(competitorName);
+ 817:         row.setStage(stage);
+ 818:         row.setParentCallId(parentCallId);
+ 819:         row.setCallStatus(result.callStatus().name());
+ 820:         row.setRetryCount(result.retryCount() == null ? 0 : result.retryCount());
+ 821:         row.setRawResponse(result.rawResponse());
+ 822:         row.setFailureReason(failureReason);
+ 823:         row.setPromptTokens(result.promptTokens());
+ 824:         row.setCompletionTokens(result.completionTokens());
+ 825:         row.setDurationMs(toIntDuration(result.durationMs()));
+ 826:         aiCallMapper.insert(row);
+ 827:         return row;
+ 828:     }
+ 829: 
+ 830:     private PresaleAiCall insertFailedCall(Long versionId,
+ 831:                                            int batchNo,
+ 832:                                            String platformCode,
+ 833:                                            Long promptTemplateId,
+ 834:                                            String competitorName,
+ 835:                                            String stage,
+ 836:                                            Long parentCallId,
+ 837:                                            String failureReason) {
+ 838:         PresaleAiCall row = new PresaleAiCall();
+ 839:         row.setVersionId(versionId);
+ 840:         row.setBatchNo(batchNo);
+ 841:         row.setPlatformCode(platformCode);
+ 842:         row.setPromptTemplateId(promptTemplateId);
+ 843:         row.setCompetitorName(competitorName);
+ 844:         row.setStage(stage);
+ 845:         row.setParentCallId(parentCallId);
+ 846:         row.setCallStatus(CallStatus.FAILED.name());
+ 847:         row.setRetryCount(0);
+ 848:         row.setRawResponse(null);
+ 849:         row.setFailureReason(truncateReason(failureReason));
+ 850:         row.setPromptTokens(null);
+ 851:         row.setCompletionTokens(null);
+ 852:         row.setDurationMs(null);
+ 853:         aiCallMapper.insert(row);
+ 854:         return row;
+ 855:     }
+ 856: 
+ 857:     private void insertSkippedCall(Long versionId,
+ 858:                                    int batchNo,
+ 859:                                    String platformCode,
+ 860:                                    Long promptTemplateId,
+ 861:                                    String competitorName,
+ 862:                                    String stage) {
+ 863:         PresaleAiCall row = new PresaleAiCall();
+ 864:         row.setVersionId(versionId);
+ 865:         row.setBatchNo(batchNo);
+ 866:         row.setPlatformCode(platformCode);
+ 867:         row.setPromptTemplateId(promptTemplateId);
+ 868:         row.setCompetitorName(competitorName);
+ 869:         row.setStage(stage);
+ 870:         row.setParentCallId(null);
+ 871:         row.setCallStatus(CallStatus.SKIPPED_DEGRADED.name());
+ 872:         row.setRetryCount(0);
+ 873:         row.setRawResponse(null);
+ 874:         row.setFailureReason("SKIPPED_DEGRADED");
+ 875:         row.setPromptTokens(null);
+ 876:         row.setCompletionTokens(null);
+ 877:         row.setDurationMs(null);
+ 878:         aiCallMapper.insert(row);
+ 879:     }
+ 880: 
+ 881:     private void insertPromptResultAnalyzeFailed(Long versionId,
+ 882:                                                  int batchNo,
+ 883:                                                  String platformCode,
+ 884:                                                  Long promptTemplateId,
+ 885:                                                  String competitorName,
+ 886:                                                  Long queryCallId,
+ 887:                                                  Long analyzeCallId) {
+ 888:         PresaleAiPromptResult row = new PresaleAiPromptResult();
+ 889:         row.setVersionId(versionId);
+ 890:         row.setBatchNo(batchNo);
+ 891:         row.setPlatformCode(platformCode);
+ 892:         row.setPromptTemplateId(promptTemplateId);
+ 893:         row.setCompetitorName(competitorName);
+ 894:         row.setQueryCallId(queryCallId);
+ 895:         row.setAnalyzeCallId(analyzeCallId);
+ 896:         row.setIsMentioned(null);
+ 897:         row.setRanking(null);
+ 898:         row.setSentiment(null);
+ 899:         row.setMentionedCompetitors(null);
+ 900:         row.setSceneAdvantages(null);
+ 901:         aiPromptResultMapper.insert(row);
+ 902:     }
+ 903: 
+ 904:     private void insertPromptResultSuccess(Long versionId,
+ 905:                                            int batchNo,
+ 906:                                            String platformCode,
+ 907:                                            Long promptTemplateId,
+ 908:                                            String competitorName,
+ 909:                                            Long queryCallId,
+ 910:                                            Long analyzeCallId,
+ 911:                                            String analyzeJson) throws AnalyzeParseException {
+ 912:         try {
+ 913:             JsonNode node = objectMapper.readTree(analyzeJson);
+ 914:             PresaleAiPromptResult row = new PresaleAiPromptResult();
+ 915:             row.setVersionId(versionId);
+ 916:             row.setBatchNo(batchNo);
+ 917:             row.setPlatformCode(platformCode);
+ 918:             row.setPromptTemplateId(promptTemplateId);
+ 919:             row.setCompetitorName(competitorName);
+ 920:             row.setQueryCallId(queryCallId);
+ 921:             row.setAnalyzeCallId(analyzeCallId);
+ 922:             row.setIsMentioned(node.get("is_mentioned").asBoolean() ? 1 : 0);
+ 923:             row.setRanking(node.get("ranking") == null || node.get("ranking").isNull() ? null : node.get("ranking").asInt());
+ 924:             row.setSentiment(node.get("sentiment").asText());
+ 925:             row.setMentionedCompetitors(objectMapper.writeValueAsString(node.get("mentioned_competitors")));
+ 926:             row.setSceneAdvantages(objectMapper.writeValueAsString(node.get("scene_advantages")));
+ 927:             aiPromptResultMapper.insert(row);
+ 928:         } catch (Exception ex) {
+ 929:             throw new AnalyzeParseException("failed to persist analyze success payload", ex);
+ 930:         }
+ 931:     }
+ 932: 
+ 933:     /**
+ 934:      * spec §7.4: 平台仅在"已执行 prompt 达到总量一半"后开始判降级,
+ 935:      * 且判定条件为"已执行中的失败率 >= 50%"。
+ 936:      */
+ 937:     private boolean shouldDegrade(PlatformBatchState state) {
+ 938:         if (state.processedPrompts * 2 < state.totalPrompts) {
+ 939:             return false;
+ 940:         }
+ 941:         return state.failedPrompts * 2 >= state.processedPrompts;
+ 942:     }
+ 943: 
+ 944:     private Integer toIntDuration(Long durationMs) {
+ 945:         if (durationMs == null) {
+ 946:             return null;
+ 947:         }
+ 948:         if (durationMs <= 0) {
+ 949:             log.warn("Non-positive duration from invoker, clamp to 1ms, durationMs={}", durationMs);
+ 950:             return 1;
+ 951:         }
+ 952:         if (durationMs > Integer.MAX_VALUE) {
+ 953:             return Integer.MAX_VALUE;
+ 954:         }
+ 955:         return durationMs.intValue();
+ 956:     }
+ 957: 
+ 958:     private String toJsonArray(Set<String> values) {
+ 959:         try {
+ 960:             return objectMapper.writeValueAsString(values);
+ 961:         } catch (Exception e) {
+ 962:             return "[]";
+ 963:         }
+ 964:     }
+ 965: 
+ 966:     private Set<String> parseJsonArray(String json) {
+ 967:         if (json == null || json.isBlank()) {
+ 968:             return Set.of();
+ 969:         }
+ 970:         try {
+ 971:             JsonNode node = objectMapper.readTree(json);
+ 972:             if (!node.isArray()) {
+ 973:                 return Set.of();
+ 974:             }
+ 975:             Set<String> values = new LinkedHashSet<>();
+ 976:             for (JsonNode item : node) {
+ 977:                 if (item != null && item.isTextual()) {
+ 978:                     String text = item.asText();
+ 979:                     if (text != null && !text.isBlank()) {
+ 980:                         values.add(text);
+ 981:                     }
+ 982:                 }
+ 983:             }
+ 984:             return values;
+ 985:         } catch (Exception ex) {
+ 986:             return Set.of();
+ 987:         }
+ 988:     }
+ 989: 
+ 990:     private boolean resolveAllowSyntheticFallback() {
+ 991:         return mockEnabled ? allowSyntheticFallbackMock : allowSyntheticFallbackReal;
+ 992:     }
+ 993: 
+ 994:     private record FixturePayload(String rawJson, String computedJson, String editableJson) {
+ 995:     }
+ 996: 
+ 997:     private static final class PreflightResult {
+ 998:         private final boolean success;
+ 999:         private final String failureReason;
+1000:         private final int platformCount;
+1001:         private final int competitorPromptCount;
+1002:         private final int batch1TotalCalls;
+1003:         private final int totalUpperBoundCalls;
+1004: 
+1005:         private PreflightResult(boolean success,
+1006:                                 String failureReason,
+1007:                                 int platformCount,
+1008:                                 int competitorPromptCount,
+1009:                                 int batch1TotalCalls,
+1010:                                 int totalUpperBoundCalls) {
+1011:             this.success = success;
+1012:             this.failureReason = failureReason;
+1013:             this.platformCount = platformCount;
+1014:             this.competitorPromptCount = competitorPromptCount;
+1015:             this.batch1TotalCalls = batch1TotalCalls;
+1016:             this.totalUpperBoundCalls = totalUpperBoundCalls;
+1017:         }
+1018: 
+1019:         static PreflightResult fail(String reason) {
+1020:             return new PreflightResult(false, reason, 0, 0, 0, 0);
+1021:         }
+1022: 
+1023:         static PreflightResult success(int platformCount,
+1024:                                        int competitorPromptCount,
+1025:                                        int batch1TotalCalls,
+1026:                                        int totalUpperBoundCalls) {
+1027:             return new PreflightResult(true, null, platformCount, competitorPromptCount,
+1028:                     batch1TotalCalls, totalUpperBoundCalls);
+1029:         }
+1030: 
+1031:         boolean success() {
+1032:             return success;
+1033:         }
+1034: 
+1035:         String failureReason() {
+1036:             return failureReason;
+1037:         }
+1038: 
+1039:         int platformCount() {
+1040:             return platformCount;
+1041:         }
+1042: 
+1043:         int competitorPromptCount() {
+1044:             return competitorPromptCount;
+1045:         }
+1046: 
+1047:         int batch1TotalCalls() {
+1048:             return batch1TotalCalls;
+1049:         }
+1050: 
+1051:         int totalUpperBoundCalls() {
+1052:             return totalUpperBoundCalls;
+1053:         }
+1054:     }
+1055: 
+1056:     private static final class PlatformBatchState {
+1057:         private final String platformCode;
+1058:         private final int totalPrompts;
+1059:         private int processedPrompts;
+1060:         private int failedPrompts;
+1061:         private boolean degraded;
+1062: 
+1063:         private PlatformBatchState(String platformCode, int totalPrompts) {
+1064:             this.platformCode = platformCode;
+1065:             this.totalPrompts = totalPrompts;
+1066:         }
+1067:     }
+1068: 
+1069:     private static final class Batch1ExecutionResult {
+1070:         private final boolean stopPipeline;
+1071: 
+1072:         private Batch1ExecutionResult(boolean stopPipeline) {
+1073:             this.stopPipeline = stopPipeline;
+1074:         }
+1075: 
+1076:         static Batch1ExecutionResult stop() {
+1077:             return new Batch1ExecutionResult(true);
+1078:         }
+1079: 
+1080:         static Batch1ExecutionResult continuePipeline() {
+1081:             return new Batch1ExecutionResult(false);
+1082:         }
+1083:     }
+1084: 
+1085:     private static final class Batch2ExecutionResult {
+1086:         private final boolean stopPipeline;
+1087: 
+1088:         private Batch2ExecutionResult(boolean stopPipeline) {
+1089:             this.stopPipeline = stopPipeline;
+1090:         }
+1091: 
+1092:         static Batch2ExecutionResult stop() {
+1093:             return new Batch2ExecutionResult(true);
+1094:         }
+1095: 
+1096:         static Batch2ExecutionResult continuePipeline() {
+1097:             return new Batch2ExecutionResult(false);
+1098:         }
+1099:     }
+1100: 
+1101:     private String truncateReason(String reason) {
+1102:         if (reason == null) {
+1103:             return null;
+1104:         }
+1105:         if (reason.length() <= FAILURE_REASON_MAX_LEN) {
+1106:             return reason;
+1107:         }
+1108:         return reason.substring(0, FAILURE_REASON_MAX_LEN);
+1109:     }
+1110: }
