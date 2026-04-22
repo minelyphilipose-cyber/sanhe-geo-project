@@ -26,7 +26,7 @@ class ReuseDecisionServiceTest {
     private ReuseDecisionService service;
 
     @Test
-    void reuseConflict_successAndFailedExist_successWins() {
+    void analyzeSuccessPresent_returnsSkipAll_evenIfOtherRowsExist() {
         PresaleAiCall analyzeSuccess = call(100L, 1, "kimi", 10L, "", "ANALYZE", "SUCCESS", null);
         PresaleAiCall analyzeFailed = call(100L, 1, "kimi", 10L, "", "ANALYZE", "FAILED", null);
         PresaleAiCall querySuccess = call(100L, 1, "kimi", 10L, "", "QUERY", "SUCCESS", "answer");

@@ -8,13 +8,16 @@ import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMappe
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -58,5 +61,35 @@ class PresaleReusePersistenceServiceTest {
         verify(aiCallMapper, times(1)).insert(any(PresaleAiCall.class));
         verify(aiPromptResultMapper, times(1)).insert(any(PresaleAiPromptResult.class));
     }
-}
 
+    @Test
+    void replaceFailedAnalyzeAndResult_normalPath_executesDeleteDeleteInsertInsert_withKeyConditions() {
+        PlatformCallContext ctx = new PlatformCallContext(
+                201L, 2, "kimi", 44L, "", "Acme", 1L, false
+        );
+        PresaleAiCall reusedQuery = new PresaleAiCall();
+        reusedQuery.setId(556L);
+        PresaleAiCall newAnalyze = new PresaleAiCall();
+        PresaleAiPromptResult newResult = new PresaleAiPromptResult();
+
+        when(reuseDecisionService.normalizeCompetitor(anyString())).thenAnswer(inv -> {
+            String val = inv.getArgument(0, String.class);
+            return val == null ? "" : val.trim();
+        });
+
+        service.replaceFailedAnalyzeAndResult(ctx, reusedQuery, newAnalyze, newResult);
+
+        InOrder inOrder = inOrder(aiPromptResultMapper, aiCallMapper, aiPromptResultMapper);
+        inOrder.verify(aiPromptResultMapper).delete(any());
+        inOrder.verify(aiCallMapper).delete(any());
+        inOrder.verify(aiCallMapper).insert(any(PresaleAiCall.class));
+        inOrder.verify(aiPromptResultMapper).insert(any(PresaleAiPromptResult.class));
+
+        verify(aiPromptResultMapper, times(1)).delete(any());
+        verify(aiCallMapper, times(1)).delete(any());
+        verify(reuseDecisionService, times(2)).normalizeCompetitor("");
+
+        assertEquals(556L, newAnalyze.getParentCallId());
+        assertEquals(556L, newResult.getQueryCallId());
+    }
+}

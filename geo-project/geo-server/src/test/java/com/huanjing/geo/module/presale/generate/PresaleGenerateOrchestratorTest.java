@@ -169,6 +169,38 @@ class PresaleGenerateOrchestratorTest {
     }
 
     @Test
+    void interruptedOnPlatform1_platform2NotExecuted() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        setupBasePreflightSuccess(9704L, 8704L, 2, 2, 1);
+
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("p1"), platform("p2")));
+        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
+                promptTemplate(751L, "G1", "Q1"),
+                promptTemplate(752L, "G2", "Q2")
+        ));
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+                .thenAnswer(inv -> inv.getArgument(0, String.class));
+        when(llmInvoker.query(any(PlatformCallContext.class), anyString())).thenAnswer(invocation -> {
+            PlatformCallContext ctx = invocation.getArgument(0, PlatformCallContext.class);
+            if ("p1".equals(ctx.platformCode())) {
+                Thread.currentThread().interrupt();
+                throw new LlmInvokeException("interrupt on platform1");
+            }
+            return successResult("unexpected-platform2-call");
+        });
+
+        orchestrator.triggerGenerate(9704L, 704L, false);
+
+        ArgumentCaptor<PlatformCallContext> queryCtxCaptor = ArgumentCaptor.forClass(PlatformCallContext.class);
+        verify(llmInvoker, times(1)).query(queryCtxCaptor.capture(), anyString());
+        assertEquals("p1", queryCtxCaptor.getValue().platformCode());
+
+        ArgumentCaptor<PresaleAiCall> callCaptor = ArgumentCaptor.forClass(PresaleAiCall.class);
+        verify(aiCallMapper, times(1)).insert(callCaptor.capture());
+        assertEquals("p1", callCaptor.getValue().getPlatformCode());
+    }
+
+    @Test
     void triggerGenerate_realModePreflightFail_marksFailedWithoutRunning() {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
 
@@ -284,6 +316,7 @@ class PresaleGenerateOrchestratorTest {
 
         verify(llmInvoker, never()).query(any(), anyString());
         verify(llmInvoker, never()).analyze(any(), anyString(), anyString());
+        verify(reusePersistenceService, never()).replaceFailedAnalyzeAndResult(any(), any(), any(), any());
         ArgumentCaptor<PresaleReportVersion> versionCaptor = ArgumentCaptor.forClass(PresaleReportVersion.class);
         verify(versionMapper, atLeastOnce()).updateById(versionCaptor.capture());
         int maxBatch1Completed = versionCaptor.getAllValues().stream()
@@ -321,8 +354,12 @@ class PresaleGenerateOrchestratorTest {
 
         verify(llmInvoker, never()).query(any(), anyString());
         verify(llmInvoker, times(1)).analyze(any(), anyString(), anyString());
+        ArgumentCaptor<PlatformCallContext> ctxCaptor = ArgumentCaptor.forClass(PlatformCallContext.class);
+        ArgumentCaptor<PresaleAiCall> reusedQueryCaptor = ArgumentCaptor.forClass(PresaleAiCall.class);
         verify(reusePersistenceService, times(1))
-                .replaceFailedAnalyzeAndResult(any(), any(), any(), any());
+                .replaceFailedAnalyzeAndResult(ctxCaptor.capture(), reusedQueryCaptor.capture(), any(), any());
+        assertEquals(999L, reusedQueryCaptor.getValue().getId());
+        assertEquals("", ctxCaptor.getValue().competitorName());
     }
 
     @Test
@@ -347,6 +384,7 @@ class PresaleGenerateOrchestratorTest {
 
         verify(llmInvoker, times(1)).query(any(), anyString());
         verify(llmInvoker, times(1)).analyze(any(), anyString(), anyString());
+        verify(reusePersistenceService, never()).replaceFailedAnalyzeAndResult(any(), any(), any(), any());
     }
 
     @Test
@@ -767,20 +805,20 @@ class PresaleGenerateOrchestratorTest {
     }
 
     @Test
-    void completedEqualsTotal_inMixedCase_withoutEarlyStop() throws Exception {
+    void regenerate_fromDone_reusePath_appliesAndPipelineContinues() throws Exception {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
-        setupBasePreflightSuccess(9503L, 8503L, 2, 1, 2);
+        setupBasePreflightSuccess(9801L, 8801L, 2, 2, 1);
         PresaleReportVersion preflightVersion = new PresaleReportVersion();
-        preflightVersion.setId(9503L);
-        preflightVersion.setReportId(8503L);
+        preflightVersion.setId(9801L);
+        preflightVersion.setReportId(8801L);
         PresaleReportVersion batch1Version = new PresaleReportVersion();
-        batch1Version.setId(9503L);
-        batch1Version.setReportId(8503L);
+        batch1Version.setId(9801L);
+        batch1Version.setReportId(8801L);
         PresaleReportVersion batch2EntryVersion = new PresaleReportVersion();
-        batch2EntryVersion.setId(9503L);
-        batch2EntryVersion.setReportId(8503L);
-        batch2EntryVersion.setBatch1CompletedCalls(4);
-        when(versionMapper.selectById(9503L))
+        batch2EntryVersion.setId(9801L);
+        batch2EntryVersion.setReportId(8801L);
+        batch2EntryVersion.setBatch1CompletedCalls(8);
+        when(versionMapper.selectById(9801L))
                 .thenReturn(preflightVersion, batch1Version, batch2EntryVersion, batch2EntryVersion);
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(
@@ -788,57 +826,48 @@ class PresaleGenerateOrchestratorTest {
                 List.of(platform("p1"), platform("p2"))
         );
         when(promptTemplateMapper.selectList(any())).thenReturn(
-                List.of(promptTemplate(621L, "G1", "batch1 {brand}")),
                 List.of(
-                        promptTemplate(622L, "C1", "batch2-a {competitor}"),
-                        promptTemplate(623L, "C2", "batch2-b {competitor}")
-                )
+                        promptTemplate(821L, "G1", "batch1-q1 {brand}"),
+                        promptTemplate(822L, "G2", "batch1-q2 {brand}")
+                ),
+                List.of(promptTemplate(823L, "C1", "batch2-q1 {competitor}"))
         );
         when(aiPromptResultMapper.selectList(any())).thenReturn(
-                List.of(promptResult(621L, "[\"Claude\", \"Gemini\", \"Doubao\"]"))
+                List.of(promptResult(821L, "[\"Claude\"]"))
         );
         when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
 
-        AtomicInteger p2Batch2QueryCounter = new AtomicInteger(0);
-        when(llmInvoker.query(any(), anyString())).thenAnswer(invocation -> {
-            Object ctxObj = invocation.getArgument(0);
-            int batchNo = (int) ctxObj.getClass().getMethod("batchNo").invoke(ctxObj);
-            String platformCode = (String) ctxObj.getClass().getMethod("platformCode").invoke(ctxObj);
-            if (batchNo == 1) {
-                return successResult("batch1-ok");
+        when(reuseDecisionService.decide(any(), any())).thenAnswer(invocation -> {
+            PlatformCallContext ctx = invocation.getArgument(0, PlatformCallContext.class);
+            if (ctx.batchNo() == 1 && "p1".equals(ctx.platformCode()) && ctx.promptTemplateId().equals(821L)) {
+                return ReuseDecision.SKIP_ALL; // 命中 1 对
             }
-            if ("p2".equals(platformCode)) {
-                int n = p2Batch2QueryCounter.incrementAndGet();
-                if (n <= 3) {
-                    throw new LlmInvokeException("p2 batch2 query fail " + n);
-                }
+            if (ctx.batchNo() == 2) {
+                return ReuseDecision.SKIP_ALL; // batch2 全短路，确保总 query=3
             }
-            return successResult("batch2-ok");
+            return ReuseDecision.RUN_FULL;
         });
+        when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
         when(llmInvoker.analyze(any(), anyString(), anyString()))
                 .thenReturn(successResult("{\"is_mentioned\":true,\"ranking\":1,\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[],\"scene_advantages\":[]}"));
 
-        orchestrator.triggerGenerate(9503L, 503L, false);
+        orchestrator.triggerGenerate(9801L, 801L, false);
 
         ArgumentCaptor<PresaleReportVersion> versionCaptor = ArgumentCaptor.forClass(PresaleReportVersion.class);
         verify(versionMapper, atLeastOnce()).updateById(versionCaptor.capture());
-        int maxTotal = versionCaptor.getAllValues().stream()
-                .map(PresaleReportVersion::getTotalLlmCalls)
+        verify(llmInvoker, times(3)).query(any(), anyString());
+        boolean hasBatch2Stage = versionCaptor.getAllValues().stream()
+                .anyMatch(v -> "BATCH2".equals(v.getGenerationStage()));
+        assertTrue(hasBatch2Stage);
+        String lastStatus = versionCaptor.getAllValues().stream()
+                .map(PresaleReportVersion::getGenerationStatus)
                 .filter(v -> v != null)
-                .max(Integer::compareTo)
-                .orElse(0);
-        int maxCompleted = versionCaptor.getAllValues().stream()
-                .map(PresaleReportVersion::getCompletedLlmCalls)
-                .filter(v -> v != null)
-                .max(Integer::compareTo)
-                .orElse(0);
-        long batch2DegradedPlatformCount = versionCaptor.getAllValues().stream()
-                .map(PresaleReportVersion::getDegradedPlatforms)
-                .filter(v -> v != null && !v.isBlank() && !"[]".equals(v))
-                .count();
-        assertEquals(maxTotal, maxCompleted);
-        assertTrue(batch2DegradedPlatformCount >= 1);
+                .reduce((first, second) -> second)
+                .orElse(null);
+        assertTrue(lastStatus != null
+                && !PresaleGenerateStatus.INIT.name().equals(lastStatus)
+                && !PresaleGenerateStatus.QUEUED.name().equals(lastStatus));
     }
 
     private void setupBasePreflightSuccess(Long versionId,
