@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.presale.generate.llm;
 
+import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -15,12 +16,8 @@ class PromptTemplateRendererTest {
         String actual = renderer.render(
                 template,
                 "P001",
-                2,
-                "Acme",
-                "餐饮",
-                "连锁",
-                "上海",
-                "Top1"
+                ctx(2, "Top1"),
+                report("Acme", "餐饮", "连锁", "上海")
         );
 
         assertEquals("Acme-餐饮-连锁-上海--Top1", actual);
@@ -33,15 +30,47 @@ class PromptTemplateRendererTest {
         String actual = renderer.render(
                 template,
                 "P002",
-                1,
-                null,
-                "餐饮",
-                null,
-                null,
-                null
+                ctx(1, null),
+                report(null, "餐饮", null, null)
         );
 
         assertEquals("|餐饮||||", actual);
     }
-}
 
+    @Test
+    void batch1_competitorPlaceholder_warnsButDoesNotThrow() {
+        String template = "vs {competitor} by {brand}";
+        String actual = renderer.render(
+                template,
+                "P003",
+                ctx(1, "Claude"),
+                report("Acme", "SaaS", "B2B", "CN")
+        );
+        assertEquals("vs Claude by Acme", actual);
+    }
+
+    @Test
+    void batch2_competitorPlaceholder_replacedWithCtxCompetitorName() {
+        String template = "{brand} vs {competitor}";
+        String actual = renderer.render(
+                template,
+                "P004",
+                ctx(2, "Gemini"),
+                report("Acme", "SaaS", "B2B", "CN")
+        );
+        assertEquals("Acme vs Gemini", actual);
+    }
+
+    private PlatformCallContext ctx(int batchNo, String competitor) {
+        return new PlatformCallContext(1L, batchNo, "kimi", 101L, competitor, "Acme", 1L, false);
+    }
+
+    private PresaleReport report(String brand, String industry, String role, String region) {
+        PresaleReport report = new PresaleReport();
+        report.setBrandName(brand);
+        report.setIndustry(industry);
+        report.setIndustryRole(role);
+        report.setRegion(region);
+        return report;
+    }
+}

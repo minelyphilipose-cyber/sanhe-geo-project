@@ -64,6 +64,7 @@ public class PresaleGenerateOrchestrator {
     private static final String STAGE_L3_INIT = "L3_INIT";
     private static final String FAILURE_CATEGORY_CONFIG_MISSING = "CONFIG_MISSING";
     private static final String FAILURE_CATEGORY_TOO_MANY_DEGRADED = "TOO_MANY_DEGRADED_PLATFORMS";
+    private static final String FAILURE_CATEGORY_INTERRUPTED = "INTERRUPTED";
     private static final String FAILURE_CATEGORY_UNEXPECTED_ERROR = "UNEXPECTED_ERROR";
     private static final String FAILURE_CATEGORY_SNAPSHOT_BUILD_ERROR = "SNAPSHOT_BUILD_ERROR";
     private static final String FAILURE_CATEGORY_STAGE_D_CHECKPOINT = "STAGE_D_CHECKPOINT";
@@ -134,7 +135,10 @@ public class PresaleGenerateOrchestrator {
         } catch (Throwable t) {
             log.error("Presale generate fatal error, versionId={}", versionId, t);
             try {
-                markFailed(versionId, FAILURE_CATEGORY_UNEXPECTED_ERROR,
+                String failureCategory = isInterruptedFailure(t)
+                        ? FAILURE_CATEGORY_INTERRUPTED
+                        : FAILURE_CATEGORY_UNEXPECTED_ERROR;
+                markFailed(versionId, failureCategory,
                         truncateReason("Unexpected error: " + t.getClass().getSimpleName()));
             } catch (Throwable markFailedError) {
                 log.error("Failed to mark presale version FAILED after fatal error, versionId={}", versionId, markFailedError);
@@ -158,7 +162,7 @@ public class PresaleGenerateOrchestrator {
             Thread.sleep(mockDelayMs);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            markFailed(versionId, FAILURE_CATEGORY_UNEXPECTED_ERROR, truncateReason("Generation interrupted"));
+            markFailed(versionId, FAILURE_CATEGORY_INTERRUPTED, truncateReason("Generation interrupted"));
             return;
         }
 
@@ -330,17 +334,6 @@ public class PresaleGenerateOrchestrator {
                     continue;
                 }
 
-                String renderedPrompt = promptTemplateRenderer.render(
-                        template.getPromptContent(),
-                        template.getPromptCode(),
-                        1,
-                        report.getBrandName(),
-                        report.getIndustry(),
-                        report.getIndustryRole(),
-                        report.getRegion(),
-                        ""
-                );
-
                 PlatformCallContext ctx = new PlatformCallContext(
                         versionId,
                         1,
@@ -350,6 +343,12 @@ public class PresaleGenerateOrchestrator {
                         report.getBrandName(),
                         operatorUserId,
                         isManager
+                );
+                String renderedPrompt = promptTemplateRenderer.render(
+                        template.getPromptContent(),
+                        template.getPromptCode(),
+                        ctx,
+                        report
                 );
 
                 ReuseDecision reuseDecision = reuseDecisionService.decide(ctx, reuseCache);
@@ -363,6 +362,13 @@ public class PresaleGenerateOrchestrator {
                     ReuseSnapshot snapshot = reuseDecisionService.snapshotOf(ctx, reuseCache);
                     PresaleAiCall reusedQueryCall = snapshot == null ? null : snapshot.querySuccessCall();
                     if (reusedQueryCall != null && reusedQueryCall.getRawResponse() != null) {
+                        boolean interruptedInAnalyze = false;
+                        // REUSE_QUERY_ONLY: 只捕获 LLM 异常(LlmInvokeException / AnalyzeParseException),
+                        // 不捕获通用 Throwable。DB 中断等底层异常直接冒泡到 triggerGenerate 外层 catch (Throwable t),
+                        // 由 isInterruptedFailure 统一分类为 INTERRUPTED。
+                        // 这样设计避免吞掉非中断类的真实 DB / RuntimeException,保留 bug 暴露面。
+                        // 已知副作用:DB 中断时 state.processedPrompts / counts 本对未累加,
+                        // 与 LLM 中断路径(能走本 catch 分支完成累加)轻微不一致,但不影响 INTERRUPTED 分类本身。
                         try {
                             LlmCallResult analyzeResult = llmInvoker.analyze(ctx, renderedPrompt, reusedQueryCall.getRawResponse());
                             PresaleAiCall analyzeCall = buildCall(
@@ -384,6 +390,7 @@ public class PresaleGenerateOrchestrator {
                             );
                             reusePersistenceService.replaceFailedAnalyzeAndResult(ctx, reusedQueryCall, analyzeCall, promptResult);
                             state.failedPrompts++;
+                            interruptedInAnalyze = isInterruptedFailure(ex);
                         }
 
                         state.processedPrompts++;
@@ -396,6 +403,9 @@ public class PresaleGenerateOrchestrator {
                             updateBatchProgress(versionId, counts.batch1CompletedCalls(), counts.batch2CompletedCalls(), degradedPlatforms, true);
                             markTooManyDegradedFailed(versionId, degradedPlatforms);
                             return Batch1ExecutionResult.stop();
+                        }
+                        if (interruptedInAnalyze) {
+                            throw new BatchInterruptedException("batch1 interrupted during reused analyze");
                         }
                         continue;
                     }
@@ -423,6 +433,9 @@ public class PresaleGenerateOrchestrator {
                         updateBatchProgress(versionId, counts.batch1CompletedCalls(), counts.batch2CompletedCalls(), degradedPlatforms, true);
                         markTooManyDegradedFailed(versionId, degradedPlatforms);
                         return Batch1ExecutionResult.stop();
+                    }
+                    if (isInterruptedFailure(ex)) {
+                        throw new BatchInterruptedException("batch1 interrupted during query");
                     }
                     continue;
                 }
@@ -510,16 +523,6 @@ public class PresaleGenerateOrchestrator {
                         continue;
                     }
 
-                    String renderedPrompt = promptTemplateRenderer.render(
-                            template.getPromptContent(),
-                            template.getPromptCode(),
-                            2,
-                            report.getBrandName(),
-                            report.getIndustry(),
-                            report.getIndustryRole(),
-                            report.getRegion(),
-                            competitorName
-                    );
                     PlatformCallContext ctx = new PlatformCallContext(
                             versionId,
                             2,
@@ -529,6 +532,12 @@ public class PresaleGenerateOrchestrator {
                             report.getBrandName(),
                             operatorUserId,
                             isManager
+                    );
+                    String renderedPrompt = promptTemplateRenderer.render(
+                            template.getPromptContent(),
+                            template.getPromptCode(),
+                            ctx,
+                            report
                     );
 
                     ReuseDecision reuseDecision = reuseDecisionService.decide(ctx, reuseCache);
@@ -552,6 +561,13 @@ public class PresaleGenerateOrchestrator {
                         ReuseSnapshot snapshot = reuseDecisionService.snapshotOf(ctx, reuseCache);
                         PresaleAiCall reusedQueryCall = snapshot == null ? null : snapshot.querySuccessCall();
                         if (reusedQueryCall != null && reusedQueryCall.getRawResponse() != null) {
+                            boolean interruptedInAnalyze = false;
+                            // REUSE_QUERY_ONLY: 只捕获 LLM 异常(LlmInvokeException / AnalyzeParseException),
+                            // 不捕获通用 Throwable。DB 中断等底层异常直接冒泡到 triggerGenerate 外层 catch (Throwable t),
+                            // 由 isInterruptedFailure 统一分类为 INTERRUPTED。
+                            // 这样设计避免吞掉非中断类的真实 DB / RuntimeException,保留 bug 暴露面。
+                            // 已知副作用:DB 中断时 state.processedPrompts / counts 本对未累加,
+                            // 与 LLM 中断路径(能走本 catch 分支完成累加)轻微不一致,但不影响 INTERRUPTED 分类本身。
                             try {
                                 LlmCallResult analyzeResult = llmInvoker.analyze(ctx, renderedPrompt, reusedQueryCall.getRawResponse());
                                 PresaleAiCall analyzeCall = buildCall(
@@ -574,6 +590,7 @@ public class PresaleGenerateOrchestrator {
                                 );
                                 reusePersistenceService.replaceFailedAnalyzeAndResult(ctx, reusedQueryCall, analyzeCall, promptResult);
                                 state.failedPrompts++;
+                                interruptedInAnalyze = isInterruptedFailure(ex);
                             }
 
                             state.processedPrompts++;
@@ -587,6 +604,9 @@ public class PresaleGenerateOrchestrator {
                                 updateBatchProgress(versionId, counts.batch1CompletedCalls(), counts.batch2CompletedCalls(), displayDegradedPlatforms, true);
                                 markTooManyDegradedFailed(versionId, displayDegradedPlatforms);
                                 return Batch2ExecutionResult.stop();
+                            }
+                            if (interruptedInAnalyze) {
+                                throw new BatchInterruptedException("batch2 interrupted during reused analyze");
                             }
                             continue;
                         }
@@ -615,6 +635,9 @@ public class PresaleGenerateOrchestrator {
                             updateBatchProgress(versionId, counts.batch1CompletedCalls(), counts.batch2CompletedCalls(), displayDegradedPlatforms, true);
                             markTooManyDegradedFailed(versionId, displayDegradedPlatforms);
                             return Batch2ExecutionResult.stop();
+                        }
+                        if (isInterruptedFailure(ex)) {
+                            throw new BatchInterruptedException("batch2 interrupted during query");
                         }
                         continue;
                     }
@@ -1163,6 +1186,41 @@ public class PresaleGenerateOrchestrator {
 
     private boolean resolveAllowSyntheticFallback() {
         return mockEnabled ? allowSyntheticFallbackMock : allowSyntheticFallbackReal;
+    }
+
+    /**
+     * 判定异常是否由中断引起,归类为 INTERRUPTED 而非 UNEXPECTED_ERROR。
+     *
+     * 判定优先级(任一满足即归 INTERRUPTED):
+     * 1. 异常类型是 InterruptedException 或 BatchInterruptedException
+     * 2. 当前线程的中断标志为 true(读而不消费)
+     * 3. cause 链内(最大深度 10)存在 InterruptedException
+     *
+     * 注意条件 2 的副作用:如果线程被中断后抛出无关 RuntimeException(例如 NPE),
+     * 也会归为 INTERRUPTED。这是有意设计——中断信号是强优先级,用户主动中断的意图
+     * 优先于无关异常。排障时看日志的 exception type,不只看 failure_category。
+     */
+    private boolean isInterruptedFailure(Throwable throwable) {
+        if (throwable == null) {
+            return false;
+        }
+        if (throwable instanceof InterruptedException) {
+            return true;
+        }
+        if (throwable instanceof BatchInterruptedException) {
+            return true;
+        }
+        if (Thread.currentThread().isInterrupted()) {
+            return true;
+        }
+        Throwable current = throwable.getCause();
+        for (int depth = 0; current != null && depth < 10; depth++) {
+            if (current instanceof InterruptedException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private record FixturePayload(String rawJson, String computedJson, String editableJson) {

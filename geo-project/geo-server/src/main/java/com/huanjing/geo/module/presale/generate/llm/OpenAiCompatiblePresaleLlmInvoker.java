@@ -294,7 +294,7 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         return text == null ? "" : text;
     }
 
-    private void throttle(String platformCode, int qps) {
+    private void throttle(String platformCode, int qps) throws LlmInvokeException {
         long minIntervalMs = Math.max(1L, 1000L / qps);
         long now = System.currentTimeMillis();
         synchronized (lastInvokeAtByPlatform) {
@@ -306,6 +306,7 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                         Thread.sleep(waitMs);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
+                        throw new LlmInvokeException("Interrupted during rate limit throttle", e);
                     }
                 }
             }

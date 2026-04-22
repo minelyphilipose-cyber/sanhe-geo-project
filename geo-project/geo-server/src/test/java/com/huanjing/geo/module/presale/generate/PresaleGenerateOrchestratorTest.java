@@ -5,6 +5,7 @@ import com.huanjing.geo.module.presale.generate.l3.PresaleL3InitService;
 import com.huanjing.geo.module.presale.generate.llm.CallStatus;
 import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
 import com.huanjing.geo.module.presale.generate.llm.LlmInvokeException;
+import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
 import com.huanjing.geo.module.presale.generate.llm.PromptTemplateRenderer;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
@@ -21,6 +22,7 @@ import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
@@ -87,6 +89,83 @@ class PresaleGenerateOrchestratorTest {
         lenient().when(reuseDecisionService.preloadByVersionAndBatch(any(), anyInt())).thenReturn(Map.of());
         lenient().when(reuseDecisionService.decide(any(), any())).thenReturn(ReuseDecision.RUN_FULL);
         lenient().when(reuseDecisionService.snapshotOf(any(), any())).thenReturn(null);
+    }
+
+    @AfterEach
+    void clearInterruptFlag() {
+        Thread.interrupted();
+    }
+
+    @Test
+    void interruptedException_directThrow_markedAsInterrupted() {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", true);
+        ReflectionTestUtils.setField(orchestrator, "mockDelayMs", 1000L);
+        Thread.currentThread().interrupt();
+
+        orchestrator.triggerGenerate(9701L, 701L, false);
+
+        ArgumentCaptor<PresaleReportVersion> updateCaptor = ArgumentCaptor.forClass(PresaleReportVersion.class);
+        verify(versionMapper, atLeastOnce()).updateById(updateCaptor.capture());
+        PresaleReportVersion failed = updateCaptor.getAllValues().stream()
+                .filter(v -> PresaleGenerateStatus.FAILED.name().equals(v.getGenerationStatus()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("INTERRUPTED", failed.getFailureCategory());
+    }
+
+    @Test
+    void llmInvokeException_wrapsInterruptedException_markedAsInterrupted() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        setupBasePreflightSuccess(9702L, 8702L, 1, 1, 1);
+
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("kimi")));
+        when(promptTemplateMapper.selectList(any())).thenReturn(
+                List.of(promptTemplate(731L, "G1", "batch1 {brand}"))
+        );
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+                .thenAnswer(inv -> inv.getArgument(0, String.class));
+        when(llmInvoker.query(any(), anyString()))
+                .thenThrow(new LlmInvokeException("wrapped", new InterruptedException("stop")));
+
+        orchestrator.triggerGenerate(9702L, 702L, false);
+
+        ArgumentCaptor<PresaleReportVersion> versionCaptor = ArgumentCaptor.forClass(PresaleReportVersion.class);
+        verify(versionMapper, atLeastOnce()).updateById(versionCaptor.capture());
+        PresaleReportVersion failed = versionCaptor.getAllValues().stream()
+                .filter(v -> PresaleGenerateStatus.FAILED.name().equals(v.getGenerationStatus()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("INTERRUPTED", failed.getFailureCategory());
+    }
+
+    @Test
+    void llmInvokeException_withInterruptedFlag_abortsBatchEarly() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        setupBasePreflightSuccess(9703L, 8703L, 1, 3, 1);
+
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("kimi")));
+        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
+                promptTemplate(741L, "G1", "Q1"),
+                promptTemplate(742L, "G2", "Q2"),
+                promptTemplate(743L, "G3", "Q3")
+        ));
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+                .thenAnswer(inv -> inv.getArgument(0, String.class));
+        when(llmInvoker.query(any(PlatformCallContext.class), anyString())).thenAnswer(invocation -> {
+            Thread.currentThread().interrupt();
+            throw new LlmInvokeException("interrupted flag set");
+        });
+
+        orchestrator.triggerGenerate(9703L, 703L, false);
+
+        verify(aiCallMapper, times(1)).insert(any(PresaleAiCall.class));
+        ArgumentCaptor<PresaleReportVersion> versionCaptor = ArgumentCaptor.forClass(PresaleReportVersion.class);
+        verify(versionMapper, atLeastOnce()).updateById(versionCaptor.capture());
+        PresaleReportVersion failed = versionCaptor.getAllValues().stream()
+                .filter(v -> PresaleGenerateStatus.FAILED.name().equals(v.getGenerationStatus()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("INTERRUPTED", failed.getFailureCategory());
     }
 
     @Test
@@ -197,7 +276,7 @@ class PresaleGenerateOrchestratorTest {
                 List.of(promptTemplate(702L, "C1", "batch2 {competitor}"))
         );
         when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), anyString()))
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(reuseDecisionService.decide(any(), any())).thenReturn(ReuseDecision.SKIP_ALL);
 
@@ -226,7 +305,7 @@ class PresaleGenerateOrchestratorTest {
                 List.of(promptTemplate(712L, "C1", "batch2 {competitor}"))
         );
         when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), anyString()))
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
 
         PresaleAiCall reusedQuery = new PresaleAiCall();
@@ -257,7 +336,7 @@ class PresaleGenerateOrchestratorTest {
                 List.of(promptTemplate(722L, "C1", "batch2 {competitor}"))
         );
         when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), anyString()))
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(reuseDecisionService.decide(any(), any())).thenReturn(ReuseDecision.RUN_FULL);
         when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
@@ -284,7 +363,7 @@ class PresaleGenerateOrchestratorTest {
                 promptTemplate(2L, "P2", "Q2"),
                 promptTemplate(3L, "P3", "Q3")
         ));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), anyString()))
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(llmInvoker.query(any(), anyString()))
                 .thenReturn(successResult("query-ok"));
@@ -309,7 +388,7 @@ class PresaleGenerateOrchestratorTest {
                 promptTemplate(13L, "P3", "Q3"),
                 promptTemplate(14L, "P4", "Q4")
         ));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), anyString()))
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(llmInvoker.query(any(), anyString()))
                 .thenThrow(new LlmInvokeException("q1 failed"))
@@ -344,7 +423,7 @@ class PresaleGenerateOrchestratorTest {
                 promptTemplate(1009L, "P9", "Q9"),
                 promptTemplate(1010L, "P10", "Q10")
         ));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), anyString()))
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
 
         AtomicInteger queryCounter = new AtomicInteger(0);
@@ -408,7 +487,7 @@ class PresaleGenerateOrchestratorTest {
                 promptTemplate(21L, "P1", "Q1"),
                 promptTemplate(22L, "P2", "Q2")
         ));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), anyString()))
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(llmInvoker.query(any(), anyString()))
                 .thenThrow(new LlmInvokeException("query failed"));
@@ -529,7 +608,7 @@ class PresaleGenerateOrchestratorTest {
         when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(promptResult(401L, "[\"Claude\"]"))
         );
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), anyString()))
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
         when(llmInvoker.analyze(any(), anyString(), anyString()))
@@ -572,7 +651,7 @@ class PresaleGenerateOrchestratorTest {
         when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(promptResult(501L, "[\"Claude\", \"Gemini\", \"Doubao\"]"))
         );
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), anyString()))
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
 
         AtomicInteger batch2QueryCounter = new AtomicInteger(0);
@@ -613,7 +692,7 @@ class PresaleGenerateOrchestratorTest {
                 List.of(promptTemplate(602L, "C1", "batch2 {competitor}"))
         );
         when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), anyString()))
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(llmInvoker.query(any(), anyString())).thenThrow(new LlmInvokeException("batch1 query fail"));
 
@@ -651,7 +730,7 @@ class PresaleGenerateOrchestratorTest {
         when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(promptResult(611L, "[\"Claude\"]"))
         );
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), anyString()))
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
 
         when(llmInvoker.query(any(), anyString())).thenAnswer(invocation -> {
@@ -718,7 +797,7 @@ class PresaleGenerateOrchestratorTest {
         when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(promptResult(621L, "[\"Claude\", \"Gemini\", \"Doubao\"]"))
         );
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), anyString(), anyString(), anyString(), anyString(), anyString()))
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
 
         AtomicInteger p2Batch2QueryCounter = new AtomicInteger(0);
@@ -817,3 +896,4 @@ class PresaleGenerateOrchestratorTest {
         return row;
     }
 }
+
