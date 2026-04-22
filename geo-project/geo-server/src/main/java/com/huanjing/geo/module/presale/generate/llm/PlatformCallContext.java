@@ -8,6 +8,7 @@ package com.huanjing.geo.module.presale.generate.llm;
  * @param platformCode     平台编码
  * @param promptTemplateId prompt 模板 ID
  * @param competitorName   竞品名(batch1 固定为空串)
+ * @param brandName        品牌名(Analyze 模板注入)
  * @param operatorUserId   触发者用户 ID
  * @param operatorIsManager 触发者是否 manager
  */
@@ -16,7 +17,7 @@ public record PlatformCallContext(Long versionId,
                                   String platformCode,
                                   Long promptTemplateId,
                                   String competitorName,
+                                  String brandName,
                                   Long operatorUserId,
                                   boolean operatorIsManager) {
 }
-
