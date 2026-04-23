@@ -101,7 +101,7 @@ class PresaleGenerateOrchestratorTest {
         lenient().when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
                 .thenReturn("{\"client_info\":{\"brand_name\":\"Acme\",\"industry\":\"Software\"},\"test_summary\":{\"total_platforms\":1,\"total_prompts\":1},\"benchmarks_frozen\":{\"industry_avg\":{\"overall\":50.0}},\"competitors\":[]}");
         lenient().when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
-                .thenReturn("{\"scores\":{\"overall\":60.0},\"intent_breakdown\":[],\"optimization_findings\":[],\"roi_simulation\":{\"phases\":[]}}");
+                .thenReturn("{}");
         lenient().when(l3InitService.derive(anyString(), anyString())).thenReturn("{}");
     }
 

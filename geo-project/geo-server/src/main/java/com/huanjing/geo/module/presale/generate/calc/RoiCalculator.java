@@ -64,7 +64,7 @@ public class RoiCalculator {
                         .build()
         );
 
-        double upliftPercent = current == 0.0 ? 0.0 : ((t3 - current) / current * 100.0);
+        double upliftPercent = Double.compare(current, 0.0) == 0 ? 0.0 : ((t3 - current) / current * 100.0);
         return RoiSimulation.builder()
                 .currentScore(current)
                 .targetScore(t3)
@@ -74,4 +74,3 @@ public class RoiCalculator {
                 .build();
     }
 }
-

@@ -95,6 +95,10 @@ class PlatformIntentBreakdownBuilderTest {
 
     @Test
     void build_templateCountWithCompetitorVar_doesNotMultiplyByCompetitorCount() {
+        // Defensive regression:
+        // production SQL now filters has_competitor_var = 0, so this mixed fixture is intentionally
+        // synthetic and unreachable in normal flow. Keep it to prevent accidental reintroduction of
+        // "template_count × competitor_count" multiplication in Java-side logic.
         PresaleAiPromptResultMapper mapper = Mockito.mock(PresaleAiPromptResultMapper.class);
         Mockito.when(mapper.selectIntentSamplesByVersionId(1L)).thenReturn(List.of());
         Mockito.when(mapper.selectTemplateIntentStats()).thenReturn(templateStatsWithCompetitorVarRecommendation());

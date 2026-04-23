@@ -125,7 +125,7 @@ public class PresaleComputedSnapshotEnricher {
             if (ranking == null) {
                 continue;
             }
-            if (ranking <= 1) {
+            if (ranking == 1) {
                 c1++;
             } else if (ranking == 2) {
                 c2++;

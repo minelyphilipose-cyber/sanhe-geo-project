@@ -807,7 +807,6 @@ public class PresaleGenerateOrchestrator {
         update.setGenerationStatus(PresaleGenerateStatus.DONE.name());
         update.setGenerationStage(null);
         update.setCompletedLlmCalls(totalCalls);
-        update.setTotalLlmCalls(totalCalls);
         update.setBatch1CompletedCalls(current == null ? null : current.getBatch1TotalCalls());
         update.setBatch2CompletedCalls(current == null ? null : current.getBatch2TotalCalls());
         update.setFailureCategory(null);
