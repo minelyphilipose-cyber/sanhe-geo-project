@@ -19,10 +19,10 @@ class PresaleBenchmarkResolverTest {
     void exactMatch_financeAll_hitsExactAndReturnsExactLevel() {
         PresaleBenchmarkResolver resolver = createDefaultResolver();
 
-        BenchmarksFrozen result = resolver.resolve("金融", "_ALL_");
+        BenchmarksFrozen result = resolver.resolve("finance", "_ALL_");
 
         assertThat(result).isNotNull();
-        assertThat(result.getIndustry()).isEqualTo("金融");
+        assertThat(result.getIndustry()).isEqualTo("finance");
         assertThat(result.getIndustryRole()).isEqualTo("_ALL_");
         assertThat(result.getMatchLevel()).isEqualTo(MatchLevel.EXACT);
     }
@@ -31,19 +31,61 @@ class PresaleBenchmarkResolverTest {
     void fallbackToIndustryAll_financeCto_hitsIndustryFallback() {
         PresaleBenchmarkResolver resolver = createDefaultResolver();
 
-        BenchmarksFrozen result = resolver.resolve("金融", "CTO");
+        BenchmarksFrozen result = resolver.resolve("finance", "CTO");
 
         assertThat(result).isNotNull();
-        assertThat(result.getIndustry()).isEqualTo("金融");
+        assertThat(result.getIndustry()).isEqualTo("finance");
         assertThat(result.getIndustryRole()).isEqualTo("_ALL_");
         assertThat(result.getMatchLevel()).isEqualTo(MatchLevel.FALLBACK_INDUSTRY);
     }
 
     @Test
-    void fallbackToAllAll_tourismAll_hitsGlobalFallback() {
+    void fallbackToAllAll_unknownIndustry_hitsGlobalFallback() {
         PresaleBenchmarkResolver resolver = createDefaultResolver();
 
-        BenchmarksFrozen result = resolver.resolve("旅游", "_ALL_");
+        BenchmarksFrozen result = resolver.resolve("unknown_industry", "_ALL_");
+
+        assertThat(result).isNotNull();
+        assertThat(result.getIndustry()).isEqualTo("_ALL_");
+        assertThat(result.getIndustryRole()).isEqualTo("_ALL_");
+        assertThat(result.getMatchLevel()).isEqualTo(MatchLevel.FALLBACK_INDUSTRY);
+    }
+
+    @Test
+    void fallbackToAllAll_unknownIndustryAndRole_hitsGlobalFallback() {
+        PresaleBenchmarkResolver resolver = createDefaultResolver();
+
+        BenchmarksFrozen result = resolver.resolve("unknown_industry", "unknown_role");
+
+        assertThat(result).isNotNull();
+        assertThat(result.getIndustry()).isEqualTo("_ALL_");
+        assertThat(result.getIndustryRole()).isEqualTo("_ALL_");
+        assertThat(result.getMatchLevel()).isEqualTo(MatchLevel.FALLBACK_INDUSTRY);
+    }
+
+    @Test
+    void fallbackToIndustryAll_allEightEnglishIndustries_hitIndustryFallback() {
+        PresaleBenchmarkResolver resolver = createDefaultResolver();
+        String[] industries = {
+                "restaurant", "education", "automotive", "retail",
+                "finance", "tourism", "medical_beauty", "tech_software"
+        };
+
+        for (String industry : industries) {
+            BenchmarksFrozen result = resolver.resolve(industry, "non_exist_role");
+
+            assertThat(result).isNotNull();
+            assertThat(result.getIndustry()).isEqualTo(industry);
+            assertThat(result.getIndustryRole()).isEqualTo("_ALL_");
+            assertThat(result.getMatchLevel()).isEqualTo(MatchLevel.FALLBACK_INDUSTRY);
+        }
+    }
+
+    @Test
+    void fallbackToAllAll_blankIndustry_hitsGlobalFallback() {
+        PresaleBenchmarkResolver resolver = createDefaultResolver();
+
+        BenchmarksFrozen result = resolver.resolve("   ", "non_exist_role");
 
         assertThat(result).isNotNull();
         assertThat(result.getIndustry()).isEqualTo("_ALL_");
@@ -58,7 +100,7 @@ class PresaleBenchmarkResolverTest {
                   "version": "v1.0",
                   "entries": [
                     {
-                      "industry": "金融",
+                      "industry": "finance",
                       "industryRole": "_ALL_",
                       "industryAvg": { "overall": 62.0, "mention": 65.0, "ranking": 58.0, "sentiment": 70.0, "coverage": 55.0 },
                       "top1": { "overall": 86.0, "mention": 90.0, "ranking": 88.0, "sentiment": 85.0, "coverage": 82.0 },
