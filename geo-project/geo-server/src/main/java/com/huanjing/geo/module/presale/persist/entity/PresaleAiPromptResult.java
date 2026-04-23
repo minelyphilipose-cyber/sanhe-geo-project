@@ -24,6 +24,7 @@ public class PresaleAiPromptResult {
     private String sentiment;
     private String mentionedCompetitors;
     private String sceneAdvantages;
+    private String topKeywordsJson;
+    private String negativeEvidenceJson;
     private LocalDateTime createdAt;
 }
-

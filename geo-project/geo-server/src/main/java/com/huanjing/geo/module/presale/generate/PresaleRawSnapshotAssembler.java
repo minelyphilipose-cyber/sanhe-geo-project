@@ -30,13 +30,16 @@ import org.springframework.stereotype.Component;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalDouble;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Component
 public class PresaleRawSnapshotAssembler {
@@ -45,6 +48,8 @@ public class PresaleRawSnapshotAssembler {
     private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String STATUS_SKIPPED_DEGRADED = "SKIPPED_DEGRADED";
     private static final int MAX_SCENE_ADVANTAGES = 5;
+    private static final int MAX_TOP_KEYWORDS = 10;
+    private static final int MAX_NEGATIVE_EVIDENCE = 3;
 
     private final PresaleAiCallMapper aiCallMapper;
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
@@ -346,15 +351,222 @@ public class PresaleRawSnapshotAssembler {
                         .eq(PresaleAiPromptResult::getVersionId, versionId)
                         .isNotNull(PresaleAiPromptResult::getSentiment)
         );
+        if (rows == null) {
+            rows = new ArrayList<>();
+        } else {
+            rows = new ArrayList<>(rows);
+        }
+        rows.sort(Comparator.comparing(PresaleAiPromptResult::getId, Comparator.nullsLast(Long::compareTo)));
+
         int positive = (int) rows.stream().filter(r -> "POSITIVE".equals(r.getSentiment())).count();
         int neutral = (int) rows.stream().filter(r -> "NEUTRAL".equals(r.getSentiment())).count();
         int negative = (int) rows.stream().filter(r -> "NEGATIVE".equals(r.getSentiment())).count();
+
+        List<SentimentDetail.SentimentKeyword> topKeywords = aggregateTopKeywords(rows);
+        List<SentimentDetail.NegativeEvidence> negativeEvidence = aggregateNegativeEvidence(rows);
+
         return SentimentDetail.builder()
                 .positiveCount(positive)
                 .neutralCount(neutral)
                 .negativeCount(negative)
-                .topKeywords(null)
-                .negativeEvidence(null)
+                .topKeywords(topKeywords)
+                .negativeEvidence(negativeEvidence)
                 .build();
+    }
+
+    private List<SentimentDetail.SentimentKeyword> aggregateTopKeywords(List<PresaleAiPromptResult> rows) {
+        Map<String, KeywordAgg> aggByKeyword = new LinkedHashMap<>();
+        for (PresaleAiPromptResult row : rows) {
+            String raw = row.getTopKeywordsJson();
+            if (raw == null || raw.isBlank()) {
+                continue;
+            }
+            try {
+                JsonNode arr = objectMapper.readTree(raw);
+                if (!arr.isArray()) {
+                    continue;
+                }
+                for (JsonNode item : arr) {
+                    if (item == null || !item.isObject()) {
+                        continue;
+                    }
+                    JsonNode keywordNode = item.get("keyword");
+                    JsonNode sentimentNode = item.get("sentiment");
+                    if (keywordNode == null || !keywordNode.isTextual() || sentimentNode == null || !sentimentNode.isTextual()) {
+                        continue;
+                    }
+                    String keyword = keywordNode.asText().trim();
+                    if (keyword.isEmpty()) {
+                        continue;
+                    }
+                    SentimentDetail.Sentiment sentiment = parseSentimentEnum(sentimentNode.asText());
+                    if (sentiment == null) {
+                        continue;
+                    }
+                    KeywordAgg agg = aggByKeyword.get(keyword);
+                    if (agg == null) {
+                        aggByKeyword.put(keyword, new KeywordAgg(keyword, sentiment, 1));
+                    } else {
+                        agg.frequency += 1;
+                    }
+                }
+            } catch (Exception ex) {
+                log.warn("Skip invalid top_keywords_json, versionId={}, rowId={}", row.getVersionId(), row.getId(), ex);
+            }
+        }
+        return aggByKeyword.values().stream()
+                .sorted(Comparator
+                        .comparingInt(KeywordAgg::frequency).reversed()
+                        .thenComparing(KeywordAgg::keyword))
+                .limit(MAX_TOP_KEYWORDS)
+                .map(agg -> SentimentDetail.SentimentKeyword.builder()
+                        .keyword(agg.keyword)
+                        .frequency(agg.frequency)
+                        .sentiment(agg.sentiment)
+                        .build())
+                .collect(Collectors.toList());
+    }
+
+    private List<SentimentDetail.NegativeEvidence> aggregateNegativeEvidence(List<PresaleAiPromptResult> rows) {
+        if (rows.isEmpty()) {
+            return Collections.emptyList();
+        }
+
+        List<AiPlatformConfig> platformRows = aiPlatformConfigMapper.selectList(
+                new LambdaQueryWrapper<AiPlatformConfig>().eq(AiPlatformConfig::getEnabled, true));
+        if (platformRows == null) {
+            platformRows = List.of();
+        }
+        Map<String, String> platformNameByCode = platformRows.stream()
+                .filter(p -> p.getPlatformCode() != null)
+                .collect(Collectors.toMap(AiPlatformConfig::getPlatformCode,
+                        p -> p.getPlatformName() == null ? p.getPlatformCode() : p.getPlatformName(),
+                        (a, b) -> a));
+
+        List<Long> templateIds = rows.stream()
+                .map(PresaleAiPromptResult::getPromptTemplateId)
+                .filter(id -> id != null)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, String> promptByTemplateId;
+        if (templateIds.isEmpty()) {
+            promptByTemplateId = Map.of();
+        } else {
+            List<PresalePromptTemplate> templates = promptTemplateMapper.selectBatchIds(templateIds);
+            if (templates == null) {
+                templates = List.of();
+            }
+            promptByTemplateId = templates.stream()
+                    .collect(Collectors.toMap(PresalePromptTemplate::getId,
+                            t -> t.getPromptContent() == null ? "" : t.getPromptContent(),
+                            (a, b) -> a));
+        }
+
+        List<Long> analyzeCallIds = rows.stream()
+                .map(PresaleAiPromptResult::getAnalyzeCallId)
+                .filter(id -> id != null)
+                .distinct()
+                .collect(Collectors.toList());
+        Map<Long, LocalDateTime> testedAtByAnalyzeCallId;
+        if (analyzeCallIds.isEmpty()) {
+            testedAtByAnalyzeCallId = Map.of();
+        } else {
+            List<PresaleAiCall> analyzeCalls = aiCallMapper.selectBatchIds(analyzeCallIds);
+            if (analyzeCalls == null) {
+                analyzeCalls = List.of();
+            }
+            testedAtByAnalyzeCallId = analyzeCalls.stream()
+                    .collect(Collectors.toMap(PresaleAiCall::getId, PresaleAiCall::getCreatedAt, (a, b) -> a));
+        }
+
+        List<SentimentDetail.NegativeEvidence> result = new ArrayList<>();
+        for (PresaleAiPromptResult row : rows) {
+            String raw = row.getNegativeEvidenceJson();
+            if (raw == null || raw.isBlank()) {
+                continue;
+            }
+            try {
+                JsonNode node = objectMapper.readTree(raw);
+                if (!node.isObject()) {
+                    continue;
+                }
+                JsonNode hasNegativeNode = node.get("has_negative");
+                if (hasNegativeNode == null || !hasNegativeNode.isBoolean() || !hasNegativeNode.asBoolean()) {
+                    continue;
+                }
+                JsonNode snippetNode = node.get("snippet");
+                if (snippetNode == null || !snippetNode.isTextual() || snippetNode.asText().trim().isEmpty()) {
+                    continue;
+                }
+                String platformCode = row.getPlatformCode();
+                String platformName = platformNameByCode.getOrDefault(platformCode, platformCode);
+                Long promptTemplateId = row.getPromptTemplateId();
+                String query = promptTemplateId == null ? "" : promptByTemplateId.getOrDefault(promptTemplateId, "");
+                Long analyzeCallId = row.getAnalyzeCallId();
+                LocalDateTime testedAt = analyzeCallId == null ? null : testedAtByAnalyzeCallId.get(analyzeCallId);
+                if (testedAt == null) {
+                    testedAt = row.getCreatedAt();
+                }
+                result.add(SentimentDetail.NegativeEvidence.builder()
+                        .platformCode(platformCode)
+                        .platformName(platformName)
+                        .query(query)
+                        .snippet(snippetNode.asText().trim())
+                        .testedAt(testedAt)
+                        .build());
+            } catch (Exception ex) {
+                log.warn("Skip invalid negative_evidence_json, versionId={}, rowId={}", row.getVersionId(), row.getId(), ex);
+            }
+        }
+
+        result.sort((a, b) -> {
+            LocalDateTime at = a.getTestedAt();
+            LocalDateTime bt = b.getTestedAt();
+            if (at == null && bt == null) {
+                return 0;
+            }
+            if (at == null) {
+                return 1;
+            }
+            if (bt == null) {
+                return -1;
+            }
+            return bt.compareTo(at);
+        });
+        if (result.size() > MAX_NEGATIVE_EVIDENCE) {
+            return new ArrayList<>(result.subList(0, MAX_NEGATIVE_EVIDENCE));
+        }
+        return result;
+    }
+
+    private SentimentDetail.Sentiment parseSentimentEnum(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        try {
+            return SentimentDetail.Sentiment.valueOf(raw);
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    private static final class KeywordAgg {
+        private final String keyword;
+        private final SentimentDetail.Sentiment sentiment;
+        private int frequency;
+
+        private KeywordAgg(String keyword, SentimentDetail.Sentiment sentiment, int frequency) {
+            this.keyword = keyword;
+            this.sentiment = sentiment;
+            this.frequency = frequency;
+        }
+
+        private String keyword() {
+            return keyword;
+        }
+
+        private int frequency() {
+            return frequency;
+        }
     }
 }

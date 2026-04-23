@@ -3,7 +3,7 @@
   "description": "GEO diagnostic benchmark seed values for MVP.",
   "entries": [
     {
-      "industry": "零售",
+      "industry": "retail",
       "industryRole": "_ALL_",
       "industryAvg": {
         "overall": 55.0,
@@ -29,7 +29,7 @@
       }
     },
     {
-      "industry": "金融",
+      "industry": "finance",
       "industryRole": "_ALL_",
       "industryAvg": {
         "overall": 62.0,
@@ -55,7 +55,7 @@
       }
     },
     {
-      "industry": "教育",
+      "industry": "education",
       "industryRole": "_ALL_",
       "industryAvg": {
         "overall": 50.0,
@@ -81,33 +81,111 @@
       }
     },
     {
-      "industry": "医疗",
+      "industry": "restaurant",
       "industryRole": "_ALL_",
       "industryAvg": {
-        "overall": 48.0,
-        "mention": 52.0,
-        "ranking": 42.0,
-        "sentiment": 62.0,
-        "coverage": 38.0
+        "overall": 60.0,
+        "mention": 65.0,
+        "ranking": 55.0,
+        "sentiment": 68.0,
+        "coverage": 50.0
       },
       "top1": {
-        "overall": 75.0,
-        "mention": 80.0,
-        "ranking": 75.0,
-        "sentiment": 75.0,
-        "coverage": 68.0
+        "overall": 85.0,
+        "mention": 88.0,
+        "ranking": 85.0,
+        "sentiment": 82.0,
+        "coverage": 78.0
       },
-      "top10Score": 65.0,
-      "confidenceLevel": "LOW",
-      "source": "MANUAL",
-      "sampleSize": 40,
+      "top10Score": 75.0,
+      "confidenceLevel": "MEDIUM",
+      "source": "HYBRID",
+      "sampleSize": 500,
       "industryRanking": {
         "position": null,
-        "total": 40
+        "total": 500
       }
     },
     {
-      "industry": "科技",
+      "industry": "automotive",
+      "industryRole": "_ALL_",
+      "industryAvg": {
+        "overall": 60.0,
+        "mention": 65.0,
+        "ranking": 55.0,
+        "sentiment": 68.0,
+        "coverage": 50.0
+      },
+      "top1": {
+        "overall": 85.0,
+        "mention": 88.0,
+        "ranking": 85.0,
+        "sentiment": 82.0,
+        "coverage": 78.0
+      },
+      "top10Score": 75.0,
+      "confidenceLevel": "MEDIUM",
+      "source": "HYBRID",
+      "sampleSize": 500,
+      "industryRanking": {
+        "position": null,
+        "total": 500
+      }
+    },
+    {
+      "industry": "tourism",
+      "industryRole": "_ALL_",
+      "industryAvg": {
+        "overall": 60.0,
+        "mention": 65.0,
+        "ranking": 55.0,
+        "sentiment": 68.0,
+        "coverage": 50.0
+      },
+      "top1": {
+        "overall": 85.0,
+        "mention": 88.0,
+        "ranking": 85.0,
+        "sentiment": 82.0,
+        "coverage": 78.0
+      },
+      "top10Score": 75.0,
+      "confidenceLevel": "MEDIUM",
+      "source": "HYBRID",
+      "sampleSize": 500,
+      "industryRanking": {
+        "position": null,
+        "total": 500
+      }
+    },
+    {
+      "industry": "medical_beauty",
+      "industryRole": "_ALL_",
+      "industryAvg": {
+        "overall": 60.0,
+        "mention": 65.0,
+        "ranking": 55.0,
+        "sentiment": 68.0,
+        "coverage": 50.0
+      },
+      "top1": {
+        "overall": 85.0,
+        "mention": 88.0,
+        "ranking": 85.0,
+        "sentiment": 82.0,
+        "coverage": 78.0
+      },
+      "top10Score": 75.0,
+      "confidenceLevel": "MEDIUM",
+      "source": "HYBRID",
+      "sampleSize": 500,
+      "industryRanking": {
+        "position": null,
+        "total": 500
+      }
+    },
+    {
+      "industry": "tech_software",
       "industryRole": "_ALL_",
       "industryAvg": {
         "overall": 68.0,

@@ -80,7 +80,7 @@ geo:
 
 presale:
   generate:
-    mock: true
+    mock: false
     mock-delay-ms: 5000
     mock-fixture-path: fixtures/01-mock-sample-v1.2.json
     allow-synthetic-fallback:

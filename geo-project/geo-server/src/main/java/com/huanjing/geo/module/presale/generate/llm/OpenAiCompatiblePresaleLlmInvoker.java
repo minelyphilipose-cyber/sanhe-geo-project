@@ -171,10 +171,55 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
             if (!root.has("scene_advantages") || !root.get("scene_advantages").isArray()) {
                 throw new AnalyzeParseException("analyze output scene_advantages must be array");
             }
+            validateTopKeywords(root.get("top_keywords"));
+            validateNegativeEvidence(root.get("negative_evidence"));
         } catch (AnalyzeParseException ex) {
             throw ex;
         } catch (Exception ex) {
             throw new AnalyzeParseException("analyze output is not valid JSON", ex);
+        }
+    }
+
+    private void validateTopKeywords(JsonNode topKeywordsNode) throws AnalyzeParseException {
+        if (topKeywordsNode == null || !topKeywordsNode.isArray()) {
+            throw new AnalyzeParseException("analyze output top_keywords must be array");
+        }
+        for (JsonNode item : topKeywordsNode) {
+            if (item == null || !item.isObject()) {
+                throw new AnalyzeParseException("analyze output top_keywords element must be object");
+            }
+            JsonNode keywordNode = item.get("keyword");
+            if (keywordNode == null || !keywordNode.isTextual() || keywordNode.asText().trim().isEmpty()) {
+                throw new AnalyzeParseException("analyze output top_keywords.keyword must be non-blank string");
+            }
+            JsonNode sentimentNode = item.get("sentiment");
+            if (sentimentNode == null || !sentimentNode.isTextual()) {
+                throw new AnalyzeParseException("analyze output top_keywords.sentiment must be string");
+            }
+            String sentiment = sentimentNode.asText();
+            if (!"POSITIVE".equals(sentiment) && !"NEUTRAL".equals(sentiment) && !"NEGATIVE".equals(sentiment)) {
+                throw new AnalyzeParseException("analyze output top_keywords.sentiment invalid: " + sentiment);
+            }
+        }
+    }
+
+    private void validateNegativeEvidence(JsonNode negativeEvidenceNode) throws AnalyzeParseException {
+        if (negativeEvidenceNode == null || !negativeEvidenceNode.isObject()) {
+            throw new AnalyzeParseException("analyze output negative_evidence must be object");
+        }
+        JsonNode hasNegativeNode = negativeEvidenceNode.get("has_negative");
+        if (hasNegativeNode == null || !hasNegativeNode.isBoolean()) {
+            throw new AnalyzeParseException("analyze output negative_evidence.has_negative must be boolean");
+        }
+        JsonNode snippetNode = negativeEvidenceNode.get("snippet");
+        if (hasNegativeNode.asBoolean()) {
+            if (snippetNode == null || !snippetNode.isTextual() || snippetNode.asText().trim().isEmpty()) {
+                throw new AnalyzeParseException("analyze output negative_evidence.snippet must be non-blank string when has_negative=true");
+            }
+            return;
+        }
+        if (snippetNode != null && !snippetNode.isNull()) {
+            throw new AnalyzeParseException("analyze output negative_evidence.snippet must be null when has_negative=false");
         }
     }
 

@@ -66,20 +66,30 @@ public class PresaleBenchmarkResolver {
 
         BenchmarkJsonEntry exact = entriesByKey.get(keyOf(normalizedIndustry, normalizedRole));
         if (exact != null) {
-            return toBenchmarksFrozen(exact, MatchLevel.EXACT);
+            return resolveWithLog(industry, industryRole, exact, MatchLevel.EXACT);
         }
 
         BenchmarkJsonEntry industryFallback = entriesByKey.get(keyOf(normalizedIndustry, ALL));
         if (industryFallback != null) {
-            return toBenchmarksFrozen(industryFallback, MatchLevel.FALLBACK_INDUSTRY);
+            return resolveWithLog(industry, industryRole, industryFallback, MatchLevel.FALLBACK_INDUSTRY);
         }
 
         BenchmarkJsonEntry allFallback = entriesByKey.get(keyOf(ALL, ALL));
         if (allFallback != null) {
-            return toBenchmarksFrozen(allFallback, MatchLevel.FALLBACK_INDUSTRY);
+            return resolveWithLog(industry, industryRole, allFallback, MatchLevel.FALLBACK_INDUSTRY);
         }
 
         throw new IllegalStateException("Benchmark fallback entry (_ALL_, _ALL_) is missing");
+    }
+
+    private BenchmarksFrozen resolveWithLog(String industry,
+                                            String industryRole,
+                                            BenchmarkJsonEntry entry,
+                                            MatchLevel matchLevel) {
+        BenchmarksFrozen resolved = toBenchmarksFrozen(entry, matchLevel);
+        log.info("Presale benchmark resolved: industry={}, industryRole={}, matchLevel={}",
+                industry, industryRole, matchLevel);
+        return resolved;
     }
 
     private Map<String, BenchmarkJsonEntry> loadAndIndex(String path) {

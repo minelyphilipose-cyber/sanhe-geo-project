@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.presale.generate;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
@@ -72,6 +73,7 @@ public class PresaleGenerateOrchestrator {
     private static final String FAILURE_CATEGORY_L1_SERIALIZATION_ERROR = "L1_SERIALIZATION_ERROR";
     private static final String FAILURE_CATEGORY_L2_COMPUTE_ERROR = "L2_COMPUTE_ERROR";
     private static final String FAILURE_CATEGORY_L3_INIT_ERROR = "L3_INIT_ERROR";
+    private static final int ANALYZE_TOP_KEYWORDS_MAX = 5;
 
     private final PresaleReportVersionMapper versionMapper;
     private final PresaleReportMapper reportMapper;
@@ -1117,6 +1119,8 @@ public class PresaleGenerateOrchestrator {
         row.setSentiment(null);
         row.setMentionedCompetitors(null);
         row.setSceneAdvantages(null);
+        row.setTopKeywordsJson("[]");
+        row.setNegativeEvidenceJson("{}");
         return row;
     }
 
@@ -1142,10 +1146,30 @@ public class PresaleGenerateOrchestrator {
             row.setSentiment(node.get("sentiment").asText());
             row.setMentionedCompetitors(objectMapper.writeValueAsString(node.get("mentioned_competitors")));
             row.setSceneAdvantages(objectMapper.writeValueAsString(node.get("scene_advantages")));
+            row.setTopKeywordsJson(writeTopKeywords(node.get("top_keywords")));
+            row.setNegativeEvidenceJson(writeNegativeEvidence(node.get("negative_evidence")));
             return row;
         } catch (Exception ex) {
             throw new AnalyzeParseException("failed to persist analyze success payload", ex);
         }
+    }
+
+    private String writeTopKeywords(JsonNode topKeywordsNode) throws JsonProcessingException {
+        if (topKeywordsNode == null || !topKeywordsNode.isArray()) {
+            return "[]";
+        }
+        List<JsonNode> limited = new ArrayList<>();
+        for (int i = 0; i < topKeywordsNode.size() && i < ANALYZE_TOP_KEYWORDS_MAX; i++) {
+            limited.add(topKeywordsNode.get(i));
+        }
+        return objectMapper.writeValueAsString(limited);
+    }
+
+    private String writeNegativeEvidence(JsonNode negativeEvidenceNode) throws JsonProcessingException {
+        if (negativeEvidenceNode == null || !negativeEvidenceNode.isObject()) {
+            return "{}";
+        }
+        return objectMapper.writeValueAsString(negativeEvidenceNode);
     }
 
     private ProgressCounts applyCompletedForOnePromptPair(Long versionId,

@@ -11,6 +11,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -71,7 +72,7 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
         when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
         when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
                 .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
-                        "{\"choices\":[{\"message\":{\"content\":\"```json\\n{\\\"is_mentioned\\\":true,\\\"ranking\\\":1,\\\"sentiment\\\":\\\"POSITIVE\\\",\\\"mentioned_competitors\\\":[],\\\"scene_advantages\\\":[]}\\n```\"}}],\"usage\":{\"prompt_tokens\":22,\"completion_tokens\":18}}"));
+                        "{\"choices\":[{\"message\":{\"content\":\"```json\\n{\\\"is_mentioned\\\":true,\\\"ranking\\\":1,\\\"sentiment\\\":\\\"POSITIVE\\\",\\\"mentioned_competitors\\\":[],\\\"scene_advantages\\\":[],\\\"top_keywords\\\":[{\\\"keyword\\\":\\\"性价比高\\\",\\\"sentiment\\\":\\\"POSITIVE\\\"}],\\\"negative_evidence\\\":{\\\"has_negative\\\":false,\\\"snippet\\\":null}}\\n```\"}}],\"usage\":{\"prompt_tokens\":22,\"completion_tokens\":18}}"));
 
         PlatformCallContext ctx = new PlatformCallContext(
                 1L, 1, "kimi", 1002L, "", "Acme", 11L, false
@@ -83,6 +84,96 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
         assertTrue(result.rawResponse().contains("\"is_mentioned\":true"));
         assertEquals(22, result.promptTokens());
         assertEquals(18, result.completionTokens());
+    }
+
+    @Test
+    void analyze_invalidTopKeywordsShape_throwsAnalyzeParseException() throws Exception {
+        PresaleLlmPlatformConfigRow row = row();
+        when(configMapper.selectRuntimeConfig("kimi")).thenReturn(row);
+        when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
+        when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
+                .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
+                        "{\"choices\":[{\"message\":{\"content\":\"{\\\"is_mentioned\\\":true,\\\"ranking\\\":1,\\\"sentiment\\\":\\\"POSITIVE\\\",\\\"mentioned_competitors\\\":[],\\\"scene_advantages\\\":[],\\\"top_keywords\\\":{},\\\"negative_evidence\\\":{\\\"has_negative\\\":false,\\\"snippet\\\":null}}\"}}]}"));
+
+        PlatformCallContext ctx = new PlatformCallContext(
+                1L, 1, "kimi", 1002L, "", "Acme", 11L, false
+        );
+        assertThrows(AnalyzeParseException.class, () -> invoker.analyze(ctx, "问句", "回答"));
+    }
+
+    @Test
+    void analyze_invalidTopKeywordsElement_throwsAnalyzeParseException() throws Exception {
+        PresaleLlmPlatformConfigRow row = row();
+        when(configMapper.selectRuntimeConfig("kimi")).thenReturn(row);
+        when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
+        when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
+                .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
+                        "{\"choices\":[{\"message\":{\"content\":\"{\\\"is_mentioned\\\":true,\\\"ranking\\\":1,\\\"sentiment\\\":\\\"POSITIVE\\\",\\\"mentioned_competitors\\\":[],\\\"scene_advantages\\\":[],\\\"top_keywords\\\":[{\\\"keyword\\\":\\\"词A\\\",\\\"sentiment\\\":\\\"BAD\\\"}],\\\"negative_evidence\\\":{\\\"has_negative\\\":false,\\\"snippet\\\":null}}\"}}]}"));
+
+        PlatformCallContext ctx = new PlatformCallContext(
+                1L, 1, "kimi", 1002L, "", "Acme", 11L, false
+        );
+        assertThrows(AnalyzeParseException.class, () -> invoker.analyze(ctx, "问句", "回答"));
+    }
+
+    @Test
+    void analyze_topKeywordsElementMissingKeyword_throwsAnalyzeParseException() throws Exception {
+        PresaleLlmPlatformConfigRow row = row();
+        when(configMapper.selectRuntimeConfig("kimi")).thenReturn(row);
+        when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
+        when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
+                .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
+                        "{\"choices\":[{\"message\":{\"content\":\"{\\\"is_mentioned\\\":true,\\\"ranking\\\":1,\\\"sentiment\\\":\\\"POSITIVE\\\",\\\"mentioned_competitors\\\":[],\\\"scene_advantages\\\":[],\\\"top_keywords\\\":[{\\\"sentiment\\\":\\\"POSITIVE\\\"}],\\\"negative_evidence\\\":{\\\"has_negative\\\":false,\\\"snippet\\\":null}}\"}}]}"));
+
+        PlatformCallContext ctx = new PlatformCallContext(
+                1L, 1, "kimi", 1002L, "", "Acme", 11L, false
+        );
+        assertThrows(AnalyzeParseException.class, () -> invoker.analyze(ctx, "问句", "回答"));
+    }
+
+    @Test
+    void analyze_invalidNegativeEvidenceShape_throwsAnalyzeParseException() throws Exception {
+        PresaleLlmPlatformConfigRow row = row();
+        when(configMapper.selectRuntimeConfig("kimi")).thenReturn(row);
+        when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
+        when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
+                .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
+                        "{\"choices\":[{\"message\":{\"content\":\"{\\\"is_mentioned\\\":true,\\\"ranking\\\":1,\\\"sentiment\\\":\\\"POSITIVE\\\",\\\"mentioned_competitors\\\":[],\\\"scene_advantages\\\":[],\\\"top_keywords\\\":[],\\\"negative_evidence\\\":[]}\"}}]}"));
+
+        PlatformCallContext ctx = new PlatformCallContext(
+                1L, 1, "kimi", 1002L, "", "Acme", 11L, false
+        );
+        assertThrows(AnalyzeParseException.class, () -> invoker.analyze(ctx, "问句", "回答"));
+    }
+
+    @Test
+    void analyze_hasNegativeTrueButSnippetNull_throwsAnalyzeParseException() throws Exception {
+        PresaleLlmPlatformConfigRow row = row();
+        when(configMapper.selectRuntimeConfig("kimi")).thenReturn(row);
+        when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
+        when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
+                .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
+                        "{\"choices\":[{\"message\":{\"content\":\"{\\\"is_mentioned\\\":true,\\\"ranking\\\":1,\\\"sentiment\\\":\\\"POSITIVE\\\",\\\"mentioned_competitors\\\":[],\\\"scene_advantages\\\":[],\\\"top_keywords\\\":[],\\\"negative_evidence\\\":{\\\"has_negative\\\":true,\\\"snippet\\\":null}}\"}}]}"));
+
+        PlatformCallContext ctx = new PlatformCallContext(
+                1L, 1, "kimi", 1002L, "", "Acme", 11L, false
+        );
+        assertThrows(AnalyzeParseException.class, () -> invoker.analyze(ctx, "问句", "回答"));
+    }
+
+    @Test
+    void analyze_negativeEvidenceMissingHasNegative_throwsAnalyzeParseException() throws Exception {
+        PresaleLlmPlatformConfigRow row = row();
+        when(configMapper.selectRuntimeConfig("kimi")).thenReturn(row);
+        when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
+        when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
+                .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
+                        "{\"choices\":[{\"message\":{\"content\":\"{\\\"is_mentioned\\\":true,\\\"ranking\\\":1,\\\"sentiment\\\":\\\"POSITIVE\\\",\\\"mentioned_competitors\\\":[],\\\"scene_advantages\\\":[],\\\"top_keywords\\\":[],\\\"negative_evidence\\\":{\\\"snippet\\\":null}}\"}}]}"));
+
+        PlatformCallContext ctx = new PlatformCallContext(
+                1L, 1, "kimi", 1002L, "", "Acme", 11L, false
+        );
+        assertThrows(AnalyzeParseException.class, () -> invoker.analyze(ctx, "问句", "回答"));
     }
 
     private PresaleLlmPlatformConfigRow row() {

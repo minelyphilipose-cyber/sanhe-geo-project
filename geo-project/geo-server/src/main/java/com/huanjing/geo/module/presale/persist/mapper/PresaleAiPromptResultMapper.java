@@ -30,7 +30,6 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "COUNT(*) AS templateCount " +
             "FROM presale_prompt_template " +
             "WHERE enabled = 1 " +
-            "AND has_competitor_var = 0 " +
             "GROUP BY category, has_competitor_var")
     List<PromptTemplateIntentStatRow> selectTemplateIntentStats();
 }
