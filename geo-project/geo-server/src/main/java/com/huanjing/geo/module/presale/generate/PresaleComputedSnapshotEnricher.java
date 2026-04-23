@@ -1,22 +1,29 @@
 package com.huanjing.geo.module.presale.generate;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.ComputedSnapshotDTO;
-import com.huanjing.geo.module.presale.dto.snapshot.computed.IntentBreakdown;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.PlatformIntentCell;
-import com.huanjing.geo.module.presale.dto.snapshot.computed.PresaleIntentCode;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
+import com.huanjing.geo.module.presale.generate.calc.RankingStats;
+import com.huanjing.geo.module.presale.generate.calc.RoiCalculator;
+import com.huanjing.geo.module.presale.generate.calc.SceneAndIntentResult;
+import com.huanjing.geo.module.presale.generate.calc.SceneCoverageCalculator;
+import com.huanjing.geo.module.presale.generate.calc.ScoresCalculator;
+import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
+import com.huanjing.geo.module.presale.ruleengine.PresaleRuleEngineExecutor;
+import com.huanjing.geo.module.presale.ruleengine.RuleEngineResult;
 import lombok.RequiredArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * 统一 computed_snapshot 增强/校验入口。
@@ -27,6 +34,8 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class PresaleComputedSnapshotEnricher {
 
+    private static final Logger log = LoggerFactory.getLogger(PresaleComputedSnapshotEnricher.class);
+
     private static final String[] COMPUTED_KEYS = {
             "scores", "intent_breakdown", "scene_coverage", "optimization_findings", "roi_simulation"
     };
@@ -34,6 +43,11 @@ public class PresaleComputedSnapshotEnricher {
     private final ObjectMapper objectMapper;
     private final PlatformIntentBreakdownBuilder builder;
     private final PlatformIntentBreakdownValidator validator;
+    private final SceneCoverageCalculator sceneCoverageCalculator;
+    private final ScoresCalculator scoresCalculator;
+    private final PresaleRuleEngineExecutor ruleEngineExecutor;
+    private final RoiCalculator roiCalculator;
+    private final PresaleAiPromptResultMapper aiPromptResultMapper;
 
     public String enrichAndValidate(Long versionId,
                                     String rawSnapshotJson,
@@ -57,9 +71,33 @@ public class PresaleComputedSnapshotEnricher {
                     versionId, rawSnapshot, computedSnapshot, allowSyntheticFallback);
             List<PlatformIntentCell> cells = buildResult.cells();
             computedSnapshot.setPlatformIntentBreakdown(cells);
-            computedSnapshot.setIntentBreakdown(mergeIntentBreakdown(computedSnapshot.getIntentBreakdown(),
-                    buildResult.intentTotalPrompts()));
 
+            // 1) Scene coverage + intent breakdown (同源)
+            SceneAndIntentResult scenes = sceneCoverageCalculator.compute(
+                    versionId, rawSnapshot, buildResult.intentTotalPrompts());
+            computedSnapshot.setSceneCoverage(scenes.sceneCoverage());
+            computedSnapshot.setIntentBreakdown(scenes.intentBreakdown());
+
+            // 2) Scores (D25)
+            RankingStats rankingStats = queryRankingStats(versionId);
+            var scores = scoresCalculator.compute(rawSnapshot, scenes, rankingStats);
+            computedSnapshot.setScores(scores);
+
+            // 3) Rule engine (必须在 scores/sceneCoverage 就绪后调用)
+            RuleEngineResult ruleResult = ruleEngineExecutor.execute(rawSnapshot, computedSnapshot);
+            computedSnapshot.setOptimizationFindings(ruleResult.getFindings());
+            if (ruleResult.getFindings() == null || ruleResult.getFindings().isEmpty()) {
+                log.warn("No optimization rule triggered for versionId={}, this may indicate a perfect-brand scenario or a rule threshold anomaly",
+                        versionId);
+            }
+
+            // 4) ROI (D27/D28/D30)
+            computedSnapshot.setRoiSimulation(roiCalculator.compute(
+                    scores == null ? null : scores.getOverall(),
+                    ruleResult.getFindings()
+            ));
+
+            // 5) Existing integrity validator
             validator.validate(rawSnapshot.getPlatformBreakdown(), computedSnapshot.getIntentBreakdown(), cells);
             return objectMapper.writeValueAsString(computedSnapshot);
         } catch (BizException e) {
@@ -67,6 +105,41 @@ public class PresaleComputedSnapshotEnricher {
         } catch (JsonProcessingException e) {
             throw new BizException(500, "platform_intent_breakdown integrity violated: json parse failed - " + e.getMessage());
         }
+    }
+
+    private RankingStats queryRankingStats(Long versionId) {
+        List<PresaleAiPromptResult> rows = aiPromptResultMapper.selectList(
+                new LambdaQueryWrapper<PresaleAiPromptResult>()
+                        .eq(PresaleAiPromptResult::getVersionId, versionId)
+                        .eq(PresaleAiPromptResult::getBatchNo, 1)
+                        .isNotNull(PresaleAiPromptResult::getRanking)
+        );
+        int c1 = 0;
+        int c2 = 0;
+        int c3 = 0;
+        int c4 = 0;
+        int c5 = 0;
+        int c6 = 0;
+        for (PresaleAiPromptResult row : rows == null ? List.<PresaleAiPromptResult>of() : rows) {
+            Integer ranking = row.getRanking();
+            if (ranking == null) {
+                continue;
+            }
+            if (ranking <= 1) {
+                c1++;
+            } else if (ranking == 2) {
+                c2++;
+            } else if (ranking == 3) {
+                c3++;
+            } else if (ranking == 4) {
+                c4++;
+            } else if (ranking == 5) {
+                c5++;
+            } else {
+                c6++;
+            }
+        }
+        return new RankingStats(c1, c2, c3, c4, c5, c6);
     }
 
     private String stripBom(String json) {
@@ -119,42 +192,5 @@ public class PresaleComputedSnapshotEnricher {
             }
         }
         return out;
-    }
-
-    private List<IntentBreakdown> mergeIntentBreakdown(List<IntentBreakdown> existing,
-                                                       Map<String, Integer> intentTotals) {
-        Map<String, IntentBreakdown> byCode = new HashMap<>();
-        List<IntentBreakdown> source = existing == null ? List.of() : existing;
-        for (IntentBreakdown item : source) {
-            if (item == null || item.getCategory() == null) {
-                continue;
-            }
-            PresaleIntentCode intentCode = PresaleIntentCode.fromLabel(item.getCategory());
-            byCode.put(intentCode.getCode(), item);
-        }
-
-        List<IntentBreakdown> merged = new ArrayList<>();
-        for (PresaleIntentCode intentCode : PresaleIntentCode.allInOrder()) {
-            IntentBreakdown item = byCode.get(intentCode.getCode());
-            if (item == null) {
-                item = new IntentBreakdown();
-                item.setCategory(intentCode.getLabel());
-                item.setBusinessValue(defaultBusinessValue(intentCode));
-                item.setCoveredPrompts(0);
-                item.setCoverageRate(0D);
-                item.setAvgRanking(null);
-            }
-            item.setTotalPrompts(intentTotals.getOrDefault(intentCode.getCode(), 0));
-            merged.add(item);
-        }
-        return merged;
-    }
-
-    private String defaultBusinessValue(PresaleIntentCode intentCode) {
-        return switch (intentCode) {
-            case RECOMMENDATION, COMPARISON -> "高";
-            case INQUIRY, COGNITIVE -> "中";
-            case SCENARIO -> "低";
-        };
     }
 }

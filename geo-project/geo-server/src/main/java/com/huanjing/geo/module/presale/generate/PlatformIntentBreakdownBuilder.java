@@ -40,8 +40,7 @@ public class PlatformIntentBreakdownBuilder {
             }
         }
 
-        int competitorCount = rawSnapshot.getCompetitors() == null ? 0 : rawSnapshot.getCompetitors().size();
-        Map<String, Integer> intentTotalPrompts = resolveIntentTotalPromptsFromTemplate(competitorCount);
+        Map<String, Integer> intentTotalPrompts = resolveIntentTotalPromptsFromTemplate();
         List<PlatformIntentSampleRow> rows = aiPromptResultMapper.selectIntentSamplesByVersionId(versionId);
         if ((rows == null || rows.isEmpty()) && allowSyntheticFallback) {
             List<PlatformIntentCell> cells = buildSyntheticFallback(platforms, intentTotalPrompts);
@@ -110,7 +109,7 @@ public class PlatformIntentBreakdownBuilder {
         return new BuildResult(result, intentTotalPrompts);
     }
 
-    private Map<String, Integer> resolveIntentTotalPromptsFromTemplate(int competitorCount) {
+    private Map<String, Integer> resolveIntentTotalPromptsFromTemplate() {
         Map<String, Integer> map = new HashMap<>();
         List<PromptTemplateIntentStatRow> rows = aiPromptResultMapper.selectTemplateIntentStats();
         if (rows != null) {
@@ -120,9 +119,6 @@ public class PlatformIntentBreakdownBuilder {
                 }
                 PresaleIntentCode intentCode = resolveIntentByLabel(row.getIntentLabel());
                 int base = safeInt(row.getTemplateCount());
-                if (safeInt(row.getHasCompetitorVar()) == 1) {
-                    base = base * Math.max(competitorCount, 0);
-                }
                 map.merge(intentCode.getCode(), base, Integer::sum);
             }
         }

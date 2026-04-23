@@ -44,6 +44,14 @@ public enum PresaleIntentCode {
         return label;
     }
 
+    public String businessValue() {
+        return switch (this) {
+            case RECOMMENDATION, COMPARISON -> "高";
+            case INQUIRY, COGNITIVE -> "中";
+            case SCENARIO -> "低";
+        };
+    }
+
     public static List<PresaleIntentCode> allInOrder() {
         return List.of(values());
     }
@@ -74,4 +82,3 @@ public enum PresaleIntentCode {
         return fromCode(code).getLabel();
     }
 }
-

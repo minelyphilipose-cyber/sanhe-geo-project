@@ -4,6 +4,7 @@ import com.huanjing.geo.module.presale.dto.snapshot.computed.ComputedSnapshotDTO
 import com.huanjing.geo.module.presale.dto.snapshot.computed.IntentBreakdown;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.PlatformIntentCell;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.PresaleIntentCode;
+import com.huanjing.geo.module.presale.dto.snapshot.raw.Competitor;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.PlatformBreakdown;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
@@ -92,6 +93,27 @@ class PlatformIntentBreakdownBuilderTest {
         assertThat(recommendation.getMentionRate()).isEqualTo(13);
     }
 
+    @Test
+    void build_templateCountWithCompetitorVar_doesNotMultiplyByCompetitorCount() {
+        PresaleAiPromptResultMapper mapper = Mockito.mock(PresaleAiPromptResultMapper.class);
+        Mockito.when(mapper.selectIntentSamplesByVersionId(1L)).thenReturn(List.of());
+        Mockito.when(mapper.selectTemplateIntentStats()).thenReturn(templateStatsWithCompetitorVarRecommendation());
+        PlatformIntentBreakdownBuilder builder = new PlatformIntentBreakdownBuilder(mapper);
+
+        RawSnapshotDTO raw = raw("P1", 0);
+        raw.setCompetitors(List.of(
+                Competitor.builder().name("Claude").build(),
+                Competitor.builder().name("Gemini").build(),
+                Competitor.builder().name("Doubao").build()
+        ));
+
+        PlatformIntentBreakdownBuilder.BuildResult result = builder.build(1L, raw, computed(), true);
+        assertThat(result.intentTotalPrompts().get("RECOMMENDATION")).isEqualTo(5);
+
+        PlatformIntentCell recommendation = findCell(result.cells(), "P1", "RECOMMENDATION");
+        assertThat(recommendation.getTotalPrompts()).isEqualTo(5);
+    }
+
     private RawSnapshotDTO raw(String p1, int mentionCount) {
         return raw(p1, null, mentionCount, 0);
     }
@@ -152,6 +174,23 @@ class PlatformIntentBreakdownBuilderTest {
             row.setIntentLabel(code.getLabel());
             row.setHasCompetitorVar(0);
             row.setTemplateCount(10);
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    private List<PromptTemplateIntentStatRow> templateStatsWithCompetitorVarRecommendation() {
+        List<PromptTemplateIntentStatRow> rows = new ArrayList<>();
+        for (PresaleIntentCode code : PresaleIntentCode.allInOrder()) {
+            PromptTemplateIntentStatRow row = new PromptTemplateIntentStatRow();
+            row.setIntentLabel(code.getLabel());
+            if (code == PresaleIntentCode.RECOMMENDATION) {
+                row.setHasCompetitorVar(1);
+                row.setTemplateCount(5);
+            } else {
+                row.setHasCompetitorVar(0);
+                row.setTemplateCount(0);
+            }
             rows.add(row);
         }
         return rows;
