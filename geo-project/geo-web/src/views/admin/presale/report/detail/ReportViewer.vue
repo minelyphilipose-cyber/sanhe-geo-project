@@ -30,17 +30,16 @@
       β·1 阶段:Page01(封面)和 Page02(诊断对象)用真实 SFC。
       β·2 阶段:Page03(执行摘要)、Page04(可见度评分,radar)、
                Page06(平台详细数据,bar) 真实 SFC;
-               Page05(多平台热力图 5×N)保持占位,
-               等后端补 platform_intent_breakdown 交叉数据契约。
-      β·2·补:Page05 真实 SFC 落地,后端 platform_intent_breakdown 已合入。
-               历史报告 platform_intent_breakdown 为空时,Page05 内部走降级态,
-               显示"早于功能上线"提示。
+               Page05(多平台热力图)保持占位,等后端补 platform_intent_breakdown 契约。
+      β·2·补:Page05 真实 SFC 落地(5×N CSS grid 热力图),历史报告走降级态。
       β·3 阶段:Page07(竞品对标总览,bar)、Page08(竞品场景差异)、
                Page09(情感倾向,doughnut) 真实 SFC。
-      γ·1 阶段:Page10(覆盖度总览)、Page11(覆盖度详情)、
-               Page12/P13/P14(优化机会 三 priority) 真实 SFC;
+      γ·1 阶段:Page10/P11(覆盖度)、Page12/P13/P14(优化机会 三 priority) 真实 SFC;
                引入 shared/FindingCard.vue 组件。
-      γ·2 将补 Page15~Page18(4 页)。
+      γ·2 阶段:Page15(预期收益,line chart,B-无③ 版)、Page16(分阶段路径)、
+               Page17(关键发现总结)、Page18(关于我们 封底) 真实 SFC 落地。
+               P15 的 ESTIMATED IMPACT 块按 estimated-impact-spec 会签后 r2 补回。
+               18 页全部真实 SFC,不再有 PagePlaceholder 占位。
       每页的外层结构约定:<section :id="page-XX"><div class="page [cover]">...</div></section>,
       Sidebar 锚点依赖此 id。
     -->
@@ -87,15 +86,17 @@
       <!-- P14 优化机会 · 建议关注(γ·1,含 CATEGORY BREAKDOWN) -->
       <Page14FindingsLow />
 
-      <!-- P15~P18 占位(γ·2 将逐步替换) -->
-      <PagePlaceholder
-        v-for="p in PLACEHOLDER_PAGES"
-        :key="p.id"
-        :anchor-id="p.id"
-        :page-num="p.num"
-        :page-title="p.title"
-        :cover="p.cover"
-      />
+      <!-- P15 预期收益模拟(γ·2,line chart,B-无③ 版) -->
+      <Page15ExpectedRoi />
+
+      <!-- P16 分阶段优化路径(γ·2,timeline) -->
+      <Page16PhasedRoadmap />
+
+      <!-- P17 关键发现总结(γ·2) -->
+      <Page17KeyTakeaways />
+
+      <!-- P18 关于我们 / 封底(γ·2,cover 样式) -->
+      <Page18AboutUs />
     </template>
 
     <!-- 非 DONE 理论上不会到这里(Detail 顶层已拦截),留兜底占位 -->
@@ -108,7 +109,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useMergedView } from '@/composables/presale/useMergedView'
-import PagePlaceholder from './PagePlaceholder.vue'
 import Page01Cover from './Page01Cover.vue'
 import Page02Target from './Page02Target.vue'
 import Page03ExecutiveSummary from './Page03ExecutiveSummary.vue'
@@ -123,6 +123,10 @@ import Page11CoverageDetail from './Page11CoverageDetail.vue'
 import Page12FindingsHigh from './Page12FindingsHigh.vue'
 import Page13FindingsMid from './Page13FindingsMid.vue'
 import Page14FindingsLow from './Page14FindingsLow.vue'
+import Page15ExpectedRoi from './Page15ExpectedRoi.vue'
+import Page16PhasedRoadmap from './Page16PhasedRoadmap.vue'
+import Page17KeyTakeaways from './Page17KeyTakeaways.vue'
+import Page18AboutUs from './Page18AboutUs.vue'
 
 const { mergedView } = useMergedView()
 
@@ -130,23 +134,6 @@ const meta = computed(() => mergedView.value?.meta)
 const isDone = computed(() => meta.value?.generation_status === 'DONE')
 const matchLevel = computed(() => meta.value?.match_level)
 const degradedPlatforms = computed(() => meta.value?.degraded_platforms ?? [])
-
-/**
- * P15~P18 占位规格(与 DetailSidebar.PAGE_ANCHORS 的 P15~P18 一一对应)。
- *
- * β·1:P01/P02 用真实 SFC,P03~P18 占位
- * β·2:P03/P04/P06 用真实 SFC,P05 单独占位(带后端需求标注),P07~P18 仍占位
- * β·2·补:P05 用真实 SFC(Page05PlatformHeatmap),占位数组保持 P15~P18
- * β·3:P07/P08/P09 用真实 SFC,P10~P18 仍占位
- * γ·1:P10/P11/P12/P13/P14 用真实 SFC,P15~P18 仍占位
- * γ·2:将 P15~P18 替换为真实 SFC,届时数组清空,PagePlaceholder import 亦可删除
- */
-const PLACEHOLDER_PAGES = [
-  { id: 'page-15', num: '15', title: '预期收益', cover: false },
-  { id: 'page-16', num: '16', title: '分阶段路径', cover: false },
-  { id: 'page-17', num: '17', title: '关键发现总结', cover: false },
-  { id: 'page-18', num: '18', title: '关于我们', cover: true }
-] as const
 </script>
 
 <style scoped>

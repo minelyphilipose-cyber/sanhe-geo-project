@@ -1,0 +1,214 @@
+<template>
+  <section id="page-16" class="page-anchor">
+    <div class="page">
+      <div class="page-topbar">
+        <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
+        <span>09 / 分阶段优化路径</span>
+      </div>
+
+      <div class="p16-body">
+        <!-- 标题(CONTINUED 风格,P15 已用 09,这里是"续") -->
+        <div class="p16-header">
+          <div class="mono p16-subtitle">PHASED ROADMAP</div>
+          <h3 class="chinese-serif p16-title">分阶段优化路径</h3>
+        </div>
+
+        <div class="p16-timeline">
+          <div
+            v-for="(item, idx) in steps"
+            :key="item.phase_no"
+            class="timeline-step"
+          >
+            <div class="timeline-dot">{{ item.phase_no }}</div>
+            <div class="p16-step-head">
+              <div class="chinese-serif p16-step-title">{{ item.title }}</div>
+              <div class="mono p16-step-month">{{ formatDuration(item.duration_label) }}</div>
+            </div>
+            <div class="p16-step-desc">{{ item.description }}</div>
+            <div class="p16-stats">
+              <div class="p16-stat">
+                <div class="mono p16-stat-label">TARGET SCORE</div>
+                <div
+                  class="display-serif p16-stat-value"
+                  :class="idx === steps.length - 1 ? 'p16-stat-accent' : 'p16-stat-primary'"
+                >
+                  {{ item.target_score }}
+                </div>
+              </div>
+              <div class="p16-stat">
+                <div class="mono p16-stat-label">预期提升</div>
+                <div class="display-serif p16-stat-value p16-stat-green">
+                  +{{ item.uplift_from_previous }}
+                </div>
+              </div>
+              <div class="p16-stat">
+                <div class="mono p16-stat-label">完成项</div>
+                <div class="display-serif p16-stat-value p16-stat-ink">
+                  {{ item.completed_optimization_count }} / {{ item.total_optimization_count }}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="pull-quote">
+          具体执行方案、资源投入预估和关键里程碑,建议结合您的业务规划和团队资源状况讨论。
+        </div>
+      </div>
+
+      <div class="page-footer-brand">GEO · CONFIDENTIAL</div>
+      <div class="page-label">16</div>
+    </div>
+  </section>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useMergedView } from '@/composables/presale/useMergedView'
+
+/**
+ * Page16 分阶段优化路径(γ·2)。
+ *
+ * 数据映射:
+ *   - 每个 step 来自 mergedView.merged_phases[i]:
+ *     - timeline-dot 数字 = phase.phase_no
+ *     - 标题 = merged_phases[i].title
+ *     - MONTH 标签 = phase.duration_label(经 formatDuration 转换为 "MONTH 1" 等形态)
+ *     - 描述 = merged_phases[i].description
+ *     - TARGET SCORE = phase.target_score
+ *     - 预期提升 = phase.uplift_from_previous
+ *     - 完成项 = phase.completed_optimization_count / total_optimization_count
+ *
+ * 视觉约定:
+ *   - 前 N-1 阶段 TARGET SCORE 用 primary(蓝),最后一阶段用 accent(橙)表示"最终目标"
+ *   - duration_label 契约里是紧凑形态("M1"/"M2-3"/"M4-6"),渲染时转 "MONTH 1" 等更易读形态
+ */
+
+const { mergedView: mergedViewRef } = useMergedView()
+const mergedView = computed(() => mergedViewRef.value!)
+
+interface Step {
+  phase_no: 1 | 2 | 3
+  title: string
+  description: string
+  duration_label: string
+  target_score: number
+  uplift_from_previous: number
+  completed_optimization_count: number
+  total_optimization_count: number
+}
+
+const steps = computed<Step[]>(() => {
+  return mergedView.value.merged_phases.map<Step>((mp) => ({
+    phase_no: mp.phase.phase_no,
+    title: mp.title,
+    description: mp.description,
+    duration_label: mp.phase.duration_label,
+    target_score: mp.phase.target_score,
+    uplift_from_previous: mp.phase.uplift_from_previous,
+    completed_optimization_count: mp.phase.completed_optimization_count,
+    total_optimization_count: mp.phase.total_optimization_count
+  }))
+})
+
+/**
+ * duration_label 形态转换:
+ *   - "M1"     → "MONTH 1"
+ *   - "M2-3"   → "MONTH 2-3"
+ *   - "M4-6"   → "MONTH 4-6"
+ *   - 其他形态 → 原样返回(兜底)
+ */
+function formatDuration(label: string): string {
+  const match = /^M(\d.*)$/.exec(label.trim())
+  if (match) return `MONTH ${match[1]}`
+  return label
+}
+</script>
+
+<style scoped>
+.page-anchor {
+  display: flex;
+  justify-content: center;
+}
+
+.p16-body {
+  margin-top: 60px;
+}
+
+.p16-header {
+  margin-bottom: 28px;
+}
+.p16-subtitle {
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: var(--presale-muted);
+  margin-bottom: 8px;
+}
+.p16-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--presale-ink);
+  margin: 0;
+}
+
+.p16-timeline {
+  margin-bottom: 24px;
+}
+
+.p16-step-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.p16-step-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--presale-ink);
+}
+
+.p16-step-month {
+  font-size: 11px;
+  color: var(--presale-muted);
+  letter-spacing: 1px;
+}
+
+.p16-step-desc {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--presale-ink-soft);
+  line-height: 1.7;
+}
+
+.p16-stats {
+  display: flex;
+  gap: 24px;
+  margin-top: 12px;
+  padding: 12px 16px;
+  background: var(--presale-paper-alt);
+}
+
+.p16-stat-label {
+  font-size: 10px;
+  color: var(--presale-muted);
+  letter-spacing: 1px;
+}
+
+.p16-stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+.p16-stat-primary {
+  color: var(--presale-primary);
+}
+.p16-stat-accent {
+  color: var(--presale-accent);
+}
+.p16-stat-green {
+  color: var(--presale-accent-green);
+}
+.p16-stat-ink {
+  color: var(--presale-ink);
+}
+</style>
