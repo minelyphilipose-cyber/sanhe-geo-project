@@ -3,6 +3,7 @@ package com.huanjing.geo.module.presale.generate;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.presale.generate.llm.AnalyzeParseException;
 import com.huanjing.geo.module.presale.generate.llm.CallStatus;
 import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
@@ -46,7 +47,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Presale generation orchestrator.
  * mockEnabled=true: fixture flow.
- * mockEnabled=false: PR-3 real pipeline (stage C skeleton in this commit).
+ * mockEnabled=false: PR-3 real pipeline full flow.
  */
 @Component
 public class PresaleGenerateOrchestrator {
@@ -68,6 +69,9 @@ public class PresaleGenerateOrchestrator {
     private static final String FAILURE_CATEGORY_SNAPSHOT_BUILD_ERROR = "SNAPSHOT_BUILD_ERROR";
     private static final String FAILURE_CATEGORY_STAGE_D_CHECKPOINT = "STAGE_D_CHECKPOINT";
     private static final String FAILURE_CATEGORY_COMPETITOR_EXTRACT_EMPTY = "COMPETITOR_EXTRACT_EMPTY";
+    private static final String FAILURE_CATEGORY_L1_SERIALIZATION_ERROR = "L1_SERIALIZATION_ERROR";
+    private static final String FAILURE_CATEGORY_L2_COMPUTE_ERROR = "L2_COMPUTE_ERROR";
+    private static final String FAILURE_CATEGORY_L3_INIT_ERROR = "L3_INIT_ERROR";
 
     private final PresaleReportVersionMapper versionMapper;
     private final PresaleReportMapper reportMapper;
@@ -79,6 +83,7 @@ public class PresaleGenerateOrchestrator {
     private final PresaleReusePersistenceService reusePersistenceService;
     private final PresaleLlmInvoker llmInvoker;
     private final PromptTemplateRenderer promptTemplateRenderer;
+    private final PresaleRawSnapshotAssembler rawSnapshotAssembler;
     private final PresaleComputedSnapshotEnricher computedSnapshotEnricher;
     private final PresaleL3InitService l3InitService;
     private final PresaleCompetitorAggregator competitorAggregator;
@@ -110,6 +115,7 @@ public class PresaleGenerateOrchestrator {
                                        PresaleReusePersistenceService reusePersistenceService,
                                        PresaleLlmInvoker llmInvoker,
                                        PromptTemplateRenderer promptTemplateRenderer,
+                                       PresaleRawSnapshotAssembler rawSnapshotAssembler,
                                        PresaleComputedSnapshotEnricher computedSnapshotEnricher,
                                        PresaleL3InitService l3InitService,
                                        PresaleCompetitorAggregator competitorAggregator,
@@ -124,6 +130,7 @@ public class PresaleGenerateOrchestrator {
         this.reusePersistenceService = reusePersistenceService;
         this.llmInvoker = llmInvoker;
         this.promptTemplateRenderer = promptTemplateRenderer;
+        this.rawSnapshotAssembler = rawSnapshotAssembler;
         this.computedSnapshotEnricher = computedSnapshotEnricher;
         this.l3InitService = l3InitService;
         this.competitorAggregator = competitorAggregator;
@@ -153,7 +160,7 @@ public class PresaleGenerateOrchestrator {
             runMockFlow(versionId);
             return;
         }
-        runRealSkeletonFlow(versionId, operatorUserId, isManager);
+        runRealFullFlow(versionId, operatorUserId, isManager);
     }
 
     private void runMockFlow(Long versionId) {
@@ -207,7 +214,7 @@ public class PresaleGenerateOrchestrator {
         log.info("Presale mock generate done, versionId={}", versionId);
     }
 
-    private void runRealSkeletonFlow(Long versionId, Long operatorUserId, boolean isManager) {
+    private void runRealFullFlow(Long versionId, Long operatorUserId, boolean isManager) {
         PreflightResult preflight = preflight(versionId);
         if (!preflight.success()) {
             markFailed(versionId, FAILURE_CATEGORY_CONFIG_MISSING,
@@ -226,8 +233,9 @@ public class PresaleGenerateOrchestrator {
         if (batch1Result.stopPipeline) {
             return;
         }
+        Set<String> allDegraded = new LinkedHashSet<>(batch1Result.degradedPlatforms());
 
-        enterStage(versionId, STAGE_COMPETITOR_EXTRACT, "skeleton only");
+        enterStage(versionId, STAGE_COMPETITOR_EXTRACT, "extract competitors");
 
         List<String> extractedCompetitors = extractTopCompetitorsFromBatch1(versionId, report.getBrandName());
         int extractedCompetitorCount = extractedCompetitors.size();
@@ -251,18 +259,57 @@ public class PresaleGenerateOrchestrator {
             if (batch2Result.stopPipeline) {
                 return;
             }
+            allDegraded.addAll(batch2Result.degradedPlatforms());
         } else {
             markCompetitorExtractEmpty(versionId);
-            log.info("PR-3 stage C skeleton skip batch2 because extracted competitors is 0, versionId={}", versionId);
+            log.info("Skip batch2 because extracted competitors is 0, versionId={}", versionId);
         }
 
-        enterStage(versionId, STAGE_L1_AGGREGATE, "skeleton only");
-        enterStage(versionId, STAGE_L2_COMPUTE, "skeleton only");
-        enterStage(versionId, STAGE_L3_INIT, "skeleton only");
+        String rawJson;
+        enterStage(versionId, STAGE_L1_AGGREGATE, "assemble raw snapshot");
+        try {
+            rawJson = rawSnapshotAssembler.assemble(versionId, report, version, allDegraded, extractedCompetitors);
+        } catch (IllegalStateException ex) {
+            markFailed(versionId, FAILURE_CATEGORY_CONFIG_MISSING,
+                    truncateReason("L1 aggregate failed: " + ex.getMessage()));
+            return;
+        } catch (BizException ex) {
+            String msg = ex.getMessage();
+            String category = msg != null && msg.contains("BENCHMARK_MISSING")
+                    ? FAILURE_CATEGORY_CONFIG_MISSING
+                    : FAILURE_CATEGORY_L1_SERIALIZATION_ERROR;
+            markFailed(versionId, category, truncateReason("L1 aggregate failed: " + msg));
+            return;
+        }
+        writeRawSnapshotJson(versionId, rawJson);
 
-        markFailed(versionId, FAILURE_CATEGORY_STAGE_D_CHECKPOINT,
-                "PR-3 stage D checkpoint: batch2/l1/l2/l3 not implemented yet");
-        log.info("PR-3 stage C skeleton finished with placeholder failure, versionId={}, operatorUserId={}, isManager={}",
+        String computedJson;
+        enterStage(versionId, STAGE_L2_COMPUTE, "compute computed snapshot");
+        try {
+            PresaleReportVersion current = versionMapper.selectById(versionId);
+            String currentComputedJson = current == null ? null : current.getComputedSnapshotJson();
+            computedJson = computedSnapshotEnricher.enrichAndValidate(
+                    versionId, rawJson, currentComputedJson, allowSyntheticFallbackReal);
+        } catch (BizException ex) {
+            markFailed(versionId, FAILURE_CATEGORY_L2_COMPUTE_ERROR,
+                    truncateReason("L2 compute failed: " + ex.getMessage()));
+            return;
+        }
+        writeComputedSnapshotJson(versionId, computedJson);
+
+        String editableJson;
+        enterStage(versionId, STAGE_L3_INIT, "derive editable content");
+        try {
+            editableJson = l3InitService.derive(rawJson, computedJson);
+        } catch (BizException ex) {
+            markFailed(versionId, FAILURE_CATEGORY_L3_INIT_ERROR,
+                    truncateReason("L3 init failed: " + ex.getMessage()));
+            return;
+        }
+        writeEditableContentJson(versionId, editableJson);
+
+        markDone(versionId);
+        log.info("Presale real full flow done, versionId={}, operatorUserId={}, isManager={}",
                 versionId, operatorUserId, isManager);
     }
 
@@ -748,6 +795,50 @@ public class PresaleGenerateOrchestrator {
         update.setUpdatedAt(LocalDateTime.now());
         versionMapper.updateById(update);
         lastProgressUpdateAtByVersion.remove(versionId);
+    }
+
+    private void markDone(Long versionId) {
+        PresaleReportVersion current = versionMapper.selectById(versionId);
+        int totalCalls = current == null || current.getTotalLlmCalls() == null
+                ? 0 : current.getTotalLlmCalls();
+
+        PresaleReportVersion update = new PresaleReportVersion();
+        update.setId(versionId);
+        update.setGenerationStatus(PresaleGenerateStatus.DONE.name());
+        update.setGenerationStage(null);
+        update.setCompletedLlmCalls(totalCalls);
+        update.setTotalLlmCalls(totalCalls);
+        update.setBatch1CompletedCalls(current == null ? null : current.getBatch1TotalCalls());
+        update.setBatch2CompletedCalls(current == null ? null : current.getBatch2TotalCalls());
+        update.setFailureCategory(null);
+        update.setFailureReason(null);
+        update.setUpdatedAt(LocalDateTime.now());
+        versionMapper.updateById(update);
+        lastProgressUpdateAtByVersion.remove(versionId);
+    }
+
+    private void writeRawSnapshotJson(Long versionId, String rawJson) {
+        PresaleReportVersion update = new PresaleReportVersion();
+        update.setId(versionId);
+        update.setRawSnapshotJson(rawJson);
+        update.setUpdatedAt(LocalDateTime.now());
+        versionMapper.updateById(update);
+    }
+
+    private void writeComputedSnapshotJson(Long versionId, String computedJson) {
+        PresaleReportVersion update = new PresaleReportVersion();
+        update.setId(versionId);
+        update.setComputedSnapshotJson(computedJson);
+        update.setUpdatedAt(LocalDateTime.now());
+        versionMapper.updateById(update);
+    }
+
+    private void writeEditableContentJson(Long versionId, String editableJson) {
+        PresaleReportVersion update = new PresaleReportVersion();
+        update.setId(versionId);
+        update.setEditableContentJson(editableJson);
+        update.setUpdatedAt(LocalDateTime.now());
+        versionMapper.updateById(update);
     }
 
     @Async("presaleGenerateExecutor")

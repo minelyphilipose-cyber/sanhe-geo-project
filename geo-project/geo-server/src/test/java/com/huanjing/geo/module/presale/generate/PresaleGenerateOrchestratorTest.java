@@ -41,8 +41,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
@@ -74,6 +77,8 @@ class PresaleGenerateOrchestratorTest {
     @Mock
     private PromptTemplateRenderer promptTemplateRenderer;
     @Mock
+    private PresaleRawSnapshotAssembler rawSnapshotAssembler;
+    @Mock
     private PresaleComputedSnapshotEnricher computedSnapshotEnricher;
     @Mock
     private PresaleL3InitService l3InitService;
@@ -93,6 +98,11 @@ class PresaleGenerateOrchestratorTest {
         lenient().when(reuseDecisionService.snapshotOf(any(), any())).thenReturn(null);
         lenient().when(competitorAggregator.extractTopCompetitorsFromBatch1(any(), anyString())).thenReturn(List.of());
         lenient().when(competitorAggregator.normalizeName(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
+                .thenReturn("{\"client_info\":{\"brand_name\":\"Acme\",\"industry\":\"Software\"},\"test_summary\":{\"total_platforms\":1,\"total_prompts\":1},\"benchmarks_frozen\":{\"industry_avg\":{\"overall\":50.0}},\"competitors\":[]}");
+        lenient().when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
+                .thenReturn("{\"scores\":{\"overall\":60.0},\"intent_breakdown\":[],\"optimization_findings\":[],\"roi_simulation\":{\"phases\":[]}}");
+        lenient().when(l3InitService.derive(anyString(), anyString())).thenReturn("{}");
     }
 
     @AfterEach
@@ -868,6 +878,138 @@ class PresaleGenerateOrchestratorTest {
                 && !PresaleGenerateStatus.QUEUED.name().equals(lastStatus));
     }
 
+    @Test
+    void realFullFlow_happyPath_reachesDone() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        setupSimpleRealFlow(9901L, 8901L, List.of("Claude"));
+
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
+        when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
+                .thenReturn("{\"scores\":{\"overall\":60.0}}");
+        when(l3InitService.derive(anyString(), anyString())).thenReturn("{\"editable\":\"ok\"}");
+
+        orchestrator.triggerGenerate(9901L, 901L, false);
+
+        ArgumentCaptor<PresaleReportVersion> versionCaptor = ArgumentCaptor.forClass(PresaleReportVersion.class);
+        verify(versionMapper, atLeastOnce()).updateById(versionCaptor.capture());
+        boolean rawWritten = versionCaptor.getAllValues().stream()
+                .anyMatch(v -> v.getRawSnapshotJson() != null && !v.getRawSnapshotJson().isBlank());
+        boolean computedWritten = versionCaptor.getAllValues().stream()
+                .anyMatch(v -> v.getComputedSnapshotJson() != null && !v.getComputedSnapshotJson().isBlank());
+        boolean editableWritten = versionCaptor.getAllValues().stream()
+                .anyMatch(v -> v.getEditableContentJson() != null && !v.getEditableContentJson().isBlank());
+        PresaleReportVersion done = versionCaptor.getAllValues().stream()
+                .filter(v -> PresaleGenerateStatus.DONE.name().equals(v.getGenerationStatus()))
+                .reduce((first, second) -> second)
+                .orElseThrow();
+
+        assertTrue(rawWritten);
+        assertTrue(computedWritten);
+        assertTrue(editableWritten);
+        assertEquals(PresaleGenerateStatus.DONE.name(), done.getGenerationStatus());
+        assertNull(done.getGenerationStage());
+    }
+
+    @Test
+    void realFullFlow_l1Fails_marksL1Error() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        setupSimpleRealFlow(9902L, 8902L, List.of());
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
+                .thenThrow(new com.huanjing.geo.common.exception.BizException(500, "L1 aggregate failed: boom"));
+
+        orchestrator.triggerGenerate(9902L, 902L, false);
+
+        ArgumentCaptor<PresaleReportVersion> versionCaptor = ArgumentCaptor.forClass(PresaleReportVersion.class);
+        verify(versionMapper, atLeastOnce()).updateById(versionCaptor.capture());
+        PresaleReportVersion failed = versionCaptor.getAllValues().stream()
+                .filter(v -> PresaleGenerateStatus.FAILED.name().equals(v.getGenerationStatus()))
+                .reduce((first, second) -> second)
+                .orElseThrow();
+        assertEquals("L1_SERIALIZATION_ERROR", failed.getFailureCategory());
+    }
+
+    @Test
+    void realFullFlow_benchmarkMissing_marksConfigMissing() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        setupSimpleRealFlow(9903L, 8903L, List.of());
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("BENCHMARK_MISSING fallback (_ALL_,_ALL_) not found"));
+
+        orchestrator.triggerGenerate(9903L, 903L, false);
+
+        ArgumentCaptor<PresaleReportVersion> versionCaptor = ArgumentCaptor.forClass(PresaleReportVersion.class);
+        verify(versionMapper, atLeastOnce()).updateById(versionCaptor.capture());
+        PresaleReportVersion failed = versionCaptor.getAllValues().stream()
+                .filter(v -> PresaleGenerateStatus.FAILED.name().equals(v.getGenerationStatus()))
+                .reduce((first, second) -> second)
+                .orElseThrow();
+        assertEquals("CONFIG_MISSING", failed.getFailureCategory());
+    }
+
+    @Test
+    void realFullFlow_l2Fails_marksL2Error() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        setupSimpleRealFlow(9904L, 8904L, List.of("Claude"));
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
+        when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
+                .thenThrow(new com.huanjing.geo.common.exception.BizException(500, "L2 compute failed"));
+
+        orchestrator.triggerGenerate(9904L, 904L, false);
+
+        ArgumentCaptor<PresaleReportVersion> versionCaptor = ArgumentCaptor.forClass(PresaleReportVersion.class);
+        verify(versionMapper, atLeastOnce()).updateById(versionCaptor.capture());
+        PresaleReportVersion failed = versionCaptor.getAllValues().stream()
+                .filter(v -> PresaleGenerateStatus.FAILED.name().equals(v.getGenerationStatus()))
+                .reduce((first, second) -> second)
+                .orElseThrow();
+        assertEquals("L2_COMPUTE_ERROR", failed.getFailureCategory());
+    }
+
+    @Test
+    void realFullFlow_l3Fails_marksL3Error() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        setupSimpleRealFlow(9905L, 8905L, List.of("Claude"));
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
+        when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
+                .thenReturn("{\"scores\":{\"overall\":60.0}}");
+        when(l3InitService.derive(anyString(), anyString()))
+                .thenThrow(new com.huanjing.geo.common.exception.BizException(500, "L3 init failed"));
+
+        orchestrator.triggerGenerate(9905L, 905L, false);
+
+        ArgumentCaptor<PresaleReportVersion> versionCaptor = ArgumentCaptor.forClass(PresaleReportVersion.class);
+        verify(versionMapper, atLeastOnce()).updateById(versionCaptor.capture());
+        PresaleReportVersion failed = versionCaptor.getAllValues().stream()
+                .filter(v -> PresaleGenerateStatus.FAILED.name().equals(v.getGenerationStatus()))
+                .reduce((first, second) -> second)
+                .orElseThrow();
+        assertEquals("L3_INIT_ERROR", failed.getFailureCategory());
+    }
+
+    @Test
+    void realFullFlow_zeroCompetitors_reachesDone() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        setupSimpleRealFlow(9906L, 8906L, List.of());
+
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
+        when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
+                .thenReturn("{\"scores\":{\"overall\":60.0}}");
+        when(l3InitService.derive(anyString(), anyString())).thenReturn("{\"editable\":\"ok\"}");
+
+        orchestrator.triggerGenerate(9906L, 906L, false);
+
+        ArgumentCaptor<PresaleReportVersion> versionCaptor = ArgumentCaptor.forClass(PresaleReportVersion.class);
+        verify(versionMapper, atLeastOnce()).updateById(versionCaptor.capture());
+        boolean hasExtractEmptyMarker = versionCaptor.getAllValues().stream()
+                .anyMatch(v -> "COMPETITOR_EXTRACT_EMPTY".equals(v.getFailureCategory()));
+        PresaleReportVersion done = versionCaptor.getAllValues().stream()
+                .filter(v -> PresaleGenerateStatus.DONE.name().equals(v.getGenerationStatus()))
+                .reduce((first, second) -> second)
+                .orElseThrow();
+        assertTrue(hasExtractEmptyMarker);
+        assertEquals(PresaleGenerateStatus.DONE.name(), done.getGenerationStatus());
+    }
+
     private void setupBasePreflightSuccess(Long versionId,
                                            Long reportId,
                                            int platformCount,
@@ -889,6 +1031,25 @@ class PresaleGenerateOrchestratorTest {
         when(aiPlatformConfigMapper.selectCount(any())).thenReturn((long) platformCount);
         when(promptTemplateMapper.selectCount(any()))
                 .thenReturn((long) genericPromptCount, (long) competitorPromptCount);
+    }
+
+    private void setupSimpleRealFlow(Long versionId, Long reportId, List<String> extractedCompetitors) throws Exception {
+        setupBasePreflightSuccess(versionId, reportId, 1, 1, 1);
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(
+                List.of(platform("kimi")),
+                List.of(platform("kimi"))
+        );
+        when(promptTemplateMapper.selectList(any())).thenReturn(
+                List.of(promptTemplate(991L, "G1", "batch1 {brand}")),
+                List.of(promptTemplate(992L, "C1", "batch2 {competitor}"))
+        );
+        when(competitorAggregator.extractTopCompetitorsFromBatch1(versionId, "Acme"))
+                .thenReturn(extractedCompetitors);
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+                .thenAnswer(inv -> inv.getArgument(0, String.class));
+        when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
+        when(llmInvoker.analyze(any(), anyString(), anyString()))
+                .thenReturn(successResult("{\"is_mentioned\":true,\"ranking\":1,\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[],\"scene_advantages\":[]}"));
     }
 
     private AiPlatformConfig platform(String code) {
