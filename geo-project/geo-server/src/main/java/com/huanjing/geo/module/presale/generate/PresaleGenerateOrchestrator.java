@@ -90,19 +90,19 @@ public class PresaleGenerateOrchestrator {
     private final ObjectMapper objectMapper;
     private final Map<Long, Long> lastProgressUpdateAtByVersion = new ConcurrentHashMap<>();
 
-    @Value("${presale.generate.mock:true}")
+    @Value("${presale.generate.mock}")
     private boolean mockEnabled;
 
-    @Value("${presale.generate.mock-delay-ms:5000}")
+    @Value("${presale.generate.mock-delay-ms}")
     private long mockDelayMs;
 
-    @Value("${presale.generate.mock-fixture-path:fixtures/01-mock-sample-v1.2.json}")
+    @Value("${presale.generate.mock-fixture-path}")
     private String mockFixturePath;
 
-    @Value("${presale.generate.allow-synthetic-fallback.mock:true}")
+    @Value("${presale.generate.allow-synthetic-fallback.mock}")
     private boolean allowSyntheticFallbackMock;
 
-    @Value("${presale.generate.allow-synthetic-fallback.real:false}")
+    @Value("${presale.generate.allow-synthetic-fallback.real}")
     private boolean allowSyntheticFallbackReal;
 
     public PresaleGenerateOrchestrator(PresaleReportVersionMapper versionMapper,
