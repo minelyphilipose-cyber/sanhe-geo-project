@@ -169,6 +169,7 @@ function buildMeta(
     version_no: row.version_no,
     schema_version: row.schema_version,
     generation_status: row.generation_status,
+    generated_at: raw?.meta?.generated_at ?? null,
     frozen: row.frozen_at != null,
     frozen_at: row.frozen_at ?? null,
     frozen_by: row.frozen_by ?? null,

@@ -58,6 +58,12 @@ public class MergedViewMeta {
     @JsonProperty("generation_status")
     private String generationStatus;
 
+    /** 报告生成完成时间。来源 raw.meta.generated_at,可 null。序列化为 RFC3339 带 +08:00。 */
+    @JsonProperty("generated_at")
+    @JsonSerialize(using = PresaleDateTimeJson.Serializer.class)
+    @JsonDeserialize(using = PresaleDateTimeJson.Deserializer.class)
+    private LocalDateTime generatedAt;
+
     /** 是否冻结(frozen_at != null 派生得到,便于前端判断)。 */
     private Boolean frozen;
 

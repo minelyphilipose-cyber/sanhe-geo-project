@@ -19,6 +19,7 @@ public class PresaleAiPromptResult {
     private String competitorName;
     private Long queryCallId;
     private Long analyzeCallId;
+    private String requestPromptContent;
     private Integer isMentioned;
     private Integer ranking;
     private String sentiment;
