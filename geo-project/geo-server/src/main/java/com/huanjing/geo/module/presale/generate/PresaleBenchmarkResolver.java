@@ -11,6 +11,7 @@ import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.ResourceLoader;
 import org.springframework.stereotype.Component;
@@ -38,6 +39,7 @@ public class PresaleBenchmarkResolver {
 
     private volatile Map<String, BenchmarkJsonEntry> entriesByKey = Collections.emptyMap();
 
+    @Autowired
     public PresaleBenchmarkResolver(ObjectMapper objectMapper, ResourceLoader resourceLoader) {
         this(objectMapper, resourceLoader, RESOURCE_PATH);
     }
