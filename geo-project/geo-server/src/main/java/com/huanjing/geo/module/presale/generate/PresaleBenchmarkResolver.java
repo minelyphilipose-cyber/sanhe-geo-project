@@ -55,6 +55,10 @@ public class PresaleBenchmarkResolver {
     }
 
     public BenchmarksFrozen resolve(String industry, String industryRole) {
+        if (industry == null || industry.isBlank()) {
+            log.warn("Resolve called with null/blank industry, falling back to _ALL_. "
+                    + "This may indicate a Preflight validation gap.");
+        }
         String normalizedIndustry = normalize(industry);
         String normalizedRole = normalize(industryRole);
 

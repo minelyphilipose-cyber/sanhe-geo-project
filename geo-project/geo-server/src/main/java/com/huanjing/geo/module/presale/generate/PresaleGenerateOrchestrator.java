@@ -39,7 +39,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -82,6 +81,7 @@ public class PresaleGenerateOrchestrator {
     private final PromptTemplateRenderer promptTemplateRenderer;
     private final PresaleComputedSnapshotEnricher computedSnapshotEnricher;
     private final PresaleL3InitService l3InitService;
+    private final PresaleCompetitorAggregator competitorAggregator;
     private final ObjectMapper objectMapper;
     private final Map<Long, Long> lastProgressUpdateAtByVersion = new ConcurrentHashMap<>();
 
@@ -112,6 +112,7 @@ public class PresaleGenerateOrchestrator {
                                        PromptTemplateRenderer promptTemplateRenderer,
                                        PresaleComputedSnapshotEnricher computedSnapshotEnricher,
                                        PresaleL3InitService l3InitService,
+                                       PresaleCompetitorAggregator competitorAggregator,
                                        ObjectMapper objectMapper) {
         this.versionMapper = versionMapper;
         this.reportMapper = reportMapper;
@@ -125,6 +126,7 @@ public class PresaleGenerateOrchestrator {
         this.promptTemplateRenderer = promptTemplateRenderer;
         this.computedSnapshotEnricher = computedSnapshotEnricher;
         this.l3InitService = l3InitService;
+        this.competitorAggregator = competitorAggregator;
         this.objectMapper = objectMapper;
     }
 
@@ -402,7 +404,7 @@ public class PresaleGenerateOrchestrator {
                         if (degradedPlatforms.size() >= 4) {
                             updateBatchProgress(versionId, counts.batch1CompletedCalls(), counts.batch2CompletedCalls(), degradedPlatforms, true);
                             markTooManyDegradedFailed(versionId, degradedPlatforms);
-                            return Batch1ExecutionResult.stop();
+                            return Batch1ExecutionResult.stop(degradedPlatforms);
                         }
                         if (interruptedInAnalyze) {
                             throw new BatchInterruptedException("batch1 interrupted during reused analyze");
@@ -432,7 +434,7 @@ public class PresaleGenerateOrchestrator {
                     if (degradedPlatforms.size() >= 4) {
                         updateBatchProgress(versionId, counts.batch1CompletedCalls(), counts.batch2CompletedCalls(), degradedPlatforms, true);
                         markTooManyDegradedFailed(versionId, degradedPlatforms);
-                        return Batch1ExecutionResult.stop();
+                        return Batch1ExecutionResult.stop(degradedPlatforms);
                     }
                     if (isInterruptedFailure(ex)) {
                         throw new BatchInterruptedException("batch1 interrupted during query");
@@ -465,12 +467,12 @@ public class PresaleGenerateOrchestrator {
                 if (degradedPlatforms.size() >= 4) {
                     updateBatchProgress(versionId, counts.batch1CompletedCalls(), counts.batch2CompletedCalls(), degradedPlatforms, true);
                     markTooManyDegradedFailed(versionId, degradedPlatforms);
-                    return Batch1ExecutionResult.stop();
+                    return Batch1ExecutionResult.stop(degradedPlatforms);
                 }
             }
         }
         updateBatchProgress(versionId, counts.batch1CompletedCalls(), counts.batch2CompletedCalls(), degradedPlatforms, true);
-        return Batch1ExecutionResult.continuePipeline();
+        return Batch1ExecutionResult.continuePipeline(degradedPlatforms);
     }
 
     private Batch2ExecutionResult executeBatch2(Long versionId,
@@ -552,7 +554,7 @@ public class PresaleGenerateOrchestrator {
                         if (batch2DegradedPlatforms.size() >= 4) {
                             updateBatchProgress(versionId, counts.batch1CompletedCalls(), counts.batch2CompletedCalls(), displayDegradedPlatforms, true);
                             markTooManyDegradedFailed(versionId, displayDegradedPlatforms);
-                            return Batch2ExecutionResult.stop();
+                            return Batch2ExecutionResult.stop(displayDegradedPlatforms);
                         }
                         continue;
                     }
@@ -603,7 +605,7 @@ public class PresaleGenerateOrchestrator {
                             if (batch2DegradedPlatforms.size() >= 4) {
                                 updateBatchProgress(versionId, counts.batch1CompletedCalls(), counts.batch2CompletedCalls(), displayDegradedPlatforms, true);
                                 markTooManyDegradedFailed(versionId, displayDegradedPlatforms);
-                                return Batch2ExecutionResult.stop();
+                                return Batch2ExecutionResult.stop(displayDegradedPlatforms);
                             }
                             if (interruptedInAnalyze) {
                                 throw new BatchInterruptedException("batch2 interrupted during reused analyze");
@@ -634,7 +636,7 @@ public class PresaleGenerateOrchestrator {
                         if (batch2DegradedPlatforms.size() >= 4) {
                             updateBatchProgress(versionId, counts.batch1CompletedCalls(), counts.batch2CompletedCalls(), displayDegradedPlatforms, true);
                             markTooManyDegradedFailed(versionId, displayDegradedPlatforms);
-                            return Batch2ExecutionResult.stop();
+                            return Batch2ExecutionResult.stop(displayDegradedPlatforms);
                         }
                         if (isInterruptedFailure(ex)) {
                             throw new BatchInterruptedException("batch2 interrupted during query");
@@ -668,13 +670,13 @@ public class PresaleGenerateOrchestrator {
                     if (batch2DegradedPlatforms.size() >= 4) {
                         updateBatchProgress(versionId, counts.batch1CompletedCalls(), counts.batch2CompletedCalls(), displayDegradedPlatforms, true);
                         markTooManyDegradedFailed(versionId, displayDegradedPlatforms);
-                        return Batch2ExecutionResult.stop();
+                        return Batch2ExecutionResult.stop(displayDegradedPlatforms);
                     }
                 }
             }
         }
         updateBatchProgress(versionId, counts.batch1CompletedCalls(), counts.batch2CompletedCalls(), displayDegradedPlatforms, true);
-        return Batch2ExecutionResult.continuePipeline();
+        return Batch2ExecutionResult.continuePipeline(displayDegradedPlatforms);
     }
 
     private void markRunningForMock(Long versionId) {
@@ -852,70 +854,11 @@ public class PresaleGenerateOrchestrator {
     }
 
     private List<String> extractTopCompetitorsFromBatch1(Long versionId, String brandName) {
-        List<PresaleAiPromptResult> rows = aiPromptResultMapper.selectList(
-                new LambdaQueryWrapper<PresaleAiPromptResult>()
-                        .eq(PresaleAiPromptResult::getVersionId, versionId)
-                        .eq(PresaleAiPromptResult::getBatchNo, 1)
-                        .isNotNull(PresaleAiPromptResult::getIsMentioned)
-        );
-        if (rows == null || rows.isEmpty()) {
-            return List.of();
-        }
-
-        String normalizedBrand = normalizeName(brandName);
-        Map<String, Integer> countByNormalized = new HashMap<>();
-        Map<String, String> displayByNormalized = new HashMap<>();
-        for (PresaleAiPromptResult row : rows) {
-            String mentionedCompetitors = row.getMentionedCompetitors();
-            if (mentionedCompetitors == null || mentionedCompetitors.isBlank()) {
-                continue;
-            }
-
-            try {
-                JsonNode node = objectMapper.readTree(mentionedCompetitors);
-                if (!node.isArray()) {
-                    continue;
-                }
-
-                Set<String> rowDedup = new HashSet<>();
-                for (JsonNode item : node) {
-                    if (!item.isTextual()) {
-                        continue;
-                    }
-                    String display = item.asText() == null ? "" : item.asText().trim();
-                    if (display.isEmpty()) {
-                        continue;
-                    }
-                    String normalized = normalizeName(display);
-                    if (normalized.isEmpty() || normalized.equals(normalizedBrand)) {
-                        continue;
-                    }
-                    if (!rowDedup.add(normalized)) {
-                        continue;
-                    }
-                    countByNormalized.merge(normalized, 1, Integer::sum);
-                    displayByNormalized.putIfAbsent(normalized, display);
-                }
-            } catch (Exception ex) {
-                log.warn("Skip invalid mentioned_competitors json, versionId={}, promptResultId={}",
-                        versionId, row.getId(), ex);
-            }
-        }
-
-        return countByNormalized.entrySet().stream()
-                .sorted(Comparator
-                        .comparing(Map.Entry<String, Integer>::getValue, Comparator.reverseOrder())
-                        .thenComparing(Map.Entry::getKey))
-                .limit(3)
-                .map(entry -> displayByNormalized.getOrDefault(entry.getKey(), entry.getKey()))
-                .toList();
+        return competitorAggregator.extractTopCompetitorsFromBatch1(versionId, brandName);
     }
 
     private String normalizeName(String input) {
-        if (input == null) {
-            return "";
-        }
-        return input.trim().replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+        return competitorAggregator.normalizeName(input);
     }
 
     private void markCompetitorExtractEmpty(Long versionId) {
@@ -1300,33 +1243,53 @@ public class PresaleGenerateOrchestrator {
 
     private static final class Batch1ExecutionResult {
         private final boolean stopPipeline;
+        private final Set<String> degradedPlatforms;
 
-        private Batch1ExecutionResult(boolean stopPipeline) {
+        private Batch1ExecutionResult(boolean stopPipeline, Set<String> degradedPlatforms) {
             this.stopPipeline = stopPipeline;
+            this.degradedPlatforms = degradedPlatforms == null ? Set.of() : Set.copyOf(degradedPlatforms);
         }
 
-        static Batch1ExecutionResult stop() {
-            return new Batch1ExecutionResult(true);
+        static Batch1ExecutionResult stop(Set<String> degradedPlatforms) {
+            return new Batch1ExecutionResult(true, degradedPlatforms);
         }
 
-        static Batch1ExecutionResult continuePipeline() {
-            return new Batch1ExecutionResult(false);
+        static Batch1ExecutionResult continuePipeline(Set<String> degradedPlatforms) {
+            return new Batch1ExecutionResult(false, degradedPlatforms);
+        }
+
+        boolean stopPipeline() {
+            return stopPipeline;
+        }
+
+        Set<String> degradedPlatforms() {
+            return degradedPlatforms;
         }
     }
 
     private static final class Batch2ExecutionResult {
         private final boolean stopPipeline;
+        private final Set<String> degradedPlatforms;
 
-        private Batch2ExecutionResult(boolean stopPipeline) {
+        private Batch2ExecutionResult(boolean stopPipeline, Set<String> degradedPlatforms) {
             this.stopPipeline = stopPipeline;
+            this.degradedPlatforms = degradedPlatforms == null ? Set.of() : Set.copyOf(degradedPlatforms);
         }
 
-        static Batch2ExecutionResult stop() {
-            return new Batch2ExecutionResult(true);
+        static Batch2ExecutionResult stop(Set<String> degradedPlatforms) {
+            return new Batch2ExecutionResult(true, degradedPlatforms);
         }
 
-        static Batch2ExecutionResult continuePipeline() {
-            return new Batch2ExecutionResult(false);
+        static Batch2ExecutionResult continuePipeline(Set<String> degradedPlatforms) {
+            return new Batch2ExecutionResult(false, degradedPlatforms);
+        }
+
+        boolean stopPipeline() {
+            return stopPipeline;
+        }
+
+        Set<String> degradedPlatforms() {
+            return degradedPlatforms;
         }
     }
 
