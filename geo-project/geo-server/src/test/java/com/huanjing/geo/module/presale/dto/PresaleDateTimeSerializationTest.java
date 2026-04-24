@@ -26,6 +26,8 @@ class PresaleDateTimeSerializationTest {
     }
 
     @Test
+    // 本断言依赖 Jackson 默认 NON_NULL 包含策略,字段 null 时省略输出。
+    // 若未来后端启用 ALWAYS 保留 null,断言需改为 contains("\"generated_at\":null")。
     void mergedViewMeta_generatedAt_nonDone_nullAllowed() throws Exception {
         MergedViewMeta meta = MergedViewMeta.builder()
                 .generationStatus("RUNNING")
