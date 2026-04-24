@@ -10,6 +10,7 @@ import java.util.List;
 
 @Mapper
 public interface PresaleReportVersionMapper extends BaseMapper<PresaleReportVersion> {
+    int tryTransitionToRunning(@Param("versionId") Long versionId);
 
     /**
      * 取指定 report 的最大 version_no(用于派生新版本递增编号)。

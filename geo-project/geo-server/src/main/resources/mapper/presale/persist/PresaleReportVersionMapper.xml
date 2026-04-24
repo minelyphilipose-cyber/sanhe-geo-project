@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper">
+
+    <update id="tryTransitionToRunning">
+        UPDATE presale_report_version
+        SET generation_status = 'RUNNING',
+            updated_at = NOW()
+        WHERE id = #{versionId}
+          AND generation_status = 'QUEUED'
+    </update>
+
+</mapper>
