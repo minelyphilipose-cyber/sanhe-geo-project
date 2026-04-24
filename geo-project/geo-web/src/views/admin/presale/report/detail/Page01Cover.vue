@@ -249,7 +249,7 @@ const issuedText = computed(() => {
 
 /* 底部 grid */
 .cover-footer {
-  margin-top: auto;
+  /* margin-top: auto; */
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 20px;
