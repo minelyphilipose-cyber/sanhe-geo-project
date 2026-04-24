@@ -188,6 +188,7 @@ interface HeatCellView {
   heatClass: string
   isNull: boolean
   tooltip: string
+  stance: PlatformIntentCell['stance']
 }
 
 interface HeatRowView {
@@ -374,7 +375,8 @@ function buildCellView(
       display: '—',
       heatClass: 'heat-0',
       isNull: true,
-      tooltip: `${platform.platform_name} · ${FALLBACK_INTENT_LABEL[intentCode]}:数据缺失`
+      tooltip: `${platform.platform_name} · ${FALLBACK_INTENT_LABEL[intentCode]}:数据缺失`,
+      stance: null
     }
   }
 
@@ -387,17 +389,40 @@ function buildCellView(
       display: '—',
       heatClass: 'heat-0',
       isNull: true,
-      tooltip: `${platform.platform_name} · ${cell.intent_label}:未测试该意图`
+      tooltip: `${platform.platform_name} · ${cell.intent_label}:未测试该意图`,
+      stance: cell.stance ?? null
     }
   }
+
+  const tooltip = buildTooltip(cell)
 
   return {
     key,
     display: `${cell.mention_rate}%`,
     heatClass: rateToHeatClass(cell.mention_rate),
     isNull: false,
-    tooltip: `${platform.platform_name} · ${cell.intent_label}:${cell.mention_count}/${cell.platform_prompt_count} 提及(${cell.mention_rate}%)`
+    tooltip: `${platform.platform_name} · ${cell.intent_label}:${tooltip}`,
+    stance: cell.stance ?? null
   }
+}
+
+function buildTooltip(cell: PlatformIntentCell): string {
+  if (cell.intent_code === 'COGNITIVE' || cell.intent_code === 'COMPARISON') {
+    const base = `评分 ${cell.mention_rate}%（基于 ${cell.platform_prompt_count} 次裁判）`
+    if (cell.intent_code !== 'COMPARISON') return base
+    const stanceLabel = toStanceLabel(cell.stance)
+    return stanceLabel ? `${base}，站队:${stanceLabel}` : base
+  }
+  return `${cell.mention_count}/${cell.platform_prompt_count} 提及(${cell.mention_rate}%)`
+}
+
+function toStanceLabel(
+  stance: PlatformIntentCell['stance']
+): '我方领先' | '竞品领先' | '持平' | null {
+  if (stance === 'target') return '我方领先'
+  if (stance === 'competitor') return '竞品领先'
+  if (stance === 'tie') return '持平'
+  return null
 }
 
 /**
