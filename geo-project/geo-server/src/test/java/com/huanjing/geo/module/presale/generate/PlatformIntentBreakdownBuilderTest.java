@@ -94,6 +94,9 @@ class PlatformIntentBreakdownBuilderTest {
     }
 
     @Test
+    // D26 架构让步(PR-3.D3 CP5 Block 2)的防御测试:
+    // SQL 层返回 has_competitor_var 分组全量后,本方法用于锁定 Java 层过滤不可删除。
+    // 删除该测试等于解除唯一屏障,会导致竞品模板混入 intent_breakdown。
     void build_templateCountWithCompetitorVar_doesNotMultiplyByCompetitorCount() {
         // Defensive regression:
         // even when template stats include has_competitor_var=1 rows, Java-side total_prompts must not
@@ -188,14 +191,16 @@ class PlatformIntentBreakdownBuilderTest {
         for (PresaleIntentCode code : PresaleIntentCode.allInOrder()) {
             PromptTemplateIntentStatRow row = new PromptTemplateIntentStatRow();
             row.setIntentLabel(code.getLabel());
-            if (code == PresaleIntentCode.RECOMMENDATION) {
-                row.setHasCompetitorVar(1);
-                row.setTemplateCount(5);
-            } else {
-                row.setHasCompetitorVar(0);
-                row.setTemplateCount(0);
-            }
+            row.setHasCompetitorVar(0);
+            row.setTemplateCount(code == PresaleIntentCode.RECOMMENDATION ? 5 : 0);
             rows.add(row);
+            if (code == PresaleIntentCode.RECOMMENDATION) {
+                PromptTemplateIntentStatRow competitorVarRow = new PromptTemplateIntentStatRow();
+                competitorVarRow.setIntentLabel(code.getLabel());
+                competitorVarRow.setHasCompetitorVar(1);
+                competitorVarRow.setTemplateCount(50);
+                rows.add(competitorVarRow);
+            }
         }
         return rows;
     }

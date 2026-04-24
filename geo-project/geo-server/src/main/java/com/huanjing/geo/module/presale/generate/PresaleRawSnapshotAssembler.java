@@ -20,9 +20,9 @@ import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleLlmConfigMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
-import com.huanjing.geo.module.system.entity.AiPlatformConfig;
-import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
+import com.huanjing.geo.module.presale.generate.llm.PresaleWhitelistedPlatformRow;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -53,7 +53,7 @@ public class PresaleRawSnapshotAssembler {
 
     private final PresaleAiCallMapper aiCallMapper;
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
-    private final AiPlatformConfigMapper aiPlatformConfigMapper;
+    private final PresaleLlmConfigMapper presaleLlmConfigMapper;
     private final PresalePromptTemplateMapper promptTemplateMapper;
     private final PresaleBenchmarkResolver benchmarkResolver;
     private final PresaleCompetitorAggregator competitorAggregator;
@@ -61,14 +61,14 @@ public class PresaleRawSnapshotAssembler {
 
     public PresaleRawSnapshotAssembler(PresaleAiCallMapper aiCallMapper,
                                        PresaleAiPromptResultMapper aiPromptResultMapper,
-                                       AiPlatformConfigMapper aiPlatformConfigMapper,
+                                       PresaleLlmConfigMapper presaleLlmConfigMapper,
                                        PresalePromptTemplateMapper promptTemplateMapper,
                                        PresaleBenchmarkResolver benchmarkResolver,
                                        PresaleCompetitorAggregator competitorAggregator,
                                        ObjectMapper objectMapper) {
         this.aiCallMapper = aiCallMapper;
         this.aiPromptResultMapper = aiPromptResultMapper;
-        this.aiPlatformConfigMapper = aiPlatformConfigMapper;
+        this.presaleLlmConfigMapper = presaleLlmConfigMapper;
         this.promptTemplateMapper = promptTemplateMapper;
         this.benchmarkResolver = benchmarkResolver;
         this.competitorAggregator = competitorAggregator;
@@ -176,9 +176,7 @@ public class PresaleRawSnapshotAssembler {
     }
 
     private int countEnabledPlatforms() {
-        Long count = aiPlatformConfigMapper.selectCount(
-                new LambdaQueryWrapper<AiPlatformConfig>().eq(AiPlatformConfig::getEnabled, true)
-        );
+        Long count = presaleLlmConfigMapper.countWhitelistedPlatforms();
         return count == null ? 0 : count.intValue();
     }
 
@@ -214,14 +212,13 @@ public class PresaleRawSnapshotAssembler {
     }
 
     private List<PlatformBreakdown> buildPlatformBreakdown(Long versionId, Set<String> degradedPlatforms) {
-        List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(
-                new LambdaQueryWrapper<AiPlatformConfig>()
-                        .eq(AiPlatformConfig::getEnabled, true)
-                        .orderByAsc(AiPlatformConfig::getPlatformCode)
-        );
+        List<PresaleWhitelistedPlatformRow> platforms = presaleLlmConfigMapper.selectWhitelistedPlatforms();
+        if (platforms == null) {
+            platforms = List.of();
+        }
         Set<String> safeDegraded = degradedPlatforms == null ? Set.of() : degradedPlatforms;
         List<PlatformBreakdown> out = new ArrayList<>();
-        for (AiPlatformConfig platform : platforms) {
+        for (PresaleWhitelistedPlatformRow platform : platforms) {
             String platformCode = platform.getPlatformCode();
             List<PresaleAiPromptResult> batch1Rows = aiPromptResultMapper.selectList(
                     new LambdaQueryWrapper<PresaleAiPromptResult>()
@@ -432,14 +429,13 @@ public class PresaleRawSnapshotAssembler {
             return Collections.emptyList();
         }
 
-        List<AiPlatformConfig> platformRows = aiPlatformConfigMapper.selectList(
-                new LambdaQueryWrapper<AiPlatformConfig>().eq(AiPlatformConfig::getEnabled, true));
+        List<PresaleWhitelistedPlatformRow> platformRows = presaleLlmConfigMapper.selectWhitelistedPlatforms();
         if (platformRows == null) {
             platformRows = List.of();
         }
         Map<String, String> platformNameByCode = platformRows.stream()
                 .filter(p -> p.getPlatformCode() != null)
-                .collect(Collectors.toMap(AiPlatformConfig::getPlatformCode,
+                .collect(Collectors.toMap(PresaleWhitelistedPlatformRow::getPlatformCode,
                         p -> p.getPlatformName() == null ? p.getPlatformCode() : p.getPlatformName(),
                         (a, b) -> a));
 

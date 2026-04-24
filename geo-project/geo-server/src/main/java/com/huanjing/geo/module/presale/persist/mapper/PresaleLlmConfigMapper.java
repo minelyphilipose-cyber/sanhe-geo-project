@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.presale.persist.mapper;
 
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmPlatformConfigRow;
+import com.huanjing.geo.module.presale.generate.llm.PresaleWhitelistedPlatformRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -30,6 +31,15 @@ public interface PresaleLlmConfigMapper {
             "WHERE p.in_whitelist = 1 " +
             "ORDER BY p.platform_code")
     List<String> selectWhitelistedPlatformCodes();
+
+    @Select("SELECT " +
+            "p.platform_code AS platformCode, " +
+            "COALESCE(a.platform_name, p.platform_code) AS platformName " +
+            "FROM presale_platform_config p " +
+            "LEFT JOIN ai_platform_config a ON a.platform_code = p.platform_code " +
+            "WHERE p.in_whitelist = 1 " +
+            "ORDER BY p.platform_code")
+    List<PresaleWhitelistedPlatformRow> selectWhitelistedPlatforms();
 
     @Select("SELECT COUNT(1) " +
             "FROM presale_platform_config p " +

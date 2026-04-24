@@ -8,9 +8,8 @@ import com.huanjing.geo.module.presale.generate.PresaleCompetitorAggregator;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleLlmConfigMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
-import com.huanjing.geo.module.system.entity.AiPlatformConfig;
-import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -32,17 +31,15 @@ class SceneCoverageCalculatorTest {
     @Mock
     private PresalePromptTemplateMapper promptTemplateMapper;
     @Mock
-    private AiPlatformConfigMapper aiPlatformConfigMapper;
+    private PresaleLlmConfigMapper presaleLlmConfigMapper;
     @Mock
     private PresaleCompetitorAggregator competitorAggregator;
 
     @Test
     void happyPath_sceneCoverageAndIntentBreakdownAreConsistent() {
         SceneCoverageCalculator calculator = new SceneCoverageCalculator(
-                aiPromptResultMapper, promptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
-                platform("p1"), platform("p2"), platform("p3"), platform("p4")
-        ));
+                aiPromptResultMapper, promptTemplateMapper, presaleLlmConfigMapper, competitorAggregator, new ObjectMapper());
+        when(presaleLlmConfigMapper.selectWhitelistedPlatformCodes()).thenReturn(List.of("p1", "p2", "p3", "p4"));
         when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
                 template(11L, "P11", "推荐型", "rec question"),
                 template(12L, "P12", "问题型", "inq question"),
@@ -97,12 +94,9 @@ class SceneCoverageCalculatorTest {
     @Test
     void threePlatformsDegraded_thresholdUsesEffectivePlatforms() {
         SceneCoverageCalculator calculator = new SceneCoverageCalculator(
-                aiPromptResultMapper, promptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
-                platform("p1"), platform("p2"), platform("p3"),
-                platform("p4"), platform("p5"), platform("p6"),
-                platform("p7"), platform("p8"), platform("p9")
-        ));
+                aiPromptResultMapper, promptTemplateMapper, presaleLlmConfigMapper, competitorAggregator, new ObjectMapper());
+        when(presaleLlmConfigMapper.selectWhitelistedPlatformCodes()).thenReturn(List.of(
+                "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9"));
         when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
                 template(21L, "P21", "推荐型", "rec")
         ));
@@ -128,10 +122,8 @@ class SceneCoverageCalculatorTest {
     @Test
     void missingQueriesWithTopCompetitors_returnsMatchedDisplayNames() {
         SceneCoverageCalculator calculator = new SceneCoverageCalculator(
-                aiPromptResultMapper, promptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
-                platform("p1"), platform("p2"), platform("p3"), platform("p4")
-        ));
+                aiPromptResultMapper, promptTemplateMapper, presaleLlmConfigMapper, competitorAggregator, new ObjectMapper());
+        when(presaleLlmConfigMapper.selectWhitelistedPlatformCodes()).thenReturn(List.of("p1", "p2", "p3", "p4"));
         when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
                 template(31L, "P31", "推荐型", "missing rec prompt")
         ));
@@ -198,10 +190,4 @@ class SceneCoverageCalculatorTest {
         return row;
     }
 
-    private AiPlatformConfig platform(String code) {
-        AiPlatformConfig p = new AiPlatformConfig();
-        p.setPlatformCode(code);
-        p.setEnabled(true);
-        return p;
-    }
 }

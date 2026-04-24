@@ -13,9 +13,9 @@ import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleLlmConfigMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
-import com.huanjing.geo.module.system.entity.AiPlatformConfig;
-import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
+import com.huanjing.geo.module.presale.generate.llm.PresaleWhitelistedPlatformRow;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -43,7 +43,7 @@ class PresaleRawSnapshotAssemblerTest {
     @Mock
     private PresaleAiPromptResultMapper aiPromptResultMapper;
     @Mock
-    private AiPlatformConfigMapper aiPlatformConfigMapper;
+    private PresaleLlmConfigMapper presaleLlmConfigMapper;
     @Mock
     private PresalePromptTemplateMapper promptTemplateMapper;
     @Mock
@@ -308,7 +308,7 @@ class PresaleRawSnapshotAssemblerTest {
         return new PresaleRawSnapshotAssembler(
                 aiCallMapper,
                 aiPromptResultMapper,
-                aiPlatformConfigMapper,
+                presaleLlmConfigMapper,
                 promptTemplateMapper,
                 benchmarkResolver,
                 competitorAggregator,
@@ -321,13 +321,13 @@ class PresaleRawSnapshotAssemblerTest {
                                   Long batch2TemplateCount,
                                   Long totalCalls,
                                   Long successfulCalls) {
-        when(aiPlatformConfigMapper.selectCount(any())).thenReturn(platformCount);
+        when(presaleLlmConfigMapper.countWhitelistedPlatforms()).thenReturn(platformCount);
         when(promptTemplateMapper.selectCount(any())).thenReturn(batch1TemplateCount, batch2TemplateCount);
         when(aiCallMapper.selectCount(any())).thenReturn(totalCalls, successfulCalls);
     }
 
-    private void mockEnabledPlatforms(AiPlatformConfig... platforms) {
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platforms));
+    private void mockEnabledPlatforms(PresaleWhitelistedPlatformRow... platforms) {
+        when(presaleLlmConfigMapper.selectWhitelistedPlatforms()).thenReturn(List.of(platforms));
     }
 
     private PresaleReport report() {
@@ -402,11 +402,10 @@ class PresaleRawSnapshotAssemblerTest {
         return row;
     }
 
-    private AiPlatformConfig platform(String code, String name) {
-        AiPlatformConfig p = new AiPlatformConfig();
+    private PresaleWhitelistedPlatformRow platform(String code, String name) {
+        PresaleWhitelistedPlatformRow p = new PresaleWhitelistedPlatformRow();
         p.setPlatformCode(code);
         p.setPlatformName(name);
-        p.setEnabled(true);
         return p;
     }
 

@@ -15,9 +15,8 @@ import com.huanjing.geo.module.presale.generate.PresaleCompetitorAggregator;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleLlmConfigMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
-import com.huanjing.geo.module.system.entity.AiPlatformConfig;
-import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,7 +30,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
@@ -41,18 +39,17 @@ public class SceneCoverageCalculator {
 
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
     private final PresalePromptTemplateMapper promptTemplateMapper;
-    private final AiPlatformConfigMapper aiPlatformConfigMapper;
+    private final PresaleLlmConfigMapper presaleLlmConfigMapper;
     private final PresaleCompetitorAggregator competitorAggregator;
     private final ObjectMapper objectMapper;
 
     public SceneAndIntentResult compute(Long versionId,
                                         RawSnapshotDTO raw,
                                         Map<String, Integer> intentTotalPrompts) {
-        Set<String> allPlatforms = aiPlatformConfigMapper.selectList(
-                        new LambdaQueryWrapper<AiPlatformConfig>().eq(AiPlatformConfig::getEnabled, true))
-                .stream()
-                .map(AiPlatformConfig::getPlatformCode)
-                .collect(Collectors.toSet());
+        List<String> whitelistedPlatformCodes = presaleLlmConfigMapper.selectWhitelistedPlatformCodes();
+        Set<String> allPlatforms = new HashSet<>(
+                whitelistedPlatformCodes == null ? List.of() : whitelistedPlatformCodes
+        );
 
         Set<String> degraded = raw == null || raw.getTestSummary() == null || raw.getTestSummary().getDegradedPlatforms() == null
                 ? Set.of() : new HashSet<>(raw.getTestSummary().getDegradedPlatforms());
@@ -240,4 +237,3 @@ public class SceneCoverageCalculator {
                                        boolean covered) {
     }
 }
-
