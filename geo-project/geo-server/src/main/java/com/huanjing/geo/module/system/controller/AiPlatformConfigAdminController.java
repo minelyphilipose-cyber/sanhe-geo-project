@@ -3,6 +3,7 @@ package com.huanjing.geo.module.system.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.system.dto.AiPlatformConfigCreateRequest;
+import com.huanjing.geo.module.system.dto.AiPlatformPresaleEnabledUpdateRequest;
 import com.huanjing.geo.module.system.dto.AiPlatformConfigUpdateRequest;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.service.AiPlatformConfigService;
@@ -38,6 +39,12 @@ public class AiPlatformConfigAdminController {
     @PutMapping("/{id}")
     public R<AiPlatformConfig> update(@PathVariable Long id, @Valid @RequestBody AiPlatformConfigUpdateRequest req) {
         return R.ok(aiPlatformConfigService.update(id, req));
+    }
+
+    @RequestMapping(path = "/{id}/presale-enabled", method = {RequestMethod.PATCH, RequestMethod.PUT})
+    public R<AiPlatformConfig> updatePresaleEnabled(@PathVariable Long id,
+                                                    @Valid @RequestBody AiPlatformPresaleEnabledUpdateRequest req) {
+        return R.ok(aiPlatformConfigService.updatePresaleEnabled(id, req.getEnabledForPresale()));
     }
 
     @DeleteMapping("/{id}")

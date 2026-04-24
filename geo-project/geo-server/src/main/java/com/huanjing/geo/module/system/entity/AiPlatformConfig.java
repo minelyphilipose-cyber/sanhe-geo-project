@@ -29,6 +29,11 @@ public class AiPlatformConfig {
     private String modelName;
     private Integer concurrencyLimit;
     private Boolean enabled;
+    private Boolean enabledForPresale;
+    private Boolean enabledForArticle;
+    private Integer maxRetry;
+    private Integer timeoutMs;
+    private Integer rateLimitQps;
     private Boolean degraded;
     private String degradedReason;
     private String currentHealthStatus;

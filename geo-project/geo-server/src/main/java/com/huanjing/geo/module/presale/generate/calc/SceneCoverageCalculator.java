@@ -12,11 +12,13 @@ import com.huanjing.geo.module.presale.dto.snapshot.computed.PresaleIntentCode;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.Competitor;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.generate.PresaleCompetitorAggregator;
+import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
-import com.huanjing.geo.module.presale.persist.mapper.PresaleLlmConfigMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
+import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,14 +41,19 @@ public class SceneCoverageCalculator {
 
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
     private final PresalePromptTemplateMapper promptTemplateMapper;
-    private final PresaleLlmConfigMapper presaleLlmConfigMapper;
+    private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PresaleCompetitorAggregator competitorAggregator;
     private final ObjectMapper objectMapper;
 
     public SceneAndIntentResult compute(Long versionId,
                                         RawSnapshotDTO raw,
                                         Map<String, Integer> intentTotalPrompts) {
-        List<String> whitelistedPlatformCodes = presaleLlmConfigMapper.selectWhitelistedPlatformCodes();
+        List<String> whitelistedPlatformCodes = aiPlatformConfigMapper.selectList(
+                        PresalePlatformConfigQueries.presaleEnabledWrapper()
+                ).stream()
+                .map(AiPlatformConfig::getPlatformCode)
+                .filter(code -> code != null && !code.isBlank())
+                .toList();
         Set<String> allPlatforms = new HashSet<>(
                 whitelistedPlatformCodes == null ? List.of() : whitelistedPlatformCodes
         );

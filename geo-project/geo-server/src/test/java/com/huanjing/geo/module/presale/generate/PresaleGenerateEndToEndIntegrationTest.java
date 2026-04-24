@@ -10,7 +10,8 @@ import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMappe
 import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
-import com.huanjing.geo.module.presale.persist.mapper.PresaleLlmConfigMapper;
+import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -42,7 +43,7 @@ class PresaleGenerateEndToEndIntegrationTest {
     private PresaleReportVersionMapper versionMapper;
 
     @MockBean
-    private PresaleLlmConfigMapper presaleLlmConfigMapper;
+    private AiPlatformConfigMapper aiPlatformConfigMapper;
     @MockBean
     private PresalePromptTemplateMapper promptTemplateMapper;
     @MockBean
@@ -73,9 +74,9 @@ class PresaleGenerateEndToEndIntegrationTest {
         PresaleReport report = insertReport();
         PresaleReportVersion version = insertVersion(report.getId());
 
-        when(presaleLlmConfigMapper.countWhitelistedPlatforms()).thenReturn(1L);
+        when(aiPlatformConfigMapper.selectCount(any())).thenReturn(1L);
         when(promptTemplateMapper.selectCount(any())).thenReturn(1L, 1L);
-        when(presaleLlmConfigMapper.selectWhitelistedPlatformCodes()).thenReturn(List.of());
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("kimi")));
         when(promptTemplateMapper.selectList(any())).thenReturn(List.of());
         when(competitorAggregator.extractTopCompetitorsFromBatch1(anyLong(), anyString())).thenReturn(List.of());
         when(reuseDecisionService.preloadByVersionAndBatch(anyLong(), anyInt())).thenReturn(Map.of());
@@ -120,6 +121,15 @@ class PresaleGenerateEndToEndIntegrationTest {
         version.setCreatedBy(1L);
         versionMapper.insert(version);
         return version;
+    }
+
+    private AiPlatformConfig platform(String code) {
+        AiPlatformConfig config = new AiPlatformConfig();
+        config.setPlatformCode(code);
+        config.setEnabled(true);
+        config.setEnabledForPresale(true);
+        config.setLowModelId("low-model");
+        return config;
     }
 }
 

@@ -8,15 +8,16 @@ import com.huanjing.geo.module.presale.dto.response.ReportListItemVO;
 import com.huanjing.geo.module.presale.dto.response.ReportVersionMetaVO;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateStatus;
+import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
 import com.huanjing.geo.module.presale.generate.PromptTemplateIntentStatRow;
 import com.huanjing.geo.module.presale.access.AccessScope;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
-import com.huanjing.geo.module.presale.persist.mapper.PresaleLlmConfigMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
+import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,7 +54,7 @@ public class PresaleReportService {
     private final PresaleGenerateOrchestrator orchestrator;
     private final CurrentUserService currentUserService;
     private final PresaleAccessService accessService;
-    private final PresaleLlmConfigMapper presaleLlmConfigMapper;
+    private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
 
     public PresaleReportService(PresaleReportMapper reportMapper,
@@ -61,14 +62,14 @@ public class PresaleReportService {
                                 PresaleGenerateOrchestrator orchestrator,
                                 CurrentUserService currentUserService,
                                 PresaleAccessService accessService,
-                                PresaleLlmConfigMapper presaleLlmConfigMapper,
+                                AiPlatformConfigMapper aiPlatformConfigMapper,
                                 PresaleAiPromptResultMapper aiPromptResultMapper) {
         this.reportMapper = reportMapper;
         this.versionMapper = versionMapper;
         this.orchestrator = orchestrator;
         this.currentUserService = currentUserService;
         this.accessService = accessService;
-        this.presaleLlmConfigMapper = presaleLlmConfigMapper;
+        this.aiPlatformConfigMapper = aiPlatformConfigMapper;
         this.aiPromptResultMapper = aiPromptResultMapper;
     }
 
@@ -291,7 +292,7 @@ public class PresaleReportService {
     }
 
     private int countEnabledPlatforms() {
-        Long count = presaleLlmConfigMapper.countWhitelistedPlatforms();
+        Long count = aiPlatformConfigMapper.selectCount(PresalePlatformConfigQueries.presaleEnabledWrapper());
         return count == null ? 0 : count.intValue();
     }
 

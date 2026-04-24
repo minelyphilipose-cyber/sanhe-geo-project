@@ -1,7 +1,8 @@
 package com.huanjing.geo.module.presale.generate.llm;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.huanjing.geo.module.presale.persist.mapper.PresaleLlmConfigMapper;
+import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,7 +24,7 @@ import static org.mockito.Mockito.when;
 class OpenAiCompatiblePresaleLlmInvokerTest {
 
     @Mock
-    private PresaleLlmConfigMapper configMapper;
+    private AiPlatformConfigMapper aiPlatformConfigMapper;
     @Mock
     private PlatformCredentialService credentialService;
     @Mock
@@ -34,7 +35,7 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
     @BeforeEach
     void setUp() {
         invoker = new OpenAiCompatiblePresaleLlmInvoker(
-                configMapper,
+                aiPlatformConfigMapper,
                 credentialService,
                 httpClient,
                 new ObjectMapper()
@@ -44,8 +45,8 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
 
     @Test
     void query_retriesOnceThenSuccess() throws Exception {
-        PresaleLlmPlatformConfigRow row = row();
-        when(configMapper.selectRuntimeConfig("kimi")).thenReturn(row);
+        AiPlatformConfig row = row();
+        when(aiPlatformConfigMapper.selectOne(any())).thenReturn(row);
         when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
         when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
                 .thenThrow(new RuntimeException("temporary timeout"))
@@ -67,8 +68,8 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
 
     @Test
     void analyze_stripsMarkdownFenceAndValidatesJson() throws Exception {
-        PresaleLlmPlatformConfigRow row = row();
-        when(configMapper.selectRuntimeConfig("kimi")).thenReturn(row);
+        AiPlatformConfig row = row();
+        when(aiPlatformConfigMapper.selectOne(any())).thenReturn(row);
         when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
         when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
                 .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
@@ -88,8 +89,8 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
 
     @Test
     void analyze_invalidTopKeywordsShape_throwsAnalyzeParseException() throws Exception {
-        PresaleLlmPlatformConfigRow row = row();
-        when(configMapper.selectRuntimeConfig("kimi")).thenReturn(row);
+        AiPlatformConfig row = row();
+        when(aiPlatformConfigMapper.selectOne(any())).thenReturn(row);
         when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
         when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
                 .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
@@ -103,8 +104,8 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
 
     @Test
     void analyze_invalidTopKeywordsElement_throwsAnalyzeParseException() throws Exception {
-        PresaleLlmPlatformConfigRow row = row();
-        when(configMapper.selectRuntimeConfig("kimi")).thenReturn(row);
+        AiPlatformConfig row = row();
+        when(aiPlatformConfigMapper.selectOne(any())).thenReturn(row);
         when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
         when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
                 .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
@@ -118,8 +119,8 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
 
     @Test
     void analyze_topKeywordsElementMissingKeyword_throwsAnalyzeParseException() throws Exception {
-        PresaleLlmPlatformConfigRow row = row();
-        when(configMapper.selectRuntimeConfig("kimi")).thenReturn(row);
+        AiPlatformConfig row = row();
+        when(aiPlatformConfigMapper.selectOne(any())).thenReturn(row);
         when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
         when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
                 .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
@@ -133,8 +134,8 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
 
     @Test
     void analyze_invalidNegativeEvidenceShape_throwsAnalyzeParseException() throws Exception {
-        PresaleLlmPlatformConfigRow row = row();
-        when(configMapper.selectRuntimeConfig("kimi")).thenReturn(row);
+        AiPlatformConfig row = row();
+        when(aiPlatformConfigMapper.selectOne(any())).thenReturn(row);
         when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
         when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
                 .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
@@ -148,8 +149,8 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
 
     @Test
     void analyze_hasNegativeTrueButSnippetNull_throwsAnalyzeParseException() throws Exception {
-        PresaleLlmPlatformConfigRow row = row();
-        when(configMapper.selectRuntimeConfig("kimi")).thenReturn(row);
+        AiPlatformConfig row = row();
+        when(aiPlatformConfigMapper.selectOne(any())).thenReturn(row);
         when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
         when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
                 .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
@@ -163,8 +164,8 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
 
     @Test
     void analyze_negativeEvidenceMissingHasNegative_throwsAnalyzeParseException() throws Exception {
-        PresaleLlmPlatformConfigRow row = row();
-        when(configMapper.selectRuntimeConfig("kimi")).thenReturn(row);
+        AiPlatformConfig row = row();
+        when(aiPlatformConfigMapper.selectOne(any())).thenReturn(row);
         when(credentialService.resolveApiKey(anyString(), anyString(), anyString())).thenReturn("key");
         when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
                 .thenReturn(new PresaleLlmHttpClient.HttpResponse(200,
@@ -176,17 +177,37 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
         assertThrows(AnalyzeParseException.class, () -> invoker.analyze(ctx, "问句", "回答"));
     }
 
-    private PresaleLlmPlatformConfigRow row() {
-        PresaleLlmPlatformConfigRow row = new PresaleLlmPlatformConfigRow();
+    @Test
+    void resolvePresaleModelId_fallbackToModelId_whenLowModelBlank() {
+        AiPlatformConfig platform = new AiPlatformConfig();
+        platform.setPlatformCode("qwen");
+        platform.setLowModelId("   ");
+        platform.setModelId("qwen3.6-plus");
+
+        assertEquals("qwen3.6-plus", invoker.resolvePresaleModelId(platform));
+    }
+
+    @Test
+    void resolvePresaleModelId_returnLowModelId_whenLowModelPresent() {
+        AiPlatformConfig platform = new AiPlatformConfig();
+        platform.setPlatformCode("qwen");
+        platform.setLowModelId("qwen3.6-turbo");
+        platform.setModelId("qwen3.6-plus");
+
+        assertEquals("qwen3.6-turbo", invoker.resolvePresaleModelId(platform));
+    }
+
+    private AiPlatformConfig row() {
+        AiPlatformConfig row = new AiPlatformConfig();
         row.setPlatformCode("kimi");
         row.setApiUrl("https://api.example.com/v1");
         row.setModelId("model-x");
+        row.setLowModelId("model-low");
         row.setApiKey("ENC:abc");
         row.setPrimaryKeyRef("REF1");
         row.setMaxRetry(2);
         row.setTimeoutMs(10_000);
         row.setRateLimitQps(1000);
-        row.setInWhitelist(1);
         return row;
     }
 }

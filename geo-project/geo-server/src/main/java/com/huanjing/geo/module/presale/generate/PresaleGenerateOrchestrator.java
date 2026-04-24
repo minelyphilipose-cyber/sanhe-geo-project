@@ -20,10 +20,11 @@ import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
-import com.huanjing.geo.module.presale.persist.mapper.PresaleLlmConfigMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
+import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import org.slf4j.Logger;
@@ -80,7 +81,7 @@ public class PresaleGenerateOrchestrator {
 
     private final PresaleReportVersionMapper versionMapper;
     private final PresaleReportMapper reportMapper;
-    private final PresaleLlmConfigMapper presaleLlmConfigMapper;
+    private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final SysDictItemMapper sysDictItemMapper;
     private final PresalePromptTemplateMapper promptTemplateMapper;
     private final PresaleAiCallMapper aiCallMapper;
@@ -113,7 +114,7 @@ public class PresaleGenerateOrchestrator {
 
     public PresaleGenerateOrchestrator(PresaleReportVersionMapper versionMapper,
                                        PresaleReportMapper reportMapper,
-                                       PresaleLlmConfigMapper presaleLlmConfigMapper,
+                                       AiPlatformConfigMapper aiPlatformConfigMapper,
                                        SysDictItemMapper sysDictItemMapper,
                                        PresalePromptTemplateMapper promptTemplateMapper,
                                        PresaleAiCallMapper aiCallMapper,
@@ -129,7 +130,7 @@ public class PresaleGenerateOrchestrator {
                                        ObjectMapper objectMapper) {
         this.versionMapper = versionMapper;
         this.reportMapper = reportMapper;
-        this.presaleLlmConfigMapper = presaleLlmConfigMapper;
+        this.aiPlatformConfigMapper = aiPlatformConfigMapper;
         this.sysDictItemMapper = sysDictItemMapper;
         this.promptTemplateMapper = promptTemplateMapper;
         this.aiCallMapper = aiCallMapper;
@@ -885,13 +886,19 @@ public class PresaleGenerateOrchestrator {
     }
 
     private int countWhitelistedPlatforms() {
-        Long count = presaleLlmConfigMapper.countWhitelistedPlatforms();
+        Long count = aiPlatformConfigMapper.selectCount(PresalePlatformConfigQueries.presaleEnabledWrapper());
         return count == null ? 0 : count.intValue();
     }
 
     private List<String> loadWhitelistedPlatformCodes() {
-        List<String> platformCodes = presaleLlmConfigMapper.selectWhitelistedPlatformCodes();
-        return platformCodes == null ? List.of() : platformCodes;
+        List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(PresalePlatformConfigQueries.presaleEnabledWrapper());
+        if (platforms == null) {
+            return List.of();
+        }
+        return platforms.stream()
+                .map(AiPlatformConfig::getPlatformCode)
+                .filter(code -> code != null && !code.isBlank())
+                .toList();
     }
 
     private int countPromptTemplates(int hasCompetitorVar) {

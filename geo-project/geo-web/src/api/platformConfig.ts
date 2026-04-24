@@ -27,6 +27,11 @@ export function createPlatformConfig(data: {
   modelName: string
   concurrencyLimit?: number
   enabled: boolean
+  enabledForPresale?: boolean
+  enabledForArticle?: boolean
+  maxRetry?: number
+  timeoutMs?: number
+  rateLimitQps?: number
   degraded: boolean
   degradedReason?: string
   remark?: string
@@ -50,6 +55,11 @@ export function updatePlatformConfig(id: number, data: {
   modelName: string
   concurrencyLimit?: number
   enabled: boolean
+  enabledForPresale?: boolean
+  enabledForArticle?: boolean
+  maxRetry?: number
+  timeoutMs?: number
+  rateLimitQps?: number
   degraded: boolean
   degradedReason?: string
   remark?: string
@@ -59,4 +69,10 @@ export function updatePlatformConfig(id: number, data: {
 
 export function deletePlatformConfig(id: number) {
   return request.delete<R<void>>(`/admin/platform-configs/${id}`)
+}
+
+export function updatePresaleEnabled(id: number, enabledForPresale: boolean) {
+  return request.put<R<AIPlatformConfigItem>>(`/admin/platform-configs/${id}/presale-enabled`, {
+    enabledForPresale,
+  })
 }
