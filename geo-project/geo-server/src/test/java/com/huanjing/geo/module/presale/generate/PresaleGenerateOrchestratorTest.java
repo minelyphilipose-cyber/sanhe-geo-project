@@ -37,9 +37,21 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.BrokenBarrierException;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -49,6 +61,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -88,6 +101,8 @@ class PresaleGenerateOrchestratorTest {
     private PresaleL3InitService l3InitService;
     @Mock
     private PresaleCompetitorAggregator competitorAggregator;
+    @Mock
+    private Executor platformExecutor;
 
     @Spy
     private ObjectMapper objectMapper = new ObjectMapper();
@@ -97,6 +112,11 @@ class PresaleGenerateOrchestratorTest {
 
     @BeforeEach
     void setupReuseDefaults() {
+        lenient().doAnswer(invocation -> {
+            Runnable task = invocation.getArgument(0, Runnable.class);
+            task.run();
+            return null;
+        }).when(platformExecutor).execute(any(Runnable.class));
         lenient().when(reuseDecisionService.preloadByVersionAndBatch(any(), anyInt())).thenReturn(Map.of());
         lenient().when(reuseDecisionService.decide(any(), any())).thenReturn(ReuseDecision.RUN_FULL);
         lenient().when(reuseDecisionService.snapshotOf(any(), any())).thenReturn(null);
@@ -105,6 +125,7 @@ class PresaleGenerateOrchestratorTest {
         lenient().when(competitorAggregator.normalizeName(anyString())).thenAnswer(inv -> inv.getArgument(0));
         lenient().when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
         lenient().when(aiPlatformConfigMapper.selectCount(any())).thenReturn(1L);
+        lenient().when(versionMapper.tryTransitionToRunning(anyLong())).thenReturn(1);
         lenient().when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
                 .thenReturn("{\"client_info\":{\"brand_name\":\"Acme\",\"industry\":\"Software\"},\"test_summary\":{\"total_platforms\":1,\"total_prompts\":1},\"benchmarks_frozen\":{\"industry_avg\":{\"overall\":50.0}},\"competitors\":[]}");
         lenient().when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
@@ -560,6 +581,292 @@ class PresaleGenerateOrchestratorTest {
                 .findFirst()
                 .orElseThrow();
         assertEquals("TOO_MANY_DEGRADED_PLATFORMS", failed.getFailureReason());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void executeBatch1_platformParallel_degradeThresholdStopsNewTasks() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        ReflectionTestUtils.setField(orchestrator, "platformExecutor", (Executor) Runnable::run);
+
+        AtomicInteger submittedPlatforms = new AtomicInteger(0);
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("p1", "p2", "p3", "p4", "p5"));
+        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(promptTemplate(301L, "G1", "t")));
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any())).thenAnswer(invocation -> {
+            PlatformCallContext ctx = invocation.getArgument(2, PlatformCallContext.class);
+            submittedPlatforms.incrementAndGet();
+            if (Set.of("p1", "p2", "p3", "p4").contains(ctx.platformCode())) {
+                throw new LlmInvokeException("force degrade " + ctx.platformCode());
+            }
+            return invocation.getArgument(0, String.class);
+        });
+
+        Object result = invokeExecuteBatch1(3001L, 7001L);
+        List<PlatformBatchResult> platformResults = (List<PlatformBatchResult>) invokeNoArg(result, "platformResults");
+        Set<String> degradedPlatforms = (Set<String>) invokeNoArg(result, "degradedPlatforms");
+        boolean stopPipeline = (boolean) invokeNoArg(result, "stopPipeline");
+
+        assertEquals(4, submittedPlatforms.get());
+        assertEquals(4, platformResults.size());
+        assertEquals(Set.of("p1", "p2", "p3", "p4"), degradedPlatforms);
+        assertTrue(stopPipeline);
+        assertTrue(platformResults.stream().allMatch(r -> r.status() == PlatformStatus.DEGRADED));
+        assertTrue(platformResults.stream().noneMatch(r -> "p5".equals(r.platformCode())));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void executeBatch1_platformParallel_sharedStateThreadSafe() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        ExecutorService pool = Executors.newFixedThreadPool(10);
+        ReflectionTestUtils.setField(orchestrator, "platformExecutor", pool);
+
+        try {
+            List<AiPlatformConfig> platforms = platforms(
+                    "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10");
+            when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms);
+            when(promptTemplateMapper.selectList(any())).thenReturn(List.of(promptTemplate(302L, "G1", "t")));
+
+            CyclicBarrier barrier = new CyclicBarrier(10);
+            AtomicInteger entered = new AtomicInteger(0);
+            AtomicReference<Throwable> failure = new AtomicReference<>();
+            when(promptTemplateRenderer.render(anyString(), anyString(), any(), any())).thenAnswer(invocation -> {
+                entered.incrementAndGet();
+                awaitBarrier(barrier, failure);
+                return invocation.getArgument(0, String.class);
+            });
+            when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
+            when(llmInvoker.analyze(any(), anyString(), anyString()))
+                    .thenReturn(successResult("{\"is_mentioned\":true,\"ranking\":1,\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[],\"scene_advantages\":[]}"));
+
+            Object result = invokeExecuteBatch1(3002L, 7002L);
+            assertNoFailure(failure);
+
+            List<PlatformBatchResult> platformResults = (List<PlatformBatchResult>) invokeNoArg(result, "platformResults");
+            Set<String> degradedPlatforms = (Set<String>) invokeNoArg(result, "degradedPlatforms");
+            assertEquals(10, entered.get());
+            assertEquals(10, platformResults.size());
+            assertTrue(degradedPlatforms.isEmpty());
+            assertTrue(platformResults.stream().allMatch(r -> r.status() == PlatformStatus.DONE));
+
+            ArgumentCaptor<PresaleReportVersion> progressCaptor = ArgumentCaptor.forClass(PresaleReportVersion.class);
+            verify(versionMapper, atLeastOnce()).updateById(progressCaptor.capture());
+            List<Integer> completedProgress = progressCaptor.getAllValues().stream()
+                    .map(PresaleReportVersion::getBatch1CompletedCalls)
+                    .filter(v -> v != null)
+                    .toList();
+            for (int i = 1; i < completedProgress.size(); i++) {
+                assertTrue(completedProgress.get(i) >= completedProgress.get(i - 1));
+            }
+            assertTrue(completedProgress.stream().anyMatch(v -> v == 20));
+        } finally {
+            pool.shutdownNow();
+            pool.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void executeBatch1_rejectedExecution_markVersionFailed() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        ReflectionTestUtils.setField(orchestrator, "platformExecutor", (Executor) command -> {
+            throw new java.util.concurrent.RejectedExecutionException("reject");
+        });
+
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("p1", "p2", "p3", "p4"));
+        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(promptTemplate(303L, "G1", "t")));
+
+        Object result = invokeExecuteBatch1(3003L, 7003L);
+        List<PlatformBatchResult> platformResults = (List<PlatformBatchResult>) invokeNoArg(result, "platformResults");
+        boolean stopPipeline = (boolean) invokeNoArg(result, "stopPipeline");
+
+        assertEquals(4, platformResults.size());
+        assertTrue(stopPipeline);
+        assertTrue(platformResults.stream().allMatch(r -> r.status() == PlatformStatus.SKIPPED));
+        verify(versionMapper, atLeastOnce()).updateById(any(PresaleReportVersion.class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void executeBatch1_completionException_unwrapped() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+
+        LlmInvokeException expected = new LlmInvokeException("boom");
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("p1"));
+        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(promptTemplate(304L, "G1", "t")));
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+                .thenAnswer(invocation -> {
+                    throw new CompletionException(expected);
+                });
+
+        Object result = invokeExecuteBatch1(3004L, 7004L);
+        List<PlatformBatchResult> platformResults = (List<PlatformBatchResult>) invokeNoArg(result, "platformResults");
+
+        assertEquals(1, platformResults.size());
+        PlatformBatchResult row = platformResults.get(0);
+        assertEquals(PlatformStatus.DEGRADED, row.status());
+        assertNotNull(row.errorCause());
+        assertInstanceOf(LlmInvokeException.class, row.errorCause());
+    }
+
+    @Test
+    void doTriggerGenerate_versionAlreadyRunning_skipSilently() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        when(versionMapper.tryTransitionToRunning(3010L)).thenReturn(0);
+
+        Method doTriggerGenerate = PresaleGenerateOrchestrator.class
+                .getDeclaredMethod("doTriggerGenerate", Long.class, Long.class, boolean.class);
+        doTriggerGenerate.setAccessible(true);
+        doTriggerGenerate.invoke(orchestrator, 3010L, 1L, false);
+
+        verify(versionMapper, never()).selectById(3010L);
+        verify(reportMapper, never()).selectById(anyLong());
+        verify(aiPlatformConfigMapper, never()).selectCount(any());
+        verify(promptTemplateMapper, never()).selectCount(any());
+        verify(llmInvoker, never()).query(any(), anyString());
+        verify(llmInvoker, never()).analyze(any(), anyString(), anyString());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void executeBatch2_platformParallel_degradeThresholdStopsNewTasks() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        ReflectionTestUtils.setField(orchestrator, "platformExecutor", (Executor) Runnable::run);
+
+        AtomicInteger submittedPlatforms = new AtomicInteger(0);
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("p3", "p4", "p5"));
+        PresalePromptTemplate template = promptTemplate(401L, "C1", "t {competitor}");
+        template.setHasCompetitorVar(1);
+        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(template));
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any())).thenAnswer(invocation -> {
+            PlatformCallContext ctx = invocation.getArgument(2, PlatformCallContext.class);
+            submittedPlatforms.incrementAndGet();
+            if (Set.of("p3", "p4").contains(ctx.platformCode())) {
+                throw new LlmInvokeException("force degrade " + ctx.platformCode());
+            }
+            return invocation.getArgument(0, String.class);
+        });
+
+        Object result = invokeExecuteBatch2(4001L, 8001L, List.of("c1"), 1, Set.of("p1", "p2"));
+        List<PlatformBatchResult> platformResults = (List<PlatformBatchResult>) invokeNoArg(result, "platformResults");
+        Set<String> batch2DegradedPlatforms = (Set<String>) invokeNoArg(result, "batch2DegradedPlatforms");
+        Set<String> displayDegradedPlatforms = (Set<String>) invokeNoArg(result, "displayDegradedPlatforms");
+        boolean stopPipeline = (boolean) invokeNoArg(result, "stopPipeline");
+
+        assertEquals(2, submittedPlatforms.get());
+        assertEquals(2, platformResults.size());
+        assertEquals(Set.of("p3", "p4"), batch2DegradedPlatforms);
+        assertEquals(Set.of("p1", "p2", "p3", "p4"), displayDegradedPlatforms);
+        assertTrue(stopPipeline);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void executeBatch2_platformParallel_sharedStateThreadSafe() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        ExecutorService pool = Executors.newFixedThreadPool(10);
+        ReflectionTestUtils.setField(orchestrator, "platformExecutor", pool);
+
+        try {
+            when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms(
+                    "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10"));
+            PresalePromptTemplate template = promptTemplate(402L, "C1", "t {competitor}");
+            template.setHasCompetitorVar(1);
+            when(promptTemplateMapper.selectList(any())).thenReturn(List.of(template));
+
+            CyclicBarrier barrier = new CyclicBarrier(10);
+            AtomicInteger entered = new AtomicInteger(0);
+            AtomicReference<Throwable> failure = new AtomicReference<>();
+            when(promptTemplateRenderer.render(anyString(), anyString(), any(), any())).thenAnswer(invocation -> {
+                PlatformCallContext ctx = invocation.getArgument(2, PlatformCallContext.class);
+                if ("c1".equals(ctx.competitorName())) {
+                    entered.incrementAndGet();
+                    awaitBarrier(barrier, failure);
+                }
+                return invocation.getArgument(0, String.class);
+            });
+            when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
+            when(llmInvoker.analyze(any(), anyString(), anyString()))
+                    .thenReturn(successResult("{\"is_mentioned\":true,\"ranking\":1,\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[],\"scene_advantages\":[]}"));
+
+            Object result = invokeExecuteBatch2(4002L, 8002L, List.of("c1", "c2"), 1, Set.of());
+            assertNoFailure(failure);
+
+            Set<String> batch2DegradedPlatforms = (Set<String>) invokeNoArg(result, "batch2DegradedPlatforms");
+            Set<String> displayDegradedPlatforms = (Set<String>) invokeNoArg(result, "displayDegradedPlatforms");
+            assertEquals(10, entered.get());
+            assertTrue(batch2DegradedPlatforms.isEmpty());
+            assertTrue(displayDegradedPlatforms.isEmpty());
+
+            ArgumentCaptor<PresaleReportVersion> progressCaptor = ArgumentCaptor.forClass(PresaleReportVersion.class);
+            verify(versionMapper, atLeastOnce()).updateById(progressCaptor.capture());
+            List<Integer> completedProgress = progressCaptor.getAllValues().stream()
+                    .map(PresaleReportVersion::getBatch2CompletedCalls)
+                    .filter(v -> v != null)
+                    .toList();
+            for (int i = 1; i < completedProgress.size(); i++) {
+                assertTrue(completedProgress.get(i) >= completedProgress.get(i - 1));
+            }
+            assertTrue(completedProgress.stream().anyMatch(v -> v == 40));
+        } finally {
+            pool.shutdownNow();
+            pool.awaitTermination(5, TimeUnit.SECONDS);
+        }
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void executeBatch2_rejectedExecution_markVersionFailed() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        ReflectionTestUtils.setField(orchestrator, "platformExecutor", (Executor) command -> {
+            throw new java.util.concurrent.RejectedExecutionException("reject");
+        });
+
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("p1", "p2", "p3", "p4"));
+        PresalePromptTemplate template = promptTemplate(403L, "C1", "t {competitor}");
+        template.setHasCompetitorVar(1);
+        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(template));
+
+        Object result = invokeExecuteBatch2(4003L, 8003L, List.of("c1"), 1, Set.of());
+        List<PlatformBatchResult> platformResults = (List<PlatformBatchResult>) invokeNoArg(result, "platformResults");
+        Set<String> batch2DegradedPlatforms = (Set<String>) invokeNoArg(result, "batch2DegradedPlatforms");
+        boolean stopPipeline = (boolean) invokeNoArg(result, "stopPipeline");
+
+        assertEquals(4, platformResults.size());
+        assertTrue(stopPipeline);
+        assertEquals(Set.of("p1", "p2", "p3", "p4"), batch2DegradedPlatforms);
+        assertTrue(platformResults.stream().allMatch(r -> r.status() == PlatformStatus.SKIPPED));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void executeBatch2_delta_excludesBatch1Degraded() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        ReflectionTestUtils.setField(orchestrator, "platformExecutor", (Executor) Runnable::run);
+
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("p2", "p3", "p4", "p5"));
+        PresalePromptTemplate template = promptTemplate(404L, "C1", "t {competitor}");
+        template.setHasCompetitorVar(1);
+        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(template));
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any())).thenAnswer(invocation -> {
+            PlatformCallContext ctx = invocation.getArgument(2, PlatformCallContext.class);
+            if ("p3".equals(ctx.platformCode())) {
+                throw new LlmInvokeException("degrade p3");
+            }
+            return invocation.getArgument(0, String.class);
+        });
+        when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
+        when(llmInvoker.analyze(any(), anyString(), anyString()))
+                .thenReturn(successResult("{\"is_mentioned\":true,\"ranking\":1,\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[],\"scene_advantages\":[]}"));
+
+        Object result = invokeExecuteBatch2(4004L, 8004L, List.of("c1"), 1, Set.of("p1"));
+        Set<String> batch2DegradedPlatforms = (Set<String>) invokeNoArg(result, "batch2DegradedPlatforms");
+        Set<String> displayDegradedPlatforms = (Set<String>) invokeNoArg(result, "displayDegradedPlatforms");
+        boolean stopPipeline = (boolean) invokeNoArg(result, "stopPipeline");
+
+        assertFalse(stopPipeline);
+        assertEquals(Set.of("p3"), batch2DegradedPlatforms);
+        assertEquals(Set.of("p1", "p3"), displayDegradedPlatforms);
     }
 
     @Test
@@ -1080,6 +1387,81 @@ class PresaleGenerateOrchestratorTest {
                 .findFirst()
                 .orElseThrow();
         assertEquals("行业=餐饮,身份=连锁品牌,品牌=Acme", row.getRequestPromptContent());
+    }
+
+    private Object invokeExecuteBatch1(Long versionId, Long reportId) throws Exception {
+        PresaleReportVersion version = new PresaleReportVersion();
+        version.setId(versionId);
+        version.setReportId(reportId);
+        PresaleReport report = new PresaleReport();
+        report.setId(reportId);
+        report.setBrandName("Acme");
+
+        Method executeBatch1 = PresaleGenerateOrchestrator.class.getDeclaredMethod(
+                "executeBatch1",
+                PresaleReportVersion.class,
+                PresaleReport.class,
+                PresaleReport.class,
+                Long.class,
+                boolean.class,
+                Class.forName("com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator$PreflightResult")
+        );
+        executeBatch1.setAccessible(true);
+        return executeBatch1.invoke(orchestrator, version, report, report, 1L, false, null);
+    }
+
+    private Object invokeExecuteBatch2(Long versionId,
+                                       Long reportId,
+                                       List<String> competitors,
+                                       int competitorPromptCount,
+                                       Set<String> batch1DegradedPlatforms) throws Exception {
+        PresaleReport report = new PresaleReport();
+        report.setId(reportId);
+        report.setBrandName("Acme");
+
+        PresaleReportVersion version = new PresaleReportVersion();
+        version.setId(versionId);
+        version.setBatch1CompletedCalls(0);
+        version.setBatch2CompletedCalls(0);
+        when(versionMapper.selectById(versionId)).thenReturn(version);
+
+        Method executeBatch2 = PresaleGenerateOrchestrator.class.getDeclaredMethod(
+                "executeBatch2",
+                Long.class,
+                PresaleReport.class,
+                PresaleReport.class,
+                Long.class,
+                boolean.class,
+                List.class,
+                int.class,
+                Set.class
+        );
+        executeBatch2.setAccessible(true);
+        return executeBatch2.invoke(orchestrator, versionId, report, report, 1L, false, competitors, competitorPromptCount, batch1DegradedPlatforms);
+    }
+
+    private Object invokeNoArg(Object target, String methodName) throws Exception {
+        Method method = target.getClass().getDeclaredMethod(methodName);
+        method.setAccessible(true);
+        return method.invoke(target);
+    }
+
+    private void awaitBarrier(CyclicBarrier barrier, AtomicReference<Throwable> failure) {
+        try {
+            barrier.await();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            failure.compareAndSet(null, e);
+        } catch (BrokenBarrierException e) {
+            failure.compareAndSet(null, e);
+        }
+    }
+
+    private void assertNoFailure(AtomicReference<Throwable> failure) {
+        Throwable t = failure.get();
+        if (t != null) {
+            throw new AssertionError("Unexpected barrier failure", t);
+        }
     }
 
     private void setupBasePreflightSuccess(Long versionId,

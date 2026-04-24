@@ -1,8 +1,12 @@
 package com.huanjing.geo.module.presale.generate;
 
 import com.huanjing.geo.module.presale.generate.l3.PresaleL3InitService;
+import com.huanjing.geo.module.presale.generate.llm.CallStatus;
+import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
+import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
 import com.huanjing.geo.module.presale.generate.llm.PromptTemplateRenderer;
+import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
@@ -18,17 +22,22 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.util.AopTestUtils;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @SpringBootTest
@@ -93,6 +102,83 @@ class PresaleGenerateEndToEndIntegrationTest {
         assertThat(latest.getFailureReason()).contains("L1 aggregate failed");
     }
 
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void realFlow_multiPlatform_parallelExecution_snapshotComplete() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+
+        PresaleReport report = insertReport();
+        PresaleReportVersion version = insertVersion(report.getId());
+
+        List<AiPlatformConfig> platforms = List.of(
+                platform("kimi"),
+                platform("qwen"),
+                platform("doubao"),
+                platform("deepseek"),
+                platform("glm")
+        );
+        Set<String> seenPlatforms = ConcurrentHashMap.newKeySet();
+
+        PresalePromptTemplate batch1Template = promptTemplate(101L, "B1_TEMPLATE", "batch1 prompt", 0);
+        PresalePromptTemplate batch2Template = promptTemplate(201L, "B2_TEMPLATE", "batch2 prompt ${competitor}", 1);
+
+        when(aiPlatformConfigMapper.selectCount(any())).thenReturn(5L);
+        when(promptTemplateMapper.selectCount(any())).thenReturn(1L, 1L);
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms);
+        when(promptTemplateMapper.selectList(any())).thenReturn(
+                List.of(batch1Template),
+                List.of(batch2Template)
+        );
+        when(reuseDecisionService.preloadByVersionAndBatch(anyLong(), anyInt())).thenReturn(Map.of());
+        when(reuseDecisionService.decide(any(), any())).thenReturn(ReuseDecision.RUN_FULL);
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(PlatformCallContext.class), any(PresaleReport.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0, String.class));
+        when(llmInvoker.query(any(PlatformCallContext.class), anyString()))
+                .thenAnswer(invocation -> {
+                    PlatformCallContext ctx = invocation.getArgument(0, PlatformCallContext.class);
+                    seenPlatforms.add(ctx.platformCode());
+                    return new LlmCallResult(
+                            "query-ok-" + ctx.platformCode(),
+                            100,
+                            30,
+                            20L,
+                            0,
+                            CallStatus.SUCCESS
+                    );
+                });
+        when(llmInvoker.analyze(any(PlatformCallContext.class), anyString(), anyString()))
+                .thenAnswer(invocation -> {
+                    PlatformCallContext ctx = invocation.getArgument(0, PlatformCallContext.class);
+                    return new LlmCallResult(
+                            "{\"is_mentioned\":true,\"ranking\":1,\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[],\"scene_advantages\":[],\"top_keywords\":[],\"negative_evidence\":{}}",
+                            120,
+                            40,
+                            25L,
+                            0,
+                            CallStatus.SUCCESS
+                    );
+                });
+        when(competitorAggregator.extractTopCompetitorsFromBatch1(anyLong(), anyString()))
+                .thenReturn(List.of("c1", "c2"));
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
+                .thenReturn("{\"platform_breakdown\":[{\"platform_code\":\"kimi\"},{\"platform_code\":\"qwen\"},{\"platform_code\":\"doubao\"},{\"platform_code\":\"deepseek\"},{\"platform_code\":\"glm\"}]}");
+        when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), any(), any(Boolean.class)))
+                .thenReturn("{\"summary\":\"ok\"}");
+        when(l3InitService.derive(anyString(), anyString())).thenReturn("{\"l3\":\"ok\"}");
+
+        Object target = AopTestUtils.getTargetObject(orchestrator);
+        ReflectionTestUtils.invokeMethod(target, "doTriggerGenerate", version.getId(), 1L, false);
+
+        PresaleReportVersion latest = versionMapper.selectById(version.getId());
+        assertThat(latest).isNotNull();
+        assertThat(latest.getGenerationStatus()).isEqualTo(PresaleGenerateStatus.DONE.name());
+        assertThat(latest.getRawSnapshotJson()).contains("platform_breakdown");
+        assertThat(seenPlatforms).containsExactlyInAnyOrder("kimi", "qwen", "doubao", "deepseek", "glm");
+
+        verify(llmInvoker, atLeastOnce()).query(any(PlatformCallContext.class), anyString());
+        verify(llmInvoker, atLeastOnce()).analyze(any(PlatformCallContext.class), anyString(), anyString());
+    }
+
     private PresaleReport insertReport() {
         LocalDateTime now = LocalDateTime.now();
         PresaleReport report = new PresaleReport();
@@ -130,6 +216,16 @@ class PresaleGenerateEndToEndIntegrationTest {
         config.setEnabledForPresale(true);
         config.setLowModelId("low-model");
         return config;
+    }
+
+    private PresalePromptTemplate promptTemplate(Long id, String code, String content, Integer hasCompetitorVar) {
+        PresalePromptTemplate template = new PresalePromptTemplate();
+        template.setId(id);
+        template.setPromptCode(code);
+        template.setPromptContent(content);
+        template.setEnabled(1);
+        template.setHasCompetitorVar(hasCompetitorVar);
+        return template;
     }
 }
 
