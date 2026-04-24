@@ -20,9 +20,9 @@ public class PresalePromptTemplate {
     private String promptContent;
     private Integer hasCompetitorVar;
     private Integer enabled;
+    private String templateVersion;
     private Integer sortOrder;
     private String remark;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
-

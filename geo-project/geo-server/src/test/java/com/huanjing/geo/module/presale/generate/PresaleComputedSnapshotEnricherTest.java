@@ -132,7 +132,7 @@ class PresaleComputedSnapshotEnricherTest {
     void shouldAcceptCurrentFixtureWithRealBuilderPath() {
         PresaleAiPromptResultMapper mapper = org.mockito.Mockito.mock(PresaleAiPromptResultMapper.class);
         org.mockito.Mockito.when(mapper.selectIntentSamplesByVersionId(anyLong())).thenReturn(List.of());
-        org.mockito.Mockito.when(mapper.selectTemplateIntentStats())
+        org.mockito.Mockito.when(mapper.selectTemplateIntentStats(org.mockito.ArgumentMatchers.nullable(String.class)))
                 .thenReturn(List.of(
                         templateRow("推荐型", 200),
                         templateRow("对比型", 200),

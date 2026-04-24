@@ -23,6 +23,7 @@ import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMappe
 import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
+import org.springframework.beans.factory.annotation.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -45,8 +46,12 @@ import java.util.stream.Collectors;
 public class PresaleRawSnapshotAssembler {
 
     private static final Logger log = LoggerFactory.getLogger(PresaleRawSnapshotAssembler.class);
+    private static final String CATEGORY_COGNITIVE = "认知型";
+    private static final String CATEGORY_COMPARISON = "对比型";
     private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String STATUS_SKIPPED_DEGRADED = "SKIPPED_DEGRADED";
+    @Value("${presale.prompt.active-version:v2}")
+    private String activePromptTemplateVersion;
     private static final int MAX_SCENE_ADVANTAGES = 5;
     private static final int MAX_TOP_KEYWORDS = 10;
     private static final int MAX_NEGATIVE_EVIDENCE = 3;
@@ -106,8 +111,10 @@ public class PresaleRawSnapshotAssembler {
         } catch (IllegalStateException ex) {
             throw ex;
         } catch (JsonProcessingException ex) {
+            log.error("L1 aggregate JSON serialization error, versionId={}", versionId, ex);
             throw new BizException(500, "L1 aggregate failed: JSON serialization error - " + ex.getMessage());
         } catch (Exception ex) {
+            log.error("L1 aggregate unexpected error, versionId={}", versionId, ex);
             throw new BizException(500, "L1 aggregate failed: " + ex.getMessage());
         }
     }
@@ -184,6 +191,7 @@ public class PresaleRawSnapshotAssembler {
         Long count = promptTemplateMapper.selectCount(
                 new LambdaQueryWrapper<PresalePromptTemplate>()
                         .eq(PresalePromptTemplate::getEnabled, 1)
+                        .eq(PresalePromptTemplate::getTemplateVersion, activePromptTemplateVersion)
                         .eq(PresalePromptTemplate::getHasCompetitorVar, hasCompetitorVar)
         );
         return count == null ? 0 : count.intValue();
@@ -216,6 +224,7 @@ public class PresaleRawSnapshotAssembler {
         if (platforms == null) {
             platforms = List.of();
         }
+        Map<Long, String> categoryByTemplateId = loadActiveTemplateCategoryMap();
         Set<String> safeDegraded = degradedPlatforms == null ? Set.of() : degradedPlatforms;
         List<PlatformBreakdown> out = new ArrayList<>();
         for (AiPlatformConfig platform : platforms) {
@@ -227,29 +236,40 @@ public class PresaleRawSnapshotAssembler {
                             .eq(PresaleAiPromptResult::getBatchNo, 1)
                             .isNotNull(PresaleAiPromptResult::getIsMentioned)
             );
+            if (batch1Rows == null) {
+                batch1Rows = List.of();
+            }
 
-            int totalTests = batch1Rows.size();
-            int mentionCount = (int) batch1Rows.stream()
+            List<PresaleAiPromptResult> sampleRows = batch1Rows.stream()
+                    .filter(row -> {
+                        Long templateId = row.getPromptTemplateId();
+                        String category = templateId == null ? null : categoryByTemplateId.get(templateId);
+                        return isSampleIntentCategory(category);
+                    })
+                    .toList();
+
+            int totalTests = sampleRows.size();
+            int mentionCount = (int) sampleRows.stream()
                     .filter(r -> Integer.valueOf(1).equals(r.getIsMentioned()))
                     .count();
             double mentionRate = totalTests == 0 ? 0.0 : (mentionCount * 100.0 / totalTests);
-            OptionalDouble avgRankingOpt = batch1Rows.stream()
+            OptionalDouble avgRankingOpt = sampleRows.stream()
                     .filter(r -> Integer.valueOf(1).equals(r.getIsMentioned()))
                     .filter(r -> r.getRanking() != null)
                     .mapToInt(PresaleAiPromptResult::getRanking)
                     .average();
             Double avgRanking = avgRankingOpt.isPresent() ? avgRankingOpt.getAsDouble() : null;
-            int primaryRec = (int) batch1Rows.stream()
+            int primaryRec = (int) sampleRows.stream()
                     .filter(r -> Integer.valueOf(1).equals(r.getRanking()))
                     .count();
 
-            int positive = (int) batch1Rows.stream()
+            int positive = (int) sampleRows.stream()
                     .filter(r -> "POSITIVE".equals(r.getSentiment()))
                     .count();
-            int neutral = (int) batch1Rows.stream()
+            int neutral = (int) sampleRows.stream()
                     .filter(r -> "NEUTRAL".equals(r.getSentiment()))
                     .count();
-            int negative = (int) batch1Rows.stream()
+            int negative = (int) sampleRows.stream()
                     .filter(r -> "NEGATIVE".equals(r.getSentiment()))
                     .count();
 
@@ -270,6 +290,26 @@ public class PresaleRawSnapshotAssembler {
                     .build());
         }
         return out;
+    }
+
+    private Map<Long, String> loadActiveTemplateCategoryMap() {
+        List<PresalePromptTemplate> templates = promptTemplateMapper.selectList(
+                new LambdaQueryWrapper<PresalePromptTemplate>()
+                        .eq(PresalePromptTemplate::getEnabled, 1)
+                        .eq(PresalePromptTemplate::getTemplateVersion, activePromptTemplateVersion)
+        );
+        if (templates == null || templates.isEmpty()) {
+            return Map.of();
+        }
+        return templates.stream().collect(Collectors.toMap(
+                PresalePromptTemplate::getId,
+                PresalePromptTemplate::getCategory,
+                (left, right) -> left
+        ));
+    }
+
+    private boolean isSampleIntentCategory(String category) {
+        return !CATEGORY_COGNITIVE.equals(category) && !CATEGORY_COMPARISON.equals(category);
     }
 
     private List<Competitor> buildCompetitors(Long versionId,

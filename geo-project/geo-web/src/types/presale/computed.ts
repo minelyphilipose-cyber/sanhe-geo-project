@@ -171,4 +171,6 @@ export interface PlatformIntentCell {
    * - 正整数:正常样本
    */
   platform_prompt_count: number | null;
+  /** 对比型站队方向:target/tie/competitor/null;本阶段前端暂不消费。 */
+  stance?: 'target' | 'tie' | 'competitor' | null;
 }

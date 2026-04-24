@@ -30,7 +30,10 @@ public class PlatformIntentCell {
     @JsonProperty("intent_label")
     private String intentLabel;
 
-    /** 该平台该意图下被提及次数。 */
+    /**
+     * 该平台该意图下被提及次数。
+     * 认知/对比下无意义,始终为 0。
+     */
     @JsonProperty("mention_count")
     private Integer mentionCount;
 
@@ -48,5 +51,8 @@ public class PlatformIntentCell {
      */
     @JsonProperty("platform_prompt_count")
     private Integer platformPromptCount;
-}
 
+    /** 对比型专用站队方向:target|tie|competitor|null。 */
+    @JsonProperty("stance")
+    private String stance;
+}

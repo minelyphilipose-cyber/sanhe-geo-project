@@ -79,6 +79,13 @@ geo:
     api-key-aes-secret: ${DISPATCH_API_KEY_AES_SECRET:geo-dispatch-key}
 
 presale:
+  prompt:
+    active-version: v3
+  judge:
+    concurrent-platforms: 4 # 如需性能优化可调高此值或后续改异步
+    temperature: 0
+    retry:
+      max-attempts: 2 # 总尝试次数;2 表示首次+重试1次
   generate:
     mock: false
     mock-delay-ms: 5000

@@ -65,6 +65,18 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         return result;
     }
 
+    @Override
+    public LlmCallResult judge(PlatformCallContext ctx, String judgePrompt, double temperature)
+            throws LlmInvokeException {
+        return invokeWithRetry(
+                ctx,
+                JudgePromptTemplates.SYSTEM_INSTRUCTION,
+                safe(judgePrompt),
+                temperature,
+                true
+        );
+    }
+
     private LlmCallResult invokeWithRetry(PlatformCallContext ctx,
                                           String systemPrompt,
                                           String userPrompt,

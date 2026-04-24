@@ -19,6 +19,7 @@ import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -56,6 +57,8 @@ public class PresaleReportService {
     private final PresaleAccessService accessService;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
+    @Value("${presale.prompt.active-version:v2}")
+    private String activePromptTemplateVersion;
 
     public PresaleReportService(PresaleReportMapper reportMapper,
                                 PresaleReportVersionMapper versionMapper,
@@ -297,7 +300,7 @@ public class PresaleReportService {
     }
 
     private int countPromptTemplates(int hasCompetitorVar) {
-        List<PromptTemplateIntentStatRow> stats = aiPromptResultMapper.selectTemplateIntentStats();
+        List<PromptTemplateIntentStatRow> stats = aiPromptResultMapper.selectTemplateIntentStats(activePromptTemplateVersion);
         if (stats == null || stats.isEmpty()) {
             return 0;
         }

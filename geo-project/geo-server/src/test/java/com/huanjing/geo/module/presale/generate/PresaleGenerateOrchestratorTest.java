@@ -102,6 +102,8 @@ class PresaleGenerateOrchestratorTest {
     @Mock
     private PresaleCompetitorAggregator competitorAggregator;
     @Mock
+    private PresaleJudgeService presaleJudgeService;
+    @Mock
     private Executor platformExecutor;
 
     @Spy

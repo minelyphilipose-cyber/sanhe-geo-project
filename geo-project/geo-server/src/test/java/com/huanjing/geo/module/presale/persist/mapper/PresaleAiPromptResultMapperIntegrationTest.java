@@ -23,7 +23,7 @@ class PresaleAiPromptResultMapperIntegrationTest {
     @Sql(scripts = "/sql/presale_prompt_template_mixed_competitor_var.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
     @Sql(scripts = "/sql/presale_prompt_template_c5_cleanup.sql", executionPhase = Sql.ExecutionPhase.AFTER_TEST_METHOD)
     void selectTemplateIntentStats_includesBothCompetitorVarRows() {
-        List<PromptTemplateIntentStatRow> rows = mapper.selectTemplateIntentStats();
+        List<PromptTemplateIntentStatRow> rows = mapper.selectTemplateIntentStats("v2");
         assertThat(rows).isNotEmpty();
 
         List<PromptTemplateIntentStatRow> c5Rows = rows.stream()

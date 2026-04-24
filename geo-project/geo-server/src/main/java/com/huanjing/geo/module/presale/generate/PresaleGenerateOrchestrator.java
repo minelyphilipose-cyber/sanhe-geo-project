@@ -74,6 +74,8 @@ public class PresaleGenerateOrchestrator {
     private static final String STAGE_BATCH1 = "BATCH1";
     private static final String STAGE_COMPETITOR_EXTRACT = "COMPETITOR_EXTRACT";
     private static final String STAGE_BATCH2 = "BATCH2";
+    private static final String STAGE_JUDGE_COGNITIVE = "JUDGE_COGNITIVE";
+    private static final String STAGE_JUDGE_COMPARISON = "JUDGE_COMPARISON";
     private static final String STAGE_L1_AGGREGATE = "L1_AGGREGATE";
     private static final String STAGE_L2_COMPUTE = "L2_COMPUTE";
     private static final String STAGE_L3_INIT = "L3_INIT";
@@ -106,6 +108,7 @@ public class PresaleGenerateOrchestrator {
     private final PresaleComputedSnapshotEnricher computedSnapshotEnricher;
     private final PresaleL3InitService l3InitService;
     private final PresaleCompetitorAggregator competitorAggregator;
+    private final PresaleJudgeService presaleJudgeService;
     private final ObjectMapper objectMapper;
     private final Executor platformExecutor;
     private final Map<Long, AtomicLong> lastProgressUpdateAtByVersion = new ConcurrentHashMap<>();
@@ -124,6 +127,8 @@ public class PresaleGenerateOrchestrator {
 
     @Value("${presale.generate.allow-synthetic-fallback.real}")
     private boolean allowSyntheticFallbackReal;
+    @Value("${presale.prompt.active-version:v2}")
+    private String activePromptTemplateVersion;
 
     public PresaleGenerateOrchestrator(PresaleReportVersionMapper versionMapper,
                                        PresaleReportMapper reportMapper,
@@ -140,6 +145,7 @@ public class PresaleGenerateOrchestrator {
                                        PresaleComputedSnapshotEnricher computedSnapshotEnricher,
                                        PresaleL3InitService l3InitService,
                                        PresaleCompetitorAggregator competitorAggregator,
+                                       PresaleJudgeService presaleJudgeService,
                                        ObjectMapper objectMapper,
                                        @Qualifier("presalePlatformExecutor") Executor platformExecutor) {
         this.versionMapper = versionMapper;
@@ -157,6 +163,7 @@ public class PresaleGenerateOrchestrator {
         this.computedSnapshotEnricher = computedSnapshotEnricher;
         this.l3InitService = l3InitService;
         this.competitorAggregator = competitorAggregator;
+        this.presaleJudgeService = presaleJudgeService;
         this.objectMapper = objectMapper;
         this.platformExecutor = Objects.requireNonNull(platformExecutor, "presalePlatformExecutor must not be null");
     }
@@ -263,6 +270,10 @@ public class PresaleGenerateOrchestrator {
         if (batch1Result.stopPipeline) {
             return;
         }
+
+        enterStage(versionId, STAGE_JUDGE_COGNITIVE, "judge cognitive");
+        presaleJudgeService.judgeCognitiveAfterBatch1(versionId, report.getBrandName(), operatorUserId, isManager);
+
         Set<String> allDegraded = new LinkedHashSet<>(batch1Result.degradedPlatforms());
 
         enterStage(versionId, STAGE_COMPETITOR_EXTRACT, "extract competitors");
@@ -296,6 +307,9 @@ public class PresaleGenerateOrchestrator {
             markCompetitorExtractEmpty(versionId);
             log.info("Skip batch2 because extracted competitors is 0, versionId={}", versionId);
         }
+
+        enterStage(versionId, STAGE_JUDGE_COMPARISON, "judge comparison");
+        presaleJudgeService.judgeComparisonAfterBatch2(versionId, report.getBrandName(), operatorUserId, isManager);
 
         String rawJson;
         enterStage(versionId, STAGE_L1_AGGREGATE, "assemble raw snapshot");
@@ -387,6 +401,7 @@ public class PresaleGenerateOrchestrator {
         List<PresalePromptTemplate> templates = promptTemplateMapper.selectList(
                 new LambdaQueryWrapper<PresalePromptTemplate>()
                         .eq(PresalePromptTemplate::getEnabled, 1)
+                        .eq(PresalePromptTemplate::getTemplateVersion, activePromptTemplateVersion)
                         .eq(PresalePromptTemplate::getHasCompetitorVar, 0)
                         .orderByAsc(PresalePromptTemplate::getSortOrder)
                         .orderByAsc(PresalePromptTemplate::getId)
@@ -840,6 +855,7 @@ public class PresaleGenerateOrchestrator {
         List<PresalePromptTemplate> templates = promptTemplateMapper.selectList(
                 new LambdaQueryWrapper<PresalePromptTemplate>()
                         .eq(PresalePromptTemplate::getEnabled, 1)
+                        .eq(PresalePromptTemplate::getTemplateVersion, activePromptTemplateVersion)
                         .eq(PresalePromptTemplate::getHasCompetitorVar, 1)
                         .orderByAsc(PresalePromptTemplate::getSortOrder)
                         .orderByAsc(PresalePromptTemplate::getId)
@@ -1204,6 +1220,7 @@ public class PresaleGenerateOrchestrator {
         Long count = promptTemplateMapper.selectCount(
                 new LambdaQueryWrapper<PresalePromptTemplate>()
                         .eq(PresalePromptTemplate::getEnabled, 1)
+                        .eq(PresalePromptTemplate::getTemplateVersion, activePromptTemplateVersion)
                         .eq(PresalePromptTemplate::getHasCompetitorVar, hasCompetitorVar)
         );
         return count == null ? 0 : count.intValue();

@@ -8,8 +8,10 @@ import com.huanjing.geo.module.presale.dto.snapshot.raw.PlatformBreakdown;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -24,6 +26,10 @@ import java.util.Map;
 public class PlatformIntentBreakdownBuilder {
 
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
+    private static final String CATEGORY_COGNITIVE = "COGNITIVE";
+    private static final String CATEGORY_COMPARISON = "COMPARISON";
+    @Value("${presale.prompt.active-version:v2}")
+    private String activePromptTemplateVersion;
 
     public BuildResult build(Long versionId,
                              RawSnapshotDTO rawSnapshot,
@@ -42,11 +48,31 @@ public class PlatformIntentBreakdownBuilder {
 
         Map<String, Integer> intentTotalPrompts = resolveIntentTotalPromptsFromTemplate();
         List<PlatformIntentSampleRow> rows = aiPromptResultMapper.selectIntentSamplesByVersionId(versionId);
+        List<PlatformIntentJudgeAggregateRow> judgeRows = aiPromptResultMapper.selectJudgeAggregatesByVersionId(versionId);
         if ((rows == null || rows.isEmpty()) && allowSyntheticFallback) {
             List<PlatformIntentCell> cells = buildSyntheticFallback(platforms, intentTotalPrompts);
             return new BuildResult(cells, intentTotalPrompts);
         }
 
+        Map<String, Stat> statByKey = buildSampleStats(rows, platformByCode);
+        Map<String, JudgeStat> judgeStatByKey = buildJudgeStats(judgeRows, platformByCode);
+        List<PlatformIntentCell> result = new ArrayList<>();
+        for (PlatformBreakdown platform : platforms) {
+            String platformCode = platform.getPlatformCode();
+            for (PresaleIntentCode intent : PresaleIntentCode.allInOrder()) {
+                String key = key(platformCode, intent.getCode());
+                Integer totalPrompts = intentTotalPrompts.get(intent.getCode());
+                if (totalPrompts == null) {
+                    throw new BizException(500, "platform_intent_breakdown integrity violated: missing total_prompts for intent=" + intent.getCode());
+                }
+                result.add(buildCell(platformCode, intent, totalPrompts, statByKey.get(key), judgeStatByKey.get(key)));
+            }
+        }
+        return new BuildResult(result, intentTotalPrompts);
+    }
+
+    private Map<String, Stat> buildSampleStats(List<PlatformIntentSampleRow> rows,
+                                               Map<String, PlatformBreakdown> platformByCode) {
         Map<String, Stat> statByKey = new HashMap<>();
         if (rows != null) {
             for (PlatformIntentSampleRow row : rows) {
@@ -77,54 +103,91 @@ public class PlatformIntentBreakdownBuilder {
                 }
             }
         }
+        return statByKey;
+    }
 
-        List<PlatformIntentCell> result = new ArrayList<>();
-        for (PlatformBreakdown platform : platforms) {
-            String platformCode = platform.getPlatformCode();
-            for (PresaleIntentCode intent : PresaleIntentCode.allInOrder()) {
-                String key = key(platformCode, intent.getCode());
-                Stat stat = statByKey.get(key);
-                Integer promptCount = null;
-                int mentionCount = 0;
-                if (stat != null && stat.totalRows > 0) {
-                    promptCount = stat.includedRows;
-                    mentionCount = stat.includedRows > 0 ? stat.mentionedRows : 0;
-                }
-                int mentionRate = calculateRate(mentionCount, promptCount);
-                Integer totalPrompts = intentTotalPrompts.get(intent.getCode());
-                if (totalPrompts == null) {
-                    throw new BizException(500, "platform_intent_breakdown integrity violated: missing total_prompts for intent=" + intent.getCode());
-                }
-                result.add(PlatformIntentCell.builder()
-                        .platformCode(platformCode)
-                        .intentCode(intent.getCode())
-                        .intentLabel(intent.getLabel())
-                        .mentionCount(mentionCount)
-                        .mentionRate(mentionRate)
-                        .totalPrompts(totalPrompts)
-                        .platformPromptCount(promptCount)
-                        .build());
+    private Map<String, JudgeStat> buildJudgeStats(List<PlatformIntentJudgeAggregateRow> rows,
+                                                   Map<String, PlatformBreakdown> platformByCode) {
+        Map<String, JudgeStat> statByKey = new HashMap<>();
+        if (rows == null) {
+            return statByKey;
+        }
+        for (PlatformIntentJudgeAggregateRow row : rows) {
+            if (row == null || row.getPlatformCode() == null || row.getCategory() == null) {
+                continue;
+            }
+            if (!platformByCode.containsKey(row.getPlatformCode())) {
+                continue;
+            }
+            String category = row.getCategory();
+            if (!CATEGORY_COGNITIVE.equals(category) && !CATEGORY_COMPARISON.equals(category)) {
+                continue;
+            }
+            String key = key(row.getPlatformCode(), category);
+            JudgeStat judgeStat = new JudgeStat();
+            judgeStat.cellScore = row.getCellScore();
+            judgeStat.sampleCount = row.getSampleCount();
+            judgeStat.stance = row.getStance();
+            statByKey.put(key, judgeStat);
+        }
+        return statByKey;
+    }
+
+    private PlatformIntentCell buildCell(String platformCode,
+                                         PresaleIntentCode intent,
+                                         Integer totalPrompts,
+                                         Stat sampleStat,
+                                         JudgeStat judgeStat) {
+        Integer samplePromptCount = null;
+        int mentionCount = 0;
+        if (sampleStat != null && sampleStat.totalRows > 0) {
+            samplePromptCount = sampleStat.includedRows;
+            mentionCount = sampleStat.includedRows > 0 ? sampleStat.mentionedRows : 0;
+        }
+
+        Integer mentionRate = calculateRate(mentionCount, samplePromptCount);
+        Integer platformPromptCount = samplePromptCount;
+        String stance = null;
+
+        if (isJudgeIntent(intent) && judgeStat != null) {
+            // 认知/对比在 PR3 口径切换后由裁判聚合给出 0-100 标量，映射到 mention_rate 字段。
+            mentionRate = mapJudgeCellScore(judgeStat.cellScore);
+            platformPromptCount = judgeStat.sampleCount;
+            // 认知/对比下无意义,始终为 0。
+            mentionCount = 0;
+            if (PresaleIntentCode.COMPARISON == intent) {
+                stance = judgeStat.stance;
             }
         }
-        return new BuildResult(result, intentTotalPrompts);
+
+        return PlatformIntentCell.builder()
+                .platformCode(platformCode)
+                .intentCode(intent.getCode())
+                .intentLabel(intent.getLabel())
+                .mentionCount(mentionCount)
+                .mentionRate(mentionRate)
+                .totalPrompts(totalPrompts)
+                .platformPromptCount(platformPromptCount)
+                .stance(stance)
+                .build();
     }
 
     private Map<String, Integer> resolveIntentTotalPromptsFromTemplate() {
         Map<String, Integer> map = new HashMap<>();
-        List<PromptTemplateIntentStatRow> rows = aiPromptResultMapper.selectTemplateIntentStats();
+        List<PromptTemplateIntentStatRow> rows = aiPromptResultMapper.selectTemplateIntentStats(activePromptTemplateVersion);
         if (rows != null) {
             for (PromptTemplateIntentStatRow row : rows) {
                 if (row == null || row.getIntentLabel() == null) {
                     continue;
                 }
-                // D26 架构让步(PR-3.D3 CP5 Block 2):SQL 层 selectTemplateIntentStats
-                // 不再过滤 has_competitor_var,返回全量 GROUP BY 结果。此处 Java 层单点
-                // 过滤为唯一屏障,删除此过滤会导致 intent_breakdown 混入竞品模板,
-                // 破坏 scene_coverage 同源语义。修改前先查 snapshot §D26 调整记录。
-                if (row.getHasCompetitorVar() == null || row.getHasCompetitorVar() != 0) {
+                PresaleIntentCode intentCode = resolveIntentByLabel(row.getIntentLabel());
+                Integer hasCompetitorVar = row.getHasCompetitorVar();
+                // 对比型在 v3 下依赖竞品变量模板(has_competitor_var=1)，不能按旧规则剔除。
+                // 其余意图仍只计入通用模板(has_competitor_var=0)，保持 scene_coverage 同源口径。
+                if (intentCode != PresaleIntentCode.COMPARISON
+                        && (hasCompetitorVar == null || hasCompetitorVar != 0)) {
                     continue;
                 }
-                PresaleIntentCode intentCode = resolveIntentByLabel(row.getIntentLabel());
                 int base = safeInt(row.getTemplateCount());
                 map.merge(intentCode.getCode(), base, Integer::sum);
             }
@@ -151,23 +214,30 @@ public class PlatformIntentBreakdownBuilder {
      */
     private List<PlatformIntentCell> buildSyntheticFallback(List<PlatformBreakdown> platforms,
                                                             Map<String, Integer> intentTotalPrompts) {
-        int totalIntentPrompts = intentTotalPrompts.values().stream().mapToInt(Integer::intValue).sum();
-        if (totalIntentPrompts <= 0) {
-            throw new BizException(500, "platform_intent_breakdown integrity violated: intent total_prompts sum <= 0");
+        Map<String, Integer> sampleIntentPrompts = new HashMap<>();
+        for (PresaleIntentCode intent : PresaleIntentCode.allInOrder()) {
+            if (isJudgeIntent(intent)) {
+                continue;
+            }
+            sampleIntentPrompts.put(intent.getCode(), intentTotalPrompts.getOrDefault(intent.getCode(), 0));
+        }
+        int totalSampleIntentPrompts = sampleIntentPrompts.values().stream().mapToInt(Integer::intValue).sum();
+        if (totalSampleIntentPrompts <= 0) {
+            throw new BizException(500, "platform_intent_breakdown integrity violated: sample intent total_prompts sum <= 0");
         }
 
         List<PlatformIntentCell> result = new ArrayList<>();
         for (PlatformBreakdown platform : platforms) {
             int platformMentionTotal = safeInt(platform.getMentionCount());
-            if (platformMentionTotal > totalIntentPrompts) {
+            if (platformMentionTotal > totalSampleIntentPrompts) {
                 throw new BizException(500, "platform_intent_breakdown integrity violated: platform mention_count exceeds total_prompts, platform="
                         + platform.getPlatformCode());
             }
 
-            Map<String, Integer> mentionAllocation = allocateByLargestRemainder(platformMentionTotal, intentTotalPrompts, totalIntentPrompts);
+            Map<String, Integer> mentionAllocation = allocateByLargestRemainder(platformMentionTotal, sampleIntentPrompts, totalSampleIntentPrompts);
             for (PresaleIntentCode intent : PresaleIntentCode.allInOrder()) {
                 int promptCount = intentTotalPrompts.get(intent.getCode());
-                int mentionCount = mentionAllocation.getOrDefault(intent.getCode(), 0);
+                int mentionCount = isJudgeIntent(intent) ? 0 : mentionAllocation.getOrDefault(intent.getCode(), 0);
                 int mentionRate = calculateRate(mentionCount, promptCount);
                 result.add(PlatformIntentCell.builder()
                         .platformCode(platform.getPlatformCode())
@@ -209,11 +279,22 @@ public class PlatformIntentBreakdownBuilder {
         return allocation;
     }
 
-    private int calculateRate(int mentionCount, Integer promptCount) {
+    private Integer calculateRate(int mentionCount, Integer promptCount) {
         if (promptCount == null || promptCount <= 0) {
             return 0;
         }
         return (int) Math.round(mentionCount * 100.0d / promptCount);
+    }
+
+    private Integer mapJudgeCellScore(BigDecimal cellScore) {
+        if (cellScore == null) {
+            return null;
+        }
+        return (int) Math.round(cellScore.doubleValue());
+    }
+
+    private boolean isJudgeIntent(PresaleIntentCode intent) {
+        return intent == PresaleIntentCode.COGNITIVE || intent == PresaleIntentCode.COMPARISON;
     }
 
     private String key(String platformCode, String intentCode) {
@@ -228,6 +309,12 @@ public class PlatformIntentBreakdownBuilder {
         int totalRows;
         int includedRows;
         int mentionedRows;
+    }
+
+    private static class JudgeStat {
+        BigDecimal cellScore;
+        Integer sampleCount;
+        String stance;
     }
 
     public record BuildResult(List<PlatformIntentCell> cells,

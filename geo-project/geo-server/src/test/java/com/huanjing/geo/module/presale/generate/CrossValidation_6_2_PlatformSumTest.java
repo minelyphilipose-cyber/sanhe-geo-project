@@ -10,20 +10,31 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CrossValidation_6_2_PlatformSumTest {
 
     @Test
-    void validate_throwsWhenPlatformMentionSumMismatch() {
+    void validate_throwsWhenPlatformMentionSumMismatchForSampleIntents() {
         PlatformIntentBreakdownValidator validator = new PlatformIntentBreakdownValidator();
-        List<PlatformBreakdown> platforms = List.of(platform("P1", 5));
+        List<PlatformBreakdown> platforms = List.of(platform("P1", 3));
         List<IntentBreakdown> intents = intents();
-        List<PlatformIntentCell> cells = cells("P1", 4); // 4 != 5
+        List<PlatformIntentCell> cells = cells("P1", 2, 0, 0); // sample sum 2 != 3
 
         assertThatThrownBy(() -> validator.validate(platforms, intents, cells))
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("platform mention sum mismatch");
+    }
+
+    @Test
+    void validate_skipsSumCheckForJudgeIntents() {
+        PlatformIntentBreakdownValidator validator = new PlatformIntentBreakdownValidator();
+        List<PlatformBreakdown> platforms = List.of(platform("P1", 2));
+        List<IntentBreakdown> intents = intents();
+        List<PlatformIntentCell> cells = cells("P1", 2, 9, 8); // judge intents 任意值不参与守恒
+
+        assertThatCode(() -> validator.validate(platforms, intents, cells)).doesNotThrowAnyException();
     }
 
     private List<IntentBreakdown> intents() {
@@ -37,20 +48,31 @@ class CrossValidation_6_2_PlatformSumTest {
         return list;
     }
 
-    private List<PlatformIntentCell> cells(String platformCode, int totalMention) {
+    private List<PlatformIntentCell> cells(String platformCode, int sampleMentionTotal, int cognitiveMention, int comparisonMention) {
         List<PlatformIntentCell> list = new ArrayList<>();
-        int left = totalMention;
+        int left = sampleMentionTotal;
         for (PresaleIntentCode code : PresaleIntentCode.allInOrder()) {
-            int mention = left > 0 ? 1 : 0;
-            left -= mention;
+            int mention;
+            if (code == PresaleIntentCode.COGNITIVE) {
+                mention = cognitiveMention;
+            } else if (code == PresaleIntentCode.COMPARISON) {
+                mention = comparisonMention;
+            } else {
+                mention = left > 0 ? 1 : 0;
+                left -= mention;
+            }
+            int promptCount = code == PresaleIntentCode.COGNITIVE ? 7 : (code == PresaleIntentCode.COMPARISON ? 17 : 10);
+            int rate = code == PresaleIntentCode.COGNITIVE ? 71
+                    : (code == PresaleIntentCode.COMPARISON ? 47 : (mention > 0 ? 10 : 0));
             list.add(PlatformIntentCell.builder()
                     .platformCode(platformCode)
                     .intentCode(code.getCode())
                     .intentLabel(code.getLabel())
                     .mentionCount(mention)
-                    .mentionRate(mention > 0 ? 10 : 0)
+                    .mentionRate(rate)
                     .totalPrompts(10)
-                    .platformPromptCount(10)
+                    .platformPromptCount(promptCount)
+                    .stance(code == PresaleIntentCode.COMPARISON ? "target" : null)
                     .build());
         }
         return list;

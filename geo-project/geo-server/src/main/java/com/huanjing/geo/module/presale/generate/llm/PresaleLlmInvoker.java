@@ -16,5 +16,10 @@ public interface PresaleLlmInvoker {
      */
     LlmCallResult analyze(PlatformCallContext ctx, String originalPrompt, String queryAnswer)
             throws LlmInvokeException, AnalyzeParseException;
-}
 
+    /**
+     * 阶段 2.5:Judge 调用。
+     */
+    LlmCallResult judge(PlatformCallContext ctx, String judgePrompt, double temperature)
+            throws LlmInvokeException;
+}

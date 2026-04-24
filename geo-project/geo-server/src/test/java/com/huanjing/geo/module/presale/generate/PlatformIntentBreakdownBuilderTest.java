@@ -11,6 +11,7 @@ import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMappe
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -27,7 +28,7 @@ class PlatformIntentBreakdownBuilderTest {
                 row("P1", "推荐型", "SUCCESS", 0, 1),
                 row("P2", "对比型", "SUCCESS", 0, 1)
         ));
-        Mockito.when(mapper.selectTemplateIntentStats()).thenReturn(templateStats());
+        Mockito.when(mapper.selectTemplateIntentStats(Mockito.nullable(String.class))).thenReturn(templateStats());
         PlatformIntentBreakdownBuilder builder = new PlatformIntentBreakdownBuilder(mapper);
 
         List<PlatformIntentCell> cells = builder.build(1L, raw("P1", "P2", 1, 1), computed(), false).cells();
@@ -48,6 +49,37 @@ class PlatformIntentBreakdownBuilderTest {
     }
 
     @Test
+    void build_overridesCognitiveAndComparisonMentionRateFromJudgeRows() {
+        PresaleAiPromptResultMapper mapper = Mockito.mock(PresaleAiPromptResultMapper.class);
+        Mockito.when(mapper.selectIntentSamplesByVersionId(1L)).thenReturn(List.of(
+                row("P1", "认知型", "SUCCESS", 0, 1),
+                row("P1", "认知型", "SUCCESS", 0, 0),
+                row("P1", "对比型", "SUCCESS", 0, 1),
+                row("P1", "对比型", "SUCCESS", 0, 0)
+        ));
+        Mockito.when(mapper.selectJudgeAggregatesByVersionId(1L)).thenReturn(List.of(
+                judge("P1", "COGNITIVE", new BigDecimal("71.43"), null, 7),
+                judge("P1", "COMPARISON", new BigDecimal("47.06"), "target", 17)
+        ));
+        Mockito.when(mapper.selectTemplateIntentStats(Mockito.nullable(String.class))).thenReturn(templateStats());
+        PlatformIntentBreakdownBuilder builder = new PlatformIntentBreakdownBuilder(mapper);
+
+        List<PlatformIntentCell> cells = builder.build(1L, raw("P1", 2), computed(), false).cells();
+        PlatformIntentCell cognitive = findCell(cells, "P1", "COGNITIVE");
+        PlatformIntentCell comparison = findCell(cells, "P1", "COMPARISON");
+
+        assertThat(cognitive.getMentionRate()).isEqualTo(71);
+        assertThat(cognitive.getPlatformPromptCount()).isEqualTo(7);
+        assertThat(cognitive.getStance()).isNull();
+        assertThat(cognitive.getMentionCount()).isEqualTo(0);
+
+        assertThat(comparison.getMentionRate()).isEqualTo(47);
+        assertThat(comparison.getPlatformPromptCount()).isEqualTo(17);
+        assertThat(comparison.getStance()).isEqualTo("target");
+        assertThat(comparison.getMentionCount()).isEqualTo(0);
+    }
+
+    @Test
     void build_distinguishesNullVsZeroPlatformPromptCount() {
         PresaleAiPromptResultMapper mapper = Mockito.mock(PresaleAiPromptResultMapper.class);
         Mockito.when(mapper.selectIntentSamplesByVersionId(1L)).thenReturn(List.of(
@@ -55,7 +87,7 @@ class PlatformIntentBreakdownBuilderTest {
                 row("P1", "推荐型", "SUCCESS", 1, 1)
                 // 对比型无记录 -> platform_prompt_count = null
         ));
-        Mockito.when(mapper.selectTemplateIntentStats()).thenReturn(templateStats());
+        Mockito.when(mapper.selectTemplateIntentStats(Mockito.nullable(String.class))).thenReturn(templateStats());
         PlatformIntentBreakdownBuilder builder = new PlatformIntentBreakdownBuilder(mapper);
 
         List<PlatformIntentCell> cells = builder.build(1L, raw("P1", 0), computed(), false).cells();
@@ -82,7 +114,7 @@ class PlatformIntentBreakdownBuilderTest {
             rows.add(row("P1", "推荐型", "SUCCESS", 0, 0));
         }
         Mockito.when(mapper.selectIntentSamplesByVersionId(1L)).thenReturn(rows);
-        Mockito.when(mapper.selectTemplateIntentStats()).thenReturn(templateStats());
+        Mockito.when(mapper.selectTemplateIntentStats(Mockito.nullable(String.class))).thenReturn(templateStats());
         PlatformIntentBreakdownBuilder builder = new PlatformIntentBreakdownBuilder(mapper);
 
         List<PlatformIntentCell> cells = builder.build(1L, raw("P1", 1), computed(), false).cells();
@@ -104,7 +136,7 @@ class PlatformIntentBreakdownBuilderTest {
         // "template_count × competitor_count" logic.
         PresaleAiPromptResultMapper mapper = Mockito.mock(PresaleAiPromptResultMapper.class);
         Mockito.when(mapper.selectIntentSamplesByVersionId(1L)).thenReturn(List.of());
-        Mockito.when(mapper.selectTemplateIntentStats()).thenReturn(templateStatsWithCompetitorVarRecommendation());
+        Mockito.when(mapper.selectTemplateIntentStats(Mockito.nullable(String.class))).thenReturn(templateStatsWithCompetitorVarRecommendation());
         PlatformIntentBreakdownBuilder builder = new PlatformIntentBreakdownBuilder(mapper);
 
         RawSnapshotDTO raw = raw("P1", 0);
@@ -119,6 +151,21 @@ class PlatformIntentBreakdownBuilderTest {
 
         PlatformIntentCell recommendation = findCell(result.cells(), "P1", "RECOMMENDATION");
         assertThat(recommendation.getTotalPrompts()).isEqualTo(5);
+    }
+
+    @Test
+    void build_allowsComparisonIntentFromCompetitorVarTemplateOnly() {
+        PresaleAiPromptResultMapper mapper = Mockito.mock(PresaleAiPromptResultMapper.class);
+        Mockito.when(mapper.selectIntentSamplesByVersionId(1L)).thenReturn(List.of());
+        Mockito.when(mapper.selectTemplateIntentStats(Mockito.nullable(String.class)))
+                .thenReturn(templateStatsComparisonOnlyCompetitorVar());
+        PlatformIntentBreakdownBuilder builder = new PlatformIntentBreakdownBuilder(mapper);
+
+        PlatformIntentBreakdownBuilder.BuildResult result = builder.build(1L, raw("P1", 0), computed(), true);
+        PlatformIntentCell comparison = findCell(result.cells(), "P1", "COMPARISON");
+
+        assertThat(result.intentTotalPrompts().get("COMPARISON")).isEqualTo(7);
+        assertThat(comparison.getTotalPrompts()).isEqualTo(7);
     }
 
     private RawSnapshotDTO raw(String p1, int mentionCount) {
@@ -174,6 +221,20 @@ class PlatformIntentBreakdownBuilderTest {
                 .orElseThrow();
     }
 
+    private PlatformIntentJudgeAggregateRow judge(String platformCode,
+                                                  String category,
+                                                  BigDecimal cellScore,
+                                                  String stance,
+                                                  Integer sampleCount) {
+        PlatformIntentJudgeAggregateRow row = new PlatformIntentJudgeAggregateRow();
+        row.setPlatformCode(platformCode);
+        row.setCategory(category);
+        row.setCellScore(cellScore);
+        row.setStance(stance);
+        row.setSampleCount(sampleCount);
+        return row;
+    }
+
     private List<PromptTemplateIntentStatRow> templateStats() {
         List<PromptTemplateIntentStatRow> rows = new ArrayList<>();
         for (PresaleIntentCode code : PresaleIntentCode.allInOrder()) {
@@ -201,6 +262,26 @@ class PlatformIntentBreakdownBuilderTest {
                 competitorVarRow.setTemplateCount(50);
                 rows.add(competitorVarRow);
             }
+        }
+        return rows;
+    }
+
+    private List<PromptTemplateIntentStatRow> templateStatsComparisonOnlyCompetitorVar() {
+        List<PromptTemplateIntentStatRow> rows = new ArrayList<>();
+        for (PresaleIntentCode code : PresaleIntentCode.allInOrder()) {
+            if (code == PresaleIntentCode.COMPARISON) {
+                PromptTemplateIntentStatRow comparisonRow = new PromptTemplateIntentStatRow();
+                comparisonRow.setIntentLabel(code.getLabel());
+                comparisonRow.setHasCompetitorVar(1);
+                comparisonRow.setTemplateCount(7);
+                rows.add(comparisonRow);
+                continue;
+            }
+            PromptTemplateIntentStatRow row = new PromptTemplateIntentStatRow();
+            row.setIntentLabel(code.getLabel());
+            row.setHasCompetitorVar(0);
+            row.setTemplateCount(5);
+            rows.add(row);
         }
         return rows;
     }

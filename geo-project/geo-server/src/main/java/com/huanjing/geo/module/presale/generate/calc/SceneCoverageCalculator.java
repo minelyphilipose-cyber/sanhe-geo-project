@@ -22,6 +22,7 @@ import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -44,6 +45,8 @@ public class SceneCoverageCalculator {
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PresaleCompetitorAggregator competitorAggregator;
     private final ObjectMapper objectMapper;
+    @Value("${presale.prompt.active-version:v2}")
+    private String activePromptTemplateVersion;
 
     public SceneAndIntentResult compute(Long versionId,
                                         RawSnapshotDTO raw,
@@ -67,6 +70,7 @@ public class SceneCoverageCalculator {
         List<PresalePromptTemplate> templates = promptTemplateMapper.selectList(
                 new LambdaQueryWrapper<PresalePromptTemplate>()
                         .eq(PresalePromptTemplate::getEnabled, 1)
+                        .eq(PresalePromptTemplate::getTemplateVersion, activePromptTemplateVersion)
                         .eq(PresalePromptTemplate::getHasCompetitorVar, 0)
                         .orderByAsc(PresalePromptTemplate::getSortOrder)
                         .orderByAsc(PresalePromptTemplate::getId)

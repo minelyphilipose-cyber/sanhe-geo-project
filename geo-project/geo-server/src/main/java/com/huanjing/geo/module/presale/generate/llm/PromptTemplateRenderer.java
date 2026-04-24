@@ -22,6 +22,7 @@ public class PromptTemplateRenderer {
                 .replace("{industry_role}", safe(report == null ? null : report.getIndustryRole()))
                 .replace("{region}", safe(report == null ? null : report.getRegion()))
                 .replace("{product}", "")
+                .replace("{user_type}", "")
                 .replace("{competitor}", safe(ctx == null ? null : ctx.competitorName()));
     }
 

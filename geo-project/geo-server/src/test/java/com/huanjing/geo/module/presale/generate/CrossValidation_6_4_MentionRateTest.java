@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class CrossValidation_6_4_MentionRateTest {
@@ -23,11 +24,38 @@ class CrossValidation_6_4_MentionRateTest {
         cells.get(0).setMentionCount(1);
         cells.get(0).setPlatformPromptCount(8);
         cells.get(0).setMentionRate(12); // expected 13
-        cells.get(1).setMentionCount(1);
 
         assertThatThrownBy(() -> validator.validate(platforms, intents, cells))
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("mention_rate formula mismatch");
+    }
+
+    @Test
+    void validate_allowsJudgeDrivenMentionRateForCognitiveAndComparison() {
+        PlatformIntentBreakdownValidator validator = new PlatformIntentBreakdownValidator();
+        List<PlatformBreakdown> platforms = List.of(platform("P1", 0));
+        List<IntentBreakdown> intents = intents();
+        List<PlatformIntentCell> cells = validCells("P1");
+
+        PlatformIntentCell cognitive = cells.stream()
+                .filter(it -> "COGNITIVE".equals(it.getIntentCode()))
+                .findFirst()
+                .orElseThrow();
+        cognitive.setMentionCount(1);
+        cognitive.setPlatformPromptCount(7);
+        cognitive.setMentionRate(71);
+        cognitive.setStance(null);
+
+        PlatformIntentCell comparison = cells.stream()
+                .filter(it -> "COMPARISON".equals(it.getIntentCode()))
+                .findFirst()
+                .orElseThrow();
+        comparison.setMentionCount(1);
+        comparison.setPlatformPromptCount(17);
+        comparison.setMentionRate(47);
+        comparison.setStance("target");
+
+        assertThatCode(() -> validator.validate(platforms, intents, cells)).doesNotThrowAnyException();
     }
 
     private List<IntentBreakdown> intents() {
@@ -64,4 +92,3 @@ class CrossValidation_6_4_MentionRateTest {
         return p;
     }
 }
-
