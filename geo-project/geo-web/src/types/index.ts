@@ -387,6 +387,11 @@ export interface AIPlatformConfigItem {
   modelName: string
   concurrencyLimit?: number | null
   enabled: boolean
+  enabledForPresale?: boolean
+  enabledForArticle?: boolean
+  maxRetry?: number | null
+  timeoutMs?: number | null
+  rateLimitQps?: number | null
   degraded: boolean
   degradedReason?: string | null
   remark?: string | null

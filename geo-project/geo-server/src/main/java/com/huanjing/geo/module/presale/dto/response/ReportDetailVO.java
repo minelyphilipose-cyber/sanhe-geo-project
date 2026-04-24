@@ -1,5 +1,8 @@
 package com.huanjing.geo.module.presale.dto.response;
 
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+import com.huanjing.geo.module.presale.json.PresaleDateTimeJson;
 import lombok.Builder;
 import lombok.Data;
 
@@ -22,6 +25,8 @@ public class ReportDetailVO {
     private String industryRole;
     private String region;
     private String userDemand;
+    @JsonSerialize(using = PresaleDateTimeJson.Serializer.class)
+    @JsonDeserialize(using = PresaleDateTimeJson.Deserializer.class)
     private LocalDateTime createdAt;
 
     /** 当前查看的版本元信息。 */

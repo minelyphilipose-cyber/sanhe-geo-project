@@ -21,7 +21,9 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "r.is_mentioned AS isMentioned " +
             "FROM presale_ai_prompt_result r " +
             "LEFT JOIN presale_prompt_template pt ON pt.id = r.prompt_template_id " +
-            "WHERE r.version_id = #{versionId}")
+            "WHERE r.version_id = #{versionId} " +
+            "AND r.batch_no = 1 " +
+            "AND pt.has_competitor_var = 0")
     List<PlatformIntentSampleRow> selectIntentSamplesByVersionId(@Param("versionId") Long versionId);
 
     @Select("SELECT " +
@@ -30,7 +32,6 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "COUNT(*) AS templateCount " +
             "FROM presale_prompt_template " +
             "WHERE enabled = 1 " +
-            "AND has_competitor_var = 0 " +
             "GROUP BY category, has_competitor_var")
     List<PromptTemplateIntentStatRow> selectTemplateIntentStats();
 }

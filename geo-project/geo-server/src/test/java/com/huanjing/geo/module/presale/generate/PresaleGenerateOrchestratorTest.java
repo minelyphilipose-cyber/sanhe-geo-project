@@ -15,11 +15,13 @@ import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
+import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
-import com.huanjing.geo.module.system.entity.AiPlatformConfig;
-import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
+import com.huanjing.geo.module.system.entity.SysDictItem;
+import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.AfterEach;
@@ -63,6 +65,8 @@ class PresaleGenerateOrchestratorTest {
     @Mock
     private AiPlatformConfigMapper aiPlatformConfigMapper;
     @Mock
+    private SysDictItemMapper sysDictItemMapper;
+    @Mock
     private PresalePromptTemplateMapper promptTemplateMapper;
     @Mock
     private PresaleAiCallMapper aiCallMapper;
@@ -97,7 +101,10 @@ class PresaleGenerateOrchestratorTest {
         lenient().when(reuseDecisionService.decide(any(), any())).thenReturn(ReuseDecision.RUN_FULL);
         lenient().when(reuseDecisionService.snapshotOf(any(), any())).thenReturn(null);
         lenient().when(competitorAggregator.extractTopCompetitorsFromBatch1(any(), anyString())).thenReturn(List.of());
+        lenient().when(sysDictItemMapper.selectList(any())).thenReturn(List.of());
         lenient().when(competitorAggregator.normalizeName(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
+        lenient().when(aiPlatformConfigMapper.selectCount(any())).thenReturn(1L);
         lenient().when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
                 .thenReturn("{\"client_info\":{\"brand_name\":\"Acme\",\"industry\":\"Software\"},\"test_summary\":{\"total_platforms\":1,\"total_prompts\":1},\"benchmarks_frozen\":{\"industry_avg\":{\"overall\":50.0}},\"competitors\":[]}");
         lenient().when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
@@ -132,7 +139,7 @@ class PresaleGenerateOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupBasePreflightSuccess(9702L, 8702L, 1, 1, 1);
 
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("kimi")));
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
         when(promptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(731L, "G1", "batch1 {brand}"))
         );
@@ -157,7 +164,7 @@ class PresaleGenerateOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupBasePreflightSuccess(9703L, 8703L, 1, 3, 1);
 
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("kimi")));
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
         when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
                 promptTemplate(741L, "G1", "Q1"),
                 promptTemplate(742L, "G2", "Q2"),
@@ -187,7 +194,7 @@ class PresaleGenerateOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupBasePreflightSuccess(9704L, 8704L, 2, 2, 1);
 
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("p1"), platform("p2")));
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("p1", "p2"));
         when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
                 promptTemplate(751L, "G1", "Q1"),
                 promptTemplate(752L, "G2", "Q2")
@@ -316,7 +323,7 @@ class PresaleGenerateOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupBasePreflightSuccess(9601L, 8601L, 1, 1, 1);
 
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("kimi")));
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
         when(promptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(701L, "G1", "batch1 {brand}")),
                 List.of(promptTemplate(702L, "C1", "batch2 {competitor}"))
@@ -346,7 +353,7 @@ class PresaleGenerateOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupBasePreflightSuccess(9602L, 8602L, 1, 1, 1);
 
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("kimi")));
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
         when(promptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(711L, "G1", "batch1 {brand}")),
                 List.of(promptTemplate(712L, "C1", "batch2 {competitor}"))
@@ -381,7 +388,7 @@ class PresaleGenerateOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupBasePreflightSuccess(9603L, 8603L, 1, 1, 1);
 
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("kimi")));
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
         when(promptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(721L, "G1", "batch1 {brand}")),
                 List.of(promptTemplate(722L, "C1", "batch2 {competitor}"))
@@ -406,9 +413,9 @@ class PresaleGenerateOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupBasePreflightSuccess(9101L, 8101L, 2, 3, 2);
 
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
-                platform("chatgpt"),
-                platform("claude")
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms(
+                "chatgpt",
+                "claude"
         ));
         when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
                 promptTemplate(1L, "P1", "Q1"),
@@ -433,7 +440,7 @@ class PresaleGenerateOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupBasePreflightSuccess(9102L, 8102L, 1, 4, 1);
 
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("kimi")));
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
         when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
                 promptTemplate(11L, "P1", "Q1"),
                 promptTemplate(12L, "P2", "Q2"),
@@ -462,7 +469,7 @@ class PresaleGenerateOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupBasePreflightSuccess(9104L, 8104L, 1, 10, 1);
 
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("kimi")));
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
         when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
                 promptTemplate(1001L, "P1", "Q1"),
                 promptTemplate(1002L, "P2", "Q2"),
@@ -529,11 +536,11 @@ class PresaleGenerateOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupBasePreflightSuccess(9103L, 8103L, 4, 2, 1);
 
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
-                platform("p1"),
-                platform("p2"),
-                platform("p3"),
-                platform("p4")
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms(
+                "p1",
+                "p2",
+                "p3",
+                "p4"
         ));
         when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
                 promptTemplate(21L, "P1", "Q1"),
@@ -636,8 +643,8 @@ class PresaleGenerateOrchestratorTest {
         setupBasePreflightSuccess(9401L, 8401L, 1, 1, 1);
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(
-                List.of(platform("kimi")),
-                List.of(platform("kimi"))
+                platforms("kimi"),
+                platforms("kimi")
         );
         when(promptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(401L, "G1", "batch1 {brand}")),
@@ -678,8 +685,8 @@ class PresaleGenerateOrchestratorTest {
         setupBasePreflightSuccess(9402L, 8402L, 1, 1, 2);
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(
-                List.of(platform("kimi")),
-                List.of(platform("kimi"))
+                platforms("kimi"),
+                platforms("kimi")
         );
         when(promptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(501L, "G1", "batch1 {brand}")),
@@ -728,7 +735,7 @@ class PresaleGenerateOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupBasePreflightSuccess(9501L, 8501L, 1, 1, 1);
 
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("kimi")));
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
         when(promptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(601L, "G1", "batch1 {brand}")),
                 List.of(promptTemplate(602L, "C1", "batch2 {competitor}"))
@@ -762,8 +769,8 @@ class PresaleGenerateOrchestratorTest {
         setupBasePreflightSuccess(9502L, 8502L, 1, 1, 1);
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(
-                List.of(platform("kimi")),
-                List.of(platform("kimi"))
+                platforms("kimi"),
+                platforms("kimi")
         );
         when(promptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(611L, "G1", "batch1 {brand}")),
@@ -828,8 +835,8 @@ class PresaleGenerateOrchestratorTest {
                 .thenReturn(preflightVersion, batch1Version, batch2EntryVersion, batch2EntryVersion);
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(
-                List.of(platform("p1"), platform("p2")),
-                List.of(platform("p1"), platform("p2"))
+                platforms("p1", "p2"),
+                platforms("p1", "p2")
         );
         when(promptTemplateMapper.selectList(any())).thenReturn(
                 List.of(
@@ -1010,6 +1017,71 @@ class PresaleGenerateOrchestratorTest {
         assertEquals(PresaleGenerateStatus.DONE.name(), done.getGenerationStatus());
     }
 
+    @Test
+    void promptResult_persistsRenderedRequestPromptContent() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        setupSimpleRealFlow(9910L, 8910L, List.of());
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
+        when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
+                .thenReturn("{\"scores\":{\"overall\":60.0}}");
+        when(l3InitService.derive(anyString(), anyString())).thenReturn("{\"editable\":\"ok\"}");
+
+        orchestrator.triggerGenerate(9910L, 910L, false);
+
+        ArgumentCaptor<PresaleAiPromptResult> resultCaptor = ArgumentCaptor.forClass(PresaleAiPromptResult.class);
+        verify(aiPromptResultMapper, atLeastOnce()).insert(resultCaptor.capture());
+        PresaleAiPromptResult row = resultCaptor.getAllValues().stream()
+                .filter(r -> Integer.valueOf(1).equals(r.getBatchNo()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("batch1 {brand}", row.getRequestPromptContent());
+    }
+
+    @Test
+    void promptRender_usesChineseDictValueForIndustryAndRole() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        setupBasePreflightSuccess(9911L, 8911L, 1, 1, 1);
+
+        PresaleReport report = new PresaleReport();
+        report.setId(8911L);
+        report.setBrandName("Acme");
+        report.setIndustry("restaurant");
+        report.setIndustryRole("chain_brand");
+        report.setRegion("CN");
+        when(reportMapper.selectById(8911L)).thenReturn(report);
+
+        when(sysDictItemMapper.selectList(any()))
+                .thenReturn(List.of(dictItem("餐饮")), List.of(dictItem("连锁品牌")));
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(
+                platforms("kimi"),
+                platforms("kimi")
+        );
+        when(promptTemplateMapper.selectList(any())).thenReturn(
+                List.of(promptTemplate(1991L, "G1", "行业={industry},身份={industry_role},品牌={brand}")),
+                List.of(promptTemplate(1992L, "C1", "batch2 {competitor}"))
+        );
+        when(competitorAggregator.extractTopCompetitorsFromBatch1(9911L, "Acme")).thenReturn(List.of());
+        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+                .thenCallRealMethod();
+        when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
+        when(llmInvoker.analyze(any(), anyString(), anyString()))
+                .thenReturn(successResult("{\"is_mentioned\":true,\"ranking\":1,\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[],\"scene_advantages\":[]}"));
+        when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any())).thenReturn("{\"raw\":\"ok\"}");
+        when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
+                .thenReturn("{\"scores\":{\"overall\":60.0}}");
+        when(l3InitService.derive(anyString(), anyString())).thenReturn("{\"editable\":\"ok\"}");
+
+        orchestrator.triggerGenerate(9911L, 911L, false);
+
+        ArgumentCaptor<PresaleAiPromptResult> resultCaptor = ArgumentCaptor.forClass(PresaleAiPromptResult.class);
+        verify(aiPromptResultMapper, atLeastOnce()).insert(resultCaptor.capture());
+        PresaleAiPromptResult row = resultCaptor.getAllValues().stream()
+                .filter(r -> Integer.valueOf(1).equals(r.getBatchNo()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("行业=餐饮,身份=连锁品牌,品牌=Acme", row.getRequestPromptContent());
+    }
+
     private void setupBasePreflightSuccess(Long versionId,
                                            Long reportId,
                                            int platformCount,
@@ -1036,8 +1108,8 @@ class PresaleGenerateOrchestratorTest {
     private void setupSimpleRealFlow(Long versionId, Long reportId, List<String> extractedCompetitors) throws Exception {
         setupBasePreflightSuccess(versionId, reportId, 1, 1, 1);
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(
-                List.of(platform("kimi")),
-                List.of(platform("kimi"))
+                platforms("kimi"),
+                platforms("kimi")
         );
         when(promptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(991L, "G1", "batch1 {brand}")),
@@ -1050,13 +1122,6 @@ class PresaleGenerateOrchestratorTest {
         when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
         when(llmInvoker.analyze(any(), anyString(), anyString()))
                 .thenReturn(successResult("{\"is_mentioned\":true,\"ranking\":1,\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[],\"scene_advantages\":[]}"));
-    }
-
-    private AiPlatformConfig platform(String code) {
-        AiPlatformConfig p = new AiPlatformConfig();
-        p.setPlatformCode(code);
-        p.setEnabled(true);
-        return p;
     }
 
     private PresalePromptTemplate promptTemplate(Long id, String code, String content) {
@@ -1083,6 +1148,33 @@ class PresaleGenerateOrchestratorTest {
         row.setMentionedCompetitors(competitorsJson);
         return row;
     }
+
+    private SysDictItem dictItem(String value) {
+        SysDictItem item = new SysDictItem();
+        item.setDictValue(value);
+        item.setEnabled(true);
+        return item;
+    }
+
+    private List<AiPlatformConfig> platforms(String... platformCodes) {
+        return java.util.Arrays.stream(platformCodes)
+                .map(code -> {
+                    AiPlatformConfig p = new AiPlatformConfig();
+                    p.setPlatformCode(code);
+                    p.setPlatformName(code);
+                    p.setEnabled(true);
+                    p.setEnabledForPresale(true);
+                    p.setLowModelId("low-model");
+                    return p;
+                })
+                .toList();
+    }
 }
+
+
+
+
+
+
 
 

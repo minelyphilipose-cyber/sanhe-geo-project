@@ -164,6 +164,7 @@ function buildMetaOnlyView(d: ReportDetailVO): MergedViewDTO {
       version_no: v.versionNo,
       schema_version: 'v1.2',
       generation_status: v.generationStatus,
+      generated_at: null,
       frozen: v.frozen,
       frozen_at: v.frozenAt,
       frozen_by: null,
@@ -237,13 +238,13 @@ function goProgress() {
 
 // ─── provide 上下文 ───────────────────────────────────────
 /**
- * β·1 新增 reportCreatedAt:
- *   Page01 封面需要显示"ISSUED"日期。MergedViewDTO 本身没有"报告创建时间"
- *   字段(P1·B meta 未提升 raw.meta.generated_at),此处用 ReportDetailVO.createdAt
- *   作为替代并透传。
- *   未来若 MergedViewMeta 补 generated_at,这里可改为优先读 generated_at。
+ * W4: reportCreatedAt 优先读 mergedView.meta.generated_at(生成时间),
+ * 再回退 ReportDetailVO.createdAt(报告创建时间)。
  */
-const reportCreatedAt = computed<string | null>(() => detail.value?.createdAt ?? null)
+const reportCreatedAt = computed<string | null>(() => {
+  const generatedAt = mergedView.value?.meta?.generated_at ?? null
+  return generatedAt ?? detail.value?.createdAt ?? null
+})
 
 provideMergedViewContext({
   mergedView,

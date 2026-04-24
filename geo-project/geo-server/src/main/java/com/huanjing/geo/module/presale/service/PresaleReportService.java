@@ -8,6 +8,7 @@ import com.huanjing.geo.module.presale.dto.response.ReportListItemVO;
 import com.huanjing.geo.module.presale.dto.response.ReportVersionMetaVO;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateStatus;
+import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
 import com.huanjing.geo.module.presale.generate.PromptTemplateIntentStatRow;
 import com.huanjing.geo.module.presale.access.AccessScope;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
@@ -16,11 +17,12 @@ import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
-import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -119,10 +121,24 @@ public class PresaleReportService {
         report.setLatestVersionId(version.getId());
         reportMapper.updateById(report);
 
-        // 异步触发生成
-        orchestrator.triggerGenerate(version.getId(), userId, accessService.canManageCurrentUser());
+        // 异步生成在事务提交后触发,避免异步线程早于 version insert 提交导致 "version not found"
+        triggerGenerateAfterCommit(version.getId(), userId, accessService.canManageCurrentUser());
 
         return report.getId();
+    }
+
+    private void triggerGenerateAfterCommit(Long versionId, Long userId, boolean canManageCurrentUser) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    orchestrator.triggerGenerate(versionId, userId, canManageCurrentUser);
+                }
+            });
+            return;
+        }
+        orchestrator.triggerGenerate(versionId, userId, canManageCurrentUser);
     }
 
     /**
@@ -276,9 +292,7 @@ public class PresaleReportService {
     }
 
     private int countEnabledPlatforms() {
-        LambdaQueryWrapper<AiPlatformConfig> query = new LambdaQueryWrapper<>();
-        query.eq(AiPlatformConfig::getEnabled, true);
-        Long count = aiPlatformConfigMapper.selectCount(query);
+        Long count = aiPlatformConfigMapper.selectCount(PresalePlatformConfigQueries.presaleEnabledWrapper());
         return count == null ? 0 : count.intValue();
     }
 

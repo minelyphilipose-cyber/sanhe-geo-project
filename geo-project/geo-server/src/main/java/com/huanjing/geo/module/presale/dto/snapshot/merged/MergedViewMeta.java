@@ -21,7 +21,16 @@ import java.util.List;
  * 前端据此展示版本号、冻结状态、回退提示条、降级标记等全局信息。
  * </p>
  * <p>
- * <b>存储:</b>不落库,每次请求由合并服务从 presale_report_version 行 + 三层 JSON 提取。
+ * 报告合并视图的元信息 DTO。
+ * </p>
+ * <p>
+ * 当前 PR-3.D3 阶段,本 DTO 实际由前端 merge-snapshot.ts 的 buildMeta() 在本地组装,
+ * 后端暂无 MergeService / /merged-view 接口。本类字段仅作为 TS 契约镜像存在,
+ * 供未来 MergeService 实装时直接填充(见 snapshot 登记的独立 PR)。
+ * </p>
+ * <p>
+ * 字段序列化注解(如 @PresaleDateTimeJson)在 MergeService 上线前不会被实际触发,
+ * 但保留以确保未来实装时输出形态与前端透传的 raw.meta.generated_at 一致。
  * </p>
  */
 @Data
@@ -57,6 +66,12 @@ public class MergedViewMeta {
      */
     @JsonProperty("generation_status")
     private String generationStatus;
+
+    /** 报告生成完成时间。来源 raw.meta.generated_at,可 null。序列化为 RFC3339 带 +08:00。 */
+    @JsonProperty("generated_at")
+    @JsonSerialize(using = PresaleDateTimeJson.Serializer.class)
+    @JsonDeserialize(using = PresaleDateTimeJson.Deserializer.class)
+    private LocalDateTime generatedAt;
 
     /** 是否冻结(frozen_at != null 派生得到,便于前端判断)。 */
     private Boolean frozen;

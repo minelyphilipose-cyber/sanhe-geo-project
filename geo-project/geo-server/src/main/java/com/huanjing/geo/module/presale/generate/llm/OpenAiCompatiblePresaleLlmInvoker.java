@@ -2,7 +2,9 @@ package com.huanjing.geo.module.presale.generate.llm;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.huanjing.geo.module.presale.persist.mapper.PresaleLlmConfigMapper;
+import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
+import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +26,7 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
     private static final String DEFAULT_QUERY_SYSTEM_PROMPT = "You are a GEO monitoring assistant.";
     private static final int DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
 
-    private final PresaleLlmConfigMapper configMapper;
+    private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
     private final PresaleLlmHttpClient httpClient;
     private final ObjectMapper objectMapper;
@@ -68,7 +70,8 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                                           String userPrompt,
                                           double temperature,
                                           boolean normalizeJsonOutput) throws LlmInvokeException {
-        PresaleLlmPlatformConfigRow config = requireConfig(ctx.platformCode());
+        AiPlatformConfig config = requireConfig(ctx.platformCode());
+        String modelId = resolvePresaleModelId(config);
         String apiKey = platformCredentialService.resolveApiKey(
                 config.getPlatformCode(), config.getPrimaryKeyRef(), config.getApiKey()
         );
@@ -85,7 +88,7 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
             long started = System.currentTimeMillis();
             try {
                 throttle(config.getPlatformCode(), qps);
-                InvocationResponse response = invokeOnce(config, apiKey, systemPrompt, userPrompt, temperature, timeoutMs);
+                InvocationResponse response = invokeOnce(config, modelId, apiKey, systemPrompt, userPrompt, temperature, timeoutMs);
                 String responseText = response.text();
                 if (normalizeJsonOutput) {
                     responseText = normalizeJsonText(responseText);
@@ -115,14 +118,15 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         throw new LlmInvokeException("LLM invoke failed after retries: " + reason, lastError);
     }
 
-    private InvocationResponse invokeOnce(PresaleLlmPlatformConfigRow config,
+    private InvocationResponse invokeOnce(AiPlatformConfig config,
+                                          String modelId,
                                           String apiKey,
                                           String systemPrompt,
                                           String userPrompt,
                                           double temperature,
                                           int timeoutMs) throws Exception {
         String targetUrl = normalizeChatCompletionsUrl(config.getApiUrl());
-        String requestBody = buildRequestBody(config.getModelId(), systemPrompt, userPrompt, temperature);
+        String requestBody = buildRequestBody(modelId, systemPrompt, userPrompt, temperature);
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put("Content-Type", "application/json");
         headers.put("Authorization", "Bearer " + apiKey);
@@ -171,10 +175,55 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
             if (!root.has("scene_advantages") || !root.get("scene_advantages").isArray()) {
                 throw new AnalyzeParseException("analyze output scene_advantages must be array");
             }
+            validateTopKeywords(root.get("top_keywords"));
+            validateNegativeEvidence(root.get("negative_evidence"));
         } catch (AnalyzeParseException ex) {
             throw ex;
         } catch (Exception ex) {
             throw new AnalyzeParseException("analyze output is not valid JSON", ex);
+        }
+    }
+
+    private void validateTopKeywords(JsonNode topKeywordsNode) throws AnalyzeParseException {
+        if (topKeywordsNode == null || !topKeywordsNode.isArray()) {
+            throw new AnalyzeParseException("analyze output top_keywords must be array");
+        }
+        for (JsonNode item : topKeywordsNode) {
+            if (item == null || !item.isObject()) {
+                throw new AnalyzeParseException("analyze output top_keywords element must be object");
+            }
+            JsonNode keywordNode = item.get("keyword");
+            if (keywordNode == null || !keywordNode.isTextual() || keywordNode.asText().trim().isEmpty()) {
+                throw new AnalyzeParseException("analyze output top_keywords.keyword must be non-blank string");
+            }
+            JsonNode sentimentNode = item.get("sentiment");
+            if (sentimentNode == null || !sentimentNode.isTextual()) {
+                throw new AnalyzeParseException("analyze output top_keywords.sentiment must be string");
+            }
+            String sentiment = sentimentNode.asText();
+            if (!"POSITIVE".equals(sentiment) && !"NEUTRAL".equals(sentiment) && !"NEGATIVE".equals(sentiment)) {
+                throw new AnalyzeParseException("analyze output top_keywords.sentiment invalid: " + sentiment);
+            }
+        }
+    }
+
+    private void validateNegativeEvidence(JsonNode negativeEvidenceNode) throws AnalyzeParseException {
+        if (negativeEvidenceNode == null || !negativeEvidenceNode.isObject()) {
+            throw new AnalyzeParseException("analyze output negative_evidence must be object");
+        }
+        JsonNode hasNegativeNode = negativeEvidenceNode.get("has_negative");
+        if (hasNegativeNode == null || !hasNegativeNode.isBoolean()) {
+            throw new AnalyzeParseException("analyze output negative_evidence.has_negative must be boolean");
+        }
+        JsonNode snippetNode = negativeEvidenceNode.get("snippet");
+        if (hasNegativeNode.asBoolean()) {
+            if (snippetNode == null || !snippetNode.isTextual() || snippetNode.asText().trim().isEmpty()) {
+                throw new AnalyzeParseException("analyze output negative_evidence.snippet must be non-blank string when has_negative=true");
+            }
+            return;
+        }
+        if (snippetNode != null && !snippetNode.isNull()) {
+            throw new AnalyzeParseException("analyze output negative_evidence.snippet must be null when has_negative=false");
         }
     }
 
@@ -240,18 +289,36 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         return trimmed;
     }
 
-    private PresaleLlmPlatformConfigRow requireConfig(String platformCode) throws LlmInvokeException {
-        PresaleLlmPlatformConfigRow row = configMapper.selectRuntimeConfig(platformCode);
-        if (row == null) {
+    private AiPlatformConfig requireConfig(String platformCode) throws LlmInvokeException {
+        AiPlatformConfig platform = aiPlatformConfigMapper.selectOne(
+                PresalePlatformConfigQueries.presaleEnabledWrapper()
+                        .eq(AiPlatformConfig::getPlatformCode, platformCode)
+                        .last("LIMIT 1")
+        );
+        if (platform == null) {
             throw new LlmInvokeException("Platform config not found: " + platformCode);
         }
-        if (row.getInWhitelist() == null || row.getInWhitelist() != 1) {
-            throw new LlmInvokeException("Platform not in presale whitelist: " + platformCode);
-        }
-        if (!StringUtils.hasText(row.getApiUrl()) || !StringUtils.hasText(row.getModelId())) {
+        String modelId = resolvePresaleModelId(platform);
+        if (!StringUtils.hasText(platform.getApiUrl()) || !StringUtils.hasText(modelId)) {
             throw new LlmInvokeException("Invalid api_url/model_id for platform: " + platformCode);
         }
-        return row;
+        return platform;
+    }
+
+    /**
+     * 防御性 fallback: 正常流程由 SQL 过滤保证 low_model_id 非空,
+     * 本方法仅防止调用方绕过 SQL 过滤导致崩溃。
+     */
+    String resolvePresaleModelId(AiPlatformConfig platform) {
+        String low = platform == null ? null : platform.getLowModelId();
+        if (StringUtils.hasText(low)) {
+            return low.trim();
+        }
+        if (platform != null) {
+            log.warn("low_model_id is blank, fallback to model_id, platformCode={}", platform.getPlatformCode());
+            return platform.getModelId();
+        }
+        return null;
     }
 
     private String buildRequestBody(String modelId, String systemPrompt, String userPrompt, double temperature)

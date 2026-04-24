@@ -14,14 +14,14 @@
           <div class="mono report-id">REPORT · {{ reportCode }}</div>
         </div>
 
-        <!-- 主标题区域 -->
+        <!-- 主标题区域(固定两行,不随品牌名变长) -->
         <div class="cover-hero">
           <div class="cover-eyebrow">AI Visibility Diagnostic Report</div>
           <h1 class="display-serif cover-title">
-            {{ reportTitleLine1 }}<br />{{ reportTitleLine2 }}
+            AI 可见度<br />诊断报告
           </h1>
           <div class="cover-divider"></div>
-          <div class="chinese-serif cover-custom-for">
+          <div class="chinese-serif cover-custom-for" :style="customForStyle">
             专为 <span class="cover-brand-highlight">{{ mergedView.brand_name }}</span> 定制
           </div>
           <div class="cover-sub">{{ categoryLine }}</div>
@@ -142,6 +142,20 @@ const issuedText = computed(() => {
     day: 'numeric'
   })
 })
+
+/**
+ * 副标题字体响应式降级(方案 A 防御性塔注底)。
+ *
+ * 正常情况下"专为 XXX 定制"走 22px,品牌名超过 8 字时降为 18px,
+ * 超过 14 字降为 16px。避免副标题换行挤压 divider 和 cover-sub。
+ */
+ const customForStyle = computed(() => {
+  const brandLen = (mergedView.value.brand_name || '').length
+  let fontSize = 22
+  if (brandLen > 14) fontSize = 16
+  else if (brandLen > 8) fontSize = 18
+  return { fontSize: `${fontSize}px` }
+})
 </script>
 
 <style scoped>
@@ -235,7 +249,7 @@ const issuedText = computed(() => {
 
 /* 底部 grid */
 .cover-footer {
-  margin-top: auto;
+  /* margin-top: auto; */
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 20px;

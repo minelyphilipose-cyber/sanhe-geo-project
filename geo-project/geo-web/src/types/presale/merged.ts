@@ -41,6 +41,8 @@ export interface MergedViewMeta {
   schema_version: string;
   /** INIT/QUEUED/.../DONE/FAILED,前端仅在 DONE 时渲染完整报告。 */
   generation_status: string;
+  /** 来源 raw.meta.generated_at,RFC3339 带 +08:00,可 null。 */
+  generated_at?: string | null;
   /** frozen_at != null 派生。 */
   frozen: boolean;
   /** RFC3339 带 +08:00,可 null。 */

@@ -51,8 +51,22 @@
           <el-table-column label="创建时间" width="180">
             <template #default="scope">{{ scope.row.createdAt || '-' }}</template>
           </el-table-column>
-          <el-table-column v-if="canManage" label="操作" width="180" fixed="right">
+          <el-table-column v-if="canManage" label="操作" width="260" fixed="right">
             <template #default="scope">
+              <el-tooltip
+                :content="presaleActionTooltip(scope.row)"
+                :disabled="!presaleActionDisabled(scope.row)"
+                placement="top"
+              >
+                <el-button
+                  link
+                  :type="isPresaleEnabled(scope.row) ? 'warning' : 'success'"
+                  :disabled="presaleActionDisabled(scope.row)"
+                  @click="togglePresaleEnabled(scope.row)"
+                >
+                  {{ isPresaleEnabled(scope.row) ? '售前已启用' : '售前已停用' }}
+                </el-button>
+              </el-tooltip>
               <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
               <el-button link type="danger" @click="remove(scope.row)">删除</el-button>
             </template>
@@ -175,6 +189,9 @@
               <el-switch v-model="form.enabled" active-text="启用" inactive-text="停用" />
             </el-form-item>
           </el-col>
+        </el-row>
+
+        <el-row :gutter="12">
           <el-col :xs="24" :md="12">
             <el-form-item label="降级处理" prop="degraded">
               <el-switch v-model="form.degraded" active-text="是" inactive-text="否" />
@@ -204,7 +221,13 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 import { useDictStore } from '@/stores/dict'
 import { useUserStore } from '@/stores/user'
 import DataState from '@/components/ui/DataState.vue'
-import { createPlatformConfig, deletePlatformConfig, getPlatformConfigPage, updatePlatformConfig } from '@/api/platformConfig'
+import {
+  createPlatformConfig,
+  deletePlatformConfig,
+  getPlatformConfigPage,
+  updatePlatformConfig,
+  updatePresaleEnabled,
+} from '@/api/platformConfig'
 import type { AIPlatformConfigItem } from '@/types'
 
 const dictStore = useDictStore()
@@ -408,6 +431,43 @@ async function remove(row: AIPlatformConfigItem) {
     )
     await deletePlatformConfig(row.id)
     ElMessage.success('删除成功')
+    await load()
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return
+  }
+}
+
+function isPresaleEnabled(row: AIPlatformConfigItem) {
+  return row.enabledForPresale ?? true
+}
+
+function hasLowModel(row: AIPlatformConfigItem) {
+  return !!(row.lowModelId && row.lowModelId.trim())
+}
+
+function presaleActionDisabled(row: AIPlatformConfigItem) {
+  return !isPresaleEnabled(row) && !hasLowModel(row)
+}
+
+function presaleActionTooltip(row: AIPlatformConfigItem) {
+  return presaleActionDisabled(row) ? '请先配置低性能模型(low_model_id)' : ''
+}
+
+async function togglePresaleEnabled(row: AIPlatformConfigItem) {
+  const target = !isPresaleEnabled(row)
+  const actionText = target ? '启用' : '停用'
+  if (target && !hasLowModel(row)) {
+    ElMessage.warning('请先配置低性能模型(low_model_id)')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认${actionText}平台「${row.platformName}」的售前能力？`,
+      `${actionText}确认`,
+      { type: target ? 'success' : 'warning', confirmButtonText: '确认', cancelButtonText: '取消' },
+    )
+    await updatePresaleEnabled(row.id, target)
+    ElMessage.success(`售前已${actionText}`)
     await load()
   } catch (err: any) {
     if (err === 'cancel' || err === 'close') return

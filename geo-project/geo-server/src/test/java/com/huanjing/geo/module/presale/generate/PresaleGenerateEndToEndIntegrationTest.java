@@ -10,11 +10,13 @@ import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMappe
 import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
+import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.test.util.AopTestUtils;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -74,14 +76,15 @@ class PresaleGenerateEndToEndIntegrationTest {
 
         when(aiPlatformConfigMapper.selectCount(any())).thenReturn(1L);
         when(promptTemplateMapper.selectCount(any())).thenReturn(1L, 1L);
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of());
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("kimi")));
         when(promptTemplateMapper.selectList(any())).thenReturn(List.of());
         when(competitorAggregator.extractTopCompetitorsFromBatch1(anyLong(), anyString())).thenReturn(List.of());
         when(reuseDecisionService.preloadByVersionAndBatch(anyLong(), anyInt())).thenReturn(Map.of());
         when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
                 .thenThrow(new IllegalStateException("BENCHMARK_MISSING fallback (_ALL_,_ALL_) not found"));
 
-        ReflectionTestUtils.invokeMethod(orchestrator, "doTriggerGenerate", version.getId(), 1L, false);
+        Object target = AopTestUtils.getTargetObject(orchestrator);
+        ReflectionTestUtils.invokeMethod(target, "doTriggerGenerate", version.getId(), 1L, false);
 
         PresaleReportVersion latest = versionMapper.selectById(version.getId());
         assertThat(latest).isNotNull();
@@ -119,5 +122,15 @@ class PresaleGenerateEndToEndIntegrationTest {
         versionMapper.insert(version);
         return version;
     }
+
+    private AiPlatformConfig platform(String code) {
+        AiPlatformConfig config = new AiPlatformConfig();
+        config.setPlatformCode(code);
+        config.setEnabled(true);
+        config.setEnabledForPresale(true);
+        config.setLowModelId("low-model");
+        return config;
+    }
 }
+
 

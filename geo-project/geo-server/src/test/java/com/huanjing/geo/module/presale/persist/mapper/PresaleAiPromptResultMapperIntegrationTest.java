@@ -22,17 +22,19 @@ class PresaleAiPromptResultMapperIntegrationTest {
     @Sql(scripts = "/sql/presale_prompt_template_c5_cleanup.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
     @Sql(scripts = "/sql/presale_prompt_template_mixed_competitor_var.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
     @Sql(scripts = "/sql/presale_prompt_template_c5_cleanup.sql", executionPhase = Sql.ExecutionPhase.AFTER_TEST_METHOD)
-    void selectTemplateIntentStats_excludesHasCompetitorVar1Rows() {
+    void selectTemplateIntentStats_includesBothCompetitorVarRows() {
         List<PromptTemplateIntentStatRow> rows = mapper.selectTemplateIntentStats();
         assertThat(rows).isNotEmpty();
-        assertThat(rows).allMatch(row -> row.getHasCompetitorVar() != null && row.getHasCompetitorVar() == 0);
 
-        PromptTemplateIntentStatRow c5Row = rows.stream()
+        List<PromptTemplateIntentStatRow> c5Rows = rows.stream()
                 .filter(row -> "C5_TEST_INTENT".equals(row.getIntentLabel()))
-                .findFirst()
-                .orElseThrow();
-        assertThat(c5Row.getHasCompetitorVar()).isEqualTo(0);
-        assertThat(c5Row.getTemplateCount()).isEqualTo(1);
+                .toList();
+        assertThat(c5Rows).hasSize(2);
+        assertThat(c5Rows).anyMatch(row -> row.getHasCompetitorVar() != null
+                && row.getHasCompetitorVar() == 0
+                && row.getTemplateCount() == 1);
+        assertThat(c5Rows).anyMatch(row -> row.getHasCompetitorVar() != null
+                && row.getHasCompetitorVar() == 1
+                && row.getTemplateCount() == 1);
     }
 }
-

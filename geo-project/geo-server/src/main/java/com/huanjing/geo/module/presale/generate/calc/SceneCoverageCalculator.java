@@ -12,6 +12,7 @@ import com.huanjing.geo.module.presale.dto.snapshot.computed.PresaleIntentCode;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.Competitor;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.generate.PresaleCompetitorAggregator;
+import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
@@ -31,7 +32,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
@@ -48,11 +48,15 @@ public class SceneCoverageCalculator {
     public SceneAndIntentResult compute(Long versionId,
                                         RawSnapshotDTO raw,
                                         Map<String, Integer> intentTotalPrompts) {
-        Set<String> allPlatforms = aiPlatformConfigMapper.selectList(
-                        new LambdaQueryWrapper<AiPlatformConfig>().eq(AiPlatformConfig::getEnabled, true))
-                .stream()
+        List<String> whitelistedPlatformCodes = aiPlatformConfigMapper.selectList(
+                        PresalePlatformConfigQueries.presaleEnabledWrapper()
+                ).stream()
                 .map(AiPlatformConfig::getPlatformCode)
-                .collect(Collectors.toSet());
+                .filter(code -> code != null && !code.isBlank())
+                .toList();
+        Set<String> allPlatforms = new HashSet<>(
+                whitelistedPlatformCodes == null ? List.of() : whitelistedPlatformCodes
+        );
 
         Set<String> degraded = raw == null || raw.getTestSummary() == null || raw.getTestSummary().getDegradedPlatforms() == null
                 ? Set.of() : new HashSet<>(raw.getTestSummary().getDegradedPlatforms());
@@ -240,4 +244,3 @@ public class SceneCoverageCalculator {
                                        boolean covered) {
     }
 }
-

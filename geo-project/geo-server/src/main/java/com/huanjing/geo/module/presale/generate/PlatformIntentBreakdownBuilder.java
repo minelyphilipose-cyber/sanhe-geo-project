@@ -117,6 +117,13 @@ public class PlatformIntentBreakdownBuilder {
                 if (row == null || row.getIntentLabel() == null) {
                     continue;
                 }
+                // D26 架构让步(PR-3.D3 CP5 Block 2):SQL 层 selectTemplateIntentStats
+                // 不再过滤 has_competitor_var,返回全量 GROUP BY 结果。此处 Java 层单点
+                // 过滤为唯一屏障,删除此过滤会导致 intent_breakdown 混入竞品模板,
+                // 破坏 scene_coverage 同源语义。修改前先查 snapshot §D26 调整记录。
+                if (row.getHasCompetitorVar() == null || row.getHasCompetitorVar() != 0) {
+                    continue;
+                }
                 PresaleIntentCode intentCode = resolveIntentByLabel(row.getIntentLabel());
                 int base = safeInt(row.getTemplateCount());
                 map.merge(intentCode.getCode(), base, Integer::sum);

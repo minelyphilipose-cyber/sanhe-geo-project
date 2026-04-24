@@ -123,6 +123,31 @@ public class AiPlatformConfigService {
         return entity;
     }
 
+    public AiPlatformConfig updatePresaleEnabled(Long id, Boolean enabledForPresale) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission("user.manage");
+
+        AiPlatformConfig entity = requireById(id);
+        if (Boolean.TRUE.equals(enabledForPresale) && !StringUtils.hasText(entity.getLowModelId())) {
+            throw new BizException(400, "low_model_id is required when enabling presale");
+        }
+
+        Map<String, Object> before = snapshot(entity);
+        entity.setEnabledForPresale(Boolean.TRUE.equals(enabledForPresale));
+        aiPlatformConfigMapper.updateById(entity);
+
+        activityLogService.logAction(
+                operator.getId(),
+                "platform.presale_enabled.update",
+                "platform",
+                entity.getId(),
+                before,
+                snapshot(entity),
+                null
+        );
+        return entity;
+    }
+
     public void delete(Long id) {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("user.manage");
@@ -227,6 +252,11 @@ public class AiPlatformConfigService {
         entity.setModelName(req.getModelName().trim());
         entity.setConcurrencyLimit(req.getConcurrencyLimit() != null ? req.getConcurrencyLimit() : 1);
         entity.setEnabled(req.getEnabled());
+        entity.setEnabledForPresale(req.getEnabledForPresale() != null ? req.getEnabledForPresale() : true);
+        entity.setEnabledForArticle(req.getEnabledForArticle() != null ? req.getEnabledForArticle() : false);
+        entity.setMaxRetry(req.getMaxRetry() != null ? req.getMaxRetry() : 2);
+        entity.setTimeoutMs(req.getTimeoutMs() != null ? req.getTimeoutMs() : 60000);
+        entity.setRateLimitQps(req.getRateLimitQps() != null ? req.getRateLimitQps() : 3);
         entity.setDegraded(req.getDegraded());
         entity.setDegradedReason(StringUtils.hasText(req.getDegradedReason()) ? req.getDegradedReason().trim() : null);
         entity.setCurrentHealthStatus("normal");
@@ -251,6 +281,11 @@ public class AiPlatformConfigService {
         entity.setModelName(req.getModelName().trim());
         entity.setConcurrencyLimit(req.getConcurrencyLimit() != null ? req.getConcurrencyLimit() : entity.getConcurrencyLimit());
         entity.setEnabled(req.getEnabled());
+        entity.setEnabledForPresale(req.getEnabledForPresale() != null ? req.getEnabledForPresale() : entity.getEnabledForPresale());
+        entity.setEnabledForArticle(req.getEnabledForArticle() != null ? req.getEnabledForArticle() : entity.getEnabledForArticle());
+        entity.setMaxRetry(req.getMaxRetry() != null ? req.getMaxRetry() : entity.getMaxRetry());
+        entity.setTimeoutMs(req.getTimeoutMs() != null ? req.getTimeoutMs() : entity.getTimeoutMs());
+        entity.setRateLimitQps(req.getRateLimitQps() != null ? req.getRateLimitQps() : entity.getRateLimitQps());
         entity.setDegraded(req.getDegraded());
         entity.setDegradedReason(StringUtils.hasText(req.getDegradedReason()) ? req.getDegradedReason().trim() : null);
         entity.setRemark(req.getRemark());
@@ -272,6 +307,11 @@ public class AiPlatformConfigService {
         snapshot.put("modelName", entity.getModelName());
         snapshot.put("concurrencyLimit", entity.getConcurrencyLimit());
         snapshot.put("enabled", entity.getEnabled());
+        snapshot.put("enabledForPresale", entity.getEnabledForPresale());
+        snapshot.put("enabledForArticle", entity.getEnabledForArticle());
+        snapshot.put("maxRetry", entity.getMaxRetry());
+        snapshot.put("timeoutMs", entity.getTimeoutMs());
+        snapshot.put("rateLimitQps", entity.getRateLimitQps());
         snapshot.put("degraded", entity.getDegraded());
         snapshot.put("degradedReason", entity.getDegradedReason());
         snapshot.put("currentHealthStatus", entity.getCurrentHealthStatus());

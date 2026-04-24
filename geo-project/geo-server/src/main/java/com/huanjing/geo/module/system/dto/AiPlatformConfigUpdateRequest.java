@@ -30,6 +30,11 @@ public class AiPlatformConfigUpdateRequest {
     private Integer concurrencyLimit;
     @NotNull
     private Boolean enabled;
+    private Boolean enabledForPresale;
+    private Boolean enabledForArticle;
+    private Integer maxRetry;
+    private Integer timeoutMs;
+    private Integer rateLimitQps;
     @NotNull
     private Boolean degraded;
     private String degradedReason;

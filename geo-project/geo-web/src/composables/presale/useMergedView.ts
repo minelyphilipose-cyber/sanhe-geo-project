@@ -23,9 +23,8 @@
  *
  * 版本演进:
  *   - α·2:初版,含 mergedView/currentVersionNo/loading/error/refresh/switchVersion
- *   - β·1:追加 reportCreatedAt(MergedViewDTO 无"报告创建时间"字段,Page01 封面
- *          等需要显示"ISSUED"日期。该字段源自 ReportDetailVO.createdAt,
- *          Detail 顶层取出并注入。向后兼容追加,不影响 α·2 既有消费方)
+ *   - β·1/W4:追加 reportCreatedAt(Page01 封面等需要显示"ISSUED"日期)。
+ *            Detail 顶层按 `meta.generated_at ?? reportDetail.createdAt` 计算并注入。
  *
  * 不在本 composable 内做的事:
  *   - fetch / mergeSnapshot:Detail 顶层做
@@ -62,17 +61,9 @@ export interface MergedViewContext {
   switchVersion: (versionNo: number) => Promise<void>
 
   /**
-   * 报告主表创建时间(ReportDetailVO.createdAt,RFC3339 带 +08:00)。
-   *
-   * 为什么在这里:
-   *   MergedViewDTO 本身没有"报告创建时间"字段,P1·B buildMeta 也没有把
-   *   raw.meta.generated_at 提升到 merged view。Page01 封面的 ISSUED 区块
-   *   需要一个日期,目前用 reportCreatedAt 代替。
-   *
-   * TODO:未来若 MergedViewMeta 补上 generated_at,优先用那个(精确到"生成完成时刻"),
-   *       本字段降级为 fallback。
-   *
-   * β·1 新增(α·2 合入时未提供,Codex 合入本批后重新 provide;向后兼容追加)。
+   * 报告展示时间(ISSUED)。
+   * 计算优先级: `mergedView.meta.generated_at`(生成完成时刻)
+   *        > `ReportDetailVO.createdAt`(报告创建时刻)。
    */
   reportCreatedAt: Ref<string | null>
 }

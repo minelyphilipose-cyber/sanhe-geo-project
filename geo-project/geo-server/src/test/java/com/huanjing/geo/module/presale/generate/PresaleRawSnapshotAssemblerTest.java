@@ -5,15 +5,17 @@ import com.huanjing.geo.module.presale.dto.snapshot.common.MatchLevel;
 import com.huanjing.geo.module.presale.dto.snapshot.common.ScoreSet;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.BenchmarksFrozen;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
+import com.huanjing.geo.module.presale.dto.snapshot.raw.SentimentDetail;
+import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
+import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
-import com.huanjing.geo.module.system.entity.AiPlatformConfig;
-import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -212,6 +214,96 @@ class PresaleRawSnapshotAssemblerTest {
                 assembler.assemble(1001L, report, version, Set.of(), List.of()));
     }
 
+    @Test
+    void sentimentDetail_aggregatesKeywordsAndNegativeEvidence_withSortingAndLimits() throws Exception {
+        PresaleRawSnapshotAssembler assembler = createAssembler();
+        PresaleReport report = report();
+        PresaleReportVersion version = version();
+
+        mockCommonCounts(1L, 1L, 0L, 4L, 4L);
+        mockEnabledPlatforms(platform("kimi", "Kimi"));
+        when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
+
+        LocalDateTime t1 = LocalDateTime.of(2026, 4, 23, 10, 0);
+        LocalDateTime t2 = LocalDateTime.of(2026, 4, 23, 10, 5);
+        LocalDateTime t3 = LocalDateTime.of(2026, 4, 23, 10, 10);
+        LocalDateTime t4 = LocalDateTime.of(2026, 4, 23, 10, 20);
+
+        PresaleAiPromptResult r1 = promptResultWithSentimentPayload(1L, "POSITIVE",
+                "[{\"keyword\":\"性价比高\",\"sentiment\":\"POSITIVE\"},{\"keyword\":\"等位时间长\",\"sentiment\":\"NEGATIVE\"}]",
+                "{\"has_negative\":true,\"snippet\":\"证据A\"}", 11L, 101L, "kimi", t1);
+        PresaleAiPromptResult r2 = promptResultWithSentimentPayload(2L, "NEGATIVE",
+                "[{\"keyword\":\"性价比高\",\"sentiment\":\"POSITIVE\"}]",
+                "{\"has_negative\":true,\"snippet\":\"证据B\"}", 12L, 102L, "kimi", t2);
+        PresaleAiPromptResult r3 = promptResultWithSentimentPayload(3L, "NEUTRAL",
+                "[{\"keyword\":\"服务稳定\",\"sentiment\":\"POSITIVE\"}]",
+                "{\"has_negative\":false,\"snippet\":null}", 13L, 103L, "kimi", t3);
+        PresaleAiPromptResult r4 = promptResultWithSentimentPayload(4L, "POSITIVE",
+                "[]",
+                "{\"has_negative\":true,\"snippet\":\"证据C\"}", 14L, 104L, "kimi", t4);
+
+        when(aiPromptResultMapper.selectList(any())).thenReturn(
+                List.of(promptResult(10L, 1, 1, "POSITIVE", null, null)),
+                List.of(r1, r2, r3, r4)
+        );
+
+        when(promptTemplateMapper.selectBatchIds(any())).thenReturn(List.of(
+                promptTemplate(101L, "问句1"),
+                promptTemplate(102L, "问句2"),
+                promptTemplate(103L, "问句3"),
+                promptTemplate(104L, "问句4")
+        ));
+
+        when(aiCallMapper.selectBatchIds(any())).thenReturn(List.of(
+                aiCall(11L, t1),
+                aiCall(12L, t2),
+                aiCall(13L, t3),
+                aiCall(14L, t4)
+        ));
+
+        String json = assembler.assemble(1001L, report, version, Set.of(), List.of());
+        RawSnapshotDTO raw = new ObjectMapper().readValue(json, RawSnapshotDTO.class);
+
+        assertNotNull(raw.getSentimentDetail());
+        assertEquals(3, raw.getSentimentDetail().getTopKeywords().size());
+        assertEquals("性价比高", raw.getSentimentDetail().getTopKeywords().get(0).getKeyword());
+        assertEquals(2, raw.getSentimentDetail().getTopKeywords().get(0).getFrequency());
+        assertEquals(SentimentDetail.Sentiment.POSITIVE, raw.getSentimentDetail().getTopKeywords().get(0).getSentiment());
+
+        assertEquals(3, raw.getSentimentDetail().getNegativeEvidence().size());
+        assertEquals("证据C", raw.getSentimentDetail().getNegativeEvidence().get(0).getSnippet());
+        assertEquals("问句4", raw.getSentimentDetail().getNegativeEvidence().get(0).getQuery());
+        assertEquals("证据B", raw.getSentimentDetail().getNegativeEvidence().get(1).getSnippet());
+        assertEquals("证据A", raw.getSentimentDetail().getNegativeEvidence().get(2).getSnippet());
+    }
+
+    @Test
+    void sentimentDetail_emptyPayloads_returnsEmptyArraysNotNull() throws Exception {
+        PresaleRawSnapshotAssembler assembler = createAssembler();
+        PresaleReport report = report();
+        PresaleReportVersion version = version();
+
+        mockCommonCounts(1L, 1L, 0L, 2L, 2L);
+        mockEnabledPlatforms(platform("kimi", "Kimi"));
+        when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
+
+        PresaleAiPromptResult sentimentOnly = promptResultWithSentimentPayload(1L, "NEUTRAL",
+                "[]", "{}", null, 101L, "kimi", LocalDateTime.now());
+        when(aiPromptResultMapper.selectList(any())).thenReturn(
+                List.of(promptResult(10L, 1, 1, "POSITIVE", null, null)),
+                List.of(sentimentOnly)
+        );
+        when(promptTemplateMapper.selectBatchIds(any())).thenReturn(List.of(promptTemplate(101L, "问句1")));
+
+        String json = assembler.assemble(1001L, report, version, Set.of(), List.of());
+        RawSnapshotDTO raw = new ObjectMapper().readValue(json, RawSnapshotDTO.class);
+
+        assertNotNull(raw.getSentimentDetail().getTopKeywords());
+        assertTrue(raw.getSentimentDetail().getTopKeywords().isEmpty());
+        assertNotNull(raw.getSentimentDetail().getNegativeEvidence());
+        assertTrue(raw.getSentimentDetail().getNegativeEvidence().isEmpty());
+    }
+
     private PresaleRawSnapshotAssembler createAssembler() {
         return new PresaleRawSnapshotAssembler(
                 aiCallMapper,
@@ -284,6 +376,29 @@ class PresaleRawSnapshotAssemblerTest {
         row.setSentiment(sentiment);
         row.setMentionedCompetitors(mentionedCompetitors);
         row.setSceneAdvantages(sceneAdvantages);
+        row.setTopKeywordsJson("[]");
+        row.setNegativeEvidenceJson("{}");
+        row.setCreatedAt(LocalDateTime.now());
+        return row;
+    }
+
+    private PresaleAiPromptResult promptResultWithSentimentPayload(Long id,
+                                                                   String sentiment,
+                                                                   String topKeywordsJson,
+                                                                   String negativeEvidenceJson,
+                                                                   Long analyzeCallId,
+                                                                   Long promptTemplateId,
+                                                                   String platformCode,
+                                                                   LocalDateTime createdAt) {
+        PresaleAiPromptResult row = new PresaleAiPromptResult();
+        row.setId(id);
+        row.setSentiment(sentiment);
+        row.setTopKeywordsJson(topKeywordsJson);
+        row.setNegativeEvidenceJson(negativeEvidenceJson);
+        row.setAnalyzeCallId(analyzeCallId);
+        row.setPromptTemplateId(promptTemplateId);
+        row.setPlatformCode(platformCode);
+        row.setCreatedAt(createdAt);
         return row;
     }
 
@@ -291,7 +406,20 @@ class PresaleRawSnapshotAssemblerTest {
         AiPlatformConfig p = new AiPlatformConfig();
         p.setPlatformCode(code);
         p.setPlatformName(name);
-        p.setEnabled(true);
         return p;
+    }
+
+    private PresalePromptTemplate promptTemplate(Long id, String content) {
+        PresalePromptTemplate template = new PresalePromptTemplate();
+        template.setId(id);
+        template.setPromptContent(content);
+        return template;
+    }
+
+    private PresaleAiCall aiCall(Long id, LocalDateTime createdAt) {
+        PresaleAiCall call = new PresaleAiCall();
+        call.setId(id);
+        call.setCreatedAt(createdAt);
+        return call;
     }
 }
