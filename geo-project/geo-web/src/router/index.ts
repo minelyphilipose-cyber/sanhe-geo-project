@@ -9,6 +9,27 @@ import { resolvePostLoginPath } from '@/utils/navigation'
 
 NProgress.configure({ showSpinner: false })
 
+const enablePresalePrintPoc = import.meta.env.DEV && import.meta.env.VITE_ENABLE_PRESALE_POC !== 'false'
+const presalePrintPocRoutes = enablePresalePrintPoc
+  ? [
+      {
+        path: '/presale-print-poc/:reportId',
+        name: 'PresalePrintPoc',
+        component: () => import('@/views/admin/presale/report/PresalePrintPoc.vue'),
+        meta: { title: '售前报表打印 PoC' },
+      },
+    ]
+  : []
+const publicPathPrefixes = [
+  '/login',
+  '/r/',
+  '/dashboard/',
+  '/presale-print/',
+  ...(enablePresalePrintPoc ? ['/presale-print-poc/'] : []),
+  '/403',
+  '/session-expired',
+]
+
 const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -42,6 +63,13 @@ const router = createRouter({
       component: () => import('@/views/share/ProjectDashboard.vue'),
       meta: { title: '项目统计看板' },
     },
+    {
+      path: '/presale-print/:renderToken',
+      name: 'PresalePrint',
+      component: () => import('@/views/admin/presale/report/PresalePrint.vue'),
+      meta: { title: '售前报表打印' },
+    },
+    ...presalePrintPocRoutes,
     adminRoutes,
     partnerRoutes,
     {
@@ -57,10 +85,8 @@ const router = createRouter({
   ],
 })
 
-const PUBLIC_PATHS = ['/login', '/r/', '/dashboard/', '/403', '/session-expired']
-
 function isPublicPath(path: string): boolean {
-  return PUBLIC_PATHS.some((p) => path.startsWith(p))
+  return publicPathPrefixes.some((p) => path.startsWith(p))
 }
 
 router.beforeEach(async (to, _from, next) => {

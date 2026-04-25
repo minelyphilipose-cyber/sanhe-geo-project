@@ -61,6 +61,28 @@ geo:
   report:
     web-base-url: ${REPORT_WEB_BASE_URL:http://127.0.0.1:3000}
     render-timeout-ms: ${REPORT_RENDER_TIMEOUT_MS:30000}
+  presale-export:
+    browser:
+      enabled: ${PRESALE_EXPORT_BROWSER_ENABLED:true}
+      preheat-on-startup: ${PRESALE_EXPORT_BROWSER_PREHEAT:true}
+      headless: ${PRESALE_EXPORT_BROWSER_HEADLESS:true}
+      device-scale-factor: ${PRESALE_EXPORT_DPR:2}
+      viewport-width: ${PRESALE_EXPORT_VIEWPORT_WIDTH:1440}
+      viewport-height: ${PRESALE_EXPORT_VIEWPORT_HEIGHT:2200}
+      browser-start-timeout-ms: ${PRESALE_EXPORT_BROWSER_START_TIMEOUT_MS:10000}
+      page-load-timeout-ms: ${PRESALE_EXPORT_PAGE_LOAD_TIMEOUT_MS:30000}
+      ready-timeout-ms: ${PRESALE_EXPORT_READY_TIMEOUT_MS:60000}
+      pdf-timeout-ms: ${PRESALE_EXPORT_PDF_TIMEOUT_MS:60000}
+      max-concurrency: ${PRESALE_EXPORT_MAX_CONCURRENCY:1}
+
+management:
+  endpoint:
+    health:
+      show-details: always
+  endpoints:
+    web:
+      exposure:
+        include: health
   dispatch:
     cron: "0 55 18 * * *"
     timezone: "Asia/Shanghai"
