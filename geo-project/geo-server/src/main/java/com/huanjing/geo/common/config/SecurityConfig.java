@@ -55,9 +55,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/login", "/api/auth/refresh").permitAll()
                 .requestMatchers("/api/health").permitAll()
                 .requestMatchers("/api/share/**").permitAll()
-                .requestMatchers("/api/presale/exports/render/**").permitAll()
-                // Local presale PDF PoC endpoints are only registered in the dev profile.
-                .requestMatchers("/api/dev/**").permitAll()
+                // TODO(PR-B): open /api/presale/exports/render/** when the signed render-token
+                // controller is implemented. Do not permit it before the backend contract exists.
                 .requestMatchers("/api/public/dashboard/**").permitAll()
                 .requestMatchers("/doc.html", "/swagger-ui/**", "/v3/api-docs/**", "/webjars/**").permitAll()
                 .requestMatchers("/actuator/**").permitAll()

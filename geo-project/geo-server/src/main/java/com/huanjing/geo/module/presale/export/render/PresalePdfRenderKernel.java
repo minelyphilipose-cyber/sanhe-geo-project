@@ -18,6 +18,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Component
@@ -37,11 +38,22 @@ public class PresalePdfRenderKernel {
         this.concurrency = new Semaphore(Math.max(1, properties.getBrowser().getMaxConcurrency()));
     }
 
+    /**
+     * Synchronous blocking render entry. The caller owns task-level queueing and should
+     * keep concurrency at or below the configured browser capacity.
+     */
     public PresalePdfRenderResult render(PresalePdfRenderRequest request) throws Exception {
         long started = System.nanoTime();
         PresaleExportProperties.Browser browserProps = properties.getBrowser();
-        if (!concurrency.tryAcquire()) {
-            throw new IllegalStateException("Presale export browser concurrency limit reached");
+        try {
+            if (!concurrency.tryAcquire(browserProps.getAcquireTimeoutMs(), TimeUnit.MILLISECONDS)) {
+                throw new PresaleExportConcurrencyException(
+                        "Presale export browser concurrency limit reached after "
+                                + browserProps.getAcquireTimeoutMs() + "ms");
+            }
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new PresaleExportConcurrencyException("Interrupted while waiting for presale export browser slot", ex);
         }
         try {
             Browser browser = browserManager.getBrowser();
@@ -103,8 +115,8 @@ public class PresalePdfRenderKernel {
                     }
                     throw ex;
                 } finally {
-                    Files.write(request.getDebugDir().resolve("console.log"), consoleLines, StandardCharsets.UTF_8);
-                    Files.write(request.getDebugDir().resolve("network.log"), networkLines, StandardCharsets.UTF_8);
+                    writeDebugFileQuietly(request, "console.log", consoleLines);
+                    writeDebugFileQuietly(request, "network.log", networkLines);
                 }
             }
         } finally {
@@ -118,5 +130,13 @@ public class PresalePdfRenderKernel {
 
     private String formatFailedRequest(Request req) {
         return "[requestfailed] " + req.method() + " " + req.url() + " " + req.failure();
+    }
+
+    private void writeDebugFileQuietly(PresalePdfRenderRequest request, String fileName, List<String> lines) {
+        try {
+            Files.write(request.getDebugDir().resolve(fileName), lines, StandardCharsets.UTF_8);
+        } catch (Exception ex) {
+            log.warn("Failed to write presale export debug file: {}", fileName, ex);
+        }
     }
 }

@@ -73,16 +73,8 @@ geo:
       page-load-timeout-ms: ${PRESALE_EXPORT_PAGE_LOAD_TIMEOUT_MS:30000}
       ready-timeout-ms: ${PRESALE_EXPORT_READY_TIMEOUT_MS:60000}
       pdf-timeout-ms: ${PRESALE_EXPORT_PDF_TIMEOUT_MS:60000}
+      acquire-timeout-ms: ${PRESALE_EXPORT_ACQUIRE_TIMEOUT_MS:30000}
       max-concurrency: ${PRESALE_EXPORT_MAX_CONCURRENCY:1}
-
-management:
-  endpoint:
-    health:
-      show-details: always
-  endpoints:
-    web:
-      exposure:
-        include: health
   dispatch:
     cron: "0 55 18 * * *"
     timezone: "Asia/Shanghai"
@@ -115,3 +107,12 @@ presale:
     allow-synthetic-fallback:
       mock: true
       real: false
+
+management:
+  endpoint:
+    health:
+      show-details: always
+  endpoints:
+    web:
+      exposure:
+        include: health
