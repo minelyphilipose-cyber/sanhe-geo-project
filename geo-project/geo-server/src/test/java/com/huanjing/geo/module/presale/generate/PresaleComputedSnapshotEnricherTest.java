@@ -149,7 +149,7 @@ class PresaleComputedSnapshotEnricherTest {
         ScoresCalculator scoresCalc = org.mockito.Mockito.mock(ScoresCalculator.class);
         PresaleRuleEngineExecutor engine = org.mockito.Mockito.mock(PresaleRuleEngineExecutor.class);
         RoiCalculator roiCalc = org.mockito.Mockito.mock(RoiCalculator.class);
-        org.mockito.Mockito.when(sceneCalc.compute(anyLong(), any(), any())).thenAnswer(inv -> {
+        org.mockito.Mockito.when(sceneCalc.compute(anyLong(), any(), any(), any())).thenAnswer(inv -> {
             @SuppressWarnings("unchecked")
             Map<String, Integer> totals = inv.getArgument(2, Map.class);
             return sceneAndIntentFromTotals(totals);
@@ -210,7 +210,7 @@ class PresaleComputedSnapshotEnricherTest {
         enricher.enrichAndValidate(1L, minimalWrappedRaw(), "{}", true);
 
         InOrder inOrder = org.mockito.Mockito.inOrder(sceneCoverageCalculator, scoresCalculator, ruleEngineExecutor, roiCalculator);
-        inOrder.verify(sceneCoverageCalculator).compute(anyLong(), any(), any());
+        inOrder.verify(sceneCoverageCalculator).compute(anyLong(), any(), any(), any());
         inOrder.verify(scoresCalculator).compute(any(), any(), any());
         inOrder.verify(ruleEngineExecutor).execute(any(), any());
         inOrder.verify(roiCalculator).compute(any(), any());
@@ -273,7 +273,7 @@ class PresaleComputedSnapshotEnricherTest {
                                 "SCENARIO", 0
                         )));
         doNothing().when(validator).validate(any(), any(), any());
-        lenient().when(sceneCoverageCalculator.compute(anyLong(), any(), any())).thenReturn(defaultSceneAndIntent());
+        lenient().when(sceneCoverageCalculator.compute(anyLong(), any(), any(), any())).thenReturn(defaultSceneAndIntent());
         lenient().when(scoresCalculator.compute(any(), any(), any())).thenReturn(defaultScores());
         lenient().when(ruleEngineExecutor.execute(any(), any())).thenReturn(defaultRuleResult());
         lenient().when(roiCalculator.compute(any(), any())).thenReturn(defaultRoi());

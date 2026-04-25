@@ -8,6 +8,7 @@ import com.huanjing.geo.module.presale.dto.snapshot.common.SceneQueryItem;
 import com.huanjing.geo.module.presale.dto.snapshot.common.SceneQueryMissing;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.ComputedSnapshotDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.IntentBreakdown;
+import com.huanjing.geo.module.presale.dto.snapshot.computed.PlatformIntentCell;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.PresaleIntentCode;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.Competitor;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
@@ -51,6 +52,13 @@ public class SceneCoverageCalculator {
     public SceneAndIntentResult compute(Long versionId,
                                         RawSnapshotDTO raw,
                                         Map<String, Integer> intentTotalPrompts) {
+        return compute(versionId, raw, intentTotalPrompts, List.of());
+    }
+
+    public SceneAndIntentResult compute(Long versionId,
+                                        RawSnapshotDTO raw,
+                                        Map<String, Integer> intentTotalPrompts,
+                                        List<PlatformIntentCell> platformIntentCells) {
         List<String> whitelistedPlatformCodes = aiPlatformConfigMapper.selectList(
                         PresalePlatformConfigQueries.presaleEnabledWrapper()
                 ).stream()
@@ -71,7 +79,6 @@ public class SceneCoverageCalculator {
                 new LambdaQueryWrapper<PresalePromptTemplate>()
                         .eq(PresalePromptTemplate::getEnabled, 1)
                         .eq(PresalePromptTemplate::getTemplateVersion, activePromptTemplateVersion)
-                        .eq(PresalePromptTemplate::getHasCompetitorVar, 0)
                         .orderByAsc(PresalePromptTemplate::getSortOrder)
                         .orderByAsc(PresalePromptTemplate::getId)
         );
@@ -108,13 +115,25 @@ public class SceneCoverageCalculator {
         }
 
         Map<PresaleIntentCode, List<TemplateWithCovered>> byIntent = new EnumMap<>(PresaleIntentCode.class);
+        Map<PresaleIntentCode, IntentCoverage> judgeCoverageByIntent = buildJudgeCoverageByIntent(
+                platformIntentCells, effectivePlatforms);
+        for (PresalePromptTemplate template : templates) {
+            if (template.getId() != null && template.getPromptContent() != null && !template.getPromptContent().isBlank()) {
+                renderedPromptByTemplate.putIfAbsent(template.getId(), template.getPromptContent());
+            }
+        }
         for (PresaleIntentCode intent : PresaleIntentCode.allInOrder()) {
             byIntent.put(intent, new ArrayList<>());
         }
         for (PresalePromptTemplate template : templates) {
-            int hitCount = hitPlatformsByTemplate.getOrDefault(template.getId(), Set.of()).size();
-            boolean covered = hitCount >= threshold;
             PresaleIntentCode intent = PresaleIntentCode.fromLabel(template.getCategory());
+            if (!isTemplateIncludedForIntent(template, intent)) {
+                continue;
+            }
+            int hitCount = hitPlatformsByTemplate.getOrDefault(template.getId(), Set.of()).size();
+            boolean covered = isJudgeIntent(intent)
+                    ? judgeCoverageByIntent.getOrDefault(intent, IntentCoverage.empty()).isCovered()
+                    : hitCount >= threshold;
             byIntent.get(intent).add(new TemplateWithCovered(template, intent, covered));
         }
 
@@ -122,7 +141,10 @@ public class SceneCoverageCalculator {
         for (PresaleIntentCode intent : PresaleIntentCode.allInOrder()) {
             List<TemplateWithCovered> list = byIntent.getOrDefault(intent, List.of());
             int total = intentTotalPrompts.getOrDefault(intent.getCode(), 0);
-            int covered = (int) list.stream().filter(TemplateWithCovered::covered).count();
+            IntentCoverage judgeCoverage = judgeCoverageByIntent.get(intent);
+            int covered = judgeCoverage == null
+                    ? (int) list.stream().filter(TemplateWithCovered::covered).count()
+                    : toPromptEquivalentCovered(total, judgeCoverage);
             double coverageRate = total == 0 ? 0.0 : (covered * 100.0 / total);
 
             List<Integer> rankings = list.stream()
@@ -173,6 +195,53 @@ public class SceneCoverageCalculator {
                 .lowValue(lowGroup)
                 .build();
         return new SceneAndIntentResult(sceneCoverage, intentBreakdown);
+    }
+
+    private Map<PresaleIntentCode, IntentCoverage> buildJudgeCoverageByIntent(List<PlatformIntentCell> cells,
+                                                                              Set<String> effectivePlatforms) {
+        Map<PresaleIntentCode, IntentCoverage> result = new EnumMap<>(PresaleIntentCode.class);
+        if (cells == null || cells.isEmpty()) {
+            return result;
+        }
+        for (PlatformIntentCell cell : cells) {
+            if (cell == null || cell.getIntentCode() == null || cell.getPlatformCode() == null) {
+                continue;
+            }
+            PresaleIntentCode intent;
+            try {
+                intent = PresaleIntentCode.fromCode(cell.getIntentCode());
+            } catch (IllegalArgumentException ignored) {
+                continue;
+            }
+            if (!isJudgeIntent(intent) || !effectivePlatforms.contains(cell.getPlatformCode())) {
+                continue;
+            }
+            IntentCoverage coverage = result.computeIfAbsent(intent, ignored -> new IntentCoverage());
+            coverage.totalCells++;
+            if (cell.getMentionRate() != null) {
+                coverage.coveredCells++;
+            }
+        }
+        return result;
+    }
+
+    private int toPromptEquivalentCovered(int totalPrompts, IntentCoverage coverage) {
+        if (totalPrompts <= 0 || coverage == null || coverage.totalCells <= 0) {
+            return 0;
+        }
+        return (int) Math.round(totalPrompts * coverage.coveredCells * 1.0d / coverage.totalCells);
+    }
+
+    private boolean isTemplateIncludedForIntent(PresalePromptTemplate template, PresaleIntentCode intent) {
+        Integer hasCompetitorVar = template.getHasCompetitorVar();
+        if (intent == PresaleIntentCode.COMPARISON) {
+            return hasCompetitorVar != null && hasCompetitorVar == 1;
+        }
+        return hasCompetitorVar != null && hasCompetitorVar == 0;
+    }
+
+    private boolean isJudgeIntent(PresaleIntentCode intent) {
+        return intent == PresaleIntentCode.COGNITIVE || intent == PresaleIntentCode.COMPARISON;
     }
 
     private SceneCoverageGroup buildGroup(Map<PresaleIntentCode, List<TemplateWithCovered>> byIntent,
@@ -266,5 +335,18 @@ public class SceneCoverageCalculator {
     private record TemplateWithCovered(PresalePromptTemplate template,
                                        PresaleIntentCode intent,
                                        boolean covered) {
+    }
+
+    private static class IntentCoverage {
+        int totalCells;
+        int coveredCells;
+
+        static IntentCoverage empty() {
+            return new IntentCoverage();
+        }
+
+        boolean isCovered() {
+            return totalCells > 0 && coveredCells > 0;
+        }
     }
 }

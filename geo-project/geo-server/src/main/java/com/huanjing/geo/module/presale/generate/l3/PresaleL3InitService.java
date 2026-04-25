@@ -373,7 +373,7 @@ public class PresaleL3InitService {
     private static Map<String, String> buildRuleTitleMap() {
         Map<String, String> map = new HashMap<>();
         map.put(RuleCodes.RULE_COVERAGE_LOW_RECOMMEND, "推荐型查询覆盖偏低");
-        map.put(RuleCodes.RULE_BRAND_AWARENESS_LOW, "品牌认知度偏低");
+        map.put(RuleCodes.RULE_BRAND_AWARENESS_LOW, "品牌综合可见度偏低");
         map.put(RuleCodes.RULE_COMPARE_GAP, "对比型查询存在差距");
         map.put(RuleCodes.RULE_PLATFORM_IMBALANCE, "平台表现不均衡");
         map.put(RuleCodes.RULE_SCENE_MISS_HIGH_VALUE, "高价值场景缺失");
@@ -397,14 +397,14 @@ public class PresaleL3InitService {
                 RuleCodes.RULE_BRAND_AWARENESS_LOW, new RuleFindingTemplate(
                         "品牌综合可见度偏低",
                         "综合得分 {overall_score} 分,低于行业均值 {industry_avg_overall} 分,与行业 Top1 的 {top1_overall} 分存在较大差距。" +
-                                "综合得分覆盖提及率、排名、情感、场景覆盖四个维度,偏低表明品牌在 AI 平台的整体认知深度不足。" +
+                                "综合得分覆盖提及率、排名、情感、场景覆盖四个维度,偏低表明品牌在 AI 平台的整体可见度仍有提升空间。" +
                                 "建议从基础认知建设入手,通过内容铺设、平台优化、负面管理多管齐下提升整体可见度。",
                         "综合得分 {overall_score} 分(行业均值 {industry_avg_overall} / Top1 {top1_overall})"
                 ),
                 RuleCodes.RULE_COMPARE_GAP, new RuleFindingTemplate(
                         "对比型查询覆盖不足",
-                        "在 {total_prompts} 个对比型查询中,品牌仅被提及 {covered_prompts} 次,覆盖率 {coverage_rate}%。" +
-                                "对比型查询反映用户在决策阶段的信息需求,覆盖不足意味着在用户主动对比时品牌难以进入候选集。" +
+                        "在 {total_prompts} 个对比型查询中,品牌形成有效对比判断 {covered_prompts} 个,覆盖率 {coverage_rate}%。" +
+                                "对比型查询反映用户在决策阶段的信息需求,覆盖不足意味着 AI 在用户主动对比时未充分形成清晰立场。" +
                                 "建议补齐\"与竞品 X 相比\"、\"X 类型哪个好\"等典型对比型场景的内容布局。",
                         "对比型查询覆盖率 {coverage_rate}%({covered_prompts}/{total_prompts})"
                 ),

@@ -5,8 +5,11 @@ import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
 import com.huanjing.geo.module.presale.generate.llm.LlmInvokeException;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptJudgeResult;
+import com.huanjing.geo.module.presale.persist.mapper.IndustryCoreAttributeConfigMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptJudgeResultMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +41,12 @@ class PresaleJudgeServiceTest {
     @Mock
     private PresaleAiPromptJudgeResultMapper judgeResultMapper;
     @Mock
+    private IndustryCoreAttributeConfigMapper attributeConfigMapper;
+    @Mock
+    private PresaleReportVersionMapper reportVersionMapper;
+    @Mock
+    private PresaleReportMapper reportMapper;
+    @Mock
     private PresaleLlmInvoker llmInvoker;
     @Mock
     private AiPlatformConfigMapper aiPlatformConfigMapper;
@@ -50,6 +59,9 @@ class PresaleJudgeServiceTest {
         judgeService = new PresaleJudgeService(
                 promptResultMapper,
                 judgeResultMapper,
+                attributeConfigMapper,
+                reportVersionMapper,
+                reportMapper,
                 llmInvoker,
                 aiPlatformConfigMapper,
                 new ObjectMapper(),

@@ -74,7 +74,7 @@ public class PresaleComputedSnapshotEnricher {
 
             // 1) Scene coverage + intent breakdown (同源)
             SceneAndIntentResult scenes = sceneCoverageCalculator.compute(
-                    versionId, rawSnapshot, buildResult.intentTotalPrompts());
+                    versionId, rawSnapshot, buildResult.intentTotalPrompts(), cells);
             computedSnapshot.setSceneCoverage(scenes.sceneCoverage());
             computedSnapshot.setIntentBreakdown(scenes.intentBreakdown());
 

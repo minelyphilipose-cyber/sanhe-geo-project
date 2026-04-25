@@ -40,7 +40,12 @@
           <div class="p15-hero-card p15-hero-gain">
             <div class="mono p15-hero-label">GAIN</div>
             <div class="p15-hero-value p15-hero-value-green">
-              {{ exposureMultiplierInt }}<span class="p15-hero-value-suffix">{{ exposureMultiplierDecimal }}x</span>
+              <template v-if="gainDisplay.kind === 'multiplier'">
+                {{ gainDisplay.main }}<span class="p15-hero-value-suffix">x</span>
+              </template>
+              <template v-else>
+                {{ gainDisplay.main }}<span class="p15-hero-value-suffix">%</span>
+              </template>
             </div>
             <div class="p15-hero-caption">综合可见度提升</div>
           </div>
@@ -130,7 +135,7 @@ import { toIntRounded } from '@/utils/presale/numberFormat'
  * Page15 预期收益模拟(γ·2,r2 补 ③ 块)。
  *
  * 实现策略(r2 混合方案):
- *   - ① 3 数字卡片:current / target / gain(exposure_multiplier)+ uplift 小标
+ *   - ① 3 数字卡片:current / target / gain(由 target/current 动态计算)+ uplift 小标
  *   - ② 4 点折线图:起点 M0 + 3 phase 的 target_score
  *   - ③ ESTIMATED IMPACT 块:4 格 2×2 grid,**2 硬编码示意值 + 2 真实契约数据**
  *     - AI 渠道月度品牌曝光:硬编码 "+30% ~ +200%" 区间
@@ -158,42 +163,30 @@ const { mergedView: mergedViewRef } = useMergedView()
 const mergedView = computed(() => mergedViewRef.value!)
 
 const roi = computed(() => mergedView.value.roi_simulation)
-const ROI_KEEP_ONE_DECIMAL = false
-
 // ─── 核心数字 ────────────────────────────────────────────
 
-/**
- * exposure_multiplier 拆整数部分 + 小数部分以对齐原型视觉(2.9 → "2" + ".9x")。
- *
- * 流程:先归一到 1 位小数(`round(m * 10) / 10`)避免浮点误差和进位问题:
- *   - 2.95 先归一为 3.0,再拆为 "3" + ".0x"(不是 "2" + ".10x")
- *   - 2.9  归一后仍为 2.9,拆为 "2" + ".9x"
- *   - 3.0  归一后仍为 3.0,拆为 "3" + ".0x"
- *
- * exposureMultiplierDecimal 为 ".0" 时前端仍会显示 ".0x",和 "2.9x" 视觉形态对齐(数字统一三位)。
- */
 const currentScoreDisplay = computed(() => toIntRounded(roi.value.current_score))
 const targetScoreDisplay = computed(() => toIntRounded(roi.value.target_score))
 const estimatedUpliftPercentDisplay = computed(() =>
   toIntRounded(roi.value.estimated_uplift_percent)
 )
 
-const exposureMultiplierRounded = computed(() => {
-  if (ROI_KEEP_ONE_DECIMAL) {
-    return Math.round(roi.value.estimated_exposure_multiplier * 10) / 10
-  }
-  return toIntRounded(roi.value.estimated_exposure_multiplier)
+const visibilityMultiplier = computed(() => {
+  const current = roi.value.current_score
+  const target = roi.value.target_score
+  if (!current || current <= 0) return null
+  return target / current
 })
-const exposureMultiplierInt = computed(() =>
-  ROI_KEEP_ONE_DECIMAL
-    ? Math.floor(exposureMultiplierRounded.value)
-    : toIntRounded(exposureMultiplierRounded.value)
-)
-const exposureMultiplierDecimal = computed(() => {
-  if (!ROI_KEEP_ONE_DECIMAL) return ''
-  const rounded = exposureMultiplierRounded.value
-  const decimalTenth = Math.round((rounded - Math.floor(rounded)) * 10)
-  return `.${decimalTenth}`
+
+const gainDisplay = computed<{ kind: 'multiplier' | 'percent'; main: string }>(() => {
+  const multiplier = visibilityMultiplier.value
+  if (multiplier == null) {
+    return { kind: 'multiplier', main: '—' }
+  }
+  if (multiplier >= 1.5) {
+    return { kind: 'multiplier', main: multiplier.toFixed(1) }
+  }
+  return { kind: 'percent', main: `+${estimatedUpliftPercentDisplay.value}` }
 })
 
 // ─── ③ ESTIMATED IMPACT 块 ──────────────────────────────

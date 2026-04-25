@@ -3,7 +3,7 @@
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
-        <span>04 / 多平台提及率(续)</span>
+        <span>04 / 多平台 AI 可见度(续)</span>
       </div>
 
       <div class="p06-body">
@@ -73,7 +73,7 @@ import { toIntRounded } from '@/utils/presale/numberFormat'
  * 数据映射:
  *   - 平台表:platform_breakdown 按 mention_rate 降序排序
  *   - bar chart:x 轴平台名,y 轴 mention_rate
- *   - 情感 %:sentiment_distribution.positive / (positive + neutral + negative)
+ *   - 情感 %:(positive + neutral * 0.5) / (positive + neutral + negative)
  *   - 情感文字色:≥70% 绿色,<70% 红色(对齐原型 tick/cross 分色)
  */
 
@@ -98,7 +98,7 @@ const tableRows = computed<TableRow[]>(() => {
   return sorted.map((p, idx) => {
     const sd = p.sentiment_distribution
     const sTotal = sd.positive + sd.neutral + sd.negative
-    const sPct = sTotal === 0 ? 0 : toIntRounded((sd.positive / sTotal) * 100)
+    const sPct = sTotal === 0 ? 0 : toIntRounded(((sd.positive + sd.neutral * 0.5) / sTotal) * 100)
     return {
       platform_code: p.platform_code,
       platform_name: p.platform_name,
