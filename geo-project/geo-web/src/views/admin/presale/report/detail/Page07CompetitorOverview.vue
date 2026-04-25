@@ -36,12 +36,12 @@
             </div>
             <div class="chinese-serif p07-card-name">{{ c.name }}</div>
             <div class="p07-card-metric-wrap">
-              <div class="p07-card-sub">提及率</div>
+              <div class="p07-card-sub">提及次数</div>
               <div
                 class="metric-hero p07-card-rate"
                 :class="`p07-card-rate-${c.rank}`"
               >
-                {{ toIntRounded(c.mention_rate) }}%
+                {{ c.mention_count }}<span class="p07-card-unit">次</span>
               </div>
               <div class="p07-card-sub-alt">
                 平均排名 {{ formatAvgRank(c.avg_ranking) }}
@@ -57,9 +57,9 @@
             </div>
             <div class="chinese-serif p07-card-name">{{ mergedView.brand_name }}</div>
             <div class="p07-card-metric-wrap p07-card-metric-self">
-              <div class="p07-card-sub-self">提及率</div>
+              <div class="p07-card-sub-self">提及次数</div>
               <div class="metric-hero p07-card-rate p07-card-rate-self">
-                {{ selfMentionRatePct }}%
+                {{ selfTotalMentions }}<span class="p07-card-unit">次</span>
               </div>
               <div class="p07-card-sub-self-alt">
                 平均排名 {{ selfAvgRankText }}
@@ -71,7 +71,7 @@
         <!-- 对比柱状图(方案 D: mention_count 绝对量) -->
         <div class="p07-chart-wrap">
           <div class="mono p07-chart-title">
-            MENTION COUNT · 42 个测试场景中被 AI 提及的次数
+            MENTION COUNT · AI 测试结果中被提及的次数
           </div>
           <PresaleChart :option="barOption" height="260px" />
         </div>
@@ -100,11 +100,10 @@ import { toIntRounded } from '@/utils/presale/numberFormat'
  *
  * 数据映射:
  *   - 3 竞品卡片:merged_competitors(按 rank 排序,后端已保证 1/2/3)
- *   - 自家卡片:brand_name + 聚合 mention_rate(计数直除,同 P03)+ 加权平均 avg_ranking
+ *   - 自家卡片:brand_name + 聚合 mention_count + 加权平均 avg_ranking
  *   - bar chart(方案 D):mention_count 横向对比
  *     4 根柱 = 3 竞品 + 自己,数值 = mention_count
- *     原型文案"42 中 29 次"是 mention_count,视觉上用绝对量而非百分比,
- *     和卡片的 mention_rate(%) 互为补充,不重复
+ *     卡片和柱状图统一使用绝对次数,避免不同分母的 mention_rate 横向比较。
  *
  * 不做:
  *   - 原型底部"差距并非全面落后..."文案无契约字段,本批用静态话术
@@ -113,17 +112,10 @@ import { toIntRounded } from '@/utils/presale/numberFormat'
 const { mergedView: mergedViewRef } = useMergedView()
 const mergedView = computed(() => mergedViewRef.value!)
 
-// ─── 自家品牌聚合(对齐 P03 算法) ──────────────────────
-const selfTotalPrompts = computed(() =>
-  mergedView.value.platform_breakdown.reduce((sum, p) => sum + p.total_tests, 0)
-)
+// ─── 自家品牌聚合 ─────────────────────────────────────
 const selfTotalMentions = computed(() =>
   mergedView.value.platform_breakdown.reduce((sum, p) => sum + p.mention_count, 0)
 )
-const selfMentionRatePct = computed(() => {
-  if (selfTotalPrompts.value === 0) return 0
-  return toIntRounded((selfTotalMentions.value / selfTotalPrompts.value) * 100)
-})
 const selfAvgRankText = computed(() => {
   const list = mergedView.value.platform_breakdown.filter(
     (p) => p.avg_ranking != null && p.mention_count > 0
@@ -319,6 +311,10 @@ const quoteText = `上图展示了 AI 视角下您与 Top3 竞品的提及次数
 }
 .p07-card-rate {
   font-size: 32px;
+}
+.p07-card-unit {
+  font-size: 14px;
+  margin-left: 2px;
 }
 .p07-card-rate-1 {
   color: #d97706;
