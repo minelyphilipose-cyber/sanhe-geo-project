@@ -79,3 +79,17 @@ When aftersale starts integration:
 4. Define aftersale permissions and audit events explicitly.
 5. Map aftersale quality rules to its page design instead of copying presale page-count/bottom-band values.
 6. Reuse cleanup service pattern, but use aftersale object key prefixes.
+
+## Known Technical Debt
+
+### Browser Manager Naming
+
+`PlaywrightPdfRenderKernel` currently depends on `PresaleBrowserManager`. The dependency is intentionally left in PR-D because renaming it touches browser health checks, preheat events, and configuration naming. Before aftersale integration, upgrade this class to a generic `BrowserManager` and move product-specific naming out of the browser lifecycle layer.
+
+### Concurrency Configuration
+
+`PlaywrightPdfRenderKernel` currently reads `maxConcurrency` from `PresaleExportProperties` during construction to initialize its semaphore. Before aftersale integration, move this value into a generic kernel configuration path, either by reading it from `ExportRenderProfile` where appropriate or injecting it into the kernel constructor.
+
+### Concurrency Sharing Semantics
+
+`PlaywrightPdfRenderKernel` is a singleton Spring component. Future presale and aftersale exports should share the same semaphore on one host so Browser total concurrency is capped per machine rather than per product. This is expected behavior, but operations should know that a saturated aftersale export queue can block presale rendering on the same node.
