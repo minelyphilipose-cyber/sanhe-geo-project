@@ -43,6 +43,7 @@ public class PresaleExportDebugPackageService {
             files.filter(Files::isRegularFile)
                     .forEach(file -> uploadDebugFile(prefix, debugDir, file));
             log.info("Presale export debug package uploaded: exportId={}, debugKey={}", exportId, prefix);
+            deleteQuietly(debugDir);
             return prefix;
         } catch (Exception ex) {
             log.warn("Upload presale export debug package failed, keep local fallback: exportId={}, debugDir={}",

@@ -20,10 +20,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
 @Slf4j
 @Service
@@ -122,6 +124,7 @@ public class PresaleReportExportWorker {
             String pdfKey = "presale/exports/" + exportId + "/report.pdf";
             storageService.uploadPdf(pdfBytes, pdfKey);
             markSuccess(exportId, pdfKey, result, pdfBytes.length);
+            deleteLocalWorkDirQuietly(exportId, workDir);
         } catch (PresaleExportConcurrencyException ex) {
             requeue(exportId, ex.getMessage());
         } catch (Exception ex) {
@@ -230,6 +233,20 @@ public class PresaleReportExportWorker {
             exportMapper.updateById(latest);
         }
         log.info("Presale export canceled, worker cleanup completed: exportId={}", exportId);
+    }
+
+    private void deleteLocalWorkDirQuietly(Long exportId, Path workDir) {
+        try (Stream<Path> files = Files.walk(workDir)) {
+            files.sorted(Comparator.reverseOrder()).forEach(path -> {
+                try {
+                    Files.deleteIfExists(path);
+                } catch (Exception ex) {
+                    log.warn("Delete presale export local work file failed, exportId={}, path={}", exportId, path, ex);
+                }
+            });
+        } catch (Exception ex) {
+            log.warn("Delete presale export local work dir failed, exportId={}", exportId, ex);
+        }
     }
 
     private int extractPageCount(String metricsJson) {

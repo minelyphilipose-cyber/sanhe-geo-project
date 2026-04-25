@@ -6,7 +6,9 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -15,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 public class ChromiumMemorySampler {
     private final ProcessHandle root;
     private final ScheduledExecutorService executor;
+    private final Set<Long> loggedPids = new HashSet<>();
     private volatile long peakMb;
     private volatile long sampleCount;
 
@@ -32,7 +35,15 @@ public class ChromiumMemorySampler {
     }
 
     public void stop() {
-        executor.shutdownNow();
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(1, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+            }
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            executor.shutdownNow();
+        }
     }
 
     public long getPeakMb() {
@@ -47,7 +58,7 @@ public class ChromiumMemorySampler {
         try {
             long totalBytes = root.descendants()
                     .filter(this::isChromiumProcess)
-                    .mapToLong(this::residentBytes)
+                    .mapToLong(this::sampleProcessBytes)
                     .sum();
             sampleCount++;
             peakMb = Math.max(peakMb, totalBytes / 1024 / 1024);
@@ -58,17 +69,25 @@ public class ChromiumMemorySampler {
 
     private boolean isChromiumProcess(ProcessHandle handle) {
         String command = handle.info().command().orElse("").toLowerCase(Locale.ROOT);
-        String commandLine = handle.info().commandLine().orElse("").toLowerCase(Locale.ROOT);
-        return command.contains("chrome")
-                || command.contains("chromium")
-                || commandLine.contains("chrome")
-                || commandLine.contains("chromium")
-                || commandLine.contains("ms-playwright");
+        String normalized = command.replace('\\', '/');
+        return normalized.endsWith("/chrome.exe")
+                || normalized.endsWith("/chrome")
+                || normalized.contains("/chromium")
+                || normalized.contains("chromium");
+    }
+
+    private long sampleProcessBytes(ProcessHandle handle) {
+        long bytes = residentBytes(handle);
+        if (loggedPids.add(handle.pid())) {
+            log.info("Sampled chromium process: pid={}, command={}, bytes={}",
+                    handle.pid(), handle.info().command().orElse(""), bytes);
+        }
+        return bytes;
     }
 
     private long residentBytes(ProcessHandle handle) {
         if (isWindows()) {
-            return windowsWorkingSetBytes(handle.pid());
+            return windowsPrivateBytes(handle.pid());
         }
         return linuxResidentBytes(handle.pid());
     }
@@ -95,23 +114,22 @@ public class ChromiumMemorySampler {
         return 0L;
     }
 
-    private long windowsWorkingSetBytes(long pid) {
+    private long windowsPrivateBytes(long pid) {
         Process process = null;
         try {
-            process = new ProcessBuilder("tasklist", "/FI", "PID eq " + pid, "/FO", "CSV", "/NH")
+            process = new ProcessBuilder("wmic", "process", "where", "ProcessId=" + pid,
+                    "get", "PrivatePageCount", "/value")
                     .redirectErrorStream(true)
                     .start();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                String line = reader.readLine();
-                if (line == null || line.startsWith("INFO:")) {
-                    return 0L;
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    if (line.startsWith("PrivatePageCount=")) {
+                        String value = line.substring("PrivatePageCount=".length()).trim();
+                        return value.isEmpty() ? 0L : Long.parseLong(value);
+                    }
                 }
-                String[] columns = line.split("\",\"");
-                if (columns.length < 5) {
-                    return 0L;
-                }
-                String mem = columns[4].replace("\"", "").replaceAll("[^0-9]", "");
-                return mem.isEmpty() ? 0L : Long.parseLong(mem) * 1024L;
+                return 0L;
             }
         } catch (Exception ignored) {
             return 0L;
