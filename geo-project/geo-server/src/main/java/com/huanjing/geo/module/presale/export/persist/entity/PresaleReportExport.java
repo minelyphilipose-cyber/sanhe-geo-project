@@ -31,6 +31,7 @@ public class PresaleReportExport {
     private Long fileSize;
     private Integer filePages;
     private LocalDateTime expireAt;
+    private LocalDateTime filePurgedAt;
     private String snapshotStorageType;
     private String snapshotJson;
     private String snapshotKey;

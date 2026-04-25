@@ -31,4 +31,8 @@ public interface PresaleReportExportMapper extends BaseMapper<PresaleReportExpor
     int incrementVersionExportSuccess(@Param("versionId") Long versionId);
 
     int archiveExpiredIdempotencyKey(@Param("id") Long id, @Param("archivedKey") String archivedKey);
+
+    List<PresaleReportExport> selectExpiredForCleanup(@Param("now") LocalDateTime now, @Param("limit") int limit);
+
+    int markFilePurged(@Param("id") Long id);
 }

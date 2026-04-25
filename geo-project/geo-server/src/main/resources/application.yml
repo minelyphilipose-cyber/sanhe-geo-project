@@ -95,6 +95,14 @@ geo:
       enforce-chart-non-blank: ${PRESALE_EXPORT_ENFORCE_CHART_NON_BLANK:false}
       enforce-page-count: ${PRESALE_EXPORT_ENFORCE_PAGE_COUNT:true}
       bottom-band-px: ${PRESALE_EXPORT_BOTTOM_BAND_PX:110}
+    cleanup:
+      enabled: ${PRESALE_EXPORT_CLEANUP_ENABLED:true}
+      cron: "${PRESALE_EXPORT_CLEANUP_CRON:0 15 3 * * *}"
+      batch-size: ${PRESALE_EXPORT_CLEANUP_BATCH_SIZE:1000}
+      lock-key: ${PRESALE_EXPORT_CLEANUP_LOCK_KEY:lock:presale-export-cleanup}
+      lock-ttl-ms: ${PRESALE_EXPORT_CLEANUP_LOCK_TTL_MS:1800000}
+      cron-jitter-ms: ${PRESALE_EXPORT_CLEANUP_CRON_JITTER_MS:60000}
+      max-retry-count: ${PRESALE_EXPORT_CLEANUP_MAX_RETRY_COUNT:5}
   dispatch:
     cron: "0 55 18 * * *"
     timezone: "Asia/Shanghai"

@@ -14,6 +14,7 @@ public class PresaleExportProperties {
     private Retry retry = new Retry();
     private Storage storage = new Storage();
     private Quality quality = new Quality();
+    private Cleanup cleanup = new Cleanup();
 
     @Data
     public static class Browser {
@@ -60,5 +61,16 @@ public class PresaleExportProperties {
         private boolean enforceChartNonBlank = false;
         private boolean enforcePageCount = true;
         private int bottomBandPx = 110;
+    }
+
+    @Data
+    public static class Cleanup {
+        private boolean enabled = true;
+        private String cron = "0 15 3 * * *";
+        private int batchSize = 1_000;
+        private String lockKey = "lock:presale-export-cleanup";
+        private long lockTtlMs = 1_800_000;
+        private long cronJitterMs = 60_000;
+        private int maxRetryCount = 5;
     }
 }

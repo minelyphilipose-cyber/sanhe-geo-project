@@ -32,4 +32,12 @@ public class PresaleExportStorageService {
     public void remove(String objectKey) {
         minioStorageService.remove(objectKey);
     }
+
+    public void removeStrict(String objectKey) throws Exception {
+        minioStorageService.removeStrict(objectKey);
+    }
+
+    public void removePrefixStrict(String prefix) throws Exception {
+        minioStorageService.removePrefixStrict(prefix);
+    }
 }

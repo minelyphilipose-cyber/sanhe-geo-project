@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Component
 @RequiredArgsConstructor
@@ -69,6 +70,43 @@ public class PresaleExportMetricsJsonHelper {
             return objectMapper.writeValueAsString(root);
         } catch (Exception ex) {
             throw new IllegalStateException("Update presale export metrics failed", ex);
+        }
+    }
+
+    public int intValue(String currentJson, String fieldName) {
+        try {
+            return readRoot(currentJson).path(fieldName).asInt(0);
+        } catch (Exception ex) {
+            return 0;
+        }
+    }
+
+    public String putInt(String currentJson, String fieldName, int value) {
+        try {
+            ObjectNode root = readRoot(currentJson);
+            root.put(fieldName, value);
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Update presale export metrics failed", ex);
+        }
+    }
+
+    public String putCleanupFailure(String currentJson, int retryCount, List<String> pendingKeys) {
+        try {
+            ObjectNode root = readRoot(currentJson);
+            ObjectNode cleanupFailure = objectMapper.createObjectNode();
+            cleanupFailure.put("error_code", "CLEANUP_PARTIAL_FAILURE");
+            cleanupFailure.put("retry_count", retryCount);
+            cleanupFailure.put("at", LocalDateTime.now().toString());
+            ArrayNode pending = objectMapper.createArrayNode();
+            for (String pendingKey : pendingKeys) {
+                pending.add(pendingKey);
+            }
+            cleanupFailure.set("pending_keys", pending);
+            root.set("cleanup_failure", cleanupFailure);
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Update presale export cleanup failure metrics failed", ex);
         }
     }
 

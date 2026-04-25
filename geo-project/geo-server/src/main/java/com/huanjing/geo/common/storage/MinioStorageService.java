@@ -3,6 +3,7 @@ package com.huanjing.geo.common.storage;
 import com.huanjing.geo.common.exception.BizException;
 import io.minio.*;
 import io.minio.http.Method;
+import io.minio.messages.Item;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -66,9 +67,25 @@ public class MinioStorageService {
 
     public void remove(String objectKey) {
         try {
-            minioClient.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(objectKey).build());
+            removeStrict(objectKey);
         } catch (Exception ex) {
             log.warn("Remove minio object failed, objectKey={}, err={}", objectKey, ex.getMessage());
+        }
+    }
+
+    public void removeStrict(String objectKey) throws Exception {
+        minioClient.removeObject(RemoveObjectArgs.builder().bucket(bucket).object(objectKey).build());
+    }
+
+    public void removePrefixStrict(String prefix) throws Exception {
+        Iterable<Result<Item>> results = minioClient.listObjects(ListObjectsArgs.builder()
+                .bucket(bucket)
+                .prefix(prefix)
+                .recursive(true)
+                .build());
+        for (Result<Item> result : results) {
+            Item item = result.get();
+            removeStrict(item.objectName());
         }
     }
 

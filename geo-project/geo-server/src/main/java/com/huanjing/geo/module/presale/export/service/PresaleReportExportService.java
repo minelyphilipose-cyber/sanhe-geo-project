@@ -40,6 +40,8 @@ public class PresaleReportExportService {
     private static final String PERM_EXPORT = "presale.report.export";
     private static final String PERM_DOWNLOAD = "presale.report.download";
     private static final int CODE_EXPORT_IN_PROGRESS = 40901;
+    private static final int CODE_FILE_PURGED = 41003;
+    private static final int CODE_FILE_EXPIRED = 41004;
     private static final String DEFAULT_PROFILE = "PDF_A4_DPR2";
 
     private final PresaleReportExportMapper exportMapper;
@@ -150,8 +152,11 @@ public class PresaleReportExportService {
         if (!PresaleExportStatuses.SUCCESS.equals(task.getStatus())) {
             throw new BizException(409, "Presale export is not successful");
         }
+        if (task.getFilePurgedAt() != null) {
+            throw new BizException(CODE_FILE_PURGED, "PRESALE_EXPORT_FILE_PURGED", 410, null);
+        }
         if (task.getExpireAt() != null && task.getExpireAt().isBefore(LocalDateTime.now())) {
-            throw new BizException(410, "Presale export file expired");
+            throw new BizException(CODE_FILE_EXPIRED, "PRESALE_EXPORT_FILE_EXPIRED", 410, null);
         }
         if (!StringUtils.hasText(task.getFileKey())) {
             throw new BizException(404, "Presale export file not found");

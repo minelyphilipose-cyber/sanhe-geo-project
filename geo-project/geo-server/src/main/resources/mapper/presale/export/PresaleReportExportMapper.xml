@@ -93,4 +93,23 @@
           AND status = 'SUCCESS'
     </update>
 
+    <select id="selectExpiredForCleanup" resultType="com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport">
+        SELECT *
+        FROM presale_report_export
+        WHERE expire_at IS NOT NULL
+          AND expire_at &lt; #{now}
+          AND file_purged_at IS NULL
+          AND status IN ('SUCCESS', 'FAILED', 'CANCELED')
+        ORDER BY expire_at ASC, id ASC
+        LIMIT #{limit}
+    </select>
+
+    <update id="markFilePurged">
+        UPDATE presale_report_export
+        SET file_purged_at = NOW(),
+            updated_at = NOW()
+        WHERE id = #{id}
+          AND file_purged_at IS NULL
+    </update>
+
 </mapper>
