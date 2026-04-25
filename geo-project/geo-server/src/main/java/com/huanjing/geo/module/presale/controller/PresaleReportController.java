@@ -6,6 +6,7 @@ import com.huanjing.geo.module.presale.dto.request.CreateReportRequest;
 import com.huanjing.geo.module.presale.dto.request.ReportListQueryRequest;
 import com.huanjing.geo.module.presale.dto.response.ReportDetailVO;
 import com.huanjing.geo.module.presale.dto.response.ReportListItemVO;
+import com.huanjing.geo.module.presale.dto.response.ReportScopePreviewVO;
 import com.huanjing.geo.module.presale.dto.response.ReportVersionMetaVO;
 import com.huanjing.geo.module.presale.service.PresaleReportService;
 import com.huanjing.geo.module.presale.service.PresaleReportVersionService;
@@ -52,6 +53,14 @@ public class PresaleReportController {
     @GetMapping
     public R<Page<ReportListItemVO>> list(@ModelAttribute ReportListQueryRequest req) {
         return R.ok(reportService.listReports(req));
+    }
+
+    /**
+     * 新建报告页:诊断范围预览。
+     */
+    @GetMapping("/scope-preview")
+    public R<ReportScopePreviewVO> getScopePreview() {
+        return R.ok(reportService.getScopePreview());
     }
 
     /**

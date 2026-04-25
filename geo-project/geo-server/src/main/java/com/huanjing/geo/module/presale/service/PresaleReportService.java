@@ -4,8 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.module.presale.dto.request.CreateReportRequest;
 import com.huanjing.geo.module.presale.dto.request.ReportListQueryRequest;
+import com.huanjing.geo.module.presale.dto.response.ReportScopePreviewVO;
 import com.huanjing.geo.module.presale.dto.response.ReportListItemVO;
 import com.huanjing.geo.module.presale.dto.response.ReportVersionMetaVO;
+import com.huanjing.geo.module.presale.dto.snapshot.computed.PresaleIntentCode;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateStatus;
 import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
@@ -99,15 +101,12 @@ public class PresaleReportService {
         reportMapper.insert(report);
 
         PresaleReportVersion version = new PresaleReportVersion();
-        int platformCount = countEnabledPlatforms();
-        int genericPromptCount = countPromptTemplates(0);
-        int competitorPromptCount = countPromptTemplates(1);
-        int batch1Total = platformCount * genericPromptCount * 2;
-        int totalUpperBound = batch1Total + (platformCount * competitorPromptCount * 3 * 2);
+        ReportScopePreviewVO scopePreview = buildScopePreview();
+        int batch1Total = scopePreview.getPlatformCount() * scopePreview.getGenericPromptCount() * 2;
         version.setReportId(report.getId());
         version.setVersionNo(1);
         version.setGenerationStatus(PresaleGenerateStatus.QUEUED.name());
-        version.setTotalLlmCalls(totalUpperBound);
+        version.setTotalLlmCalls(scopePreview.getLlmCallUpperBound());
         version.setCompletedLlmCalls(0);
         version.setBatch1TotalCalls(batch1Total);
         version.setBatch1CompletedCalls(0);
@@ -128,6 +127,14 @@ public class PresaleReportService {
         triggerGenerateAfterCommit(version.getId(), userId, accessService.canManageCurrentUser());
 
         return report.getId();
+    }
+
+    /**
+     * 新建报告页诊断范围预览。与 createReport 写入版本执行量的口径共用同一套计算。
+     */
+    public ReportScopePreviewVO getScopePreview() {
+        currentUserService.ensurePermission(PERM_CREATE);
+        return buildScopePreview();
     }
 
     private void triggerGenerateAfterCommit(Long versionId, Long userId, boolean canManageCurrentUser) {
@@ -299,15 +306,34 @@ public class PresaleReportService {
         return count == null ? 0 : count.intValue();
     }
 
-    private int countPromptTemplates(int hasCompetitorVar) {
+    private ReportScopePreviewVO buildScopePreview() {
+        int platformCount = countEnabledPlatforms();
+        Map<Integer, Integer> promptCountByCompetitorVar = countPromptTemplatesByCompetitorVar();
+        int genericPromptCount = promptCountByCompetitorVar.getOrDefault(0, 0);
+        int competitorPromptCount = promptCountByCompetitorVar.getOrDefault(1, 0);
+        int batch1Total = platformCount * genericPromptCount * 2;
+        int totalUpperBound = batch1Total + (platformCount * competitorPromptCount * 3 * 2);
+        return ReportScopePreviewVO.builder()
+                .platformCount(platformCount)
+                .genericPromptCount(genericPromptCount)
+                .competitorPromptCount(competitorPromptCount)
+                .promptQueryCount(genericPromptCount + competitorPromptCount)
+                .llmCallUpperBound(totalUpperBound)
+                .dimensionCount(PresaleIntentCode.allInOrder().size())
+                .build();
+    }
+
+    private Map<Integer, Integer> countPromptTemplatesByCompetitorVar() {
         List<PromptTemplateIntentStatRow> stats = aiPromptResultMapper.selectTemplateIntentStats(activePromptTemplateVersion);
         if (stats == null || stats.isEmpty()) {
-            return 0;
+            return Collections.emptyMap();
         }
         return stats.stream()
                 .filter(row -> row != null && row.getHasCompetitorVar() != null
-                        && row.getHasCompetitorVar() == hasCompetitorVar)
-                .mapToInt(row -> row.getTemplateCount() == null ? 0 : row.getTemplateCount())
-                .sum();
+                        && row.getTemplateCount() != null)
+                .collect(Collectors.groupingBy(
+                        PromptTemplateIntentStatRow::getHasCompetitorVar,
+                        Collectors.summingInt(PromptTemplateIntentStatRow::getTemplateCount)
+                ));
     }
 }

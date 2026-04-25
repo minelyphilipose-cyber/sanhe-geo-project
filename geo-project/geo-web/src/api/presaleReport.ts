@@ -64,6 +64,18 @@ export interface ReportDetailVO {
 }
 
 /**
+ * 新建报告页诊断范围预览。
+ */
+export interface ReportScopePreviewVO {
+  platformCount: number
+  genericPromptCount: number
+  competitorPromptCount: number
+  promptQueryCount: number
+  llmCallUpperBound: number
+  dimensionCount: number
+}
+
+/**
  * MyBatis-Plus Page 响应结构。
  */
 export interface Page<T> {
@@ -169,6 +181,15 @@ export function listReports(params: ReportListQueryRequest) {
  */
 export function createReport(data: CreateReportRequest) {
   return unwrap(request.post<R<number>>('/presale/reports', data))
+}
+
+/**
+ * 新建报告页:取实时诊断范围预览。
+ */
+export function getReportScopePreview() {
+  return unwrap(
+    request.get<R<ReportScopePreviewVO>>('/presale/reports/scope-preview')
+  )
 }
 
 /**

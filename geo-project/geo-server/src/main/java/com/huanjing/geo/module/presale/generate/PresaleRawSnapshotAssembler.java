@@ -244,7 +244,12 @@ public class PresaleRawSnapshotAssembler {
                     .filter(row -> {
                         Long templateId = row.getPromptTemplateId();
                         String category = templateId == null ? null : categoryByTemplateId.get(templateId);
-                        return isSampleIntentCategory(category);
+                        return isSampleIntentCategory(category)
+                                && PresaleSampleInclusion.isIncluded(
+                                        row.getIsMentioned() == null ? "FAILED" : STATUS_SUCCESS,
+                                        0,
+                                        safeDegraded.contains(platformCode)
+                                );
                     })
                     .toList();
 

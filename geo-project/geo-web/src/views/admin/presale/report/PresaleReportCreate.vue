@@ -89,30 +89,30 @@
         </el-form-item>
       </el-form>
 
-      <!-- 诊断范围预览(静态展示) -->
+      <!-- 诊断范围预览 -->
       <el-divider />
       <div class="scope-preview">
         <div class="scope-title">诊断范围预览</div>
         <div class="scope-grid">
           <div class="scope-item">
-            <div class="scope-number">11</div>
+            <div class="scope-number">{{ scopeNumber(scopePreview?.platformCount) }}</div>
             <div class="scope-label">AI 平台</div>
           </div>
           <div class="scope-item">
-            <div class="scope-number">30</div>
+            <div class="scope-number">{{ scopeNumber(scopePreview?.promptQueryCount) }}</div>
             <div class="scope-label">Prompt 查询</div>
           </div>
           <div class="scope-item">
-            <div class="scope-number">660</div>
-            <div class="scope-label">LLM 调用</div>
+            <div class="scope-number">{{ scopeNumber(scopePreview?.llmCallUpperBound) }}</div>
+            <div class="scope-label">LLM 调用上限</div>
           </div>
           <div class="scope-item">
-            <div class="scope-number">5</div>
+            <div class="scope-number">{{ scopeNumber(scopePreview?.dimensionCount) }}</div>
             <div class="scope-label">分析维度</div>
           </div>
         </div>
         <div class="scope-note">
-          预计生成时长 2.5-3.5 分钟。生成过程异步进行,提交后会跳到进度页。
+          {{ scopeNote }}
         </div>
       </div>
 
@@ -127,14 +127,22 @@
 </template>
 
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { createReport, type CreateReportRequest } from '@/api/presaleReport'
+import {
+  createReport,
+  getReportScopePreview,
+  type CreateReportRequest,
+  type ReportScopePreviewVO
+} from '@/api/presaleReport'
 
 const router = useRouter()
 const formRef = ref<FormInstance>()
 const submitting = ref(false)
+const scopePreview = ref<ReportScopePreviewVO | null>(null)
+const scopeLoading = ref(false)
+const scopeLoadFailed = ref(false)
 
 const form = reactive<CreateReportRequest>({
   brandName: '',
@@ -180,6 +188,30 @@ const allRoleOptions = [
  */
 const filteredRoleOptions = computed(() => allRoleOptions)
 
+const scopeNote = computed(() => {
+  if (scopeLoading.value) return '正在读取当前启用平台与 Prompt 模板配置...'
+  if (scopeLoadFailed.value) return '诊断范围预览读取失败,请刷新页面后重试。'
+  if (!scopePreview.value) return '暂无诊断范围数据。'
+  return `按当前启用配置预计最多发起 ${formatInt(scopePreview.value.llmCallUpperBound)} 次 LLM 调用。生成过程异步进行,提交后会跳到进度页。`
+})
+
+onMounted(() => {
+  void loadScopePreview()
+})
+
+async function loadScopePreview() {
+  scopeLoading.value = true
+  scopeLoadFailed.value = false
+  try {
+    scopePreview.value = await getReportScopePreview()
+  } catch {
+    scopePreview.value = null
+    scopeLoadFailed.value = true
+  } finally {
+    scopeLoading.value = false
+  }
+}
+
 function onIndustryChange() {
   // 切换行业时清空身份(可能新行业不支持旧身份)
   form.industryRole = ''
@@ -224,6 +256,15 @@ async function onCancel() {
     }
   }
   router.push('/admin/presale/report')
+}
+
+function scopeNumber(value: number | undefined) {
+  if (value == null) return '—'
+  return formatInt(value)
+}
+
+function formatInt(value: number) {
+  return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(value)
 }
 </script>
 
