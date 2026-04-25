@@ -44,6 +44,20 @@ public class PresaleExportMetricsJsonHelper {
         }
     }
 
+    public String mergeRenderMetrics(String currentJson, String renderMetricsJson) {
+        try {
+            ObjectNode renderRoot = readRoot(renderMetricsJson);
+            ObjectNode currentRoot = readRoot(currentJson);
+            JsonNode retryHistory = currentRoot.get("retry_history");
+            if (retryHistory instanceof ArrayNode && retryHistory.size() > 0) {
+                renderRoot.set("retry_history", retryHistory);
+            }
+            return objectMapper.writeValueAsString(renderRoot);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Merge presale export metrics failed", ex);
+        }
+    }
+
     private ObjectNode readRoot(String currentJson) throws Exception {
         if (!StringUtils.hasText(currentJson)) {
             return objectMapper.createObjectNode();

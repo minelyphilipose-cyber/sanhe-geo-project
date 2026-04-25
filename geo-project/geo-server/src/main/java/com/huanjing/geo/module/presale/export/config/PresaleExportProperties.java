@@ -37,7 +37,7 @@ public class PresaleExportProperties {
         private int claimBatchSize = 1;
         private long heartbeatIntervalMs = 30_000;
         private long staleScanIntervalMs = 60_000;
-        private long staleRunningTimeoutMs = 120_000;
+        private long staleRunningTimeoutMs = 90_000;
     }
 
     @Data

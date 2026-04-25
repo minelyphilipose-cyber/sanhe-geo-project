@@ -5,8 +5,6 @@ import com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport
 import com.huanjing.geo.module.presale.export.persist.mapper.PresaleReportExportMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
-import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -17,32 +15,15 @@ import java.util.List;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+/*
+ * Startup recovery is intentionally not implemented. worker_id contains a UUID and changes on every
+ * process start, so a restarted process cannot reliably identify its own previous RUNNING tasks.
+ * All orphaned RUNNING tasks are recovered by markStaleRunningFailed based on heartbeat timeout.
+ */
 public class PresaleReportExportRecoveryService {
     private final PresaleReportExportMapper exportMapper;
-    private final PresaleExportWorkerIdentity workerIdentity;
     private final PresaleExportProperties properties;
     private final PresaleExportMetricsJsonHelper metricsJsonHelper;
-
-    @EventListener(ApplicationReadyEvent.class)
-    public void markOwnRunningInterrupted() {
-        String workerId = workerIdentity.workerId();
-        List<PresaleReportExport> running = exportMapper.selectRunningByWorker(workerId);
-        if (running.isEmpty()) {
-            return;
-        }
-        int updated = 0;
-        for (PresaleReportExport task : running) {
-            String metricsJson = metricsJsonHelper.appendRetryHistory(task.getMetricsJson(),
-                    PresaleExportMetricsJsonHelper.RetryHistoryEntry.builder()
-                            .errorCode("INTERRUPTED_BY_RESTART")
-                            .errorMsg("Application restarted while rendering")
-                            .retryCount(task.getRetryCount())
-                            .build());
-            updated += exportMapper.markInterruptedByRestartById(task.getId(), workerId, metricsJson);
-        }
-        log.info("Presale export restart recovery marked {} RUNNING tasks as FAILED, workerId={}, exportIds={}",
-                updated, workerId, running.stream().map(PresaleReportExport::getId).toList());
-    }
 
     @Scheduled(fixedDelayString = "${geo.presale-export.worker.stale-scan-interval-ms:60000}")
     public void markStaleRunningFailed() {

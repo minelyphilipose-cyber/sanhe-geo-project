@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 @RequiredArgsConstructor
 public class PresaleReportExportCompletionService {
     private final PresaleReportExportMapper exportMapper;
+    private final PresaleExportMetricsJsonHelper metricsJsonHelper;
 
     @Transactional
     public boolean markSuccessAndIncrementVersion(Long exportId,
@@ -27,10 +28,13 @@ public class PresaleReportExportCompletionService {
         latest.setFileKey(fileKey);
         latest.setFileSize(fileSize);
         latest.setFilePages(filePages);
-        latest.setMetricsJson(metricsJson);
+        latest.setErrorMsg(null);
+        latest.setMetricsJson(metricsJsonHelper.mergeRenderMetrics(latest.getMetricsJson(), metricsJson));
         latest.setRenderTokenId(null);
         latest.setUpdatedAt(LocalDateTime.now());
         exportMapper.updateById(latest);
+        exportMapper.clearRenderToken(exportId);
+        exportMapper.clearErrorMsg(exportId);
         exportMapper.incrementVersionExportSuccess(latest.getVersionId());
         return true;
     }

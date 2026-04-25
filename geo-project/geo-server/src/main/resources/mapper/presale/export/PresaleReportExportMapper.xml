@@ -56,12 +56,19 @@
           AND status = 'RUNNING'
     </update>
 
-    <select id="selectRunningByWorker" resultType="com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport">
-        SELECT *
-        FROM presale_report_export
-        WHERE worker_id = #{workerId}
-          AND status = 'RUNNING'
-    </select>
+    <update id="clearRenderToken">
+        UPDATE presale_report_export
+        SET render_token_id = NULL,
+            updated_at = NOW()
+        WHERE id = #{id}
+    </update>
+
+    <update id="clearErrorMsg">
+        UPDATE presale_report_export
+        SET error_msg = NULL,
+            updated_at = NOW()
+        WHERE id = #{id}
+    </update>
 
     <select id="selectStaleRunning" resultType="com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport">
         SELECT *
@@ -71,19 +78,6 @@
         ORDER BY updated_at ASC
         LIMIT 100
     </select>
-
-    <update id="markInterruptedByRestartById">
-        UPDATE presale_report_export
-        SET status = 'FAILED',
-            error_msg = 'INTERRUPTED_BY_RESTART',
-            render_token_id = NULL,
-            cancel_requested = 0,
-            metrics_json = #{metricsJson},
-            updated_at = NOW()
-        WHERE id = #{id}
-          AND worker_id = #{workerId}
-          AND status = 'RUNNING'
-    </update>
 
     <update id="markStaleFailed">
         UPDATE presale_report_export

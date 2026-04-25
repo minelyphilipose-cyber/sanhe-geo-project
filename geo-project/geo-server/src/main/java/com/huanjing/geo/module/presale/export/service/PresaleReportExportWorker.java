@@ -137,6 +137,7 @@ public class PresaleReportExportWorker {
             storageService.remove(pdfKey);
             return;
         }
+        exportMapper.clearRenderToken(exportId);
         log.info("Presale export succeeded: exportId={}, fileKey={}, size={}", exportId, pdfKey, fileSize);
     }
 
@@ -156,6 +157,7 @@ public class PresaleReportExportWorker {
                         .build()));
         latest.setUpdatedAt(LocalDateTime.now());
         exportMapper.updateById(latest);
+        exportMapper.clearRenderToken(exportId);
         log.warn("Presale export failed: exportId={}, error={}", exportId, latest.getErrorMsg());
     }
 
@@ -176,6 +178,7 @@ public class PresaleReportExportWorker {
                         .build()));
         latest.setUpdatedAt(LocalDateTime.now());
         exportMapper.updateById(latest);
+        exportMapper.clearRenderToken(exportId);
         log.info("Presale export requeued after concurrency timeout: exportId={}", exportId);
     }
 
@@ -191,6 +194,13 @@ public class PresaleReportExportWorker {
             }
         } catch (Exception ex) {
             log.warn("Delete canceled presale export temp PDF failed, exportId={}", exportId, ex);
+        }
+        PresaleReportExport latest = exportMapper.selectById(exportId);
+        if (latest != null && PresaleExportStatuses.CANCELED.equals(latest.getStatus())) {
+            latest.setRenderTokenId(null);
+            latest.setUpdatedAt(LocalDateTime.now());
+            exportMapper.updateById(latest);
+            exportMapper.clearRenderToken(exportId);
         }
         log.info("Presale export canceled, worker cleanup completed: exportId={}", exportId);
     }

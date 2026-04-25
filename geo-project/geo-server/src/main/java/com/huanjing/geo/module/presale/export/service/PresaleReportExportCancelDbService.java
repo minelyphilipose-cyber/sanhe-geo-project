@@ -20,9 +20,13 @@ public class PresaleReportExportCancelDbService {
         }
         if (PresaleExportStatuses.PENDING.equals(task.getStatus())
                 || PresaleExportStatuses.RUNNING.equals(task.getStatus())) {
+            String renderTokenId = task.getRenderTokenId();
             task.setStatus(PresaleExportStatuses.CANCELED);
             task.setCancelRequested(true);
+            task.setRenderTokenId(null);
             exportMapper.updateById(task);
+            exportMapper.clearRenderToken(task.getId());
+            task.setRenderTokenId(renderTokenId);
             return task;
         }
         throw new BizException(409, "Presale export status is not cancelable");

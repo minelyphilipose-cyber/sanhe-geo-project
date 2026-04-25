@@ -2,7 +2,6 @@ package com.huanjing.geo.module.presale.export.service;
 
 import org.springframework.stereotype.Component;
 
-import java.lang.management.ManagementFactory;
 import java.net.InetAddress;
 import java.util.UUID;
 
@@ -21,8 +20,11 @@ public class PresaleExportWorkerIdentity {
         } catch (Exception ex) {
             host = "unknown-host";
         }
+        if (host.length() > 16) {
+            host = host.substring(0, 16);
+        }
         long pid = ProcessHandle.current().pid();
-        String runtime = ManagementFactory.getRuntimeMXBean().getName().replace('@', '-');
-        return host + ":" + pid + ":" + runtime + ":" + UUID.randomUUID();
+        String uuid = UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+        return host + ":" + pid + ":" + uuid;
     }
 }
