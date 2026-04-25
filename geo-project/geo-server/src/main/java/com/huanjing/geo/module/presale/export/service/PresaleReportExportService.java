@@ -18,7 +18,9 @@ import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -27,12 +29,17 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PresaleReportExportService {
     private static final String PERM_VIEW = "presale.report.view";
+    private static final String PERM_EXPORT = "presale.report.export";
+    private static final String PERM_DOWNLOAD = "presale.report.download";
+    private static final int CODE_EXPORT_IN_PROGRESS = 40901;
     private static final String DEFAULT_PROFILE = "PDF_A4_DPR2";
 
     private final PresaleReportExportMapper exportMapper;
@@ -43,10 +50,11 @@ public class PresaleReportExportService {
     private final PresaleExportProperties properties;
     private final PresaleExportStorageService storageService;
     private final PresaleRenderTokenService renderTokenService;
+    private final PresaleExportMetricsJsonHelper metricsJsonHelper;
 
     @Transactional
     public PresaleExportResponse create(Long reportId, PresaleExportCreateRequest req) {
-        currentUserService.ensurePermission(PERM_VIEW);
+        currentUserService.ensurePermission(PERM_EXPORT);
         Long userId = currentUserService.requireCurrentUser().getId();
         PresaleReport report = accessService.requireReportWithAccess(reportId);
         PresaleReportVersion version = versionMapper.selectById(req.getVersionId());
@@ -59,10 +67,11 @@ public class PresaleReportExportService {
 
         PresaleReportExport active = exportMapper.selectActiveByUserReportVersion(userId, reportId, version.getId());
         if (active != null) {
-            return toResponse(active).toBuilder()
-                    .runningExportId(active.getId())
-                    .runningStatus(active.getStatus())
-                    .build();
+            throw new BizException(
+                    CODE_EXPORT_IN_PROGRESS,
+                    "PRESALE_EXPORT_IN_PROGRESS",
+                    HttpStatus.CONFLICT.value(),
+                    Map.of("runningExportId", active.getId(), "runningStatus", active.getStatus()));
         }
 
         String exportProfile = StringUtils.hasText(req.getExportProfile()) ? req.getExportProfile() : DEFAULT_PROFILE;
@@ -134,7 +143,8 @@ public class PresaleReportExportService {
     }
 
     public String downloadUrl(Long reportId, Long exportId) {
-        currentUserService.ensurePermission(PERM_VIEW);
+        currentUserService.ensurePermission(PERM_DOWNLOAD);
+        Long userId = currentUserService.requireCurrentUser().getId();
         accessService.requireReportWithAccess(reportId);
         PresaleReportExport task = requireExport(reportId, exportId);
         if (!PresaleExportStatuses.SUCCESS.equals(task.getStatus())) {
@@ -146,12 +156,14 @@ public class PresaleReportExportService {
         if (!StringUtils.hasText(task.getFileKey())) {
             throw new BizException(404, "Presale export file not found");
         }
+        log.info("Presale export download: userId={}, reportId={}, exportId={}, fileKey={}",
+                userId, reportId, exportId, task.getFileKey());
         return storageService.presignedDownloadUrl(task.getFileKey());
     }
 
     @Transactional
     public PresaleExportResponse retry(Long reportId, Long exportId) {
-        currentUserService.ensurePermission(PERM_VIEW);
+        currentUserService.ensurePermission(PERM_EXPORT);
         accessService.requireReportWithAccess(reportId);
         PresaleReportExport task = exportMapper.selectByIdForUpdate(exportId);
         if (task == null || !reportId.equals(task.getReportId())) {
@@ -173,7 +185,12 @@ public class PresaleReportExportService {
         task.setRenderTokenId(null);
         task.setWorkerId(null);
         task.setUpdatedAt(LocalDateTime.now());
-        task.setMetricsJson(appendRetryHistory(task, "RETRY", previousError));
+        task.setMetricsJson(metricsJsonHelper.appendRetryHistory(task.getMetricsJson(),
+                PresaleExportMetricsJsonHelper.RetryHistoryEntry.builder()
+                        .errorCode("RETRY")
+                        .errorMsg(previousError)
+                        .retryCount(retryCount + 1)
+                        .build()));
         exportMapper.updateById(task);
         return toResponse(task);
     }
@@ -299,8 +316,4 @@ public class PresaleReportExportService {
         }
     }
 
-    private String appendRetryHistory(PresaleReportExport task, String code, String message) {
-        String safeMessage = message == null ? "" : message.replace("\"", "'");
-        return "{\"retry_history\":[{\"error_code\":\"" + code + "\",\"error_msg\":\"" + safeMessage + "\"}]}";
-    }
 }

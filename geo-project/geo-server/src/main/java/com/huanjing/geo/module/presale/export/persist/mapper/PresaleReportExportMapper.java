@@ -28,7 +28,9 @@ public interface PresaleReportExportMapper extends BaseMapper<PresaleReportExpor
 
     List<PresaleReportExport> selectStaleRunning(@Param("deadline") LocalDateTime deadline);
 
-    int markInterruptedByRestart(@Param("workerId") String workerId, @Param("metricsJson") String metricsJson);
+    int markInterruptedByRestartById(@Param("id") Long id,
+                                     @Param("workerId") String workerId,
+                                     @Param("metricsJson") String metricsJson);
 
     int markStaleFailed(@Param("id") Long id, @Param("metricsJson") String metricsJson);
 

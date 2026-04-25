@@ -10,6 +10,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -20,6 +21,7 @@ public class PresaleReportExportRecoveryService {
     private final PresaleReportExportMapper exportMapper;
     private final PresaleExportWorkerIdentity workerIdentity;
     private final PresaleExportProperties properties;
+    private final PresaleExportMetricsJsonHelper metricsJsonHelper;
 
     @EventListener(ApplicationReadyEvent.class)
     public void markOwnRunningInterrupted() {
@@ -28,8 +30,16 @@ public class PresaleReportExportRecoveryService {
         if (running.isEmpty()) {
             return;
         }
-        int updated = exportMapper.markInterruptedByRestart(workerId,
-                "{\"retry_history\":[{\"error_code\":\"INTERRUPTED_BY_RESTART\"}]}");
+        int updated = 0;
+        for (PresaleReportExport task : running) {
+            String metricsJson = metricsJsonHelper.appendRetryHistory(task.getMetricsJson(),
+                    PresaleExportMetricsJsonHelper.RetryHistoryEntry.builder()
+                            .errorCode("INTERRUPTED_BY_RESTART")
+                            .errorMsg("Application restarted while rendering")
+                            .retryCount(task.getRetryCount())
+                            .build());
+            updated += exportMapper.markInterruptedByRestartById(task.getId(), workerId, metricsJson);
+        }
         log.info("Presale export restart recovery marked {} RUNNING tasks as FAILED, workerId={}, exportIds={}",
                 updated, workerId, running.stream().map(PresaleReportExport::getId).toList());
     }
@@ -39,11 +49,17 @@ public class PresaleReportExportRecoveryService {
         if (!properties.getWorker().isEnabled()) {
             return;
         }
-        LocalDateTime deadline = LocalDateTime.now().minusNanos(properties.getWorker().getStaleRunningTimeoutMs() * 1_000_000);
+        LocalDateTime deadline = LocalDateTime.now()
+                .minus(Duration.ofMillis(properties.getWorker().getStaleRunningTimeoutMs()));
         List<PresaleReportExport> stale = exportMapper.selectStaleRunning(deadline);
         for (PresaleReportExport task : stale) {
-            int updated = exportMapper.markStaleFailed(task.getId(),
-                    "{\"retry_history\":[{\"error_code\":\"WORKER_HEARTBEAT_TIMEOUT\"}]}");
+            String metricsJson = metricsJsonHelper.appendRetryHistory(task.getMetricsJson(),
+                    PresaleExportMetricsJsonHelper.RetryHistoryEntry.builder()
+                            .errorCode("WORKER_HEARTBEAT_TIMEOUT")
+                            .errorMsg("Worker heartbeat timed out")
+                            .retryCount(task.getRetryCount())
+                            .build());
+            int updated = exportMapper.markStaleFailed(task.getId(), metricsJson);
             if (updated > 0) {
                 log.warn("Stale RUNNING force-failed: exportId={}, last_updated_at={}, worker_id={}",
                         task.getId(), task.getUpdatedAt(), task.getWorkerId());

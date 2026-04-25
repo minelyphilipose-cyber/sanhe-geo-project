@@ -38,6 +38,7 @@ public class PresaleReportExportWorker {
     private final PresaleReportExportCompletionService completionService;
     private final PresaleReportExportMapper exportMapper;
     private final ObjectMapper objectMapper;
+    private final PresaleExportMetricsJsonHelper metricsJsonHelper;
 
     @Value("${geo.report.web-base-url:http://127.0.0.1:3000}")
     private String webBaseUrl;
@@ -147,6 +148,12 @@ public class PresaleReportExportWorker {
         latest.setStatus(PresaleExportStatuses.FAILED);
         latest.setErrorMsg(message == null ? "Render failed" : message);
         latest.setRenderTokenId(null);
+        latest.setMetricsJson(metricsJsonHelper.appendRetryHistory(latest.getMetricsJson(),
+                PresaleExportMetricsJsonHelper.RetryHistoryEntry.builder()
+                        .errorCode("RENDER_FAILED")
+                        .errorMsg(latest.getErrorMsg())
+                        .retryCount(latest.getRetryCount())
+                        .build()));
         latest.setUpdatedAt(LocalDateTime.now());
         exportMapper.updateById(latest);
         log.warn("Presale export failed: exportId={}, error={}", exportId, latest.getErrorMsg());
@@ -161,7 +168,12 @@ public class PresaleReportExportWorker {
         latest.setErrorMsg(null);
         latest.setWorkerId(null);
         latest.setRenderTokenId(null);
-        latest.setMetricsJson("{\"retry_history\":[{\"error_code\":\"CONCURRENCY_REQUEUE\",\"error_msg\":\"" + safe(message) + "\"}]}");
+        latest.setMetricsJson(metricsJsonHelper.appendRetryHistory(latest.getMetricsJson(),
+                PresaleExportMetricsJsonHelper.RetryHistoryEntry.builder()
+                        .errorCode("CONCURRENCY_REQUEUE")
+                        .errorMsg(message)
+                        .retryCount(latest.getRetryCount())
+                        .build()));
         latest.setUpdatedAt(LocalDateTime.now());
         exportMapper.updateById(latest);
         log.info("Presale export requeued after concurrency timeout: exportId={}", exportId);
@@ -197,7 +209,4 @@ public class PresaleReportExportWorker {
         return value != null && value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
     }
 
-    private String safe(String message) {
-        return message == null ? "" : message.replace("\"", "'");
-    }
 }

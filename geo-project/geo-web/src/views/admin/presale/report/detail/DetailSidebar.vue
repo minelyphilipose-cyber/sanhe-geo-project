@@ -179,6 +179,7 @@ import {
   getPresaleExport,
   type PresaleExportResponse
 } from '@/api/presaleExport'
+import type { ApiError } from '@/api/request'
 import { useMergedView } from '@/composables/presale/useMergedView'
 
 const route = useRoute()
@@ -310,21 +311,28 @@ async function handleRetry() {
 async function handleExport() {
   const versionId = meta.value?.version_id
   if (!versionId) return
-  const res = await runAction('export', () =>
-    createPresaleExport(reportId.value, {
+  if (acting.value) return
+  acting.value = 'export'
+  try {
+    const res = await createPresaleExport(reportId.value, {
       versionId,
       exportProfile: 'PDF_A4_DPR2'
     })
-  )
-  if (!res) return
-
-  const exportId = res.runningExportId ?? res.exportId
-  if (res.runningExportId) {
-    ElMessage.info('已有导出任务进行中,继续等待当前任务完成')
-  } else {
     ElMessage.success('已提交 PDF 导出任务')
+    await waitExportAndDownload(res.exportId)
+  } catch (e: unknown) {
+    const err = e as ApiError<{ runningExportId?: number; runningStatus?: string }>
+    if (err.code === 40901 && err.data?.runningExportId) {
+      ElMessage.warning('已有导出任务进行中,继续等待当前任务完成')
+      await waitExportAndDownload(err.data.runningExportId)
+    } else {
+      // request 拦截器已弹消息,这里仅保留调试日志。
+      // eslint-disable-next-line no-console
+      console.warn('[sidebar action failed]', 'export', e)
+    }
+  } finally {
+    acting.value = null
   }
-  await waitExportAndDownload(exportId)
 }
 
 async function waitExportAndDownload(exportId: number) {

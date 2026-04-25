@@ -37,6 +37,20 @@ let isRefreshing = false
 let pendingQueue: Array<(token: string) => void> = []
 const AUTH_STORAGE_KEY = 'geo_auth_v1'
 
+export interface ApiError<T = unknown> extends Error {
+  code?: number
+  status?: number
+  data?: T
+}
+
+function buildApiError(message: string, code?: number, data?: unknown, status?: number): ApiError {
+  const err = new Error(message) as ApiError
+  err.code = code
+  err.data = data
+  err.status = status
+  return err
+}
+
 function buildSessionExpiredUrl() {
   const current = router.currentRoute.value
   const currentPath = current?.fullPath || ''
@@ -64,18 +78,18 @@ request.interceptors.response.use(
     const reqUrl = response.config.url || ''
     const isAuthApi = isAuthRequest(reqUrl)
 
-    if (res.code !== 0) {
-      if (res.code === 401 && !isAuthApi) {
-        await redirectToSessionExpired()
-        return Promise.reject(new Error(res.message || '登录状态已失效'))
+      if (res.code !== 0) {
+        if (res.code === 401 && !isAuthApi) {
+          await redirectToSessionExpired()
+          return Promise.reject(buildApiError(res.message || '登录状态已失效', res.code, res.data))
+        }
+        if (res.code === 403) {
+          router.push('/403')
+          return Promise.reject(buildApiError(res.message || '无权限访问', res.code, res.data))
+        }
+        ElMessage.error(res.message || '请求失败')
+        return Promise.reject(buildApiError(res.message || '请求失败', res.code, res.data))
       }
-      if (res.code === 403) {
-        router.push('/403')
-        return Promise.reject(new Error(res.message || '无权限访问'))
-      }
-      ElMessage.error(res.message || '请求失败')
-      return Promise.reject(new Error(res.message))
-    }
 
     return response
   },
@@ -156,6 +170,13 @@ request.interceptors.response.use(
 
       router.push('/403')
       return Promise.reject(error)
+    }
+
+    const responseData = error.response?.data
+    if (responseData && typeof responseData === 'object' && 'code' in responseData) {
+      const msg = responseData.message || error.message || '网络异常'
+      ElMessage.error(msg)
+      return Promise.reject(buildApiError(msg, responseData.code, responseData.data, error.response?.status))
     }
 
     const msg = error.response?.data?.message || error.message || '网络异常'

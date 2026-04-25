@@ -3,6 +3,7 @@ package com.huanjing.geo.module.presale.export.service;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.export.dto.PresaleExportResponse;
 import com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport;
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,7 +13,7 @@ import org.springframework.stereotype.Service;
 @Service
 @RequiredArgsConstructor
 public class PresaleReportExportCancelService {
-    private static final String PERM_VIEW = "presale.report.view";
+    private static final String PERM_EXPORT = "presale.report.export";
 
     private final CurrentUserService currentUserService;
     private final PresaleAccessService accessService;
@@ -22,11 +23,14 @@ public class PresaleReportExportCancelService {
     private final PresaleReportExportService exportService;
 
     public PresaleExportResponse cancel(Long reportId, Long exportId) {
-        currentUserService.ensurePermission(PERM_VIEW);
+        currentUserService.ensurePermission(PERM_EXPORT);
         accessService.requireReportWithAccess(reportId);
 
         // 阶段 1: DB 事务先落 CANCELED。DB 是真理之源,用户可立即发起新导出。
         PresaleReportExport canceled = cancelDbService.cancelInDb(reportId, exportId);
+        if (!PresaleExportStatuses.CANCELED.equals(canceled.getStatus())) {
+            throw new BizException(409, "Presale export status is not cancelable");
+        }
 
         // 阶段 2: 事务外副作用。内存标志不失败;token 删除失败有 TTL 兜底。
         cancellationRegistry.cancel(exportId);

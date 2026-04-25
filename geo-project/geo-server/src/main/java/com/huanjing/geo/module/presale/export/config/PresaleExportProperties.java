@@ -33,7 +33,6 @@ public class PresaleExportProperties {
     @Data
     public static class Worker {
         private boolean enabled = true;
-        private int poolSize = 1;
         private long scanIntervalMs = 1_000;
         private int claimBatchSize = 1;
         private long heartbeatIntervalMs = 30_000;

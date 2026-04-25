@@ -72,7 +72,7 @@
         LIMIT 100
     </select>
 
-    <update id="markInterruptedByRestart">
+    <update id="markInterruptedByRestartById">
         UPDATE presale_report_export
         SET status = 'FAILED',
             error_msg = 'INTERRUPTED_BY_RESTART',
@@ -80,7 +80,8 @@
             cancel_requested = 0,
             metrics_json = #{metricsJson},
             updated_at = NOW()
-        WHERE worker_id = #{workerId}
+        WHERE id = #{id}
+          AND worker_id = #{workerId}
           AND status = 'RUNNING'
     </update>
 

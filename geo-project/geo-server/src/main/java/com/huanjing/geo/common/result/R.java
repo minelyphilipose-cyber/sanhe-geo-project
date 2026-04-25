@@ -35,4 +35,10 @@ public class R<T> {
         r.message = message;
         return r;
     }
+
+    public static <T> R<T> fail(int code, String message, T data) {
+        R<T> r = fail(code, message);
+        r.data = data;
+        return r;
+    }
 }

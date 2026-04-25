@@ -1,8 +1,9 @@
 package com.huanjing.geo.common.exception;
 
 import com.huanjing.geo.common.result.R;
-import jakarta.validation.ConstraintViolationException;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
@@ -20,7 +21,10 @@ import org.springframework.web.multipart.MultipartException;
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(BizException.class)
-    public R<?> handleBizException(BizException e, HttpServletRequest request) {
+    public R<?> handleBizException(BizException e, HttpServletRequest request, HttpServletResponse response) {
+        if (e.getHttpStatus() > 0 && e.getHttpStatus() != 200) {
+            response.setStatus(e.getHttpStatus());
+        }
         if (e.getCode() >= 500) {
             log.error("Business exception code={} path={} method={} ip={} msg={}",
                     e.getCode(), request.getRequestURI(), request.getMethod(), request.getRemoteAddr(), e.getMessage(), e);
@@ -28,7 +32,7 @@ public class GlobalExceptionHandler {
             log.warn("Business exception code={} path={} method={} ip={} msg={}",
                     e.getCode(), request.getRequestURI(), request.getMethod(), request.getRemoteAddr(), e.getMessage());
         }
-        return R.fail(e.getCode(), e.getMessage());
+        return R.fail(e.getCode(), e.getMessage(), e.getData());
     }
 
     @ExceptionHandler(BadCredentialsException.class)
