@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.presale.export.persist.entity;
 
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -18,9 +20,12 @@ public class PresaleReportExport {
     private String exportProfile;
     private String fileFormat;
     private String status;
+    @TableField(value = "error_msg", updateStrategy = FieldStrategy.ALWAYS)
     private String errorMsg;
     private Integer retryCount;
+    @TableField(value = "cancel_requested", updateStrategy = FieldStrategy.ALWAYS)
     private Boolean cancelRequested;
+    @TableField(value = "worker_id", updateStrategy = FieldStrategy.ALWAYS)
     private String workerId;
     private String fileKey;
     private Long fileSize;
@@ -29,6 +34,7 @@ public class PresaleReportExport {
     private String snapshotStorageType;
     private String snapshotJson;
     private String snapshotKey;
+    @TableField(value = "render_token_id", updateStrategy = FieldStrategy.ALWAYS)
     private String renderTokenId;
     private String metricsJson;
     private Long triggerUserId;

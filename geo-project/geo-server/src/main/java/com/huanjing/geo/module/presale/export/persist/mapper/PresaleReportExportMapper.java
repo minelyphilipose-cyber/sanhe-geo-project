@@ -24,10 +24,6 @@ public interface PresaleReportExportMapper extends BaseMapper<PresaleReportExpor
 
     int heartbeat(@Param("id") Long id, @Param("workerId") String workerId);
 
-    int clearRenderToken(@Param("id") Long id);
-
-    int clearErrorMsg(@Param("id") Long id);
-
     List<PresaleReportExport> selectStaleRunning(@Param("deadline") LocalDateTime deadline);
 
     int markStaleFailed(@Param("id") Long id, @Param("metricsJson") String metricsJson);

@@ -192,7 +192,6 @@ public class PresaleReportExportService {
                         .retryCount(retryCount + 1)
                         .build()));
         exportMapper.updateById(task);
-        exportMapper.clearErrorMsg(task.getId());
         return toResponse(task);
     }
 

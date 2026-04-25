@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.presale.export.render;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.huanjing.geo.module.presale.export.config.PresaleExportProperties;
 import com.microsoft.playwright.Browser;
 import com.microsoft.playwright.BrowserContext;
@@ -81,10 +82,8 @@ public class PresalePdfRenderKernel {
                             new Page.WaitForFunctionOptions().setTimeout((double) browserProps.getReadyTimeoutMs()));
 
                     Object metrics = page.evaluate("() => window.__PRESALE_PRINT_METRICS__ || {}");
-                    String metricsJson = objectMapper.writeValueAsString(metrics);
-                    Files.writeString(request.getDebugDir().resolve("print-metrics.json"),
-                            metricsJson, StandardCharsets.UTF_8);
-
+                    ObjectNode metricsRoot = objectMapper.valueToTree(metrics);
+                    long pdfStarted = System.nanoTime();
                     page.pdf(new Page.PdfOptions()
                             .setPath(request.getPdfPath())
                             .setFormat("A4")
@@ -95,9 +94,13 @@ public class PresalePdfRenderKernel {
                                     .setRight("0")
                                     .setBottom("0")
                                     .setLeft("0")));
+                    metricsRoot.put("pdf_elapsed_ms", Duration.ofNanos(System.nanoTime() - pdfStarted).toMillis());
+                    String metricsJson = objectMapper.writeValueAsString(metricsRoot);
+                    Files.writeString(request.getDebugDir().resolve("metrics.json"),
+                            metricsJson, StandardCharsets.UTF_8);
 
                     page.screenshot(new Page.ScreenshotOptions()
-                            .setPath(request.getDebugDir().resolve("final-page.png"))
+                            .setPath(request.getDebugDir().resolve("screenshot.png"))
                             .setFullPage(true));
                     long elapsedMs = Duration.ofNanos(System.nanoTime() - started).toMillis();
                     return PresalePdfRenderResult.builder()
@@ -108,13 +111,14 @@ public class PresalePdfRenderKernel {
                 } catch (Exception ex) {
                     try {
                         page.screenshot(new Page.ScreenshotOptions()
-                                .setPath(request.getDebugDir().resolve("failure.png"))
+                                .setPath(request.getDebugDir().resolve("screenshot.png"))
                                 .setFullPage(true));
                     } catch (Exception ignored) {
                         // Preserve the original render failure.
                     }
                     throw ex;
                 } finally {
+                    writePageHtmlQuietly(request, page);
                     writeDebugFileQuietly(request, "console.log", consoleLines);
                     writeDebugFileQuietly(request, "network.log", networkLines);
                 }
@@ -137,6 +141,14 @@ public class PresalePdfRenderKernel {
             Files.write(request.getDebugDir().resolve(fileName), lines, StandardCharsets.UTF_8);
         } catch (Exception ex) {
             log.warn("Failed to write presale export debug file: {}", fileName, ex);
+        }
+    }
+
+    private void writePageHtmlQuietly(PresalePdfRenderRequest request, Page page) {
+        try {
+            Files.writeString(request.getDebugDir().resolve("page.html"), page.content(), StandardCharsets.UTF_8);
+        } catch (Exception ex) {
+            log.warn("Failed to write presale export page html", ex);
         }
     }
 }

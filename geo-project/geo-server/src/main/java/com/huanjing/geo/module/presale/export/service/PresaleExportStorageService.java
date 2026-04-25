@@ -17,6 +17,10 @@ public class PresaleExportStorageService {
         minioStorageService.uploadBytes(bytes, objectKey, "application/pdf");
     }
 
+    public void uploadDebugFile(byte[] bytes, String objectKey, String contentType) {
+        minioStorageService.uploadBytes(bytes, objectKey, contentType);
+    }
+
     public byte[] readObject(String objectKey) {
         return minioStorageService.getObjectBytes(objectKey);
     }

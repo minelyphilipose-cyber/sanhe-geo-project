@@ -58,6 +58,20 @@ public class PresaleExportMetricsJsonHelper {
         }
     }
 
+    public String putString(String currentJson, String fieldName, String value) {
+        try {
+            ObjectNode root = readRoot(currentJson);
+            if (value == null) {
+                root.remove(fieldName);
+            } else {
+                root.put(fieldName, value);
+            }
+            return objectMapper.writeValueAsString(root);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Update presale export metrics failed", ex);
+        }
+    }
+
     private ObjectNode readRoot(String currentJson) throws Exception {
         if (!StringUtils.hasText(currentJson)) {
             return objectMapper.createObjectNode();

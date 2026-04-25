@@ -9,4 +9,12 @@ public class PresalePdfRenderResult {
     long elapsedMs;
     long fileSize;
     String metricsJson;
+
+    public PresalePdfRenderResult withMetricsJson(String newMetricsJson) {
+        return PresalePdfRenderResult.builder()
+                .elapsedMs(elapsedMs)
+                .fileSize(fileSize)
+                .metricsJson(newMetricsJson)
+                .build();
+    }
 }

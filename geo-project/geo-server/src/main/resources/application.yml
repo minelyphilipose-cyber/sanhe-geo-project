@@ -88,7 +88,13 @@ geo:
     storage:
       inline-snapshot-max-bytes: ${PRESALE_EXPORT_INLINE_SNAPSHOT_MAX_BYTES:1048576}
       expire-days: ${PRESALE_EXPORT_EXPIRE_DAYS:7}
+      debug-retention-days: ${PRESALE_EXPORT_DEBUG_RETENTION_DAYS:7}
       local-root: ${PRESALE_EXPORT_LOCAL_ROOT:target/presale-exports}
+    quality:
+      enforce-bottom-band: ${PRESALE_EXPORT_ENFORCE_BOTTOM_BAND:true}
+      enforce-chart-non-blank: ${PRESALE_EXPORT_ENFORCE_CHART_NON_BLANK:false}
+      enforce-page-count: ${PRESALE_EXPORT_ENFORCE_PAGE_COUNT:true}
+      bottom-band-px: ${PRESALE_EXPORT_BOTTOM_BAND_PX:110}
   dispatch:
     cron: "0 55 18 * * *"
     timezone: "Asia/Shanghai"

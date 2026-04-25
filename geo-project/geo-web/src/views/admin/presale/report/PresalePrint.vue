@@ -37,11 +37,18 @@ interface ChartMetric {
 }
 
 interface PrintMetrics {
-  pageCount: number
-  chartCount: number
-  chartsWithData: number
-  representativeCanvasNonBlank: boolean
-  overflowPages: PageOverflowMetric[]
+  page_count: number
+  chart_count: number
+  charts_with_data: number
+  canvas_non_blank: boolean
+  bottom_band_ok: boolean
+  overflow_pages: PageOverflowMetric[]
+  ready_elapsed_ms: number
+  device_scale_factor: number
+  viewport: {
+    width: number
+    height: number
+  }
   charts: ChartMetric[]
 }
 
@@ -60,6 +67,8 @@ const detail = ref<ReportDetailVO | null>(null)
 const mergedView = ref<MergedViewDTO | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
+const readyStartedAt = ref(0)
+const deviceScaleFactor = ref(window.devicePixelRatio || 1)
 const currentVersionNo = computed(() => mergedView.value?.meta.version_no ?? null)
 const reportCreatedAt = computed(() => mergedView.value?.meta.generated_at ?? detail.value?.createdAt ?? null)
 
@@ -91,6 +100,8 @@ async function load(): Promise<void> {
   error.value = null
   try {
     const payload = await getPresalePrintRenderDetail(renderToken.value)
+    readyStartedAt.value = performance.now()
+    deviceScaleFactor.value = payload.renderProfile.deviceScaleFactor || window.devicePixelRatio || 1
     const d = payload.snapshot
     detail.value = d
     mergedView.value = buildMergedView(d)
@@ -282,12 +293,20 @@ function collectMetrics(charts: ECharts[], chartEls: HTMLElement[]): PrintMetric
       canvasNonBlank: isCanvasNonBlank(chartEls[index])
     }
   })
+  const overflowPages = collectPageOverflowMetrics()
   return {
-    pageCount: document.querySelectorAll('.page[data-page-id]').length,
-    chartCount: charts.length,
-    chartsWithData: chartMetrics.filter((item) => item.hasData).length,
-    representativeCanvasNonBlank: chartMetrics.some((item) => item.hasData && item.canvasNonBlank),
-    overflowPages: collectPageOverflowMetrics(),
+    page_count: document.querySelectorAll('.page[data-page-id]').length,
+    chart_count: charts.length,
+    charts_with_data: chartMetrics.filter((item) => item.hasData).length,
+    canvas_non_blank: chartMetrics.some((item) => item.hasData && item.canvasNonBlank),
+    bottom_band_ok: overflowPages.length === 0,
+    overflow_pages: overflowPages,
+    ready_elapsed_ms: Math.round(performance.now() - readyStartedAt.value),
+    device_scale_factor: deviceScaleFactor.value,
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight
+    },
     charts: chartMetrics
   }
 }

@@ -56,20 +56,6 @@
           AND status = 'RUNNING'
     </update>
 
-    <update id="clearRenderToken">
-        UPDATE presale_report_export
-        SET render_token_id = NULL,
-            updated_at = NOW()
-        WHERE id = #{id}
-    </update>
-
-    <update id="clearErrorMsg">
-        UPDATE presale_report_export
-        SET error_msg = NULL,
-            updated_at = NOW()
-        WHERE id = #{id}
-    </update>
-
     <select id="selectStaleRunning" resultType="com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport">
         SELECT *
         FROM presale_report_export

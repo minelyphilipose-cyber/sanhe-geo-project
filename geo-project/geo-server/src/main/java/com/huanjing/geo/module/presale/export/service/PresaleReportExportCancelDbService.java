@@ -13,7 +13,7 @@ public class PresaleReportExportCancelDbService {
     private final PresaleReportExportMapper exportMapper;
 
     @Transactional
-    public PresaleReportExport cancelInDb(Long reportId, Long exportId) {
+    public CancelResult cancelInDb(Long reportId, Long exportId) {
         PresaleReportExport task = exportMapper.selectByIdForUpdate(exportId);
         if (task == null || !reportId.equals(task.getReportId())) {
             throw new BizException(404, "Presale export not found");
@@ -25,10 +25,11 @@ public class PresaleReportExportCancelDbService {
             task.setCancelRequested(true);
             task.setRenderTokenId(null);
             exportMapper.updateById(task);
-            exportMapper.clearRenderToken(task.getId());
-            task.setRenderTokenId(renderTokenId);
-            return task;
+            return new CancelResult(task, renderTokenId);
         }
         throw new BizException(409, "Presale export status is not cancelable");
+    }
+
+    public record CancelResult(PresaleReportExport task, String renderTokenIdToInvalidate) {
     }
 }

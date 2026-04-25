@@ -27,7 +27,8 @@ public class PresaleReportExportCancelService {
         accessService.requireReportWithAccess(reportId);
 
         // 阶段 1: DB 事务先落 CANCELED。DB 是真理之源,用户可立即发起新导出。
-        PresaleReportExport canceled = cancelDbService.cancelInDb(reportId, exportId);
+        PresaleReportExportCancelDbService.CancelResult cancelResult = cancelDbService.cancelInDb(reportId, exportId);
+        PresaleReportExport canceled = cancelResult.task();
         if (!PresaleExportStatuses.CANCELED.equals(canceled.getStatus())) {
             throw new BizException(409, "Presale export status is not cancelable");
         }
@@ -35,7 +36,7 @@ public class PresaleReportExportCancelService {
         // 阶段 2: 事务外副作用。内存标志不失败;token 删除失败有 TTL 兜底。
         cancellationRegistry.cancel(exportId);
         try {
-            renderTokenService.invalidate(canceled.getRenderTokenId());
+            renderTokenService.invalidate(cancelResult.renderTokenIdToInvalidate());
         } catch (Exception ex) {
             log.warn("Invalidate render token after cancel failed, exportId={}", exportId, ex);
         }

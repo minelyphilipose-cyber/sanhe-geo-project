@@ -13,6 +13,7 @@ public class PresaleExportProperties {
     private Worker worker = new Worker();
     private Retry retry = new Retry();
     private Storage storage = new Storage();
+    private Quality quality = new Quality();
 
     @Data
     public static class Browser {
@@ -49,6 +50,15 @@ public class PresaleExportProperties {
     public static class Storage {
         private long inlineSnapshotMaxBytes = 1_048_576;
         private int expireDays = 7;
+        private int debugRetentionDays = 7;
         private String localRoot = "target/presale-exports";
+    }
+
+    @Data
+    public static class Quality {
+        private boolean enforceBottomBand = true;
+        private boolean enforceChartNonBlank = false;
+        private boolean enforcePageCount = true;
+        private int bottomBandPx = 110;
     }
 }

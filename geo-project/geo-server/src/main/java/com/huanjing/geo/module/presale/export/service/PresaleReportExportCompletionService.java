@@ -33,8 +33,6 @@ public class PresaleReportExportCompletionService {
         latest.setRenderTokenId(null);
         latest.setUpdatedAt(LocalDateTime.now());
         exportMapper.updateById(latest);
-        exportMapper.clearRenderToken(exportId);
-        exportMapper.clearErrorMsg(exportId);
         exportMapper.incrementVersionExportSuccess(latest.getVersionId());
         return true;
     }
