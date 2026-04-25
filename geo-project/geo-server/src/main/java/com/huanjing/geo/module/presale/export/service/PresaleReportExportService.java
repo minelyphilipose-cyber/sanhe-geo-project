@@ -145,6 +145,16 @@ public class PresaleReportExportService {
     }
 
     public String downloadUrl(Long reportId, Long exportId) {
+        PresaleReportExport task = requireDownloadableExport(reportId, exportId);
+        return storageService.presignedDownloadUrl(task.getFileKey());
+    }
+
+    public byte[] downloadBytes(Long reportId, Long exportId) {
+        PresaleReportExport task = requireDownloadableExport(reportId, exportId);
+        return storageService.readObject(task.getFileKey());
+    }
+
+    private PresaleReportExport requireDownloadableExport(Long reportId, Long exportId) {
         currentUserService.ensurePermission(PERM_DOWNLOAD);
         Long userId = currentUserService.requireCurrentUser().getId();
         accessService.requireReportWithAccess(reportId);
@@ -163,7 +173,7 @@ public class PresaleReportExportService {
         }
         log.info("Presale export download: userId={}, reportId={}, exportId={}, fileKey={}",
                 userId, reportId, exportId, task.getFileKey());
-        return storageService.presignedDownloadUrl(task.getFileKey());
+        return task;
     }
 
     @Transactional

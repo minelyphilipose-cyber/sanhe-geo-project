@@ -14,7 +14,7 @@
         </div>
 
         <!-- 场景对比表 -->
-        <div v-if="missingRows.length > 0" class="data-matrix p08-matrix">
+        <div v-if="visibleMissingRows.length > 0" class="data-matrix p08-matrix">
           <!-- 表头 -->
           <div class="data-matrix-row p08-row-head">
             <div class="mono p08-col-label">价值</div>
@@ -32,7 +32,7 @@
 
           <!-- 数据行 -->
           <div
-            v-for="(row, idx) in missingRows"
+            v-for="(row, idx) in visibleMissingRows"
             :key="`${row.prompt_code}-${idx}`"
             class="data-matrix-row p08-row-data"
           >
@@ -60,6 +60,11 @@
         <!-- 无缺口兜底:极罕见情况,但逻辑上可能(100% 覆盖) -->
         <div v-else class="p08-empty">
           未发现您未被推荐的场景 —— 您的覆盖表现优异。
+        </div>
+
+        <div v-if="hiddenMissingCount > 0" class="p08-limit-note">
+          本页按商业价值优先展示 {{ visibleMissingRows.length }} 条代表性缺口；其余
+          {{ hiddenMissingCount }} 条已计入下方缺口总数。
         </div>
 
         <!-- 3 张卡片:各价值层的缺口数/总数 -->
@@ -129,6 +134,7 @@ import { useMergedView } from '@/composables/presale/useMergedView'
 
 const { mergedView: mergedViewRef } = useMergedView()
 const mergedView = computed(() => mergedViewRef.value!)
+const MAX_VISIBLE_MISSING_ROWS = 8
 
 // ─── 竞品名列表(动态,不硬编码) ──────────────────────
 const competitorNames = computed(() =>
@@ -185,6 +191,9 @@ const missingRows = computed<MissingRow[]>(() => {
 
   return rows
 })
+
+const visibleMissingRows = computed(() => missingRows.value.slice(0, MAX_VISIBLE_MISSING_ROWS))
+const hiddenMissingCount = computed(() => Math.max(0, missingRows.value.length - visibleMissingRows.value.length))
 
 // ─── 3 张卡片计数 ──────────────────────────────────────
 const highGapCount = computed(
@@ -260,6 +269,10 @@ const showRawTag = computed(() => topCompetitor.value?.scene_is_polished === fal
 }
 .p08-query-text {
   font-size: 13px;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 .p08-intent-text {
   font-size: 11px;
@@ -275,6 +288,12 @@ const showRawTag = computed(() => topCompetitor.value?.scene_is_polished === fal
   border-top: 2px solid #0b1426;
   border-bottom: 2px solid #0b1426;
   margin-bottom: 32px;
+}
+
+.p08-limit-note {
+  margin: -18px 0 22px;
+  font-size: 11px;
+  color: #6b6456;
 }
 
 /* 3 张卡片 */

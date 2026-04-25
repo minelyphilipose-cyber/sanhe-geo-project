@@ -54,3 +54,18 @@ export function retryPresaleExport(reportId: number, exportId: number) {
 export function buildPresaleExportDownloadUrl(reportId: number, exportId: number): string {
   return `/api/presale/reports/${reportId}/exports/${exportId}/download`
 }
+
+export async function downloadPresaleExportPdf(reportId: number, exportId: number) {
+  const response = await request.get<Blob>(`/presale/reports/${reportId}/exports/${exportId}/download`, {
+    responseType: 'blob'
+  })
+  const blob = response.data
+  const url = window.URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `presale-report-${reportId}-${exportId}.pdf`
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.URL.revokeObjectURL(url)
+}
