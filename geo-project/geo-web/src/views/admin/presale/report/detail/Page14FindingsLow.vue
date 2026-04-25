@@ -26,8 +26,13 @@
         </template>
 
         <div v-else class="p14-empty">
-          <span class="p14-empty-icon">✓</span>
-          本优先级下无待优化项 — 您在该维度已表现良好,建议继续保持。
+          <div>
+            <span class="p14-empty-icon">✓</span>
+            暂无建议关注项
+          </div>
+          <div class="p14-empty-desc">
+            您在平台基础覆盖、内容情感、运营响应等方面表现良好,主要优化机会集中在高/中优先级。
+          </div>
         </div>
 
         <!-- 底部引用(动态合成) -->
@@ -142,6 +147,9 @@ const categoryCounts = computed<CategoryCount[]>(() => {
   color: #047857;
   font-weight: 700;
   font-size: 16px;
+}
+.p14-empty-desc {
+  margin-top: 4px;
 }
 
 .p14-quote-wrap {

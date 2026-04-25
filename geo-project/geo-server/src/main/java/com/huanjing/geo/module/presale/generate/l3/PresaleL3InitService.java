@@ -51,7 +51,7 @@ public class PresaleL3InitService {
      * 缺失占位符会被替换为 "—",并输出 WARN 日志(便于排查规则与文案不一致)。
      */
     static final Map<String, RuleFindingTemplate> RULE_FINDING_MAP = buildRuleFindingMap();
-    private static final String DEFAULT_ROI_DISCLAIMER = "基于行业平均模型的估算,实际效果受多种因素影响,建议结合业务实际情况评估。";
+    private static final String DEFAULT_ROI_DISCLAIMER = "区间为基于同行业历史优化案例的统计估算,具体效果以实际执行为准。";
 
     private final ObjectMapper objectMapper;
     private final PresaleTextFormatter textFormatter;
@@ -184,14 +184,14 @@ public class PresaleL3InitService {
     }
 
     private List<PhaseDescription> buildPhaseDescriptions(ComputedSnapshotDTO computed) {
-        Integer phase1Completed = extractPhase1CompletedCount(computed);
-        if (phase1Completed == null) {
+        Integer phase1Total = extractPhase1TotalCount(computed);
+        if (phase1Total == null) {
             return fallbackPhaseDescriptions();
         }
         List<PhaseDescription> out = new ArrayList<>();
         out.add(PhaseDescription.builder()
                 .phaseNo(1)
-                .title("基础优化阶段,聚焦" + phase1Completed + "项关键改动")
+                .title("基础优化阶段,聚焦" + phase1Total + "项关键改动")
                 .description(null)
                 .build());
         out.add(PhaseDescription.builder().phaseNo(2).title("内容深化阶段").description(null).build());
@@ -313,19 +313,19 @@ public class PresaleL3InitService {
         }
         String text = evidenceData.entrySet().stream()
                 .sorted(Map.Entry.comparingByKey())
-                .map(e -> e.getKey() + ":" + String.valueOf(e.getValue()))
+                .map(e -> SignalKeyLabelMap.format(e.getKey(), e.getValue()))
                 .collect(Collectors.joining("，"));
         return "关键信号: " + text;
     }
 
-    private Integer extractPhase1CompletedCount(ComputedSnapshotDTO computed) {
+    private Integer extractPhase1TotalCount(ComputedSnapshotDTO computed) {
         if (computed == null || computed.getRoiSimulation() == null || computed.getRoiSimulation().getPhases() == null) {
             return null;
         }
         return computed.getRoiSimulation().getPhases().stream()
                 .filter(Objects::nonNull)
                 .filter(phase -> Integer.valueOf(1).equals(phase.getPhaseNo()))
-                .map(phase -> phase.getCompletedOptimizationCount() == null ? 0 : phase.getCompletedOptimizationCount())
+                .map(phase -> phase.getTotalOptimizationCount() == null ? 0 : phase.getTotalOptimizationCount())
                 .findFirst()
                 .orElse(null);
     }

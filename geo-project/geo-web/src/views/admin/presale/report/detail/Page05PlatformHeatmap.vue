@@ -3,7 +3,7 @@
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
-        <span>04 / 多平台提及率</span>
+        <span>04 / 多平台 AI 可见度</span>
       </div>
 
       <div class="p05-body">
@@ -12,7 +12,7 @@
           <span class="section-number">04</span>
           <div>
             <div class="section-label">PLATFORM MATRIX</div>
-            <div class="section-heading">多平台提及率热力图</div>
+            <div class="section-heading">多平台 AI 可见度热力图</div>
           </div>
         </div>
 
@@ -39,7 +39,10 @@
               class="p05-row"
               :style="gridTemplate"
             >
-              <div class="p05-row-label">{{ row.intent_label }}</div>
+              <div class="p05-row-label">
+                <span>{{ row.intent_label }}</span>
+                <span class="p05-row-metric">{{ row.metric_label }}</span>
+              </div>
               <div
                 v-for="cell in row.cells"
                 :key="cell.key"
@@ -53,7 +56,7 @@
 
             <!-- 图例 -->
             <div class="mono p05-legend">
-              <span>提及率</span>
+              <span>分值</span>
               <div v-for="l in LEGEND" :key="l.cls" class="p05-legend-item">
                 <div class="heat-cell p05-legend-swatch" :class="l.cls"></div>
                 <span>{{ l.label }}</span>
@@ -62,6 +65,13 @@
                 <div class="heat-cell p05-legend-swatch p05-cell-null"></div>
                 <span>未测</span>
               </div>
+            </div>
+          </div>
+
+          <div class="p05-metric-note">
+            <div class="mono p05-metric-note-label">指标口径说明</div>
+            <div>
+              注:认知型与对比型测试中,问题已包含品牌名,故采用裁判 LLM 评估“AI 对品牌的认知质量”与“AI 在竞争中的立场”,而非主动提及率。三类指标统一映射至 0~100,但语义不同。
             </div>
           </div>
 
@@ -187,6 +197,7 @@ interface HeatCellView {
 interface HeatRowView {
   intent_code: IntentCode
   intent_label: string
+  metric_label: string
   cells: HeatCellView[]
 }
 
@@ -202,7 +213,7 @@ const heatRows = computed<HeatRowView[]>(() => {
       .find((c): c is PlatformIntentCell => c != null)
     const intentLabel =
       firstCellWithLabel?.intent_label ?? toIntentLabel(intentCode)
-    return { intent_code: intentCode, intent_label: intentLabel, cells }
+    return { intent_code: intentCode, intent_label: intentLabel, metric_label: metricLabel(intentCode), cells }
   })
 })
 
@@ -236,8 +247,8 @@ const platformAvgs = computed<PlatformAvg[]>(() => {
       )
       const validRates = cells
         .filter((c): c is PlatformIntentCell => c != null)
-        .filter((c) => c.platform_prompt_count != null && c.platform_prompt_count > 0)
-        .map((c) => c.mention_rate)
+        .filter((c) => c.platform_prompt_count != null && c.platform_prompt_count > 0 && c.mention_rate != null)
+        .map((c) => c.mention_rate ?? 0)
       if (validRates.length === 0) return null
       const avg = validRates.reduce((sum, x) => sum + x, 0) / validRates.length
       return {
@@ -374,7 +385,7 @@ function buildCellView(
   }
 
   const isNull =
-    cell.platform_prompt_count == null || cell.platform_prompt_count <= 0
+    cell.platform_prompt_count == null || cell.platform_prompt_count <= 0 || cell.mention_rate == null
 
   if (isNull) {
     return {
@@ -382,17 +393,18 @@ function buildCellView(
       display: '—',
       heatClass: 'heat-0',
       isNull: true,
-      tooltip: `${platform.platform_name} · ${cell.intent_label}:未测试该意图`,
+      tooltip: `${platform.platform_name} · ${cell.intent_label}:数据不足`,
       stance: cell.stance ?? null
     }
   }
 
   const tooltip = buildTooltip(cell)
+  const rate = cell.mention_rate ?? 0
 
   return {
     key,
-    display: `${cell.mention_rate}%`,
-    heatClass: rateToHeatClass(cell.mention_rate),
+    display: `${rate}%`,
+    heatClass: rateToHeatClass(rate),
     isNull: false,
     tooltip: `${platform.platform_name} · ${cell.intent_label}:${tooltip}`,
     stance: cell.stance ?? null
@@ -400,13 +412,21 @@ function buildCellView(
 }
 
 function buildTooltip(cell: PlatformIntentCell): string {
+  const rate = cell.mention_rate ?? 0
   if (cell.intent_code === 'COGNITIVE' || cell.intent_code === 'COMPARISON') {
-    const base = `评分 ${cell.mention_rate}%（基于 ${cell.platform_prompt_count} 次裁判）`
+    const scoreLabel = cell.intent_code === 'COMPARISON' ? '净推荐立场评分' : '品牌认知质量评分'
+    const base = `${scoreLabel} ${rate}（基于 ${cell.platform_prompt_count} 次裁判）`
     if (cell.intent_code !== 'COMPARISON') return base
     const stanceLabel = toStanceLabel(cell.stance)
     return stanceLabel ? `${base}，站队:${stanceLabel}` : base
   }
-  return `${cell.mention_count}/${cell.platform_prompt_count} 提及(${cell.mention_rate}%)`
+  return `${cell.mention_count}/${cell.platform_prompt_count} 提及(${rate}%)`
+}
+
+function metricLabel(intentCode: IntentCode): string {
+  if (intentCode === 'COGNITIVE') return '品牌认知质量'
+  if (intentCode === 'COMPARISON') return '净推荐立场'
+  return '主动提及率'
 }
 
 /**
@@ -463,8 +483,14 @@ function rateToHeatClass(rate: number): string {
 .p05-row-label {
   font-size: 13px;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  justify-content: center;
   color: var(--presale-ink);
+}
+.p05-row-metric {
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--presale-muted);
 }
 
 /* 未测 cell —— 灰底 + 灰字 "—",叠加在 heat-0 上 */
@@ -498,6 +524,22 @@ function rateToHeatClass(rate: number): string {
 }
 .p05-legend-null {
   margin-left: 12px;
+}
+
+.p05-metric-note {
+  margin-top: 20px;
+  padding: 14px 16px;
+  background: var(--presale-paper-alt);
+  border-left: 3px solid var(--presale-primary);
+  color: var(--presale-ink-soft);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.p05-metric-note-label {
+  margin-bottom: 4px;
+  color: var(--presale-muted);
+  font-size: 10px;
+  letter-spacing: 2px;
 }
 
 /* ─── 降级态 ───────────────────────────────────────────── */

@@ -53,6 +53,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useMergedView } from '@/composables/presale/useMergedView'
+import { presaleLabel } from '@/utils/presale/presaleLabel'
 
 /**
  * Page01 封面。
@@ -119,8 +120,8 @@ const reportTitleLine2 = computed(() => {
 /** 行业 · 身份 · 地区(空段自动跳过)。 */
 const categoryLine = computed(() => {
   const parts = [
-    mergedView.value.industry,
-    mergedView.value.industry_role,
+    presaleLabel('presale_industry', mergedView.value.industry),
+    presaleLabel('presale_industry_role', mergedView.value.industry_role),
     mergedView.value.region
   ].filter((x) => x && x.length > 0)
   return parts.join(' · ')

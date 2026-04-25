@@ -34,11 +34,11 @@
         <div class="data-matrix p02-matrix">
           <div class="data-matrix-row p02-matrix-row">
             <div class="mono p02-field-label">INDUSTRY</div>
-            <div class="p02-matrix-value">{{ mergedView.industry }}</div>
+            <div class="p02-matrix-value">{{ industryLabel }}</div>
           </div>
           <div class="data-matrix-row p02-matrix-row">
             <div class="mono p02-field-label">BUSINESS ROLE</div>
-            <div class="p02-matrix-value">{{ mergedView.industry_role }}</div>
+            <div class="p02-matrix-value">{{ industryRoleLabel }}</div>
           </div>
           <div class="data-matrix-row p02-matrix-row">
             <div class="mono p02-field-label">USER INQUIRY</div>
@@ -95,6 +95,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useMergedView } from '@/composables/presale/useMergedView'
+import { presaleLabel } from '@/utils/presale/presaleLabel'
 
 /**
  * Page02 诊断对象。
@@ -109,6 +110,10 @@ import { useMergedView } from '@/composables/presale/useMergedView'
 
 const { mergedView: mergedViewRef, reportCreatedAt } = useMergedView()
 const mergedView = computed(() => mergedViewRef.value!)
+const industryLabel = computed(() => presaleLabel('presale_industry', mergedView.value.industry))
+const industryRoleLabel = computed(() =>
+  presaleLabel('presale_industry_role', mergedView.value.industry_role)
+)
 
 const brandSubText = computed(() => {
   // 未来若 MergedViewDTO 补 brand_name_en / legal_entity,从那里读;现阶段返回空串

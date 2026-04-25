@@ -33,13 +33,13 @@
                   {{ row.label }}
                 </span>
                 <span class="mono p09-bar-value">
-                  {{ row.pct }}% · {{ row.count }} 次
+                  {{ row.pctText }} · {{ row.count }} 次
                 </span>
               </div>
               <div class="p09-bar-track">
                 <div
                   class="p09-bar-fill"
-                  :style="{ width: row.pct + '%', background: row.color }"
+                  :style="{ width: row.barWidth, background: row.color }"
                 ></div>
               </div>
             </div>
@@ -121,6 +121,18 @@ function pct(count: number): number {
   return Math.round((count / totalCount.value) * 100)
 }
 
+function pctRaw(count: number): number {
+  if (totalCount.value === 0) return 0
+  return (count / totalCount.value) * 100
+}
+
+function formatPct(count: number): string {
+  if (count === 0 || totalCount.value === 0) return '0%'
+  const value = pctRaw(count)
+  if (value > 0 && value < 1) return '<1%'
+  return `${Math.round(value)}%`
+}
+
 // ─── 3 条进度条数据 ─────────────────────────────────────
 interface BreakdownRow {
   key: 'positive' | 'neutral' | 'negative'
@@ -128,6 +140,8 @@ interface BreakdownRow {
   color: string
   count: number
   pct: number
+  pctText: string
+  barWidth: string
 }
 const breakdownRows = computed<BreakdownRow[]>(() => {
   const s = sentiment.value
@@ -137,24 +151,42 @@ const breakdownRows = computed<BreakdownRow[]>(() => {
       label: '正面',
       color: '#047857',
       count: s.positive_count,
-      pct: pct(s.positive_count)
+      pct: pct(s.positive_count),
+      pctText: formatPct(s.positive_count),
+      barWidth: formatBarWidth(s.positive_count)
     },
     {
       key: 'neutral',
       label: '中性',
       color: '#6b6456',
       count: s.neutral_count,
-      pct: pct(s.neutral_count)
+      pct: pct(s.neutral_count),
+      pctText: formatPct(s.neutral_count),
+      barWidth: formatBarWidth(s.neutral_count)
     },
     {
       key: 'negative',
       label: '负面',
       color: '#b91c1c',
       count: s.negative_count,
-      pct: pct(s.negative_count)
+      pct: pct(s.negative_count),
+      pctText: formatPct(s.negative_count),
+      barWidth: formatBarWidth(s.negative_count)
     }
   ]
 })
+
+function formatBarWidth(count: number): string {
+  const raw = pctRaw(count)
+  if (count > 0 && raw > 0 && raw < 1) return '1%'
+  return `${raw}%`
+}
+
+function formatDoughnutTooltip(params: unknown): string {
+  const item = params as { name?: string; value?: unknown }
+  const count = typeof item.value === 'number' ? item.value : Number(item.value ?? 0)
+  return `${item.name ?? ''}: ${count} 次 (${formatPct(count)})`
+}
 
 // ─── doughnut chart ─────────────────────────────────────
 const doughnutOption = computed<EChartsOption>(() => {
@@ -165,7 +197,7 @@ const doughnutOption = computed<EChartsOption>(() => {
       backgroundColor: 'rgba(11, 20, 38, 0.9)',
       borderWidth: 0,
       textStyle: { color: '#fefcf7', fontSize: 12 },
-      formatter: '{b}: {c} 次 ({d}%)'
+      formatter: formatDoughnutTooltip
     },
     legend: {
       show: false

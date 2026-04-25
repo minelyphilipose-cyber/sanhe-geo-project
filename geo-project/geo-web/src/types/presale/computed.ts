@@ -14,6 +14,7 @@ import type { SceneCoverageGroup } from './common';
  * L2 顶层。
  */
 export interface ComputedSnapshotDTO {
+  meta?: ComputedSnapshotMeta;
   scores: Scores;
   intent_breakdown: IntentBreakdown[];
   scene_coverage: SceneCoverage;
@@ -33,6 +34,10 @@ export interface ComputedSnapshotDTO {
   platform_intent_breakdown?: PlatformIntentCell[];
 }
 
+export interface ComputedSnapshotMeta {
+  algorithm_version?: string;
+}
+
 /**
  * Schema v1.2 $.computed_snapshot.scores
  * 五维分 0-100。weights 是本次使用的权重冻结副本。
@@ -40,7 +45,7 @@ export interface ComputedSnapshotDTO {
 export interface Scores {
   overall: number;
   mention: number;
-  ranking: number;
+  ranking: number | null;
   sentiment: number;
   coverage: number;
   weights: {
@@ -160,7 +165,7 @@ export interface PlatformIntentCell {
   /** 该 (平台, 意图) 下被品牌提及的次数,>= 0 整数。 */
   mention_count: number;
   /** 该 (平台, 意图) 下的提及率,0-100 整数。 */
-  mention_rate: number;
+  mention_rate: number | null;
   /** 该意图类别的总 prompt 数(与同 intent_code 的其他 cell 相同,亦等于 intent_breakdown 对应 category.total_prompts)。 */
   total_prompts: number;
   /**

@@ -5,8 +5,8 @@
       <div class="label">REPORT</div>
       <div class="brand-name">{{ mergedView?.brand_name || '—' }}</div>
       <div class="brand-sub">
-        {{ mergedView?.industry || '' }}
-        <template v-if="mergedView?.industry_role"> · {{ mergedView.industry_role }}</template>
+        {{ industryLabel }}
+        <template v-if="industryRoleLabel"> · {{ industryRoleLabel }}</template>
       </div>
     </div>
 
@@ -174,18 +174,24 @@ import {
   retryVersion
 } from '@/api/presaleReport'
 import {
-  buildPresaleExportDownloadUrl,
   createPresaleExport,
+  downloadPresaleExportPdf,
   getPresaleExport,
+  retryPresaleExport,
   type PresaleExportResponse
 } from '@/api/presaleExport'
 import type { ApiError } from '@/api/request'
 import { useMergedView } from '@/composables/presale/useMergedView'
+import { presaleLabel } from '@/utils/presale/presaleLabel'
 
 const route = useRoute()
 const router = useRouter()
 
 const { mergedView, currentVersionNo, refresh, switchVersion } = useMergedView()
+const industryLabel = computed(() => presaleLabel('presale_industry', mergedView.value?.industry))
+const industryRoleLabel = computed(() =>
+  presaleLabel('presale_industry_role', mergedView.value?.industry_role)
+)
 
 // ─── 安全读取 meta(非 DONE 降级视图也能用) ─────────────
 const meta = computed(() => mergedView.value?.meta)
@@ -318,8 +324,10 @@ async function handleExport() {
       versionId,
       exportProfile: 'PDF_A4_DPR2'
     })
-    ElMessage.success('已提交 PDF 导出任务')
-    await waitExportAndDownload(res.exportId)
+    const task = await ensureExportRunnable(res)
+    if (task.status !== 'SUCCESS') {
+      await waitExportAndDownload(task.exportId)
+    }
   } catch (e: unknown) {
     const err = e as ApiError<{ runningExportId?: number; runningStatus?: string }>
     if (err.code === 40901 && err.data?.runningExportId) {
@@ -335,11 +343,25 @@ async function handleExport() {
   }
 }
 
+async function ensureExportRunnable(task: PresaleExportResponse): Promise<PresaleExportResponse> {
+  if (task.status === 'FAILED') {
+    ElMessage.warning('上次 PDF 导出失败,已重新提交生成')
+    return retryPresaleExport(reportId.value, task.exportId)
+  }
+  if (task.status === 'SUCCESS') {
+    await downloadPresaleExportPdf(reportId.value, task.exportId)
+    await refresh()
+    return task
+  }
+  ElMessage.success('已提交 PDF 导出任务')
+  return task
+}
+
 async function waitExportAndDownload(exportId: number) {
   for (let i = 0; i < 120; i++) {
     const task: PresaleExportResponse = await getPresaleExport(reportId.value, exportId)
     if (task.status === 'SUCCESS') {
-      window.location.href = buildPresaleExportDownloadUrl(reportId.value, exportId)
+      await downloadPresaleExportPdf(reportId.value, exportId)
       await refresh()
       return
     }

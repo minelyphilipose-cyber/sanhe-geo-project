@@ -9,8 +9,14 @@ import com.huanjing.geo.module.presale.generate.llm.LlmInvokeException;
 import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptJudgeResult;
+import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
+import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
+import com.huanjing.geo.module.presale.persist.mapper.IndustryCoreAttributeConfigMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptJudgeResultMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
+import com.huanjing.geo.module.presale.persist.entity.IndustryCoreAttributeConfig;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -45,11 +51,16 @@ public class PresaleJudgeService {
     private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String STATUS_FAILED = "FAILED";
     private static final int JUDGE_ERROR_MAX_LEN = 500;
-    private static final List<String> COGNITIVE_ATTRIBUTES = List.of("专业", "性价比", "服务", "规模", "创新");
-    private static final Set<String> COGNITIVE_ATTRIBUTE_SET = new LinkedHashSet<>(COGNITIVE_ATTRIBUTES);
+    private static final String COMMON_ATTRIBUTE_INDUSTRY = "_ALL_";
+    private static final List<String> DEFAULT_COGNITIVE_ATTRIBUTES = List.of(
+            "品牌历史", "产品", "服务", "价格", "口碑", "创新", "规模", "影响力"
+    );
 
     private final PresaleAiPromptResultMapper promptResultMapper;
     private final PresaleAiPromptJudgeResultMapper judgeResultMapper;
+    private final IndustryCoreAttributeConfigMapper attributeConfigMapper;
+    private final PresaleReportVersionMapper reportVersionMapper;
+    private final PresaleReportMapper reportMapper;
     private final PresaleLlmInvoker llmInvoker;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final ObjectMapper objectMapper;
@@ -63,12 +74,18 @@ public class PresaleJudgeService {
 
     public PresaleJudgeService(PresaleAiPromptResultMapper promptResultMapper,
                                PresaleAiPromptJudgeResultMapper judgeResultMapper,
+                               IndustryCoreAttributeConfigMapper attributeConfigMapper,
+                               PresaleReportVersionMapper reportVersionMapper,
+                               PresaleReportMapper reportMapper,
                                PresaleLlmInvoker llmInvoker,
                                AiPlatformConfigMapper aiPlatformConfigMapper,
                                ObjectMapper objectMapper,
                                @Qualifier("presaleJudgeExecutor") Executor judgeExecutor) {
         this.promptResultMapper = promptResultMapper;
         this.judgeResultMapper = judgeResultMapper;
+        this.attributeConfigMapper = attributeConfigMapper;
+        this.reportVersionMapper = reportVersionMapper;
+        this.reportMapper = reportMapper;
         this.llmInvoker = llmInvoker;
         this.aiPlatformConfigMapper = aiPlatformConfigMapper;
         this.objectMapper = objectMapper;
@@ -156,14 +173,17 @@ public class PresaleJudgeService {
         }
 
         int maxAttempts = Math.max(1, judgeMaxAttempts);
-        String judgePrompt = buildJudgePrompt(category, brandName, candidate.getCompetitorName(), candidate.getQueryAnswer());
+        List<String> cognitiveAttributes = CATEGORY_COGNITIVE.equals(category)
+                ? resolveCognitiveAttributes(candidate.getVersionId())
+                : DEFAULT_COGNITIVE_ATTRIBUTES;
+        String judgePrompt = buildJudgePrompt(category, brandName, candidate.getCompetitorName(), candidate.getQueryAnswer(), cognitiveAttributes);
         JudgeAttemptError lastError = null;
         int attemptsUsed = 0;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             attemptsUsed = attempt;
             try {
                 PresaleAiPromptJudgeResult successRow = invokeAndBuildSuccess(
-                        candidate, category, brandName, operatorUserId, isManager, judgePrompt, modelId, attempt
+                        candidate, category, brandName, operatorUserId, isManager, judgePrompt, modelId, attempt, cognitiveAttributes
                 );
                 upsertJudgeSuccess(successRow);
                 return JudgeOutcome.SUCCESS;
@@ -188,7 +208,8 @@ public class PresaleJudgeService {
                                                              boolean isManager,
                                                              String judgePrompt,
                                                              String modelId,
-                                                             int attempt) throws JudgeAttemptError {
+                                                             int attempt,
+                                                             List<String> cognitiveAttributes) throws JudgeAttemptError {
         String competitorName = normalizeCompetitor(candidate.getCompetitorName());
         PlatformCallContext ctx = new PlatformCallContext(
                 candidate.getVersionId(),
@@ -218,7 +239,7 @@ public class PresaleJudgeService {
         row.setJudgePayloadJson(toJsonOrNull(payload));
 
         if (CATEGORY_COGNITIVE.equals(category)) {
-            applyCognitivePayload(row, payload);
+            applyCognitivePayload(row, payload, cognitiveAttributes);
         } else if (CATEGORY_COMPARISON.equals(category)) {
             applyComparisonPayload(row, payload);
         } else {
@@ -247,7 +268,9 @@ public class PresaleJudgeService {
         }
     }
 
-    private void applyCognitivePayload(PresaleAiPromptJudgeResult row, JsonNode payload) throws JudgeAttemptError {
+    private void applyCognitivePayload(PresaleAiPromptJudgeResult row,
+                                       JsonNode payload,
+                                       List<String> cognitiveAttributes) throws JudgeAttemptError {
         BigDecimal sentimentScore = parseScore(payload.get("sentiment_score"), -1D, 1D);
         if (sentimentScore == null) {
             throw new JudgeAttemptError(JudgeErrorCode.INVALID_SENTIMENT_SCORE,
@@ -268,9 +291,9 @@ public class PresaleJudgeService {
         }
         row.setSentiment(recomputedSentiment);
 
-        List<String> attrs = filterCognitiveAttributes(readStringArray(payload.get("attributes_hit")));
+        List<String> attrs = filterCognitiveAttributes(readStringArray(payload.get("attributes_hit")), cognitiveAttributes);
         row.setAttributesHit(toJsonOrNull(attrs));
-        row.setAttributeHitRate(calculateAttributeHitRate(attrs));
+        row.setAttributeHitRate(calculateAttributeHitRate(attrs, cognitiveAttributes));
 
         List<String> factualErrors = readStringArray(payload.get("factual_errors"));
         row.setFactualErrors(toJsonOrNull(factualErrors));
@@ -305,26 +328,27 @@ public class PresaleJudgeService {
         row.setReasoningQuality(reasoningQuality == null ? null : reasoningQuality.toLowerCase(Locale.ROOT));
     }
 
-    private List<String> filterCognitiveAttributes(List<String> source) {
+    private List<String> filterCognitiveAttributes(List<String> source, List<String> cognitiveAttributes) {
         if (source == null || source.isEmpty()) {
             return Collections.emptyList();
         }
+        Set<String> attributeSet = new LinkedHashSet<>(safeCognitiveAttributes(cognitiveAttributes));
         LinkedHashSet<String> filtered = new LinkedHashSet<>();
         for (String item : source) {
             if (!StringUtils.hasText(item)) {
                 continue;
             }
             String normalized = item.trim();
-            if (COGNITIVE_ATTRIBUTE_SET.contains(normalized)) {
+            if (attributeSet.contains(normalized)) {
                 filtered.add(normalized);
             }
         }
         return new ArrayList<>(filtered);
     }
 
-    private BigDecimal calculateAttributeHitRate(List<String> attrs) {
+    private BigDecimal calculateAttributeHitRate(List<String> attrs, List<String> cognitiveAttributes) {
         int numerator = attrs == null ? 0 : attrs.size();
-        int denominator = COGNITIVE_ATTRIBUTES.size();
+        int denominator = safeCognitiveAttributes(cognitiveAttributes).size();
         if (denominator <= 0) {
             return BigDecimal.ZERO.setScale(4, RoundingMode.HALF_UP);
         }
@@ -455,13 +479,71 @@ public class PresaleJudgeService {
         return StringUtils.hasText(config.getModelId()) ? config.getModelId().trim() : null;
     }
 
-    private String buildJudgePrompt(String category, String brandName, String competitorName, String answer) {
+    private List<String> resolveCognitiveAttributes(Long versionId) {
+        String industry = resolveIndustry(versionId);
+        List<String> industryAttributes = loadEnabledAttributes(industry);
+        if (!industryAttributes.isEmpty()) {
+            return industryAttributes;
+        }
+        List<String> commonAttributes = loadEnabledAttributes(COMMON_ATTRIBUTE_INDUSTRY);
+        return commonAttributes.isEmpty() ? DEFAULT_COGNITIVE_ATTRIBUTES : commonAttributes;
+    }
+
+    private String resolveIndustry(Long versionId) {
+        if (versionId == null) {
+            return null;
+        }
+        PresaleReportVersion version = reportVersionMapper.selectById(versionId);
+        if (version == null || version.getReportId() == null) {
+            return null;
+        }
+        PresaleReport report = reportMapper.selectById(version.getReportId());
+        return report == null ? null : report.getIndustry();
+    }
+
+    private List<String> loadEnabledAttributes(String industry) {
+        if (!StringUtils.hasText(industry)) {
+            return Collections.emptyList();
+        }
+        IndustryCoreAttributeConfig config = attributeConfigMapper.selectOne(
+                new LambdaQueryWrapper<IndustryCoreAttributeConfig>()
+                        .eq(IndustryCoreAttributeConfig::getIndustry, industry)
+                        .eq(IndustryCoreAttributeConfig::getEnabled, true)
+                        .last("LIMIT 1")
+        );
+        if (config == null || !StringUtils.hasText(config.getAttributesJson())) {
+            return Collections.emptyList();
+        }
+        return readJsonStringArray(config.getAttributesJson());
+    }
+
+    private List<String> readJsonStringArray(String json) {
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            return readStringArray(node);
+        } catch (Exception ex) {
+            log.warn("invalid industry core attribute config json, json={}", json, ex);
+            return Collections.emptyList();
+        }
+    }
+
+    private List<String> safeCognitiveAttributes(List<String> cognitiveAttributes) {
+        return cognitiveAttributes == null || cognitiveAttributes.isEmpty()
+                ? DEFAULT_COGNITIVE_ATTRIBUTES
+                : cognitiveAttributes;
+    }
+
+    private String buildJudgePrompt(String category,
+                                    String brandName,
+                                    String competitorName,
+                                    String answer,
+                                    List<String> cognitiveAttributes) {
         String safeBrand = safeText(brandName);
         String safeAnswer = safeText(answer);
         if (CATEGORY_COGNITIVE.equals(category)) {
             return JudgePromptTemplates.COGNITIVE_TEMPLATE
                     .replace("{brand}", safeBrand)
-                    .replace("{attributes}", String.join("、", COGNITIVE_ATTRIBUTES))
+                    .replace("{attributes}", String.join("、", safeCognitiveAttributes(cognitiveAttributes)))
                     .replace("{answer}", safeAnswer);
         }
         if (CATEGORY_COMPARISON.equals(category)) {

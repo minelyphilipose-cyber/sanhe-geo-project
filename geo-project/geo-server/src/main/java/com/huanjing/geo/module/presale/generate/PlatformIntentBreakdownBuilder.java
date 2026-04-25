@@ -26,6 +26,7 @@ import java.util.Map;
 public class PlatformIntentBreakdownBuilder {
 
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
+    private static final String ALGORITHM_VERSION = "v2";
     private static final String CATEGORY_COGNITIVE = "COGNITIVE";
     private static final String CATEGORY_COMPARISON = "COMPARISON";
     @Value("${presale.prompt.active-version:v2}")
@@ -38,6 +39,9 @@ public class PlatformIntentBreakdownBuilder {
         if (rawSnapshot == null || rawSnapshot.getPlatformBreakdown() == null || rawSnapshot.getPlatformBreakdown().isEmpty()) {
             throw new BizException(500, "platform_intent_breakdown integrity violated: platform_breakdown is empty");
         }
+        computedSnapshot.setMeta(ComputedSnapshotDTO.Meta.builder()
+                .algorithmVersion(ALGORITHM_VERSION)
+                .build());
         List<PlatformBreakdown> platforms = rawSnapshot.getPlatformBreakdown();
         Map<String, PlatformBreakdown> platformByCode = new HashMap<>();
         for (PlatformBreakdown platform : platforms) {

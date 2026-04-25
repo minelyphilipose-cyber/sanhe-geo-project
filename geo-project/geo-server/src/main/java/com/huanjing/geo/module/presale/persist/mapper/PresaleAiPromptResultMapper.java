@@ -76,12 +76,16 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "  SELECT " +
             "    j.platform_code AS platform_code, " +
             "    'COGNITIVE' AS category, " +
-            "    CASE WHEN SUM(CASE WHEN j.judge_status = 'SUCCESS' AND j.sentiment_score IS NOT NULL THEN 1 ELSE 0 END) = 0 " +
+            "    CASE WHEN SUM(CASE WHEN j.judge_status = 'SUCCESS' AND j.attribute_hit_rate IS NOT NULL AND j.sentiment_score IS NOT NULL THEN 1 ELSE 0 END) < 3 " +
             "         THEN NULL " +
-            "         ELSE ROUND((AVG(CASE WHEN j.judge_status = 'SUCCESS' AND j.sentiment_score IS NOT NULL THEN j.sentiment_score END) + 1) * 50, 2) " +
+            "         ELSE ROUND( " +
+            "           AVG(CASE WHEN j.judge_status = 'SUCCESS' AND j.attribute_hit_rate IS NOT NULL AND j.sentiment_score IS NOT NULL THEN j.attribute_hit_rate END) " +
+            "           * (AVG(CASE WHEN j.judge_status = 'SUCCESS' AND j.attribute_hit_rate IS NOT NULL AND j.sentiment_score IS NOT NULL THEN j.sentiment_score END) + 1) / 2 * 100, " +
+            "           2 " +
+            "         ) " +
             "    END AS cell_score, " +
             "    NULL AS stance, " +
-            "    SUM(CASE WHEN j.judge_status = 'SUCCESS' AND j.sentiment_score IS NOT NULL THEN 1 ELSE 0 END) AS sample_count " +
+            "    SUM(CASE WHEN j.judge_status = 'SUCCESS' AND j.attribute_hit_rate IS NOT NULL AND j.sentiment_score IS NOT NULL THEN 1 ELSE 0 END) AS sample_count " +
             "  FROM presale_ai_prompt_judge_result j " +
             "  WHERE j.version_id = #{versionId} " +
             "    AND j.category = 'COGNITIVE' " +
@@ -90,7 +94,7 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "  SELECT " +
             "    c.platform_code AS platform_code, " +
             "    'COMPARISON' AS category, " +
-            "    CASE WHEN c.denom = 0 THEN NULL ELSE ROUND(c.numer * 100.0 / c.denom, 2) END AS cell_score, " +
+            "    CASE WHEN c.denom = 0 THEN NULL ELSE ROUND(((c.target_cnt - c.competitor_cnt) * 50.0 / c.denom) + 50, 2) END AS cell_score, " +
             // stance 平局处理规则(参考补充纪要 2.3 节 + 未明确的边界):
             //   target=competitor 且 >=tie      → tie   (纪要明确)
             //   target=tie 且 >competitor       → target(纪要明确,倾向性优先)

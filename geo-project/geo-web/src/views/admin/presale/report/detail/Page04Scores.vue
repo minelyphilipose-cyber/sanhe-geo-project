@@ -37,9 +37,9 @@
                 <div class="p04-dim-avg">均值 {{ dim.avg }}</div>
                 <div
                   class="mono p04-dim-delta"
-                  :class="dim.delta >= 0 ? 'p04-dim-delta-up' : 'p04-dim-delta-down'"
+                  :class="dim.delta == null || dim.delta >= 0 ? 'p04-dim-delta-up' : 'p04-dim-delta-down'"
                 >
-                  {{ dim.delta >= 0 ? '+' : '' }}{{ dim.delta }}
+                  {{ dim.delta == null ? '—' : `${dim.delta >= 0 ? '+' : ''}${dim.delta}` }}
                 </div>
               </div>
             </div>
@@ -64,7 +64,11 @@
 
             <!-- 当前位置 -->
             <div class="p04-mark-line p04-mark-self" :style="{ left: selfLeft }"></div>
-            <div class="p04-mark-label p04-mark-self-label" :style="{ left: selfLeft }">
+            <div
+              class="p04-mark-label p04-mark-self-label"
+              :class="selfLabelClasses"
+              :style="{ left: selfLeft }"
+            >
               您 · {{ overall }}
             </div>
 
@@ -120,9 +124,9 @@ const mergedView = computed(() => mergedViewRef.value!)
 interface DimRow {
   key: 'mention' | 'ranking' | 'sentiment' | 'coverage'
   label: string
-  score: number
-  avg: number
-  delta: number
+  score: number | string
+  avg: number | string
+  delta: number | null
   isGreen: boolean
 }
 
@@ -140,10 +144,10 @@ const dimensionRows = computed<DimRow[]>(() => {
     },
     {
       key: 'ranking',
-      label: '平均排名',
-      score: toIntRounded(scores.ranking),
+      label: '排名得分',
+      score: scores.ranking == null ? '—' : toIntRounded(scores.ranking),
       avg: toIntRounded(avg.ranking),
-      delta: toIntRounded(scores.ranking - avg.ranking),
+      delta: scores.ranking == null ? null : toIntRounded(scores.ranking - avg.ranking),
       isGreen: false
     },
     {
@@ -170,8 +174,8 @@ const dimensionRows = computed<DimRow[]>(() => {
 const radarOption = computed<EChartsOption>(() => {
   const rows = dimensionRows.value
   const indicator = rows.map((d) => ({ name: d.label, max: 100 }))
-  const selfData = rows.map((d) => d.score)
-  const avgData = rows.map((d) => d.avg)
+  const selfData = rows.map((d) => (typeof d.score === 'number' ? d.score : 0))
+  const avgData = rows.map((d) => (typeof d.avg === 'number' ? d.avg : 0))
 
   return {
     tooltip: {
@@ -246,9 +250,15 @@ function toLeftPct(score: number): string {
 const selfLeft = computed(() => toLeftPct(overall.value))
 const avgLeft = computed(() => toLeftPct(industryAvgOverall.value))
 const top1Left = computed(() => toLeftPct(top1Overall.value))
+const selfLabelClasses = computed(() => ({
+  'p04-label-left-edge': overall.value < 20,
+  'p04-label-right-edge': overall.value > 80,
+  'p04-label-collision': Math.abs(overall.value - industryAvgOverall.value) < 10 ||
+    Math.abs(overall.value - top1Overall.value) < 10
+}))
 
 // ─── 底部引用文案(静态) ────────────────────────────────
-const quoteText = `本次诊断从提及率、平均排名、情感倾向、覆盖度 4 个维度综合评估品牌可见度。建议优先关注表现偏弱的维度,详见后续分析章节。`
+const quoteText = `本次诊断从提及率、排名得分、情感倾向、覆盖度 4 个维度综合评估品牌可见度。建议优先关注表现偏弱的维度,详见后续分析章节。`
 </script>
 
 <style scoped>
@@ -318,6 +328,7 @@ const quoteText = `本次诊断从提及率、平均排名、情感倾向、覆�
 .p04-compare-bar {
   position: relative;
   height: 60px;
+  margin-top: 28px;
   background: linear-gradient(90deg, #fee2e2 0%, #fef3c7 40%, #d1fae5 100%);
   border-radius: 4px;
 }
@@ -372,6 +383,17 @@ const quoteText = `本次诊断从提及率、平均排名、情感倾向、覆�
   font-size: 13px;
   font-weight: 700;
   color: #1e3a8a;
+}
+.p04-mark-self-label.p04-label-left-edge {
+  transform: translateX(0);
+  padding-left: 4px;
+}
+.p04-mark-self-label.p04-label-right-edge {
+  transform: translateX(-100%);
+  padding-right: 4px;
+}
+.p04-mark-self-label.p04-label-collision {
+  top: -50px;
 }
 .p04-mark-top1-label {
   top: -22px;

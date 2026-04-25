@@ -27,6 +27,9 @@ import java.util.List;
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class ComputedSnapshotDTO {
 
+    /** 计算快照元信息。 */
+    private Meta meta;
+
     /** 综合评分 + 冻结权重。 */
     private Scores scores;
 
@@ -66,5 +69,15 @@ public class ComputedSnapshotDTO {
         private SceneCoverageGroup midValue;
         @JsonProperty("low_value")
         private SceneCoverageGroup lowValue;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class Meta {
+        @JsonProperty("algorithm_version")
+        private String algorithmVersion;
     }
 }

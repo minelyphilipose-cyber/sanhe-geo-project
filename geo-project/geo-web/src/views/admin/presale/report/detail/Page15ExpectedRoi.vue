@@ -42,7 +42,7 @@
             <div class="p15-hero-value p15-hero-value-green">
               {{ exposureMultiplierInt }}<span class="p15-hero-value-suffix">{{ exposureMultiplierDecimal }}x</span>
             </div>
-            <div class="p15-hero-caption">潜在客户触达增长</div>
+            <div class="p15-hero-caption">综合可见度提升</div>
           </div>
         </div>
 
@@ -61,9 +61,7 @@
             <div class="p15-impact-item">
               <div class="p15-impact-caption">AI 渠道月度品牌曝光</div>
               <div class="p15-impact-value">
-                <span class="mono">{{ IMPACT_EXPOSURE.before }}</span>
-                <span class="p15-impact-arrow">→</span>
-                <span class="mono p15-impact-after">{{ IMPACT_EXPOSURE.after }}</span>
+                <span class="mono p15-impact-after">{{ IMPACT_EXPOSURE.value }}</span>
               </div>
             </div>
 
@@ -81,9 +79,7 @@
             <div class="p15-impact-item">
               <div class="p15-impact-caption">主推荐次数</div>
               <div class="p15-impact-value">
-                <span class="mono">{{ IMPACT_PRIMARY_REC.before }}</span>
-                <span class="p15-impact-arrow">→</span>
-                <span class="mono p15-impact-after">{{ IMPACT_PRIMARY_REC.after }}</span>
+                <span class="mono p15-impact-after">{{ IMPACT_PRIMARY_REC.value }}</span>
               </div>
             </div>
 
@@ -137,9 +133,9 @@ import { toIntRounded } from '@/utils/presale/numberFormat'
  *   - ① 3 数字卡片:current / target / gain(exposure_multiplier)+ uplift 小标
  *   - ② 4 点折线图:起点 M0 + 3 phase 的 target_score
  *   - ③ ESTIMATED IMPACT 块:4 格 2×2 grid,**2 硬编码示意值 + 2 真实契约数据**
- *     - AI 渠道月度品牌曝光:硬编码 "1,200 次 → 3,500 次"(产品定稿后替换)
+ *     - AI 渠道月度品牌曝光:硬编码 "+30% ~ +200%" 区间
  *     - 高价值查询场景覆盖:scene_coverage.high_value.{covered/total} → {total/total}(真实)
- *     - 主推荐次数:硬编码 "8 次 → 22 次"(产品定稿后替换)
+ *     - 主推荐次数:硬编码 "+25% ~ +80%" 区间
  *     - 对标竞品差距:scores.overall - top1.overall → target_score - top1.overall(真实)
  *   - ④ 3 个 phase 摘要条(duration_label + title + target_score),给曲线加注解
  *   - ⑤ ROI disclaimer
@@ -214,16 +210,14 @@ const exposureMultiplierDecimal = computed(() => {
 //   - 高价值查询场景覆盖:scene_coverage.high_value.{covered}/{total} → {total}/{total}
 //   - 对标竞品差距:scores.overall - benchmarks.top1.overall → target_score - top1.overall
 
-/** 硬编码示意值 —— AI 渠道月度品牌曝光(所有报告同值,产品定稿后替换)。 */
+/** 统计估算区间 —— AI 渠道月度品牌曝光。 */
 const IMPACT_EXPOSURE = {
-  before: '1,200 次',
-  after: '3,500 次'
+  value: '+30% ~ +200%'
 } as const
 
-/** 硬编码示意值 —— 主推荐次数(所有报告同值,产品定稿后替换)。 */
+/** 统计估算区间 —— 主推荐次数。 */
 const IMPACT_PRIMARY_REC = {
-  before: '8 次',
-  after: '22 次'
+  value: '+25% ~ +80%'
 } as const
 
 interface ImpactCell {

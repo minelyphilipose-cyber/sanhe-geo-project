@@ -127,4 +127,8 @@ public class MergedViewMeta {
     @JsonSerialize(using = PresaleDateTimeJson.Serializer.class)
     @JsonDeserialize(using = PresaleDateTimeJson.Deserializer.class)
     private LocalDateTime exportSuccessAt;
+
+    /** 评分算法版本。来源 computed_snapshot_json.meta.algorithm_version,缺失时前端 fallback 为 v1。 */
+    @JsonProperty("algorithm_version")
+    private String algorithmVersion;
 }

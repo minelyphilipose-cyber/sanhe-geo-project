@@ -24,9 +24,9 @@ public class ScoresCalculator {
         double mention = sumTests == 0 ? 0.0 : (sumMention * 100.0 / sumTests);
 
         RankingStats stats = rankingStats == null ? new RankingStats(0, 0, 0, 0, 0, 0) : rankingStats;
-        double ranking;
+        Double ranking;
         if (stats.total() == 0) {
-            ranking = 0.0;
+            ranking = null;
         } else {
             double sumScore = stats.count1() * 90.0
                     + stats.count2() * 80.0
@@ -52,10 +52,15 @@ public class ScoresCalculator {
 
         double coverage = computeCoverage(scenes);
 
-        double overall = mention * W_MENTION
-                + ranking * W_RANKING
+        double availableWeightedScore = mention * W_MENTION
                 + sentiment * W_SENTIMENT
                 + coverage * W_COVERAGE;
+        double availableWeight = W_MENTION + W_SENTIMENT + W_COVERAGE;
+        if (ranking != null) {
+            availableWeightedScore += ranking * W_RANKING;
+            availableWeight += W_RANKING;
+        }
+        double overall = availableWeight == 0 ? 0.0 : availableWeightedScore / availableWeight;
 
         return Scores.builder()
                 .overall(overall)
@@ -90,4 +95,3 @@ public class ScoresCalculator {
         return value == null ? 0 : value;
     }
 }
-

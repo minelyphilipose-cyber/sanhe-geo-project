@@ -43,6 +43,7 @@ import type {
   MergedViewDTO,
   MergedViewMeta,
 } from '../../types/presale/merged';
+import { toIntRounded } from './numberFormat';
 
 /**
  * 版本行元数据(对应 presale_report_version 行)。
@@ -88,7 +89,7 @@ export function mergeSnapshot(
   editable: EditableContentDTO,
   versionRow: VersionRowMeta
 ): MergedViewDTO {
-  const meta = buildMeta(raw, versionRow);
+  const meta = buildMeta(raw, computed, versionRow);
   const l2Findings = asArray<OptimizationFinding>(computed?.optimization_findings);
   const l3FindingContent = asArray<FindingContent>(
     editable?.optimization_findings_content
@@ -160,6 +161,7 @@ export function mergeSnapshot(
 
 function buildMeta(
   raw: RawSnapshotDTO,
+  computed: ComputedSnapshotDTO,
   row: VersionRowMeta
 ): MergedViewMeta {
   const matchLevel = raw?.benchmarks_frozen?.match_level ?? 'EXACT';
@@ -184,6 +186,7 @@ function buildMeta(
     match_level: matchLevel,
     export_success_count: row.export_success_count,
     export_success_at: row.export_success_at ?? null,
+    algorithm_version: computed?.meta?.algorithm_version ?? 'v1',
   };
 }
 
@@ -237,7 +240,7 @@ function resolveExecutiveSummary(
  */
 function resolveRoiDisclaimer(l3: string | null): string {
   if (l3 != null) return l3;
-  return '基于行业平均模型的估算,实际效果受多种因素影响,建议结合业务实际情况评估';
+  return '区间为基于同行业历史优化案例的统计估算,具体效果以实际执行为准。';
 }
 
 // ─────────────────────── findings 合并 ───────────────────────
@@ -270,7 +273,7 @@ export function mergeFindings(
       finding: l2,
       title: l3?.title ?? renderDefaultFindingTitle(l2),
       description: l3?.description ?? renderDefaultFindingDescription(l2),
-      evidence_text: l3?.evidence_text ?? renderDefaultEvidenceText(l2),
+      evidence_text: l3?.evidence_text ?? '(无证据数据)',
       // sort_order 合并后保证非 null:L3.sort_order ?? L2 原序 (idx+1)
       sort_order: l3?.sort_order ?? idx + 1,
     };
@@ -296,21 +299,6 @@ function renderDefaultFindingTitle(l2: OptimizationFinding): string {
 
 function renderDefaultFindingDescription(l2: OptimizationFinding): string {
   return `规则 ${l2.rule_code} 触发 ${l2.category} 类优化建议。详细依据见证据数据。`;
-}
-
-function renderDefaultEvidenceText(l2: OptimizationFinding): string {
-  // 简单序列化 evidence_data 作为兜底;后端会按 rule_code 模板渲染更人性化的文本
-  const entries = Object.entries(l2.evidence_data);
-  if (entries.length === 0) return '(无证据数据)';
-  return entries.map(([k, v]) => `${k}=${formatEvidenceValue(v)}`).join(', ');
-}
-
-function formatEvidenceValue(v: unknown): string {
-  if (v == null) return 'null';
-  if (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean') {
-    return String(v);
-  }
-  return JSON.stringify(v);
 }
 
 // ─────────────────────── phases 合并 ───────────────────────
@@ -380,7 +368,7 @@ function renderDefaultPhaseTitle(phase: RoiPhase): string {
 }
 
 function renderDefaultPhaseDescription(phase: RoiPhase): string {
-  return `${phase.duration_label}:目标 ${phase.target_score} 分,完成 ${phase.completed_optimization_count}/${phase.total_optimization_count} 项优化`;
+  return `${phase.duration_label}:目标 ${toIntRounded(phase.target_score)} 分,完成 ${phase.completed_optimization_count}/${phase.total_optimization_count} 项优化`;
 }
 
 // ─────────────────────── competitors 合并 ───────────────────────

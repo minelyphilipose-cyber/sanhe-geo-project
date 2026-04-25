@@ -33,10 +33,6 @@
               <div class="p03-overall-avg-note">
                 行业均值 {{ industryAvgOverallRounded }}
               </div>
-              <div class="p03-overall-rank">
-                行业排名 #{{ mergedView.benchmarks_frozen.industry_ranking.position }} /
-                {{ mergedView.benchmarks_frozen.industry_ranking.total }}
-              </div>
             </div>
           </div>
 
@@ -77,10 +73,10 @@
             <div class="p03-metric-card">
               <div class="mono p03-card-label">SENTIMENT</div>
               <div class="metric-hero p03-metric-number p03-metric-green">
-                {{ positiveSentimentRate
-                }}<span class="p03-metric-unit">%</span>
+                {{ sentimentScore
+                }}<span class="p03-metric-unit">/100</span>
               </div>
-              <div class="p03-metric-sub">正面提及比例</div>
+              <div class="p03-metric-sub">情感得分 · 含中性折半计算</div>
             </div>
           </div>
         </div>
@@ -128,7 +124,7 @@ import { toIntRounded } from '@/utils/presale/numberFormat'
  *     (团队决议:"计数直除",与 scores.mention 维度分数无关,这是原始提及频率)
  *   - avg rank:从 platform_breakdown 聚合非 null 的 avg_ranking 做加权平均
  *   - high-value coverage:scene_coverage.high_value 直出
- *   - sentiment:sentiment_detail positive / (positive+neutral+negative)
+ *   - sentiment:scores.sentiment,口径为 positive + neutral * 0.5
  *   - key findings:L3 editable_content.key_takeaways
  *
  * 聚合逻辑刻意放本 SFC 的 computed 里,不进 composable:
@@ -205,12 +201,7 @@ const highValueCoverageRate = computed(() => {
 })
 
 // ─── sentiment ───────────────────────────────────────────
-const positiveSentimentRate = computed(() => {
-  const s = mergedView.value.sentiment_detail
-  const total = s.positive_count + s.neutral_count + s.negative_count
-  if (total === 0) return 0
-  return toIntRounded((s.positive_count / total) * 100)
-})
+const sentimentScore = computed(() => toIntRounded(mergedView.value.scores.sentiment))
 
 // ─── key findings 编号格式化 ────────────────────────────
 function formatFindingNum(n: number): string {
@@ -239,7 +230,7 @@ function formatFindingNum(n: number): string {
 /* overall card */
 .p03-overall-card {
   text-align: center;
-  padding: 24px;
+  padding: 24px 24px 20px 24px;
   background: #f7f3ea;
   border-top: 3px solid #1e3a8a;
 }
@@ -260,9 +251,10 @@ function formatFindingNum(n: number): string {
   margin-top: 4px;
 }
 .p03-overall-compare {
-  margin-top: 20px;
-  padding-top: 20px;
+  margin-top: 14px;
+  padding-top: 14px;
   border-top: 1px solid #c8bfa8;
+  padding-bottom: 4px;
 }
 .p03-overall-delta {
   font-size: 13px;
@@ -271,14 +263,8 @@ function formatFindingNum(n: number): string {
 .p03-overall-avg-note {
   font-size: 11px;
   color: #6b6456;
-  margin-top: 4px;
+  margin-top: 6px;
 }
-.p03-overall-rank {
-  font-size: 11px;
-  color: #6b6456;
-  margin-top: 4px;
-}
-
 /* 4 维度 metric card grid */
 .p03-metrics-wrap {
   display: grid;

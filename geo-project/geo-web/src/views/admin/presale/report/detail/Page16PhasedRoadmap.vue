@@ -42,9 +42,12 @@
                 </div>
               </div>
               <div class="p16-stat">
-                <div class="mono p16-stat-label">完成项</div>
-                <div class="display-serif p16-stat-value p16-stat-ink">
-                  {{ item.completed_optimization_count }} / {{ item.total_optimization_count }}
+                <div class="mono p16-stat-label">{{ formatCompletion(item).label }}</div>
+                <div
+                  class="display-serif p16-stat-value p16-stat-ink"
+                  :class="{ 'p16-stat-muted': formatCompletion(item).isPassive }"
+                >
+                  {{ formatCompletion(item).value }}
                 </div>
               </div>
             </div>
@@ -123,6 +126,18 @@ function formatDuration(label: string): string {
   const match = /^M(\d.*)$/.exec(label.trim())
   if (match) return `MONTH ${match[1]}`
   return label
+}
+
+function formatCompletion(item: Step): { label: string; value: string; isPassive: boolean } {
+  const total = item.total_optimization_count ?? 0
+  if (item.phase_no === 3 && total === 0) {
+    return { label: '运营状态', value: '持续监测中', isPassive: true }
+  }
+  return {
+    label: '完成项',
+    value: `${item.completed_optimization_count ?? 0} / ${total}`,
+    isPassive: false
+  }
 }
 </script>
 
@@ -211,5 +226,9 @@ function formatDuration(label: string): string {
 }
 .p16-stat-ink {
   color: var(--presale-ink);
+}
+.p16-stat-muted {
+  color: var(--presale-muted);
+  font-size: 18px;
 }
 </style>

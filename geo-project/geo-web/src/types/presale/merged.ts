@@ -63,6 +63,8 @@ export interface MergedViewMeta {
   export_success_count: number;
   /** RFC3339 带 +08:00,可 null。 */
   export_success_at?: string | null;
+  /** computed_snapshot_json.meta.algorithm_version,缺失时前端合并层 fallback 为 v1。 */
+  algorithm_version: string;
 }
 
 /**
