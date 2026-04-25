@@ -10,6 +10,7 @@ import org.springframework.scheduling.annotation.EnableAsync;
 @MapperScan({
         "com.huanjing.geo.module.*.mapper",
         "com.huanjing.geo.module.presale.persist.mapper",
+        "com.huanjing.geo.module.presale.export.persist.mapper",
         "com.huanjing.geo.module.presale.ruleengine.persist"
 })
 @EnableAsync

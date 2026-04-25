@@ -1,0 +1,40 @@
+package com.huanjing.geo.module.presale.export.service;
+
+import com.huanjing.geo.module.presale.access.PresaleAccessService;
+import com.huanjing.geo.module.presale.export.dto.PresaleExportResponse;
+import com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport;
+import com.huanjing.geo.module.system.service.CurrentUserService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Service;
+
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class PresaleReportExportCancelService {
+    private static final String PERM_VIEW = "presale.report.view";
+
+    private final CurrentUserService currentUserService;
+    private final PresaleAccessService accessService;
+    private final PresaleReportExportCancelDbService cancelDbService;
+    private final PresaleExportCancellationRegistry cancellationRegistry;
+    private final PresaleRenderTokenService renderTokenService;
+    private final PresaleReportExportService exportService;
+
+    public PresaleExportResponse cancel(Long reportId, Long exportId) {
+        currentUserService.ensurePermission(PERM_VIEW);
+        accessService.requireReportWithAccess(reportId);
+
+        // 阶段 1: DB 事务先落 CANCELED。DB 是真理之源,用户可立即发起新导出。
+        PresaleReportExport canceled = cancelDbService.cancelInDb(reportId, exportId);
+
+        // 阶段 2: 事务外副作用。内存标志不失败;token 删除失败有 TTL 兜底。
+        cancellationRegistry.cancel(exportId);
+        try {
+            renderTokenService.invalidate(canceled.getRenderTokenId());
+        } catch (Exception ex) {
+            log.warn("Invalidate render token after cancel failed, exportId={}", exportId, ex);
+        }
+        return exportService.toResponse(canceled);
+    }
+}

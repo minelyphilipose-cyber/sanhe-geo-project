@@ -55,8 +55,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/auth/login", "/api/auth/refresh").permitAll()
                 .requestMatchers("/api/health").permitAll()
                 .requestMatchers("/api/share/**").permitAll()
-                // TODO(PR-B): open /api/presale/exports/render/** when the signed render-token
-                // controller is implemented. Do not permit it before the backend contract exists.
+                .requestMatchers("/api/presale/exports/render/**").permitAll()
                 .requestMatchers("/api/public/dashboard/**").permitAll()
                 .requestMatchers("/doc.html", "/swagger-ui/**", "/v3/api-docs/**", "/webjars/**").permitAll()
                 .requestMatchers("/actuator/**").permitAll()

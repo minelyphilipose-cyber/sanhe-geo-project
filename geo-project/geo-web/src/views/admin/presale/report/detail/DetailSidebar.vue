@@ -115,13 +115,16 @@
         删除版本(manager)
       </el-button>
 
-      <!-- export PDF:v1 占位 -->
-      <el-tooltip content="PDF 导出功能将在后续版本开放" placement="right">
-        <el-button size="small" class="action-btn" disabled>
-          <el-icon><Download /></el-icon>
-          导出 PDF
-        </el-button>
-      </el-tooltip>
+      <el-button
+        size="small"
+        class="action-btn"
+        :disabled="!canExport"
+        :loading="acting === 'export'"
+        @click="handleExport"
+      >
+        <el-icon><Download /></el-icon>
+        导出 PDF
+      </el-button>
     </div>
 
     <!-- ─── 18 页锚点导航 ─── -->
@@ -170,6 +173,12 @@ import {
   deleteVersion,
   retryVersion
 } from '@/api/presaleReport'
+import {
+  buildPresaleExportDownloadUrl,
+  createPresaleExport,
+  getPresaleExport,
+  type PresaleExportResponse
+} from '@/api/presaleExport'
 import { useMergedView } from '@/composables/presale/useMergedView'
 
 const route = useRoute()
@@ -191,9 +200,10 @@ const hasExports = computed(() => (meta.value?.export_success_count ?? 0) > 0)
 const canDerive = computed(() => isDone.value)
 const canFreeze = computed(() => isDone.value && !isFrozen.value)
 const canDelete = computed(() => !hasExports.value)
+const canExport = computed(() => isDone.value && Boolean(meta.value?.version_id))
 
 // ─── 写动作 ───────────────────────────────────────────────
-type ActionKind = 'derive' | 'freeze' | 'unfreeze' | 'delete' | 'retry'
+type ActionKind = 'derive' | 'freeze' | 'unfreeze' | 'delete' | 'retry' | 'export'
 const acting = ref<ActionKind | null>(null)
 
 const reportId = computed(() => Number(route.params.id))
@@ -295,6 +305,47 @@ async function handleRetry() {
     ElMessage.success('已提交重试,跳转进度页')
     void router.push(`/admin/presale/report/${reportId.value}/progress`)
   }
+}
+
+async function handleExport() {
+  const versionId = meta.value?.version_id
+  if (!versionId) return
+  const res = await runAction('export', () =>
+    createPresaleExport(reportId.value, {
+      versionId,
+      exportProfile: 'PDF_A4_DPR2'
+    })
+  )
+  if (!res) return
+
+  const exportId = res.runningExportId ?? res.exportId
+  if (res.runningExportId) {
+    ElMessage.info('已有导出任务进行中,继续等待当前任务完成')
+  } else {
+    ElMessage.success('已提交 PDF 导出任务')
+  }
+  await waitExportAndDownload(exportId)
+}
+
+async function waitExportAndDownload(exportId: number) {
+  for (let i = 0; i < 120; i++) {
+    const task: PresaleExportResponse = await getPresaleExport(reportId.value, exportId)
+    if (task.status === 'SUCCESS') {
+      window.location.href = buildPresaleExportDownloadUrl(reportId.value, exportId)
+      await refresh()
+      return
+    }
+    if (task.status === 'FAILED') {
+      ElMessage.error(task.errorMsg || 'PDF 导出失败')
+      return
+    }
+    if (task.status === 'CANCELED') {
+      ElMessage.warning('PDF 导出已取消')
+      return
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 2000))
+  }
+  ElMessage.warning('PDF 导出仍在处理中,请稍后重试下载')
 }
 
 // ─── 18 页锚点 ────────────────────────────────────────────

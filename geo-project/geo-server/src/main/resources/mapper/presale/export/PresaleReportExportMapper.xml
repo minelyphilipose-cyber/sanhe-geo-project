@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.huanjing.geo.module.presale.export.persist.mapper.PresaleReportExportMapper">
+
+    <select id="selectByIdempotencyKeyForUpdate" resultType="com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport">
+        SELECT *
+        FROM presale_report_export
+        WHERE idempotency_key = #{idempotencyKey}
+        LIMIT 1
+        FOR UPDATE
+    </select>
+
+    <select id="selectByIdForUpdate" resultType="com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport">
+        SELECT *
+        FROM presale_report_export
+        WHERE id = #{id}
+        LIMIT 1
+        FOR UPDATE
+    </select>
+
+    <select id="selectActiveByUserReportVersion" resultType="com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport">
+        SELECT *
+        FROM presale_report_export
+        WHERE trigger_user_id = #{triggerUserId}
+          AND report_id = #{reportId}
+          AND version_id = #{versionId}
+          AND status IN ('PENDING', 'RUNNING')
+        ORDER BY created_at ASC
+        LIMIT 1
+    </select>
+
+    <select id="selectOnePendingForUpdateSkipLocked" resultType="com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport">
+        SELECT *
+        FROM presale_report_export
+        WHERE status = 'PENDING'
+        ORDER BY created_at ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+    </select>
+
+    <update id="markClaimed">
+        UPDATE presale_report_export
+        SET status = 'RUNNING',
+            worker_id = #{workerId},
+            updated_at = NOW()
+        WHERE id = #{id}
+          AND status = 'PENDING'
+        <!-- FOR UPDATE SKIP LOCKED 已保证唯一持锁;status 条件是防御性写法。 -->
+    </update>
+
+    <update id="heartbeat">
+        UPDATE presale_report_export
+        SET updated_at = NOW()
+        WHERE id = #{id}
+          AND worker_id = #{workerId}
+          AND status = 'RUNNING'
+    </update>
+
+    <select id="selectRunningByWorker" resultType="com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport">
+        SELECT *
+        FROM presale_report_export
+        WHERE worker_id = #{workerId}
+          AND status = 'RUNNING'
+    </select>
+
+    <select id="selectStaleRunning" resultType="com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport">
+        SELECT *
+        FROM presale_report_export
+        WHERE status = 'RUNNING'
+          AND updated_at &lt; #{deadline}
+        ORDER BY updated_at ASC
+        LIMIT 100
+    </select>
+
+    <update id="markInterruptedByRestart">
+        UPDATE presale_report_export
+        SET status = 'FAILED',
+            error_msg = 'INTERRUPTED_BY_RESTART',
+            render_token_id = NULL,
+            cancel_requested = 0,
+            metrics_json = #{metricsJson},
+            updated_at = NOW()
+        WHERE worker_id = #{workerId}
+          AND status = 'RUNNING'
+    </update>
+
+    <update id="markStaleFailed">
+        UPDATE presale_report_export
+        SET status = 'FAILED',
+            error_msg = 'WORKER_HEARTBEAT_TIMEOUT',
+            render_token_id = NULL,
+            cancel_requested = 0,
+            metrics_json = #{metricsJson},
+            updated_at = NOW()
+        WHERE id = #{id}
+          AND status = 'RUNNING'
+    </update>
+
+    <update id="incrementVersionExportSuccess">
+        UPDATE presale_report_version
+        SET export_success_count = COALESCE(export_success_count, 0) + 1,
+            export_success_at = NOW(),
+            updated_at = NOW()
+        WHERE id = #{versionId}
+    </update>
+
+    <update id="archiveExpiredIdempotencyKey">
+        UPDATE presale_report_export
+        SET idempotency_key = #{archivedKey},
+            updated_at = NOW()
+        WHERE id = #{id}
+          AND status = 'SUCCESS'
+    </update>
+
+</mapper>
