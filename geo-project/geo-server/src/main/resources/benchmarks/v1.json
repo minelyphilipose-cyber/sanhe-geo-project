@@ -6,18 +6,18 @@
       "industry": "retail",
       "industryRole": "_ALL_",
       "industryAvg": {
-        "overall": 55.0,
-        "mention": 60.0,
-        "ranking": 50.0,
-        "sentiment": 65.0,
-        "coverage": 45.0
+        "overall": 56.0,
+        "mention": 61.0,
+        "ranking": 52.0,
+        "sentiment": 63.0,
+        "coverage": 46.0
       },
       "top1": {
         "overall": 82.0,
         "mention": 88.0,
-        "ranking": 85.0,
-        "sentiment": 80.0,
-        "coverage": 75.0
+        "ranking": 86.0,
+        "sentiment": 79.0,
+        "coverage": 74.0
       },
       "top10Score": 72.0,
       "confidenceLevel": "MEDIUM",
@@ -33,16 +33,16 @@
       "industryRole": "_ALL_",
       "industryAvg": {
         "overall": 62.0,
-        "mention": 65.0,
+        "mention": 67.0,
         "ranking": 58.0,
-        "sentiment": 70.0,
-        "coverage": 55.0
+        "sentiment": 71.0,
+        "coverage": 53.0
       },
       "top1": {
         "overall": 86.0,
-        "mention": 90.0,
+        "mention": 91.0,
         "ranking": 88.0,
-        "sentiment": 85.0,
+        "sentiment": 86.0,
         "coverage": 82.0
       },
       "top10Score": 78.0,
@@ -58,18 +58,18 @@
       "industry": "education",
       "industryRole": "_ALL_",
       "industryAvg": {
-        "overall": 50.0,
-        "mention": 55.0,
-        "ranking": 45.0,
-        "sentiment": 60.0,
-        "coverage": 40.0
+        "overall": 51.0,
+        "mention": 56.0,
+        "ranking": 44.0,
+        "sentiment": 62.0,
+        "coverage": 41.0
       },
       "top1": {
-        "overall": 78.0,
+        "overall": 77.0,
         "mention": 82.0,
-        "ranking": 78.0,
-        "sentiment": 78.0,
-        "coverage": 70.0
+        "ranking": 79.0,
+        "sentiment": 76.0,
+        "coverage": 71.0
       },
       "top10Score": 68.0,
       "confidenceLevel": "MEDIUM",
@@ -84,20 +84,20 @@
       "industry": "restaurant",
       "industryRole": "_ALL_",
       "industryAvg": {
-        "overall": 60.0,
-        "mention": 65.0,
-        "ranking": 55.0,
+        "overall": 61.0,
+        "mention": 66.0,
+        "ranking": 57.0,
         "sentiment": 68.0,
-        "coverage": 50.0
+        "coverage": 52.0
       },
       "top1": {
-        "overall": 85.0,
+        "overall": 86.0,
         "mention": 88.0,
-        "ranking": 85.0,
+        "ranking": 84.0,
         "sentiment": 82.0,
         "coverage": 78.0
       },
-      "top10Score": 75.0,
+      "top10Score": 78.0,
       "confidenceLevel": "MEDIUM",
       "source": "HYBRID",
       "sampleSize": 500,
@@ -110,16 +110,16 @@
       "industry": "automotive",
       "industryRole": "_ALL_",
       "industryAvg": {
-        "overall": 60.0,
-        "mention": 65.0,
-        "ranking": 55.0,
+        "overall": 61.0,
+        "mention": 66.0,
+        "ranking": 54.0,
         "sentiment": 68.0,
-        "coverage": 50.0
+        "coverage": 52.0
       },
       "top1": {
-        "overall": 85.0,
+        "overall": 84.0,
         "mention": 88.0,
-        "ranking": 85.0,
+        "ranking": 87.0,
         "sentiment": 82.0,
         "coverage": 78.0
       },
@@ -214,20 +214,20 @@
       "industry": "_ALL_",
       "industryRole": "_ALL_",
       "industryAvg": {
-        "overall": 60.0,
-        "mention": 65.0,
-        "ranking": 55.0,
+        "overall": 61.0,
+        "mention": 66.0,
+        "ranking": 53.0,
         "sentiment": 68.0,
-        "coverage": 50.0
+        "coverage": 54.0
       },
       "top1": {
-        "overall": 85.0,
+        "overall": 86.0,
         "mention": 88.0,
-        "ranking": 85.0,
+        "ranking": 87.0,
         "sentiment": 82.0,
         "coverage": 78.0
       },
-      "top10Score": 75.0,
+      "top10Score": 77.0,
       "confidenceLevel": "MEDIUM",
       "source": "HYBRID",
       "sampleSize": 500,

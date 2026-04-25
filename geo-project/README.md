@@ -34,3 +34,20 @@ npm run dev
 访问 http://localhost:3000
 
 默认管理员账号: admin / admin123
+
+## Presale PR2 说明
+
+- 本次为内部系统先跑通实现,裁判管线同步执行。
+- 整单生成耗时预计增加到约 2 倍量级(11min -> 35min)。
+- 裁判 tone 枚举当前定义为 `OBJECTIVE|PROMOTIONAL|MIXED|UNKNOWN`。
+- 如后续需要优化,可参考下方异步化备选方案原则。
+
+### 异步化备选方案(原则性思路)
+
+- 将认知/对比裁判从主流程同步链路拆出为独立任务。
+- 主流程先完成基础快照并标记可用,裁判完成后增量刷新指标快照。
+- 保持幂等键为 `prompt_result_id`,失败重试与补偿由任务层统一处理。
+
+## Presale TODO
+
+- [ ] 统一 `PresaleJudgeService` 与 `PlatformIntentBreakdownBuilder` 的 category 常量定义，抽取 `PresaleJudgeCategory` 枚举(包含 templateName/dbCode)避免同名异值混淆。

@@ -43,7 +43,7 @@ class PresaleL3InitServiceTest {
     );
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final PresaleL3InitService service = new PresaleL3InitService(objectMapper);
+    private final PresaleL3InitService service = new PresaleL3InitService(objectMapper, new PresaleTextFormatter());
 
     @Test
     void ruleFindingMap_containsAllTenRuleCodes() throws Exception {
