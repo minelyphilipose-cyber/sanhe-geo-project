@@ -32,13 +32,13 @@
                   class="display-serif p16-stat-value"
                   :class="idx === steps.length - 1 ? 'p16-stat-accent' : 'p16-stat-primary'"
                 >
-                  {{ item.target_score }}
+                  {{ toIntRounded(item.target_score) }}
                 </div>
               </div>
               <div class="p16-stat">
                 <div class="mono p16-stat-label">预期提升</div>
                 <div class="display-serif p16-stat-value p16-stat-green">
-                  +{{ item.uplift_from_previous }}
+                  +{{ toIntRounded(item.uplift_from_previous) }}
                 </div>
               </div>
               <div class="p16-stat">
@@ -65,6 +65,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useMergedView } from '@/composables/presale/useMergedView'
+import { toIntRounded } from '@/utils/presale/numberFormat'
 
 /**
  * Page16 分阶段优化路径(γ·2)。

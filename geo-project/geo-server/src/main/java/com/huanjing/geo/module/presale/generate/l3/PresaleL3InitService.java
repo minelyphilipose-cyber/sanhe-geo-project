@@ -54,6 +54,7 @@ public class PresaleL3InitService {
     private static final String DEFAULT_ROI_DISCLAIMER = "基于行业平均模型的估算,实际效果受多种因素影响,建议结合业务实际情况评估。";
 
     private final ObjectMapper objectMapper;
+    private final PresaleTextFormatter textFormatter;
 
     public String derive(String rawSnapshotJson, String computedSnapshotJson) {
         try {
@@ -84,8 +85,8 @@ public class PresaleL3InitService {
                                                    Integer platformCount) {
         Double overall = requireOverallScore(computed);
         Double industryAvgOverall = requireIndustryAvgOverall(raw);
-        int roundedOverall = (int) Math.round(overall);
-        int delta = (int) Math.round(overall - industryAvgOverall);
+        int roundedOverall = textFormatter.roundToInt(overall);
+        int delta = textFormatter.roundToInt(overall - industryAvgOverall);
         String deltaLabel = classifyDelta(delta);
         String industry = requireIndustry(raw);
 
@@ -105,7 +106,7 @@ public class PresaleL3InitService {
                     : topIntent.getCategory();
             String coverage = topIntent == null || topIntent.getCoverageRate() == null
                     ? "0"
-                    : String.valueOf((int) Math.round(topIntent.getCoverageRate()));
+                    : textFormatter.formatInt(topIntent.getCoverageRate());
             String competitorName = raw.getCompetitors().get(0).getName() == null
                     ? "行业Top1竞品"
                     : raw.getCompetitors().get(0).getName();
@@ -363,11 +364,8 @@ public class PresaleL3InitService {
         if (value == null) {
             return "—";
         }
-        if (value instanceof Double d) {
-            return String.valueOf(Math.round(d));
-        }
         if (value instanceof Number number) {
-            return number.toString();
+            return textFormatter.formatInt(number);
         }
         return value.toString();
     }

@@ -98,6 +98,7 @@ import { computed, watchEffect } from 'vue'
 import { useMergedView } from '@/composables/presale/useMergedView'
 import type { IntentCode, PlatformIntentCell } from '@/types/presale/computed'
 import type { PlatformBreakdown } from '@/types/presale/raw'
+import { toIntentLabel, toStanceLabel } from '@/utils/presale/enumLabels'
 
 /**
  * Page05 多平台提及率热力图(β·2·补)。
@@ -145,14 +146,6 @@ const INTENT_ORDER: readonly IntentCode[] = [
 ] as const
 
 /** 行头中文兜底(正常情况从 cell.intent_label 取;cell 缺失时用这张表)。 */
-const FALLBACK_INTENT_LABEL: Record<IntentCode, string> = {
-  RECOMMENDATION: '推荐型',
-  COMPARISON: '对比型',
-  INQUIRY: '问题型',
-  COGNITIVE: '认知型',
-  SCENARIO: '场景型'
-}
-
 /** 图例(不含 null,null 图例单独放,只在有 null cell 时显示)。 */
 const LEGEND = [
   { cls: 'heat-0', label: '0-10%' },
@@ -208,7 +201,7 @@ const heatRows = computed<HeatRowView[]>(() => {
       .map((p) => cellMap.value.get(makeKey(p.platform_code, intentCode)))
       .find((c): c is PlatformIntentCell => c != null)
     const intentLabel =
-      firstCellWithLabel?.intent_label ?? FALLBACK_INTENT_LABEL[intentCode]
+      firstCellWithLabel?.intent_label ?? toIntentLabel(intentCode)
     return { intent_code: intentCode, intent_label: intentLabel, cells }
   })
 })
@@ -375,7 +368,7 @@ function buildCellView(
       display: '—',
       heatClass: 'heat-0',
       isNull: true,
-      tooltip: `${platform.platform_name} · ${FALLBACK_INTENT_LABEL[intentCode]}:数据缺失`,
+      tooltip: `${platform.platform_name} · ${toIntentLabel(intentCode)}:数据缺失`,
       stance: null
     }
   }
@@ -414,15 +407,6 @@ function buildTooltip(cell: PlatformIntentCell): string {
     return stanceLabel ? `${base}，站队:${stanceLabel}` : base
   }
   return `${cell.mention_count}/${cell.platform_prompt_count} 提及(${cell.mention_rate}%)`
-}
-
-function toStanceLabel(
-  stance: PlatformIntentCell['stance']
-): '我方领先' | '竞品领先' | '持平' | null {
-  if (stance === 'target') return '我方领先'
-  if (stance === 'competitor') return '竞品领先'
-  if (stance === 'tie') return '持平'
-  return null
 }
 
 /**

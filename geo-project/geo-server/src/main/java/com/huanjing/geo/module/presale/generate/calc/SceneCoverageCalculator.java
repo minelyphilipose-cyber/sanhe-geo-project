@@ -85,8 +85,13 @@ public class SceneCoverageCalculator {
         Map<Long, Set<String>> hitPlatformsByTemplate = new HashMap<>();
         Map<Long, List<Integer>> rankingsByTemplate = new HashMap<>();
         Map<Long, List<PresaleAiPromptResult>> rowsByTemplate = new HashMap<>();
+        Map<Long, String> renderedPromptByTemplate = new HashMap<>();
         for (PresaleAiPromptResult row : batch1Rows) {
             rowsByTemplate.computeIfAbsent(row.getPromptTemplateId(), ignored -> new ArrayList<>()).add(row);
+            if (row.getPromptTemplateId() != null && row.getRequestPromptContent() != null
+                    && !row.getRequestPromptContent().isBlank()) {
+                renderedPromptByTemplate.putIfAbsent(row.getPromptTemplateId(), row.getRequestPromptContent());
+            }
             if (!effectivePlatforms.contains(row.getPlatformCode())) {
                 continue;
             }
@@ -147,17 +152,20 @@ public class SceneCoverageCalculator {
                 Set.of(PresaleIntentCode.RECOMMENDATION, PresaleIntentCode.COMPARISON),
                 intentTotalPrompts,
                 topCompetitorDisplayNames,
-                rowsByTemplate);
+                rowsByTemplate,
+                renderedPromptByTemplate);
         SceneCoverageGroup midGroup = buildGroup(byIntent,
                 Set.of(PresaleIntentCode.INQUIRY, PresaleIntentCode.COGNITIVE),
                 intentTotalPrompts,
                 topCompetitorDisplayNames,
-                rowsByTemplate);
+                rowsByTemplate,
+                renderedPromptByTemplate);
         SceneCoverageGroup lowGroup = buildGroup(byIntent,
                 Set.of(PresaleIntentCode.SCENARIO),
                 intentTotalPrompts,
                 topCompetitorDisplayNames,
-                rowsByTemplate);
+                rowsByTemplate,
+                renderedPromptByTemplate);
 
         ComputedSnapshotDTO.SceneCoverage sceneCoverage = ComputedSnapshotDTO.SceneCoverage.builder()
                 .highValue(highGroup)
@@ -171,7 +179,8 @@ public class SceneCoverageCalculator {
                                           Set<PresaleIntentCode> intents,
                                           Map<String, Integer> intentTotalPrompts,
                                           List<String> topCompetitorDisplayNames,
-                                          Map<Long, List<PresaleAiPromptResult>> rowsByTemplate) {
+                                          Map<Long, List<PresaleAiPromptResult>> rowsByTemplate,
+                                          Map<Long, String> renderedPromptByTemplate) {
         List<TemplateWithCovered> combined = intents.stream()
                 .flatMap(intent -> byIntent.getOrDefault(intent, List.of()).stream())
                 .toList();
@@ -184,7 +193,7 @@ public class SceneCoverageCalculator {
                 .filter(TemplateWithCovered::covered)
                 .map(item -> SceneQueryItem.builder()
                         .promptCode(item.template().getPromptCode())
-                        .promptContent(item.template().getPromptContent())
+                        .promptContent(resolveRenderedPrompt(renderedPromptByTemplate, item.template().getId()))
                         .category(item.intent().getLabel())
                         .build())
                 .toList();
@@ -193,7 +202,7 @@ public class SceneCoverageCalculator {
                 .filter(item -> !item.covered())
                 .map(item -> SceneQueryMissing.builder()
                         .promptCode(item.template().getPromptCode())
-                        .promptContent(item.template().getPromptContent())
+                        .promptContent(resolveRenderedPrompt(renderedPromptByTemplate, item.template().getId()))
                         .category(item.intent().getLabel())
                         .topCompetitorCoverage(resolveTopCompetitorCoverage(
                                 rowsByTemplate.getOrDefault(item.template().getId(), List.of()),
@@ -208,6 +217,17 @@ public class SceneCoverageCalculator {
                 .coveredQueries(coveredQueries)
                 .missingQueries(missingQueries)
                 .build();
+    }
+
+    private String resolveRenderedPrompt(Map<Long, String> renderedPromptByTemplate, Long templateId) {
+        if (templateId == null) {
+            return "—";
+        }
+        String rendered = renderedPromptByTemplate.get(templateId);
+        if (rendered == null || rendered.isBlank()) {
+            return "—";
+        }
+        return rendered;
     }
 
     private List<String> resolveTopCompetitorCoverage(List<PresaleAiPromptResult> rows,

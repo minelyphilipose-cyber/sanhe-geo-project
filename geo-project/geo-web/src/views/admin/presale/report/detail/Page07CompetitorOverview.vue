@@ -41,7 +41,7 @@
                 class="metric-hero p07-card-rate"
                 :class="`p07-card-rate-${c.rank}`"
               >
-                {{ Math.round(c.mention_rate) }}%
+                {{ toIntRounded(c.mention_rate) }}%
               </div>
               <div class="p07-card-sub-alt">
                 平均排名 {{ formatAvgRank(c.avg_ranking) }}
@@ -93,6 +93,7 @@ import { computed } from 'vue'
 import type { EChartsOption } from 'echarts'
 import { useMergedView } from '@/composables/presale/useMergedView'
 import PresaleChart from './shared/PresaleChart.vue'
+import { toIntRounded } from '@/utils/presale/numberFormat'
 
 /**
  * Page07 竞品对标总览。
@@ -121,7 +122,7 @@ const selfTotalMentions = computed(() =>
 )
 const selfMentionRatePct = computed(() => {
   if (selfTotalPrompts.value === 0) return 0
-  return Math.round((selfTotalMentions.value / selfTotalPrompts.value) * 100)
+  return toIntRounded((selfTotalMentions.value / selfTotalPrompts.value) * 100)
 })
 const selfAvgRankText = computed(() => {
   const list = mergedView.value.platform_breakdown.filter(
@@ -131,7 +132,7 @@ const selfAvgRankText = computed(() => {
   const weightedSum = list.reduce((s, p) => s + (p.avg_ranking as number) * p.mention_count, 0)
   const weightTotal = list.reduce((s, p) => s + p.mention_count, 0)
   if (weightTotal === 0) return '—'
-  return (weightedSum / weightTotal).toFixed(1)
+  return String(toIntRounded(weightedSum / weightTotal))
 })
 
 // ─── bar chart(方案 D:mention_count 对比) ─────────────
@@ -224,7 +225,7 @@ function formatRank(n: number): string {
 }
 function formatAvgRank(r: number | null): string {
   if (r == null) return '—'
-  return r.toFixed(1)
+  return String(toIntRounded(r))
 }
 
 // ─── 底部引用文案(静态) ──────────────────────────────

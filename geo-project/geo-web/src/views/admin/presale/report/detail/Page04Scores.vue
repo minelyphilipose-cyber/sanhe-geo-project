@@ -93,6 +93,7 @@ import { computed } from 'vue'
 import type { EChartsOption } from 'echarts'
 import { useMergedView } from '@/composables/presale/useMergedView'
 import PresaleChart from './shared/PresaleChart.vue'
+import { toIntRounded } from '@/utils/presale/numberFormat'
 
 /**
  * Page04 可见度评分详情。
@@ -132,34 +133,34 @@ const dimensionRows = computed<DimRow[]>(() => {
     {
       key: 'mention',
       label: '提及率',
-      score: scores.mention,
-      avg: avg.mention,
-      delta: scores.mention - avg.mention,
+      score: toIntRounded(scores.mention),
+      avg: toIntRounded(avg.mention),
+      delta: toIntRounded(scores.mention - avg.mention),
       isGreen: false
     },
     {
       key: 'ranking',
       label: '平均排名',
-      score: scores.ranking,
-      avg: avg.ranking,
-      delta: scores.ranking - avg.ranking,
+      score: toIntRounded(scores.ranking),
+      avg: toIntRounded(avg.ranking),
+      delta: toIntRounded(scores.ranking - avg.ranking),
       isGreen: false
     },
     {
       key: 'sentiment',
       label: '情感倾向',
-      score: scores.sentiment,
-      avg: avg.sentiment,
-      delta: scores.sentiment - avg.sentiment,
+      score: toIntRounded(scores.sentiment),
+      avg: toIntRounded(avg.sentiment),
+      delta: toIntRounded(scores.sentiment - avg.sentiment),
       // 情感维度视觉上绿色(对齐原型)
       isGreen: true
     },
     {
       key: 'coverage',
       label: '覆盖度',
-      score: scores.coverage,
-      avg: avg.coverage,
-      delta: scores.coverage - avg.coverage,
+      score: toIntRounded(scores.coverage),
+      avg: toIntRounded(avg.coverage),
+      delta: toIntRounded(scores.coverage - avg.coverage),
       isGreen: false
     }
   ]
@@ -231,11 +232,11 @@ const radarOption = computed<EChartsOption>(() => {
 })
 
 // ─── 行业对比条定位 ─────────────────────────────────────
-const overall = computed(() => mergedView.value.scores.overall)
+const overall = computed(() => toIntRounded(mergedView.value.scores.overall))
 const industryAvgOverall = computed(
-  () => mergedView.value.benchmarks_frozen.industry_avg.overall
+  () => toIntRounded(mergedView.value.benchmarks_frozen.industry_avg.overall)
 )
-const top1Overall = computed(() => mergedView.value.benchmarks_frozen.top1.overall)
+const top1Overall = computed(() => toIntRounded(mergedView.value.benchmarks_frozen.top1.overall))
 
 /** 0-100 分数映射为 "XX%" 字符串(CSS left)。边界处夹紧 0-100%。 */
 function toLeftPct(score: number): string {

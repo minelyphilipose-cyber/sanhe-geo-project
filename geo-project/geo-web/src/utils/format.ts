@@ -25,6 +25,7 @@ export function formatDateTime(date: string | null | undefined): string {
 
 /**
  * 百分比
+ * // 非 presale 使用:presale 报表统一走 @/utils/presale/numberFormat
  */
 export function formatPercent(value: number | null | undefined, digits = 1): string {
   if (value == null) return '—'

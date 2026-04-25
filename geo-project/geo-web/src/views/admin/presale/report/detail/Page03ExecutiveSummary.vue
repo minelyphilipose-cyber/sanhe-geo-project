@@ -21,7 +21,7 @@
           <!-- Overall -->
           <div class="p03-overall-card">
             <div class="mono p03-card-label">OVERALL SCORE</div>
-            <div class="metric-hero p03-overall-number">{{ mergedView.scores.overall }}</div>
+            <div class="metric-hero p03-overall-number">{{ overallScoreRounded }}</div>
             <div class="p03-overall-unit">/ 100</div>
             <div class="p03-overall-compare">
               <div class="p03-overall-delta">
@@ -31,7 +31,7 @@
                 <strong>{{ overallDeltaAbs }}</strong> 分
               </div>
               <div class="p03-overall-avg-note">
-                行业均值 {{ mergedView.benchmarks_frozen.industry_avg.overall }}
+                行业均值 {{ industryAvgOverallRounded }}
               </div>
               <div class="p03-overall-rank">
                 行业排名 #{{ mergedView.benchmarks_frozen.industry_ranking.position }} /
@@ -117,6 +117,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useMergedView } from '@/composables/presale/useMergedView'
+import { toIntRounded } from '@/utils/presale/numberFormat'
 
 /**
  * Page03 执行摘要。
@@ -144,7 +145,11 @@ const overallDelta = computed(() => {
   return mergedView.value.scores.overall - mergedView.value.benchmarks_frozen.industry_avg.overall
 })
 /** 差值绝对值,模板里作为主行"高于/低于 N 分"的 N。 */
-const overallDeltaAbs = computed(() => Math.abs(overallDelta.value))
+const overallDeltaAbs = computed(() => toIntRounded(Math.abs(overallDelta.value)))
+const overallScoreRounded = computed(() => toIntRounded(mergedView.value.scores.overall))
+const industryAvgOverallRounded = computed(() =>
+  toIntRounded(mergedView.value.benchmarks_frozen.industry_avg.overall)
+)
 
 // ─── key_takeaways 排序(按 order_no 升序) ─────────────
 /**
@@ -164,7 +169,7 @@ const totalMentions = computed(() =>
 )
 const mentionRatePct = computed(() => {
   if (totalPrompts.value === 0) return 0
-  return Math.round((totalMentions.value / totalPrompts.value) * 100)
+  return toIntRounded((totalMentions.value / totalPrompts.value) * 100)
 })
 
 // ─── avg rank(按 mention_count 加权) ───────────────────
@@ -182,7 +187,7 @@ const avgRankText = computed<string>(() => {
   const weightedSum = list.reduce((s, p) => s + (p.avg_ranking as number) * p.mention_count, 0)
   const weightTotal = list.reduce((s, p) => s + p.mention_count, 0)
   if (weightTotal === 0) return '—'
-  return (weightedSum / weightTotal).toFixed(1)
+  return String(toIntRounded(weightedSum / weightTotal))
 })
 
 const primaryRecommendationTotal = computed(() =>
@@ -196,7 +201,7 @@ const primaryRecommendationTotal = computed(() =>
 const highValueCoverageRate = computed(() => {
   const g = mergedView.value.scene_coverage.high_value
   // coverage_rate 可能后端给的是 0-100 或 0-1;按 contract 是 0-100
-  return Math.round(g.coverage_rate)
+  return toIntRounded(g.coverage_rate)
 })
 
 // ─── sentiment ───────────────────────────────────────────
@@ -204,7 +209,7 @@ const positiveSentimentRate = computed(() => {
   const s = mergedView.value.sentiment_detail
   const total = s.positive_count + s.neutral_count + s.negative_count
   if (total === 0) return 0
-  return Math.round((s.positive_count / total) * 100)
+  return toIntRounded((s.positive_count / total) * 100)
 })
 
 // ─── key findings 编号格式化 ────────────────────────────

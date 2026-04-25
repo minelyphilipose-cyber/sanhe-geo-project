@@ -38,7 +38,7 @@
               {{ formatRank(idx + 1) }}
             </div>
             <div class="p06-platform-name">{{ row.platform_name }}</div>
-            <div class="p06-col-right p06-mention-rate">{{ Math.round(row.mention_rate) }}%</div>
+            <div class="p06-col-right p06-mention-rate">{{ toIntRounded(row.mention_rate) }}%</div>
             <div class="p06-col-right p06-avg-ranking">{{ formatAvgRank(row.avg_ranking) }}</div>
             <div class="p06-col-right">
               {{ row.primary_recommendation_count }} 次
@@ -65,6 +65,7 @@ import { computed } from 'vue'
 import type { EChartsOption } from 'echarts'
 import { useMergedView } from '@/composables/presale/useMergedView'
 import PresaleChart from './shared/PresaleChart.vue'
+import { toIntRounded } from '@/utils/presale/numberFormat'
 
 /**
  * Page06 平台详细数据。
@@ -97,7 +98,7 @@ const tableRows = computed<TableRow[]>(() => {
   return sorted.map((p, idx) => {
     const sd = p.sentiment_distribution
     const sTotal = sd.positive + sd.neutral + sd.negative
-    const sPct = sTotal === 0 ? 0 : Math.round((sd.positive / sTotal) * 100)
+    const sPct = sTotal === 0 ? 0 : toIntRounded((sd.positive / sTotal) * 100)
     return {
       platform_code: p.platform_code,
       platform_name: p.platform_name,
@@ -164,7 +165,7 @@ const barOption = computed<EChartsOption>(() => {
     series: [
       {
         type: 'bar',
-        data: rows.map((r) => Math.round(r.mention_rate)),
+        data: rows.map((r) => toIntRounded(r.mention_rate)),
         barMaxWidth: 36,
         itemStyle: {
           color: (params) => {
@@ -194,7 +195,7 @@ function formatRank(n: number): string {
 
 function formatAvgRank(r: number | null): string {
   if (r == null) return '—'
-  return r.toFixed(1)
+  return String(toIntRounded(r))
 }
 </script>
 

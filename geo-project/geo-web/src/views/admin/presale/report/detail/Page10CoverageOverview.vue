@@ -133,13 +133,13 @@ const highValueRows = computed<CoverageRow[]>(() => {
   const g = mergedView.value.scene_coverage.high_value
   const covered: CoverageRow[] = (g.covered_queries ?? []).map((q) => ({
     prompt_code: q.prompt_code,
-    prompt_content: q.prompt_content,
+    prompt_content: q.prompt_content?.trim() ? q.prompt_content : '—',
     category: q.category,
     covered: true
   }))
   const missing: CoverageRow[] = (g.missing_queries ?? []).map((q) => ({
     prompt_code: q.prompt_code,
-    prompt_content: q.prompt_content,
+    prompt_content: q.prompt_content?.trim() ? q.prompt_content : '—',
     category: q.category,
     covered: false
   }))

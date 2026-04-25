@@ -20,7 +20,7 @@
         <div class="p15-hero-grid">
           <div class="p15-hero-card p15-hero-current">
             <div class="mono p15-hero-label">CURRENT</div>
-            <div class="p15-hero-value p15-hero-value-muted">{{ roi.current_score }}</div>
+            <div class="p15-hero-value p15-hero-value-muted">{{ currentScoreDisplay }}</div>
             <div class="p15-hero-caption">当前可见度</div>
           </div>
           <div class="p15-hero-arrow">
@@ -30,12 +30,12 @@
           </div>
           <div class="p15-hero-card p15-hero-target">
             <div class="mono p15-hero-label p15-hero-label-dim">TARGET</div>
-            <div class="p15-hero-value p15-hero-value-accent">{{ roi.target_score }}</div>
+            <div class="p15-hero-value p15-hero-value-accent">{{ targetScoreDisplay }}</div>
             <div class="p15-hero-caption p15-hero-caption-dim">目标可见度(Top10)</div>
           </div>
           <div class="p15-uplift">
             <div class="mono p15-uplift-label">UPLIFT</div>
-            <div class="display-serif p15-uplift-value">+{{ roi.estimated_uplift_percent }}%</div>
+            <div class="display-serif p15-uplift-value">+{{ estimatedUpliftPercentDisplay }}%</div>
           </div>
           <div class="p15-hero-card p15-hero-gain">
             <div class="mono p15-hero-label">GAIN</div>
@@ -109,7 +109,7 @@
           >
             <div class="mono p15-phase-duration">{{ p.duration_label }}</div>
             <div class="chinese-serif p15-phase-title">{{ p.title }}</div>
-            <div class="mono p15-phase-target">→ {{ p.target_score }} 分</div>
+            <div class="mono p15-phase-target">→ {{ toIntRounded(p.target_score) }} 分</div>
           </div>
         </div>
 
@@ -128,6 +128,7 @@ import { computed } from 'vue'
 import type { EChartsOption } from 'echarts'
 import { useMergedView } from '@/composables/presale/useMergedView'
 import PresaleChart from './shared/PresaleChart.vue'
+import { toIntRounded } from '@/utils/presale/numberFormat'
 
 /**
  * Page15 预期收益模拟(γ·2,r2 补 ③ 块)。
@@ -161,6 +162,7 @@ const { mergedView: mergedViewRef } = useMergedView()
 const mergedView = computed(() => mergedViewRef.value!)
 
 const roi = computed(() => mergedView.value.roi_simulation)
+const ROI_KEEP_ONE_DECIMAL = false
 
 // ─── 核心数字 ────────────────────────────────────────────
 
@@ -174,11 +176,25 @@ const roi = computed(() => mergedView.value.roi_simulation)
  *
  * exposureMultiplierDecimal 为 ".0" 时前端仍会显示 ".0x",和 "2.9x" 视觉形态对齐(数字统一三位)。
  */
-const exposureMultiplierRounded = computed(
-  () => Math.round(roi.value.estimated_exposure_multiplier * 10) / 10
+const currentScoreDisplay = computed(() => toIntRounded(roi.value.current_score))
+const targetScoreDisplay = computed(() => toIntRounded(roi.value.target_score))
+const estimatedUpliftPercentDisplay = computed(() =>
+  toIntRounded(roi.value.estimated_uplift_percent)
 )
-const exposureMultiplierInt = computed(() => Math.floor(exposureMultiplierRounded.value))
+
+const exposureMultiplierRounded = computed(() => {
+  if (ROI_KEEP_ONE_DECIMAL) {
+    return Math.round(roi.value.estimated_exposure_multiplier * 10) / 10
+  }
+  return toIntRounded(roi.value.estimated_exposure_multiplier)
+})
+const exposureMultiplierInt = computed(() =>
+  ROI_KEEP_ONE_DECIMAL
+    ? Math.floor(exposureMultiplierRounded.value)
+    : toIntRounded(exposureMultiplierRounded.value)
+)
 const exposureMultiplierDecimal = computed(() => {
+  if (!ROI_KEEP_ONE_DECIMAL) return ''
   const rounded = exposureMultiplierRounded.value
   const decimalTenth = Math.round((rounded - Math.floor(rounded)) * 10)
   return `.${decimalTenth}`
@@ -239,9 +255,10 @@ const competitorGap = computed<ImpactCell>(() => {
 
 /** 带正负号的分数显示:+5 分 / -18 分 / 0 分(0 时不带符号)。 */
 function formatSignedScore(n: number): string {
-  if (n === 0) return '0 分'
-  const sign = n > 0 ? '+' : ''
-  return `${sign}${n} 分`
+  const rounded = toIntRounded(n)
+  if (rounded === 0) return '0 分'
+  const sign = rounded > 0 ? '+' : ''
+  return `${sign}${rounded} 分`
 }
 
 // ─── Phase 摘要条 ────────────────────────────────────────
@@ -269,7 +286,10 @@ const roiLineOption = computed<EChartsOption>(() => {
   // X 轴类目:"当前" + 3 phase 的 duration_label
   const xCategories = ['当前', ...phases.map((p) => p.phase.duration_label)]
   // Y 值:current_score + 3 phase.target_score
-  const yValues = [roi.value.current_score, ...phases.map((p) => p.phase.target_score)]
+  const yValues = [
+    toIntRounded(roi.value.current_score),
+    ...phases.map((p) => toIntRounded(p.phase.target_score))
+  ]
 
   return {
     grid: {
@@ -290,14 +310,14 @@ const roiLineOption = computed<EChartsOption>(() => {
         const p = params[0]
         const idx = p.dataIndex as number
         if (idx === 0) {
-          return `${p.name}<br/>当前分值:${p.value}`
+          return `${p.name}<br/>当前分值:${toIntRounded(Number(p.value))}`
         }
         const mp = phases[idx - 1]
-        if (!mp) return `${p.name}<br/>${p.value}`
+        if (!mp) return `${p.name}<br/>${toIntRounded(Number(p.value))}`
         return [
           `${p.name} · ${mp.title}`,
-          `目标分:${mp.phase.target_score}`,
-          `较上阶段提升:+${mp.phase.uplift_from_previous}`,
+          `目标分:${toIntRounded(mp.phase.target_score)}`,
+          `较上阶段提升:+${toIntRounded(mp.phase.uplift_from_previous)}`,
           `优化完成度:${mp.phase.completed_optimization_count} / ${mp.phase.total_optimization_count}`
         ].join('<br/>')
       }

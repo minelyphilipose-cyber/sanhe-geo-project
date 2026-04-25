@@ -170,7 +170,7 @@ const missingRows = computed<MissingRow[]>(() => {
       }
       rows.push({
         prompt_code: m.prompt_code,
-        prompt_content: m.prompt_content,
+        prompt_content: m.prompt_content?.trim() ? m.prompt_content : '—',
         category: m.category,
         priorityClass,
         priorityLabel,

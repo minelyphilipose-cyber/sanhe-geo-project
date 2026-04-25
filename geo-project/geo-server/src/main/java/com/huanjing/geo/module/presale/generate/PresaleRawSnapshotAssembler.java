@@ -479,25 +479,6 @@ public class PresaleRawSnapshotAssembler {
                         p -> p.getPlatformName() == null ? p.getPlatformCode() : p.getPlatformName(),
                         (a, b) -> a));
 
-        List<Long> templateIds = rows.stream()
-                .map(PresaleAiPromptResult::getPromptTemplateId)
-                .filter(id -> id != null)
-                .distinct()
-                .collect(Collectors.toList());
-        Map<Long, String> promptByTemplateId;
-        if (templateIds.isEmpty()) {
-            promptByTemplateId = Map.of();
-        } else {
-            List<PresalePromptTemplate> templates = promptTemplateMapper.selectBatchIds(templateIds);
-            if (templates == null) {
-                templates = List.of();
-            }
-            promptByTemplateId = templates.stream()
-                    .collect(Collectors.toMap(PresalePromptTemplate::getId,
-                            t -> t.getPromptContent() == null ? "" : t.getPromptContent(),
-                            (a, b) -> a));
-        }
-
         List<Long> analyzeCallIds = rows.stream()
                 .map(PresaleAiPromptResult::getAnalyzeCallId)
                 .filter(id -> id != null)
@@ -536,8 +517,9 @@ public class PresaleRawSnapshotAssembler {
                 }
                 String platformCode = row.getPlatformCode();
                 String platformName = platformNameByCode.getOrDefault(platformCode, platformCode);
-                Long promptTemplateId = row.getPromptTemplateId();
-                String query = promptTemplateId == null ? "" : promptByTemplateId.getOrDefault(promptTemplateId, "");
+                String query = (row.getRequestPromptContent() == null || row.getRequestPromptContent().isBlank())
+                        ? "—"
+                        : row.getRequestPromptContent();
                 Long analyzeCallId = row.getAnalyzeCallId();
                 LocalDateTime testedAt = analyzeCallId == null ? null : testedAtByAnalyzeCallId.get(analyzeCallId);
                 if (testedAt == null) {
