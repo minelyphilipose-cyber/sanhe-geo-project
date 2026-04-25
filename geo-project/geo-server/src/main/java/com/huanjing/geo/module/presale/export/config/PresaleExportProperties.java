@@ -23,7 +23,7 @@ public class PresaleExportProperties {
         private int pageLoadTimeoutMs = 30_000;
         private int readyTimeoutMs = 60_000;
         private int pdfTimeoutMs = 60_000;
-        private int acquireTimeoutMs = 30_000;
+        private int acquireTimeoutMs = 5_000;
         private int maxConcurrency = 1;
     }
 }

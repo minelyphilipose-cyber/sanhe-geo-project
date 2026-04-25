@@ -73,7 +73,7 @@ geo:
       page-load-timeout-ms: ${PRESALE_EXPORT_PAGE_LOAD_TIMEOUT_MS:30000}
       ready-timeout-ms: ${PRESALE_EXPORT_READY_TIMEOUT_MS:60000}
       pdf-timeout-ms: ${PRESALE_EXPORT_PDF_TIMEOUT_MS:60000}
-      acquire-timeout-ms: ${PRESALE_EXPORT_ACQUIRE_TIMEOUT_MS:30000}
+      acquire-timeout-ms: ${PRESALE_EXPORT_ACQUIRE_TIMEOUT_MS:5000}
       max-concurrency: ${PRESALE_EXPORT_MAX_CONCURRENCY:1}
   dispatch:
     cron: "0 55 18 * * *"
