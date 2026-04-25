@@ -31,7 +31,7 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
     private final PresaleLlmHttpClient httpClient;
     private final ObjectMapper objectMapper;
 
-    private final Map<String, Long> lastInvokeAtByPlatform = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, PlatformThrottleState> throttleStates = new ConcurrentHashMap<>();
 
     @Value("${presale.generate.llm.connect-timeout-ms:10000}")
     private int connectTimeoutMs;
@@ -375,10 +375,12 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
 
     private void throttle(String platformCode, int qps) throws LlmInvokeException {
         long minIntervalMs = Math.max(1L, 1000L / qps);
-        long now = System.currentTimeMillis();
-        synchronized (lastInvokeAtByPlatform) {
-            Long last = lastInvokeAtByPlatform.get(platformCode);
-            if (last != null) {
+        PlatformThrottleState state = throttleStates.computeIfAbsent(
+                platformCode, k -> new PlatformThrottleState());
+        synchronized (state) {
+            long now = System.currentTimeMillis();
+            long last = state.lastCallAtMillis;
+            if (last > 0L) {
                 long waitMs = minIntervalMs - (now - last);
                 if (waitMs > 0) {
                     try {
@@ -389,8 +391,12 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                     }
                 }
             }
-            lastInvokeAtByPlatform.put(platformCode, System.currentTimeMillis());
+            state.lastCallAtMillis = System.currentTimeMillis();
         }
+    }
+
+    private static final class PlatformThrottleState {
+        private volatile long lastCallAtMillis = 0L;
     }
 
     private record InvocationResponse(String text, Integer promptTokens, Integer completionTokens) {
