@@ -1,17 +1,17 @@
-package com.huanjing.geo.module.presale.export.render;
+package com.huanjing.geo.module.export.render;
 
 import lombok.Builder;
 import lombok.Value;
 
 @Value
 @Builder
-public class PresalePdfRenderResult {
+public class ExportRenderResult {
     long elapsedMs;
     long fileSize;
     String metricsJson;
 
-    public PresalePdfRenderResult withMetricsJson(String newMetricsJson) {
-        return PresalePdfRenderResult.builder()
+    public ExportRenderResult withMetricsJson(String newMetricsJson) {
+        return ExportRenderResult.builder()
                 .elapsedMs(elapsedMs)
                 .fileSize(fileSize)
                 .metricsJson(newMetricsJson)

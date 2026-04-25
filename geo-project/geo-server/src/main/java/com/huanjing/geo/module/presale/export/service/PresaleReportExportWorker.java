@@ -3,13 +3,14 @@ package com.huanjing.geo.module.presale.export.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.huanjing.geo.module.export.render.ExportRenderConcurrencyException;
+import com.huanjing.geo.module.export.render.ExportRenderKernel;
+import com.huanjing.geo.module.export.render.ExportRenderProfile;
+import com.huanjing.geo.module.export.render.ExportRenderRequest;
+import com.huanjing.geo.module.export.render.ExportRenderResult;
 import com.huanjing.geo.module.presale.export.config.PresaleExportProperties;
 import com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport;
 import com.huanjing.geo.module.presale.export.persist.mapper.PresaleReportExportMapper;
-import com.huanjing.geo.module.presale.export.render.PresaleExportConcurrencyException;
-import com.huanjing.geo.module.presale.export.render.PresalePdfRenderKernel;
-import com.huanjing.geo.module.presale.export.render.PresalePdfRenderRequest;
-import com.huanjing.geo.module.presale.export.render.PresalePdfRenderResult;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -34,7 +35,7 @@ public class PresaleReportExportWorker {
     private final PresaleExportProperties properties;
     private final PresaleReportExportClaimService claimService;
     private final PresaleReportExportHeartbeatService heartbeatService;
-    private final PresalePdfRenderKernel renderKernel;
+    private final ExportRenderKernel renderKernel;
     private final PresaleRenderTokenService renderTokenService;
     private final PresaleExportStorageService storageService;
     private final PresaleExportCancellationRegistry cancellationRegistry;
@@ -93,13 +94,14 @@ public class PresaleReportExportWorker {
 
             memorySampler = new ChromiumMemorySampler(ProcessHandle.current());
             memorySampler.start();
-            PresalePdfRenderResult result;
+            ExportRenderResult result;
             try {
-                result = renderKernel.render(PresalePdfRenderRequest.builder()
+                result = renderKernel.render(ExportRenderRequest.builder()
                         .exportId(exportId)
                         .renderUrl(renderUrl)
-                        .pdfPath(pdfPath)
+                        .outputPath(pdfPath)
                         .debugDir(debugDir)
+                        .profile(buildRenderProfile())
                         .build());
             } finally {
                 memorySampler.stop();
@@ -125,7 +127,7 @@ public class PresaleReportExportWorker {
             storageService.uploadPdf(pdfBytes, pdfKey);
             markSuccess(exportId, pdfKey, result, pdfBytes.length);
             deleteLocalWorkDirQuietly(exportId, workDir);
-        } catch (PresaleExportConcurrencyException ex) {
+        } catch (ExportRenderConcurrencyException ex) {
             requeue(exportId, ex.getMessage());
         } catch (Exception ex) {
             String debugKey = debugPackageService.retainFailureDebugPackage(exportId, debugDir, ex.getMessage());
@@ -153,7 +155,7 @@ public class PresaleReportExportWorker {
         return token;
     }
 
-    private void markSuccess(Long exportId, String pdfKey, PresalePdfRenderResult result, long fileSize) {
+    private void markSuccess(Long exportId, String pdfKey, ExportRenderResult result, long fileSize) {
         PresaleReportExport latest = exportMapper.selectById(exportId);
         if (latest == null || PresaleExportStatuses.CANCELED.equals(latest.getStatus())) {
             storageService.remove(pdfKey);
@@ -259,7 +261,7 @@ public class PresaleReportExportWorker {
         }
     }
 
-    private QualityFailure validateRenderQuality(PresalePdfRenderResult result) {
+    private QualityFailure validateRenderQuality(ExportRenderResult result) {
         try {
             JsonNode root = objectMapper.readTree(result.getMetricsJson());
             int pageCount = root.path("page_count").asInt(18);
@@ -290,6 +292,20 @@ public class PresaleReportExportWorker {
 
     private String trimTrailingSlash(String value) {
         return value != null && value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    private ExportRenderProfile buildRenderProfile() {
+        PresaleExportProperties.Browser browser = properties.getBrowser();
+        return ExportRenderProfile.builder()
+                .pageFormat("A4")
+                .deviceScaleFactor(browser.getDeviceScaleFactor())
+                .viewportWidth(browser.getViewportWidth())
+                .viewportHeight(browser.getViewportHeight())
+                .pageLoadTimeoutMs(browser.getPageLoadTimeoutMs())
+                .readyTimeoutMs(browser.getReadyTimeoutMs())
+                .pdfTimeoutMs(browser.getPdfTimeoutMs())
+                .acquireTimeoutMs(browser.getAcquireTimeoutMs())
+                .build();
     }
 
     private String readMetricsJson(Path debugDir) {
