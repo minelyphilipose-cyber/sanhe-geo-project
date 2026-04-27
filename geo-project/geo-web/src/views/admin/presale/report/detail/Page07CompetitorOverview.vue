@@ -43,9 +43,6 @@
               >
                 {{ c.mention_count }}<span class="p07-card-unit">次</span>
               </div>
-              <div class="p07-card-sub-alt">
-                平均排名 {{ formatAvgRank(c.avg_ranking) }}
-              </div>
             </div>
           </div>
 
@@ -60,9 +57,6 @@
               <div class="p07-card-sub-self">提及次数</div>
               <div class="metric-hero p07-card-rate p07-card-rate-self">
                 {{ selfTotalMentions }}<span class="p07-card-unit">次</span>
-              </div>
-              <div class="p07-card-sub-self-alt">
-                平均排名 {{ selfAvgRankText }}
               </div>
             </div>
           </div>
@@ -116,16 +110,6 @@ const mergedView = computed(() => mergedViewRef.value!)
 const selfTotalMentions = computed(() =>
   mergedView.value.platform_breakdown.reduce((sum, p) => sum + p.mention_count, 0)
 )
-const selfAvgRankText = computed(() => {
-  const list = mergedView.value.platform_breakdown.filter(
-    (p) => p.avg_ranking != null && p.mention_count > 0
-  )
-  if (list.length === 0) return '—'
-  const weightedSum = list.reduce((s, p) => s + (p.avg_ranking as number) * p.mention_count, 0)
-  const weightTotal = list.reduce((s, p) => s + p.mention_count, 0)
-  if (weightTotal === 0) return '—'
-  return String(toIntRounded(weightedSum / weightTotal))
-})
 
 // ─── bar chart(方案 D:mention_count 对比) ─────────────
 const barOption = computed<EChartsOption>(() => {
@@ -215,10 +199,6 @@ const barOption = computed<EChartsOption>(() => {
 function formatRank(n: number): string {
   return n.toString().padStart(2, '0')
 }
-function formatAvgRank(r: number | null): string {
-  if (r == null) return '—'
-  return String(toIntRounded(r))
-}
 
 // ─── 底部引用文案(静态) ──────────────────────────────
 const quoteText = `上图展示了 AI 视角下您与 Top3 竞品的提及次数对比。差距集中在哪些场景类别、差距的具体机制,建议结合后续章节的场景明细逐项分析。`
@@ -284,7 +264,8 @@ const quoteText = `上图展示了 AI 视角下您与 Top3 竞品的提及次数
 }
 .p07-card-metric-wrap {
   border-top: 1px solid #c8bfa8;
-  padding-top: 10px;
+  padding-top: 14px;        /* 原 10px → 14px */
+  padding-bottom: 6px;      /* 新增,补底部呼吸感 */
 }
 .p07-card-metric-self {
   border-top: 1px solid rgba(255, 255, 255, 0.2);
@@ -292,28 +273,18 @@ const quoteText = `上图展示了 AI 视角下您与 Top3 竞品的提及次数
 .p07-card-sub {
   font-size: 11px;
   color: #6b6456;
-  margin-bottom: 2px;
+  margin-bottom: 6px;       /* 原 2px → 6px,拉开"提及次数"和数字距离 */
 }
 .p07-card-sub-self {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.6);
-  margin-bottom: 2px;
-}
-.p07-card-sub-alt {
-  font-size: 11px;
-  color: #6b6456;
-  margin-top: 6px;
-}
-.p07-card-sub-self-alt {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
-  margin-top: 6px;
+  margin-bottom: 6px;       /* 同步,原 2px → 6px */
 }
 .p07-card-rate {
-  font-size: 32px;
+  font-size: 36px;          /* 原 32px → 36px */
 }
 .p07-card-unit {
-  font-size: 14px;
+  font-size: 15px;          /* 原 14px → 15px */
   margin-left: 2px;
 }
 .p07-card-rate-1 {

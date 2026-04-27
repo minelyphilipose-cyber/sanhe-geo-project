@@ -271,9 +271,14 @@ public class PresaleReportExportWorker {
             }
 
             boolean bottomBandOk = root.path("bottom_band_ok").asBoolean(true);
-            if (properties.getQuality().isEnforceBottomBand() && !bottomBandOk) {
+            JsonNode overflowPages = root.path("overflow_pages");
+            boolean hasBlockingOverflow = overflowPages.isArray() ? !overflowPages.isEmpty() : !bottomBandOk;
+            if (properties.getQuality().isEnforceBottomBand() && !bottomBandOk && hasBlockingOverflow) {
                 return new QualityFailure("PRINT_BOTTOM_BAND_BLOCKED",
                         "Print bottom safety band blocked");
+            }
+            if (!bottomBandOk && overflowPages.isArray() && overflowPages.isEmpty()) {
+                log.warn("Presale print bottom_band_ok=false but overflow_pages is empty; export continues");
             }
 
             boolean canvasNonBlank = root.path("canvas_non_blank").asBoolean(true);

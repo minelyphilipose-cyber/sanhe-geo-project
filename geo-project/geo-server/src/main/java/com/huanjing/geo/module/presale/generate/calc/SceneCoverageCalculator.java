@@ -83,21 +83,24 @@ public class SceneCoverageCalculator {
                         .orderByAsc(PresalePromptTemplate::getId)
         );
 
-        List<PresaleAiPromptResult> batch1Rows = aiPromptResultMapper.selectList(
+        List<PresaleAiPromptResult> promptRows = aiPromptResultMapper.selectList(
                 new LambdaQueryWrapper<PresaleAiPromptResult>()
                         .eq(PresaleAiPromptResult::getVersionId, versionId)
-                        .eq(PresaleAiPromptResult::getBatchNo, 1)
+                        .in(PresaleAiPromptResult::getBatchNo, List.of(1, 2))
         );
 
         Map<Long, Set<String>> hitPlatformsByTemplate = new HashMap<>();
         Map<Long, List<Integer>> rankingsByTemplate = new HashMap<>();
         Map<Long, List<PresaleAiPromptResult>> rowsByTemplate = new HashMap<>();
         Map<Long, String> renderedPromptByTemplate = new HashMap<>();
-        for (PresaleAiPromptResult row : batch1Rows) {
+        for (PresaleAiPromptResult row : promptRows) {
             rowsByTemplate.computeIfAbsent(row.getPromptTemplateId(), ignored -> new ArrayList<>()).add(row);
             if (row.getPromptTemplateId() != null && row.getRequestPromptContent() != null
                     && !row.getRequestPromptContent().isBlank()) {
                 renderedPromptByTemplate.putIfAbsent(row.getPromptTemplateId(), row.getRequestPromptContent());
+            }
+            if (!Integer.valueOf(1).equals(row.getBatchNo())) {
+                continue;
             }
             if (!effectivePlatforms.contains(row.getPlatformCode())) {
                 continue;

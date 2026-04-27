@@ -56,17 +56,16 @@
 
         <!--
           ③ ESTIMATED IMPACT 块(γ·2 r2 新增)。
-          4 个格子:2 个硬编码示意值 + 2 个真实契约数据。
-          硬编码示意值待产品定稿后替换,详见 estimated-impact-spec-v1-draft 会签进度。
+          4 个格子:2 个评分派生估算值 + 2 个真实契约数据。
         -->
         <div class="p15-impact">
           <div class="mono p15-impact-label">ESTIMATED IMPACT · 预估影响</div>
           <div class="p15-impact-grid">
-            <!-- 格子 1:AI 渠道月度品牌曝光(硬编码,待产品定稿) -->
+            <!-- 格子 1:AI 渠道月度品牌曝光(基于 current/target 动态估算) -->
             <div class="p15-impact-item">
               <div class="p15-impact-caption">AI 渠道月度品牌曝光</div>
               <div class="p15-impact-value">
-                <span class="mono p15-impact-after">{{ IMPACT_EXPOSURE.value }}</span>
+                <span class="mono p15-impact-after">{{ exposureUpliftDisplay }}</span>
               </div>
             </div>
 
@@ -80,11 +79,11 @@
               </div>
             </div>
 
-            <!-- 格子 3:主推荐次数(硬编码,待产品定稿) -->
+            <!-- 格子 3:主推荐次数(基于 current/target 动态估算) -->
             <div class="p15-impact-item">
               <div class="p15-impact-caption">主推荐次数</div>
               <div class="p15-impact-value">
-                <span class="mono p15-impact-after">{{ IMPACT_PRIMARY_REC.value }}</span>
+                <span class="mono p15-impact-after">{{ primaryRecUpliftDisplay }}</span>
               </div>
             </div>
 
@@ -137,10 +136,10 @@ import { toIntRounded } from '@/utils/presale/numberFormat'
  * 实现策略(r2 混合方案):
  *   - ① 3 数字卡片:current / target / gain(由 target/current 动态计算)+ uplift 小标
  *   - ② 4 点折线图:起点 M0 + 3 phase 的 target_score
- *   - ③ ESTIMATED IMPACT 块:4 格 2×2 grid,**2 硬编码示意值 + 2 真实契约数据**
- *     - AI 渠道月度品牌曝光:硬编码 "+30% ~ +200%" 区间
+ *   - ③ ESTIMATED IMPACT 块:4 格 2×2 grid,2 个评分派生估算值 + 2 个真实契约数据
+ *     - AI 渠道月度品牌曝光:基于 current/target 估算确定提升值
  *     - 高价值查询场景覆盖:scene_coverage.high_value.{covered/total} → {total/total}(真实)
- *     - 主推荐次数:硬编码 "+25% ~ +80%" 区间
+ *     - 主推荐次数:基于 current/target 估算确定提升值
  *     - 对标竞品差距:scores.overall - top1.overall → target_score - top1.overall(真实)
  *   - ④ 3 个 phase 摘要条(duration_label + title + target_score),给曲线加注解
  *   - ⑤ ROI disclaimer
@@ -153,10 +152,6 @@ import { toIntRounded } from '@/utils/presale/numberFormat'
  *   - mergedView.scores.overall
  *   - mergedView.benchmarks_frozen.top1.overall
  *   - mergedView.roi_disclaimer
- *
- * 硬编码常量替换路径(r3 或更后):
- *   IMPACT_EXPOSURE / IMPACT_PRIMARY_REC 两个 const 对象替换为 computed,
- *   从 roi_simulation 派生(公式由 estimated-impact-spec 会签定稿)。
  */
 
 const { mergedView: mergedViewRef } = useMergedView()
@@ -191,27 +186,92 @@ const gainDisplay = computed<{ kind: 'multiplier' | 'percent'; main: string }>((
 
 // ─── ③ ESTIMATED IMPACT 块 ──────────────────────────────
 //
-// 4 个格子:2 硬编码示意值 + 2 真实契约数据。
-//
-// 硬编码格子(待产品定稿后换为真实推导):
-//   - AI 渠道月度品牌曝光
-//   - 主推荐次数
-// 改动路径:待 estimated-impact-spec 会签后,替换 IMPACT_EXPOSURE / IMPACT_PRIMARY_REC
-// 两个常量为基于 roi_simulation 派生的 computed。当前为产品讨论期的"所有报告同值"示意。
+// 4 个格子:2 个评分派生估算值 + 2 个真实契约数据。
 //
 // 真实契约格子:
 //   - 高价值查询场景覆盖:scene_coverage.high_value.{covered}/{total} → {total}/{total}
 //   - 对标竞品差距:scores.overall - benchmarks.top1.overall → target_score - top1.overall
 
-/** 统计估算区间 —— AI 渠道月度品牌曝光。 */
-const IMPACT_EXPOSURE = {
-  value: '+30% ~ +200%'
+const EXPOSURE_UPLIFT_COEF = {
+  baseMultiplier: 5,
+  factorBase: 2,
+  factorDivisor: 50,
+  factorFloor: 0.7,
+  upliftMin: 30,
+  upliftMax: 200
 } as const
 
-/** 统计估算区间 —— 主推荐次数。 */
-const IMPACT_PRIMARY_REC = {
-  value: '+25% ~ +80%'
+const PRIMARY_REC_UPLIFT_COEF = {
+  baseMultiplier: 2.5,
+  factorBase: 1.5,
+  factorDivisor: 80,
+  factorFloor: 0.6,
+  upliftMin: 25,
+  upliftMax: 80
 } as const
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, n))
+}
+
+function isFiniteNumber(value: number | null | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+/**
+ * 基于综合得分变化估算 AI 渠道月度品牌曝光提升百分比。
+ * 展示估算,非实测值。示例:41→61 为 +118%,80→90 为 +35%。
+ */
+function calculateExposureUplift(
+  current: number | null | undefined,
+  target: number | null | undefined
+): number | null {
+  if (!isFiniteNumber(current) || !isFiniteNumber(target) || target <= current) return null
+  const baseLift = (target - current) * EXPOSURE_UPLIFT_COEF.baseMultiplier
+  const factor = Math.max(
+    EXPOSURE_UPLIFT_COEF.factorFloor,
+    EXPOSURE_UPLIFT_COEF.factorBase - current / EXPOSURE_UPLIFT_COEF.factorDivisor
+  )
+  return clamp(
+    Math.round(baseLift * factor),
+    EXPOSURE_UPLIFT_COEF.upliftMin,
+    EXPOSURE_UPLIFT_COEF.upliftMax
+  )
+}
+
+/**
+ * 基于综合得分变化估算主推荐次数提升百分比。
+ * 展示估算,非实测值。示例:41→61 为 +50%,80→90 为 +25%。
+ */
+function calculatePrimaryRecUplift(
+  current: number | null | undefined,
+  target: number | null | undefined
+): number | null {
+  if (!isFiniteNumber(current) || !isFiniteNumber(target) || target <= current) return null
+  const baseLift = (target - current) * PRIMARY_REC_UPLIFT_COEF.baseMultiplier
+  const factor = Math.max(
+    PRIMARY_REC_UPLIFT_COEF.factorFloor,
+    PRIMARY_REC_UPLIFT_COEF.factorBase - current / PRIMARY_REC_UPLIFT_COEF.factorDivisor
+  )
+  return clamp(
+    Math.round(baseLift * factor),
+    PRIMARY_REC_UPLIFT_COEF.upliftMin,
+    PRIMARY_REC_UPLIFT_COEF.upliftMax
+  )
+}
+
+const exposureUpliftPct = computed(() =>
+  calculateExposureUplift(roi.value.current_score, roi.value.target_score)
+)
+const primaryRecUpliftPct = computed(() =>
+  calculatePrimaryRecUplift(roi.value.current_score, roi.value.target_score)
+)
+const exposureUpliftDisplay = computed(() =>
+  exposureUpliftPct.value == null ? '—' : `+${exposureUpliftPct.value}%`
+)
+const primaryRecUpliftDisplay = computed(() =>
+  primaryRecUpliftPct.value == null ? '—' : `+${primaryRecUpliftPct.value}%`
+)
 
 interface ImpactCell {
   before: string

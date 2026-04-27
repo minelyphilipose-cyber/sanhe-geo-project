@@ -132,6 +132,17 @@ presale:
     mock: false
     mock-delay-ms: 5000
     mock-fixture-path: fixtures/01-mock-sample-v1.2.json
+    threadpool:
+      keep-alive-seconds: ${PRESALE_GENERATE_THREADPOOL_KEEP_ALIVE_SECONDS:60}
+      await-termination-seconds: ${PRESALE_GENERATE_THREADPOOL_AWAIT_TERMINATION_SECONDS:30}
+      generate:
+        core-pool-size: ${PRESALE_GENERATE_CORE_POOL_SIZE:4}
+        max-pool-size: ${PRESALE_GENERATE_MAX_POOL_SIZE:8}
+        queue-capacity: ${PRESALE_GENERATE_QUEUE_CAPACITY:200}
+      platform:
+        core-pool-size: ${PRESALE_PLATFORM_CORE_POOL_SIZE:10}
+        max-pool-size: ${PRESALE_PLATFORM_MAX_POOL_SIZE:16}
+        queue-capacity: ${PRESALE_PLATFORM_QUEUE_CAPACITY:50}
     allow-synthetic-fallback:
       mock: true
       real: false

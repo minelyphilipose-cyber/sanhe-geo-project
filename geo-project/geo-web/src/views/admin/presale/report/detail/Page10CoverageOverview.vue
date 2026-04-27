@@ -79,7 +79,7 @@
             </div>
             <!-- 数据行 -->
             <div
-              v-for="(row, idx) in highValueRows"
+              v-for="(row, idx) in visibleHighValueRows"
               :key="`${row.prompt_code}-${idx}`"
               class="data-matrix-row p10-row-data"
             >
@@ -92,6 +92,11 @@
           </div>
 
           <div v-else class="p10-empty">暂无高价值场景数据。</div>
+
+          <div v-if="hiddenHighValueCount > 0" class="p10-limit-note">
+            本页展示 {{ visibleHighValueRows.length }} 条代表性高价值场景；其余
+            {{ hiddenHighValueCount }} 条已计入覆盖统计。
+          </div>
         </div>
       </div>
 
@@ -120,6 +125,7 @@ import { useMergedView } from '@/composables/presale/useMergedView'
 
 const { mergedView: mergedViewRef } = useMergedView()
 const mergedView = computed(() => mergedViewRef.value!)
+const MAX_VISIBLE_HIGH_VALUE_ROWS = 8
 
 // ─── 高价值明细行合成 ──────────────────────────────────
 interface CoverageRow {
@@ -145,6 +151,10 @@ const highValueRows = computed<CoverageRow[]>(() => {
   }))
   return [...covered, ...missing]
 })
+const visibleHighValueRows = computed(() => highValueRows.value.slice(0, MAX_VISIBLE_HIGH_VALUE_ROWS))
+const hiddenHighValueCount = computed(
+  () => Math.max(0, highValueRows.value.length - visibleHighValueRows.value.length)
+)
 </script>
 
 <style scoped>
@@ -243,5 +253,12 @@ const highValueRows = computed<CoverageRow[]>(() => {
   border-top: 2px solid #0b1426;
   border-bottom: 2px solid #0b1426;
   text-align: center;
+}
+
+.p10-limit-note {
+  margin-top: 10px;
+  font-size: 11px;
+  color: #6b6456;
+  line-height: 1.6;
 }
 </style>

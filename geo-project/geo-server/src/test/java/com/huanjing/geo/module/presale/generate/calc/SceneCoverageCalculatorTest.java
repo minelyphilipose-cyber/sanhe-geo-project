@@ -200,6 +200,35 @@ class SceneCoverageCalculatorTest {
         assertEquals(4, result.sceneCoverage().getHighValue().getCovered());
     }
 
+    @Test
+    void comparisonSceneQueriesUseRenderedBatch2PromptContent() {
+        SceneCoverageCalculator calculator = new SceneCoverageCalculator(
+                aiPromptResultMapper, promptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
+                platform("p1"), platform("p2"), platform("p3"), platform("p4")
+        ));
+        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
+                template(51L, "P51", "对比型", "{brand}和{competitor}相比有什么优势?", 1)
+        ));
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of(
+                row(51L, "p1", 2, 1, null, null, "吾悦广场和万达广场相比有什么优势?")
+        ));
+
+        Map<String, Integer> totals = Map.of(
+                "RECOMMENDATION", 0,
+                "COMPARISON", 1,
+                "INQUIRY", 0,
+                "COGNITIVE", 0,
+                "SCENARIO", 0
+        );
+        List<PlatformIntentCell> cells = List.of(judgeCell("p1", "COMPARISON", 59));
+
+        SceneAndIntentResult result = calculator.compute(5001L, raw(List.of(), List.of()), totals, cells);
+
+        assertEquals("吾悦广场和万达广场相比有什么优势?",
+                result.sceneCoverage().getHighValue().getCoveredQueries().get(0).getPromptContent());
+    }
+
     private RawSnapshotDTO raw(List<String> degradedPlatforms, List<Competitor> competitors) {
         RawSnapshotDTO raw = new RawSnapshotDTO();
         raw.setTestSummary(TestSummary.builder().degradedPlatforms(degradedPlatforms).build());
@@ -239,14 +268,25 @@ class SceneCoverageCalculatorTest {
                                       Integer isMentioned,
                                       Integer ranking,
                                       String mentionedCompetitors) {
+        return row(templateId, platformCode, 1, isMentioned, ranking, mentionedCompetitors, null);
+    }
+
+    private PresaleAiPromptResult row(Long templateId,
+                                      String platformCode,
+                                      Integer batchNo,
+                                      Integer isMentioned,
+                                      Integer ranking,
+                                      String mentionedCompetitors,
+                                      String requestPromptContent) {
         PresaleAiPromptResult row = new PresaleAiPromptResult();
         row.setVersionId(1L);
-        row.setBatchNo(1);
+        row.setBatchNo(batchNo);
         row.setPromptTemplateId(templateId);
         row.setPlatformCode(platformCode);
         row.setIsMentioned(isMentioned);
         row.setRanking(ranking);
         row.setMentionedCompetitors(mentionedCompetitors);
+        row.setRequestPromptContent(requestPromptContent);
         return row;
     }
 

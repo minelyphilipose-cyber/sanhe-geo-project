@@ -26,13 +26,7 @@
         </template>
 
         <div v-else class="p14-empty">
-          <div>
-            <span class="p14-empty-icon">✓</span>
-            暂无建议关注项
-          </div>
-          <div class="p14-empty-desc">
-            您在平台基础覆盖、内容情感、运营响应等方面表现良好,主要优化机会集中在高/中优先级。
-          </div>
+          <p>优化机会已按优先级分级呈现。从洞察到执行的转化,通常是项目成败的关键,建议尽早确立专项目标与里程碑。</p>
         </div>
 
         <!-- 底部引用(动态合成) -->
@@ -133,23 +127,13 @@ const categoryCounts = computed<CategoryCount[]>(() => {
 }
 
 .p14-empty {
-  padding: 32px 24px;
   text-align: center;
-  color: #6b6456;
-  font-size: 14px;
+  padding: 28px 32px;
+  font-size: 13px;
   line-height: 1.8;
-  background: rgba(4, 120, 87, 0.04);
-  border-left: 3px solid #047857;
-}
-.p14-empty-icon {
-  display: inline-block;
-  margin-right: 8px;
-  color: #047857;
-  font-weight: 700;
-  font-size: 16px;
-}
-.p14-empty-desc {
-  margin-top: 4px;
+  color: #1a2942;
+  background: #f7f3ea;
+  border-left: 3px solid #c8bfa8;
 }
 
 .p14-quote-wrap {
