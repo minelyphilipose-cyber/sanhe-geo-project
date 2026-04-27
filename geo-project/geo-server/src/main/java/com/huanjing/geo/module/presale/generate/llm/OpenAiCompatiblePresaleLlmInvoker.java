@@ -58,7 +58,7 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                 ctx,
                 AnalyzePromptTemplates.SYSTEM_INSTRUCTION,
                 userPrompt,
-                0D,
+                0.1D,
                 true
         );
         validateAnalyzeJson(result.rawResponse());
