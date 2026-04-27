@@ -85,19 +85,14 @@ public class ReuseDecisionService {
     }
 
     /**
-     * 复用键归一化:仅 trim,不做 lowercase / 空白删除。
+     * 复用键归一化:
+     * - 单竞品:保持历史 trim-only 语义。
+     * - 竞品组:拆分、trim、排序后拼接,避免 Top 竞品顺序波动导致复用失效。
      *
-     * 与 E1 PresaleGenerateOrchestrator.normalizeName(用于竞品计数归并)规则不同:
-     * - E1 归一化用于"是否同一竞品"的语义等价判定,做 trim + 去所有空白 + lowercase
-     * - F1 归一化用于"与 DB 存储值精确匹配"的复用键构造,只做 trim
-     *
-     * 切勿将两者对齐,否则复用键会失配 DB 历史数据,复用短路失效,retry 退化为 RUN_FULL。
+     * 注意:DB 入库 competitor_name 仍保持用户可见的 Top 排名顺序,复用 key 与入库值不是同一个概念。
      */
     public String normalizeCompetitor(String competitorName) {
-        if (competitorName == null) {
-            return "";
-        }
-        return competitorName.trim();
+        return CompetitorGroupKeyUtils.reuseKey(competitorName);
     }
 
     public record ReuseKey(Long versionId,

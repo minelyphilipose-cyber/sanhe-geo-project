@@ -69,8 +69,13 @@
     <div class="action-bar">
       <el-button @click="goList">返回列表</el-button>
       <el-button v-if="isDone" type="primary" @click="goDetail">查看报告</el-button>
-      <el-button v-if="isFailed" type="primary" @click="onRetry" disabled>
-        重试(v1 暂未开放)
+      <el-button
+        v-if="isFailed"
+        type="primary"
+        :loading="retrying"
+        @click="onRetry"
+      >
+        重试生成
       </el-button>
     </div>
   </div>
@@ -87,7 +92,11 @@ import {
   CircleCloseFilled
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
-import { getLatestVersionMeta, type ReportVersionMetaVO } from '@/api/presaleReport'
+import {
+  getLatestVersionMeta,
+  retryVersion,
+  type ReportVersionMetaVO
+} from '@/api/presaleReport'
 import { isTerminal } from '@/utils/presale/statusMeta'
 
 const route = useRoute()
@@ -96,6 +105,7 @@ const router = useRouter()
 const reportId = Number(route.params.id)
 const version = ref<ReportVersionMetaVO | null>(null)
 const pollTimer = ref<number | null>(null)
+const retrying = ref(false)
 
 const POLL_INTERVAL_MS = 3000
 const AUTO_JUMP_DELAY_MS = 2000
@@ -228,8 +238,21 @@ function goDetail() {
   router.push(`/admin/presale/report/${reportId}/detail`)
 }
 
-function onRetry() {
-  ElMessage.info('重试功能 v1 暂未开放,将在 P1·F·1·b 中实现')
+async function onRetry() {
+  if (retrying.value || !version.value || !isFailed.value) return
+  retrying.value = true
+  try {
+    await retryVersion(reportId, version.value.versionNo)
+    ElMessage.success('已提交重试')
+    await fetchOnce()
+    if (!isTerminal(version.value?.generationStatus ?? '')) {
+      startPolling()
+    }
+  } catch (err: any) {
+    ElMessage.error(err?.message || '提交重试失败')
+  } finally {
+    retrying.value = false
+  }
 }
 
 onMounted(async () => {

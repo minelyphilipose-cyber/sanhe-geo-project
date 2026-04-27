@@ -22,6 +22,8 @@ export interface RawSnapshotDTO {
   test_summary: TestSummary;
   platform_breakdown: PlatformBreakdown[];
   competitors: Competitor[];
+  /** Group comparison mode only: scene advantages aggregated from combined competitor prompts. */
+  group_scene_advantages?: string[];
   sentiment_detail: SentimentDetail;
   benchmarks_frozen: BenchmarksFrozen;
 }

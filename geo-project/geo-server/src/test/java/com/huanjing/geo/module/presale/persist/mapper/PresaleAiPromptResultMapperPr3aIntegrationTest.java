@@ -4,7 +4,7 @@ import com.huanjing.geo.module.presale.generate.PlatformIntentJudgeAggregateRow;
 import com.huanjing.geo.module.presale.generate.PlatformIntentSampleRow;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptJudgeResult;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
-import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
+import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersionPromptTemplate;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -23,15 +23,15 @@ class PresaleAiPromptResultMapperPr3aIntegrationTest {
     @Autowired
     private PresaleAiPromptResultMapper resultMapper;
     @Autowired
-    private PresalePromptTemplateMapper templateMapper;
+    private PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
     @Autowired
     private PresaleAiPromptJudgeResultMapper judgeResultMapper;
 
     @Test
     void selectIntentSamplesByVersionId_shouldSplitBatchByCategory() {
         long versionId = 991001L;
-        PresalePromptTemplate recTemplate = insertTemplate("推荐型", 0, "UT_PR3A_REC_A");
-        PresalePromptTemplate cmpTemplate = insertTemplate("对比型", 1, "UT_PR3A_CMP_A");
+        PresaleReportVersionPromptTemplate recTemplate = insertTemplate(versionId, "推荐型", 0, "UT_PR3A_REC_A");
+        PresaleReportVersionPromptTemplate cmpTemplate = insertTemplate(versionId, "对比型", 1, "UT_PR3A_CMP_A");
 
         insertPromptResult(versionId, 1, "ut-platform", recTemplate.getId(), "", 1L, 1);
         insertPromptResult(versionId, 2, "ut-platform", recTemplate.getId(), "", 2L, 0);
@@ -47,11 +47,11 @@ class PresaleAiPromptResultMapperPr3aIntegrationTest {
     @Test
     void selectJudgeAggregatesByVersionId_shouldMatchFormulaExamples() {
         long versionId = 991002L;
-        PresalePromptTemplate cmpTemplate = insertTemplate("对比型", 1, "UT_PR3A_CMP_B");
+        PresaleReportVersionPromptTemplate cmpTemplate = insertTemplate(versionId, "对比型", 1, "UT_PR3A_CMP_B");
 
         double[] cognitiveScores = {0.8, 0.5, 0.2, -0.1, 0.6, 0.3, 0.7};
         for (int i = 0; i < cognitiveScores.length; i++) {
-            PresalePromptTemplate cogTemplate = insertTemplate("认知型", 0, "UT_PR3A_COG_" + i);
+            PresaleReportVersionPromptTemplate cogTemplate = insertTemplate(versionId, "认知型", 0, "UT_PR3A_COG_" + i);
             PresaleAiPromptResult promptResult = insertPromptResult(versionId, 1, "platform-cog", cogTemplate.getId(), "", 1000L + i, 1);
             insertJudge(promptResult, "COGNITIVE", "SUCCESS", BigDecimal.valueOf(cognitiveScores[i]), null);
         }
@@ -87,7 +87,7 @@ class PresaleAiPromptResultMapperPr3aIntegrationTest {
         assertThat(cognitive.getStance()).isNull();
 
         PlatformIntentJudgeAggregateRow comparison = findRow(rows, "platform-cmp", "COMPARISON");
-        assertThat(comparison.getCellScore()).isEqualByComparingTo("47.06");
+        assertThat(comparison.getCellScore()).isEqualByComparingTo("58.82");
         assertThat(comparison.getSampleCount()).isEqualTo(17);
         assertThat(comparison.getStance()).isEqualTo("target");
 
@@ -97,20 +97,24 @@ class PresaleAiPromptResultMapperPr3aIntegrationTest {
         assertThat(fullUnclear.getStance()).isNull();
     }
 
-    private PresalePromptTemplate insertTemplate(String category, int hasCompetitorVar, String codePrefix) {
-        PresalePromptTemplate template = new PresalePromptTemplate();
-        template.setPromptCode(codePrefix + "_" + System.nanoTime());
-        template.setIndustry("_ALL_");
-        template.setIndustryRole("_ALL_");
+    private PresaleReportVersionPromptTemplate insertTemplate(long versionId,
+                                                              String category,
+                                                              int hasCompetitorVar,
+                                                              String codePrefix) {
+        PresaleReportVersionPromptTemplate template = new PresaleReportVersionPromptTemplate();
+        template.setReportId(versionId + 100000L);
+        template.setReportVersionId(versionId);
+        template.setSourceTemplateId(System.nanoTime());
+        template.setSourcePromptCode(codePrefix + "_" + System.nanoTime());
+        template.setSourceTemplateVersion("v3");
         template.setCategory(category);
         template.setBusinessValue("中");
         template.setPromptContent("UT template " + category);
         template.setHasCompetitorVar(hasCompetitorVar);
-        template.setEnabled(1);
-        template.setTemplateVersion("v2");
-        template.setSortOrder(9000 + hasCompetitorVar);
+        template.setSortOrderInVersion(9000 + hasCompetitorVar);
         template.setRemark("ut");
-        templateMapper.insert(template);
+        template.setIsUserAdded(0);
+        versionPromptTemplateMapper.insert(template);
         return template;
     }
 
@@ -161,7 +165,7 @@ class PresaleAiPromptResultMapperPr3aIntegrationTest {
         judge.setJudgeError(null);
         judge.setSentiment(sentimentScore == null ? null : "NEUTRAL");
         judge.setSentimentScore(sentimentScore);
-        judge.setAttributeHitRate(null);
+        judge.setAttributeHitRate(sentimentScore == null ? null : BigDecimal.ONE);
         judge.setTone(null);
         judge.setPreferredBrand(preferredBrand);
         judge.setTargetSentiment(null);

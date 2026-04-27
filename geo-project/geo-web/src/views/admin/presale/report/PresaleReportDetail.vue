@@ -33,6 +33,15 @@
         当前版本状态为 {{ mergedView.meta.generation_status }},报告内容尚未就绪
       </template>
       <template #default>
+        <el-button
+          v-if="isFailed"
+          size="small"
+          type="primary"
+          :loading="retrying"
+          @click="handleRetry"
+        >
+          重试生成
+        </el-button>
         <el-button size="small" type="primary" @click="goProgress">查看生成进度</el-button>
         <el-button size="small" @click="goList">返回列表</el-button>
       </template>
@@ -55,6 +64,7 @@ import { Loading } from '@element-plus/icons-vue'
 import {
   getLatestDetail,
   getVersionDetail,
+  retryVersion,
   type ReportDetailVO
 } from '@/api/presaleReport'
 import {
@@ -87,6 +97,8 @@ const queryVersionNo = computed<number | undefined>(() => {
 const detail = ref<ReportDetailVO | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
+const retrying = ref(false)
+const isFailed = computed(() => detail.value?.version.generationStatus === 'FAILED')
 
 /**
  * 从 ReportDetailVO 构造 mergeSnapshot 需要的 VersionRowMeta。
@@ -234,6 +246,21 @@ function goList() {
 
 function goProgress() {
   void router.push(`/admin/presale/report/${reportId.value}/progress`)
+}
+
+async function handleRetry() {
+  const versionNo = detail.value?.version.versionNo
+  if (retrying.value || !versionNo || !isFailed.value) return
+  retrying.value = true
+  try {
+    await retryVersion(reportId.value, versionNo)
+    ElMessage.success('已提交重试')
+    void router.push(`/admin/presale/report/${reportId.value}/progress`)
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || '提交重试失败')
+  } finally {
+    retrying.value = false
+  }
 }
 
 // ─── provide 上下文 ───────────────────────────────────────

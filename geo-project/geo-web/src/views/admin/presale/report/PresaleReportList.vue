@@ -134,19 +134,39 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <el-button text type="primary" size="small" @click.stop="goDetail(row)">
               {{ isInProgress(row.latestVersion?.generationStatus) ? '查看进度' : '查看' }}
             </el-button>
-            <el-button
-              text
-              type="primary"
-              size="small"
-              :disabled="!canEdit(row)"
-              @click.stop="goEdit(row)"
+            <el-tooltip
+              :disabled="canEdit(row)"
+              :content="editDisabledReason(row)"
+              placement="top"
             >
-              编辑
+              <span>
+                <el-button
+                  text
+                  type="primary"
+                  size="small"
+                  :disabled="!canEdit(row)"
+                  :loading="derivingReportId === row.reportId"
+                  @click.stop="goEdit(row)"
+                >
+                  {{ editButtonText(row) }}
+                </el-button>
+              </span>
+            </el-tooltip>
+            <el-button
+              v-if="canDeleteReportPermission"
+              text
+              type="danger"
+              size="small"
+              :disabled="!canDelete(row)"
+              :loading="deletingReportId === row.reportId"
+              @click.stop="confirmDelete(row)"
+            >
+              删除
             </el-button>
           </template>
         </el-table-column>
@@ -174,18 +194,26 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Plus, Search, Loading, Lock } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
+  deleteReport,
+  deriveVersion,
   listReports,
   type ReportListItemVO,
   type ReportListQueryRequest
 } from '@/api/presaleReport'
+import { useUserStore } from '@/stores/user'
 import { formatDateTime, toRfc3339Range } from '@/utils/presale/formatDateTime'
 import { getStatusMeta, isInProgress } from '@/utils/presale/statusMeta'
 
 const router = useRouter()
+const userStore = useUserStore()
+const canDeleteReportPermission = computed(() =>
+  userStore.hasPermission('presale.report.delete')
+)
 
 // TODO: 这两份字典应该从 sys_dict_item(presale_industry / presale_industry_role)动态加载
 // v1 先写死,P1·F·1·b 补全字典加载逻辑
@@ -232,6 +260,8 @@ const pagination = reactive({
 
 const tableData = ref<ReportListItemVO[]>([])
 const loading = ref(false)
+const deletingReportId = ref<number | null>(null)
+const derivingReportId = ref<number | null>(null)
 
 async function loadData() {
   loading.value = true
@@ -270,8 +300,41 @@ function onReset() {
 }
 
 function canEdit(row: ReportListItemVO): boolean {
-  const st = row.latestVersion?.generationStatus
-  return st === 'DONE' && !row.latestVersion?.frozen
+  return row.canEdit === true
+}
+
+function editButtonText(row: ReportListItemVO): string {
+  return row.latestVersion?.frozen ? '派生并编辑' : '编辑'
+}
+
+function editDisabledReason(row: ReportListItemVO): string {
+  return row.canEditReason || '当前报告不可编辑'
+}
+
+function canDelete(row: ReportListItemVO): boolean {
+  return !isInProgress(row.latestVersion?.generationStatus)
+}
+
+async function confirmDelete(row: ReportListItemVO) {
+  if (!canDelete(row) || deletingReportId.value) return
+  const confirmed = await ElMessageBox.confirm(
+    `删除后「${row.brandName}」将从报告列表中移除。确认删除?`,
+    '删除售前报告',
+    { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+  ).catch(() => false)
+  if (!confirmed) return
+
+  deletingReportId.value = row.reportId
+  try {
+    await deleteReport(row.reportId)
+    ElMessage.success('已删除')
+    if (tableData.value.length === 1 && pagination.page > 1) {
+      pagination.page -= 1
+    }
+    await loadData()
+  } finally {
+    deletingReportId.value = null
+  }
 }
 
 function onRowClick(row: ReportListItemVO) {
@@ -290,8 +353,27 @@ function goDetail(row: ReportListItemVO) {
   }
 }
 
-function goEdit(row: ReportListItemVO) {
-  router.push(`/admin/presale/report/${row.reportId}/edit`)
+async function goEdit(row: ReportListItemVO) {
+  if (!canEdit(row) || !row.latestVersion || derivingReportId.value) return
+  if (!row.latestVersion.frozen) {
+    router.push(`/admin/presale/report/${row.reportId}/edit`)
+    return
+  }
+  const confirmed = await ElMessageBox.confirm(
+    `将基于版本 v${row.latestVersion.versionNo} 创建新版本,新版本会复制当前的所有内容,原版本保持冻结不变。`,
+    '派生新版本并编辑',
+    { confirmButtonText: '创建并编辑', cancelButtonText: '取消', type: 'warning' }
+  ).catch(() => false)
+  if (!confirmed) return
+
+  derivingReportId.value = row.reportId
+  try {
+    const res = await deriveVersion(row.reportId, row.latestVersion.versionNo)
+    ElMessage.success(`已创建 v${res.newVersionNo}`)
+    router.push(`/admin/presale/report/${row.reportId}/edit`)
+  } finally {
+    derivingReportId.value = null
+  }
 }
 
 onMounted(loadData)

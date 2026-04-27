@@ -33,25 +33,31 @@ public final class JudgePromptTemplates {
             """;
 
     public static final String COMPARISON_TEMPLATE = """
-            任务:分析下面回答中目标品牌与竞品的对比结论,并严格输出 JSON。
+            任务:分析下面回答中目标品牌与竞品组内每个竞品的对比结论,并严格输出 JSON。
             目标品牌:{brand}
-            竞品:{competitor}
+            竞品组:{competitor}
             回答文本:
             {answer}
 
             JSON 字段要求:
             {
-              "preferred_brand":"target|competitor|tie|unclear",
-              "target_sentiment":"POSITIVE|NEUTRAL|NEGATIVE|UNKNOWN",
-              "target_advantages":[string],
-              "target_disadvantages":[string],
-              "competitor_advantages":[string],
-              "reasoning_quality":"high|medium|low|unknown"
+              "verdicts":[
+                {
+                  "competitor":"必须逐字使用竞品组中的一个竞品名",
+                  "preferred_brand":"target|competitor|tie|unclear",
+                  "target_sentiment":"POSITIVE|NEUTRAL|NEGATIVE|UNKNOWN",
+                  "target_advantages":[string],
+                  "target_disadvantages":[string],
+                  "competitor_advantages":[string],
+                  "reasoning_quality":"high|medium|low|unknown"
+                }
+              ]
             }
 
             约束:
             1) 必须是合法 JSON。
-            2) preferred_brand 只能输出 target|competitor|tie|unclear,禁止中文或其他变体。
-            3) 不允许输出 markdown 或解释文本。
+            2) verdicts 必须覆盖竞品组中的每一个竞品,每个竞品只输出一条。
+            3) preferred_brand 只能输出 target|competitor|tie|unclear,禁止中文或其他变体。
+            4) 不允许输出 markdown 或解释文本。
             """;
 }

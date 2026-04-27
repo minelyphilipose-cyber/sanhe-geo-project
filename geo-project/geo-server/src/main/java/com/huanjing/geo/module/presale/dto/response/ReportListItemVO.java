@@ -30,5 +30,11 @@ public class ReportListItemVO {
     /** 最新版本元信息。始终非空(创建报告时已经入第一版 INIT)。 */
     private ReportVersionMetaVO latestVersion;
 
+    /** 当前用户是否可对最新版本发起编辑/派生编辑入口。 */
+    private Boolean canEdit;
+
+    /** canEdit=false 时的前端 tooltip 文案。 */
+    private String canEditReason;
+
     private LocalDateTime createdAt;
 }

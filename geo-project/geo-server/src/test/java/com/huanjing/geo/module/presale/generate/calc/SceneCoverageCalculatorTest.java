@@ -9,9 +9,9 @@ import com.huanjing.geo.module.presale.generate.PresaleCompetitorAggregator;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
-import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
+import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersionPromptTemplate;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
-import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionPromptTemplateMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -31,7 +31,7 @@ class SceneCoverageCalculatorTest {
     @Mock
     private PresaleAiPromptResultMapper aiPromptResultMapper;
     @Mock
-    private PresalePromptTemplateMapper promptTemplateMapper;
+    private PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
     @Mock
     private AiPlatformConfigMapper aiPlatformConfigMapper;
     @Mock
@@ -40,11 +40,11 @@ class SceneCoverageCalculatorTest {
     @Test
     void happyPath_sceneCoverageAndIntentBreakdownAreConsistent() {
         SceneCoverageCalculator calculator = new SceneCoverageCalculator(
-                aiPromptResultMapper, promptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
+                aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
                 platform("p1"), platform("p2"), platform("p3"), platform("p4")
         ));
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
                 template(11L, "P11", "推荐型", "rec question"),
                 template(12L, "P12", "问题型", "inq question"),
                 template(13L, "P13", "场景型", "scene question")
@@ -98,12 +98,12 @@ class SceneCoverageCalculatorTest {
     @Test
     void threePlatformsDegraded_thresholdUsesEffectivePlatforms() {
         SceneCoverageCalculator calculator = new SceneCoverageCalculator(
-                aiPromptResultMapper, promptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
+                aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
                 platform("p1"), platform("p2"), platform("p3"), platform("p4"), platform("p5"),
                 platform("p6"), platform("p7"), platform("p8"), platform("p9")
         ));
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
                 template(21L, "P21", "推荐型", "rec")
         ));
         when(aiPromptResultMapper.selectList(any())).thenReturn(List.of(
@@ -128,11 +128,11 @@ class SceneCoverageCalculatorTest {
     @Test
     void missingQueriesWithTopCompetitors_returnsMatchedDisplayNames() {
         SceneCoverageCalculator calculator = new SceneCoverageCalculator(
-                aiPromptResultMapper, promptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
+                aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
                 platform("p1"), platform("p2"), platform("p3"), platform("p4")
         ));
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
                 template(31L, "P31", "推荐型", "missing rec prompt")
         ));
         when(aiPromptResultMapper.selectList(any())).thenReturn(List.of(
@@ -164,13 +164,13 @@ class SceneCoverageCalculatorTest {
     }
 
     @Test
-    void comparisonCoverageUsesJudgeCellAvailability() {
+    void comparisonCoverageRequiresThresholdAndNonCompetitorStanceOnHalfPlatforms() {
         SceneCoverageCalculator calculator = new SceneCoverageCalculator(
-                aiPromptResultMapper, promptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
+                aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
                 platform("p1"), platform("p2"), platform("p3"), platform("p4")
         ));
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
                 template(41L, "P41", "对比型", "comparison 1", 1),
                 template(42L, "P42", "对比型", "comparison 2", 1),
                 template(43L, "P43", "对比型", "comparison 3", 1),
@@ -187,27 +187,91 @@ class SceneCoverageCalculatorTest {
                 "SCENARIO", 0
         );
         List<PlatformIntentCell> cells = List.of(
-                judgeCell("p1", "COMPARISON", 59),
-                judgeCell("p2", "COMPARISON", 50),
-                judgeCell("p3", "COMPARISON", 54),
-                judgeCell("p4", "COMPARISON", 55)
+                judgeCell("p1", "COMPARISON", 80, "target"),
+                judgeCell("p2", "COMPARISON", 60, "tie"),
+                judgeCell("p3", "COMPARISON", 90, "competitor"),
+                judgeCell("p4", "COMPARISON", 59, "target")
         );
 
         SceneAndIntentResult result = calculator.compute(4001L, raw, totals, cells);
-        assertEquals(4, result.intentBreakdown().stream()
+        assertEquals(2, result.intentBreakdown().stream()
                 .filter(i -> "对比型".equals(i.getCategory()))
                 .findFirst().orElseThrow().getCoveredPrompts());
         assertEquals(4, result.sceneCoverage().getHighValue().getCovered());
     }
 
     @Test
-    void comparisonSceneQueriesUseRenderedBatch2PromptContent() {
+    void comparisonCoverageFallsBackToMissingWhenLessThanHalfPlatformsMeetThreshold() {
         SceneCoverageCalculator calculator = new SceneCoverageCalculator(
-                aiPromptResultMapper, promptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
+                aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
                 platform("p1"), platform("p2"), platform("p3"), platform("p4")
         ));
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
+                template(45L, "P45", "对比型", "comparison missing", 1)
+        ));
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
+
+        Map<String, Integer> totals = Map.of(
+                "RECOMMENDATION", 0,
+                "COMPARISON", 1,
+                "INQUIRY", 0,
+                "COGNITIVE", 0,
+                "SCENARIO", 0
+        );
+        List<PlatformIntentCell> cells = List.of(
+                judgeCell("p1", "COMPARISON", 80, "competitor"),
+                judgeCell("p2", "COMPARISON", 59, "target"),
+                judgeCell("p3", "COMPARISON", null, null),
+                judgeCell("p4", "COMPARISON", 70, "target")
+        );
+
+        SceneAndIntentResult result = calculator.compute(4501L, raw(List.of(), List.of()), totals, cells);
+
+        assertEquals(0, result.sceneCoverage().getHighValue().getCovered());
+        assertEquals(1, result.sceneCoverage().getHighValue().getMissingQueries().size());
+    }
+
+    @Test
+    void cognitiveCoverageRequiresThresholdOnHalfPlatforms() {
+        SceneCoverageCalculator calculator = new SceneCoverageCalculator(
+                aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
+                platform("p1"), platform("p2"), platform("p3"), platform("p4")
+        ));
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
+                template(46L, "P46", "认知型", "cognitive")
+        ));
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
+
+        Map<String, Integer> totals = Map.of(
+                "RECOMMENDATION", 0,
+                "COMPARISON", 0,
+                "INQUIRY", 0,
+                "COGNITIVE", 1,
+                "SCENARIO", 0
+        );
+        List<PlatformIntentCell> cells = List.of(
+                judgeCell("p1", "COGNITIVE", 60),
+                judgeCell("p2", "COGNITIVE", 72),
+                judgeCell("p3", "COGNITIVE", 59),
+                judgeCell("p4", "COGNITIVE", null)
+        );
+
+        SceneAndIntentResult result = calculator.compute(4601L, raw(List.of(), List.of()), totals, cells);
+
+        assertEquals(1, result.sceneCoverage().getMidValue().getCovered());
+        assertEquals(1, result.sceneCoverage().getMidValue().getCoveredQueries().size());
+    }
+
+    @Test
+    void comparisonSceneQueriesUseRenderedBatch2PromptContent() {
+        SceneCoverageCalculator calculator = new SceneCoverageCalculator(
+                aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
+                platform("p1"), platform("p2"), platform("p3"), platform("p4")
+        ));
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
                 template(51L, "P51", "对比型", "{brand}和{competitor}相比有什么优势?", 1)
         ));
         when(aiPromptResultMapper.selectList(any())).thenReturn(List.of(
@@ -221,7 +285,7 @@ class SceneCoverageCalculatorTest {
                 "COGNITIVE", 0,
                 "SCENARIO", 0
         );
-        List<PlatformIntentCell> cells = List.of(judgeCell("p1", "COMPARISON", 59));
+        List<PlatformIntentCell> cells = List.of(judgeCell("p1", "COMPARISON", 60, "target"));
 
         SceneAndIntentResult result = calculator.compute(5001L, raw(List.of(), List.of()), totals, cells);
 
@@ -236,23 +300,26 @@ class SceneCoverageCalculatorTest {
         return raw;
     }
 
-    private PresalePromptTemplate template(Long id, String promptCode, String category, String promptContent) {
+    private PresaleReportVersionPromptTemplate template(Long id, String promptCode, String category, String promptContent) {
         return template(id, promptCode, category, promptContent, 0);
     }
 
-    private PresalePromptTemplate template(Long id, String promptCode, String category, String promptContent, Integer hasCompetitorVar) {
-        PresalePromptTemplate t = new PresalePromptTemplate();
+    private PresaleReportVersionPromptTemplate template(Long id, String promptCode, String category, String promptContent, Integer hasCompetitorVar) {
+        PresaleReportVersionPromptTemplate t = new PresaleReportVersionPromptTemplate();
         t.setId(id);
-        t.setPromptCode(promptCode);
+        t.setSourcePromptCode(promptCode);
         t.setCategory(category);
         t.setPromptContent(promptContent);
-        t.setEnabled(1);
         t.setHasCompetitorVar(hasCompetitorVar);
-        t.setSortOrder(1);
+        t.setSortOrderInVersion(1);
         return t;
     }
 
     private PlatformIntentCell judgeCell(String platformCode, String intentCode, Integer score) {
+        return judgeCell(platformCode, intentCode, score, null);
+    }
+
+    private PlatformIntentCell judgeCell(String platformCode, String intentCode, Integer score, String stance) {
         return PlatformIntentCell.builder()
                 .platformCode(platformCode)
                 .intentCode(intentCode)
@@ -260,6 +327,7 @@ class SceneCoverageCalculatorTest {
                 .mentionRate(score)
                 .totalPrompts(4)
                 .platformPromptCount(4)
+                .stance(stance)
                 .build();
     }
 

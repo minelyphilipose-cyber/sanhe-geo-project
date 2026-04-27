@@ -154,6 +154,7 @@ export function mergeSnapshot(
       l1Competitors,
       l3CompetitorDescriptions
     ),
+    group_scene_advantages: raw.group_scene_advantages ?? [],
   };
 }
 

@@ -15,15 +15,14 @@ import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.generate.PresaleCompetitorAggregator;
 import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
-import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
+import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersionPromptTemplate;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
-import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionPromptTemplateMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -40,14 +39,15 @@ import java.util.Set;
 public class SceneCoverageCalculator {
 
     private static final Logger log = LoggerFactory.getLogger(SceneCoverageCalculator.class);
+    private static final int COGNITIVE_COVERAGE_THRESHOLD = 60;
+    private static final int COMPARISON_COVERAGE_THRESHOLD = 60;
+    private static final String COMPARISON_STANCE_COMPETITOR = "competitor";
 
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
-    private final PresalePromptTemplateMapper promptTemplateMapper;
+    private final PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PresaleCompetitorAggregator competitorAggregator;
     private final ObjectMapper objectMapper;
-    @Value("${presale.prompt.active-version:v2}")
-    private String activePromptTemplateVersion;
 
     public SceneAndIntentResult compute(Long versionId,
                                         RawSnapshotDTO raw,
@@ -75,12 +75,11 @@ public class SceneCoverageCalculator {
         effectivePlatforms.removeAll(degraded);
         int threshold = (int) Math.ceil(effectivePlatforms.size() / 2.0);
 
-        List<PresalePromptTemplate> templates = promptTemplateMapper.selectList(
-                new LambdaQueryWrapper<PresalePromptTemplate>()
-                        .eq(PresalePromptTemplate::getEnabled, 1)
-                        .eq(PresalePromptTemplate::getTemplateVersion, activePromptTemplateVersion)
-                        .orderByAsc(PresalePromptTemplate::getSortOrder)
-                        .orderByAsc(PresalePromptTemplate::getId)
+        List<PresaleReportVersionPromptTemplate> templates = versionPromptTemplateMapper.selectList(
+                new LambdaQueryWrapper<PresaleReportVersionPromptTemplate>()
+                        .eq(PresaleReportVersionPromptTemplate::getReportVersionId, versionId)
+                        .orderByAsc(PresaleReportVersionPromptTemplate::getSortOrderInVersion)
+                        .orderByAsc(PresaleReportVersionPromptTemplate::getId)
         );
 
         List<PresaleAiPromptResult> promptRows = aiPromptResultMapper.selectList(
@@ -120,7 +119,7 @@ public class SceneCoverageCalculator {
         Map<PresaleIntentCode, List<TemplateWithCovered>> byIntent = new EnumMap<>(PresaleIntentCode.class);
         Map<PresaleIntentCode, IntentCoverage> judgeCoverageByIntent = buildJudgeCoverageByIntent(
                 platformIntentCells, effectivePlatforms);
-        for (PresalePromptTemplate template : templates) {
+        for (PresaleReportVersionPromptTemplate template : templates) {
             if (template.getId() != null && template.getPromptContent() != null && !template.getPromptContent().isBlank()) {
                 renderedPromptByTemplate.putIfAbsent(template.getId(), template.getPromptContent());
             }
@@ -128,7 +127,7 @@ public class SceneCoverageCalculator {
         for (PresaleIntentCode intent : PresaleIntentCode.allInOrder()) {
             byIntent.put(intent, new ArrayList<>());
         }
-        for (PresalePromptTemplate template : templates) {
+        for (PresaleReportVersionPromptTemplate template : templates) {
             PresaleIntentCode intent = PresaleIntentCode.fromLabel(template.getCategory());
             if (!isTemplateIncludedForIntent(template, intent)) {
                 continue;
@@ -221,11 +220,26 @@ public class SceneCoverageCalculator {
             }
             IntentCoverage coverage = result.computeIfAbsent(intent, ignored -> new IntentCoverage());
             coverage.totalCells++;
-            if (cell.getMentionRate() != null) {
+            if (isJudgeCellCovered(intent, cell)) {
                 coverage.coveredCells++;
             }
         }
         return result;
+    }
+
+    private boolean isJudgeCellCovered(PresaleIntentCode intent, PlatformIntentCell cell) {
+        if (cell == null || cell.getMentionRate() == null) {
+            return false;
+        }
+        int score = cell.getMentionRate();
+        if (intent == PresaleIntentCode.COGNITIVE) {
+            return score >= COGNITIVE_COVERAGE_THRESHOLD;
+        }
+        if (intent == PresaleIntentCode.COMPARISON) {
+            return score >= COMPARISON_COVERAGE_THRESHOLD
+                    && !COMPARISON_STANCE_COMPETITOR.equals(cell.getStance());
+        }
+        return false;
     }
 
     private int toPromptEquivalentCovered(int totalPrompts, IntentCoverage coverage) {
@@ -235,7 +249,7 @@ public class SceneCoverageCalculator {
         return (int) Math.round(totalPrompts * coverage.coveredCells * 1.0d / coverage.totalCells);
     }
 
-    private boolean isTemplateIncludedForIntent(PresalePromptTemplate template, PresaleIntentCode intent) {
+    private boolean isTemplateIncludedForIntent(PresaleReportVersionPromptTemplate template, PresaleIntentCode intent) {
         Integer hasCompetitorVar = template.getHasCompetitorVar();
         if (intent == PresaleIntentCode.COMPARISON) {
             return hasCompetitorVar != null && hasCompetitorVar == 1;
@@ -264,7 +278,7 @@ public class SceneCoverageCalculator {
         List<SceneQueryItem> coveredQueries = combined.stream()
                 .filter(TemplateWithCovered::covered)
                 .map(item -> SceneQueryItem.builder()
-                        .promptCode(item.template().getPromptCode())
+                        .promptCode(item.template().getSourcePromptCode())
                         .promptContent(resolveRenderedPrompt(renderedPromptByTemplate, item.template().getId()))
                         .category(item.intent().getLabel())
                         .build())
@@ -273,7 +287,7 @@ public class SceneCoverageCalculator {
         List<SceneQueryMissing> missingQueries = combined.stream()
                 .filter(item -> !item.covered())
                 .map(item -> SceneQueryMissing.builder()
-                        .promptCode(item.template().getPromptCode())
+                        .promptCode(item.template().getSourcePromptCode())
                         .promptContent(resolveRenderedPrompt(renderedPromptByTemplate, item.template().getId()))
                         .category(item.intent().getLabel())
                         .topCompetitorCoverage(resolveTopCompetitorCoverage(
@@ -335,7 +349,7 @@ public class SceneCoverageCalculator {
         return ordered.stream().limit(3).toList();
     }
 
-    private record TemplateWithCovered(PresalePromptTemplate template,
+    private record TemplateWithCovered(PresaleReportVersionPromptTemplate template,
                                        PresaleIntentCode intent,
                                        boolean covered) {
     }
@@ -349,7 +363,7 @@ public class SceneCoverageCalculator {
         }
 
         boolean isCovered() {
-            return totalCells > 0 && coveredCells > 0;
+            return totalCells > 0 && coveredCells >= (int) Math.ceil(totalCells / 2.0d);
         }
     }
 }

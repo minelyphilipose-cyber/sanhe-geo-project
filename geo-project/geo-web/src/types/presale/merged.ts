@@ -119,6 +119,8 @@ export interface MergedViewDTO {
   merged_phases: MergedPhase[];
   /** L1 competitors × L3 scene_descriptions,scene_advantages 带回退来源标记。 */
   merged_competitors: MergedCompetitor[];
+  /** 竞品组对比模式下的组级优势场景;为空时按单竞品回退。 */
+  group_scene_advantages?: string[];
 }
 
 /**

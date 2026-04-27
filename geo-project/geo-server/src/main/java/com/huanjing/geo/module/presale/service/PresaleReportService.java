@@ -2,11 +2,17 @@ package com.huanjing.geo.module.presale.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport;
+import com.huanjing.geo.module.presale.export.persist.mapper.PresaleReportExportMapper;
+import com.huanjing.geo.module.presale.export.service.PresaleExportStatuses;
 import com.huanjing.geo.module.presale.dto.request.CreateReportRequest;
 import com.huanjing.geo.module.presale.dto.request.ReportListQueryRequest;
+import com.huanjing.geo.module.presale.dto.response.PromptTemplateVO;
 import com.huanjing.geo.module.presale.dto.response.ReportScopePreviewVO;
 import com.huanjing.geo.module.presale.dto.response.ReportListItemVO;
 import com.huanjing.geo.module.presale.dto.response.ReportVersionMetaVO;
+import com.huanjing.geo.module.presale.generate.PromptScopeCalculator;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.PresaleIntentCode;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateStatus;
@@ -14,11 +20,15 @@ import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
 import com.huanjing.geo.module.presale.generate.PromptTemplateIntentStatRow;
 import com.huanjing.geo.module.presale.access.AccessScope;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
+import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
+import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersionPromptTemplate;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionPromptTemplateMapper;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.springframework.beans.factory.annotation.Value;
@@ -51,31 +61,53 @@ import java.util.stream.Collectors;
 public class PresaleReportService {
     private static final String PERM_LIST = "presale.report.list";
     private static final String PERM_CREATE = "presale.report.create";
+    private static final String PERM_DELETE = "presale.report.delete";
+    private static final List<String> ACTIVE_GENERATION_STATUSES = List.of(
+            PresaleGenerateStatus.INIT.name(),
+            PresaleGenerateStatus.QUEUED.name(),
+            PresaleGenerateStatus.RUNNING.name()
+    );
+    private static final List<String> ACTIVE_EXPORT_STATUSES = List.of(
+            PresaleExportStatuses.PENDING,
+            PresaleExportStatuses.RUNNING
+    );
 
     private final PresaleReportMapper reportMapper;
     private final PresaleReportVersionMapper versionMapper;
+    private final PresaleReportExportMapper exportMapper;
     private final PresaleGenerateOrchestrator orchestrator;
     private final CurrentUserService currentUserService;
     private final PresaleAccessService accessService;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
+    private final PresalePromptTemplateMapper promptTemplateMapper;
+    private final PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
+    private final PromptTemplateDraftValidator promptTemplateDraftValidator;
     @Value("${presale.prompt.active-version:v2}")
     private String activePromptTemplateVersion;
 
     public PresaleReportService(PresaleReportMapper reportMapper,
                                 PresaleReportVersionMapper versionMapper,
+                                PresaleReportExportMapper exportMapper,
                                 PresaleGenerateOrchestrator orchestrator,
                                 CurrentUserService currentUserService,
                                 PresaleAccessService accessService,
                                 AiPlatformConfigMapper aiPlatformConfigMapper,
-                                PresaleAiPromptResultMapper aiPromptResultMapper) {
+                                PresaleAiPromptResultMapper aiPromptResultMapper,
+                                PresalePromptTemplateMapper promptTemplateMapper,
+                                PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper,
+                                PromptTemplateDraftValidator promptTemplateDraftValidator) {
         this.reportMapper = reportMapper;
         this.versionMapper = versionMapper;
+        this.exportMapper = exportMapper;
         this.orchestrator = orchestrator;
         this.currentUserService = currentUserService;
         this.accessService = accessService;
         this.aiPlatformConfigMapper = aiPlatformConfigMapper;
         this.aiPromptResultMapper = aiPromptResultMapper;
+        this.promptTemplateMapper = promptTemplateMapper;
+        this.versionPromptTemplateMapper = versionPromptTemplateMapper;
+        this.promptTemplateDraftValidator = promptTemplateDraftValidator;
     }
 
     /**
@@ -95,6 +127,7 @@ public class PresaleReportService {
         report.setIndustryRole(req.getIndustryRole());
         report.setRegion(req.getRegion());
         report.setUserDemand(req.getUserDemand());
+        report.setUserType(req.getUserType());
         report.setCreatedAt(now);
         report.setUpdatedAt(now);
         report.setCreatedBy(userId);
@@ -119,6 +152,19 @@ public class PresaleReportService {
         version.setCreatedBy(userId);
         versionMapper.insert(version);
 
+        List<PresaleReportVersionPromptTemplate> promptSnapshots =
+                promptTemplateDraftValidator.validateAndBuildSnapshots(
+                        req.getPromptTemplateVersion(),
+                        req.getPromptTemplates(),
+                        activePromptTemplateVersion,
+                        report.getId(),
+                        version.getId(),
+                        now
+                );
+        for (PresaleReportVersionPromptTemplate row : promptSnapshots) {
+            versionPromptTemplateMapper.insert(row);
+        }
+
         // 回填 latest_version_id
         report.setLatestVersionId(version.getId());
         reportMapper.updateById(report);
@@ -130,11 +176,50 @@ public class PresaleReportService {
     }
 
     /**
+     * 列表页删除报告。当前采用软删除:隐藏报告主入口,保留版本、AI 调用和导出审计数据。
+     */
+    @Transactional
+    public void deleteReport(Long reportId) {
+        currentUserService.ensurePermission(PERM_DELETE);
+        PresaleReport report = accessService.requireReportWithAccess(reportId);
+        if (report.getDeletedAt() != null) {
+            return;
+        }
+
+        ensureNoActiveGeneration(reportId);
+        ensureNoActiveExport(reportId);
+        ensureNoFrozenVersion(reportId);
+
+        LocalDateTime now = LocalDateTime.now();
+        report.setDeletedAt(now);
+        report.setDeletedBy(currentUserService.requireCurrentUser().getId());
+        report.setUpdatedAt(now);
+        reportMapper.updateById(report);
+    }
+
+    /**
      * 新建报告页诊断范围预览。与 createReport 写入版本执行量的口径共用同一套计算。
      */
     public ReportScopePreviewVO getScopePreview() {
         currentUserService.ensurePermission(PERM_CREATE);
         return buildScopePreview();
+    }
+
+    public List<PromptTemplateVO> listPromptTemplates() {
+        currentUserService.ensurePermission(PERM_CREATE);
+        return activePromptTemplates().stream()
+                .map(t -> PromptTemplateVO.builder()
+                        .id(t.getId())
+                        .promptCode(t.getPromptCode())
+                        .category(t.getCategory())
+                        .businessValue(t.getBusinessValue())
+                        .promptContent(t.getPromptContent())
+                        .hasCompetitorVar(Integer.valueOf(1).equals(t.getHasCompetitorVar()))
+                        .sortOrder(t.getSortOrder())
+                        .remark(t.getRemark())
+                        .templateVersion(t.getTemplateVersion())
+                        .build())
+                .toList();
     }
 
     private void triggerGenerateAfterCommit(Long versionId, Long userId, boolean canManageCurrentUser) {
@@ -204,6 +289,8 @@ public class PresaleReportService {
                     .region(r.getRegion())
                     .versionCount(countByReport.getOrDefault(r.getId(), 0))
                     .latestVersion(v == null ? null : toVersionMeta(v))
+                    .canEdit(canEditLatestVersion(r, v))
+                    .canEditReason(resolveEditDisabledReason(r, v))
                     .createdAt(r.getCreatedAt())
                     .build());
         }
@@ -211,8 +298,38 @@ public class PresaleReportService {
         return voPage;
     }
 
+    private boolean canEditLatestVersion(PresaleReport report, PresaleReportVersion version) {
+        if (!accessService.canEditCurrentUser(report)) {
+            return false;
+        }
+        if (version == null) {
+            return false;
+        }
+        return PresaleGenerateStatus.DONE.name().equals(version.getGenerationStatus());
+    }
+
+    private String resolveEditDisabledReason(PresaleReport report, PresaleReportVersion version) {
+        if (!accessService.canEditCurrentUser(report)) {
+            return "无编辑权限或非本人创建的报告";
+        }
+        if (version == null) {
+            return "报告版本不存在";
+        }
+        String status = version.getGenerationStatus();
+        if (PresaleGenerateStatus.INIT.name().equals(status)
+                || PresaleGenerateStatus.QUEUED.name().equals(status)
+                || PresaleGenerateStatus.RUNNING.name().equals(status)) {
+            return "报告生成中";
+        }
+        if (PresaleGenerateStatus.FAILED.name().equals(status)) {
+            return "报告生成失败,请重新生成";
+        }
+        return null;
+    }
+
     private LambdaQueryWrapper<PresaleReport> buildQueryWrapper(ReportListQueryRequest req) {
         LambdaQueryWrapper<PresaleReport> q = new LambdaQueryWrapper<>();
+        q.isNull(PresaleReport::getDeletedAt);
         Long currentUserId = accessService.currentUserId();
         if (accessService.getAccessScope() == AccessScope.OWN_ONLY) {
             q.eq(PresaleReport::getCreatedBy, currentUserId);
@@ -237,6 +354,33 @@ public class PresaleReportService {
         // generationStatus / frozen 过滤基于 version 字段,v1 先不做(需要 join 或二次筛选),
         // 作为 P1·F·1·b 的优化点;当前列表页这两列只用于展示,筛选提示"暂未实现"
         return q;
+    }
+
+    private void ensureNoActiveGeneration(Long reportId) {
+        Long activeCount = versionMapper.selectCount(new LambdaQueryWrapper<PresaleReportVersion>()
+                .eq(PresaleReportVersion::getReportId, reportId)
+                .in(PresaleReportVersion::getGenerationStatus, ACTIVE_GENERATION_STATUSES));
+        if (activeCount != null && activeCount > 0) {
+            throw new BizException(409, "Report is generating, cannot delete now");
+        }
+    }
+
+    private void ensureNoActiveExport(Long reportId) {
+        Long activeCount = exportMapper.selectCount(new LambdaQueryWrapper<PresaleReportExport>()
+                .eq(PresaleReportExport::getReportId, reportId)
+                .in(PresaleReportExport::getStatus, ACTIVE_EXPORT_STATUSES));
+        if (activeCount != null && activeCount > 0) {
+            throw new BizException(409, "Report export is running, cannot delete now");
+        }
+    }
+
+    private void ensureNoFrozenVersion(Long reportId) {
+        Long frozenCount = versionMapper.selectCount(new LambdaQueryWrapper<PresaleReportVersion>()
+                .eq(PresaleReportVersion::getReportId, reportId)
+                .isNotNull(PresaleReportVersion::getFrozenAt));
+        if (frozenCount != null && frozenCount > 0) {
+            throw new BizException(409, "Report has frozen versions, cannot delete");
+        }
     }
 
     private void applySorting(LambdaQueryWrapper<PresaleReport> q, ReportListQueryRequest req) {
@@ -311,16 +455,29 @@ public class PresaleReportService {
         Map<Integer, Integer> promptCountByCompetitorVar = countPromptTemplatesByCompetitorVar();
         int genericPromptCount = promptCountByCompetitorVar.getOrDefault(0, 0);
         int competitorPromptCount = promptCountByCompetitorVar.getOrDefault(1, 0);
-        int batch1Total = platformCount * genericPromptCount * 2;
-        int totalUpperBound = batch1Total + (platformCount * competitorPromptCount * 3 * 2);
+        PromptScopeCalculator.ScopeResult scope = PromptScopeCalculator.calculate(
+                platformCount,
+                genericPromptCount,
+                competitorPromptCount
+        );
         return ReportScopePreviewVO.builder()
                 .platformCount(platformCount)
                 .genericPromptCount(genericPromptCount)
                 .competitorPromptCount(competitorPromptCount)
                 .promptQueryCount(genericPromptCount + competitorPromptCount)
-                .llmCallUpperBound(totalUpperBound)
+                .llmCallUpperBound(scope.totalUpperBound())
                 .dimensionCount(PresaleIntentCode.allInOrder().size())
                 .build();
+    }
+
+    private List<PresalePromptTemplate> activePromptTemplates() {
+        return promptTemplateMapper.selectList(
+                new LambdaQueryWrapper<PresalePromptTemplate>()
+                        .eq(PresalePromptTemplate::getEnabled, 1)
+                        .eq(PresalePromptTemplate::getTemplateVersion, activePromptTemplateVersion)
+                        .orderByAsc(PresalePromptTemplate::getSortOrder)
+                        .orderByAsc(PresalePromptTemplate::getId)
+        );
     }
 
     private Map<Integer, Integer> countPromptTemplatesByCompetitorVar() {

@@ -25,6 +25,8 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
 
     private static final String DEFAULT_QUERY_SYSTEM_PROMPT = "You are a GEO monitoring assistant.";
     private static final int DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
+    private static final String PLATFORM_WENXIN = "wenxin";
+    private static final double WENXIN_MIN_JUDGE_TEMPERATURE = 0.1D;
 
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
@@ -50,10 +52,11 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
     @Override
     public LlmCallResult analyze(PlatformCallContext ctx, String originalPrompt, String queryAnswer)
             throws LlmInvokeException, AnalyzeParseException {
-        String userPrompt = AnalyzePromptTemplates.USER_TEMPLATE
-                .replace("{{originalPrompt}}", safe(originalPrompt))
-                .replace("{{queryAnswer}}", safe(queryAnswer))
-                .replace("{{brandName}}", safe(ctx.brandName()));
+        String userPrompt = AnalyzePromptTemplates.renderUserPrompt(
+                originalPrompt,
+                queryAnswer,
+                ctx.brandName()
+        );
         LlmCallResult result = invokeWithRetry(
                 ctx,
                 AnalyzePromptTemplates.SYSTEM_INSTRUCTION,
@@ -72,7 +75,7 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                 ctx,
                 JudgePromptTemplates.SYSTEM_INSTRUCTION,
                 safe(judgePrompt),
-                temperature,
+                normalizeJudgeTemperature(ctx, temperature),
                 true
         );
     }
@@ -331,6 +334,15 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
             return platform.getModelId();
         }
         return null;
+    }
+
+    double normalizeJudgeTemperature(PlatformCallContext ctx, double temperature) {
+        if (ctx != null
+                && PLATFORM_WENXIN.equalsIgnoreCase(ctx.platformCode())
+                && temperature <= 0D) {
+            return WENXIN_MIN_JUDGE_TEMPERATURE;
+        }
+        return temperature;
     }
 
     private String buildRequestBody(String modelId, String systemPrompt, String userPrompt, double temperature)

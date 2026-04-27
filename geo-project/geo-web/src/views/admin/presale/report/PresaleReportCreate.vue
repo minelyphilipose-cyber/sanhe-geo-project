@@ -196,7 +196,7 @@
 
               <el-alert
                 v-if="group.hasCompetitorVar"
-                title="{competitor} 为竞品占位符。系统会在第一轮分析后识别最多 3 个竞品，并分别替换该占位符生成对比问题。"
+                title="{competitor} 为竞品组占位符。系统会在第一轮分析后识别最多 3 个竞品，并用「品牌1、品牌2、品牌3」的形式整体替换该占位符。每条对比型问题在每个平台只执行一次。"
                 type="info"
                 :closable="false"
                 class="competitor-hint"

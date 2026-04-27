@@ -19,6 +19,22 @@ public class PresaleReusePersistenceService {
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
     private final ReuseDecisionService reuseDecisionService;
 
+    @Transactional(propagation = Propagation.REQUIRED, rollbackFor = Exception.class)
+    public void cleanupLegacySingleCompetitorBatch2Rows(Long versionId, String competitorGroupName) {
+        if (versionId == null || competitorGroupName == null
+                || !competitorGroupName.contains(CompetitorGroupKeyUtils.SEPARATOR)) {
+            return;
+        }
+        aiPromptResultMapper.delete(new LambdaQueryWrapper<PresaleAiPromptResult>()
+                .eq(PresaleAiPromptResult::getVersionId, versionId)
+                .eq(PresaleAiPromptResult::getBatchNo, 2)
+                .notLike(PresaleAiPromptResult::getCompetitorName, CompetitorGroupKeyUtils.SEPARATOR));
+        aiCallMapper.delete(new LambdaQueryWrapper<PresaleAiCall>()
+                .eq(PresaleAiCall::getVersionId, versionId)
+                .eq(PresaleAiCall::getBatchNo, 2)
+                .notLike(PresaleAiCall::getCompetitorName, CompetitorGroupKeyUtils.SEPARATOR));
+    }
+
     /**
      * ⚠ 事务回滚已知盲区:
      * 当前仅 Mockito 单测覆盖逻辑分支(PresaleReusePersistenceServiceTest

@@ -170,6 +170,16 @@ const adminRoutes: RouteRecordRaw = {
       },
     },
     {
+      path: 'presale/report/:id/edit',
+      name: 'PresaleReportEdit',
+      component: () => import('@/views/admin/presale/report/PresaleReportEdit.vue'),
+      meta: {
+        title: '编辑售前报告',
+        hidden: true,
+        permissions: ['presale.report.edit_content', 'presale.report.manage'],
+      },
+    },
+    {
       path: 'partners',
       name: 'PartnerList',
       component: () => import('@/views/admin/partner/PartnerList.vue'),

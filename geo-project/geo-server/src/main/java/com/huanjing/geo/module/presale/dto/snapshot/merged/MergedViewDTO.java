@@ -136,6 +136,10 @@ public class MergedViewDTO {
     @JsonProperty("merged_competitors")
     private List<MergedCompetitor> mergedCompetitors;
 
+    /** 竞品组对比模式下的组级优势场景;为空时前端回退 Top1 竞品场景。 */
+    @JsonProperty("group_scene_advantages")
+    private List<String> groupSceneAdvantages;
+
     // ─────────────────────── 合并专用嵌套类型 ───────────────────────
 
     /**

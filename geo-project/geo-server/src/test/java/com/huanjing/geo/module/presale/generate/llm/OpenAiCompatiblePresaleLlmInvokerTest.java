@@ -197,6 +197,33 @@ class OpenAiCompatiblePresaleLlmInvokerTest {
         assertEquals("qwen3.6-turbo", invoker.resolvePresaleModelId(platform));
     }
 
+    @Test
+    void normalizeJudgeTemperature_wenxinZeroFallsBackToPointOne() {
+        PlatformCallContext ctx = new PlatformCallContext(
+                1L, 1, "wenxin", 1002L, "", "Acme", 11L, false
+        );
+
+        assertEquals(0.1D, invoker.normalizeJudgeTemperature(ctx, 0D));
+    }
+
+    @Test
+    void normalizeJudgeTemperature_nonWenxinKeepsZero() {
+        PlatformCallContext ctx = new PlatformCallContext(
+                1L, 1, "kimi", 1002L, "", "Acme", 11L, false
+        );
+
+        assertEquals(0D, invoker.normalizeJudgeTemperature(ctx, 0D));
+    }
+
+    @Test
+    void normalizeJudgeTemperature_wenxinPositiveValueIsUnchanged() {
+        PlatformCallContext ctx = new PlatformCallContext(
+                1L, 1, "wenxin", 1002L, "", "Acme", 11L, false
+        );
+
+        assertEquals(0.2D, invoker.normalizeJudgeTemperature(ctx, 0.2D));
+    }
+
     private AiPlatformConfig row() {
         AiPlatformConfig row = new AiPlatformConfig();
         row.setPlatformCode("kimi");

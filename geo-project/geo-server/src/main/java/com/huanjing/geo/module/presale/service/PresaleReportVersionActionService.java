@@ -2,6 +2,9 @@ package com.huanjing.geo.module.presale.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.presale.dto.DeriveVersionRequest;
 import com.huanjing.geo.module.presale.dto.DeriveVersionResponse;
@@ -9,6 +12,12 @@ import com.huanjing.geo.module.presale.dto.EditVersionContentRequest;
 import com.huanjing.geo.module.presale.dto.FreezeVersionRequest;
 import com.huanjing.geo.module.presale.dto.RetryVersionResponse;
 import com.huanjing.geo.module.presale.dto.VersionActionResponse;
+import com.huanjing.geo.module.presale.dto.snapshot.editable.CompetitorSceneDescription;
+import com.huanjing.geo.module.presale.dto.snapshot.editable.EditableContentDTO;
+import com.huanjing.geo.module.presale.dto.snapshot.editable.ExecutiveSummary;
+import com.huanjing.geo.module.presale.dto.snapshot.editable.FindingContent;
+import com.huanjing.geo.module.presale.dto.snapshot.editable.KeyTakeaway;
+import com.huanjing.geo.module.presale.dto.snapshot.editable.PhaseDescription;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateStatus;
@@ -22,8 +31,15 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * 版本写动作 Service:edit / derive / freeze / unfreeze / delete / retry。
@@ -64,11 +80,15 @@ public class PresaleReportVersionActionService {
      * unfreeze/delete 是管理员级别操作,独立权限 key,只绑 manager 角色。
      */
     private static final String PERM_MANAGE = "presale.report.manage";
+    private static final String ERR_CONTENT_CONFLICT = "content_conflict";
+    private static final String ERR_VERSION_FROZEN = "version_frozen";
+    private static final String ERR_VERSION_NOT_DONE = "version_not_done";
 
     private final PresaleReportMapper reportMapper;
     private final PresaleReportVersionMapper versionMapper;
     private final CurrentUserService currentUserService;
     private final PresaleAccessService accessService;
+    private final ObjectMapper objectMapper;
 
     /**
      * P1·F·1·a 已存在的 Mock Orchestrator,retry 时重新触发生成。
@@ -90,11 +110,16 @@ public class PresaleReportVersionActionService {
         PresaleReportVersion version = accessService.requireVersionWithAccess(report.getId(), versionNo);
 
         if (version.getFrozenAt() != null) {
-            throw new BizException(409, "Version is frozen, cannot edit");
+            throw editConflict(ERR_VERSION_FROZEN, "Version is frozen, cannot edit");
         }
         if (!PresaleGenerateStatus.DONE.name().equals(version.getGenerationStatus())) {
             // 只有生成完成的版本允许编辑 L3;INIT/QUEUED/RUNNING/FAILED 均不可
-            throw new BizException(409, "Version not generated yet, cannot edit");
+            throw editConflict(ERR_VERSION_NOT_DONE, "Version not generated yet, cannot edit");
+        }
+        validateEditableContentJson(req.getEditableContentJson());
+        if (!Boolean.TRUE.equals(req.getForceOverwrite())
+                && !Objects.equals(version.getContentUpdatedAt(), req.getExpectedContentUpdatedAt())) {
+            throw editConflict(ERR_CONTENT_CONFLICT, "Content has been updated by another user");
         }
 
         LocalDateTime now = LocalDateTime.now();
@@ -111,6 +136,158 @@ public class PresaleReportVersionActionService {
                 .frozen(false)
                 .updatedAt(now)
                 .build();
+    }
+
+    private BizException editConflict(String errorCode, String message) {
+        return new BizException(409, message, 200, Map.of("errorCode", errorCode));
+    }
+
+    private void validateEditableContentJson(String json) {
+        JsonNode root;
+        EditableContentDTO dto;
+        try {
+            root = objectMapper.readTree(json);
+            dto = objectMapper.treeToValue(root, EditableContentDTO.class);
+        } catch (JsonProcessingException | IllegalArgumentException e) {
+            throw new BizException(400, "Invalid editable content JSON");
+        }
+        if (root == null || !root.isObject()) {
+            throw new BizException(400, "Invalid editable content JSON");
+        }
+        requireTopLevelFields(root);
+        validateText("report_title", dto.getReportTitle(), 40);
+        validateText("report_subtitle", dto.getReportSubtitle(), 80);
+        validateExecutiveSummary(dto.getExecutiveSummary());
+        validateKeyTakeaways(dto.getKeyTakeaways());
+        validateFindings(dto.getOptimizationFindingsContent());
+        validatePhases(dto.getPhaseDescriptions());
+        validateCompetitors(dto.getCompetitorSceneDescriptions());
+        validateText("roi_disclaimer", dto.getRoiDisclaimer(), 200);
+    }
+
+    private void requireTopLevelFields(JsonNode root) {
+        List<String> fields = List.of(
+                "report_title",
+                "report_subtitle",
+                "executive_summary",
+                "key_takeaways",
+                "optimization_findings_content",
+                "phase_descriptions",
+                "competitor_scene_descriptions",
+                "roi_disclaimer"
+        );
+        for (String field : fields) {
+            if (!root.has(field)) {
+                throw new BizException(400, "Missing editable content field: " + field);
+            }
+        }
+    }
+
+    private void validateExecutiveSummary(ExecutiveSummary summary) {
+        if (summary == null) {
+            return;
+        }
+        requireText("executive_summary.headline", summary.getHeadline(), 60);
+        requireText("executive_summary.paragraph", summary.getParagraph(), 500);
+    }
+
+    private void validateKeyTakeaways(List<KeyTakeaway> list) {
+        requireList("key_takeaways", list);
+        if (list.size() > 8) {
+            throw new BizException(400, "key_takeaways must not exceed 8 items");
+        }
+        for (int i = 0; i < list.size(); i++) {
+            KeyTakeaway item = list.get(i);
+            if (item == null) {
+                throw new BizException(400, "key_takeaways item must not be null");
+            }
+            if (item.getOrderNo() == null || item.getOrderNo() <= 0) {
+                throw new BizException(400, "key_takeaways.order_no must be positive");
+            }
+            requireText("key_takeaways.title", item.getTitle(), 30);
+            requireText("key_takeaways.description", item.getDescription(), 500);
+        }
+    }
+
+    private void validateFindings(List<FindingContent> list) {
+        requireList("optimization_findings_content", list);
+        for (FindingContent item : list) {
+            if (item == null) {
+                throw new BizException(400, "optimization_findings_content item must not be null");
+            }
+            requireText("optimization_findings_content.finding_id", item.getFindingId(), 64);
+            validateText("optimization_findings_content.title", item.getTitle(), 50);
+            validateText("optimization_findings_content.description", item.getDescription(), 500);
+            validateText("optimization_findings_content.evidence_text", item.getEvidenceText(), 300);
+        }
+    }
+
+    private void validatePhases(List<PhaseDescription> list) {
+        requireList("phase_descriptions", list);
+        if (list.size() != 3) {
+            throw new BizException(400, "phase_descriptions must contain exactly 3 items");
+        }
+        Set<Integer> seen = new HashSet<>();
+        for (PhaseDescription item : list) {
+            if (item == null) {
+                throw new BizException(400, "phase_descriptions item must not be null");
+            }
+            Integer phaseNo = item.getPhaseNo();
+            if (phaseNo == null || phaseNo < 1 || phaseNo > 3) {
+                throw new BizException(400, "phase_no must be 1, 2 or 3");
+            }
+            if (!seen.add(phaseNo)) {
+                throw new BizException(400, "phase_no must be unique");
+            }
+            validateText("phase_descriptions.title", item.getTitle(), 30);
+            validateText("phase_descriptions.description", item.getDescription(), 300);
+        }
+    }
+
+    private void validateCompetitors(List<CompetitorSceneDescription> list) {
+        requireList("competitor_scene_descriptions", list);
+        Set<Integer> seen = new HashSet<>();
+        for (CompetitorSceneDescription item : list) {
+            if (item == null) {
+                throw new BizException(400, "competitor_scene_descriptions item must not be null");
+            }
+            Integer rank = item.getCompetitorRank();
+            if (rank == null || rank < 1 || rank > 3) {
+                throw new BizException(400, "competitor_rank must be 1, 2 or 3");
+            }
+            if (!seen.add(rank)) {
+                throw new BizException(400, "competitor_rank must be unique");
+            }
+            List<String> values = item.getSceneAdvantagesPolished();
+            if (values == null) {
+                continue;
+            }
+            if (values.size() > 6) {
+                throw new BizException(400, "scene_advantages_polished must not exceed 6 items");
+            }
+            for (String value : values) {
+                requireText("scene_advantages_polished[]", value, 100);
+            }
+        }
+    }
+
+    private void requireList(String field, List<?> list) {
+        if (list == null) {
+            throw new BizException(400, field + " must not be null");
+        }
+    }
+
+    private void requireText(String field, String value, int maxLength) {
+        if (value == null) {
+            throw new BizException(400, field + " must not be null");
+        }
+        validateText(field, value, maxLength);
+    }
+
+    private void validateText(String field, String value, int maxLength) {
+        if (value != null && value.length() > maxLength) {
+            throw new BizException(400, field + " length must not exceed " + maxLength);
+        }
     }
 
     // ---------------------------------------------------------------
@@ -348,8 +525,8 @@ public class PresaleReportVersionActionService {
                 .set(PresaleReportVersion::getFailureCategory, null);
         versionMapper.update(null, update);
 
-        // 触发 orchestrator 重跑
-        generateOrchestrator.triggerGenerate(version.getId(), user.getId(), accessService.canManageCurrentUser());
+        // 事务提交后触发,避免异步线程早于 QUEUED 状态提交而跳过执行。
+        triggerGenerateAfterCommit(version.getId(), user.getId(), accessService.canManageCurrentUser());
 
         log.info("presale.retry report={} version={} by user={}",
                 report.getId(), versionNo, user.getId());
@@ -392,13 +569,27 @@ public class PresaleReportVersionActionService {
                 .set(PresaleReportVersion::getDegradedPlatforms, null);
         versionMapper.update(null, update);
 
-        generateOrchestrator.triggerGenerate(version.getId(), user.getId(), accessService.canManageCurrentUser());
+        triggerGenerateAfterCommit(version.getId(), user.getId(), accessService.canManageCurrentUser());
 
         return RetryVersionResponse.builder()
                 .versionId(version.getId())
                 .versionNo(version.getVersionNo())
                 .generationStatus(PresaleGenerateStatus.QUEUED.name())
                 .build();
+    }
+
+    private void triggerGenerateAfterCommit(Long versionId, Long userId, boolean canManageCurrentUser) {
+        if (TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    generateOrchestrator.triggerGenerate(versionId, userId, canManageCurrentUser);
+                }
+            });
+            return;
+        }
+        generateOrchestrator.triggerGenerate(versionId, userId, canManageCurrentUser);
     }
 
 }

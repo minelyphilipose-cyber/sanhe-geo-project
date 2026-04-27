@@ -13,6 +13,8 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.LocalDateTime;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
@@ -97,6 +99,18 @@ class PresaleAccessServiceTest {
     @Test
     void requireReportWithAccess_reportNotFoundReturns404() {
         when(reportMapper.selectById(REPORT_ID)).thenReturn(null);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> accessService.requireReportWithAccess(REPORT_ID));
+
+        assertEquals(404, ex.getCode());
+    }
+
+    @Test
+    void requireReportWithAccess_deletedReportReturns404() {
+        PresaleReport report = report(REPORT_ID, OWNER_USER_ID);
+        report.setDeletedAt(LocalDateTime.now());
+        when(reportMapper.selectById(REPORT_ID)).thenReturn(report);
 
         BizException ex = assertThrows(BizException.class,
                 () -> accessService.requireReportWithAccess(REPORT_ID));

@@ -15,7 +15,7 @@ import java.util.List;
 @Mapper
 public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptResult> {
 
-    // NOTE: 本 SQL 依赖 presale_prompt_template.category 使用中文字面值('对比型')。
+    // NOTE: 本 SQL 依赖 Prompt 快照 category 使用中文字面值('对比型')。
     //       若未来将模板 category 迁移为英文枚举,本方法和
     //       PresaleJudgeService.CATEGORY_COMPARISON 常量需同步修改。
     //       相关 category 字面值分布在 3 处:此 SQL、V79 种子 SQL、
@@ -27,7 +27,7 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "0 AS isExcluded, " +
             "r.is_mentioned AS isMentioned " +
             "FROM presale_ai_prompt_result r " +
-            "INNER JOIN presale_prompt_template pt ON pt.id = r.prompt_template_id " +
+            "INNER JOIN presale_report_version_prompt_template pt ON pt.id = r.prompt_template_id " +
             "WHERE r.version_id = #{versionId} " +
             "AND ( " +
             "  (pt.category = '对比型' AND r.batch_no = 2) " +
@@ -56,7 +56,7 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "r.request_prompt_content AS requestPromptContent, " +
             "qc.raw_response AS queryAnswer " +
             "FROM presale_ai_prompt_result r " +
-            "INNER JOIN presale_prompt_template pt ON pt.id = r.prompt_template_id " +
+            "INNER JOIN presale_report_version_prompt_template pt ON pt.id = r.prompt_template_id " +
             "LEFT JOIN presale_ai_call qc ON qc.id = r.query_call_id " +
             "WHERE r.version_id = #{versionId} " +
             "AND r.batch_no = #{batchNo} " +

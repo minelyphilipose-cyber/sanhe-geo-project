@@ -71,6 +71,21 @@ class ReuseDecisionServiceTest {
         assertEquals(ReuseDecision.RUN_FULL, service.decide(ctxLowercase, cache));
     }
 
+    @Test
+    void competitorGroup_orderAndWhitespaceVariants_normalizedToSameReuseKey() {
+        PresaleAiCall querySuccessGroup = call(104L, 2, "kimi", 14L, "A、B、C", "QUERY", "SUCCESS", "answer");
+        when(aiCallMapper.selectList(any())).thenReturn(List.of(querySuccessGroup));
+
+        Map<ReuseDecisionService.ReuseKey, ReuseSnapshot> cache = service.preloadByVersionAndBatch(104L, 2);
+
+        assertEquals(ReuseDecision.REUSE_QUERY_ONLY, service.decide(
+                new PlatformCallContext(104L, 2, "kimi", 14L, "B、A、C", "Acme", 1L, false), cache));
+        assertEquals(ReuseDecision.REUSE_QUERY_ONLY, service.decide(
+                new PlatformCallContext(104L, 2, "kimi", 14L, "A 、B、C", "Acme", 1L, false), cache));
+        assertEquals(ReuseDecision.REUSE_QUERY_ONLY, service.decide(
+                new PlatformCallContext(104L, 2, "kimi", 14L, "A、 B 、C", "Acme", 1L, false), cache));
+    }
+
     private PresaleAiCall call(Long versionId,
                                int batchNo,
                                String platformCode,

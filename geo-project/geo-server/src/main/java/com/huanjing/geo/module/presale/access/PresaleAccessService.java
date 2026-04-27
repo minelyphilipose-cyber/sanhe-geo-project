@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 public class PresaleAccessService {
 
     private static final String PERM_MANAGE = "presale.report.manage";
+    private static final String PERM_EDIT = "presale.report.edit_content";
 
     private final PresaleReportMapper reportMapper;
     private final PresaleReportVersionMapper versionMapper;
@@ -28,7 +29,7 @@ public class PresaleAccessService {
 
     public PresaleReport requireReportWithAccess(Long reportId) {
         PresaleReport report = reportMapper.selectById(reportId);
-        if (report == null) {
+        if (report == null || report.getDeletedAt() != null) {
             throw new BizException(404, "Report not found: " + reportId);
         }
         SysUser current = currentUserService.requireCurrentUser();
@@ -58,6 +59,17 @@ public class PresaleAccessService {
         return getAccessScope() == AccessScope.ALL;
     }
 
+    public boolean canEditCurrentUser(PresaleReport report) {
+        if (report == null || !currentUserService.hasPermission(PERM_EDIT)) {
+            return false;
+        }
+        if (getAccessScope() == AccessScope.ALL) {
+            return true;
+        }
+        SysUser current = currentUserService.requireCurrentUser();
+        return current.getId().equals(report.getCreatedBy());
+    }
+
     public Long currentUserId() {
         return currentUserService.requireCurrentUser().getId();
     }
@@ -66,4 +78,3 @@ public class PresaleAccessService {
         return currentUserService.hasPermission(PERM_MANAGE);
     }
 }
-

@@ -121,6 +121,9 @@ public class DispatchExecutionService {
         }
         List<AiPlatformConfig> platformConfigs = resolvePlatformCandidates(task.getProjectId(), type);
         if (platformConfigs.isEmpty()) {
+            if (type == DispatchTaskType.CONTENT_GENERATION) {
+                throw new BizException(400, "No article-enabled platform configured");
+            }
             throw new BizException(400, "No enabled platform configured for task type " + task.getTaskType());
         }
         if (type == DispatchTaskType.BI_DAILY_POLL) {
@@ -1283,6 +1286,10 @@ public class DispatchExecutionService {
     }
 
     private List<AiPlatformConfig> resolvePlatformCandidates(Long projectId, DispatchTaskType type) {
+        if (type == DispatchTaskType.CONTENT_GENERATION) {
+            return resolveArticlePlatformCandidates();
+        }
+
         List<ProjectPlatformBinding> bindings = projectPlatformBindingMapper.selectList(
                 new LambdaQueryWrapper<ProjectPlatformBinding>()
                         .eq(ProjectPlatformBinding::getProjectId, projectId)
@@ -1304,6 +1311,15 @@ public class DispatchExecutionService {
                 .filter(cfg -> preferredLevels.contains(levelByCode.get(cfg.getPlatformCode())))
                 .sorted(Comparator.comparingInt(cfg -> preferredLevels.indexOf(levelByCode.get(cfg.getPlatformCode()))))
                 .collect(Collectors.toList());
+    }
+
+    private List<AiPlatformConfig> resolveArticlePlatformCandidates() {
+        return aiPlatformConfigMapper.selectList(
+                new LambdaQueryWrapper<AiPlatformConfig>()
+                        .eq(AiPlatformConfig::getEnabled, true)
+                        .eq(AiPlatformConfig::getEnabledForArticle, true)
+                        .orderByAsc(AiPlatformConfig::getId)
+        );
     }
 
     private List<String> preferredLevels(DispatchTaskType type) {

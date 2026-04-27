@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.presale.generate.llm.AnalyzeParseException;
+import com.huanjing.geo.module.presale.generate.llm.AnalyzePromptTemplates;
 import com.huanjing.geo.module.presale.generate.llm.CallStatus;
 import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
 import com.huanjing.geo.module.presale.generate.llm.LlmInvokeException;
@@ -16,13 +17,13 @@ import com.huanjing.geo.module.presale.generate.l3.PresaleL3InitService;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
-import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
+import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersionPromptTemplate;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
-import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionPromptTemplateMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.entity.SysDictItem;
@@ -97,7 +98,7 @@ public class PresaleGenerateOrchestrator {
     private final PresaleReportMapper reportMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final SysDictItemMapper sysDictItemMapper;
-    private final PresalePromptTemplateMapper promptTemplateMapper;
+    private final PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
     private final PresaleAiCallMapper aiCallMapper;
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
     private final ReuseDecisionService reuseDecisionService;
@@ -127,14 +128,12 @@ public class PresaleGenerateOrchestrator {
 
     @Value("${presale.generate.allow-synthetic-fallback.real}")
     private boolean allowSyntheticFallbackReal;
-    @Value("${presale.prompt.active-version:v2}")
-    private String activePromptTemplateVersion;
 
     public PresaleGenerateOrchestrator(PresaleReportVersionMapper versionMapper,
                                        PresaleReportMapper reportMapper,
                                        AiPlatformConfigMapper aiPlatformConfigMapper,
                                        SysDictItemMapper sysDictItemMapper,
-                                       PresalePromptTemplateMapper promptTemplateMapper,
+                                       PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper,
                                        PresaleAiCallMapper aiCallMapper,
                                        PresaleAiPromptResultMapper aiPromptResultMapper,
                                        ReuseDecisionService reuseDecisionService,
@@ -152,7 +151,7 @@ public class PresaleGenerateOrchestrator {
         this.reportMapper = reportMapper;
         this.aiPlatformConfigMapper = aiPlatformConfigMapper;
         this.sysDictItemMapper = sysDictItemMapper;
-        this.promptTemplateMapper = promptTemplateMapper;
+        this.versionPromptTemplateMapper = versionPromptTemplateMapper;
         this.aiCallMapper = aiCallMapper;
         this.aiPromptResultMapper = aiPromptResultMapper;
         this.reuseDecisionService = reuseDecisionService;
@@ -280,7 +279,7 @@ public class PresaleGenerateOrchestrator {
 
         List<String> extractedCompetitors = extractTopCompetitorsFromBatch1(versionId, report.getBrandName());
         int extractedCompetitorCount = extractedCompetitors.size();
-        int batch2TotalCalls = preflight.platformCount() * preflight.competitorPromptCount() * extractedCompetitorCount * 2;
+        int batch2TotalCalls = preflight.platformCount() * preflight.competitorPromptCount() * 2;
         updateAfterCompetitorExtract(
                 versionId,
                 extractedCompetitorCount,
@@ -377,14 +376,14 @@ public class PresaleGenerateOrchestrator {
             return PreflightResult.fail("whitelisted platform count is 0");
         }
 
-        int genericPromptCount = countPromptTemplates(0);
+        int genericPromptCount = countPromptTemplates(versionId, 0);
         if (genericPromptCount < 1) {
             return PreflightResult.fail("generic prompt count is 0");
         }
 
-        int competitorPromptCount = countPromptTemplates(1);
+        int competitorPromptCount = countPromptTemplates(versionId, 1);
         int batch1TotalCalls = platformCount * genericPromptCount * 2;
-        int totalUpperBoundCalls = batch1TotalCalls + (platformCount * competitorPromptCount * 3 * 2);
+        int totalUpperBoundCalls = batch1TotalCalls + (platformCount * competitorPromptCount * 2);
         return PreflightResult.success(platformCount, competitorPromptCount, batch1TotalCalls, totalUpperBoundCalls);
     }
 
@@ -398,13 +397,12 @@ public class PresaleGenerateOrchestrator {
         enterStage(versionId, STAGE_BATCH1, "batch1 executing");
 
         List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(PresalePlatformConfigQueries.presaleEnabledWrapper());
-        List<PresalePromptTemplate> templates = promptTemplateMapper.selectList(
-                new LambdaQueryWrapper<PresalePromptTemplate>()
-                        .eq(PresalePromptTemplate::getEnabled, 1)
-                        .eq(PresalePromptTemplate::getTemplateVersion, activePromptTemplateVersion)
-                        .eq(PresalePromptTemplate::getHasCompetitorVar, 0)
-                        .orderByAsc(PresalePromptTemplate::getSortOrder)
-                        .orderByAsc(PresalePromptTemplate::getId)
+        List<PresaleReportVersionPromptTemplate> templates = versionPromptTemplateMapper.selectList(
+                new LambdaQueryWrapper<PresaleReportVersionPromptTemplate>()
+                        .eq(PresaleReportVersionPromptTemplate::getReportVersionId, versionId)
+                        .eq(PresaleReportVersionPromptTemplate::getHasCompetitorVar, 0)
+                        .orderByAsc(PresaleReportVersionPromptTemplate::getSortOrderInVersion)
+                        .orderByAsc(PresaleReportVersionPromptTemplate::getId)
         );
 
         Set<String> degradedPlatforms = ConcurrentHashMap.newKeySet();
@@ -533,7 +531,7 @@ public class PresaleGenerateOrchestrator {
 
     PlatformBatchResult executePlatformBatch1(AiPlatformConfig platform,
                                               Long versionId,
-                                              List<PresalePromptTemplate> templates,
+                                              List<PresaleReportVersionPromptTemplate> templates,
                                               Map<ReuseDecisionService.ReuseKey, ReuseSnapshot> reuseCache,
                                               Set<String> degradedPlatforms,
                                               AtomicInteger degradedCount,
@@ -547,7 +545,7 @@ public class PresaleGenerateOrchestrator {
         String platformCode = platform.getPlatformCode();
         PlatformBatchState state = new PlatformBatchState(platformCode, templates.size());
 
-        for (PresalePromptTemplate template : templates) {
+        for (PresaleReportVersionPromptTemplate template : templates) {
             if (state.degraded) {
                 insertSkippedCall(versionId, 1, platformCode, template.getId(), "", "QUERY");
                 insertSkippedCall(versionId, 1, platformCode, template.getId(), "", "ANALYZE");
@@ -570,9 +568,7 @@ public class PresaleGenerateOrchestrator {
             );
             String renderedPrompt = promptTemplateRenderer.render(
                     template.getPromptContent(),
-                    template.getPromptCode(),
-                    ctx,
-                    promptRenderReport
+                    promptTemplateRenderer.variables(ctx, promptRenderReport)
             );
 
             ReuseDecision reuseDecision = reuseDecisionService.decide(ctx, reuseCache);
@@ -589,11 +585,12 @@ public class PresaleGenerateOrchestrator {
                 PresaleAiCall reusedQueryCall = snapshot == null ? null : snapshot.querySuccessCall();
                 if (reusedQueryCall != null && reusedQueryCall.getRawResponse() != null) {
                     boolean interruptedInAnalyze = false;
+                    String analyzeRequestPrompt = buildAnalyzeRequestPrompt(ctx, renderedPrompt, reusedQueryCall.getRawResponse());
                     try {
                         LlmCallResult analyzeResult = llmInvoker.analyze(ctx, renderedPrompt, reusedQueryCall.getRawResponse());
                         PresaleAiCall analyzeCall = buildCall(
                                 versionId, 1, platformCode, template.getId(), "",
-                                "ANALYZE", reusedQueryCall.getId(), analyzeResult, null
+                                "ANALYZE", reusedQueryCall.getId(), analyzeRequestPrompt, analyzeResult, null
                         );
                         PresaleAiPromptResult promptResult = buildPromptResultSuccess(
                                 versionId, 1, platformCode, template.getId(), "",
@@ -603,7 +600,7 @@ public class PresaleGenerateOrchestrator {
                     } catch (LlmInvokeException | AnalyzeParseException ex) {
                         PresaleAiCall analyzeCall = buildFailedCall(
                                 versionId, 1, platformCode, template.getId(), "",
-                                "ANALYZE", reusedQueryCall.getId(), ex.getMessage()
+                                "ANALYZE", reusedQueryCall.getId(), analyzeRequestPrompt, ex.getMessage()
                         );
                         PresaleAiPromptResult promptResult = buildPromptResultAnalyzeFailed(
                                 versionId, 1, platformCode, template.getId(), "",
@@ -630,11 +627,11 @@ public class PresaleGenerateOrchestrator {
                 queryResult = llmInvoker.query(ctx, renderedPrompt);
                 queryCall = insertCall(
                         versionId, 1, platformCode, template.getId(), "",
-                        "QUERY", null, queryResult, null
+                        "QUERY", null, renderedPrompt, queryResult, null
                 );
             } catch (LlmInvokeException ex) {
                 insertFailedCall(versionId, 1, platformCode, template.getId(), "",
-                        "QUERY", null, ex.getMessage());
+                        "QUERY", null, renderedPrompt, ex.getMessage());
                 state.processedPrompts++;
                 state.failedPrompts++;
                 int nextCompleted = completedCalls.addAndGet(2);
@@ -647,16 +644,18 @@ public class PresaleGenerateOrchestrator {
             }
 
             try {
+                String analyzeRequestPrompt = buildAnalyzeRequestPrompt(ctx, renderedPrompt, queryResult.rawResponse());
                 LlmCallResult analyzeResult = llmInvoker.analyze(ctx, renderedPrompt, queryResult.rawResponse());
                 PresaleAiCall analyzeCall = insertCall(
                         versionId, 1, platformCode, template.getId(), "",
-                        "ANALYZE", queryCall.getId(), analyzeResult, null
+                        "ANALYZE", queryCall.getId(), analyzeRequestPrompt, analyzeResult, null
                 );
                 insertPromptResultSuccess(versionId, 1, platformCode, template.getId(), "",
                         queryCall.getId(), analyzeCall.getId(), renderedPrompt, analyzeResult.rawResponse());
             } catch (LlmInvokeException | AnalyzeParseException ex) {
                 PresaleAiCall analyzeCall = insertFailedCall(versionId, 1, platformCode, template.getId(), "",
-                        "ANALYZE", queryCall.getId(), ex.getMessage());
+                        "ANALYZE", queryCall.getId(),
+                        buildAnalyzeRequestPrompt(ctx, renderedPrompt, queryResult.rawResponse()), ex.getMessage());
                 insertPromptResultAnalyzeFailed(versionId, 1, platformCode, template.getId(), "",
                         queryCall.getId(), analyzeCall.getId(), renderedPrompt);
                 state.failedPrompts++;
@@ -681,7 +680,7 @@ public class PresaleGenerateOrchestrator {
 
     PlatformBatchResult executePlatformBatch2(AiPlatformConfig platform,
                                               Long versionId,
-                                              List<PresalePromptTemplate> templates,
+                                              List<PresaleReportVersionPromptTemplate> templates,
                                               List<String> topCompetitors,
                                               Map<ReuseDecisionService.ReuseKey, ReuseSnapshot> reuseCache,
                                               Set<String> degradedPlatforms,
@@ -695,132 +694,132 @@ public class PresaleGenerateOrchestrator {
                                               AtomicInteger lastWrittenCompleted,
                                               int batch1Completed) {
         String platformCode = platform.getPlatformCode();
-        PlatformBatchState state = new PlatformBatchState(platformCode, templates.size() * topCompetitors.size());
+        String competitorGroupName = CompetitorGroupKeyUtils.storageKey(topCompetitors);
+        PlatformBatchState state = new PlatformBatchState(platformCode, templates.size());
         if (degradedPlatforms.contains(platformCode)) {
             state.degraded = true;
         }
 
-        for (PresalePromptTemplate template : templates) {
-            for (String competitorName : topCompetitors) {
-                if (state.degraded) {
-                    insertSkippedCall(versionId, 2, platformCode, template.getId(), competitorName, "QUERY");
-                    insertSkippedCall(versionId, 2, platformCode, template.getId(), competitorName, "ANALYZE");
-                    state.processedPrompts++;
-                    skippedCalls.addAndGet(2);
-                    int nextCompleted = completedCalls.addAndGet(2);
-                    updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false, lastWrittenCompleted, batch1Completed);
-                    continue;
-                }
+        for (PresaleReportVersionPromptTemplate template : templates) {
+            if (state.degraded) {
+                insertSkippedCall(versionId, 2, platformCode, template.getId(), competitorGroupName, "QUERY");
+                insertSkippedCall(versionId, 2, platformCode, template.getId(), competitorGroupName, "ANALYZE");
+                state.processedPrompts++;
+                skippedCalls.addAndGet(2);
+                int nextCompleted = completedCalls.addAndGet(2);
+                updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false, lastWrittenCompleted, batch1Completed);
+                continue;
+            }
 
-                PlatformCallContext ctx = new PlatformCallContext(
-                        versionId,
-                        2,
-                        platformCode,
-                        template.getId(),
-                        competitorName,
-                        report.getBrandName(),
-                        operatorUserId,
-                        isManager
-                );
-                String renderedPrompt = promptTemplateRenderer.render(
-                        template.getPromptContent(),
-                        template.getPromptCode(),
-                        ctx,
-                        promptRenderReport
-                );
+            PlatformCallContext ctx = new PlatformCallContext(
+                    versionId,
+                    2,
+                    platformCode,
+                    template.getId(),
+                    competitorGroupName,
+                    report.getBrandName(),
+                    operatorUserId,
+                    isManager
+            );
+            String renderedPrompt = promptTemplateRenderer.render(
+                    template.getPromptContent(),
+                    promptTemplateRenderer.variables(ctx, promptRenderReport)
+            );
 
-                ReuseDecision reuseDecision = reuseDecisionService.decide(ctx, reuseCache);
-                if (reuseDecision == ReuseDecision.SKIP_ALL) {
-                    state.processedPrompts++;
-                    int nextCompleted = completedCalls.addAndGet(2);
-                    updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false, lastWrittenCompleted, batch1Completed);
-                    maybeDegradeBatch2Platform(state, degradedPlatforms, degradedCount);
-                    continue;
-                }
-
-                if (reuseDecision == ReuseDecision.REUSE_QUERY_ONLY) {
-                    ReuseSnapshot snapshot = reuseDecisionService.snapshotOf(ctx, reuseCache);
-                    PresaleAiCall reusedQueryCall = snapshot == null ? null : snapshot.querySuccessCall();
-                    if (reusedQueryCall != null && reusedQueryCall.getRawResponse() != null) {
-                        boolean interruptedInAnalyze = false;
-                        try {
-                            LlmCallResult analyzeResult = llmInvoker.analyze(ctx, renderedPrompt, reusedQueryCall.getRawResponse());
-                            PresaleAiCall analyzeCall = buildCall(
-                                    versionId, 2, platformCode, template.getId(), competitorName,
-                                    "ANALYZE", reusedQueryCall.getId(), analyzeResult, null
-                            );
-                            PresaleAiPromptResult promptResult = buildPromptResultSuccess(
-                                    versionId, 2, platformCode, template.getId(), competitorName,
-                                    reusedQueryCall.getId(), renderedPrompt, analyzeResult.rawResponse()
-                            );
-                            reusePersistenceService.replaceFailedAnalyzeAndResult(ctx, reusedQueryCall, analyzeCall, promptResult);
-                        } catch (LlmInvokeException | AnalyzeParseException ex) {
-                            PresaleAiCall analyzeCall = buildFailedCall(
-                                    versionId, 2, platformCode, template.getId(), competitorName,
-                                    "ANALYZE", reusedQueryCall.getId(), ex.getMessage()
-                            );
-                            PresaleAiPromptResult promptResult = buildPromptResultAnalyzeFailed(
-                                    versionId, 2, platformCode, template.getId(), competitorName,
-                                    reusedQueryCall.getId(), renderedPrompt
-                            );
-                            reusePersistenceService.replaceFailedAnalyzeAndResult(ctx, reusedQueryCall, analyzeCall, promptResult);
-                            state.failedPrompts++;
-                            interruptedInAnalyze = isInterruptedFailure(ex);
-                        }
-                        state.processedPrompts++;
-                        int nextCompleted = completedCalls.addAndGet(2);
-                        updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false, lastWrittenCompleted, batch1Completed);
-                        maybeDegradeBatch2Platform(state, degradedPlatforms, degradedCount);
-                        if (interruptedInAnalyze) {
-                            throw new BatchInterruptedException("batch2 interrupted during reused analyze");
-                        }
-                        continue;
-                    }
-                }
-
-                PresaleAiCall queryCall;
-                LlmCallResult queryResult;
-                try {
-                    queryResult = llmInvoker.query(ctx, renderedPrompt);
-                    queryCall = insertCall(
-                            versionId, 2, platformCode, template.getId(), competitorName,
-                            "QUERY", null, queryResult, null
-                    );
-                } catch (LlmInvokeException ex) {
-                    insertFailedCall(versionId, 2, platformCode, template.getId(), competitorName,
-                            "QUERY", null, ex.getMessage());
-                    state.processedPrompts++;
-                    state.failedPrompts++;
-                    int nextCompleted = completedCalls.addAndGet(2);
-                    updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false, lastWrittenCompleted, batch1Completed);
-                    maybeDegradeBatch2Platform(state, degradedPlatforms, degradedCount);
-                    if (isInterruptedFailure(ex)) {
-                        throw new BatchInterruptedException("batch2 interrupted during query");
-                    }
-                    continue;
-                }
-
-                try {
-                    LlmCallResult analyzeResult = llmInvoker.analyze(ctx, renderedPrompt, queryResult.rawResponse());
-                    PresaleAiCall analyzeCall = insertCall(
-                            versionId, 2, platformCode, template.getId(), competitorName,
-                            "ANALYZE", queryCall.getId(), analyzeResult, null
-                    );
-                    insertPromptResultSuccess(versionId, 2, platformCode, template.getId(), competitorName,
-                            queryCall.getId(), analyzeCall.getId(), renderedPrompt, analyzeResult.rawResponse());
-                } catch (LlmInvokeException | AnalyzeParseException ex) {
-                    PresaleAiCall analyzeCall = insertFailedCall(versionId, 2, platformCode, template.getId(), competitorName,
-                            "ANALYZE", queryCall.getId(), ex.getMessage());
-                    insertPromptResultAnalyzeFailed(versionId, 2, platformCode, template.getId(), competitorName,
-                            queryCall.getId(), analyzeCall.getId(), renderedPrompt);
-                    state.failedPrompts++;
-                }
-
+            ReuseDecision reuseDecision = reuseDecisionService.decide(ctx, reuseCache);
+            if (reuseDecision == ReuseDecision.SKIP_ALL) {
                 state.processedPrompts++;
                 int nextCompleted = completedCalls.addAndGet(2);
                 updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false, lastWrittenCompleted, batch1Completed);
                 maybeDegradeBatch2Platform(state, degradedPlatforms, degradedCount);
+                continue;
             }
+
+            if (reuseDecision == ReuseDecision.REUSE_QUERY_ONLY) {
+                ReuseSnapshot snapshot = reuseDecisionService.snapshotOf(ctx, reuseCache);
+                PresaleAiCall reusedQueryCall = snapshot == null ? null : snapshot.querySuccessCall();
+                if (reusedQueryCall != null && reusedQueryCall.getRawResponse() != null) {
+                    boolean interruptedInAnalyze = false;
+                    String analyzeRequestPrompt = buildAnalyzeRequestPrompt(ctx, renderedPrompt, reusedQueryCall.getRawResponse());
+                    try {
+                        LlmCallResult analyzeResult = llmInvoker.analyze(ctx, renderedPrompt, reusedQueryCall.getRawResponse());
+                        PresaleAiCall analyzeCall = buildCall(
+                                versionId, 2, platformCode, template.getId(), competitorGroupName,
+                                "ANALYZE", reusedQueryCall.getId(), analyzeRequestPrompt, analyzeResult, null
+                        );
+                        PresaleAiPromptResult promptResult = buildPromptResultSuccess(
+                                versionId, 2, platformCode, template.getId(), competitorGroupName,
+                                reusedQueryCall.getId(), renderedPrompt, analyzeResult.rawResponse()
+                        );
+                        reusePersistenceService.replaceFailedAnalyzeAndResult(ctx, reusedQueryCall, analyzeCall, promptResult);
+                    } catch (LlmInvokeException | AnalyzeParseException ex) {
+                        PresaleAiCall analyzeCall = buildFailedCall(
+                                versionId, 2, platformCode, template.getId(), competitorGroupName,
+                                "ANALYZE", reusedQueryCall.getId(), analyzeRequestPrompt, ex.getMessage()
+                        );
+                        PresaleAiPromptResult promptResult = buildPromptResultAnalyzeFailed(
+                                versionId, 2, platformCode, template.getId(), competitorGroupName,
+                                reusedQueryCall.getId(), renderedPrompt
+                        );
+                        reusePersistenceService.replaceFailedAnalyzeAndResult(ctx, reusedQueryCall, analyzeCall, promptResult);
+                        state.failedPrompts++;
+                        interruptedInAnalyze = isInterruptedFailure(ex);
+                    }
+                    state.processedPrompts++;
+                    int nextCompleted = completedCalls.addAndGet(2);
+                    updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false, lastWrittenCompleted, batch1Completed);
+                    maybeDegradeBatch2Platform(state, degradedPlatforms, degradedCount);
+                    if (interruptedInAnalyze) {
+                        throw new BatchInterruptedException("batch2 interrupted during reused analyze");
+                    }
+                    continue;
+                }
+            }
+
+            PresaleAiCall queryCall;
+            LlmCallResult queryResult;
+            try {
+                queryResult = llmInvoker.query(ctx, renderedPrompt);
+                queryCall = insertCall(
+                        versionId, 2, platformCode, template.getId(), competitorGroupName,
+                        "QUERY", null, renderedPrompt, queryResult, null
+                );
+            } catch (LlmInvokeException ex) {
+                insertFailedCall(versionId, 2, platformCode, template.getId(), competitorGroupName,
+                        "QUERY", null, renderedPrompt, ex.getMessage());
+                state.processedPrompts++;
+                state.failedPrompts++;
+                int nextCompleted = completedCalls.addAndGet(2);
+                updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false, lastWrittenCompleted, batch1Completed);
+                maybeDegradeBatch2Platform(state, degradedPlatforms, degradedCount);
+                if (isInterruptedFailure(ex)) {
+                    throw new BatchInterruptedException("batch2 interrupted during query");
+                }
+                continue;
+            }
+
+            try {
+                String analyzeRequestPrompt = buildAnalyzeRequestPrompt(ctx, renderedPrompt, queryResult.rawResponse());
+                LlmCallResult analyzeResult = llmInvoker.analyze(ctx, renderedPrompt, queryResult.rawResponse());
+                PresaleAiCall analyzeCall = insertCall(
+                        versionId, 2, platformCode, template.getId(), competitorGroupName,
+                        "ANALYZE", queryCall.getId(), analyzeRequestPrompt, analyzeResult, null
+                );
+                insertPromptResultSuccess(versionId, 2, platformCode, template.getId(), competitorGroupName,
+                        queryCall.getId(), analyzeCall.getId(), renderedPrompt, analyzeResult.rawResponse());
+            } catch (LlmInvokeException | AnalyzeParseException ex) {
+                PresaleAiCall analyzeCall = insertFailedCall(versionId, 2, platformCode, template.getId(), competitorGroupName,
+                        "ANALYZE", queryCall.getId(),
+                        buildAnalyzeRequestPrompt(ctx, renderedPrompt, queryResult.rawResponse()), ex.getMessage());
+                insertPromptResultAnalyzeFailed(versionId, 2, platformCode, template.getId(), competitorGroupName,
+                        queryCall.getId(), analyzeCall.getId(), renderedPrompt);
+                state.failedPrompts++;
+            }
+
+            state.processedPrompts++;
+            int nextCompleted = completedCalls.addAndGet(2);
+            updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false, lastWrittenCompleted, batch1Completed);
+            maybeDegradeBatch2Platform(state, degradedPlatforms, degradedCount);
         }
 
         PlatformStatus status = state.degraded ? PlatformStatus.DEGRADED : PlatformStatus.DONE;
@@ -852,14 +851,16 @@ public class PresaleGenerateOrchestrator {
         enterStage(versionId, STAGE_BATCH2, "batch2 executing");
 
         List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(PresalePlatformConfigQueries.presaleEnabledWrapper());
-        List<PresalePromptTemplate> templates = promptTemplateMapper.selectList(
-                new LambdaQueryWrapper<PresalePromptTemplate>()
-                        .eq(PresalePromptTemplate::getEnabled, 1)
-                        .eq(PresalePromptTemplate::getTemplateVersion, activePromptTemplateVersion)
-                        .eq(PresalePromptTemplate::getHasCompetitorVar, 1)
-                        .orderByAsc(PresalePromptTemplate::getSortOrder)
-                        .orderByAsc(PresalePromptTemplate::getId)
+        List<PresaleReportVersionPromptTemplate> templates = versionPromptTemplateMapper.selectList(
+                new LambdaQueryWrapper<PresaleReportVersionPromptTemplate>()
+                        .eq(PresaleReportVersionPromptTemplate::getReportVersionId, versionId)
+                        .eq(PresaleReportVersionPromptTemplate::getHasCompetitorVar, 1)
+                        .orderByAsc(PresaleReportVersionPromptTemplate::getSortOrderInVersion)
+                        .orderByAsc(PresaleReportVersionPromptTemplate::getId)
         );
+
+        String competitorGroupName = CompetitorGroupKeyUtils.storageKey(competitors);
+        reusePersistenceService.cleanupLegacySingleCompetitorBatch2Rows(versionId, competitorGroupName);
 
         PresaleReportVersion current = versionMapper.selectById(versionId);
         int batch1Completed = current != null && current.getBatch1CompletedCalls() != null
@@ -1216,12 +1217,11 @@ public class PresaleGenerateOrchestrator {
                 .toList();
     }
 
-    private int countPromptTemplates(int hasCompetitorVar) {
-        Long count = promptTemplateMapper.selectCount(
-                new LambdaQueryWrapper<PresalePromptTemplate>()
-                        .eq(PresalePromptTemplate::getEnabled, 1)
-                        .eq(PresalePromptTemplate::getTemplateVersion, activePromptTemplateVersion)
-                        .eq(PresalePromptTemplate::getHasCompetitorVar, hasCompetitorVar)
+    private int countPromptTemplates(Long versionId, int hasCompetitorVar) {
+        Long count = versionPromptTemplateMapper.selectCount(
+                new LambdaQueryWrapper<PresaleReportVersionPromptTemplate>()
+                        .eq(PresaleReportVersionPromptTemplate::getReportVersionId, versionId)
+                        .eq(PresaleReportVersionPromptTemplate::getHasCompetitorVar, hasCompetitorVar)
         );
         return count == null ? 0 : count.intValue();
     }
@@ -1326,6 +1326,14 @@ public class PresaleGenerateOrchestrator {
         versionMapper.updateById(update);
     }
 
+    private String buildAnalyzeRequestPrompt(PlatformCallContext ctx, String originalPrompt, String queryAnswer) {
+        return AnalyzePromptTemplates.renderUserPrompt(
+                originalPrompt,
+                queryAnswer,
+                ctx == null ? null : ctx.brandName()
+        );
+    }
+
     private PresaleAiCall insertCall(Long versionId,
                                      int batchNo,
                                      String platformCode,
@@ -1333,11 +1341,12 @@ public class PresaleGenerateOrchestrator {
                                      String competitorName,
                                      String stage,
                                      Long parentCallId,
+                                     String requestPromptContent,
                                      LlmCallResult result,
                                      String failureReason) {
         PresaleAiCall row = buildCall(
                 versionId, batchNo, platformCode, promptTemplateId, competitorName, stage,
-                parentCallId, result, failureReason
+                parentCallId, requestPromptContent, result, failureReason
         );
         aiCallMapper.insert(row);
         return row;
@@ -1346,13 +1355,15 @@ public class PresaleGenerateOrchestrator {
     private PresaleAiCall insertFailedCall(Long versionId,
                                            int batchNo,
                                            String platformCode,
-                                           Long promptTemplateId,
-                                           String competitorName,
-                                           String stage,
-                                           Long parentCallId,
-                                           String failureReason) {
+                                            Long promptTemplateId,
+                                            String competitorName,
+                                            String stage,
+                                            Long parentCallId,
+                                            String requestPromptContent,
+                                            String failureReason) {
         PresaleAiCall row = buildFailedCall(
-                versionId, batchNo, platformCode, promptTemplateId, competitorName, stage, parentCallId, failureReason
+                versionId, batchNo, platformCode, promptTemplateId, competitorName, stage,
+                parentCallId, requestPromptContent, failureReason
         );
         aiCallMapper.insert(row);
         return row;
@@ -1362,11 +1373,12 @@ public class PresaleGenerateOrchestrator {
                                     int batchNo,
                                     String platformCode,
                                     Long promptTemplateId,
-                                    String competitorName,
-                                    String stage,
-                                    Long parentCallId,
-                                    LlmCallResult result,
-                                    String failureReason) {
+                                     String competitorName,
+                                     String stage,
+                                     Long parentCallId,
+                                     String requestPromptContent,
+                                     LlmCallResult result,
+                                     String failureReason) {
         PresaleAiCall row = new PresaleAiCall();
         row.setVersionId(versionId);
         row.setBatchNo(batchNo);
@@ -1375,6 +1387,7 @@ public class PresaleGenerateOrchestrator {
         row.setCompetitorName(competitorName);
         row.setStage(stage);
         row.setParentCallId(parentCallId);
+        row.setRequestPromptContent(requestPromptContent);
         row.setCallStatus(result.callStatus().name());
         row.setRetryCount(result.retryCount() == null ? 0 : result.retryCount());
         row.setRawResponse(result.rawResponse());
@@ -1389,10 +1402,11 @@ public class PresaleGenerateOrchestrator {
                                           int batchNo,
                                           String platformCode,
                                           Long promptTemplateId,
-                                          String competitorName,
-                                          String stage,
-                                          Long parentCallId,
-                                          String failureReason) {
+                                           String competitorName,
+                                           String stage,
+                                           Long parentCallId,
+                                           String requestPromptContent,
+                                           String failureReason) {
         PresaleAiCall row = new PresaleAiCall();
         row.setVersionId(versionId);
         row.setBatchNo(batchNo);
@@ -1401,6 +1415,7 @@ public class PresaleGenerateOrchestrator {
         row.setCompetitorName(competitorName);
         row.setStage(stage);
         row.setParentCallId(parentCallId);
+        row.setRequestPromptContent(requestPromptContent);
         row.setCallStatus(CallStatus.FAILED.name());
         row.setRetryCount(0);
         row.setRawResponse(null);
@@ -1425,6 +1440,7 @@ public class PresaleGenerateOrchestrator {
         row.setCompetitorName(competitorName);
         row.setStage(stage);
         row.setParentCallId(null);
+        row.setRequestPromptContent(null);
         row.setCallStatus(CallStatus.SKIPPED_DEGRADED.name());
         row.setRetryCount(0);
         row.setRawResponse(null);

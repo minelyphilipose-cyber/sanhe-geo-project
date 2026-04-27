@@ -20,7 +20,7 @@ class PromptTemplateRendererTest {
                 report("Acme", "餐饮", "连锁", "上海")
         );
 
-        assertEquals("Acme-餐饮-连锁-上海--Top1", actual);
+        assertEquals("Acme-餐饮-连锁-上海-Acme-Top1", actual);
     }
 
     @Test

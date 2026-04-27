@@ -95,7 +95,7 @@
           </div>
         </div>
 
-        <!-- 底部引用(从竞品 scene_advantages 合成) -->
+        <!-- 底部引用(优先使用竞品组优势,否则回退 Top1 竞品 scene_advantages) -->
         <div v-if="topCompetitorAdvantagesText" class="p08-quote-wrap">
           <div class="pull-quote">
             {{ topCompetitorAdvantagesText }}
@@ -125,8 +125,7 @@ import { useMergedView } from '@/composables/presale/useMergedView'
  *       您列 = ✗(固定,因为在 missing 列表里)
  *       竞品列 = top_competitor_coverage 是否含该竞品名
  *   - 3 张卡片:每组 missing_queries.length / group.total
- *   - 底部引用:取 Top1 竞品的 scene_advantages[0](L3 润色优先,L1 回退,
- *     scene_is_polished=false 显示"原始提取"弱标签)
+ *   - 底部引用:竞品组对比模式优先取 group_scene_advantages;否则回退 Top1 竞品 scene_advantages
  *
  * 不做:
  *   - 不展示 covered_queries(主题是"gap",覆盖的不显示)
@@ -206,18 +205,26 @@ const lowGapCount = computed(
   () => mergedView.value.scene_coverage.low_value.missing_queries?.length ?? 0
 )
 
-// ─── 底部引用:Top1 竞品的 scene_advantages ────────────
+// ─── 底部引用:竞品组优势优先,否则 Top1 竞品 scene_advantages ────────────
 const topCompetitor = computed(() =>
   mergedView.value.merged_competitors.find((c) => c.rank === 1) ?? null
 )
+const groupSceneAdvantages = computed(() =>
+  mergedView.value.group_scene_advantages?.filter((item) => item && item.trim()) ?? []
+)
 const topCompetitorAdvantagesText = computed(() => {
+  if (groupSceneAdvantages.value.length > 0) {
+    const joined = groupSceneAdvantages.value.slice(0, 3).join('、')
+    return `竞品组优势场景集中在:${joined}。建议围绕这些场景补足内容覆盖,降低竞品组在关键查询中的先发优势。`
+  }
   const top = topCompetitor.value
   if (!top || !top.scene_advantages || top.scene_advantages.length === 0) return ''
-  // 拼接,"Top1 品牌在以下场景有优势:xxx、yyy"
   const joined = top.scene_advantages.slice(0, 3).join('、')
   return `Top1 品牌 ${top.name} 的优势场景集中在:${joined}。建议针对这些场景做针对性的内容布局。`
 })
-const showRawTag = computed(() => topCompetitor.value?.scene_is_polished === false)
+const showRawTag = computed(() =>
+  groupSceneAdvantages.value.length === 0 && topCompetitor.value?.scene_is_polished === false
+)
 </script>
 
 <style scoped>

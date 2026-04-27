@@ -10,12 +10,11 @@ import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
-import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
-import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionPromptTemplateMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -45,7 +44,7 @@ class PresaleRawSnapshotAssemblerTest {
     @Mock
     private AiPlatformConfigMapper aiPlatformConfigMapper;
     @Mock
-    private PresalePromptTemplateMapper promptTemplateMapper;
+    private PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
     @Mock
     private PresaleBenchmarkResolver benchmarkResolver;
     @Mock
@@ -231,28 +230,21 @@ class PresaleRawSnapshotAssemblerTest {
 
         PresaleAiPromptResult r1 = promptResultWithSentimentPayload(1L, "POSITIVE",
                 "[{\"keyword\":\"性价比高\",\"sentiment\":\"POSITIVE\"},{\"keyword\":\"等位时间长\",\"sentiment\":\"NEGATIVE\"}]",
-                "{\"has_negative\":true,\"snippet\":\"证据A\"}", 11L, 101L, "kimi", t1);
+                "{\"has_negative\":true,\"snippet\":\"证据A\"}", 11L, 101L, "kimi", "问句1", t1);
         PresaleAiPromptResult r2 = promptResultWithSentimentPayload(2L, "NEGATIVE",
                 "[{\"keyword\":\"性价比高\",\"sentiment\":\"POSITIVE\"}]",
-                "{\"has_negative\":true,\"snippet\":\"证据B\"}", 12L, 102L, "kimi", t2);
+                "{\"has_negative\":true,\"snippet\":\"证据B\"}", 12L, 102L, "kimi", "问句2", t2);
         PresaleAiPromptResult r3 = promptResultWithSentimentPayload(3L, "NEUTRAL",
                 "[{\"keyword\":\"服务稳定\",\"sentiment\":\"POSITIVE\"}]",
-                "{\"has_negative\":false,\"snippet\":null}", 13L, 103L, "kimi", t3);
+                "{\"has_negative\":false,\"snippet\":null}", 13L, 103L, "kimi", "问句3", t3);
         PresaleAiPromptResult r4 = promptResultWithSentimentPayload(4L, "POSITIVE",
                 "[]",
-                "{\"has_negative\":true,\"snippet\":\"证据C\"}", 14L, 104L, "kimi", t4);
+                "{\"has_negative\":true,\"snippet\":\"证据C\"}", 14L, 104L, "kimi", "问句4", t4);
 
         when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(promptResult(10L, 1, 1, "POSITIVE", null, null)),
                 List.of(r1, r2, r3, r4)
         );
-
-        when(promptTemplateMapper.selectBatchIds(any())).thenReturn(List.of(
-                promptTemplate(101L, "问句1"),
-                promptTemplate(102L, "问句2"),
-                promptTemplate(103L, "问句3"),
-                promptTemplate(104L, "问句4")
-        ));
 
         when(aiCallMapper.selectBatchIds(any())).thenReturn(List.of(
                 aiCall(11L, t1),
@@ -288,12 +280,11 @@ class PresaleRawSnapshotAssemblerTest {
         when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
 
         PresaleAiPromptResult sentimentOnly = promptResultWithSentimentPayload(1L, "NEUTRAL",
-                "[]", "{}", null, 101L, "kimi", LocalDateTime.now());
+                "[]", "{}", null, 101L, "kimi", "问句1", LocalDateTime.now());
         when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(promptResult(10L, 1, 1, "POSITIVE", null, null)),
                 List.of(sentimentOnly)
         );
-        when(promptTemplateMapper.selectBatchIds(any())).thenReturn(List.of(promptTemplate(101L, "问句1")));
 
         String json = assembler.assemble(1001L, report, version, Set.of(), List.of());
         RawSnapshotDTO raw = new ObjectMapper().readValue(json, RawSnapshotDTO.class);
@@ -309,7 +300,7 @@ class PresaleRawSnapshotAssemblerTest {
                 aiCallMapper,
                 aiPromptResultMapper,
                 aiPlatformConfigMapper,
-                promptTemplateMapper,
+                versionPromptTemplateMapper,
                 benchmarkResolver,
                 competitorAggregator,
                 new ObjectMapper()
@@ -322,7 +313,7 @@ class PresaleRawSnapshotAssemblerTest {
                                   Long totalCalls,
                                   Long successfulCalls) {
         when(aiPlatformConfigMapper.selectCount(any())).thenReturn(platformCount);
-        when(promptTemplateMapper.selectCount(any())).thenReturn(batch1TemplateCount, batch2TemplateCount);
+        when(versionPromptTemplateMapper.selectCount(any())).thenReturn(batch1TemplateCount, batch2TemplateCount);
         when(aiCallMapper.selectCount(any())).thenReturn(totalCalls, successfulCalls);
     }
 
@@ -389,6 +380,7 @@ class PresaleRawSnapshotAssemblerTest {
                                                                    Long analyzeCallId,
                                                                    Long promptTemplateId,
                                                                    String platformCode,
+                                                                   String requestPromptContent,
                                                                    LocalDateTime createdAt) {
         PresaleAiPromptResult row = new PresaleAiPromptResult();
         row.setId(id);
@@ -398,6 +390,7 @@ class PresaleRawSnapshotAssemblerTest {
         row.setAnalyzeCallId(analyzeCallId);
         row.setPromptTemplateId(promptTemplateId);
         row.setPlatformCode(platformCode);
+        row.setRequestPromptContent(requestPromptContent);
         row.setCreatedAt(createdAt);
         return row;
     }
@@ -407,13 +400,6 @@ class PresaleRawSnapshotAssemblerTest {
         p.setPlatformCode(code);
         p.setPlatformName(name);
         return p;
-    }
-
-    private PresalePromptTemplate promptTemplate(Long id, String content) {
-        PresalePromptTemplate template = new PresalePromptTemplate();
-        template.setId(id);
-        template.setPromptContent(content);
-        return template;
     }
 
     private PresaleAiCall aiCall(Long id, LocalDateTime createdAt) {

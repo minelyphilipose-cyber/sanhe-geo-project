@@ -188,20 +188,20 @@
       "industry": "tech_software",
       "industryRole": "_ALL_",
       "industryAvg": {
-        "overall": 47.0,
-        "mention": 45.0,
-        "ranking": 49.0,
+        "overall": 57.0,
+        "mention": 56.0,
+        "ranking": 61.0,
         "sentiment": 54.0,
-        "coverage": 38.0
+        "coverage": 58.0
       },
       "top1": {
-        "overall": 73.0,
-        "mention": 68.0,
+        "overall": 78.0,
+        "mention": 74.0,
         "ranking": 81.0,
         "sentiment": 72.0,
         "coverage": 79.0
       },
-      "top10Score": 67.0,
+      "top10Score": 74.0,
       "confidenceLevel": "HIGH",
       "source": "AUTO_P50",
       "sampleSize": 150,
@@ -214,20 +214,20 @@
       "industry": "_ALL_",
       "industryRole": "_ALL_",
       "industryAvg": {
-        "overall": 46.0,
-        "mention": 45.0,
-        "ranking": 49.0,
+        "overall": 55.0,
+        "mention": 57.0,
+        "ranking": 59.0,
         "sentiment": 54.0,
-        "coverage": 38.0
+        "coverage": 48.0
       },
       "top1": {
-        "overall": 73.0,
-        "mention": 68.0,
-        "ranking": 81.0,
-        "sentiment": 72.0,
-        "coverage": 79.0
+        "overall": 78.0,
+        "mention": 79.0,
+        "ranking": 82.0,
+        "sentiment": 75.0,
+        "coverage": 74.0
       },
-      "top10Score": 68.0,
+      "top10Score": 73.0,
       "confidenceLevel": "MEDIUM",
       "source": "HYBRID",
       "sampleSize": 500,

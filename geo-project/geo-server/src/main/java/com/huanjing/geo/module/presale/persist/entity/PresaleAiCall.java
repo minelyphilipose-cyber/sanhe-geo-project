@@ -19,6 +19,7 @@ public class PresaleAiCall {
     private String competitorName;
     private String stage;
     private Long parentCallId;
+    private String requestPromptContent;
     private String callStatus;
     private Integer retryCount;
     private String rawResponse;
@@ -28,4 +29,3 @@ public class PresaleAiCall {
     private Integer durationMs;
     private LocalDateTime createdAt;
 }
-

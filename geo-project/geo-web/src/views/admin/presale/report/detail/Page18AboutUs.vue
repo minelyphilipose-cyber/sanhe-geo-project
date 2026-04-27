@@ -20,12 +20,12 @@
         <div class="p18-middle">
           <div class="mono p18-eyebrow">ABOUT US</div>
           <h2 class="display-serif p18-title">
-            让每一个品牌<br>被 AI 看见
+            让品牌在AI时代<br>被看见 · 被理解 · 被选择
           </h2>
           <div class="p18-divider"></div>
 
           <p class="p18-intro">
-            我们专注于生成式引擎优化(GEO)领域,帮助品牌在 AI 驱动的新搜索时代重建可见度。通过数据驱动的诊断、优化和持续监控,让您的品牌成为 AI 回答中的首选答案。
+            幻境AI 为品牌与企业提供 AI 可见性增长解决方案，让品牌在生成式搜索、智能问答与决策场景中建立确定性增长。
           </p>
 
           <div class="p18-services">
@@ -166,119 +166,128 @@ const copyrightYear = computed(() => dateParts.value.y)
 .p18-brand {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 14px;
 }
 
 .p18-logo {
-  width: 32px;
-  height: 32px;
-  border: 2px solid white;
+  width: 34px;
+  height: 34px;
+  border: 1.5px solid rgba(255, 255, 255, 0.92);
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 900;
   color: white;
+  line-height: 1;
 }
 
 .p18-brand-name {
-  font-size: 12px;
-  letter-spacing: 4px;
+  font-size: 11px;
+  letter-spacing: 4.5px;
   text-transform: uppercase;
-  color: white;
+  color: rgba(255, 255, 255, 0.92);
 }
 
 .p18-end-marker {
-  font-size: 11px;
-  letter-spacing: 2px;
-  color: rgba(255, 255, 255, 0.6);
+  font-size: 10px;
+  letter-spacing: 2.8px;
+  color: rgba(255, 255, 255, 0.56);
 }
 
 /* ─── 中部 ABOUT US ───────────────────────────────────── */
 
 .p18-middle {
   flex: 1;
-  padding-top: 60px;
+  padding-top: 70px;
 }
 
 .p18-eyebrow {
-  font-size: 11px;
-  letter-spacing: 4px;
-  color: rgba(255, 255, 255, 0.6);
-  margin-bottom: 20px;
+  font-size: 10px;
+  letter-spacing: 5px;
+  color: rgba(255, 255, 255, 0.58);
+  margin-bottom: 18px;
 }
 
 .p18-title {
-  font-size: 54px;
+  font-size: 50px;
   font-weight: 900;
-  line-height: 1.1;
-  margin: 0 0 32px;
-  letter-spacing: -1px;
+  line-height: 1.2;
+  margin: 0 0 30px;
+  letter-spacing: -1.6px;
   color: white;
+  text-shadow: 0 14px 34px rgba(0, 0, 0, 0.18);
 }
 
 .p18-divider {
-  width: 60px;
+  width: 66px;
   height: 2px;
   background: var(--presale-accent);
-  margin-bottom: 28px;
+  margin-bottom: 26px;
 }
 
 .p18-intro {
-  font-size: 15px;
-  line-height: 1.9;
-  color: rgba(255, 255, 255, 0.85);
-  max-width: 540px;
-  margin: 0 0 48px;
+  font-size: 14px;
+  line-height: 2;
+  letter-spacing: 0.2px;
+  color: rgba(255, 255, 255, 0.82);
+  max-width: 590px;
+  margin: 0 0 56px;
 }
 
 .p18-services {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 24px;
+  column-gap: 54px;
+  row-gap: 24px;
   margin-bottom: 60px;
 }
 
+.p18-service {
+  min-width: 0;
+}
+
 .p18-service-no {
-  font-size: 10px;
-  letter-spacing: 2px;
+  font-size: 9px;
+  letter-spacing: 2.4px;
   color: var(--presale-accent);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .p18-service-title {
-  font-size: 15px;
-  font-weight: 500;
-  margin-bottom: 4px;
-  color: white;
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: rgba(255, 255, 255, 0.96);
 }
 
 .p18-service-desc {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
-  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.58);
+  line-height: 1.72;
 }
 
 /* ─── 底部元信息 ──────────────────────────────────────── */
 
 .p18-bottom {
-  padding-top: 40px;
-  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  padding-top: 36px;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
-  gap: 20px;
+  gap: 28px;
 }
 
 .p18-meta-label {
-  font-size: 10px;
-  letter-spacing: 2px;
-  color: rgba(255, 255, 255, 0.5);
-  margin-bottom: 6px;
+  font-size: 9px;
+  letter-spacing: 2.8px;
+  color: rgba(255, 255, 255, 0.46);
+  margin-bottom: 8px;
 }
 
 .p18-meta-value {
-  font-size: 13px;
-  font-weight: 500;
-  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: rgba(255, 255, 255, 0.94);
 }
 
 .p18-meta-right {
@@ -293,9 +302,9 @@ const copyrightYear = computed(() => dateParts.value.y)
 
 .p18-copyright {
   margin-top: 24px;
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.4);
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.36);
   text-align: center;
-  letter-spacing: 2px;
+  letter-spacing: 2.4px;
 }
 </style>

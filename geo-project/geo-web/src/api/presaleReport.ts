@@ -43,6 +43,8 @@ export interface ReportListItemVO {
   region: string
   versionCount: number
   latestVersion: ReportVersionMetaVO | null
+  canEdit: boolean
+  canEditReason: string | null
   createdAt: string
 }
 
@@ -75,6 +77,18 @@ export interface ReportScopePreviewVO {
   dimensionCount: number
 }
 
+export interface PromptTemplateVO {
+  id: number
+  promptCode: string
+  category: string
+  businessValue: string
+  promptContent: string
+  hasCompetitorVar: boolean
+  sortOrder: number
+  remark: string | null
+  templateVersion: string
+}
+
 /**
  * MyBatis-Plus Page 响应结构。
  */
@@ -95,6 +109,14 @@ export interface CreateReportRequest {
   industryRole: string
   region: string
   userDemand?: string
+  userType?: string
+  promptTemplateVersion: string
+  promptTemplates: PromptTemplateDraftRequest[]
+}
+
+export interface PromptTemplateDraftRequest {
+  sourceTemplateId: number
+  promptContent: string
 }
 
 export interface ReportListQueryRequest {
@@ -115,6 +137,8 @@ export interface ReportListQueryRequest {
 /** PATCH L3 编辑请求。 */
 export interface EditVersionContentRequest {
   editableContentJson: string
+  expectedContentUpdatedAt?: string | null
+  forceOverwrite?: boolean
 }
 
 /** POST 派生请求(v1 空壳,预留扩展)。 */
@@ -184,11 +208,27 @@ export function createReport(data: CreateReportRequest) {
 }
 
 /**
+ * 删除报告。后端当前为软删除:列表/详情不可见,版本与导出审计数据保留。
+ */
+export function deleteReport(reportId: number) {
+  return unwrap(request.delete<R<void>>(`/presale/reports/${reportId}`))
+}
+
+/**
  * 新建报告页:取实时诊断范围预览。
  */
 export function getReportScopePreview() {
   return unwrap(
     request.get<R<ReportScopePreviewVO>>('/presale/reports/scope-preview')
+  )
+}
+
+/**
+ * 新建报告页:反显当前 active version 的 Prompt 原文模板。
+ */
+export function listPromptTemplates() {
+  return unwrap(
+    request.get<R<PromptTemplateVO[]>>('/presale/reports/prompt-templates')
   )
 }
 

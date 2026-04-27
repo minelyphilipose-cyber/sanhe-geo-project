@@ -32,6 +32,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 class PresaleJudgeServiceTest {
@@ -74,7 +75,7 @@ class PresaleJudgeServiceTest {
         config.setPlatformCode("kimi");
         config.setLowModelId("test-low-model");
         when(aiPlatformConfigMapper.selectOne(any())).thenReturn(config);
-        when(judgeResultMapper.selectOne(any())).thenReturn(null);
+        lenient().when(judgeResultMapper.selectCount(any())).thenReturn(0L);
     }
 
     @Test
@@ -111,7 +112,7 @@ class PresaleJudgeServiceTest {
                 .thenReturn(List.of(row));
         when(llmInvoker.judge(any(), anyString(), anyDouble()))
                 .thenReturn(new LlmCallResult(
-                        "{\"preferred_brand\":\"target\",\"target_sentiment\":\"POSITIVE\",\"target_advantages\":[],\"target_disadvantages\":[],\"competitor_advantages\":[],\"reasoning_quality\":\"high\"}",
+                        "{\"verdicts\":[{\"competitor\":\"竞品A\",\"preferred_brand\":\"target\",\"target_sentiment\":\"POSITIVE\",\"target_advantages\":[],\"target_disadvantages\":[],\"competitor_advantages\":[],\"reasoning_quality\":\"high\"}]}",
                         10, 20, 100L, 0, com.huanjing.geo.module.presale.generate.llm.CallStatus.SUCCESS
                 ));
 

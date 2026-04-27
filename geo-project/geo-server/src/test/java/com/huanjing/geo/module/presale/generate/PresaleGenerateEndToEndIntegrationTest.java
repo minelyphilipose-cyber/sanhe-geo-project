@@ -6,14 +6,14 @@ import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
 import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
 import com.huanjing.geo.module.presale.generate.llm.PromptTemplateRenderer;
-import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
+import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersionPromptTemplate;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
-import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionPromptTemplateMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import org.junit.jupiter.api.Test;
@@ -54,7 +54,7 @@ class PresaleGenerateEndToEndIntegrationTest {
     @MockBean
     private AiPlatformConfigMapper aiPlatformConfigMapper;
     @MockBean
-    private PresalePromptTemplateMapper promptTemplateMapper;
+    private PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
     @MockBean
     private PresaleAiCallMapper aiCallMapper;
     @MockBean
@@ -84,9 +84,9 @@ class PresaleGenerateEndToEndIntegrationTest {
         PresaleReportVersion version = insertVersion(report.getId());
 
         when(aiPlatformConfigMapper.selectCount(any())).thenReturn(1L);
-        when(promptTemplateMapper.selectCount(any())).thenReturn(1L, 1L);
+        when(versionPromptTemplateMapper.selectCount(any())).thenReturn(1L, 1L);
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("kimi")));
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of());
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(promptTemplate(101L, "B1_TEMPLATE", "batch1 prompt", 0)));
         when(competitorAggregator.extractTopCompetitorsFromBatch1(anyLong(), anyString())).thenReturn(List.of());
         when(reuseDecisionService.preloadByVersionAndBatch(anyLong(), anyInt())).thenReturn(Map.of());
         when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
@@ -119,19 +119,21 @@ class PresaleGenerateEndToEndIntegrationTest {
         );
         Set<String> seenPlatforms = ConcurrentHashMap.newKeySet();
 
-        PresalePromptTemplate batch1Template = promptTemplate(101L, "B1_TEMPLATE", "batch1 prompt", 0);
-        PresalePromptTemplate batch2Template = promptTemplate(201L, "B2_TEMPLATE", "batch2 prompt ${competitor}", 1);
+        PresaleReportVersionPromptTemplate batch1Template = promptTemplate(101L, "B1_TEMPLATE", "batch1 prompt", 0);
+        PresaleReportVersionPromptTemplate batch2Template = promptTemplate(201L, "B2_TEMPLATE", "batch2 prompt {competitor}", 1);
 
         when(aiPlatformConfigMapper.selectCount(any())).thenReturn(5L);
-        when(promptTemplateMapper.selectCount(any())).thenReturn(1L, 1L);
+        when(versionPromptTemplateMapper.selectCount(any())).thenReturn(1L, 1L);
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms);
-        when(promptTemplateMapper.selectList(any())).thenReturn(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(
                 List.of(batch1Template),
                 List.of(batch2Template)
         );
         when(reuseDecisionService.preloadByVersionAndBatch(anyLong(), anyInt())).thenReturn(Map.of());
         when(reuseDecisionService.decide(any(), any())).thenReturn(ReuseDecision.RUN_FULL);
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(PlatformCallContext.class), any(PresaleReport.class)))
+        when(promptTemplateRenderer.variables(any(PlatformCallContext.class), any(PresaleReport.class)))
+                .thenCallRealMethod();
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0, String.class));
         when(llmInvoker.query(any(PlatformCallContext.class), anyString()))
                 .thenAnswer(invocation -> {
@@ -218,13 +220,20 @@ class PresaleGenerateEndToEndIntegrationTest {
         return config;
     }
 
-    private PresalePromptTemplate promptTemplate(Long id, String code, String content, Integer hasCompetitorVar) {
-        PresalePromptTemplate template = new PresalePromptTemplate();
+    private PresaleReportVersionPromptTemplate promptTemplate(Long id, String code, String content, Integer hasCompetitorVar) {
+        PresaleReportVersionPromptTemplate template = new PresaleReportVersionPromptTemplate();
         template.setId(id);
-        template.setPromptCode(code);
+        template.setReportId(1L);
+        template.setReportVersionId(1L);
+        template.setSourceTemplateId(id);
+        template.setSourcePromptCode(code);
+        template.setSourceTemplateVersion("v3");
+        template.setCategory(Integer.valueOf(1).equals(hasCompetitorVar) ? "对比型" : "推荐型");
+        template.setBusinessValue("中");
         template.setPromptContent(content);
-        template.setEnabled(1);
         template.setHasCompetitorVar(hasCompetitorVar);
+        template.setSortOrderInVersion(id.intValue());
+        template.setIsUserAdded(0);
         return template;
     }
 }

@@ -161,8 +161,7 @@ public class PresaleJudgeService {
         if (candidate == null || candidate.getPromptResultId() == null) {
             return JudgeOutcome.SKIPPED;
         }
-        PresaleAiPromptJudgeResult existing = findByPromptResultId(candidate.getPromptResultId());
-        if (existing != null && STATUS_SUCCESS.equalsIgnoreCase(existing.getJudgeStatus())) {
+        if (hasSuccessfulJudge(candidate, category)) {
             return JudgeOutcome.SKIPPED;
         }
 
@@ -182,10 +181,13 @@ public class PresaleJudgeService {
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             attemptsUsed = attempt;
             try {
-                PresaleAiPromptJudgeResult successRow = invokeAndBuildSuccess(
+                List<PresaleAiPromptJudgeResult> successRows = invokeAndBuildSuccess(
                         candidate, category, brandName, operatorUserId, isManager, judgePrompt, modelId, attempt, cognitiveAttributes
                 );
-                upsertJudgeSuccess(successRow);
+                cleanupLegacyComparisonGroupJudge(candidate, category);
+                for (PresaleAiPromptJudgeResult successRow : successRows) {
+                    upsertJudgeSuccess(successRow);
+                }
                 return JudgeOutcome.SUCCESS;
             } catch (JudgeAttemptError ex) {
                 lastError = ex;
@@ -201,15 +203,15 @@ public class PresaleJudgeService {
         return JudgeOutcome.FAILED;
     }
 
-    private PresaleAiPromptJudgeResult invokeAndBuildSuccess(PresaleJudgeCandidateRow candidate,
-                                                             String category,
-                                                             String brandName,
-                                                             Long operatorUserId,
-                                                             boolean isManager,
-                                                             String judgePrompt,
-                                                             String modelId,
-                                                             int attempt,
-                                                             List<String> cognitiveAttributes) throws JudgeAttemptError {
+    private List<PresaleAiPromptJudgeResult> invokeAndBuildSuccess(PresaleJudgeCandidateRow candidate,
+                                                                   String category,
+                                                                   String brandName,
+                                                                   Long operatorUserId,
+                                                                   boolean isManager,
+                                                                   String judgePrompt,
+                                                                   String modelId,
+                                                                   int attempt,
+                                                                   List<String> cognitiveAttributes) throws JudgeAttemptError {
         String competitorName = normalizeCompetitor(candidate.getCompetitorName());
         PlatformCallContext ctx = new PlatformCallContext(
                 candidate.getVersionId(),
@@ -229,24 +231,31 @@ public class PresaleJudgeService {
                     "JUDGE_LLM_CALL_FAILED: " + safeMessage(ex), null, ex);
         }
         JsonNode payload = parseJudgePayload(result.rawResponse());
-        PresaleAiPromptJudgeResult row = initBaseJudgeRow(candidate, category);
+        if (CATEGORY_COGNITIVE.equals(category)) {
+            PresaleAiPromptJudgeResult row = initBaseJudgeRow(candidate, category);
+            applySuccessMeta(row, attempt, modelId, result.rawResponse(), payload);
+            applyCognitivePayload(row, payload, cognitiveAttributes);
+            return List.of(row);
+        } else if (CATEGORY_COMPARISON.equals(category)) {
+            return buildComparisonRows(candidate, attempt, modelId, result.rawResponse(), payload);
+        } else {
+            throw new JudgeAttemptError(JudgeErrorCode.UNSUPPORTED_CATEGORY,
+                    "UNSUPPORTED_CATEGORY: " + category, result.rawResponse(), null);
+        }
+    }
+
+    private void applySuccessMeta(PresaleAiPromptJudgeResult row,
+                                  int attempt,
+                                  String modelId,
+                                  String rawResponse,
+                                  JsonNode payload) {
         row.setJudgeStatus(STATUS_SUCCESS);
         row.setJudgeAttemptCount(attempt);
         row.setJudgeModelId(modelId);
         row.setJudgeTemperature(BigDecimal.valueOf(judgeTemperature).setScale(2, RoundingMode.HALF_UP));
         row.setJudgeError(null);
-        row.setRawJudgeResponse(result.rawResponse());
+        row.setRawJudgeResponse(rawResponse);
         row.setJudgePayloadJson(toJsonOrNull(payload));
-
-        if (CATEGORY_COGNITIVE.equals(category)) {
-            applyCognitivePayload(row, payload, cognitiveAttributes);
-        } else if (CATEGORY_COMPARISON.equals(category)) {
-            applyComparisonPayload(row, payload);
-        } else {
-            throw new JudgeAttemptError(JudgeErrorCode.UNSUPPORTED_CATEGORY,
-                    "UNSUPPORTED_CATEGORY: " + category, result.rawResponse(), null);
-        }
-        return row;
     }
 
     private JsonNode parseJudgePayload(String rawResponse) throws JudgeAttemptError {
@@ -301,6 +310,51 @@ public class PresaleJudgeService {
         String tone = normalizeEnumText(payload.path("tone").asText(null),
                 Set.of("OBJECTIVE", "PROMOTIONAL", "MIXED", "UNKNOWN"));
         row.setTone(tone);
+    }
+
+    private List<PresaleAiPromptJudgeResult> buildComparisonRows(PresaleJudgeCandidateRow candidate,
+                                                                 int attempt,
+                                                                 String modelId,
+                                                                 String rawResponse,
+                                                                 JsonNode payload) throws JudgeAttemptError {
+        List<String> expectedCompetitors = CompetitorGroupKeyUtils.split(candidate.getCompetitorName());
+        if (expectedCompetitors.isEmpty()) {
+            expectedCompetitors = List.of(normalizeCompetitor(candidate.getCompetitorName()));
+        }
+        Set<String> expected = new LinkedHashSet<>(expectedCompetitors);
+        JsonNode verdicts = payload.get("verdicts");
+        if (verdicts == null || !verdicts.isArray()) {
+            throw new JudgeAttemptError(JudgeErrorCode.INVALID_VERDICTS,
+                    "JUDGE_INVALID_VERDICTS", rawResponse, null);
+        }
+
+        Map<String, JsonNode> verdictByCompetitor = new LinkedHashMap<>();
+        for (JsonNode verdict : verdicts) {
+            String competitor = normalizeCompetitor(verdict.path("competitor").asText(null));
+            if (!StringUtils.hasText(competitor) || !expected.contains(competitor)) {
+                throw new JudgeAttemptError(JudgeErrorCode.INVALID_VERDICTS,
+                        "JUDGE_INVALID_VERDICT_COMPETITOR: " + competitor, rawResponse, null);
+            }
+            if (verdictByCompetitor.putIfAbsent(competitor, verdict) != null) {
+                throw new JudgeAttemptError(JudgeErrorCode.INVALID_VERDICTS,
+                        "JUDGE_DUPLICATE_VERDICT_COMPETITOR: " + competitor, rawResponse, null);
+            }
+        }
+        if (verdictByCompetitor.size() != expected.size()) {
+            throw new JudgeAttemptError(JudgeErrorCode.INVALID_VERDICTS,
+                    "JUDGE_VERDICTS_NOT_COVER_ALL_COMPETITORS", rawResponse, null);
+        }
+
+        List<PresaleAiPromptJudgeResult> rows = new ArrayList<>();
+        for (String competitor : expectedCompetitors) {
+            PresaleAiPromptJudgeResult row = initBaseJudgeRow(candidate, CATEGORY_COMPARISON);
+            row.setCompetitorName(competitor);
+            JsonNode verdict = verdictByCompetitor.get(competitor);
+            applySuccessMeta(row, attempt, modelId, rawResponse, verdict);
+            applyComparisonPayload(row, verdict);
+            rows.add(row);
+        }
+        return rows;
     }
 
     private void applyComparisonPayload(PresaleAiPromptJudgeResult row, JsonNode payload) throws JudgeAttemptError {
@@ -420,6 +474,19 @@ public class PresaleJudgeService {
         judgeResultMapper.upsertByPromptResultId(row);
     }
 
+    private void cleanupLegacyComparisonGroupJudge(PresaleJudgeCandidateRow candidate, String category) {
+        if (!CATEGORY_COMPARISON.equals(category) || candidate == null || candidate.getPromptResultId() == null) {
+            return;
+        }
+        String groupName = normalizeCompetitor(candidate.getCompetitorName());
+        if (!StringUtils.hasText(groupName) || !groupName.contains(CompetitorGroupKeyUtils.SEPARATOR)) {
+            return;
+        }
+        judgeResultMapper.delete(new LambdaQueryWrapper<PresaleAiPromptJudgeResult>()
+                .eq(PresaleAiPromptJudgeResult::getPromptResultId, candidate.getPromptResultId())
+                .eq(PresaleAiPromptJudgeResult::getCompetitorName, groupName));
+    }
+
     private void upsertJudgeFailure(PresaleJudgeCandidateRow candidate,
                                     String category,
                                     int attemptCount,
@@ -453,12 +520,23 @@ public class PresaleJudgeService {
         row.setCompetitorAdvantages(null);
     }
 
-    private PresaleAiPromptJudgeResult findByPromptResultId(Long promptResultId) {
-        if (promptResultId == null) {
-            return null;
+    private boolean hasSuccessfulJudge(PresaleJudgeCandidateRow candidate, String category) {
+        if (candidate == null || candidate.getPromptResultId() == null) {
+            return false;
         }
-        return judgeResultMapper.selectOne(new LambdaQueryWrapper<PresaleAiPromptJudgeResult>()
-                .eq(PresaleAiPromptJudgeResult::getPromptResultId, promptResultId));
+        if (CATEGORY_COMPARISON.equals(category)) {
+            int expectedCount = Math.max(1, CompetitorGroupKeyUtils.split(candidate.getCompetitorName()).size());
+            Long count = judgeResultMapper.selectCount(new LambdaQueryWrapper<PresaleAiPromptJudgeResult>()
+                    .eq(PresaleAiPromptJudgeResult::getPromptResultId, candidate.getPromptResultId())
+                    .eq(PresaleAiPromptJudgeResult::getCategory, CATEGORY_COMPARISON_DB)
+                    .eq(PresaleAiPromptJudgeResult::getJudgeStatus, STATUS_SUCCESS));
+            return count != null && count >= expectedCount;
+        }
+        Long count = judgeResultMapper.selectCount(new LambdaQueryWrapper<PresaleAiPromptJudgeResult>()
+                .eq(PresaleAiPromptJudgeResult::getPromptResultId, candidate.getPromptResultId())
+                .eq(PresaleAiPromptJudgeResult::getCategory, CATEGORY_COGNITIVE_DB)
+                .eq(PresaleAiPromptJudgeResult::getJudgeStatus, STATUS_SUCCESS));
+        return count != null && count > 0;
     }
 
     private String resolveModelId(String platformCode) {
@@ -625,6 +703,7 @@ public class PresaleJudgeService {
         JSON_PARSE_FAILED(true),
         UNSUPPORTED_CATEGORY(false),
         INVALID_PREFERRED_BRAND(false),
+        INVALID_VERDICTS(false),
         INVALID_SENTIMENT_SCORE(false);
 
         private final boolean retryableInOuterLoop;

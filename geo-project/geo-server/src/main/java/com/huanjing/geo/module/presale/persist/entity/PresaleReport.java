@@ -34,6 +34,9 @@ public class PresaleReport {
     /** 客户诉求,可选。 */
     private String userDemand;
 
+    /** 目标用户/消费群体,可选。 */
+    private String userType;
+
     /** 指向最新版本,初始为 null,第一版创建后更新。 */
     @TableField("current_version_id")
     private Long latestVersionId;
@@ -44,4 +47,10 @@ public class PresaleReport {
 
     /** 创建人(sys_user.id),由当前登录上下文注入。 */
     private Long createdBy;
+
+    /** 软删除时间。删除后的报告不再出现在列表/详情入口。 */
+    private LocalDateTime deletedAt;
+
+    /** 软删除操作人。 */
+    private Long deletedBy;
 }

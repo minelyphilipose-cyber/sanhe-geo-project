@@ -3,6 +3,8 @@ package com.huanjing.geo.module.presale.dto;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
+import java.time.LocalDateTime;
+
 /**
  * PATCH /api/presale/reports/{id}/versions/{versionNo}/content 请求体。
  *
@@ -21,4 +23,16 @@ public class EditVersionContentRequest {
      */
     @NotBlank(message = "editableContentJson must not be blank")
     private String editableContentJson;
+
+    /**
+     * 前端加载详情时拿到的 contentUpdatedAt。
+     * <p>null 是合法基线值(表示此前从未编辑过),因此后端默认也会参与乐观锁比较。
+     * 只有 forceOverwrite=true 时跳过比较。</p>
+     */
+    private LocalDateTime expectedContentUpdatedAt;
+
+    /**
+     * 冲突弹窗中"强制覆盖"使用。默认 false。
+     */
+    private Boolean forceOverwrite;
 }

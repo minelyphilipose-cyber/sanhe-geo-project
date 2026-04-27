@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.presale.dto.request.CreateReportRequest;
 import com.huanjing.geo.module.presale.dto.request.ReportListQueryRequest;
+import com.huanjing.geo.module.presale.dto.response.PromptTemplateVO;
 import com.huanjing.geo.module.presale.dto.response.ReportDetailVO;
 import com.huanjing.geo.module.presale.dto.response.ReportListItemVO;
 import com.huanjing.geo.module.presale.dto.response.ReportScopePreviewVO;
@@ -11,6 +12,7 @@ import com.huanjing.geo.module.presale.dto.response.ReportVersionMetaVO;
 import com.huanjing.geo.module.presale.service.PresaleReportService;
 import com.huanjing.geo.module.presale.service.PresaleReportVersionService;
 import jakarta.validation.Valid;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,6 +20,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * 售前报告 Controller。
@@ -64,12 +68,29 @@ public class PresaleReportController {
     }
 
     /**
+     * 新建报告页:反显当前 active version 的 Prompt 原文模板。
+     */
+    @GetMapping("/prompt-templates")
+    public R<List<PromptTemplateVO>> listPromptTemplates() {
+        return R.ok(reportService.listPromptTemplates());
+    }
+
+    /**
      * 新建报告。
      */
     @PostMapping
     public R<Long> create(@RequestBody @Valid CreateReportRequest req) {
         Long reportId = reportService.createReport(req);
         return R.ok(reportId);
+    }
+
+    /**
+     * 删除报告。当前为软删除:列表/详情不可见,版本与导出审计数据保留。
+     */
+    @DeleteMapping("/{id}")
+    public R<Void> delete(@PathVariable("id") Long id) {
+        reportService.deleteReport(id);
+        return R.ok();
     }
 
     /**

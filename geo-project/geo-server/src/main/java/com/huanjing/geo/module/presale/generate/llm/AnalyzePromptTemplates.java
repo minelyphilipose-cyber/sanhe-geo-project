@@ -38,4 +38,15 @@ public final class AnalyzePromptTemplates {
             回答:{{queryAnswer}}
             目标品牌:{{brandName}}
             """;
+
+    public static String renderUserPrompt(String originalPrompt, String queryAnswer, String brandName) {
+        return USER_TEMPLATE
+                .replace("{{originalPrompt}}", safe(originalPrompt))
+                .replace("{{queryAnswer}}", safe(queryAnswer))
+                .replace("{{brandName}}", safe(brandName));
+    }
+
+    private static String safe(String text) {
+        return text == null ? "" : text;
+    }
 }

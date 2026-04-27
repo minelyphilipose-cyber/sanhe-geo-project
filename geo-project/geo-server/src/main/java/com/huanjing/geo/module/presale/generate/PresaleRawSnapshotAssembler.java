@@ -15,15 +15,14 @@ import com.huanjing.geo.module.presale.dto.snapshot.raw.SentimentDetail;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.TestSummary;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
-import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
+import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersionPromptTemplate;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
-import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionPromptTemplateMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
-import org.springframework.beans.factory.annotation.Value;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -50,8 +49,6 @@ public class PresaleRawSnapshotAssembler {
     private static final String CATEGORY_COMPARISON = "对比型";
     private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String STATUS_SKIPPED_DEGRADED = "SKIPPED_DEGRADED";
-    @Value("${presale.prompt.active-version:v2}")
-    private String activePromptTemplateVersion;
     private static final int MAX_SCENE_ADVANTAGES = 5;
     private static final int MAX_TOP_KEYWORDS = 10;
     private static final int MAX_NEGATIVE_EVIDENCE = 3;
@@ -59,7 +56,7 @@ public class PresaleRawSnapshotAssembler {
     private final PresaleAiCallMapper aiCallMapper;
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
-    private final PresalePromptTemplateMapper promptTemplateMapper;
+    private final PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
     private final PresaleBenchmarkResolver benchmarkResolver;
     private final PresaleCompetitorAggregator competitorAggregator;
     private final ObjectMapper objectMapper;
@@ -67,14 +64,14 @@ public class PresaleRawSnapshotAssembler {
     public PresaleRawSnapshotAssembler(PresaleAiCallMapper aiCallMapper,
                                        PresaleAiPromptResultMapper aiPromptResultMapper,
                                        AiPlatformConfigMapper aiPlatformConfigMapper,
-                                       PresalePromptTemplateMapper promptTemplateMapper,
+                                       PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper,
                                        PresaleBenchmarkResolver benchmarkResolver,
                                        PresaleCompetitorAggregator competitorAggregator,
                                        ObjectMapper objectMapper) {
         this.aiCallMapper = aiCallMapper;
         this.aiPromptResultMapper = aiPromptResultMapper;
         this.aiPlatformConfigMapper = aiPlatformConfigMapper;
-        this.promptTemplateMapper = promptTemplateMapper;
+        this.versionPromptTemplateMapper = versionPromptTemplateMapper;
         this.benchmarkResolver = benchmarkResolver;
         this.competitorAggregator = competitorAggregator;
         this.objectMapper = objectMapper;
@@ -92,6 +89,7 @@ public class PresaleRawSnapshotAssembler {
             List<PlatformBreakdown> platformBreakdown = buildPlatformBreakdown(versionId, degradedPlatforms);
             List<Competitor> competitors = buildCompetitors(
                     versionId, report, extractedCompetitorDisplayNames);
+            List<String> groupSceneAdvantages = aggregateGroupSceneAdvantages(versionId, extractedCompetitorDisplayNames);
             SentimentDetail sentimentDetail = buildSentimentDetail(versionId);
             BenchmarksFrozen benchmarksFrozen = benchmarkResolver.resolve(
                     report.getIndustry(), report.getIndustryRole());
@@ -102,6 +100,7 @@ public class PresaleRawSnapshotAssembler {
                     .testSummary(testSummary)
                     .platformBreakdown(platformBreakdown)
                     .competitors(competitors)
+                    .groupSceneAdvantages(groupSceneAdvantages)
                     .sentimentDetail(sentimentDetail)
                     .benchmarksFrozen(benchmarksFrozen)
                     .build();
@@ -159,11 +158,11 @@ public class PresaleRawSnapshotAssembler {
                                          Set<String> degradedPlatforms,
                                          List<String> extractedCompetitorDisplayNames) {
         int platformCount = countEnabledPlatforms();
-        int genericPromptCount = countPromptTemplates(0);
-        int competitorPromptCount = countPromptTemplates(1);
+        int genericPromptCount = countPromptTemplates(versionId, 0);
+        int competitorPromptCount = countPromptTemplates(versionId, 1);
         int competitorCount = extractedCompetitorDisplayNames == null ? 0 : extractedCompetitorDisplayNames.size();
 
-        int totalPrompts = genericPromptCount + (competitorPromptCount * competitorCount);
+        int totalPrompts = genericPromptCount + (competitorCount > 0 ? competitorPromptCount : 0);
         int totalCalls = countNonSkippedCalls(versionId);
         int successfulCalls = countCallsByStatus(versionId, STATUS_SUCCESS);
         int failedCalls = Math.max(0, totalCalls - successfulCalls);
@@ -187,12 +186,11 @@ public class PresaleRawSnapshotAssembler {
         return count == null ? 0 : count.intValue();
     }
 
-    private int countPromptTemplates(int hasCompetitorVar) {
-        Long count = promptTemplateMapper.selectCount(
-                new LambdaQueryWrapper<PresalePromptTemplate>()
-                        .eq(PresalePromptTemplate::getEnabled, 1)
-                        .eq(PresalePromptTemplate::getTemplateVersion, activePromptTemplateVersion)
-                        .eq(PresalePromptTemplate::getHasCompetitorVar, hasCompetitorVar)
+    private int countPromptTemplates(Long versionId, int hasCompetitorVar) {
+        Long count = versionPromptTemplateMapper.selectCount(
+                new LambdaQueryWrapper<PresaleReportVersionPromptTemplate>()
+                        .eq(PresaleReportVersionPromptTemplate::getReportVersionId, versionId)
+                        .eq(PresaleReportVersionPromptTemplate::getHasCompetitorVar, hasCompetitorVar)
         );
         return count == null ? 0 : count.intValue();
     }
@@ -224,7 +222,7 @@ public class PresaleRawSnapshotAssembler {
         if (platforms == null) {
             platforms = List.of();
         }
-        Map<Long, String> categoryByTemplateId = loadActiveTemplateCategoryMap();
+        Map<Long, String> categoryByTemplateId = loadVersionTemplateCategoryMap(versionId);
         Set<String> safeDegraded = degradedPlatforms == null ? Set.of() : degradedPlatforms;
         List<PlatformBreakdown> out = new ArrayList<>();
         for (AiPlatformConfig platform : platforms) {
@@ -297,24 +295,25 @@ public class PresaleRawSnapshotAssembler {
         return out;
     }
 
-    private Map<Long, String> loadActiveTemplateCategoryMap() {
-        List<PresalePromptTemplate> templates = promptTemplateMapper.selectList(
-                new LambdaQueryWrapper<PresalePromptTemplate>()
-                        .eq(PresalePromptTemplate::getEnabled, 1)
-                        .eq(PresalePromptTemplate::getTemplateVersion, activePromptTemplateVersion)
+    private Map<Long, String> loadVersionTemplateCategoryMap(Long versionId) {
+        List<PresaleReportVersionPromptTemplate> templates = versionPromptTemplateMapper.selectList(
+                new LambdaQueryWrapper<PresaleReportVersionPromptTemplate>()
+                        .eq(PresaleReportVersionPromptTemplate::getReportVersionId, versionId)
         );
         if (templates == null || templates.isEmpty()) {
             return Map.of();
         }
         return templates.stream().collect(Collectors.toMap(
-                PresalePromptTemplate::getId,
-                PresalePromptTemplate::getCategory,
+                PresaleReportVersionPromptTemplate::getId,
+                PresaleReportVersionPromptTemplate::getCategory,
                 (left, right) -> left
         ));
     }
 
     private boolean isSampleIntentCategory(String category) {
-        return !CATEGORY_COGNITIVE.equals(category) && !CATEGORY_COMPARISON.equals(category);
+        return category != null
+                && !CATEGORY_COGNITIVE.equals(category)
+                && !CATEGORY_COMPARISON.equals(category);
     }
 
     private List<Competitor> buildCompetitors(Long versionId,
@@ -343,6 +342,14 @@ public class PresaleRawSnapshotAssembler {
                     .build());
         }
         return out;
+    }
+
+    private List<String> aggregateGroupSceneAdvantages(Long versionId, List<String> extractedCompetitorDisplayNames) {
+        String groupName = CompetitorGroupKeyUtils.storageKey(extractedCompetitorDisplayNames);
+        if (groupName.isBlank() || !groupName.contains(CompetitorGroupKeyUtils.SEPARATOR)) {
+            return List.of();
+        }
+        return aggregateSceneAdvantages(versionId, groupName);
     }
 
     private List<String> aggregateSceneAdvantages(Long versionId, String competitorDisplayName) {

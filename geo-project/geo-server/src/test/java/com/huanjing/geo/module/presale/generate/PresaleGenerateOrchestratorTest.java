@@ -12,14 +12,14 @@ import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
-import com.huanjing.geo.module.presale.persist.entity.PresalePromptTemplate;
+import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersionPromptTemplate;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
-import com.huanjing.geo.module.presale.persist.mapper.PresalePromptTemplateMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionPromptTemplateMapper;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import org.junit.jupiter.api.Test;
@@ -29,6 +29,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.quality.Strictness;
+import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -69,6 +71,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
+@MockitoSettings(strictness = Strictness.LENIENT)
 class PresaleGenerateOrchestratorTest {
 
     @Mock
@@ -80,7 +83,7 @@ class PresaleGenerateOrchestratorTest {
     @Mock
     private SysDictItemMapper sysDictItemMapper;
     @Mock
-    private PresalePromptTemplateMapper promptTemplateMapper;
+    private PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
     @Mock
     private PresaleAiCallMapper aiCallMapper;
     @Mock
@@ -125,6 +128,9 @@ class PresaleGenerateOrchestratorTest {
         lenient().when(competitorAggregator.extractTopCompetitorsFromBatch1(any(), anyString())).thenReturn(List.of());
         lenient().when(sysDictItemMapper.selectList(any())).thenReturn(List.of());
         lenient().when(competitorAggregator.normalizeName(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(promptTemplateRenderer.variables(any(), any())).thenCallRealMethod();
+        lenient().when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
+                .thenAnswer(inv -> inv.getArgument(0, String.class));
         lenient().when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
         lenient().when(aiPlatformConfigMapper.selectCount(any())).thenReturn(1L);
         lenient().when(versionMapper.tryTransitionToRunning(anyLong())).thenReturn(1);
@@ -163,10 +169,10 @@ class PresaleGenerateOrchestratorTest {
         setupBasePreflightSuccess(9702L, 8702L, 1, 1, 1);
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
-        when(promptTemplateMapper.selectList(any())).thenReturn(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(731L, "G1", "batch1 {brand}"))
         );
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(llmInvoker.query(any(), anyString()))
                 .thenThrow(new LlmInvokeException("wrapped", new InterruptedException("stop")));
@@ -188,12 +194,12 @@ class PresaleGenerateOrchestratorTest {
         setupBasePreflightSuccess(9703L, 8703L, 1, 3, 1);
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
                 promptTemplate(741L, "G1", "Q1"),
                 promptTemplate(742L, "G2", "Q2"),
                 promptTemplate(743L, "G3", "Q3")
         ));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(llmInvoker.query(any(PlatformCallContext.class), anyString())).thenAnswer(invocation -> {
             Thread.currentThread().interrupt();
@@ -218,11 +224,11 @@ class PresaleGenerateOrchestratorTest {
         setupBasePreflightSuccess(9704L, 8704L, 2, 2, 1);
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("p1", "p2"));
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
                 promptTemplate(751L, "G1", "Q1"),
                 promptTemplate(752L, "G2", "Q2")
         ));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(llmInvoker.query(any(PlatformCallContext.class), anyString())).thenAnswer(invocation -> {
             PlatformCallContext ctx = invocation.getArgument(0, PlatformCallContext.class);
@@ -242,6 +248,7 @@ class PresaleGenerateOrchestratorTest {
         ArgumentCaptor<PresaleAiCall> callCaptor = ArgumentCaptor.forClass(PresaleAiCall.class);
         verify(aiCallMapper, times(1)).insert(callCaptor.capture());
         assertEquals("p1", callCaptor.getValue().getPlatformCode());
+        assertEquals("Q1", callCaptor.getValue().getRequestPromptContent());
     }
 
     @Test
@@ -308,7 +315,7 @@ class PresaleGenerateOrchestratorTest {
         when(reportMapper.selectById(8003L)).thenReturn(report);
 
         when(aiPlatformConfigMapper.selectCount(any())).thenReturn(9L);
-        when(promptTemplateMapper.selectCount(any())).thenReturn(0L);
+        when(versionPromptTemplateMapper.selectCount(any())).thenReturn(0L);
 
         orchestrator.triggerGenerate(9003L, 1003L, false);
 
@@ -324,7 +331,7 @@ class PresaleGenerateOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupBasePreflightSuccess(9004L, 8004L, 9, 25, 5);
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of());
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of());
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of());
 
         orchestrator.triggerGenerate(9004L, 1004L, false);
 
@@ -337,7 +344,7 @@ class PresaleGenerateOrchestratorTest {
                 .orElseThrow();
         assertEquals("BATCH1", runningUpdate.getGenerationStage());
         assertEquals(450, runningUpdate.getBatch1TotalCalls());
-        assertEquals(720, runningUpdate.getTotalLlmCalls());
+        assertEquals(540, runningUpdate.getTotalLlmCalls());
         assertEquals(0, runningUpdate.getCompletedLlmCalls());
     }
 
@@ -347,12 +354,12 @@ class PresaleGenerateOrchestratorTest {
         setupBasePreflightSuccess(9601L, 8601L, 1, 1, 1);
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
-        when(promptTemplateMapper.selectList(any())).thenReturn(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(701L, "G1", "batch1 {brand}")),
                 List.of(promptTemplate(702L, "C1", "batch2 {competitor}"))
         );
         lenient().when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(reuseDecisionService.decide(any(), any())).thenReturn(ReuseDecision.SKIP_ALL);
 
@@ -377,12 +384,12 @@ class PresaleGenerateOrchestratorTest {
         setupBasePreflightSuccess(9602L, 8602L, 1, 1, 1);
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
-        when(promptTemplateMapper.selectList(any())).thenReturn(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(711L, "G1", "batch1 {brand}")),
                 List.of(promptTemplate(712L, "C1", "batch2 {competitor}"))
         );
         lenient().when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
 
         PresaleAiCall reusedQuery = new PresaleAiCall();
@@ -412,12 +419,12 @@ class PresaleGenerateOrchestratorTest {
         setupBasePreflightSuccess(9603L, 8603L, 1, 1, 1);
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
-        when(promptTemplateMapper.selectList(any())).thenReturn(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(721L, "G1", "batch1 {brand}")),
                 List.of(promptTemplate(722L, "C1", "batch2 {competitor}"))
         );
         lenient().when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(reuseDecisionService.decide(any(), any())).thenReturn(ReuseDecision.RUN_FULL);
         when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
@@ -440,12 +447,12 @@ class PresaleGenerateOrchestratorTest {
                 "chatgpt",
                 "claude"
         ));
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
                 promptTemplate(1L, "P1", "Q1"),
                 promptTemplate(2L, "P2", "Q2"),
                 promptTemplate(3L, "P3", "Q3")
         ));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(llmInvoker.query(any(), anyString()))
                 .thenReturn(successResult("query-ok"));
@@ -454,7 +461,21 @@ class PresaleGenerateOrchestratorTest {
 
         orchestrator.triggerGenerate(9101L, 101L, false);
 
-        verify(aiCallMapper, times(12)).insert(any(PresaleAiCall.class));
+        ArgumentCaptor<PresaleAiCall> callCaptor = ArgumentCaptor.forClass(PresaleAiCall.class);
+        verify(aiCallMapper, times(12)).insert(callCaptor.capture());
+        List<PresaleAiCall> calls = callCaptor.getAllValues();
+        PresaleAiCall queryCall = calls.stream()
+                .filter(c -> "QUERY".equals(c.getStage()))
+                .findFirst()
+                .orElseThrow();
+        PresaleAiCall analyzeCall = calls.stream()
+                .filter(c -> "ANALYZE".equals(c.getStage()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("Q1", queryCall.getRequestPromptContent());
+        assertTrue(analyzeCall.getRequestPromptContent().contains("问题:Q1"));
+        assertTrue(analyzeCall.getRequestPromptContent().contains("回答:query-ok"));
+        assertTrue(analyzeCall.getRequestPromptContent().contains("目标品牌:"));
         verify(aiPromptResultMapper, times(6)).insert(any());
     }
 
@@ -464,13 +485,13 @@ class PresaleGenerateOrchestratorTest {
         setupBasePreflightSuccess(9102L, 8102L, 1, 4, 1);
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
                 promptTemplate(11L, "P1", "Q1"),
                 promptTemplate(12L, "P2", "Q2"),
                 promptTemplate(13L, "P3", "Q3"),
                 promptTemplate(14L, "P4", "Q4")
         ));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(llmInvoker.query(any(), anyString()))
                 .thenThrow(new LlmInvokeException("q1 failed"))
@@ -493,7 +514,7 @@ class PresaleGenerateOrchestratorTest {
         setupBasePreflightSuccess(9104L, 8104L, 1, 10, 1);
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
                 promptTemplate(1001L, "P1", "Q1"),
                 promptTemplate(1002L, "P2", "Q2"),
                 promptTemplate(1003L, "P3", "Q3"),
@@ -505,7 +526,7 @@ class PresaleGenerateOrchestratorTest {
                 promptTemplate(1009L, "P9", "Q9"),
                 promptTemplate(1010L, "P10", "Q10")
         ));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
 
         AtomicInteger queryCounter = new AtomicInteger(0);
@@ -565,11 +586,11 @@ class PresaleGenerateOrchestratorTest {
                 "p3",
                 "p4"
         ));
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
                 promptTemplate(21L, "P1", "Q1"),
                 promptTemplate(22L, "P2", "Q2")
         ));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(llmInvoker.query(any(), anyString()))
                 .thenThrow(new LlmInvokeException("query failed"));
@@ -593,14 +614,16 @@ class PresaleGenerateOrchestratorTest {
 
         AtomicInteger submittedPlatforms = new AtomicInteger(0);
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("p1", "p2", "p3", "p4", "p5"));
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(promptTemplate(301L, "G1", "t")));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any())).thenAnswer(invocation -> {
-            PlatformCallContext ctx = invocation.getArgument(2, PlatformCallContext.class);
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(promptTemplate(301L, "G1", "t")));
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0, String.class));
+        when(llmInvoker.query(any(PlatformCallContext.class), anyString())).thenAnswer(invocation -> {
+            PlatformCallContext ctx = invocation.getArgument(0, PlatformCallContext.class);
             submittedPlatforms.incrementAndGet();
             if (Set.of("p1", "p2", "p3", "p4").contains(ctx.platformCode())) {
                 throw new LlmInvokeException("force degrade " + ctx.platformCode());
             }
-            return invocation.getArgument(0, String.class);
+            return successResult("query-ok");
         });
 
         Object result = invokeExecuteBatch1(3001L, 7001L);
@@ -627,12 +650,12 @@ class PresaleGenerateOrchestratorTest {
             List<AiPlatformConfig> platforms = platforms(
                     "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10");
             when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms);
-            when(promptTemplateMapper.selectList(any())).thenReturn(List.of(promptTemplate(302L, "G1", "t")));
+            when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(promptTemplate(302L, "G1", "t")));
 
             CyclicBarrier barrier = new CyclicBarrier(10);
             AtomicInteger entered = new AtomicInteger(0);
             AtomicReference<Throwable> failure = new AtomicReference<>();
-            when(promptTemplateRenderer.render(anyString(), anyString(), any(), any())).thenAnswer(invocation -> {
+            when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class))).thenAnswer(invocation -> {
                 entered.incrementAndGet();
                 awaitBarrier(barrier, failure);
                 return invocation.getArgument(0, String.class);
@@ -676,7 +699,7 @@ class PresaleGenerateOrchestratorTest {
         });
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("p1", "p2", "p3", "p4"));
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(promptTemplate(303L, "G1", "t")));
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(promptTemplate(303L, "G1", "t")));
 
         Object result = invokeExecuteBatch1(3003L, 7003L);
         List<PlatformBatchResult> platformResults = (List<PlatformBatchResult>) invokeNoArg(result, "platformResults");
@@ -695,8 +718,8 @@ class PresaleGenerateOrchestratorTest {
 
         LlmInvokeException expected = new LlmInvokeException("boom");
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("p1"));
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(promptTemplate(304L, "G1", "t")));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(promptTemplate(304L, "G1", "t")));
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(invocation -> {
                     throw new CompletionException(expected);
                 });
@@ -724,7 +747,7 @@ class PresaleGenerateOrchestratorTest {
         verify(versionMapper, never()).selectById(3010L);
         verify(reportMapper, never()).selectById(anyLong());
         verify(aiPlatformConfigMapper, never()).selectCount(any());
-        verify(promptTemplateMapper, never()).selectCount(any());
+        verify(versionPromptTemplateMapper, never()).selectCount(any());
         verify(llmInvoker, never()).query(any(), anyString());
         verify(llmInvoker, never()).analyze(any(), anyString(), anyString());
     }
@@ -737,16 +760,18 @@ class PresaleGenerateOrchestratorTest {
 
         AtomicInteger submittedPlatforms = new AtomicInteger(0);
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("p3", "p4", "p5"));
-        PresalePromptTemplate template = promptTemplate(401L, "C1", "t {competitor}");
+        PresaleReportVersionPromptTemplate template = promptTemplate(401L, "C1", "t {competitor}");
         template.setHasCompetitorVar(1);
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(template));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any())).thenAnswer(invocation -> {
-            PlatformCallContext ctx = invocation.getArgument(2, PlatformCallContext.class);
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(template));
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0, String.class));
+        when(llmInvoker.query(any(PlatformCallContext.class), anyString())).thenAnswer(invocation -> {
+            PlatformCallContext ctx = invocation.getArgument(0, PlatformCallContext.class);
             submittedPlatforms.incrementAndGet();
             if (Set.of("p3", "p4").contains(ctx.platformCode())) {
                 throw new LlmInvokeException("force degrade " + ctx.platformCode());
             }
-            return invocation.getArgument(0, String.class);
+            return successResult("query-ok");
         });
 
         Object result = invokeExecuteBatch2(4001L, 8001L, List.of("c1"), 1, Set.of("p1", "p2"));
@@ -772,16 +797,17 @@ class PresaleGenerateOrchestratorTest {
         try {
             when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms(
                     "p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10"));
-            PresalePromptTemplate template = promptTemplate(402L, "C1", "t {competitor}");
+            PresaleReportVersionPromptTemplate template = promptTemplate(402L, "C1", "t {competitor}");
             template.setHasCompetitorVar(1);
-            when(promptTemplateMapper.selectList(any())).thenReturn(List.of(template));
+            when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(template));
 
             CyclicBarrier barrier = new CyclicBarrier(10);
             AtomicInteger entered = new AtomicInteger(0);
             AtomicReference<Throwable> failure = new AtomicReference<>();
-            when(promptTemplateRenderer.render(anyString(), anyString(), any(), any())).thenAnswer(invocation -> {
-                PlatformCallContext ctx = invocation.getArgument(2, PlatformCallContext.class);
-                if ("c1".equals(ctx.competitorName())) {
+            when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class))).thenAnswer(invocation -> {
+                PromptTemplateRenderer.RenderVariables variables =
+                        invocation.getArgument(1, PromptTemplateRenderer.RenderVariables.class);
+                if ("c1、c2".equals(variables.competitor())) {
                     entered.incrementAndGet();
                     awaitBarrier(barrier, failure);
                 }
@@ -809,7 +835,7 @@ class PresaleGenerateOrchestratorTest {
             for (int i = 1; i < completedProgress.size(); i++) {
                 assertTrue(completedProgress.get(i) >= completedProgress.get(i - 1));
             }
-            assertTrue(completedProgress.stream().anyMatch(v -> v == 40));
+            assertTrue(completedProgress.stream().anyMatch(v -> v == 20));
         } finally {
             pool.shutdownNow();
             pool.awaitTermination(5, TimeUnit.SECONDS);
@@ -825,9 +851,9 @@ class PresaleGenerateOrchestratorTest {
         });
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("p1", "p2", "p3", "p4"));
-        PresalePromptTemplate template = promptTemplate(403L, "C1", "t {competitor}");
+        PresaleReportVersionPromptTemplate template = promptTemplate(403L, "C1", "t {competitor}");
         template.setHasCompetitorVar(1);
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(template));
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(template));
 
         Object result = invokeExecuteBatch2(4003L, 8003L, List.of("c1"), 1, Set.of());
         List<PlatformBatchResult> platformResults = (List<PlatformBatchResult>) invokeNoArg(result, "platformResults");
@@ -847,17 +873,18 @@ class PresaleGenerateOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "platformExecutor", (Executor) Runnable::run);
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("p2", "p3", "p4", "p5"));
-        PresalePromptTemplate template = promptTemplate(404L, "C1", "t {competitor}");
+        PresaleReportVersionPromptTemplate template = promptTemplate(404L, "C1", "t {competitor}");
         template.setHasCompetitorVar(1);
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of(template));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any())).thenAnswer(invocation -> {
-            PlatformCallContext ctx = invocation.getArgument(2, PlatformCallContext.class);
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(template));
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0, String.class));
+        when(llmInvoker.query(any(PlatformCallContext.class), anyString())).thenAnswer(invocation -> {
+            PlatformCallContext ctx = invocation.getArgument(0, PlatformCallContext.class);
             if ("p3".equals(ctx.platformCode())) {
                 throw new LlmInvokeException("degrade p3");
             }
-            return invocation.getArgument(0, String.class);
+            return successResult("query-ok");
         });
-        when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
         when(llmInvoker.analyze(any(), anyString(), anyString()))
                 .thenReturn(successResult("{\"is_mentioned\":true,\"ranking\":1,\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[],\"scene_advantages\":[]}"));
 
@@ -890,7 +917,7 @@ class PresaleGenerateOrchestratorTest {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupBasePreflightSuccess(9202L, 8202L, 1, 1, 1);
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of());
-        when(promptTemplateMapper.selectList(any())).thenReturn(List.of());
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of());
         lenient().when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
 
         orchestrator.triggerGenerate(9202L, 202L, false);
@@ -955,16 +982,16 @@ class PresaleGenerateOrchestratorTest {
                 platforms("kimi"),
                 platforms("kimi")
         );
-        when(promptTemplateMapper.selectList(any())).thenReturn(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(401L, "G1", "batch1 {brand}")),
                 List.of(promptTemplate(402L, "C1", "batch2 {brand} vs {competitor}"))
         );
         lenient().when(aiPromptResultMapper.selectList(any())).thenReturn(
-                List.of(promptResult(401L, "[\"Claude\"]"))
+                List.of(promptResult(401L, "[\"Claude\", \"Gemini\"]"))
         );
         when(competitorAggregator.extractTopCompetitorsFromBatch1(9401L, "Acme"))
-                .thenReturn(List.of("Claude"));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+                .thenReturn(List.of("Claude", "Gemini"));
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
         when(llmInvoker.analyze(any(), anyString(), anyString()))
@@ -977,19 +1004,27 @@ class PresaleGenerateOrchestratorTest {
         boolean hasBatch2Query = callCaptor.getAllValues().stream().anyMatch(c ->
                 Integer.valueOf(2).equals(c.getBatchNo())
                         && "QUERY".equals(c.getStage())
-                        && "Claude".equals(c.getCompetitorName())
+                        && "Claude、Gemini".equals(c.getCompetitorName())
         );
         boolean hasBatch2Analyze = callCaptor.getAllValues().stream().anyMatch(c ->
                 Integer.valueOf(2).equals(c.getBatchNo())
                         && "ANALYZE".equals(c.getStage())
-                        && "Claude".equals(c.getCompetitorName())
+                        && "Claude、Gemini".equals(c.getCompetitorName())
         );
         assertTrue(hasBatch2Query);
         assertTrue(hasBatch2Analyze);
+
+        ArgumentCaptor<PresaleAiPromptResult> resultCaptor = ArgumentCaptor.forClass(PresaleAiPromptResult.class);
+        verify(aiPromptResultMapper, atLeastOnce()).insert(resultCaptor.capture());
+        boolean hasBatch2Result = resultCaptor.getAllValues().stream().anyMatch(r ->
+                Integer.valueOf(2).equals(r.getBatchNo())
+                        && "Claude、Gemini".equals(r.getCompetitorName())
+        );
+        assertTrue(hasBatch2Result);
     }
 
     @Test
-    void batch2_degradeUsesQcmpTimesC_asTotalPrompts() throws Exception {
+    void batch2_degradeUsesQcmpOnly_asTotalPrompts() throws Exception {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         setupBasePreflightSuccess(9402L, 8402L, 1, 1, 2);
 
@@ -997,7 +1032,7 @@ class PresaleGenerateOrchestratorTest {
                 platforms("kimi"),
                 platforms("kimi")
         );
-        when(promptTemplateMapper.selectList(any())).thenReturn(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(501L, "G1", "batch1 {brand}")),
                 List.of(
                         promptTemplate(502L, "C1", "batch2-a {competitor}"),
@@ -1009,7 +1044,7 @@ class PresaleGenerateOrchestratorTest {
         );
         when(competitorAggregator.extractTopCompetitorsFromBatch1(9402L, "Acme"))
                 .thenReturn(List.of("Claude", "Gemini", "Doubao"));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
 
         AtomicInteger batch2QueryCounter = new AtomicInteger(0);
@@ -1036,7 +1071,7 @@ class PresaleGenerateOrchestratorTest {
                 .filter(c -> Integer.valueOf(2).equals(c.getBatchNo()))
                 .filter(c -> CallStatus.SKIPPED_DEGRADED.name().equals(c.getCallStatus()))
                 .count();
-        assertEquals(6L, batch2Skipped);
+        assertEquals(2L, batch2Skipped);
     }
 
     @Test
@@ -1045,12 +1080,12 @@ class PresaleGenerateOrchestratorTest {
         setupBasePreflightSuccess(9501L, 8501L, 1, 1, 1);
 
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
-        when(promptTemplateMapper.selectList(any())).thenReturn(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(601L, "G1", "batch1 {brand}")),
                 List.of(promptTemplate(602L, "C1", "batch2 {competitor}"))
         );
         lenient().when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(llmInvoker.query(any(), anyString())).thenThrow(new LlmInvokeException("batch1 query fail"));
 
@@ -1081,7 +1116,7 @@ class PresaleGenerateOrchestratorTest {
                 platforms("kimi"),
                 platforms("kimi")
         );
-        when(promptTemplateMapper.selectList(any())).thenReturn(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(611L, "G1", "batch1 {brand}")),
                 List.of(promptTemplate(612L, "C1", "batch2 {brand} vs {competitor}"))
         );
@@ -1090,7 +1125,7 @@ class PresaleGenerateOrchestratorTest {
         );
         when(competitorAggregator.extractTopCompetitorsFromBatch1(9502L, "Acme"))
                 .thenReturn(List.of("Claude"));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
 
         when(llmInvoker.query(any(), anyString())).thenAnswer(invocation -> {
@@ -1147,7 +1182,7 @@ class PresaleGenerateOrchestratorTest {
                 platforms("p1", "p2"),
                 platforms("p1", "p2")
         );
-        when(promptTemplateMapper.selectList(any())).thenReturn(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(
                 List.of(
                         promptTemplate(821L, "G1", "batch1-q1 {brand}"),
                         promptTemplate(822L, "G2", "batch1-q2 {brand}")
@@ -1159,7 +1194,7 @@ class PresaleGenerateOrchestratorTest {
         );
         when(competitorAggregator.extractTopCompetitorsFromBatch1(9801L, "Acme"))
                 .thenReturn(List.of("Claude"));
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
 
         when(reuseDecisionService.decide(any(), any())).thenAnswer(invocation -> {
@@ -1365,12 +1400,12 @@ class PresaleGenerateOrchestratorTest {
                 platforms("kimi"),
                 platforms("kimi")
         );
-        when(promptTemplateMapper.selectList(any())).thenReturn(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(1991L, "G1", "行业={industry},身份={industry_role},品牌={brand}")),
                 List.of(promptTemplate(1992L, "C1", "batch2 {competitor}"))
         );
         when(competitorAggregator.extractTopCompetitorsFromBatch1(9911L, "Acme")).thenReturn(List.of());
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenCallRealMethod();
         when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
         when(llmInvoker.analyze(any(), anyString(), anyString()))
@@ -1485,7 +1520,7 @@ class PresaleGenerateOrchestratorTest {
         when(reportMapper.selectById(reportId)).thenReturn(report);
 
         when(aiPlatformConfigMapper.selectCount(any())).thenReturn((long) platformCount);
-        when(promptTemplateMapper.selectCount(any()))
+        when(versionPromptTemplateMapper.selectCount(any()))
                 .thenReturn((long) genericPromptCount, (long) competitorPromptCount);
     }
 
@@ -1495,27 +1530,26 @@ class PresaleGenerateOrchestratorTest {
                 platforms("kimi"),
                 platforms("kimi")
         );
-        when(promptTemplateMapper.selectList(any())).thenReturn(
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(
                 List.of(promptTemplate(991L, "G1", "batch1 {brand}")),
                 List.of(promptTemplate(992L, "C1", "batch2 {competitor}"))
         );
         when(competitorAggregator.extractTopCompetitorsFromBatch1(versionId, "Acme"))
                 .thenReturn(extractedCompetitors);
-        when(promptTemplateRenderer.render(anyString(), anyString(), any(), any()))
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
         when(llmInvoker.analyze(any(), anyString(), anyString()))
                 .thenReturn(successResult("{\"is_mentioned\":true,\"ranking\":1,\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[],\"scene_advantages\":[]}"));
     }
 
-    private PresalePromptTemplate promptTemplate(Long id, String code, String content) {
-        PresalePromptTemplate t = new PresalePromptTemplate();
+    private PresaleReportVersionPromptTemplate promptTemplate(Long id, String code, String content) {
+        PresaleReportVersionPromptTemplate t = new PresaleReportVersionPromptTemplate();
         t.setId(id);
-        t.setPromptCode(code);
+        t.setSourcePromptCode(code);
         t.setPromptContent(content);
-        t.setEnabled(1);
-        t.setHasCompetitorVar(0);
-        t.setSortOrder(1);
+        t.setHasCompetitorVar(content != null && content.contains("{competitor}") ? 1 : 0);
+        t.setSortOrderInVersion(1);
         return t;
     }
 
@@ -1554,11 +1588,4 @@ class PresaleGenerateOrchestratorTest {
                 .toList();
     }
 }
-
-
-
-
-
-
-
 

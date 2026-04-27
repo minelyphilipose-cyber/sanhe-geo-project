@@ -63,7 +63,9 @@ public class DispatchQueueService {
             return null;
         }
         try {
-            return Long.parseLong(String.valueOf(value));
+            Long taskId = Long.parseLong(String.valueOf(value));
+            clearQueueMark(taskId);
+            return taskId;
         } catch (NumberFormatException ex) {
             log.warn("Ignore invalid task id in queue: {}", value);
             return null;
@@ -71,7 +73,8 @@ public class DispatchQueueService {
     }
 
     public boolean existsInQueue(Long taskId) {
-        return Boolean.TRUE.equals(redisTemplate.hasKey(dedupeKey(taskId)));
+        Double score = redisTemplate.opsForZSet().score(dispatchProperties.getQueueKey(), String.valueOf(taskId));
+        return score != null;
     }
 
     public void clearQueueMark(Long taskId) {
@@ -99,7 +102,10 @@ public class DispatchQueueService {
         DefaultRedisScript<Long> script = new DefaultRedisScript<>();
         script.setResultType(Long.class);
         script.setScriptText(
-                "if redis.call('SETNX', KEYS[2], ARGV[2]) == 1 then " +
+                "if not redis.call('ZSCORE', KEYS[1], ARGV[2]) then " +
+                        "redis.call('DEL', KEYS[2]); " +
+                        "end; " +
+                        "if redis.call('SETNX', KEYS[2], ARGV[2]) == 1 then " +
                         "redis.call('EXPIRE', KEYS[2], ARGV[3]); " +
                         "redis.call('ZADD', KEYS[1], ARGV[1], ARGV[2]); " +
                         "return 1; " +

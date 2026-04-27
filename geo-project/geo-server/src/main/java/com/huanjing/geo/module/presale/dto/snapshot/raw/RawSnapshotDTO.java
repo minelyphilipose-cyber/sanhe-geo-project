@@ -44,6 +44,10 @@ public class RawSnapshotDTO {
     /** Top3 竞品识别结果(maxItems=3)。 */
     private List<Competitor> competitors;
 
+    /** 竞品组对比模式下,从组合对比回答聚合出的组级优势场景。 */
+    @JsonProperty("group_scene_advantages")
+    private List<String> groupSceneAdvantages;
+
     /** 情感明细(两轮合计)。 */
     @JsonProperty("sentiment_detail")
     private SentimentDetail sentimentDetail;
