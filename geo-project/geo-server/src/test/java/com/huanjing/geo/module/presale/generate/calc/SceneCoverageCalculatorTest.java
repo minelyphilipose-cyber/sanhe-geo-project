@@ -96,6 +96,47 @@ class SceneCoverageCalculatorTest {
     }
 
     @Test
+    void sceneCoverageGroupsUseConfiguredBusinessValueOrder() {
+        SceneCoverageCalculator calculator = new SceneCoverageCalculator(
+                aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
+                platform("p1"), platform("p2")
+        ));
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
+                template(61L, "P61", "对比型", "comparison", 1),
+                template(62L, "P62", "推荐型", "recommendation"),
+                template(63L, "P63", "问题型", "inquiry"),
+                template(64L, "P64", "场景型", "scenario"),
+                template(65L, "P65", "认知型", "cognitive")
+        ));
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of(
+                row(62L, "p1", 1, 1, null),
+                row(64L, "p1", 1, 1, null)
+        ));
+
+        Map<String, Integer> totals = Map.of(
+                "RECOMMENDATION", 1,
+                "COMPARISON", 1,
+                "INQUIRY", 1,
+                "COGNITIVE", 1,
+                "SCENARIO", 1
+        );
+        List<PlatformIntentCell> cells = List.of(
+                judgeCell("p1", "COMPARISON", 10, "target"),
+                judgeCell("p1", "COGNITIVE", 10)
+        );
+
+        SceneAndIntentResult result = calculator.compute(6001L, raw(List.of(), List.of()), totals, cells);
+
+        assertEquals(List.of("推荐型", "对比型"), result.sceneCoverage().getHighValue().getCoveredQueries()
+                .stream().map(item -> item.getCategory()).toList());
+        assertEquals(List.of("认知型", "场景型"), result.sceneCoverage().getMidValue().getCoveredQueries()
+                .stream().map(item -> item.getCategory()).toList());
+        assertEquals(List.of("问题型"), result.sceneCoverage().getLowValue().getMissingQueries()
+                .stream().map(item -> item.getCategory()).toList());
+    }
+
+    @Test
     void threePlatformsDegraded_thresholdUsesEffectivePlatforms() {
         SceneCoverageCalculator calculator = new SceneCoverageCalculator(
                 aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());

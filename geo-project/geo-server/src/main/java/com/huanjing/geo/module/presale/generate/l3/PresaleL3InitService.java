@@ -425,10 +425,10 @@ public class PresaleL3InitService {
                 ),
                 RuleCodes.RULE_NEGATIVE_EVIDENCE, new RuleFindingTemplate(
                         "存在负面评价证据",
-                        "在本次测试中,品牌出现了 {negative_count} 条负面提及,主要集中在\"{key_topic}\"相关话题,涉及 {affected_platform_count} 个平台:{affected_platforms_text}。" +
+                        "在本次测试中,品牌出现了 {negative_evidence_count} 条负面评价证据,主要集中在\"{key_topic}\"相关话题,涉及 {affected_platform_count} 个平台:{affected_platforms_text}。" +
                                 "负面评价会直接影响 AI 在推荐场景下的品牌倾向,削弱潜在客户的初印象。" +
                                 "建议对负面话题溯源并制定专项回应内容,通过正面叙事在 AI 平台上形成对冲。",
-                        "负面提及 {negative_count} 条,涉及 {affected_platform_count} 个平台"
+                        "负面证据 {negative_evidence_count} 条,涉及 {affected_platform_count} 个平台"
                 ),
                 RuleCodes.RULE_LOW_SENTIMENT_SCORE, new RuleFindingTemplate(
                         "情感分偏低",

@@ -46,6 +46,7 @@ class NegativeEvidenceBuilderTest {
                 RuleBuildInput.builder().l1(l1).l2(new ComputedSnapshotDTO()).build());
 
         assertThat(ev.get("negative_count")).isEqualTo(3);
+        assertThat(ev.get("negative_evidence_count")).isEqualTo(3);
         assertThat(ev.get("affected_platform_count")).isEqualTo(2);
         assertThat(ev.get("affected_platforms_text").toString()).contains("豆包", "文心一言");
         assertThat(ev.get("key_topic")).isEqualTo("服务质量");
@@ -58,6 +59,7 @@ class NegativeEvidenceBuilderTest {
                 RuleBuildInput.builder().l1(l1).l2(new ComputedSnapshotDTO()).build());
 
         assertThat(ev.get("negative_count")).isEqualTo(0);
+        assertThat(ev.get("negative_evidence_count")).isEqualTo(0);
         assertThat(ev.get("affected_platform_count")).isEqualTo(0);
         assertThat(ev.get("affected_platforms_text")).isEqualTo("");
         assertThat(ev.get("key_topic")).isEqualTo("负面反馈");

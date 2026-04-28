@@ -16,10 +16,11 @@ import java.util.TreeSet;
 
 /**
  * evidence_data 字段:
- * - key_topic, affected_platform_count, affected_platforms_text, negative_count
+ * - key_topic, affected_platform_count, affected_platforms_text, negative_count, negative_evidence_count
  *
  * 数据来源:L1.sentimentDetail
  * - negative_count ← sentimentDetail.negativeCount
+ * - negative_evidence_count ← negativeEvidence 条数
  * - key_topic      ← 简化实现:取 negativeEvidence 中首条 snippet 关联的主题
  *                   (L1 DTO 没有 key_topic 字段,由 Builder 从 evidence 归纳,v1 用占位)
  * - affected_platforms_text ← negativeEvidence 中 platformName 去重拼接
@@ -52,9 +53,12 @@ public class NegativeEvidenceBuilder implements EvidenceDataBuilder {
         }
 
         ev.put("key_topic", deriveKeyTopic(sd));
+        int evidenceCount = sd == null || sd.getNegativeEvidence() == null ? 0 : sd.getNegativeEvidence().size();
+
         ev.put("affected_platform_count", platforms.size());
         ev.put("affected_platforms_text", TextFormatUtil.formatPlatformNames(platforms));
         ev.put("negative_count", negativeCount);
+        ev.put("negative_evidence_count", evidenceCount);
         return ev;
     }
 

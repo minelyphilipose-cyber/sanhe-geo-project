@@ -174,19 +174,19 @@ public class SceneCoverageCalculator {
                 .toList();
 
         SceneCoverageGroup highGroup = buildGroup(byIntent,
-                Set.of(PresaleIntentCode.RECOMMENDATION, PresaleIntentCode.COMPARISON),
+                List.of(PresaleIntentCode.RECOMMENDATION, PresaleIntentCode.COMPARISON),
                 intentTotalPrompts,
                 topCompetitorDisplayNames,
                 rowsByTemplate,
                 renderedPromptByTemplate);
         SceneCoverageGroup midGroup = buildGroup(byIntent,
-                Set.of(PresaleIntentCode.INQUIRY, PresaleIntentCode.COGNITIVE),
+                List.of(PresaleIntentCode.COGNITIVE, PresaleIntentCode.SCENARIO),
                 intentTotalPrompts,
                 topCompetitorDisplayNames,
                 rowsByTemplate,
                 renderedPromptByTemplate);
         SceneCoverageGroup lowGroup = buildGroup(byIntent,
-                Set.of(PresaleIntentCode.SCENARIO),
+                List.of(PresaleIntentCode.INQUIRY),
                 intentTotalPrompts,
                 topCompetitorDisplayNames,
                 rowsByTemplate,
@@ -264,7 +264,7 @@ public class SceneCoverageCalculator {
     }
 
     private SceneCoverageGroup buildGroup(Map<PresaleIntentCode, List<TemplateWithCovered>> byIntent,
-                                          Set<PresaleIntentCode> intents,
+                                          List<PresaleIntentCode> intents,
                                           Map<String, Integer> intentTotalPrompts,
                                           List<String> topCompetitorDisplayNames,
                                           Map<Long, List<PresaleAiPromptResult>> rowsByTemplate,
