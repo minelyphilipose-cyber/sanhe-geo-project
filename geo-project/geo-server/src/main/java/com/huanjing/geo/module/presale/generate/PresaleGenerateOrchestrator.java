@@ -80,6 +80,8 @@ public class PresaleGenerateOrchestrator {
     private static final String STAGE_L1_AGGREGATE = "L1_AGGREGATE";
     private static final String STAGE_L2_COMPUTE = "L2_COMPUTE";
     private static final String STAGE_L3_INIT = "L3_INIT";
+    private static final String CATEGORY_COGNITIVE = "认知型";
+    private static final String CATEGORY_COMPARISON = "对比型";
     private static final String FAILURE_CATEGORY_CONFIG_MISSING = "CONFIG_MISSING";
     private static final String FAILURE_CATEGORY_TOO_MANY_DEGRADED = "TOO_MANY_DEGRADED_PLATFORMS";
     private static final String FAILURE_CATEGORY_INTERRUPTED = "INTERRUPTED";
@@ -113,6 +115,7 @@ public class PresaleGenerateOrchestrator {
     private final ObjectMapper objectMapper;
     private final Executor platformExecutor;
     private final Map<Long, AtomicLong> lastProgressUpdateAtByVersion = new ConcurrentHashMap<>();
+    private final Map<Long, StageTiming> stageTimingByVersion = new ConcurrentHashMap<>();
 
     @Value("${presale.generate.mock}")
     private boolean mockEnabled;
@@ -271,7 +274,13 @@ public class PresaleGenerateOrchestrator {
         }
 
         enterStage(versionId, STAGE_JUDGE_COGNITIVE, "judge cognitive");
-        presaleJudgeService.judgeCognitiveAfterBatch1(versionId, report.getBrandName(), operatorUserId, isManager);
+        presaleJudgeService.judgeCognitiveAfterBatch1(
+                versionId,
+                report.getBrandName(),
+                operatorUserId,
+                isManager,
+                judgeProgressCallback(versionId, preflight.batch1TotalCalls(), preflight.totalUpperBoundCalls())
+        );
 
         Set<String> allDegraded = new LinkedHashSet<>(batch1Result.degradedPlatforms());
 
@@ -279,12 +288,18 @@ public class PresaleGenerateOrchestrator {
 
         List<String> extractedCompetitors = extractTopCompetitorsFromBatch1(versionId, report.getBrandName());
         int extractedCompetitorCount = extractedCompetitors.size();
-        int batch2TotalCalls = preflight.platformCount() * preflight.competitorPromptCount() * 2;
+        int batch2TotalCalls = extractedCompetitorCount > 0
+                ? preflight.platformCount() * preflight.competitorPromptCount() * 2
+                : 0;
+        int comparisonJudgeTotalCalls = extractedCompetitorCount > 0
+                ? preflight.comparisonJudgeTotalCalls()
+                : 0;
         updateAfterCompetitorExtract(
                 versionId,
                 extractedCompetitorCount,
                 batch2TotalCalls,
-                preflight.batch1TotalCalls() + batch2TotalCalls
+                preflight.batch1TotalCalls() + preflight.cognitiveJudgeTotalCalls()
+                        + batch2TotalCalls + comparisonJudgeTotalCalls
         );
 
         if (extractedCompetitorCount > 0) {
@@ -308,7 +323,18 @@ public class PresaleGenerateOrchestrator {
         }
 
         enterStage(versionId, STAGE_JUDGE_COMPARISON, "judge comparison");
-        presaleJudgeService.judgeComparisonAfterBatch2(versionId, report.getBrandName(), operatorUserId, isManager);
+        presaleJudgeService.judgeComparisonAfterBatch2(
+                versionId,
+                report.getBrandName(),
+                operatorUserId,
+                isManager,
+                judgeProgressCallback(
+                        versionId,
+                        preflight.batch1TotalCalls() + preflight.cognitiveJudgeTotalCalls() + batch2TotalCalls,
+                        preflight.batch1TotalCalls() + preflight.cognitiveJudgeTotalCalls()
+                                + batch2TotalCalls + comparisonJudgeTotalCalls
+                )
+        );
 
         String rawJson;
         enterStage(versionId, STAGE_L1_AGGREGATE, "assemble raw snapshot");
@@ -382,9 +408,15 @@ public class PresaleGenerateOrchestrator {
         }
 
         int competitorPromptCount = countPromptTemplates(versionId, 1);
+        int cognitivePromptCount = countPromptTemplates(versionId, CATEGORY_COGNITIVE, 0);
+        int comparisonPromptCount = countPromptTemplates(versionId, CATEGORY_COMPARISON, 1);
         int batch1TotalCalls = platformCount * genericPromptCount * 2;
-        int totalUpperBoundCalls = batch1TotalCalls + (platformCount * competitorPromptCount * 2);
-        return PreflightResult.success(platformCount, competitorPromptCount, batch1TotalCalls, totalUpperBoundCalls);
+        int cognitiveJudgeTotalCalls = platformCount * cognitivePromptCount;
+        int comparisonJudgeTotalCalls = platformCount * comparisonPromptCount;
+        int totalUpperBoundCalls = batch1TotalCalls + cognitiveJudgeTotalCalls
+                + (platformCount * competitorPromptCount * 2) + comparisonJudgeTotalCalls;
+        return PreflightResult.success(platformCount, competitorPromptCount, batch1TotalCalls,
+                cognitiveJudgeTotalCalls, comparisonJudgeTotalCalls, totalUpperBoundCalls);
     }
 
     private Batch1ExecutionResult executeBatch1(PresaleReportVersion version,
@@ -692,7 +724,8 @@ public class PresaleGenerateOrchestrator {
                                               AtomicInteger completedCalls,
                                               AtomicInteger skippedCalls,
                                               AtomicInteger lastWrittenCompleted,
-                                              int batch1Completed) {
+                                              int batch1Completed,
+                                              int completedOffset) {
         String platformCode = platform.getPlatformCode();
         String competitorGroupName = CompetitorGroupKeyUtils.storageKey(topCompetitors);
         PlatformBatchState state = new PlatformBatchState(platformCode, templates.size());
@@ -707,7 +740,8 @@ public class PresaleGenerateOrchestrator {
                 state.processedPrompts++;
                 skippedCalls.addAndGet(2);
                 int nextCompleted = completedCalls.addAndGet(2);
-                updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false, lastWrittenCompleted, batch1Completed);
+                updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false,
+                        lastWrittenCompleted, batch1Completed, completedOffset);
                 continue;
             }
 
@@ -730,7 +764,8 @@ public class PresaleGenerateOrchestrator {
             if (reuseDecision == ReuseDecision.SKIP_ALL) {
                 state.processedPrompts++;
                 int nextCompleted = completedCalls.addAndGet(2);
-                updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false, lastWrittenCompleted, batch1Completed);
+                updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false,
+                        lastWrittenCompleted, batch1Completed, completedOffset);
                 maybeDegradeBatch2Platform(state, degradedPlatforms, degradedCount);
                 continue;
             }
@@ -767,7 +802,8 @@ public class PresaleGenerateOrchestrator {
                     }
                     state.processedPrompts++;
                     int nextCompleted = completedCalls.addAndGet(2);
-                    updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false, lastWrittenCompleted, batch1Completed);
+                    updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false,
+                            lastWrittenCompleted, batch1Completed, completedOffset);
                     maybeDegradeBatch2Platform(state, degradedPlatforms, degradedCount);
                     if (interruptedInAnalyze) {
                         throw new BatchInterruptedException("batch2 interrupted during reused analyze");
@@ -790,7 +826,8 @@ public class PresaleGenerateOrchestrator {
                 state.processedPrompts++;
                 state.failedPrompts++;
                 int nextCompleted = completedCalls.addAndGet(2);
-                updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false, lastWrittenCompleted, batch1Completed);
+                updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false,
+                        lastWrittenCompleted, batch1Completed, completedOffset);
                 maybeDegradeBatch2Platform(state, degradedPlatforms, degradedCount);
                 if (isInterruptedFailure(ex)) {
                     throw new BatchInterruptedException("batch2 interrupted during query");
@@ -818,7 +855,8 @@ public class PresaleGenerateOrchestrator {
 
             state.processedPrompts++;
             int nextCompleted = completedCalls.addAndGet(2);
-            updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false, lastWrittenCompleted, batch1Completed);
+            updateBatch2ProgressRolling(versionId, nextCompleted, degradedPlatforms, false,
+                    lastWrittenCompleted, batch1Completed, completedOffset);
             maybeDegradeBatch2Platform(state, degradedPlatforms, degradedCount);
         }
 
@@ -867,6 +905,9 @@ public class PresaleGenerateOrchestrator {
                 ? current.getBatch1CompletedCalls() : 0;
         int existingBatch2Completed = current != null && current.getBatch2CompletedCalls() != null
                 ? current.getBatch2CompletedCalls() : 0;
+        int completedOverall = current != null && current.getCompletedLlmCalls() != null
+                ? current.getCompletedLlmCalls() : 0;
+        int completedOffset = Math.max(0, completedOverall - batch1Completed - existingBatch2Completed);
 
         Set<String> batch1DegradedBefore = Set.copyOf(batch1DegradedPlatforms);
         Set<String> displayDegradedPlatforms = ConcurrentHashMap.newKeySet();
@@ -913,7 +954,8 @@ public class PresaleGenerateOrchestrator {
                                 completedCalls,
                                 skippedCalls,
                                 lastWrittenCompleted,
-                                batch1Completed
+                                batch1Completed,
+                                completedOffset
                         ), platformExecutor)
                         .handle((result, ex) -> {
                             if (ex == null) {
@@ -991,7 +1033,8 @@ public class PresaleGenerateOrchestrator {
             throw new BatchInterruptedException("batch2 interrupted in async execution");
         }
 
-        updateBatch2ProgressRolling(versionId, completedCalls.get(), displayDegradedPlatforms, true, lastWrittenCompleted, batch1Completed);
+        updateBatch2ProgressRolling(versionId, completedCalls.get(), displayDegradedPlatforms, true,
+                lastWrittenCompleted, batch1Completed, completedOffset);
         if (degradedCount.get() >= 4) {
             log.info("batch=2 versionId={} platformCode=- threadName={} degradeThresholdReached degradedPlatforms={} overRunCount={}",
                     versionId,
@@ -1020,13 +1063,14 @@ public class PresaleGenerateOrchestrator {
                                              Set<String> degradedPlatforms,
                                              boolean forceFlush,
                                              AtomicInteger lastWrittenCompleted,
-                                             int batch1Completed) {
+                                             int batch1Completed,
+                                             int completedOffset) {
         int current;
         while (true) {
             current = lastWrittenCompleted.get();
             if (candidateBatch2Completed <= current) {
                 if (forceFlush) {
-                    updateBatchProgress(versionId, batch1Completed, current, degradedPlatforms, true);
+                    updateBatchProgress(versionId, batch1Completed, current, degradedPlatforms, true, completedOffset);
                 }
                 return;
             }
@@ -1034,7 +1078,8 @@ public class PresaleGenerateOrchestrator {
                 break;
             }
         }
-        updateBatchProgress(versionId, batch1Completed, candidateBatch2Completed, degradedPlatforms, forceFlush);
+        updateBatchProgress(versionId, batch1Completed, candidateBatch2Completed, degradedPlatforms,
+                forceFlush, completedOffset);
     }
 
     private void maybeDegradeBatch2Platform(PlatformBatchState state,
@@ -1086,6 +1131,7 @@ public class PresaleGenerateOrchestrator {
     }
 
     private void enterStage(Long versionId, String stage, String note) {
+        logPreviousStageDuration(versionId, stage);
         PresaleReportVersion update = new PresaleReportVersion();
         update.setId(versionId);
         update.setGenerationStage(stage);
@@ -1117,6 +1163,7 @@ public class PresaleGenerateOrchestrator {
         update.setUpdatedAt(LocalDateTime.now());
         versionMapper.updateById(update);
         lastProgressUpdateAtByVersion.remove(versionId);
+        logTerminalStageDuration(versionId, PresaleGenerateStatus.FAILED.name());
     }
 
     private void markDone(Long versionId) {
@@ -1136,6 +1183,25 @@ public class PresaleGenerateOrchestrator {
         update.setUpdatedAt(LocalDateTime.now());
         versionMapper.updateById(update);
         lastProgressUpdateAtByVersion.remove(versionId);
+        logTerminalStageDuration(versionId, PresaleGenerateStatus.DONE.name());
+    }
+
+    private void logPreviousStageDuration(Long versionId, String nextStage) {
+        long now = System.currentTimeMillis();
+        StageTiming previous = stageTimingByVersion.put(versionId, new StageTiming(nextStage, now));
+        if (previous != null) {
+            log.info("Presale generation stage completed, versionId={}, stage={}, durationMs={}, nextStage={}",
+                    versionId, previous.stage(), now - previous.startedAtMs(), nextStage);
+        }
+    }
+
+    private void logTerminalStageDuration(Long versionId, String terminalStatus) {
+        long now = System.currentTimeMillis();
+        StageTiming previous = stageTimingByVersion.remove(versionId);
+        if (previous != null) {
+            log.info("Presale generation stage completed, versionId={}, stage={}, durationMs={}, terminalStatus={}",
+                    versionId, previous.stage(), now - previous.startedAtMs(), terminalStatus);
+        }
     }
 
     private void writeRawSnapshotJson(Long versionId, String rawJson) {
@@ -1226,6 +1292,35 @@ public class PresaleGenerateOrchestrator {
         return count == null ? 0 : count.intValue();
     }
 
+    private int countPromptTemplates(Long versionId, String category, int hasCompetitorVar) {
+        Long count = versionPromptTemplateMapper.selectCount(
+                new LambdaQueryWrapper<PresaleReportVersionPromptTemplate>()
+                        .eq(PresaleReportVersionPromptTemplate::getReportVersionId, versionId)
+                        .eq(PresaleReportVersionPromptTemplate::getCategory, category)
+                        .eq(PresaleReportVersionPromptTemplate::getHasCompetitorVar, hasCompetitorVar)
+        );
+        return count == null ? 0 : count.intValue();
+    }
+
+    private Runnable judgeProgressCallback(Long versionId, int startCompletedCalls, int totalCalls) {
+        AtomicInteger completedCalls = new AtomicInteger(startCompletedCalls);
+        Object writeLock = new Object();
+        return () -> {
+            int nextCompleted = Math.min(totalCalls, completedCalls.incrementAndGet());
+            synchronized (writeLock) {
+                updateCompletedLlmCalls(versionId, nextCompleted);
+            }
+        };
+    }
+
+    private void updateCompletedLlmCalls(Long versionId, int completedCalls) {
+        PresaleReportVersion update = new PresaleReportVersion();
+        update.setId(versionId);
+        update.setCompletedLlmCalls(completedCalls);
+        update.setUpdatedAt(LocalDateTime.now());
+        versionMapper.updateById(update);
+    }
+
     private void updateBatchProgress(Long versionId,
                                      int batch1CompletedCalls,
                                      int batch2CompletedCalls,
@@ -1238,6 +1333,15 @@ public class PresaleGenerateOrchestrator {
                                      int batch2CompletedCalls,
                                      Set<String> degradedPlatforms,
                                      boolean forceFlush) {
+        updateBatchProgress(versionId, batch1CompletedCalls, batch2CompletedCalls, degradedPlatforms, forceFlush, 0);
+    }
+
+    private void updateBatchProgress(Long versionId,
+                                     int batch1CompletedCalls,
+                                     int batch2CompletedCalls,
+                                     Set<String> degradedPlatforms,
+                                     boolean forceFlush,
+                                     int completedOffset) {
         AtomicLong lastUpdateAt = lastProgressUpdateAtByVersion.computeIfAbsent(versionId, v -> new AtomicLong(0L));
         if (!forceFlush) {
             long now = System.currentTimeMillis();
@@ -1256,7 +1360,7 @@ public class PresaleGenerateOrchestrator {
         update.setId(versionId);
         update.setBatch1CompletedCalls(batch1CompletedCalls);
         update.setBatch2CompletedCalls(batch2CompletedCalls);
-        update.setCompletedLlmCalls(batch1CompletedCalls + batch2CompletedCalls);
+        update.setCompletedLlmCalls(batch1CompletedCalls + batch2CompletedCalls + completedOffset);
         update.setIsDegraded(!degradedPlatforms.isEmpty());
         update.setDegradedPlatforms(toJsonArray(degradedPlatforms));
         update.setUpdatedAt(LocalDateTime.now());
@@ -1679,12 +1783,17 @@ public class PresaleGenerateOrchestrator {
     private record FixturePayload(String rawJson, String computedJson, String editableJson) {
     }
 
+    private record StageTiming(String stage, long startedAtMs) {
+    }
+
     private static final class PreflightResult {
         private final boolean success;
         private final String failureReason;
         private final int platformCount;
         private final int competitorPromptCount;
         private final int batch1TotalCalls;
+        private final int cognitiveJudgeTotalCalls;
+        private final int comparisonJudgeTotalCalls;
         private final int totalUpperBoundCalls;
 
         private PreflightResult(boolean success,
@@ -1692,25 +1801,31 @@ public class PresaleGenerateOrchestrator {
                                 int platformCount,
                                 int competitorPromptCount,
                                 int batch1TotalCalls,
+                                int cognitiveJudgeTotalCalls,
+                                int comparisonJudgeTotalCalls,
                                 int totalUpperBoundCalls) {
             this.success = success;
             this.failureReason = failureReason;
             this.platformCount = platformCount;
             this.competitorPromptCount = competitorPromptCount;
             this.batch1TotalCalls = batch1TotalCalls;
+            this.cognitiveJudgeTotalCalls = cognitiveJudgeTotalCalls;
+            this.comparisonJudgeTotalCalls = comparisonJudgeTotalCalls;
             this.totalUpperBoundCalls = totalUpperBoundCalls;
         }
 
         static PreflightResult fail(String reason) {
-            return new PreflightResult(false, reason, 0, 0, 0, 0);
+            return new PreflightResult(false, reason, 0, 0, 0, 0, 0, 0);
         }
 
         static PreflightResult success(int platformCount,
                                        int competitorPromptCount,
                                        int batch1TotalCalls,
+                                       int cognitiveJudgeTotalCalls,
+                                       int comparisonJudgeTotalCalls,
                                        int totalUpperBoundCalls) {
             return new PreflightResult(true, null, platformCount, competitorPromptCount,
-                    batch1TotalCalls, totalUpperBoundCalls);
+                    batch1TotalCalls, cognitiveJudgeTotalCalls, comparisonJudgeTotalCalls, totalUpperBoundCalls);
         }
 
         boolean success() {
@@ -1731,6 +1846,14 @@ public class PresaleGenerateOrchestrator {
 
         int batch1TotalCalls() {
             return batch1TotalCalls;
+        }
+
+        int cognitiveJudgeTotalCalls() {
+            return cognitiveJudgeTotalCalls;
+        }
+
+        int comparisonJudgeTotalCalls() {
+            return comparisonJudgeTotalCalls;
         }
 
         int totalUpperBoundCalls() {

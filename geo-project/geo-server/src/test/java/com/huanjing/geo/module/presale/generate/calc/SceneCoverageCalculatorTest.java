@@ -164,7 +164,7 @@ class SceneCoverageCalculatorTest {
     }
 
     @Test
-    void comparisonCoverageRequiresThresholdAndNonCompetitorStanceOnHalfPlatforms() {
+    void comparisonCoverageRequiresScoreThresholdAndNonCompetitorStanceOnOneThirdPlatforms() {
         SceneCoverageCalculator calculator = new SceneCoverageCalculator(
                 aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
@@ -187,10 +187,10 @@ class SceneCoverageCalculatorTest {
                 "SCENARIO", 0
         );
         List<PlatformIntentCell> cells = List.of(
-                judgeCell("p1", "COMPARISON", 80, "target"),
+                judgeCell("p1", "COMPARISON", 10, "target"),
                 judgeCell("p2", "COMPARISON", 60, "tie"),
                 judgeCell("p3", "COMPARISON", 90, "competitor"),
-                judgeCell("p4", "COMPARISON", 59, "target")
+                judgeCell("p4", "COMPARISON", 9, "target")
         );
 
         SceneAndIntentResult result = calculator.compute(4001L, raw, totals, cells);
@@ -201,7 +201,7 @@ class SceneCoverageCalculatorTest {
     }
 
     @Test
-    void comparisonCoverageFallsBackToMissingWhenLessThanHalfPlatformsMeetThreshold() {
+    void comparisonCoverageFallsBackToMissingWhenLessThanOneThirdPlatformsMeetThreshold() {
         SceneCoverageCalculator calculator = new SceneCoverageCalculator(
                 aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
@@ -221,7 +221,7 @@ class SceneCoverageCalculatorTest {
         );
         List<PlatformIntentCell> cells = List.of(
                 judgeCell("p1", "COMPARISON", 80, "competitor"),
-                judgeCell("p2", "COMPARISON", 59, "target"),
+                judgeCell("p2", "COMPARISON", 9, "target"),
                 judgeCell("p3", "COMPARISON", null, null),
                 judgeCell("p4", "COMPARISON", 70, "target")
         );
@@ -233,7 +233,7 @@ class SceneCoverageCalculatorTest {
     }
 
     @Test
-    void cognitiveCoverageRequiresThresholdOnHalfPlatforms() {
+    void cognitiveCoverageRequiresScoreThresholdOnOneThirdPlatforms() {
         SceneCoverageCalculator calculator = new SceneCoverageCalculator(
                 aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
         when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
@@ -252,9 +252,9 @@ class SceneCoverageCalculatorTest {
                 "SCENARIO", 0
         );
         List<PlatformIntentCell> cells = List.of(
-                judgeCell("p1", "COGNITIVE", 60),
-                judgeCell("p2", "COGNITIVE", 72),
-                judgeCell("p3", "COGNITIVE", 59),
+                judgeCell("p1", "COGNITIVE", 10),
+                judgeCell("p2", "COGNITIVE", 40),
+                judgeCell("p3", "COGNITIVE", 9),
                 judgeCell("p4", "COGNITIVE", null)
         );
 
@@ -262,6 +262,38 @@ class SceneCoverageCalculatorTest {
 
         assertEquals(1, result.sceneCoverage().getMidValue().getCovered());
         assertEquals(1, result.sceneCoverage().getMidValue().getCoveredQueries().size());
+    }
+
+    @Test
+    void cognitiveCoverageFallsBackToMissingWhenLessThanOneThirdPlatformsMeetThreshold() {
+        SceneCoverageCalculator calculator = new SceneCoverageCalculator(
+                aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
+                platform("p1"), platform("p2"), platform("p3"), platform("p4")
+        ));
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
+                template(47L, "P47", "认知型", "cognitive missing")
+        ));
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
+
+        Map<String, Integer> totals = Map.of(
+                "RECOMMENDATION", 0,
+                "COMPARISON", 0,
+                "INQUIRY", 0,
+                "COGNITIVE", 1,
+                "SCENARIO", 0
+        );
+        List<PlatformIntentCell> cells = List.of(
+                judgeCell("p1", "COGNITIVE", 10),
+                judgeCell("p2", "COGNITIVE", 9),
+                judgeCell("p3", "COGNITIVE", null),
+                judgeCell("p4", "COGNITIVE", 0)
+        );
+
+        SceneAndIntentResult result = calculator.compute(4701L, raw(List.of(), List.of()), totals, cells);
+
+        assertEquals(0, result.sceneCoverage().getMidValue().getCovered());
+        assertEquals(1, result.sceneCoverage().getMidValue().getMissingQueries().size());
     }
 
     @Test
@@ -285,7 +317,10 @@ class SceneCoverageCalculatorTest {
                 "COGNITIVE", 0,
                 "SCENARIO", 0
         );
-        List<PlatformIntentCell> cells = List.of(judgeCell("p1", "COMPARISON", 60, "target"));
+        List<PlatformIntentCell> cells = List.of(
+                judgeCell("p1", "COMPARISON", 10, "target"),
+                judgeCell("p2", "COMPARISON", 11, "tie")
+        );
 
         SceneAndIntentResult result = calculator.compute(5001L, raw(List.of(), List.of()), totals, cells);
 

@@ -140,8 +140,10 @@ const percentage = computed(() => {
 
 const stageOrder = [
   'BATCH1',
+  'JUDGE_COGNITIVE',
   'COMPETITOR_EXTRACT',
   'BATCH2',
+  'JUDGE_COMPARISON',
   'L1_AGGREGATE',
   'L2_COMPUTE',
   'L3_INIT'
@@ -182,17 +184,27 @@ const stages = computed(() => {
     {
       name: '第一批调用',
       desc: `${version.value?.batch1CompletedCalls ?? 0} / ${version.value?.batch1TotalCalls ?? 0}`,
-      state: useStage ? stageState('BATCH1') : legacyState(0, 45)
+      state: useStage ? stageState('BATCH1') : legacyState(0, 40)
+    },
+    {
+      name: '认知裁判',
+      desc: '评估品牌认知质量',
+      state: useStage ? stageState('JUDGE_COGNITIVE') : legacyState(40, 45)
     },
     {
       name: '竞品抽取',
       desc: `已抽取 ${version.value?.extractedCompetitorCount ?? 0} 个竞品`,
-      state: useStage ? stageState('COMPETITOR_EXTRACT') : legacyState(45, 55)
+      state: useStage ? stageState('COMPETITOR_EXTRACT') : legacyState(45, 50)
     },
     {
       name: '第二批调用',
       desc: `${version.value?.batch2CompletedCalls ?? 0} / ${version.value?.batch2TotalCalls ?? 0}`,
-      state: useStage ? stageState('BATCH2') : legacyState(55, 90)
+      state: useStage ? stageState('BATCH2') : legacyState(50, 80)
+    },
+    {
+      name: '对比裁判',
+      desc: '评估竞品对比立场',
+      state: useStage ? stageState('JUDGE_COMPARISON') : legacyState(80, 90)
     },
     { name: 'L1 聚合', desc: '写入 raw snapshot', state: useStage ? stageState('L1_AGGREGATE') : legacyState(90, 94) },
     { name: 'L2 计算', desc: '评分与规则命中', state: useStage ? stageState('L2_COMPUTE') : legacyState(94, 98) },

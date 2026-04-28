@@ -39,8 +39,9 @@ import java.util.Set;
 public class SceneCoverageCalculator {
 
     private static final Logger log = LoggerFactory.getLogger(SceneCoverageCalculator.class);
-    private static final int COGNITIVE_COVERAGE_THRESHOLD = 60;
-    private static final int COMPARISON_COVERAGE_THRESHOLD = 60;
+    private static final int COGNITIVE_COVERAGE_THRESHOLD = 10;
+    private static final int COMPARISON_COVERAGE_THRESHOLD = 10;
+    private static final int JUDGE_INTENT_COVERAGE_PLATFORM_DIVISOR = 3;
     private static final String COMPARISON_STANCE_COMPETITOR = "competitor";
 
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
@@ -218,7 +219,8 @@ public class SceneCoverageCalculator {
             if (!isJudgeIntent(intent) || !effectivePlatforms.contains(cell.getPlatformCode())) {
                 continue;
             }
-            IntentCoverage coverage = result.computeIfAbsent(intent, ignored -> new IntentCoverage());
+            IntentCoverage coverage = result.computeIfAbsent(intent,
+                    ignored -> new IntentCoverage(effectivePlatforms.size()));
             coverage.totalCells++;
             if (isJudgeCellCovered(intent, cell)) {
                 coverage.coveredCells++;
@@ -355,15 +357,22 @@ public class SceneCoverageCalculator {
     }
 
     private static class IntentCoverage {
+        private final int effectivePlatformCount;
         int totalCells;
         int coveredCells;
 
+        IntentCoverage(int effectivePlatformCount) {
+            this.effectivePlatformCount = effectivePlatformCount;
+        }
+
         static IntentCoverage empty() {
-            return new IntentCoverage();
+            return new IntentCoverage(0);
         }
 
         boolean isCovered() {
-            return totalCells > 0 && coveredCells >= (int) Math.ceil(totalCells / 2.0d);
+            return effectivePlatformCount > 0
+                    && coveredCells >= (int) Math.ceil(effectivePlatformCount * 1.0d
+                    / JUDGE_INTENT_COVERAGE_PLATFORM_DIVISOR);
         }
     }
 }

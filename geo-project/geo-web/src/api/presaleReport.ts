@@ -13,7 +13,16 @@ export interface ReportVersionMetaVO {
   versionId: number
   versionNo: number
   generationStatus: 'INIT' | 'QUEUED' | 'RUNNING' | 'DONE' | 'FAILED'
-  generationStage?: 'BATCH1' | 'COMPETITOR_EXTRACT' | 'BATCH2' | 'L1_AGGREGATE' | 'L2_COMPUTE' | 'L3_INIT' | null
+  generationStage?:
+    | 'BATCH1'
+    | 'JUDGE_COGNITIVE'
+    | 'COMPETITOR_EXTRACT'
+    | 'BATCH2'
+    | 'JUDGE_COMPARISON'
+    | 'L1_AGGREGATE'
+    | 'L2_COMPUTE'
+    | 'L3_INIT'
+    | null
   totalLlmCalls?: number
   completedLlmCalls?: number
   batch1TotalCalls?: number | null

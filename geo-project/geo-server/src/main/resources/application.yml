@@ -124,7 +124,7 @@ presale:
   prompt:
     active-version: v3
   judge:
-    concurrent-platforms: 4 # 如需性能优化可调高此值或后续改异步
+    concurrent-platforms: 10 # 如需性能优化可调高此值或后续改异步
     temperature: 0
     retry:
       max-attempts: 2 # 总尝试次数;2 表示首次+重试1次

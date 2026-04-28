@@ -344,7 +344,7 @@ class PresaleGenerateOrchestratorTest {
                 .orElseThrow();
         assertEquals("BATCH1", runningUpdate.getGenerationStage());
         assertEquals(450, runningUpdate.getBatch1TotalCalls());
-        assertEquals(540, runningUpdate.getTotalLlmCalls());
+        assertEquals(810, runningUpdate.getTotalLlmCalls());
         assertEquals(0, runningUpdate.getCompletedLlmCalls());
     }
 
@@ -1521,7 +1521,12 @@ class PresaleGenerateOrchestratorTest {
 
         when(aiPlatformConfigMapper.selectCount(any())).thenReturn((long) platformCount);
         when(versionPromptTemplateMapper.selectCount(any()))
-                .thenReturn((long) genericPromptCount, (long) competitorPromptCount);
+                .thenReturn(
+                        (long) genericPromptCount,
+                        (long) competitorPromptCount,
+                        (long) genericPromptCount,
+                        (long) competitorPromptCount
+                );
     }
 
     private void setupSimpleRealFlow(Long versionId, Long reportId, List<String> extractedCompetitors) throws Exception {

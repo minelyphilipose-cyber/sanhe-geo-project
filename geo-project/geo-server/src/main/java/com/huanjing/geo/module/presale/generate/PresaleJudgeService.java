@@ -93,11 +93,27 @@ public class PresaleJudgeService {
     }
 
     public void judgeCognitiveAfterBatch1(Long versionId, String brandName, Long operatorUserId, boolean isManager) {
-        runJudge(versionId, 1, CATEGORY_COGNITIVE, brandName, operatorUserId, isManager);
+        judgeCognitiveAfterBatch1(versionId, brandName, operatorUserId, isManager, null);
+    }
+
+    public void judgeCognitiveAfterBatch1(Long versionId,
+                                          String brandName,
+                                          Long operatorUserId,
+                                          boolean isManager,
+                                          Runnable progressCallback) {
+        runJudge(versionId, 1, CATEGORY_COGNITIVE, brandName, operatorUserId, isManager, progressCallback);
     }
 
     public void judgeComparisonAfterBatch2(Long versionId, String brandName, Long operatorUserId, boolean isManager) {
-        runJudge(versionId, 2, CATEGORY_COMPARISON, brandName, operatorUserId, isManager);
+        judgeComparisonAfterBatch2(versionId, brandName, operatorUserId, isManager, null);
+    }
+
+    public void judgeComparisonAfterBatch2(Long versionId,
+                                           String brandName,
+                                           Long operatorUserId,
+                                           boolean isManager,
+                                           Runnable progressCallback) {
+        runJudge(versionId, 2, CATEGORY_COMPARISON, brandName, operatorUserId, isManager, progressCallback);
     }
 
     private void runJudge(Long versionId,
@@ -105,7 +121,8 @@ public class PresaleJudgeService {
                           String category,
                           String brandName,
                           Long operatorUserId,
-                          boolean isManager) {
+                          boolean isManager,
+                          Runnable progressCallback) {
         List<PresaleJudgeCandidateRow> candidates = promptResultMapper.selectJudgeCandidatesByVersionAndCategory(
                 versionId, batchNo, category
         );
@@ -135,6 +152,9 @@ public class PresaleJudgeService {
                         successCount.incrementAndGet();
                     } else if (outcome == JudgeOutcome.FAILED) {
                         failedCount.incrementAndGet();
+                    }
+                    if (progressCallback != null) {
+                        progressCallback.run();
                     }
                 }
             }, judgeExecutor);
