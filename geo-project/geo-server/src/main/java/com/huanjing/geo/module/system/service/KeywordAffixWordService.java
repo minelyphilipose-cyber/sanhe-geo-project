@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.project.dto.KeywordTypeConfigVO;
 import com.huanjing.geo.module.project.service.KeywordTypeConfigService;
+import com.huanjing.geo.module.system.dto.KeywordAffixWordAdminItemVO;
 import com.huanjing.geo.module.system.dto.KeywordAffixWordCreateRequest;
 import com.huanjing.geo.module.system.dto.KeywordAffixWordOptionItemVO;
 import com.huanjing.geo.module.system.dto.KeywordAffixWordOptionVO;
@@ -23,7 +24,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.function.Predicate;
 
 @Service
 @RequiredArgsConstructor
@@ -31,14 +31,14 @@ public class KeywordAffixWordService {
 
     private static final Set<String> AFFIX_KIND_SET = Set.of("area", "prefix", "suffix", "industry", "compare");
     private static final Set<String> EDITABLE_AFFIX_KIND_SET = Set.of("prefix", "suffix", "industry", "area", "compare");
-    private static final String DICT_TYPE_QUESTION_TYPE = "question_type";
+    private static final String DICT_TYPE_KEYWORD_GROUP_TYPE = "keyword_group_type";
 
     private final CurrentUserService currentUserService;
     private final KeywordAffixWordMapper keywordAffixWordMapper;
     private final SysDictItemMapper sysDictItemMapper;
     private final KeywordTypeConfigService keywordTypeConfigService;
 
-    public Page<KeywordAffixWord> page(long current, long size, String type, String affixKind, String keyword, Boolean enabled) {
+    public Page<KeywordAffixWordAdminItemVO> page(long current, long size, String type, String affixKind, String keyword, Boolean enabled) {
         currentUserService.ensurePermission("keyword_affix.manage");
         LambdaQueryWrapper<KeywordAffixWord> wrapper = new LambdaQueryWrapper<KeywordAffixWord>()
                 .orderByAsc(KeywordAffixWord::getType)
@@ -57,7 +57,10 @@ public class KeywordAffixWordService {
         if (enabled != null) {
             wrapper.eq(KeywordAffixWord::getEnabled, enabled);
         }
-        return keywordAffixWordMapper.selectPage(new Page<>(current, size), wrapper);
+        Page<KeywordAffixWord> page = keywordAffixWordMapper.selectPage(new Page<>(current, size), wrapper);
+        Page<KeywordAffixWordAdminItemVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        result.setRecords(page.getRecords().stream().map(this::toAdminItem).toList());
+        return result;
     }
 
     public KeywordAffixWordOptionVO options(String type) {
@@ -75,11 +78,11 @@ public class KeywordAffixWordService {
 
         KeywordAffixWordOptionVO vo = new KeywordAffixWordOptionVO();
         if (StringUtils.hasText(normalizedType)) {
-            vo.setAreaWords(filterOptionItems(enabledAffixWords, "area", this::isVisibleByIndustryTag));
-            vo.setPrefixWords(filterOptionItems(enabledAffixWords, "prefix", this::isVisibleByIndustryTag));
-            vo.setSuffixWords(filterOptionItems(enabledAffixWords, "suffix", this::isVisibleByIndustryTag));
-            vo.setIndustryWords(filterOptionItems(enabledAffixWords, "industry", this::isVisibleByIndustryTag));
-            vo.setCompareWords(filterOptionItems(enabledAffixWords, "compare", this::isVisibleByIndustryTag));
+            vo.setAreaWords(filterOptionItems(enabledAffixWords, "area"));
+            vo.setPrefixWords(filterOptionItems(enabledAffixWords, "prefix"));
+            vo.setSuffixWords(filterOptionItems(enabledAffixWords, "suffix"));
+            vo.setIndustryWords(filterOptionItems(enabledAffixWords, "industry"));
+            vo.setCompareWords(filterOptionItems(enabledAffixWords, "compare"));
         } else {
             vo.setAreaWords(List.of());
             vo.setPrefixWords(List.of());
@@ -94,7 +97,7 @@ public class KeywordAffixWordService {
     }
 
     @Transactional
-    public KeywordAffixWord create(KeywordAffixWordCreateRequest req) {
+    public KeywordAffixWordAdminItemVO create(KeywordAffixWordCreateRequest req) {
         currentUserService.ensurePermission("keyword_affix.manage");
         String affixKind = normalizeAffixKind(req.getAffixKind());
         String type = normalizeWordType(req.getType(), affixKind, true);
@@ -108,11 +111,11 @@ public class KeywordAffixWordService {
         word.setSortOrder(req.getSortOrder() == null ? 100 : req.getSortOrder());
         word.setEnabled(req.getEnabled() == null || req.getEnabled());
         keywordAffixWordMapper.insert(word);
-        return requireById(word.getId());
+        return toAdminItem(requireById(word.getId()));
     }
 
     @Transactional
-    public KeywordAffixWord update(Long id, KeywordAffixWordUpdateRequest req) {
+    public KeywordAffixWordAdminItemVO update(Long id, KeywordAffixWordUpdateRequest req) {
         currentUserService.ensurePermission("keyword_affix.manage");
         KeywordAffixWord word = requireById(id);
         String affixKind = normalizeAffixKind(req.getAffixKind());
@@ -125,7 +128,7 @@ public class KeywordAffixWordService {
         word.setWordText(wordText);
         word.setSortOrder(req.getSortOrder() == null ? 100 : req.getSortOrder());
         keywordAffixWordMapper.updateById(word);
-        return requireById(id);
+        return toAdminItem(requireById(id));
     }
 
     @Transactional
@@ -163,7 +166,7 @@ public class KeywordAffixWordService {
             return;
         }
         LambdaQueryWrapper<SysDictItem> wrapper = new LambdaQueryWrapper<SysDictItem>()
-                .eq(SysDictItem::getDictType, DICT_TYPE_QUESTION_TYPE)
+                .eq(SysDictItem::getDictType, DICT_TYPE_KEYWORD_GROUP_TYPE)
                 .eq(SysDictItem::getDictKey, type);
         if (enabledOnly) {
             wrapper.eq(SysDictItem::getEnabled, true);
@@ -287,18 +290,33 @@ public class KeywordAffixWordService {
         return "common".equals(wordIndustryTag) || (requestedIndustryTag != null && wordIndustryTag.equals(requestedIndustryTag));
     }
 
-    private boolean isVisibleByIndustryTag(KeywordAffixWord word) {
-        return true;
-    }
-
-    private List<KeywordAffixWordOptionItemVO> filterOptionItems(List<KeywordAffixWord> words, String affixKind, Predicate<KeywordAffixWord> extraFilter) {
+    private List<KeywordAffixWordOptionItemVO> filterOptionItems(List<KeywordAffixWord> words, String affixKind) {
         List<KeywordAffixWordOptionItemVO> result = new ArrayList<>();
         for (KeywordAffixWord word : words) {
-            if (affixKind.equals(word.getAffixKind()) && extraFilter.test(word)) {
+            if (affixKind.equals(word.getAffixKind())) {
                 result.add(toOptionItem(word));
             }
         }
         return result;
+    }
+
+    private KeywordAffixWordAdminItemVO toAdminItem(KeywordAffixWord word) {
+        KeywordAffixWordAdminItemVO item = new KeywordAffixWordAdminItemVO();
+        item.setId(word.getId());
+        item.setType(word.getType());
+        item.setAffixKind(word.getAffixKind());
+        item.setWordText(word.getWordText());
+        item.setSubCategory(word.getSubCategory());
+        item.setVisualTag(word.getVisualTag());
+        item.setIndustryTag(word.getIndustryTag());
+        item.setSortOrder(word.getSortOrder());
+        item.setEnabled(word.getEnabled());
+        item.setIsManual(word.getIsManual());
+        item.setIsTemporary(word.getIsTemporary());
+        item.setScopeType(word.getScopeType());
+        item.setScopeId(word.getScopeId());
+        item.setApprovalStatus(word.getApprovalStatus());
+        return item;
     }
 
     private KeywordAffixWordOptionItemVO toOptionItem(KeywordAffixWord word) {

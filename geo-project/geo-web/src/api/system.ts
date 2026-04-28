@@ -77,11 +77,13 @@ export function getActivityLogs(params: ActivityLogQuery) {
   return request.get<R<PageResult<ActivityLog>>>('/admin/activity-logs', { params })
 }
 
+export type KeywordAffixKind = 'area' | 'prefix' | 'suffix' | 'industry' | 'compare'
+
 export interface KeywordAffixWordQuery {
   current?: number
   size?: number
   type?: string
-  affixKind?: 'prefix' | 'suffix' | 'industry'
+  affixKind?: KeywordAffixKind
   keyword?: string
   enabled?: boolean
 }
@@ -92,7 +94,7 @@ export function getAdminKeywordAffixWords(params: KeywordAffixWordQuery) {
 
 export function createAdminKeywordAffixWord(payload: {
   type?: string
-  affixKind: 'prefix' | 'suffix' | 'industry'
+  affixKind: KeywordAffixKind
   wordText: string
   sortOrder: number
   enabled?: boolean
@@ -102,7 +104,7 @@ export function createAdminKeywordAffixWord(payload: {
 
 export function updateAdminKeywordAffixWord(id: number, payload: {
   type?: string
-  affixKind: 'prefix' | 'suffix' | 'industry'
+  affixKind: KeywordAffixKind
   wordText: string
   sortOrder: number
 }) {
@@ -113,6 +115,21 @@ export function updateAdminKeywordAffixWordStatus(id: number, enabled: boolean) 
   return request.put<R<void>>(`/admin/keyword-affix-words/${id}/status`, { enabled })
 }
 
-export function getKeywordAffixWordOptions(type?: string) {
-  return request.get<R<KeywordAffixWordOptionResult>>('/keyword-affix-words/options', { params: { type: type || undefined } })
+export function getKeywordAffixWordOptions(params?: string | {
+  type?: string
+  industryTag?: string
+  includeManual?: boolean
+  scopeType?: string
+  scopeId?: number
+}) {
+  const finalParams = typeof params === 'string' ? { type: params } : params
+  return request.get<R<KeywordAffixWordOptionResult>>('/keyword-affix-words/options', {
+    params: {
+      type: finalParams?.type || undefined,
+      industryTag: finalParams?.industryTag || undefined,
+      includeManual: finalParams?.includeManual,
+      scopeType: finalParams?.scopeType || undefined,
+      scopeId: finalParams?.scopeId,
+    },
+  })
 }

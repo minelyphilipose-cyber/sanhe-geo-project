@@ -37,14 +37,14 @@ public class KeywordGroupController {
         return R.ok(keywordGroupService.page(current, size, keyword, companyId, projectId, type));
     }
 
-    @GetMapping("/{id}")
-    public R<KeywordGroupVO> detail(@PathVariable Long id) {
-        return R.ok(keywordGroupService.detail(id));
-    }
-
     @GetMapping("/type-configs")
     public R<List<KeywordTypeConfigVO>> getTypeConfigs() {
         return R.ok(keywordTypeConfigService.listConfigs());
+    }
+
+    @GetMapping("/{id:\\d+}")
+    public R<KeywordGroupVO> detail(@PathVariable Long id) {
+        return R.ok(keywordGroupService.detail(id));
     }
 
     @PostMapping

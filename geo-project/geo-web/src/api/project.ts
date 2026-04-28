@@ -9,6 +9,7 @@ import type {
   KeywordGroup,
   KeywordGroupPayload,
   KeywordPreviewResult,
+  KeywordTypeConfig,
 } from '@/types'
 
 export function getProjectList(params: {
@@ -88,6 +89,10 @@ export function updateQuestionStrategy(questionId: number, data: {
 
 export function getKeywordGroupPage(params: { current?: number; size?: number; keyword?: string; companyId?: number; type?: string }) {
   return request.get<R<PageResult<KeywordGroup>>>('/keyword-groups', { params })
+}
+
+export function getKeywordGroupTypeConfigs() {
+  return request.get<R<KeywordTypeConfig[]>>('/keyword-groups/type-configs')
 }
 
 export function getKeywordGroupDetail(id: number) {

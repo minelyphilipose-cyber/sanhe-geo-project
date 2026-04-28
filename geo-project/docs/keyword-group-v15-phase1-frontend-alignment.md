@@ -146,7 +146,7 @@ PRD 4.1.2 描述 function.prefix 是"按行业调用",落地方式:
 - `KeywordTypeConfigVO.columns.prefix=true` 表示该列必然渲染
 - options 接口必须带 `industryTag` 参数才能返回正确的前缀词
 - 后端 `KeywordAffixOptionsService` 按 `industry_tag = :industryTag OR industry_tag = 'common'` 过滤 function.prefix
-- 前端在 industryTag 未选择时,function.prefix 列应展示"请先选择行业"占位提示,不应展示空选项列表
+- 前端在 industryTag 未选择时,function.prefix 列展示 common 类前缀词;行业词在 industryTag 选择后 reload
 - industryTag 切换时按议题 5.4 主体规则:保留 common 类前缀词,清空旧行业类
 
 ### 5.5 临时词 UI 标识

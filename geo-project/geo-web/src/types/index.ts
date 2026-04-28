@@ -572,17 +572,25 @@ export interface KeywordWordItem {
 }
 
 export interface KeywordGroupColumns {
-  regionWords: KeywordWordItem[]
+  areaWords: KeywordWordItem[]
+  /** @deprecated V1.6 删除，仅兼容旧 payload */
+  regionWords?: KeywordWordItem[]
   prefixWords: KeywordWordItem[]
   coreWords: KeywordWordItem[]
   industryWords: KeywordWordItem[]
   suffixWords: KeywordWordItem[]
+  coreWordsA: KeywordWordItem[]
+  compareWords: KeywordWordItem[]
+  coreWordsB: KeywordWordItem[]
 }
 
 export interface KeywordGroupPayload {
   companyId: number
+  projectId?: number | null
   name?: string
   type: string
+  areaEnabled?: boolean
+  functionIndustryTag?: string | null
   remark?: string
   count?: number
   resultKeywords?: string[]
@@ -593,8 +601,15 @@ export interface KeywordGroup {
   id: number
   companyId: number
   companyName?: string | null
+  projectId?: number | null
+  projectName?: string | null
+  packageType?: string | null
   name: string
   type: string
+  typeLabel?: string | null
+  legacyType?: boolean
+  areaEnabled?: boolean | null
+  functionIndustryTag?: string | null
   remark?: string | null
   estimatedKeywordCount?: number
   savedKeywordCount?: number
@@ -607,30 +622,66 @@ export interface KeywordPreviewResult {
   totalEstimated: number
   totalAvailable: number
   totalGenerated: number
+  filteredCount?: number
   keywords: string[]
 }
 
 export interface KeywordAffixWord {
   id: number
   type: string
-  affixKind: 'prefix' | 'suffix' | 'industry' | 'type' | string
+  affixKind?: 'area' | 'prefix' | 'suffix' | 'industry' | 'compare' | 'type' | string
   wordText: string
+  subCategory?: string | null
+  visualTag?: string | null
+  industryTag?: string | null
+  isManual?: boolean
+  isTemporary?: boolean
+  scopeType?: string | null
+  scopeId?: number | null
   sortOrder: number
   enabled: boolean
-  createdAt: string
-  updatedAt: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface KeywordTypeOption {
   value: string
   label: string
+  legacy?: boolean
+}
+
+export interface KeywordColumnVisibility {
+  area: boolean
+  prefix: boolean
+  core: boolean
+  industry: boolean
+  suffix: boolean
+  compareCore: boolean
+  compareWord: boolean
+}
+
+export interface KeywordTypeConfig {
+  type: string
+  label: string
+  description?: string
+  structure: 'standard' | 'compare' | string
+  areaEnabledByDefault: boolean
+  industryRequired: boolean
+  supportsManualAdd: boolean
+  functionIndustryRequired: boolean
+  columns: KeywordColumnVisibility
+  requiredColumns: KeywordColumnVisibility
 }
 
 export interface KeywordAffixWordOptionResult {
+  areaWords: KeywordAffixWord[]
   prefixWords: KeywordAffixWord[]
   suffixWords: KeywordAffixWord[]
   industryWords: KeywordAffixWord[]
+  compareWords: KeywordAffixWord[]
   typeOptions: KeywordTypeOption[]
+  typeConfigs: KeywordTypeConfig[]
+  currentTypeConfig?: KeywordTypeConfig | null
 }
 
 export interface BrandStatementContent {
