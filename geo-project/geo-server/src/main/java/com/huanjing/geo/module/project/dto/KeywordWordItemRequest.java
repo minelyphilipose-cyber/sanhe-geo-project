@@ -14,4 +14,13 @@ public class KeywordWordItemRequest {
     private String source;
 
     private Integer sortOrder;
+
+    private Boolean isManual;
+
+    private Boolean isTemporary;
+
+    @Size(max = 16, message = "scopeType length must be <= 16")
+    private String scopeType;
+
+    private Long scopeId;
 }

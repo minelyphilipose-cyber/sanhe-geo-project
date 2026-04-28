@@ -7,19 +7,23 @@ import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.project.dto.KeywordGroupColumnsRequest;
 import com.huanjing.geo.module.project.dto.KeywordGroupColumnsVO;
+import com.huanjing.geo.module.project.dto.KeywordGroupListItemVO;
 import com.huanjing.geo.module.project.dto.KeywordGroupPayloadRequest;
 import com.huanjing.geo.module.project.dto.KeywordGroupVO;
 import com.huanjing.geo.module.project.dto.KeywordPreviewVO;
+import com.huanjing.geo.module.project.dto.KeywordRequiredColumnsVO;
+import com.huanjing.geo.module.project.dto.KeywordTypeConfigVO;
 import com.huanjing.geo.module.project.dto.KeywordWordItemRequest;
 import com.huanjing.geo.module.project.dto.KeywordWordItemVO;
 import com.huanjing.geo.module.project.entity.KeywordGroup;
 import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.entity.KeywordGroupWord;
+import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.KeywordGroupWordMapper;
+import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
-import com.huanjing.geo.module.system.service.KeywordAffixWordService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,7 +35,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -41,17 +44,18 @@ import java.util.stream.Collectors;
 public class KeywordGroupService {
 
     private static final int MAX_GENERATION = 1000;
-    private static final Set<String> COLUMN_TYPE_SET = Set.of("region", "prefix", "core", "industry", "suffix");
+    private static final Set<String> COLUMN_TYPE_SET = Set.of("area", "region", "prefix", "core", "industry", "suffix", "core_a", "compare", "core_b");
     private static final Set<String> SOURCE_SET = Set.of("system", "custom");
 
     private final KeywordGroupMapper keywordGroupMapper;
     private final KeywordGroupResultMapper keywordGroupResultMapper;
     private final KeywordGroupWordMapper keywordGroupWordMapper;
     private final CompanyMapper companyMapper;
+    private final ProjectMapper projectMapper;
     private final CurrentUserService currentUserService;
-    private final KeywordAffixWordService keywordAffixWordService;
+    private final KeywordTypeConfigService keywordTypeConfigService;
 
-    public Page<KeywordGroupVO> page(long current, long size, String keyword, Long companyId, String type) {
+    public Page<KeywordGroupListItemVO> page(long current, long size, String keyword, Long companyId, Long projectId, String type) {
         currentUserService.ensurePermission("keyword_group.read");
         LambdaQueryWrapper<KeywordGroup> wrapper = new LambdaQueryWrapper<KeywordGroup>()
                 .orderByDesc(KeywordGroup::getUpdatedAt)
@@ -62,23 +66,22 @@ public class KeywordGroupService {
         if (companyId != null) {
             wrapper.eq(KeywordGroup::getCompanyId, companyId);
         }
+        if (projectId != null) {
+            wrapper.eq(KeywordGroup::getProjectId, projectId);
+        }
         if (StringUtils.hasText(type)) {
             wrapper.eq(KeywordGroup::getType, normalizeType(type));
         }
+
         Page<KeywordGroup> page = keywordGroupMapper.selectPage(new Page<>(current, size), wrapper);
         List<Long> groupIds = page.getRecords().stream().map(KeywordGroup::getId).toList();
         Map<Long, String> companyNameMap = buildCompanyNameMap(page.getRecords().stream().map(KeywordGroup::getCompanyId).toList());
-        Map<Long, Long> estimatedCountMap = calcEstimatedCountsByGroupIds(groupIds);
+        Map<Long, Project> projectMap = buildProjectMap(page.getRecords().stream().map(KeywordGroup::getProjectId).toList());
         Map<Long, Long> savedCountMap = calcSavedCountsByGroupIds(groupIds);
 
-        Page<KeywordGroupVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        Page<KeywordGroupListItemVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         result.setRecords(page.getRecords().stream()
-                .map(group -> toSummaryVO(
-                        group,
-                        companyNameMap.get(group.getCompanyId()),
-                        estimatedCountMap.get(group.getId()),
-                        savedCountMap.get(group.getId())
-                ))
+                .map(group -> toListItemVO(group, companyNameMap.get(group.getCompanyId()), projectMap.get(group.getProjectId()), savedCountMap.get(group.getId())))
                 .toList());
         return result;
     }
@@ -87,9 +90,10 @@ public class KeywordGroupService {
         currentUserService.ensurePermission("keyword_group.read");
         KeywordGroup group = requireGroup(id);
         String companyName = resolveCompanyName(group.getCompanyId());
+        Project project = group.getProjectId() == null ? null : projectMapper.selectById(group.getProjectId());
         Long estimatedCount = calcEstimatedCountsByGroupIds(List.of(group.getId())).getOrDefault(group.getId(), 0L);
         Long savedCount = calcSavedCountsByGroupIds(List.of(group.getId())).getOrDefault(group.getId(), 0L);
-        return toDetailVO(group, companyName, estimatedCount, savedCount);
+        return toDetailVO(group, companyName, project, estimatedCount, savedCount);
     }
 
     @Transactional
@@ -99,20 +103,27 @@ public class KeywordGroupService {
             throw new BizException(400, "name is required");
         }
 
-        KeywordGroup group = new KeywordGroup();
+        String type = normalizeType(req.getType());
         Company company = requireCompany(req.getCompanyId());
+        Project project = resolveProject(req.getProjectId(), company.getId());
+
+        KeywordGroup group = new KeywordGroup();
         group.setCompanyId(company.getId());
+        group.setProjectId(project == null ? null : project.getId());
         group.setName(req.getName().trim());
-        group.setType(normalizeType(req.getType()));
-        group.setRemark(StringUtils.hasText(req.getRemark()) ? req.getRemark().trim() : null);
+        group.setType(type);
+        group.setAreaEnabled(resolveAreaEnabled(type, req.getAreaEnabled(), null));
+        group.setFunctionIndustryTag(normalizeNullable(req.getFunctionIndustryTag()));
+        group.setRemark(normalizeNullable(req.getRemark()));
         keywordGroupMapper.insert(group);
 
-        List<KeywordGroupWord> words = normalizeWordsForPersist(group.getId(), req.getColumns());
-        List<String> candidateKeywords = buildCandidateKeywords(req.getColumns());
+        List<KeywordGroupWord> words = normalizeWordsForPersist(group.getId(), type, req.getColumns());
+        assertGenerationLimit(type, req);
+        List<String> candidateKeywords = buildCandidateKeywords(req);
         List<String> resultKeywords = normalizeResultKeywordsForPersist(req, candidateKeywords);
         saveWords(group.getId(), words);
         saveResults(group.getId(), resultKeywords);
-        return toDetailVO(requireGroup(group.getId()), company.getCompanyName(), calcEstimatedByWords(words), (long) resultKeywords.size());
+        return toDetailVO(requireGroup(group.getId()), company.getCompanyName(), project, calcEstimatedByWords(type, group.getAreaEnabled(), words), (long) resultKeywords.size());
     }
 
     @Transactional
@@ -122,19 +133,26 @@ public class KeywordGroupService {
             throw new BizException(400, "name is required");
         }
         KeywordGroup group = requireGroup(id);
+        String type = normalizeType(req.getType());
         Company company = requireCompany(req.getCompanyId());
+        Project project = resolveProject(req.getProjectId(), company.getId());
+
         group.setCompanyId(company.getId());
+        group.setProjectId(project == null ? null : project.getId());
         group.setName(req.getName().trim());
-        group.setType(normalizeType(req.getType()));
-        group.setRemark(StringUtils.hasText(req.getRemark()) ? req.getRemark().trim() : null);
+        group.setType(type);
+        group.setAreaEnabled(resolveAreaEnabled(type, req.getAreaEnabled(), group.getAreaEnabled()));
+        group.setFunctionIndustryTag(normalizeNullable(req.getFunctionIndustryTag()));
+        group.setRemark(normalizeNullable(req.getRemark()));
         keywordGroupMapper.updateById(group);
 
-        List<KeywordGroupWord> words = normalizeWordsForPersist(id, req.getColumns());
-        List<String> candidateKeywords = buildCandidateKeywords(req.getColumns());
+        List<KeywordGroupWord> words = normalizeWordsForPersist(id, type, req.getColumns());
+        assertGenerationLimit(type, req);
+        List<String> candidateKeywords = buildCandidateKeywords(req);
         List<String> resultKeywords = normalizeResultKeywordsForPersist(req, candidateKeywords);
         saveWords(id, words);
         saveResults(id, resultKeywords);
-        return toDetailVO(requireGroup(id), company.getCompanyName(), calcEstimatedByWords(words), (long) resultKeywords.size());
+        return toDetailVO(requireGroup(id), company.getCompanyName(), project, calcEstimatedByWords(type, group.getAreaEnabled(), words), (long) resultKeywords.size());
     }
 
     @Transactional
@@ -148,31 +166,25 @@ public class KeywordGroupService {
 
     public KeywordPreviewVO preview(KeywordGroupPayloadRequest req) {
         currentUserService.ensurePermission("keyword_group.read");
-        normalizeType(req.getType());
+        String type = normalizeType(req.getType());
         int count = req.getCount() == null ? MAX_GENERATION : req.getCount();
         if (count <= 0) {
             throw new BizException(400, "count must be > 0");
         }
 
-        List<String> regionWords = normalizeWordsForPreview(req.getColumns() == null ? null : req.getColumns().getRegionWords());
-        List<String> prefixWords = normalizeWordsForPreview(req.getColumns() == null ? null : req.getColumns().getPrefixWords());
-        List<String> coreWords = normalizeWordsForPreview(req.getColumns() == null ? null : req.getColumns().getCoreWords());
-        List<String> industryWords = normalizeWordsForPreview(req.getColumns() == null ? null : req.getColumns().getIndustryWords());
-        List<String> suffixWords = normalizeWordsForPreview(req.getColumns() == null ? null : req.getColumns().getSuffixWords());
-
-        long totalEstimated = calcTotalEstimated(regionWords, prefixWords, coreWords, industryWords, suffixWords);
+        long totalEstimated = calcTotalEstimated(type, req.getAreaEnabled(), req.getColumns());
         if (totalEstimated > MAX_GENERATION) {
             throw new BizException(400, "预计生成 " + totalEstimated + " 条，超过上限 " + MAX_GENERATION + "，请减少选词");
         }
-
-        List<String> keywords = buildKeywords(regionWords, prefixWords, coreWords, industryWords, suffixWords);
-        Collections.shuffle(keywords);
+        List<String> keywords = buildCandidateKeywords(req);
         int limit = Math.min(Math.max(1, count), keywords.size());
 
         KeywordPreviewVO vo = new KeywordPreviewVO();
         vo.setTotalEstimated(totalEstimated);
         vo.setTotalAvailable(keywords.size());
         vo.setTotalGenerated(limit);
+        // TODO: 阶段二接入黑名单后置过滤后更新真实过滤数量。
+        vo.setFilteredCount(0);
         vo.setKeywords(new ArrayList<>(keywords.subList(0, limit)));
         return vo;
     }
@@ -181,25 +193,20 @@ public class KeywordGroupService {
         if (groupIds == null || groupIds.isEmpty()) {
             return Collections.emptyMap();
         }
+        List<KeywordGroup> groups = keywordGroupMapper.selectList(new LambdaQueryWrapper<KeywordGroup>().in(KeywordGroup::getId, groupIds));
+        Map<Long, KeywordGroup> groupMap = groups.stream().collect(Collectors.toMap(KeywordGroup::getId, g -> g));
         List<KeywordGroupWord> words = keywordGroupWordMapper.selectList(
-                new LambdaQueryWrapper<KeywordGroupWord>()
-                        .in(KeywordGroupWord::getGroupId, groupIds)
+                new LambdaQueryWrapper<KeywordGroupWord>().in(KeywordGroupWord::getGroupId, groupIds)
         );
-        Map<Long, Map<String, Integer>> countMap = new HashMap<>();
-        for (KeywordGroupWord word : words) {
-            countMap.computeIfAbsent(word.getGroupId(), k -> new HashMap<>())
-                    .merge(word.getColumnType(), 1, Integer::sum);
-        }
+        Map<Long, List<KeywordGroupWord>> wordMap = words.stream().collect(Collectors.groupingBy(KeywordGroupWord::getGroupId));
         Map<Long, Long> result = new HashMap<>();
         for (Long groupId : groupIds) {
-            Map<String, Integer> columnCount = countMap.getOrDefault(groupId, Map.of());
-            long estimated = 1L
-                    * Math.max(1, columnCount.getOrDefault("region", 0))
-                    * Math.max(1, columnCount.getOrDefault("prefix", 0))
-                    * Math.max(1, columnCount.getOrDefault("core", 0))
-                    * Math.max(1, columnCount.getOrDefault("industry", 0))
-                    * Math.max(1, columnCount.getOrDefault("suffix", 0));
-            result.put(groupId, estimated);
+            KeywordGroup group = groupMap.get(groupId);
+            result.put(groupId, calcEstimatedByWords(
+                    group == null ? null : group.getType(),
+                    group == null ? null : group.getAreaEnabled(),
+                    wordMap.getOrDefault(groupId, List.of())
+            ));
         }
         return result;
     }
@@ -224,13 +231,20 @@ public class KeywordGroupService {
         return finalMap;
     }
 
-    private List<KeywordGroupWord> normalizeWordsForPersist(Long groupId, KeywordGroupColumnsRequest columns) {
+    private List<KeywordGroupWord> normalizeWordsForPersist(Long groupId, String type, KeywordGroupColumnsRequest columns) {
         Map<String, List<KeywordWordItemRequest>> sourceMap = new LinkedHashMap<>();
-        sourceMap.put("region", columns == null ? null : columns.getRegionWords());
-        sourceMap.put("prefix", columns == null ? null : columns.getPrefixWords());
-        sourceMap.put("core", columns == null ? null : columns.getCoreWords());
-        sourceMap.put("industry", columns == null ? null : columns.getIndustryWords());
-        sourceMap.put("suffix", columns == null ? null : columns.getSuffixWords());
+        if (isCompareType(type)) {
+            sourceMap.put("core_a", columns == null ? null : columns.getCoreWordsA());
+            sourceMap.put("compare", columns == null ? null : columns.getCompareWords());
+            sourceMap.put("core_b", columns == null ? null : columns.getCoreWordsB());
+            sourceMap.put("suffix", columns == null ? null : columns.getSuffixWords());
+        } else {
+            sourceMap.put("area", readAreaWords(columns));
+            sourceMap.put("prefix", columns == null ? null : columns.getPrefixWords());
+            sourceMap.put("core", columns == null ? null : columns.getCoreWords());
+            sourceMap.put("industry", columns == null ? null : columns.getIndustryWords());
+            sourceMap.put("suffix", columns == null ? null : columns.getSuffixWords());
+        }
 
         List<KeywordGroupWord> result = new ArrayList<>();
         for (Map.Entry<String, List<KeywordWordItemRequest>> entry : sourceMap.entrySet()) {
@@ -279,13 +293,37 @@ public class KeywordGroupService {
         return group;
     }
 
-    private KeywordGroupVO toSummaryVO(KeywordGroup group, String companyName, Long estimatedCount, Long savedCount) {
+    private KeywordGroupListItemVO toListItemVO(KeywordGroup group, String companyName, Project project, Long savedCount) {
+        KeywordGroupListItemVO vo = new KeywordGroupListItemVO();
+        vo.setId(group.getId());
+        vo.setCompanyId(group.getCompanyId());
+        vo.setCompanyName(companyName);
+        vo.setProjectId(group.getProjectId());
+        vo.setProjectName(project == null ? null : project.getProjectName());
+        vo.setPackageType(project == null ? null : project.getPackageType());
+        vo.setName(group.getName());
+        vo.setType(group.getType());
+        vo.setTypeLabel(keywordTypeConfigService.labelOf(group.getType()));
+        vo.setLegacyType(keywordTypeConfigService.isLegacyType(group.getType()));
+        vo.setSavedKeywordCount(savedCount == null ? 0L : savedCount);
+        vo.setUpdatedAt(group.getUpdatedAt());
+        return vo;
+    }
+
+    private KeywordGroupVO toSummaryVO(KeywordGroup group, String companyName, Project project, Long estimatedCount, Long savedCount) {
         KeywordGroupVO vo = new KeywordGroupVO();
         vo.setId(group.getId());
         vo.setCompanyId(group.getCompanyId());
         vo.setCompanyName(companyName);
+        vo.setProjectId(group.getProjectId());
+        vo.setProjectName(project == null ? null : project.getProjectName());
+        vo.setPackageType(project == null ? null : project.getPackageType());
         vo.setName(group.getName());
         vo.setType(group.getType());
+        vo.setTypeLabel(keywordTypeConfigService.labelOf(group.getType()));
+        vo.setLegacyType(keywordTypeConfigService.isLegacyType(group.getType()));
+        vo.setAreaEnabled(group.getAreaEnabled());
+        vo.setFunctionIndustryTag(group.getFunctionIndustryTag());
         vo.setRemark(group.getRemark());
         vo.setEstimatedKeywordCount(estimatedCount == null ? 0L : estimatedCount);
         vo.setSavedKeywordCount(savedCount == null ? 0L : savedCount);
@@ -294,8 +332,8 @@ public class KeywordGroupService {
         return vo;
     }
 
-    private KeywordGroupVO toDetailVO(KeywordGroup group, String companyName, Long estimatedCount, Long savedCount) {
-        KeywordGroupVO vo = toSummaryVO(group, companyName, estimatedCount, savedCount);
+    private KeywordGroupVO toDetailVO(KeywordGroup group, String companyName, Project project, Long estimatedCount, Long savedCount) {
+        KeywordGroupVO vo = toSummaryVO(group, companyName, project, estimatedCount, savedCount);
         List<KeywordGroupWord> words = keywordGroupWordMapper.selectList(
                 new LambdaQueryWrapper<KeywordGroupWord>()
                         .eq(KeywordGroupWord::getGroupId, group.getId())
@@ -314,26 +352,44 @@ public class KeywordGroupService {
             item.setWordText(word.getWordText());
             item.setSource(word.getSource());
             item.setSortOrder(word.getSortOrder());
+            item.setIsManual(false);
+            item.setIsTemporary(false);
             map.computeIfAbsent(word.getColumnType(), k -> new ArrayList<>()).add(item);
         }
 
+        List<KeywordWordItemVO> areaWords = new ArrayList<>();
+        areaWords.addAll(map.getOrDefault("area", List.of()));
+        areaWords.addAll(map.getOrDefault("region", List.of()));
+
         KeywordGroupColumnsVO columnsVO = new KeywordGroupColumnsVO();
-        columnsVO.setRegionWords(map.getOrDefault("region", List.of()));
+        columnsVO.setAreaWords(areaWords);
         columnsVO.setPrefixWords(map.getOrDefault("prefix", List.of()));
         columnsVO.setCoreWords(map.getOrDefault("core", List.of()));
         columnsVO.setIndustryWords(map.getOrDefault("industry", List.of()));
         columnsVO.setSuffixWords(map.getOrDefault("suffix", List.of()));
+        columnsVO.setCoreWordsA(map.getOrDefault("core_a", List.of()));
+        columnsVO.setCompareWords(map.getOrDefault("compare", List.of()));
+        columnsVO.setCoreWordsB(map.getOrDefault("core_b", List.of()));
         vo.setColumns(columnsVO);
         return vo;
     }
 
-    private long calcEstimatedByWords(List<KeywordGroupWord> words) {
+    private long calcEstimatedByWords(String type, Boolean areaEnabled, List<KeywordGroupWord> words) {
         Map<String, Integer> columnCount = new HashMap<>();
         for (KeywordGroupWord word : words) {
-            columnCount.merge(word.getColumnType(), 1, Integer::sum);
+            String columnType = normalizeColumnType(word.getColumnType());
+            columnCount.merge(columnType, 1, Integer::sum);
         }
+        if (isCompareType(type)) {
+            return 1L
+                    * Math.max(1, columnCount.getOrDefault("core_a", 0))
+                    * Math.max(1, columnCount.getOrDefault("compare", 0))
+                    * Math.max(1, columnCount.getOrDefault("core_b", 0))
+                    * Math.max(1, columnCount.getOrDefault("suffix", 0));
+        }
+        boolean useArea = Boolean.TRUE.equals(areaEnabled);
         return 1L
-                * Math.max(1, columnCount.getOrDefault("region", 0))
+                * (useArea ? Math.max(1, columnCount.getOrDefault("area", 0)) : 1)
                 * Math.max(1, columnCount.getOrDefault("prefix", 0))
                 * Math.max(1, columnCount.getOrDefault("core", 0))
                 * Math.max(1, columnCount.getOrDefault("industry", 0))
@@ -352,6 +408,18 @@ public class KeywordGroupService {
         ).stream().collect(Collectors.toMap(Company::getId, Company::getCompanyName, (a, b) -> a));
     }
 
+    private Map<Long, Project> buildProjectMap(List<Long> projectIds) {
+        List<Long> validIds = projectIds.stream().filter(id -> id != null && id > 0).distinct().toList();
+        if (validIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return projectMapper.selectList(
+                new LambdaQueryWrapper<Project>()
+                        .select(Project::getId, Project::getProjectName, Project::getPackageType)
+                        .in(Project::getId, validIds)
+        ).stream().collect(Collectors.toMap(Project::getId, p -> p, (a, b) -> a));
+    }
+
     private String resolveCompanyName(Long companyId) {
         if (companyId == null) {
             return null;
@@ -368,12 +436,25 @@ public class KeywordGroupService {
         return company;
     }
 
-    private String normalizeType(String raw) {
-        if (!StringUtils.hasText(raw)) {
-            throw new BizException(400, "type is required");
+    private Project resolveProject(Long projectId, Long companyId) {
+        if (projectId == null) {
+            return null;
         }
-        String type = raw.trim().toLowerCase(Locale.ROOT);
-        keywordAffixWordService.ensureTypeExists(type, true);
+        Project project = projectMapper.selectById(projectId);
+        if (project == null) {
+            throw new BizException(404, "Project not found");
+        }
+        if (project.getCompanyId() != null && !project.getCompanyId().equals(companyId)) {
+            throw new BizException(400, "Project does not belong to company");
+        }
+        return project;
+    }
+
+    private String normalizeType(String raw) {
+        String type = keywordTypeConfigService.normalizeType(raw);
+        if (!keywordTypeConfigService.isKnownType(type)) {
+            throw new BizException(400, "Unknown keyword group type: " + raw);
+        }
         return type;
     }
 
@@ -385,7 +466,7 @@ public class KeywordGroupService {
                 if (req == null || !StringUtils.hasText(req.getWordText())) {
                     continue;
                 }
-                String source = StringUtils.hasText(req.getSource()) ? req.getSource().trim().toLowerCase(Locale.ROOT) : "custom";
+                String source = StringUtils.hasText(req.getSource()) ? req.getSource().trim().toLowerCase() : "custom";
                 if (!SOURCE_SET.contains(source)) {
                     source = "custom";
                 }
@@ -411,18 +492,68 @@ public class KeywordGroupService {
         return normalizeItems(input).stream().map(PreparedWord::wordText).toList();
     }
 
-    private List<String> buildCandidateKeywords(KeywordGroupColumnsRequest columns) {
-        List<String> regionWords = normalizeWordsForPreview(columns == null ? null : columns.getRegionWords());
-        List<String> prefixWords = normalizeWordsForPreview(columns == null ? null : columns.getPrefixWords());
-        List<String> coreWords = normalizeWordsForPreview(columns == null ? null : columns.getCoreWords());
-        List<String> industryWords = normalizeWordsForPreview(columns == null ? null : columns.getIndustryWords());
-        List<String> suffixWords = normalizeWordsForPreview(columns == null ? null : columns.getSuffixWords());
+    private List<String> buildCandidateKeywords(KeywordGroupPayloadRequest req) {
+        String type = normalizeType(req.getType());
+        validateRequiredColumns(type, req);
 
-        long totalEstimated = calcTotalEstimated(regionWords, prefixWords, coreWords, industryWords, suffixWords);
+        List<String> keywords;
+        if (isCompareType(type)) {
+            keywords = buildCompareKeywords(
+                    normalizeWordsForPreview(req.getColumns() == null ? null : req.getColumns().getCoreWordsA()),
+                    normalizeWordsForPreview(req.getColumns() == null ? null : req.getColumns().getCompareWords()),
+                    normalizeWordsForPreview(req.getColumns() == null ? null : req.getColumns().getCoreWordsB()),
+                    normalizeWordsForPreview(req.getColumns() == null ? null : req.getColumns().getSuffixWords())
+            );
+        } else {
+            boolean useArea = shouldUseArea(type, req.getAreaEnabled());
+            keywords = buildStandardKeywords(
+                    useArea ? normalizeWordsForPreview(readAreaWords(req.getColumns())) : List.of(),
+                    normalizeWordsForPreview(req.getColumns() == null ? null : req.getColumns().getPrefixWords()),
+                    normalizeWordsForPreview(req.getColumns() == null ? null : req.getColumns().getCoreWords()),
+                    normalizeWordsForPreview(req.getColumns() == null ? null : req.getColumns().getIndustryWords()),
+                    normalizeWordsForPreview(req.getColumns() == null ? null : req.getColumns().getSuffixWords())
+            );
+        }
+        return keywords;
+    }
+
+    private void assertGenerationLimit(String type, KeywordGroupPayloadRequest req) {
+        long totalEstimated = calcTotalEstimated(type, req.getAreaEnabled(), req.getColumns());
         if (totalEstimated > MAX_GENERATION) {
             throw new BizException(400, "预计生成 " + totalEstimated + " 条，超过上限 " + MAX_GENERATION + "，请减少选词");
         }
-        return buildKeywords(regionWords, prefixWords, coreWords, industryWords, suffixWords);
+    }
+
+    private void validateRequiredColumns(String type, KeywordGroupPayloadRequest req) {
+        if (keywordTypeConfigService.isLegacyType(type)) {
+            return;
+        }
+        KeywordTypeConfigVO config = keywordTypeConfigService.getConfig(type);
+        KeywordRequiredColumnsVO required = config.getRequiredColumns();
+        KeywordGroupColumnsRequest columns = req.getColumns();
+        if (required.isCore() && normalizeWordsForPreview(columns == null ? null : columns.getCoreWords()).isEmpty()) {
+            throw new BizException(400, "coreWords is required");
+        }
+        if (required.isIndustry() && normalizeWordsForPreview(columns == null ? null : columns.getIndustryWords()).isEmpty()) {
+            throw new BizException(400, "industryWords is required");
+        }
+        if (required.isCompareCore()) {
+            if (normalizeWordsForPreview(columns == null ? null : columns.getCoreWordsA()).isEmpty()) {
+                throw new BizException(400, "COMPARE_CORE_A_REQUIRED: coreWordsA is required");
+            }
+            if (normalizeWordsForPreview(columns == null ? null : columns.getCoreWordsB()).isEmpty()) {
+                throw new BizException(400, "COMPARE_CORE_B_REQUIRED: coreWordsB is required");
+            }
+        }
+        if (required.isCompareWord() && normalizeWordsForPreview(columns == null ? null : columns.getCompareWords()).isEmpty()) {
+            throw new BizException(400, "COMPARE_WORD_REQUIRED: compareWords is required");
+        }
+        if (required.isSuffix() && normalizeWordsForPreview(columns == null ? null : columns.getSuffixWords()).isEmpty()) {
+            throw new BizException(400, "suffixWords is required");
+        }
+        if (config.isFunctionIndustryRequired() && !StringUtils.hasText(req.getFunctionIndustryTag())) {
+            throw new BizException(400, "FUNCTION_INDUSTRY_REQUIRED: functionIndustryTag is required");
+        }
     }
 
     private List<String> normalizeResultKeywordsForPersist(KeywordGroupPayloadRequest req, List<String> candidateKeywords) {
@@ -451,46 +582,49 @@ public class KeywordGroupService {
         Set<String> candidateSet = new LinkedHashSet<>(candidateKeywords);
         for (String keyword : resultKeywords) {
             if (!candidateSet.contains(keyword)) {
-                throw new BizException(400, "resultKeywords contains invalid keyword: " + keyword);
+                throw new BizException(400, "INVALID_RESULT_KEYWORDS: " + keyword);
             }
         }
         return resultKeywords;
     }
 
-    private long calcTotalEstimated(
-            List<String> region,
-            List<String> prefix,
-            List<String> core,
-            List<String> industry,
-            List<String> suffix
-    ) {
-        return 1L * Math.max(1, region.size())
-                * Math.max(1, prefix.size())
-                * Math.max(1, core.size())
-                * Math.max(1, industry.size())
-                * Math.max(1, suffix.size());
+    private long calcTotalEstimated(String type, Boolean areaEnabled, KeywordGroupColumnsRequest columns) {
+        if (isCompareType(type)) {
+            return 1L
+                    * Math.max(1, normalizeWordsForPreview(columns == null ? null : columns.getCoreWordsA()).size())
+                    * Math.max(1, normalizeWordsForPreview(columns == null ? null : columns.getCompareWords()).size())
+                    * Math.max(1, normalizeWordsForPreview(columns == null ? null : columns.getCoreWordsB()).size())
+                    * Math.max(1, normalizeWordsForPreview(columns == null ? null : columns.getSuffixWords()).size());
+        }
+        boolean useArea = shouldUseArea(type, areaEnabled);
+        return 1L
+                * (useArea ? Math.max(1, normalizeWordsForPreview(readAreaWords(columns)).size()) : 1)
+                * Math.max(1, normalizeWordsForPreview(columns == null ? null : columns.getPrefixWords()).size())
+                * Math.max(1, normalizeWordsForPreview(columns == null ? null : columns.getCoreWords()).size())
+                * Math.max(1, normalizeWordsForPreview(columns == null ? null : columns.getIndustryWords()).size())
+                * Math.max(1, normalizeWordsForPreview(columns == null ? null : columns.getSuffixWords()).size());
     }
 
-    private List<String> buildKeywords(
-            List<String> region,
+    private List<String> buildStandardKeywords(
+            List<String> area,
             List<String> prefix,
             List<String> core,
             List<String> industry,
             List<String> suffix
     ) {
-        List<String> regionList = region.isEmpty() ? List.of("") : region;
+        List<String> areaList = area.isEmpty() ? List.of("") : area;
         List<String> prefixList = prefix.isEmpty() ? List.of("") : prefix;
         List<String> coreList = core.isEmpty() ? List.of("") : core;
         List<String> industryList = industry.isEmpty() ? List.of("") : industry;
         List<String> suffixList = suffix.isEmpty() ? List.of("") : suffix;
 
         LinkedHashSet<String> result = new LinkedHashSet<>();
-        for (String regionWord : regionList) {
+        for (String areaWord : areaList) {
             for (String prefixWord : prefixList) {
                 for (String coreWord : coreList) {
                     for (String industryWord : industryList) {
                         for (String suffixWord : suffixList) {
-                            String combined = (regionWord + prefixWord + coreWord + industryWord + suffixWord).trim();
+                            String combined = (areaWord + prefixWord + coreWord + industryWord + suffixWord).trim();
                             if (StringUtils.hasText(combined)) {
                                 result.add(combined);
                             }
@@ -500,6 +634,67 @@ public class KeywordGroupService {
             }
         }
         return new ArrayList<>(result);
+    }
+
+    private List<String> buildCompareKeywords(List<String> coreA, List<String> compare, List<String> coreB, List<String> suffix) {
+        List<String> suffixList = suffix.isEmpty() ? List.of("") : suffix;
+        LinkedHashSet<String> result = new LinkedHashSet<>();
+        for (String coreAWord : coreA) {
+            for (String compareWord : compare) {
+                for (String coreBWord : coreB) {
+                    for (String suffixWord : suffixList) {
+                        String combined = (coreAWord + compareWord + coreBWord + suffixWord).trim();
+                        if (StringUtils.hasText(combined)) {
+                            result.add(combined);
+                        }
+                    }
+                }
+            }
+        }
+        return new ArrayList<>(result);
+    }
+
+    private boolean isCompareType(String type) {
+        return "comparison".equals(type);
+    }
+
+    private boolean shouldUseArea(String type, Boolean areaEnabled) {
+        if (keywordTypeConfigService.isLegacyType(type)) {
+            return Boolean.TRUE.equals(areaEnabled);
+        }
+        KeywordTypeConfigVO config = keywordTypeConfigService.getConfig(type);
+        if (!config.getColumns().isArea()) {
+            return false;
+        }
+        return areaEnabled == null ? config.isAreaEnabledByDefault() : areaEnabled;
+    }
+
+    private Boolean resolveAreaEnabled(String type, Boolean requested, Boolean existing) {
+        if (requested != null) {
+            return requested;
+        }
+        if (existing != null) {
+            return existing;
+        }
+        if (keywordTypeConfigService.isLegacyType(type)) {
+            return false;
+        }
+        return keywordTypeConfigService.getConfig(type).isAreaEnabledByDefault();
+    }
+
+    private List<KeywordWordItemRequest> readAreaWords(KeywordGroupColumnsRequest columns) {
+        if (columns == null) {
+            return null;
+        }
+        return columns.getAreaWords() != null ? columns.getAreaWords() : columns.getRegionWords();
+    }
+
+    private String normalizeColumnType(String columnType) {
+        return "region".equals(columnType) ? "area" : columnType;
+    }
+
+    private String normalizeNullable(String raw) {
+        return StringUtils.hasText(raw) ? raw.trim() : null;
     }
 
     private record PreparedWord(String wordText, String source, Integer sortOrder, int index) {

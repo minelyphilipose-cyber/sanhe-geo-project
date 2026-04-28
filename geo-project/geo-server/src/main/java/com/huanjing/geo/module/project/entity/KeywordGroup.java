@@ -13,8 +13,11 @@ public class KeywordGroup {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long companyId;
+    private Long projectId;
     private String name;
     private String type;
+    private Boolean areaEnabled;
+    private String functionIndustryTag;
     private String remark;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

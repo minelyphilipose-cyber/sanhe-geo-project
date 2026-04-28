@@ -13,6 +13,8 @@ public class KeywordGroupPayloadRequest {
     @NotNull(message = "companyId is required")
     private Long companyId;
 
+    private Long projectId;
+
     @Size(max = 64, message = "name length must be <= 64")
     private String name;
 
@@ -22,6 +24,11 @@ public class KeywordGroupPayloadRequest {
 
     @Size(max = 255, message = "remark length must be <= 255")
     private String remark;
+
+    private Boolean areaEnabled;
+
+    @Size(max = 30, message = "functionIndustryTag length must be <= 30")
+    private String functionIndustryTag;
 
     @Valid
     private KeywordGroupColumnsRequest columns;

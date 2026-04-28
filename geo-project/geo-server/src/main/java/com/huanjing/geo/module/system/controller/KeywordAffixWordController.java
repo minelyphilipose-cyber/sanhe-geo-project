@@ -19,7 +19,13 @@ public class KeywordAffixWordController {
     private final KeywordAffixWordService keywordAffixWordService;
 
     @GetMapping("/options")
-    public R<KeywordAffixWordOptionVO> options(@RequestParam(required = false) String type) {
-        return R.ok(keywordAffixWordService.options(type));
+    public R<KeywordAffixWordOptionVO> options(
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String industryTag,
+            @RequestParam(defaultValue = "false") Boolean includeManual,
+            @RequestParam(required = false) String scopeType,
+            @RequestParam(required = false) Long scopeId
+    ) {
+        return R.ok(keywordAffixWordService.options(type, industryTag, includeManual, scopeType, scopeId));
     }
 }

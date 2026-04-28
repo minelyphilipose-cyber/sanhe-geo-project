@@ -5,7 +5,7 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-public class KeywordGroupVO {
+public class KeywordGroupListItemVO {
     private Long id;
     private Long companyId;
     private String companyName;
@@ -16,12 +16,6 @@ public class KeywordGroupVO {
     private String type;
     private String typeLabel;
     private Boolean legacyType;
-    private Boolean areaEnabled;
-    private String functionIndustryTag;
-    private String remark;
-    private KeywordGroupColumnsVO columns;
-    private Long estimatedKeywordCount;
     private Long savedKeywordCount;
-    private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
