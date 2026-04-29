@@ -15,7 +15,6 @@ public class BrandOfficialSiteCreateRequest {
     @NotBlank
     private String apiEndpoint;
     private String authType;
-    @NotBlank
     private String credentials;
     private String remark;
 }
