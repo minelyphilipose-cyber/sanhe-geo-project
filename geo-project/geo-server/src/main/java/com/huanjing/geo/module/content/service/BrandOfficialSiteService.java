@@ -6,6 +6,7 @@ import com.huanjing.geo.module.content.dto.BrandOfficialSiteCreateRequest;
 import com.huanjing.geo.module.content.dto.BrandOfficialSiteUpdateRequest;
 import com.huanjing.geo.module.content.entity.BrandOfficialSite;
 import com.huanjing.geo.module.content.mapper.BrandOfficialSiteMapper;
+import com.huanjing.geo.module.content.service.adapter.OfficialCmsSiteAdapter;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.MpCredentialCipherService;
@@ -38,7 +39,7 @@ public class BrandOfficialSiteService {
         entity.setBrandId(brandId);
         entity.setSiteName(requireTrimmed(req.getSiteName(), "site_name is required"));
         entity.setSiteDomain(trimToNull(req.getSiteDomain()));
-        entity.setCmsFrameworkCode(requireTrimmed(req.getCmsFrameworkCode(), "cms_framework_code is required"));
+        entity.setCmsFrameworkCode(requireSupportedFrameworkCode(req.getCmsFrameworkCode()));
         entity.setTenantKey(requireTrimmed(req.getTenantKey(), "tenant_key is required"));
         entity.setApiEndpoint(requireTrimmed(req.getApiEndpoint(), "api_endpoint is required"));
         entity.setAuthType(StringUtils.hasText(req.getAuthType()) ? req.getAuthType().trim() : DEFAULT_AUTH_TYPE);
@@ -58,7 +59,7 @@ public class BrandOfficialSiteService {
 
         applyIfPresent(req.getSiteName(), value -> entity.setSiteName(requireTrimmed(value, "site_name is required")));
         applyIfPresent(req.getSiteDomain(), value -> entity.setSiteDomain(trimToNull(value)));
-        applyIfPresent(req.getCmsFrameworkCode(), value -> entity.setCmsFrameworkCode(requireTrimmed(value, "cms_framework_code is required")));
+        applyIfPresent(req.getCmsFrameworkCode(), value -> entity.setCmsFrameworkCode(requireSupportedFrameworkCode(value)));
         applyIfPresent(req.getTenantKey(), value -> entity.setTenantKey(requireTrimmed(value, "tenant_key is required")));
         applyIfPresent(req.getApiEndpoint(), value -> entity.setApiEndpoint(requireTrimmed(value, "api_endpoint is required")));
         applyIfPresent(req.getAuthType(), value -> entity.setAuthType(StringUtils.hasText(value) ? value.trim() : DEFAULT_AUTH_TYPE));
@@ -129,6 +130,15 @@ public class BrandOfficialSiteService {
             throw new BizException(400, message);
         }
         return value.trim();
+    }
+
+    private String requireSupportedFrameworkCode(String value) {
+        String frameworkCode = requireTrimmed(value, "cms_framework_code is required");
+        if (!OfficialCmsSiteAdapter.FRAMEWORK_CODE_DEFAULT.equals(frameworkCode)) {
+            throw new BizException(400,
+                    "Phase 1 only supports cms_framework_code='" + OfficialCmsSiteAdapter.FRAMEWORK_CODE_DEFAULT + "'");
+        }
+        return frameworkCode;
     }
 
     private String trimToNull(String value) {

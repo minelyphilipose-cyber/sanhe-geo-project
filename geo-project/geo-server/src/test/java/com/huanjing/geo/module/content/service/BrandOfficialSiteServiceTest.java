@@ -5,6 +5,7 @@ import com.huanjing.geo.module.content.dto.BrandOfficialSiteCreateRequest;
 import com.huanjing.geo.module.content.dto.BrandOfficialSiteUpdateRequest;
 import com.huanjing.geo.module.content.entity.BrandOfficialSite;
 import com.huanjing.geo.module.content.mapper.BrandOfficialSiteMapper;
+import com.huanjing.geo.module.content.service.adapter.OfficialCmsSiteAdapter;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.MpCredentialCipherService;
@@ -55,7 +56,7 @@ class BrandOfficialSiteServiceTest {
         assertSame(saved, result);
         assertEquals(10L, saved.getBrandId());
         assertEquals("Official Site", saved.getSiteName());
-        assertEquals("official_cms_v1", saved.getCmsFrameworkCode());
+        assertEquals(OfficialCmsSiteAdapter.FRAMEWORK_CODE_DEFAULT, saved.getCmsFrameworkCode());
         assertEquals("tenant-a", saved.getTenantKey());
         assertEquals("https://cms.example/api", saved.getApiEndpoint());
         assertEquals("bearer_token", saved.getAuthType());
@@ -75,6 +76,20 @@ class BrandOfficialSiteServiceTest {
 
         assertEquals(400, ex.getCode());
         assertEquals("credentials is required", ex.getMessage());
+        verify(brandOfficialSiteMapper, never()).insert(any());
+    }
+
+    @Test
+    void createSite_cmsFrameworkCodeMismatch_throws400() {
+        SysUser operator = operator();
+        BrandOfficialSiteCreateRequest req = createRequest();
+        req.setCmsFrameworkCode("official_cms_v2");
+        when(currentUserService.requireCurrentUser()).thenReturn(operator);
+
+        BizException ex = assertThrows(BizException.class, () -> brandOfficialSiteService.createSite(10L, req));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("Phase 1 only supports cms_framework_code='" + OfficialCmsSiteAdapter.FRAMEWORK_CODE_DEFAULT + "'", ex.getMessage());
         verify(brandOfficialSiteMapper, never()).insert(any());
     }
 
@@ -128,7 +143,7 @@ class BrandOfficialSiteServiceTest {
         BrandOfficialSiteUpdateRequest req = new BrandOfficialSiteUpdateRequest();
         req.setSiteName(" New Name ");
         req.setSiteDomain(" https://brand.example ");
-        req.setCmsFrameworkCode(" official_cms_v2 ");
+        req.setCmsFrameworkCode(" " + OfficialCmsSiteAdapter.FRAMEWORK_CODE_DEFAULT + " ");
         req.setTenantKey(" tenant-b ");
         req.setApiEndpoint(" https://cms.example/v2 ");
         req.setAuthType(" api_key ");
@@ -140,7 +155,7 @@ class BrandOfficialSiteServiceTest {
 
         assertEquals("New Name", entity.getSiteName());
         assertEquals("https://brand.example", entity.getSiteDomain());
-        assertEquals("official_cms_v2", entity.getCmsFrameworkCode());
+        assertEquals(OfficialCmsSiteAdapter.FRAMEWORK_CODE_DEFAULT, entity.getCmsFrameworkCode());
         assertEquals("tenant-b", entity.getTenantKey());
         assertEquals("https://cms.example/v2", entity.getApiEndpoint());
         assertEquals("api_key", entity.getAuthType());
@@ -158,6 +173,22 @@ class BrandOfficialSiteServiceTest {
 
         verify(brandOfficialSiteMapper).deleteById(1L);
     }
+
+    @Test
+    void updateSite_cmsFrameworkCodeMismatch_throws400() {
+        BrandOfficialSite entity = existingSite();
+        BrandOfficialSiteUpdateRequest req = new BrandOfficialSiteUpdateRequest();
+        req.setCmsFrameworkCode("official_cms_v2");
+        when(brandOfficialSiteMapper.selectById(1L)).thenReturn(entity);
+        when(currentUserService.requireCurrentUser()).thenReturn(operator());
+
+        BizException ex = assertThrows(BizException.class, () -> brandOfficialSiteService.updateSite(1L, req));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("Phase 1 only supports cms_framework_code='" + OfficialCmsSiteAdapter.FRAMEWORK_CODE_DEFAULT + "'", ex.getMessage());
+        verify(brandOfficialSiteMapper, never()).updateById(any());
+    }
+
 
     @Test
     void disableSite_setsDisabled() {
@@ -230,7 +261,7 @@ class BrandOfficialSiteServiceTest {
         BrandOfficialSiteCreateRequest req = new BrandOfficialSiteCreateRequest();
         req.setSiteName(" Official Site ");
         req.setSiteDomain(" https://official.example ");
-        req.setCmsFrameworkCode(" official_cms_v1 ");
+        req.setCmsFrameworkCode(" " + OfficialCmsSiteAdapter.FRAMEWORK_CODE_DEFAULT + " ");
         req.setTenantKey(" tenant-a ");
         req.setApiEndpoint(" https://cms.example/api ");
         req.setCredentials(" token ");
@@ -243,7 +274,7 @@ class BrandOfficialSiteServiceTest {
         entity.setBrandId(10L);
         entity.setSiteName("Old Name");
         entity.setSiteDomain("https://old.example");
-        entity.setCmsFrameworkCode("official_cms_v1");
+        entity.setCmsFrameworkCode(OfficialCmsSiteAdapter.FRAMEWORK_CODE_DEFAULT);
         entity.setTenantKey("tenant-a");
         entity.setApiEndpoint("https://cms.example/api");
         entity.setAuthType("bearer_token");
