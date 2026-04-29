@@ -3,10 +3,15 @@ package com.huanjing.geo.module.system.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.util.SecurityUtils;
+import com.huanjing.geo.module.customer.entity.Brand;
+import com.huanjing.geo.module.customer.entity.Company;
+import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysUserMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.Set;
 
@@ -17,6 +22,8 @@ public class CurrentUserService {
     private static final Set<String> PARTNER_ROLES = Set.of("partner", "partner_staff", "partner_viewer");
     private final SysUserMapper sysUserMapper;
     private final PermissionService permissionService;
+    private final BrandMapper brandMapper;
+    private final CompanyMapper companyMapper;
 
     public SysUser requireCurrentUser() {
         Long userId = SecurityUtils.getCurrentUserId();
@@ -104,5 +111,24 @@ public class CurrentUserService {
         if (resourcePartnerId == null || !selfPartnerId.equals(resourcePartnerId)) {
             throw new BizException(403, "No permission to access this " + resourceName);
         }
+    }
+
+    public void ensureBrandAccess(SysUser operator, Long brandId, String resourceTag) {
+        if (operator == null) {
+            throw new BizException(401, "Not logged in");
+        }
+        if (!permissionService.hasPerm(operator, "company.read")) {
+            throw new BizException(403, "No permission: company.read");
+        }
+        Brand brand = brandMapper.selectById(brandId);
+        if (brand == null) {
+            throw new BizException(404, "Brand not found");
+        }
+        Company company = companyMapper.selectById(brand.getCompanyId());
+        if (company == null) {
+            throw new BizException(404, "Company not found");
+        }
+        String resolvedTag = StringUtils.hasText(resourceTag) ? resourceTag : "brand";
+        ensurePartnerResourceAccess(operator, company.getPartnerId(), resolvedTag);
     }
 }
