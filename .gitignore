@@ -4,11 +4,12 @@ dist/
 # Build artifacts (Maven, frontend bundle, TS incremental cache)
 target/
 **/target/
-geo-web/tsconfig.tsbuildinfo
+*.tsbuildinfo
 
-# Runtime logs (apply to any depth)
+# Runtime logs (apply to any depth + any .log file anywhere)
 logs/
 **/logs/
+*.log
 
 # Existing exclusions kept for compatibility
 target/poc/
