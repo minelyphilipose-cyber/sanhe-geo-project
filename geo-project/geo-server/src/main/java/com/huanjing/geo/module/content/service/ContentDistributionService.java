@@ -224,6 +224,7 @@ public class ContentDistributionService {
 
         List<PublishSite> sites = publishSiteMapper.selectList(
                 new LambdaQueryWrapper<PublishSite>()
+                        .eq(PublishSite::getIsFramework, 0)
                         .ne(PublishSite::getStatus, "suspended")
                         .ne(PublishSite::getStatus, "maintenance")
         );
@@ -601,6 +602,10 @@ public class ContentDistributionService {
         PublishSite site = publishSiteMapper.selectById(siteId);
         if (site == null) {
             throw new BizException(404, "Publish site not found");
+        }
+        // IC-3 (d): framework rows are not valid publish targets
+        if (site.getIsFramework() != null && site.getIsFramework() == 1) {
+            throw new BizException(400, "framework site is not a valid publish target");
         }
         return site;
     }

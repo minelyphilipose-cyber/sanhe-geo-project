@@ -47,6 +47,7 @@ public class PublishSiteService {
     public List<PublishSite> list(String tier, String status, String industry) {
         ensureReadRole();
         LambdaQueryWrapper<PublishSite> wrapper = new LambdaQueryWrapper<PublishSite>()
+                .eq(PublishSite::getIsFramework, 0)
                 .orderByAsc(PublishSite::getTier)
                 .orderByAsc(PublishSite::getSiteName)
                 .orderByAsc(PublishSite::getId);

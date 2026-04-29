@@ -31,6 +31,7 @@ public class PublishSite {
     private String currentHealthStatus;
     private LocalDateTime lastFailureAt;
     private BigDecimal failureRate;
+    private Integer isFramework;
     private String remark;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
