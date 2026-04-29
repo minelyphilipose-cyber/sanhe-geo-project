@@ -1,9 +1,15 @@
 node_modules/
-target/
 dist/
+
+# Build artifacts (Maven, frontend bundle, TS incremental cache)
+target/
+**/target/
+geo-web/tsconfig.tsbuildinfo
+
+# Runtime logs (apply to any depth)
+logs/
+**/logs/
+
+# Existing exclusions kept for compatibility
 target/poc/
 geo-project/geo-server/target/poc/
-geo-server/target/**
-geo-web/tsconfig.tsbuildinfo
-logs/**
-geo-project/logs/**
