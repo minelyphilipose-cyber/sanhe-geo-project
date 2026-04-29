@@ -1,14 +1,19 @@
 package com.huanjing.geo.module.content.service;
 
 import cn.hutool.json.JSONUtil;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.exception.NotImplementedException;
+import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.dto.DistributionAttemptVO;
 import com.huanjing.geo.module.content.dto.PublishQuotaVO;
 import com.huanjing.geo.module.content.dto.RecommendedSiteVO;
 import com.huanjing.geo.module.content.dto.RecommendedSitesResponseVO;
 import com.huanjing.geo.module.content.entity.*;
 import com.huanjing.geo.module.content.mapper.*;
+import com.huanjing.geo.module.content.service.adapter.FailureKind;
+import com.huanjing.geo.module.content.service.adapter.OfficialCmsSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.SiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import com.huanjing.geo.module.content.service.adapter.ValidationResult;
@@ -22,7 +27,9 @@ import com.huanjing.geo.module.system.mapper.PublishSiteMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.SystemAlertService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
@@ -35,6 +42,7 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ContentDistributionService {
 
     private static final ZoneId SH_ZONE = ZoneId.of("Asia/Shanghai");
@@ -100,6 +108,30 @@ public class ContentDistributionService {
         SubmitResult submitResult = executeByAdapter(article, site, content);
         finalizeExecution(task, article, project, submitResult, quota);
         return distributionTaskMapper.selectById(task.getId());
+    }
+
+    public DistributionTask distributeTo(Long articleId, TargetContext target) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission("project.write");
+        ensureDistributeRole(operator);
+
+        ArticleDraft article = requireArticle(articleId);
+        if (!ACTIVE_ARTICLE_STATUS.contains(article.getStatus())) {
+            throw new BizException(400, "Only approved/unpublished article can distribute");
+        }
+        Project project = requireProject(article.getProjectId());
+        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
+
+        if (target instanceof TargetContext.BrandOfficialSiteTarget brandTarget) {
+            return distributeToBrandOfficialSite(article, project, operator, brandTarget);
+        }
+        if (target instanceof TargetContext.SiteTarget) {
+            throw new BizException(400, "Use distribute(articleId, siteId) for legacy site targets");
+        }
+        if (target instanceof TargetContext.MpAccountTarget) {
+            throw new NotImplementedException("MpAccountTarget will be supported in Phase 2A");
+        }
+        throw new IllegalArgumentException("Unsupported TargetContext type: " + target.getClass().getSimpleName());
     }
 
     @Transactional
@@ -347,6 +379,139 @@ public class ContentDistributionService {
         task.setOperatorId(operatorId);
         distributionTaskMapper.insert(task);
         return task;
+    }
+
+    private DistributionTask distributeToBrandOfficialSite(ArticleDraft article,
+                                                           Project project,
+                                                           SysUser operator,
+                                                           TargetContext.BrandOfficialSiteTarget brandTarget) {
+        BrandOfficialSite site = brandTarget.site();
+        if (!"active".equalsIgnoreCase(site.getStatus())) {
+            throw new BizException(400, "Brand official site is not active");
+        }
+        currentUserService.ensureBrandAccess(operator, site.getBrandId(), "official_site");
+
+        String content = requireLatestContent(article.getId());
+        PackagePublishConfig packageConfig = requirePackagePublishConfig(project.getPackageType());
+        String monthKey = LocalDate.now(SH_ZONE).format(MONTH_FMT);
+        DistributionTask task = beginAttemptForBrandOfficialSite(article, project, site, operator.getId(), monthKey, packageConfig);
+
+        article.setStatus("distributing");
+        articleDraftMapper.updateById(article);
+
+        OfficialCmsSiteAdapter adapter = resolveOfficialCmsAdapter();
+        SubmitResult submitResult;
+        try {
+            submitResult = adapter.submitToTarget(article, content, brandTarget);
+        } catch (Exception unexpected) {
+            submitResult = SubmitResult.failure(
+                    500,
+                    null,
+                    null,
+                    "adapter unexpected exception: " + unexpected.getClass().getSimpleName(),
+                    FailureKind.UNKNOWN,
+                    false
+            );
+        }
+
+        finalizeAttemptForBrandOfficialSite(task.getId(), submitResult);
+        finalizeArticleStatus(article, submitResult);
+        return distributionTaskMapper.selectById(task.getId());
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    protected DistributionTask beginAttemptForBrandOfficialSite(ArticleDraft article,
+                                                                Project project,
+                                                                BrandOfficialSite site,
+                                                                Long operatorId,
+                                                                String monthKey,
+                                                                PackagePublishConfig packageConfig) {
+        Integer monthlyLimit = Optional.ofNullable(packageConfig.getMonthlyPublishLimit()).orElse(0);
+        ensureQuotaRow(project.getId(), monthKey, monthlyLimit);
+        int affected = projectPublishQuotaMapper.tryReserve(project.getId(), monthKey, monthlyLimit);
+        if (affected == 0) {
+            throw new BizException(400, "Monthly publishing quota exhausted (project=" + project.getId() + ", month=" + monthKey + ")");
+        }
+        return createAttemptForBrandOfficialSite(article, site, operatorId);
+    }
+
+    private void ensureQuotaRow(Long projectId, String monthKey, Integer monthlyLimit) {
+        ProjectPublishQuota existing = projectPublishQuotaMapper.selectOne(
+                new LambdaQueryWrapper<ProjectPublishQuota>()
+                        .eq(ProjectPublishQuota::getProjectId, projectId)
+                        .eq(ProjectPublishQuota::getQuotaMonth, monthKey)
+                        .last("LIMIT 1")
+        );
+        if (existing == null) {
+            ProjectPublishQuota newRow = new ProjectPublishQuota();
+            newRow.setProjectId(projectId);
+            newRow.setQuotaMonth(monthKey);
+            newRow.setUsedCount(0);
+            newRow.setMonthlyLimit(monthlyLimit);
+            projectPublishQuotaMapper.insert(newRow);
+        }
+    }
+
+    private DistributionTask createAttemptForBrandOfficialSite(ArticleDraft article, BrandOfficialSite site, Long operatorId) {
+        Integer maxAttempt = distributionTaskMapper.selectList(
+                new LambdaQueryWrapper<DistributionTask>()
+                        .eq(DistributionTask::getArticleId, article.getId())
+                        .eq(DistributionTask::getBrandOfficialSiteId, site.getId())
+        ).stream().map(DistributionTask::getAttemptNo).max(Integer::compareTo).orElse(0);
+
+        DistributionTask task = new DistributionTask();
+        task.setArticleId(article.getId());
+        task.setProjectId(article.getProjectId());
+        task.setSiteId(null);
+        task.setTargetKind("brand_official_site");
+        task.setBrandOfficialSiteId(site.getId());
+        task.setAttemptNo(maxAttempt + 1);
+        task.setStatus("submitting");
+        task.setIntegrationMethod("official_cms");
+        task.setRetryCount(0);
+        task.setOperatorId(operatorId);
+        task.setLockedUntil(LocalDateTime.now(SH_ZONE).plusMinutes(5));
+        distributionTaskMapper.insert(task);
+        return task;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    protected void finalizeAttemptForBrandOfficialSite(Long taskId, SubmitResult result) {
+        LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
+                .eq(DistributionTask::getId, taskId)
+                .eq(DistributionTask::getStatus, "submitting")
+                .set(DistributionTask::getLockedUntil, null)
+                .set(DistributionTask::getFinishedAt, LocalDateTime.now(SH_ZONE));
+
+        if (result.isSuccess()) {
+            wrapper.set(DistributionTask::getStatus, "submitted")
+                    .set(DistributionTask::getPublishedUrl, result.getPublishedUrl())
+                    .set(DistributionTask::getPlatformArticleId, result.getPlatformArticleId())
+                    .set(DistributionTask::getResponsePayload, result.getResponseBody());
+        } else {
+            wrapper.set(DistributionTask::getStatus, "failed")
+                    .set(DistributionTask::getFailureKind, result.getFailureKind())
+                    .set(DistributionTask::getErrorMessage, result.getErrorMessage());
+        }
+
+        int affected = distributionTaskMapper.update(null, wrapper);
+        if (affected == 0) {
+            log.warn("finalizeAttemptForBrandOfficialSite: task {} state changed concurrently, skipped finalize", taskId);
+        }
+    }
+
+    private void finalizeArticleStatus(ArticleDraft article, SubmitResult result) {
+        article.setStatus(result.isSuccess() ? "published" : "approved");
+        articleDraftMapper.updateById(article);
+    }
+
+    private OfficialCmsSiteAdapter resolveOfficialCmsAdapter() {
+        return siteAdapters.stream()
+                .filter(adapter -> adapter.supportsPlatform("official_cms"))
+                .filter(OfficialCmsSiteAdapter.class::isInstance)
+                .map(OfficialCmsSiteAdapter.class::cast)
+                .findFirst()
+                .orElseThrow(() -> new BizException(500, "OfficialCmsSiteAdapter not registered"));
     }
 
     private QuotaContext validateQuota(Project project, PackagePublishConfig config) {
