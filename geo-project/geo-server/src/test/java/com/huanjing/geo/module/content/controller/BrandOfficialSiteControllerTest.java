@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.content.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.huanjing.geo.common.exception.BizException;
@@ -15,6 +16,7 @@ import com.huanjing.geo.module.content.service.ContentDistributionService;
 import com.huanjing.geo.module.content.service.adapter.AuthCheckResult;
 import com.huanjing.geo.module.content.service.adapter.FailureKind;
 import com.huanjing.geo.module.content.service.adapter.OfficialCmsSiteAdapter;
+import com.huanjing.geo.module.content.vo.BrandOfficialSiteVO;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.MpCredentialCipherService;
@@ -27,7 +29,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -52,6 +54,7 @@ class BrandOfficialSiteControllerTest {
     private ContentDistributionService contentDistributionService;
 
     private BrandOfficialSiteController controller;
+    private ObjectMapper objectMapper;
 
     @BeforeEach
     void setUp() {
@@ -68,6 +71,7 @@ class BrandOfficialSiteControllerTest {
                 officialCmsSiteAdapter,
                 contentDistributionService
         );
+        objectMapper = new ObjectMapper();
     }
 
     @Test
@@ -77,12 +81,12 @@ class BrandOfficialSiteControllerTest {
         when(currentUserService.requireCurrentUser()).thenReturn(operator);
         when(mpCredentialCipherService.encryptForStorage("token")).thenReturn("ENC:token");
 
-        R<BrandOfficialSite> response = controller.create(10L, req);
+        R<BrandOfficialSiteVO> response = controller.create(10L, req);
 
         ArgumentCaptor<BrandOfficialSite> captor = ArgumentCaptor.forClass(BrandOfficialSite.class);
         verify(brandOfficialSiteMapper).insert(captor.capture());
         BrandOfficialSite saved = captor.getValue();
-        assertSame(saved, response.getData());
+        assertEquals(saved.getId(), response.getData().getId());
         assertEquals(10L, saved.getBrandId());
         assertEquals("Official Site", saved.getSiteName());
         assertEquals("ENC:token", saved.getCredentialsCipher());
@@ -126,9 +130,9 @@ class BrandOfficialSiteControllerTest {
         when(brandOfficialSiteMapper.selectOne(any())).thenReturn(entity);
         when(brandOfficialSiteMapper.selectById(1L)).thenReturn(entity);
 
-        R<BrandOfficialSite> response = controller.update(1L, req);
+        R<BrandOfficialSiteVO> response = controller.update(1L, req);
 
-        assertSame(entity, response.getData());
+        assertEquals(entity.getId(), response.getData().getId());
         assertEquals("ENC:old", entity.getCredentialsCipher());
         verify(mpCredentialCipherService, never()).encryptForStorage(any());
         verify(brandOfficialSiteMapper).updateById(entity);
@@ -145,11 +149,25 @@ class BrandOfficialSiteControllerTest {
         when(brandOfficialSiteMapper.selectById(1L)).thenReturn(entity);
         when(mpCredentialCipherService.encryptForStorage("new-token")).thenReturn("ENC:new");
 
-        R<BrandOfficialSite> response = controller.update(1L, req);
+        R<BrandOfficialSiteVO> response = controller.update(1L, req);
 
-        assertSame(entity, response.getData());
+        assertEquals(entity.getId(), response.getData().getId());
         assertEquals("ENC:new", entity.getCredentialsCipher());
         verify(brandOfficialSiteMapper).updateById(entity);
+    }
+
+    @Test
+    void getResponse_doesNotLeakCredentialsCipher() throws Exception {
+        SysUser operator = operator();
+        BrandOfficialSite entity = existingSite();
+        entity.setCredentialsCipher("ENC(secret)");
+        when(currentUserService.requireCurrentUser()).thenReturn(operator);
+        when(brandOfficialSiteMapper.selectOne(any())).thenReturn(entity);
+
+        String responseJson = objectMapper.writeValueAsString(controller.get(1L));
+
+        assertFalse(responseJson.contains("credentialsCipher"));
+        assertFalse(responseJson.contains("ENC(secret)"));
     }
 
     @Test

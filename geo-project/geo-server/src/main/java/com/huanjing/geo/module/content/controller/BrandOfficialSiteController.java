@@ -13,6 +13,7 @@ import com.huanjing.geo.module.content.service.BrandOfficialSiteService;
 import com.huanjing.geo.module.content.service.ContentDistributionService;
 import com.huanjing.geo.module.content.service.adapter.AuthCheckResult;
 import com.huanjing.geo.module.content.service.adapter.OfficialCmsSiteAdapter;
+import com.huanjing.geo.module.content.vo.BrandOfficialSiteVO;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -29,6 +30,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.stream.Collectors;
 
 @Tag(name = "BrandOfficialSite")
 @RestController
@@ -43,29 +45,31 @@ public class BrandOfficialSiteController {
     private final ContentDistributionService contentDistributionService;
 
     @GetMapping
-    public R<List<BrandOfficialSite>> list(@RequestParam Long brandId) {
+    public R<List<BrandOfficialSiteVO>> list(@RequestParam Long brandId) {
         ensureBrandAccess(brandId, "brand_official_site");
-        return R.ok(brandOfficialSiteService.listByBrand(brandId));
+        return R.ok(brandOfficialSiteService.listByBrand(brandId).stream()
+                .map(BrandOfficialSiteVO::from)
+                .collect(Collectors.toList()));
     }
 
     @GetMapping("/{id}")
-    public R<BrandOfficialSite> get(@PathVariable Long id) {
+    public R<BrandOfficialSiteVO> get(@PathVariable Long id) {
         BrandOfficialSite site = requireSiteAndAccess(id);
-        return R.ok(site);
+        return R.ok(BrandOfficialSiteVO.from(site));
     }
 
     @PostMapping
-    public R<BrandOfficialSite> create(@RequestParam Long brandId,
-                                       @Valid @RequestBody BrandOfficialSiteCreateRequest req) {
+    public R<BrandOfficialSiteVO> create(@RequestParam Long brandId,
+                                         @Valid @RequestBody BrandOfficialSiteCreateRequest req) {
         ensureBrandAccess(brandId, "brand_official_site");
-        return R.ok(brandOfficialSiteService.createSite(brandId, req));
+        return R.ok(BrandOfficialSiteVO.from(brandOfficialSiteService.createSite(brandId, req)));
     }
 
     @PutMapping("/{id}")
-    public R<BrandOfficialSite> update(@PathVariable Long id,
-                                       @RequestBody BrandOfficialSiteUpdateRequest req) {
+    public R<BrandOfficialSiteVO> update(@PathVariable Long id,
+                                         @RequestBody BrandOfficialSiteUpdateRequest req) {
         requireSiteAndAccess(id);
-        return R.ok(brandOfficialSiteService.updateSite(id, req));
+        return R.ok(BrandOfficialSiteVO.from(brandOfficialSiteService.updateSite(id, req)));
     }
 
     @DeleteMapping("/{id}")
