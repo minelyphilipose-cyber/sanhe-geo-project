@@ -1,3 +1,5 @@
+import type { LlmQuestionItem } from '@/types'
+
 export interface KeywordGroupFormState {
   companyId: number | null
   projectId: number | null
@@ -8,6 +10,9 @@ export interface KeywordGroupFormState {
   previewCount: number
   areaEnabled: boolean
   functionIndustryTag: string
+  llmSeedText: string
+  llmGenerationToken: string
+  llmQuestions: LlmQuestionItem[]
   areaText: string
   prefixSystemWords: string[]
   prefixCustomText: string

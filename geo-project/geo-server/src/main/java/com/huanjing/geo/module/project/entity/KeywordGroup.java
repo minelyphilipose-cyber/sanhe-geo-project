@@ -21,4 +21,5 @@ public class KeywordGroup {
     private String remark;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private Boolean deleted;
 }

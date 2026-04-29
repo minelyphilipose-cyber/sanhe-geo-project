@@ -7,6 +7,7 @@ import type {
   QuestionPoolManageItemVO,
   QuestionPoolVersionVO,
   KeywordGroup,
+  KeywordLlmQuestionGenerateResult,
   KeywordGroupPayload,
   KeywordPreviewResult,
   KeywordTypeConfig,
@@ -113,5 +114,9 @@ export function deleteKeywordGroup(id: number) {
 
 export function previewKeywordGroup(data: KeywordGroupPayload) {
   return request.post<R<KeywordPreviewResult>>('/keyword-groups/preview', data)
+}
+
+export function generateKeywordGroupLlmQuestions(data: { companyId: number; seedText: string; currentToken?: string; count?: number; currentLlmCount?: number; targetCount?: number }) {
+  return request.post<R<KeywordLlmQuestionGenerateResult>>('/keyword-groups/llm-questions/generate', data)
 }
 

@@ -14,6 +14,8 @@ public class KeywordGroupResult {
     private Long id;
     private Long groupId;
     private String keywordText;
+    private String sourceType;
+    private String seedText;
     private Integer sortOrder;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

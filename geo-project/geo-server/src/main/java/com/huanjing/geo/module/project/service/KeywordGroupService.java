@@ -10,11 +10,13 @@ import com.huanjing.geo.module.project.dto.KeywordGroupColumnsVO;
 import com.huanjing.geo.module.project.dto.KeywordGroupListItemVO;
 import com.huanjing.geo.module.project.dto.KeywordGroupPayloadRequest;
 import com.huanjing.geo.module.project.dto.KeywordGroupVO;
+import com.huanjing.geo.module.project.dto.KeywordPreviewItemVO;
 import com.huanjing.geo.module.project.dto.KeywordPreviewVO;
 import com.huanjing.geo.module.project.dto.KeywordRequiredColumnsVO;
 import com.huanjing.geo.module.project.dto.KeywordTypeConfigVO;
 import com.huanjing.geo.module.project.dto.KeywordWordItemRequest;
 import com.huanjing.geo.module.project.dto.KeywordWordItemVO;
+import com.huanjing.geo.module.project.dto.LlmQuestionItemDTO;
 import com.huanjing.geo.module.project.entity.KeywordGroup;
 import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.entity.KeywordGroupWord;
@@ -46,6 +48,8 @@ public class KeywordGroupService {
     private static final int MAX_GENERATION = 1000;
     private static final Set<String> COLUMN_TYPE_SET = Set.of("area", "region", "prefix", "core", "industry", "suffix", "core_a", "compare", "core_b");
     private static final Set<String> SOURCE_SET = Set.of("system", "custom");
+    private static final String RESULT_SOURCE_CARTESIAN = "cartesian";
+    private static final String RESULT_SOURCE_LLM = "llm";
 
     private final KeywordGroupMapper keywordGroupMapper;
     private final KeywordGroupResultMapper keywordGroupResultMapper;
@@ -54,10 +58,12 @@ public class KeywordGroupService {
     private final ProjectMapper projectMapper;
     private final CurrentUserService currentUserService;
     private final KeywordTypeConfigService keywordTypeConfigService;
+    private final KeywordLlmQuestionService keywordLlmQuestionService;
 
     public Page<KeywordGroupListItemVO> page(long current, long size, String keyword, Long companyId, Long projectId, String type) {
         currentUserService.ensurePermission("keyword_group.read");
         LambdaQueryWrapper<KeywordGroup> wrapper = new LambdaQueryWrapper<KeywordGroup>()
+                .eq(KeywordGroup::getDeleted, false)
                 .orderByDesc(KeywordGroup::getUpdatedAt)
                 .orderByDesc(KeywordGroup::getId);
         if (StringUtils.hasText(keyword)) {
@@ -106,6 +112,7 @@ public class KeywordGroupService {
         String type = normalizeType(req.getType());
         Company company = requireCompany(req.getCompanyId());
         Project project = resolveProject(req.getProjectId(), company.getId());
+        ensureNameUnique(company.getId(), req.getName().trim(), null);
 
         KeywordGroup group = new KeywordGroup();
         group.setCompanyId(company.getId());
@@ -115,15 +122,17 @@ public class KeywordGroupService {
         group.setAreaEnabled(resolveAreaEnabled(type, req.getAreaEnabled(), null));
         group.setFunctionIndustryTag(normalizeNullable(req.getFunctionIndustryTag()));
         group.setRemark(normalizeNullable(req.getRemark()));
+        group.setDeleted(false);
         keywordGroupMapper.insert(group);
 
         List<KeywordGroupWord> words = normalizeWordsForPersist(group.getId(), type, req.getColumns());
         assertGenerationLimit(type, req);
         List<String> candidateKeywords = buildCandidateKeywords(req);
-        List<String> resultKeywords = normalizeResultKeywordsForPersist(req, candidateKeywords);
+        PreparedResults preparedResults = prepareResultsForPersist(req, candidateKeywords, null);
         saveWords(group.getId(), words);
-        saveResults(group.getId(), resultKeywords);
-        return toDetailVO(requireGroup(group.getId()), company.getCompanyName(), project, calcEstimatedByWords(type, group.getAreaEnabled(), words), (long) resultKeywords.size());
+        saveResults(group.getId(), preparedResults.items());
+        keywordLlmQuestionService.deleteToken(req.getLlmGenerationToken());
+        return toDetailVO(requireGroup(group.getId()), company.getCompanyName(), project, calcEstimatedByWords(type, group.getAreaEnabled(), words) + preparedResults.llmCount(), (long) preparedResults.items().size());
     }
 
     @Transactional
@@ -136,6 +145,7 @@ public class KeywordGroupService {
         String type = normalizeType(req.getType());
         Company company = requireCompany(req.getCompanyId());
         Project project = resolveProject(req.getProjectId(), company.getId());
+        ensureNameUnique(company.getId(), req.getName().trim(), id);
 
         group.setCompanyId(company.getId());
         group.setProjectId(project == null ? null : project.getId());
@@ -149,19 +159,22 @@ public class KeywordGroupService {
         List<KeywordGroupWord> words = normalizeWordsForPersist(id, type, req.getColumns());
         assertGenerationLimit(type, req);
         List<String> candidateKeywords = buildCandidateKeywords(req);
-        List<String> resultKeywords = normalizeResultKeywordsForPersist(req, candidateKeywords);
+        PreparedResults preparedResults = prepareResultsForPersist(req, candidateKeywords, id);
         saveWords(id, words);
-        saveResults(id, resultKeywords);
-        return toDetailVO(requireGroup(id), company.getCompanyName(), project, calcEstimatedByWords(type, group.getAreaEnabled(), words), (long) resultKeywords.size());
+        saveResults(id, preparedResults.items());
+        keywordLlmQuestionService.deleteToken(req.getLlmGenerationToken());
+        return toDetailVO(requireGroup(id), company.getCompanyName(), project, calcEstimatedByWords(type, group.getAreaEnabled(), words) + preparedResults.llmCount(), (long) preparedResults.items().size());
     }
 
     @Transactional
     public void delete(Long id) {
         currentUserService.ensurePermission("keyword_group.write");
-        requireGroup(id);
+        KeywordGroup group = requireGroup(id);
         keywordGroupResultMapper.delete(new LambdaQueryWrapper<KeywordGroupResult>().eq(KeywordGroupResult::getGroupId, id));
         keywordGroupWordMapper.delete(new LambdaQueryWrapper<KeywordGroupWord>().eq(KeywordGroupWord::getGroupId, id));
-        keywordGroupMapper.deleteById(id);
+        group.setName(group.getName() + "_deleted_" + id);
+        group.setDeleted(true);
+        keywordGroupMapper.updateById(group);
     }
 
     public KeywordPreviewVO preview(KeywordGroupPayloadRequest req) {
@@ -177,15 +190,15 @@ public class KeywordGroupService {
             throw new BizException(400, "预计生成 " + totalEstimated + " 条，超过上限 " + MAX_GENERATION + "，请减少选词");
         }
         List<String> keywords = buildCandidateKeywords(req);
-        int limit = Math.min(Math.max(1, count), keywords.size());
+        PreparedResults preparedResults = prepareResultsForPreview(req, keywords);
 
         KeywordPreviewVO vo = new KeywordPreviewVO();
-        vo.setTotalEstimated(totalEstimated);
-        vo.setTotalAvailable(keywords.size());
-        vo.setTotalGenerated(limit);
+        vo.setTotalEstimated(totalEstimated + preparedResults.llmCount());
+        vo.setTotalAvailable(keywords.size() + preparedResults.llmCount());
+        vo.setTotalGenerated(preparedResults.items().size());
         // TODO: 阶段二接入黑名单后置过滤后更新真实过滤数量。
         vo.setFilteredCount(0);
-        vo.setKeywords(new ArrayList<>(keywords.subList(0, limit)));
+        vo.setItems(preparedResults.items());
         return vo;
     }
 
@@ -195,6 +208,7 @@ public class KeywordGroupService {
         }
         List<KeywordGroup> groups = keywordGroupMapper.selectList(new LambdaQueryWrapper<KeywordGroup>().in(KeywordGroup::getId, groupIds));
         Map<Long, KeywordGroup> groupMap = groups.stream().collect(Collectors.toMap(KeywordGroup::getId, g -> g));
+        Map<Long, Long> llmCountMap = calcLlmCountsByGroupIds(groupIds);
         List<KeywordGroupWord> words = keywordGroupWordMapper.selectList(
                 new LambdaQueryWrapper<KeywordGroupWord>().in(KeywordGroupWord::getGroupId, groupIds)
         );
@@ -202,11 +216,12 @@ public class KeywordGroupService {
         Map<Long, Long> result = new HashMap<>();
         for (Long groupId : groupIds) {
             KeywordGroup group = groupMap.get(groupId);
-            result.put(groupId, calcEstimatedByWords(
+            long cartesianCount = calcEstimatedByWords(
                     group == null ? null : group.getType(),
                     group == null ? null : group.getAreaEnabled(),
                     wordMap.getOrDefault(groupId, List.of())
-            ));
+            );
+            result.put(groupId, cartesianCount + llmCountMap.getOrDefault(groupId, 0L));
         }
         return result;
     }
@@ -274,12 +289,15 @@ public class KeywordGroupService {
         }
     }
 
-    private void saveResults(Long groupId, List<String> keywords) {
+    private void saveResults(Long groupId, List<KeywordPreviewItemVO> items) {
         keywordGroupResultMapper.delete(new LambdaQueryWrapper<KeywordGroupResult>().eq(KeywordGroupResult::getGroupId, groupId));
-        for (int i = 0; i < keywords.size(); i++) {
+        for (int i = 0; i < items.size(); i++) {
+            KeywordPreviewItemVO item = items.get(i);
             KeywordGroupResult result = new KeywordGroupResult();
             result.setGroupId(groupId);
-            result.setKeywordText(keywords.get(i));
+            result.setKeywordText(item.getText());
+            result.setSourceType(normalizeResultSource(item.getSourceType()));
+            result.setSeedText(RESULT_SOURCE_LLM.equals(normalizeResultSource(item.getSourceType())) ? normalizeNullable(item.getSeedText()) : null);
             result.setSortOrder((i + 1) * 10);
             keywordGroupResultMapper.insert(result);
         }
@@ -288,6 +306,9 @@ public class KeywordGroupService {
     private KeywordGroup requireGroup(Long id) {
         KeywordGroup group = keywordGroupMapper.selectById(id);
         if (group == null) {
+            throw new BizException(404, "Keyword group not found");
+        }
+        if (Boolean.TRUE.equals(group.getDeleted())) {
             throw new BizException(404, "Keyword group not found");
         }
         return group;
@@ -371,6 +392,7 @@ public class KeywordGroupService {
         columnsVO.setCompareWords(map.getOrDefault("compare", List.of()));
         columnsVO.setCoreWordsB(map.getOrDefault("core_b", List.of()));
         vo.setColumns(columnsVO);
+        vo.setLlmQuestions(keywordGroupResultMapper.selectLlmQuestionsByGroupId(group.getId()));
         return vo;
     }
 
@@ -394,6 +416,27 @@ public class KeywordGroupService {
                 * Math.max(1, columnCount.getOrDefault("core", 0))
                 * Math.max(1, columnCount.getOrDefault("industry", 0))
                 * Math.max(1, columnCount.getOrDefault("suffix", 0));
+    }
+
+    private Map<Long, Long> calcLlmCountsByGroupIds(List<Long> groupIds) {
+        if (groupIds == null || groupIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<KeywordGroupResult> results = keywordGroupResultMapper.selectList(
+                new LambdaQueryWrapper<KeywordGroupResult>()
+                        .select(KeywordGroupResult::getGroupId)
+                        .in(KeywordGroupResult::getGroupId, groupIds)
+                        .eq(KeywordGroupResult::getSourceType, RESULT_SOURCE_LLM)
+        );
+        Map<Long, Long> countMap = new HashMap<>();
+        for (KeywordGroupResult result : results) {
+            countMap.merge(result.getGroupId(), 1L, Long::sum);
+        }
+        Map<Long, Long> finalMap = new HashMap<>();
+        for (Long groupId : groupIds) {
+            finalMap.put(groupId, countMap.getOrDefault(groupId, 0L));
+        }
+        return finalMap;
     }
 
     private Map<Long, String> buildCompanyNameMap(List<Long> companyIds) {
@@ -556,36 +599,154 @@ public class KeywordGroupService {
         }
     }
 
-    private List<String> normalizeResultKeywordsForPersist(KeywordGroupPayloadRequest req, List<String> candidateKeywords) {
+    private PreparedResults prepareResultsForPreview(KeywordGroupPayloadRequest req, List<String> candidateKeywords) {
+        List<LlmQuestionItemDTO> llmQuestions = normalizeLlmQuestionsForPreview(req);
+        return allocateResults(req, candidateKeywords, llmQuestions);
+    }
+
+    private PreparedResults prepareResultsForPersist(KeywordGroupPayloadRequest req, List<String> candidateKeywords, Long groupId) {
         if (req.getResultKeywords() == null || req.getResultKeywords().isEmpty()) {
             throw new BizException(400, "resultKeywords is required");
         }
+        List<LlmQuestionItemDTO> llmQuestions = normalizeLlmQuestionsForPersist(req, groupId);
+        PreparedResults expected = allocateResults(req, candidateKeywords, llmQuestions);
+        List<KeywordPreviewItemVO> submitted = normalizeSubmittedResultItems(req.getResultKeywords());
+        if (submitted.size() != expected.items().size()) {
+            throw new BizException(400, "INVALID_RESULT_KEYWORDS: resultKeywords size does not match preview size");
+        }
+        for (int i = 0; i < submitted.size(); i++) {
+            KeywordPreviewItemVO actual = submitted.get(i);
+            KeywordPreviewItemVO want = expected.items().get(i);
+            if (!want.getText().equals(actual.getText())
+                    || !want.getSourceType().equals(normalizeResultSource(actual.getSourceType()))
+                    || !equalsNullable(normalizeNullable(want.getSeedText()), normalizeNullable(actual.getSeedText()))) {
+                throw new BizException(400, "INVALID_RESULT_KEYWORDS: " + actual.getText());
+            }
+        }
+        return expected;
+    }
 
+    private PreparedResults allocateResults(KeywordGroupPayloadRequest req, List<String> candidateKeywords, List<LlmQuestionItemDTO> llmQuestions) {
         int count = req.getCount() == null ? MAX_GENERATION : req.getCount();
         if (count <= 0) {
             throw new BizException(400, "count must be > 0");
         }
-
-        int expectedSize = Math.min(Math.max(1, count), candidateKeywords.size());
-        List<String> resultKeywords = req.getResultKeywords().stream()
-                .filter(StringUtils::hasText)
-                .map(String::trim)
-                .distinct()
-                .toList();
-        if (resultKeywords.size() != req.getResultKeywords().size()) {
-            throw new BizException(400, "resultKeywords contains duplicate or blank items");
-        }
-        if (resultKeywords.size() != expectedSize) {
-            throw new BizException(400, "resultKeywords size does not match preview size");
+        if (count < llmQuestions.size()) {
+            throw new BizException(400, "COUNT_LESS_THAN_LLM: 入库数 " + count + " 小于已生成 LLM 问题数 " + llmQuestions.size() + ",请调整");
         }
 
-        Set<String> candidateSet = new LinkedHashSet<>(candidateKeywords);
-        for (String keyword : resultKeywords) {
-            if (!candidateSet.contains(keyword)) {
-                throw new BizException(400, "INVALID_RESULT_KEYWORDS: " + keyword);
+        int cartesianLimit = count - llmQuestions.size();
+        List<KeywordPreviewItemVO> items = new ArrayList<>();
+        Set<String> usedTexts = new LinkedHashSet<>();
+        for (LlmQuestionItemDTO question : llmQuestions) {
+            KeywordPreviewItemVO item = new KeywordPreviewItemVO(question.getQuestionText(), RESULT_SOURCE_LLM);
+            item.setSeedText(normalizeNullable(question.getSeedText()));
+            items.add(item);
+            usedTexts.add(question.getQuestionText());
+        }
+        for (String keyword : candidateKeywords) {
+            if (items.size() >= count) {
+                break;
+            }
+            if (cartesianLimit <= 0 || !usedTexts.add(keyword)) {
+                continue;
+            }
+            items.add(new KeywordPreviewItemVO(keyword, RESULT_SOURCE_CARTESIAN));
+            cartesianLimit--;
+        }
+        return new PreparedResults(items, llmQuestions.size());
+    }
+
+    private List<LlmQuestionItemDTO> normalizeLlmQuestionsForPreview(KeywordGroupPayloadRequest req) {
+        return dedupLlmItems(req.getLlmQuestions());
+    }
+
+    private List<LlmQuestionItemDTO> normalizeLlmQuestionsForPersist(KeywordGroupPayloadRequest req, Long groupId) {
+        List<LlmQuestionItemDTO> llmQuestions = dedupLlmItems(req.getLlmQuestions());
+        if (llmQuestions.isEmpty()) {
+            return List.of();
+        }
+
+        Set<String> valid;
+        if (StringUtils.hasText(req.getLlmGenerationToken())) {
+            valid = keywordLlmQuestionService.loadTokenItems(req.getLlmGenerationToken()).stream()
+                    .map(this::llmItemKey)
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+        } else if (groupId != null) {
+            valid = keywordGroupResultMapper.selectLlmQuestionsByGroupId(groupId).stream()
+                    .map(this::llmItemKey)
+                    .collect(Collectors.toCollection(LinkedHashSet::new));
+        } else {
+            throw new BizException(400, "LLM_QUESTION_TAMPERED: LLM 生成已过期,请重新生成");
+        }
+        if (valid.isEmpty()) {
+            throw new BizException(400, "LLM_QUESTION_TAMPERED: LLM 生成已过期,请重新生成");
+        }
+        for (LlmQuestionItemDTO question : llmQuestions) {
+            if (!valid.contains(llmItemKey(question))) {
+                throw new BizException(400, "LLM_QUESTION_TAMPERED: 检测到大模型问题被篡改,请重新生成");
             }
         }
-        return resultKeywords;
+        return llmQuestions;
+    }
+
+    private List<KeywordPreviewItemVO> normalizeSubmittedResultItems(List<KeywordPreviewItemVO> input) {
+        List<KeywordPreviewItemVO> items = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (KeywordPreviewItemVO item : input) {
+            if (item == null || !StringUtils.hasText(item.getText())) {
+                continue;
+            }
+            String text = item.getText().trim();
+            String sourceType = normalizeResultSource(item.getSourceType());
+            String seedText = RESULT_SOURCE_LLM.equals(sourceType) ? normalizeNullable(item.getSeedText()) : null;
+            String key = sourceType + "\n" + text + "\n" + (seedText == null ? "" : seedText);
+            if (seen.add(key)) {
+                KeywordPreviewItemVO normalized = new KeywordPreviewItemVO(text, sourceType);
+                normalized.setSeedText(seedText);
+                items.add(normalized);
+            }
+        }
+        if (items.size() != input.size()) {
+            throw new BizException(400, "resultKeywords contains duplicate or blank items");
+        }
+        return items;
+    }
+
+    private List<LlmQuestionItemDTO> dedupLlmItems(List<LlmQuestionItemDTO> input) {
+        if (input == null || input.isEmpty()) {
+            return List.of();
+        }
+        LinkedHashMap<String, LlmQuestionItemDTO> map = new LinkedHashMap<>();
+        for (LlmQuestionItemDTO item : input) {
+            if (item == null || !StringUtils.hasText(item.getQuestionText())) {
+                continue;
+            }
+            String questionText = item.getQuestionText().trim();
+            String seedText = normalizeNullable(item.getSeedText());
+            if (questionText.length() > 64) {
+                throw new BizException(400, "LLM_QUESTION_TAMPERED: 检测到大模型问题被篡改,请重新生成");
+            }
+            map.putIfAbsent(questionText, new LlmQuestionItemDTO(questionText, seedText));
+        }
+        return new ArrayList<>(map.values());
+    }
+
+    private String llmItemKey(LlmQuestionItemDTO item) {
+        String questionText = item == null ? "" : normalizeNullable(item.getQuestionText());
+        String seedText = item == null ? "" : normalizeNullable(item.getSeedText());
+        return (questionText == null ? "" : questionText) + "\n" + (seedText == null ? "" : seedText);
+    }
+
+    private boolean equalsNullable(String left, String right) {
+        if (left == null) {
+            return right == null;
+        }
+        return left.equals(right);
+    }
+
+    private String normalizeResultSource(String sourceType) {
+        return RESULT_SOURCE_LLM.equals(sourceType) ? RESULT_SOURCE_LLM : RESULT_SOURCE_CARTESIAN;
     }
 
     private long calcTotalEstimated(String type, Boolean areaEnabled, KeywordGroupColumnsRequest columns) {
@@ -697,6 +858,20 @@ public class KeywordGroupService {
         return StringUtils.hasText(raw) ? raw.trim() : null;
     }
 
+    private void ensureNameUnique(Long companyId, String name, Long excludeId) {
+        Long count = keywordGroupMapper.selectCount(new LambdaQueryWrapper<KeywordGroup>()
+                .eq(KeywordGroup::getCompanyId, companyId)
+                .eq(KeywordGroup::getName, name)
+                .eq(KeywordGroup::getDeleted, false)
+                .ne(excludeId != null, KeywordGroup::getId, excludeId));
+        if (count != null && count > 0) {
+            throw new BizException(400, "KEYWORD_GROUP_NAME_DUPLICATE: 该客户下已存在同名词组");
+        }
+    }
+
     private record PreparedWord(String wordText, String source, Integer sortOrder, int index) {
+    }
+
+    private record PreparedResults(List<KeywordPreviewItemVO> items, int llmCount) {
     }
 }

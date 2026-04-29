@@ -35,7 +35,7 @@
     <div class="column-builder">
       <div class="preview-bar">
         <div class="estimate-text">
-          预计生成 <strong>{{ estimatedCount }}</strong> 条
+          预计生成 <strong>{{ estimatedCount }}</strong> 条 = 组合 {{ cartesianEstimatedCount }} 条 + AI 问题 {{ form.llmQuestions.length }} 条
           <span v-if="estimatedCount > limit" class="over-limit">{{ overLimitText }}</span>
         </div>
         <div class="preview-actions-inline">
@@ -58,6 +58,17 @@
         :options="wordOptions"
       />
     </div>
+
+    <LlmQuestionPanel
+      :company-id="form.companyId"
+      :seed-text="form.llmSeedText"
+      :questions="form.llmQuestions"
+      :generation-token="form.llmGenerationToken"
+      :preview-count="form.previewCount"
+      @update:seed-text="form.llmSeedText = $event"
+      @update:questions="form.llmQuestions = $event"
+      @update:generation-token="form.llmGenerationToken = $event"
+    />
 
     <el-card class="group-list-card">
       <div class="list-toolbar">
@@ -99,7 +110,7 @@
 
     <KeywordPreviewPanel
       v-model:visible="previewVisible"
-      :keywords="previewKeywords"
+      :items="previewItems"
       :total-available="previewTotalAvailable"
       :preview-count="form.previewCount"
       :saving="saving"
@@ -116,11 +127,12 @@ import KeywordTypeSelector from './keyword-group/KeywordTypeSelector.vue'
 import KeywordColumnBuilder from './keyword-group/KeywordColumnBuilder.vue'
 import CompareKeywordBuilder from './keyword-group/CompareKeywordBuilder.vue'
 import KeywordPreviewPanel from './keyword-group/KeywordPreviewPanel.vue'
+import LlmQuestionPanel from './keyword-group/LlmQuestionPanel.vue'
 import { createKeywordGroup, deleteKeywordGroup, getKeywordGroupDetail, getKeywordGroupPage, getKeywordGroupTypeConfigs, previewKeywordGroup, updateKeywordGroup } from '@/api/project'
 import { getKeywordAffixWordOptions } from '@/api/system'
 import { getCompanyList } from '@/api/customer'
 import { ERROR_CODE_HINTS, parseErrorCode } from '@/utils/errorCode'
-import type { Company, KeywordAffixWordOptionResult, KeywordGroup, KeywordGroupColumns, KeywordGroupPayload, KeywordTypeConfig, KeywordTypeOption, KeywordWordItem } from '@/types'
+import type { Company, KeywordAffixWordOptionResult, KeywordGroup, KeywordGroupColumns, KeywordGroupPayload, KeywordPreviewItem, KeywordTypeConfig, KeywordTypeOption, KeywordWordItem } from '@/types'
 import type { KeywordGroupFormState } from './keyword-group/types'
 
 const limit = 1000
@@ -130,7 +142,7 @@ const previewing = ref(false)
 const saving = ref(false)
 const previewVisible = ref(false)
 const rows = ref<KeywordGroup[]>([])
-const previewKeywords = ref<string[]>([])
+const previewItems = ref<KeywordPreviewItem[]>([])
 const previewTotalAvailable = ref(0)
 const companyOptions = ref<Company[]>([])
 const typeConfigs = ref<KeywordTypeConfig[]>([])
@@ -163,6 +175,9 @@ const form = reactive<KeywordGroupFormState>({
   previewCount: 100,
   areaEnabled: false,
   functionIndustryTag: '',
+  llmSeedText: '',
+  llmGenerationToken: '',
+  llmQuestions: [],
   areaText: '',
   prefixSystemWords: [],
   prefixCustomText: '',
@@ -234,11 +249,12 @@ const estimatedParts = computed(() => {
   }
 })
 
-const estimatedCount = computed(() => Object.values(estimatedParts.value).reduce((acc, n) => acc * n, 1))
+const cartesianEstimatedCount = computed(() => Object.values(estimatedParts.value).reduce((acc, n) => acc * n, 1))
+const estimatedCount = computed(() => cartesianEstimatedCount.value + form.llmQuestions.length)
 const overLimitText = computed(() => {
   if (currentTypeConfig.value.structure === 'compare' && 'coreA' in estimatedParts.value) {
     const p = estimatedParts.value
-    return `预计生成 ${estimatedCount.value} 条 = 核心词A(${p.coreA}) × 对比词(${p.compare}) × 核心词B(${p.coreB}) × 后缀词(${p.suffix})，超过 ${limit} 条，请减少任一侧词数`
+    return `预计生成 ${estimatedCount.value} 条，其中组合 ${cartesianEstimatedCount.value} 条、AI 问题 ${form.llmQuestions.length} 条，超过 ${limit} 条，请减少任一侧词数`
   }
   return `超过上限 ${limit} 条，请减少选词`
 })
@@ -311,6 +327,8 @@ function buildPayload(): KeywordGroupPayload {
     functionIndustryTag: form.functionIndustryTag || null,
     remark: form.remark.trim() || undefined,
     count: form.previewCount,
+    llmGenerationToken: form.llmGenerationToken || undefined,
+    llmQuestions: [...form.llmQuestions],
     columns: buildColumns(),
   }
 }
@@ -351,7 +369,7 @@ function restore(state: Partial<KeywordGroupFormState>) {
 }
 
 function resetPreview() {
-  previewKeywords.value = []
+  previewItems.value = []
   previewTotalAvailable.value = 0
   previewVisible.value = false
 }
@@ -383,6 +401,9 @@ function resetForm() {
   form.legacyType = false
   form.remark = ''
   form.previewCount = 100
+  form.llmSeedText = ''
+  form.llmGenerationToken = ''
+  form.llmQuestions = []
   clearTypeRelatedSelections()
   applyDefaultVisibilityByType(form.type)
 }
@@ -501,6 +522,9 @@ function hydrateForm(detail: KeywordGroup) {
   form.remark = detail.remark || ''
   form.areaEnabled = detail.areaEnabled ?? currentTypeConfig.value.areaEnabledByDefault
   form.functionIndustryTag = detail.functionIndustryTag || ''
+  form.llmSeedText = ''
+  form.llmGenerationToken = ''
+  form.llmQuestions = [...(detail.llmQuestions || [])]
   form.previewCount = 100
 
   const columns = detail.columns || emptyColumns()
@@ -569,6 +593,10 @@ function validateBase(forSave: boolean) {
     ElMessage.warning(overLimitText.value)
     return false
   }
+  if (form.previewCount < form.llmQuestions.length) {
+    ElMessage.warning(`入库数 ${form.previewCount} 小于已生成 AI 问题数 ${form.llmQuestions.length}，请调整`)
+    return false
+  }
   return true
 }
 
@@ -585,7 +613,7 @@ async function doPreview() {
   previewing.value = true
   try {
     const { data } = await previewKeywordGroup(buildPayload())
-    previewKeywords.value = data.data.keywords || []
+    previewItems.value = data.data.items || []
     previewTotalAvailable.value = data.data.totalAvailable || 0
     previewVisible.value = true
     if ((data.data.totalAvailable || 0) < form.previewCount) {
@@ -602,7 +630,7 @@ async function submit() {
   if (!validateBase(true)) {
     return
   }
-  if (!previewKeywords.value.length) {
+  if (!previewItems.value.length) {
     ElMessage.warning('请先预览并确认当前入库关键词')
     return
   }
@@ -610,7 +638,7 @@ async function submit() {
   try {
     const payload = {
       ...buildPayload(),
-      resultKeywords: [...previewKeywords.value],
+      resultKeywords: [...previewItems.value],
     }
     if (editingId.value) {
       await updateKeywordGroup(editingId.value, payload)

@@ -593,7 +593,9 @@ export interface KeywordGroupPayload {
   functionIndustryTag?: string | null
   remark?: string
   count?: number
-  resultKeywords?: string[]
+  llmGenerationToken?: string
+  llmQuestions?: LlmQuestionItem[]
+  resultKeywords?: KeywordPreviewItem[]
   columns: KeywordGroupColumns
 }
 
@@ -614,8 +616,20 @@ export interface KeywordGroup {
   estimatedKeywordCount?: number
   savedKeywordCount?: number
   columns?: KeywordGroupColumns
+  llmQuestions?: LlmQuestionItem[]
   createdAt: string
   updatedAt: string
+}
+
+export interface KeywordPreviewItem {
+  text: string
+  sourceType: 'cartesian' | 'llm' | string
+  seedText?: string | null
+}
+
+export interface LlmQuestionItem {
+  questionText: string
+  seedText: string
 }
 
 export interface KeywordPreviewResult {
@@ -623,7 +637,13 @@ export interface KeywordPreviewResult {
   totalAvailable: number
   totalGenerated: number
   filteredCount?: number
-  keywords: string[]
+  items: KeywordPreviewItem[]
+}
+
+export interface KeywordLlmQuestionGenerateResult {
+  generationToken: string
+  seedText: string
+  newQuestions: string[]
 }
 
 export interface KeywordAffixWord {

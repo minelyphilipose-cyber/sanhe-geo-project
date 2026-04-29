@@ -6,17 +6,28 @@
     <div v-if="visible" class="preview-panel">
       <div class="preview-header">
         <h3 class="preview-title">拓词预览</h3>
-        <div class="preview-meta">本次入库 <strong>{{ keywords.length }}</strong> 条，候选池共 {{ totalAvailable }} 条</div>
+        <div class="preview-meta">本次入库 <strong>{{ items.length }}</strong> 条，候选池共 {{ totalAvailable }} 条</div>
       </div>
       <div class="preview-body">
         <div v-if="totalAvailable < previewCount" class="preview-tip">
           当前组合可生成 {{ totalAvailable }} 条关键词，少于设定的 {{ previewCount }} 条，请增加选词后再预览。
         </div>
         <div class="keyword-tags">
-          <span v-for="(kw, idx) in displayKeywords" :key="`${idx}_${kw}`" class="keyword-tag">{{ kw }}</span>
+          <span
+            v-for="(item, idx) in displayItems"
+            :key="`${idx}_${item.sourceType}_${item.text}`"
+            class="keyword-tag"
+            :class="item.sourceType === 'llm' ? 'keyword-tag-llm' : 'keyword-tag-cartesian'"
+          >
+            {{ item.text }}
+          </span>
         </div>
-        <div v-if="keywords.length > maxDisplay" class="show-more">
-          <button class="btn-show-more" @click="showAll = !showAll">{{ showAll ? '收起' : `展开全部 ${keywords.length} 条` }}</button>
+        <div v-if="items.length > maxDisplay" class="show-more">
+          <button class="btn-show-more" @click="showAll = !showAll">{{ showAll ? '收起' : `展开全部 ${items.length} 条` }}</button>
+        </div>
+        <div class="preview-legend">
+          <span><i class="legend-dot legend-cartesian"></i>页面组合生成</span>
+          <span><i class="legend-dot legend-llm"></i>AI 生成</span>
         </div>
       </div>
       <div class="preview-actions">
@@ -29,10 +40,11 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import type { KeywordPreviewItem } from '@/types'
 
 const props = withDefaults(defineProps<{
   visible: boolean
-  keywords: string[]
+  items: KeywordPreviewItem[]
   totalAvailable: number
   previewCount: number
   saving?: boolean
@@ -47,7 +59,7 @@ const emit = defineEmits<{
 
 const maxDisplay = 50
 const showAll = ref(false)
-const displayKeywords = computed(() => (showAll.value ? props.keywords : props.keywords.slice(0, maxDisplay)))
+const displayItems = computed(() => (showAll.value ? props.items : props.items.slice(0, maxDisplay)))
 
 watch(() => props.visible, () => {
   showAll.value = false
@@ -126,14 +138,51 @@ watch(() => props.visible, () => {
 
 .keyword-tag {
   font-size: 13px;
-  color: #4361ee;
-  background: #eef1ff;
   border-radius: 16px;
   padding: 5px 12px;
 }
 
+.keyword-tag-cartesian {
+  color: #4361ee;
+  background: #eef1ff;
+}
+
+.keyword-tag-llm {
+  color: #15803d;
+  background: #dcfce7;
+}
+
 .show-more {
   margin-top: 12px;
+}
+
+.preview-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 14px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.preview-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.legend-cartesian {
+  background: #4361ee;
+}
+
+.legend-llm {
+  background: #16a34a;
 }
 
 .btn-show-more,

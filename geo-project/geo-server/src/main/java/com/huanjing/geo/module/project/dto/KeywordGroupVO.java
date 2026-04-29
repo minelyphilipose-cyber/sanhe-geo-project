@@ -20,6 +20,7 @@ public class KeywordGroupVO {
     private String functionIndustryTag;
     private String remark;
     private KeywordGroupColumnsVO columns;
+    private java.util.List<LlmQuestionItemDTO> llmQuestions;
     private Long estimatedKeywordCount;
     private Long savedKeywordCount;
     private LocalDateTime createdAt;

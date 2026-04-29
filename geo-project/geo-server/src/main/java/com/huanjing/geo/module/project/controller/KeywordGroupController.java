@@ -5,9 +5,12 @@ import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.project.dto.KeywordGroupListItemVO;
 import com.huanjing.geo.module.project.dto.KeywordGroupPayloadRequest;
 import com.huanjing.geo.module.project.dto.KeywordGroupVO;
+import com.huanjing.geo.module.project.dto.KeywordLlmQuestionGenerateRequest;
+import com.huanjing.geo.module.project.dto.KeywordLlmQuestionGenerateVO;
 import com.huanjing.geo.module.project.dto.KeywordPreviewVO;
 import com.huanjing.geo.module.project.dto.KeywordTypeConfigVO;
 import com.huanjing.geo.module.project.service.KeywordGroupService;
+import com.huanjing.geo.module.project.service.KeywordLlmQuestionService;
 import com.huanjing.geo.module.project.service.KeywordTypeConfigService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -24,6 +27,7 @@ public class KeywordGroupController {
 
     private final KeywordGroupService keywordGroupService;
     private final KeywordTypeConfigService keywordTypeConfigService;
+    private final KeywordLlmQuestionService keywordLlmQuestionService;
 
     @GetMapping
     public R<Page<KeywordGroupListItemVO>> page(
@@ -66,5 +70,10 @@ public class KeywordGroupController {
     @PostMapping("/preview")
     public R<KeywordPreviewVO> preview(@Valid @RequestBody KeywordGroupPayloadRequest req) {
         return R.ok(keywordGroupService.preview(req));
+    }
+
+    @PostMapping("/llm-questions/generate")
+    public R<KeywordLlmQuestionGenerateVO> generateLlmQuestions(@Valid @RequestBody KeywordLlmQuestionGenerateRequest req) {
+        return R.ok(keywordLlmQuestionService.generate(req.getCompanyId(), req.getSeedText(), req.getCurrentToken(), req.getCount(), req.getCurrentLlmCount(), req.getTargetCount()));
     }
 }

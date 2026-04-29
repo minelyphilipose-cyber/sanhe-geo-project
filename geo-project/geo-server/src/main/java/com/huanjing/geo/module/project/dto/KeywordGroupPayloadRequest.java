@@ -35,5 +35,11 @@ public class KeywordGroupPayloadRequest {
 
     private Integer count;
 
-    private List<String> resultKeywords;
+    @Size(max = 32, message = "llmGenerationToken length must be <= 32")
+    private String llmGenerationToken;
+
+    @Valid
+    private List<LlmQuestionItemDTO> llmQuestions;
+
+    private List<KeywordPreviewItemVO> resultKeywords;
 }

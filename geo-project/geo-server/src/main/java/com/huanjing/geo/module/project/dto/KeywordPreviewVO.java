@@ -10,5 +10,5 @@ public class KeywordPreviewVO {
     private int totalAvailable;
     private int totalGenerated;
     private int filteredCount;
-    private List<String> keywords;
+    private List<KeywordPreviewItemVO> items;
 }
