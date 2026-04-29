@@ -171,6 +171,36 @@ class BrandOfficialSiteControllerTest {
     }
 
     @Test
+    void getResponse_doesNotIncludeQuotaFields() throws Exception {
+        SysUser operator = operator();
+        BrandOfficialSite entity = existingSite();
+        when(currentUserService.requireCurrentUser()).thenReturn(operator);
+        when(brandOfficialSiteMapper.selectOne(any())).thenReturn(entity);
+
+        String responseJson = objectMapper.writeValueAsString(controller.get(1L));
+
+        assertFalse(responseJson.contains("monthlyQuotaUsed"));
+        assertFalse(responseJson.contains("monthlyLimit"));
+    }
+
+    @Test
+    void getResponse_includesAllExpectedPublicFields() throws Exception {
+        SysUser operator = operator();
+        BrandOfficialSite entity = existingSite();
+        when(currentUserService.requireCurrentUser()).thenReturn(operator);
+        when(brandOfficialSiteMapper.selectOne(any())).thenReturn(entity);
+
+        String responseJson = objectMapper.writeValueAsString(controller.get(1L));
+
+        assertEquals(true, responseJson.contains("siteName"));
+        assertEquals(true, responseJson.contains("apiEndpoint"));
+        assertEquals(true, responseJson.contains("status"));
+        assertEquals(true, responseJson.contains("cmsFrameworkCode"));
+        assertEquals(true, responseJson.contains("tenantKey"));
+        assertEquals(true, responseJson.contains("authType"));
+    }
+
+    @Test
     void checkAuth_returnsAdapterResult() {
         SysUser operator = operator();
         BrandOfficialSite entity = existingSite();
