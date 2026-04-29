@@ -82,6 +82,10 @@
       </div>
     </el-card>
 
+    <el-card>
+      <BrandOfficialSites :brand-id="brandId" :can-write="canWriteCompany" />
+    </el-card>
+
     <el-dialog v-model="statementVisible" title="编辑品牌标准表达" width="760px">
       <el-form :model="statementForm" label-width="140px">
         <el-form-item label="一句话定位">
@@ -169,6 +173,7 @@ import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
+import BrandOfficialSites from './BrandOfficialSites.vue'
 
 const route = useRoute()
 const router = useRouter()

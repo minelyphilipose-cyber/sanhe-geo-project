@@ -43,6 +43,7 @@
               <el-button v-if="canWrite && canEdit(scope.row.status)" link type="primary" @click="openRevision(scope.row)">修订</el-button>
               <el-button v-if="canWrite && canResubmit(scope.row.status)" link type="primary" @click="openResubmit(scope.row)">重新提交</el-button>
               <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openDistribute(scope.row)">分发到站点</el-button>
+              <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openOfficialDistribute(scope.row)">发布到官网</el-button>
               <el-button v-if="canWrite && canPublish(scope.row.status)" link type="info" @click="openPublish(scope.row)">Legacy发布</el-button>
             </template>
           </el-table-column>
@@ -183,6 +184,47 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="officialDistributeVisible" title="发布到官网" width="620px">
+      <div class="official-distribute-wrap">
+        <el-alert
+          v-if="officialQuota"
+          :type="officialQuotaExhausted ? 'warning' : 'info'"
+          :closable="false"
+          show-icon
+          :title="officialQuotaText"
+        />
+        <el-alert v-else type="info" :closable="false" show-icon title="正在加载项目发布配额" />
+        <el-form label-width="110px">
+          <el-form-item label="官网站点">
+            <el-select
+              v-model="officialDistributeForm.siteId"
+              :loading="officialSitesLoading"
+              placeholder="请选择官网站点"
+              style="width: 100%"
+            >
+              <el-option
+                v-for="site in officialSites"
+                :key="site.id"
+                :label="site.siteName"
+                :value="site.id"
+              />
+            </el-select>
+          </el-form-item>
+        </el-form>
+      </div>
+      <template #footer>
+        <el-button @click="officialDistributeVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="submitting"
+          :disabled="!officialDistributeForm.siteId || officialQuotaExhausted"
+          @click="submitOfficialDistribute"
+        >
+          确认发布
+        </el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="publishVisible" title="Legacy发布记录" width="560px">
       <el-form :model="publishForm" label-width="100px">
         <el-form-item label="动作" required>
@@ -216,17 +258,23 @@ import { ElMessage } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
-import type { ArticleDetailResponse, ArticleDraft, RecommendedSite } from '@/types'
+import type { ArticleDetailResponse, ArticleDraft, PublishQuota, RecommendedSite } from '@/types'
 import {
   distributeContentArticle,
   getContentArticleDetail,
   getContentArticles,
+  getProjectPublishQuota,
   getRecommendedSites,
   publishContentArticle,
   resubmitContentArticle,
   reviewContentArticle,
   saveContentArticleRevision,
 } from '@/api/content'
+import {
+  distributeArticleToBrandOfficialSite,
+  listBrandOfficialSites,
+  type BrandOfficialSite,
+} from '@/api/brandOfficialSite'
 
 const userStore = useUserStore()
 const dictStore = useDictStore()
@@ -275,6 +323,17 @@ const distributeForm = reactive({
   siteId: 0,
 })
 
+const officialDistributeVisible = ref(false)
+const officialSitesLoading = ref(false)
+const officialSites = ref<BrandOfficialSite[]>([])
+const officialQuota = ref<PublishQuota | null>(null)
+const officialDistributeForm = reactive({
+  articleId: 0,
+  projectId: 0,
+  brandId: 0,
+  siteId: 0,
+})
+
 const publishVisible = ref(false)
 const publishForm = reactive({
   publishAction: 'publish' as 'publish' | 'unpublish',
@@ -292,6 +351,15 @@ const markdown = new MarkdownIt({
 const detailMarkdown = computed(() => detailData.value?.versions?.[0]?.contentMarkdown || '')
 const detailHtml = computed(() => markdown.render(detailMarkdown.value || ''))
 const revisionHtml = computed(() => markdown.render(revisionForm.contentMarkdown || ''))
+const officialQuotaExhausted = computed(() => {
+  if (!officialQuota.value) return false
+  return officialQuota.value.monthUsed >= officialQuota.value.monthLimit
+})
+const officialQuotaText = computed(() => {
+  if (!officialQuota.value) return '正在加载项目发布配额'
+  const text = `本月已发布 ${officialQuota.value.monthUsed}/${officialQuota.value.monthLimit}`
+  return officialQuotaExhausted.value ? `${text}，配额已用尽` : text
+})
 
 const statusOptions = [
   { label: '待审核', value: 'pending_review' },
@@ -456,6 +524,38 @@ async function openDistribute(row: ArticleDraft) {
   }
 }
 
+async function openOfficialDistribute(row: ArticleDraft) {
+  officialDistributeForm.articleId = row.id
+  officialDistributeForm.projectId = row.projectId
+  officialDistributeForm.brandId = 0
+  officialDistributeForm.siteId = 0
+  officialSites.value = []
+  officialQuota.value = null
+  officialSitesLoading.value = true
+  officialDistributeVisible.value = true
+  try {
+    const [detailRes, quotaRes] = await Promise.all([
+      getContentArticleDetail(row.id),
+      getProjectPublishQuota(row.projectId),
+    ])
+    const brandId = detailRes.data.data.project?.brandId
+    if (!brandId) {
+      ElMessage.error('当前文章未绑定品牌，无法发布到官网')
+      officialDistributeVisible.value = false
+      return
+    }
+    officialDistributeForm.brandId = brandId
+    officialQuota.value = quotaRes.data.data
+    const sites = await listBrandOfficialSites(brandId)
+    officialSites.value = sites.filter((site) => site.status === 'active' || site.status === 'enabled')
+  } catch {
+    ElMessage.error('加载官网发布信息失败')
+    officialDistributeVisible.value = false
+  } finally {
+    officialSitesLoading.value = false
+  }
+}
+
 async function submitReview() {
   if (!currentArticleId.value) return
   if ((reviewForm.action === 'reject' || reviewForm.action === 'return_for_revision') && !reviewForm.comment.trim()) {
@@ -520,6 +620,28 @@ async function submitDistribute() {
     await distributeContentArticle(distributeForm.articleId, distributeForm.siteId)
     distributeVisible.value = false
     ElMessage.success('分发任务已触发')
+    await load()
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function submitOfficialDistribute() {
+  if (!officialDistributeForm.articleId || !officialDistributeForm.siteId || officialQuotaExhausted.value) return
+  submitting.value = true
+  try {
+    const task = await distributeArticleToBrandOfficialSite(
+      officialDistributeForm.siteId,
+      officialDistributeForm.articleId,
+    )
+    officialDistributeVisible.value = false
+    if (task.status === 'submitted') {
+      ElMessage.success(`已提交，平台文章 ID: ${task.platformArticleId || '-'}`)
+    } else if (task.status === 'failed') {
+      ElMessage.error(`发布失败: ${task.failureKind || 'UNKNOWN'}`)
+    } else {
+      ElMessage.info(`发布任务状态: ${task.status}`)
+    }
     await load()
   } finally {
     submitting.value = false
@@ -693,5 +815,11 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.official-distribute-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 </style>
