@@ -9,6 +9,7 @@ import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.system.entity.PublishSite;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -17,6 +18,7 @@ import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class BrandGeoSiteAdapter implements SiteAdapter {
 
     public static final String PLATFORM = "brand_geo_site";
@@ -67,6 +69,11 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
         }
 
         try {
+            log.info("brand_geo_site outbound request articleId={} siteCode={} endpoint={} payloadBytes={}",
+                    article == null ? null : article.getId(),
+                    geoTarget.siteCode(),
+                    properties.getEndpoint(),
+                    requestPayload.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
             HttpClientUtil.HttpResult response = postJson(
                     properties.getEndpoint(),
                     jsonHeaders(),
@@ -74,9 +81,22 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
                     properties.getConnectTimeoutMs(),
                     properties.getReadTimeoutMs()
             );
+            log.info("brand_geo_site outbound response articleId={} siteCode={} endpoint={} statusCode={} responseBytes={}",
+                    article == null ? null : article.getId(),
+                    geoTarget.siteCode(),
+                    properties.getEndpoint(),
+                    response.statusCode(),
+                    response.body() == null ? 0 : response.body().getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
             return toSubmitResult(response, requestPayload, mappedType, geoTarget.siteCode());
         } catch (Exception ex) {
-            return SubmitResult.failure(500, requestPayload, null, "network error: " + safeMessage(ex),
+            log.warn("brand_geo_site outbound exception articleId={} siteCode={} endpoint={} error={}",
+                    article == null ? null : article.getId(),
+                    geoTarget.siteCode(),
+                    properties.getEndpoint(),
+                    safeMessage(ex),
+                    ex);
+            return SubmitResult.failure(500, requestPayload, null,
+                    "network error: " + safeMessage(ex) + " while POST " + properties.getEndpoint(),
                     FailureKind.SERVER_ERROR, true);
         }
     }

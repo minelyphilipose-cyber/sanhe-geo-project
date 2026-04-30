@@ -477,8 +477,13 @@ async function publishToGeoSite(row: ArticleDraft) {
       ElMessage.warning('该品牌GEO站点已停用')
       return
     }
-    await distributeContentArticleToGeoSite(row.id, brandId)
-    ElMessage.success(`已分发到 https://www.${brand.geoSiteCode}.com`)
+    const result = await distributeContentArticleToGeoSite(row.id, brandId)
+    const task = result.data.data
+    if (task.status === 'submitted') {
+      ElMessage.success(`已分发到 https://www.${brand.geoSiteCode}.com`)
+    } else {
+      ElMessage.error(task.errorMessage || 'GEO站点分发失败')
+    }
     await load()
   } finally {
     submitting.value = false
