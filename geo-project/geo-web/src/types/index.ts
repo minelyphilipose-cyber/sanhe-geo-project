@@ -167,6 +167,8 @@ export interface Brand {
   statementVersion?: number | null
   statementHistory?: any[] | null
   forbiddenPhrases: string | string[] | null
+  geoSiteCode?: string | null
+  geoSiteStatus?: 'active' | 'disabled' | string | null
   status?: string
   createdAt: string
   updatedAt: string
@@ -836,6 +838,12 @@ export interface DistributionTask {
   attemptNo: number
   status: 'pending' | 'submitting' | 'submitted' | 'failed' | 'confirmed' | string
   integrationMethod: 'rest_api' | 'ftp' | 'email' | 'manual' | string
+  targetKind?: string | null
+  targetBrandId?: number | null
+  brandOfficialSiteId?: number | null
+  platformArticleId?: string | null
+  failureKind?: string | null
+  nextRetryAt?: string | null
   requestPayload?: string | null
   responsePayload?: string | null
   publishedUrl?: string | null

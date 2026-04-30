@@ -34,12 +34,16 @@ import java.util.Map;
 import java.util.Set;
 import java.util.Locale;
 import java.util.stream.Collectors;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
 public class BrandService {
 
     private static final Set<String> BRAND_STATUS = Set.of("draft", "active", "archived");
+    private static final Set<String> GEO_SITE_STATUS = Set.of("active", "disabled");
+    private static final Pattern GEO_SITE_CODE_PATTERN =
+            Pattern.compile("^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$");
 
     private final BrandMapper brandMapper;
     private final BrandMaterialMapper brandMaterialMapper;
@@ -84,6 +88,15 @@ public class BrandService {
         return brand;
     }
 
+    public Brand requireBrandWithAccess(Long id, boolean write) {
+        SysUser user = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission(write ? "company.write" : "company.read");
+        Brand brand = requireBrand(id);
+        Company company = requireCompany(brand.getCompanyId());
+        currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "brand");
+        return brand;
+    }
+
     public Brand create(BrandCreateRequest req) {
         currentUserService.ensurePermission("company.write");
         SysUser operator = currentUserService.requireCurrentUser();
@@ -121,6 +134,7 @@ public class BrandService {
         brand.setStandardBrandStatement(req.getStandardBrandStatement());
         brand.setBusinessStandardStatement(req.getBusinessStandardStatement());
         brand.setForbiddenPhrases(normalizeForbiddenPhrases(req.getForbiddenPhrases()));
+        applyGeoSiteFields(brand, req.getGeoSiteCode(), req.getGeoSiteStatus(), null);
         brand.setStatus(StringUtils.hasText(req.getStatus()) ? req.getStatus() : "active");
         brandMapper.insert(brand);
         brandProfileService.createProfileVersionSnapshot(
@@ -178,6 +192,7 @@ public class BrandService {
         brand.setStandardBrandStatement(req.getStandardBrandStatement());
         brand.setBusinessStandardStatement(req.getBusinessStandardStatement());
         brand.setForbiddenPhrases(normalizeForbiddenPhrases(req.getForbiddenPhrases()));
+        applyGeoSiteFields(brand, req.getGeoSiteCode(), req.getGeoSiteStatus(), id);
         brand.setStatus(req.getStatus());
         brandMapper.updateById(brand);
         brandProfileService.createProfileVersionSnapshot(
@@ -238,6 +253,10 @@ public class BrandService {
         return brand;
     }
 
+    public Brand requireExistingBrand(Long id) {
+        return requireBrand(id);
+    }
+
     private Company requireCompany(Long id) {
         Company company = companyMapper.selectById(id);
         if (company == null) {
@@ -250,6 +269,41 @@ public class BrandService {
         if (!BRAND_STATUS.contains(status)) {
             throw new BizException(400, "Invalid brand status");
         }
+    }
+
+    private void applyGeoSiteFields(Brand brand, String rawCode, String rawStatus, Long selfId) {
+        String code = trimToNull(rawCode);
+        String status = trimToNull(rawStatus);
+        if (code == null) {
+            if (status != null) {
+                throw new BizException(400, "geo_site_status requires geo_site_code");
+            }
+            brand.setGeoSiteCode(null);
+            brand.setGeoSiteStatus(null);
+            return;
+        }
+
+        code = code.toLowerCase(Locale.ROOT);
+        if (!GEO_SITE_CODE_PATTERN.matcher(code).matches()) {
+            throw new BizException(400, "Invalid geo_site_code");
+        }
+        Brand existed = brandMapper.selectOne(new LambdaQueryWrapper<Brand>()
+                .eq(Brand::getGeoSiteCode, code)
+                .ne(selfId != null, Brand::getId, selfId)
+                .last("LIMIT 1"));
+        if (existed != null) {
+            throw new BizException(400, "geo_site_code already exists");
+        }
+
+        if (status == null) {
+            status = "active";
+        }
+        status = status.toLowerCase(Locale.ROOT);
+        if (!GEO_SITE_STATUS.contains(status)) {
+            throw new BizException(400, "Invalid geo_site_status");
+        }
+        brand.setGeoSiteCode(code);
+        brand.setGeoSiteStatus(status);
     }
 
     private Map<String, Object> snapshotBrand(Brand brand) {
@@ -268,6 +322,8 @@ public class BrandService {
         snapshot.put("status", brand.getStatus());
         snapshot.put("businessIntro", brand.getBusinessIntro());
         snapshot.put("businessStandardStatement", brand.getBusinessStandardStatement());
+        snapshot.put("geoSiteCode", brand.getGeoSiteCode());
+        snapshot.put("geoSiteStatus", brand.getGeoSiteStatus());
         snapshot.put("officialAccount", brand.getOfficialAccount());
         snapshot.put("videoAccount", brand.getVideoAccount());
         snapshot.put("douyinAccount", brand.getDouyinAccount());

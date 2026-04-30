@@ -58,6 +58,10 @@ logging:
     org.flywaydb: info
 
 geo:
+  brand-geo-site:
+    endpoint: ${BRAND_GEO_SITE_ENDPOINT:}
+    connect-timeout-ms: ${BRAND_GEO_SITE_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${BRAND_GEO_SITE_READ_TIMEOUT_MS:30000}
   report:
     web-base-url: ${REPORT_WEB_BASE_URL:http://127.0.0.1:3000}
     render-timeout-ms: ${REPORT_RENDER_TIMEOUT_MS:30000}

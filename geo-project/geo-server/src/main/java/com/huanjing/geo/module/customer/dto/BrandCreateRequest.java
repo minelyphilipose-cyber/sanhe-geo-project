@@ -33,6 +33,8 @@ public class BrandCreateRequest {
     private String standardBrandStatement;
     private String businessStandardStatement;
     private String forbiddenPhrases;
+    private String geoSiteCode;
+    private String geoSiteStatus;
     private String status;
     private String versionChangeReason;
 }

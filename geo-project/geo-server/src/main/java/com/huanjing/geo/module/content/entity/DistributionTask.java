@@ -29,6 +29,7 @@ public class DistributionTask {
     private String targetKind;
     private Long mpAccountId;
     private Long brandOfficialSiteId;
+    private Long targetBrandId;
     private Long industrySiteId;
     private Long authorityMediaId;
     // existing columns continue

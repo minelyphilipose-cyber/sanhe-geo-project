@@ -12,13 +12,14 @@ import com.huanjing.geo.module.content.dto.RecommendedSiteVO;
 import com.huanjing.geo.module.content.dto.RecommendedSitesResponseVO;
 import com.huanjing.geo.module.content.entity.*;
 import com.huanjing.geo.module.content.mapper.*;
+import com.huanjing.geo.module.content.service.adapter.BrandGeoSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.FailureKind;
 import com.huanjing.geo.module.content.service.adapter.OfficialCmsSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.SiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import com.huanjing.geo.module.content.service.adapter.ValidationResult;
 import com.huanjing.geo.module.customer.entity.Brand;
-import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.customer.service.BrandService;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.PublishSite;
@@ -62,7 +63,8 @@ public class ContentDistributionService {
     private final CurrentUserService currentUserService;
     private final SystemAlertService systemAlertService;
     private final List<SiteAdapter> siteAdapters;
-    private final BrandMapper brandMapper;
+    private final BrandService brandService;
+    private final ProjectPublishQuotaService projectPublishQuotaService;
 
     @Transactional
     public DistributionTask distribute(Long articleId, Long siteId) {
@@ -124,6 +126,9 @@ public class ContentDistributionService {
 
         if (target instanceof TargetContext.BrandOfficialSiteTarget brandTarget) {
             return distributeToBrandOfficialSite(article, project, operator, brandTarget);
+        }
+        if (target instanceof TargetContext.BrandGeoSiteTarget brandGeoTarget) {
+            return distributeToBrandGeoSite(article, project, operator, brandGeoTarget);
         }
         if (target instanceof TargetContext.SiteTarget) {
             throw new BizException(400, "Use distribute(articleId, siteId) for legacy site targets");
@@ -419,6 +424,60 @@ public class ContentDistributionService {
         return distributionTaskMapper.selectById(task.getId());
     }
 
+    private DistributionTask distributeToBrandGeoSite(ArticleDraft article,
+                                                      Project project,
+                                                      SysUser operator,
+                                                      TargetContext.BrandGeoSiteTarget brandGeoTarget) {
+        Brand brand = brandService.requireBrandWithAccess(brandGeoTarget.brandId(), true);
+        String siteCode = validateBrandGeoSite(brand);
+        currentUserService.ensureBrandAccess(operator, brand.getId(), "brand_geo_site");
+
+        String content = requireLatestContent(article.getId());
+        PackagePublishConfig packageConfig = requirePackagePublishConfig(project.getPackageType());
+        String monthKey = LocalDate.now(SH_ZONE).format(MONTH_FMT);
+        projectPublishQuotaService.reserve(
+                project.getId(),
+                monthKey,
+                Optional.ofNullable(packageConfig.getMonthlyPublishLimit()).orElse(0)
+        );
+
+        DistributionTask task = createAttemptForBrandGeoSite(article, brand, operator.getId());
+        article.setStatus("distributing");
+        articleDraftMapper.updateById(article);
+
+        BrandGeoSiteAdapter adapter = resolveBrandGeoSiteAdapter();
+        SubmitResult submitResult;
+        try {
+            submitResult = adapter.submitToTarget(article, content, new TargetContext.BrandGeoSiteTarget(brand.getId(), siteCode));
+        } catch (Exception ex) {
+            submitResult = SubmitResult.failure(
+                    500,
+                    null,
+                    null,
+                    "adapter unexpected exception: " + ex.getClass().getSimpleName(),
+                    FailureKind.UNKNOWN,
+                    false
+            );
+        }
+
+        finalizeAttemptForBrandGeoSite(task.getId(), submitResult);
+        finalizeArticleStatus(article, submitResult);
+        if (!submitResult.isSuccess()) {
+            projectPublishQuotaService.refund(project.getId(), monthKey);
+        }
+        return distributionTaskMapper.selectById(task.getId());
+    }
+
+    private String validateBrandGeoSite(Brand brand) {
+        if (!StringUtils.hasText(brand.getGeoSiteCode())) {
+            throw new BizException(400, "Brand has no GEO site configured");
+        }
+        if (!"active".equalsIgnoreCase(brand.getGeoSiteStatus())) {
+            throw new BizException(400, "Brand GEO site is not active");
+        }
+        return brand.getGeoSiteCode().trim();
+    }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     protected DistributionTask beginAttemptForBrandOfficialSite(ArticleDraft article,
                                                                 Project project,
@@ -475,6 +534,29 @@ public class ContentDistributionService {
         return task;
     }
 
+    private DistributionTask createAttemptForBrandGeoSite(ArticleDraft article, Brand brand, Long operatorId) {
+        Integer maxAttempt = distributionTaskMapper.selectList(
+                new LambdaQueryWrapper<DistributionTask>()
+                        .eq(DistributionTask::getArticleId, article.getId())
+                        .eq(DistributionTask::getTargetBrandId, brand.getId())
+        ).stream().map(DistributionTask::getAttemptNo).max(Integer::compareTo).orElse(0);
+
+        DistributionTask task = new DistributionTask();
+        task.setArticleId(article.getId());
+        task.setProjectId(article.getProjectId());
+        task.setSiteId(null);
+        task.setTargetKind(BrandGeoSiteAdapter.PLATFORM);
+        task.setTargetBrandId(brand.getId());
+        task.setAttemptNo(maxAttempt + 1);
+        task.setStatus("submitting");
+        task.setIntegrationMethod(BrandGeoSiteAdapter.PLATFORM);
+        task.setRetryCount(0);
+        task.setOperatorId(operatorId);
+        task.setLockedUntil(LocalDateTime.now(SH_ZONE).plusMinutes(5));
+        distributionTaskMapper.insert(task);
+        return task;
+    }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     protected void finalizeAttemptForBrandOfficialSite(Long taskId, SubmitResult result) {
         LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
@@ -500,6 +582,38 @@ public class ContentDistributionService {
         }
     }
 
+    private void finalizeAttemptForBrandGeoSite(Long taskId, SubmitResult result) {
+        LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
+                .eq(DistributionTask::getId, taskId)
+                .eq(DistributionTask::getStatus, "submitting")
+                .set(DistributionTask::getLockedUntil, null)
+                .set(DistributionTask::getFinishedAt, LocalDateTime.now(SH_ZONE))
+                .set(DistributionTask::getRequestPayload, result.getRequestPayload())
+                .set(DistributionTask::getResponsePayload, result.getResponseBody());
+
+        if (result.isSuccess()) {
+            wrapper.set(DistributionTask::getStatus, "submitted")
+                    .set(DistributionTask::getPublishedUrl, result.getPublishedUrl())
+                    .set(DistributionTask::getPlatformArticleId, result.getPlatformArticleId())
+                    .set(DistributionTask::getFailureKind, null)
+                    .set(DistributionTask::getErrorMessage, null)
+                    .set(DistributionTask::getNextRetryAt, null);
+        } else {
+            LocalDateTime nextRetryAt = result.isRetryable()
+                    ? LocalDateTime.now(SH_ZONE).plusMinutes(5)
+                    : null;
+            wrapper.set(DistributionTask::getStatus, "failed")
+                    .set(DistributionTask::getFailureKind, result.getFailureKind())
+                    .set(DistributionTask::getErrorMessage, result.getErrorMessage())
+                    .set(DistributionTask::getNextRetryAt, nextRetryAt);
+        }
+
+        int affected = distributionTaskMapper.update(null, wrapper);
+        if (affected == 0) {
+            log.warn("finalizeAttemptForBrandGeoSite: task {} state changed concurrently, skipped finalize", taskId);
+        }
+    }
+
     private void finalizeArticleStatus(ArticleDraft article, SubmitResult result) {
         article.setStatus(result.isSuccess() ? "published" : "approved");
         articleDraftMapper.updateById(article);
@@ -512,6 +626,15 @@ public class ContentDistributionService {
                 .map(OfficialCmsSiteAdapter.class::cast)
                 .findFirst()
                 .orElseThrow(() -> new BizException(500, "OfficialCmsSiteAdapter not registered"));
+    }
+
+    private BrandGeoSiteAdapter resolveBrandGeoSiteAdapter() {
+        return siteAdapters.stream()
+                .filter(adapter -> adapter.supportsPlatform(BrandGeoSiteAdapter.PLATFORM))
+                .filter(BrandGeoSiteAdapter.class::isInstance)
+                .map(BrandGeoSiteAdapter.class::cast)
+                .findFirst()
+                .orElseThrow(() -> new BizException(500, "BrandGeoSiteAdapter not registered"));
     }
 
     private QuotaContext validateQuota(Project project, PackagePublishConfig config) {
@@ -681,7 +804,7 @@ public class ContentDistributionService {
         if (project == null || project.getBrandId() == null) {
             throw new BizException(400, "请先完善品牌行业信息后再进行分发");
         }
-        Brand brand = brandMapper.selectById(project.getBrandId());
+        Brand brand = brandService.requireExistingBrand(project.getBrandId());
         if (brand == null || !StringUtils.hasText(brand.getIndustry())) {
             throw new BizException(400, "请先完善品牌行业信息后再进行分发");
         }

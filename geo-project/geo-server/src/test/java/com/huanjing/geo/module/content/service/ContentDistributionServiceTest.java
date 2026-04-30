@@ -15,10 +15,13 @@ import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.mapper.PackagePublishConfigMapper;
 import com.huanjing.geo.module.content.mapper.ProjectPublishQuotaMapper;
+import com.huanjing.geo.module.content.service.adapter.BrandGeoSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.FailureKind;
 import com.huanjing.geo.module.content.service.adapter.OfficialCmsSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.customer.entity.Brand;
+import com.huanjing.geo.module.customer.service.BrandService;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.PublishSite;
@@ -62,6 +65,9 @@ class ContentDistributionServiceTest {
     private PublishSiteMapper publishSiteMapper;
     private CurrentUserService currentUserService;
     private TestOfficialCmsSiteAdapter officialCmsSiteAdapter;
+    private TestBrandGeoSiteAdapter brandGeoSiteAdapter;
+    private BrandService brandService;
+    private ProjectPublishQuotaService projectPublishQuotaService;
     private ContentDistributionService contentDistributionService;
     private List<String> articleStatusUpdates;
 
@@ -78,6 +84,9 @@ class ContentDistributionServiceTest {
         publishSiteMapper = mock(PublishSiteMapper.class);
         currentUserService = mock(CurrentUserService.class);
         officialCmsSiteAdapter = new TestOfficialCmsSiteAdapter();
+        brandGeoSiteAdapter = new TestBrandGeoSiteAdapter();
+        brandService = mock(BrandService.class);
+        projectPublishQuotaService = mock(ProjectPublishQuotaService.class);
         contentDistributionService = new ContentDistributionService(
                 articleDraftMapper,
                 articleDraftVersionMapper,
@@ -88,8 +97,9 @@ class ContentDistributionServiceTest {
                 publishSiteMapper,
                 currentUserService,
                 mock(SystemAlertService.class),
-                List.of(officialCmsSiteAdapter),
-                mock(BrandMapper.class)
+                List.of(officialCmsSiteAdapter, brandGeoSiteAdapter),
+                brandService,
+                projectPublishQuotaService
         );
     }
 
@@ -197,6 +207,97 @@ class ContentDistributionServiceTest {
         verify(distributionTaskMapper, never()).insert(any());
     }
 
+    @Test
+    void distributeTo_brandGeoSite_success_writesSubmittedAndRefundNotCalled() {
+        givenCommonData();
+        givenBrandGeoSite("ok", "active");
+        brandGeoSiteAdapter.result = SubmitResult.success(200, "{\"siteCode\":\"ok\"}", "{\"code\":200}", "https://www.ok.com/knowledge/detail/12345", "12345");
+        when(distributionTaskMapper.selectById(300L)).thenReturn(task("submitted"));
+
+        DistributionTask result = contentDistributionService.distributeTo(1L, new TargetContext.BrandGeoSiteTarget(30L, "ignored"));
+
+        assertEquals("submitted", result.getStatus());
+        verify(projectPublishQuotaService).reserve(20L, currentMonth(), 5);
+        verify(projectPublishQuotaService, never()).refund(any(), any());
+        ArgumentCaptor<DistributionTask> inserted = ArgumentCaptor.forClass(DistributionTask.class);
+        verify(distributionTaskMapper).insert(inserted.capture());
+        assertEquals("submitting", inserted.getValue().getStatus());
+        assertEquals(BrandGeoSiteAdapter.PLATFORM, inserted.getValue().getTargetKind());
+        assertEquals(30L, inserted.getValue().getTargetBrandId());
+        assertArticleStatusTransitions("distributing", "published");
+    }
+
+    @Test
+    void distributeTo_brandGeoSite_failure_finalizesThenRefunds() {
+        givenCommonData();
+        givenBrandGeoSite("bad", "active");
+        brandGeoSiteAdapter.result = SubmitResult.failure(400, "{\"siteCode\":\"bad\"}", "{\"code\":400}", "HTTP 400", FailureKind.CLIENT_ERROR, false);
+        when(distributionTaskMapper.selectById(300L)).thenReturn(task("failed"));
+
+        contentDistributionService.distributeTo(1L, new TargetContext.BrandGeoSiteTarget(30L, "ignored"));
+
+        verify(distributionTaskMapper).update(eq(null), any());
+        verify(projectPublishQuotaService).refund(20L, currentMonth());
+        assertArticleStatusTransitions("distributing", "approved");
+    }
+
+    @Test
+    void distributeTo_brandGeoSite_adapterException_writesUnknownFailureAndRefunds() {
+        givenCommonData();
+        givenBrandGeoSite("ok", "active");
+        brandGeoSiteAdapter.throwUnexpected = true;
+        when(distributionTaskMapper.selectById(300L)).thenReturn(task("failed"));
+
+        contentDistributionService.distributeTo(1L, new TargetContext.BrandGeoSiteTarget(30L, "ignored"));
+
+        verify(distributionTaskMapper).update(eq(null), any());
+        verify(projectPublishQuotaService).refund(20L, currentMonth());
+        assertArticleStatusTransitions("distributing", "approved");
+    }
+
+    @Test
+    void distributeTo_brandGeoSite_brandWithoutCode_throws400() {
+        givenCommonData();
+        givenBrandGeoSite(null, "active");
+
+        BizException ex = assertThrows(BizException.class,
+                () -> contentDistributionService.distributeTo(1L, new TargetContext.BrandGeoSiteTarget(30L, null)));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("Brand has no GEO site configured", ex.getMessage());
+        verify(projectPublishQuotaService, never()).reserve(any(), any(), any());
+        verify(distributionTaskMapper, never()).insert(any());
+    }
+
+    @Test
+    void distributeTo_brandGeoSite_disabled_throws400() {
+        givenCommonData();
+        givenBrandGeoSite("ok", "disabled");
+
+        BizException ex = assertThrows(BizException.class,
+                () -> contentDistributionService.distributeTo(1L, new TargetContext.BrandGeoSiteTarget(30L, "ok")));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("Brand GEO site is not active", ex.getMessage());
+        verify(projectPublishQuotaService, never()).reserve(any(), any(), any());
+        verify(distributionTaskMapper, never()).insert(any());
+    }
+
+    @Test
+    void distributeTo_brandGeoSite_quotaExhausted_throws400() {
+        givenCommonData();
+        givenBrandGeoSite("ok", "active");
+        doThrow(new BizException(400, "Monthly publishing quota exhausted"))
+                .when(projectPublishQuotaService).reserve(20L, currentMonth(), 5);
+
+        BizException ex = assertThrows(BizException.class,
+                () -> contentDistributionService.distributeTo(1L, new TargetContext.BrandGeoSiteTarget(30L, "ok")));
+
+        assertEquals(400, ex.getCode());
+        verify(distributionTaskMapper, never()).insert(any());
+        verify(articleDraftMapper, never()).updateById(articleWithStatus("distributing"));
+    }
+
     private void givenCommonData() {
         SysUser operator = new SysUser();
         operator.setId(100L);
@@ -244,6 +345,14 @@ class ContentDistributionServiceTest {
         return new TargetContext.BrandOfficialSiteTarget(site);
     }
 
+    private void givenBrandGeoSite(String siteCode, String status) {
+        Brand brand = new Brand();
+        brand.setId(30L);
+        brand.setGeoSiteCode(siteCode);
+        brand.setGeoSiteStatus(status);
+        when(brandService.requireBrandWithAccess(30L, true)).thenReturn(brand);
+    }
+
     private ArticleDraft articleWithStatus(String status) {
         ArticleDraft article = new ArticleDraft();
         article.setId(1L);
@@ -282,6 +391,28 @@ class ContentDistributionServiceTest {
 
         @Override
         public SubmitResult submitToTarget(ArticleDraft article, String contentMarkdown, TargetContext target) {
+            return result;
+        }
+    }
+
+    private static class TestBrandGeoSiteAdapter extends BrandGeoSiteAdapter {
+        private SubmitResult result;
+        private boolean throwUnexpected;
+
+        TestBrandGeoSiteAdapter() {
+            super(null, null);
+        }
+
+        @Override
+        public boolean supportsPlatform(String platform) {
+            return BrandGeoSiteAdapter.PLATFORM.equals(platform);
+        }
+
+        @Override
+        public SubmitResult submitToTarget(ArticleDraft article, String contentMarkdown, TargetContext target) {
+            if (throwUnexpected) {
+                throw new IllegalStateException("boom");
+            }
             return result;
         }
     }

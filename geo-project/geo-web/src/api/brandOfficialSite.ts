@@ -1,6 +1,9 @@
 import request from './request'
 import type { R } from '@/types'
 
+// Legacy C1 customer official CMS API. Backend controller is cold-stored in Phase 2A;
+// keep this file for a future restore, but do not wire it into active UI flows.
+
 export interface BrandOfficialSite {
   id: number
   brandId: number
