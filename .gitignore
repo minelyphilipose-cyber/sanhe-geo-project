@@ -14,3 +14,6 @@ logs/
 # Existing exclusions kept for compatibility
 target/poc/
 geo-project/geo-server/target/poc/
+
+# IDE configs (per-developer)
+.vscode/
