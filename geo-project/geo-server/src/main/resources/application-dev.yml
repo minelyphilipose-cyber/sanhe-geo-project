@@ -15,7 +15,7 @@ spring:
 # JWT
 geo:
   brand-geo-site:
-    endpoint: http://127.0.0.1:18080/api/v1/content
+    endpoint: https://www.sanhexinglian.com/api/v1/content
 
   jwt:
     secret: "huanjing-geo-2024-jwt-secret-key-must-be-at-least-256-bits-long"
