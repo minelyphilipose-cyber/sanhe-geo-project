@@ -1,12 +1,15 @@
 package com.huanjing.geo.module.content.controller;
 
 import com.huanjing.geo.common.result.R;
+import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.dto.ArticleDistributeRequest;
 import com.huanjing.geo.module.content.dto.DistributionManualConfirmRequest;
 import com.huanjing.geo.module.content.dto.PublishQuotaVO;
 import com.huanjing.geo.module.content.dto.RecommendedSitesResponseVO;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.service.ContentDistributionService;
+import com.huanjing.geo.module.customer.entity.Brand;
+import com.huanjing.geo.module.customer.service.BrandService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -21,10 +24,20 @@ import java.util.Map;
 public class ContentDistributionController {
 
     private final ContentDistributionService contentDistributionService;
+    private final BrandService brandService;
 
     @PostMapping("/articles/{articleId}/distribute")
     public R<DistributionTask> distribute(@PathVariable Long articleId, @Valid @RequestBody ArticleDistributeRequest req) {
         return R.ok(contentDistributionService.distribute(articleId, req.getSiteId()));
+    }
+
+    @PostMapping("/articles/{articleId}/distribute-to-geo-site")
+    public R<DistributionTask> distributeToGeoSite(@PathVariable Long articleId,
+                                                   @RequestParam Long brandId) {
+        Brand brand = brandService.requireBrandWithAccess(brandId, true);
+        TargetContext.BrandGeoSiteTarget target =
+                new TargetContext.BrandGeoSiteTarget(brand.getId(), brand.getGeoSiteCode());
+        return R.ok(contentDistributionService.distributeTo(articleId, target));
     }
 
     @GetMapping("/articles/{articleId}/distribution")

@@ -31,6 +31,9 @@
         <el-descriptions-item label="官网">{{ brand?.website || '-' }}</el-descriptions-item>
         <el-descriptions-item label="公众号">{{ brand?.officialAccount || '-' }}</el-descriptions-item>
         <el-descriptions-item label="视频号">{{ brand?.videoAccount || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="GEO站点标识">{{ brand?.geoSiteCode || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="GEO站点状态">{{ geoSiteStatusLabel(brand?.geoSiteStatus) }}</el-descriptions-item>
+        <el-descriptions-item label="GEO站点域名">{{ brand?.geoSiteCode ? `https://www.${brand.geoSiteCode}.com` : '-' }}</el-descriptions-item>
         <el-descriptions-item label="抖音号">{{ brand?.douyinAccount || '-' }}</el-descriptions-item>
         <el-descriptions-item label="联系电话">{{ brand?.phone || '-' }}</el-descriptions-item>
         <el-descriptions-item label="微信">{{ brand?.wechat || '-' }}</el-descriptions-item>
@@ -82,10 +85,6 @@
       </div>
     </el-card>
 
-    <el-card>
-      <BrandOfficialSites :brand-id="brandId" :can-write="canWriteCompany" />
-    </el-card>
-
     <el-dialog v-model="statementVisible" title="编辑品牌标准表达" width="760px">
       <el-form :model="statementForm" label-width="140px">
         <el-form-item label="一句话定位">
@@ -124,6 +123,15 @@
         <el-form-item label="主营业务"><el-input v-model="brandForm.mainBusiness" /></el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="brandForm.regionCodes" /></el-form-item>
         <el-form-item label="官网"><el-input v-model="brandForm.website" /></el-form-item>
+        <el-form-item label="GEO站点标识">
+          <el-input v-model="brandForm.geoSiteCode" placeholder="例如 ok / sanhexinglian" />
+        </el-form-item>
+        <el-form-item label="GEO站点状态">
+          <el-select v-model="brandForm.geoSiteStatus" style="width: 100%" clearable>
+            <el-option label="启用" value="active" />
+            <el-option label="停用" value="disabled" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="公众号"><el-input v-model="brandForm.officialAccount" /></el-form-item>
         <el-form-item label="视频号"><el-input v-model="brandForm.videoAccount" /></el-form-item>
         <el-form-item label="抖音号"><el-input v-model="brandForm.douyinAccount" /></el-form-item>
@@ -173,7 +181,6 @@ import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
-import BrandOfficialSites from './BrandOfficialSites.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -210,6 +217,8 @@ const brandForm = reactive({
   mainBusiness: '',
   regionCodes: [] as string[],
   website: '',
+  geoSiteCode: '',
+  geoSiteStatus: 'active',
   officialAccount: '',
   videoAccount: '',
   douyinAccount: '',
@@ -267,6 +276,12 @@ function industryLabel(value?: string | null) {
   return dictStore.label('industry_tag', value) || value
 }
 
+function geoSiteStatusLabel(value?: string | null) {
+  if (value === 'active') return '启用'
+  if (value === 'disabled') return '停用'
+  return '-'
+}
+
 function parseIndustryTags(value?: string | string[] | null) {
   if (Array.isArray(value)) return value
   if (!value) return []
@@ -285,6 +300,8 @@ function fillForm(data: Brand) {
   brandForm.mainBusiness = data.mainBusiness || ''
   brandForm.regionCodes = regionCodesFromPayload(data)
   brandForm.website = data.website || ''
+  brandForm.geoSiteCode = data.geoSiteCode || ''
+  brandForm.geoSiteStatus = data.geoSiteCode ? (data.geoSiteStatus || 'active') : ''
   brandForm.officialAccount = data.officialAccount || ''
   brandForm.videoAccount = data.videoAccount || ''
   brandForm.douyinAccount = data.douyinAccount || ''
@@ -408,6 +425,8 @@ async function submitBrand() {
       districtCode: region.districtCode,
       districtName: region.districtName,
       website: brandForm.website || undefined,
+      geoSiteCode: brandForm.geoSiteCode || undefined,
+      geoSiteStatus: brandForm.geoSiteStatus || undefined,
       officialAccount: brandForm.officialAccount || undefined,
       videoAccount: brandForm.videoAccount || undefined,
       douyinAccount: brandForm.douyinAccount || undefined,

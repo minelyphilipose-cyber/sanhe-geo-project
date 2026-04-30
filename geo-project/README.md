@@ -24,6 +24,14 @@ cd geo-server
 mvn spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
+如需联调品牌 GEO 站点发布通道,先在项目根目录启动无依赖 mock:
+
+```bash
+python tools/brand-geo-site-mock-server.py
+```
+
+dev 配置默认请求 `http://127.0.0.1:18080/api/v1/content`,验收清单见 `docs/phase2a-brand-geo-site-acceptance.md`。
+
 ### 3. 启动前端
 ```bash
 cd geo-web

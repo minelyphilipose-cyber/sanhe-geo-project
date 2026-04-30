@@ -30,6 +30,8 @@ public class BrandUpdateRequest {
     private String standardBrandStatement;
     private String businessStandardStatement;
     private String forbiddenPhrases;
+    private String geoSiteCode;
+    private String geoSiteStatus;
     @NotBlank
     private String status;
     private String versionChangeReason;
