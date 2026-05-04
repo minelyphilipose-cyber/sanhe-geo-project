@@ -11,9 +11,9 @@
           </div>
           <div class="space-x-2">
             <el-button v-if="brand?.companyId" link @click="goCompanyDetail">查看客户</el-button>
-            <el-button v-if="canWriteProject" type="primary" link @click="goCreateProject">基于该品牌建项目</el-button>
-            <el-button v-if="canWriteCompany" type="primary" link @click="openEdit">编辑</el-button>
-            <el-button v-if="canWriteCompany" type="danger" link @click="removeCurrentBrand">删除品牌</el-button>
+            <el-button v-if="canCreateProject" type="primary" link @click="goCreateProject">基于该品牌建项目</el-button>
+            <el-button v-if="canUpdateBrand" type="primary" link @click="openEdit">编辑</el-button>
+            <el-button v-if="canDeleteBrand" type="danger" link @click="removeCurrentBrand">删除品牌</el-button>
           </div>
         </div>
       </template>
@@ -190,13 +190,14 @@ const dictStore = useDictStore()
 const brandId = Number(route.params.id)
 const hasValidId = Number.isFinite(brandId) && brandId > 0
 
-const canWriteCompany = computed(() => userStore.hasPermission('company.write'))
-const canWriteProject = computed(() => userStore.hasPermission('project.write'))
+const canUpdateBrand = computed(() => userStore.hasPermission('brand.update'))
+const canDeleteBrand = computed(() => userStore.hasPermission('brand.delete'))
+const canCreateProject = computed(() => userStore.hasPermission('project.create'))
 const canLockStatement = computed(() => userStore.hasPermission('brand.statement.lock'))
 const isPartnerRole = computed(() =>
   ['partner', 'partner_staff', 'partner_viewer'].includes(userStore.role || ''),
 )
-const canEditStatement = computed(() => canWriteCompany.value && !isPartnerRole.value)
+const canEditStatement = computed(() => canUpdateBrand.value && !isPartnerRole.value)
 const canRegenerateStatement = computed(() => canEditStatement.value)
 
 const loading = ref(false)

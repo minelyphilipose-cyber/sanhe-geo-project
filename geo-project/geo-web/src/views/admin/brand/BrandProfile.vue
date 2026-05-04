@@ -23,7 +23,7 @@
         <el-tab-pane label="基础资料" name="info">
           <div class="flex items-center justify-between mb-4">
             <span class="text-sm text-gray-500">品牌基础信息与联系方式</span>
-            <div v-if="!editingInfo && canWriteCompany">
+            <div v-if="!editingInfo && canUpdateBrand">
               <el-button type="primary" link @click="startEditInfo">编辑</el-button>
             </div>
             <div v-if="editingInfo" class="space-x-2">
@@ -236,7 +236,7 @@ const dictStore = useDictStore()
 // ────────── [FIX-2] brandId 响应式 ──────────
 const brandId = computed(() => Number(route.params.id))
 const hasValidId = computed(() => Number.isFinite(brandId.value) && brandId.value > 0)
-const canWriteCompany = computed(() => userStore.hasPermission('company.write'))
+const canUpdateBrand = computed(() => userStore.hasPermission('brand.update'))
 
 // ────────── 页面状态 ──────────
 const loading = ref(false)

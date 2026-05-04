@@ -42,6 +42,24 @@ export interface PartnerTxn {
   createdAt: string
 }
 
+export interface PartnerRechargeOrder {
+  id: number
+  orderNo: string
+  partnerId: number
+  amount: number
+  status: 'pending' | 'cancelled' | 'approved' | 'rejected' | 'expired'
+  offlineReference?: string | null
+  applyRemark?: string | null
+  rejectReason?: string | null
+  applicantUserId: number
+  auditedBy?: number | null
+  auditedAt?: string | null
+  accountTxnId?: number | null
+  expiresAt?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export interface PartnerCreateResult {
   partner: PartnerItem
   username: string
@@ -105,6 +123,34 @@ export function getPartnerAccountTxns(id: number, params: {
   dateTo?: string
 }) {
   return request.get<R<PageResult<PartnerTxn>>>(`/partners/${id}/account/txns`, { params })
+}
+
+export function getPartnerRechargeOrders(id: number, params: {
+  current?: number
+  size?: number
+  status?: string
+}) {
+  return request.get<R<PageResult<PartnerRechargeOrder>>>(`/partners/${id}/account/recharge-orders`, { params })
+}
+
+export function applyPartnerRecharge(id: number, data: {
+  amount: number
+  offlineReference?: string
+  remark?: string
+}) {
+  return request.post<R<PartnerRechargeOrder>>(`/partners/${id}/account/recharge-orders`, data)
+}
+
+export function cancelPartnerRechargeOrder(id: number, orderId: number) {
+  return request.post<R<void>>(`/partners/${id}/account/recharge-orders/${orderId}/cancel`)
+}
+
+export function auditPartnerRechargeOrder(id: number, orderId: number, data: {
+  action: 'approve' | 'reject'
+  rejectReason?: string
+  remark?: string
+}) {
+  return request.post<R<PartnerRechargeOrder>>(`/partners/${id}/account/recharge-orders/${orderId}/audit`, data)
 }
 
 export function rechargePartnerAccount(id: number, data: {

@@ -26,10 +26,8 @@ public class DispatchFacadeService {
 
     public void replayTask(Long taskId) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.write");
         DispatchTask task = dispatchTaskService.requireTask(taskId);
-        if (com.huanjing.geo.module.dispatch.enums.DispatchTaskStatus.DEAD_LETTER.value().equals(task.getStatus())
-                && !permissionService.hasPerm(operator, "dispatch.task.replay.dead_letter")) {
+        if (!permissionService.hasPerm(operator, "dispatch.task.replay.dead_letter")) {
             throw new BizException(403, "No permission: dispatch.task.replay.dead_letter");
         }
         dispatchTaskService.replayTask(taskId);
@@ -37,6 +35,13 @@ public class DispatchFacadeService {
 
     public List<DispatchTask> listReplayableTasks(Long projectId, Integer limit) {
         currentUserService.ensurePermission("project.read");
+        if (projectId != null) {
+            Project project = projectMapper.selectById(projectId);
+            if (project == null || project.getDeletedAt() != null) {
+                throw new BizException(404, "Project not found");
+            }
+            currentUserService.ensurePartnerResourceAccess(currentUserService.requireCurrentUser(), project.getPartnerId(), "project");
+        }
         return dispatchTaskService.listReplayableTasks(projectId, limit == null ? 20 : limit);
     }
 
@@ -47,19 +52,27 @@ public class DispatchFacadeService {
             throw new BizException(403, "Partner role cannot access dispatch task");
         }
         boolean canRead = permissionService.hasPerm(operator, "project.read")
-                || permissionService.hasPerm(operator, "project.write");
+                || permissionService.hasPerm(operator, "project.update");
         if (!canRead) {
             throw new BizException(403, "No permission to query dispatch task");
         }
         if ("sales".equals(operator.getRole())) {
             Project project = projectMapper.selectById(task.getProjectId());
-            if (project == null) {
+            if (project == null || project.getDeletedAt() != null) {
                 throw new BizException(404, "Project not found");
             }
             Company company = companyMapper.selectById(project.getCompanyId());
-            if (company == null || company.getSalesOwnerId() == null || !company.getSalesOwnerId().equals(operator.getId())) {
+            if (company == null || company.getDeletedAt() != null
+                    || company.getSalesOwnerId() == null || !company.getSalesOwnerId().equals(operator.getId())) {
                 throw new BizException(403, "No permission to query this task");
             }
+        }
+        if (!"sales".equals(operator.getRole())) {
+            Project project = projectMapper.selectById(task.getProjectId());
+            if (project == null || project.getDeletedAt() != null) {
+                throw new BizException(404, "Project not found");
+            }
+            currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         }
         return task;
     }

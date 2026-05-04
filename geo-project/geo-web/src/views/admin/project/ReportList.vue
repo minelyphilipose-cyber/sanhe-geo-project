@@ -146,7 +146,7 @@ const shareSubmitting = ref(false)
 const shares = ref<ProjectDashboardShare[]>([])
 const reports = ref<Report[]>([])
 
-const canManageDashboard = computed(() => userStore.hasPermission('project.write'))
+const canManageDashboard = computed(() => userStore.hasPermission('project.report.export'))
 const activeShare = computed(() => shares.value.find((item) => item.status === 'active') || null)
 
 async function loadAll() {

@@ -7,7 +7,7 @@
           <div class="flex items-center gap-2">
             <el-input v-model="keyword" clearable placeholder="搜索客户名称" style="width: 240px" @keyup.enter="load" />
             <el-button @click="load">查询</el-button>
-            <el-button v-if="canWriteCompany" type="primary" @click="openCreate">新增客户</el-button>
+            <el-button v-if="canCreateCompany" type="primary" @click="openCreate">新增客户</el-button>
           </div>
         </div>
       </template>
@@ -24,7 +24,7 @@
           <el-table-column label="状态" width="120">
             <template #default="scope">{{ dictStore.label('company_status', scope.row.status) }}</template>
           </el-table-column>
-          <el-table-column v-if="canWriteCompany" label="操作" width="100" fixed="right">
+          <el-table-column v-if="canUpdateCompany" label="操作" width="100" fixed="right">
             <template #default="scope">
               <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
             </template>
@@ -76,7 +76,8 @@ import { useUserStore } from '@/stores/user'
 
 const dictStore = useDictStore()
 const userStore = useUserStore()
-const canWriteCompany = computed(() => userStore.hasPermission('company.write'))
+const canCreateCompany = computed(() => userStore.hasPermission('company.create'))
+const canUpdateCompany = computed(() => userStore.hasPermission('company.update'))
 
 const loading = ref(false)
 const saving = ref(false)

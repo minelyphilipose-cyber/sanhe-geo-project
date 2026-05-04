@@ -34,7 +34,7 @@ const adminRoutes: RouteRecordRaw = {
       path: 'brands/create',
       name: 'BrandCreate',
       component: () => import('@/views/admin/brand/BrandCreate.vue'),
-      meta: { title: '新建品牌', hidden: true, permissions: ['company.write'] },
+      meta: { title: '新建品牌', hidden: true, permissions: ['brand.create'] },
     },
     {
       path: 'brands/:id',

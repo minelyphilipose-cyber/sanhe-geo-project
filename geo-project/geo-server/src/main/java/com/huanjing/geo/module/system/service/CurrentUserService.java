@@ -51,7 +51,7 @@ public class CurrentUserService {
 
     public void ensureInternalOperator() {
         SysUser user = requireCurrentUser();
-        if (isPartnerUser(user) || !permissionService.hasPerm(user, "company.write")) {
+        if (isPartnerUser(user) || !permissionService.hasPerm(user, "company.update")) {
             throw new BizException(403, "No permission for internal operation");
         }
     }
@@ -121,11 +121,11 @@ public class CurrentUserService {
             throw new BizException(403, "No permission: company.read");
         }
         Brand brand = brandMapper.selectById(brandId);
-        if (brand == null) {
+        if (brand == null || brand.getDeletedAt() != null) {
             throw new BizException(404, "Brand not found");
         }
         Company company = companyMapper.selectById(brand.getCompanyId());
-        if (company == null) {
+        if (company == null || company.getDeletedAt() != null) {
             throw new BizException(404, "Company not found");
         }
         String resolvedTag = StringUtils.hasText(resourceTag) ? resourceTag : "brand";

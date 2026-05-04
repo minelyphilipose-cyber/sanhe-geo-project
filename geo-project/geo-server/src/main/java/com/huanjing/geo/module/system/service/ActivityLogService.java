@@ -53,7 +53,11 @@ public class ActivityLogService {
     public Page<ActivityLogItem> page(long current, long size,
                                       Long userId, String action, String targetType, Long targetId,
                                       String dateFrom, String dateTo) {
-        currentUserService.ensurePermission("user.manage");
+        boolean canReadAll = currentUserService.hasPermission("activity_log.read");
+        boolean canReadFinance = currentUserService.hasPermission("activity_log.finance.read");
+        if (!canReadAll && !canReadFinance) {
+            throw new com.huanjing.geo.common.exception.BizException(403, "No permission: activity_log.read");
+        }
 
         LambdaQueryWrapper<ActivityLog> wrapper = new LambdaQueryWrapper<ActivityLog>()
                 .orderByDesc(ActivityLog::getCreatedAt);
@@ -68,6 +72,18 @@ public class ActivityLogService {
         }
         if (targetId != null) {
             wrapper.eq(ActivityLog::getTargetId, targetId);
+        }
+        if (!canReadAll) {
+            // Finance filter must stay wrapped in .and() so these OR branches do not escape outer filters.
+            wrapper.and(w -> w.in(ActivityLog::getTargetType, financeTargetTypes())
+                    .or()
+                    .likeRight(ActivityLog::getAction, "partner.account.")
+                    .or()
+                    .likeRight(ActivityLog::getAction, "company.account.")
+                    .or()
+                    .eq(ActivityLog::getAction, "project.sign_and_deduct")
+                    .or()
+                    .eq(ActivityLog::getAction, "partner.discount.update"));
         }
 
         LocalDateTime from = parseDateTimeStart(dateFrom);
@@ -100,6 +116,10 @@ public class ActivityLogService {
         Page<ActivityLogItem> result = new Page<>(rawPage.getCurrent(), rawPage.getSize(), rawPage.getTotal());
         result.setRecords(items);
         return result;
+    }
+
+    private List<String> financeTargetTypes() {
+        return List.of("partner_account_txn", "partner_recharge_order", "partner_account", "company_account_txn");
     }
 
     private Map<Long, String> buildUserNameMap(List<ActivityLog> records) {

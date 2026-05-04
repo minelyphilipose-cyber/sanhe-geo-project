@@ -7,8 +7,8 @@
         <div class="flex items-center justify-between">
           <span>客户信息</span>
           <div class="space-x-2">
-            <el-button v-if="canWriteCompany" type="primary" link @click="editVisible = true">编辑</el-button>
-            <el-button v-if="canWriteCompany" type="danger" link @click="removeCurrentCompany">删除客户</el-button>
+            <el-button v-if="canUpdateCompany" type="primary" link @click="editVisible = true">编辑</el-button>
+            <el-button v-if="canDeleteCompany" type="danger" link @click="removeCurrentCompany">删除客户</el-button>
           </div>
         </div>
       </template>
@@ -27,8 +27,8 @@
         <div class="flex items-center justify-between">
           <span>客户余额</span>
           <div class="space-x-2">
-            <el-button v-if="canWriteCompany" type="primary" @click="rechargeVisible = true">充值</el-button>
-            <el-button v-if="canWriteCompany" @click="deductVisible = true">扣款</el-button>
+            <el-button v-if="canAdjustCompanyAccount" type="primary" @click="rechargeVisible = true">充值</el-button>
+            <el-button v-if="canAdjustCompanyAccount" @click="deductVisible = true">扣款</el-button>
           </div>
         </div>
       </template>
@@ -76,7 +76,7 @@
       <template #header>
         <div class="flex items-center justify-between">
           <span>品牌列表</span>
-          <el-button v-if="canWriteCompany" type="primary" @click="openBrandCreate">新增品牌</el-button>
+          <el-button v-if="canCreateBrand" type="primary" @click="openBrandCreate">新增品牌</el-button>
         </div>
       </template>
       <DataState :loading="brandLoading" :empty="!brandLoading && brands.length === 0" empty-text="暂无品牌数据">
@@ -97,12 +97,12 @@
             <template #default="scope">
               <div class="flex flex-col gap-1">
                 <div class="flex items-center justify-center gap-2">
-                  <el-button v-if="canWriteCompany" link type="primary" @click="openBrandEdit(scope.row)">编辑</el-button>
-                  <el-button v-if="canWriteCompany" link type="danger" @click="removeBrand(scope.row)">删除</el-button>
+                  <el-button v-if="canUpdateBrand" link type="primary" @click="openBrandEdit(scope.row)">编辑</el-button>
+                  <el-button v-if="canDeleteBrand" link type="danger" @click="removeBrand(scope.row)">删除</el-button>
                   <el-button link type="primary" @click="goBrandDetail(scope.row.id)">详情</el-button>
                 </div>
                 <div class="flex justify-center">
-                  <el-button v-if="canWriteProject" link type="primary" @click="goCreateProject(scope.row.id)">基于该品牌建项目</el-button>
+                  <el-button v-if="canCreateProject" link type="primary" @click="goCreateProject(scope.row.id)">基于该品牌建项目</el-button>
                 </div>
               </div>
             </template>
@@ -261,8 +261,13 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const dictStore = useDictStore()
-const canWriteCompany = computed(() => userStore.hasPermission('company.write'))
-const canWriteProject = computed(() => userStore.hasPermission('project.write'))
+const canUpdateCompany = computed(() => userStore.hasPermission('company.update'))
+const canDeleteCompany = computed(() => userStore.hasPermission('company.delete'))
+const canAdjustCompanyAccount = computed(() => userStore.hasPermission('company.account.adjust'))
+const canCreateBrand = computed(() => userStore.hasPermission('brand.create'))
+const canUpdateBrand = computed(() => userStore.hasPermission('brand.update'))
+const canDeleteBrand = computed(() => userStore.hasPermission('brand.delete'))
+const canCreateProject = computed(() => userStore.hasPermission('project.create'))
 const companyId = Number(route.params.id)
 const hasValidId = Number.isFinite(companyId) && companyId > 0
 

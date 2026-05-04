@@ -56,6 +56,7 @@ public class ContentArticleService {
         } else if (currentUserService.isPartnerUser(operator)) {
             List<Long> projectIds = projectMapper.selectList(
                     new LambdaQueryWrapper<Project>()
+                            .isNull(Project::getDeletedAt)
                             .eq(Project::getPartnerId, operator.getPartnerId())
                             .select(Project::getId)
             ).stream().map(Project::getId).collect(Collectors.toList());
@@ -108,7 +109,7 @@ public class ContentArticleService {
     @Transactional
     public void saveRevision(Long articleId, ArticleRevisionSaveRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.write");
+        currentUserService.ensurePermission("project.update");
         ArticleDraft article = requireArticle(articleId);
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
@@ -153,7 +154,7 @@ public class ContentArticleService {
     @Transactional
     public void resubmit(Long articleId, ArticleResubmitRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.write");
+        currentUserService.ensurePermission("project.update");
         ArticleDraft article = requireArticle(articleId);
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
@@ -175,7 +176,7 @@ public class ContentArticleService {
     @Transactional
     public void review(Long articleId, ArticleReviewRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.write");
+        currentUserService.ensurePermission("project.update");
         ArticleDraft article = requireArticle(articleId);
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
@@ -223,7 +224,7 @@ public class ContentArticleService {
     @Transactional
     public void publish(Long articleId, ArticlePublishRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.write");
+        currentUserService.ensurePermission("project.update");
         ArticleDraft article = requireArticle(articleId);
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
@@ -321,7 +322,7 @@ public class ContentArticleService {
 
     private Project requireProject(Long projectId) {
         Project project = projectMapper.selectById(projectId);
-        if (project == null) {
+        if (project == null || project.getDeletedAt() != null) {
             throw new BizException(404, "Project not found");
         }
         return project;
@@ -341,6 +342,7 @@ public class ContentArticleService {
         }
         Map<Long, String> projectNameMap = projectMapper.selectList(
                         new LambdaQueryWrapper<Project>()
+                                .isNull(Project::getDeletedAt)
                                 .in(Project::getId, projectIds)
                                 .select(Project::getId, Project::getProjectName)
                 ).stream()
@@ -353,7 +355,7 @@ public class ContentArticleService {
     private void ensureProjectAccess(SysUser operator, Project project, boolean write) {
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         if (write) {
-            currentUserService.ensurePermission("project.write");
+            currentUserService.ensurePermission("project.update");
         }
     }
 
@@ -380,6 +382,9 @@ public class ContentArticleService {
         String lower = Optional.ofNullable(content).orElse("").toLowerCase(Locale.ROOT);
 
         Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
+        if (brand != null && brand.getDeletedAt() != null) {
+            brand = null;
+        }
         for (String phrase : parseStringList(brand == null ? null : brand.getForbiddenPhrases())) {
             if (lower.contains(phrase.toLowerCase(Locale.ROOT))) {
                 hits.add(Map.of("word", phrase, "severity", "block", "source", "brand"));

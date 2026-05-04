@@ -8,7 +8,7 @@
         </el-select>
         <el-button @click="load">查询</el-button>
       </div>
-      <el-button v-if="canWriteProject" type="primary" @click="openCreate">新建项目</el-button>
+      <el-button v-if="canCreateProject" type="primary" @click="openCreate">新建项目</el-button>
     </div>
 
     <el-card>
@@ -55,8 +55,8 @@
                   <template #dropdown>
                     <el-dropdown-menu>
                       <el-dropdown-item v-if="scope.row.status === 'paused' && canActivateProject" command="activate">去激活</el-dropdown-item>
-                      <el-dropdown-item v-if="canWriteProject" command="edit">编辑</el-dropdown-item>
-                      <el-dropdown-item v-if="canWriteProject" command="delete">删除</el-dropdown-item>
+                      <el-dropdown-item v-if="canUpdateProject" command="edit">编辑</el-dropdown-item>
+                      <el-dropdown-item v-if="canDeleteProject" command="delete">删除</el-dropdown-item>
                     </el-dropdown-menu>
                   </template>
                 </el-dropdown>
@@ -311,9 +311,11 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const dictStore = useDictStore()
-const canWriteProject = computed(() => userStore.hasPermission('project.write'))
-const canActivateProject = computed(() => userStore.hasPermission('project.status.activate'))
-const canCloseProject = computed(() => userStore.hasPermission('project.status.close'))
+const canCreateProject = computed(() => userStore.hasPermission('project.create'))
+const canUpdateProject = computed(() => userStore.hasPermission('project.update'))
+const canDeleteProject = computed(() => userStore.hasPermission('project.delete'))
+const canActivateProject = computed(() => userStore.hasPermission('project.start'))
+const canCloseProject = computed(() => userStore.hasPermission('project.pause'))
 const presetCompanyId = computed(() => {
   const raw = Number(route.query.companyId)
   return Number.isFinite(raw) && raw > 0 ? raw : null
@@ -859,7 +861,7 @@ onMounted(async () => {
   await loadBrands(form.companyId)
   await loadKeywordGroups(form.companyId)
   await load()
-  if (fromCustomerBrandPath.value && canWriteProject.value) {
+  if (fromCustomerBrandPath.value && canCreateProject.value) {
     await openCreate()
   }
 })

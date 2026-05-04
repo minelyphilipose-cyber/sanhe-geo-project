@@ -100,7 +100,7 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const dictStore = useDictStore()
-const canActivateProject = computed(() => userStore.hasPermission('project.status.activate'))
+const canActivateProject = computed(() => userStore.hasPermission('project.start'))
 const projectId = Number(route.params.id)
 const hasValidId = Number.isFinite(projectId) && projectId > 0
 

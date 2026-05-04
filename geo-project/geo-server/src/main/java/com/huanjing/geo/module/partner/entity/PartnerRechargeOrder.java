@@ -9,22 +9,22 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("partner_account_txn")
-public class PartnerAccountTxn {
+@TableName("partner_recharge_order")
+public class PartnerRechargeOrder {
     @TableId(type = IdType.AUTO)
     private Long id;
+    private String orderNo;
     private Long partnerId;
-    private Long accountId;
-    private String txnNo;
-    private String txnType;
-    private String bizType;
     private BigDecimal amount;
-    private BigDecimal balanceBefore;
-    private BigDecimal balanceAfter;
-    private Long relatedProjectId;
-    private Long rechargeOrderId;
-    private Long operatorUserId;
+    private String status;
     private String offlineReference;
-    private String remark;
+    private String applyRemark;
+    private String rejectReason;
+    private Long applicantUserId;
+    private Long auditedBy;
+    private LocalDateTime auditedAt;
+    private Long accountTxnId;
+    private LocalDateTime expiresAt;
     private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
 }

@@ -79,6 +79,8 @@ public class Project {
     private String remark;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private LocalDateTime deletedAt;
+    private Long deletedBy;
     @TableField(exist = false)
     private List<String> selectedPlatformCodesP0;
     @TableField(exist = false)

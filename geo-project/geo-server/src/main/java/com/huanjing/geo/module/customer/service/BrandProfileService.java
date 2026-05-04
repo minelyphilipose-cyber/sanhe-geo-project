@@ -72,7 +72,7 @@ public class BrandProfileService {
     @Transactional
     public BrandMaterial uploadMaterial(Long brandId, String category, MultipartFile file) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("company.write");
+        currentUserService.ensurePermission("brand.material.upload");
         Brand brand = requireAccessibleBrand(brandId, false);
         validateCategory(category);
         if (file == null || file.isEmpty()) {
@@ -115,7 +115,7 @@ public class BrandProfileService {
     @Transactional
     public void deleteMaterial(Long brandId, Long materialId) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("company.write");
+        currentUserService.ensurePermission("brand.material.delete");
         requireAccessibleBrand(brandId, false);
         BrandMaterial material = brandMaterialMapper.selectById(materialId);
         if (material == null || !brandId.equals(material.getBrandId())) {
@@ -247,15 +247,15 @@ public class BrandProfileService {
         if (readOnly) {
             currentUserService.ensurePermission("company.read");
         } else {
-            currentUserService.ensurePermission("company.write");
+            currentUserService.ensurePermission("brand.update");
         }
 
         Brand brand = brandMapper.selectById(brandId);
-        if (brand == null) {
+        if (brand == null || brand.getDeletedAt() != null) {
             throw new BizException(404, "Brand not found");
         }
         Company company = companyMapper.selectById(brand.getCompanyId());
-        if (company == null) {
+        if (company == null || company.getDeletedAt() != null) {
             throw new BizException(404, "Company not found");
         }
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "brand");

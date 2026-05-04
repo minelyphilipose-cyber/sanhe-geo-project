@@ -141,7 +141,7 @@ import type { DispatchDashboardMetrics, DispatchTaskItem } from '@/types'
 const route = useRoute()
 const userStore = useUserStore()
 const projectId = computed(() => Number(route.params.id))
-const canReplay = computed(() => userStore.hasPermission('project.write'))
+const canReplay = computed(() => userStore.hasPermission('dispatch.task.replay.dead_letter'))
 
 const loading = ref(false)
 const tasks = ref<DispatchTaskItem[]>([])

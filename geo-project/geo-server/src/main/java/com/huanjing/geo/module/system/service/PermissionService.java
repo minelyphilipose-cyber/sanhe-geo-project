@@ -12,30 +12,7 @@ import java.util.*;
 public class PermissionService {
 
     private static final Map<String, Set<String>> LEGACY_ROLE_PERMS = Map.of(
-            "super_admin", Set.of("*"),
-            "manager", Set.of(
-                    "user.manage", "partner.read", "partner.write", "company.read", "company.write", "project.read", "project.write",
-                    "project.status.activate", "project.status.close",
-                    "question_pool.core.confirm", "question_pool.core.delete",
-                    "report.review",
-                    "dispatch.alert.resolve", "dispatch.task.replay.dead_letter",
-                    "brand.statement.lock",
-                    "keyword_group.read", "keyword_group.write", "keyword_affix.manage"
-            ),
-            "delivery_manager", Set.of(
-                    "company.read", "company.write", "project.read", "project.write", "partner.read",
-                    "project.status.activate", "project.status.close",
-                    "question_pool.core.confirm", "question_pool.core.delete",
-                    "report.review",
-                    "dispatch.alert.resolve",
-                    "brand.statement.lock",
-                    "keyword_group.read", "keyword_group.write"
-            ),
-            "operator", Set.of("company.read", "company.write", "project.read", "project.write", "partner.read", "keyword_group.read", "keyword_group.write"),
-            "sales", Set.of("company.read", "project.read", "keyword_group.read"),
-            "partner", Set.of("partner.read", "company.read", "company.write", "project.read", "project.write"),
-            "partner_staff", Set.of("partner.read", "company.read", "company.write", "project.read"),
-            "partner_viewer", Set.of("partner.read", "company.read", "project.read")
+            "super_admin", Set.of("*")
     );
 
     private final SysPermissionMapper sysPermissionMapper;
@@ -47,7 +24,7 @@ public class PermissionService {
             perms.addAll(fromDb);
         }
 
-        // Fallback compatibility for historical data not fully backfilled.
+        // Only super_admin keeps a hardcoded wildcard fallback; normal role grants are DB-authoritative.
         Set<String> legacy = LEGACY_ROLE_PERMS.getOrDefault(user.getRole(), Collections.emptySet());
         perms.addAll(legacy);
         return perms;

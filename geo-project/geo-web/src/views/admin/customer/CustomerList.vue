@@ -13,7 +13,7 @@
         </el-select>
         <el-button @click="load">查询</el-button>
       </div>
-      <el-button v-if="canWriteCompany" type="primary" @click="openCreate">新建客户</el-button>
+      <el-button v-if="canCreateCompany" type="primary" @click="openCreate">新建客户</el-button>
     </div>
 
     <el-card>
@@ -43,8 +43,8 @@
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="goDetail(scope.row.id)">详情</el-button>
-            <el-button v-if="canWriteCompany" link type="primary" @click="openEdit(scope.row)">编辑</el-button>
-            <el-button v-if="canWriteCompany" link type="danger" @click="removeCompany(scope.row)">删除</el-button>
+            <el-button v-if="canUpdateCompany" link type="primary" @click="openEdit(scope.row)">编辑</el-button>
+            <el-button v-if="canDeleteCompany" link type="danger" @click="removeCompany(scope.row)">删除</el-button>
           </template>
         </el-table-column>
         </el-table>
@@ -155,7 +155,9 @@ import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCode
 const router = useRouter()
 const userStore = useUserStore()
 const dictStore = useDictStore()
-const canWriteCompany = computed(() => userStore.hasPermission('company.write'))
+const canCreateCompany = computed(() => userStore.hasPermission('company.create'))
+const canUpdateCompany = computed(() => userStore.hasPermission('company.update'))
+const canDeleteCompany = computed(() => userStore.hasPermission('company.delete'))
 
 const loading = ref(false)
 const saving = ref(false)

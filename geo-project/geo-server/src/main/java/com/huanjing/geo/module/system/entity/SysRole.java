@@ -15,6 +15,7 @@ public class SysRole {
     private String roleKey;
     private String roleName;
     private String roleType;
+    private String dataScope;
     private String status;
     private Boolean isBuiltin;
     private Integer sortOrder;

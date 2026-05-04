@@ -13,7 +13,7 @@
         </el-select>
         <el-button @click="load">查询</el-button>
       </div>
-      <el-button v-if="canWritePartner" type="primary" @click="openCreate">新建合伙人</el-button>
+      <el-button v-if="canCreatePartner" type="primary" @click="openCreate">新建合伙人</el-button>
     </div>
 
     <el-card>
@@ -36,8 +36,8 @@
         <el-table-column label="操作" width="260" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="goDetail(scope.row.id)">详情</el-button>
-            <el-button v-if="canWritePartner" link type="primary" @click="openEdit(scope.row)">编辑</el-button>
-            <el-dropdown v-if="canWritePartner" @command="(v: string) => changeStatus(scope.row.id, v)">
+            <el-button v-if="canUpdatePartner" link type="primary" @click="openEdit(scope.row)">编辑</el-button>
+            <el-dropdown v-if="canUpdatePartnerStatus" @command="(v: string) => changeStatus(scope.row.id, v)">
               <el-button link type="primary" style="margin-left: 10px;margin-top: 3px;">
                 改状态
               </el-button>
@@ -152,7 +152,9 @@ import { chinaRegionOptions, regionPayloadFromCodes } from '@/constants/region'
 const router = useRouter()
 const userStore = useUserStore()
 const dictStore = useDictStore()
-const canWritePartner = computed(() => userStore.hasPermission('partner.write'))
+const canCreatePartner = computed(() => userStore.hasPermission('partner.create'))
+const canUpdatePartner = computed(() => userStore.hasPermission('partner.update'))
+const canUpdatePartnerStatus = computed(() => userStore.hasPermission('partner.status.update'))
 
 const loading = ref(false)
 const saving = ref(false)
@@ -369,4 +371,3 @@ const cityDisplayPreview = computed(() => {
   return regionPayloadFromCodes(form.cityCodes).displayName || form.city
 })
 </script>
-

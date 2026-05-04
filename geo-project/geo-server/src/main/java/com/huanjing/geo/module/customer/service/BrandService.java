@@ -60,6 +60,7 @@ public class BrandService {
         currentUserService.ensurePermission("company.read");
 
         LambdaQueryWrapper<Brand> wrapper = new LambdaQueryWrapper<Brand>()
+                .isNull(Brand::getDeletedAt)
                 .orderByDesc(Brand::getCreatedAt);
 
         if (companyId != null) {
@@ -90,7 +91,7 @@ public class BrandService {
 
     public Brand requireBrandWithAccess(Long id, boolean write) {
         SysUser user = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission(write ? "company.write" : "company.read");
+        currentUserService.ensurePermission(write ? "brand.update" : "company.read");
         Brand brand = requireBrand(id);
         Company company = requireCompany(brand.getCompanyId());
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "brand");
@@ -98,13 +99,14 @@ public class BrandService {
     }
 
     public Brand create(BrandCreateRequest req) {
-        currentUserService.ensurePermission("company.write");
+        currentUserService.ensurePermission("brand.create");
         SysUser operator = currentUserService.requireCurrentUser();
         Company company = requireCompany(req.getCompanyId());
         validateBrandStatus(StringUtils.hasText(req.getStatus()) ? req.getStatus() : "active");
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "company");
 
         Brand existed = brandMapper.selectOne(new LambdaQueryWrapper<Brand>()
+                .isNull(Brand::getDeletedAt)
                 .eq(Brand::getCompanyId, req.getCompanyId())
                 .eq(Brand::getBrandSlug, req.getBrandSlug()));
         if (existed != null) {
@@ -155,7 +157,7 @@ public class BrandService {
     }
 
     public Brand update(Long id, BrandUpdateRequest req) {
-        currentUserService.ensurePermission("company.write");
+        currentUserService.ensurePermission("brand.update");
         SysUser operator = currentUserService.requireCurrentUser();
 
         Brand brand = requireBrand(id);
@@ -164,6 +166,7 @@ public class BrandService {
         validateBrandStatus(req.getStatus());
         Map<String, Object> before = snapshotBrand(brand);
         Brand existed = brandMapper.selectOne(new LambdaQueryWrapper<Brand>()
+                .isNull(Brand::getDeletedAt)
                 .eq(Brand::getCompanyId, brand.getCompanyId())
                 .eq(Brand::getBrandSlug, req.getBrandSlug())
                 .ne(Brand::getId, id));
@@ -214,7 +217,7 @@ public class BrandService {
 
     @Transactional
     public void delete(Long id) {
-        currentUserService.ensurePermission("company.write");
+        currentUserService.ensurePermission("brand.delete");
         SysUser operator = currentUserService.requireCurrentUser();
         Brand brand = requireBrand(id);
         Company company = requireCompany(brand.getCompanyId());
@@ -222,6 +225,7 @@ public class BrandService {
 
         List<Long> projectIds = projectMapper.selectList(
                 new LambdaQueryWrapper<Project>()
+                        .isNull(Project::getDeletedAt)
                         .eq(Project::getBrandId, id)
                         .select(Project::getId)
         ).stream().map(Project::getId).toList();
@@ -229,11 +233,9 @@ public class BrandService {
             throw new BizException(400, "Brand has projects, cannot delete");
         }
 
-        brandMaterialMapper.delete(new LambdaQueryWrapper<BrandMaterial>()
-                .eq(BrandMaterial::getBrandId, id));
-        brandProfileVersionMapper.delete(new LambdaQueryWrapper<BrandProfileVersion>()
-                .eq(BrandProfileVersion::getBrandId, id));
-        brandMapper.deleteById(id);
+        brand.setDeletedAt(java.time.LocalDateTime.now());
+        brand.setDeletedBy(operator.getId());
+        brandMapper.updateById(brand);
         activityLogService.logAction(
                 operator.getId(),
                 "brand.delete",
@@ -247,7 +249,7 @@ public class BrandService {
 
     private Brand requireBrand(Long id) {
         Brand brand = brandMapper.selectById(id);
-        if (brand == null) {
+        if (brand == null || brand.getDeletedAt() != null) {
             throw new BizException(404, "Brand not found");
         }
         return brand;
@@ -259,7 +261,7 @@ public class BrandService {
 
     private Company requireCompany(Long id) {
         Company company = companyMapper.selectById(id);
-        if (company == null) {
+        if (company == null || company.getDeletedAt() != null) {
             throw new BizException(404, "Company not found");
         }
         return company;
@@ -288,6 +290,7 @@ public class BrandService {
             throw new BizException(400, "Invalid geo_site_code");
         }
         Brand existed = brandMapper.selectOne(new LambdaQueryWrapper<Brand>()
+                .isNull(Brand::getDeletedAt)
                 .eq(Brand::getGeoSiteCode, code)
                 .ne(selfId != null, Brand::getId, selfId)
                 .last("LIMIT 1"));

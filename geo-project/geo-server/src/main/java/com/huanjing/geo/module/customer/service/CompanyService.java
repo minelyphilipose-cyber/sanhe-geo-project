@@ -64,6 +64,7 @@ public class CompanyService {
         SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("company.read");
         LambdaQueryWrapper<Company> wrapper = new LambdaQueryWrapper<Company>()
+                .isNull(Company::getDeletedAt)
                 .orderByDesc(Company::getCreatedAt);
 
         if (StringUtils.hasText(keyword)) {
@@ -96,7 +97,7 @@ public class CompanyService {
 
     @Transactional
     public Company create(CompanyCreateRequest req) {
-        currentUserService.ensurePermission("company.write");
+        currentUserService.ensurePermission("company.create");
         SysUser operator = currentUserService.requireCurrentUser();
         String ownerType = resolveCreateOwnerType(operator);
         Long partnerId = resolveCreatePartnerId(operator);
@@ -149,7 +150,7 @@ public class CompanyService {
     }
 
     public Company update(Long id, CompanyUpdateRequest req) {
-        currentUserService.ensurePermission("company.write");
+        currentUserService.ensurePermission("company.update");
         SysUser operator = currentUserService.requireCurrentUser();
         Company company = requireCompany(id);
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "company");
@@ -238,7 +239,7 @@ public class CompanyService {
 
     @Transactional
     public CompanyAccountTxn recharge(Long companyId, CompanyRechargeRequest req) {
-        currentUserService.ensurePermission("company.write");
+        currentUserService.ensurePermission("company.account.adjust");
         SysUser operator = currentUserService.requireCurrentUser();
         Company company = requireCompany(companyId);
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "company");
@@ -282,7 +283,7 @@ public class CompanyService {
 
     @Transactional
     public CompanyAccountTxn deduct(Long companyId, CompanyDeductRequest req) {
-        currentUserService.ensurePermission("company.write");
+        currentUserService.ensurePermission("company.account.adjust");
         SysUser operator = currentUserService.requireCurrentUser();
         Company company = requireCompany(companyId);
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "company");
@@ -328,13 +329,15 @@ public class CompanyService {
 
     @Transactional
     public void delete(Long id) {
-        currentUserService.ensurePermission("company.write");
+        currentUserService.ensurePermission("company.delete");
         SysUser operator = currentUserService.requireCurrentUser();
         Company company = requireCompany(id);
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "company");
 
         Long brandCount = brandMapper.selectCount(
-                new LambdaQueryWrapper<Brand>().eq(Brand::getCompanyId, id)
+                new LambdaQueryWrapper<Brand>()
+                        .isNull(Brand::getDeletedAt)
+                        .eq(Brand::getCompanyId, id)
         );
         if (brandCount != null && brandCount > 0) {
             throw new BizException(400, "Company has brands, cannot delete");
@@ -353,10 +356,11 @@ public class CompanyService {
             if (txnCount != null && txnCount > 0) {
                 throw new BizException(400, "Company has account transactions, cannot delete");
             }
-            companyAccountMapper.deleteById(account.getId());
         }
 
-        companyMapper.deleteById(id);
+        company.setDeletedAt(LocalDateTime.now());
+        company.setDeletedBy(operator.getId());
+        companyMapper.updateById(company);
         activityLogService.logAction(
                 operator.getId(),
                 "company.delete",
@@ -370,7 +374,7 @@ public class CompanyService {
 
     private Company requireCompany(Long id) {
         Company company = companyMapper.selectById(id);
-        if (company == null) {
+        if (company == null || company.getDeletedAt() != null) {
             throw new BizException(404, "Company not found");
         }
         return company;

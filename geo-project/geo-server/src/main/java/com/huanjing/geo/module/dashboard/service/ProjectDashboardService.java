@@ -302,7 +302,7 @@ public class ProjectDashboardService {
     }
 
     private Project requireWritableProject(Long projectId) {
-        currentUserService.ensurePermission("project.write");
+        currentUserService.ensurePermission("project.report.export");
         Project project = requireProject(projectId);
         SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePartnerResourceAccess(user, project.getPartnerId(), "project");
@@ -311,7 +311,7 @@ public class ProjectDashboardService {
 
     private Project requireProject(Long projectId) {
         Project project = projectMapper.selectById(projectId);
-        if (project == null) {
+        if (project == null || project.getDeletedAt() != null) {
             throw new BizException(404, "Project not found");
         }
         return project;

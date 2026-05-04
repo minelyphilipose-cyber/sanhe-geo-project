@@ -288,7 +288,7 @@ public class BrandStatementService {
 
     private Brand requireBrand(Long brandId) {
         Brand brand = brandMapper.selectById(brandId);
-        if (brand == null) {
+        if (brand == null || brand.getDeletedAt() != null) {
             throw new BizException(404, "Brand not found");
         }
         return brand;
@@ -296,14 +296,14 @@ public class BrandStatementService {
 
     private void ensureBrandAccess(SysUser user, Brand brand) {
         Company company = companyMapper.selectById(brand.getCompanyId());
-        if (company == null) {
+        if (company == null || company.getDeletedAt() != null) {
             throw new BizException(404, "Company not found");
         }
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "brand");
     }
 
     private void ensureEditableByInternal(SysUser user) {
-        currentUserService.ensurePermission("company.write");
+        currentUserService.ensurePermission("brand.update");
         if (currentUserService.isPartnerUser(user)) {
             throw new BizException(403, "Partner role can only view brand statement");
         }

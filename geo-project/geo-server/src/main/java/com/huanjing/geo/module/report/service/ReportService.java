@@ -82,6 +82,7 @@ public class ReportService {
         if (StringUtils.hasText(keyword)) {
             List<Long> projectIds = projectMapper.selectList(
                     new LambdaQueryWrapper<Project>()
+                            .isNull(Project::getDeletedAt)
                             .like(Project::getProjectName, keyword.trim())
                             .select(Project::getId)
             ).stream().map(Project::getId).toList();
@@ -134,7 +135,7 @@ public class ReportService {
         }
         ensurePostsaleEnabled(reportType);
         Project project = projectMapper.selectById(projectId);
-        if (project == null) {
+        if (project == null || project.getDeletedAt() != null) {
             throw new BizException(404, "Project not found");
         }
 
@@ -804,7 +805,7 @@ public class ReportService {
 
     private void ensureProjectReadable(Long projectId) {
         Project project = projectMapper.selectById(projectId);
-        if (project == null) {
+        if (project == null || project.getDeletedAt() != null) {
             throw new BizException(404, "Project not found");
         }
         currentUserService.ensurePartnerResourceAccess(currentUserService.requireCurrentUser(), project.getPartnerId(), "project");
@@ -868,6 +869,7 @@ public class ReportService {
         }
         Map<Long, String> projectNameMap = projectMapper.selectList(
                 new LambdaQueryWrapper<Project>()
+                        .isNull(Project::getDeletedAt)
                         .in(Project::getId, projectIds)
                         .select(Project::getId, Project::getProjectName)
         ).stream().collect(Collectors.toMap(Project::getId, Project::getProjectName, (a, b) -> a));

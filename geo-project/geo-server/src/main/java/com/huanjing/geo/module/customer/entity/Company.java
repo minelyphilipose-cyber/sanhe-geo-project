@@ -42,4 +42,6 @@ public class Company {
     private Long createdBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private LocalDateTime deletedAt;
+    private Long deletedBy;
 }

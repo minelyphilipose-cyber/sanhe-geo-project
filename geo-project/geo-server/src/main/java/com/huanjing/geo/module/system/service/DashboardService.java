@@ -84,20 +84,23 @@ public class DashboardService {
         DashboardOverviewVO vo = new DashboardOverviewVO();
         LocalDateTime monthStart = LocalDate.now().withDayOfMonth(1).atStartOfDay();
 
-        LambdaQueryWrapper<Company> companyWrapper = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<Company> companyWrapper = new LambdaQueryWrapper<Company>()
+                .isNull(Company::getDeletedAt);
         if (scopePartnerId != null) {
             companyWrapper.eq(Company::getPartnerId, scopePartnerId);
         }
         vo.setTotalCustomers(companyMapper.selectCount(companyWrapper));
 
         LambdaQueryWrapper<Project> activeProjectWrapper = new LambdaQueryWrapper<Project>()
+                .isNull(Project::getDeletedAt)
                 .in(Project::getStage, ACTIVE_STAGES);
         if (scopePartnerId != null) {
             activeProjectWrapper.eq(Project::getPartnerId, scopePartnerId);
         }
         vo.setActiveProjects(projectMapper.selectCount(activeProjectWrapper));
 
-        LambdaQueryWrapper<Project> allProjectWrapper = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<Project> allProjectWrapper = new LambdaQueryWrapper<Project>()
+                .isNull(Project::getDeletedAt);
         if (scopePartnerId != null) {
             allProjectWrapper.eq(Project::getPartnerId, scopePartnerId);
         }
@@ -133,6 +136,7 @@ public class DashboardService {
         }
 
         LambdaQueryWrapper<Company> newCustomerWrapper = new LambdaQueryWrapper<Company>()
+                .isNull(Company::getDeletedAt)
                 .ge(Company::getCreatedAt, monthStart)
                 .eq(Company::getStatus, "signed");
         if (scopePartnerId != null) {
@@ -141,6 +145,7 @@ public class DashboardService {
         vo.setMonthlyNewCustomers(companyMapper.selectCount(newCustomerWrapper));
 
         LambdaQueryWrapper<Project> riskWrapper = new LambdaQueryWrapper<Project>()
+                .isNull(Project::getDeletedAt)
                 .eq(Project::getStage, "high_risk");
         if (scopePartnerId != null) {
             riskWrapper.eq(Project::getPartnerId, scopePartnerId);
@@ -185,6 +190,7 @@ public class DashboardService {
         }
 
         LambdaQueryWrapper<Project> riskProjectWrapper = new LambdaQueryWrapper<Project>()
+                .isNull(Project::getDeletedAt)
                 .eq(Project::getStage, "high_risk")
                 .orderByDesc(Project::getUpdatedAt)
                 .last("LIMIT " + safeLimit);
@@ -227,6 +233,7 @@ public class DashboardService {
         }
 
         LambdaQueryWrapper<Project> renewalWrapper = new LambdaQueryWrapper<Project>()
+                .isNull(Project::getDeletedAt)
                 .eq(Project::getStage, "needs_renewal")
                 .orderByAsc(Project::getEndDate)
                 .last("LIMIT " + safeLimit);
@@ -258,7 +265,8 @@ public class DashboardService {
         currentUserService.ensurePermission("project.read");
         Long scopePartnerId = currentUserService.requirePartnerScope(user);
 
-        LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<>();
+        LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<Project>()
+                .isNull(Project::getDeletedAt);
         if (scopePartnerId != null) {
             wrapper.eq(Project::getPartnerId, scopePartnerId);
         }
@@ -321,6 +329,7 @@ public class DashboardService {
     private List<Long> loadProjectIdsByPartner(Long partnerId) {
         return projectMapper.selectList(
                         new LambdaQueryWrapper<Project>()
+                                .isNull(Project::getDeletedAt)
                                 .eq(Project::getPartnerId, partnerId)
                                 .select(Project::getId)
                 ).stream()

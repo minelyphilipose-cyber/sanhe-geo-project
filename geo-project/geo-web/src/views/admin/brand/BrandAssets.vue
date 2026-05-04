@@ -88,7 +88,7 @@
                 <el-icon><List /></el-icon>
               </el-radio-button>
             </el-radio-group>
-            <el-dropdown v-if="canWriteCompany" @command="handleUploadCategory">
+            <el-dropdown v-if="canUploadMaterial" @command="handleUploadCategory">
               <el-button type="primary" size="small">
                 上传素材
                 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
@@ -133,7 +133,7 @@
             </div>
             <div class="absolute top-1 right-1 hidden group-hover:flex gap-1">
               <el-button circle size="small" type="primary" :icon="Download" @click.stop="downloadMaterial(mat)" />
-              <el-button v-if="canWriteCompany" circle size="small" type="danger" :icon="Delete" @click.stop="confirmDeleteMaterial(mat)" />
+              <el-button v-if="canDeleteMaterial" circle size="small" type="danger" :icon="Delete" @click.stop="confirmDeleteMaterial(mat)" />
             </div>
             <el-tag class="absolute top-1 left-1" size="small" :type="categoryTagType(mat.category)" effect="dark">
               {{ categoryLabel(mat.category) }}
@@ -181,7 +181,7 @@
                 预览
               </el-button>
               <el-button link type="primary" :loading="row._downloading" @click="downloadMaterial(row)">下载</el-button>
-              <el-popconfirm v-if="canWriteCompany" title="确定删除此素材？" @confirm="removeMaterial(row)">
+              <el-popconfirm v-if="canDeleteMaterial" title="确定删除此素材？" @confirm="removeMaterial(row)">
                 <template #reference>
                   <el-button link type="danger">删除</el-button>
                 </template>
@@ -225,7 +225,8 @@ const userStore = useUserStore()
 
 const brandId = computed(() => Number(route.params.id))
 const hasValidId = computed(() => Number.isFinite(brandId.value) && brandId.value > 0)
-const canWriteCompany = computed(() => userStore.hasPermission('company.write'))
+const canUploadMaterial = computed(() => userStore.hasPermission('brand.material.upload'))
+const canDeleteMaterial = computed(() => userStore.hasPermission('brand.material.delete'))
 
 // ────────── 状态 ──────────
 type BrandMaterialExt = BrandMaterial & {

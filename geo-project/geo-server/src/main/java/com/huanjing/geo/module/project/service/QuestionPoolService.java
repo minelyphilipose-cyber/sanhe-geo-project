@@ -101,7 +101,7 @@ public class QuestionPoolService {
 
     @Transactional
     public DispatchTask triggerSingleStrategyGeneration(Long questionId, String triggerSource) {
-        currentUserService.ensurePermission("project.write");
+        currentUserService.ensurePermission("project.update");
         SysUser user = currentUserService.requireCurrentUser();
         QuestionPoolItem item = questionPoolItemMapper.selectById(questionId);
         if (item == null) {
@@ -114,7 +114,7 @@ public class QuestionPoolService {
 
     @Transactional
     public void updateQuestionStrategy(Long questionId, QuestionStrategyUpdateRequest req) {
-        currentUserService.ensurePermission("project.write");
+        currentUserService.ensurePermission("project.update");
         SysUser user = currentUserService.requireCurrentUser();
         QuestionPoolItem item = questionPoolItemMapper.selectById(questionId);
         if (item == null) {
@@ -203,7 +203,9 @@ public class QuestionPoolService {
 
         List<Long> projectIds = versionRecords.stream().map(QuestionPoolVersion::getProjectId).distinct().collect(Collectors.toList());
         List<Project> projects = projectMapper.selectList(
-                new LambdaQueryWrapper<Project>().in(Project::getId, projectIds)
+                new LambdaQueryWrapper<Project>()
+                        .isNull(Project::getDeletedAt)
+                        .in(Project::getId, projectIds)
         );
         Map<Long, Project> projectMap = new HashMap<>();
         for (Project project : projects) {
@@ -330,14 +332,14 @@ public class QuestionPoolService {
 
     private Project requireProjectForRead(Long projectId) {
         Project project = projectMapper.selectById(projectId);
-        if (project == null) {
+        if (project == null || project.getDeletedAt() != null) {
             throw new BizException(404, "Project not found");
         }
         return project;
     }
 
     private Project requireProjectForWrite(Long projectId) {
-        currentUserService.ensurePermission("project.write");
+        currentUserService.ensurePermission("project.update");
         return requireProjectForRead(projectId);
     }
 

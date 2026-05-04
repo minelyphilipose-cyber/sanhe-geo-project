@@ -147,6 +147,7 @@ public class ProjectService {
     private final ReportMapper reportMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final CurrentUserService currentUserService;
+    private final ProjectStateGuard projectStateGuard;
     private final ActivityLogService activityLogService;
     private final BrandStatementDispatchService brandStatementDispatchService;
 
@@ -154,6 +155,7 @@ public class ProjectService {
         SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
         LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<Project>()
+                .isNull(Project::getDeletedAt)
                 .orderByDesc(Project::getCreatedAt);
 
         if (StringUtils.hasText(keyword)) {
@@ -173,6 +175,7 @@ public class ProjectService {
         if ("sales".equals(user.getRole())) {
             List<Long> signedCompanyIds = companyMapper.selectList(
                     new LambdaQueryWrapper<Company>()
+                            .isNull(Company::getDeletedAt)
                             .select(Company::getId)
                             .eq(Company::getSalesOwnerId, user.getId())
                             .eq(Company::getStatus, "signed")
@@ -226,7 +229,7 @@ public class ProjectService {
 
     @Transactional
     public Project create(ProjectCreateRequest req) {
-        currentUserService.ensurePermission("project.write");
+        currentUserService.ensurePermission("project.create");
         SysUser operator = currentUserService.requireCurrentUser();
         Company company = validateCompanyBrand(req.getCompanyId(), req.getBrandId());
         String ownerType = resolveOwnerTypeByCompany(company);
@@ -313,10 +316,9 @@ public class ProjectService {
 
     @Transactional
     public Project update(Long id, ProjectUpdateRequest req) {
-        currentUserService.ensurePermission("project.write");
         SysUser operator = currentUserService.requireCurrentUser();
         Project project = requireProject(id);
-        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
+        projectStateGuard.ensureCanEditBasicInfo(project, operator);
         Company company = validateCompanyBrand(req.getCompanyId(), req.getBrandId());
         String ownerType = resolveOwnerTypeByCompany(company);
         Long partnerId = resolvePartnerIdByCompany(company);
@@ -324,8 +326,9 @@ public class ProjectService {
         currentUserService.ensurePartnerResourceAccess(operator, partnerId, "project");
         Map<String, Object> before = snapshotProject(project);
         validateProjectCompanyPartnerConsistency(ownerType, partnerId, company.getPartnerId());
-        validateProjectBase(req.getPackageType());
-        com.huanjing.geo.module.project.entity.PackagePlan packagePlan = packagePlanService.requireEnabledByType(req.getPackageType());
+        if (StringUtils.hasText(req.getPackageType()) && !req.getPackageType().equals(project.getPackageType())) {
+            throw new BizException(400, "Project package can only be changed through package change flow");
+        }
 
         project.setCompanyId(company.getId());
         project.setCompanyName(company.getCompanyName());
@@ -333,10 +336,6 @@ public class ProjectService {
         project.setBrandName(resolveBrandName(req.getBrandId()));
         project.setProjectName(req.getProjectName());
         project.setProjectAliases(normalizeAliases(req.getProjectAliases()));
-        project.setPackageType(req.getPackageType());
-        project.setPackagePrice(packagePlan.getStandardPrice());
-        project.setServiceMonths(packagePlan.getServiceMonths());
-        applyPackageSnapshot(project, packagePlan);
         project.setOwnerType(ownerType);
         project.setPartnerId(partnerId);
         applyRegionFields(project, req.getProvinceCode(), req.getProvinceName(), req.getCityCode(), req.getCityName(), req.getDistrictCode(), req.getDistrictName());
@@ -402,11 +401,10 @@ public class ProjectService {
     }
 
     public void updateStage(Long id, ProjectStageUpdateRequest req) {
-        currentUserService.ensurePermission("project.write");
         SysUser operator = currentUserService.requireCurrentUser();
         validateStage(req.getStage());
         Project project = requireProject(id);
-        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
+        projectStateGuard.ensureCanChangeStage(project, operator, req.getStage());
         ensureStageBoundary(project.getStatus(), project.getStage(), req.getStage());
         if (req.getStage().equals(project.getStage())) {
             return;
@@ -427,12 +425,10 @@ public class ProjectService {
 
     @Transactional
     public void updateStatus(Long id, ProjectStatusUpdateRequest req) {
-        currentUserService.ensurePermission("project.write");
         SysUser operator = currentUserService.requireCurrentUser();
         validateStatus(req.getStatus());
         Project project = requireProject(id);
-        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
-        ensureStatusOperatePermission(req.getStatus());
+        ensureStatusOperatePermission(project, req.getStatus(), operator);
         ensureStatusTransition(project.getStatus(), req.getStatus());
         if (req.getStatus().equals(project.getStatus())) {
             return;
@@ -466,15 +462,16 @@ public class ProjectService {
 
     @Transactional
     public void updateFlow(Long id, ProjectFlowUpdateRequest req) {
-        currentUserService.ensurePermission("project.write");
         SysUser operator = currentUserService.requireCurrentUser();
         validateStatus(req.getStatus());
         validateStage(req.getStage());
 
         Project project = requireProject(id);
-        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         if (!req.getStatus().equals(project.getStatus())) {
-            ensureStatusOperatePermission(req.getStatus());
+            ensureStatusOperatePermission(project, req.getStatus(), operator);
+        }
+        if (!req.getStage().equals(project.getStage())) {
+            projectStateGuard.ensureCanChangeStage(project, operator, req.getStage());
         }
 
         ensureStatusTransition(project.getStatus(), req.getStatus());
@@ -514,12 +511,12 @@ public class ProjectService {
 
     @Transactional
     public void delete(Long id) {
-        currentUserService.ensurePermission("project.write");
         SysUser operator = currentUserService.requireCurrentUser();
         Project project = requireProject(id);
-        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
-        purgeProjectRelations(id);
-        projectMapper.deleteById(id);
+        projectStateGuard.ensureCanDelete(project, operator);
+        project.setDeletedAt(LocalDateTime.now());
+        project.setDeletedBy(operator.getId());
+        projectMapper.updateById(project);
         activityLogService.logAction(
                 operator.getId(),
                 "project.delete",
@@ -616,7 +613,7 @@ public class ProjectService {
 
     private Project requireProject(Long id) {
         Project project = projectMapper.selectById(id);
-        if (project == null) {
+        if (project == null || project.getDeletedAt() != null) {
             throw new BizException(404, "Project not found");
         }
         return project;
@@ -624,7 +621,7 @@ public class ProjectService {
 
     private Company validateCompany(Long companyId) {
         Company company = companyMapper.selectById(companyId);
-        if (company == null) {
+        if (company == null || company.getDeletedAt() != null) {
             throw new BizException(404, "Company not found");
         }
         return company;
@@ -634,7 +631,7 @@ public class ProjectService {
         Company company = validateCompany(companyId);
         if (brandId != null) {
             Brand brand = brandMapper.selectById(brandId);
-            if (brand == null) {
+            if (brand == null || brand.getDeletedAt() != null) {
                 throw new BizException(404, "Brand not found");
             }
             if (!companyId.equals(brand.getCompanyId())) {
@@ -791,13 +788,13 @@ public class ProjectService {
         return currentUserService.isPartnerUser(operator) ? "partner" : "internal";
     }
 
-    private void ensureStatusOperatePermission(String targetStatus) {
+    private void ensureStatusOperatePermission(Project project, String targetStatus, SysUser operator) {
         if ("active".equals(targetStatus)) {
-            currentUserService.ensurePermission("project.status.activate");
+            projectStateGuard.ensureCanStart(project, operator);
             return;
         }
         if ("paused".equals(targetStatus)) {
-            currentUserService.ensurePermission("project.status.close");
+            projectStateGuard.ensureCanPause(project, operator);
         }
     }
 
@@ -832,7 +829,8 @@ public class ProjectService {
             return;
         }
         Company company = companyMapper.selectById(project.getCompanyId());
-        if (company == null || company.getSalesOwnerId() == null || !company.getSalesOwnerId().equals(user.getId())) {
+        if (company == null || company.getDeletedAt() != null
+                || company.getSalesOwnerId() == null || !company.getSalesOwnerId().equals(user.getId())) {
             throw new BizException(403, "No permission to access this project");
         }
         if (!"signed".equals(company.getStatus())) {
@@ -1315,7 +1313,7 @@ public class ProjectService {
             return null;
         }
         Brand brand = brandMapper.selectById(brandId);
-        if (brand == null) {
+        if (brand == null || brand.getDeletedAt() != null) {
             throw new BizException(404, "Brand not found");
         }
         return brand.getBrandName();

@@ -7,7 +7,7 @@
           <div class="flex items-center gap-2">
             <el-input v-model="keyword" clearable placeholder="搜索项目名称" style="width: 240px" @keyup.enter="load" />
             <el-button @click="load">查询</el-button>
-            <el-button v-if="canWriteProject" type="primary" @click="openCreate">新增项目</el-button>
+            <el-button v-if="canCreateProject" type="primary" @click="openCreate">新增项目</el-button>
           </div>
         </div>
       </template>
@@ -29,7 +29,7 @@
           <el-table-column label="阶段" width="180">
             <template #default="scope">{{ dictStore.label('project_stage', scope.row.stage) || scope.row.stage }}</template>
           </el-table-column>
-          <el-table-column v-if="canWriteProject" label="操作" width="100" fixed="right">
+          <el-table-column v-if="canUpdateProject" label="操作" width="100" fixed="right">
             <template #default="scope">
               <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
             </template>
@@ -185,7 +185,8 @@ import { useUserStore } from '@/stores/user'
 
 const dictStore = useDictStore()
 const userStore = useUserStore()
-const canWriteProject = computed(() => userStore.hasPermission('project.write'))
+const canCreateProject = computed(() => userStore.hasPermission('project.create'))
+const canUpdateProject = computed(() => userStore.hasPermission('project.update'))
 
 const loading = ref(false)
 const saving = ref(false)
