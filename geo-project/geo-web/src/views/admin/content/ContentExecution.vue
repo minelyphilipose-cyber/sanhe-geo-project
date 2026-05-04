@@ -36,7 +36,7 @@
             </template>
           </el-table-column>
           <el-table-column prop="createdAt" label="创建时间" width="180" />
-          <el-table-column label="操作" width="460" fixed="right">
+          <el-table-column label="操作" width="540" fixed="right">
             <template #default="scope">
               <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
               <el-button v-if="canWrite && canReview(scope.row.status)" link type="primary" @click="openReview(scope.row)">审核</el-button>
@@ -44,6 +44,7 @@
               <el-button v-if="canWrite && canResubmit(scope.row.status)" link type="primary" @click="openResubmit(scope.row)">重新提交</el-button>
               <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openDistribute(scope.row)">分发到站点</el-button>
               <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="publishToGeoSite(scope.row)">分发到GEO站点</el-button>
+              <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openMediaDistribute(scope.row)">自媒体分发</el-button>
               <el-button v-if="canWrite && canPublish(scope.row.status)" link type="info" @click="openPublish(scope.row)">Legacy发布</el-button>
             </template>
           </el-table-column>
@@ -184,6 +185,90 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="mediaDistributeVisible" title="文章站点分发" width="720px">
+      <div class="media-distribute">
+        <el-alert
+          v-if="wechatCapability && !wechatCapability.draftDistributionEnabled"
+          type="warning"
+          :closable="false"
+          show-icon
+          title="微信公众号能力审核中"
+        />
+
+        <div class="media-grid">
+          <button
+            class="media-platform"
+            :class="{ active: wechatActive, disabled: !wechatCapability?.draftDistributionEnabled }"
+            type="button"
+            @click="handleWechatPlatformClick"
+          >
+            <span class="wechat-mark">微</span>
+            <span class="media-name">微信公众号</span>
+            <el-tag size="small" :type="wechatStatusTagType">{{ wechatStatusLabel }}</el-tag>
+          </button>
+        </div>
+
+        <div v-if="wechatAccounts.length" class="mp-account-list">
+          <div v-for="account in wechatAccounts" :key="account.id" class="mp-account-row">
+            <div class="mp-account-main">
+              <div class="mp-account-title">{{ account.accountName }}</div>
+              <div class="mp-account-meta">{{ account.authorizerAppid }}</div>
+            </div>
+            <el-tag size="small" :type="mpAccountStatusTag(account.status)">{{ mpAccountStatusLabel(account.status) }}</el-tag>
+            <el-button
+              v-if="account.status === 'active'"
+              size="small"
+              :loading="checkingMpAccountId === account.id"
+              @click="checkWechatAccount(account.id)"
+            >
+              检测登录
+            </el-button>
+            <el-button
+              v-if="account.status === 'active'"
+              size="small"
+              type="primary"
+              @click="startWechatDraft(account)"
+            >
+              保存草稿
+            </el-button>
+          </div>
+        </div>
+
+        <div v-if="selectedMpAccountId" class="cover-picker">
+          <div class="cover-picker-header">
+            <span>选择公众号封面</span>
+            <el-tag size="small" type="info">{{ imageMaterials.length }} 张图片</el-tag>
+          </div>
+          <el-empty v-if="!imageMaterials.length" description="当前品牌暂无可用图片素材" />
+          <div v-else class="cover-grid">
+            <button
+              v-for="material in imageMaterials"
+              :key="material.id"
+              type="button"
+              class="cover-item"
+              :class="{ selected: selectedCoverMaterialId === material.id }"
+              @click="selectedCoverMaterialId = material.id"
+            >
+              <img :src="material.fileUrl" :alt="material.fileName" />
+              <span>{{ material.fileName }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="mediaDistributeVisible = false">关闭</el-button>
+        <el-button
+          v-if="selectedMpAccountId"
+          type="primary"
+          :loading="mpSubmitting"
+          :disabled="!selectedCoverMaterialId"
+          @click="submitWechatDraft"
+        >
+          保存至公众号草稿箱
+        </el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="publishVisible" title="Legacy发布记录" width="560px">
       <el-form :model="publishForm" label-width="100px">
         <el-form-item label="动作" required>
@@ -212,27 +297,34 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import { ElMessage } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
-import type { ArticleDetailResponse, ArticleDraft, RecommendedSite } from '@/types'
+import type { ArticleDetailResponse, ArticleDraft, BrandMaterial, MpAccount, RecommendedSite, WechatMpCapability } from '@/types'
 import {
+  checkMpAccountAuth,
   distributeContentArticle,
   distributeContentArticleToGeoSite,
+  distributeContentArticleToMpAccount,
   getContentArticleDetail,
   getContentArticles,
+  getMpAccountsByBrand,
   getRecommendedSites,
+  getWechatMpAuthUrl,
+  getWechatMpCapability,
   publishContentArticle,
   resubmitContentArticle,
   reviewContentArticle,
   saveContentArticleRevision,
 } from '@/api/content'
-import { getBrandDetail } from '@/api/customer'
+import { getBrandDetail, getBrandMaterials } from '@/api/customer'
 
 const userStore = useUserStore()
 const dictStore = useDictStore()
+const route = useRoute()
 const canWrite = computed(() => userStore.hasPermission('project.write'))
 
 const loading = ref(false)
@@ -278,6 +370,17 @@ const distributeForm = reactive({
   siteId: 0,
 })
 
+const mediaDistributeVisible = ref(false)
+const mediaDistributeArticleId = ref<number | null>(null)
+const mediaDistributeBrandId = ref<number | null>(null)
+const wechatCapability = ref<WechatMpCapability | null>(null)
+const wechatAccounts = ref<MpAccount[]>([])
+const checkingMpAccountId = ref<number | null>(null)
+const brandMaterials = ref<BrandMaterial[]>([])
+const selectedMpAccountId = ref<number | null>(null)
+const selectedCoverMaterialId = ref<number | null>(null)
+const mpSubmitting = ref(false)
+
 const publishVisible = ref(false)
 const publishForm = reactive({
   publishAction: 'publish' as 'publish' | 'unpublish',
@@ -295,6 +398,20 @@ const markdown = new MarkdownIt({
 const detailMarkdown = computed(() => detailData.value?.versions?.[0]?.contentMarkdown || '')
 const detailHtml = computed(() => markdown.render(detailMarkdown.value || ''))
 const revisionHtml = computed(() => markdown.render(revisionForm.contentMarkdown || ''))
+const wechatActive = computed(() => wechatAccounts.value.some((account) => account.status === 'active'))
+const wechatStatusLabel = computed(() => {
+  if (!wechatCapability.value?.draftDistributionEnabled) return '审核中'
+  if (wechatActive.value) return '已登录'
+  return '未登录'
+})
+const wechatStatusTagType = computed<'success' | 'warning' | 'info'>(() => {
+  if (!wechatCapability.value?.draftDistributionEnabled) return 'warning'
+  return wechatActive.value ? 'success' : 'info'
+})
+const imageMaterials = computed(() => brandMaterials.value.filter((item) => {
+  const type = (item.fileType || '').toLowerCase()
+  return ['jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(type)
+}))
 const statusOptions = [
   { label: '待审核', value: 'pending_review' },
   { label: '已通过', value: 'approved' },
@@ -458,6 +575,126 @@ async function openDistribute(row: ArticleDraft) {
   }
 }
 
+async function openMediaDistribute(row: ArticleDraft) {
+  mediaDistributeArticleId.value = row.id
+  mediaDistributeBrandId.value = null
+  wechatAccounts.value = []
+  brandMaterials.value = []
+  selectedMpAccountId.value = null
+  selectedCoverMaterialId.value = null
+  try {
+    const [detailRes, capabilityRes] = await Promise.all([
+      getContentArticleDetail(row.id),
+      getWechatMpCapability(),
+    ])
+    const brandId = detailRes.data.data.project?.brandId
+    if (!brandId) {
+      ElMessage.error('当前文章未绑定品牌，无法分发到自媒体')
+      return
+    }
+    mediaDistributeBrandId.value = brandId
+    wechatCapability.value = capabilityRes.data.data
+    const [accountRes, materialRes] = await Promise.all([
+      getMpAccountsByBrand(brandId),
+      getBrandMaterials(brandId),
+    ])
+    wechatAccounts.value = accountRes.data.data || []
+    brandMaterials.value = materialRes.data.data || []
+    mediaDistributeVisible.value = true
+  } catch {
+    ElMessage.error('加载自媒体账号失败')
+  }
+}
+
+async function handleWechatPlatformClick() {
+  if (!wechatCapability.value?.draftDistributionEnabled) {
+    ElMessage.info('微信公众号能力审核中，暂未开放授权')
+    return
+  }
+  if (!wechatActive.value) {
+    if (!mediaDistributeBrandId.value) {
+      ElMessage.error('当前文章未绑定品牌，无法授权公众号')
+      return
+    }
+    const { data } = await getWechatMpAuthUrl({
+      brandId: mediaDistributeBrandId.value,
+      redirectArticleId: mediaDistributeArticleId.value || undefined,
+    })
+    window.location.href = data.data.authUrl
+    return
+  }
+  const account = wechatAccounts.value.find((item) => item.status === 'active')
+  if (account) {
+    startWechatDraft(account)
+  }
+}
+
+function startWechatDraft(account: MpAccount) {
+  selectedMpAccountId.value = account.id
+  selectedCoverMaterialId.value = imageMaterials.value[0]?.id || null
+}
+
+async function submitWechatDraft() {
+  if (!mediaDistributeArticleId.value || !selectedMpAccountId.value || !selectedCoverMaterialId.value) {
+    ElMessage.warning('请选择公众号和封面图片')
+    return
+  }
+  mpSubmitting.value = true
+  try {
+    const result = await distributeContentArticleToMpAccount(mediaDistributeArticleId.value, {
+      mpAccountId: selectedMpAccountId.value,
+      coverMaterialId: selectedCoverMaterialId.value,
+      requestId: createRequestId(),
+    })
+    const task = result.data.data
+    if (task.status === 'submitted') {
+      mediaDistributeVisible.value = false
+      ElMessage.success('已保存至公众号草稿箱')
+      await load()
+      return
+    }
+    ElMessage.error(task.errorMessage || '保存公众号草稿失败')
+  } finally {
+    mpSubmitting.value = false
+  }
+}
+
+async function checkWechatAccount(id: number) {
+  checkingMpAccountId.value = id
+  try {
+    const { data } = await checkMpAccountAuth(id)
+    const next = data.data
+    wechatAccounts.value = wechatAccounts.value.map((account) => account.id === id ? next : account)
+    ElMessage.success(next.status === 'active' ? '登录状态有效' : '登录状态已更新')
+  } finally {
+    checkingMpAccountId.value = null
+  }
+}
+
+function mpAccountStatusLabel(status: string) {
+  const map: Record<string, string> = {
+    active: '已登录',
+    expired: '已过期',
+    revoked: '已取消',
+    disabled: '不可用',
+  }
+  return map[status] || status
+}
+
+function mpAccountStatusTag(status: string): 'success' | 'warning' | 'danger' | 'info' {
+  if (status === 'active') return 'success'
+  if (status === 'expired') return 'warning'
+  if (status === 'revoked' || status === 'disabled') return 'danger'
+  return 'info'
+}
+
+function createRequestId() {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+  return `mp_${Date.now()}_${Math.random().toString(16).slice(2)}`
+}
+
 async function publishToGeoSite(row: ArticleDraft) {
   submitting.value = true
   try {
@@ -579,9 +816,25 @@ async function submitPublish() {
 }
 
 onMounted(async () => {
+  handleWechatAuthResult()
   await dictStore.ensureLoaded()
   await load()
 })
+
+function handleWechatAuthResult() {
+  const auth = route.query.wechatAuth
+  if (auth === 'success') {
+    ElMessage.success('微信公众号授权成功')
+    return
+  }
+  if (auth === 'permission_missing') {
+    ElMessage.warning('微信公众号授权完成，但权限不足，请重新授权并勾选素材管理/群发权限')
+    return
+  }
+  if (auth === 'callback_failed') {
+    ElMessage.error('微信公众号授权回调失败，请重试')
+  }
+}
 </script>
 
 <style scoped>
@@ -727,6 +980,155 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.media-distribute {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.media-platform {
+  min-height: 118px;
+  border: 1px solid #dcdfe6;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--el-text-color-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.media-platform:hover {
+  border-color: var(--el-color-success);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 8%);
+}
+
+.media-platform.active {
+  border-color: var(--el-color-success);
+}
+
+.media-platform.disabled {
+  cursor: not-allowed;
+  background: #fafafa;
+}
+
+.wechat-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: #1aad19;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.media-name {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.mp-account-list {
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.mp-account-row {
+  min-height: 58px;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.mp-account-row:last-child {
+  border-bottom: 0;
+}
+
+.mp-account-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.mp-account-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.cover-picker {
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fafafa;
+}
+
+.cover-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.cover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 10px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.cover-item {
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  padding: 6px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.cover-item.selected {
+  border-color: var(--el-color-primary);
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+
+.cover-item img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #f2f3f5;
+  display: block;
+}
+
+.cover-item span {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 </style>

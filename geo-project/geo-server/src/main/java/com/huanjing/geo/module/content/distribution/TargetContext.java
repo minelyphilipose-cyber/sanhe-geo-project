@@ -13,7 +13,7 @@ public sealed interface TargetContext
 
     record SiteTarget(PublishSite site) implements TargetContext {}
 
-    record MpAccountTarget(MpAccount account) implements TargetContext {}
+    record MpAccountTarget(MpAccount account, Long coverMaterialId, String requestId) implements TargetContext {}
 
     record BrandOfficialSiteTarget(BrandOfficialSite site) implements TargetContext {}
 

@@ -4,7 +4,6 @@ import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
-import com.huanjing.geo.common.exception.NotImplementedException;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.dto.DistributionAttemptVO;
 import com.huanjing.geo.module.content.dto.PublishQuotaVO;
@@ -18,6 +17,7 @@ import com.huanjing.geo.module.content.service.adapter.OfficialCmsSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.SiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import com.huanjing.geo.module.content.service.adapter.ValidationResult;
+import com.huanjing.geo.module.content.service.adapter.WechatMpAdapter;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.service.BrandService;
 import com.huanjing.geo.module.project.entity.Project;
@@ -133,8 +133,8 @@ public class ContentDistributionService {
         if (target instanceof TargetContext.SiteTarget) {
             throw new BizException(400, "Use distribute(articleId, siteId) for legacy site targets");
         }
-        if (target instanceof TargetContext.MpAccountTarget) {
-            throw new NotImplementedException("MpAccountTarget will be supported in Phase 2A");
+        if (target instanceof TargetContext.MpAccountTarget mpTarget) {
+            return distributeToMpAccount(article, project, operator, mpTarget);
         }
         throw new IllegalArgumentException("Unsupported TargetContext type: " + target.getClass().getSimpleName());
     }
@@ -468,6 +468,64 @@ public class ContentDistributionService {
         return distributionTaskMapper.selectById(task.getId());
     }
 
+    private DistributionTask distributeToMpAccount(ArticleDraft article,
+                                                   Project project,
+                                                   SysUser operator,
+                                                   TargetContext.MpAccountTarget mpTarget) {
+        MpAccount account = mpTarget.account();
+        if (account == null || account.getId() == null) {
+            throw new BizException(400, "mp account missing");
+        }
+        if (!StringUtils.hasText(mpTarget.requestId())) {
+            throw new BizException(400, "requestId is required");
+        }
+        DistributionTask existed = distributionTaskMapper.selectOne(
+                new LambdaQueryWrapper<DistributionTask>()
+                        .eq(DistributionTask::getRequestId, mpTarget.requestId().trim())
+                        .last("LIMIT 1")
+        );
+        if (existed != null) {
+            return existed;
+        }
+        if (!"active".equalsIgnoreCase(account.getStatus())) {
+            throw new BizException(400, "微信公众号授权不可用，请重新授权");
+        }
+        if (project.getBrandId() == null || !project.getBrandId().equals(account.getBrandId())) {
+            throw new BizException(403, "公众号与文章品牌不匹配");
+        }
+        if (mpTarget.coverMaterialId() == null) {
+            throw new BizException(400, "请选择公众号封面图片");
+        }
+        currentUserService.ensureBrandAccess(operator, account.getBrandId(), "mp_account");
+
+        String content = requireLatestContent(article.getId());
+        PackagePublishConfig packageConfig = requirePackagePublishConfig(project.getPackageType());
+        String monthKey = LocalDate.now(SH_ZONE).format(MONTH_FMT);
+        projectPublishQuotaService.reserve(
+                project.getId(),
+                monthKey,
+                Optional.ofNullable(packageConfig.getMonthlyPublishLimit()).orElse(0)
+        );
+
+        DistributionTask task = createAttemptForMpAccount(article, account, operator.getId(), mpTarget.requestId().trim());
+        article.setStatus("distributing");
+        articleDraftMapper.updateById(article);
+
+        WechatMpAdapter adapter = resolveWechatMpAdapter();
+        SubmitResult submitResult;
+        try {
+            submitResult = adapter.submitToTarget(article, content, mpTarget);
+        } catch (Exception ex) {
+            submitResult = SubmitResult.failure(500, null, null, trimError(ex.getMessage()), FailureKind.UNKNOWN, false);
+        }
+        finalizeAttemptForMpAccount(task.getId(), submitResult);
+        finalizeArticleStatusForDraft(article, submitResult);
+        if (!submitResult.isSuccess()) {
+            projectPublishQuotaService.refund(project.getId(), monthKey);
+        }
+        return distributionTaskMapper.selectById(task.getId());
+    }
+
     private String validateBrandGeoSite(Brand brand) {
         if (!StringUtils.hasText(brand.getGeoSiteCode())) {
             throw new BizException(400, "Brand has no GEO site configured");
@@ -557,6 +615,30 @@ public class ContentDistributionService {
         return task;
     }
 
+    private DistributionTask createAttemptForMpAccount(ArticleDraft article, MpAccount account, Long operatorId, String requestId) {
+        Integer maxAttempt = distributionTaskMapper.selectList(
+                new LambdaQueryWrapper<DistributionTask>()
+                        .eq(DistributionTask::getArticleId, article.getId())
+                        .eq(DistributionTask::getMpAccountId, account.getId())
+        ).stream().map(DistributionTask::getAttemptNo).max(Integer::compareTo).orElse(0);
+
+        DistributionTask task = new DistributionTask();
+        task.setArticleId(article.getId());
+        task.setProjectId(article.getProjectId());
+        task.setSiteId(null);
+        task.setTargetKind(WechatMpAdapter.PLATFORM);
+        task.setMpAccountId(account.getId());
+        task.setAttemptNo(maxAttempt + 1);
+        task.setStatus("submitting");
+        task.setIntegrationMethod(WechatMpAdapter.PLATFORM);
+        task.setRetryCount(0);
+        task.setOperatorId(operatorId);
+        task.setRequestId(requestId);
+        task.setLockedUntil(LocalDateTime.now(SH_ZONE).plusMinutes(5));
+        distributionTaskMapper.insert(task);
+        return task;
+    }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     protected void finalizeAttemptForBrandOfficialSite(Long taskId, SubmitResult result) {
         LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
@@ -614,8 +696,45 @@ public class ContentDistributionService {
         }
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    protected void finalizeAttemptForMpAccount(Long taskId, SubmitResult result) {
+        LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
+                .eq(DistributionTask::getId, taskId)
+                .eq(DistributionTask::getStatus, "submitting")
+                .set(DistributionTask::getLockedUntil, null)
+                .set(DistributionTask::getFinishedAt, LocalDateTime.now(SH_ZONE))
+                .set(DistributionTask::getRequestPayload, result.getRequestPayload())
+                .set(DistributionTask::getResponsePayload, result.getResponseBody());
+
+        if (result.isSuccess()) {
+            wrapper.set(DistributionTask::getStatus, "submitted")
+                    .set(DistributionTask::getPlatformArticleId, result.getPlatformArticleId())
+                    .set(DistributionTask::getFailureKind, null)
+                    .set(DistributionTask::getErrorMessage, null)
+                    .set(DistributionTask::getNextRetryAt, null);
+        } else {
+            LocalDateTime nextRetryAt = result.isRetryable()
+                    ? LocalDateTime.now(SH_ZONE).plusMinutes(5)
+                    : null;
+            wrapper.set(DistributionTask::getStatus, "failed")
+                    .set(DistributionTask::getFailureKind, result.getFailureKind())
+                    .set(DistributionTask::getErrorMessage, trimError(result.getErrorMessage()))
+                    .set(DistributionTask::getNextRetryAt, nextRetryAt);
+        }
+
+        int affected = distributionTaskMapper.update(null, wrapper);
+        if (affected == 0) {
+            log.warn("finalizeAttemptForMpAccount: task {} state changed concurrently, skipped finalize", taskId);
+        }
+    }
+
     private void finalizeArticleStatus(ArticleDraft article, SubmitResult result) {
         article.setStatus(result.isSuccess() ? "published" : "approved");
+        articleDraftMapper.updateById(article);
+    }
+
+    private void finalizeArticleStatusForDraft(ArticleDraft article, SubmitResult result) {
+        article.setStatus(result.isSuccess() ? "distributed" : "approved");
         articleDraftMapper.updateById(article);
     }
 
@@ -635,6 +754,15 @@ public class ContentDistributionService {
                 .map(BrandGeoSiteAdapter.class::cast)
                 .findFirst()
                 .orElseThrow(() -> new BizException(500, "BrandGeoSiteAdapter not registered"));
+    }
+
+    private WechatMpAdapter resolveWechatMpAdapter() {
+        return siteAdapters.stream()
+                .filter(adapter -> adapter.supportsPlatform(WechatMpAdapter.PLATFORM))
+                .filter(WechatMpAdapter.class::isInstance)
+                .map(WechatMpAdapter.class::cast)
+                .findFirst()
+                .orElseThrow(() -> new BizException(500, "WechatMpAdapter not registered"));
     }
 
     private QuotaContext validateQuota(Project project, PackagePublishConfig config) {
@@ -880,7 +1008,7 @@ public class ContentDistributionService {
 
     private Project requireProject(Long projectId) {
         Project project = projectMapper.selectById(projectId);
-        if (project == null) {
+        if (project == null || project.getDeletedAt() != null) {
             throw new BizException(404, "Project not found");
         }
         return project;

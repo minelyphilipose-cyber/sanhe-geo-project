@@ -17,6 +17,22 @@ geo:
   brand-geo-site:
     endpoint: https://www.sanhexinglian.com/api/v1/content
 
+  wechat:
+    client:
+      mode: mock
+      fault: ""
+    open-platform:
+      component-appid: ${WECHAT_COMPONENT_APPID:wx514c6537de79de97}
+      component-app-secret: ${WECHAT_COMPONENT_SECRET:}
+      token: ${WECHAT_TOKEN:}
+      encoding-aes-key: ${WECHAT_ENCODING_AES_KEY:}
+      draft-distribution-enabled: false
+      func-scope-strict-mode: false
+      required-draft-func-scopes: [1, 13]
+      auth-type: 1
+      backend-auth-callback-url: http://localhost:8080/api/wechat/open-platform/auth/callback
+      frontend-callback-url: http://localhost:5173/admin/content/execution
+
   jwt:
     secret: "huanjing-geo-2024-jwt-secret-key-must-be-at-least-256-bits-long"
     access-token-expire: 7200        # 2小时(秒)

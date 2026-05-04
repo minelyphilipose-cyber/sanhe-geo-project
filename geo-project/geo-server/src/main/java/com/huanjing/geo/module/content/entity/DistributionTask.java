@@ -49,6 +49,7 @@ public class DistributionTask {
     private LocalDateTime lockedUntil;
     private Integer retryCount;
     private Long operatorId;
+    private String requestId;
     private LocalDateTime createdAt;
     private LocalDateTime finishedAt;
 }

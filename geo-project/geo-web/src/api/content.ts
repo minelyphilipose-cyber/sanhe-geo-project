@@ -7,6 +7,9 @@ import type {
   PublishQuota,
   RecommendedSitesResponse,
   R,
+  MpAccount,
+  WechatMpAuthUrl,
+  WechatMpCapability,
 } from '@/types'
 
 export function getContentArticles(params: {
@@ -80,4 +83,28 @@ export function getProjectPublishQuota(projectId: number) {
 
 export function getRecommendedSites(projectId: number) {
   return request.get<R<RecommendedSitesResponse>>(`/content/projects/${projectId}/recommended-sites`)
+}
+
+export function getWechatMpCapability() {
+  return request.get<R<WechatMpCapability>>('/content/mp-accounts/wechat/capability')
+}
+
+export function getWechatMpAuthUrl(params: { brandId: number; redirectArticleId?: number }) {
+  return request.get<R<WechatMpAuthUrl>>('/content/mp-accounts/wechat/auth-url', { params })
+}
+
+export function getMpAccountsByBrand(brandId: number) {
+  return request.get<R<MpAccount[]>>(`/content/brands/${brandId}/mp-accounts`)
+}
+
+export function checkMpAccountAuth(id: number) {
+  return request.post<R<MpAccount>>(`/content/mp-accounts/${id}/check-auth`)
+}
+
+export function distributeContentArticleToMpAccount(articleId: number, data: {
+  mpAccountId: number
+  coverMaterialId: number
+  requestId: string
+}) {
+  return request.post<R<DistributionTask>>(`/content/articles/${articleId}/distribute-to-mp-account`, data)
 }

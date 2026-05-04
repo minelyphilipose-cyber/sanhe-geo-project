@@ -831,7 +831,7 @@ export interface DistributionTask {
   id: number
   articleId?: number
   projectId?: number
-  siteId: number
+  siteId: number | null
   siteName?: string
   domain?: string
   tier?: string
@@ -841,6 +841,7 @@ export interface DistributionTask {
   targetKind?: string | null
   targetBrandId?: number | null
   brandOfficialSiteId?: number | null
+  mpAccountId?: number | null
   platformArticleId?: string | null
   failureKind?: string | null
   nextRetryAt?: string | null
@@ -852,6 +853,30 @@ export interface DistributionTask {
   operatorId?: number
   createdAt?: string
   finishedAt?: string | null
+}
+
+export interface WechatMpCapability {
+  draftDistributionEnabled: boolean
+  clientMode: string
+  reason?: string | null
+}
+
+export interface WechatMpAuthUrl {
+  authUrl: string
+  expiresIn: number
+}
+
+export interface MpAccount {
+  id: number
+  brandId: number
+  platform: 'wechat_mp' | string
+  accountName: string
+  authorizerAppid: string
+  headImg?: string | null
+  qrcodeUrl?: string | null
+  status: 'active' | 'expired' | 'revoked' | 'disabled' | string
+  lastAuthCheckedAt?: string | null
+  lastAuthError?: string | null
 }
 
 export interface PublishQuota {
