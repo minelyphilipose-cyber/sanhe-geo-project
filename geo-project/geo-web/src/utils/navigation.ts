@@ -22,7 +22,6 @@ export function resolvePostLoginPath(ctx: AccessContext): string | null {
     { path: '/admin/customers', permissions: ['company.read'] },
     { path: '/admin/projects', permissions: ['project.read'] },
     { path: '/admin/content/execution', permissions: ['project.read'] },
-    { path: '/admin/reports', permissions: ['report.review'] },
     { path: '/admin/monitoring/tasks', roles: OPS_ROLES },
     { path: '/admin/alerts', roles: OPS_ROLES },
     { path: '/admin/partners', permissions: ['partner.read'] },
@@ -39,4 +38,3 @@ export function resolvePostLoginPath(ctx: AccessContext): string | null {
 
   return null
 }
-

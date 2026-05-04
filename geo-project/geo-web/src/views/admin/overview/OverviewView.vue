@@ -111,10 +111,6 @@
             <el-icon class="mr-1"><Monitor /></el-icon>
             监测中心
           </el-button>
-          <el-button class="w-full !ml-0" @click="router.push('/admin/reports')">
-            <el-icon class="mr-1"><DataAnalysis /></el-icon>
-            报表管理
-          </el-button>
           <el-button class="w-full !ml-0" @click="router.push('/admin/alerts')">
             <el-icon class="mr-1"><Bell /></el-icon>
             异常中心
@@ -188,7 +184,7 @@ const statCards = computed(() => [
     icon: 'DataAnalysis',
     color: '#059669',
     sub: '',
-    onClick: () => router.push('/admin/reports'),
+    onClick: () => router.push('/admin/projects'),
   },
   {
     key: isInternal.value ? 'openAlerts' : 'highRiskProjects',

@@ -114,16 +114,6 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '平台健康', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
     },
     {
-      path: 'reports',
-      name: 'ReportManage',
-      component: () => import('@/views/admin/report/ReportManage.vue'),
-      meta: {
-        title: '报表管理',
-        icon: 'DataAnalysis',
-        permissions: ['report.review'],
-      },
-    },
-    {
       path: 'reports/:id',
       name: 'ReportPreview',
       component: () => import('@/views/admin/report/ReportPreview.vue'),
