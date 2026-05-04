@@ -26,13 +26,34 @@ class RoiCalculatorTest {
     @Test
     void highScore_case() {
         var roi = calculator.compute(95.0, List.of());
-        assertEquals(100.0, roi.getPhases().get(0).getTargetScore(), 0.0001);
-        assertEquals(100.0, roi.getPhases().get(1).getTargetScore(), 0.0001);
-        assertEquals(100.0, roi.getPhases().get(2).getTargetScore(), 0.0001);
-        assertEquals(5.0, roi.getPhases().get(0).getUpliftFromPrevious(), 0.0001);
+        assertEquals(95.0, roi.getPhases().get(0).getTargetScore(), 0.0001);
+        assertEquals(95.0, roi.getPhases().get(1).getTargetScore(), 0.0001);
+        assertEquals(95.0, roi.getPhases().get(2).getTargetScore(), 0.0001);
+        assertEquals(0.0, roi.getPhases().get(0).getUpliftFromPrevious(), 0.0001);
         assertEquals(0.0, roi.getPhases().get(1).getUpliftFromPrevious(), 0.0001);
         assertEquals(0.0, roi.getPhases().get(2).getUpliftFromPrevious(), 0.0001);
-        assertEquals(5.26, roi.getEstimatedUpliftPercent(), 0.05);
+        assertEquals(0.0, roi.getEstimatedUpliftPercent(), 0.0001);
+    }
+
+    @Test
+    void highButImprovableScore_case() {
+        var roi = calculator.compute(88.0, List.of());
+        assertEquals(90.0, roi.getPhases().get(0).getTargetScore(), 0.0001);
+        assertEquals(92.0, roi.getPhases().get(1).getTargetScore(), 0.0001);
+        assertEquals(94.0, roi.getPhases().get(2).getTargetScore(), 0.0001);
+        assertEquals(2.0, roi.getPhases().get(0).getUpliftFromPrevious(), 0.0001);
+        assertEquals(2.0, roi.getPhases().get(1).getUpliftFromPrevious(), 0.0001);
+        assertEquals(2.0, roi.getPhases().get(2).getUpliftFromPrevious(), 0.0001);
+        assertEquals(6.82, roi.getEstimatedUpliftPercent(), 0.05);
+    }
+
+    @Test
+    void ninetyPlusScore_capsAtNinetyFive() {
+        var roi = calculator.compute(92.0, List.of());
+        assertEquals(93.0, roi.getPhases().get(0).getTargetScore(), 0.0001);
+        assertEquals(94.0, roi.getPhases().get(1).getTargetScore(), 0.0001);
+        assertEquals(95.0, roi.getPhases().get(2).getTargetScore(), 0.0001);
+        assertEquals(3.26, roi.getEstimatedUpliftPercent(), 0.05);
     }
 
     @Test
@@ -64,4 +85,3 @@ class RoiCalculatorTest {
         return f;
     }
 }
-

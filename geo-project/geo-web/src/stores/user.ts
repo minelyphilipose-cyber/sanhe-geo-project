@@ -34,6 +34,7 @@ export const useUserStore = defineStore('user', () => {
   const accessToken = ref<string>(persisted.accessToken)
   const refreshToken = ref<string>(persisted.refreshToken)
   const userInfo = ref<UserInfo | null>(persisted.userInfo)
+  const profileSynced = ref(false)
 
   const isLoggedIn = computed(() => !!accessToken.value && !!userInfo.value)
   const role = computed<RoleType | null>(() => userInfo.value?.role ?? null)
@@ -64,6 +65,7 @@ export const useUserStore = defineStore('user', () => {
     if (!userInfo.value.permissions) {
       userInfo.value.permissions = []
     }
+    profileSynced.value = true
     persistAuth()
   }
 
@@ -103,6 +105,7 @@ export const useUserStore = defineStore('user', () => {
       avatarUrl: profile.avatarUrl,
       permissions: profile.permissions || [],
     }
+    profileSynced.value = true
     persistAuth()
   }
 
@@ -115,6 +118,7 @@ export const useUserStore = defineStore('user', () => {
       accessToken.value = ''
       refreshToken.value = ''
       userInfo.value = null
+      profileSynced.value = false
       clearPersistedAuth()
     }
   }
@@ -143,6 +147,7 @@ export const useUserStore = defineStore('user', () => {
     displayName,
     avatarUrl,
     permissions,
+    profileSynced,
     login,
     refreshAccessToken,
     updateAccessToken,

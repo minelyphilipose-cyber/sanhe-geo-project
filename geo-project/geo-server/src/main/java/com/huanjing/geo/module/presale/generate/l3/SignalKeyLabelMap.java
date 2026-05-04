@@ -20,6 +20,7 @@ final class SignalKeyLabelMap {
             Map.entry("affected_platforms_text", "涉及平台"),
             Map.entry("key_topic", "主要话题"),
             Map.entry("negative_count", "负面提及数"),
+            Map.entry("negative_evidence_count", "负面证据数"),
             Map.entry("missed_count", "缺失场景数"),
             Map.entry("missed_scenes_text", "缺失场景列表"),
             Map.entry("weak_platforms_text", "弱势平台"),

@@ -17,6 +17,7 @@ public class PresaleReportVersionPromptTemplate {
     private Long sourceTemplateId;
     private String sourcePromptCode;
     private String sourceTemplateVersion;
+    private String sourceType;
     private String category;
     private String businessValue;
     private String promptContent;

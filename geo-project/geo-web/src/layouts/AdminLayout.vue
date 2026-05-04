@@ -68,7 +68,7 @@ const sidebarGroups: MenuGroup[] = [
       { path: '/admin/projects', name: 'ProjectList', title: '项目管理', icon: 'Folder', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['project.read'] },
       { path: '/admin/content/execution', name: 'ContentExecution', title: '内容与执行', icon: 'Memo', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['project.read'] },
       { path: '/admin/keyword-groups', name: 'KeywordGroupManage', title: '拓词管理', icon: 'MagicStick', roles: ['sales', 'operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['keyword_group.read'] },
-      { path: '/admin/presale/report', name: 'PresaleReportList', title: '售前报告', icon: 'Document', roles: ['sales', 'operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['presale.report.edit_content', 'presale.report.manage'] },
+      { path: '/admin/presale/report', name: 'PresaleReportList', title: '售前报告', icon: 'Document', permissions: ['presale.report.list'] },
     ],
   },
   {

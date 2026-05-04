@@ -126,7 +126,7 @@ const adminRoutes: RouteRecordRaw = {
       meta: {
         title: '售前报告',
         icon: 'Document',
-        permissions: ['presale.report.edit_content', 'presale.report.manage'],
+        permissions: ['presale.report.list'],
       },
     },
     {
@@ -136,7 +136,7 @@ const adminRoutes: RouteRecordRaw = {
       meta: {
         title: '新建报告',
         hidden: true,
-        permissions: ['presale.report.edit_content', 'presale.report.manage'],
+        permissions: ['presale.report.create'],
       },
     },
     {
@@ -146,7 +146,7 @@ const adminRoutes: RouteRecordRaw = {
       meta: {
         title: '生成进度',
         hidden: true,
-        permissions: ['presale.report.edit_content', 'presale.report.manage'],
+        permissions: ['presale.report.view'],
       },
     },
     {
@@ -156,7 +156,7 @@ const adminRoutes: RouteRecordRaw = {
       meta: {
         title: '报告详情',
         hidden: true,
-        permissions: ['presale.report.edit_content', 'presale.report.manage'],
+        permissions: ['presale.report.view'],
       },
     },
     {

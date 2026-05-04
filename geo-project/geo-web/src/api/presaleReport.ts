@@ -98,6 +98,50 @@ export interface PromptTemplateVO {
   templateVersion: string
 }
 
+export type PromptSourceMode = 'template' | 'llm'
+export type PresalePromptCategoryCode =
+  | 'RECOMMENDATION'
+  | 'COMPARISON'
+  | 'PROBLEM'
+  | 'COGNITIVE'
+  | 'SCENARIO'
+
+export interface LlmPromptQuestionPlan {
+  totalCount: number
+  categoryCounts: Record<PresalePromptCategoryCode, number>
+}
+
+export interface LlmPromptQuestionDraft {
+  categoryCode: PresalePromptCategoryCode
+  promptContent: string
+}
+
+export interface LlmPromptQuestionGenerateRequest {
+  brandName: string
+  industry: string
+  industryRole: string
+  region: string
+  userType?: string
+  userDemand?: string
+  totalCount: number
+  categoryCounts: Record<PresalePromptCategoryCode, number>
+  existingQuestions?: LlmPromptQuestionDraft[]
+}
+
+export interface LlmPromptQuestionGenerateVO {
+  requestedTotal: number
+  generatedTotal: number
+  missingTotal: number
+  requestedCategoryCounts: Record<PresalePromptCategoryCode, number>
+  generatedCategoryCounts: Record<PresalePromptCategoryCode, number>
+  missingCategoryCounts: Record<PresalePromptCategoryCode, number>
+  questions: Array<LlmPromptQuestionDraft & {
+    categoryLabel: string
+    hasCompetitorVar: boolean
+  }>
+  warnings?: string[]
+}
+
 /**
  * MyBatis-Plus Page 响应结构。
  */
@@ -119,8 +163,11 @@ export interface CreateReportRequest {
   region: string
   userDemand?: string
   userType?: string
-  promptTemplateVersion: string
-  promptTemplates: PromptTemplateDraftRequest[]
+  promptSourceMode?: PromptSourceMode
+  promptTemplateVersion?: string
+  promptTemplates?: PromptTemplateDraftRequest[]
+  llmQuestionPlan?: LlmPromptQuestionPlan
+  llmPromptQuestions?: LlmPromptQuestionDraft[]
 }
 
 export interface PromptTemplateDraftRequest {
@@ -238,6 +285,15 @@ export function getReportScopePreview() {
 export function listPromptTemplates() {
   return unwrap(
     request.get<R<PromptTemplateVO[]>>('/presale/reports/prompt-templates')
+  )
+}
+
+export function generateLlmPromptQuestions(data: LlmPromptQuestionGenerateRequest) {
+  return unwrap(
+    request.post<R<LlmPromptQuestionGenerateVO>>(
+      '/presale/reports/llm-prompt-questions/generate',
+      data
+    )
   )
 }
 

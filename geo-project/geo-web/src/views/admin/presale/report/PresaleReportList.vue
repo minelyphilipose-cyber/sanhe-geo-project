@@ -10,7 +10,7 @@
         <h2 class="page-title">报告列表</h2>
       </div>
       <div class="header-right">
-        <el-button type="primary" :icon="Plus" @click="goCreate">新建报告</el-button>
+        <el-button v-if="canCreateReportPermission" type="primary" :icon="Plus" @click="goCreate">新建报告</el-button>
       </div>
     </div>
 
@@ -173,7 +173,7 @@
 
         <template #empty>
           <el-empty description="暂无报告,新建后约 2.5-3.5 分钟生成首版">
-            <el-button type="primary" :icon="Plus" @click="goCreate">新建报告</el-button>
+            <el-button v-if="canCreateReportPermission" type="primary" :icon="Plus" @click="goCreate">新建报告</el-button>
           </el-empty>
         </template>
       </el-table>
@@ -211,6 +211,9 @@ import { getStatusMeta, isInProgress } from '@/utils/presale/statusMeta'
 
 const router = useRouter()
 const userStore = useUserStore()
+const canCreateReportPermission = computed(() =>
+  userStore.hasPermission('presale.report.create')
+)
 const canDeleteReportPermission = computed(() =>
   userStore.hasPermission('presale.report.delete')
 )

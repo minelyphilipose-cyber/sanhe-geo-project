@@ -9,18 +9,16 @@ import java.util.List;
 @Component
 public class RoiCalculator {
 
-    private static final double PHASE1_UPLIFT = 5.0;
-    private static final double PHASE2_UPLIFT = 12.0;
-    private static final double PHASE3_UPLIFT = 20.0;
-    private static final double SCORE_CAP = 100.0;
+    private static final double TARGET_SCORE_CAP = 95.0;
     private static final double FIXED_EXPOSURE_MULTIPLIER = 1.8;
 
     public RoiSimulation compute(Double overallScore, List<OptimizationFinding> findings) {
         double current = overallScore == null ? 0.0 : overallScore;
 
-        double t1 = Math.min(current + PHASE1_UPLIFT, SCORE_CAP);
-        double t2 = Math.min(current + PHASE2_UPLIFT, SCORE_CAP);
-        double t3 = Math.min(current + PHASE3_UPLIFT, SCORE_CAP);
+        PhaseUplift uplift = resolvePhaseUplift(current);
+        double t1 = capTargetScore(current + uplift.phase1());
+        double t2 = capTargetScore(current + uplift.phase2());
+        double t3 = capTargetScore(current + uplift.phase3());
 
         int phase1Total = 0;
         int phase2Total = 0;
@@ -42,7 +40,7 @@ public class RoiCalculator {
                         .phaseNo(1)
                         .durationLabel("M1")
                         .targetScore(t1)
-                        .upliftFromPrevious(t1 - current)
+                        .upliftFromPrevious(Math.max(0.0, t1 - current))
                         .completedOptimizationCount(0)
                         .totalOptimizationCount(phase1Total)
                         .build(),
@@ -50,7 +48,7 @@ public class RoiCalculator {
                         .phaseNo(2)
                         .durationLabel("M2-3")
                         .targetScore(t2)
-                        .upliftFromPrevious(t2 - t1)
+                        .upliftFromPrevious(Math.max(0.0, t2 - t1))
                         .completedOptimizationCount(0)
                         .totalOptimizationCount(phase2Total)
                         .build(),
@@ -58,13 +56,13 @@ public class RoiCalculator {
                         .phaseNo(3)
                         .durationLabel("M4-6")
                         .targetScore(t3)
-                        .upliftFromPrevious(t3 - t2)
+                        .upliftFromPrevious(Math.max(0.0, t3 - t2))
                         .completedOptimizationCount(0)
                         .totalOptimizationCount(phase3Total)
                         .build()
         );
 
-        double upliftPercent = Double.compare(current, 0.0) == 0 ? 0.0 : ((t3 - current) / current * 100.0);
+        double upliftPercent = Double.compare(current, 0.0) == 0 ? 0.0 : Math.max(0.0, (t3 - current) / current * 100.0);
         return RoiSimulation.builder()
                 .currentScore(current)
                 .targetScore(t3)
@@ -72,5 +70,31 @@ public class RoiCalculator {
                 .estimatedExposureMultiplier(FIXED_EXPOSURE_MULTIPLIER)
                 .phases(phases)
                 .build();
+    }
+
+    private PhaseUplift resolvePhaseUplift(double current) {
+        if (current >= 95.0) {
+            return new PhaseUplift(0.0, 0.0, 0.0);
+        }
+        if (current >= 90.0) {
+            return new PhaseUplift(1.0, 2.0, 3.0);
+        }
+        if (current >= 85.0) {
+            return new PhaseUplift(2.0, 4.0, 6.0);
+        }
+        if (current >= 75.0) {
+            return new PhaseUplift(3.0, 7.0, 10.0);
+        }
+        if (current >= 60.0) {
+            return new PhaseUplift(4.0, 9.0, 15.0);
+        }
+        return new PhaseUplift(5.0, 12.0, 20.0);
+    }
+
+    private double capTargetScore(double score) {
+        return Math.min(score, TARGET_SCORE_CAP);
+    }
+
+    private record PhaseUplift(double phase1, double phase2, double phase3) {
     }
 }

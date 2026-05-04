@@ -166,6 +166,7 @@
             <div class="prompt-toolbar">
               <div class="prompt-version">模板版本: {{ promptTemplateVersion || '—' }}</div>
               <el-button
+                v-if="activePromptTab === 'template'"
                 size="small"
                 :disabled="modifiedCount === 0"
                 @click="restoreAllModified"
@@ -174,88 +175,197 @@
               </el-button>
             </div>
 
-            <div
-              v-for="group in promptGroups"
-              :key="group.category"
-              class="prompt-group"
-            >
-              <div class="group-header">
-                <div>
-                  <span class="group-title">{{ group.category }}</span>
-                  <span class="group-count">{{ group.items.length }} 条</span>
-                </div>
-                <el-button
-                  size="small"
-                  text
-                  :disabled="group.modifiedCount === 0"
-                  @click="restoreGroup(group.category, group.modifiedCount)"
+            <el-tabs v-model="activePromptTab" class="prompt-tabs">
+              <el-tab-pane label="模板问题预览" name="template">
+                <div
+                  v-for="group in promptGroups"
+                  :key="group.category"
+                  class="prompt-group"
                 >
-                  恢复本类默认
-                </el-button>
-              </div>
-
-              <el-alert
-                v-if="group.hasCompetitorVar"
-                title="{competitor} 为竞品组占位符。系统会在第一轮分析后识别最多 3 个竞品，并用「品牌1、品牌2、品牌3」的形式整体替换该占位符。每条对比型问题在每个平台只执行一次。"
-                type="info"
-                :closable="false"
-                class="competitor-hint"
-              />
-
-              <div
-                v-for="item in group.items"
-                :key="item.source.id"
-                class="prompt-row"
-                :class="{ 'is-modified': isModified(item) }"
-              >
-                <div class="prompt-row-head">
-                  <div class="prompt-meta">
-                    <span class="prompt-code">{{ item.source.promptCode }}</span>
-                    <el-tag v-if="isModified(item)" size="small" type="warning">已修改</el-tag>
-                    <el-tag v-else size="small" type="info">默认</el-tag>
-                  </div>
-                  <div class="prompt-actions">
-                    <el-button size="small" text @click="toggleEdit(item.source.id)">
-                      {{ editingId === item.source.id ? '完成' : '编辑' }}
-                    </el-button>
+                  <div class="group-header">
+                    <div>
+                      <span class="group-title">{{ group.category }}</span>
+                      <span class="group-count">{{ group.items.length }} 条</span>
+                    </div>
                     <el-button
                       size="small"
                       text
-                      :disabled="!isModified(item)"
-                      @click="restoreOne(item.source.id)"
+                      :disabled="group.modifiedCount === 0"
+                      @click="restoreGroup(group.category, group.modifiedCount)"
                     >
-                      恢复默认
+                      恢复本类默认
                     </el-button>
                   </div>
-                </div>
 
-                <template v-if="editingId === item.source.id">
-                  <el-input
-                    v-model="item.draft.promptContent"
-                    type="textarea"
-                    :rows="4"
-                    maxlength="1000"
-                    show-word-limit
-                    class="prompt-editor"
+                  <el-alert
+                    v-if="group.hasCompetitorVar"
+                    title="{competitor} 为竞品组占位符。系统会在第一轮分析后识别最多 3 个竞品，并用「品牌1、品牌2、品牌3」的形式整体替换该占位符。每条对比型问题在每个平台只执行一次。"
+                    type="info"
+                    :closable="false"
+                    class="competitor-hint"
                   />
-                  <div class="variable-help">
-                    可用变量: {brand} {product} {industry} {industry_role} {region} {user_type}
-                    <span v-if="item.source.hasCompetitorVar">{competitor}</span>
-                  </div>
-                  <div class="render-preview">
-                    <span class="preview-label">实时预览</span>
-                    <span v-html="renderPromptHtml(item.draft.promptContent)"></span>
-                  </div>
-                </template>
-                <template v-else>
-                  <div class="rendered-prompt" v-html="renderPromptHtml(item.draft.promptContent)"></div>
-                </template>
 
-                <div v-if="isModified(item)" class="modified-tip">
-                  基础信息已变化时,当前内容仍为你的修改版本。点击恢复默认可使用最新基础信息重新渲染。
+                  <div
+                    v-for="item in group.items"
+                    :key="item.source.id"
+                    class="prompt-row"
+                    :class="{ 'is-modified': isModified(item) }"
+                  >
+                    <div class="prompt-row-head">
+                      <div class="prompt-meta">
+                        <span class="prompt-code">{{ item.source.promptCode }}</span>
+                        <el-tag v-if="isModified(item)" size="small" type="warning">已修改</el-tag>
+                        <el-tag v-else size="small" type="info">默认</el-tag>
+                      </div>
+                      <div class="prompt-actions">
+                        <el-button size="small" text @click="toggleEdit(item.source.id)">
+                          {{ editingId === item.source.id ? '完成' : '编辑' }}
+                        </el-button>
+                        <el-button
+                          size="small"
+                          text
+                          :disabled="!isModified(item)"
+                          @click="restoreOne(item.source.id)"
+                        >
+                          恢复默认
+                        </el-button>
+                      </div>
+                    </div>
+
+                    <template v-if="editingId === item.source.id">
+                      <el-input
+                        v-model="item.draft.promptContent"
+                        type="textarea"
+                        :rows="4"
+                        maxlength="1000"
+                        show-word-limit
+                        class="prompt-editor"
+                      />
+                      <div class="variable-help">
+                        可用变量: {brand} {product} {industry} {industry_role} {region} {user_type}
+                        <span v-if="item.source.hasCompetitorVar">{competitor}</span>
+                      </div>
+                      <div class="render-preview">
+                        <span class="preview-label">实时预览</span>
+                        <span v-html="renderPromptHtml(item.draft.promptContent)"></span>
+                      </div>
+                    </template>
+                    <template v-else>
+                      <div class="rendered-prompt" v-html="renderPromptHtml(item.draft.promptContent)"></div>
+                    </template>
+
+                    <div v-if="isModified(item)" class="modified-tip">
+                      基础信息已变化时,当前内容仍为你的修改版本。点击恢复默认可使用最新基础信息重新渲染。
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </el-tab-pane>
+
+              <el-tab-pane label="LLM问题预览" name="llm">
+                <div class="llm-config">
+                  <div class="llm-total">
+                    <span class="form-label compact">总问题数</span>
+                    <el-input-number v-model="llmPlan.totalCount" :min="1" :max="60" controls-position="right" />
+                  </div>
+                  <div class="llm-category-grid">
+                    <div v-for="cat in CATEGORY_OPTIONS" :key="cat.code" class="llm-category-input">
+                      <span>{{ cat.label }}</span>
+                      <el-input-number
+                        v-model="llmPlan.categoryCounts[cat.code]"
+                        :min="cat.code === 'COMPARISON' ? 1 : 0"
+                        :max="30"
+                        size="small"
+                        controls-position="right"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <el-alert
+                  v-if="llmStale"
+                  title="基础信息已变化，当前 LLM 问题可能不再匹配。请重新生成或确认继续使用。"
+                  type="warning"
+                  :closable="false"
+                  class="prompt-alert"
+                />
+
+                <div class="llm-actions">
+                  <el-button
+                    type="primary"
+                    :loading="llmGenerating"
+                    :disabled="!canGenerateLlm || (llmQuestions.length > 0 && llmMissingTotal === 0)"
+                    @click="generateLlmQuestions(false)"
+                  >
+                    {{ llmQuestions.length ? `补 ${llmMissingTotal} 条` : '生成 LLM 问题' }}
+                  </el-button>
+                  <el-button :loading="llmGenerating" :disabled="!canGenerateLlm" @click="generateLlmQuestions(true)">重新生成</el-button>
+                  <el-button v-if="llmStale" @click="confirmUseStaleLlmQuestions">确认继续使用当前问题</el-button>
+                  <span class="llm-count-status" :class="{ danger: llmSubmitIssues.length > 0 }">
+                    当前 {{ llmQuestions.length }} / {{ llmPlan.totalCount }}
+                  </span>
+                </div>
+
+                <el-alert
+                  v-if="llmLastWarning"
+                  :title="llmLastWarning"
+                  type="warning"
+                  :closable="false"
+                  class="prompt-alert"
+                />
+
+                <div v-for="cat in CATEGORY_OPTIONS" :key="cat.code" class="prompt-group">
+                  <div class="group-header">
+                    <div>
+                      <span class="group-title">{{ cat.label }}</span>
+                      <span class="group-count">{{ llmActualCategoryCounts[cat.code] }} / {{ llmPlan.categoryCounts[cat.code] }}</span>
+                    </div>
+                    <el-button size="small" text @click="addLlmQuestion(cat.code)">手动新增</el-button>
+                  </div>
+
+                  <el-alert
+                    v-if="cat.code === 'COMPARISON'"
+                    title="对比型问题必须包含 {competitor}，其他类型不能包含该占位符。"
+                    type="info"
+                    :closable="false"
+                    class="competitor-hint"
+                  />
+
+                  <div
+                    v-for="item in llmQuestionsByCategory[cat.code]"
+                    :key="item.id"
+                    class="prompt-row"
+                    :class="{ 'is-modified': llmQuestionError(item) }"
+                  >
+                    <div class="prompt-row-head">
+                      <div class="prompt-meta">
+                        <span class="prompt-code">LLM_{{ cat.code }}</span>
+                        <el-tag size="small" :type="llmQuestionError(item) ? 'danger' : 'success'">
+                          {{ llmQuestionError(item) || '有效' }}
+                        </el-tag>
+                      </div>
+                      <div class="prompt-actions">
+                        <el-button size="small" text type="danger" @click="removeLlmQuestion(item.id)">删除</el-button>
+                      </div>
+                    </div>
+                    <el-input
+                      v-model="item.promptContent"
+                      type="textarea"
+                      :rows="3"
+                      maxlength="1000"
+                      show-word-limit
+                      class="prompt-editor"
+                    />
+                    <div v-if="cat.code === 'COMPARISON'" class="variable-help">
+                      可用变量: 仅 {competitor}（其他信息请直接写真实文本）
+                    </div>
+                    <div class="render-preview">
+                      <span class="preview-label">实时预览</span>
+                      <span v-html="renderPromptHtml(item.promptContent)"></span>
+                    </div>
+                  </div>
+                </div>
+              </el-tab-pane>
+            </el-tabs>
           </template>
         </div>
       </section>
@@ -265,6 +375,7 @@
         <el-button type="primary" :loading="submitting" @click="onSubmit">
           {{ submitting ? '提交中...' : '提交生成' }}
         </el-button>
+        <div class="submit-source-tip">将使用当前 Tab 的问题生成报告：{{ activePromptTab === 'template' ? '模板问题预览' : 'LLM问题预览' }}</div>
       </div>
     </el-card>
   </div>
@@ -277,11 +388,16 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 import { ArrowDown } from '@element-plus/icons-vue'
 import {
   createReport,
+  generateLlmPromptQuestions,
   getReportScopePreview,
   listPromptTemplates,
   type CreateReportRequest,
+  type LlmPromptQuestionDraft,
+  type LlmPromptQuestionPlan,
   type PromptTemplateDraftRequest,
   type PromptTemplateVO,
+  type PresalePromptCategoryCode,
+  type PromptSourceMode,
   type ReportScopePreviewVO
 } from '@/api/presaleReport'
 import { calculatePromptScope } from '@/utils/presale/prompt-scope'
@@ -296,7 +412,31 @@ interface PromptItem {
   draft: PromptDraftItem
 }
 
+interface LlmQuestionDraftItem extends LlmPromptQuestionDraft {
+  id: string
+}
+
 const CATEGORY_ORDER = ['推荐型', '对比型', '问题型', '认知型', '场景型']
+const CATEGORY_OPTIONS: Array<{ code: PresalePromptCategoryCode; label: string }> = [
+  { code: 'RECOMMENDATION', label: '推荐型' },
+  { code: 'COMPARISON', label: '对比型' },
+  { code: 'PROBLEM', label: '问题型' },
+  { code: 'COGNITIVE', label: '认知型' },
+  { code: 'SCENARIO', label: '场景型' }
+]
+const CATEGORY_LABEL_TO_CODE: Record<string, PresalePromptCategoryCode> = {
+  推荐型: 'RECOMMENDATION',
+  对比型: 'COMPARISON',
+  问题型: 'PROBLEM',
+  认知型: 'COGNITIVE',
+  场景型: 'SCENARIO'
+}
+const CATEGORY_CODES = CATEGORY_OPTIONS.map((item) => item.code)
+const ALLOWED_PROMPT_VARIABLES = new Set([
+  'competitor'
+])
+const MAX_LLM_TOTAL_COUNT = 60
+const MAX_LLM_CATEGORY_COUNT = 30
 
 const router = useRouter()
 const formRef = ref<FormInstance>()
@@ -310,6 +450,17 @@ const promptLoading = ref(false)
 const promptLoadFailed = ref(false)
 const promptPanelOpen = ref(false)
 const editingId = ref<number | null>(null)
+const activePromptTab = ref<PromptSourceMode>('template')
+const llmGenerating = ref(false)
+const llmStale = ref(false)
+const llmBaseSnapshot = ref('')
+const llmLastWarning = ref('')
+const llmQuestionSeq = ref(0)
+const llmQuestions = ref<LlmQuestionDraftItem[]>([])
+const llmPlan = reactive<LlmPromptQuestionPlan>({
+  totalCount: 0,
+  categoryCounts: emptyCategoryCounts()
+})
 
 const form = reactive<CreateReportRequest>({
   brandName: '',
@@ -379,6 +530,23 @@ watch(canPreviewPrompts, (ready) => {
   }
 })
 
+watch(
+  () => [
+    form.brandName,
+    form.industry,
+    form.industryRole,
+    form.region,
+    form.userType,
+    form.userDemand
+  ],
+  () => {
+    if (!llmQuestions.value.length || !llmBaseSnapshot.value) {
+      return
+    }
+    llmStale.value = currentBaseSnapshot() !== llmBaseSnapshot.value
+  }
+)
+
 const promptTemplateVersion = computed(() => {
   return promptSources.value[0]?.templateVersion || ''
 })
@@ -408,6 +576,30 @@ const promptGroups = computed(() => {
 
 const modifiedCount = computed(() => promptItems.value.filter((item) => isModified(item)).length)
 
+const llmQuestionsByCategory = computed<Record<PresalePromptCategoryCode, LlmQuestionDraftItem[]>>(() => {
+  const grouped = createCategoryRecord<LlmQuestionDraftItem[]>(() => [])
+  for (const item of llmQuestions.value) {
+    grouped[item.categoryCode].push(item)
+  }
+  return grouped
+})
+
+const llmActualCategoryCounts = computed<Record<PresalePromptCategoryCode, number>>(() => {
+  const counts = createCategoryRecord(() => 0)
+  for (const item of llmQuestions.value) {
+    counts[item.categoryCode] += 1
+  }
+  return counts
+})
+
+const llmMissingTotal = computed(() => Math.max(0, Number(llmPlan.totalCount || 0) - llmQuestions.value.length))
+
+const llmSubmitIssues = computed(() => validateLlmSubmit(false))
+
+const canGenerateLlm = computed(() => {
+  return canPreviewPrompts.value && !llmGenerating.value && validateLlmPlanConfig(false).length === 0
+})
+
 const scopeNote = computed(() => {
   if (scopeLoading.value) return '正在读取当前启用平台与 Prompt 模板配置...'
   if (scopeLoadFailed.value) return '诊断范围预览读取失败,请刷新页面后重试。'
@@ -419,6 +611,10 @@ const promptSummary = computed(() => {
   if (promptLoading.value) return '正在读取 Prompt 清单...'
   if (promptLoadFailed.value) return 'Prompt 清单读取失败'
   if (!promptSources.value.length) return '暂无 Prompt 模板'
+  if (activePromptTab.value === 'llm') {
+    const status = llmSubmitIssues.value.length ? `，还差 ${llmMissingTotal.value} 条或存在待修正项` : '，数量已匹配'
+    return `当前为 LLM 问题预览：${llmQuestions.value.length}/${llmPlan.totalCount} 条${status}。提交时只使用当前 Tab 的问题。`
+  }
   const counts = CATEGORY_ORDER.map((category) => {
     const count = promptSources.value.filter((x) => x.category === category).length
     return count > 0 ? `${category} ${count}` : ''
@@ -462,6 +658,7 @@ async function loadPromptTemplates() {
       promptContent: source.promptContent
     }))
     form.promptTemplateVersion = promptTemplateVersion.value
+    applyDefaultLlmPlanFromTemplates()
   } catch {
     promptSources.value = []
     promptDrafts.value = []
@@ -538,6 +735,217 @@ async function restoreAllModified() {
   }
 }
 
+function emptyCategoryCounts(): Record<PresalePromptCategoryCode, number> {
+  return createCategoryRecord(() => 0)
+}
+
+function createCategoryRecord<T>(factory: () => T): Record<PresalePromptCategoryCode, T> {
+  return CATEGORY_CODES.reduce((result, code) => {
+    result[code] = factory()
+    return result
+  }, {} as Record<PresalePromptCategoryCode, T>)
+}
+
+function applyDefaultLlmPlanFromTemplates() {
+  const counts = emptyCategoryCounts()
+  for (const source of promptSources.value) {
+    const code = CATEGORY_LABEL_TO_CODE[source.category]
+    if (code) {
+      counts[code] += 1
+    }
+  }
+  Object.assign(llmPlan.categoryCounts, counts)
+  llmPlan.totalCount = promptSources.value.length
+}
+
+function currentBaseSnapshot() {
+  return JSON.stringify({
+    brandName: form.brandName.trim(),
+    industry: form.industry,
+    industryRole: form.industryRole,
+    region: form.region.trim(),
+    userType: form.userType?.trim() || '',
+    userDemand: form.userDemand?.trim() || ''
+  })
+}
+
+function validateLlmPlanConfig(showMessage: boolean) {
+  const issues: string[] = []
+  const totalCount = Number(llmPlan.totalCount || 0)
+  if (!Number.isInteger(totalCount) || totalCount < 1 || totalCount > MAX_LLM_TOTAL_COUNT) {
+    issues.push(`总问题数需在 1-${MAX_LLM_TOTAL_COUNT} 之间`)
+  }
+
+  let sum = 0
+  for (const cat of CATEGORY_OPTIONS) {
+    const value = Number(llmPlan.categoryCounts[cat.code] || 0)
+    if (!Number.isInteger(value) || value < 0 || value > MAX_LLM_CATEGORY_COUNT) {
+      issues.push(`${cat.label}数量需在 0-${MAX_LLM_CATEGORY_COUNT} 之间`)
+    }
+    sum += value
+  }
+
+  if (Number(llmPlan.categoryCounts.COMPARISON || 0) < 1) {
+    issues.push('对比型分类必须存在，数量至少为 1')
+  }
+  if (sum !== totalCount) {
+    issues.push(`各分类数量之和需等于总问题数，当前为 ${sum}`)
+  }
+
+  if (showMessage && issues.length) {
+    ElMessage.warning(issues[0])
+  }
+  return issues
+}
+
+function validateLlmSubmit(showMessage: boolean) {
+  const issues = validateLlmPlanConfig(false)
+  if (llmStale.value) {
+    issues.push('基础信息已变化，请重新生成或确认继续使用当前问题')
+  }
+  if (llmQuestions.value.length !== Number(llmPlan.totalCount || 0)) {
+    issues.push(`LLM 问题数量需为 ${llmPlan.totalCount} 条，当前 ${llmQuestions.value.length} 条`)
+  }
+  for (const cat of CATEGORY_OPTIONS) {
+    const actual = llmActualCategoryCounts.value[cat.code]
+    const expected = Number(llmPlan.categoryCounts[cat.code] || 0)
+    if (actual !== expected) {
+      issues.push(`${cat.label}需为 ${expected} 条，当前 ${actual} 条`)
+    }
+  }
+  for (const item of llmQuestions.value) {
+    const error = llmQuestionError(item)
+    if (error) {
+      issues.push(`${categoryLabel(item.categoryCode)}问题不合法：${error}`)
+      break
+    }
+  }
+
+  if (showMessage && issues.length) {
+    ElMessage.warning(issues[0])
+  }
+  return issues
+}
+
+function llmQuestionError(item: LlmPromptQuestionDraft) {
+  const content = item.promptContent.trim()
+  if (!content) return '内容不能为空'
+  if (content.length > 1000) return '内容最多 1000 字'
+  if (item.categoryCode === 'COMPARISON' && !content.includes('{competitor}')) {
+    return '必须包含 {competitor}'
+  }
+  if (item.categoryCode !== 'COMPARISON' && content.includes('{competitor}')) {
+    return '不能包含 {competitor}'
+  }
+  const invalidVar = extractVariables(content).find((name) => !ALLOWED_PROMPT_VARIABLES.has(name))
+  if (invalidVar) return `除 {competitor} 外不能包含占位符`
+  if ((content.includes('{') || content.includes('}')) && extractVariables(content).length === 0) {
+    return '不能包含花括号'
+  }
+  return ''
+}
+
+function extractVariables(content: string) {
+  return Array.from(content.matchAll(/\{([a-z_]+)\}/g)).map((match) => match[1])
+}
+
+function categoryLabel(code: PresalePromptCategoryCode) {
+  return CATEGORY_OPTIONS.find((item) => item.code === code)?.label || code
+}
+
+function nextLlmQuestionId() {
+  llmQuestionSeq.value += 1
+  return `llm-${Date.now()}-${llmQuestionSeq.value}`
+}
+
+function buildLlmPromptQuestions(): LlmPromptQuestionDraft[] {
+  return llmQuestions.value.map((item) => ({
+    categoryCode: item.categoryCode,
+    promptContent: item.promptContent.trim()
+  }))
+}
+
+async function generateLlmQuestions(reset: boolean) {
+  if (!formRef.value) return
+  const ok = await formRef.value.validate().catch(() => false)
+  if (!ok || validateLlmPlanConfig(true).length) {
+    return
+  }
+
+  llmGenerating.value = true
+  llmLastWarning.value = ''
+  try {
+    if (reset) {
+      llmQuestions.value = []
+    }
+    const existingQuestions = reset ? [] : buildLlmPromptQuestions()
+    const result = await generateLlmPromptQuestions({
+      brandName: form.brandName.trim(),
+      industry: form.industry,
+      industryRole: form.industryRole,
+      region: form.region.trim(),
+      userType: form.userType?.trim() || undefined,
+      userDemand: form.userDemand?.trim() || undefined,
+      totalCount: Number(llmPlan.totalCount || 0),
+      categoryCounts: { ...llmPlan.categoryCounts },
+      existingQuestions
+    })
+    llmQuestions.value.push(
+      ...result.questions.map((item) => ({
+        id: nextLlmQuestionId(),
+        categoryCode: item.categoryCode,
+        promptContent: item.promptContent
+      }))
+    )
+    llmBaseSnapshot.value = currentBaseSnapshot()
+    llmStale.value = false
+    llmLastWarning.value =
+      result.warnings?.[0] ||
+      (result.missingTotal > 0 ? `还差 ${result.missingTotal} 条，请手动补齐或重新生成。` : '')
+    if (!llmLastWarning.value) {
+      ElMessage.success('LLM 问题已生成')
+    }
+  } catch (err: any) {
+    ElMessage.error(err?.message || 'LLM 问题生成失败')
+  } finally {
+    llmGenerating.value = false
+  }
+}
+
+function addLlmQuestion(categoryCode: PresalePromptCategoryCode) {
+  const brandName = form.brandName.trim() || '目标品牌'
+  llmQuestions.value.push({
+    id: nextLlmQuestionId(),
+    categoryCode,
+    promptContent:
+      categoryCode === 'COMPARISON'
+        ? `${brandName} 与 {competitor} 相比，用户更关注哪些差异？`
+        : ''
+  })
+}
+
+function removeLlmQuestion(id: string) {
+  llmQuestions.value = llmQuestions.value.filter((item) => item.id !== id)
+}
+
+async function confirmUseStaleLlmQuestions() {
+  try {
+    await ElMessageBox.confirm(
+      '当前 LLM 问题内容不会随基础信息变更自动更新。除对比型的 {competitor} 会由系统动态填充外，品牌名、行业、地区等内容都已写入问题原文。如基础信息有重大变化，建议重新生成。确认继续使用当前问题吗？',
+      '确认继续使用当前问题',
+      {
+        confirmButtonText: '继续使用',
+        cancelButtonText: '重新检查',
+        type: 'warning'
+      }
+    )
+  } catch {
+    return
+  }
+  llmBaseSnapshot.value = currentBaseSnapshot()
+  llmStale.value = false
+}
+
 async function onSubmit() {
   if (!formRef.value) return
   const ok = await formRef.value.validate().catch(() => false)
@@ -546,18 +954,41 @@ async function onSubmit() {
     ElMessage.error('Prompt 清单未加载完成')
     return
   }
+  if (activePromptTab.value === 'llm' && validateLlmSubmit(true).length) {
+    return
+  }
 
   submitting.value = true
   try {
+    const payload: CreateReportRequest =
+      activePromptTab.value === 'llm'
+        ? {
+            brandName: form.brandName.trim(),
+            industry: form.industry,
+            industryRole: form.industryRole,
+            region: form.region.trim(),
+            userDemand: form.userDemand?.trim() || undefined,
+            userType: form.userType?.trim() || undefined,
+            promptSourceMode: 'llm',
+            llmQuestionPlan: {
+              totalCount: Number(llmPlan.totalCount || 0),
+              categoryCounts: { ...llmPlan.categoryCounts }
+            },
+            llmPromptQuestions: buildLlmPromptQuestions()
+          }
+        : {
+            brandName: form.brandName.trim(),
+            industry: form.industry,
+            industryRole: form.industryRole,
+            region: form.region.trim(),
+            userDemand: form.userDemand?.trim() || undefined,
+            userType: form.userType?.trim() || undefined,
+            promptSourceMode: 'template',
+            promptTemplateVersion: promptTemplateVersion.value,
+            promptTemplates: buildPromptTemplateDrafts()
+          }
     const reportId = await createReport({
-      brandName: form.brandName.trim(),
-      industry: form.industry,
-      industryRole: form.industryRole,
-      region: form.region.trim(),
-      userDemand: form.userDemand?.trim() || undefined,
-      userType: form.userType?.trim() || undefined,
-      promptTemplateVersion: promptTemplateVersion.value,
-      promptTemplates: buildPromptTemplateDrafts()
+      ...payload
     })
     ElMessage.success('已创建报告,开始生成')
     router.push(`/admin/presale/report/${reportId}/progress`)
@@ -597,7 +1028,8 @@ async function onCancel() {
     form.region ||
     form.userDemand ||
     form.userType ||
-    modifiedCount.value > 0
+    modifiedCount.value > 0 ||
+    llmQuestions.value.length > 0
   if (hasInput) {
     try {
       await ElMessageBox.confirm('表单有未保存内容,确定要离开吗?', '提示', {
@@ -796,10 +1228,60 @@ function formatInt(value: number) {
   color: #606266;
   font-size: 13px;
 }
+.prompt-tabs {
+  margin-top: 4px;
+}
 .prompt-empty {
   padding: 24px;
   text-align: center;
   color: #909399;
+}
+.llm-config {
+  display: grid;
+  grid-template-columns: minmax(180px, 220px) 1fr;
+  gap: 16px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  background: #f7f9fc;
+}
+.llm-total,
+.llm-category-input,
+.llm-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.form-label.compact {
+  color: #606266;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.llm-category-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 10px;
+}
+.llm-category-input {
+  justify-content: space-between;
+  min-width: 0;
+}
+.llm-category-input span {
+  color: #606266;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.llm-actions {
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.llm-count-status {
+  color: #606266;
+  font-size: 13px;
+}
+.llm-count-status.danger {
+  color: #e6a23c;
 }
 .prompt-group {
   border-top: 1px solid #ebeef5;
@@ -888,6 +1370,11 @@ function formatInt(value: number) {
   border-top: 1px solid #e4e7ed;
   text-align: right;
 }
+.submit-source-tip {
+  margin-top: 10px;
+  color: #909399;
+  font-size: 12px;
+}
 .action-bar .el-button + .el-button {
   margin-left: 12px;
 }
@@ -912,6 +1399,12 @@ function formatInt(value: number) {
   }
   .summary-text {
     grid-column: 1 / -1;
+  }
+  .llm-config {
+    grid-template-columns: 1fr;
+  }
+  .llm-category-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

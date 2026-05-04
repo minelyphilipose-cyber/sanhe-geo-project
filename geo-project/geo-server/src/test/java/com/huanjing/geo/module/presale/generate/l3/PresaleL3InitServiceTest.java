@@ -93,6 +93,7 @@ class PresaleL3InitServiceTest {
             assertNoPlaceholder(finding.getTitle());
             assertNoPlaceholder(finding.getDescription());
             assertNoPlaceholder(finding.getEvidenceText());
+            assertFalse(finding.getEvidenceText().contains("negative_evidence_count"));
             assertFalse(finding.getDescription().contains("—"), "unexpected fallback value in " + finding.getFindingId());
             assertFalse(finding.getEvidenceText().contains("—"), "unexpected fallback value in " + finding.getFindingId());
         }
@@ -202,6 +203,7 @@ class PresaleL3InitServiceTest {
         evidence.put("missed_count", 3);
         evidence.put("missed_scenes_text", "价格对比、渠道推荐、口碑评估");
         evidence.put("negative_count", 4);
+        evidence.put("negative_evidence_count", 4);
         evidence.put("key_topic", "价格偏高");
         evidence.put("affected_platform_count", 2);
         evidence.put("affected_platforms_text", "Kimi、豆包");

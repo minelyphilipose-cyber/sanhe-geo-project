@@ -3,12 +3,15 @@ package com.huanjing.geo.module.presale.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.presale.dto.request.CreateReportRequest;
+import com.huanjing.geo.module.presale.dto.request.LlmPromptQuestionGenerateRequest;
 import com.huanjing.geo.module.presale.dto.request.ReportListQueryRequest;
+import com.huanjing.geo.module.presale.dto.response.LlmPromptQuestionGenerateVO;
 import com.huanjing.geo.module.presale.dto.response.PromptTemplateVO;
 import com.huanjing.geo.module.presale.dto.response.ReportDetailVO;
 import com.huanjing.geo.module.presale.dto.response.ReportListItemVO;
 import com.huanjing.geo.module.presale.dto.response.ReportScopePreviewVO;
 import com.huanjing.geo.module.presale.dto.response.ReportVersionMetaVO;
+import com.huanjing.geo.module.presale.service.PresaleLlmPromptQuestionService;
 import com.huanjing.geo.module.presale.service.PresaleReportService;
 import com.huanjing.geo.module.presale.service.PresaleReportVersionService;
 import jakarta.validation.Valid;
@@ -43,11 +46,14 @@ public class PresaleReportController {
 
     private final PresaleReportService reportService;
     private final PresaleReportVersionService versionService;
+    private final PresaleLlmPromptQuestionService llmPromptQuestionService;
 
     public PresaleReportController(PresaleReportService reportService,
-                                   PresaleReportVersionService versionService) {
+                                   PresaleReportVersionService versionService,
+                                   PresaleLlmPromptQuestionService llmPromptQuestionService) {
         this.reportService = reportService;
         this.versionService = versionService;
+        this.llmPromptQuestionService = llmPromptQuestionService;
     }
 
     /**
@@ -73,6 +79,12 @@ public class PresaleReportController {
     @GetMapping("/prompt-templates")
     public R<List<PromptTemplateVO>> listPromptTemplates() {
         return R.ok(reportService.listPromptTemplates());
+    }
+
+    @PostMapping("/llm-prompt-questions/generate")
+    public R<LlmPromptQuestionGenerateVO> generateLlmPromptQuestions(
+            @RequestBody @Valid LlmPromptQuestionGenerateRequest req) {
+        return R.ok(llmPromptQuestionService.generate(req));
     }
 
     /**

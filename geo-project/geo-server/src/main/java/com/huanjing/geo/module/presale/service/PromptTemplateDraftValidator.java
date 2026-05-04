@@ -215,6 +215,7 @@ public class PromptTemplateDraftValidator {
         row.setSourceTemplateId(source.getId());
         row.setSourcePromptCode(source.getPromptCode());
         row.setSourceTemplateVersion(source.getTemplateVersion());
+        row.setSourceType("template");
         row.setCategory(source.getCategory());
         row.setBusinessValue(source.getBusinessValue());
         row.setPromptContent(promptContent);

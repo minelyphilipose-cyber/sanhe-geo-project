@@ -119,7 +119,7 @@ router.beforeEach(async (to, _from, next) => {
     return next(`/login?redirect=${encodeURIComponent(to.fullPath)}`)
   }
 
-  if (!userStore.permissions.length) {
+  if (!userStore.profileSynced || !userStore.permissions.length) {
     try {
       await userStore.syncProfile()
     } catch {

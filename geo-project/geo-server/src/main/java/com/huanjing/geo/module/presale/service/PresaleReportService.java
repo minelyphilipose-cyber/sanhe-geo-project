@@ -6,6 +6,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport;
 import com.huanjing.geo.module.presale.export.persist.mapper.PresaleReportExportMapper;
 import com.huanjing.geo.module.presale.export.service.PresaleExportStatuses;
+import com.huanjing.geo.module.presale.dto.PromptSourceMode;
 import com.huanjing.geo.module.presale.dto.request.CreateReportRequest;
 import com.huanjing.geo.module.presale.dto.request.ReportListQueryRequest;
 import com.huanjing.geo.module.presale.dto.response.PromptTemplateVO;
@@ -83,6 +84,7 @@ public class PresaleReportService {
     private final PresalePromptTemplateMapper promptTemplateMapper;
     private final PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
     private final PromptTemplateDraftValidator promptTemplateDraftValidator;
+    private final LlmPromptQuestionDraftValidator llmPromptQuestionDraftValidator;
     @Value("${presale.prompt.active-version:v2}")
     private String activePromptTemplateVersion;
 
@@ -96,7 +98,8 @@ public class PresaleReportService {
                                 PresaleAiPromptResultMapper aiPromptResultMapper,
                                 PresalePromptTemplateMapper promptTemplateMapper,
                                 PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper,
-                                PromptTemplateDraftValidator promptTemplateDraftValidator) {
+                                PromptTemplateDraftValidator promptTemplateDraftValidator,
+                                LlmPromptQuestionDraftValidator llmPromptQuestionDraftValidator) {
         this.reportMapper = reportMapper;
         this.versionMapper = versionMapper;
         this.exportMapper = exportMapper;
@@ -108,6 +111,7 @@ public class PresaleReportService {
         this.promptTemplateMapper = promptTemplateMapper;
         this.versionPromptTemplateMapper = versionPromptTemplateMapper;
         this.promptTemplateDraftValidator = promptTemplateDraftValidator;
+        this.llmPromptQuestionDraftValidator = llmPromptQuestionDraftValidator;
     }
 
     /**
@@ -134,14 +138,12 @@ public class PresaleReportService {
         reportMapper.insert(report);
 
         PresaleReportVersion version = new PresaleReportVersion();
-        ReportScopePreviewVO scopePreview = buildScopePreview();
-        int batch1Total = scopePreview.getPlatformCount() * scopePreview.getGenericPromptCount() * 2;
         version.setReportId(report.getId());
         version.setVersionNo(1);
         version.setGenerationStatus(PresaleGenerateStatus.QUEUED.name());
-        version.setTotalLlmCalls(scopePreview.getLlmCallUpperBound());
+        version.setTotalLlmCalls(0);
         version.setCompletedLlmCalls(0);
-        version.setBatch1TotalCalls(batch1Total);
+        version.setBatch1TotalCalls(0);
         version.setBatch1CompletedCalls(0);
         version.setBatch2TotalCalls(null);
         version.setBatch2CompletedCalls(0);
@@ -152,18 +154,11 @@ public class PresaleReportService {
         version.setCreatedBy(userId);
         versionMapper.insert(version);
 
-        List<PresaleReportVersionPromptTemplate> promptSnapshots =
-                promptTemplateDraftValidator.validateAndBuildSnapshots(
-                        req.getPromptTemplateVersion(),
-                        req.getPromptTemplates(),
-                        activePromptTemplateVersion,
-                        report.getId(),
-                        version.getId(),
-                        now
-                );
+        List<PresaleReportVersionPromptTemplate> promptSnapshots = buildPromptSnapshots(req, report.getId(), version.getId(), now);
         for (PresaleReportVersionPromptTemplate row : promptSnapshots) {
             versionPromptTemplateMapper.insert(row);
         }
+        applyPromptScopeToVersion(version.getId(), promptSnapshots);
 
         // 回填 latest_version_id
         report.setLatestVersionId(version.getId());
@@ -173,6 +168,55 @@ public class PresaleReportService {
         triggerGenerateAfterCommit(version.getId(), userId, accessService.canManageCurrentUser());
 
         return report.getId();
+    }
+
+    private List<PresaleReportVersionPromptTemplate> buildPromptSnapshots(CreateReportRequest req,
+                                                                          Long reportId,
+                                                                          Long versionId,
+                                                                          LocalDateTime now) {
+        PromptSourceMode mode = PromptSourceMode.fromJson(req.getPromptSourceMode());
+        if (mode == PromptSourceMode.LLM) {
+            return llmPromptQuestionDraftValidator.validateAndBuildSnapshots(
+                    req.getLlmQuestionPlan(),
+                    req.getLlmPromptQuestions(),
+                    reportId,
+                    versionId,
+                    now
+            );
+        }
+        return promptTemplateDraftValidator.validateAndBuildSnapshots(
+                req.getPromptTemplateVersion(),
+                req.getPromptTemplates(),
+                activePromptTemplateVersion,
+                reportId,
+                versionId,
+                now
+        );
+    }
+
+    private void applyPromptScopeToVersion(Long versionId, List<PresaleReportVersionPromptTemplate> promptSnapshots) {
+        int platformCount = countEnabledPlatforms();
+        int genericPromptCount = 0;
+        int competitorPromptCount = 0;
+        for (PresaleReportVersionPromptTemplate row : promptSnapshots) {
+            if (Integer.valueOf(1).equals(row.getHasCompetitorVar())) {
+                competitorPromptCount++;
+            } else {
+                genericPromptCount++;
+            }
+        }
+        PromptScopeCalculator.ScopeResult scope = PromptScopeCalculator.calculate(
+                platformCount,
+                genericPromptCount,
+                competitorPromptCount
+        );
+        PresaleReportVersion update = new PresaleReportVersion();
+        update.setId(versionId);
+        update.setTotalLlmCalls(scope.totalUpperBound());
+        update.setBatch1TotalCalls(scope.batch1Calls());
+        update.setBatch2TotalCalls(null);
+        update.setUpdatedAt(LocalDateTime.now());
+        versionMapper.updateById(update);
     }
 
     /**

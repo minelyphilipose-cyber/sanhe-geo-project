@@ -1,7 +1,6 @@
 package com.huanjing.geo.module.presale.dto.request;
 
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -38,10 +37,15 @@ public class CreateReportRequest {
     private String userType;
 
     /** 前端反显时加载到的 Prompt 模板版本,用于防止提交前全局 active version 变化。 */
-    @NotBlank(message = "Prompt 模板版本不能为空")
     private String promptTemplateVersion;
 
     /** 固定数量 Prompt 草稿。首版只允许修改 promptContent,不允许增删排序。 */
-    @NotEmpty(message = "Prompt 清单不能为空")
     private List<PromptTemplateDraftRequest> promptTemplates;
+
+    /** 当前 Tab 决定提交来源: template / llm。空值兼容旧前端,按 template 处理。 */
+    private String promptSourceMode;
+
+    private LlmPromptQuestionPlanRequest llmQuestionPlan;
+
+    private List<LlmPromptQuestionDraftRequest> llmPromptQuestions;
 }

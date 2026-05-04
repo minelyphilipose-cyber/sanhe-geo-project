@@ -57,6 +57,8 @@ class PresaleReportServiceTest {
     private PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
     @Mock
     private PromptTemplateDraftValidator promptTemplateDraftValidator;
+    @Mock
+    private LlmPromptQuestionDraftValidator llmPromptQuestionDraftValidator;
 
     private PresaleReportService service;
 
@@ -73,7 +75,8 @@ class PresaleReportServiceTest {
                 aiPromptResultMapper,
                 promptTemplateMapper,
                 versionPromptTemplateMapper,
-                promptTemplateDraftValidator
+                promptTemplateDraftValidator,
+                llmPromptQuestionDraftValidator
         );
     }
 
