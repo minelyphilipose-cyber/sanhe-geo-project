@@ -124,7 +124,8 @@ import { useMergedView } from '@/composables/presale/useMergedView'
  *       价值 badge = 所在分组(high/mid/low)
  *       您列 = ✗(固定,因为在 missing 列表里)
  *       竞品列 = top_competitor_coverage 是否含该竞品名
- *   - 3 张卡片:每组 missing_queries.length / group.total
+ *       仅展示至少一个竞品被推荐的缺口,避免混入双方都未推荐的场景
+ *   - 3 张卡片:每组竞品差异缺口数 / group.total
  *   - 底部引用:竞品组对比模式优先取 group_scene_advantages;否则回退 Top1 竞品 scene_advantages
  *
  * 不做:
@@ -171,8 +172,9 @@ const missingRows = computed<MissingRow[]>(() => {
     for (const m of group.missing_queries) {
       const map: Record<string, boolean> = {}
       for (const cname of competitorNames.value) {
-        map[cname] = m.top_competitor_coverage.includes(cname)
+        map[cname] = isCoveredByCompetitor(m, cname)
       }
+      if (!Object.values(map).some(Boolean)) continue
       rows.push({
         prompt_code: m.prompt_code,
         prompt_content: m.prompt_content?.trim() ? m.prompt_content : '—',
@@ -195,14 +197,27 @@ const visibleMissingRows = computed(() => missingRows.value.slice(0, MAX_VISIBLE
 const hiddenMissingCount = computed(() => Math.max(0, missingRows.value.length - visibleMissingRows.value.length))
 
 // ─── 3 张卡片计数 ──────────────────────────────────────
+function isCoveredByCompetitor(
+  query: { top_competitor_coverage?: string[] },
+  competitorName: string
+): boolean {
+  return query.top_competitor_coverage?.includes(competitorName) ?? false
+}
+
+function competitorGapCount(group: typeof mergedView.value.scene_coverage.high_value): number {
+  return (group.missing_queries ?? []).filter((q) =>
+    competitorNames.value.some((cname) => isCoveredByCompetitor(q, cname))
+  ).length
+}
+
 const highGapCount = computed(
-  () => mergedView.value.scene_coverage.high_value.missing_queries?.length ?? 0
+  () => competitorGapCount(mergedView.value.scene_coverage.high_value)
 )
 const midGapCount = computed(
-  () => mergedView.value.scene_coverage.mid_value.missing_queries?.length ?? 0
+  () => competitorGapCount(mergedView.value.scene_coverage.mid_value)
 )
 const lowGapCount = computed(
-  () => mergedView.value.scene_coverage.low_value.missing_queries?.length ?? 0
+  () => competitorGapCount(mergedView.value.scene_coverage.low_value)
 )
 
 // ─── 底部引用:竞品组优势优先,否则 Top1 竞品 scene_advantages ────────────

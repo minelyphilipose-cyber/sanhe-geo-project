@@ -221,13 +221,13 @@
         "coverage": 48.0
       },
       "top1": {
-        "overall": 78.0,
+        "overall": 80.0,
         "mention": 79.0,
         "ranking": 82.0,
         "sentiment": 75.0,
-        "coverage": 74.0
+        "coverage": 84.0
       },
-      "top10Score": 73.0,
+      "top10Score": 77.0,
       "confidenceLevel": "MEDIUM",
       "source": "HYBRID",
       "sampleSize": 500,

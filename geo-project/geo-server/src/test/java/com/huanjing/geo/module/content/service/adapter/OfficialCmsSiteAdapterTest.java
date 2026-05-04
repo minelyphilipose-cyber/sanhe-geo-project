@@ -85,7 +85,8 @@ class OfficialCmsSiteAdapterTest {
     @Test
     void submitToTarget_wrongTarget_throwsIae() {
         assertThrows(IllegalArgumentException.class,
-                () -> adapter.submitToTarget(article("Title", "qa"), "body", new TargetContext.MpAccountTarget(new MpAccount())));
+                () -> adapter.submitToTarget(article("Title", "qa"), "body",
+                        new TargetContext.MpAccountTarget(new MpAccount(), null, "test-request")));
     }
 
     @Test
