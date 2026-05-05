@@ -62,6 +62,9 @@ public class WechatMpAdapter implements SiteAdapter, SelfMediaAdapter {
     public ValidationResult validate(ArticleDraft article,
                                      String contentMarkdown,
                                      TargetContext.SelfMediaTarget target) {
+        if (target == null || target.coverMaterialId() == null) {
+            throw new BizException(400, "请选择公众号封面图片");
+        }
         return ValidationResult.pass();
     }
 

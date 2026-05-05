@@ -15,6 +15,7 @@ import com.huanjing.geo.module.content.mapper.*;
 import com.huanjing.geo.module.content.service.adapter.BrandGeoSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.FailureKind;
 import com.huanjing.geo.module.content.service.adapter.OfficialCmsSiteAdapter;
+import com.huanjing.geo.module.content.service.adapter.ReviewStatusResult;
 import com.huanjing.geo.module.content.service.adapter.SiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaAdapter;
 import com.huanjing.geo.module.content.service.adapter.SubmitResult;
@@ -57,6 +58,7 @@ public class ContentDistributionService {
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
     private final DistributionTaskMapper distributionTaskMapper;
+    private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final PackagePublishConfigMapper packagePublishConfigMapper;
     private final ProjectPublishQuotaMapper projectPublishQuotaMapper;
     private final ProjectMapper projectMapper;
@@ -233,6 +235,31 @@ public class ContentDistributionService {
         result.put("articleStatus", article.getStatus());
         result.put("attempts", attempts);
         return result;
+    }
+
+    @Transactional
+    public DistributionTask refreshDistributionTaskReviewStatus(Long taskId) {
+        DistributionTask task = requireTask(taskId);
+        if (!DistributionTargetKind.MP_ACCOUNT.equals(task.getTargetKind()) || task.getSelfMediaAccountId() == null) {
+            throw new BizException(400, "distribution task is not self-media");
+        }
+        SelfMediaAccount account = selfMediaAccountMapper.selectById(task.getSelfMediaAccountId());
+        if (account == null) {
+            throw new BizException(404, "self media account not found");
+        }
+        SelfMediaAdapter adapter = resolveSelfMediaAdapter(account.getPlatform());
+        ReviewStatusResult result = adapter.refreshReviewStatus(task, account);
+        if (result != null
+                && result.status() != null
+                && result.status() != ReviewStatusResult.ReviewStatus.UNKNOWN) {
+            LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
+                    .eq(DistributionTask::getId, taskId)
+                    .set(DistributionTask::getReviewStatus, SubmitResult.toStorageValue(result.status()))
+                    .set(DistributionTask::getReviewFeedback, result.reviewFeedback())
+                    .set(DistributionTask::getExternalStatus, result.externalStatus());
+            distributionTaskMapper.update(null, wrapper);
+        }
+        return distributionTaskMapper.selectById(taskId);
     }
 
     public PublishQuotaVO quota(Long projectId) {
@@ -476,7 +503,7 @@ public class ContentDistributionService {
                                                    TargetContext.SelfMediaTarget mpTarget) {
         SelfMediaAccount account = mpTarget.account();
         if (account == null || account.getId() == null) {
-            throw new BizException(400, "mp account missing");
+            throw new BizException(400, "self media account missing");
         }
         if (!StringUtils.hasText(mpTarget.requestId())) {
             throw new BizException(400, "requestId is required");
@@ -490,13 +517,10 @@ public class ContentDistributionService {
             return existed;
         }
         if (!"active".equalsIgnoreCase(account.getStatus())) {
-            throw new BizException(400, "微信公众号授权不可用，请重新授权");
+            throw new BizException(400, "自媒体账号不可用，请重新授权");
         }
         if (project.getBrandId() == null || !project.getBrandId().equals(account.getBrandId())) {
-            throw new BizException(403, "公众号与文章品牌不匹配");
-        }
-        if (mpTarget.coverMaterialId() == null) {
-            throw new BizException(400, "请选择公众号封面图片");
+            throw new BizException(403, "自媒体账号与文章品牌不匹配");
         }
         currentUserService.ensureBrandAccess(operator, account.getBrandId(), "self_media_account");
 
@@ -867,6 +891,10 @@ public class ContentDistributionService {
         vo.setErrorMessage(task.getErrorMessage());
         vo.setRequestPayload(task.getRequestPayload());
         vo.setResponsePayload(task.getResponsePayload());
+        vo.setPlatformArticleId(task.getPlatformArticleId());
+        vo.setExternalStatus(task.getExternalStatus());
+        vo.setReviewStatus(task.getReviewStatus());
+        vo.setReviewFeedback(task.getReviewFeedback());
         vo.setCreatedAt(task.getCreatedAt());
         vo.setFinishedAt(task.getFinishedAt());
         return vo;

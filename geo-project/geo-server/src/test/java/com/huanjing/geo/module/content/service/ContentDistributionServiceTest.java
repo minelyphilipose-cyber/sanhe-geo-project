@@ -18,6 +18,7 @@ import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.mapper.PackagePublishConfigMapper;
 import com.huanjing.geo.module.content.mapper.ProjectPublishQuotaMapper;
+import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.service.adapter.BrandGeoSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.FailureKind;
 import com.huanjing.geo.module.content.service.adapter.OfficialCmsSiteAdapter;
@@ -46,6 +47,7 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -65,6 +67,7 @@ class ContentDistributionServiceTest {
     private ArticleDraftMapper articleDraftMapper;
     private ArticleDraftVersionMapper articleDraftVersionMapper;
     private DistributionTaskMapper distributionTaskMapper;
+    private SelfMediaAccountMapper selfMediaAccountMapper;
     private PackagePublishConfigMapper packagePublishConfigMapper;
     private ProjectPublishQuotaMapper projectPublishQuotaMapper;
     private ProjectMapper projectMapper;
@@ -85,6 +88,7 @@ class ContentDistributionServiceTest {
         articleDraftMapper = mock(ArticleDraftMapper.class);
         articleDraftVersionMapper = mock(ArticleDraftVersionMapper.class);
         distributionTaskMapper = mock(DistributionTaskMapper.class);
+        selfMediaAccountMapper = mock(SelfMediaAccountMapper.class);
         packagePublishConfigMapper = mock(PackagePublishConfigMapper.class);
         projectPublishQuotaMapper = mock(ProjectPublishQuotaMapper.class);
         projectMapper = mock(ProjectMapper.class);
@@ -99,6 +103,7 @@ class ContentDistributionServiceTest {
                 articleDraftMapper,
                 articleDraftVersionMapper,
                 distributionTaskMapper,
+                selfMediaAccountMapper,
                 packagePublishConfigMapper,
                 projectPublishQuotaMapper,
                 projectMapper,
@@ -344,6 +349,78 @@ class ContentDistributionServiceTest {
         assertEquals("Self-media platform not implemented: douyin", ex.getMessage());
     }
 
+    @Test
+    void distributeTo_selfMedia_douyinPassesTargetFieldsToPlatformAdapter() {
+        givenCommonData();
+        selfMediaAdapter.platform = "douyin";
+        selfMediaAdapter.result = SubmitResult.success(200, "{}", "{\"item_id\":\"item-1\"}", null, "item-1");
+        when(distributionTaskMapper.selectById(300L)).thenReturn(task("submitted"));
+
+        TargetContext.SelfMediaTarget target = selfMediaTarget(
+                "douyin",
+                null,
+                List.of(101L, 102L),
+                1,
+                2,
+                Map.of("text", "douyin text")
+        );
+        DistributionTask result = contentDistributionService.distributeTo(1L, target);
+
+        assertEquals("submitted", result.getStatus());
+        assertEquals("douyin", selfMediaAdapter.capturedTarget.account().getPlatform());
+        assertEquals(List.of(101L, 102L), selfMediaAdapter.capturedTarget.imageMaterialIds());
+        assertEquals(1, selfMediaAdapter.capturedTarget.privateStatus());
+        assertEquals(2, selfMediaAdapter.capturedTarget.downloadType());
+        assertEquals("douyin text", selfMediaAdapter.capturedTarget.platformOptions().get("text"));
+    }
+
+    @Test
+    void refreshDistributionTaskReviewStatus_publishedUpdatesReviewFields() {
+        DistributionTask task = new DistributionTask();
+        task.setId(700L);
+        task.setTargetKind(DistributionTargetKind.MP_ACCOUNT);
+        task.setSelfMediaAccountId(40L);
+        task.setResponsePayload("{\"_mock_review_outcome\":\"passed\"}");
+        SelfMediaAccount account = selfMediaAccount("douyin");
+        selfMediaAdapter.platform = "douyin";
+        selfMediaAdapter.reviewStatusResult = new ReviewStatusResult(
+                ReviewStatusResult.ReviewStatus.PUBLISHED,
+                "passed",
+                null,
+                false,
+                task.getResponsePayload()
+        );
+        when(distributionTaskMapper.selectById(700L)).thenReturn(task);
+        when(selfMediaAccountMapper.selectById(40L)).thenReturn(account);
+        when(distributionTaskMapper.update(eq(null), any())).thenReturn(1);
+
+        contentDistributionService.refreshDistributionTaskReviewStatus(700L);
+
+        ArgumentCaptor<LambdaUpdateWrapper<DistributionTask>> updateCaptor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(distributionTaskMapper).update(eq(null), updateCaptor.capture());
+        String sqlSet = updateCaptor.getValue().getSqlSet();
+        assertTrue(sqlSet.contains("review_status"));
+        assertTrue(sqlSet.contains("review_feedback"));
+        assertTrue(sqlSet.contains("external_status"));
+    }
+
+    @Test
+    void refreshDistributionTaskReviewStatus_unknownSkipsUpdate() {
+        DistributionTask task = new DistributionTask();
+        task.setId(701L);
+        task.setTargetKind(DistributionTargetKind.MP_ACCOUNT);
+        task.setSelfMediaAccountId(40L);
+        SelfMediaAccount account = selfMediaAccount("douyin");
+        selfMediaAdapter.platform = "douyin";
+        selfMediaAdapter.reviewStatusResult = ReviewStatusResult.unknown(null, null, false, null);
+        when(distributionTaskMapper.selectById(701L)).thenReturn(task);
+        when(selfMediaAccountMapper.selectById(40L)).thenReturn(account);
+
+        contentDistributionService.refreshDistributionTaskReviewStatus(701L);
+
+        verify(distributionTaskMapper, never()).update(eq(null), any());
+    }
+
     private void givenCommonData() {
         SysUser operator = new SysUser();
         operator.setId(100L);
@@ -393,12 +470,30 @@ class ContentDistributionServiceTest {
     }
 
     private TargetContext.SelfMediaTarget selfMediaTarget(String platform) {
+        return selfMediaTarget(platform, 50L, null, null, null, null);
+    }
+
+    private TargetContext.SelfMediaTarget selfMediaTarget(String platform,
+                                                          Long coverMaterialId,
+                                                          List<Long> imageMaterialIds,
+                                                          Integer privateStatus,
+                                                          Integer downloadType,
+                                                          Map<String, Object> platformOptions) {
         SelfMediaAccount account = new SelfMediaAccount();
         account.setId(40L);
         account.setBrandId(30L);
         account.setPlatform(platform);
         account.setStatus("active");
-        return new TargetContext.SelfMediaTarget(account, 50L, null, null, null, null, "req-1", null);
+        return new TargetContext.SelfMediaTarget(account, coverMaterialId, imageMaterialIds, null, privateStatus, downloadType, "req-1", platformOptions);
+    }
+
+    private SelfMediaAccount selfMediaAccount(String platform) {
+        SelfMediaAccount account = new SelfMediaAccount();
+        account.setId(40L);
+        account.setBrandId(30L);
+        account.setPlatform(platform);
+        account.setStatus("active");
+        return account;
     }
 
     private void givenBrandGeoSite(String siteCode, String status) {
@@ -474,11 +569,14 @@ class ContentDistributionServiceTest {
     }
 
     private static class TestSelfMediaAdapter implements SelfMediaAdapter {
+        private String platform = "wechat_mp";
         private SubmitResult result;
+        private ReviewStatusResult reviewStatusResult = ReviewStatusResult.notApplicable();
+        private TargetContext.SelfMediaTarget capturedTarget;
 
         @Override
         public String platform() {
-            return "wechat_mp";
+            return platform;
         }
 
         @Override
@@ -488,12 +586,13 @@ class ContentDistributionServiceTest {
 
         @Override
         public SubmitResult submitToTarget(ArticleDraft article, String contentMarkdown, TargetContext.SelfMediaTarget target) {
+            this.capturedTarget = target;
             return result;
         }
 
         @Override
         public ReviewStatusResult refreshReviewStatus(DistributionTask task, SelfMediaAccount account) {
-            return ReviewStatusResult.notApplicable();
+            return reviewStatusResult;
         }
     }
 }

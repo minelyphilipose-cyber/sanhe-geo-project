@@ -5,6 +5,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.config.DouyinClientProperties;
+import com.huanjing.geo.module.content.config.DouyinFeatureProperties;
 import com.huanjing.geo.module.content.config.DouyinOpenPlatformProperties;
 import com.huanjing.geo.module.content.douyin.client.DouyinClient;
 import com.huanjing.geo.module.content.douyin.client.dto.DouyinCodeTokenRequest;
@@ -35,6 +37,8 @@ import static org.mockito.Mockito.when;
 
 class DouyinAuthorizationServiceTest {
     private DouyinOpenPlatformProperties properties;
+    private DouyinFeatureProperties featureProperties;
+    private DouyinClientProperties clientProperties;
     private DouyinClient douyinClient;
     private SelfMediaAccountMapper selfMediaAccountMapper;
     private MpCredentialCipherService cipherService;
@@ -52,6 +56,8 @@ class DouyinAuthorizationServiceTest {
         properties.setAuthCallbackUrl("http://localhost:8080/api/douyin/open-platform/auth/callback");
         properties.setFrontendCallbackUrl("http://localhost:5173/admin/content/execution");
         properties.setRequiredScopes(List.of("video.create.bind"));
+        featureProperties = new DouyinFeatureProperties();
+        clientProperties = new DouyinClientProperties();
         douyinClient = mock(DouyinClient.class);
         selfMediaAccountMapper = mock(SelfMediaAccountMapper.class);
         cipherService = mock(MpCredentialCipherService.class);
@@ -61,6 +67,8 @@ class DouyinAuthorizationServiceTest {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         service = new DouyinAuthorizationService(
                 properties,
+                featureProperties,
+                clientProperties,
                 douyinClient,
                 selfMediaAccountMapper,
                 cipherService,

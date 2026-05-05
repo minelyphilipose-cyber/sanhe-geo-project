@@ -3,12 +3,15 @@ package com.huanjing.geo.module.content.douyin;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.config.DouyinClientProperties;
+import com.huanjing.geo.module.content.config.DouyinFeatureProperties;
 import com.huanjing.geo.module.content.config.DouyinOpenPlatformProperties;
 import com.huanjing.geo.module.content.douyin.client.DouyinClient;
 import com.huanjing.geo.module.content.douyin.client.dto.DouyinCodeTokenRequest;
 import com.huanjing.geo.module.content.douyin.client.dto.DouyinTokenResponse;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
+import com.huanjing.geo.module.content.vo.DouyinCapabilityVO;
 import com.huanjing.geo.module.content.vo.DouyinAuthUrlVO;
 import com.huanjing.geo.module.system.service.MpCredentialCipherService;
 import lombok.RequiredArgsConstructor;
@@ -38,6 +41,8 @@ public class DouyinAuthorizationService {
     private static final Duration STATE_TTL = Duration.ofMinutes(10);
 
     private final DouyinOpenPlatformProperties properties;
+    private final DouyinFeatureProperties featureProperties;
+    private final DouyinClientProperties clientProperties;
     private final DouyinClient douyinClient;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final MpCredentialCipherService cipherService;
@@ -57,6 +62,16 @@ public class DouyinAuthorizationService {
                 .build(true)
                 .toUriString();
         return new DouyinAuthUrlVO(authUrl, (int) STATE_TTL.toSeconds());
+    }
+
+    public DouyinCapabilityVO capability() {
+        boolean enabled = featureProperties.getImageText() != null
+                && featureProperties.getImageText().isEnabled();
+        return new DouyinCapabilityVO(
+                enabled,
+                clientProperties.getMode(),
+                enabled ? null : "feature flag disabled"
+        );
     }
 
     public String handleCallback(String code, String state) {

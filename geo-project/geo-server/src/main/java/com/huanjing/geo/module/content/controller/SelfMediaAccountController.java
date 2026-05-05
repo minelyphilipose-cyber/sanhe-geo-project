@@ -3,6 +3,7 @@ package com.huanjing.geo.module.content.controller;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.content.service.SelfMediaAccountService;
 import com.huanjing.geo.module.content.vo.DouyinAuthUrlVO;
+import com.huanjing.geo.module.content.vo.DouyinCapabilityVO;
 import com.huanjing.geo.module.content.vo.SelfMediaAccountVO;
 import com.huanjing.geo.module.content.vo.WechatMpAuthUrlVO;
 import com.huanjing.geo.module.content.vo.WechatMpCapabilityVO;
@@ -28,6 +29,11 @@ public class SelfMediaAccountController {
     @GetMapping("/self-media-accounts/wechat/capability")
     public R<WechatMpCapabilityVO> capability() {
         return R.ok(selfMediaAccountService.capability());
+    }
+
+    @GetMapping("/self-media-accounts/douyin/capability")
+    public R<DouyinCapabilityVO> douyinCapability() {
+        return R.ok(douyinAuthorizationService.capability());
     }
 
     @GetMapping("/self-media-accounts/wechat/auth-url")
