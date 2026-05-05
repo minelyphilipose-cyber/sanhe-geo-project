@@ -19,9 +19,14 @@ import org.jsoup.Jsoup;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+/**
+ * Implements SiteAdapter only as transition compatibility. After self-media
+ * account abstraction and Douyin mock integration are complete, this adapter
+ * should keep only the SelfMediaAdapter role.
+ */
 @Component
 @RequiredArgsConstructor
-public class WechatMpAdapter implements SiteAdapter {
+public class WechatMpAdapter implements SiteAdapter, SelfMediaAdapter {
     public static final String PLATFORM = "wechat_mp";
 
     private final MarkdownToHtmlRenderer markdownRenderer;
@@ -43,7 +48,19 @@ public class WechatMpAdapter implements SiteAdapter {
     }
 
     @Override
+    public String platform() {
+        return PLATFORM;
+    }
+
+    @Override
     public ValidationResult validate(ArticleDraft article, String contentMarkdown, PublishSite site) {
+        return ValidationResult.pass();
+    }
+
+    @Override
+    public ValidationResult validate(ArticleDraft article,
+                                     String contentMarkdown,
+                                     TargetContext.SelfMediaTarget target) {
         return ValidationResult.pass();
     }
 
@@ -59,7 +76,14 @@ public class WechatMpAdapter implements SiteAdapter {
 
     @Override
     public SubmitResult submitToTarget(ArticleDraft article, String contentMarkdown, TargetContext target) {
-        TargetContext.MpAccountTarget mpTarget = requireTarget(target);
+        TargetContext.SelfMediaTarget mpTarget = requireTarget(target);
+        return submitToTarget(article, contentMarkdown, mpTarget);
+    }
+
+    @Override
+    public SubmitResult submitToTarget(ArticleDraft article,
+                                       String contentMarkdown,
+                                       TargetContext.SelfMediaTarget mpTarget) {
         MpAccount account = mpTarget.account();
         String requestPayload = null;
         try {
@@ -82,11 +106,17 @@ public class WechatMpAdapter implements SiteAdapter {
         }
     }
 
-    private TargetContext.MpAccountTarget requireTarget(TargetContext target) {
-        if (!(target instanceof TargetContext.MpAccountTarget mpTarget)) {
-            throw new IllegalArgumentException("WechatMpAdapter requires MpAccountTarget");
+    @Override
+    public ReviewStatusResult refreshReviewStatus(com.huanjing.geo.module.content.entity.DistributionTask task,
+                                                  MpAccount account) {
+        return ReviewStatusResult.notApplicable();
+    }
+
+    private TargetContext.SelfMediaTarget requireTarget(TargetContext target) {
+        if (target instanceof TargetContext.SelfMediaTarget mpTarget) {
+            return mpTarget;
         }
-        return mpTarget;
+        throw new IllegalArgumentException("WechatMpAdapter requires SelfMediaTarget");
     }
 
     private WechatMpClient.DraftArticle buildDraftArticle(ArticleDraft article,

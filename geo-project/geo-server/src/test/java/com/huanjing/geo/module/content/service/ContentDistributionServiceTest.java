@@ -3,11 +3,13 @@ package com.huanjing.geo.module.content.service;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
 import com.huanjing.geo.module.content.entity.BrandOfficialSite;
 import com.huanjing.geo.module.content.entity.DistributionTask;
+import com.huanjing.geo.module.content.entity.MpAccount;
 import com.huanjing.geo.module.content.entity.PackagePublishConfig;
 import com.huanjing.geo.module.content.entity.ProjectPublishQuota;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
@@ -18,7 +20,10 @@ import com.huanjing.geo.module.content.mapper.ProjectPublishQuotaMapper;
 import com.huanjing.geo.module.content.service.adapter.BrandGeoSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.FailureKind;
 import com.huanjing.geo.module.content.service.adapter.OfficialCmsSiteAdapter;
+import com.huanjing.geo.module.content.service.adapter.ReviewStatusResult;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaAdapter;
 import com.huanjing.geo.module.content.service.adapter.SubmitResult;
+import com.huanjing.geo.module.content.service.adapter.ValidationResult;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.service.BrandService;
@@ -66,6 +71,7 @@ class ContentDistributionServiceTest {
     private CurrentUserService currentUserService;
     private TestOfficialCmsSiteAdapter officialCmsSiteAdapter;
     private TestBrandGeoSiteAdapter brandGeoSiteAdapter;
+    private TestSelfMediaAdapter selfMediaAdapter;
     private BrandService brandService;
     private ProjectPublishQuotaService projectPublishQuotaService;
     private ContentDistributionService contentDistributionService;
@@ -85,6 +91,7 @@ class ContentDistributionServiceTest {
         currentUserService = mock(CurrentUserService.class);
         officialCmsSiteAdapter = new TestOfficialCmsSiteAdapter();
         brandGeoSiteAdapter = new TestBrandGeoSiteAdapter();
+        selfMediaAdapter = new TestSelfMediaAdapter();
         brandService = mock(BrandService.class);
         projectPublishQuotaService = mock(ProjectPublishQuotaService.class);
         contentDistributionService = new ContentDistributionService(
@@ -98,6 +105,7 @@ class ContentDistributionServiceTest {
                 currentUserService,
                 mock(SystemAlertService.class),
                 List.of(officialCmsSiteAdapter, brandGeoSiteAdapter),
+                List.of(selfMediaAdapter),
                 brandService,
                 projectPublishQuotaService
         );
@@ -298,6 +306,34 @@ class ContentDistributionServiceTest {
         verify(articleDraftMapper, never()).updateById(articleWithStatus("distributing"));
     }
 
+    @Test
+    void distributeTo_selfMedia_usesPlatformAdapterAndWritesMpAccountTargetKind() {
+        givenCommonData();
+        selfMediaAdapter.result = SubmitResult.success(200, "{}", "{\"media_id\":\"draft-1\"}", null, "draft-1");
+        when(distributionTaskMapper.selectById(300L)).thenReturn(task("submitted"));
+
+        DistributionTask result = contentDistributionService.distributeTo(1L, selfMediaTarget("wechat_mp"));
+
+        assertEquals("submitted", result.getStatus());
+        ArgumentCaptor<DistributionTask> inserted = ArgumentCaptor.forClass(DistributionTask.class);
+        verify(distributionTaskMapper).insert(inserted.capture());
+        assertEquals(DistributionTargetKind.MP_ACCOUNT, inserted.getValue().getTargetKind());
+        assertEquals("wechat_mp", inserted.getValue().getIntegrationMethod());
+        assertEquals(40L, inserted.getValue().getMpAccountId());
+        assertEquals("req-1", inserted.getValue().getRequestId());
+    }
+
+    @Test
+    void distributeTo_selfMedia_unregisteredPlatform_throws501() {
+        givenCommonData();
+
+        BizException ex = assertThrows(BizException.class,
+                () -> contentDistributionService.distributeTo(1L, selfMediaTarget("douyin")));
+
+        assertEquals(501, ex.getCode());
+        assertEquals("Self-media platform not implemented: douyin", ex.getMessage());
+    }
+
     private void givenCommonData() {
         SysUser operator = new SysUser();
         operator.setId(100L);
@@ -313,6 +349,7 @@ class ContentDistributionServiceTest {
         Project project = new Project();
         project.setId(20L);
         project.setPartnerId(200L);
+        project.setBrandId(30L);
         project.setPackageType("basic");
         when(projectMapper.selectById(20L)).thenReturn(project);
         PackagePublishConfig config = new PackagePublishConfig();
@@ -343,6 +380,15 @@ class ContentDistributionServiceTest {
         site.setBrandId(30L);
         site.setStatus(status);
         return new TargetContext.BrandOfficialSiteTarget(site);
+    }
+
+    private TargetContext.SelfMediaTarget selfMediaTarget(String platform) {
+        MpAccount account = new MpAccount();
+        account.setId(40L);
+        account.setBrandId(30L);
+        account.setPlatform(platform);
+        account.setStatus("active");
+        return new TargetContext.SelfMediaTarget(account, 50L, null, null, null, null, "req-1", null);
     }
 
     private void givenBrandGeoSite(String siteCode, String status) {
@@ -414,6 +460,30 @@ class ContentDistributionServiceTest {
                 throw new IllegalStateException("boom");
             }
             return result;
+        }
+    }
+
+    private static class TestSelfMediaAdapter implements SelfMediaAdapter {
+        private SubmitResult result;
+
+        @Override
+        public String platform() {
+            return "wechat_mp";
+        }
+
+        @Override
+        public ValidationResult validate(ArticleDraft article, String contentMarkdown, TargetContext.SelfMediaTarget target) {
+            return ValidationResult.pass();
+        }
+
+        @Override
+        public SubmitResult submitToTarget(ArticleDraft article, String contentMarkdown, TargetContext.SelfMediaTarget target) {
+            return result;
+        }
+
+        @Override
+        public ReviewStatusResult refreshReviewStatus(DistributionTask task, MpAccount account) {
+            return ReviewStatusResult.notApplicable();
         }
     }
 }

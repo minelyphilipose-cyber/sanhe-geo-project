@@ -4,6 +4,7 @@ import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.dto.DistributionAttemptVO;
 import com.huanjing.geo.module.content.dto.PublishQuotaVO;
@@ -15,9 +16,9 @@ import com.huanjing.geo.module.content.service.adapter.BrandGeoSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.FailureKind;
 import com.huanjing.geo.module.content.service.adapter.OfficialCmsSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.SiteAdapter;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaAdapter;
 import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import com.huanjing.geo.module.content.service.adapter.ValidationResult;
-import com.huanjing.geo.module.content.service.adapter.WechatMpAdapter;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.service.BrandService;
 import com.huanjing.geo.module.project.entity.Project;
@@ -63,6 +64,7 @@ public class ContentDistributionService {
     private final CurrentUserService currentUserService;
     private final SystemAlertService systemAlertService;
     private final List<SiteAdapter> siteAdapters;
+    private final List<SelfMediaAdapter> selfMediaAdapters;
     private final BrandService brandService;
     private final ProjectPublishQuotaService projectPublishQuotaService;
 
@@ -133,8 +135,8 @@ public class ContentDistributionService {
         if (target instanceof TargetContext.SiteTarget) {
             throw new BizException(400, "Use distribute(articleId, siteId) for legacy site targets");
         }
-        if (target instanceof TargetContext.MpAccountTarget mpTarget) {
-            return distributeToMpAccount(article, project, operator, mpTarget);
+        if (target instanceof TargetContext.SelfMediaTarget selfMediaTarget) {
+            return distributeToMpAccount(article, project, operator, selfMediaTarget);
         }
         throw new IllegalArgumentException("Unsupported TargetContext type: " + target.getClass().getSimpleName());
     }
@@ -471,7 +473,7 @@ public class ContentDistributionService {
     private DistributionTask distributeToMpAccount(ArticleDraft article,
                                                    Project project,
                                                    SysUser operator,
-                                                   TargetContext.MpAccountTarget mpTarget) {
+                                                   TargetContext.SelfMediaTarget mpTarget) {
         MpAccount account = mpTarget.account();
         if (account == null || account.getId() == null) {
             throw new BizException(400, "mp account missing");
@@ -511,7 +513,7 @@ public class ContentDistributionService {
         article.setStatus("distributing");
         articleDraftMapper.updateById(article);
 
-        WechatMpAdapter adapter = resolveWechatMpAdapter();
+        SelfMediaAdapter adapter = resolveSelfMediaAdapter(account.getPlatform());
         SubmitResult submitResult;
         try {
             submitResult = adapter.submitToTarget(article, content, mpTarget);
@@ -580,7 +582,7 @@ public class ContentDistributionService {
         task.setArticleId(article.getId());
         task.setProjectId(article.getProjectId());
         task.setSiteId(null);
-        task.setTargetKind("brand_official_site");
+        task.setTargetKind(DistributionTargetKind.BRAND_OFFICIAL_SITE);
         task.setBrandOfficialSiteId(site.getId());
         task.setAttemptNo(maxAttempt + 1);
         task.setStatus("submitting");
@@ -603,7 +605,7 @@ public class ContentDistributionService {
         task.setArticleId(article.getId());
         task.setProjectId(article.getProjectId());
         task.setSiteId(null);
-        task.setTargetKind(BrandGeoSiteAdapter.PLATFORM);
+        task.setTargetKind(DistributionTargetKind.BRAND_GEO_SITE);
         task.setTargetBrandId(brand.getId());
         task.setAttemptNo(maxAttempt + 1);
         task.setStatus("submitting");
@@ -626,11 +628,11 @@ public class ContentDistributionService {
         task.setArticleId(article.getId());
         task.setProjectId(article.getProjectId());
         task.setSiteId(null);
-        task.setTargetKind(WechatMpAdapter.PLATFORM);
+        task.setTargetKind(DistributionTargetKind.MP_ACCOUNT);
         task.setMpAccountId(account.getId());
         task.setAttemptNo(maxAttempt + 1);
         task.setStatus("submitting");
-        task.setIntegrationMethod(WechatMpAdapter.PLATFORM);
+        task.setIntegrationMethod(account.getPlatform());
         task.setRetryCount(0);
         task.setOperatorId(operatorId);
         task.setRequestId(requestId);
@@ -756,13 +758,14 @@ public class ContentDistributionService {
                 .orElseThrow(() -> new BizException(500, "BrandGeoSiteAdapter not registered"));
     }
 
-    private WechatMpAdapter resolveWechatMpAdapter() {
-        return siteAdapters.stream()
-                .filter(adapter -> adapter.supportsPlatform(WechatMpAdapter.PLATFORM))
-                .filter(WechatMpAdapter.class::isInstance)
-                .map(WechatMpAdapter.class::cast)
+    private SelfMediaAdapter resolveSelfMediaAdapter(String platform) {
+        if (!StringUtils.hasText(platform)) {
+            throw new BizException(400, "Missing self-media platform");
+        }
+        return selfMediaAdapters.stream()
+                .filter(adapter -> adapter.supportsPlatform(platform))
                 .findFirst()
-                .orElseThrow(() -> new BizException(500, "WechatMpAdapter not registered"));
+                .orElseThrow(() -> new BizException(501, "Self-media platform not implemented: " + platform));
     }
 
     private QuotaContext validateQuota(Project project, PackagePublishConfig config) {

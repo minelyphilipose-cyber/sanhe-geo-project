@@ -52,8 +52,17 @@ public class ContentDistributionController {
         if (account == null || !"wechat_mp".equalsIgnoreCase(account.getPlatform())) {
             throw new BizException(404, "Mp account not found");
         }
-        TargetContext.MpAccountTarget target =
-                new TargetContext.MpAccountTarget(account, req.getCoverMaterialId(), req.getRequestId());
+        TargetContext.SelfMediaTarget target =
+                new TargetContext.SelfMediaTarget(
+                        account,
+                        req.getCoverMaterialId(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        req.getRequestId(),
+                        null
+                );
         return R.ok(contentDistributionService.distributeTo(articleId, target));
     }
 

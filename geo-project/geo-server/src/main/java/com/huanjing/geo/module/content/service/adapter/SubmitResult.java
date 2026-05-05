@@ -11,6 +11,9 @@ public class SubmitResult {
     private String errorMessage;
     private String publishedUrl;
     private String platformArticleId;
+    private String externalStatus;
+    private String reviewStatus;
+    private String reviewFeedback;
     private String failureKind;
     private boolean retryable;
 
@@ -54,5 +57,13 @@ public class SubmitResult {
         result.failureKind = failureKind;
         result.retryable = retryable;
         return result;
+    }
+
+    public void setReviewStatus(ReviewStatusResult.ReviewStatus status) {
+        this.reviewStatus = toStorageValue(status);
+    }
+
+    public static String toStorageValue(ReviewStatusResult.ReviewStatus status) {
+        return status == null ? null : status.name().toLowerCase();
     }
 }
