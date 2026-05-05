@@ -44,7 +44,7 @@ public class SelfMediaAccountService {
     public List<SelfMediaAccountVO> listByBrand(Long brandId) {
         return selfMediaAccountMapper.selectList(new LambdaQueryWrapper<SelfMediaAccount>()
                         .eq(SelfMediaAccount::getBrandId, brandId)
-                        .eq(SelfMediaAccount::getPlatform, "wechat_mp")
+                        .orderByAsc(SelfMediaAccount::getPlatform)
                         .orderByDesc(SelfMediaAccount::getUpdatedAt))
                 .stream()
                 .map(SelfMediaAccountVO::from)
