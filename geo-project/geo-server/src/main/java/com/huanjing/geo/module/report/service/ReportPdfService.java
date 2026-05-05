@@ -16,10 +16,15 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.Arrays;
+import java.util.List;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ReportPdfService {
+
+    private static final String CHROMIUM_LAUNCH_ARGS_ENV = "PLAYWRIGHT_CHROMIUM_LAUNCH_ARGS";
 
     private final MinioStorageService minioStorageService;
 
@@ -42,7 +47,9 @@ public class ReportPdfService {
         String base = reportWebBaseUrl.endsWith("/") ? reportWebBaseUrl.substring(0, reportWebBaseUrl.length() - 1) : reportWebBaseUrl;
         String renderUrl = base + "/r/" + shareToken + "?print=1";
         try (Playwright playwright = Playwright.create();
-             Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions().setHeadless(true));
+             Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
+                     .setHeadless(true)
+                     .setArgs(chromiumLaunchArgs()));
              BrowserContext context = browser.newContext(
                      new Browser.NewContextOptions()
                              .setLocale("zh-CN")
@@ -72,5 +79,15 @@ public class ReportPdfService {
 
     public String buildPdfObjectKey(Report report) {
         return String.format("reports/%d/%s/latest.pdf", report.getProjectId(), report.getReportType());
+    }
+
+    private List<String> chromiumLaunchArgs() {
+        String raw = System.getenv(CHROMIUM_LAUNCH_ARGS_ENV);
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(raw.trim().split("\\s+"))
+                .filter(arg -> !arg.isBlank())
+                .toList();
     }
 }

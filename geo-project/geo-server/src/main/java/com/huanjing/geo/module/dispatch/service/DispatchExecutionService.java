@@ -75,6 +75,7 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.function.Supplier;
 
 @Slf4j
 @Service
@@ -84,6 +85,7 @@ public class DispatchExecutionService {
     private static final Pattern URL_QUERY_PATTERN = Pattern.compile("(https?://[^\\s?#]+)(\\?[^\\s#]*)");
     private static final Pattern TOKEN_PATTERN = Pattern.compile("(?i)(api[_-]?key|token)\\s*[:=]\\s*([^\\s,;]+)");
     private static final Pattern PHONE_TEXT_PATTERN = Pattern.compile("(\\+?\\d[\\d\\-\\s()]{5,}\\d)");
+    private static final int DB_TRANSIENT_RETRY_DELAY_MS = 200;
 
     private final ProjectPlatformBindingMapper projectPlatformBindingMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
@@ -881,41 +883,87 @@ public class DispatchExecutionService {
     }
 
     private void upsertPollResult(PollResult result) {
-        LambdaQueryWrapper<PollResult> wrapper = new LambdaQueryWrapper<PollResult>()
-                .eq(PollResult::getProjectId, result.getProjectId())
-                .eq(PollResult::getPlatformId, result.getPlatformId())
-                .eq(PollResult::getBatchDate, result.getBatchDate())
-                .eq(PollResult::getBatchNo, result.getBatchNo())
-                .last("LIMIT 1");
-        if (result.getKeywordResultId() != null) {
-            wrapper.eq(PollResult::getKeywordResultId, result.getKeywordResultId());
-        } else {
-            wrapper.eq(PollResult::getQuestionId, result.getQuestionId());
-        }
-        PollResult existing = pollResultMapper.selectOne(wrapper);
-        if (existing == null) {
-            pollResultMapper.insert(result);
-            return;
-        }
-        result.setId(existing.getId());
-        pollResultMapper.updateById(result);
+        withTransientDbRetry("upsert poll result", () -> {
+            LambdaQueryWrapper<PollResult> wrapper = new LambdaQueryWrapper<PollResult>()
+                    .eq(PollResult::getProjectId, result.getProjectId())
+                    .eq(PollResult::getPlatformId, result.getPlatformId())
+                    .eq(PollResult::getBatchDate, result.getBatchDate())
+                    .eq(PollResult::getBatchNo, result.getBatchNo())
+                    .last("LIMIT 1");
+            if (result.getKeywordResultId() != null) {
+                wrapper.eq(PollResult::getKeywordResultId, result.getKeywordResultId());
+            } else {
+                wrapper.eq(PollResult::getQuestionId, result.getQuestionId());
+            }
+            PollResult existing = pollResultMapper.selectOne(wrapper);
+            if (existing == null) {
+                pollResultMapper.insert(result);
+                return null;
+            }
+            result.setId(existing.getId());
+            pollResultMapper.updateById(result);
+            return null;
+        });
     }
 
     private void upsertPollStat(PollDailyStat stat) {
-        PollDailyStat existing = pollDailyStatMapper.selectOne(
-                new LambdaQueryWrapper<PollDailyStat>()
-                        .eq(PollDailyStat::getProjectId, stat.getProjectId())
-                        .eq(PollDailyStat::getPlatformId, stat.getPlatformId())
-                        .eq(PollDailyStat::getBatchDate, stat.getBatchDate())
-                        .eq(PollDailyStat::getBatchNo, stat.getBatchNo())
-                        .last("LIMIT 1")
-        );
-        if (existing == null) {
-            pollDailyStatMapper.insert(stat);
-            return;
+        withTransientDbRetry("upsert poll stat", () -> {
+            PollDailyStat existing = pollDailyStatMapper.selectOne(
+                    new LambdaQueryWrapper<PollDailyStat>()
+                            .eq(PollDailyStat::getProjectId, stat.getProjectId())
+                            .eq(PollDailyStat::getPlatformId, stat.getPlatformId())
+                            .eq(PollDailyStat::getBatchDate, stat.getBatchDate())
+                            .eq(PollDailyStat::getBatchNo, stat.getBatchNo())
+                            .last("LIMIT 1")
+            );
+            if (existing == null) {
+                pollDailyStatMapper.insert(stat);
+                return null;
+            }
+            stat.setId(existing.getId());
+            pollDailyStatMapper.updateById(stat);
+            return null;
+        });
+    }
+
+    private <T> T withTransientDbRetry(String operation, Supplier<T> action) {
+        try {
+            return action.get();
+        } catch (RuntimeException ex) {
+            if (!isTransientConnectionFailure(ex)) {
+                throw ex;
+            }
+            log.warn("Transient DB connection failure during {}, retrying once: {}", operation, ex.getMessage());
+            sleepBeforeDbRetry();
+            return action.get();
         }
-        stat.setId(existing.getId());
-        pollDailyStatMapper.updateById(stat);
+    }
+
+    private boolean isTransientConnectionFailure(Throwable ex) {
+        Throwable current = ex;
+        for (int depth = 0; current != null && depth < 8; depth++) {
+            String className = current.getClass().getName();
+            if (className.contains("CommunicationsException")
+                    || className.contains("SQLTransientConnectionException")
+                    || className.contains("SQLNonTransientConnectionException")) {
+                return true;
+            }
+            String message = current.getMessage();
+            if (message != null && message.contains("Communications link failure")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private void sleepBeforeDbRetry() {
+        try {
+            Thread.sleep(DB_TRANSIENT_RETRY_DELAY_MS);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted before DB retry", ex);
+        }
     }
 
     private PollBatch ensureBatch(DispatchTask task, Project project, LocalDate batchDate, int batchNo, int totalQuestions, int totalPlatforms) {

@@ -14,11 +14,15 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.List;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class PresaleBrowserManager {
+
+    private static final String CHROMIUM_LAUNCH_ARGS_ENV = "PLAYWRIGHT_CHROMIUM_LAUNCH_ARGS";
 
     private final PresaleExportProperties properties;
 
@@ -65,7 +69,8 @@ public class PresaleBrowserManager {
             closeQuietly();
             playwright = Playwright.create();
             browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
-                    .setHeadless(properties.getBrowser().isHeadless()));
+                    .setHeadless(properties.getBrowser().isHeadless())
+                    .setArgs(chromiumLaunchArgs()));
             status = BrowserStatus.READY;
             lastError = null;
             lastStartedAt = Instant.now();
@@ -103,5 +108,15 @@ public class PresaleBrowserManager {
             }
             playwright = null;
         }
+    }
+
+    private List<String> chromiumLaunchArgs() {
+        String raw = System.getenv(CHROMIUM_LAUNCH_ARGS_ENV);
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(raw.trim().split("\\s+"))
+                .filter(arg -> !arg.isBlank())
+                .toList();
     }
 }

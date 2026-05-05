@@ -12,6 +12,12 @@ spring:
     multipart:
       max-file-size: 10MB
       max-request-size: 10MB
+  datasource:
+    hikari:
+      max-lifetime: ${DB_HIKARI_MAX_LIFETIME_MS:600000}
+      idle-timeout: ${DB_HIKARI_IDLE_TIMEOUT_MS:300000}
+      keepalive-time: ${DB_HIKARI_KEEPALIVE_TIME_MS:30000}
+      validation-timeout: ${DB_HIKARI_VALIDATION_TIMEOUT_MS:5000}
 
   # Jackson
   jackson:

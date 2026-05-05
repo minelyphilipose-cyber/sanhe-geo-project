@@ -11,7 +11,6 @@ import com.huanjing.geo.module.presale.dto.request.LlmPromptQuestionGenerateRequ
 import com.huanjing.geo.module.presale.dto.request.LlmPromptQuestionPlanRequest;
 import com.huanjing.geo.module.presale.dto.response.LlmPromptQuestionDraftVO;
 import com.huanjing.geo.module.presale.dto.response.LlmPromptQuestionGenerateVO;
-import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmHttpClient;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -37,7 +36,9 @@ import java.util.Set;
 @Slf4j
 public class PresaleLlmPromptQuestionService {
 
-    private static final int TIMEOUT_MS = 30_000;
+    private static final int CONNECT_TIMEOUT_MS = 30_000;
+    private static final int REQUEST_TIMEOUT_MS = 60_000;
+    private static final int ERROR_BODY_SNIPPET_LENGTH = 300;
 
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
@@ -141,6 +142,8 @@ public class PresaleLlmPromptQuestionService {
         String rawText;
         try {
             rawText = invokeOnce(renderUserPrompt(req, existing, missingCounts));
+        } catch (BizException ex) {
+            throw ex;
         } catch (Exception ex) {
             log.error("LLM question generation request failed", ex);
             throw new BizException(400, "LLM 问题生成失败，请稍后重试");
@@ -176,8 +179,34 @@ public class PresaleLlmPromptQuestionService {
     }
 
     private String invokeOnce(String userPrompt) throws Exception {
-        AiPlatformConfig config = requirePlatformConfig();
-        String modelId = StringUtils.hasText(config.getLowModelId()) ? config.getLowModelId().trim() : config.getModelId();
+        List<AiPlatformConfig> configs = requirePlatformConfigs();
+        Exception lastError = null;
+        boolean quotaFailure = false;
+        for (AiPlatformConfig config : configs) {
+            try {
+                return invokePlatform(config, userPrompt);
+            } catch (LlmQuestionProviderException ex) {
+                lastError = ex;
+                quotaFailure = quotaFailure || ex.isQuotaFailure();
+                log.warn("LLM question generation provider failed, platformCode={}, statusCode={}, body={}",
+                        ex.platformCode, ex.statusCode, ex.bodySnippet);
+            } catch (Exception ex) {
+                lastError = ex;
+                log.warn("LLM question generation provider failed, platformCode={}, msg={}",
+                        config.getPlatformCode(), ex.getMessage());
+            }
+        }
+        if (quotaFailure) {
+            throw new BizException(400, "LLM 问题生成失败：AI 平台余额或额度不足，请检查平台账户");
+        }
+        if (lastError != null) {
+            throw lastError;
+        }
+        throw new BizException(400, "LLM 问题生成失败，请检查 AI 平台配置");
+    }
+
+    private String invokePlatform(AiPlatformConfig config, String userPrompt) throws Exception {
+        String modelId = config.getLowModelId().trim();
         String apiKey = platformCredentialService.resolveApiKey(
                 config.getPlatformCode(), config.getPrimaryKeyRef(), config.getApiKey()
         );
@@ -202,27 +231,44 @@ public class PresaleLlmPromptQuestionService {
                 normalizeChatCompletionsUrl(config.getApiUrl()),
                 headers,
                 objectMapper.writeValueAsString(payload),
-                TIMEOUT_MS,
-                TIMEOUT_MS
+                CONNECT_TIMEOUT_MS,
+                REQUEST_TIMEOUT_MS
         );
         if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IllegalStateException("HTTP " + response.statusCode());
+            throw new LlmQuestionProviderException(
+                    config.getPlatformCode(),
+                    response.statusCode(),
+                    safeSnippet(response.body())
+            );
         }
         return extractText(response.body());
     }
 
-    private AiPlatformConfig requirePlatformConfig() {
-        AiPlatformConfig config = aiPlatformConfigMapper.selectOne(
-                PresalePlatformConfigQueries.presaleEnabledWrapper().last("LIMIT 1")
+    private List<AiPlatformConfig> requirePlatformConfigs() {
+        List<AiPlatformConfig> configs = aiPlatformConfigMapper.selectList(
+                new LambdaQueryWrapper<AiPlatformConfig>()
+                        .eq(AiPlatformConfig::getEnabled, true)
+                        .eq(AiPlatformConfig::getEnabledForPresale, true)
+                        .isNotNull(AiPlatformConfig::getLowModelId)
+                        .apply("TRIM(low_model_id) <> ''")
+                        .orderByAsc(AiPlatformConfig::getPlatformCode)
         );
-        if (config == null || !StringUtils.hasText(config.getApiUrl())) {
+        if (configs == null || configs.isEmpty()) {
             throw new BizException(400, "LLM 问题生成失败，请检查 AI 平台配置");
         }
-        String modelId = StringUtils.hasText(config.getLowModelId()) ? config.getLowModelId() : config.getModelId();
-        if (!StringUtils.hasText(modelId)) {
+        List<AiPlatformConfig> valid = new ArrayList<>();
+        for (AiPlatformConfig config : configs) {
+            if (config == null || !StringUtils.hasText(config.getApiUrl())) {
+                continue;
+            }
+            if (StringUtils.hasText(config.getLowModelId())) {
+                valid.add(config);
+            }
+        }
+        if (valid.isEmpty()) {
             throw new BizException(400, "LLM 问题生成失败，请检查 AI 平台模型配置");
         }
-        return config;
+        return valid;
     }
 
     private String renderUserPrompt(LlmPromptQuestionGenerateRequest req,
@@ -424,5 +470,32 @@ public class PresaleLlmPromptQuestionService {
 
     private String safe(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private String safeSnippet(String text) {
+        if (!StringUtils.hasText(text)) {
+            return "";
+        }
+        String trimmed = text.trim();
+        return trimmed.length() <= ERROR_BODY_SNIPPET_LENGTH
+                ? trimmed
+                : trimmed.substring(0, ERROR_BODY_SNIPPET_LENGTH);
+    }
+
+    private static final class LlmQuestionProviderException extends Exception {
+        private final String platformCode;
+        private final int statusCode;
+        private final String bodySnippet;
+
+        private LlmQuestionProviderException(String platformCode, int statusCode, String bodySnippet) {
+            super("HTTP " + statusCode + (StringUtils.hasText(bodySnippet) ? ": " + bodySnippet : ""));
+            this.platformCode = platformCode;
+            this.statusCode = statusCode;
+            this.bodySnippet = bodySnippet;
+        }
+
+        private boolean isQuotaFailure() {
+            return statusCode == 402 || statusCode == 429;
+        }
     }
 }

@@ -40,8 +40,10 @@ public final class HttpClientUtil {
                                      int requestTimeoutMs) throws Exception {
         HttpClient client = clientByTimeout(connectTimeoutMs);
         HttpRequest.Builder builder = HttpRequest.newBuilder()
-                .uri(URI.create(url))
-                .timeout(Duration.ofMillis(Math.max(requestTimeoutMs, 1000)));
+                .uri(URI.create(url));
+        if (requestTimeoutMs > 0) {
+            builder.timeout(Duration.ofMillis(Math.max(requestTimeoutMs, 1000)));
+        }
 
         if (headers != null) {
             for (Map.Entry<String, String> entry : headers.entrySet()) {

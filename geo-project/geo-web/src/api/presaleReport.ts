@@ -292,7 +292,8 @@ export function generateLlmPromptQuestions(data: LlmPromptQuestionGenerateReques
   return unwrap(
     request.post<R<LlmPromptQuestionGenerateVO>>(
       '/presale/reports/llm-prompt-questions/generate',
-      data
+      data,
+      { timeout: 60000 }
     )
   )
 }
