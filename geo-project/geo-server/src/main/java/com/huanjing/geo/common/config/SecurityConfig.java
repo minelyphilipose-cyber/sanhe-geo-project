@@ -60,6 +60,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/wechat/open-platform/auth/callback").permitAll()
                 .requestMatchers("/api/wechat/open-platform/events/**").permitAll()
                 .requestMatchers("/api/wechat/open-platform/messages/**").permitAll()
+                .requestMatchers("/api/douyin/open-platform/auth/callback").permitAll()
                 .requestMatchers("/doc.html", "/swagger-ui/**", "/v3/api-docs/**", "/webjars/**").permitAll()
                 .requestMatchers("/actuator/**").permitAll()
                 .requestMatchers(HttpMethod.OPTIONS).permitAll()

@@ -2,9 +2,11 @@ package com.huanjing.geo.module.content.controller;
 
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.content.service.SelfMediaAccountService;
+import com.huanjing.geo.module.content.vo.DouyinAuthUrlVO;
 import com.huanjing.geo.module.content.vo.SelfMediaAccountVO;
 import com.huanjing.geo.module.content.vo.WechatMpAuthUrlVO;
 import com.huanjing.geo.module.content.vo.WechatMpCapabilityVO;
+import com.huanjing.geo.module.content.douyin.DouyinAuthorizationService;
 import com.huanjing.geo.module.content.wechat.WechatMpAuthorizationService;
 import com.huanjing.geo.module.customer.service.BrandService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -21,6 +23,7 @@ public class SelfMediaAccountController {
     private final SelfMediaAccountService selfMediaAccountService;
     private final BrandService brandService;
     private final WechatMpAuthorizationService authorizationService;
+    private final DouyinAuthorizationService douyinAuthorizationService;
 
     @GetMapping("/self-media-accounts/wechat/capability")
     public R<WechatMpCapabilityVO> capability() {
@@ -32,6 +35,13 @@ public class SelfMediaAccountController {
                                         @RequestParam(required = false) Long redirectArticleId) {
         brandService.requireBrandWithAccess(brandId, true);
         return R.ok(authorizationService.buildAuthUrl(brandId, redirectArticleId));
+    }
+
+    @GetMapping("/self-media-accounts/douyin/auth-url")
+    public R<DouyinAuthUrlVO> douyinAuthUrl(@RequestParam Long brandId,
+                                            @RequestParam(required = false) Long redirectArticleId) {
+        brandService.requireBrandWithAccess(brandId, true);
+        return R.ok(douyinAuthorizationService.buildAuthUrl(brandId, redirectArticleId));
     }
 
     @GetMapping("/brands/{brandId}/self-media-accounts")
