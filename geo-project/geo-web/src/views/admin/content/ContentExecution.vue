@@ -208,17 +208,17 @@
           </button>
         </div>
 
-        <div v-if="wechatAccounts.length" class="mp-account-list">
-          <div v-for="account in wechatAccounts" :key="account.id" class="mp-account-row">
-            <div class="mp-account-main">
-              <div class="mp-account-title">{{ account.accountName }}</div>
-              <div class="mp-account-meta">{{ account.authorizerAppid }}</div>
+        <div v-if="wechatAccounts.length" class="self-media-account-list">
+          <div v-for="account in wechatAccounts" :key="account.id" class="self-media-account-row">
+            <div class="self-media-account-main">
+              <div class="self-media-account-title">{{ account.accountName }}</div>
+              <div class="self-media-account-meta">{{ account.platformAccountId }}</div>
             </div>
-            <el-tag size="small" :type="mpAccountStatusTag(account.status)">{{ mpAccountStatusLabel(account.status) }}</el-tag>
+            <el-tag size="small" :type="selfMediaAccountStatusTag(account.status)">{{ selfMediaAccountStatusLabel(account.status) }}</el-tag>
             <el-button
               v-if="account.status === 'active'"
               size="small"
-              :loading="checkingMpAccountId === account.id"
+              :loading="checkingSelfMediaAccountId === account.id"
               @click="checkWechatAccount(account.id)"
             >
               检测登录
@@ -234,7 +234,7 @@
           </div>
         </div>
 
-        <div v-if="selectedMpAccountId" class="cover-picker">
+        <div v-if="selectedSelfMediaAccountId" class="cover-picker">
           <div class="cover-picker-header">
             <span>选择公众号封面</span>
             <el-tag size="small" type="info">{{ imageMaterials.length }} 张图片</el-tag>
@@ -258,9 +258,9 @@
       <template #footer>
         <el-button @click="mediaDistributeVisible = false">关闭</el-button>
         <el-button
-          v-if="selectedMpAccountId"
+          v-if="selectedSelfMediaAccountId"
           type="primary"
-          :loading="mpSubmitting"
+          :loading="selfMediaSubmitting"
           :disabled="!selectedCoverMaterialId"
           @click="submitWechatDraft"
         >
@@ -303,15 +303,15 @@ import { ElMessage } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
-import type { ArticleDetailResponse, ArticleDraft, BrandMaterial, MpAccount, RecommendedSite, WechatMpCapability } from '@/types'
+import type { ArticleDetailResponse, ArticleDraft, BrandMaterial, SelfMediaAccount, RecommendedSite, WechatMpCapability } from '@/types'
 import {
-  checkMpAccountAuth,
+  checkSelfMediaAccountAuth,
   distributeContentArticle,
   distributeContentArticleToGeoSite,
-  distributeContentArticleToMpAccount,
+  distributeContentArticleToSelfMediaAccount,
   getContentArticleDetail,
   getContentArticles,
-  getMpAccountsByBrand,
+  getSelfMediaAccountsByBrand,
   getRecommendedSites,
   getWechatMpAuthUrl,
   getWechatMpCapability,
@@ -374,12 +374,12 @@ const mediaDistributeVisible = ref(false)
 const mediaDistributeArticleId = ref<number | null>(null)
 const mediaDistributeBrandId = ref<number | null>(null)
 const wechatCapability = ref<WechatMpCapability | null>(null)
-const wechatAccounts = ref<MpAccount[]>([])
-const checkingMpAccountId = ref<number | null>(null)
+const wechatAccounts = ref<SelfMediaAccount[]>([])
+const checkingSelfMediaAccountId = ref<number | null>(null)
 const brandMaterials = ref<BrandMaterial[]>([])
-const selectedMpAccountId = ref<number | null>(null)
+const selectedSelfMediaAccountId = ref<number | null>(null)
 const selectedCoverMaterialId = ref<number | null>(null)
-const mpSubmitting = ref(false)
+const selfMediaSubmitting = ref(false)
 
 const publishVisible = ref(false)
 const publishForm = reactive({
@@ -580,7 +580,7 @@ async function openMediaDistribute(row: ArticleDraft) {
   mediaDistributeBrandId.value = null
   wechatAccounts.value = []
   brandMaterials.value = []
-  selectedMpAccountId.value = null
+  selectedSelfMediaAccountId.value = null
   selectedCoverMaterialId.value = null
   try {
     const [detailRes, capabilityRes] = await Promise.all([
@@ -595,7 +595,7 @@ async function openMediaDistribute(row: ArticleDraft) {
     mediaDistributeBrandId.value = brandId
     wechatCapability.value = capabilityRes.data.data
     const [accountRes, materialRes] = await Promise.all([
-      getMpAccountsByBrand(brandId),
+      getSelfMediaAccountsByBrand(brandId),
       getBrandMaterials(brandId),
     ])
     wechatAccounts.value = accountRes.data.data || []
@@ -629,20 +629,20 @@ async function handleWechatPlatformClick() {
   }
 }
 
-function startWechatDraft(account: MpAccount) {
-  selectedMpAccountId.value = account.id
+function startWechatDraft(account: SelfMediaAccount) {
+  selectedSelfMediaAccountId.value = account.id
   selectedCoverMaterialId.value = imageMaterials.value[0]?.id || null
 }
 
 async function submitWechatDraft() {
-  if (!mediaDistributeArticleId.value || !selectedMpAccountId.value || !selectedCoverMaterialId.value) {
+  if (!mediaDistributeArticleId.value || !selectedSelfMediaAccountId.value || !selectedCoverMaterialId.value) {
     ElMessage.warning('请选择公众号和封面图片')
     return
   }
-  mpSubmitting.value = true
+  selfMediaSubmitting.value = true
   try {
-    const result = await distributeContentArticleToMpAccount(mediaDistributeArticleId.value, {
-      mpAccountId: selectedMpAccountId.value,
+    const result = await distributeContentArticleToSelfMediaAccount(mediaDistributeArticleId.value, {
+      selfMediaAccountId: selectedSelfMediaAccountId.value,
       coverMaterialId: selectedCoverMaterialId.value,
       requestId: createRequestId(),
     })
@@ -655,23 +655,23 @@ async function submitWechatDraft() {
     }
     ElMessage.error(task.errorMessage || '保存公众号草稿失败')
   } finally {
-    mpSubmitting.value = false
+    selfMediaSubmitting.value = false
   }
 }
 
 async function checkWechatAccount(id: number) {
-  checkingMpAccountId.value = id
+  checkingSelfMediaAccountId.value = id
   try {
-    const { data } = await checkMpAccountAuth(id)
+    const { data } = await checkSelfMediaAccountAuth(id)
     const next = data.data
     wechatAccounts.value = wechatAccounts.value.map((account) => account.id === id ? next : account)
     ElMessage.success(next.status === 'active' ? '登录状态有效' : '登录状态已更新')
   } finally {
-    checkingMpAccountId.value = null
+    checkingSelfMediaAccountId.value = null
   }
 }
 
-function mpAccountStatusLabel(status: string) {
+function selfMediaAccountStatusLabel(status: string) {
   const map: Record<string, string> = {
     active: '已登录',
     expired: '已过期',
@@ -681,7 +681,7 @@ function mpAccountStatusLabel(status: string) {
   return map[status] || status
 }
 
-function mpAccountStatusTag(status: string): 'success' | 'warning' | 'danger' | 'info' {
+function selfMediaAccountStatusTag(status: string): 'success' | 'warning' | 'danger' | 'info' {
   if (status === 'active') return 'success'
   if (status === 'expired') return 'warning'
   if (status === 'revoked' || status === 'disabled') return 'danger'
@@ -692,7 +692,7 @@ function createRequestId() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID()
   }
-  return `mp_${Date.now()}_${Math.random().toString(16).slice(2)}`
+  return `self_media_${Date.now()}_${Math.random().toString(16).slice(2)}`
 }
 
 async function publishToGeoSite(row: ArticleDraft) {
@@ -1041,13 +1041,13 @@ function handleWechatAuthResult() {
   font-weight: 600;
 }
 
-.mp-account-list {
+.self-media-account-list {
   border: 1px solid #ebeef5;
   border-radius: 8px;
   overflow: hidden;
 }
 
-.mp-account-row {
+.self-media-account-row {
   min-height: 58px;
   padding: 10px 12px;
   display: grid;
@@ -1057,17 +1057,17 @@ function handleWechatAuthResult() {
   border-bottom: 1px solid #ebeef5;
 }
 
-.mp-account-row:last-child {
+.self-media-account-row:last-child {
   border-bottom: 0;
 }
 
-.mp-account-title {
+.self-media-account-title {
   font-size: 14px;
   font-weight: 600;
   color: var(--el-text-color-primary);
 }
 
-.mp-account-meta {
+.self-media-account-meta {
   margin-top: 2px;
   font-size: 12px;
   color: var(--el-text-color-secondary);

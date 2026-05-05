@@ -841,7 +841,7 @@ export interface DistributionTask {
   targetKind?: string | null
   targetBrandId?: number | null
   brandOfficialSiteId?: number | null
-  mpAccountId?: number | null
+  selfMediaAccountId?: number | null
   platformArticleId?: string | null
   failureKind?: string | null
   nextRetryAt?: string | null
@@ -866,13 +866,13 @@ export interface WechatMpAuthUrl {
   expiresIn: number
 }
 
-export interface MpAccount {
+export interface SelfMediaAccount {
   id: number
   brandId: number
   platform: 'wechat_mp' | string
   accountName: string
-  authorizerAppid: string
-  headImg?: string | null
+  platformAccountId: string
+  avatarUrl?: string | null
   qrcodeUrl?: string | null
   status: 'active' | 'expired' | 'revoked' | 'disabled' | string
   lastAuthCheckedAt?: string | null

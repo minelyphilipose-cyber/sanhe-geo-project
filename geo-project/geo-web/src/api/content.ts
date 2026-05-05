@@ -7,7 +7,7 @@ import type {
   PublishQuota,
   RecommendedSitesResponse,
   R,
-  MpAccount,
+  SelfMediaAccount,
   WechatMpAuthUrl,
   WechatMpCapability,
 } from '@/types'
@@ -86,25 +86,25 @@ export function getRecommendedSites(projectId: number) {
 }
 
 export function getWechatMpCapability() {
-  return request.get<R<WechatMpCapability>>('/content/mp-accounts/wechat/capability')
+  return request.get<R<WechatMpCapability>>('/content/self-media-accounts/wechat/capability')
 }
 
 export function getWechatMpAuthUrl(params: { brandId: number; redirectArticleId?: number }) {
-  return request.get<R<WechatMpAuthUrl>>('/content/mp-accounts/wechat/auth-url', { params })
+  return request.get<R<WechatMpAuthUrl>>('/content/self-media-accounts/wechat/auth-url', { params })
 }
 
-export function getMpAccountsByBrand(brandId: number) {
-  return request.get<R<MpAccount[]>>(`/content/brands/${brandId}/mp-accounts`)
+export function getSelfMediaAccountsByBrand(brandId: number) {
+  return request.get<R<SelfMediaAccount[]>>(`/content/brands/${brandId}/self-media-accounts`)
 }
 
-export function checkMpAccountAuth(id: number) {
-  return request.post<R<MpAccount>>(`/content/mp-accounts/${id}/check-auth`)
+export function checkSelfMediaAccountAuth(id: number) {
+  return request.post<R<SelfMediaAccount>>(`/content/self-media-accounts/${id}/check-auth`)
 }
 
-export function distributeContentArticleToMpAccount(articleId: number, data: {
-  mpAccountId: number
+export function distributeContentArticleToSelfMediaAccount(articleId: number, data: {
+  selfMediaAccountId: number
   coverMaterialId: number
   requestId: string
 }) {
-  return request.post<R<DistributionTask>>(`/content/articles/${articleId}/distribute-to-mp-account`, data)
+  return request.post<R<DistributionTask>>(`/content/articles/${articleId}/distribute-to-self-media`, data)
 }
