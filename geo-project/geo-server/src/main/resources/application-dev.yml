@@ -33,6 +33,26 @@ geo:
       backend-auth-callback-url: http://localhost:8080/api/wechat/open-platform/auth/callback
       frontend-callback-url: http://localhost:5173/admin/content/execution
 
+  douyin:
+    client:
+      mode: mock
+      fault:
+        token-expired: false
+        upload-failed: false
+        create-failed: false
+        rate-limit: false
+        permission-denied: false
+        review-outcome: passed
+    open-platform:
+      client-key: ${DOUYIN_CLIENT_KEY:}
+      client-secret: ${DOUYIN_CLIENT_SECRET:}
+      auth-callback-url: http://localhost:8080/api/douyin/open-platform/auth/callback
+      frontend-callback-url: http://localhost:5173/admin/content/execution
+      required-scopes: [video.create.bind]
+    feature:
+      image-text:
+        enabled: false
+
   jwt:
     secret: "huanjing-geo-2024-jwt-secret-key-must-be-at-least-256-bits-long"
     access-token-expire: 7200        # 2小时(秒)
