@@ -47,6 +47,7 @@ public class DictService {
         vo.setDictKey(item.getDictKey());
         vo.setDictValue(item.getDictValue());
         vo.setSortOrder(item.getSortOrder());
+        vo.setRemark(item.getRemark());
         return vo;
     }
 

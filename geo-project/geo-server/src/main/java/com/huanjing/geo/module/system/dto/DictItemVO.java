@@ -8,4 +8,5 @@ public class DictItemVO {
     private String dictKey;
     private String dictValue;
     private Integer sortOrder;
+    private String remark;
 }

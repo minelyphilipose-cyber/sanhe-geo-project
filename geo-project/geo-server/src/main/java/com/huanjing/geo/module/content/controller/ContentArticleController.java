@@ -6,6 +6,7 @@ import com.huanjing.geo.module.content.dto.ArticlePublishRequest;
 import com.huanjing.geo.module.content.dto.ArticleResubmitRequest;
 import com.huanjing.geo.module.content.dto.ArticleReviewRequest;
 import com.huanjing.geo.module.content.dto.ArticleRevisionSaveRequest;
+import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.service.ContentArticleService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -30,6 +31,11 @@ public class ContentArticleController {
                                       @RequestParam(defaultValue = "1") Long current,
                                       @RequestParam(defaultValue = "10") Long size) {
         return R.ok(contentArticleService.page(projectId, status, articleType, current, size));
+    }
+
+    @PostMapping("/manual")
+    public R<ArticleDraft> createManual(@Valid @RequestBody ManualArticleCreateRequest req) {
+        return R.ok(contentArticleService.createManual(req));
     }
 
     @GetMapping("/{articleId}")
@@ -61,4 +67,3 @@ public class ContentArticleController {
         return R.ok();
     }
 }
-

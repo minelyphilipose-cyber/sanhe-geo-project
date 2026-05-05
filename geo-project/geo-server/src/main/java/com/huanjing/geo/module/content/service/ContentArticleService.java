@@ -4,10 +4,12 @@ import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.dto.ArticlePublishRequest;
 import com.huanjing.geo.module.content.dto.ArticleResubmitRequest;
 import com.huanjing.geo.module.content.dto.ArticleReviewRequest;
 import com.huanjing.geo.module.content.dto.ArticleRevisionSaveRequest;
+import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
 import com.huanjing.geo.module.content.entity.*;
 import com.huanjing.geo.module.content.mapper.*;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -104,6 +106,56 @@ public class ContentArticleService {
         result.put("reviewLogs", reviewLogs);
         result.put("publishLogs", publishLogs);
         return result;
+    }
+
+    @Transactional
+    public ArticleDraft createManual(ManualArticleCreateRequest req) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission("project.update");
+        Project project = requireProject(req.getProjectId());
+        ensureProjectAccess(operator, project, true);
+
+        String articleType = StringUtils.hasText(req.getArticleType()) ? req.getArticleType().trim() : "";
+        if (!ArticleTypes.isSupported(articleType)) {
+            throw new BizException(400, "Invalid article type");
+        }
+        String content = req.getContentMarkdown().trim();
+        String title = StringUtils.hasText(req.getTitle()) ? req.getTitle().trim() : "";
+        if (!StringUtils.hasText(title)) {
+            throw new BizException(400, "Title is required");
+        }
+
+        ArticleDraft draft = new ArticleDraft();
+        draft.setProjectId(project.getId());
+        draft.setArticleType(articleType);
+        draft.setTitle(title);
+        draft.setStatus("pending_review");
+        draft.setCurrentVersionNo(1);
+        draft.setHasRisk(false);
+        draft.setRiskSeverity("none");
+        draft.setIsDuplicateTitle(false);
+        articleDraftMapper.insert(draft);
+
+        ArticleDraftVersion version = new ArticleDraftVersion();
+        version.setArticleId(draft.getId());
+        version.setVersionNo(1);
+        version.setTitle(title);
+        version.setContentMarkdown(content);
+        version.setGeneratedBy("manual");
+        version.setCreatedBy(operator.getId());
+        articleDraftVersionMapper.insert(version);
+
+        RiskResult riskResult = scanRisk(project, content);
+        DuplicateResult duplicateResult = checkDuplicate(draft, title);
+        draft.setHasRisk(riskResult.hasRisk);
+        draft.setRiskSeverity(riskResult.severity);
+        draft.setRiskWordsJson(riskResult.wordsJson);
+        draft.setIsDuplicateTitle(duplicateResult.duplicate);
+        draft.setDuplicateScore(duplicateResult.score);
+        draft.setDuplicateArticleId(duplicateResult.articleId);
+        articleDraftMapper.updateById(draft);
+        draft.setProjectName(project.getProjectName());
+        return draft;
     }
 
     @Transactional

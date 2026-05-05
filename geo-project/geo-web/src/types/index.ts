@@ -765,7 +765,7 @@ export interface DispatchAlertItem {
 
 export interface ArticleDraft {
   id: number
-  batchId: number
+  batchId?: number | null
   projectId: number
   projectName?: string
   articleType: 'faq' | 'scenario_content' | 'industry_article' | 'stage_advice' | string

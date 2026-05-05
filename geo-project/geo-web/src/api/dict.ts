@@ -6,6 +6,7 @@ export interface DictItem {
   dictKey: string
   dictValue: string
   sortOrder: number
+  remark?: string | null
 }
 
 export type DictGroup = Record<string, DictItem[]>
@@ -67,4 +68,3 @@ export function updateAdminDictItem(
 export function updateAdminDictItemStatus(id: number, enabled: boolean) {
   return request.put<R<void>>(`/admin/dicts/${id}/status`, { enabled })
 }
-

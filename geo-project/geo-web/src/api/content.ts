@@ -29,6 +29,15 @@ export function getContentArticleDetail(articleId: number) {
   return request.get<R<ArticleDetailResponse>>(`/content/articles/${articleId}`)
 }
 
+export function createManualContentArticle(data: {
+  projectId: number
+  articleType: string
+  title?: string
+  contentMarkdown: string
+}) {
+  return request.post<R<ArticleDraft>>('/content/articles/manual', data)
+}
+
 export function saveContentArticleRevision(articleId: number, data: {
   title?: string
   contentMarkdown: string

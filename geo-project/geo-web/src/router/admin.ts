@@ -102,6 +102,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '内容与执行', icon: 'Memo', permissions: ['project.read'] },
     },
     {
+      path: 'content/articles/manual-create',
+      name: 'ManualArticleCreate',
+      component: () => import('@/views/admin/content/ManualArticleCreate.vue'),
+      meta: { title: '手动生成文章', hidden: true, permissions: ['project.read'] },
+    },
+    {
       path: 'keyword-groups',
       name: 'KeywordGroupManage',
       component: () => import('@/views/admin/project/KeywordGroupManage.vue'),

@@ -16,6 +16,7 @@
           <el-button type="primary" @click="search">查询</el-button>
           <el-button @click="resetQuery">重置</el-button>
         </div>
+        <el-button v-if="canWrite" type="primary" @click="goManualCreate">手动生成文章</el-button>
       </div>
     </el-card>
 
@@ -408,7 +409,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import { ElMessage } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
@@ -440,6 +441,7 @@ import { getBrandDetail, getBrandMaterials } from '@/api/customer'
 const userStore = useUserStore()
 const dictStore = useDictStore()
 const route = useRoute()
+const router = useRouter()
 const canWrite = computed(() => userStore.hasPermission('project.write'))
 
 const loading = ref(false)
@@ -649,6 +651,16 @@ function resetQuery() {
 function onPageChange(v: number) {
   page.current = v
   load()
+}
+
+function goManualCreate() {
+  router.push({
+    path: '/admin/content/articles/manual-create',
+    query: {
+      projectId: query.projectId || undefined,
+      articleType: query.articleType || undefined,
+    },
+  })
 }
 
 async function openDetail(articleId: number) {
@@ -1078,9 +1090,29 @@ async function submitPublish() {
 onMounted(async () => {
   handleWechatAuthResult()
   handleDouyinAuthResult()
+  handleManualCreateResult()
   await dictStore.ensureLoaded()
   await load()
+  await openCreatedArticleDetail()
 })
+
+function handleManualCreateResult() {
+  const projectId = Number(route.query.projectId || 0)
+  if (projectId > 0) {
+    query.projectId = projectId
+  }
+  const articleType = String(route.query.articleType || '')
+  if (articleType) {
+    query.articleType = articleType
+  }
+}
+
+async function openCreatedArticleDetail() {
+  const articleId = Number(route.query.articleId || 0)
+  if (articleId > 0) {
+    await openDetail(articleId)
+  }
+}
 
 function handleWechatAuthResult() {
   const auth = route.query.wechatAuth
