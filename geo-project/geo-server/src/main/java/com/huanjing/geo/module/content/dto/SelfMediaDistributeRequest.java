@@ -5,9 +5,9 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 @Data
-public class WechatMpDistributeRequest {
+public class SelfMediaDistributeRequest {
     @NotNull
-    private Long mpAccountId;
+    private Long selfMediaAccountId;
     @NotNull
     private Long coverMaterialId;
     @NotBlank

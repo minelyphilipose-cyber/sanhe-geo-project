@@ -142,7 +142,7 @@ public class WechatMpAdapter implements SiteAdapter, SelfMediaAdapter {
     private String buildRequestPayload(SelfMediaAccount account, Long coverMaterialId, WechatMpClient.DraftArticle article) throws Exception {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("platform", PLATFORM);
-        root.put("mpAccountId", account.getId());
+            root.put("selfMediaAccountId", account.getId());
         root.put("authorizerAppid", account.getPlatformAccountId());
         root.put("coverMaterialId", coverMaterialId);
         ObjectNode draft = root.putObject("draftArticle");

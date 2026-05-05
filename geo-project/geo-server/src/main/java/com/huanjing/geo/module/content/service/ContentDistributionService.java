@@ -498,7 +498,7 @@ public class ContentDistributionService {
         if (mpTarget.coverMaterialId() == null) {
             throw new BizException(400, "请选择公众号封面图片");
         }
-        currentUserService.ensureBrandAccess(operator, account.getBrandId(), "mp_account");
+        currentUserService.ensureBrandAccess(operator, account.getBrandId(), "self_media_account");
 
         String content = requireLatestContent(article.getId());
         PackagePublishConfig packageConfig = requirePackagePublishConfig(project.getPackageType());

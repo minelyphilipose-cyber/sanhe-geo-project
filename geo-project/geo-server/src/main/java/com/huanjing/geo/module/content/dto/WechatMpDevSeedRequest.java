@@ -4,7 +4,7 @@ import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 @Data
-public class MpAccountDevSeedRequest {
+public class WechatMpDevSeedRequest {
     @NotNull
     private Long brandId;
     private String status = "active";

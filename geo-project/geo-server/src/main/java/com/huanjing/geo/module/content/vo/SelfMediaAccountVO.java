@@ -6,26 +6,26 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-public class MpAccountVO {
+public class SelfMediaAccountVO {
     private Long id;
     private Long brandId;
     private String platform;
     private String accountName;
-    private String authorizerAppid;
-    private String headImg;
+    private String platformAccountId;
+    private String avatarUrl;
     private String qrcodeUrl;
     private String status;
     private LocalDateTime lastAuthCheckedAt;
     private String lastAuthError;
 
-    public static MpAccountVO from(SelfMediaAccount account) {
-        MpAccountVO vo = new MpAccountVO();
+    public static SelfMediaAccountVO from(SelfMediaAccount account) {
+        SelfMediaAccountVO vo = new SelfMediaAccountVO();
         vo.setId(account.getId());
         vo.setBrandId(account.getBrandId());
         vo.setPlatform(account.getPlatform());
         vo.setAccountName(account.getAccountName());
-        vo.setAuthorizerAppid(account.getPlatformAccountId());
-        vo.setHeadImg(account.getAvatarUrl());
+        vo.setPlatformAccountId(account.getPlatformAccountId());
+        vo.setAvatarUrl(account.getAvatarUrl());
         vo.setQrcodeUrl(account.getQrcodeUrl());
         vo.setStatus(account.getStatus());
         vo.setLastAuthCheckedAt(account.getLastAuthCheckedAt());

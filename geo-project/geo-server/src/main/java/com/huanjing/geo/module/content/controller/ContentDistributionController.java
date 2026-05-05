@@ -6,7 +6,7 @@ import com.huanjing.geo.module.content.dto.ArticleDistributeRequest;
 import com.huanjing.geo.module.content.dto.DistributionManualConfirmRequest;
 import com.huanjing.geo.module.content.dto.PublishQuotaVO;
 import com.huanjing.geo.module.content.dto.RecommendedSitesResponseVO;
-import com.huanjing.geo.module.content.dto.WechatMpDistributeRequest;
+import com.huanjing.geo.module.content.dto.SelfMediaDistributeRequest;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
@@ -45,12 +45,12 @@ public class ContentDistributionController {
         return R.ok(contentDistributionService.distributeTo(articleId, target));
     }
 
-    @PostMapping("/articles/{articleId}/distribute-to-mp-account")
-    public R<DistributionTask> distributeToMpAccount(@PathVariable Long articleId,
-                                                     @Valid @RequestBody WechatMpDistributeRequest req) {
-        SelfMediaAccount account = selfMediaAccountMapper.selectById(req.getMpAccountId());
+    @PostMapping("/articles/{articleId}/distribute-to-self-media")
+    public R<DistributionTask> distributeToSelfMedia(@PathVariable Long articleId,
+                                                     @Valid @RequestBody SelfMediaDistributeRequest req) {
+        SelfMediaAccount account = selfMediaAccountMapper.selectById(req.getSelfMediaAccountId());
         if (account == null || !"wechat_mp".equalsIgnoreCase(account.getPlatform())) {
-            throw new BizException(404, "Mp account not found");
+            throw new BizException(404, "Self media account not found");
         }
         TargetContext.SelfMediaTarget target =
                 new TargetContext.SelfMediaTarget(

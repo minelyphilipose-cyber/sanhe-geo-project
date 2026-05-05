@@ -307,7 +307,7 @@ class ContentDistributionServiceTest {
     }
 
     @Test
-    void distributeTo_selfMedia_usesPlatformAdapterAndWritesMpAccountTargetKind() {
+    void distributeTo_selfMedia_usesPlatformAdapterAndWritesSelfMediaTargetKind() {
         givenCommonData();
         selfMediaAdapter.result = SubmitResult.success(200, "{}", "{\"media_id\":\"draft-1\"}", null, "draft-1");
         when(distributionTaskMapper.selectById(300L)).thenReturn(task("submitted"));

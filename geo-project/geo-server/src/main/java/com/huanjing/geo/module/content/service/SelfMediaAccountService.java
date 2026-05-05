@@ -4,10 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.config.WechatMpClientProperties;
 import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
-import com.huanjing.geo.module.content.dto.MpAccountDevSeedRequest;
+import com.huanjing.geo.module.content.dto.WechatMpDevSeedRequest;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
-import com.huanjing.geo.module.content.vo.MpAccountVO;
+import com.huanjing.geo.module.content.vo.SelfMediaAccountVO;
 import com.huanjing.geo.module.content.vo.WechatMpCapabilityVO;
 import com.huanjing.geo.module.content.wechat.WechatAuthorizerTokenService;
 import com.huanjing.geo.module.content.wechat.WechatMpClient;
@@ -22,7 +22,7 @@ import java.util.List;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class MpAccountService {
+public class SelfMediaAccountService {
     private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final WechatMpClient wechatMpClient;
     private final WechatOpenPlatformProperties openPlatformProperties;
@@ -41,17 +41,17 @@ public class MpAccountService {
         );
     }
 
-    public List<MpAccountVO> listByBrand(Long brandId) {
+    public List<SelfMediaAccountVO> listByBrand(Long brandId) {
         return selfMediaAccountMapper.selectList(new LambdaQueryWrapper<SelfMediaAccount>()
                         .eq(SelfMediaAccount::getBrandId, brandId)
                         .eq(SelfMediaAccount::getPlatform, "wechat_mp")
                         .orderByDesc(SelfMediaAccount::getUpdatedAt))
                 .stream()
-                .map(MpAccountVO::from)
+                .map(SelfMediaAccountVO::from)
                 .toList();
     }
 
-    public MpAccountVO checkAuth(Long id) {
+    public SelfMediaAccountVO checkAuth(Long id) {
         SelfMediaAccount account = requireAccount(id);
         try {
             checkMaterialCount(account);
@@ -69,7 +69,7 @@ public class MpAccountService {
         }
         account.setLastAuthCheckedAt(LocalDateTime.now());
         selfMediaAccountMapper.updateById(account);
-        return MpAccountVO.from(account);
+        return SelfMediaAccountVO.from(account);
     }
 
     private void checkMaterialCount(SelfMediaAccount account) {
@@ -95,7 +95,7 @@ public class MpAccountService {
         }
     }
 
-    public MpAccountVO seedForDev(MpAccountDevSeedRequest request) {
+    public SelfMediaAccountVO seedForDev(WechatMpDevSeedRequest request) {
         SelfMediaAccount account = selfMediaAccountMapper.selectOne(new LambdaQueryWrapper<SelfMediaAccount>()
                 .eq(SelfMediaAccount::getPlatformAccountId, request.getAuthorizerAppid())
                 .last("LIMIT 1"));
@@ -120,13 +120,13 @@ public class MpAccountService {
         } else {
             selfMediaAccountMapper.updateById(account);
         }
-        return MpAccountVO.from(account);
+        return SelfMediaAccountVO.from(account);
     }
 
     private SelfMediaAccount requireAccount(Long id) {
         SelfMediaAccount account = selfMediaAccountMapper.selectById(id);
         if (account == null) {
-            throw new BizException(404, "mp account not found");
+            throw new BizException(404, "self media account not found");
         }
         return account;
     }

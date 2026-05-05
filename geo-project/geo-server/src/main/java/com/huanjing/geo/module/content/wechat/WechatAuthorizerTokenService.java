@@ -39,10 +39,10 @@ public class WechatAuthorizerTokenService {
         return refreshWithLock(account, tokenKey);
     }
 
-    public String getAccessToken(Long mpAccountId) {
-        SelfMediaAccount account = selfMediaAccountMapper.selectById(mpAccountId);
+    public String getAccessToken(Long selfMediaAccountId) {
+        SelfMediaAccount account = selfMediaAccountMapper.selectById(selfMediaAccountId);
         if (account == null) {
-            throw new BizException(404, "mp account not found");
+            throw new BizException(404, "self media account not found");
         }
         return getAccessToken(account);
     }
