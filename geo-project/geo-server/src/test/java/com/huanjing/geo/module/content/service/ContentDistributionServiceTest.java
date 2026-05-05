@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.content.service;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
@@ -310,6 +311,9 @@ class ContentDistributionServiceTest {
     void distributeTo_selfMedia_usesPlatformAdapterAndWritesSelfMediaTargetKind() {
         givenCommonData();
         selfMediaAdapter.result = SubmitResult.success(200, "{}", "{\"media_id\":\"draft-1\"}", null, "draft-1");
+        selfMediaAdapter.result.setExternalStatus("accepted");
+        selfMediaAdapter.result.setReviewStatus(ReviewStatusResult.ReviewStatus.UNDER_REVIEW);
+        selfMediaAdapter.result.setReviewFeedback(null);
         when(distributionTaskMapper.selectById(300L)).thenReturn(task("submitted"));
 
         DistributionTask result = contentDistributionService.distributeTo(1L, selfMediaTarget("wechat_mp"));
@@ -321,6 +325,12 @@ class ContentDistributionServiceTest {
         assertEquals("wechat_mp", inserted.getValue().getIntegrationMethod());
         assertEquals(40L, inserted.getValue().getSelfMediaAccountId());
         assertEquals("req-1", inserted.getValue().getRequestId());
+        ArgumentCaptor<LambdaUpdateWrapper<DistributionTask>> updateCaptor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(distributionTaskMapper).update(eq(null), updateCaptor.capture());
+        String sqlSet = updateCaptor.getValue().getSqlSet();
+        assertTrue(sqlSet.contains("external_status"));
+        assertTrue(sqlSet.contains("review_status"));
+        assertTrue(sqlSet.contains("review_feedback"));
     }
 
     @Test

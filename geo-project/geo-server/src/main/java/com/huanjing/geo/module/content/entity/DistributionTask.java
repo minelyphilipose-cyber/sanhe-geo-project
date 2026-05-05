@@ -41,6 +41,9 @@ public class DistributionTask {
     private String publishedUrl;
     // V93: post-publish identifier returned by external platform
     private String platformArticleId;
+    private String externalStatus;
+    private String reviewStatus;
+    private String reviewFeedback;
     private String errorMessage;
     // V93: failure classification (FailureKind constants)
     private String failureKind;

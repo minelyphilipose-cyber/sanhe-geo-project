@@ -706,7 +706,10 @@ public class ContentDistributionService {
                 .set(DistributionTask::getLockedUntil, null)
                 .set(DistributionTask::getFinishedAt, LocalDateTime.now(SH_ZONE))
                 .set(DistributionTask::getRequestPayload, result.getRequestPayload())
-                .set(DistributionTask::getResponsePayload, result.getResponseBody());
+                .set(DistributionTask::getResponsePayload, result.getResponseBody())
+                .set(DistributionTask::getExternalStatus, result.getExternalStatus())
+                .set(DistributionTask::getReviewStatus, result.getReviewStatus())
+                .set(DistributionTask::getReviewFeedback, result.getReviewFeedback());
 
         if (result.isSuccess()) {
             wrapper.set(DistributionTask::getStatus, "submitted")
