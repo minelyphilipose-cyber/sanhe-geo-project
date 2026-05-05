@@ -1,7 +1,7 @@
 package com.huanjing.geo.module.content.distribution;
 
 import com.huanjing.geo.module.content.entity.BrandOfficialSite;
-import com.huanjing.geo.module.content.entity.MpAccount;
+import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.system.entity.PublishSite;
 
 import java.util.List;
@@ -16,10 +16,7 @@ public sealed interface TargetContext
 
     record SiteTarget(PublishSite site) implements TargetContext {}
 
-    /**
-     * TODO Step 2: replace MpAccount with SelfMediaAccount after account table abstraction.
-     */
-    record SelfMediaTarget(MpAccount account,
+    record SelfMediaTarget(SelfMediaAccount account,
                            Long coverMaterialId,
                            List<Long> imageMaterialIds,
                            List<String> hashtags,

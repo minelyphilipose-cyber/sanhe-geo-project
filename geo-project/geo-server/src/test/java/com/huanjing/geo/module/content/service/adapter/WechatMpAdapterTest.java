@@ -1,6 +1,6 @@
 package com.huanjing.geo.module.content.service.adapter;
 
-import com.huanjing.geo.module.content.entity.MpAccount;
+import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -18,7 +18,7 @@ class WechatMpAdapterTest {
 
     @Test
     void refreshReviewStatus_notApplicableForWechatDraftFlow() {
-        ReviewStatusResult result = adapter.refreshReviewStatus(null, new MpAccount());
+        ReviewStatusResult result = adapter.refreshReviewStatus(null, new SelfMediaAccount());
 
         assertEquals(ReviewStatusResult.ReviewStatus.NOT_APPLICABLE, result.status());
     }

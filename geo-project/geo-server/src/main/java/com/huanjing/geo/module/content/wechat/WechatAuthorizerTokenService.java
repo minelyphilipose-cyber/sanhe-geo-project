@@ -2,8 +2,8 @@ package com.huanjing.geo.module.content.wechat;
 
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
-import com.huanjing.geo.module.content.entity.MpAccount;
-import com.huanjing.geo.module.content.mapper.MpAccountMapper;
+import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.system.service.MpCredentialCipherService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -22,15 +22,15 @@ public class WechatAuthorizerTokenService {
     private static final Duration LOCK_TTL = Duration.ofSeconds(10);
     private static final int REFRESH_MARGIN_SECONDS = 300;
 
-    private final MpAccountMapper mpAccountMapper;
+    private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final WechatOpenPlatformProperties properties;
     private final WechatComponentAccessTokenService componentAccessTokenService;
     private final WechatOpenPlatformClient openPlatformClient;
     private final StringRedisTemplate redisTemplate;
     private final MpCredentialCipherService cipherService;
 
-    public String getAccessToken(MpAccount account) {
-        String appid = require(account.getAuthorizerAppid(), "authorizer appid missing");
+    public String getAccessToken(SelfMediaAccount account) {
+        String appid = require(account.getPlatformAccountId(), "authorizer appid missing");
         String tokenKey = TOKEN_KEY_PREFIX + appid;
         String cached = redisTemplate.opsForValue().get(tokenKey);
         if (StringUtils.hasText(cached)) {
@@ -40,20 +40,20 @@ public class WechatAuthorizerTokenService {
     }
 
     public String getAccessToken(Long mpAccountId) {
-        MpAccount account = mpAccountMapper.selectById(mpAccountId);
+        SelfMediaAccount account = selfMediaAccountMapper.selectById(mpAccountId);
         if (account == null) {
             throw new BizException(404, "mp account not found");
         }
         return getAccessToken(account);
     }
 
-    public void evictAccessToken(MpAccount account) {
-        String appid = require(account.getAuthorizerAppid(), "authorizer appid missing");
+    public void evictAccessToken(SelfMediaAccount account) {
+        String appid = require(account.getPlatformAccountId(), "authorizer appid missing");
         redisTemplate.delete(TOKEN_KEY_PREFIX + appid);
     }
 
-    private String refreshWithLock(MpAccount account, String tokenKey) {
-        String appid = account.getAuthorizerAppid();
+    private String refreshWithLock(SelfMediaAccount account, String tokenKey) {
+        String appid = account.getPlatformAccountId();
         String lockKey = LOCK_KEY_PREFIX + appid;
         String lockValue = UUID.randomUUID().toString();
         Boolean locked = redisTemplate.opsForValue().setIfAbsent(lockKey, lockValue, LOCK_TTL);
@@ -70,7 +70,7 @@ public class WechatAuthorizerTokenService {
             if (StringUtils.hasText(cached)) {
                 return cached;
             }
-            String refreshToken = cipherService.decrypt(account.getAuthorizerRefreshTokenCipher());
+            String refreshToken = cipherService.decrypt(account.getRefreshTokenCipher());
             String componentToken = componentAccessTokenService.getAccessToken();
             WechatOpenPlatformClient.AuthorizerTokenResult result =
                     openPlatformClient.refreshAuthorizerToken(
@@ -83,10 +83,10 @@ public class WechatAuthorizerTokenService {
             redisTemplate.opsForValue().set(tokenKey, result.authorizerAccessToken(), Duration.ofSeconds(ttl));
             if (StringUtils.hasText(result.authorizerRefreshToken())
                     && !result.authorizerRefreshToken().equals(refreshToken)) {
-                account.setAuthorizerRefreshTokenCipher(cipherService.encryptForStorage(result.authorizerRefreshToken()));
+                account.setRefreshTokenCipher(cipherService.encryptForStorage(result.authorizerRefreshToken()));
                 account.setLastAuthCheckedAt(LocalDateTime.now());
                 account.setLastAuthError(null);
-                mpAccountMapper.updateById(account);
+                selfMediaAccountMapper.updateById(account);
             }
             return result.authorizerAccessToken();
         } finally {

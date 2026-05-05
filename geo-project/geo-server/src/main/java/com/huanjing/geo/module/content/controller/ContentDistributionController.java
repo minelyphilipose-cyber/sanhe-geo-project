@@ -8,8 +8,8 @@ import com.huanjing.geo.module.content.dto.PublishQuotaVO;
 import com.huanjing.geo.module.content.dto.RecommendedSitesResponseVO;
 import com.huanjing.geo.module.content.dto.WechatMpDistributeRequest;
 import com.huanjing.geo.module.content.entity.DistributionTask;
-import com.huanjing.geo.module.content.entity.MpAccount;
-import com.huanjing.geo.module.content.mapper.MpAccountMapper;
+import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.service.ContentDistributionService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.service.BrandService;
@@ -29,7 +29,7 @@ public class ContentDistributionController {
 
     private final ContentDistributionService contentDistributionService;
     private final BrandService brandService;
-    private final MpAccountMapper mpAccountMapper;
+    private final SelfMediaAccountMapper selfMediaAccountMapper;
 
     @PostMapping("/articles/{articleId}/distribute")
     public R<DistributionTask> distribute(@PathVariable Long articleId, @Valid @RequestBody ArticleDistributeRequest req) {
@@ -48,7 +48,7 @@ public class ContentDistributionController {
     @PostMapping("/articles/{articleId}/distribute-to-mp-account")
     public R<DistributionTask> distributeToMpAccount(@PathVariable Long articleId,
                                                      @Valid @RequestBody WechatMpDistributeRequest req) {
-        MpAccount account = mpAccountMapper.selectById(req.getMpAccountId());
+        SelfMediaAccount account = selfMediaAccountMapper.selectById(req.getMpAccountId());
         if (account == null || !"wechat_mp".equalsIgnoreCase(account.getPlatform())) {
             throw new BizException(404, "Mp account not found");
         }

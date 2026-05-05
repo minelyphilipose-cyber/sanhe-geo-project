@@ -9,9 +9,9 @@ import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
 import com.huanjing.geo.module.content.entity.BrandOfficialSite;
 import com.huanjing.geo.module.content.entity.DistributionTask;
-import com.huanjing.geo.module.content.entity.MpAccount;
 import com.huanjing.geo.module.content.entity.PackagePublishConfig;
 import com.huanjing.geo.module.content.entity.ProjectPublishQuota;
+import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
@@ -319,7 +319,7 @@ class ContentDistributionServiceTest {
         verify(distributionTaskMapper).insert(inserted.capture());
         assertEquals(DistributionTargetKind.MP_ACCOUNT, inserted.getValue().getTargetKind());
         assertEquals("wechat_mp", inserted.getValue().getIntegrationMethod());
-        assertEquals(40L, inserted.getValue().getMpAccountId());
+        assertEquals(40L, inserted.getValue().getSelfMediaAccountId());
         assertEquals("req-1", inserted.getValue().getRequestId());
     }
 
@@ -383,7 +383,7 @@ class ContentDistributionServiceTest {
     }
 
     private TargetContext.SelfMediaTarget selfMediaTarget(String platform) {
-        MpAccount account = new MpAccount();
+        SelfMediaAccount account = new SelfMediaAccount();
         account.setId(40L);
         account.setBrandId(30L);
         account.setPlatform(platform);
@@ -482,7 +482,7 @@ class ContentDistributionServiceTest {
         }
 
         @Override
-        public ReviewStatusResult refreshReviewStatus(DistributionTask task, MpAccount account) {
+        public ReviewStatusResult refreshReviewStatus(DistributionTask task, SelfMediaAccount account) {
             return ReviewStatusResult.notApplicable();
         }
     }

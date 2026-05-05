@@ -1,6 +1,6 @@
 package com.huanjing.geo.module.content.vo;
 
-import com.huanjing.geo.module.content.entity.MpAccount;
+import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -18,14 +18,14 @@ public class MpAccountVO {
     private LocalDateTime lastAuthCheckedAt;
     private String lastAuthError;
 
-    public static MpAccountVO from(MpAccount account) {
+    public static MpAccountVO from(SelfMediaAccount account) {
         MpAccountVO vo = new MpAccountVO();
         vo.setId(account.getId());
         vo.setBrandId(account.getBrandId());
         vo.setPlatform(account.getPlatform());
         vo.setAccountName(account.getAccountName());
-        vo.setAuthorizerAppid(account.getAuthorizerAppid());
-        vo.setHeadImg(account.getHeadImg());
+        vo.setAuthorizerAppid(account.getPlatformAccountId());
+        vo.setHeadImg(account.getAvatarUrl());
         vo.setQrcodeUrl(account.getQrcodeUrl());
         vo.setStatus(account.getStatus());
         vo.setLastAuthCheckedAt(account.getLastAuthCheckedAt());

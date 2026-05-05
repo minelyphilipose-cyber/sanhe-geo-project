@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
  * Distribution task entity.
  *
  * <p>V93 (Phase 0) extended this table with multi-target columns
- * (target_kind, brand_official_site_id, mp_account_id, locked_until, etc.)
+ * (target_kind, brand_official_site_id, self_media_account_id, locked_until, etc.)
  * The corresponding Java fields were missing from this entity due to a
  * Phase 0 commit oversight (the modified file was not actually changed at
  * git level due to LF/CRLF normalization). P1.4-b0 supplements them
@@ -27,7 +27,7 @@ public class DistributionTask {
     private Long siteId;
     // V93: multi-target discriminator + per-channel FK columns
     private String targetKind;
-    private Long mpAccountId;
+    private Long selfMediaAccountId;
     private Long brandOfficialSiteId;
     private Long targetBrandId;
     private Long industrySiteId;

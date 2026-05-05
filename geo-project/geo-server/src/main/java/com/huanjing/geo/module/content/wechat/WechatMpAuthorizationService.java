@@ -3,8 +3,8 @@ package com.huanjing.geo.module.content.wechat;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
-import com.huanjing.geo.module.content.entity.MpAccount;
-import com.huanjing.geo.module.content.mapper.MpAccountMapper;
+import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.vo.WechatMpAuthUrlVO;
 import com.huanjing.geo.module.system.service.MpCredentialCipherService;
 import lombok.RequiredArgsConstructor;
@@ -31,7 +31,7 @@ public class WechatMpAuthorizationService {
     private final WechatOpenPlatformProperties properties;
     private final WechatComponentAccessTokenService componentAccessTokenService;
     private final WechatOpenPlatformClient openPlatformClient;
-    private final MpAccountMapper mpAccountMapper;
+    private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final MpCredentialCipherService cipherService;
     private final WechatFuncInfoValidator funcInfoValidator;
     private final StringRedisTemplate redisTemplate;
@@ -64,33 +64,33 @@ public class WechatMpAuthorizationService {
                 openPlatformClient.queryAuth(componentToken, componentAppid, authCode);
         WechatOpenPlatformClient.AuthorizerInfoResult info =
                 openPlatformClient.getAuthorizerInfo(componentToken, componentAppid, queryAuth.authorizerAppid());
-        MpAccount account = saveAccount(decoded.brandId(), queryAuth, info);
+        SelfMediaAccount account = saveAccount(decoded.brandId(), queryAuth, info);
         String status = "active".equals(account.getStatus()) ? "success" : "permission_missing";
-        return redirectUrl(decoded.brandId(), decoded.redirectArticleId(), account.getAuthorizerAppid(), account.getStatus(), status);
+        return redirectUrl(decoded.brandId(), decoded.redirectArticleId(), account.getPlatformAccountId(), account.getStatus(), status);
     }
 
-    private MpAccount saveAccount(Long brandId,
-                                  WechatOpenPlatformClient.QueryAuthResult queryAuth,
-                                  WechatOpenPlatformClient.AuthorizerInfoResult info) {
-        MpAccount account = mpAccountMapper.selectOne(new LambdaQueryWrapper<MpAccount>()
-                .eq(MpAccount::getAuthorizerAppid, queryAuth.authorizerAppid())
+    private SelfMediaAccount saveAccount(Long brandId,
+                                         WechatOpenPlatformClient.QueryAuthResult queryAuth,
+                                         WechatOpenPlatformClient.AuthorizerInfoResult info) {
+        SelfMediaAccount account = selfMediaAccountMapper.selectOne(new LambdaQueryWrapper<SelfMediaAccount>()
+                .eq(SelfMediaAccount::getPlatformAccountId, queryAuth.authorizerAppid())
                 .last("LIMIT 1"));
         LocalDateTime now = LocalDateTime.now();
         if (account == null) {
-            account = new MpAccount();
+            account = new SelfMediaAccount();
             account.setCreatedAt(now);
         }
         account.setBrandId(brandId);
         account.setPlatform("wechat_mp");
         account.setAccountName(StringUtils.hasText(info.accountName()) ? info.accountName() : queryAuth.authorizerAppid());
-        account.setAuthorizerAppid(queryAuth.authorizerAppid());
-        account.setAuthorizerRefreshTokenCipher(cipherService.encryptForStorage(queryAuth.authorizerRefreshToken()));
+        account.setPlatformAccountId(queryAuth.authorizerAppid());
+        account.setRefreshTokenCipher(cipherService.encryptForStorage(queryAuth.authorizerRefreshToken()));
         account.setCredentialKeyVersion("v1");
         String funcInfo = StringUtils.hasText(info.funcInfoJson()) && !"null".equals(info.funcInfoJson())
                 ? info.funcInfoJson()
                 : queryAuth.funcInfoJson();
-        account.setFuncInfoJson(funcInfo);
-        account.setHeadImg(info.headImg());
+        account.setScopeJson(funcInfo);
+        account.setAvatarUrl(info.headImg());
         account.setQrcodeUrl(info.qrcodeUrl());
         if (funcInfoValidator.hasDraftPermissions(funcInfo)) {
             account.setStatus("active");
@@ -102,9 +102,9 @@ public class WechatMpAuthorizationService {
         account.setLastAuthCheckedAt(now);
         account.setUpdatedAt(now);
         if (account.getId() == null) {
-            mpAccountMapper.insert(account);
+            selfMediaAccountMapper.insert(account);
         } else {
-            mpAccountMapper.updateById(account);
+            selfMediaAccountMapper.updateById(account);
         }
         return account;
     }

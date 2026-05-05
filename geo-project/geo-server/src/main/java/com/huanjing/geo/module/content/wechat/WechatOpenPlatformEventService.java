@@ -3,8 +3,8 @@ package com.huanjing.geo.module.content.wechat;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
-import com.huanjing.geo.module.content.entity.MpAccount;
-import com.huanjing.geo.module.content.mapper.MpAccountMapper;
+import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -18,7 +18,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class WechatOpenPlatformEventService {
     private final WechatComponentTicketService ticketService;
-    private final MpAccountMapper mpAccountMapper;
+    private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final WechatComponentAccessTokenService componentAccessTokenService;
     private final WechatOpenPlatformClient openPlatformClient;
     private final WechatOpenPlatformProperties properties;
@@ -48,12 +48,12 @@ public class WechatOpenPlatformEventService {
         if (!StringUtils.hasText(authorizerAppid)) {
             return;
         }
-        LambdaUpdateWrapper<MpAccount> update = new LambdaUpdateWrapper<MpAccount>()
-                .eq(MpAccount::getAuthorizerAppid, authorizerAppid)
-                .set(MpAccount::getStatus, status)
-                .set(MpAccount::getLastAuthCheckedAt, LocalDateTime.now())
-                .set(MpAccount::getLastAuthError, error);
-        int rows = mpAccountMapper.update(null, update);
+        LambdaUpdateWrapper<SelfMediaAccount> update = new LambdaUpdateWrapper<SelfMediaAccount>()
+                .eq(SelfMediaAccount::getPlatformAccountId, authorizerAppid)
+                .set(SelfMediaAccount::getStatus, status)
+                .set(SelfMediaAccount::getLastAuthCheckedAt, LocalDateTime.now())
+                .set(SelfMediaAccount::getLastAuthError, error);
+        int rows = selfMediaAccountMapper.update(null, update);
         log.info("WeChat authorizer status synced authorizerAppid={} status={} rows={}",
                 authorizerAppid, status, rows);
     }
@@ -62,8 +62,8 @@ public class WechatOpenPlatformEventService {
         if (!StringUtils.hasText(authorizerAppid)) {
             return;
         }
-        MpAccount account = mpAccountMapper.selectOne(new LambdaQueryWrapper<MpAccount>()
-                .eq(MpAccount::getAuthorizerAppid, authorizerAppid)
+        SelfMediaAccount account = selfMediaAccountMapper.selectOne(new LambdaQueryWrapper<SelfMediaAccount>()
+                .eq(SelfMediaAccount::getPlatformAccountId, authorizerAppid)
                 .last("LIMIT 1"));
         if (account == null) {
             log.info("WeChat updateauthorized ignored; mp account not found authorizerAppid={}", authorizerAppid);
@@ -79,9 +79,9 @@ public class WechatOpenPlatformEventService {
             );
             String funcInfo = info.funcInfoJson();
             account.setAccountName(StringUtils.hasText(info.accountName()) ? info.accountName() : account.getAccountName());
-            account.setHeadImg(info.headImg());
+            account.setAvatarUrl(info.headImg());
             account.setQrcodeUrl(info.qrcodeUrl());
-            account.setFuncInfoJson(funcInfo);
+            account.setScopeJson(funcInfo);
             if (funcInfoValidator.hasDraftPermissions(funcInfo)) {
                 account.setStatus("active");
                 account.setLastAuthError(null);
@@ -91,15 +91,15 @@ public class WechatOpenPlatformEventService {
             }
             account.setLastAuthCheckedAt(now);
             account.setUpdatedAt(now);
-            mpAccountMapper.updateById(account);
+            selfMediaAccountMapper.updateById(account);
             log.info("WeChat updateauthorized revalidated authorizerAppid={} status={}",
                     authorizerAppid, account.getStatus());
         } catch (Exception ex) {
-            LambdaUpdateWrapper<MpAccount> update = new LambdaUpdateWrapper<MpAccount>()
-                    .eq(MpAccount::getAuthorizerAppid, authorizerAppid)
-                    .set(MpAccount::getLastAuthCheckedAt, now)
-                    .set(MpAccount::getLastAuthError, "func_info revalidation failed");
-            mpAccountMapper.update(null, update);
+            LambdaUpdateWrapper<SelfMediaAccount> update = new LambdaUpdateWrapper<SelfMediaAccount>()
+                    .eq(SelfMediaAccount::getPlatformAccountId, authorizerAppid)
+                    .set(SelfMediaAccount::getLastAuthCheckedAt, now)
+                    .set(SelfMediaAccount::getLastAuthError, "func_info revalidation failed");
+            selfMediaAccountMapper.update(null, update);
             log.warn("WeChat updateauthorized revalidation failed authorizerAppid={}", authorizerAppid, ex);
         }
     }

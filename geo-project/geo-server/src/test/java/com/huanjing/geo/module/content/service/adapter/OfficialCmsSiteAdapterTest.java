@@ -6,7 +6,7 @@ import com.huanjing.geo.common.util.HttpClientUtil;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.BrandOfficialSite;
-import com.huanjing.geo.module.content.entity.MpAccount;
+import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import com.huanjing.geo.module.system.entity.PublishSite;
 import com.huanjing.geo.module.system.mapper.PublishSiteMapper;
@@ -86,7 +86,7 @@ class OfficialCmsSiteAdapterTest {
     void submitToTarget_wrongTarget_throwsIae() {
         assertThrows(IllegalArgumentException.class,
                 () -> adapter.submitToTarget(article("Title", "qa"), "body",
-                        new TargetContext.SelfMediaTarget(new MpAccount(), null, null, null, null, null,
+                        new TargetContext.SelfMediaTarget(new SelfMediaAccount(), null, null, null, null, null,
                                 "test-request", null)));
     }
 

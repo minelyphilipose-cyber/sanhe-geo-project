@@ -3,9 +3,9 @@ package com.huanjing.geo.module.content.wechat;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.storage.MinioStorageService;
-import com.huanjing.geo.module.content.entity.MpAccount;
-import com.huanjing.geo.module.content.entity.MpMaterialMapping;
-import com.huanjing.geo.module.content.mapper.MpMaterialMappingMapper;
+import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.entity.SelfMediaMaterialMapping;
+import com.huanjing.geo.module.content.mapper.SelfMediaMaterialMappingMapper;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
 import lombok.RequiredArgsConstructor;
@@ -37,7 +37,7 @@ public class WechatMediaService {
     private static final Set<String> IMAGE_TYPES = Set.of("jpg", "jpeg", "png", "gif", "bmp");
 
     private final BrandMaterialMapper brandMaterialMapper;
-    private final MpMaterialMappingMapper mappingMapper;
+    private final SelfMediaMaterialMappingMapper mappingMapper;
     private final MinioStorageService minioStorageService;
     private final WechatAuthorizerTokenService tokenService;
     private final WechatMpClient wechatMpClient;
@@ -47,30 +47,30 @@ public class WechatMediaService {
             .connectTimeout(Duration.ofSeconds(5))
             .build();
 
-    public String ensureThumbMediaId(MpAccount account, Long brandId, Long brandMaterialId) {
+    public String ensureThumbMediaId(SelfMediaAccount account, Long brandId, Long brandMaterialId) {
         BrandMaterial material = requireImageMaterial(brandId, brandMaterialId);
         byte[] bytes = readMaterialBytes(material);
         validateImageSize(bytes, "cover_too_large");
         String hash = sha256(bytes);
-        MpMaterialMapping existed = findMapping(account.getId(), brandMaterialId, hash, TYPE_THUMB);
-        if (existed != null && StringUtils.hasText(existed.getMediaId())) {
-            return existed.getMediaId();
+        SelfMediaMaterialMapping existed = findMapping(account.getId(), brandMaterialId, hash, TYPE_THUMB);
+        if (existed != null && StringUtils.hasText(existed.getPlatformMediaId())) {
+            return existed.getPlatformMediaId();
         }
 
         String accessToken = tokenService.getAccessToken(account);
         WechatMpClient.MaterialResult result =
                 wechatMpClient.addThumbMaterial(accessToken, bytes, material.getFileName());
-        MpMaterialMapping row = new MpMaterialMapping();
-        row.setMpAccountId(account.getId());
+        SelfMediaMaterialMapping row = new SelfMediaMaterialMapping();
+        row.setSelfMediaAccountId(account.getId());
         row.setBrandMaterialId(material.getId());
         row.setContentHash(hash);
         row.setMediaType(TYPE_THUMB);
-        row.setMediaId(result.mediaId());
+        row.setPlatformMediaId(result.mediaId());
         mappingMapper.insert(row);
         return result.mediaId();
     }
 
-    public String ensureContentImageUrl(MpAccount account, String sourceUrl) {
+    public String ensureContentImageUrl(SelfMediaAccount account, String sourceUrl) {
         if (!StringUtils.hasText(sourceUrl)) {
             return null;
         }
@@ -81,9 +81,9 @@ public class WechatMediaService {
         byte[] bytes = downloadImage(normalized);
         validateImageSize(bytes, "content_image_too_large");
         String hash = sha256(bytes);
-        MpMaterialMapping existed = findMappingByHash(account.getId(), hash, TYPE_IMAGE);
-        if (existed != null && StringUtils.hasText(existed.getWechatUrl())) {
-            return existed.getWechatUrl();
+        SelfMediaMaterialMapping existed = findMappingByHash(account.getId(), hash, TYPE_IMAGE);
+        if (existed != null && StringUtils.hasText(existed.getPlatformUrl())) {
+            return existed.getPlatformUrl();
         }
 
         return uploadContentImageWithLock(account, normalized, bytes, hash);
@@ -161,35 +161,35 @@ public class WechatMediaService {
                 || "::1".equals(hostAddress);
     }
 
-    private String uploadContentImageWithLock(MpAccount account, String normalizedUrl, byte[] bytes, String hash) {
+    private String uploadContentImageWithLock(SelfMediaAccount account, String normalizedUrl, byte[] bytes, String hash) {
         String lockKey = CONTENT_IMAGE_LOCK_PREFIX + account.getId() + ":" + hash;
         String lockValue = UUID.randomUUID().toString();
         Boolean locked = redisTemplate.opsForValue().setIfAbsent(lockKey, lockValue, CONTENT_IMAGE_LOCK_TTL);
         if (!Boolean.TRUE.equals(locked)) {
             sleepBriefly();
-            MpMaterialMapping existed = findMappingByHash(account.getId(), hash, TYPE_IMAGE);
-            if (existed != null && StringUtils.hasText(existed.getWechatUrl())) {
-                return existed.getWechatUrl();
+            SelfMediaMaterialMapping existed = findMappingByHash(account.getId(), hash, TYPE_IMAGE);
+            if (existed != null && StringUtils.hasText(existed.getPlatformUrl())) {
+                return existed.getPlatformUrl();
             }
             throw new BizException(429, "wechat content image uploading");
         }
         try {
-            MpMaterialMapping existed = findMappingByHash(account.getId(), hash, TYPE_IMAGE);
-            if (existed != null && StringUtils.hasText(existed.getWechatUrl())) {
-                return existed.getWechatUrl();
+            SelfMediaMaterialMapping existed = findMappingByHash(account.getId(), hash, TYPE_IMAGE);
+            if (existed != null && StringUtils.hasText(existed.getPlatformUrl())) {
+                return existed.getPlatformUrl();
             }
             String filename = filenameFromUrl(normalizedUrl);
             String accessToken = tokenService.getAccessToken(account);
             WechatMpClient.UploadImageResult result =
                     wechatMpClient.uploadContentImage(accessToken, bytes, filename);
-            MpMaterialMapping row = new MpMaterialMapping();
-            row.setMpAccountId(account.getId());
+            SelfMediaMaterialMapping row = new SelfMediaMaterialMapping();
+            row.setSelfMediaAccountId(account.getId());
             // MySQL unique indexes treat NULL brand_material_id values as distinct, so content
             // images rely on this Redis single-flight lock plus the double-check above.
             row.setBrandMaterialId(null);
             row.setContentHash(hash);
             row.setMediaType(TYPE_IMAGE);
-            row.setWechatUrl(result.url());
+            row.setPlatformUrl(result.url());
             mappingMapper.insert(row);
             return result.url();
         } finally {
@@ -209,20 +209,20 @@ public class WechatMediaService {
         }
     }
 
-    private MpMaterialMapping findMapping(Long mpAccountId, Long brandMaterialId, String hash, String mediaType) {
-        return mappingMapper.selectOne(new LambdaQueryWrapper<MpMaterialMapping>()
-                .eq(MpMaterialMapping::getMpAccountId, mpAccountId)
-                .eq(MpMaterialMapping::getBrandMaterialId, brandMaterialId)
-                .eq(MpMaterialMapping::getContentHash, hash)
-                .eq(MpMaterialMapping::getMediaType, mediaType)
+    private SelfMediaMaterialMapping findMapping(Long selfMediaAccountId, Long brandMaterialId, String hash, String mediaType) {
+        return mappingMapper.selectOne(new LambdaQueryWrapper<SelfMediaMaterialMapping>()
+                .eq(SelfMediaMaterialMapping::getSelfMediaAccountId, selfMediaAccountId)
+                .eq(SelfMediaMaterialMapping::getBrandMaterialId, brandMaterialId)
+                .eq(SelfMediaMaterialMapping::getContentHash, hash)
+                .eq(SelfMediaMaterialMapping::getMediaType, mediaType)
                 .last("LIMIT 1"));
     }
 
-    private MpMaterialMapping findMappingByHash(Long mpAccountId, String hash, String mediaType) {
-        return mappingMapper.selectOne(new LambdaQueryWrapper<MpMaterialMapping>()
-                .eq(MpMaterialMapping::getMpAccountId, mpAccountId)
-                .eq(MpMaterialMapping::getContentHash, hash)
-                .eq(MpMaterialMapping::getMediaType, mediaType)
+    private SelfMediaMaterialMapping findMappingByHash(Long selfMediaAccountId, String hash, String mediaType) {
+        return mappingMapper.selectOne(new LambdaQueryWrapper<SelfMediaMaterialMapping>()
+                .eq(SelfMediaMaterialMapping::getSelfMediaAccountId, selfMediaAccountId)
+                .eq(SelfMediaMaterialMapping::getContentHash, hash)
+                .eq(SelfMediaMaterialMapping::getMediaType, mediaType)
                 .last("LIMIT 1"));
     }
 

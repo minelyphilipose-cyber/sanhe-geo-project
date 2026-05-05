@@ -136,7 +136,7 @@ public class ContentDistributionService {
             throw new BizException(400, "Use distribute(articleId, siteId) for legacy site targets");
         }
         if (target instanceof TargetContext.SelfMediaTarget selfMediaTarget) {
-            return distributeToMpAccount(article, project, operator, selfMediaTarget);
+            return distributeToSelfMedia(article, project, operator, selfMediaTarget);
         }
         throw new IllegalArgumentException("Unsupported TargetContext type: " + target.getClass().getSimpleName());
     }
@@ -470,11 +470,11 @@ public class ContentDistributionService {
         return distributionTaskMapper.selectById(task.getId());
     }
 
-    private DistributionTask distributeToMpAccount(ArticleDraft article,
+    private DistributionTask distributeToSelfMedia(ArticleDraft article,
                                                    Project project,
                                                    SysUser operator,
                                                    TargetContext.SelfMediaTarget mpTarget) {
-        MpAccount account = mpTarget.account();
+        SelfMediaAccount account = mpTarget.account();
         if (account == null || account.getId() == null) {
             throw new BizException(400, "mp account missing");
         }
@@ -509,7 +509,7 @@ public class ContentDistributionService {
                 Optional.ofNullable(packageConfig.getMonthlyPublishLimit()).orElse(0)
         );
 
-        DistributionTask task = createAttemptForMpAccount(article, account, operator.getId(), mpTarget.requestId().trim());
+        DistributionTask task = createAttemptForSelfMedia(article, account, operator.getId(), mpTarget.requestId().trim());
         article.setStatus("distributing");
         articleDraftMapper.updateById(article);
 
@@ -520,7 +520,7 @@ public class ContentDistributionService {
         } catch (Exception ex) {
             submitResult = SubmitResult.failure(500, null, null, trimError(ex.getMessage()), FailureKind.UNKNOWN, false);
         }
-        finalizeAttemptForMpAccount(task.getId(), submitResult);
+        finalizeAttemptForSelfMedia(task.getId(), submitResult);
         finalizeArticleStatusForDraft(article, submitResult);
         if (!submitResult.isSuccess()) {
             projectPublishQuotaService.refund(project.getId(), monthKey);
@@ -617,11 +617,11 @@ public class ContentDistributionService {
         return task;
     }
 
-    private DistributionTask createAttemptForMpAccount(ArticleDraft article, MpAccount account, Long operatorId, String requestId) {
+    private DistributionTask createAttemptForSelfMedia(ArticleDraft article, SelfMediaAccount account, Long operatorId, String requestId) {
         Integer maxAttempt = distributionTaskMapper.selectList(
                 new LambdaQueryWrapper<DistributionTask>()
                         .eq(DistributionTask::getArticleId, article.getId())
-                        .eq(DistributionTask::getMpAccountId, account.getId())
+                        .eq(DistributionTask::getSelfMediaAccountId, account.getId())
         ).stream().map(DistributionTask::getAttemptNo).max(Integer::compareTo).orElse(0);
 
         DistributionTask task = new DistributionTask();
@@ -629,7 +629,7 @@ public class ContentDistributionService {
         task.setProjectId(article.getProjectId());
         task.setSiteId(null);
         task.setTargetKind(DistributionTargetKind.MP_ACCOUNT);
-        task.setMpAccountId(account.getId());
+        task.setSelfMediaAccountId(account.getId());
         task.setAttemptNo(maxAttempt + 1);
         task.setStatus("submitting");
         task.setIntegrationMethod(account.getPlatform());
@@ -699,7 +699,7 @@ public class ContentDistributionService {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    protected void finalizeAttemptForMpAccount(Long taskId, SubmitResult result) {
+    protected void finalizeAttemptForSelfMedia(Long taskId, SubmitResult result) {
         LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
                 .eq(DistributionTask::getId, taskId)
                 .eq(DistributionTask::getStatus, "submitting")
@@ -726,7 +726,7 @@ public class ContentDistributionService {
 
         int affected = distributionTaskMapper.update(null, wrapper);
         if (affected == 0) {
-            log.warn("finalizeAttemptForMpAccount: task {} state changed concurrently, skipped finalize", taskId);
+            log.warn("finalizeAttemptForSelfMedia: task {} state changed concurrently, skipped finalize", taskId);
         }
     }
 

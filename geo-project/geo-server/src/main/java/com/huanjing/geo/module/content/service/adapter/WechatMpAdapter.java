@@ -5,7 +5,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
-import com.huanjing.geo.module.content.entity.MpAccount;
+import com.huanjing.geo.module.content.entity.DistributionTask;
+import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import com.huanjing.geo.module.content.wechat.WechatHtmlRewriter;
 import com.huanjing.geo.module.content.wechat.WechatMediaService;
@@ -84,7 +85,7 @@ public class WechatMpAdapter implements SiteAdapter, SelfMediaAdapter {
     public SubmitResult submitToTarget(ArticleDraft article,
                                        String contentMarkdown,
                                        TargetContext.SelfMediaTarget mpTarget) {
-        MpAccount account = mpTarget.account();
+        SelfMediaAccount account = mpTarget.account();
         String requestPayload = null;
         try {
             Brand brand = brandService.requireExistingBrand(account.getBrandId());
@@ -107,8 +108,8 @@ public class WechatMpAdapter implements SiteAdapter, SelfMediaAdapter {
     }
 
     @Override
-    public ReviewStatusResult refreshReviewStatus(com.huanjing.geo.module.content.entity.DistributionTask task,
-                                                  MpAccount account) {
+    public ReviewStatusResult refreshReviewStatus(DistributionTask task,
+                                                  SelfMediaAccount account) {
         return ReviewStatusResult.notApplicable();
     }
 
@@ -121,7 +122,7 @@ public class WechatMpAdapter implements SiteAdapter, SelfMediaAdapter {
 
     private WechatMpClient.DraftArticle buildDraftArticle(ArticleDraft article,
                                                           Brand brand,
-                                                          MpAccount account,
+                                                          SelfMediaAccount account,
                                                           String content,
                                                           String thumbMediaId) {
         String title = trimToLength(article == null ? null : article.getTitle(), 64);
@@ -138,11 +139,11 @@ public class WechatMpAdapter implements SiteAdapter, SelfMediaAdapter {
         );
     }
 
-    private String buildRequestPayload(MpAccount account, Long coverMaterialId, WechatMpClient.DraftArticle article) throws Exception {
+    private String buildRequestPayload(SelfMediaAccount account, Long coverMaterialId, WechatMpClient.DraftArticle article) throws Exception {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("platform", PLATFORM);
         root.put("mpAccountId", account.getId());
-        root.put("authorizerAppid", account.getAuthorizerAppid());
+        root.put("authorizerAppid", account.getPlatformAccountId());
         root.put("coverMaterialId", coverMaterialId);
         ObjectNode draft = root.putObject("draftArticle");
         draft.put("title", article.title());
