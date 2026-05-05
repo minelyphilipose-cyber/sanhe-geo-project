@@ -8,6 +8,9 @@ import type {
   RecommendedSitesResponse,
   R,
   SelfMediaAccount,
+  DouyinAuthUrl,
+  DouyinCapability,
+  DouyinPlatformOptions,
   WechatMpAuthUrl,
   WechatMpCapability,
 } from '@/types'
@@ -73,6 +76,10 @@ export function retryDistributionTask(taskId: number) {
   return request.post<R<DistributionTask>>(`/content/distribution-tasks/${taskId}/retry`)
 }
 
+export function refreshDistributionTaskReviewStatus(taskId: number) {
+  return request.post<R<DistributionTask>>(`/content/distribution-tasks/${taskId}/refresh-review-status`)
+}
+
 export function confirmManualDistribution(taskId: number, data: { publishedUrl: string; responsePayload?: string }) {
   return request.patch<R<DistributionTask>>(`/content/distribution-tasks/${taskId}/confirm-manual`, data)
 }
@@ -93,6 +100,14 @@ export function getWechatMpAuthUrl(params: { brandId: number; redirectArticleId?
   return request.get<R<WechatMpAuthUrl>>('/content/self-media-accounts/wechat/auth-url', { params })
 }
 
+export function getDouyinCapability() {
+  return request.get<R<DouyinCapability>>('/content/self-media-accounts/douyin/capability')
+}
+
+export function getDouyinAuthUrl(params: { brandId: number; redirectArticleId?: number }) {
+  return request.get<R<DouyinAuthUrl>>('/content/self-media-accounts/douyin/auth-url', { params })
+}
+
 export function getSelfMediaAccountsByBrand(brandId: number) {
   return request.get<R<SelfMediaAccount[]>>(`/content/brands/${brandId}/self-media-accounts`)
 }
@@ -103,7 +118,11 @@ export function checkSelfMediaAccountAuth(id: number) {
 
 export function distributeContentArticleToSelfMediaAccount(articleId: number, data: {
   selfMediaAccountId: number
-  coverMaterialId: number
+  coverMaterialId?: number
+  imageMaterialIds?: number[]
+  privateStatus?: number | string
+  downloadType?: number | string
+  platformOptions?: DouyinPlatformOptions
   requestId: string
 }) {
   return request.post<R<DistributionTask>>(`/content/articles/${articleId}/distribute-to-self-media`, data)

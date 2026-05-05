@@ -843,6 +843,9 @@ export interface DistributionTask {
   brandOfficialSiteId?: number | null
   selfMediaAccountId?: number | null
   platformArticleId?: string | null
+  externalStatus?: string | null
+  reviewStatus?: string | null
+  reviewFeedback?: string | null
   failureKind?: string | null
   nextRetryAt?: string | null
   requestPayload?: string | null
@@ -864,6 +867,21 @@ export interface WechatMpCapability {
 export interface WechatMpAuthUrl {
   authUrl: string
   expiresIn: number
+}
+
+export interface DouyinCapability {
+  enabled: boolean
+  mode: 'mock' | 'real' | string
+  disabledReason?: string | null
+}
+
+export interface DouyinAuthUrl {
+  authUrl: string
+  expiresIn: number
+}
+
+export interface DouyinPlatformOptions {
+  text?: string
 }
 
 export interface SelfMediaAccount {

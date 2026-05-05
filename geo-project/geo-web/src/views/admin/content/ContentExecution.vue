@@ -185,7 +185,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="mediaDistributeVisible" title="文章站点分发" width="720px">
+    <el-dialog v-model="mediaDistributeVisible" title="自媒体分发" width="860px">
       <div class="media-distribute">
         <el-alert
           v-if="wechatCapability && !wechatCapability.draftDistributionEnabled"
@@ -194,11 +194,18 @@
           show-icon
           title="微信公众号能力审核中"
         />
+        <el-alert
+          v-if="douyinCapability && !douyinCapability.enabled"
+          type="warning"
+          :closable="false"
+          show-icon
+          :title="`抖音图文未开启：${douyinCapability.disabledReason || 'feature flag disabled'}`"
+        />
 
         <div class="media-grid">
           <button
             class="media-platform"
-            :class="{ active: wechatActive, disabled: !wechatCapability?.draftDistributionEnabled }"
+            :class="{ active: selectedMediaPlatform === 'wechat_mp', disabled: !wechatCapability?.draftDistributionEnabled }"
             type="button"
             @click="handleWechatPlatformClick"
           >
@@ -206,17 +213,27 @@
             <span class="media-name">微信公众号</span>
             <el-tag size="small" :type="wechatStatusTagType">{{ wechatStatusLabel }}</el-tag>
           </button>
+          <button
+            class="media-platform"
+            :class="{ active: selectedMediaPlatform === 'douyin', disabled: !douyinCapability?.enabled }"
+            type="button"
+            @click="handleDouyinPlatformClick"
+          >
+            <span class="douyin-mark">抖</span>
+            <span class="media-name">抖音图文</span>
+            <el-tag size="small" :type="douyinStatusTagType">{{ douyinStatusLabel }}</el-tag>
+          </button>
         </div>
 
-        <div v-if="wechatAccounts.length" class="self-media-account-list">
-          <div v-for="account in wechatAccounts" :key="account.id" class="self-media-account-row">
+        <div v-if="currentPlatformAccounts.length" class="self-media-account-list">
+          <div v-for="account in currentPlatformAccounts" :key="account.id" class="self-media-account-row">
             <div class="self-media-account-main">
               <div class="self-media-account-title">{{ account.accountName }}</div>
               <div class="self-media-account-meta">{{ account.platformAccountId }}</div>
             </div>
             <el-tag size="small" :type="selfMediaAccountStatusTag(account.status)">{{ selfMediaAccountStatusLabel(account.status) }}</el-tag>
             <el-button
-              v-if="account.status === 'active'"
+              v-if="selectedMediaPlatform === 'wechat_mp' && account.status === 'active'"
               size="small"
               :loading="checkingSelfMediaAccountId === account.id"
               @click="checkWechatAccount(account.id)"
@@ -224,17 +241,25 @@
               检测登录
             </el-button>
             <el-button
-              v-if="account.status === 'active'"
+              v-if="selectedMediaPlatform === 'wechat_mp' && account.status === 'active'"
               size="small"
               type="primary"
               @click="startWechatDraft(account)"
             >
               保存草稿
             </el-button>
+            <el-button
+              v-if="selectedMediaPlatform === 'douyin' && account.status === 'active'"
+              size="small"
+              type="primary"
+              @click="startDouyinImageText(account)"
+            >
+              选择账号
+            </el-button>
           </div>
         </div>
 
-        <div v-if="selectedSelfMediaAccountId" class="cover-picker">
+        <div v-if="selectedMediaPlatform === 'wechat_mp' && selectedSelfMediaAccountId" class="cover-picker">
           <div class="cover-picker-header">
             <span>选择公众号封面</span>
             <el-tag size="small" type="info">{{ imageMaterials.length }} 张图片</el-tag>
@@ -254,17 +279,103 @@
             </button>
           </div>
         </div>
+
+        <div v-if="selectedMediaPlatform === 'douyin' && selectedSelfMediaAccountId" class="cover-picker">
+          <div class="cover-picker-header">
+            <span>选择抖音图文图片</span>
+            <el-tag size="small" type="info">{{ selectedDouyinImageMaterialIds.length }}/30</el-tag>
+          </div>
+          <el-empty v-if="!douyinImageMaterials.length" description="当前品牌暂无 JPG/PNG 图片素材" />
+          <div v-else class="cover-grid">
+            <button
+              v-for="material in douyinImageMaterials"
+              :key="material.id"
+              type="button"
+              class="cover-item"
+              :class="{ selected: selectedDouyinImageMaterialIds.includes(material.id) }"
+              @click="toggleDouyinImage(material.id)"
+            >
+              <img :src="material.fileUrl" :alt="material.fileName" />
+              <span>{{ material.fileName }}</span>
+            </button>
+          </div>
+          <div v-if="selectedDouyinMaterials.length" class="douyin-selected-list">
+            <div v-for="(material, index) in selectedDouyinMaterials" :key="material.id" class="douyin-selected-row">
+              <span class="douyin-selected-index">{{ index + 1 }}</span>
+              <span class="douyin-selected-name">{{ material.fileName }}</span>
+              <el-button size="small" :disabled="index === 0" @click="moveDouyinImage(index, -1)">上移</el-button>
+              <el-button size="small" :disabled="index === selectedDouyinMaterials.length - 1" @click="moveDouyinImage(index, 1)">下移</el-button>
+            </div>
+          </div>
+          <div class="douyin-text-editor">
+            <div class="cover-picker-header">
+              <span>图文文案</span>
+              <el-tag size="small" :type="douyinText.length > 1000 ? 'danger' : 'info'">{{ douyinText.length }}/1000</el-tag>
+            </div>
+            <el-input
+              v-model="douyinText"
+              type="textarea"
+              :rows="4"
+              maxlength="1000"
+              show-word-limit
+              placeholder="可填写抖音图文文案；不填时后端使用文章标题"
+            />
+          </div>
+        </div>
+
+        <div v-if="distributionAttempts.length" class="distribution-history">
+          <div class="cover-picker-header">
+            <span>分发记录</span>
+            <el-tag size="small" type="info">{{ distributionAttempts.length }} 条</el-tag>
+          </div>
+          <el-table :data="distributionAttempts" border max-height="220">
+            <el-table-column prop="integrationMethod" label="平台" width="110" />
+            <el-table-column prop="status" label="任务状态" width="100" />
+            <el-table-column label="审核状态" width="120">
+              <template #default="scope">
+                <el-tag v-if="scope.row.reviewStatus" size="small" :type="reviewStatusTag(scope.row.reviewStatus)">
+                  {{ reviewStatusLabel(scope.row.reviewStatus) }}
+                </el-tag>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="externalStatus" label="平台状态" min-width="110" show-overflow-tooltip />
+            <el-table-column prop="errorMessage" label="错误" min-width="160" show-overflow-tooltip />
+            <el-table-column label="操作" width="100">
+              <template #default="scope">
+                <el-button
+                  v-if="scope.row.reviewStatus === 'under_review'"
+                  link
+                  type="primary"
+                  :loading="refreshingReviewTaskId === scope.row.id"
+                  @click="refreshReviewStatus(scope.row)"
+                >
+                  刷新
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
       </div>
       <template #footer>
         <el-button @click="mediaDistributeVisible = false">关闭</el-button>
         <el-button
-          v-if="selectedSelfMediaAccountId"
+          v-if="selectedMediaPlatform === 'wechat_mp' && selectedSelfMediaAccountId"
           type="primary"
           :loading="selfMediaSubmitting"
           :disabled="!selectedCoverMaterialId"
           @click="submitWechatDraft"
         >
           保存至公众号草稿箱
+        </el-button>
+        <el-button
+          v-if="selectedMediaPlatform === 'douyin' && selectedSelfMediaAccountId"
+          type="primary"
+          :loading="selfMediaSubmitting"
+          :disabled="!selectedDouyinImageMaterialIds.length || douyinText.length > 1000"
+          @click="submitDouyinImageText"
+        >
+          发布抖音图文
         </el-button>
       </template>
     </el-dialog>
@@ -303,19 +414,23 @@ import { ElMessage } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
-import type { ArticleDetailResponse, ArticleDraft, BrandMaterial, SelfMediaAccount, RecommendedSite, WechatMpCapability } from '@/types'
+import type { ArticleDetailResponse, ArticleDraft, BrandMaterial, DistributionTask, DouyinCapability, SelfMediaAccount, RecommendedSite, WechatMpCapability } from '@/types'
 import {
   checkSelfMediaAccountAuth,
   distributeContentArticle,
   distributeContentArticleToGeoSite,
   distributeContentArticleToSelfMediaAccount,
+  getArticleDistribution,
   getContentArticleDetail,
   getContentArticles,
+  getDouyinAuthUrl,
+  getDouyinCapability,
   getSelfMediaAccountsByBrand,
   getRecommendedSites,
   getWechatMpAuthUrl,
   getWechatMpCapability,
   publishContentArticle,
+  refreshDistributionTaskReviewStatus,
   resubmitContentArticle,
   reviewContentArticle,
   saveContentArticleRevision,
@@ -374,11 +489,18 @@ const mediaDistributeVisible = ref(false)
 const mediaDistributeArticleId = ref<number | null>(null)
 const mediaDistributeBrandId = ref<number | null>(null)
 const wechatCapability = ref<WechatMpCapability | null>(null)
+const douyinCapability = ref<DouyinCapability | null>(null)
 const wechatAccounts = ref<SelfMediaAccount[]>([])
+const douyinAccounts = ref<SelfMediaAccount[]>([])
 const checkingSelfMediaAccountId = ref<number | null>(null)
 const brandMaterials = ref<BrandMaterial[]>([])
+const selectedMediaPlatform = ref<'wechat_mp' | 'douyin'>('wechat_mp')
 const selectedSelfMediaAccountId = ref<number | null>(null)
 const selectedCoverMaterialId = ref<number | null>(null)
+const selectedDouyinImageMaterialIds = ref<number[]>([])
+const douyinText = ref('')
+const distributionAttempts = ref<DistributionTask[]>([])
+const refreshingReviewTaskId = ref<number | null>(null)
 const selfMediaSubmitting = ref(false)
 
 const publishVisible = ref(false)
@@ -408,10 +530,28 @@ const wechatStatusTagType = computed<'success' | 'warning' | 'info'>(() => {
   if (!wechatCapability.value?.draftDistributionEnabled) return 'warning'
   return wechatActive.value ? 'success' : 'info'
 })
+const douyinActive = computed(() => douyinAccounts.value.some((account) => account.status === 'active'))
+const douyinStatusLabel = computed(() => {
+  if (!douyinCapability.value?.enabled) return '未开启'
+  if (douyinActive.value) return '已登录'
+  return '未登录'
+})
+const douyinStatusTagType = computed<'success' | 'warning' | 'info'>(() => {
+  if (!douyinCapability.value?.enabled) return 'warning'
+  return douyinActive.value ? 'success' : 'info'
+})
+const currentPlatformAccounts = computed(() => selectedMediaPlatform.value === 'douyin' ? douyinAccounts.value : wechatAccounts.value)
 const imageMaterials = computed(() => brandMaterials.value.filter((item) => {
   const type = (item.fileType || '').toLowerCase()
   return ['jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(type)
 }))
+const douyinImageMaterials = computed(() => brandMaterials.value.filter((item) => {
+  const type = (item.fileType || '').toLowerCase()
+  return ['jpg', 'jpeg', 'png'].includes(type)
+}))
+const selectedDouyinMaterials = computed(() => selectedDouyinImageMaterialIds.value
+  .map((id) => douyinImageMaterials.value.find((item) => item.id === id))
+  .filter((item): item is BrandMaterial => !!item))
 const statusOptions = [
   { label: '待审核', value: 'pending_review' },
   { label: '已通过', value: 'approved' },
@@ -578,14 +718,21 @@ async function openDistribute(row: ArticleDraft) {
 async function openMediaDistribute(row: ArticleDraft) {
   mediaDistributeArticleId.value = row.id
   mediaDistributeBrandId.value = null
+  selectedMediaPlatform.value = 'wechat_mp'
   wechatAccounts.value = []
+  douyinAccounts.value = []
   brandMaterials.value = []
   selectedSelfMediaAccountId.value = null
   selectedCoverMaterialId.value = null
+  selectedDouyinImageMaterialIds.value = []
+  douyinText.value = row.title || ''
+  distributionAttempts.value = []
   try {
-    const [detailRes, capabilityRes] = await Promise.all([
+    const [detailRes, wechatCapabilityRes, douyinCapabilityRes, distributionRes] = await Promise.all([
       getContentArticleDetail(row.id),
       getWechatMpCapability(),
+      getDouyinCapability(),
+      getArticleDistribution(row.id),
     ])
     const brandId = detailRes.data.data.project?.brandId
     if (!brandId) {
@@ -593,12 +740,16 @@ async function openMediaDistribute(row: ArticleDraft) {
       return
     }
     mediaDistributeBrandId.value = brandId
-    wechatCapability.value = capabilityRes.data.data
+    wechatCapability.value = wechatCapabilityRes.data.data
+    douyinCapability.value = douyinCapabilityRes.data.data
+    distributionAttempts.value = distributionRes.data.data.attempts || []
     const [accountRes, materialRes] = await Promise.all([
       getSelfMediaAccountsByBrand(brandId),
       getBrandMaterials(brandId),
     ])
-    wechatAccounts.value = accountRes.data.data || []
+    const accounts = accountRes.data.data || []
+    wechatAccounts.value = accounts.filter((account) => account.platform === 'wechat_mp')
+    douyinAccounts.value = accounts.filter((account) => account.platform === 'douyin')
     brandMaterials.value = materialRes.data.data || []
     mediaDistributeVisible.value = true
   } catch {
@@ -630,8 +781,64 @@ async function handleWechatPlatformClick() {
 }
 
 function startWechatDraft(account: SelfMediaAccount) {
+  selectedMediaPlatform.value = 'wechat_mp'
   selectedSelfMediaAccountId.value = account.id
   selectedCoverMaterialId.value = imageMaterials.value[0]?.id || null
+}
+
+async function handleDouyinPlatformClick() {
+  selectedMediaPlatform.value = 'douyin'
+  selectedSelfMediaAccountId.value = null
+  selectedCoverMaterialId.value = null
+  if (!douyinCapability.value?.enabled) {
+    ElMessage.info(douyinCapability.value?.disabledReason || '抖音图文暂未开启')
+    return
+  }
+  if (!douyinActive.value) {
+    if (!mediaDistributeBrandId.value) {
+      ElMessage.error('当前文章未绑定品牌，无法授权抖音')
+      return
+    }
+    const { data } = await getDouyinAuthUrl({
+      brandId: mediaDistributeBrandId.value,
+      redirectArticleId: mediaDistributeArticleId.value || undefined,
+    })
+    window.location.href = data.data.authUrl
+    return
+  }
+  const account = douyinAccounts.value.find((item) => item.status === 'active')
+  if (account) {
+    startDouyinImageText(account)
+  }
+}
+
+function startDouyinImageText(account: SelfMediaAccount) {
+  selectedMediaPlatform.value = 'douyin'
+  selectedSelfMediaAccountId.value = account.id
+}
+
+function toggleDouyinImage(materialId: number) {
+  const index = selectedDouyinImageMaterialIds.value.indexOf(materialId)
+  if (index >= 0) {
+    selectedDouyinImageMaterialIds.value.splice(index, 1)
+    return
+  }
+  if (selectedDouyinImageMaterialIds.value.length >= 30) {
+    ElMessage.warning('抖音图文最多选择 30 张图片')
+    return
+  }
+  selectedDouyinImageMaterialIds.value.push(materialId)
+}
+
+function moveDouyinImage(index: number, offset: number) {
+  const nextIndex = index + offset
+  if (nextIndex < 0 || nextIndex >= selectedDouyinImageMaterialIds.value.length) {
+    return
+  }
+  const next = [...selectedDouyinImageMaterialIds.value]
+  const [item] = next.splice(index, 1)
+  next.splice(nextIndex, 0, item)
+  selectedDouyinImageMaterialIds.value = next
 }
 
 async function submitWechatDraft() {
@@ -656,6 +863,59 @@ async function submitWechatDraft() {
     ElMessage.error(task.errorMessage || '保存公众号草稿失败')
   } finally {
     selfMediaSubmitting.value = false
+  }
+}
+
+async function submitDouyinImageText() {
+  if (!mediaDistributeArticleId.value || !selectedSelfMediaAccountId.value) {
+    ElMessage.warning('请选择抖音账号')
+    return
+  }
+  if (!selectedDouyinImageMaterialIds.value.length) {
+    ElMessage.warning('请选择至少 1 张抖音图文图片')
+    return
+  }
+  if (douyinText.value.length > 1000) {
+    ElMessage.warning('抖音文案不能超过 1000 字')
+    return
+  }
+  selfMediaSubmitting.value = true
+  try {
+    const result = await distributeContentArticleToSelfMediaAccount(mediaDistributeArticleId.value, {
+      selfMediaAccountId: selectedSelfMediaAccountId.value,
+      imageMaterialIds: selectedDouyinImageMaterialIds.value,
+      platformOptions: {
+        text: douyinText.value.trim() || undefined,
+      },
+      requestId: createRequestId('douyin'),
+    })
+    const task = result.data.data
+    if (task.status === 'submitted') {
+      ElMessage.success('抖音图文提交成功')
+      await refreshDistributionHistory()
+      await load()
+      return
+    }
+    ElMessage.error(task.errorMessage || '抖音图文提交失败')
+  } finally {
+    selfMediaSubmitting.value = false
+  }
+}
+
+async function refreshDistributionHistory() {
+  if (!mediaDistributeArticleId.value) return
+  const { data } = await getArticleDistribution(mediaDistributeArticleId.value)
+  distributionAttempts.value = data.data.attempts || []
+}
+
+async function refreshReviewStatus(task: DistributionTask) {
+  refreshingReviewTaskId.value = task.id
+  try {
+    await refreshDistributionTaskReviewStatus(task.id)
+    await refreshDistributionHistory()
+    ElMessage.success('审核状态已刷新')
+  } finally {
+    refreshingReviewTaskId.value = null
   }
 }
 
@@ -688,11 +948,11 @@ function selfMediaAccountStatusTag(status: string): 'success' | 'warning' | 'dan
   return 'info'
 }
 
-function createRequestId() {
+function createRequestId(prefix = 'self_media') {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID()
   }
-  return `self_media_${Date.now()}_${Math.random().toString(16).slice(2)}`
+  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`
 }
 
 async function publishToGeoSite(row: ArticleDraft) {
@@ -817,6 +1077,7 @@ async function submitPublish() {
 
 onMounted(async () => {
   handleWechatAuthResult()
+  handleDouyinAuthResult()
   await dictStore.ensureLoaded()
   await load()
 })
@@ -834,6 +1095,39 @@ function handleWechatAuthResult() {
   if (auth === 'callback_failed') {
     ElMessage.error('微信公众号授权回调失败，请重试')
   }
+}
+
+function handleDouyinAuthResult() {
+  const auth = route.query.douyinAuth
+  if (auth === 'success') {
+    ElMessage.success('抖音账号授权成功')
+    return
+  }
+  if (auth === 'scope_missing') {
+    ElMessage.warning('授权成功但缺少必要权限，请重新授权并勾选必需权限')
+    return
+  }
+  if (auth === 'callback_failed') {
+    ElMessage.error(`抖音授权失败：${route.query.errorMessage || '未知错误'}`)
+  }
+}
+
+function reviewStatusLabel(status?: string | null) {
+  const map: Record<string, string> = {
+    under_review: '审核中',
+    published: '已通过',
+    rejected: '已拒审',
+    offline: '已下线',
+    unknown: '未知',
+  }
+  return status ? map[status] || status : '-'
+}
+
+function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'danger' | 'info' {
+  if (status === 'published') return 'success'
+  if (status === 'rejected' || status === 'offline') return 'danger'
+  if (status === 'under_review') return 'warning'
+  return 'info'
 }
 </script>
 
@@ -1036,6 +1330,19 @@ function handleWechatAuthResult() {
   font-weight: 700;
 }
 
+.douyin-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: #111827;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+}
+
 .media-name {
   font-size: 14px;
   font-weight: 600;
@@ -1129,6 +1436,54 @@ function handleWechatAuthResult() {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.douyin-selected-list {
+  margin-top: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.douyin-selected-row {
+  min-height: 44px;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: 32px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.douyin-selected-row:last-child {
+  border-bottom: 0;
+}
+
+.douyin-selected-index {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: #f2f3f5;
+  color: var(--el-text-color-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+
+.douyin-selected-name {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--el-text-color-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.douyin-text-editor,
+.distribution-history {
+  margin-top: 12px;
 }
 
 </style>
