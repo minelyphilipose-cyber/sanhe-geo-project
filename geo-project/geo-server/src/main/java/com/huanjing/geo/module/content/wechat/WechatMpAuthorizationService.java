@@ -73,6 +73,7 @@ public class WechatMpAuthorizationService {
                                          WechatOpenPlatformClient.QueryAuthResult queryAuth,
                                          WechatOpenPlatformClient.AuthorizerInfoResult info) {
         SelfMediaAccount account = selfMediaAccountMapper.selectOne(new LambdaQueryWrapper<SelfMediaAccount>()
+                .eq(SelfMediaAccount::getPlatform, "wechat_mp")
                 .eq(SelfMediaAccount::getPlatformAccountId, queryAuth.authorizerAppid())
                 .last("LIMIT 1"));
         LocalDateTime now = LocalDateTime.now();
