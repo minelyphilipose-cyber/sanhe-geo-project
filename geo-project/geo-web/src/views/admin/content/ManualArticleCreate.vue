@@ -188,6 +188,25 @@
           </div>
         </section>
 
+        <section class="section-card">
+          <header class="section-header">
+            <div class="section-header-left">
+              <span class="section-index">4</span>
+              <span class="section-title">品牌图库插图</span>
+              <span class="section-desc">从当前项目品牌图库选图，写入长期访问 URL</span>
+            </div>
+            <el-button :icon="Picture" :disabled="!selectedProject?.brandId" @click="openImagePicker">
+              选择图片
+            </el-button>
+          </header>
+          <div class="section-body">
+            <div v-if="!selectedProject?.brandId" class="image-empty">选择绑定项目后可使用品牌图库插图。</div>
+            <div v-else class="image-hint">
+              图片将以 Markdown 语法插入正文，并使用素材库保存的完整访问路径。
+            </div>
+          </div>
+        </section>
+
         <section class="source-card" :class="{ collapsed: !sourceExpanded, overridden: markdownOverridden }">
           <header class="source-card-head" @click="sourceExpanded = !sourceExpanded">
             <div class="source-title">
@@ -256,11 +275,60 @@
         </div>
       </aside>
     </div>
+
+    <el-dialog v-model="imagePickerVisible" title="选择品牌图片" width="860px">
+      <div class="image-picker">
+        <div class="image-picker-toolbar">
+          <el-select
+            v-model="selectedImageFolderId"
+            :loading="imageFoldersLoading"
+            placeholder="选择文件夹"
+            style="width: 220px"
+          >
+            <el-option
+              v-for="folder in imageFolders"
+              :key="folder.id"
+              :label="`${folder.folderName}（${folder.materials?.length || folder.materialCount || 0}）`"
+              :value="folder.id"
+            />
+          </el-select>
+          <el-input
+            v-model="imageAltText"
+            maxlength="80"
+            placeholder="图片说明"
+            style="width: 260px"
+          />
+          <el-button :loading="imageFoldersLoading" @click="loadImageFolders">刷新</el-button>
+        </div>
+
+        <DataState :loading="imageFoldersLoading" :empty="!imageFoldersLoading && imageMaterials.length === 0" empty-text="当前项目品牌图库暂无可用图片">
+          <div class="image-grid">
+            <button
+              v-for="material in imageMaterials"
+              :key="material.id"
+              type="button"
+              class="image-tile"
+              :class="{ selected: selectedImageMaterialId === material.id }"
+              @click="selectImageMaterial(material)"
+            >
+              <img :src="material.fileUrl" :alt="material.fileName" loading="lazy" />
+              <span>{{ material.fileName }}</span>
+            </button>
+          </div>
+        </DataState>
+      </div>
+      <template #footer>
+        <el-button @click="imagePickerVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!selectedImageMaterial" @click="insertSelectedImage">
+          插入文章
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import { ElMessage } from 'element-plus'
@@ -274,13 +342,16 @@ import {
   Delete,
   Document,
   Files,
+  Picture,
   Plus,
   Rank,
 } from '@element-plus/icons-vue'
-import type { Project } from '@/types'
+import type { BrandImageFolder, BrandMaterial, Project } from '@/types'
 import { createManualContentArticle } from '@/api/content'
+import { getBrandImageFolders } from '@/api/customer'
 import { getProjectDetail, getProjectList } from '@/api/project'
 import { useDictStore } from '@/stores/dict'
+import DataState from '@/components/ui/DataState.vue'
 
 interface ManualSection {
   id: number
@@ -316,6 +387,12 @@ const markdownOverride = ref('')
 const markdownOverridden = ref(false)
 const sourceExpanded = ref(false)
 const previewMode = ref<'rendered' | 'markdown'>('rendered')
+const imagePickerVisible = ref(false)
+const imageFoldersLoading = ref(false)
+const imageFolders = ref<BrandImageFolder[]>([])
+const selectedImageFolderId = ref<number | null>(null)
+const selectedImageMaterialId = ref<number | null>(null)
+const imageAltText = ref('')
 let nextSectionId = 1
 
 const manualForm = reactive({
@@ -375,6 +452,11 @@ const todayText = computed(() => {
   const date = String(now.getDate()).padStart(2, '0')
   return `${now.getFullYear()}.${month}.${date}`
 })
+const imageMaterials = computed(() => {
+  const folder = imageFolders.value.find((item) => item.id === selectedImageFolderId.value)
+  return (folder?.materials || []).filter((material) => material.category === 'brand_image' && isImageType(material.fileType) && Boolean(material.fileUrl))
+})
+const selectedImageMaterial = computed(() => imageMaterials.value.find((item) => item.id === selectedImageMaterialId.value) || null)
 
 function createSection(): ManualSection {
   return {
@@ -520,6 +602,104 @@ async function copyMarkdown() {
   ElMessage.success('Markdown 已复制')
 }
 
+async function openImagePicker() {
+  if (!selectedProject.value?.brandId) {
+    ElMessage.warning('请先选择绑定项目')
+    return
+  }
+  imagePickerVisible.value = true
+  if (!imageFolders.value.length) {
+    await loadImageFolders()
+  }
+}
+
+async function loadImageFolders() {
+  const project = selectedProject.value
+  if (!project?.brandId) {
+    imageFolders.value = []
+    selectedImageFolderId.value = null
+    selectedImageMaterialId.value = null
+    return
+  }
+  imageFoldersLoading.value = true
+  try {
+    const { data } = await getBrandImageFolders(project.brandId, {
+      projectId: project.id,
+      activeOnly: true,
+      includeMaterials: true,
+    })
+    imageFolders.value = data.data || []
+    if (!imageFolders.value.some((folder) => folder.id === selectedImageFolderId.value)) {
+      selectedImageFolderId.value = imageFolders.value[0]?.id || null
+    }
+    if (!imageMaterials.value.some((material) => material.id === selectedImageMaterialId.value)) {
+      selectedImageMaterialId.value = imageMaterials.value[0]?.id || null
+    }
+  } catch (err) {
+    console.error(err)
+    imageFolders.value = []
+    selectedImageFolderId.value = null
+    selectedImageMaterialId.value = null
+    ElMessage.error('加载品牌图库失败')
+  } finally {
+    imageFoldersLoading.value = false
+  }
+}
+
+function selectImageMaterial(material: BrandMaterial) {
+  selectedImageMaterialId.value = material.id
+  if (!imageAltText.value.trim()) {
+    imageAltText.value = filenameWithoutExt(material.fileName)
+  }
+}
+
+function insertSelectedImage() {
+  const material = selectedImageMaterial.value
+  if (!material?.fileUrl) {
+    ElMessage.warning('请选择可用图片')
+    return
+  }
+  const markdownText = `![${escapeMarkdownAlt(imageAltText.value.trim() || filenameWithoutExt(material.fileName))}](${material.fileUrl})`
+  if (markdownOverridden.value) {
+    manualMarkdown.value = appendMarkdown(manualMarkdown.value, markdownText)
+  } else {
+    appendImageToFocusedSection(markdownText)
+  }
+  imagePickerVisible.value = false
+  ElMessage.success('图片已插入文章')
+}
+
+function appendImageToFocusedSection(markdownText: string) {
+  let target = manualForm.sections.find((section) => section.id === focusedSectionId.value)
+  if (!target) {
+    target = manualForm.sections[manualForm.sections.length - 1]
+  }
+  if (!target) {
+    target = createSection()
+    manualForm.sections.push(target)
+  }
+  target.content = appendMarkdown(target.content, markdownText)
+}
+
+function appendMarkdown(source: string, markdownText: string) {
+  const current = source.trim()
+  return current ? `${current}\n\n${markdownText}` : markdownText
+}
+
+function escapeMarkdownAlt(value: string) {
+  return value.replace(/[[\]]/g, '')
+}
+
+function filenameWithoutExt(fileName?: string | null) {
+  const name = fileName?.trim() || '品牌图片'
+  return name.replace(/\.[^.]+$/, '')
+}
+
+function isImageType(fileType?: string | null) {
+  if (!fileType) return false
+  return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(fileType.toLowerCase())
+}
+
 function getErrorMessage(err: unknown) {
   const response = (err as { response?: { data?: { message?: string } } })?.response
   return response?.data?.message || '提交失败，请重试'
@@ -583,6 +763,13 @@ onMounted(async () => {
   if (articleType && articleTypeOptions.value.some((item) => item.value === articleType)) {
     manualForm.articleType = articleType
   }
+})
+
+watch(() => manualForm.projectId, () => {
+  imageFolders.value = []
+  selectedImageFolderId.value = null
+  selectedImageMaterialId.value = null
+  imageAltText.value = ''
 })
 </script>
 
@@ -1154,6 +1341,81 @@ onMounted(async () => {
   background: linear-gradient(to top, var(--el-color-primary-light-9) 55%, transparent 55%);
   color: var(--el-text-color-primary);
   font-weight: 700;
+}
+
+.md-body :deep(img) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 18px auto;
+  border-radius: 6px;
+}
+
+.image-empty,
+.image-hint {
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+}
+
+.image-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.image-picker-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+  max-height: 460px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.image-tile {
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--el-bg-color);
+  color: var(--el-text-color-regular);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.image-tile:hover,
+.image-tile.selected {
+  border-color: var(--el-color-primary);
+}
+
+.image-tile.selected {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
+}
+
+.image-tile img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--el-fill-color-light);
+}
+
+.image-tile span {
+  display: block;
+  margin-top: 7px;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .preview-empty {

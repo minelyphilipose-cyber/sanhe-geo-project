@@ -41,12 +41,30 @@ public class MarkdownToHtmlRenderer {
         Document document = Jsoup.parseBodyFragment(html);
         document.outputSettings().prettyPrint(false);
         document.select("script,iframe,object,embed").remove();
+        sanitizeImages(document);
         for (Element element : document.getAllElements()) {
             for (Attribute attribute : element.attributes().asList()) {
                 removeUnsafeAttribute(element, attribute);
             }
         }
         return document.body().html();
+    }
+
+    private void sanitizeImages(Document document) {
+        for (Element image : document.select("img")) {
+            String src = image.attr("src");
+            if (!StringUtils.hasText(src)) {
+                image.remove();
+                continue;
+            }
+            String normalized = src.trim().toLowerCase();
+            if (!normalized.startsWith("http://") && !normalized.startsWith("https://")) {
+                image.remove();
+                continue;
+            }
+            image.attr("loading", "lazy");
+            image.attr("referrerpolicy", "no-referrer");
+        }
     }
 
     private void removeUnsafeAttribute(Element element, Attribute attribute) {

@@ -26,6 +26,7 @@ import com.huanjing.geo.module.content.service.adapter.ReviewStatusResult;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaAdapter;
 import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import com.huanjing.geo.module.content.service.adapter.ValidationResult;
+import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.service.BrandService;
@@ -551,7 +552,7 @@ class ContentDistributionServiceTest {
         private boolean throwUnexpected;
 
         TestBrandGeoSiteAdapter() {
-            super(null, null);
+            super(null, null, new MarkdownToHtmlRenderer());
         }
 
         @Override

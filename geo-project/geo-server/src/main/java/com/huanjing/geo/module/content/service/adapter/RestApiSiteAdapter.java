@@ -3,8 +3,10 @@ package com.huanjing.geo.module.content.service.adapter;
 import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.util.HttpClientUtil;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
+import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import com.huanjing.geo.module.system.entity.PublishSite;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +24,8 @@ import java.util.Map;
 public class RestApiSiteAdapter implements SiteAdapter {
 
     private final PlatformCredentialService platformCredentialService;
+    private final MarkdownToHtmlRenderer markdownRenderer;
+    private final ObjectMapper objectMapper;
 
     @Override
     public boolean supports(String integrationMethod) {
@@ -75,10 +79,13 @@ public class RestApiSiteAdapter implements SiteAdapter {
         String method = StringUtils.hasText(site.getHttpMethod()) ? site.getHttpMethod().trim().toUpperCase(Locale.ROOT) : "POST";
         String template = StringUtils.hasText(site.getRequestBodyTemplate())
                 ? site.getRequestBodyTemplate()
-                : "{\"title\":\"{{title}}\",\"content\":\"{{content}}\",\"author\":\"{{author}}\"}";
+                : "{\"title\":\"{{title}}\",\"content\":\"{{content}}\",\"contentMarkdown\":\"{{contentMarkdown}}\",\"contentHtml\":\"{{contentHtml}}\",\"author\":\"{{author}}\"}";
+        String contentHtml = markdownRenderer.render(contentMarkdown);
         Map<String, String> placeholders = new LinkedHashMap<>();
         placeholders.put("title", article.getTitle());
-        placeholders.put("content", contentMarkdown);
+        placeholders.put("content", contentHtml);
+        placeholders.put("contentMarkdown", contentMarkdown);
+        placeholders.put("contentHtml", contentHtml);
         placeholders.put("keywords", "");
         placeholders.put("author", "geo-system");
         String requestPayload = applyPlaceholders(template, placeholders);
@@ -139,9 +146,21 @@ public class RestApiSiteAdapter implements SiteAdapter {
     private String applyPlaceholders(String template, Map<String, String> values) {
         String result = template;
         for (Map.Entry<String, String> entry : values.entrySet()) {
-            result = result.replace("{{" + entry.getKey() + "}}", entry.getValue() == null ? "" : entry.getValue());
+            result = result.replace("{{" + entry.getKey() + "}}", escapeJsonString(entry.getValue()));
         }
         return result;
+    }
+
+    private String escapeJsonString(String value) {
+        if (value == null) {
+            return "";
+        }
+        try {
+            String json = objectMapper.writeValueAsString(value);
+            return json.substring(1, json.length() - 1);
+        } catch (Exception ex) {
+            return value;
+        }
     }
 
     private Map<String, String> parseHeaders(String raw) {

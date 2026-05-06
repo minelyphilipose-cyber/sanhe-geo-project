@@ -45,6 +45,7 @@ public class ContentArticleService {
     private final ProjectMapper projectMapper;
     private final SysDictItemMapper sysDictItemMapper;
     private final CurrentUserService currentUserService;
+    private final MarkdownImageReferenceValidator markdownImageReferenceValidator;
 
     public Page<ArticleDraft> page(Long projectId, String status, String articleType, long current, long size) {
         SysUser operator = currentUserService.requireCurrentUser();
@@ -124,6 +125,7 @@ public class ContentArticleService {
         if (!StringUtils.hasText(title)) {
             throw new BizException(400, "Title is required");
         }
+        markdownImageReferenceValidator.validate(project, content);
 
         ArticleDraft draft = new ArticleDraft();
         draft.setProjectId(project.getId());
@@ -169,6 +171,7 @@ public class ContentArticleService {
         String content = req.getContentMarkdown().trim();
         String title = StringUtils.hasText(req.getTitle()) ? req.getTitle().trim() : extractTitle(content);
         int nextVersion = Optional.ofNullable(article.getCurrentVersionNo()).orElse(1) + 1;
+        markdownImageReferenceValidator.validate(project, content);
 
         ArticleDraftVersion version = new ArticleDraftVersion();
         version.setArticleId(articleId);
@@ -317,6 +320,7 @@ public class ContentArticleService {
                                              String platformCode,
                                              String modelId,
                                              List<QuestionPoolItem> questions) {
+        markdownImageReferenceValidator.validate(project, contentMarkdown);
         ArticleDraft draft = new ArticleDraft();
         draft.setBatchId(batchId);
         draft.setProjectId(project.getId());

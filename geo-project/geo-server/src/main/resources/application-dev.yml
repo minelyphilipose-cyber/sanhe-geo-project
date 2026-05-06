@@ -61,6 +61,7 @@ geo:
   # MinIO
   minio:
     endpoint: http://192.168.112.175:9000
+    public-endpoint: ${MINIO_PUBLIC_ENDPOINT:http://192.168.112.175:9000}
     access-key: admin
     secret-key: admin123
     bucket: geo-files

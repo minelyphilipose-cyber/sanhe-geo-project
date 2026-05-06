@@ -6,6 +6,7 @@ import com.huanjing.geo.common.util.HttpClientUtil;
 import com.huanjing.geo.module.content.config.BrandGeoSiteProperties;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
+import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -66,7 +67,9 @@ class BrandGeoSiteAdapterTest {
 
         JsonNode payload = objectMapper.readTree(adapter.lastBody);
         assertEquals("A \"quoted\" title", payload.get("title").asText());
-        assertEquals("line1\\line2\nbody", payload.get("content").asText());
+        assertEquals("<p>line1\\line2\nbody</p>\n", payload.get("content").asText());
+        assertEquals("line1\\line2\nbody", payload.get("contentMarkdown").asText());
+        assertEquals("<p>line1\\line2\nbody</p>\n", payload.get("contentHtml").asText());
     }
 
     @Test
@@ -164,7 +167,7 @@ class BrandGeoSiteAdapterTest {
         private String lastBody;
 
         TestAdapter(ObjectMapper objectMapper, BrandGeoSiteProperties props) {
-            super(objectMapper, props);
+            super(objectMapper, props, new MarkdownToHtmlRenderer());
         }
 
         @Override

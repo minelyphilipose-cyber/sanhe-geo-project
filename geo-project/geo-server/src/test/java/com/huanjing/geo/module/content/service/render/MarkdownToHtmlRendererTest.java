@@ -51,6 +51,14 @@ class MarkdownToHtmlRendererTest {
         String html = renderer.render("![alt](" + url + ")");
         assertTrue(html.contains("<img"));
         assertTrue(html.contains("src=\"" + url + "\""));
+        assertTrue(html.contains("loading=\"lazy\""));
+        assertTrue(html.contains("referrerpolicy=\"no-referrer\""));
+    }
+
+    @Test
+    void render_dataImage_removesImage() {
+        String html = renderer.render("![alt](data:image/png;base64,abc)");
+        assertFalse(html.contains("<img"));
     }
 
     @Test

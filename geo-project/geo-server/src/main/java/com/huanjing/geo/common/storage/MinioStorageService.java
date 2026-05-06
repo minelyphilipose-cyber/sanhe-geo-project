@@ -22,6 +22,8 @@ public class MinioStorageService {
 
     @Value("${geo.minio.endpoint}")
     private String endpoint;
+    @Value("${geo.minio.public-endpoint:${geo.minio.endpoint}}")
+    private String publicEndpoint;
     @Value("${geo.minio.bucket}")
     private String bucket;
 
@@ -101,7 +103,8 @@ public class MinioStorageService {
     }
 
     public String buildFileUrl(String objectKey) {
-        String normalized = endpoint.endsWith("/") ? endpoint.substring(0, endpoint.length() - 1) : endpoint;
+        String source = StringUtils.hasText(publicEndpoint) ? publicEndpoint : endpoint;
+        String normalized = source.endsWith("/") ? source.substring(0, source.length() - 1) : source;
         return normalized + "/" + bucket + "/" + objectKey;
     }
 

@@ -1355,6 +1355,14 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   color: #475569;
 }
 
+.markdown-preview :deep(img) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 14px auto;
+  border-radius: 6px;
+}
+
 .markdown-preview :deep(table) {
   width: 100%;
   border-collapse: collapse;

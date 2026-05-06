@@ -7,6 +7,7 @@ import com.huanjing.geo.common.util.HttpClientUtil;
 import com.huanjing.geo.module.content.config.BrandGeoSiteProperties;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
+import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import com.huanjing.geo.module.system.entity.PublishSite;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,7 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
 
     private final ObjectMapper objectMapper;
     private final BrandGeoSiteProperties properties;
+    private final MarkdownToHtmlRenderer markdownRenderer;
 
     @Override
     public boolean supports(String integrationMethod) {
@@ -124,7 +126,10 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
         root.put("siteCode", siteCode);
         root.put("articleType", mappedType);
         root.put("title", article == null ? "" : nullToEmpty(article.getTitle()));
-        root.put("content", nullToEmpty(contentMarkdown));
+        String contentHtml = markdownRenderer.render(contentMarkdown);
+        root.put("content", contentHtml);
+        root.put("contentMarkdown", nullToEmpty(contentMarkdown));
+        root.put("contentHtml", contentHtml);
         return objectMapper.writeValueAsString(root);
     }
 
