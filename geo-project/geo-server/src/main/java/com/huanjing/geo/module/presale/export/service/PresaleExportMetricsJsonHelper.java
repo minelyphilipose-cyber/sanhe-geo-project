@@ -110,6 +110,31 @@ public class PresaleExportMetricsJsonHelper {
         }
     }
 
+    public String latestErrorCode(String currentJson) {
+        try {
+            JsonNode retryHistory = readRoot(currentJson).path("retry_history");
+            if (!retryHistory.isArray() || retryHistory.isEmpty()) {
+                return null;
+            }
+            JsonNode latest = retryHistory.get(retryHistory.size() - 1);
+            return latest.path("error_code").asText(null);
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
+    public JsonNode firstContentOverflow(String currentJson) {
+        try {
+            JsonNode overflows = readRoot(currentJson).path("content_overflows");
+            if (overflows.isArray() && !overflows.isEmpty()) {
+                return overflows.get(0);
+            }
+            return null;
+        } catch (Exception ex) {
+            return null;
+        }
+    }
+
     private ObjectNode readRoot(String currentJson) throws Exception {
         if (!StringUtils.hasText(currentJson)) {
             return objectMapper.createObjectNode();

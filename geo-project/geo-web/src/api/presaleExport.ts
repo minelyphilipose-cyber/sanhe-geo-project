@@ -17,7 +17,9 @@ export interface PresaleExportResponse {
   versionId: number
   status: PresaleExportStatus
   idempotencyKey: string
+  errorCode?: string | null
   errorMsg?: string | null
+  errorDetail?: PresaleExportErrorDetail | null
   retryCount?: number | null
   fileKey?: string | null
   fileSize?: number | null
@@ -25,6 +27,13 @@ export interface PresaleExportResponse {
   expireAt?: string | null
   runningExportId?: number | null
   runningStatus?: PresaleExportStatus | null
+}
+
+export interface PresaleExportErrorDetail {
+  pageId?: string
+  block?: string
+  field?: string
+  overflowPx?: number
 }
 
 export function createPresaleExport(reportId: number, data: PresaleExportCreateRequest) {

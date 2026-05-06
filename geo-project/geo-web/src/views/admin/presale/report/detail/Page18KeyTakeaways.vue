@@ -1,45 +1,45 @@
 <template>
-  <section id="page-17" class="page-anchor">
+  <section id="page-18" class="page-anchor">
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
-        <span>10 / 关键发现总结</span>
+        <span>11 / 关键发现总结</span>
       </div>
 
-      <div class="p17-body">
+      <div class="p18-body">
         <!-- 章节标题 -->
         <div class="section-title">
-          <span class="section-number">10</span>
+          <span class="section-number">11</span>
           <div>
             <div class="section-label">KEY TAKEAWAYS</div>
             <div class="section-heading">关键发现总结</div>
           </div>
         </div>
 
-        <div v-if="takeaways.length > 0" class="p17-list">
+        <div v-if="takeaways.length > 0" class="p18-list">
           <div
             v-for="(t, idx) in takeaways"
             :key="`${t.order_no}-${idx}`"
-            class="p17-item"
+            class="p18-item"
           >
-            <div class="display-serif p17-number">{{ formatOrder(idx + 1) }}</div>
-            <div class="p17-content">
-              <div class="chinese-serif p17-title">{{ t.title }}</div>
-              <div class="p17-description">{{ t.description }}</div>
+            <div class="display-serif p18-number">{{ formatOrder(idx + 1) }}</div>
+            <div class="p18-content">
+              <div class="chinese-serif p18-title">{{ t.title }}</div>
+              <div class="p18-description">{{ t.description }}</div>
             </div>
           </div>
         </div>
 
         <!-- 空态兜底:L3 未配置 key_takeaways -->
-        <div v-else class="p17-empty">
-          <div class="mono p17-empty-label">KEY TAKEAWAYS</div>
-          <div class="p17-empty-text">本报告暂未生成关键发现总结,请联系运营补充。</div>
+        <div v-else class="p18-empty">
+          <div class="mono p18-empty-label">KEY TAKEAWAYS</div>
+          <div class="p18-empty-text">本报告暂未生成关键发现总结,请联系运营补充。</div>
         </div>
 
         <!-- Methodology note -->
-        <div class="p17-methodology">
-          <div class="mono p17-methodology-label">METHODOLOGY NOTE</div>
-          <div class="p17-methodology-text">
+        <div class="p18-methodology">
+          <div class="mono p18-methodology-label">METHODOLOGY NOTE</div>
+          <div class="p18-methodology-text">
             <template v-if="methodologyDate">
               本报告基于 {{ methodologyDate }} 的 AI 平台测试数据生成。大语言模型持续演进,推荐结果会随时间变化。建议以季度级频率持续监测关键指标。
             </template>
@@ -51,7 +51,7 @@
       </div>
 
       <div class="page-footer-brand">GEO · CONFIDENTIAL</div>
-      <div class="page-label">17</div>
+      <div class="page-label">18</div>
     </div>
   </section>
 </template>
@@ -62,7 +62,7 @@ import { useMergedView } from '@/composables/presale/useMergedView'
 import type { KeyTakeaway } from '@/types/presale/editable'
 
 /**
- * Page17 关键发现总结(γ·2)。
+ * Page18 关键发现总结(γ·2)。
  *
  * 数据映射:
  *   - mergedView.key_takeaways[]:每条 {order_no, title, description}
@@ -107,22 +107,22 @@ function formatOrder(n: number): string {
   justify-content: center;
 }
 
-.p17-body {
+.p18-body {
   margin-top: 60px;
 }
 
-.p17-list {
+.p18-list {
   margin-top: 8px;
 }
 
-.p17-item {
+.p18-item {
   display: flex;
   gap: 24px;
   padding: 24px 0;
   border-bottom: 1px solid var(--presale-line);
 }
 
-.p17-number {
+.p18-number {
   font-size: 64px;
   font-weight: 900;
   color: var(--presale-primary);
@@ -131,11 +131,11 @@ function formatOrder(n: number): string {
   min-width: 80px;
 }
 
-.p17-content {
+.p18-content {
   flex: 1;
 }
 
-.p17-title {
+.p18-title {
   font-size: 20px;
   font-weight: 700;
   color: var(--presale-ink);
@@ -143,7 +143,7 @@ function formatOrder(n: number): string {
   line-height: 1.4;
 }
 
-.p17-description {
+.p18-description {
   font-size: 13px;
   color: var(--presale-ink-soft);
   line-height: 1.8;
@@ -151,40 +151,40 @@ function formatOrder(n: number): string {
 
 /* ─── 空态 ─────────────────────────────────────────────── */
 
-.p17-empty {
+.p18-empty {
   margin: 40px 0;
   padding: 32px 24px;
   border: 1px dashed var(--presale-line);
   background: var(--presale-paper-alt);
   text-align: center;
 }
-.p17-empty-label {
+.p18-empty-label {
   font-size: 10px;
   letter-spacing: 3px;
   color: var(--presale-muted);
   margin-bottom: 12px;
 }
-.p17-empty-text {
+.p18-empty-text {
   font-size: 13px;
   color: var(--presale-muted);
 }
 
 /* ─── Methodology note ────────────────────────────────── */
 
-.p17-methodology {
+.p18-methodology {
   margin-top: 40px;
   padding: 20px;
   border: 1px solid var(--presale-line);
   border-left: 3px solid var(--presale-accent);
   background: var(--presale-paper-alt);
 }
-.p17-methodology-label {
+.p18-methodology-label {
   font-size: 10px;
   letter-spacing: 2px;
   color: var(--presale-muted);
   margin-bottom: 8px;
 }
-.p17-methodology-text {
+.p18-methodology-text {
   font-size: 12px;
   color: var(--presale-ink-soft);
   line-height: 1.7;

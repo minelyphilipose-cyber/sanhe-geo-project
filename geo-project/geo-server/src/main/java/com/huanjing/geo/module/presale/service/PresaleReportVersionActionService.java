@@ -17,10 +17,12 @@ import com.huanjing.geo.module.presale.dto.snapshot.editable.EditableContentDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.ExecutiveSummary;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.FindingContent;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.KeyTakeaway;
+import com.huanjing.geo.module.presale.dto.snapshot.editable.MarketBattleground;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.PhaseDescription;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateStatus;
+import com.huanjing.geo.module.presale.generate.l3.PresaleL3Defaults;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
@@ -89,6 +91,7 @@ public class PresaleReportVersionActionService {
     private final CurrentUserService currentUserService;
     private final PresaleAccessService accessService;
     private final ObjectMapper objectMapper;
+    private final PresaleL3Defaults l3Defaults;
 
     /**
      * P1·F·1·a 已存在的 Mock Orchestrator,retry 时重新触发生成。
@@ -116,7 +119,12 @@ public class PresaleReportVersionActionService {
             // 只有生成完成的版本允许编辑 L3;INIT/QUEUED/RUNNING/FAILED 均不可
             throw editConflict(ERR_VERSION_NOT_DONE, "Version not generated yet, cannot edit");
         }
-        validateEditableContentJson(req.getEditableContentJson());
+        validateEditableContentJson(req.getEditableContentJson(), false);
+        String normalizedEditableContentJson = l3Defaults.normalizeJson(
+                req.getEditableContentJson(),
+                version.getRawSnapshotJson(),
+                version.getComputedSnapshotJson());
+        validateEditableContentJson(normalizedEditableContentJson, true);
         if (!Boolean.TRUE.equals(req.getForceOverwrite())
                 && !Objects.equals(version.getContentUpdatedAt(), req.getExpectedContentUpdatedAt())) {
             throw editConflict(ERR_CONTENT_CONFLICT, "Content has been updated by another user");
@@ -125,7 +133,7 @@ public class PresaleReportVersionActionService {
         LocalDateTime now = LocalDateTime.now();
         LambdaUpdateWrapper<PresaleReportVersion> update = new LambdaUpdateWrapper<PresaleReportVersion>()
                 .eq(PresaleReportVersion::getId, version.getId())
-                .set(PresaleReportVersion::getEditableContentJson, req.getEditableContentJson())
+                .set(PresaleReportVersion::getEditableContentJson, normalizedEditableContentJson)
                 .set(PresaleReportVersion::getContentUpdatedAt, now);
         versionMapper.update(null, update);
 
@@ -142,7 +150,7 @@ public class PresaleReportVersionActionService {
         return new BizException(409, message, 200, Map.of("errorCode", errorCode));
     }
 
-    private void validateEditableContentJson(String json) {
+    private void validateEditableContentJson(String json, boolean requireAllTopLevelFields) {
         JsonNode root;
         EditableContentDTO dto;
         try {
@@ -154,10 +162,13 @@ public class PresaleReportVersionActionService {
         if (root == null || !root.isObject()) {
             throw new BizException(400, "Invalid editable content JSON");
         }
-        requireTopLevelFields(root);
+        if (requireAllTopLevelFields) {
+            requireTopLevelFields(root);
+        }
         validateText("report_title", dto.getReportTitle(), 40);
         validateText("report_subtitle", dto.getReportSubtitle(), 80);
         validateExecutiveSummary(dto.getExecutiveSummary());
+        validateMarketBattleground(dto.getMarketBattleground());
         validateKeyTakeaways(dto.getKeyTakeaways());
         validateFindings(dto.getOptimizationFindingsContent());
         validatePhases(dto.getPhaseDescriptions());
@@ -169,6 +180,7 @@ public class PresaleReportVersionActionService {
         List<String> fields = List.of(
                 "report_title",
                 "report_subtitle",
+                "market_battleground",
                 "executive_summary",
                 "key_takeaways",
                 "optimization_findings_content",
@@ -207,6 +219,102 @@ public class PresaleReportVersionActionService {
             requireText("key_takeaways.title", item.getTitle(), 30);
             requireText("key_takeaways.description", item.getDescription(), 500);
         }
+    }
+
+    private void validateMarketBattleground(MarketBattleground value) {
+        if (value == null) {
+            return;
+        }
+        validateText("market_battleground.topbar_title", value.getTopbarTitle(), 40);
+        validateText("market_battleground.topbar_right", value.getTopbarRight(), 24);
+        validateText("market_battleground.page_title", value.getPageTitle(), 34);
+        validateText("market_battleground.page_kicker", value.getPageKicker(), 48);
+        validateMarketCard(value.getMarketCard());
+        validateCalculationCard("market_battleground.national_card", value.getNationalCard());
+        validateText("market_battleground.bridge_text", value.getBridgeText(), 20);
+        validateCalculationCard("market_battleground.regional_card", value.getRegionalCard());
+        validateNarrative(value.getNarrative());
+        validateText("market_battleground.footnote", value.getFootnote(), 150);
+        validateText("market_battleground.footer_brand", value.getFooterBrand(), 24);
+    }
+
+    private void validateMarketCard(MarketBattleground.MarketCard value) {
+        if (value == null) {
+            return;
+        }
+        validateText("market_battleground.market_card.label", value.getLabel(), 32);
+        validateText("market_battleground.market_card.source", value.getSource(), 32);
+        if (value.getStats() != null) {
+            if (value.getStats().size() != 4) {
+                throw new BizException(400, "market_battleground.market_card.stats must contain exactly 4 items");
+            }
+            for (MarketBattleground.Stat item : value.getStats()) {
+                if (item == null) {
+                    throw new BizException(400, "market_battleground.market_card.stats item must not be null");
+                }
+                validateText("market_battleground.market_card.stats.value", item.getValue(), 12);
+                validateText("market_battleground.market_card.stats.unit", item.getUnit(), 8);
+                validateText("market_battleground.market_card.stats.label", item.getLabel(), 24);
+            }
+        }
+        validateText("market_battleground.market_card.platform_label", value.getPlatformLabel(), 16);
+        if (value.getPlatforms() != null) {
+            if (value.getPlatforms().size() != 3) {
+                throw new BizException(400, "market_battleground.market_card.platforms must contain exactly 3 items");
+            }
+            for (MarketBattleground.Platform item : value.getPlatforms()) {
+                if (item == null) {
+                    throw new BizException(400, "market_battleground.market_card.platforms item must not be null");
+                }
+                validateText("market_battleground.market_card.platforms.name", item.getName(), 12);
+                validateText("market_battleground.market_card.platforms.value", item.getValue(), 12);
+            }
+        }
+        validateText("market_battleground.market_card.platform_suffix", value.getPlatformSuffix(), 18);
+    }
+
+    private void validateCalculationCard(String field, MarketBattleground.CalculationCard value) {
+        if (value == null) {
+            return;
+        }
+        validateText(field + ".label", value.getLabel(), 24);
+        validateText(field + ".value_prefix", value.getValuePrefix(), 6);
+        validateText(field + ".value", value.getValue(), 12);
+        validateText(field + ".unit", value.getUnit(), 8);
+        validateText(field + ".subtitle", value.getSubtitle(), 28);
+        validateText(field + ".calculation_label", value.getCalculationLabel(), 24);
+        if (value.getRows() == null) {
+            return;
+        }
+        if (value.getRows().size() != 4) {
+            throw new BizException(400, field + ".rows must contain exactly 4 items");
+        }
+        for (MarketBattleground.CalculationRow row : value.getRows()) {
+            if (row == null) {
+                throw new BizException(400, field + ".rows item must not be null");
+            }
+            validateText(field + ".rows.label", row.getLabel(), 18);
+            validateText(field + ".rows.value", row.getValue(), 30);
+        }
+    }
+
+    private void validateNarrative(MarketBattleground.Narrative value) {
+        if (value == null) {
+            return;
+        }
+        validateText("market_battleground.narrative.intro", value.getIntro(), 56);
+        if (value.getQuestions() != null) {
+            if (value.getQuestions().size() != 3) {
+                throw new BizException(400, "market_battleground.narrative.questions must contain exactly 3 items");
+            }
+            for (String question : value.getQuestions()) {
+                validateText("market_battleground.narrative.questions[]", question, 34);
+            }
+        }
+        validateText("market_battleground.narrative.conclusion", value.getConclusion(), 44);
+        validateText("market_battleground.narrative.brand_line_prefix", value.getBrandLinePrefix(), 8);
+        validateText("market_battleground.narrative.brand_name", value.getBrandName(), 18);
+        validateText("market_battleground.narrative.brand_line_suffix", value.getBrandLineSuffix(), 48);
     }
 
     private void validateFindings(List<FindingContent> list) {
@@ -338,7 +446,10 @@ public class PresaleReportVersionActionService {
         // 三层 JSON:继承源版本(用户此后可在新版本上继续编辑 L3)
         next.setRawSnapshotJson(source.getRawSnapshotJson());
         next.setComputedSnapshotJson(source.getComputedSnapshotJson());
-        next.setEditableContentJson(source.getEditableContentJson());
+        next.setEditableContentJson(l3Defaults.normalizeJson(
+                source.getEditableContentJson(),
+                source.getRawSnapshotJson(),
+                source.getComputedSnapshotJson()));
 
         // 新版本自有字段
         next.setExportSuccessCount(0);

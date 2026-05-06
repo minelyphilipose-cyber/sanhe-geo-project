@@ -1,15 +1,15 @@
 <template>
-  <section id="page-03" class="page-anchor">
+  <section id="page-04" class="page-anchor">
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
-        <span>02 / 执行摘要</span>
+        <span>03 / 执行摘要</span>
       </div>
 
-      <div class="p03-body">
+      <div class="p04-body">
         <!-- 章节标题 -->
         <div class="section-title">
-          <span class="section-number">02</span>
+          <span class="section-number">03</span>
           <div>
             <div class="section-label">EXECUTIVE SUMMARY</div>
             <div class="section-heading">执行摘要</div>
@@ -17,95 +17,95 @@
         </div>
 
         <!-- 主评分区:左侧 overall,右侧 4 维度 -->
-        <div class="p03-scores-grid">
+        <div class="p04-scores-grid">
           <!-- Overall -->
-          <div class="p03-overall-card">
-            <div class="mono p03-card-label">OVERALL SCORE</div>
-            <div class="metric-hero p03-overall-number">{{ overallScoreRounded }}</div>
-            <div class="p03-overall-unit">/ 100</div>
-            <div class="p03-overall-compare">
-              <div class="p03-overall-delta">
+          <div class="p04-overall-card">
+            <div class="mono p04-card-label">OVERALL SCORE</div>
+            <div class="metric-hero p04-overall-number">{{ overallScoreRounded }}</div>
+            <div class="p04-overall-unit">/ 100</div>
+            <div class="p04-overall-compare">
+              <div class="p04-overall-delta">
                 <span v-if="overallDelta >= 0" class="tick">↑</span>
                 <span v-else class="cross">↓</span>
                 {{ overallDelta >= 0 ? '高于' : '低于' }}行业均值
                 <strong>{{ overallDeltaAbs }}</strong> 分
               </div>
-              <div class="p03-overall-avg-note">
+              <div class="p04-overall-avg-note">
                 行业均值 {{ industryAvgOverallRounded }}
               </div>
             </div>
           </div>
 
           <!-- 4 维度 metric card -->
-          <div class="p03-metrics-wrap">
-            <div class="p03-metric-card">
-              <div class="mono p03-card-label">MENTION RATE</div>
-              <div class="metric-hero p03-metric-number">
+          <div class="p04-metrics-wrap">
+            <div class="p04-metric-card">
+              <div class="mono p04-card-label">MENTION RATE</div>
+              <div class="metric-hero p04-metric-number">
                 {{ mentionRatePct
-                }}<span class="p03-metric-unit">%</span>
+                }}<span class="p04-metric-unit">%</span>
               </div>
-              <div class="p03-metric-sub">
+              <div class="p04-metric-sub">
                 {{ totalPrompts }} 个 prompt 中 {{ totalMentions }} 次
               </div>
             </div>
 
-            <div class="p03-metric-card">
-              <div class="mono p03-card-label">AVG RANK</div>
-              <div class="metric-hero p03-metric-number">
+            <div class="p04-metric-card">
+              <div class="mono p04-card-label">AVG RANK</div>
+              <div class="metric-hero p04-metric-number">
                 {{ avgRankText
-                }}<span class="p03-metric-unit">{{ avgRankText === '—' ? '' : '位' }}</span>
+                }}<span class="p04-metric-unit">{{ avgRankText === '—' ? '' : '位' }}</span>
               </div>
-              <div class="p03-metric-sub">主推荐 {{ primaryRecommendationTotal }} 次</div>
+              <div class="p04-metric-sub">主推荐 {{ primaryRecommendationTotal }} 次</div>
             </div>
 
-            <div class="p03-metric-card">
-              <div class="mono p03-card-label">HIGH-VALUE COVERAGE</div>
-              <div class="metric-hero p03-metric-number">
+            <div class="p04-metric-card">
+              <div class="mono p04-card-label">HIGH-VALUE COVERAGE</div>
+              <div class="metric-hero p04-metric-number">
                 {{ highValueCoverageRate
-                }}<span class="p03-metric-unit">%</span>
+                }}<span class="p04-metric-unit">%</span>
               </div>
-              <div class="p03-metric-sub">
+              <div class="p04-metric-sub">
                 {{ mergedView.scene_coverage.high_value.total }} 个高价值场景覆盖
                 {{ mergedView.scene_coverage.high_value.covered }} 个
               </div>
             </div>
 
-            <div class="p03-metric-card">
-              <div class="mono p03-card-label">SENTIMENT</div>
-              <div class="metric-hero p03-metric-number p03-metric-green">
+            <div class="p04-metric-card">
+              <div class="mono p04-card-label">SENTIMENT</div>
+              <div class="metric-hero p04-metric-number p04-metric-green">
                 {{ sentimentScore
-                }}<span class="p03-metric-unit">/100</span>
+                }}<span class="p04-metric-unit">/100</span>
               </div>
-              <div class="p03-metric-sub">情感得分 · 含中性折半计算</div>
+              <div class="p04-metric-sub">情感得分 · 含中性折半计算</div>
             </div>
           </div>
         </div>
 
         <!-- 关键发现(L3 key_takeaways) -->
-        <div class="p03-key-findings">
-          <div class="mono p03-findings-label">KEY FINDINGS · 关键发现</div>
+        <div class="p04-key-findings">
+          <div class="mono p04-findings-label">KEY FINDINGS · 关键发现</div>
 
           <template v-if="sortedKeyTakeaways.length > 0">
             <div
               v-for="(t, idx) in sortedKeyTakeaways"
               :key="`${t.order_no}-${idx}`"
-              class="p03-finding-row"
-              :class="{ 'p03-finding-row-last': idx === sortedKeyTakeaways.length - 1 }"
+              class="p04-finding-row"
+              :class="{ 'p04-finding-row-last': idx === sortedKeyTakeaways.length - 1 }"
             >
-              <div class="display-serif p03-finding-num">{{ formatFindingNum(t.order_no) }}</div>
-              <div class="p03-finding-content">
-                <div class="chinese-serif p03-finding-title">{{ t.title }}</div>
-                <div class="p03-finding-desc">{{ t.description }}</div>
+              <div class="display-serif p04-finding-num">{{ formatFindingNum(t.order_no) }}</div>
+              <div class="p04-finding-content">
+                <div class="chinese-serif p04-finding-title">{{ t.title }}</div>
+                <div class="p04-finding-desc">{{ t.description }}</div>
               </div>
             </div>
           </template>
 
-          <div v-else class="p03-findings-empty">暂无关键发现。</div>
+          <div v-else class="p04-findings-empty">暂无关键发现。</div>
         </div>
       </div>
 
       <div class="page-footer-brand">GEO · CONFIDENTIAL</div>
-      <div class="page-label">03</div>
+      <div class="page-label">04</div>
     </div>
   </section>
 </template>
@@ -116,7 +116,7 @@ import { useMergedView } from '@/composables/presale/useMergedView'
 import { toIntRounded } from '@/utils/presale/numberFormat'
 
 /**
- * Page03 执行摘要。
+ * Page04 执行摘要。
  *
  * 数据映射:
  *   - overall 分数 / 行业均值 / 行业排名:scores.overall + benchmarks_frozen.industry_avg.overall + industry_ranking
@@ -215,12 +215,12 @@ function formatFindingNum(n: number): string {
   justify-content: center;
 }
 
-.p03-body {
+.p04-body {
   margin-top: 60px;
 }
 
 /* 左右两栏:overall card 280 固定,右侧自适应 */
-.p03-scores-grid {
+.p04-scores-grid {
   display: grid;
   grid-template-columns: 280px 1fr;
   gap: 40px;
@@ -228,90 +228,90 @@ function formatFindingNum(n: number): string {
 }
 
 /* overall card */
-.p03-overall-card {
+.p04-overall-card {
   text-align: center;
   padding: 24px 24px 20px 24px;
   background: #f7f3ea;
   border-top: 3px solid #1e3a8a;
 }
-.p03-card-label {
+.p04-card-label {
   font-size: 10px;
   letter-spacing: 2px;
   color: #6b6456;
   margin-bottom: 12px;
 }
-.p03-overall-number {
+.p04-overall-number {
   font-size: 120px;
   color: #1e3a8a;
   line-height: 1;
 }
-.p03-overall-unit {
+.p04-overall-unit {
   font-size: 12px;
   color: #6b6456;
   margin-top: 4px;
 }
-.p03-overall-compare {
+.p04-overall-compare {
   margin-top: 14px;
   padding-top: 14px;
   border-top: 1px solid #c8bfa8;
   padding-bottom: 4px;
 }
-.p03-overall-delta {
+.p04-overall-delta {
   font-size: 13px;
   color: #1a2942;
 }
-.p03-overall-avg-note {
+.p04-overall-avg-note {
   font-size: 11px;
   color: #6b6456;
   margin-top: 6px;
 }
 /* 4 维度 metric card grid */
-.p03-metrics-wrap {
+.p04-metrics-wrap {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20px;
 }
-.p03-metric-card {
+.p04-metric-card {
   border-left: 2px solid #c8bfa8;
   padding-left: 16px;
 }
-.p03-metric-number {
+.p04-metric-number {
   font-size: 44px;
   color: #0b1426;
   margin-top: 4px;
 }
-.p03-metric-green {
+.p04-metric-green {
   color: #047857;
 }
-.p03-metric-unit {
+.p04-metric-unit {
   font-size: 24px;
   color: #6b6456;
 }
-.p03-metric-sub {
+.p04-metric-sub {
   font-size: 11px;
   color: #6b6456;
 }
 
 /* key findings */
-.p03-key-findings {
+.p04-key-findings {
   margin-top: 8px;
 }
-.p03-findings-label {
+.p04-findings-label {
   font-size: 11px;
   letter-spacing: 3px;
   color: #6b6456;
   margin-bottom: 20px;
 }
-.p03-finding-row {
+.p04-finding-row {
   display: flex;
   gap: 20px;
   padding: 20px 0;
   border-top: 1px solid #c8bfa8;
 }
-.p03-finding-row-last {
+.p04-finding-row-last {
   border-bottom: 1px solid #c8bfa8;
 }
-.p03-finding-num {
+.p04-finding-num {
   font-size: 48px;
   font-weight: 900;
   color: #1e3a8a;
@@ -320,21 +320,21 @@ function formatFindingNum(n: number): string {
   flex-shrink: 0;
   min-width: 64px;
 }
-.p03-finding-content {
+.p04-finding-content {
   flex: 1;
 }
-.p03-finding-title {
+.p04-finding-title {
   font-size: 17px;
   font-weight: 600;
   color: #0b1426;
   margin-bottom: 6px;
 }
-.p03-finding-desc {
+.p04-finding-desc {
   font-size: 13px;
   line-height: 1.7;
   color: #1a2942;
 }
-.p03-findings-empty {
+.p04-findings-empty {
   padding: 24px 0;
   color: #6b6456;
   font-size: 13px;

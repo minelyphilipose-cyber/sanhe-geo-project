@@ -13,7 +13,9 @@ public class PresaleExportResponse {
     private Long versionId;
     private String status;
     private String idempotencyKey;
+    private String errorCode;
     private String errorMsg;
+    private Object errorDetail;
     private Integer retryCount;
     private String fileKey;
     private Long fileSize;

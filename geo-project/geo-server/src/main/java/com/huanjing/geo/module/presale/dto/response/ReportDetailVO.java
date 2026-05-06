@@ -7,9 +7,10 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
- * 详情页 VO。详情页右侧 18 页渲染主要消费 mergedViewJson。
+ * 详情页 VO。详情页右侧 19 页渲染主要消费 mergedViewJson。
  *
  * <p>P1·F·1·a 暂不在后端做 merge(merge 逻辑在 P1·B 前端 TS 工具中),
  * 后端直接返回三层原始 JSON,前端 {@code mergeSnapshot()} 合成 MergedView。
@@ -38,4 +39,6 @@ public class ReportDetailVO {
     private String computedSnapshotJson;
     /** L3 编辑快照 JSON 字符串。 */
     private String editableContentJson;
+    /** L3 编辑字段元数据,后端为 maxLength / warnLength 权威源。 */
+    private List<EditableFieldMetaVO> editableFieldMeta;
 }

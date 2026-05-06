@@ -1,30 +1,30 @@
 <template>
-  <section id="page-08" class="page-anchor">
+  <section id="page-09" class="page-anchor">
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
-        <span>05 / 竞品对标(续)</span>
+        <span>06 / 竞品对标(续)</span>
       </div>
 
-      <div class="p08-body">
+      <div class="p09-body">
         <!-- 顶部标题 -->
-        <div class="p08-header">
-          <div class="mono p08-subtitle">SCENE-LEVEL GAP · 场景差异</div>
-          <h3 class="chinese-serif p08-title">竞品被推荐而您未被推荐的场景</h3>
+        <div class="p09-header">
+          <div class="mono p09-subtitle">SCENE-LEVEL GAP · 场景差异</div>
+          <h3 class="chinese-serif p09-title">竞品被推荐而您未被推荐的场景</h3>
         </div>
 
         <!-- 场景对比表 -->
-        <div v-if="visibleMissingRows.length > 0" class="data-matrix p08-matrix">
+        <div v-if="visibleMissingRows.length > 0" class="data-matrix p09-matrix">
           <!-- 表头 -->
-          <div class="data-matrix-row p08-row-head">
-            <div class="mono p08-col-label">价值</div>
-            <div class="mono p08-col-label">查询场景</div>
-            <div class="mono p08-col-label p08-col-center">意图</div>
-            <div class="mono p08-col-label p08-col-center">您</div>
+          <div class="data-matrix-row p09-row-head">
+            <div class="mono p09-col-label">价值</div>
+            <div class="mono p09-col-label">查询场景</div>
+            <div class="mono p09-col-label p09-col-center">意图</div>
+            <div class="mono p09-col-label p09-col-center">您</div>
             <div
               v-for="c in competitorNames"
               :key="c"
-              class="mono p08-col-label p08-col-center"
+              class="mono p09-col-label p09-col-center"
             >
               {{ shortenCompetitorName(c) }}
             </div>
@@ -34,22 +34,22 @@
           <div
             v-for="(row, idx) in visibleMissingRows"
             :key="`${row.prompt_code}-${idx}`"
-            class="data-matrix-row p08-row-data"
+            class="data-matrix-row p09-row-data"
           >
             <div>
               <span class="priority-badge" :class="`priority-${row.priorityClass}`">
                 <span class="priority-dot"></span>{{ row.priorityLabel }}
               </span>
             </div>
-            <div class="p08-query-text">"{{ row.prompt_content }}"</div>
-            <div class="p08-col-center p08-intent-text">{{ row.category }}</div>
+            <div class="p09-query-text">"{{ row.prompt_content }}"</div>
+            <div class="p09-col-center p09-intent-text">{{ row.category }}</div>
             <!-- 您:永远 ✗(因为是 missing) -->
-            <div class="p08-col-center cross">✗</div>
+            <div class="p09-col-center cross">✗</div>
             <!-- 每个竞品:top_competitor_coverage 包含则 ✓,否则 ✗ -->
             <div
               v-for="c in competitorNames"
               :key="c"
-              class="p08-col-center"
+              class="p09-col-center"
               :class="row.coverageByCompetitor[c] ? 'tick' : 'cross'"
             >
               {{ row.coverageByCompetitor[c] ? '✓' : '✗' }}
@@ -58,55 +58,55 @@
         </div>
 
         <!-- 无缺口兜底:极罕见情况,但逻辑上可能(100% 覆盖) -->
-        <div v-else class="p08-empty">
+        <div v-else class="p09-empty">
           未发现您未被推荐的场景 —— 您的覆盖表现优异。
         </div>
 
-        <div v-if="hiddenMissingCount > 0" class="p08-limit-note">
+        <div v-if="hiddenMissingCount > 0" class="p09-limit-note">
           本页按商业价值优先展示 {{ visibleMissingRows.length }} 条代表性缺口；其余
           {{ hiddenMissingCount }} 条已计入下方缺口总数。
         </div>
 
         <!-- 3 张卡片:各价值层的缺口数/总数 -->
-        <div class="p08-gap-cards">
-          <div class="p08-gap-card p08-gap-high">
-            <div class="mono p08-gap-label p08-gap-label-high">HIGH VALUE GAP</div>
-            <div class="metric-hero p08-gap-number">
+        <div class="p09-gap-cards">
+          <div class="p09-gap-card p09-gap-high">
+            <div class="mono p09-gap-label p09-gap-label-high">HIGH VALUE GAP</div>
+            <div class="metric-hero p09-gap-number">
               {{ highGapCount
-              }}<span class="p08-gap-denominator">/{{ mergedView.scene_coverage.high_value.total }} 缺失</span>
+              }}<span class="p09-gap-denominator">/{{ mergedView.scene_coverage.high_value.total }} 缺失</span>
             </div>
-            <div class="p08-gap-desc">高价值场景</div>
+            <div class="p09-gap-desc">高价值场景</div>
           </div>
-          <div class="p08-gap-card p08-gap-mid">
-            <div class="mono p08-gap-label p08-gap-label-mid">MID VALUE GAP</div>
-            <div class="metric-hero p08-gap-number">
+          <div class="p09-gap-card p09-gap-mid">
+            <div class="mono p09-gap-label p09-gap-label-mid">MID VALUE GAP</div>
+            <div class="metric-hero p09-gap-number">
               {{ midGapCount
-              }}<span class="p08-gap-denominator">/{{ mergedView.scene_coverage.mid_value.total }} 缺失</span>
+              }}<span class="p09-gap-denominator">/{{ mergedView.scene_coverage.mid_value.total }} 缺失</span>
             </div>
-            <div class="p08-gap-desc">中价值场景</div>
+            <div class="p09-gap-desc">中价值场景</div>
           </div>
-          <div class="p08-gap-card p08-gap-low">
-            <div class="mono p08-gap-label p08-gap-label-low">LOW VALUE GAP</div>
-            <div class="metric-hero p08-gap-number">
+          <div class="p09-gap-card p09-gap-low">
+            <div class="mono p09-gap-label p09-gap-label-low">LOW VALUE GAP</div>
+            <div class="metric-hero p09-gap-number">
               {{ lowGapCount
-              }}<span class="p08-gap-denominator">/{{ mergedView.scene_coverage.low_value.total }} 缺失</span>
+              }}<span class="p09-gap-denominator">/{{ mergedView.scene_coverage.low_value.total }} 缺失</span>
             </div>
-            <div class="p08-gap-desc">低价值场景</div>
+            <div class="p09-gap-desc">低价值场景</div>
           </div>
         </div>
 
         <!-- 底部引用(优先使用竞品组优势,否则回退 Top1 竞品 scene_advantages) -->
-        <div v-if="topCompetitorAdvantagesText" class="p08-quote-wrap">
+        <div v-if="topCompetitorAdvantagesText" class="p09-quote-wrap">
           <div class="pull-quote">
             {{ topCompetitorAdvantagesText }}
             <!-- 若来自 L1 原始提取,加个弱标签提示 -->
-            <span v-if="showRawTag" class="p08-raw-tag mono">· 原始提取</span>
+            <span v-if="showRawTag" class="p09-raw-tag mono">· 原始提取</span>
           </div>
         </div>
       </div>
 
       <div class="page-footer-brand">GEO · CONFIDENTIAL</div>
-      <div class="page-label">08</div>
+      <div class="page-label">09</div>
     </div>
   </section>
 </template>
@@ -116,7 +116,7 @@ import { computed } from 'vue'
 import { useMergedView } from '@/composables/presale/useMergedView'
 
 /**
- * Page08 竞品场景差异。
+ * Page09 竞品场景差异。
  *
  * 数据映射:
  *   - 场景表:scene_coverage.{high_value, mid_value, low_value}.missing_queries[]
@@ -248,20 +248,20 @@ const showRawTag = computed(() =>
   justify-content: center;
 }
 
-.p08-body {
+.p09-body {
   margin-top: 60px;
 }
 
-.p08-header {
+.p09-header {
   margin-bottom: 28px;
 }
-.p08-subtitle {
+.p09-subtitle {
   font-size: 11px;
   letter-spacing: 3px;
   color: #6b6456;
   margin-bottom: 8px;
 }
-.p08-title {
+.p09-title {
   font-size: 22px;
   font-weight: 700;
   color: #0b1426;
@@ -269,40 +269,40 @@ const showRawTag = computed(() =>
 }
 
 /* 场景表 */
-.p08-matrix {
+.p09-matrix {
   margin-bottom: 32px;
 }
-.p08-row-head,
-.p08-row-data {
+.p09-row-head,
+.p09-row-data {
   /* 60 价值 | 1fr 查询 | 90 意图 | 60 您 | 每竞品 60 */
   /* 3 竞品是固定数,模板直接生成表头和数据的 grid-template-columns */
   grid-template-columns: 60px 1fr 90px 60px 60px 60px 60px;
 }
-.p08-row-head {
+.p09-row-head {
   padding: 12px 0 !important;
 }
-.p08-col-label {
+.p09-col-label {
   font-size: 10px;
   letter-spacing: 2px;
   color: #6b6456;
 }
-.p08-col-center {
+.p09-col-center {
   text-align: center;
 }
-.p08-query-text {
+.p09-query-text {
   font-size: 13px;
   display: -webkit-box;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
-.p08-intent-text {
+.p09-intent-text {
   font-size: 11px;
   color: #6b6456;
 }
 
 /* 空态 */
-.p08-empty {
+.p09-empty {
   padding: 48px 0;
   text-align: center;
   color: #6b6456;
@@ -312,51 +312,51 @@ const showRawTag = computed(() =>
   margin-bottom: 32px;
 }
 
-.p08-limit-note {
+.p09-limit-note {
   margin: -18px 0 22px;
   font-size: 11px;
   color: #6b6456;
 }
 
 /* 3 张卡片 */
-.p08-gap-cards {
+.p09-gap-cards {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 16px;
   margin-bottom: 32px;
 }
-.p08-gap-card {
+.p09-gap-card {
   background: #f7f3ea;
   padding: 20px;
 }
-.p08-gap-high {
+.p09-gap-high {
   border-top: 2px solid #b91c1c;
 }
-.p08-gap-mid {
+.p09-gap-mid {
   border-top: 2px solid #d97706;
 }
-.p08-gap-low {
+.p09-gap-low {
   border-top: 2px solid #6b6456;
 }
-.p08-gap-label {
+.p09-gap-label {
   font-size: 10px;
   letter-spacing: 2px;
   margin-bottom: 8px;
 }
-.p08-gap-label-high {
+.p09-gap-label-high {
   color: #b91c1c;
 }
-.p08-gap-label-mid {
+.p09-gap-label-mid {
   color: #d97706;
 }
-.p08-gap-label-low {
+.p09-gap-label-low {
   color: #6b6456;
 }
-.p08-gap-number {
+.p09-gap-number {
   font-size: 36px;
   color: #0b1426;
 }
-.p08-gap-denominator {
+.p09-gap-denominator {
   font-size: 16px;
   color: #6b6456;
   font-family: 'Noto Sans SC', sans-serif;
@@ -365,17 +365,17 @@ const showRawTag = computed(() =>
   font-weight: 400;
   margin-left: 6px;
 }
-.p08-gap-desc {
+.p09-gap-desc {
   font-size: 11px;
   color: #6b6456;
   margin-top: 6px;
 }
 
 /* 底部引用的 "原始提取" 弱标签 */
-.p08-quote-wrap {
+.p09-quote-wrap {
   margin-top: 8px;
 }
-.p08-raw-tag {
+.p09-raw-tag {
   display: inline-block;
   margin-left: 8px;
   font-size: 10px;

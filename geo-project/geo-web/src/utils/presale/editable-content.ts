@@ -4,6 +4,7 @@ import type {
   EditableContentDTO,
   FindingContent,
   KeyTakeaway,
+  MarketBattleground,
   PhaseDescription
 } from '@/types/presale/editable'
 import type { RawSnapshotDTO } from '@/types/presale/raw'
@@ -11,6 +12,7 @@ import type { RawSnapshotDTO } from '@/types/presale/raw'
 const TOP_LEVEL_ORDER: Array<keyof EditableContentDTO> = [
   'report_title',
   'report_subtitle',
+  'market_battleground',
   'executive_summary',
   'key_takeaways',
   'optimization_findings_content',
@@ -49,6 +51,7 @@ export function normalizeEditableContent(
   return {
     report_title: value.report_title ?? null,
     report_subtitle: value.report_subtitle ?? null,
+    market_battleground: normalizeMarketBattleground(value.market_battleground),
     executive_summary: value.executive_summary ?? null,
     key_takeaways: Array.isArray(value.key_takeaways)
       ? value.key_takeaways.map((item, idx) => ({
@@ -104,6 +107,7 @@ export function toOrderedEditableContent(value: EditableContentDTO): EditableCon
     title: item.title,
     description: item.description
   }))
+  ordered.market_battleground = normalizeMarketBattleground(value.market_battleground)
   return ordered
 }
 
@@ -130,6 +134,7 @@ export function validateEditableContent(value: EditableContentDTO): EditableVali
     checkRequiredText(errors, '摘要标题', value.executive_summary.headline, 60)
     checkRequiredText(errors, '摘要正文', value.executive_summary.paragraph, 500)
   }
+  validateMarketBattleground(errors, value.market_battleground)
   if (value.key_takeaways.length > 8) {
     errors.push({ field: 'key_takeaways', message: '关键结论最多 8 条' })
   }
@@ -170,6 +175,7 @@ export function collectClearedFields(value: EditableContentDTO): string[] {
   if (value.report_subtitle === '') fields.push('报告副标题')
   if (value.executive_summary?.headline === '') fields.push('摘要标题')
   if (value.executive_summary?.paragraph === '') fields.push('摘要正文')
+  collectMarketClearedFields(value.market_battleground, fields)
   if (value.key_takeaways.length === 0) fields.push('关键结论')
   for (const item of value.optimization_findings_content) {
     if (item.title === '' || item.description === '' || item.evidence_text === '') {
@@ -186,6 +192,155 @@ export function collectClearedFields(value: EditableContentDTO): string[] {
   }
   if (value.roi_disclaimer === '') fields.push('ROI 免责声明')
   return Array.from(new Set(fields))
+}
+
+function normalizeMarketBattleground(value: Partial<MarketBattleground> | null | undefined): MarketBattleground {
+  const marketCard = value?.market_card
+  const narrative = value?.narrative
+  return {
+    topbar_title: value?.topbar_title ?? '',
+    topbar_right: value?.topbar_right ?? '',
+    page_title: value?.page_title ?? '',
+    page_kicker: value?.page_kicker ?? '',
+    market_card: {
+      label: marketCard?.label ?? '',
+      source: marketCard?.source ?? '',
+      stats: [0, 1, 2, 3].map((idx) => {
+        const item = Array.isArray(marketCard?.stats) ? marketCard?.stats[idx] : undefined
+        return {
+          value: item?.value ?? '',
+          unit: item?.unit ?? '',
+          label: item?.label ?? ''
+        }
+      }),
+      platform_label: marketCard?.platform_label ?? '',
+      platforms: [0, 1, 2].map((idx) => {
+        const item = Array.isArray(marketCard?.platforms) ? marketCard?.platforms[idx] : undefined
+        return {
+          name: item?.name ?? '',
+          value: item?.value ?? ''
+        }
+      }),
+      platform_suffix: marketCard?.platform_suffix ?? ''
+    },
+    national_card: normalizeCalculationCard(value?.national_card),
+    bridge_text: value?.bridge_text ?? '',
+    regional_card: normalizeCalculationCard(value?.regional_card),
+    narrative: {
+      intro: narrative?.intro ?? '',
+      questions: [0, 1, 2].map((idx) => (Array.isArray(narrative?.questions) ? narrative?.questions[idx] ?? '' : '')),
+      conclusion: narrative?.conclusion ?? '',
+      brand_line_prefix: narrative?.brand_line_prefix ?? '',
+      brand_name: narrative?.brand_name ?? '',
+      brand_line_suffix: narrative?.brand_line_suffix ?? ''
+    },
+    footnote: value?.footnote ?? '',
+    footer_brand: value?.footer_brand ?? ''
+  }
+}
+
+function normalizeCalculationCard(value: Partial<MarketBattleground['national_card']> | null | undefined) {
+  return {
+    label: value?.label ?? '',
+    value_prefix: value?.value_prefix ?? '',
+    value: value?.value ?? '',
+    unit: value?.unit ?? '',
+    subtitle: value?.subtitle ?? '',
+    calculation_label: value?.calculation_label ?? '',
+    rows: [0, 1, 2, 3].map((idx) => {
+      const row = Array.isArray(value?.rows) ? value?.rows[idx] : undefined
+      return {
+        label: row?.label ?? '',
+        value: row?.value ?? '',
+        is_total: row?.is_total ?? idx === 3
+      }
+    })
+  }
+}
+
+function validateMarketBattleground(errors: EditableValidationError[], value: MarketBattleground) {
+  checkText(errors, '顶部章节标题', value.topbar_title, 40)
+  checkText(errors, '顶部右侧标识', value.topbar_right, 24)
+  checkText(errors, 'AI搜索新战场 页面主标题', value.page_title, 34)
+  checkText(errors, 'AI搜索新战场 英文副标题', value.page_kicker, 48)
+  checkText(errors, '市场卡标签', value.market_card.label, 32)
+  checkText(errors, '市场卡来源', value.market_card.source, 32)
+  value.market_card.stats.forEach((item, idx) => {
+    checkText(errors, `市场数据 ${idx + 1} 数值`, item.value, 12)
+    checkText(errors, `市场数据 ${idx + 1} 单位`, item.unit, 8)
+    checkText(errors, `市场数据 ${idx + 1} 说明`, item.label, 24)
+  })
+  checkText(errors, '平台列表标签', value.market_card.platform_label, 16)
+  value.market_card.platforms.forEach((item, idx) => {
+    checkText(errors, `平台 ${idx + 1} 名称`, item.name, 12)
+    checkText(errors, `平台 ${idx + 1} 数值`, item.value, 12)
+  })
+  checkText(errors, '其他平台说明', value.market_card.platform_suffix, 18)
+  validateCalculationCard(errors, '全国推导卡', value.national_card)
+  checkText(errors, '过渡文案', value.bridge_text, 20)
+  validateCalculationCard(errors, '区域推导卡', value.regional_card)
+  checkText(errors, '问题场景引导', value.narrative.intro, 56)
+  value.narrative.questions.forEach((item, idx) => checkText(errors, `示例问题 ${idx + 1}`, item, 34))
+  checkText(errors, '结论句', value.narrative.conclusion, 44)
+  checkText(errors, '品牌句前缀', value.narrative.brand_line_prefix, 8)
+  checkText(errors, '品牌句品牌名', value.narrative.brand_name, 18)
+  checkText(errors, '品牌句后缀', value.narrative.brand_line_suffix, 48)
+  checkText(errors, '数据脚注', value.footnote, 150)
+  checkText(errors, '页脚品牌', value.footer_brand, 24)
+}
+
+function validateCalculationCard(errors: EditableValidationError[], label: string, value: MarketBattleground['national_card']) {
+  checkText(errors, `${label} 标签`, value.label, 24)
+  checkText(errors, `${label} 大数字前缀`, value.value_prefix, 6)
+  checkText(errors, `${label} 大数字`, value.value, 12)
+  checkText(errors, `${label} 大数字单位`, value.unit, 8)
+  checkText(errors, `${label} 大数字说明`, value.subtitle, 28)
+  checkText(errors, `${label} 推导标题`, value.calculation_label, 24)
+  value.rows.forEach((row, idx) => {
+    checkText(errors, `${label} 推导行 ${idx + 1} 标签`, row.label, 18)
+    checkText(errors, `${label} 推导行 ${idx + 1} 数值`, row.value, 30)
+  })
+}
+
+function collectMarketClearedFields(value: MarketBattleground, fields: string[]) {
+  if (value.topbar_title === '' || value.topbar_right === '') fields.push('AI搜索新战场 顶部条')
+  if (value.page_title === '') fields.push('AI搜索新战场 页面主标题')
+  if (value.page_kicker === '') fields.push('AI搜索新战场 英文副标题')
+  if (value.market_card.label === '' || value.market_card.source === '') fields.push('深色市场卡')
+  value.market_card.stats.forEach((item, idx) => {
+    if (item.label === '' || item.value === '' || item.unit === '') fields.push(`市场数据 ${idx + 1}`)
+  })
+  if (value.market_card.platform_label === '' || value.market_card.platform_suffix === '') fields.push('平台列表')
+  value.market_card.platforms.forEach((item, idx) => {
+    if (item.name === '' || item.value === '') fields.push(`平台 ${idx + 1}`)
+  })
+  collectCalculationClearedFields(value.national_card, '全国推导卡', fields)
+  if (value.bridge_text === '') fields.push('过渡文案')
+  collectCalculationClearedFields(value.regional_card, '区域推导卡', fields)
+  if (
+    value.narrative.intro === '' ||
+    value.narrative.questions.some((item) => item === '') ||
+    value.narrative.conclusion === '' ||
+    value.narrative.brand_line_prefix === '' ||
+    value.narrative.brand_name === '' ||
+    value.narrative.brand_line_suffix === ''
+  ) {
+    fields.push('底部叙事')
+  }
+  if (value.footnote === '' || value.footer_brand === '') fields.push('AI搜索新战场脚注')
+}
+
+function collectCalculationClearedFields(value: MarketBattleground['national_card'], label: string, fields: string[]) {
+  if (
+    value.label === '' ||
+    value.value === '' ||
+    value.unit === '' ||
+    value.subtitle === '' ||
+    value.calculation_label === '' ||
+    value.rows.some((row) => row.label === '' || row.value === '')
+  ) {
+    fields.push(label)
+  }
 }
 
 function checkRequiredText(

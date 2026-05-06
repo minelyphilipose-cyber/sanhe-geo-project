@@ -1,15 +1,15 @@
 <template>
-  <section id="page-15" class="page-anchor">
+  <section id="page-16" class="page-anchor">
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
-        <span>09 / 预期收益模拟</span>
+        <span>10 / 预期收益模拟</span>
       </div>
 
-      <div class="p15-body">
+      <div class="p16-body">
         <!-- 章节标题 -->
         <div class="section-title">
-          <span class="section-number">09</span>
+          <span class="section-number">10</span>
           <div>
             <div class="section-label">EXPECTED ROI</div>
             <div class="section-heading">预期收益模拟</div>
@@ -17,108 +17,108 @@
         </div>
 
         <!-- 核心数字对比:CURRENT → TARGET + UPLIFT 标注 + GAIN -->
-        <div class="p15-hero-grid">
-          <div class="p15-hero-card p15-hero-current">
-            <div class="mono p15-hero-label">CURRENT</div>
-            <div class="p15-hero-value p15-hero-value-muted">{{ currentScoreDisplay }}</div>
-            <div class="p15-hero-caption">当前可见度</div>
+        <div class="p16-hero-grid">
+          <div class="p16-hero-card p16-hero-current">
+            <div class="mono p16-hero-label">CURRENT</div>
+            <div class="p16-hero-value p16-hero-value-muted">{{ currentScoreDisplay }}</div>
+            <div class="p16-hero-caption">当前可见度</div>
           </div>
-          <div class="p15-hero-arrow">
+          <div class="p16-hero-arrow">
             <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M5 12h14M12 5l7 7-7 7"/>
             </svg>
           </div>
-          <div class="p15-hero-card p15-hero-target">
-            <div class="mono p15-hero-label p15-hero-label-dim">TARGET</div>
-            <div class="p15-hero-value p15-hero-value-accent">{{ targetScoreDisplay }}</div>
-            <div class="p15-hero-caption p15-hero-caption-dim">目标可见度(Top10)</div>
+          <div class="p16-hero-card p16-hero-target">
+            <div class="mono p16-hero-label p16-hero-label-dim">TARGET</div>
+            <div class="p16-hero-value p16-hero-value-accent">{{ targetScoreDisplay }}</div>
+            <div class="p16-hero-caption p16-hero-caption-dim">目标可见度(Top10)</div>
           </div>
-          <div class="p15-uplift">
-            <div class="mono p15-uplift-label">UPLIFT</div>
-            <div class="display-serif p15-uplift-value">+{{ estimatedUpliftPercentDisplay }}%</div>
+          <div class="p16-uplift">
+            <div class="mono p16-uplift-label">UPLIFT</div>
+            <div class="display-serif p16-uplift-value">+{{ estimatedUpliftPercentDisplay }}%</div>
           </div>
-          <div class="p15-hero-card p15-hero-gain">
-            <div class="mono p15-hero-label">GAIN</div>
-            <div class="p15-hero-value p15-hero-value-green">
+          <div class="p16-hero-card p16-hero-gain">
+            <div class="mono p16-hero-label">GAIN</div>
+            <div class="p16-hero-value p16-hero-value-green">
               <template v-if="gainDisplay.kind === 'multiplier'">
-                {{ gainDisplay.main }}<span class="p15-hero-value-suffix">x</span>
+                {{ gainDisplay.main }}<span class="p16-hero-value-suffix">x</span>
               </template>
               <template v-else>
-                {{ gainDisplay.main }}<span class="p15-hero-value-suffix">%</span>
+                {{ gainDisplay.main }}<span class="p16-hero-value-suffix">%</span>
               </template>
             </div>
-            <div class="p15-hero-caption">综合可见度提升</div>
+            <div class="p16-hero-caption">综合可见度提升</div>
           </div>
         </div>
 
         <!-- ROI 曲线图(4 点:起点 + 3 phase) -->
-        <PresaleChart :option="roiLineOption" height="280px" class="p15-chart" />
+        <PresaleChart :option="roiLineOption" height="280px" class="p16-chart" />
 
         <!--
           ③ ESTIMATED IMPACT 块(γ·2 r2 新增)。
           4 个格子:2 个评分派生估算值 + 2 个真实契约数据。
         -->
-        <div class="p15-impact">
-          <div class="mono p15-impact-label">ESTIMATED IMPACT · 预估影响</div>
-          <div class="p15-impact-grid">
+        <div class="p16-impact">
+          <div class="mono p16-impact-label">ESTIMATED IMPACT · 预估影响</div>
+          <div class="p16-impact-grid">
             <!-- 格子 1:AI 渠道月度品牌曝光(基于 current/target 动态估算) -->
-            <div class="p15-impact-item">
-              <div class="p15-impact-caption">AI 渠道月度品牌曝光</div>
-              <div class="p15-impact-value">
-                <span class="mono p15-impact-after">{{ exposureUpliftDisplay }}</span>
+            <div class="p16-impact-item">
+              <div class="p16-impact-caption">AI 渠道月度品牌曝光</div>
+              <div class="p16-impact-value">
+                <span class="mono p16-impact-after">{{ exposureUpliftDisplay }}</span>
               </div>
             </div>
 
             <!-- 格子 2:高价值查询场景覆盖(真实契约) -->
-            <div class="p15-impact-item">
-              <div class="p15-impact-caption">高价值查询场景覆盖</div>
-              <div class="p15-impact-value">
+            <div class="p16-impact-item">
+              <div class="p16-impact-caption">高价值查询场景覆盖</div>
+              <div class="p16-impact-value">
                 <span class="mono">{{ highValueCoverage.before }}</span>
-                <span class="p15-impact-arrow">→</span>
-                <span class="mono p15-impact-after">{{ highValueCoverage.after }}</span>
+                <span class="p16-impact-arrow">→</span>
+                <span class="mono p16-impact-after">{{ highValueCoverage.after }}</span>
               </div>
             </div>
 
             <!-- 格子 3:主推荐次数(基于 current/target 动态估算) -->
-            <div class="p15-impact-item">
-              <div class="p15-impact-caption">主推荐次数</div>
-              <div class="p15-impact-value">
-                <span class="mono p15-impact-after">{{ primaryRecUpliftDisplay }}</span>
+            <div class="p16-impact-item">
+              <div class="p16-impact-caption">主推荐次数</div>
+              <div class="p16-impact-value">
+                <span class="mono p16-impact-after">{{ primaryRecUpliftDisplay }}</span>
               </div>
             </div>
 
             <!-- 格子 4:对标竞品差距(真实契约) -->
-            <div class="p15-impact-item">
-              <div class="p15-impact-caption">对标竞品差距</div>
-              <div class="p15-impact-value">
+            <div class="p16-impact-item">
+              <div class="p16-impact-caption">对标竞品差距</div>
+              <div class="p16-impact-value">
                 <span class="mono">{{ competitorGap.before }}</span>
-                <span class="p15-impact-arrow">→</span>
-                <span class="mono p15-impact-after">{{ competitorGap.after }}</span>
+                <span class="p16-impact-arrow">→</span>
+                <span class="mono p16-impact-after">{{ competitorGap.after }}</span>
               </div>
             </div>
           </div>
         </div>
 
         <!-- 阶段摘要条(3 个 phase title + duration 并排,呼应曲线 X 轴) -->
-        <div class="p15-phase-strip">
+        <div class="p16-phase-strip">
           <div
             v-for="(p, idx) in phaseTeasers"
             :key="p.phase_no"
-            class="p15-phase-item"
-            :class="{ 'p15-phase-item-final': idx === phaseTeasers.length - 1 }"
+            class="p16-phase-item"
+            :class="{ 'p16-phase-item-final': idx === phaseTeasers.length - 1 }"
           >
-            <div class="mono p15-phase-duration">{{ p.duration_label }}</div>
-            <div class="chinese-serif p15-phase-title">{{ p.title }}</div>
-            <div class="mono p15-phase-target">→ {{ toIntRounded(p.target_score) }} 分</div>
+            <div class="mono p16-phase-duration">{{ p.duration_label }}</div>
+            <div class="chinese-serif p16-phase-title">{{ p.title }}</div>
+            <div class="mono p16-phase-target">→ {{ toIntRounded(p.target_score) }} 分</div>
           </div>
         </div>
 
         <!-- ROI disclaimer -->
-        <div class="p15-disclaimer">{{ mergedView.roi_disclaimer }}</div>
+        <div class="p16-disclaimer">{{ mergedView.roi_disclaimer }}</div>
       </div>
 
       <div class="page-footer-brand">GEO · CONFIDENTIAL</div>
-      <div class="page-label">15</div>
+      <div class="page-label">16</div>
     </div>
   </section>
 </template>
@@ -131,7 +131,7 @@ import PresaleChart from './shared/PresaleChart.vue'
 import { toIntRounded } from '@/utils/presale/numberFormat'
 
 /**
- * Page15 预期收益模拟(γ·2,r2 补 ③ 块)。
+ * Page16 预期收益模拟(γ·2,r2 补 ③ 块)。
  *
  * 实现策略(r2 混合方案):
  *   - ① 3 数字卡片:current / target / gain(由 target/current 动态计算)+ uplift 小标
@@ -451,13 +451,13 @@ const roiLineOption = computed<EChartsOption>(() => {
   justify-content: center;
 }
 
-.p15-body {
+.p16-body {
   margin-top: 60px;
 }
 
 /* ─── 核心数字 hero 区 ────────────────────────────────── */
 
-.p15-hero-grid {
+.p16-hero-grid {
   display: grid;
   grid-template-columns: 1fr 60px 1fr 60px 1fr;
   gap: 20px;
@@ -466,84 +466,84 @@ const roiLineOption = computed<EChartsOption>(() => {
   margin-bottom: 40px;
 }
 
-.p15-hero-card {
+.p16-hero-card {
   text-align: center;
   padding: 32px 20px;
 }
 
-.p15-hero-current {
+.p16-hero-current {
   background: var(--presale-paper-alt);
   border-top: 3px solid var(--presale-muted);
 }
 
-.p15-hero-target {
+.p16-hero-target {
   background: var(--presale-ink);
   color: var(--presale-paper);
   border-top: 3px solid var(--presale-accent);
 }
 
-.p15-hero-gain {
+.p16-hero-gain {
   background: var(--presale-paper-alt);
   border-top: 3px solid var(--presale-accent-green);
 }
 
-.p15-hero-label {
+.p16-hero-label {
   font-size: 10px;
   letter-spacing: 2px;
   color: var(--presale-muted);
   margin-bottom: 12px;
 }
-.p15-hero-label-dim {
+.p16-hero-label-dim {
   color: rgba(255, 255, 255, 0.6);
 }
 
-.p15-hero-value {
+.p16-hero-value {
   font-family: 'Playfair Display', serif;
   font-size: 64px;
   font-weight: 900;
   line-height: 1;
   letter-spacing: -1px;
 }
-.p15-hero-value-muted {
+.p16-hero-value-muted {
   color: var(--presale-muted);
 }
-.p15-hero-value-accent {
+.p16-hero-value-accent {
   color: var(--presale-accent);
 }
-.p15-hero-value-green {
+.p16-hero-value-green {
   color: var(--presale-accent-green);
 }
-.p15-hero-value-suffix {
+.p16-hero-value-suffix {
   font-size: 28px;
   font-weight: 700;
 }
 
-.p15-hero-caption {
+.p16-hero-caption {
   font-size: 13px;
   color: var(--presale-muted);
   margin-top: 8px;
 }
-.p15-hero-caption-dim {
+.p16-hero-caption-dim {
   color: rgba(255, 255, 255, 0.7);
 }
 
-.p15-hero-arrow {
+.p16-hero-arrow {
   text-align: center;
   color: var(--presale-accent);
   display: flex;
   justify-content: center;
 }
 
-.p15-uplift {
+.p16-uplift {
   text-align: center;
 }
-.p15-uplift-label {
+.p16-uplift-label {
   font-size: 10px;
   letter-spacing: 1px;
   color: var(--presale-accent);
   margin-bottom: 4px;
 }
-.p15-uplift-value {
+.p16-uplift-value {
   font-size: 22px;
   font-weight: 700;
   color: var(--presale-accent);
@@ -551,56 +551,56 @@ const roiLineOption = computed<EChartsOption>(() => {
 
 /* ─── ROI 曲线图 ──────────────────────────────────────── */
 
-.p15-chart {
+.p16-chart {
   margin-bottom: 16px;
 }
 
 /* ─── ③ ESTIMATED IMPACT 块(γ·2 r2) ──────────────────── */
 
-.p15-impact {
+.p16-impact {
   padding: 24px;
   background: var(--presale-paper-alt);
   border-left: 3px solid var(--presale-accent);
   margin-bottom: 24px;
 }
 
-.p15-impact-label {
+.p16-impact-label {
   font-size: 11px;
   letter-spacing: 3px;
   color: var(--presale-muted);
   margin-bottom: 16px;
 }
 
-.p15-impact-grid {
+.p16-impact-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20px;
 }
 
-.p15-impact-caption {
+.p16-impact-caption {
   font-size: 12px;
   color: var(--presale-muted);
   margin-bottom: 4px;
 }
 
-.p15-impact-value {
+.p16-impact-value {
   font-size: 14px;
   color: var(--presale-ink);
   font-weight: 500;
 }
 
-.p15-impact-arrow {
+.p16-impact-arrow {
   color: var(--presale-muted);
   margin: 0 8px;
 }
 
-.p15-impact-after {
+.p16-impact-after {
   color: var(--presale-accent-green);
 }
 
 /* ─── Phase 摘要条 ────────────────────────────────────── */
 
-.p15-phase-strip {
+.p16-phase-strip {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
@@ -609,22 +609,22 @@ const roiLineOption = computed<EChartsOption>(() => {
   border-top: 1px solid var(--presale-line);
 }
 
-.p15-phase-item {
+.p16-phase-item {
   padding: 8px 12px;
   border-left: 2px solid var(--presale-primary);
 }
-.p15-phase-item-final {
+.p16-phase-item-final {
   border-left-color: var(--presale-accent);
 }
 
-.p15-phase-duration {
+.p16-phase-duration {
   font-size: 10px;
   letter-spacing: 2px;
   color: var(--presale-muted);
   margin-bottom: 4px;
 }
 
-.p15-phase-title {
+.p16-phase-title {
   font-size: 14px;
   font-weight: 600;
   color: var(--presale-ink);
@@ -632,7 +632,7 @@ const roiLineOption = computed<EChartsOption>(() => {
   line-height: 1.4;
 }
 
-.p15-phase-target {
+.p16-phase-target {
   font-size: 11px;
   color: var(--presale-accent);
   font-weight: 500;
@@ -640,7 +640,7 @@ const roiLineOption = computed<EChartsOption>(() => {
 
 /* ─── Disclaimer ──────────────────────────────────────── */
 
-.p15-disclaimer {
+.p16-disclaimer {
   font-size: 11px;
   color: var(--presale-muted);
   line-height: 1.7;

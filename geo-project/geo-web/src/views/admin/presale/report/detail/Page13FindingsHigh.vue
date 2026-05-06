@@ -1,15 +1,15 @@
 <template>
-  <section id="page-12" class="page-anchor">
+  <section id="page-13" class="page-anchor">
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
-        <span>08 / 优化机会清单</span>
+        <span>09 / 优化机会清单</span>
       </div>
 
-      <div class="p12-body">
+      <div class="p13-body">
         <!-- 章节标题 -->
         <div class="section-title">
-          <span class="section-number">08</span>
+          <span class="section-number">09</span>
           <div>
             <div class="section-label">OPTIMIZATION OPPORTUNITIES</div>
             <div class="section-heading">优化机会清单</div>
@@ -17,31 +17,31 @@
         </div>
 
         <!-- 顶部深色 banner:TOTAL IDENTIFIED + 3 priority 数字 -->
-        <div class="p12-total-banner">
-          <div class="p12-total-left">
-            <div class="mono p12-total-label">TOTAL IDENTIFIED</div>
-            <div class="chinese-serif p12-total-text">
+        <div class="p13-total-banner">
+          <div class="p13-total-left">
+            <div class="mono p13-total-label">TOTAL IDENTIFIED</div>
+            <div class="chinese-serif p13-total-text">
               识别出 {{ totalCount }} 个可执行的优化点
             </div>
           </div>
-          <div class="p12-total-right">
-            <div class="p12-total-metric">
-              <div class="metric-hero p12-total-num p12-total-num-high">{{ highCount }}</div>
-              <div class="mono p12-total-metric-label">高优先级</div>
+          <div class="p13-total-right">
+            <div class="p13-total-metric">
+              <div class="metric-hero p13-total-num p13-total-num-high">{{ highCount }}</div>
+              <div class="mono p13-total-metric-label">高优先级</div>
             </div>
-            <div class="p12-total-metric">
-              <div class="metric-hero p12-total-num p12-total-num-mid">{{ midCount }}</div>
-              <div class="mono p12-total-metric-label">中优先级</div>
+            <div class="p13-total-metric">
+              <div class="metric-hero p13-total-num p13-total-num-mid">{{ midCount }}</div>
+              <div class="mono p13-total-metric-label">中优先级</div>
             </div>
-            <div class="p12-total-metric">
-              <div class="metric-hero p12-total-num p12-total-num-low">{{ lowCount }}</div>
-              <div class="mono p12-total-metric-label">建议关注</div>
+            <div class="p13-total-metric">
+              <div class="metric-hero p13-total-num p13-total-num-low">{{ lowCount }}</div>
+              <div class="mono p13-total-metric-label">建议关注</div>
             </div>
           </div>
         </div>
 
         <!-- 优先级 badge -->
-        <div class="p12-priority-tag">
+        <div class="p13-priority-tag">
           <span class="priority-badge priority-high">
             <span class="priority-dot"></span>高优先级 · HIGH PRIORITY
           </span>
@@ -61,14 +61,14 @@
         </template>
 
         <!-- 空态兜底 -->
-        <div v-else class="p12-empty">
-          <span class="p12-empty-icon">✓</span>
+        <div v-else class="p13-empty">
+          <span class="p13-empty-icon">✓</span>
           本优先级下无待优化项 — 您在该维度已表现良好,建议继续保持。
         </div>
       </div>
 
       <div class="page-footer-brand">GEO · CONFIDENTIAL</div>
-      <div class="page-label">12</div>
+      <div class="page-label">13</div>
     </div>
   </section>
 </template>
@@ -79,7 +79,7 @@ import { useMergedView } from '@/composables/presale/useMergedView'
 import FindingCard from './shared/FindingCard.vue'
 
 /**
- * Page12 优化机会(高优先级)。
+ * Page13 优化机会(高优先级)。
  *
  * 职能:
  *   1. 顶部深色 banner 展示整个 findings 的 total + 三 priority 分布
@@ -127,12 +127,12 @@ function formatNum(n: number): string {
   justify-content: center;
 }
 
-.p12-body {
+.p13-body {
   margin-top: 60px;
 }
 
 /* 顶部深色 banner */
-.p12-total-banner {
+.p13-total-banner {
   background: #0b1426;
   color: #fefcf7;
   padding: 24px;
@@ -141,48 +141,48 @@ function formatNum(n: number): string {
   justify-content: space-between;
   align-items: center;
 }
-.p12-total-label {
+.p13-total-label {
   font-size: 11px;
   letter-spacing: 3px;
   color: rgba(255, 255, 255, 0.6);
   margin-bottom: 6px;
 }
-.p12-total-text {
+.p13-total-text {
   font-size: 20px;
   font-weight: 500;
 }
-.p12-total-right {
+.p13-total-right {
   display: flex;
   gap: 24px;
 }
-.p12-total-metric {
+.p13-total-metric {
   text-align: center;
 }
-.p12-total-num {
+.p13-total-num {
   font-size: 44px;
 }
-.p12-total-num-high {
+.p13-total-num-high {
   color: #b91c1c;
 }
-.p12-total-num-mid {
+.p13-total-num-mid {
   color: #d97706;
 }
-.p12-total-num-low {
+.p13-total-num-low {
   color: rgba(255, 255, 255, 0.6);
 }
-.p12-total-metric-label {
+.p13-total-metric-label {
   font-size: 10px;
   color: rgba(255, 255, 255, 0.7);
   letter-spacing: 2px;
 }
 
 /* priority tag */
-.p12-priority-tag {
+.p13-priority-tag {
   margin-bottom: 16px;
 }
 
 /* 空态 */
-.p12-empty {
+.p13-empty {
   padding: 32px 24px;
   text-align: center;
   color: #6b6456;
@@ -191,7 +191,7 @@ function formatNum(n: number): string {
   background: rgba(4, 120, 87, 0.04);
   border-left: 3px solid #047857;
 }
-.p12-empty-icon {
+.p13-empty-icon {
   display: inline-block;
   margin-right: 8px;
   color: #047857;

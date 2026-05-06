@@ -13,6 +13,7 @@ import com.huanjing.geo.module.presale.export.dto.PresalePrintRenderResponse;
 import com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport;
 import com.huanjing.geo.module.presale.export.persist.mapper.PresaleReportExportMapper;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateStatus;
+import com.huanjing.geo.module.presale.generate.l3.PresaleL3Defaults;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
@@ -53,6 +54,7 @@ public class PresaleReportExportService {
     private final PresaleExportStorageService storageService;
     private final PresaleRenderTokenService renderTokenService;
     private final PresaleExportMetricsJsonHelper metricsJsonHelper;
+    private final PresaleL3Defaults l3Defaults;
 
     @Transactional
     public PresaleExportResponse create(Long reportId, PresaleExportCreateRequest req) {
@@ -228,7 +230,7 @@ public class PresaleReportExportService {
                 .renderProfile(PresalePrintRenderResponse.RenderProfile.builder()
                         .deviceScaleFactor(properties.getBrowser().getDeviceScaleFactor())
                         .pageFormat("A4")
-                        .expectedPages(18)
+                        .expectedPages(19)
                         .build())
                 .build();
     }
@@ -259,7 +261,9 @@ public class PresaleReportExportService {
                 .versionId(task.getVersionId())
                 .status(task.getStatus())
                 .idempotencyKey(task.getIdempotencyKey())
+                .errorCode(metricsJsonHelper.latestErrorCode(task.getMetricsJson()))
                 .errorMsg(task.getErrorMsg())
+                .errorDetail(metricsJsonHelper.firstContentOverflow(task.getMetricsJson()))
                 .retryCount(task.getRetryCount())
                 .fileKey(task.getFileKey())
                 .fileSize(task.getFileSize())
@@ -280,7 +284,11 @@ public class PresaleReportExportService {
                 .version(toVersionMeta(version))
                 .rawSnapshotJson(version.getRawSnapshotJson())
                 .computedSnapshotJson(version.getComputedSnapshotJson())
-                .editableContentJson(version.getEditableContentJson())
+                .editableContentJson(l3Defaults.normalizeJson(
+                        version.getEditableContentJson(),
+                        version.getRawSnapshotJson(),
+                        version.getComputedSnapshotJson()))
+                .editableFieldMeta(l3Defaults.fieldMeta())
                 .build();
     }
 

@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="presale-print">
     <div v-if="loading" class="poc-state">Loading presale print...</div>
     <div v-else-if="error" class="poc-state poc-state--error">{{ error }}</div>
@@ -43,6 +43,7 @@ interface PrintMetrics {
   canvas_non_blank: boolean
   bottom_band_ok: boolean
   overflow_pages: PageOverflowMetric[]
+  content_overflows: ContentOverflowMetric[]
   ready_elapsed_ms: number
   device_scale_factor: number
   viewport: {
@@ -58,6 +59,17 @@ interface PageOverflowMetric {
   maxContentBottom: number
   pageHeight: number
   offender: string
+}
+
+interface ContentOverflowMetric {
+  pageId: string
+  block: string
+  field: string
+  overflowPx: number
+  scrollHeight: number
+  clientHeight: number
+  scrollWidth: number
+  clientWidth: number
 }
 
 const route = useRoute()
@@ -166,7 +178,7 @@ function markPages(): void {
 async function waitForCharts(): Promise<void> {
   await document.fonts.ready
   await nextTick()
-  await waitUntil(() => document.querySelectorAll('.page-anchor').length >= 18, 60_000)
+  await waitUntil(() => document.querySelectorAll('.page-anchor').length >= 19, 60_000)
   await waitUntil(() => document.querySelectorAll('.presale-chart canvas').length > 0, 60_000)
   markPages()
   fitPagesToPrintBox()
@@ -194,7 +206,7 @@ function fitPagesToPrintBox(): void {
   const footerReservePx = 140
   document.querySelectorAll<HTMLElement>('.page[data-page-id]').forEach((page) => {
     const pageId = page.dataset.pageId || ''
-    if (pageId === 'page-01' || pageId === 'page-18') return
+    if (pageId === 'page-01' || pageId === 'page-19') return
 
     const body = Array.from(page.children).find((el) => {
       const className = (el as HTMLElement).className
@@ -294,6 +306,7 @@ function collectMetrics(charts: ECharts[], chartEls: HTMLElement[]): PrintMetric
     }
   })
   const overflowPages = collectPageOverflowMetrics()
+  const contentOverflows = collectContentOverflowMetrics()
   return {
     page_count: document.querySelectorAll('.page[data-page-id]').length,
     chart_count: charts.length,
@@ -301,6 +314,7 @@ function collectMetrics(charts: ECharts[], chartEls: HTMLElement[]): PrintMetric
     canvas_non_blank: chartMetrics.some((item) => item.hasData && item.canvasNonBlank),
     bottom_band_ok: overflowPages.length === 0,
     overflow_pages: overflowPages,
+    content_overflows: contentOverflows,
     ready_elapsed_ms: Math.round(performance.now() - readyStartedAt.value),
     device_scale_factor: deviceScaleFactor.value,
     viewport: {
@@ -311,19 +325,53 @@ function collectMetrics(charts: ECharts[], chartEls: HTMLElement[]): PrintMetric
   }
 }
 
+function collectContentOverflowMetrics(): ContentOverflowMetric[] {
+  const out = Array.from(document.querySelectorAll<HTMLElement>('#page-03 [data-field]'))
+    .map((el) => {
+      const pageId = el.dataset.pageId || el.closest<HTMLElement>('.page')?.dataset.pageId || 'page-03'
+      const verticalOverflow = Math.ceil(el.scrollHeight - el.clientHeight)
+      const horizontalOverflow = Math.ceil(el.scrollWidth - el.clientWidth)
+      const overflowPx = Math.max(0, verticalOverflow, horizontalOverflow)
+      if (overflowPx <= 1) return null
+      return {
+        pageId,
+        block: el.dataset.block || '',
+        field: el.dataset.field || '',
+        overflowPx,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+        scrollWidth: el.scrollWidth,
+        clientWidth: el.clientWidth
+      }
+    })
+    .filter((item): item is ContentOverflowMetric => item !== null)
+
+  if (out.length > 0) {
+    console.warn('[presale-print] content field overflows', out)
+  }
+  return out
+}
+
 function collectPageOverflowMetrics(): PageOverflowMetric[] {
   const footerReservePx = 110
   const overflowPages = Array.from(document.querySelectorAll<HTMLElement>('.page[data-page-id]'))
     .map((page) => {
       const pageId = page.dataset.pageId || ''
-      if (pageId === 'page-01' || pageId === 'page-18') {
+      if (pageId === 'page-01' || pageId === 'page-19') {
+        return null
+      }
+      if (page.dataset.printBottomBand === 'content-overflow-only') {
         return null
       }
       const pageRect = page.getBoundingClientRect()
       let maxContentBottom = 0
       let offender = ''
       page.querySelectorAll<HTMLElement>('*').forEach((el) => {
-        if (el.classList.contains('page-footer-brand') || el.classList.contains('page-label')) return
+        if (
+          el.classList.contains('page-footer-brand') ||
+          el.classList.contains('page-label') ||
+          el.dataset.printFooter === 'true'
+        ) return
         const style = window.getComputedStyle(el)
         if (style.display === 'none' || style.visibility === 'hidden') return
         const rect = el.getBoundingClientRect()
@@ -462,54 +510,54 @@ function isCanvasNonBlank(root: HTMLElement | undefined): boolean {
   letter-spacing: 1px;
 }
 
-:deep(#page-15 .p15-body) {
+:deep(#page-16 .p16-body) {
   margin-top: 48px;
 }
 
-:deep(#page-15 .section-title) {
+:deep(#page-16 .section-title) {
   margin-bottom: 24px;
   padding-bottom: 16px;
 }
 
-:deep(#page-15 .p15-hero-grid) {
+:deep(#page-16 .p16-hero-grid) {
   gap: 14px;
   margin-top: 18px;
   margin-bottom: 24px;
 }
 
-:deep(#page-15 .p15-hero-card) {
+:deep(#page-16 .p16-hero-card) {
   padding: 24px 16px;
 }
 
-:deep(#page-15 .p15-hero-value) {
+:deep(#page-16 .p16-hero-value) {
   font-size: 56px;
 }
 
-:deep(#page-15 .p15-chart) {
+:deep(#page-16 .p16-chart) {
   height: 250px !important;
   margin-bottom: 12px;
 }
 
-:deep(#page-15 .p15-impact) {
+:deep(#page-16 .p16-impact) {
   padding: 18px 20px;
   margin-bottom: 16px;
 }
 
-:deep(#page-15 .p15-impact-grid) {
+:deep(#page-16 .p16-impact-grid) {
   gap: 14px 18px;
 }
 
-:deep(#page-15 .p15-phase-strip) {
+:deep(#page-16 .p16-phase-strip) {
   gap: 12px;
   padding: 12px 0;
   margin-bottom: 14px;
 }
 
-:deep(#page-15 .p15-phase-item) {
+:deep(#page-16 .p16-phase-item) {
   padding: 6px 10px;
 }
 
-:deep(#page-15 .p15-disclaimer) {
+:deep(#page-16 .p16-disclaimer) {
   padding: 10px 14px;
   line-height: 1.55;
 }

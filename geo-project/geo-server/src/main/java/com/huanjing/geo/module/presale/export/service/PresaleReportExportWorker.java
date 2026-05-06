@@ -91,6 +91,7 @@ public class PresaleReportExportWorker {
             Path pdfPath = workDir.resolve("report.pdf");
             debugDir = workDir.resolve("debug");
             String renderUrl = trimTrailingSlash(webBaseUrl) + "/presale-print/" + token.token();
+            log.info("Presale export renderUrl: {}", renderUrl);
 
             memorySampler = new ChromiumMemorySampler(ProcessHandle.current());
             memorySampler.start();
@@ -255,19 +256,19 @@ public class PresaleReportExportWorker {
         try {
             JsonNode root = objectMapper.readTree(metricsJson);
             JsonNode pageCount = root.get("page_count");
-            return pageCount == null ? 18 : pageCount.asInt(18);
+            return pageCount == null ? 19 : pageCount.asInt(19);
         } catch (Exception ex) {
-            return 18;
+            return 19;
         }
     }
 
     private QualityFailure validateRenderQuality(ExportRenderResult result) {
         try {
             JsonNode root = objectMapper.readTree(result.getMetricsJson());
-            int pageCount = root.path("page_count").asInt(18);
-            if (properties.getQuality().isEnforcePageCount() && pageCount != 18) {
+            int pageCount = root.path("page_count").asInt(19);
+            if (properties.getQuality().isEnforcePageCount() && pageCount != 19) {
                 return new QualityFailure("PRINT_PAGE_COUNT_MISMATCH",
-                        "Print page count mismatch: expected 18, actual " + pageCount);
+                        "Print page count mismatch: expected 19, actual " + pageCount);
             }
 
             boolean bottomBandOk = root.path("bottom_band_ok").asBoolean(true);
@@ -279,6 +280,19 @@ public class PresaleReportExportWorker {
             }
             if (!bottomBandOk && overflowPages.isArray() && overflowPages.isEmpty()) {
                 log.warn("Presale print bottom_band_ok=false but overflow_pages is empty; export continues");
+            }
+
+            JsonNode contentOverflows = root.path("content_overflows");
+            if (contentOverflows.isArray() && !contentOverflows.isEmpty()) {
+                JsonNode first = contentOverflows.get(0);
+                String block = first.path("block").asText("未知区域");
+                String field = first.path("field").asText("");
+                int overflowPx = first.path("overflowPx").asInt(0);
+                String message = "AI 搜索新战场 · " + block + " 内容过长，请缩短后重试导出";
+                if (!field.isBlank()) {
+                    message = message + " (" + field + ", overflow " + overflowPx + "px)";
+                }
+                return new QualityFailure("PRINT_CONTENT_OVERFLOW", message);
             }
 
             boolean canvasNonBlank = root.path("canvas_non_blank").asBoolean(true);

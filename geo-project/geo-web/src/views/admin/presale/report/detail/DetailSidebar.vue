@@ -55,6 +55,17 @@
     <div class="sidebar-section action-section">
       <div class="label">操作</div>
 
+      <el-button
+        size="small"
+        type="primary"
+        class="action-btn"
+        :disabled="!canEdit"
+        @click="goEdit"
+      >
+        <el-icon><Edit /></el-icon>
+        编辑内容
+      </el-button>
+
       <!-- derive:派生新版本;仅 DONE 状态可用 -->
       <el-button
         size="small"
@@ -174,7 +185,8 @@ import {
   Refresh,
   Delete,
   Download,
-  Document
+  Document,
+  Edit
 } from '@element-plus/icons-vue'
 
 import {
@@ -220,6 +232,7 @@ const canFreeze = computed(() => isDone.value && !isFrozen.value)
 const canDelete = computed(() => !hasExports.value)
 const canExport = computed(() => isDone.value && Boolean(meta.value?.version_id))
 const canViewPrompts = computed(() => isDone.value && Boolean(currentVersionNo.value))
+const canEdit = computed(() => isDone.value && !isFrozen.value)
 
 // ─── 写动作 ───────────────────────────────────────────────
 type ActionKind = 'derive' | 'freeze' | 'unfreeze' | 'delete' | 'retry' | 'export'
@@ -334,7 +347,8 @@ async function handleExport() {
   try {
     const res = await createPresaleExport(reportId.value, {
       versionId,
-      exportProfile: 'PDF_A4_DPR2'
+      exportProfile: 'PDF_A4_DPR2',
+      forceRefresh: true
     })
     const task = await ensureExportRunnable(res)
     if (task.status !== 'SUCCESS') {
@@ -378,7 +392,7 @@ async function waitExportAndDownload(exportId: number) {
       return
     }
     if (task.status === 'FAILED') {
-      ElMessage.error(task.errorMsg || 'PDF 导出失败')
+      ElMessage.error(formatExportFailure(task))
       return
     }
     if (task.status === 'CANCELED') {
@@ -388,6 +402,15 @@ async function waitExportAndDownload(exportId: number) {
     await new Promise((resolve) => window.setTimeout(resolve, 2000))
   }
   ElMessage.warning('PDF 导出仍在处理中,请稍后重试下载')
+}
+
+function formatExportFailure(task: PresaleExportResponse) {
+  if (task.errorCode === 'PRINT_CONTENT_OVERFLOW' && task.errorDetail) {
+    const block = task.errorDetail.block || '未知区域'
+    const field = task.errorDetail.field ? `（${task.errorDetail.field}）` : ''
+    return `AI 搜索新战场 · ${block} 文案过长${field}，请缩短后重试导出`
+  }
+  return task.errorMsg || 'PDF 导出失败'
 }
 
 // ─── 19 页锚点 ────────────────────────────────────────────
@@ -457,6 +480,10 @@ onBeforeUnmount(() => {
 
 function goList() {
   void router.push('/admin/presale/report')
+}
+
+function goEdit() {
+  void router.push(`/admin/presale/report/${reportId.value}/edit`)
 }
 
 function goPromptTraces() {

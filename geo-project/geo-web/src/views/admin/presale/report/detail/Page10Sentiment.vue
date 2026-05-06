@@ -1,15 +1,15 @@
 <template>
-  <section id="page-09" class="page-anchor">
+  <section id="page-10" class="page-anchor">
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
-        <span>06 / 情感倾向</span>
+        <span>07 / 情感倾向</span>
       </div>
 
-      <div class="p09-body">
+      <div class="p10-body">
         <!-- 章节标题 -->
         <div class="section-title">
-          <span class="section-number">06</span>
+          <span class="section-number">07</span>
           <div>
             <div class="section-label">SENTIMENT ANALYSIS</div>
             <div class="section-heading">情感倾向分析</div>
@@ -17,28 +17,28 @@
         </div>
 
         <!-- 左 doughnut + 右 breakdown -->
-        <div class="p09-top-grid">
-          <div class="p09-chart-wrap">
+        <div class="p10-top-grid">
+          <div class="p10-chart-wrap">
             <PresaleChart :option="doughnutOption" height="260px" />
           </div>
 
           <div>
-            <div class="mono p09-breakdown-label">BREAKDOWN</div>
+            <div class="mono p10-breakdown-label">BREAKDOWN</div>
 
             <!-- 3 条进度 -->
-            <div v-for="row in breakdownRows" :key="row.key" class="p09-bar-row">
-              <div class="p09-bar-head">
-                <span class="p09-bar-name">
-                  <span class="p09-bar-dot" :style="{ color: row.color }">●</span>
+            <div v-for="row in breakdownRows" :key="row.key" class="p10-bar-row">
+              <div class="p10-bar-head">
+                <span class="p10-bar-name">
+                  <span class="p10-bar-dot" :style="{ color: row.color }">●</span>
                   {{ row.label }}
                 </span>
-                <span class="mono p09-bar-value">
+                <span class="mono p10-bar-value">
                   {{ row.pctText }} · {{ row.count }} 次
                 </span>
               </div>
-              <div class="p09-bar-track">
+              <div class="p10-bar-track">
                 <div
-                  class="p09-bar-fill"
+                  class="p10-bar-fill"
                   :style="{ width: row.barWidth, background: row.color }"
                 ></div>
               </div>
@@ -50,13 +50,13 @@
         </div>
 
         <!-- 正面关键词云 -->
-        <div v-if="positiveKeywords.length > 0" class="p09-keywords-wrap">
-          <div class="mono p09-keywords-label">POSITIVE KEYWORDS · 正面关键词</div>
-          <div class="p09-keywords-list">
+        <div v-if="positiveKeywords.length > 0" class="p10-keywords-wrap">
+          <div class="mono p10-keywords-label">POSITIVE KEYWORDS · 正面关键词</div>
+          <div class="p10-keywords-list">
             <span
               v-for="kw in positiveKeywords"
               :key="kw.text"
-              class="p09-keyword-chip"
+              class="p10-keyword-chip"
               :style="{ fontSize: kw.fontSize, fontWeight: kw.fontWeight }"
             >
               {{ kw.text }}
@@ -65,21 +65,21 @@
         </div>
 
         <!-- 负面证据 -->
-        <div v-if="firstNegativeEvidence" class="p09-evidence-wrap">
-          <div class="evidence-tag p09-evidence-tag">⚠ NEGATIVE EVIDENCE · 负面提及证据</div>
-          <div class="evidence-box p09-evidence-box">
-            <div class="mono p09-evidence-meta">
+        <div v-if="firstNegativeEvidence" class="p10-evidence-wrap">
+          <div class="evidence-tag p10-evidence-tag">⚠ NEGATIVE EVIDENCE · 负面提及证据</div>
+          <div class="evidence-box p10-evidence-box">
+            <div class="mono p10-evidence-meta">
               {{ firstNegativeEvidence.platform_name }} ·
               {{ formatEvidenceDate(firstNegativeEvidence.tested_at) }} ·
               "{{ firstNegativeEvidence.query }}"
             </div>
-            <div class="p09-evidence-snippet">"{{ firstNegativeEvidence.snippet }}"</div>
+            <div class="p10-evidence-snippet">"{{ firstNegativeEvidence.snippet }}"</div>
           </div>
         </div>
       </div>
 
       <div class="page-footer-brand">GEO · CONFIDENTIAL</div>
-      <div class="page-label">09</div>
+      <div class="page-label">10</div>
     </div>
   </section>
 </template>
@@ -91,7 +91,7 @@ import { useMergedView } from '@/composables/presale/useMergedView'
 import PresaleChart from './shared/PresaleChart.vue'
 
 /**
- * Page09 情感倾向。
+ * Page10 情感倾向。
  *
  * 数据映射:
  *   - doughnut chart 3 分片:sentiment_detail.{positive,neutral,negative}_count
@@ -312,22 +312,22 @@ function formatEvidenceDate(isoStr: string): string {
   justify-content: center;
 }
 
-.p09-body {
+.p10-body {
   margin-top: 60px;
 }
 
 /* 左右布局(280 + 1fr,原型一致) */
-.p09-top-grid {
+.p10-top-grid {
   display: grid;
   grid-template-columns: 280px 1fr;
   gap: 48px;
   margin-bottom: 40px;
 }
-.p09-chart-wrap {
+.p10-chart-wrap {
   min-height: 260px;
 }
 
-.p09-breakdown-label {
+.p10-breakdown-label {
   font-size: 11px;
   letter-spacing: 3px;
   color: #6b6456;
@@ -335,78 +335,78 @@ function formatEvidenceDate(isoStr: string): string {
 }
 
 /* 3 条进度 */
-.p09-bar-row {
+.p10-bar-row {
   margin-bottom: 20px;
 }
-.p09-bar-row:nth-child(4) {
+.p10-bar-row:nth-child(4) {
   margin-bottom: 28px;
 }
-.p09-bar-head {
+.p10-bar-head {
   display: flex;
   justify-content: space-between;
   margin-bottom: 4px;
 }
-.p09-bar-name {
+.p10-bar-name {
   font-size: 13px;
   font-weight: 500;
 }
-.p09-bar-dot {
+.p10-bar-dot {
   /* color 由内联 style 控制 */
 }
-.p09-bar-value {
+.p10-bar-value {
   font-size: 13px;
   font-weight: 600;
 }
-.p09-bar-track {
+.p10-bar-track {
   height: 4px;
   background: #c8bfa8;
   border-radius: 2px;
   overflow: hidden;
 }
-.p09-bar-fill {
+.p10-bar-fill {
   height: 100%;
   border-radius: 2px;
   transition: width 0.3s ease;
 }
 
 /* 正面关键词 */
-.p09-keywords-wrap {
+.p10-keywords-wrap {
   margin-bottom: 32px;
 }
-.p09-keywords-label {
+.p10-keywords-label {
   font-size: 11px;
   letter-spacing: 3px;
   color: #6b6456;
   margin-bottom: 16px;
 }
-.p09-keywords-list {
+.p10-keywords-list {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
-.p09-keyword-chip {
+.p10-keyword-chip {
   color: #047857;
   padding: 4px 12px;
   background: rgba(4, 120, 87, 0.08);
 }
 
 /* 负面证据 */
-.p09-evidence-wrap {
+.p10-evidence-wrap {
   /* evidence-tag / evidence-box 来自 report-theme.css */
 }
-.p09-evidence-tag {
+.p10-evidence-tag {
   color: #b91c1c !important;
 }
-.p09-evidence-box {
+.p10-evidence-box {
   border-color: #b91c1c !important;
   border-left: 3px solid #b91c1c !important;
 }
-.p09-evidence-meta {
+.p10-evidence-meta {
   font-size: 11px;
   color: #6b6456;
   margin-bottom: 8px;
 }
-.p09-evidence-snippet {
+.p10-evidence-snippet {
   line-height: 1.8;
   color: #1a2942;
 }

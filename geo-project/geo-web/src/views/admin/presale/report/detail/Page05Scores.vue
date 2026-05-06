@@ -1,15 +1,15 @@
 <template>
-  <section id="page-04" class="page-anchor">
+  <section id="page-05" class="page-anchor">
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
-        <span>03 / 可见度评分</span>
+        <span>04 / 可见度评分</span>
       </div>
 
-      <div class="p04-body">
+      <div class="p05-body">
         <!-- 章节标题 -->
         <div class="section-title">
-          <span class="section-number">03</span>
+          <span class="section-number">04</span>
           <div>
             <div class="section-label">VISIBILITY SCORE</div>
             <div class="section-heading">AI 可见度评分详情</div>
@@ -17,27 +17,27 @@
         </div>
 
         <!-- 左 radar + 右 breakdown 表 -->
-        <div class="p04-top-grid">
-          <div class="p04-radar-wrap">
+        <div class="p05-top-grid">
+          <div class="p05-radar-wrap">
             <PresaleChart :option="radarOption" height="340px" />
           </div>
 
           <div>
-            <div class="mono p04-section-label">BREAKDOWN BY DIMENSION</div>
+            <div class="mono p05-section-label">BREAKDOWN BY DIMENSION</div>
             <div class="data-matrix">
               <div
                 v-for="dim in dimensionRows"
                 :key="dim.key"
-                class="data-matrix-row p04-dim-row"
+                class="data-matrix-row p05-dim-row"
               >
-                <div class="p04-dim-name">{{ dim.label }}</div>
-                <div class="p04-dim-score" :class="{ 'p04-dim-score-green': dim.isGreen }">
+                <div class="p05-dim-name">{{ dim.label }}</div>
+                <div class="p05-dim-score" :class="{ 'p05-dim-score-green': dim.isGreen }">
                   {{ dim.score }}
                 </div>
-                <div class="p04-dim-avg">均值 {{ dim.avg }}</div>
+                <div class="p05-dim-avg">均值 {{ dim.avg }}</div>
                 <div
-                  class="mono p04-dim-delta"
-                  :class="dim.delta == null || dim.delta >= 0 ? 'p04-dim-delta-up' : 'p04-dim-delta-down'"
+                  class="mono p05-dim-delta"
+                  :class="dim.delta == null || dim.delta >= 0 ? 'p05-dim-delta-up' : 'p05-dim-delta-down'"
                 >
                   {{ dim.delta == null ? '—' : `${dim.delta >= 0 ? '+' : ''}${dim.delta}` }}
                 </div>
@@ -47,25 +47,25 @@
         </div>
 
         <!-- 行业对比条 -->
-        <div class="p04-compare-wrap">
-          <div class="mono p04-section-label">INDUSTRY COMPARISON</div>
-          <div class="p04-compare-bar">
+        <div class="p05-compare-wrap">
+          <div class="mono p05-section-label">INDUSTRY COMPARISON</div>
+          <div class="p05-compare-bar">
             <!-- 渐变背景:红→黄→绿 -->
             <!-- 标尺 0 / 50 / 100 -->
-            <div class="p04-ruler p04-ruler-0 mono">0</div>
-            <div class="p04-ruler p04-ruler-50 mono">50</div>
-            <div class="p04-ruler p04-ruler-100 mono">100</div>
+            <div class="p05-ruler p05-ruler-0 mono">0</div>
+            <div class="p05-ruler p05-ruler-50 mono">50</div>
+            <div class="p05-ruler p05-ruler-100 mono">100</div>
 
             <!-- 行业均值线 -->
-            <div class="p04-mark-line p04-mark-avg" :style="{ left: avgLeft }"></div>
-            <div class="p04-mark-label p04-mark-avg-label mono" :style="{ left: avgLeft }">
+            <div class="p05-mark-line p05-mark-avg" :style="{ left: avgLeft }"></div>
+            <div class="p05-mark-label p05-mark-avg-label mono" :style="{ left: avgLeft }">
               均值 {{ industryAvgOverall }}
             </div>
 
             <!-- 当前位置 -->
-            <div class="p04-mark-line p04-mark-self" :style="{ left: selfLeft }"></div>
+            <div class="p05-mark-line p05-mark-self" :style="{ left: selfLeft }"></div>
             <div
-              class="p04-mark-label p04-mark-self-label"
+              class="p05-mark-label p05-mark-self-label"
               :class="selfLabelClasses"
               :style="{ left: selfLeft }"
             >
@@ -73,21 +73,21 @@
             </div>
 
             <!-- Top1 -->
-            <div class="p04-mark-line p04-mark-top1" :style="{ left: top1Left }"></div>
-            <div class="p04-mark-label p04-mark-top1-label mono" :style="{ left: top1Left }">
+            <div class="p05-mark-line p05-mark-top1" :style="{ left: top1Left }"></div>
+            <div class="p05-mark-label p05-mark-top1-label mono" :style="{ left: top1Left }">
               Top1 · {{ top1Overall }}
             </div>
           </div>
         </div>
 
         <!-- 底部引用块(v1 静态文案,L3 未提供) -->
-        <div class="p04-quote-wrap">
+        <div class="p05-quote-wrap">
           <div class="pull-quote">{{ quoteText }}</div>
         </div>
       </div>
 
       <div class="page-footer-brand">GEO · CONFIDENTIAL</div>
-      <div class="page-label">04</div>
+      <div class="page-label">05</div>
     </div>
   </section>
 </template>
@@ -100,7 +100,7 @@ import PresaleChart from './shared/PresaleChart.vue'
 import { toIntRounded } from '@/utils/presale/numberFormat'
 
 /**
- * Page04 可见度评分详情。
+ * Page05 可见度评分详情。
  *
  * 数据映射:
  *   - 4 维度分数(mention / ranking / sentiment / coverage):scores.{key}
@@ -251,9 +251,9 @@ const selfLeft = computed(() => toLeftPct(overall.value))
 const avgLeft = computed(() => toLeftPct(industryAvgOverall.value))
 const top1Left = computed(() => toLeftPct(top1Overall.value))
 const selfLabelClasses = computed(() => ({
-  'p04-label-left-edge': overall.value < 20,
-  'p04-label-right-edge': overall.value > 80,
-  'p04-label-collision': Math.abs(overall.value - industryAvgOverall.value) < 10 ||
+  'p05-label-left-edge': overall.value < 20,
+  'p05-label-right-edge': overall.value > 80,
+  'p05-label-collision': Math.abs(overall.value - industryAvgOverall.value) < 10 ||
     Math.abs(overall.value - top1Overall.value) < 10
 }))
 
@@ -267,21 +267,21 @@ const quoteText = `本次诊断从提及率、排名得分、情感倾向、覆�
   justify-content: center;
 }
 
-.p04-body {
+.p05-body {
   margin-top: 60px;
 }
 
-.p04-top-grid {
+.p05-top-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 40px;
   margin-bottom: 40px;
 }
-.p04-radar-wrap {
+.p05-radar-wrap {
   min-height: 340px;
 }
 
-.p04-section-label {
+.p05-section-label {
   font-size: 11px;
   letter-spacing: 3px;
   color: #6b6456;
@@ -289,119 +289,119 @@ const quoteText = `本次诊断从提及率、排名得分、情感倾向、覆�
 }
 
 /* dimension 表行 */
-.p04-dim-row {
+.p05-dim-row {
   grid-template-columns: 1fr 80px 80px 80px;
 }
-.p04-dim-name {
+.p05-dim-name {
   font-size: 13px;
   font-weight: 500;
 }
-.p04-dim-score {
+.p05-dim-score {
   font-family: 'Playfair Display', serif;
   font-size: 24px;
   font-weight: 700;
   color: #1e3a8a;
 }
-.p04-dim-score-green {
+.p05-dim-score-green {
   color: #047857;
 }
-.p04-dim-avg {
+.p05-dim-avg {
   font-size: 11px;
   color: #6b6456;
   text-align: right;
 }
-.p04-dim-delta {
+.p05-dim-delta {
   font-size: 11px;
   text-align: right;
 }
-.p04-dim-delta-up {
+.p05-dim-delta-up {
   color: #047857;
 }
-.p04-dim-delta-down {
+.p05-dim-delta-down {
   color: #b91c1c;
 }
 
 /* 对比条 */
-.p04-compare-wrap {
+.p05-compare-wrap {
   margin-bottom: 32px;
 }
-.p04-compare-bar {
+.p05-compare-bar {
   position: relative;
   height: 60px;
   margin-top: 28px;
   background: linear-gradient(90deg, #fee2e2 0%, #fef3c7 40%, #d1fae5 100%);
   border-radius: 4px;
 }
-.p04-ruler {
+.p05-ruler {
   position: absolute;
   bottom: -20px;
   font-size: 10px;
   color: #6b6456;
 }
-.p04-ruler-0 {
+.p05-ruler-0 {
   left: 0;
 }
-.p04-ruler-50 {
+.p05-ruler-50 {
   left: 50%;
   transform: translateX(-50%);
 }
-.p04-ruler-100 {
+.p05-ruler-100 {
   right: 0;
 }
 
-.p04-mark-line {
+.p05-mark-line {
   position: absolute;
   top: -8px;
   bottom: -8px;
   width: 2px;
 }
-.p04-mark-avg {
+.p05-mark-avg {
   background: #6b6456;
 }
-.p04-mark-self {
+.p05-mark-self {
   background: #1e3a8a;
   width: 3px;
   top: -14px;
   bottom: -14px;
 }
-.p04-mark-top1 {
+.p05-mark-top1 {
   background: #d97706;
 }
 
-.p04-mark-label {
+.p05-mark-label {
   position: absolute;
   transform: translateX(-50%);
   white-space: nowrap;
 }
-.p04-mark-avg-label {
+.p05-mark-avg-label {
   top: -22px;
   font-size: 10px;
   color: #6b6456;
 }
-.p04-mark-self-label {
+.p05-mark-self-label {
   top: -38px;
   font-size: 13px;
   font-weight: 700;
   color: #1e3a8a;
 }
-.p04-mark-self-label.p04-label-left-edge {
+.p05-mark-self-label.p05-label-left-edge {
   transform: translateX(0);
   padding-left: 4px;
 }
-.p04-mark-self-label.p04-label-right-edge {
+.p05-mark-self-label.p05-label-right-edge {
   transform: translateX(-100%);
   padding-right: 4px;
 }
-.p04-mark-self-label.p04-label-collision {
+.p05-mark-self-label.p05-label-collision {
   top: -50px;
 }
-.p04-mark-top1-label {
+.p05-mark-top1-label {
   top: -22px;
   font-size: 10px;
   color: #d97706;
 }
 
-.p04-quote-wrap {
+.p05-quote-wrap {
   margin-top: 64px;
 }
 </style>

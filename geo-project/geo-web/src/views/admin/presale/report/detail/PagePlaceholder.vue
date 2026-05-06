@@ -17,7 +17,7 @@
           </div>
         </div>
       </div>
-      <div class="page-label">{{ pageNum }} / 18</div>
+      <div class="page-label">{{ pageNum }} / 19</div>
     </div>
   </section>
 </template>

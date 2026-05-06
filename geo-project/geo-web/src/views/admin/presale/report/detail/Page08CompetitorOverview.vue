@@ -1,15 +1,15 @@
 <template>
-  <section id="page-07" class="page-anchor">
+  <section id="page-08" class="page-anchor">
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
-        <span>05 / 竞品对标</span>
+        <span>06 / 竞品对标</span>
       </div>
 
-      <div class="p07-body">
+      <div class="p08-body">
         <!-- 章节标题 -->
         <div class="section-title">
-          <span class="section-number">05</span>
+          <span class="section-number">06</span>
           <div>
             <div class="section-label">COMPETITIVE BENCHMARK</div>
             <div class="section-heading">竞品对标分析</div>
@@ -17,67 +17,67 @@
         </div>
 
         <!-- AI 视角引入语(静态) -->
-        <div class="p07-intro">
-          <div class="mono p07-intro-label">AI'S VIEW</div>
-          <div class="chinese-serif p07-intro-text">AI 视角下您的真实竞争对手:</div>
+        <div class="p08-intro">
+          <div class="mono p08-intro-label">AI'S VIEW</div>
+          <div class="chinese-serif p08-intro-text">AI 视角下您的真实竞争对手:</div>
         </div>
 
         <!-- 竞品卡片组:3 竞品 + 自己 -->
-        <div class="p07-cards">
+        <div class="p08-cards">
           <div
             v-for="(c, idx) in mergedView.merged_competitors"
             :key="c.rank"
             class="competitor-card"
             :class="`top${c.rank}`"
           >
-            <div class="p07-card-head">
+            <div class="p08-card-head">
               <div class="competitor-rank">{{ formatRank(c.rank) }}</div>
-              <div class="mono p07-card-tag">TOP{{ c.rank }}</div>
+              <div class="mono p08-card-tag">TOP{{ c.rank }}</div>
             </div>
-            <div class="chinese-serif p07-card-name">{{ c.name }}</div>
-            <div class="p07-card-metric-wrap">
-              <div class="p07-card-sub">提及次数</div>
+            <div class="chinese-serif p08-card-name">{{ c.name }}</div>
+            <div class="p08-card-metric-wrap">
+              <div class="p08-card-sub">提及次数</div>
               <div
-                class="metric-hero p07-card-rate"
-                :class="`p07-card-rate-${c.rank}`"
+                class="metric-hero p08-card-rate"
+                :class="`p08-card-rate-${c.rank}`"
               >
-                {{ c.mention_count }}<span class="p07-card-unit">次</span>
+                {{ c.mention_count }}<span class="p08-card-unit">次</span>
               </div>
             </div>
           </div>
 
           <!-- 自己卡片 -->
           <div class="competitor-card self">
-            <div class="p07-card-head">
+            <div class="p08-card-head">
               <div class="competitor-rank">—</div>
-              <div class="mono p07-card-tag-self">您的品牌</div>
+              <div class="mono p08-card-tag-self">您的品牌</div>
             </div>
-            <div class="chinese-serif p07-card-name">{{ mergedView.brand_name }}</div>
-            <div class="p07-card-metric-wrap p07-card-metric-self">
-              <div class="p07-card-sub-self">提及次数</div>
-              <div class="metric-hero p07-card-rate p07-card-rate-self">
-                {{ selfTotalMentions }}<span class="p07-card-unit">次</span>
+            <div class="chinese-serif p08-card-name">{{ mergedView.brand_name }}</div>
+            <div class="p08-card-metric-wrap p08-card-metric-self">
+              <div class="p08-card-sub-self">提及次数</div>
+              <div class="metric-hero p08-card-rate p08-card-rate-self">
+                {{ selfTotalMentions }}<span class="p08-card-unit">次</span>
               </div>
             </div>
           </div>
         </div>
 
         <!-- 对比柱状图(方案 D: mention_count 绝对量) -->
-        <div class="p07-chart-wrap">
-          <div class="mono p07-chart-title">
+        <div class="p08-chart-wrap">
+          <div class="mono p08-chart-title">
             MENTION COUNT · AI 测试结果中被提及的次数
           </div>
           <PresaleChart :option="barOption" height="260px" />
         </div>
 
         <!-- 底部引用(静态) -->
-        <div class="p07-quote-wrap">
+        <div class="p08-quote-wrap">
           <div class="pull-quote">{{ quoteText }}</div>
         </div>
       </div>
 
       <div class="page-footer-brand">GEO · CONFIDENTIAL</div>
-      <div class="page-label">07</div>
+      <div class="page-label">08</div>
     </div>
   </section>
 </template>
@@ -90,7 +90,7 @@ import PresaleChart from './shared/PresaleChart.vue'
 import { toIntRounded } from '@/utils/presale/numberFormat'
 
 /**
- * Page07 竞品对标总览。
+ * Page08 竞品对标总览。
  *
  * 数据映射:
  *   - 3 竞品卡片:merged_competitors(按 rank 排序,后端已保证 1/2/3)
@@ -210,24 +210,24 @@ const quoteText = `上图展示了 AI 视角下您与 Top3 竞品的提及次数
   justify-content: center;
 }
 
-.p07-body {
+.p08-body {
   margin-top: 60px;
 }
 
 /* AI 视角引入 */
-.p07-intro {
+.p08-intro {
   background: #f7f3ea;
   padding: 24px;
   margin-bottom: 32px;
   border-left: 3px solid #1e3a8a;
 }
-.p07-intro-label {
+.p08-intro-label {
   font-size: 10px;
   letter-spacing: 2px;
   color: #6b6456;
   margin-bottom: 6px;
 }
-.p07-intro-text {
+.p08-intro-text {
   font-size: 18px;
   font-weight: 500;
   color: #0b1426;
@@ -235,83 +235,83 @@ const quoteText = `上图展示了 AI 视角下您与 Top3 竞品的提及次数
 }
 
 /* 竞品卡片 grid */
-.p07-cards {
+.p08-cards {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
   margin-bottom: 48px;
 }
-.p07-card-head {
+.p08-card-head {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 16px;
 }
-.p07-card-tag {
+.p08-card-tag {
   font-size: 10px;
   color: #6b6456;
   letter-spacing: 1px;
 }
-.p07-card-tag-self {
+.p08-card-tag-self {
   font-size: 10px;
   color: rgba(255, 255, 255, 0.6);
   letter-spacing: 1px;
 }
-.p07-card-name {
+.p08-card-name {
   font-size: 15px;
   font-weight: 600;
   margin-bottom: 12px;
 }
-.p07-card-metric-wrap {
+.p08-card-metric-wrap {
   border-top: 1px solid #c8bfa8;
   padding-top: 14px;        /* 原 10px → 14px */
   padding-bottom: 6px;      /* 新增,补底部呼吸感 */
 }
-.p07-card-metric-self {
+.p08-card-metric-self {
   border-top: 1px solid rgba(255, 255, 255, 0.2);
 }
-.p07-card-sub {
+.p08-card-sub {
   font-size: 11px;
   color: #6b6456;
   margin-bottom: 6px;       /* 原 2px → 6px,拉开"提及次数"和数字距离 */
 }
-.p07-card-sub-self {
+.p08-card-sub-self {
   font-size: 11px;
   color: rgba(255, 255, 255, 0.6);
   margin-bottom: 6px;       /* 同步,原 2px → 6px */
 }
-.p07-card-rate {
+.p08-card-rate {
   font-size: 36px;          /* 原 32px → 36px */
 }
-.p07-card-unit {
+.p08-card-unit {
   font-size: 15px;          /* 原 14px → 15px */
   margin-left: 2px;
 }
-.p07-card-rate-1 {
+.p08-card-rate-1 {
   color: #d97706;
 }
-.p07-card-rate-2 {
+.p08-card-rate-2 {
   color: #1e3a8a;
 }
-.p07-card-rate-3 {
+.p08-card-rate-3 {
   color: #6b6456;
 }
-.p07-card-rate-self {
+.p08-card-rate-self {
   color: #d97706;
 }
 
 /* chart */
-.p07-chart-wrap {
+.p08-chart-wrap {
   margin-bottom: 32px;
 }
-.p07-chart-title {
+.p08-chart-title {
   font-size: 11px;
   letter-spacing: 3px;
   color: #6b6456;
   margin-bottom: 12px;
 }
 
-.p07-quote-wrap {
+.p08-quote-wrap {
   margin-top: 24px;
 }
 </style>

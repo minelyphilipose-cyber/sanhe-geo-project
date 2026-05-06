@@ -21,7 +21,7 @@ import java.util.List;
  * 冻结后编辑返回 {@code 409 CONFLICT, next_action=DERIVE_NEW_VERSION}。
  * </p>
  * <p>
- * <b>8 个顶层字段全部 required</b>(顶层键必须存在,块内文案字段大多允许 null)。
+ * <b>9 个顶层字段全部 required</b>(顶层键必须存在,块内文案字段大多允许 null)。
  * </p>
  * <p><b>存储:</b>MySQL {@code presale_report_version.editable_content_json}(JSON 列)。</p>
  * <p>
@@ -53,6 +53,10 @@ public class EditableContentDTO {
     /** 执行摘要段落(第 03 页核心)。整体可 null。 */
     @JsonProperty("executive_summary")
     private ExecutiveSummary executiveSummary;
+
+    /** AI 搜索新战场(第 03 页)。整体必填,块内字符串 null 由 normalizer 补默认。 */
+    @JsonProperty("market_battleground")
+    private MarketBattleground marketBattleground;
 
     /** 关键发现总结(第 17 页)。数组本身必填,条目内 title/description 必填。 */
     @JsonProperty("key_takeaways")

@@ -1,59 +1,59 @@
 <template>
-  <section id="page-18" class="page-anchor">
+  <section id="page-19" class="page-anchor">
     <div class="page cover">
       <div class="cover-pattern"></div>
       <div class="cover-pattern-2"></div>
 
-      <div class="p18-wrap">
+      <div class="p19-wrap">
         <!-- 顶部 brand + END marker -->
-        <div class="p18-top">
-          <div class="p18-brand">
-            <div class="display-serif p18-logo">G</div>
-            <div class="mono p18-brand-name">GEO · 可见度诊断</div>
+        <div class="p19-top">
+          <div class="p19-brand">
+            <div class="display-serif p19-logo">G</div>
+            <div class="mono p19-brand-name">GEO · 可见度诊断</div>
           </div>
-          <div class="mono p18-end-marker">
+          <div class="mono p19-end-marker">
             END · REPORT-{{ reportIdSuffix }}
           </div>
         </div>
 
         <!-- 中部主内容:ABOUT US 标题 + 描述 + 3 项服务 -->
-        <div class="p18-middle">
-          <div class="mono p18-eyebrow">ABOUT US</div>
-          <h2 class="display-serif p18-title">
+        <div class="p19-middle">
+          <div class="mono p19-eyebrow">ABOUT US</div>
+          <h2 class="display-serif p19-title">
             让品牌在AI时代<br>被看见 · 被理解 · 被选择
           </h2>
-          <div class="p18-divider"></div>
+          <div class="p19-divider"></div>
 
-          <p class="p18-intro">
+          <p class="p19-intro">
             幻境AI 为品牌与企业提供 AI 可见性增长解决方案，让品牌在生成式搜索、智能问答与决策场景中建立确定性增长。
           </p>
 
-          <div class="p18-services">
-            <div v-for="s in SERVICES" :key="s.no" class="p18-service">
-              <div class="mono p18-service-no">{{ s.no }}</div>
-              <div class="chinese-serif p18-service-title">{{ s.title }}</div>
-              <div class="p18-service-desc">{{ s.desc }}</div>
+          <div class="p19-services">
+            <div v-for="s in SERVICES" :key="s.no" class="p19-service">
+              <div class="mono p19-service-no">{{ s.no }}</div>
+              <div class="chinese-serif p19-service-title">{{ s.title }}</div>
+              <div class="p19-service-desc">{{ s.desc }}</div>
             </div>
           </div>
         </div>
 
         <!-- 底部元信息 -->
-        <div class="p18-bottom">
+        <div class="p19-bottom">
           <div>
-            <div class="mono p18-meta-label">REPORT ID</div>
-            <div class="mono p18-meta-value">{{ reportIdFormatted }}</div>
+            <div class="mono p19-meta-label">REPORT ID</div>
+            <div class="mono p19-meta-value">{{ reportIdFormatted }}</div>
           </div>
           <div>
-            <div class="mono p18-meta-label">ISSUED</div>
-            <div class="p18-meta-value">{{ issuedDate }}</div>
+            <div class="mono p19-meta-label">ISSUED</div>
+            <div class="p19-meta-value">{{ issuedDate }}</div>
           </div>
-          <div class="p18-meta-right">
-            <div class="mono p18-meta-label">CONFIDENTIAL</div>
-            <div class="p18-meta-value p18-meta-accent">仅供指定客户使用</div>
+          <div class="p19-meta-right">
+            <div class="mono p19-meta-label">CONFIDENTIAL</div>
+            <div class="p19-meta-value p19-meta-accent">仅供指定客户使用</div>
           </div>
         </div>
 
-        <div class="p18-copyright">
+        <div class="p19-copyright">
           © {{ copyrightYear }} GEO · ALL RIGHTS RESERVED
         </div>
       </div>
@@ -66,7 +66,7 @@ import { computed } from 'vue'
 import { useMergedView } from '@/composables/presale/useMergedView'
 
 /**
- * Page18 关于我们 / 封底(γ·2)。
+ * Page19 关于我们 / 封底(γ·2)。
  *
  * 样式:沿用 .page.cover 深色渐变背景(P01 同款),theme.css 已定义。
  *
@@ -145,9 +145,9 @@ const copyrightYear = computed(() => dateParts.value.y)
   justify-content: center;
 }
 
-/* ─── P18 布局容器 ────────────────────────────────────── */
+/* ─── P19 布局容器 ────────────────────────────────────── */
 
-.p18-wrap {
+.p19-wrap {
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -157,19 +157,19 @@ const copyrightYear = computed(() => dateParts.value.y)
 
 /* ─── 顶部 brand + END marker ─────────────────────────── */
 
-.p18-top {
+.p19-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-.p18-brand {
+.p19-brand {
   display: flex;
   align-items: center;
   gap: 14px;
 }
 
-.p18-logo {
+.p19-logo {
   width: 34px;
   height: 34px;
   border: 1.5px solid rgba(255, 255, 255, 0.92);
@@ -181,14 +181,14 @@ const copyrightYear = computed(() => dateParts.value.y)
   line-height: 1;
 }
 
-.p18-brand-name {
+.p19-brand-name {
   font-size: 11px;
   letter-spacing: 4.5px;
   text-transform: uppercase;
   color: rgba(255, 255, 255, 0.92);
 }
 
-.p18-end-marker {
+.p19-end-marker {
   font-size: 10px;
   letter-spacing: 2.8px;
   color: rgba(255, 255, 255, 0.56);
@@ -196,19 +196,19 @@ const copyrightYear = computed(() => dateParts.value.y)
 
 /* ─── 中部 ABOUT US ───────────────────────────────────── */
 
-.p18-middle {
+.p19-middle {
   flex: 1;
   padding-top: 70px;
 }
 
-.p18-eyebrow {
+.p19-eyebrow {
   font-size: 10px;
   letter-spacing: 5px;
   color: rgba(255, 255, 255, 0.58);
   margin-bottom: 18px;
 }
 
-.p18-title {
+.p19-title {
   font-size: 50px;
   font-weight: 900;
   line-height: 1.2;
@@ -218,14 +218,14 @@ const copyrightYear = computed(() => dateParts.value.y)
   text-shadow: 0 14px 34px rgba(0, 0, 0, 0.18);
 }
 
-.p18-divider {
+.p19-divider {
   width: 66px;
   height: 2px;
   background: var(--presale-accent);
   margin-bottom: 26px;
 }
 
-.p18-intro {
+.p19-intro {
   font-size: 14px;
   line-height: 2;
   letter-spacing: 0.2px;
@@ -234,7 +234,7 @@ const copyrightYear = computed(() => dateParts.value.y)
   margin: 0 0 56px;
 }
 
-.p18-services {
+.p19-services {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   column-gap: 54px;
@@ -242,25 +242,25 @@ const copyrightYear = computed(() => dateParts.value.y)
   margin-bottom: 60px;
 }
 
-.p18-service {
+.p19-service {
   min-width: 0;
 }
 
-.p18-service-no {
+.p19-service-no {
   font-size: 9px;
   letter-spacing: 2.4px;
   color: var(--presale-accent);
   margin-bottom: 10px;
 }
 
-.p18-service-title {
+.p19-service-title {
   font-size: 16px;
   font-weight: 600;
   margin-bottom: 6px;
   color: rgba(255, 255, 255, 0.96);
 }
 
-.p18-service-desc {
+.p19-service-desc {
   font-size: 12px;
   color: rgba(255, 255, 255, 0.58);
   line-height: 1.72;
@@ -268,7 +268,7 @@ const copyrightYear = computed(() => dateParts.value.y)
 
 /* ─── 底部元信息 ──────────────────────────────────────── */
 
-.p18-bottom {
+.p19-bottom {
   padding-top: 36px;
   border-top: 1px solid rgba(255, 255, 255, 0.16);
   display: grid;
@@ -276,31 +276,31 @@ const copyrightYear = computed(() => dateParts.value.y)
   gap: 28px;
 }
 
-.p18-meta-label {
+.p19-meta-label {
   font-size: 9px;
   letter-spacing: 2.8px;
   color: rgba(255, 255, 255, 0.46);
   margin-bottom: 8px;
 }
 
-.p18-meta-value {
+.p19-meta-value {
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.2px;
   color: rgba(255, 255, 255, 0.94);
 }
 
-.p18-meta-right {
+.p19-meta-right {
   text-align: right;
 }
 
-.p18-meta-accent {
+.p19-meta-accent {
   color: var(--presale-accent);
 }
 
 /* ─── 版权 ────────────────────────────────────────────── */
 
-.p18-copyright {
+.p19-copyright {
   margin-top: 24px;
   font-size: 9px;
   color: rgba(255, 255, 255, 0.36);

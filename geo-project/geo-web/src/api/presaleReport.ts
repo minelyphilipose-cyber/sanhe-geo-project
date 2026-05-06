@@ -72,6 +72,15 @@ export interface ReportDetailVO {
   rawSnapshotJson: string | null
   computedSnapshotJson: string | null
   editableContentJson: string | null
+  editableFieldMeta?: EditableFieldMetaVO[]
+}
+
+export interface EditableFieldMetaVO {
+  field: string
+  label: string
+  block: string
+  maxLength: number
+  warnLength: number
 }
 
 /**

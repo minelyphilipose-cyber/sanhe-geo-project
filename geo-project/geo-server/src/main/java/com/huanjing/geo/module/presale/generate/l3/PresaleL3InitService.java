@@ -55,6 +55,7 @@ public class PresaleL3InitService {
 
     private final ObjectMapper objectMapper;
     private final PresaleTextFormatter textFormatter;
+    private final PresaleL3Defaults l3Defaults;
 
     public String derive(String rawSnapshotJson, String computedSnapshotJson) {
         try {
@@ -73,7 +74,7 @@ public class PresaleL3InitService {
             editable.setPhaseDescriptions(buildPhaseDescriptions(computed));
             editable.setCompetitorSceneDescriptions(buildCompetitorScenes(raw));
             editable.setRoiDisclaimer(DEFAULT_ROI_DISCLAIMER);
-            return objectMapper.writeValueAsString(editable);
+            return objectMapper.writeValueAsString(l3Defaults.normalize(editable, raw, computed));
         } catch (JsonProcessingException e) {
             throw new BizException(500, "L3 init failed: " + e.getMessage());
         }

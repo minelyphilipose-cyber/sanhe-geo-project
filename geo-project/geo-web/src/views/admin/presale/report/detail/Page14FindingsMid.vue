@@ -1,14 +1,14 @@
 <template>
-  <section id="page-13" class="page-anchor">
+  <section id="page-14" class="page-anchor">
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
-        <span>08 / 优化机会清单(续)</span>
+        <span>09 / 优化机会清单(续)</span>
       </div>
 
-      <div class="p13-body">
+      <div class="p14-body">
         <!-- priority tag -->
-        <div class="p13-priority-tag">
+        <div class="p14-priority-tag">
           <span class="priority-badge priority-mid">
             <span class="priority-dot"></span>中优先级 · MEDIUM PRIORITY
           </span>
@@ -25,14 +25,14 @@
           />
         </template>
 
-        <div v-else class="p13-empty">
-          <span class="p13-empty-icon">✓</span>
+        <div v-else class="p14-empty">
+          <span class="p14-empty-icon">✓</span>
           本优先级下无待优化项 — 您在该维度已表现良好,建议继续保持。
         </div>
       </div>
 
       <div class="page-footer-brand">GEO · CONFIDENTIAL</div>
-      <div class="page-label">13</div>
+      <div class="page-label">14</div>
     </div>
   </section>
 </template>
@@ -43,7 +43,7 @@ import { useMergedView } from '@/composables/presale/useMergedView'
 import FindingCard from './shared/FindingCard.vue'
 
 /**
- * Page13 优化机会(中优先级)。
+ * Page14 优化机会(中优先级)。
  *
  * 和 P12 差异:
  *   - 无顶部 total banner(续页,不重复)
@@ -72,15 +72,15 @@ function formatNum(n: number): string {
   justify-content: center;
 }
 
-.p13-body {
+.p14-body {
   margin-top: 60px;
 }
 
-.p13-priority-tag {
+.p14-priority-tag {
   margin-bottom: 16px;
 }
 
-.p13-empty {
+.p14-empty {
   padding: 32px 24px;
   text-align: center;
   color: #6b6456;
@@ -89,7 +89,7 @@ function formatNum(n: number): string {
   background: rgba(4, 120, 87, 0.04);
   border-left: 3px solid #047857;
 }
-.p13-empty-icon {
+.p14-empty-icon {
   display: inline-block;
   margin-right: 8px;
   color: #047857;

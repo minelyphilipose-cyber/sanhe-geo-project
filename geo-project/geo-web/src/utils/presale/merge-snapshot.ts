@@ -34,6 +34,7 @@ import type {
   ExecutiveSummary,
   FindingContent,
   KeyTakeaway,
+  MarketBattleground,
   PhaseDescription,
 } from '../../types/presale/editable';
 import type {
@@ -138,6 +139,7 @@ export function mergeSnapshot(
       raw.test_summary
     ),
     executive_summary: resolveExecutiveSummary(editable.executive_summary),
+    market_battleground: resolveMarketBattleground(editable.market_battleground),
     key_takeaways: keyTakeaways,
     roi_disclaimer: resolveRoiDisclaimer(editable.roi_disclaimer),
 
@@ -232,6 +234,71 @@ function resolveExecutiveSummary(
   return {
     headline: '暂无执行摘要',
     paragraph: '规则引擎未生成默认摘要,请运营在 L3 编辑页填写。',
+  };
+}
+
+function resolveMarketBattleground(l3: MarketBattleground | null | undefined): MarketBattleground {
+  return l3 ?? {
+    topbar_title: '',
+    topbar_right: '',
+    page_title: '',
+    page_kicker: '',
+    market_card: {
+      label: '',
+      source: '',
+      stats: [
+        { value: '', unit: '', label: '' },
+        { value: '', unit: '', label: '' },
+        { value: '', unit: '', label: '' },
+        { value: '', unit: '', label: '' },
+      ],
+      platform_label: '',
+      platforms: [
+        { name: '', value: '' },
+        { name: '', value: '' },
+        { name: '', value: '' },
+      ],
+      platform_suffix: '',
+    },
+    national_card: {
+      label: '',
+      value_prefix: '',
+      value: '',
+      unit: '',
+      subtitle: '',
+      calculation_label: '',
+      rows: [
+        { label: '', value: '', is_total: false },
+        { label: '', value: '', is_total: false },
+        { label: '', value: '', is_total: false },
+        { label: '', value: '', is_total: true },
+      ],
+    },
+    bridge_text: '',
+    regional_card: {
+      label: '',
+      value_prefix: '',
+      value: '',
+      unit: '',
+      subtitle: '',
+      calculation_label: '',
+      rows: [
+        { label: '', value: '', is_total: false },
+        { label: '', value: '', is_total: false },
+        { label: '', value: '', is_total: false },
+        { label: '', value: '', is_total: true },
+      ],
+    },
+    narrative: {
+      intro: '',
+      questions: ['', '', ''],
+      conclusion: '',
+      brand_line_prefix: '',
+      brand_name: '',
+      brand_line_suffix: '',
+    },
+    footnote: '',
+    footer_brand: '',
   };
 }
 

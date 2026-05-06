@@ -1,51 +1,51 @@
 <template>
-  <section id="page-16" class="page-anchor">
+  <section id="page-17" class="page-anchor">
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
-        <span>09 / 分阶段优化路径</span>
+        <span>10 / 分阶段优化路径</span>
       </div>
 
-      <div class="p16-body">
+      <div class="p17-body">
         <!-- 标题(CONTINUED 风格,P15 已用 09,这里是"续") -->
-        <div class="p16-header">
-          <div class="mono p16-subtitle">PHASED ROADMAP</div>
-          <h3 class="chinese-serif p16-title">分阶段优化路径</h3>
+        <div class="p17-header">
+          <div class="mono p17-subtitle">PHASED ROADMAP</div>
+          <h3 class="chinese-serif p17-title">分阶段优化路径</h3>
         </div>
 
-        <div class="p16-timeline">
+        <div class="p17-timeline">
           <div
             v-for="(item, idx) in steps"
             :key="item.phase_no"
             class="timeline-step"
           >
             <div class="timeline-dot">{{ item.phase_no }}</div>
-            <div class="p16-step-head">
-              <div class="chinese-serif p16-step-title">{{ item.title }}</div>
-              <div class="mono p16-step-month">{{ formatDuration(item.duration_label) }}</div>
+            <div class="p17-step-head">
+              <div class="chinese-serif p17-step-title">{{ item.title }}</div>
+              <div class="mono p17-step-month">{{ formatDuration(item.duration_label) }}</div>
             </div>
-            <div class="p16-step-desc">{{ item.description }}</div>
-            <div class="p16-stats">
-              <div class="p16-stat">
-                <div class="mono p16-stat-label">TARGET SCORE</div>
+            <div class="p17-step-desc">{{ item.description }}</div>
+            <div class="p17-stats">
+              <div class="p17-stat">
+                <div class="mono p17-stat-label">TARGET SCORE</div>
                 <div
-                  class="display-serif p16-stat-value"
-                  :class="idx === steps.length - 1 ? 'p16-stat-accent' : 'p16-stat-primary'"
+                  class="display-serif p17-stat-value"
+                  :class="idx === steps.length - 1 ? 'p17-stat-accent' : 'p17-stat-primary'"
                 >
                   {{ toIntRounded(item.target_score) }}
                 </div>
               </div>
-              <div class="p16-stat">
-                <div class="mono p16-stat-label">预期提升</div>
-                <div class="display-serif p16-stat-value p16-stat-green">
+              <div class="p17-stat">
+                <div class="mono p17-stat-label">预期提升</div>
+                <div class="display-serif p17-stat-value p17-stat-green">
                   +{{ toIntRounded(item.uplift_from_previous) }}
                 </div>
               </div>
-              <div class="p16-stat">
-                <div class="mono p16-stat-label">{{ formatCompletion(item).label }}</div>
+              <div class="p17-stat">
+                <div class="mono p17-stat-label">{{ formatCompletion(item).label }}</div>
                 <div
-                  class="display-serif p16-stat-value p16-stat-ink"
-                  :class="{ 'p16-stat-muted': formatCompletion(item).isPassive }"
+                  class="display-serif p17-stat-value p17-stat-ink"
+                  :class="{ 'p17-stat-muted': formatCompletion(item).isPassive }"
                 >
                   {{ formatCompletion(item).value }}
                 </div>
@@ -60,7 +60,7 @@
       </div>
 
       <div class="page-footer-brand">GEO · CONFIDENTIAL</div>
-      <div class="page-label">16</div>
+      <div class="page-label">17</div>
     </div>
   </section>
 </template>
@@ -71,7 +71,7 @@ import { useMergedView } from '@/composables/presale/useMergedView'
 import { toIntRounded } from '@/utils/presale/numberFormat'
 
 /**
- * Page16 分阶段优化路径(γ·2)。
+ * Page17 分阶段优化路径(γ·2)。
  *
  * 数据映射:
  *   - 每个 step 来自 mergedView.merged_phases[i]:
@@ -147,56 +147,56 @@ function formatCompletion(item: Step): { label: string; value: string; isPassive
   justify-content: center;
 }
 
-.p16-body {
+.p17-body {
   margin-top: 60px;
 }
 
-.p16-header {
+.p17-header {
   margin-bottom: 28px;
 }
-.p16-subtitle {
+.p17-subtitle {
   font-size: 11px;
   letter-spacing: 3px;
   color: var(--presale-muted);
   margin-bottom: 8px;
 }
-.p16-title {
+.p17-title {
   font-size: 22px;
   font-weight: 700;
   color: var(--presale-ink);
   margin: 0;
 }
 
-.p16-timeline {
+.p17-timeline {
   margin-bottom: 24px;
 }
 
-.p16-step-head {
+.p17-step-head {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
 }
 
-.p16-step-title {
+.p17-step-title {
   font-size: 18px;
   font-weight: 600;
   color: var(--presale-ink);
 }
 
-.p16-step-month {
+.p17-step-month {
   font-size: 11px;
   color: var(--presale-muted);
   letter-spacing: 1px;
 }
 
-.p16-step-desc {
+.p17-step-desc {
   margin-top: 8px;
   font-size: 13px;
   color: var(--presale-ink-soft);
   line-height: 1.7;
 }
 
-.p16-stats {
+.p17-stats {
   display: flex;
   gap: 24px;
   margin-top: 12px;
@@ -204,30 +204,30 @@ function formatCompletion(item: Step): { label: string; value: string; isPassive
   background: var(--presale-paper-alt);
 }
 
-.p16-stat-label {
+.p17-stat-label {
   font-size: 10px;
   color: var(--presale-muted);
   letter-spacing: 1px;
 }
 
-.p16-stat-value {
+.p17-stat-value {
   font-size: 22px;
   font-weight: 700;
   margin-top: 2px;
 }
-.p16-stat-primary {
+.p17-stat-primary {
   color: var(--presale-primary);
 }
-.p16-stat-accent {
+.p17-stat-accent {
   color: var(--presale-accent);
 }
-.p16-stat-green {
+.p17-stat-green {
   color: var(--presale-accent-green);
 }
-.p16-stat-ink {
+.p17-stat-ink {
   color: var(--presale-ink);
 }
-.p16-stat-muted {
+.p17-stat-muted {
   color: var(--presale-muted);
   font-size: 18px;
 }

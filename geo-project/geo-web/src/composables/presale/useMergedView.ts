@@ -4,7 +4,7 @@
  * 背景:
  *   详情页(PresaleReportDetail.vue)加载 ReportDetailVO,用 mergeSnapshot 合成
  *   MergedViewDTO,然后把它连同 loading/error/版本元信息 provide 给子孙组件。
- *   Sidebar 需要读 meta(版本号、冻结、降级平台);Viewer 和 18 页 Page SFC 需要读
+ *   Sidebar 需要读 meta(版本号、冻结、降级平台);Viewer 和 19 页 Page SFC 需要读
  *   MergedViewDTO 的全部业务字段。如果每级组件都写 provide/inject + Symbol,
  *   代码噪音大且容易类型漂移,所以抽成 composable。
  *
@@ -82,7 +82,7 @@ export function provideMergedViewContext(ctx: MergedViewContext): void {
 }
 
 /**
- * 在 Sidebar / Viewer / 18 页 Page SFC 里调用,拿到详情页上下文。
+ * 在 Sidebar / Viewer / 19 页 Page SFC 里调用,拿到详情页上下文。
  *
  * 若没有祖先调用 provideMergedViewContext(场景:组件被单独使用或单测脱离 Detail),
  * 抛异常,避免静默的 undefined 深入模板。

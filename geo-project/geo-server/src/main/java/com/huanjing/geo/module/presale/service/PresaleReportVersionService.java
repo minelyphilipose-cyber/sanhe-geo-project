@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.dto.response.ReportDetailVO;
 import com.huanjing.geo.module.presale.dto.response.ReportVersionMetaVO;
+import com.huanjing.geo.module.presale.generate.l3.PresaleL3Defaults;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
@@ -20,13 +21,16 @@ public class PresaleReportVersionService {
     private final PresaleReportVersionMapper versionMapper;
     private final PresaleAccessService accessService;
     private final CurrentUserService currentUserService;
+    private final PresaleL3Defaults l3Defaults;
 
     public PresaleReportVersionService(PresaleReportVersionMapper versionMapper,
                                        PresaleAccessService accessService,
-                                       CurrentUserService currentUserService) {
+                                       CurrentUserService currentUserService,
+                                       PresaleL3Defaults l3Defaults) {
         this.versionMapper = versionMapper;
         this.accessService = accessService;
         this.currentUserService = currentUserService;
+        this.l3Defaults = l3Defaults;
     }
 
     /**
@@ -62,7 +66,11 @@ public class PresaleReportVersionService {
                 .version(PresaleReportService.toVersionMeta(version))
                 .rawSnapshotJson(version.getRawSnapshotJson())
                 .computedSnapshotJson(version.getComputedSnapshotJson())
-                .editableContentJson(version.getEditableContentJson())
+                .editableContentJson(l3Defaults.normalizeJson(
+                        version.getEditableContentJson(),
+                        version.getRawSnapshotJson(),
+                        version.getComputedSnapshotJson()))
+                .editableFieldMeta(l3Defaults.fieldMeta())
                 .build();
     }
 

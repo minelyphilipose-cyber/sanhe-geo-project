@@ -1,14 +1,14 @@
 <template>
-  <section id="page-14" class="page-anchor">
+  <section id="page-15" class="page-anchor">
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
-        <span>08 / 优化机会清单(续)</span>
+        <span>09 / 优化机会清单(续)</span>
       </div>
 
-      <div class="p14-body">
+      <div class="p15-body">
         <!-- priority tag -->
-        <div class="p14-priority-tag">
+        <div class="p15-priority-tag">
           <span class="priority-badge priority-low">
             <span class="priority-dot"></span>建议关注 · LOW PRIORITY
           </span>
@@ -25,33 +25,33 @@
           />
         </template>
 
-        <div v-else class="p14-empty">
+        <div v-else class="p15-empty">
           <p>优化机会已按优先级分级呈现。从洞察到执行的转化,通常是项目成败的关键,建议尽早确立专项目标与里程碑。</p>
         </div>
 
         <!-- 底部引用(动态合成) -->
-        <div class="p14-quote-wrap">
+        <div class="p15-quote-wrap">
           <div class="pull-quote">{{ quoteText }}</div>
         </div>
 
         <!-- CATEGORY BREAKDOWN 4 卡片(跨 priority) -->
-        <div class="p14-category-wrap">
-          <div class="mono p14-category-label">CATEGORY BREAKDOWN</div>
-          <div class="p14-category-grid">
+        <div class="p15-category-wrap">
+          <div class="mono p15-category-label">CATEGORY BREAKDOWN</div>
+          <div class="p15-category-grid">
             <div
               v-for="cat in categoryCounts"
               :key="cat.name"
-              class="p14-category-card"
+              class="p15-category-card"
             >
-              <div class="metric-hero p14-category-num">{{ cat.count }}</div>
-              <div class="mono p14-category-name">{{ cat.name }}</div>
+              <div class="metric-hero p15-category-num">{{ cat.count }}</div>
+              <div class="mono p15-category-name">{{ cat.name }}</div>
             </div>
           </div>
         </div>
       </div>
 
       <div class="page-footer-brand">GEO · CONFIDENTIAL</div>
-      <div class="page-label">14</div>
+      <div class="page-label">15</div>
     </div>
   </section>
 </template>
@@ -62,7 +62,7 @@ import { useMergedView } from '@/composables/presale/useMergedView'
 import FindingCard from './shared/FindingCard.vue'
 
 /**
- * Page14 优化机会(建议关注)+ 底部总览。
+ * Page15 优化机会(建议关注)+ 底部总览。
  *
  * 内容:
  *   1. LOW priority finding 卡片列表
@@ -118,15 +118,15 @@ const categoryCounts = computed<CategoryCount[]>(() => {
   justify-content: center;
 }
 
-.p14-body {
+.p15-body {
   margin-top: 60px;
 }
 
-.p14-priority-tag {
+.p15-priority-tag {
   margin-bottom: 16px;
 }
 
-.p14-empty {
+.p15-empty {
   text-align: center;
   padding: 28px 32px;
   font-size: 13px;
@@ -136,35 +136,35 @@ const categoryCounts = computed<CategoryCount[]>(() => {
   border-left: 3px solid #c8bfa8;
 }
 
-.p14-quote-wrap {
+.p15-quote-wrap {
   margin-top: 40px;
 }
 
 /* category breakdown */
-.p14-category-wrap {
+.p15-category-wrap {
   margin-top: 32px;
 }
-.p14-category-label {
+.p15-category-label {
   font-size: 11px;
   letter-spacing: 3px;
   color: #6b6456;
   margin-bottom: 16px;
 }
-.p14-category-grid {
+.p15-category-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 12px;
 }
-.p14-category-card {
+.p15-category-card {
   text-align: center;
   padding: 16px;
   border: 1px solid #c8bfa8;
 }
-.p14-category-num {
+.p15-category-num {
   font-size: 32px;
   color: #0b1426;
 }
-.p14-category-name {
+.p15-category-name {
   font-size: 10px;
   color: #6b6456;
   margin-top: 4px;

@@ -8,7 +8,7 @@
  * 可变性:三层中唯一可就地 UPDATE 的层;冻结后编辑返回 409 CONFLICT。
  * 存储:MySQL presale_report_version.editable_content_json。
  *
- * 8 个顶层字段全部 required(顶层键必须存在,块内文案字段大多允许 null)。
+ * 9 个顶层字段全部 required(顶层键必须存在,块内文案字段大多允许 null)。
  */
 
 /**
@@ -21,6 +21,8 @@ export interface EditableContentDTO {
   report_subtitle: string | null;
   /** 整体可 null。 */
   executive_summary: ExecutiveSummary | null;
+  /** 第 03 页 AI 搜索新战场。 */
+  market_battleground: MarketBattleground;
   /** 数组本身必填,条目内 title/description 必填。 */
   key_takeaways: KeyTakeaway[];
   /** 通过 finding_id 关联 L2.optimization_findings。 */
@@ -41,6 +43,68 @@ export interface ExecutiveSummary {
   headline: string;
   /** 展开描述段落。 */
   paragraph: string;
+}
+
+/**
+ * 第 03 页「AI 搜索新战场」固定布局文案。
+ */
+export interface MarketBattleground {
+  topbar_title: string;
+  topbar_right: string;
+  page_title: string;
+  page_kicker: string;
+  market_card: MarketCard;
+  national_card: CalculationCard;
+  bridge_text: string;
+  regional_card: CalculationCard;
+  narrative: NarrativeBlock;
+  footnote: string;
+  footer_brand: string;
+}
+
+export interface MarketCard {
+  label: string;
+  source: string;
+  stats: MarketStat[];
+  platform_label: string;
+  platforms: MarketPlatform[];
+  platform_suffix: string;
+}
+
+export interface MarketStat {
+  value: string;
+  unit: string;
+  label: string;
+}
+
+export interface MarketPlatform {
+  name: string;
+  value: string;
+}
+
+export interface CalculationCard {
+  label: string;
+  value_prefix: string;
+  value: string;
+  unit: string;
+  subtitle: string;
+  calculation_label: string;
+  rows: CalculationRow[];
+}
+
+export interface CalculationRow {
+  label: string;
+  value: string;
+  is_total: boolean;
+}
+
+export interface NarrativeBlock {
+  intro: string;
+  questions: string[];
+  conclusion: string;
+  brand_line_prefix: string;
+  brand_name: string;
+  brand_line_suffix: string;
 }
 
 /**

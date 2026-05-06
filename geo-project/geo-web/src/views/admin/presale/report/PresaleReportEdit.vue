@@ -52,6 +52,7 @@
     <div v-else-if="draft && raw && computedSnap" class="edit-layout">
       <aside class="edit-nav">
         <a href="#basic">基本文案</a>
+        <a href="#market">AI 搜索新战场</a>
         <a href="#summary">执行摘要</a>
         <a href="#takeaways">关键结论</a>
         <a href="#findings">优化建议</a>
@@ -79,6 +80,321 @@
             @update:model-value="draft.report_subtitle = $event"
             @restore="draft.report_subtitle = null"
           />
+        </el-card>
+
+        <el-card id="market" shadow="never" class="edit-section">
+          <template #header>AI 搜索新战场</template>
+          <el-collapse v-model="marketCollapseActive" class="market-collapse">
+            <el-collapse-item name="market-topbar" title="顶部条">
+              <EditableText
+                label="顶部章节标题"
+                :model-value="draft.market_battleground.topbar_title"
+                :maxlength="fieldMax('market_battleground.topbar_title', 40)"
+                :warn-length="fieldWarn('market_battleground.topbar_title')"
+                @update:model-value="draft.market_battleground.topbar_title = $event"
+              />
+              <EditableText
+                label="顶部右侧标识"
+                :model-value="draft.market_battleground.topbar_right"
+                :maxlength="fieldMax('market_battleground.topbar_right', 24)"
+                :warn-length="fieldWarn('market_battleground.topbar_right')"
+                @update:model-value="draft.market_battleground.topbar_right = $event"
+              />
+            </el-collapse-item>
+
+            <el-collapse-item name="market-title" title="页面标题">
+              <EditableText
+                label="页面主标题"
+                :model-value="draft.market_battleground.page_title"
+                :maxlength="fieldMax('market_battleground.page_title', 34)"
+                :warn-length="fieldWarn('market_battleground.page_title')"
+                @update:model-value="draft.market_battleground.page_title = $event"
+              />
+              <EditableText
+                label="英文副标题"
+                :model-value="draft.market_battleground.page_kicker"
+                :maxlength="fieldMax('market_battleground.page_kicker', 48)"
+                :warn-length="fieldWarn('market_battleground.page_kicker')"
+                @update:model-value="draft.market_battleground.page_kicker = $event"
+              />
+            </el-collapse-item>
+
+            <el-collapse-item name="market-card" title="深色市场卡">
+              <EditableText
+                label="市场卡标签"
+                :model-value="draft.market_battleground.market_card.label"
+                :maxlength="fieldMax('market_battleground.market_card.label', 32)"
+                :warn-length="fieldWarn('market_battleground.market_card.label')"
+                @update:model-value="draft.market_battleground.market_card.label = $event"
+              />
+              <EditableText
+                label="数据来源"
+                :model-value="draft.market_battleground.market_card.source"
+                :maxlength="fieldMax('market_battleground.market_card.source', 32)"
+                :warn-length="fieldWarn('market_battleground.market_card.source')"
+                @update:model-value="draft.market_battleground.market_card.source = $event"
+              />
+              <div v-for="(stat, idx) in draft.market_battleground.market_card.stats" :key="idx" class="list-editor-item">
+                <div class="row-title"><strong>市场数据 {{ idx + 1 }}</strong></div>
+                <EditableText
+                  label="数值"
+                  :model-value="stat.value"
+                  :maxlength="fieldMax(`market_battleground.market_card.stats[${idx}].value`, 12)"
+                  :warn-length="fieldWarn(`market_battleground.market_card.stats[${idx}].value`)"
+                  @update:model-value="stat.value = $event"
+                />
+                <EditableText
+                  label="单位"
+                  :model-value="stat.unit"
+                  :maxlength="fieldMax(`market_battleground.market_card.stats[${idx}].unit`, 8)"
+                  :warn-length="fieldWarn(`market_battleground.market_card.stats[${idx}].unit`)"
+                  @update:model-value="stat.unit = $event"
+                />
+                <EditableText
+                  label="说明"
+                  :model-value="stat.label"
+                  :maxlength="fieldMax(`market_battleground.market_card.stats[${idx}].label`, 24)"
+                  :warn-length="fieldWarn(`market_battleground.market_card.stats[${idx}].label`)"
+                  @update:model-value="stat.label = $event"
+                />
+              </div>
+              <EditableText
+                label="平台列表标签"
+                :model-value="draft.market_battleground.market_card.platform_label"
+                :maxlength="fieldMax('market_battleground.market_card.platform_label', 16)"
+                :warn-length="fieldWarn('market_battleground.market_card.platform_label')"
+                @update:model-value="draft.market_battleground.market_card.platform_label = $event"
+              />
+              <div v-for="(platform, idx) in draft.market_battleground.market_card.platforms" :key="idx" class="list-editor-item">
+                <div class="row-title"><strong>平台 {{ idx + 1 }}</strong></div>
+                <EditableText
+                  label="名称"
+                  :model-value="platform.name"
+                  :maxlength="fieldMax(`market_battleground.market_card.platforms[${idx}].name`, 12)"
+                  :warn-length="fieldWarn(`market_battleground.market_card.platforms[${idx}].name`)"
+                  @update:model-value="platform.name = $event"
+                />
+                <EditableText
+                  label="数值"
+                  :model-value="platform.value"
+                  :maxlength="fieldMax(`market_battleground.market_card.platforms[${idx}].value`, 12)"
+                  :warn-length="fieldWarn(`market_battleground.market_card.platforms[${idx}].value`)"
+                  @update:model-value="platform.value = $event"
+                />
+              </div>
+              <EditableText
+                label="其他平台说明"
+                :model-value="draft.market_battleground.market_card.platform_suffix"
+                :maxlength="fieldMax('market_battleground.market_card.platform_suffix', 18)"
+                :warn-length="fieldWarn('market_battleground.market_card.platform_suffix')"
+                @update:model-value="draft.market_battleground.market_card.platform_suffix = $event"
+              />
+            </el-collapse-item>
+
+            <el-collapse-item name="national-card" title="全国推导卡">
+              <EditableText
+                label="卡片标签"
+                :model-value="draft.market_battleground.national_card.label"
+                :maxlength="fieldMax('market_battleground.national_card.label', 24)"
+                :warn-length="fieldWarn('market_battleground.national_card.label')"
+                @update:model-value="draft.market_battleground.national_card.label = $event"
+              />
+              <div class="inline-row">
+                <EditableText
+                  label="大数字前缀"
+                  :model-value="draft.market_battleground.national_card.value_prefix"
+                  :maxlength="fieldMax('market_battleground.national_card.value_prefix', 6)"
+                  :warn-length="fieldWarn('market_battleground.national_card.value_prefix')"
+                  @update:model-value="draft.market_battleground.national_card.value_prefix = $event"
+                />
+                <EditableText
+                  label="大数字"
+                  :model-value="draft.market_battleground.national_card.value"
+                  :maxlength="fieldMax('market_battleground.national_card.value', 12)"
+                  :warn-length="fieldWarn('market_battleground.national_card.value')"
+                  @update:model-value="draft.market_battleground.national_card.value = $event"
+                />
+                <EditableText
+                  label="单位"
+                  :model-value="draft.market_battleground.national_card.unit"
+                  :maxlength="fieldMax('market_battleground.national_card.unit', 8)"
+                  :warn-length="fieldWarn('market_battleground.national_card.unit')"
+                  @update:model-value="draft.market_battleground.national_card.unit = $event"
+                />
+              </div>
+              <EditableText
+                label="大数字说明"
+                :model-value="draft.market_battleground.national_card.subtitle"
+                :maxlength="fieldMax('market_battleground.national_card.subtitle', 28)"
+                :warn-length="fieldWarn('market_battleground.national_card.subtitle')"
+                @update:model-value="draft.market_battleground.national_card.subtitle = $event"
+              />
+              <EditableText
+                label="推导标题"
+                :model-value="draft.market_battleground.national_card.calculation_label"
+                :maxlength="fieldMax('market_battleground.national_card.calculation_label', 24)"
+                :warn-length="fieldWarn('market_battleground.national_card.calculation_label')"
+                @update:model-value="draft.market_battleground.national_card.calculation_label = $event"
+              />
+              <div v-for="(row, idx) in draft.market_battleground.national_card.rows" :key="idx" class="list-editor-item">
+                <div class="row-title"><strong>推导行 {{ idx + 1 }}</strong></div>
+                <EditableText
+                  label="标签"
+                  :model-value="row.label"
+                  :maxlength="fieldMax(`market_battleground.national_card.rows[${idx}].label`, 18)"
+                  :warn-length="fieldWarn(`market_battleground.national_card.rows[${idx}].label`)"
+                  @update:model-value="row.label = $event"
+                />
+                <EditableText
+                  label="数值"
+                  :model-value="row.value"
+                  :maxlength="fieldMax(`market_battleground.national_card.rows[${idx}].value`, 30)"
+                  :warn-length="fieldWarn(`market_battleground.national_card.rows[${idx}].value`)"
+                  @update:model-value="row.value = $event"
+                />
+              </div>
+            </el-collapse-item>
+
+            <el-collapse-item name="regional-card" title="区域推导卡">
+              <EditableText
+                label="过渡文案"
+                :model-value="draft.market_battleground.bridge_text"
+                :maxlength="fieldMax('market_battleground.bridge_text', 20)"
+                :warn-length="fieldWarn('market_battleground.bridge_text')"
+                @update:model-value="draft.market_battleground.bridge_text = $event"
+              />
+              <EditableText
+                label="卡片标签"
+                :model-value="draft.market_battleground.regional_card.label"
+                :maxlength="fieldMax('market_battleground.regional_card.label', 24)"
+                :warn-length="fieldWarn('market_battleground.regional_card.label')"
+                @update:model-value="draft.market_battleground.regional_card.label = $event"
+              />
+              <div class="inline-row">
+                <EditableText
+                  label="大数字前缀"
+                  :model-value="draft.market_battleground.regional_card.value_prefix"
+                  :maxlength="fieldMax('market_battleground.regional_card.value_prefix', 6)"
+                  :warn-length="fieldWarn('market_battleground.regional_card.value_prefix')"
+                  @update:model-value="draft.market_battleground.regional_card.value_prefix = $event"
+                />
+                <EditableText
+                  label="大数字"
+                  :model-value="draft.market_battleground.regional_card.value"
+                  :maxlength="fieldMax('market_battleground.regional_card.value', 12)"
+                  :warn-length="fieldWarn('market_battleground.regional_card.value')"
+                  @update:model-value="draft.market_battleground.regional_card.value = $event"
+                />
+                <EditableText
+                  label="单位"
+                  :model-value="draft.market_battleground.regional_card.unit"
+                  :maxlength="fieldMax('market_battleground.regional_card.unit', 8)"
+                  :warn-length="fieldWarn('market_battleground.regional_card.unit')"
+                  @update:model-value="draft.market_battleground.regional_card.unit = $event"
+                />
+              </div>
+              <EditableText
+                label="大数字说明"
+                :model-value="draft.market_battleground.regional_card.subtitle"
+                :maxlength="fieldMax('market_battleground.regional_card.subtitle', 28)"
+                :warn-length="fieldWarn('market_battleground.regional_card.subtitle')"
+                @update:model-value="draft.market_battleground.regional_card.subtitle = $event"
+              />
+              <EditableText
+                label="推导标题"
+                :model-value="draft.market_battleground.regional_card.calculation_label"
+                :maxlength="fieldMax('market_battleground.regional_card.calculation_label', 24)"
+                :warn-length="fieldWarn('market_battleground.regional_card.calculation_label')"
+                @update:model-value="draft.market_battleground.regional_card.calculation_label = $event"
+              />
+              <div v-for="(row, idx) in draft.market_battleground.regional_card.rows" :key="idx" class="list-editor-item">
+                <div class="row-title"><strong>推导行 {{ idx + 1 }}</strong></div>
+                <EditableText
+                  label="标签"
+                  :model-value="row.label"
+                  :maxlength="fieldMax(`market_battleground.regional_card.rows[${idx}].label`, 18)"
+                  :warn-length="fieldWarn(`market_battleground.regional_card.rows[${idx}].label`)"
+                  @update:model-value="row.label = $event"
+                />
+                <EditableText
+                  label="数值"
+                  :model-value="row.value"
+                  :maxlength="fieldMax(`market_battleground.regional_card.rows[${idx}].value`, 30)"
+                  :warn-length="fieldWarn(`market_battleground.regional_card.rows[${idx}].value`)"
+                  @update:model-value="row.value = $event"
+                />
+              </div>
+            </el-collapse-item>
+
+            <el-collapse-item name="narrative" title="底部叙事">
+              <EditableText
+                label="问题场景引导"
+                type="textarea"
+                :model-value="draft.market_battleground.narrative.intro"
+                :maxlength="fieldMax('market_battleground.narrative.intro', 56)"
+                :warn-length="fieldWarn('market_battleground.narrative.intro')"
+                @update:model-value="draft.market_battleground.narrative.intro = $event"
+              />
+              <EditableText
+                v-for="(_, idx) in draft.market_battleground.narrative.questions"
+                :key="idx"
+                :label="`示例问题 ${idx + 1}`"
+                :model-value="draft.market_battleground.narrative.questions[idx]"
+                :maxlength="fieldMax(`market_battleground.narrative.questions[${idx}]`, 34)"
+                :warn-length="fieldWarn(`market_battleground.narrative.questions[${idx}]`)"
+                @update:model-value="draft.market_battleground.narrative.questions[idx] = $event"
+              />
+              <EditableText
+                label="结论句"
+                :model-value="draft.market_battleground.narrative.conclusion"
+                :maxlength="fieldMax('market_battleground.narrative.conclusion', 44)"
+                :warn-length="fieldWarn('market_battleground.narrative.conclusion')"
+                @update:model-value="draft.market_battleground.narrative.conclusion = $event"
+              />
+              <div class="inline-row">
+                <EditableText
+                  label="品牌句前缀"
+                  :model-value="draft.market_battleground.narrative.brand_line_prefix"
+                  :maxlength="fieldMax('market_battleground.narrative.brand_line_prefix', 8)"
+                  :warn-length="fieldWarn('market_battleground.narrative.brand_line_prefix')"
+                  @update:model-value="draft.market_battleground.narrative.brand_line_prefix = $event"
+                />
+                <EditableText
+                  label="品牌名"
+                  :model-value="draft.market_battleground.narrative.brand_name"
+                  :maxlength="fieldMax('market_battleground.narrative.brand_name', 18)"
+                  :warn-length="fieldWarn('market_battleground.narrative.brand_name')"
+                  @update:model-value="draft.market_battleground.narrative.brand_name = $event"
+                />
+              </div>
+              <EditableText
+                label="品牌句后缀"
+                type="textarea"
+                :model-value="draft.market_battleground.narrative.brand_line_suffix"
+                :maxlength="fieldMax('market_battleground.narrative.brand_line_suffix', 48)"
+                :warn-length="fieldWarn('market_battleground.narrative.brand_line_suffix')"
+                @update:model-value="draft.market_battleground.narrative.brand_line_suffix = $event"
+              />
+            </el-collapse-item>
+
+            <el-collapse-item name="market-footer" title="脚注">
+              <EditableText
+                label="数据脚注"
+                type="textarea"
+                :model-value="draft.market_battleground.footnote"
+                :maxlength="fieldMax('market_battleground.footnote', 150)"
+                :warn-length="fieldWarn('market_battleground.footnote')"
+                @update:model-value="draft.market_battleground.footnote = $event"
+              />
+              <EditableText
+                label="页脚品牌"
+                :model-value="draft.market_battleground.footer_brand"
+                :maxlength="fieldMax('market_battleground.footer_brand', 24)"
+                :warn-length="fieldWarn('market_battleground.footer_brand')"
+                @update:model-value="draft.market_battleground.footer_brand = $event"
+              />
+            </el-collapse-item>
+          </el-collapse>
         </el-card>
 
         <el-card id="summary" shadow="never" class="edit-section">
@@ -293,11 +609,13 @@ const EditableText = defineComponent({
     label: { type: String, required: true },
     modelValue: { type: String as PropType<string | null>, default: null },
     maxlength: { type: Number, required: true },
+    warnLength: { type: Number, default: 0 },
     defaultText: { type: String, default: '' },
     type: { type: String, default: 'text' }
   },
   emits: ['update:modelValue', 'restore'],
   setup(props, { emit }) {
+    const isWarn = () => props.warnLength > 0 && (props.modelValue?.length ?? 0) >= props.warnLength
     return () =>
       h('div', { class: 'field-block' }, [
         h('div', { class: 'field-label' }, [
@@ -324,7 +642,10 @@ const EditableText = defineComponent({
           showWordLimit: true,
           placeholder: props.modelValue == null ? '当前使用默认文案，输入后将改为自定义' : '',
           'onUpdate:modelValue': (value: string) => emit('update:modelValue', value)
-        })
+        }),
+        isWarn()
+          ? h('div', { class: 'field-warning' }, `接近排版上限,建议控制在 ${props.warnLength} 字以内`)
+          : null
       ])
   }
 })
@@ -345,11 +666,18 @@ const deriving = ref(false)
 const error = ref('')
 const generationLocked = ref(false)
 const emptyWarningKey = ref('')
+const marketCollapseActive = ref(['market-topbar', 'market-title', 'market-footer'])
 let pollTimer: number | undefined
 const LOCAL_DRAFT_TTL = 24 * 60 * 60 * 1000
 
 const isDirty = computed(() => draft.value != null && serializeEditableContent(draft.value) !== baselineJson.value)
 const validationErrors = computed(() => (draft.value ? validateEditableContent(draft.value) : []))
+const fieldMetaByPath = computed(() => {
+  const map = new Map<string, { maxLength: number; warnLength: number; label: string; block: string }>()
+  detail.value?.editableFieldMeta?.forEach((item) => map.set(item.field, item))
+  return map
+})
+const marketWarnings = computed(() => (draft.value ? collectMarketWarnings(draft.value) : []))
 const saveDisabledReason = computed(() => {
   if (saving.value) return '正在保存'
   if (generationLocked.value) return '报告正在重新生成，编辑已锁定'
@@ -479,6 +807,72 @@ function persistLocalDraft() {
   ElMessage.success('草稿已保留在本地')
 }
 
+function fieldMax(field: string, fallback: number) {
+  return fieldMetaByPath.value.get(field)?.maxLength ?? fallback
+}
+
+function fieldWarn(field: string) {
+  return fieldMetaByPath.value.get(field)?.warnLength ?? 0
+}
+
+function collectMarketWarnings(value: EditableContentDTO) {
+  const warnings: string[] = []
+  const visit = (field: string, text: string | null | undefined) => {
+    const meta = fieldMetaByPath.value.get(field)
+    if (!meta || !text) return
+    if (text.length >= meta.warnLength) {
+      warnings.push(`${meta.block} · ${meta.label}`)
+    }
+  }
+  const m = value.market_battleground
+  visit('market_battleground.topbar_title', m.topbar_title)
+  visit('market_battleground.topbar_right', m.topbar_right)
+  visit('market_battleground.page_title', m.page_title)
+  visit('market_battleground.page_kicker', m.page_kicker)
+  visit('market_battleground.market_card.label', m.market_card.label)
+  visit('market_battleground.market_card.source', m.market_card.source)
+  m.market_card.stats.forEach((item, idx) => {
+    visit(`market_battleground.market_card.stats[${idx}].value`, item.value)
+    visit(`market_battleground.market_card.stats[${idx}].unit`, item.unit)
+    visit(`market_battleground.market_card.stats[${idx}].label`, item.label)
+  })
+  visit('market_battleground.market_card.platform_label', m.market_card.platform_label)
+  m.market_card.platforms.forEach((item, idx) => {
+    visit(`market_battleground.market_card.platforms[${idx}].name`, item.name)
+    visit(`market_battleground.market_card.platforms[${idx}].value`, item.value)
+  })
+  visit('market_battleground.market_card.platform_suffix', m.market_card.platform_suffix)
+  collectCardWarnings('national_card', m.national_card, visit)
+  visit('market_battleground.bridge_text', m.bridge_text)
+  collectCardWarnings('regional_card', m.regional_card, visit)
+  visit('market_battleground.narrative.intro', m.narrative.intro)
+  m.narrative.questions.forEach((item, idx) => visit(`market_battleground.narrative.questions[${idx}]`, item))
+  visit('market_battleground.narrative.conclusion', m.narrative.conclusion)
+  visit('market_battleground.narrative.brand_line_prefix', m.narrative.brand_line_prefix)
+  visit('market_battleground.narrative.brand_name', m.narrative.brand_name)
+  visit('market_battleground.narrative.brand_line_suffix', m.narrative.brand_line_suffix)
+  visit('market_battleground.footnote', m.footnote)
+  visit('market_battleground.footer_brand', m.footer_brand)
+  return Array.from(new Set(warnings))
+}
+
+function collectCardWarnings(
+  card: 'national_card' | 'regional_card',
+  value: EditableContentDTO['market_battleground']['national_card'],
+  visit: (field: string, text: string | null | undefined) => void
+) {
+  visit(`market_battleground.${card}.label`, value.label)
+  visit(`market_battleground.${card}.value_prefix`, value.value_prefix)
+  visit(`market_battleground.${card}.value`, value.value)
+  visit(`market_battleground.${card}.unit`, value.unit)
+  visit(`market_battleground.${card}.subtitle`, value.subtitle)
+  visit(`market_battleground.${card}.calculation_label`, value.calculation_label)
+  value.rows.forEach((item, idx) => {
+    visit(`market_battleground.${card}.rows[${idx}].label`, item.label)
+    visit(`market_battleground.${card}.rows[${idx}].value`, item.value)
+  })
+}
+
 async function handleSave(forceOverwrite: boolean) {
   if (!draft.value || validationErrors.value.length > 0 || saving.value) return
   const cleared = collectClearedFields(draft.value)
@@ -491,6 +885,9 @@ async function handleSave(forceOverwrite: boolean) {
     ).catch(() => false)
     if (!confirmed) return
     emptyWarningKey.value = warningKey
+  }
+  if (marketWarnings.value.length > 0) {
+    ElMessage.warning(`有 ${marketWarnings.value.length} 个 AI 搜索新战场字段接近排版上限，保存后导出前请检查。`)
   }
 
   saving.value = true
@@ -762,11 +1159,20 @@ onBeforeUnmount(() => {
   font-weight: 500;
 }
 .default-hint,
-.readonly-line {
+.readonly-line,
+.field-warning {
   color: #909399;
   font-size: 12px;
   line-height: 1.6;
   margin-bottom: 8px;
+}
+.field-warning {
+  margin-top: 6px;
+  color: #b88230;
+}
+.market-collapse {
+  --el-collapse-header-bg-color: #fff;
+  --el-collapse-content-bg-color: #fff;
 }
 .list-editor-item {
   border: 1px solid #e4e7ed;

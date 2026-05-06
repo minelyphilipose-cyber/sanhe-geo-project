@@ -25,21 +25,22 @@
       </template>
     </el-alert>
 
-    <!-- ═══ 18 页渲染 ═══ -->
+    <!-- ═══ 19 页渲染 ═══ -->
     <!--
       β·1 阶段:Page01(封面)和 Page02(诊断对象)用真实 SFC。
-      β·2 阶段:Page03(执行摘要)、Page04(可见度评分,radar)、
-               Page06(平台详细数据,bar) 真实 SFC;
-               Page05(多平台热力图)保持占位,等后端补 platform_intent_breakdown 契约。
-      β·2·补:Page05 真实 SFC 落地(5×N CSS grid 热力图),历史报告走降级态。
-      β·3 阶段:Page07(竞品对标总览,bar)、Page08(竞品场景差异)、
-               Page09(情感倾向,doughnut) 真实 SFC。
-      γ·1 阶段:Page10/P11(覆盖度)、Page12/P13/P14(优化机会 三 priority) 真实 SFC;
+      PR1:Page03(AI 搜索新战场)先落占位,PR2 接入真实 L3 可编辑内容。
+      β·2 阶段:Page04(执行摘要)、Page05(可见度评分,radar)、
+               Page07(平台详细数据,bar) 真实 SFC;
+               Page06(多平台热力图)保持占位,等后端补 platform_intent_breakdown 契约。
+      β·2·补:Page06 真实 SFC 落地(5×N CSS grid 热力图),历史报告走降级态。
+      β·3 阶段:Page08(竞品对标总览,bar)、Page09(竞品场景差异)、
+               Page10(情感倾向,doughnut) 真实 SFC。
+      γ·1 阶段:Page11/P12(覆盖度)、Page13/P14/Page15(优化机会 三 priority) 真实 SFC;
                引入 shared/FindingCard.vue 组件。
-      γ·2 阶段:Page15(预期收益,line chart,B-无③ 版)、Page16(分阶段路径)、
-               Page17(关键发现总结)、Page18(关于我们 封底) 真实 SFC 落地。
-               P15 的 ESTIMATED IMPACT 块按 estimated-impact-spec 会签后 r2 补回。
-               18 页全部真实 SFC,不再有 PagePlaceholder 占位。
+      γ·2 阶段:Page16(预期收益,line chart,B-无③ 版)、Page17(分阶段路径)、
+               Page18(关键发现总结)、Page19(关于我们 封底) 真实 SFC 落地。
+               P16 的 ESTIMATED IMPACT 块按 estimated-impact-spec 会签后 r2 补回。
+               19 页全部真实/占位 SFC,不再有 PagePlaceholder 占位。
       每页的外层结构约定:<section :id="page-XX"><div class="page [cover]">...</div></section>,
       Sidebar 锚点依赖此 id。
     -->
@@ -50,53 +51,56 @@
       <!-- P02 诊断对象(β·1) -->
       <Page02Target />
 
-      <!-- P03 执行摘要(β·2) -->
-      <Page03ExecutiveSummary />
+      <!-- P03 AI 搜索新战场(PR2,L3 可编辑内容) -->
+      <Page03MarketBattleground />
 
-      <!-- P04 可见度评分详情(β·2,radar chart) -->
-      <Page04Scores />
+      <!-- P04 执行摘要(β·2) -->
+      <Page04ExecutiveSummary />
 
-      <!-- P05 多平台热力图(β·2·补,5×N CSS grid 热力图) -->
-      <Page05PlatformHeatmap />
+      <!-- P05 可见度评分详情(β·2,radar chart) -->
+      <Page05Scores />
 
-      <!-- P06 平台详细数据(β·2,bar chart) -->
-      <Page06PlatformDetail />
+      <!-- P06 多平台热力图(β·2·补,5×N CSS grid 热力图) -->
+      <Page06PlatformHeatmap />
 
-      <!-- P07 竞品对标总览(β·3,bar chart) -->
-      <Page07CompetitorOverview />
+      <!-- P07 平台详细数据(β·2,bar chart) -->
+      <Page07PlatformDetail />
 
-      <!-- P08 竞品场景差异(β·3) -->
-      <Page08CompetitorScene />
+      <!-- P08 竞品对标总览(β·3,bar chart) -->
+      <Page08CompetitorOverview />
 
-      <!-- P09 情感倾向(β·3,doughnut chart) -->
-      <Page09Sentiment />
+      <!-- P09 竞品场景差异(β·3) -->
+      <Page09CompetitorScene />
 
-      <!-- P10 覆盖度总览(γ·1) -->
-      <Page10CoverageOverview />
+      <!-- P10 情感倾向(β·3,doughnut chart) -->
+      <Page10Sentiment />
 
-      <!-- P11 覆盖度详情(γ·1) -->
-      <Page11CoverageDetail />
+      <!-- P11 覆盖度总览(γ·1) -->
+      <Page11CoverageOverview />
 
-      <!-- P12 优化机会 · 高优先级(γ·1,含 TOTAL banner) -->
-      <Page12FindingsHigh />
+      <!-- P12 覆盖度详情(γ·1) -->
+      <Page12CoverageDetail />
 
-      <!-- P13 优化机会 · 中优先级(γ·1) -->
-      <Page13FindingsMid />
+      <!-- P13 优化机会 · 高优先级(γ·1,含 TOTAL banner) -->
+      <Page13FindingsHigh />
 
-      <!-- P14 优化机会 · 建议关注(γ·1,含 CATEGORY BREAKDOWN) -->
-      <Page14FindingsLow />
+      <!-- P14 优化机会 · 中优先级(γ·1) -->
+      <Page14FindingsMid />
 
-      <!-- P15 预期收益模拟(γ·2,line chart,B-无③ 版) -->
-      <Page15ExpectedRoi />
+      <!-- P15 优化机会 · 建议关注(γ·1,含 CATEGORY BREAKDOWN) -->
+      <Page15FindingsLow />
 
-      <!-- P16 分阶段优化路径(γ·2,timeline) -->
-      <Page16PhasedRoadmap />
+      <!-- P16 预期收益模拟(γ·2,line chart,B-无③ 版) -->
+      <Page16ExpectedRoi />
 
-      <!-- P17 关键发现总结(γ·2) -->
-      <Page17KeyTakeaways />
+      <!-- P17 分阶段优化路径(γ·2,timeline) -->
+      <Page17PhasedRoadmap />
 
-      <!-- P18 关于我们 / 封底(γ·2,cover 样式) -->
-      <Page18AboutUs />
+      <!-- P18 关键发现总结(γ·2) -->
+      <Page18KeyTakeaways />
+
+      <!-- P19 关于我们 / 封底(γ·2,cover 样式) -->
+      <Page19AboutUs />
     </template>
 
     <!-- 非 DONE 理论上不会到这里(Detail 顶层已拦截),留兜底占位 -->
@@ -111,22 +115,23 @@ import { computed } from 'vue'
 import { useMergedView } from '@/composables/presale/useMergedView'
 import Page01Cover from './Page01Cover.vue'
 import Page02Target from './Page02Target.vue'
-import Page03ExecutiveSummary from './Page03ExecutiveSummary.vue'
-import Page04Scores from './Page04Scores.vue'
-import Page05PlatformHeatmap from './Page05PlatformHeatmap.vue'
-import Page06PlatformDetail from './Page06PlatformDetail.vue'
-import Page07CompetitorOverview from './Page07CompetitorOverview.vue'
-import Page08CompetitorScene from './Page08CompetitorScene.vue'
-import Page09Sentiment from './Page09Sentiment.vue'
-import Page10CoverageOverview from './Page10CoverageOverview.vue'
-import Page11CoverageDetail from './Page11CoverageDetail.vue'
-import Page12FindingsHigh from './Page12FindingsHigh.vue'
-import Page13FindingsMid from './Page13FindingsMid.vue'
-import Page14FindingsLow from './Page14FindingsLow.vue'
-import Page15ExpectedRoi from './Page15ExpectedRoi.vue'
-import Page16PhasedRoadmap from './Page16PhasedRoadmap.vue'
-import Page17KeyTakeaways from './Page17KeyTakeaways.vue'
-import Page18AboutUs from './Page18AboutUs.vue'
+import Page03MarketBattleground from './Page03MarketBattleground.vue'
+import Page04ExecutiveSummary from './Page04ExecutiveSummary.vue'
+import Page05Scores from './Page05Scores.vue'
+import Page06PlatformHeatmap from './Page06PlatformHeatmap.vue'
+import Page07PlatformDetail from './Page07PlatformDetail.vue'
+import Page08CompetitorOverview from './Page08CompetitorOverview.vue'
+import Page09CompetitorScene from './Page09CompetitorScene.vue'
+import Page10Sentiment from './Page10Sentiment.vue'
+import Page11CoverageOverview from './Page11CoverageOverview.vue'
+import Page12CoverageDetail from './Page12CoverageDetail.vue'
+import Page13FindingsHigh from './Page13FindingsHigh.vue'
+import Page14FindingsMid from './Page14FindingsMid.vue'
+import Page15FindingsLow from './Page15FindingsLow.vue'
+import Page16ExpectedRoi from './Page16ExpectedRoi.vue'
+import Page17PhasedRoadmap from './Page17PhasedRoadmap.vue'
+import Page18KeyTakeaways from './Page18KeyTakeaways.vue'
+import Page19AboutUs from './Page19AboutUs.vue'
 
 const { mergedView } = useMergedView()
 

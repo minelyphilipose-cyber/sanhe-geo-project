@@ -1,49 +1,49 @@
 <template>
-  <section id="page-06" class="page-anchor">
+  <section id="page-07" class="page-anchor">
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
-        <span>04 / 多平台 AI 可见度(续)</span>
+        <span>05 / 多平台 AI 可见度(续)</span>
       </div>
 
-      <div class="p06-body">
+      <div class="p07-body">
         <!-- 顶部标题(本页沿用 P05 的章节号 04,作为"续") -->
-        <div class="p06-header">
-          <div class="mono p06-subtitle">CONTINUED · 平台详细数据</div>
-          <h3 class="chinese-serif p06-title">各平台综合表现</h3>
+        <div class="p07-header">
+          <div class="mono p07-subtitle">CONTINUED · 平台详细数据</div>
+          <h3 class="chinese-serif p07-title">各平台综合表现</h3>
         </div>
 
         <!-- bar chart -->
-        <PresaleChart :option="barOption" height="280px" class="p06-chart" />
+        <PresaleChart :option="barOption" height="280px" class="p07-chart" />
 
         <!-- 平台对比表 -->
-        <div class="data-matrix p06-matrix">
+        <div class="data-matrix p07-matrix">
           <!-- 表头 -->
-          <div class="data-matrix-row p06-row-head">
-            <div class="mono p06-col-label">RANK</div>
-            <div class="mono p06-col-label">PLATFORM</div>
-            <div class="mono p06-col-label p06-col-right">提及率</div>
-            <div class="mono p06-col-label p06-col-right">平均排名</div>
-            <div class="mono p06-col-label p06-col-right">主推荐</div>
-            <div class="mono p06-col-label p06-col-right">情感</div>
+          <div class="data-matrix-row p07-row-head">
+            <div class="mono p07-col-label">RANK</div>
+            <div class="mono p07-col-label">PLATFORM</div>
+            <div class="mono p07-col-label p07-col-right">提及率</div>
+            <div class="mono p07-col-label p07-col-right">平均排名</div>
+            <div class="mono p07-col-label p07-col-right">主推荐</div>
+            <div class="mono p07-col-label p07-col-right">情感</div>
           </div>
 
           <!-- 数据行 -->
           <div
             v-for="(row, idx) in tableRows"
             :key="row.platform_code"
-            class="data-matrix-row p06-row-data"
+            class="data-matrix-row p07-row-data"
           >
-            <div class="display-serif p06-rank" :class="row.rankColorClass">
+            <div class="display-serif p07-rank" :class="row.rankColorClass">
               {{ formatRank(idx + 1) }}
             </div>
-            <div class="p06-platform-name">{{ row.platform_name }}</div>
-            <div class="p06-col-right p06-mention-rate">{{ toIntRounded(row.mention_rate) }}%</div>
-            <div class="p06-col-right p06-avg-ranking">{{ formatAvgRank(row.avg_ranking) }}</div>
-            <div class="p06-col-right">
+            <div class="p07-platform-name">{{ row.platform_name }}</div>
+            <div class="p07-col-right p07-mention-rate">{{ toIntRounded(row.mention_rate) }}%</div>
+            <div class="p07-col-right p07-avg-ranking">{{ formatAvgRank(row.avg_ranking) }}</div>
+            <div class="p07-col-right">
               {{ row.primary_recommendation_count }} 次
             </div>
-            <div class="p06-col-right" :class="row.sentimentTextClass">
+            <div class="p07-col-right" :class="row.sentimentTextClass">
               <span :class="row.sentimentTextClass === 'cross' ? 'cross' : 'tick'">●</span>
               {{ row.sentimentPct }}%
             </div>
@@ -55,7 +55,7 @@
       </div>
 
       <div class="page-footer-brand">GEO · CONFIDENTIAL</div>
-      <div class="page-label">06</div>
+      <div class="page-label">07</div>
     </div>
   </section>
 </template>
@@ -68,7 +68,7 @@ import PresaleChart from './shared/PresaleChart.vue'
 import { toIntRounded } from '@/utils/presale/numberFormat'
 
 /**
- * Page06 平台详细数据。
+ * Page07 平台详细数据。
  *
  * 数据映射:
  *   - 平台表:platform_breakdown 按 mention_rate 降序排序
@@ -107,7 +107,7 @@ const tableRows = computed<TableRow[]>(() => {
       primary_recommendation_count: p.primary_recommendation_count,
       sentimentPct: sPct,
       sentimentTextClass: sPct >= 70 ? 'tick' : 'cross',
-      rankColorClass: idx === 0 ? 'p06-rank-gold' : idx <= 2 ? 'p06-rank-blue' : 'p06-rank-muted'
+      rankColorClass: idx === 0 ? 'p07-rank-gold' : idx <= 2 ? 'p07-rank-blue' : 'p07-rank-muted'
     }
   })
 })
@@ -205,72 +205,72 @@ function formatAvgRank(r: number | null): string {
   justify-content: center;
 }
 
-.p06-body {
+.p07-body {
   margin-top: 60px;
 }
 
-.p06-header {
+.p07-header {
   margin-bottom: 32px;
 }
-.p06-subtitle {
+.p07-subtitle {
   font-size: 11px;
   letter-spacing: 3px;
   color: #6b6456;
   margin-bottom: 8px;
 }
-.p06-title {
+.p07-title {
   font-size: 22px;
   font-weight: 700;
   color: #0b1426;
   margin: 0;
 }
 
-.p06-chart {
+.p07-chart {
   margin-bottom: 32px;
 }
 
-.p06-matrix {
+.p07-matrix {
   margin-bottom: 32px;
 }
 
-.p06-row-head {
+.p07-row-head {
   grid-template-columns: 100px 1fr 80px 80px 80px 80px;
   padding: 12px 0 !important;
 }
-.p06-row-data {
+.p07-row-data {
   grid-template-columns: 100px 1fr 80px 80px 80px 80px;
 }
-.p06-col-label {
+.p07-col-label {
   font-size: 10px;
   letter-spacing: 2px;
   color: #6b6456;
 }
-.p06-col-right {
+.p07-col-right {
   text-align: right;
 }
 
-.p06-rank {
+.p07-rank {
   font-size: 20px;
   font-weight: 700;
   font-style: italic;
 }
-.p06-rank-gold {
+.p07-rank-gold {
   color: #d97706;
 }
-.p06-rank-blue {
+.p07-rank-blue {
   color: #1e3a8a;
 }
-.p06-rank-muted {
+.p07-rank-muted {
   color: #6b6456;
 }
 
-.p06-platform-name {
+.p07-platform-name {
   font-weight: 500;
 }
-.p06-mention-rate {
+.p07-mention-rate {
   font-weight: 600;
 }
-.p06-avg-ranking {
+.p07-avg-ranking {
   color: #1a2942;
 }
 </style>

@@ -21,7 +21,7 @@
       </template>
     </el-alert>
 
-    <!-- 版本未 DONE 提示(非 DONE 不渲染 18 页,引导回进度页) -->
+    <!-- 版本未 DONE 提示(非 DONE 不渲染 19 页,引导回进度页) -->
     <el-alert
       v-else-if="mergedView && mergedView.meta.generation_status !== 'DONE'"
       type="warning"
@@ -164,7 +164,7 @@ const mergedView = computed<MergedViewDTO | null>(() => {
  *
  * 降级视图的消费约定:
  *   - Sidebar 可安全读:meta.*、brand_name、industry、industry_role、region、user_demand
- *   - Viewer 和 18 页 Page SFC 必须用 meta.generation_status === 'DONE' 做守卫,
+ *   - Viewer 和 19 页 Page SFC 必须用 meta.generation_status === 'DONE' 做守卫,
  *     不得在非 DONE 时消费业务字段
  */
 function buildMetaOnlyView(d: ReportDetailVO): MergedViewDTO {

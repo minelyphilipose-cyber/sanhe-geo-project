@@ -1,15 +1,15 @@
 <template>
-  <section id="page-10" class="page-anchor">
+  <section id="page-11" class="page-anchor">
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
-        <span>07 / 查询场景覆盖度</span>
+        <span>08 / 查询场景覆盖度</span>
       </div>
 
-      <div class="p10-body">
+      <div class="p11-body">
         <!-- 章节标题 -->
         <div class="section-title">
-          <span class="section-number">07</span>
+          <span class="section-number">08</span>
           <div>
             <div class="section-label">QUERY COVERAGE</div>
             <div class="section-heading">查询场景覆盖度</div>
@@ -17,83 +17,83 @@
         </div>
 
         <!-- 3 价值层 metric 卡片 -->
-        <div class="p10-summary-grid">
-          <div class="p10-summary-card">
-            <span class="priority-badge priority-high p10-badge-top">
+        <div class="p11-summary-grid">
+          <div class="p11-summary-card">
+            <span class="priority-badge priority-high p11-badge-top">
               <span class="priority-dot"></span>高价值
             </span>
-            <div class="metric-hero p10-summary-num p10-summary-num-high">
+            <div class="metric-hero p11-summary-num p11-summary-num-high">
               {{ Math.round(mergedView.scene_coverage.high_value.coverage_rate)
-              }}<span class="p10-summary-unit">%</span>
+              }}<span class="p11-summary-unit">%</span>
             </div>
-            <div class="p10-summary-meta">
+            <div class="p11-summary-meta">
               <strong>{{ mergedView.scene_coverage.high_value.covered }}</strong> /
               {{ mergedView.scene_coverage.high_value.total }} 已覆盖
             </div>
-            <div class="p10-summary-desc">直接关联购买决策的查询</div>
+            <div class="p11-summary-desc">直接关联购买决策的查询</div>
           </div>
 
-          <div class="p10-summary-card">
-            <span class="priority-badge priority-mid p10-badge-top">
+          <div class="p11-summary-card">
+            <span class="priority-badge priority-mid p11-badge-top">
               <span class="priority-dot"></span>中价值
             </span>
-            <div class="metric-hero p10-summary-num p10-summary-num-mid">
+            <div class="metric-hero p11-summary-num p11-summary-num-mid">
               {{ Math.round(mergedView.scene_coverage.mid_value.coverage_rate)
-              }}<span class="p10-summary-unit">%</span>
+              }}<span class="p11-summary-unit">%</span>
             </div>
-            <div class="p10-summary-meta">
+            <div class="p11-summary-meta">
               <strong>{{ mergedView.scene_coverage.mid_value.covered }}</strong> /
               {{ mergedView.scene_coverage.mid_value.total }} 已覆盖
             </div>
-            <div class="p10-summary-desc">间接关联决策的查询</div>
+            <div class="p11-summary-desc">间接关联决策的查询</div>
           </div>
 
-          <div class="p10-summary-card">
-            <span class="priority-badge priority-low p10-badge-top">
+          <div class="p11-summary-card">
+            <span class="priority-badge priority-low p11-badge-top">
               <span class="priority-dot"></span>低价值
             </span>
-            <div class="metric-hero p10-summary-num p10-summary-num-low">
+            <div class="metric-hero p11-summary-num p11-summary-num-low">
               {{ Math.round(mergedView.scene_coverage.low_value.coverage_rate)
-              }}<span class="p10-summary-unit">%</span>
+              }}<span class="p11-summary-unit">%</span>
             </div>
-            <div class="p10-summary-meta">
+            <div class="p11-summary-meta">
               <strong>{{ mergedView.scene_coverage.low_value.covered }}</strong> /
               {{ mergedView.scene_coverage.low_value.total }} 已覆盖
             </div>
-            <div class="p10-summary-desc">信息获取型查询</div>
+            <div class="p11-summary-desc">信息获取型查询</div>
           </div>
         </div>
 
         <!-- 高价值场景明细 -->
         <div>
-          <div class="mono p10-detail-label">
+          <div class="mono p11-detail-label">
             HIGH-VALUE SCENARIO DETAILS · 高价值场景详情
           </div>
 
           <div v-if="highValueRows.length > 0" class="data-matrix">
             <!-- 表头 -->
-            <div class="data-matrix-row p10-row-head">
-              <div class="mono p10-col-label">QUERY</div>
-              <div class="mono p10-col-label p10-col-center">意图</div>
-              <div class="mono p10-col-label p10-col-center">覆盖</div>
+            <div class="data-matrix-row p11-row-head">
+              <div class="mono p11-col-label">QUERY</div>
+              <div class="mono p11-col-label p11-col-center">意图</div>
+              <div class="mono p11-col-label p11-col-center">覆盖</div>
             </div>
             <!-- 数据行 -->
             <div
               v-for="(row, idx) in visibleHighValueRows"
               :key="`${row.prompt_code}-${idx}`"
-              class="data-matrix-row p10-row-data"
+              class="data-matrix-row p11-row-data"
             >
-              <div class="p10-query-text">"{{ row.prompt_content }}"</div>
-              <div class="p10-col-center p10-intent-text">{{ row.category }}</div>
-              <div class="p10-col-center" :class="row.covered ? 'tick' : 'cross'">
+              <div class="p11-query-text">"{{ row.prompt_content }}"</div>
+              <div class="p11-col-center p11-intent-text">{{ row.category }}</div>
+              <div class="p11-col-center" :class="row.covered ? 'tick' : 'cross'">
                 {{ row.covered ? '✓' : '✗' }}
               </div>
             </div>
           </div>
 
-          <div v-else class="p10-empty">暂无高价值场景数据。</div>
+          <div v-else class="p11-empty">暂无高价值场景数据。</div>
 
-          <div v-if="hiddenHighValueCount > 0" class="p10-limit-note">
+          <div v-if="hiddenHighValueCount > 0" class="p11-limit-note">
             本页展示 {{ visibleHighValueRows.length }} 条代表性高价值场景；其余
             {{ hiddenHighValueCount }} 条已计入覆盖统计。
           </div>
@@ -101,7 +101,7 @@
       </div>
 
       <div class="page-footer-brand">GEO · CONFIDENTIAL</div>
-      <div class="page-label">10</div>
+      <div class="page-label">11</div>
     </div>
   </section>
 </template>
@@ -111,7 +111,7 @@ import { computed } from 'vue'
 import { useMergedView } from '@/composables/presale/useMergedView'
 
 /**
- * Page10 覆盖度总览。
+ * Page11 覆盖度总览。
  *
  * 数据映射:
  *   - 3 张价值层卡片:scene_coverage.{high/mid/low}_value.{coverage_rate, covered, total}
@@ -163,49 +163,49 @@ const hiddenHighValueCount = computed(
   justify-content: center;
 }
 
-.p10-body {
+.p11-body {
   margin-top: 60px;
 }
 
 /* 3 张 summary 卡片 */
-.p10-summary-grid {
+.p11-summary-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
   margin-bottom: 48px;
 }
-.p10-summary-card {
+.p11-summary-card {
   position: relative;
   background: #f7f3ea;
   padding: 28px 20px;
 }
-.p10-badge-top {
+.p11-badge-top {
   position: absolute;
   top: 16px;
   right: 16px;
 }
-.p10-summary-num {
+.p11-summary-num {
   font-size: 56px;
 }
-.p10-summary-unit {
+.p11-summary-unit {
   font-size: 24px;
   color: #6b6456;
 }
-.p10-summary-num-high {
+.p11-summary-num-high {
   color: #b91c1c;
 }
-.p10-summary-num-mid {
+.p11-summary-num-mid {
   color: #d97706;
 }
-.p10-summary-num-low {
+.p11-summary-num-low {
   color: #6b6456;
 }
-.p10-summary-meta {
+.p11-summary-meta {
   font-size: 13px;
   color: #1a2942;
   margin-top: 8px;
 }
-.p10-summary-desc {
+.p11-summary-desc {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid #c8bfa8;
@@ -215,38 +215,38 @@ const hiddenHighValueCount = computed(
 }
 
 /* 高价值明细表 */
-.p10-detail-label {
+.p11-detail-label {
   font-size: 11px;
   letter-spacing: 3px;
   color: #6b6456;
   margin-bottom: 16px;
 }
 
-.p10-row-head,
-.p10-row-data {
+.p11-row-head,
+.p11-row-data {
   grid-template-columns: 1fr 120px 60px;
 }
-.p10-row-head {
+.p11-row-head {
   padding: 12px 0 !important;
 }
-.p10-col-label {
+.p11-col-label {
   font-size: 10px;
   letter-spacing: 2px;
   color: #6b6456;
 }
-.p10-col-center {
+.p11-col-center {
   text-align: center;
 }
-.p10-query-text {
+.p11-query-text {
   font-size: 13px;
 }
-.p10-intent-text {
+.p11-intent-text {
   font-size: 11px;
   color: #6b6456;
 }
 
 /* 空态 */
-.p10-empty {
+.p11-empty {
   padding: 24px 0;
   color: #6b6456;
   font-style: italic;
@@ -255,7 +255,7 @@ const hiddenHighValueCount = computed(
   text-align: center;
 }
 
-.p10-limit-note {
+.p11-limit-note {
   margin-top: 10px;
   font-size: 11px;
   color: #6b6456;

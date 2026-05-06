@@ -1,15 +1,15 @@
 <template>
-  <section id="page-05" class="page-anchor">
+  <section id="page-06" class="page-anchor">
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
-        <span>04 / 多平台 AI 可见度</span>
+        <span>05 / 多平台 AI 可见度</span>
       </div>
 
-      <div class="p05-body">
+      <div class="p06-body">
         <!-- 章节标题 -->
         <div class="section-title">
-          <span class="section-number">04</span>
+          <span class="section-number">05</span>
           <div>
             <div class="section-label">PLATFORM MATRIX</div>
             <div class="section-heading">多平台 AI 可见度热力图</div>
@@ -19,14 +19,14 @@
         <!-- 正常态:有交叉数据 -->
         <template v-if="hasCrossData">
           <!-- 热力图主体 -->
-          <div class="p05-heatmap">
+          <div class="p06-heatmap">
             <!-- 列头行(平台) -->
-            <div class="p05-row p05-row-head" :style="gridTemplate">
+            <div class="p06-row p06-row-head" :style="gridTemplate">
               <div><!-- 左上角空格 --></div>
               <div
                 v-for="p in platformCols"
                 :key="p.platform_code"
-                class="mono p05-col-head"
+                class="mono p06-col-head"
               >
                 {{ p.platform_name }}
               </div>
@@ -36,18 +36,18 @@
             <div
               v-for="row in heatRows"
               :key="row.intent_code"
-              class="p05-row"
+              class="p06-row"
               :style="gridTemplate"
             >
-              <div class="p05-row-label">
+              <div class="p06-row-label">
                 <span>{{ row.intent_label }}</span>
-                <span class="p05-row-metric">{{ row.metric_label }}</span>
+                <span class="p06-row-metric">{{ row.metric_label }}</span>
               </div>
               <div
                 v-for="cell in row.cells"
                 :key="cell.key"
                 class="heat-cell"
-                :class="[cell.heatClass, { 'p05-cell-null': cell.isNull }]"
+                :class="[cell.heatClass, { 'p06-cell-null': cell.isNull }]"
                 :title="cell.tooltip"
               >
                 {{ cell.display }}
@@ -55,21 +55,21 @@
             </div>
 
             <!-- 图例 -->
-            <div class="mono p05-legend">
+            <div class="mono p06-legend">
               <span>分值</span>
-              <div v-for="l in LEGEND" :key="l.cls" class="p05-legend-item">
-                <div class="heat-cell p05-legend-swatch" :class="l.cls"></div>
+              <div v-for="l in LEGEND" :key="l.cls" class="p06-legend-item">
+                <div class="heat-cell p06-legend-swatch" :class="l.cls"></div>
                 <span>{{ l.label }}</span>
               </div>
-              <div v-if="hasNullCells" class="p05-legend-item p05-legend-null">
-                <div class="heat-cell p05-legend-swatch p05-cell-null"></div>
+              <div v-if="hasNullCells" class="p06-legend-item p06-legend-null">
+                <div class="heat-cell p06-legend-swatch p06-cell-null"></div>
                 <span>未测</span>
               </div>
             </div>
           </div>
 
-          <div class="p05-metric-note">
-            <div class="mono p05-metric-note-label">指标口径说明</div>
+          <div class="p06-metric-note">
+            <div class="mono p06-metric-note-label">指标口径说明</div>
             <div>
               注:认知型与对比型测试中,问题已包含品牌名,故采用裁判 LLM 评估“AI 对品牌的认知质量”与“AI 在竞争中的立场”,而非主动提及率。三类指标统一映射至 0~100,但语义不同。
             </div>
@@ -81,10 +81,10 @@
 
         <!-- 降级态:历史报告 platform_intent_breakdown 为空 -->
         <template v-else>
-          <div class="p05-fallback">
-            <div class="mono p05-fallback-badge">LEGACY REPORT · 数据缺失</div>
-            <div class="chinese-serif p05-fallback-title">多平台热力图数据不可用</div>
-            <div class="p05-fallback-text">
+          <div class="p06-fallback">
+            <div class="mono p06-fallback-badge">LEGACY REPORT · 数据缺失</div>
+            <div class="chinese-serif p06-fallback-title">多平台热力图数据不可用</div>
+            <div class="p06-fallback-text">
               <template v-if="reportCreatedAtText">
                 本报告生成于 {{ reportCreatedAtText }},早于多平台热力图功能上线。
               </template>
@@ -98,7 +98,7 @@
       </div>
 
       <div class="page-footer-brand">GEO · CONFIDENTIAL</div>
-      <div class="page-label">05</div>
+      <div class="page-label">06</div>
     </div>
   </section>
 </template>
@@ -111,7 +111,7 @@ import type { PlatformBreakdown } from '@/types/presale/raw'
 import { toIntentLabel, toStanceLabel } from '@/utils/presale/enumLabels'
 
 /**
- * Page05 多平台提及率热力图(β·2·补)。
+ * Page06 多平台提及率热力图(β·2·补)。
  *
  * 数据源:mergedView.platform_intent_breakdown(平台 × 意图交叉 cell 列表)。
  *
@@ -125,10 +125,10 @@ import { toIntentLabel, toStanceLabel } from '@/utils/presale/enumLabels'
  *       [30, 50)  → heat-2
  *       [50, 70)  → heat-3
  *       [70, 100] → heat-4
- *   - null cell(platform_prompt_count === null 或 0):显示 "—",叠加 p05-cell-null 灰色态
+ *   - null cell(platform_prompt_count === null 或 0):显示 "—",叠加 p06-cell-null 灰色态
  *
  * 降级态(历史报告 platform_intent_breakdown 为空):
- *   不渲染热力图,显示 p05-fallback 块提示重新生成报告。
+ *   不渲染热力图,显示 p06-fallback 块提示重新生成报告。
  *
  * Pull-quote(A 策略):
  *   前端计算各平台 avg(mention_rate);若 top1 - top2 >= 10,显示
@@ -452,27 +452,27 @@ function rateToHeatClass(rate: number): string {
   justify-content: center;
 }
 
-.p05-body {
+.p06-body {
   margin-top: 60px;
 }
 
 /* ─── 热力图 ────────────────────────────────────────────── */
 
-.p05-heatmap {
+.p06-heatmap {
   margin-bottom: 32px;
 }
 
-.p05-row {
+.p06-row {
   display: grid;
   gap: 4px;
   margin-bottom: 4px;
 }
 
 /* 列头(平台名) */
-.p05-row-head {
+.p06-row-head {
   margin-bottom: 4px;
 }
-.p05-col-head {
+.p06-col-head {
   font-size: 10px;
   text-align: center;
   color: var(--presale-muted);
@@ -480,21 +480,21 @@ function rateToHeatClass(rate: number): string {
 }
 
 /* 行头(意图名) */
-.p05-row-label {
+.p06-row-label {
   font-size: 13px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   color: var(--presale-ink);
 }
-.p05-row-metric {
+.p06-row-metric {
   margin-top: 2px;
   font-size: 10px;
   color: var(--presale-muted);
 }
 
 /* 未测 cell —— 灰底 + 灰字 "—",叠加在 heat-0 上 */
-.p05-cell-null {
+.p06-cell-null {
   background: var(--presale-paper-alt) !important;
   color: var(--presale-muted) !important;
   border: 1px dashed var(--presale-line) !important;
@@ -502,7 +502,7 @@ function rateToHeatClass(rate: number): string {
 
 /* ─── 图例 ─────────────────────────────────────────────── */
 
-.p05-legend {
+.p06-legend {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -511,22 +511,22 @@ function rateToHeatClass(rate: number): string {
   color: var(--presale-muted);
   flex-wrap: wrap;
 }
-.p05-legend-item {
+.p06-legend-item {
   display: flex;
   align-items: center;
   gap: 4px;
 }
-.p05-legend-swatch {
+.p06-legend-swatch {
   width: 16px;
   height: 16px;
   font-size: 8px;
   aspect-ratio: auto; /* 覆盖全局 .heat-cell 的 aspect-ratio:1 */
 }
-.p05-legend-null {
+.p06-legend-null {
   margin-left: 12px;
 }
 
-.p05-metric-note {
+.p06-metric-note {
   margin-top: 20px;
   padding: 14px 16px;
   background: var(--presale-paper-alt);
@@ -535,7 +535,7 @@ function rateToHeatClass(rate: number): string {
   font-size: 12px;
   line-height: 1.7;
 }
-.p05-metric-note-label {
+.p06-metric-note-label {
   margin-bottom: 4px;
   color: var(--presale-muted);
   font-size: 10px;
@@ -544,26 +544,26 @@ function rateToHeatClass(rate: number): string {
 
 /* ─── 降级态 ───────────────────────────────────────────── */
 
-.p05-fallback {
+.p06-fallback {
   margin-top: 32px;
   padding: 32px 24px;
   border: 1px dashed var(--presale-line);
   background: var(--presale-paper-alt);
   text-align: center;
 }
-.p05-fallback-badge {
+.p06-fallback-badge {
   font-size: 11px;
   letter-spacing: 3px;
   color: var(--presale-accent);
   margin-bottom: 12px;
 }
-.p05-fallback-title {
+.p06-fallback-title {
   font-size: 20px;
   font-weight: 700;
   color: var(--presale-ink);
   margin-bottom: 12px;
 }
-.p05-fallback-text {
+.p06-fallback-text {
   font-size: 13px;
   color: var(--presale-muted);
   line-height: 1.7;

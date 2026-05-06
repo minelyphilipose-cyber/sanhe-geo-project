@@ -7,6 +7,7 @@ import com.huanjing.geo.module.presale.dto.snapshot.computed.OptimizationFinding
 import com.huanjing.geo.module.presale.dto.snapshot.computed.Scores;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.EditableContentDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.FindingContent;
+import com.huanjing.geo.module.presale.dto.snapshot.editable.MarketBattleground;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.BenchmarksFrozen;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.ClientInfo;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
@@ -43,7 +44,8 @@ class PresaleL3InitServiceTest {
     );
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final PresaleL3InitService service = new PresaleL3InitService(objectMapper, new PresaleTextFormatter());
+    private final PresaleL3Defaults l3Defaults = new PresaleL3Defaults(objectMapper);
+    private final PresaleL3InitService service = new PresaleL3InitService(objectMapper, new PresaleTextFormatter(), l3Defaults);
 
     @Test
     void ruleFindingMap_containsAllTenRuleCodes() throws Exception {
@@ -135,6 +137,65 @@ class PresaleL3InitServiceTest {
         assertNoPlaceholder(mergedFinding.getTitle());
         assertNoPlaceholder(mergedFinding.getDescription());
         assertNoPlaceholder(mergedFinding.getEvidenceText());
+    }
+
+    @Test
+    void derive_populatesMarketBattlegroundDefaults() throws Exception {
+        String editableJson = service.derive(buildRawJson(), buildComputedJson(List.of()));
+
+        EditableContentDTO editable = objectMapper.readValue(editableJson, EditableContentDTO.class);
+        assertNotNull(editable.getMarketBattleground());
+        assertEquals("每天，有数千万次消费决策正在 AI 上发生", editable.getMarketBattleground().getPageTitle());
+        assertEquals(4, editable.getMarketBattleground().getMarketCard().getStats().size());
+        assertEquals(3, editable.getMarketBattleground().getMarketCard().getPlatforms().size());
+        assertEquals(4, editable.getMarketBattleground().getNationalCard().getRows().size());
+        assertEquals(4, editable.getMarketBattleground().getRegionalCard().getRows().size());
+    }
+
+    @Test
+    void normalizeJson_preservesExplicitEmptyStringsWhenDerivingOldOrEditedJson() throws Exception {
+      EditableContentDTO editable = objectMapper.readValue(
+              service.derive(buildRawJson(), buildComputedJson(List.of())),
+              EditableContentDTO.class);
+      editable.getMarketBattleground().setPageTitle("");
+      editable.getMarketBattleground().getMarketCard().getStats().get(2).setLabel("");
+
+        String normalized = l3Defaults.normalizeJson(
+                objectMapper.writeValueAsString(editable),
+                buildRawJson(),
+                buildComputedJson(List.of()));
+
+      MarketBattleground market = objectMapper.readValue(normalized, EditableContentDTO.class).getMarketBattleground();
+      assertEquals("", market.getPageTitle());
+      assertEquals("", market.getMarketCard().getStats().get(2).getLabel());
+    }
+
+    @Test
+    void normalizeJson_addsMarketBattlegroundForLegacyEditableJson() throws Exception {
+        String legacy = """
+                {
+                  "report_title": "Acme Report",
+                  "report_subtitle": "",
+                  "executive_summary": null,
+                  "key_takeaways": [],
+                  "optimization_findings_content": [],
+                  "phase_descriptions": [
+                    {"phase_no": 1},
+                    {"phase_no": 2},
+                    {"phase_no": 3}
+                  ],
+                  "competitor_scene_descriptions": [],
+                  "roi_disclaimer": null
+                }
+                """;
+
+        EditableContentDTO normalized = objectMapper.readValue(
+                l3Defaults.normalizeJson(legacy, buildRawJson(), buildComputedJson(List.of())),
+                EditableContentDTO.class);
+
+      assertEquals("", normalized.getReportSubtitle());
+      assertNotNull(normalized.getMarketBattleground());
+      assertEquals("每天，有数千万次消费决策正在 AI 上发生", normalized.getMarketBattleground().getPageTitle());
     }
 
     private String buildRawJson() throws Exception {

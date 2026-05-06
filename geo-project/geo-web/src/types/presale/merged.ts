@@ -24,7 +24,7 @@ import type {
   SceneCoverage,
   Scores,
 } from './computed';
-import type { ExecutiveSummary, KeyTakeaway } from './editable';
+import type { ExecutiveSummary, KeyTakeaway, MarketBattleground } from './editable';
 
 /**
  * 合并视图元数据(版本、冻结、降级、match_level 等全局信息)。
@@ -109,6 +109,7 @@ export interface MergedViewDTO {
   report_title: string;
   report_subtitle: string;
   executive_summary: ExecutiveSummary;
+  market_battleground: MarketBattleground;
   key_takeaways: KeyTakeaway[];
   roi_disclaimer: string;
 
