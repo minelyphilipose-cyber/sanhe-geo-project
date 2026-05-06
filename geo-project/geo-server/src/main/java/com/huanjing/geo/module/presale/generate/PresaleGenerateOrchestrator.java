@@ -1607,18 +1607,7 @@ public class PresaleGenerateOrchestrator {
         }
         String modelId = hasText(config.getLowModelId()) ? config.getLowModelId().trim() : config.getModelId();
         String platformName = hasText(config.getPlatformName()) ? config.getPlatformName().trim() : config.getPlatformCode();
-        String modelName = buildModelDisplayName(platformName, hasText(config.getModelName()) ? config.getModelName().trim() : modelId);
-        return new CallModelSnapshot(config.getPlatformCode(), platformName, modelId, modelName);
-    }
-
-    private String buildModelDisplayName(String platformName, String displayModel) {
-        if (!hasText(platformName)) {
-            return displayModel;
-        }
-        if (!hasText(displayModel)) {
-            return platformName;
-        }
-        return platformName + " / " + displayModel;
+        return new CallModelSnapshot(config.getPlatformCode(), platformName, modelId, modelId);
     }
 
     private boolean hasText(String value) {
