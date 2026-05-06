@@ -4,14 +4,19 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.presale.dto.request.CreateReportRequest;
 import com.huanjing.geo.module.presale.dto.request.LlmPromptQuestionGenerateRequest;
+import com.huanjing.geo.module.presale.dto.request.PresalePromptTraceQueryRequest;
 import com.huanjing.geo.module.presale.dto.request.ReportListQueryRequest;
 import com.huanjing.geo.module.presale.dto.response.LlmPromptQuestionGenerateVO;
+import com.huanjing.geo.module.presale.dto.response.PresalePromptTraceDetailVO;
+import com.huanjing.geo.module.presale.dto.response.PresalePromptTracePageVO;
 import com.huanjing.geo.module.presale.dto.response.PromptTemplateVO;
 import com.huanjing.geo.module.presale.dto.response.ReportDetailVO;
 import com.huanjing.geo.module.presale.dto.response.ReportListItemVO;
 import com.huanjing.geo.module.presale.dto.response.ReportScopePreviewVO;
 import com.huanjing.geo.module.presale.dto.response.ReportVersionMetaVO;
+import com.huanjing.geo.module.presale.dto.response.ReportVersionOptionVO;
 import com.huanjing.geo.module.presale.service.PresaleLlmPromptQuestionService;
+import com.huanjing.geo.module.presale.service.PresalePromptTraceService;
 import com.huanjing.geo.module.presale.service.PresaleReportService;
 import com.huanjing.geo.module.presale.service.PresaleReportVersionService;
 import jakarta.validation.Valid;
@@ -47,13 +52,16 @@ public class PresaleReportController {
     private final PresaleReportService reportService;
     private final PresaleReportVersionService versionService;
     private final PresaleLlmPromptQuestionService llmPromptQuestionService;
+    private final PresalePromptTraceService promptTraceService;
 
     public PresaleReportController(PresaleReportService reportService,
                                    PresaleReportVersionService versionService,
-                                   PresaleLlmPromptQuestionService llmPromptQuestionService) {
+                                   PresaleLlmPromptQuestionService llmPromptQuestionService,
+                                   PresalePromptTraceService promptTraceService) {
         this.reportService = reportService;
         this.versionService = versionService;
         this.llmPromptQuestionService = llmPromptQuestionService;
+        this.promptTraceService = promptTraceService;
     }
 
     /**
@@ -121,6 +129,25 @@ public class PresaleReportController {
     public R<ReportDetailVO> getVersionDetail(@PathVariable("id") Long id,
                                               @PathVariable("versionNo") Integer versionNo) {
         return R.ok(versionService.getDetail(id, versionNo));
+    }
+
+    @GetMapping("/{id}/versions")
+    public R<List<ReportVersionOptionVO>> listVersions(@PathVariable("id") Long id) {
+        return R.ok(promptTraceService.listVersions(id));
+    }
+
+    @GetMapping("/{id}/versions/{versionNo}/prompt-traces")
+    public R<PresalePromptTracePageVO> listPromptTraces(@PathVariable("id") Long id,
+                                                        @PathVariable("versionNo") Integer versionNo,
+                                                        @ModelAttribute PresalePromptTraceQueryRequest req) {
+        return R.ok(promptTraceService.list(id, versionNo, req));
+    }
+
+    @GetMapping("/{id}/versions/{versionNo}/prompt-traces/{promptResultId}")
+    public R<PresalePromptTraceDetailVO> getPromptTraceDetail(@PathVariable("id") Long id,
+                                                              @PathVariable("versionNo") Integer versionNo,
+                                                              @PathVariable("promptResultId") Long promptResultId) {
+        return R.ok(promptTraceService.detail(id, versionNo, promptResultId));
     }
 
     /**

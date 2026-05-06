@@ -142,6 +142,93 @@ export interface LlmPromptQuestionGenerateVO {
   warnings?: string[]
 }
 
+export interface ReportVersionOptionVO {
+  versionId: number
+  versionNo: number
+  generationStatus: ReportVersionMetaVO['generationStatus']
+  generationStatusText: string
+  createdAt: string
+  hasPromptTrace: boolean
+  disabled: boolean
+  disabledReason?: string | null
+}
+
+export type PresalePromptTraceStatus = 'SUCCESS' | 'ANALYZE_FAILED' | 'QUERY_FAILED'
+
+export interface PresalePromptTraceListItemVO {
+  promptResultId: number
+  reportId: number
+  versionId: number
+  versionNo: number
+  batchNo: number
+  category: string
+  platformCode: string
+  platformName: string
+  traceStatus: PresalePromptTraceStatus
+  traceStatusText: string
+  requestPromptContent: string
+  queryAnswerBrief: string
+  queryModelName: string | null
+  analyzeModelName: string | null
+  totalDurationMs: number | null
+}
+
+export interface PresalePromptTraceFilterOptionsVO {
+  platforms: Array<{ label: string; value: string }>
+  categories: string[]
+}
+
+export interface PresalePromptTracePageVO {
+  page: Page<PresalePromptTraceListItemVO>
+  filterOptions: PresalePromptTraceFilterOptionsVO
+}
+
+export interface PresalePromptTraceQueryRequest {
+  current?: number
+  size?: number
+  platformCode?: string
+  batchNo?: 1 | 2
+  category?: string
+  keyword?: string
+  status?: PresalePromptTraceStatus
+}
+
+export interface PresalePromptTraceParseViewVO {
+  mentionedText: string
+  rankingText: string
+  sentimentText: string
+  sentimentType: string
+  mentionedCompetitors: string[]
+  sceneAdvantages: string[]
+  topKeywords: Array<{
+    keyword: string
+    sentimentText: string
+    sentimentType: string
+  }>
+  negativeEvidence: {
+    hasNegativeText: string
+    hasNegative: boolean | null
+    snippet: string | null
+  }
+}
+
+export interface PresalePromptTraceDetailVO {
+  summary: PresalePromptTraceListItemVO
+  queryPromptContent: string | null
+  queryRawResponse: string | null
+  queryCallStatus: string | null
+  queryFailureReason: string | null
+  queryDurationMs: number | null
+  queryModelSnapshotInferred: boolean
+  analyzePromptContent: string | null
+  analyzeRawResponse: string | null
+  analyzeCallStatus: string | null
+  analyzeFailureReason: string | null
+  analyzeDurationMs: number | null
+  analyzeModelSnapshotInferred: boolean
+  parseView: PresalePromptTraceParseViewVO
+}
+
 /**
  * MyBatis-Plus Page 响应结构。
  */
@@ -327,6 +414,39 @@ export function getLatestVersionMeta(reportId: number) {
   return unwrap(
     request.get<R<ReportVersionMetaVO>>(
       `/presale/reports/${reportId}/versions/latest/meta`
+    )
+  )
+}
+
+export function listReportVersions(reportId: number) {
+  return unwrap(
+    request.get<R<ReportVersionOptionVO[]>>(
+      `/presale/reports/${reportId}/versions`
+    )
+  )
+}
+
+export function listReportPromptTraces(
+  reportId: number,
+  versionNo: number,
+  params: PresalePromptTraceQueryRequest
+) {
+  return unwrap(
+    request.get<R<PresalePromptTracePageVO>>(
+      `/presale/reports/${reportId}/versions/${versionNo}/prompt-traces`,
+      { params }
+    )
+  )
+}
+
+export function getReportPromptTraceDetail(
+  reportId: number,
+  versionNo: number,
+  promptResultId: number
+) {
+  return unwrap(
+    request.get<R<PresalePromptTraceDetailVO>>(
+      `/presale/reports/${reportId}/versions/${versionNo}/prompt-traces/${promptResultId}`
     )
   )
 }

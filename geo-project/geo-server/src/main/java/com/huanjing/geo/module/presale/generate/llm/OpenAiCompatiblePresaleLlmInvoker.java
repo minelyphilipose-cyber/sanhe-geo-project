@@ -132,7 +132,11 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                         response.completionTokens(),
                         durationMs,
                         attempt,
-                        CallStatus.SUCCESS
+                        CallStatus.SUCCESS,
+                        config.getPlatformCode(),
+                        config.getPlatformName(),
+                        modelId,
+                        resolveModelDisplayName(config, modelId)
                 );
             } catch (Exception ex) {
                 lastError = ex;
@@ -346,6 +350,25 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
             return platform.getModelId();
         }
         return null;
+    }
+
+    private String resolveModelDisplayName(AiPlatformConfig config, String modelId) {
+        if (config == null) {
+            return modelId;
+        }
+        String platformName = StringUtils.hasText(config.getPlatformName())
+                ? config.getPlatformName().trim()
+                : config.getPlatformCode();
+        String displayModel = StringUtils.hasText(config.getModelName())
+                ? config.getModelName().trim()
+                : modelId;
+        if (!StringUtils.hasText(platformName)) {
+            return displayModel;
+        }
+        if (!StringUtils.hasText(displayModel)) {
+            return platformName;
+        }
+        return platformName + " / " + displayModel;
     }
 
     double normalizeJudgeTemperature(PlatformCallContext ctx, double temperature) {

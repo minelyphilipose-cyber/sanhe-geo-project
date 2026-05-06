@@ -15,6 +15,10 @@ public class PresaleAiCall {
     private Long versionId;
     private Integer batchNo;
     private String platformCode;
+    private String platformCodeSnapshot;
+    private String platformNameSnapshot;
+    private String modelIdSnapshot;
+    private String modelNameSnapshot;
     private Long promptTemplateId;
     private String competitorName;
     private String stage;

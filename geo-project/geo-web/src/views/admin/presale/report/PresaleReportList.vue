@@ -134,11 +134,28 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
+        <el-table-column label="操作" width="300" fixed="right">
           <template #default="{ row }">
             <el-button text type="primary" size="small" @click.stop="goDetail(row)">
               {{ isInProgress(row.latestVersion?.generationStatus) ? '查看进度' : '查看' }}
             </el-button>
+            <el-tooltip
+              :disabled="canViewPrompts(row)"
+              content="报告生成完成后可查看 Prompt 详情"
+              placement="top"
+            >
+              <span>
+                <el-button
+                  text
+                  type="primary"
+                  size="small"
+                  :disabled="!canViewPrompts(row)"
+                  @click.stop="goPrompts(row)"
+                >
+                  查看 Prompt
+                </el-button>
+              </span>
+            </el-tooltip>
             <el-tooltip
               :disabled="canEdit(row)"
               :content="editDisabledReason(row)"
@@ -318,6 +335,10 @@ function canDelete(row: ReportListItemVO): boolean {
   return !isInProgress(row.latestVersion?.generationStatus)
 }
 
+function canViewPrompts(row: ReportListItemVO): boolean {
+  return row.latestVersion?.generationStatus === 'DONE' && Boolean(row.latestVersion?.versionNo)
+}
+
 async function confirmDelete(row: ReportListItemVO) {
   if (!canDelete(row) || deletingReportId.value) return
   const confirmed = await ElMessageBox.confirm(
@@ -354,6 +375,11 @@ function goDetail(row: ReportListItemVO) {
   } else {
     router.push(`/admin/presale/report/${row.reportId}/detail`)
   }
+}
+
+function goPrompts(row: ReportListItemVO) {
+  if (!canViewPrompts(row)) return
+  router.push(`/admin/presale/report/${row.reportId}/versions/${row.latestVersion!.versionNo}/prompts`)
 }
 
 async function goEdit(row: ReportListItemVO) {

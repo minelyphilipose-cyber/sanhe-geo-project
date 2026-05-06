@@ -125,9 +125,19 @@
         <el-icon><Download /></el-icon>
         导出 PDF
       </el-button>
+
+      <el-button
+        size="small"
+        class="action-btn"
+        :disabled="!canViewPrompts"
+        @click="goPromptTraces"
+      >
+        <el-icon><Document /></el-icon>
+        查看 Prompt
+      </el-button>
     </div>
 
-    <!-- ─── 18 页锚点导航 ─── -->
+    <!-- ─── 19 页锚点导航 ─── -->
     <div class="sidebar-section anchor-section">
       <div class="label">章节</div>
       <ul class="anchor-list">
@@ -163,7 +173,8 @@ import {
   Unlock,
   Refresh,
   Delete,
-  Download
+  Download,
+  Document
 } from '@element-plus/icons-vue'
 
 import {
@@ -208,6 +219,7 @@ const canDerive = computed(() => isDone.value)
 const canFreeze = computed(() => isDone.value && !isFrozen.value)
 const canDelete = computed(() => !hasExports.value)
 const canExport = computed(() => isDone.value && Boolean(meta.value?.version_id))
+const canViewPrompts = computed(() => isDone.value && Boolean(currentVersionNo.value))
 
 // ─── 写动作 ───────────────────────────────────────────────
 type ActionKind = 'derive' | 'freeze' | 'unfreeze' | 'delete' | 'retry' | 'export'
@@ -378,26 +390,27 @@ async function waitExportAndDownload(exportId: number) {
   ElMessage.warning('PDF 导出仍在处理中,请稍后重试下载')
 }
 
-// ─── 18 页锚点 ────────────────────────────────────────────
+// ─── 19 页锚点 ────────────────────────────────────────────
 const PAGE_ANCHORS = [
   { id: 'page-01', num: '01', title: '封面' },
   { id: 'page-02', num: '02', title: '诊断对象' },
-  { id: 'page-03', num: '03', title: '执行摘要' },
-  { id: 'page-04', num: '04', title: '可见度评分' },
-  { id: 'page-05', num: '05', title: '多平台热力图' },
-  { id: 'page-06', num: '06', title: '平台详细数据' },
-  { id: 'page-07', num: '07', title: '竞品对标总览' },
-  { id: 'page-08', num: '08', title: '竞品场景差异' },
-  { id: 'page-09', num: '09', title: '情感倾向' },
-  { id: 'page-10', num: '10', title: '覆盖度总览' },
-  { id: 'page-11', num: '11', title: '覆盖度详情' },
-  { id: 'page-12', num: '12', title: '优化机会(高)' },
-  { id: 'page-13', num: '13', title: '优化机会(中)' },
-  { id: 'page-14', num: '14', title: '优化机会(低)' },
-  { id: 'page-15', num: '15', title: '预期收益' },
-  { id: 'page-16', num: '16', title: '分阶段路径' },
-  { id: 'page-17', num: '17', title: '关键发现总结' },
-  { id: 'page-18', num: '18', title: '关于我们' }
+  { id: 'page-03', num: '03', title: 'AI 搜索新战场' },
+  { id: 'page-04', num: '04', title: '执行摘要' },
+  { id: 'page-05', num: '05', title: '可见度评分' },
+  { id: 'page-06', num: '06', title: '多平台热力图' },
+  { id: 'page-07', num: '07', title: '平台详细数据' },
+  { id: 'page-08', num: '08', title: '竞品对标总览' },
+  { id: 'page-09', num: '09', title: '竞品场景差异' },
+  { id: 'page-10', num: '10', title: '情感倾向' },
+  { id: 'page-11', num: '11', title: '覆盖度总览' },
+  { id: 'page-12', num: '12', title: '覆盖度详情' },
+  { id: 'page-13', num: '13', title: '优化机会(高)' },
+  { id: 'page-14', num: '14', title: '优化机会(中)' },
+  { id: 'page-15', num: '15', title: '优化机会(低)' },
+  { id: 'page-16', num: '16', title: '预期收益' },
+  { id: 'page-17', num: '17', title: '分阶段路径' },
+  { id: 'page-18', num: '18', title: '关键发现总结' },
+  { id: 'page-19', num: '19', title: '关于我们' }
 ] as const
 
 const activeAnchor = ref<string>('page-01')
@@ -444,6 +457,11 @@ onBeforeUnmount(() => {
 
 function goList() {
   void router.push('/admin/presale/report')
+}
+
+function goPromptTraces() {
+  if (!currentVersionNo.value) return
+  void router.push(`/admin/presale/report/${reportId.value}/versions/${currentVersionNo.value}/prompts`)
 }
 </script>
 

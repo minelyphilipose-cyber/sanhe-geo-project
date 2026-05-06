@@ -117,6 +117,7 @@ public class PresaleGenerateOrchestrator {
     private final Executor platformExecutor;
     private final Map<Long, AtomicLong> lastProgressUpdateAtByVersion = new ConcurrentHashMap<>();
     private final Map<Long, StageTiming> stageTimingByVersion = new ConcurrentHashMap<>();
+    private final Map<String, CallModelSnapshot> modelSnapshotByPlatformCode = new ConcurrentHashMap<>();
 
     @Value("${presale.generate.mock}")
     private boolean mockEnabled;
@@ -197,6 +198,7 @@ public class PresaleGenerateOrchestrator {
             log.info("version={} not in QUEUED state, skip duplicate trigger", versionId);
             return;
         }
+        modelSnapshotByPlatformCode.clear();
         if (mockEnabled) {
             runMockFlow(versionId);
             return;
@@ -1510,6 +1512,10 @@ public class PresaleGenerateOrchestrator {
         row.setVersionId(versionId);
         row.setBatchNo(batchNo);
         row.setPlatformCode(platformCode);
+        row.setPlatformCodeSnapshot(result.platformCode());
+        row.setPlatformNameSnapshot(result.platformName());
+        row.setModelIdSnapshot(result.modelId());
+        row.setModelNameSnapshot(result.modelName());
         row.setPromptTemplateId(promptTemplateId);
         row.setCompetitorName(competitorName);
         row.setStage(stage);
@@ -1538,6 +1544,11 @@ public class PresaleGenerateOrchestrator {
         row.setVersionId(versionId);
         row.setBatchNo(batchNo);
         row.setPlatformCode(platformCode);
+        CallModelSnapshot snapshot = resolveCurrentModelSnapshot(platformCode);
+        row.setPlatformCodeSnapshot(snapshot.platformCode());
+        row.setPlatformNameSnapshot(snapshot.platformName());
+        row.setModelIdSnapshot(snapshot.modelId());
+        row.setModelNameSnapshot(snapshot.modelName());
         row.setPromptTemplateId(promptTemplateId);
         row.setCompetitorName(competitorName);
         row.setStage(stage);
@@ -1576,6 +1587,45 @@ public class PresaleGenerateOrchestrator {
         row.setCompletionTokens(null);
         row.setDurationMs(null);
         aiCallMapper.insert(row);
+    }
+
+    private CallModelSnapshot resolveCurrentModelSnapshot(String platformCode) {
+        if (platformCode == null || platformCode.isBlank()) {
+            return new CallModelSnapshot(platformCode, null, null, null);
+        }
+        return modelSnapshotByPlatformCode.computeIfAbsent(platformCode, this::loadCurrentModelSnapshot);
+    }
+
+    private CallModelSnapshot loadCurrentModelSnapshot(String platformCode) {
+        AiPlatformConfig config = aiPlatformConfigMapper.selectOne(
+                new LambdaQueryWrapper<AiPlatformConfig>()
+                        .eq(AiPlatformConfig::getPlatformCode, platformCode)
+                        .last("LIMIT 1")
+        );
+        if (config == null) {
+            return new CallModelSnapshot(platformCode, null, null, null);
+        }
+        String modelId = hasText(config.getLowModelId()) ? config.getLowModelId().trim() : config.getModelId();
+        String platformName = hasText(config.getPlatformName()) ? config.getPlatformName().trim() : config.getPlatformCode();
+        String modelName = buildModelDisplayName(platformName, hasText(config.getModelName()) ? config.getModelName().trim() : modelId);
+        return new CallModelSnapshot(config.getPlatformCode(), platformName, modelId, modelName);
+    }
+
+    private String buildModelDisplayName(String platformName, String displayModel) {
+        if (!hasText(platformName)) {
+            return displayModel;
+        }
+        if (!hasText(displayModel)) {
+            return platformName;
+        }
+        return platformName + " / " + displayModel;
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private record CallModelSnapshot(String platformCode, String platformName, String modelId, String modelName) {
     }
 
     private void insertPromptResultAnalyzeFailed(Long versionId,

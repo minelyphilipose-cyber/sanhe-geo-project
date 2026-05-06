@@ -176,6 +176,26 @@ const adminRoutes: RouteRecordRaw = {
       },
     },
     {
+      path: 'presale/report/:id/versions/:versionNo/prompts',
+      name: 'PresaleReportPromptList',
+      component: () => import('@/views/admin/presale/report/PresaleReportPromptList.vue'),
+      meta: {
+        title: 'Prompt 调用记录',
+        hidden: true,
+        permissions: ['presale.report.view'],
+      },
+    },
+    {
+      path: 'presale/report/:id/versions/:versionNo/prompts/:promptResultId',
+      name: 'PresaleReportPromptDetail',
+      component: () => import('@/views/admin/presale/report/PresaleReportPromptDetail.vue'),
+      meta: {
+        title: 'Prompt 调用详情',
+        hidden: true,
+        permissions: ['presale.report.view'],
+      },
+    },
+    {
       path: 'partners',
       name: 'PartnerList',
       component: () => import('@/views/admin/partner/PartnerList.vue'),
