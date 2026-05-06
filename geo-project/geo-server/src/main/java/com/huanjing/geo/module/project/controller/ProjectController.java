@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.project.dto.ProjectCreateRequest;
 import com.huanjing.geo.module.project.dto.ProjectFlowUpdateRequest;
-import com.huanjing.geo.module.project.dto.ProjectPlatformOptionVO;
 import com.huanjing.geo.module.project.dto.QuestionPoolVersionVO;
 import com.huanjing.geo.module.project.dto.ProjectStatusUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectStageUpdateRequest;
@@ -19,7 +18,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 @Tag(name = "Project")
 @RestController
@@ -29,11 +27,6 @@ public class ProjectController {
 
     private final ProjectService projectService;
     private final QuestionPoolService questionPoolService;
-
-    @GetMapping("/platform-options")
-    public R<Map<String, List<ProjectPlatformOptionVO>>> platformOptions() {
-        return R.ok(projectService.platformOptions());
-    }
 
     @GetMapping
     public R<Page<Project>> page(

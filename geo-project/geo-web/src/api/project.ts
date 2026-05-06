@@ -3,7 +3,6 @@ import type {
   R,
   PageResult,
   Project,
-  ProjectPlatformOption,
   QuestionPoolManageItemVO,
   QuestionPoolVersionVO,
   KeywordGroup,
@@ -27,10 +26,6 @@ export function getProjectList(params: {
 
 export function getProjectDetail(id: number) {
   return request.get<R<Project>>(`/projects/${id}`)
-}
-
-export function getProjectPlatformOptions() {
-  return request.get<R<Record<string, ProjectPlatformOption[]>>>('/projects/platform-options')
 }
 
 export function createProject(data: Record<string, any>) {

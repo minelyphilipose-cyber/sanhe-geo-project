@@ -50,17 +50,41 @@
             <el-option v-for="c in companyOptions" :key="c.id" :label="c.companyName" :value="c.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="品牌">
+        <el-form-item label="品牌" prop="brandId" required>
           <el-select
             v-model="form.brandId"
             filterable
-            clearable
             style="width: 100%"
-            placeholder="可不选；选品牌前需先选客户"
-            :disabled="!form.companyId || formMode === 'edit'"
+            placeholder="请选择品牌；选品牌前需先选客户"
+            :disabled="!form.companyId || formMode === 'edit' || dependencyLoading"
+            :loading="brandLoading"
           >
             <el-option v-for="b in brandOptions" :key="b.id" :label="b.brandName" :value="b.id" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="拓词组" prop="keywordGroupIds" required>
+          <div class="w-full">
+            <el-select
+              v-model="form.keywordGroupIds"
+              style="width: 100%"
+              multiple
+              filterable
+              collapse-tags
+              collapse-tags-tooltip
+              :max-collapse-tags="3"
+              placeholder="请选择当前客户下的拓词组"
+              :disabled="!form.companyId || dependencyLoading"
+              :loading="keywordGroupLoading"
+            >
+              <el-option
+                v-for="kg in keywordGroupOptions"
+                :key="kg.id"
+                :label="`${kg.name}（已入库${kg.savedKeywordCount || 0}条）`"
+                :value="kg.id"
+              />
+            </el-select>
+            <div class="keyword-summary">{{ keywordGroupSummary }}</div>
+          </div>
         </el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="form.regionCodes" /></el-form-item>
         <el-form-item v-if="formMode === 'edit'" label="激活状态">
@@ -88,11 +112,12 @@ import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { getBrandList, getCompanyList } from '@/api/customer'
 import {
   createProject,
+  getKeywordGroupPage,
   getProjectList,
   updateProject,
   updateProjectStatus,
 } from '@/api/project'
-import type { Brand, Company, Project } from '@/types'
+import type { Brand, Company, KeywordGroup, Project } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionPayloadFromCodes } from '@/constants/region'
@@ -106,10 +131,13 @@ const canUpdateProject = computed(() => userStore.hasPermission('project.update'
 
 const loading = ref(false)
 const saving = ref(false)
+const brandLoading = ref(false)
+const keywordGroupLoading = ref(false)
 const keyword = ref('')
 const rows = ref<Project[]>([])
 const companyOptions = ref<Company[]>([])
 const brandOptions = ref<Brand[]>([])
+const keywordGroupOptions = ref<KeywordGroup[]>([])
 
 const formVisible = ref(false)
 const formRef = ref<FormInstance>()
@@ -122,6 +150,7 @@ const form = reactive({
   projectAliases: '',
   companyId: null as number | null,
   brandId: null as number | null,
+  keywordGroupIds: [] as number[],
   status: 'paused' as 'active' | 'paused',
   regionCodes: [] as string[],
   deliveryMode: 'managed',
@@ -132,13 +161,29 @@ const form = reactive({
 const rules: FormRules = {
   projectName: [{ required: true, message: '请输入项目名称', trigger: 'blur' }],
   companyId: [{ required: true, message: '请选择客户', trigger: 'change' }],
+  brandId: [{ required: true, message: '请选择品牌', trigger: 'change' }],
+  keywordGroupIds: [{ required: true, type: 'array', min: 1, max: 10, message: '请选择 1-10 个拓词组', trigger: 'change' }],
 }
+
+const dependencyLoading = computed(() => brandLoading.value || keywordGroupLoading.value)
+
+const keywordGroupSummary = computed(() => {
+  const selected = new Set(form.keywordGroupIds)
+  let saved = 0
+  for (const group of keywordGroupOptions.value) {
+    if (selected.has(group.id)) {
+      saved += group.savedKeywordCount || 0
+    }
+  }
+  return `已选 ${form.keywordGroupIds.length} 个拓词组，已入库 ${saved} 条关键词`
+})
 
 function resetForm() {
   form.projectName = ''
   form.projectAliases = ''
   form.companyId = null
   form.brandId = null
+  form.keywordGroupIds = []
   form.status = 'paused'
   form.regionCodes = []
   form.deliveryMode = 'managed'
@@ -146,16 +191,19 @@ function resetForm() {
   form.remark = ''
 }
 
-function onCompanyChange() {
+async function onCompanyChange() {
   if (!form.companyId) {
     form.brandId = null
     brandOptions.value = []
+    keywordGroupOptions.value = []
+    form.keywordGroupIds = []
     return
   }
   if (formMode.value === 'create') {
     form.brandId = null
   }
-  loadBrands(form.companyId)
+  form.keywordGroupIds = []
+  await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId)])
 }
 
 function openCreate() {
@@ -172,22 +220,27 @@ async function openEdit(row: Project) {
   form.projectAliases = row.projectAliases || ''
   form.companyId = row.companyId || null
   form.brandId = row.brandId
+  form.keywordGroupIds = [...(row.selectedKeywordGroupIds || [])]
   form.status = row.status === 'active' ? 'active' : 'paused'
   originalStatus.value = form.status
   form.regionCodes = regionCodesFromPayload(row)
   form.deliveryMode = row.deliveryMode || 'managed'
   form.primaryGoal = row.primaryGoal || ''
   form.remark = row.remark || ''
-  await loadBrands(form.companyId)
+  await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId)])
   formVisible.value = true
 }
 
 async function submit() {
-  const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
+  if (!formRef.value) {
+    return
+  }
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) {
+    return
+  }
 
-  if (!form.companyId) {
-    ElMessage.warning('请先选择客户')
+  if (!form.companyId || !form.brandId) {
     return
   }
 
@@ -199,6 +252,7 @@ async function submit() {
       projectAliases: form.projectAliases || undefined,
       companyId: form.companyId,
       brandId: form.brandId,
+      keywordGroupIds: form.keywordGroupIds,
       deliveryMode: form.deliveryMode || 'managed',
       provinceCode: region.provinceCode,
       provinceName: region.provinceName,
@@ -222,8 +276,8 @@ async function submit() {
     formVisible.value = false
     ElMessage.success('保存成功')
     await load()
-  } catch {
-    ElMessage.error('保存失败')
+  } catch (err) {
+    ElMessage.error(errorMessage(err, '保存失败'))
   } finally {
     saving.value = false
   }
@@ -239,11 +293,36 @@ async function loadCompanies() {
 }
 
 async function loadBrands(companyId?: number | null) {
+  brandLoading.value = true
   try {
     const { data } = await getBrandList({ current: 1, size: 500, companyId: companyId || undefined })
     brandOptions.value = data.data.records || []
-  } catch {
+  } catch (err) {
     brandOptions.value = []
+    ElMessage.error(errorMessage(err, '加载品牌失败'))
+  } finally {
+    brandLoading.value = false
+  }
+}
+
+async function loadKeywordGroups(companyId?: number | null) {
+  if (!companyId) {
+    keywordGroupOptions.value = []
+    form.keywordGroupIds = []
+    return
+  }
+  keywordGroupLoading.value = true
+  try {
+    const { data } = await getKeywordGroupPage({ current: 1, size: 500, companyId })
+    keywordGroupOptions.value = data.data.records || []
+    const validIds = new Set(keywordGroupOptions.value.map((item) => item.id))
+    form.keywordGroupIds = form.keywordGroupIds.filter((id) => validIds.has(id))
+  } catch (err) {
+    keywordGroupOptions.value = []
+    form.keywordGroupIds = []
+    ElMessage.error(errorMessage(err, '加载拓词组失败'))
+  } finally {
+    keywordGroupLoading.value = false
   }
 }
 
@@ -264,9 +343,22 @@ async function load() {
   }
 }
 
+function errorMessage(err: unknown, fallback: string) {
+  const data = (err as any)?.response?.data
+  return data?.message || data?.msg || (err as any)?.message || fallback
+}
+
 onMounted(async () => {
   await dictStore.ensureLoaded()
   await loadCompanies()
   await load()
 })
 </script>
+
+<style scoped>
+.keyword-summary {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #606266;
+}
+</style>

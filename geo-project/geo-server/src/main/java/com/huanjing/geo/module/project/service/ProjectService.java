@@ -46,7 +46,6 @@ import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.dispatch.mapper.ProjectPollRotationMapper;
 import com.huanjing.geo.module.project.dto.ProjectCreateRequest;
 import com.huanjing.geo.module.project.dto.ProjectFlowUpdateRequest;
-import com.huanjing.geo.module.project.dto.ProjectPlatformOptionVO;
 import com.huanjing.geo.module.project.dto.ProjectStageUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectStatusUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectUpdateRequest;
@@ -186,30 +185,6 @@ public class ProjectService {
         attachPlatformSelections(Collections.singletonList(project));
         attachKeywordGroupSelections(Collections.singletonList(project));
         return project;
-    }
-
-    public Map<String, List<ProjectPlatformOptionVO>> platformOptions() {
-        currentUserService.ensurePermission("project.read");
-        List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(
-                new LambdaQueryWrapper<AiPlatformConfig>()
-                        .eq(AiPlatformConfig::getEnabled, true)
-                        .orderByAsc(AiPlatformConfig::getPriorityLevel, AiPlatformConfig::getPlatformName, AiPlatformConfig::getId)
-        );
-        Map<String, List<ProjectPlatformOptionVO>> result = new LinkedHashMap<>();
-        result.put("P0", new ArrayList<>());
-        result.put("P1", new ArrayList<>());
-        result.put("P2", new ArrayList<>());
-        for (AiPlatformConfig platform : platforms) {
-            if (!result.containsKey(platform.getPriorityLevel())) {
-                continue;
-            }
-            ProjectPlatformOptionVO vo = new ProjectPlatformOptionVO();
-            vo.setPlatformCode(platform.getPlatformCode());
-            vo.setPlatformName(platform.getPlatformName());
-            vo.setPriorityLevel(platform.getPriorityLevel());
-            result.get(platform.getPriorityLevel()).add(vo);
-        }
-        return result;
     }
 
     @Transactional

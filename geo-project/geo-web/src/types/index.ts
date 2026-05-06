@@ -270,13 +270,6 @@ export interface Project {
   companyName?: string
 }
 
-
-export interface ProjectPlatformOption {
-  platformCode: string
-  platformName: string
-  priorityLevel: 'P0' | 'P1' | 'P2'
-}
-
 export interface Question {
   id: number
   versionId: number
