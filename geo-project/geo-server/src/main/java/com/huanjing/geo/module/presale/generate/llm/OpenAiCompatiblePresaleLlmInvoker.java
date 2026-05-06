@@ -353,7 +353,22 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
     }
 
     private String resolveModelDisplayName(AiPlatformConfig config, String modelId) {
-        return modelId;
+        if (config == null) {
+            return modelId;
+        }
+        String platformName = StringUtils.hasText(config.getPlatformName())
+                ? config.getPlatformName().trim()
+                : config.getPlatformCode();
+        String displayModel = StringUtils.hasText(config.getModelName())
+                ? config.getModelName().trim()
+                : modelId;
+        if (!StringUtils.hasText(platformName)) {
+            return displayModel;
+        }
+        if (!StringUtils.hasText(displayModel)) {
+            return platformName;
+        }
+        return platformName + " / " + displayModel;
     }
 
     double normalizeJudgeTemperature(PlatformCallContext ctx, double temperature) {

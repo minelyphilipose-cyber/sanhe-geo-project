@@ -43,14 +43,14 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "qc.call_status AS queryCallStatus, " +
             "qc.failure_reason AS queryFailureReason, " +
             "qc.duration_ms AS queryDurationMs, " +
-            "CASE WHEN qc.id IS NULL THEN NULL ELSE COALESCE(qc.model_id_snapshot, p.low_model_id, p.model_id) END AS queryModelName, " +
+            "CASE WHEN qc.id IS NULL THEN NULL ELSE COALESCE(qc.model_name_snapshot, CONCAT(COALESCE(qc.platform_name_snapshot, p.platform_name, r.platform_code), ' / ', COALESCE(p.model_name, qc.model_id_snapshot, p.low_model_id, p.model_id))) END AS queryModelName, " +
             "CASE WHEN qc.id IS NOT NULL AND qc.model_id_snapshot IS NULL THEN 1 ELSE 0 END AS queryModelSnapshotInferred, " +
             "ac.request_prompt_content AS analyzePromptContent, " +
             "ac.raw_response AS analyzeRawResponse, " +
             "ac.call_status AS analyzeCallStatus, " +
             "ac.failure_reason AS analyzeFailureReason, " +
             "ac.duration_ms AS analyzeDurationMs, " +
-            "CASE WHEN ac.id IS NULL THEN NULL ELSE COALESCE(ac.model_id_snapshot, p.low_model_id, p.model_id) END AS analyzeModelName, " +
+            "CASE WHEN ac.id IS NULL THEN NULL ELSE COALESCE(ac.model_name_snapshot, CONCAT(COALESCE(ac.platform_name_snapshot, p.platform_name, r.platform_code), ' / ', COALESCE(p.model_name, ac.model_id_snapshot, p.low_model_id, p.model_id))) END AS analyzeModelName, " +
             "CASE WHEN ac.id IS NOT NULL AND ac.model_id_snapshot IS NULL THEN 1 ELSE 0 END AS analyzeModelSnapshotInferred ";
 
     String PROMPT_TRACE_FROM = "FROM presale_ai_prompt_result r " +
