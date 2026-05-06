@@ -357,8 +357,8 @@ public class PresaleGenerateOrchestrator {
         String rawJson;
         enterStage(versionId, STAGE_L1_AGGREGATE, "assemble raw snapshot");
         try {
-            rawJson = rawSnapshotAssembler.assembleWithCompetitorStats(
-                    versionId, report, version, allDegraded, extractedCompetitorStats);
+            rawJson = assembleRawSnapshot(
+                    versionId, report, version, allDegraded, extractedCompetitorStats, extractedCompetitors);
         } catch (IllegalStateException ex) {
             markFailed(versionId, FAILURE_CATEGORY_CONFIG_MISSING,
                     truncateReason("L1 aggregate failed: " + ex.getMessage()));
@@ -1437,9 +1437,42 @@ public class PresaleGenerateOrchestrator {
             String brandName,
             Long operatorUserId,
             boolean isManager) {
+        if (competitorNormalizationService == null) {
+            List<PresaleCompetitorAggregator.ExtractedCompetitor> competitors =
+                    extractTopCompetitorsFromBatch1(versionId, brandName).stream()
+                            .map(name -> new PresaleCompetitorAggregator.ExtractedCompetitor(name, 0, List.of(name)))
+                            .toList();
+            return new PresaleCompetitorNormalizationService.NormalizationOutcome(competitors, false);
+        }
         List<PresaleCompetitorAggregator.RawCompetitorMention> rawTop =
                 competitorAggregator.extractTopRawCompetitorMentions(versionId, brandName, 10);
+        if ((rawTop == null || rawTop.isEmpty()) && competitorAggregator != null) {
+            List<PresaleCompetitorAggregator.ExtractedCompetitor> competitors =
+                    extractTopCompetitorsFromBatch1(versionId, brandName).stream()
+                            .map(name -> new PresaleCompetitorAggregator.ExtractedCompetitor(name, 0, List.of(name)))
+                            .toList();
+            return new PresaleCompetitorNormalizationService.NormalizationOutcome(competitors, false);
+        }
         return competitorNormalizationService.normalize(versionId, brandName, rawTop, operatorUserId, isManager);
+    }
+
+    private List<String> extractTopCompetitorsFromBatch1(Long versionId, String brandName) {
+        List<String> competitors = competitorAggregator.extractTopCompetitorsFromBatch1(versionId, brandName);
+        return competitors == null ? List.of() : competitors;
+    }
+
+    private String assembleRawSnapshot(Long versionId,
+                                       PresaleReport report,
+                                       PresaleReportVersion version,
+                                       Set<String> degradedPlatforms,
+                                       List<PresaleCompetitorAggregator.ExtractedCompetitor> extractedCompetitorStats,
+                                       List<String> extractedCompetitors) {
+        String rawJson = rawSnapshotAssembler.assembleWithCompetitorStats(
+                versionId, report, version, degradedPlatforms, extractedCompetitorStats);
+        if (rawJson != null) {
+            return rawJson;
+        }
+        return rawSnapshotAssembler.assemble(versionId, report, version, degradedPlatforms, extractedCompetitors);
     }
 
     private String normalizeName(String input) {

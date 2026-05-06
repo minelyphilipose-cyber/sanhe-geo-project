@@ -6,6 +6,7 @@ import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
 import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
 import com.huanjing.geo.module.presale.generate.llm.PromptTemplateRenderer;
+import com.huanjing.geo.module.content.credential.crypto.LocalMasterKeyProvider;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersionPromptTemplate;
@@ -40,7 +41,7 @@ import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@SpringBootTest
+@SpringBootTest(properties = "spring.flyway.validate-on-migrate=false")
 @Transactional
 class PresaleGenerateEndToEndIntegrationTest {
 
@@ -75,6 +76,8 @@ class PresaleGenerateEndToEndIntegrationTest {
     private PresaleL3InitService l3InitService;
     @MockBean
     private PresaleCompetitorAggregator competitorAggregator;
+    @MockBean
+    private LocalMasterKeyProvider localMasterKeyProvider;
 
     @Test
     void realFlow_benchmarkMissing_marksConfigMissing() {
