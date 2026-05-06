@@ -9,6 +9,7 @@ import type {
   BrandProfileVersion,
   CompanyAccount,
   CompanyAccountTxn,
+  CompanyPackageBinding,
   BrandStatementView,
   DispatchTaskItem,
 } from '@/types'
@@ -69,6 +70,22 @@ export function deductCompanyAccount(
   data: { amount: number; reason: string; remark?: string },
 ) {
   return request.post<R<CompanyAccountTxn>>(`/companies/${id}/account/deduct`, data)
+}
+
+export function getCompanyPackageBindings(id: number) {
+  return request.get<R<CompanyPackageBinding[]>>(`/companies/${id}/package-bindings`)
+}
+
+export function getActiveCompanyPackageBinding(id: number) {
+  return request.get<R<CompanyPackageBinding | null>>(`/companies/${id}/package-binding/active`)
+}
+
+export function bindCompanyPackage(id: number, packagePlanId: number) {
+  return request.post<R<CompanyPackageBinding>>(`/companies/${id}/package-binding`, { packagePlanId })
+}
+
+export function unbindCompanyPackage(id: number) {
+  return request.delete<R<void>>(`/companies/${id}/package-binding`)
 }
 
 export function getBrandList(params: {

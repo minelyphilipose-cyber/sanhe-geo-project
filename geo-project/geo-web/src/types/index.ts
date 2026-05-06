@@ -319,6 +319,24 @@ export interface CompanyAccountTxn {
   createdAt: string
 }
 
+export interface CompanyPackageBinding {
+  id: number
+  companyId: number
+  packagePlanId: number
+  packageType: string
+  packageName: string
+  standardPrice: number
+  serviceMonths: number
+  questionPoolLimit: number
+  channelQuotaSnapshot: string
+  status: 'active' | 'inactive' | string
+  activeFlag?: number | null
+  boundAt: string
+  unboundAt?: string | null
+  createdAt?: string
+  updatedAt?: string
+}
+
 export interface QuestionPoolItemInput {
   questionText: string
   questionType: string

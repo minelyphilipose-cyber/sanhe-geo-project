@@ -22,6 +22,53 @@
       </el-descriptions>
     </el-card>
 
+    <el-card v-loading="packageLoading">
+      <template #header>
+        <div class="flex items-center justify-between">
+          <span>客户套餐</span>
+          <div v-if="canManagePackageBinding" class="space-x-2">
+            <el-button v-if="!activePackageBinding" type="primary" @click="openPackageBind">绑定套餐</el-button>
+            <el-button v-else type="danger" plain @click="confirmUnbindPackage">解绑套餐</el-button>
+          </div>
+        </div>
+      </template>
+      <template v-if="activePackageBinding">
+        <el-descriptions :column="4" border>
+          <el-descriptions-item label="套餐名称">{{ activePackageBinding.packageName }}</el-descriptions-item>
+          <el-descriptions-item label="套餐类型">{{ activePackageBinding.packageType }}</el-descriptions-item>
+          <el-descriptions-item label="标准价格(元)">{{ moneyText(activePackageBinding.standardPrice) }}</el-descriptions-item>
+          <el-descriptions-item label="服务周期">{{ activePackageBinding.serviceMonths }} 个月</el-descriptions-item>
+          <el-descriptions-item label="问题池总额度">{{ activePackageBinding.questionPoolLimit }}</el-descriptions-item>
+          <el-descriptions-item label="绑定时间">{{ activePackageBinding.boundAt || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="状态">{{ packageStatusLabel(activePackageBinding.status) }}</el-descriptions-item>
+        </el-descriptions>
+        <el-table class="mt-4" :data="activeQuotaSnapshot" border>
+          <el-table-column label="渠道" min-width="140">
+            <template #default="scope">{{ channelLabel(scope.row.channelCode) }}</template>
+          </el-table-column>
+          <el-table-column label="周期" width="120">
+            <template #default="scope">{{ periodLabel(scope.row.periodType) }}</template>
+          </el-table-column>
+          <el-table-column prop="quotaLimit" label="额度" width="120" />
+          <el-table-column label="启用" width="100">
+            <template #default="scope">
+              <el-tag :type="scope.row.enabled ? 'success' : 'info'">{{ scope.row.enabled ? '启用' : '停用' }}</el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+      </template>
+      <el-empty v-else description="当前客户未绑定套餐" />
+      <el-table v-if="packageBindingHistory.length" class="mt-4" :data="packageBindingHistory" border>
+        <el-table-column prop="packageName" label="历史套餐" min-width="180" />
+        <el-table-column prop="packageType" label="类型" min-width="150" />
+        <el-table-column label="状态" width="110">
+          <template #default="scope">{{ packageStatusLabel(scope.row.status) }}</template>
+        </el-table-column>
+        <el-table-column prop="boundAt" label="绑定时间" width="180" />
+        <el-table-column prop="unboundAt" label="解绑时间" width="180" />
+      </el-table>
+    </el-card>
+
     <el-card v-loading="accountLoading">
       <template #header>
         <div class="flex items-center justify-between">
@@ -202,6 +249,30 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="packageBindVisible" title="绑定客户套餐" width="520px">
+      <el-form label-width="100px">
+        <el-form-item label="套餐" required>
+          <el-select
+            v-model="packageBindForm.packagePlanId"
+            filterable
+            placeholder="请选择已启用套餐"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="item in packagePlanOptions"
+              :key="item.id"
+              :label="`${item.packageName} / ${moneyText(item.standardPrice)} 元 / ${item.questionPoolSize} 问题`"
+              :value="item.id"
+            />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="packageBindVisible = false">取消</el-button>
+        <el-button type="primary" :loading="packageSubmitting" @click="submitPackageBind">确认绑定</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="rechargeVisible" title="客户充值" width="520px">
       <el-form :model="rechargeForm" label-width="100px">
         <el-form-item label="金额(元)" required>
@@ -240,19 +311,24 @@ import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
 import {
   createBrand,
+  bindCompanyPackage,
   deductCompanyAccount,
   deleteBrand,
   deleteCompany,
+  getActiveCompanyPackageBinding,
   getBrandList,
   getCompanyAccount,
   getCompanyAccountTxns,
   getCompanyDetail,
+  getCompanyPackageBindings,
   rechargeCompanyAccount,
+  unbindCompanyPackage,
   updateBrand,
   updateCompany,
 } from '@/api/customer'
+import { getEnabledPackagePlans } from '@/api/packagePlan'
 import { getPartnerList, type PartnerItem } from '@/api/partner'
-import type { Brand, Company, CompanyAccount, CompanyAccountTxn } from '@/types'
+import type { Brand, Company, CompanyAccount, CompanyAccountTxn, CompanyPackageBinding, PackagePlan } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
@@ -268,27 +344,37 @@ const canCreateBrand = computed(() => userStore.hasPermission('brand.create'))
 const canUpdateBrand = computed(() => userStore.hasPermission('brand.update'))
 const canDeleteBrand = computed(() => userStore.hasPermission('brand.delete'))
 const canCreateProject = computed(() => userStore.hasPermission('project.create'))
+const canManagePackageBinding = computed(() => userStore.hasPermission('user.manage'))
 const companyId = Number(route.params.id)
 const hasValidId = Number.isFinite(companyId) && companyId > 0
 
 const loading = ref(false)
 const brandLoading = ref(false)
 const accountLoading = ref(false)
+const packageLoading = ref(false)
 const saving = ref(false)
 const brandSaving = ref(false)
 const accountSubmitting = ref(false)
+const packageSubmitting = ref(false)
 
 const company = ref<Company | null>(null)
 const brands = ref<Brand[]>([])
 const partnerOptions = ref<PartnerItem[]>([])
 const account = ref<CompanyAccount | null>(null)
 const txns = ref<CompanyAccountTxn[]>([])
+const activePackageBinding = ref<CompanyPackageBinding | null>(null)
+const packageBindingHistory = ref<CompanyPackageBinding[]>([])
+const packagePlanOptions = ref<PackagePlan[]>([])
 const txnPage = reactive({ current: 1, size: 10, total: 0 })
 
 const companyFormRef = ref<FormInstance>()
 const brandFormRef = ref<FormInstance>()
 
 const editVisible = ref(false)
+const packageBindVisible = ref(false)
+const packageBindForm = reactive({
+  packagePlanId: null as number | null,
+})
 const companyForm = reactive({
   companyName: '',
   industryTags: [] as string[],
@@ -357,6 +443,33 @@ function bizTypeLabel(value: string) {
   return mapping[value] || value
 }
 
+function moneyText(value?: number | null) {
+  if (value == null) return '-'
+  return Number(value).toFixed(2)
+}
+
+function packageStatusLabel(value?: string | null) {
+  const mapping: Record<string, string> = { active: '生效中', inactive: '已解绑' }
+  return value ? mapping[value] || value : '-'
+}
+
+function channelLabel(value?: string | null) {
+  const mapping: Record<string, string> = {
+    official_site: '官网',
+    industry_site: '行业资讯站',
+    self_media: '自媒体平台',
+    authority_media: '权重媒体平台',
+  }
+  return value ? mapping[value] || value : '-'
+}
+
+function periodLabel(value?: string | null) {
+  const mapping: Record<string, string> = { day: '日', week: '周', month: '月', total: '总额度' }
+  return value ? mapping[value] || value : '-'
+}
+
+const activeQuotaSnapshot = computed(() => parseQuotaSnapshot(activePackageBinding.value?.channelQuotaSnapshot))
+
 function companyRegion(value?: Company | null) {
   if (!value) return '-'
   return regionDisplayFromPayload(value) || value.city || '-'
@@ -368,6 +481,16 @@ function brandRegion(value: Brand) {
 
 function parseIndustryTags(value?: string | string[] | null) {
   if (Array.isArray(value)) return value
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function parseQuotaSnapshot(value?: string | null) {
   if (!value) return []
   try {
     const parsed = JSON.parse(value)
@@ -509,6 +632,93 @@ async function submitCompany() {
 
 function openBrandCreate() {
   router.push({ path: '/admin/brands/create', query: { companyId: String(companyId) } })
+}
+
+async function loadPackageBinding() {
+  packageLoading.value = true
+  try {
+    const activeRes = await getActiveCompanyPackageBinding(companyId)
+    activePackageBinding.value = activeRes.data.data
+  } catch (err) {
+    ElMessage.error(errorMessage(err, '加载客户套餐信息失败'))
+    packageLoading.value = false
+    return
+  }
+  if (!canManagePackageBinding.value) {
+    packageBindingHistory.value = []
+    packageLoading.value = false
+    return
+  }
+  try {
+    const historyRes = await getCompanyPackageBindings(companyId)
+    packageBindingHistory.value = (historyRes.data.data || []).filter((item) => item.status !== 'active')
+  } catch (err) {
+    ElMessage.error(errorMessage(err, '加载客户套餐历史失败'))
+  } finally {
+    packageLoading.value = false
+  }
+}
+
+function errorMessage(err: unknown, fallback: string) {
+  const data = (err as any)?.response?.data
+  return data?.message || data?.msg || (err as any)?.message || fallback
+}
+
+async function loadPackagePlanOptions() {
+  try {
+    const { data } = await getEnabledPackagePlans()
+    packagePlanOptions.value = data.data || []
+  } catch (err) {
+    packagePlanOptions.value = []
+    ElMessage.error(errorMessage(err, '加载套餐选项失败'))
+  }
+}
+
+async function openPackageBind() {
+  packageBindForm.packagePlanId = null
+  await loadPackagePlanOptions()
+  packageBindVisible.value = true
+}
+
+async function submitPackageBind() {
+  if (!packageBindForm.packagePlanId) {
+    ElMessage.warning('请选择套餐')
+    return
+  }
+  packageSubmitting.value = true
+  try {
+    await bindCompanyPackage(companyId, packageBindForm.packagePlanId)
+    ElMessage.success('客户套餐已绑定')
+    packageBindVisible.value = false
+    await loadPackageBinding()
+  } catch (err) {
+    ElMessage.error(errorMessage(err, '绑定套餐失败'))
+  } finally {
+    packageSubmitting.value = false
+  }
+}
+
+async function confirmUnbindPackage() {
+  if (!activePackageBinding.value) return
+  try {
+    await ElMessageBox.confirm(`确认解绑套餐「${activePackageBinding.value.packageName}」？解绑后该客户下项目将不能新增问题池或分发文章。`, '解绑确认', {
+      type: 'warning',
+      confirmButtonText: '确认解绑',
+      cancelButtonText: '取消',
+    })
+  } catch {
+    return
+  }
+  packageSubmitting.value = true
+  try {
+    await unbindCompanyPackage(companyId)
+    ElMessage.success('客户套餐已解绑')
+    await loadPackageBinding()
+  } catch (err) {
+    ElMessage.error(errorMessage(err, '解绑套餐失败'))
+  } finally {
+    packageSubmitting.value = false
+  }
 }
 
 async function loadPartners() {
@@ -685,8 +895,6 @@ onMounted(async () => {
   await dictStore.ensureLoaded()
   await loadPartners()
   await loadCompany()
-  await Promise.all([loadBrands(), loadAccount()])
+  await Promise.all([loadBrands(), loadAccount(), loadPackageBinding()])
 })
 </script>
-
-
