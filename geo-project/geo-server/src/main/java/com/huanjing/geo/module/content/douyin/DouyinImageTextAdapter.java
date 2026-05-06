@@ -19,9 +19,9 @@ import com.huanjing.geo.module.content.douyin.client.exception.DouyinValidationE
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.service.adapter.AutoSelfMediaAdapter;
 import com.huanjing.geo.module.content.service.adapter.FailureKind;
 import com.huanjing.geo.module.content.service.adapter.ReviewStatusResult;
-import com.huanjing.geo.module.content.service.adapter.SelfMediaAdapter;
 import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import com.huanjing.geo.module.content.service.adapter.ValidationResult;
 import lombok.RequiredArgsConstructor;
@@ -36,7 +36,7 @@ import java.util.Map;
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class DouyinImageTextAdapter implements SelfMediaAdapter {
+public class DouyinImageTextAdapter implements AutoSelfMediaAdapter {
     public static final String PLATFORM = "douyin";
     private static final int MAX_TEXT_LENGTH = 1000;
     private static final int MAX_IMAGE_COUNT = 30;

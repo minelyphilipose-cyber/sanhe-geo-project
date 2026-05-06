@@ -23,7 +23,7 @@ import com.huanjing.geo.module.content.service.adapter.BrandGeoSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.FailureKind;
 import com.huanjing.geo.module.content.service.adapter.OfficialCmsSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.ReviewStatusResult;
-import com.huanjing.geo.module.content.service.adapter.SelfMediaAdapter;
+import com.huanjing.geo.module.content.service.adapter.AutoSelfMediaAdapter;
 import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import com.huanjing.geo.module.content.service.adapter.ValidationResult;
 import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
@@ -569,7 +569,7 @@ class ContentDistributionServiceTest {
         }
     }
 
-    private static class TestSelfMediaAdapter implements SelfMediaAdapter {
+    private static class TestSelfMediaAdapter implements AutoSelfMediaAdapter {
         private String platform = "wechat_mp";
         private SubmitResult result;
         private ReviewStatusResult reviewStatusResult = ReviewStatusResult.notApplicable();

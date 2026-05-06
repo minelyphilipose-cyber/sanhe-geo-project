@@ -63,6 +63,66 @@ logging:
     org.springframework.security: info
     org.flywaydb: info
 
+semi-auto:
+  platforms:
+    profiles:
+      toutiao:
+        publish-url: ${SEMI_AUTO_TOUTIAO_PUBLISH_URL:https://mp.toutiao.com/profile_v4/graphic/publish}
+        cookie-domains:
+          - ".toutiao.com"
+          - ".bytedance.com"
+          - ".snssdk.com"
+        required-cookie-names:
+          - sessionid
+          - sessionid_ss
+          - sid_tt
+          - sid_guard
+        editor-selectors:
+          title: "input[placeholder*='标题']"
+          content: ".ProseMirror"
+          cover: "input[type='file']"
+        allowed-html-tags:
+          - p
+          - br
+          - strong
+          - em
+          - u
+          - h1
+          - h2
+          - h3
+          - ul
+          - ol
+          - li
+          - blockquote
+          - a
+          - img
+      zhihu:
+        publish-url: ${SEMI_AUTO_ZHIHU_PUBLISH_URL:https://zhuanlan.zhihu.com/write}
+        cookie-domains:
+          - ".zhihu.com"
+        required-cookie-names:
+          - z_c0
+          - d_c0
+          - _zap
+        editor-selectors:
+          title: ".WriteIndex-titleInput textarea"
+          content: ".public-DraftEditor-content"
+        allowed-html-tags:
+          - p
+          - br
+          - strong
+          - em
+          - u
+          - h1
+          - h2
+          - h3
+          - ul
+          - ol
+          - li
+          - blockquote
+          - a
+          - img
+
 geo:
   brand-geo-site:
     endpoint: ${BRAND_GEO_SITE_ENDPOINT:}

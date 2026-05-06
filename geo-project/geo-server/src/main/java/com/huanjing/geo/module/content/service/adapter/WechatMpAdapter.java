@@ -27,7 +27,7 @@ import org.springframework.util.StringUtils;
  */
 @Component
 @RequiredArgsConstructor
-public class WechatMpAdapter implements SiteAdapter, SelfMediaAdapter {
+public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
     public static final String PLATFORM = "wechat_mp";
 
     private final MarkdownToHtmlRenderer markdownRenderer;

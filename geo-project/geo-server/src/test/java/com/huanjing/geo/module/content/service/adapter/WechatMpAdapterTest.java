@@ -4,6 +4,7 @@ import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WechatMpAdapterTest {
@@ -12,6 +13,7 @@ class WechatMpAdapterTest {
 
     @Test
     void selfMediaIdentity_matchesWechatPlatform() {
+        assertInstanceOf(AutoSelfMediaAdapter.class, adapter);
         assertEquals("wechat_mp", adapter.platform());
         assertTrue(adapter.supportsPlatform("wechat_mp"));
     }

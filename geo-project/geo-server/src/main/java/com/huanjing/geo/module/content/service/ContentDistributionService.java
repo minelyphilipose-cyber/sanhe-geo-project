@@ -17,7 +17,7 @@ import com.huanjing.geo.module.content.service.adapter.FailureKind;
 import com.huanjing.geo.module.content.service.adapter.OfficialCmsSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.ReviewStatusResult;
 import com.huanjing.geo.module.content.service.adapter.SiteAdapter;
-import com.huanjing.geo.module.content.service.adapter.SelfMediaAdapter;
+import com.huanjing.geo.module.content.service.adapter.AutoSelfMediaAdapter;
 import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import com.huanjing.geo.module.content.service.adapter.ValidationResult;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -66,7 +66,7 @@ public class ContentDistributionService {
     private final CurrentUserService currentUserService;
     private final SystemAlertService systemAlertService;
     private final List<SiteAdapter> siteAdapters;
-    private final List<SelfMediaAdapter> selfMediaAdapters;
+    private final List<AutoSelfMediaAdapter> selfMediaAdapters;
     private final BrandService brandService;
     private final ProjectPublishQuotaService projectPublishQuotaService;
 
@@ -247,7 +247,7 @@ public class ContentDistributionService {
         if (account == null) {
             throw new BizException(404, "self media account not found");
         }
-        SelfMediaAdapter adapter = resolveSelfMediaAdapter(account.getPlatform());
+        AutoSelfMediaAdapter adapter = resolveSelfMediaAdapter(account.getPlatform());
         ReviewStatusResult result = adapter.refreshReviewStatus(task, account);
         if (result != null
                 && result.status() != null
@@ -537,7 +537,7 @@ public class ContentDistributionService {
         article.setStatus("distributing");
         articleDraftMapper.updateById(article);
 
-        SelfMediaAdapter adapter = resolveSelfMediaAdapter(account.getPlatform());
+        AutoSelfMediaAdapter adapter = resolveSelfMediaAdapter(account.getPlatform());
         SubmitResult submitResult;
         try {
             submitResult = adapter.submitToTarget(article, content, mpTarget);
@@ -785,7 +785,7 @@ public class ContentDistributionService {
                 .orElseThrow(() -> new BizException(500, "BrandGeoSiteAdapter not registered"));
     }
 
-    private SelfMediaAdapter resolveSelfMediaAdapter(String platform) {
+    private AutoSelfMediaAdapter resolveSelfMediaAdapter(String platform) {
         if (!StringUtils.hasText(platform)) {
             throw new BizException(400, "Missing self-media platform");
         }

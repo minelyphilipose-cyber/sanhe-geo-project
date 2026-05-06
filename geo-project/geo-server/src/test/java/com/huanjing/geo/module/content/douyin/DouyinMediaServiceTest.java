@@ -11,6 +11,7 @@ import com.huanjing.geo.module.content.entity.SelfMediaMaterialMapping;
 import com.huanjing.geo.module.content.mapper.SelfMediaMaterialMappingMapper;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
+import com.huanjing.geo.module.customer.service.BrandImageFolderService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -34,6 +35,7 @@ import static org.mockito.Mockito.when;
 
 class DouyinMediaServiceTest {
     private BrandMaterialMapper brandMaterialMapper;
+    private BrandImageFolderService brandImageFolderService;
     private SelfMediaMaterialMappingMapper mappingMapper;
     private MinioStorageService minioStorageService;
     private DouyinTokenService douyinTokenService;
@@ -45,6 +47,7 @@ class DouyinMediaServiceTest {
     @BeforeEach
     void setUp() {
         brandMaterialMapper = mock(BrandMaterialMapper.class);
+        brandImageFolderService = mock(BrandImageFolderService.class);
         mappingMapper = mock(SelfMediaMaterialMappingMapper.class);
         minioStorageService = mock(MinioStorageService.class);
         douyinTokenService = mock(DouyinTokenService.class);
@@ -54,6 +57,7 @@ class DouyinMediaServiceTest {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         service = new DouyinMediaService(
                 brandMaterialMapper,
+                brandImageFolderService,
                 mappingMapper,
                 minioStorageService,
                 douyinTokenService,
