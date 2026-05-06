@@ -82,13 +82,27 @@ public class PresaleRawSnapshotAssembler {
                            PresaleReportVersion version,
                            Set<String> degradedPlatforms,
                            List<String> extractedCompetitorDisplayNames) {
+        List<PresaleCompetitorAggregator.ExtractedCompetitor> extractedCompetitors =
+                buildLegacyExtractedCompetitors(versionId, report, extractedCompetitorDisplayNames);
+        return assembleWithCompetitorStats(versionId, report, version, degradedPlatforms, extractedCompetitors);
+    }
+
+    public String assembleWithCompetitorStats(Long versionId,
+                                              PresaleReport report,
+                                              PresaleReportVersion version,
+                                              Set<String> degradedPlatforms,
+                                              List<PresaleCompetitorAggregator.ExtractedCompetitor> extractedCompetitors) {
         try {
+            List<String> extractedCompetitorDisplayNames = extractedCompetitors == null
+                    ? List.of()
+                    : extractedCompetitors.stream()
+                    .map(PresaleCompetitorAggregator.ExtractedCompetitor::name)
+                    .toList();
             RawMeta meta = buildMeta(report, version);
             ClientInfo clientInfo = buildClientInfo(report);
             TestSummary testSummary = buildTestSummary(versionId, degradedPlatforms, extractedCompetitorDisplayNames);
             List<PlatformBreakdown> platformBreakdown = buildPlatformBreakdown(versionId, degradedPlatforms);
-            List<Competitor> competitors = buildCompetitors(
-                    versionId, report, extractedCompetitorDisplayNames);
+            List<Competitor> competitors = buildCompetitors(versionId, report, extractedCompetitors);
             List<String> groupSceneAdvantages = aggregateGroupSceneAdvantages(versionId, extractedCompetitorDisplayNames);
             SentimentDetail sentimentDetail = buildSentimentDetail(versionId);
             BenchmarksFrozen benchmarksFrozen = benchmarkResolver.resolve(
@@ -318,8 +332,8 @@ public class PresaleRawSnapshotAssembler {
 
     private List<Competitor> buildCompetitors(Long versionId,
                                               PresaleReport report,
-                                              List<String> extractedCompetitorDisplayNames) {
-        if (extractedCompetitorDisplayNames == null || extractedCompetitorDisplayNames.isEmpty()) {
+                                              List<PresaleCompetitorAggregator.ExtractedCompetitor> extractedCompetitors) {
+        if (extractedCompetitors == null || extractedCompetitors.isEmpty()) {
             return List.of();
         }
         PresaleCompetitorAggregator.Batch1MentionStats stats =
@@ -327,9 +341,9 @@ public class PresaleRawSnapshotAssembler {
 
         int rank = 1;
         List<Competitor> out = new ArrayList<>();
-        for (String competitorDisplayName : extractedCompetitorDisplayNames) {
-            String normalized = competitorAggregator.normalizeName(competitorDisplayName);
-            int mentionCount = stats.countByNormalized().getOrDefault(normalized, 0);
+        for (PresaleCompetitorAggregator.ExtractedCompetitor competitor : extractedCompetitors) {
+            String competitorDisplayName = competitor.name();
+            int mentionCount = competitor.mentionCount();
             double mentionRate = stats.denominatorRows() == 0 ? 0.0
                     : (mentionCount * 100.0 / stats.denominatorRows());
             out.add(Competitor.builder()
@@ -340,6 +354,25 @@ public class PresaleRawSnapshotAssembler {
                     .avgRanking(null)
                     .sceneAdvantagesRaw(aggregateSceneAdvantages(versionId, competitorDisplayName))
                     .build());
+        }
+        return out;
+    }
+
+    private List<PresaleCompetitorAggregator.ExtractedCompetitor> buildLegacyExtractedCompetitors(
+            Long versionId,
+            PresaleReport report,
+            List<String> extractedCompetitorDisplayNames) {
+        if (extractedCompetitorDisplayNames == null || extractedCompetitorDisplayNames.isEmpty()) {
+            return List.of();
+        }
+        PresaleCompetitorAggregator.Batch1MentionStats stats =
+                competitorAggregator.aggregateBatch1MentionStats(versionId, report.getBrandName());
+        List<PresaleCompetitorAggregator.ExtractedCompetitor> out = new ArrayList<>();
+        for (String competitorDisplayName : extractedCompetitorDisplayNames) {
+            String normalized = competitorAggregator.normalizeName(competitorDisplayName);
+            int mentionCount = stats.countByNormalized().getOrDefault(normalized, 0);
+            out.add(new PresaleCompetitorAggregator.ExtractedCompetitor(
+                    competitorDisplayName, mentionCount, List.of(competitorDisplayName)));
         }
         return out;
     }

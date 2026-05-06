@@ -22,4 +22,10 @@ public interface PresaleLlmInvoker {
      */
     LlmCallResult judge(PlatformCallContext ctx, String judgePrompt, double temperature)
             throws LlmInvokeException;
+
+    /**
+     * 阶段 2.6:竞品名称归一化调用。
+     */
+    LlmCallResult normalizeCompetitors(PlatformCallContext ctx, String normalizationPrompt)
+            throws LlmInvokeException;
 }

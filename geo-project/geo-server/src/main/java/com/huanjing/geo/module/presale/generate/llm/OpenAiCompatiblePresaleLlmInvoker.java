@@ -80,6 +80,18 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         );
     }
 
+    @Override
+    public LlmCallResult normalizeCompetitors(PlatformCallContext ctx, String normalizationPrompt)
+            throws LlmInvokeException {
+        return invokeWithRetry(
+                ctx,
+                CompetitorNormalizationPromptTemplates.SYSTEM_INSTRUCTION,
+                safe(normalizationPrompt),
+                normalizeJudgeTemperature(ctx, 0D),
+                true
+        );
+    }
+
     private LlmCallResult invokeWithRetry(PlatformCallContext ctx,
                                           String systemPrompt,
                                           String userPrompt,

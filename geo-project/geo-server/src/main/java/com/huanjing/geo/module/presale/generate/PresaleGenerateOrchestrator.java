@@ -111,6 +111,7 @@ public class PresaleGenerateOrchestrator {
     private final PresaleComputedSnapshotEnricher computedSnapshotEnricher;
     private final PresaleL3InitService l3InitService;
     private final PresaleCompetitorAggregator competitorAggregator;
+    private final PresaleCompetitorNormalizationService competitorNormalizationService;
     private final PresaleJudgeService presaleJudgeService;
     private final ObjectMapper objectMapper;
     private final Executor platformExecutor;
@@ -147,6 +148,7 @@ public class PresaleGenerateOrchestrator {
                                        PresaleComputedSnapshotEnricher computedSnapshotEnricher,
                                        PresaleL3InitService l3InitService,
                                        PresaleCompetitorAggregator competitorAggregator,
+                                       PresaleCompetitorNormalizationService competitorNormalizationService,
                                        PresaleJudgeService presaleJudgeService,
                                        ObjectMapper objectMapper,
                                        @Qualifier("presalePlatformExecutor") Executor platformExecutor) {
@@ -165,6 +167,7 @@ public class PresaleGenerateOrchestrator {
         this.computedSnapshotEnricher = computedSnapshotEnricher;
         this.l3InitService = l3InitService;
         this.competitorAggregator = competitorAggregator;
+        this.competitorNormalizationService = competitorNormalizationService;
         this.presaleJudgeService = presaleJudgeService;
         this.objectMapper = objectMapper;
         this.platformExecutor = Objects.requireNonNull(platformExecutor, "presalePlatformExecutor must not be null");
@@ -286,7 +289,18 @@ public class PresaleGenerateOrchestrator {
 
         enterStage(versionId, STAGE_COMPETITOR_EXTRACT, "extract competitors");
 
-        List<String> extractedCompetitors = extractTopCompetitorsFromBatch1(versionId, report.getBrandName());
+        PresaleCompetitorNormalizationService.NormalizationOutcome normalizationOutcome =
+                extractTopCompetitorsFromBatch1(versionId, report.getBrandName(), operatorUserId, isManager);
+        List<PresaleCompetitorAggregator.ExtractedCompetitor> extractedCompetitorStats =
+                normalizationOutcome.competitors();
+        int competitorNormalizationCalls = normalizationOutcome.llmCalled() ? 1 : 0;
+        if (competitorNormalizationCalls > 0) {
+            updateCompletedLlmCalls(versionId,
+                    preflight.batch1TotalCalls() + preflight.cognitiveJudgeTotalCalls() + competitorNormalizationCalls);
+        }
+        List<String> extractedCompetitors = extractedCompetitorStats.stream()
+                .map(PresaleCompetitorAggregator.ExtractedCompetitor::name)
+                .toList();
         int extractedCompetitorCount = extractedCompetitors.size();
         int batch2TotalCalls = extractedCompetitorCount > 0
                 ? preflight.platformCount() * preflight.competitorPromptCount() * 2
@@ -298,7 +312,7 @@ public class PresaleGenerateOrchestrator {
                 versionId,
                 extractedCompetitorCount,
                 batch2TotalCalls,
-                preflight.batch1TotalCalls() + preflight.cognitiveJudgeTotalCalls()
+                preflight.batch1TotalCalls() + preflight.cognitiveJudgeTotalCalls() + competitorNormalizationCalls
                         + batch2TotalCalls + comparisonJudgeTotalCalls
         );
 
@@ -330,8 +344,10 @@ public class PresaleGenerateOrchestrator {
                 isManager,
                 judgeProgressCallback(
                         versionId,
-                        preflight.batch1TotalCalls() + preflight.cognitiveJudgeTotalCalls() + batch2TotalCalls,
                         preflight.batch1TotalCalls() + preflight.cognitiveJudgeTotalCalls()
+                                + competitorNormalizationCalls + batch2TotalCalls,
+                        preflight.batch1TotalCalls() + preflight.cognitiveJudgeTotalCalls()
+                                + competitorNormalizationCalls
                                 + batch2TotalCalls + comparisonJudgeTotalCalls
                 )
         );
@@ -339,7 +355,8 @@ public class PresaleGenerateOrchestrator {
         String rawJson;
         enterStage(versionId, STAGE_L1_AGGREGATE, "assemble raw snapshot");
         try {
-            rawJson = rawSnapshotAssembler.assemble(versionId, report, version, allDegraded, extractedCompetitors);
+            rawJson = rawSnapshotAssembler.assembleWithCompetitorStats(
+                    versionId, report, version, allDegraded, extractedCompetitorStats);
         } catch (IllegalStateException ex) {
             markFailed(versionId, FAILURE_CATEGORY_CONFIG_MISSING,
                     truncateReason("L1 aggregate failed: " + ex.getMessage()));
@@ -1413,8 +1430,14 @@ public class PresaleGenerateOrchestrator {
         lastProgressUpdateAtByVersion.remove(versionId);
     }
 
-    private List<String> extractTopCompetitorsFromBatch1(Long versionId, String brandName) {
-        return competitorAggregator.extractTopCompetitorsFromBatch1(versionId, brandName);
+    private PresaleCompetitorNormalizationService.NormalizationOutcome extractTopCompetitorsFromBatch1(
+            Long versionId,
+            String brandName,
+            Long operatorUserId,
+            boolean isManager) {
+        List<PresaleCompetitorAggregator.RawCompetitorMention> rawTop =
+                competitorAggregator.extractTopRawCompetitorMentions(versionId, brandName, 10);
+        return competitorNormalizationService.normalize(versionId, brandName, rawTop, operatorUserId, isManager);
     }
 
     private String normalizeName(String input) {

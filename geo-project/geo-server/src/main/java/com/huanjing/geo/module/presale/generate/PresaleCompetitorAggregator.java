@@ -96,13 +96,32 @@ public class PresaleCompetitorAggregator {
     }
 
     public List<String> extractTopCompetitorsFromBatch1(Long versionId, String brandName) {
+        return extractTopCompetitorStatsFromBatch1(versionId, brandName).stream()
+                .map(ExtractedCompetitor::name)
+                .toList();
+    }
+
+    public List<RawCompetitorMention> extractTopRawCompetitorMentions(Long versionId, String brandName, int limit) {
+        if (limit <= 0) {
+            return List.of();
+        }
         Batch1MentionStats stats = aggregateBatch1MentionStats(versionId, brandName);
         return stats.countByNormalized().entrySet().stream()
                 .sorted(Comparator
                         .comparing(Map.Entry<String, Integer>::getValue, Comparator.reverseOrder())
                         .thenComparing(Map.Entry::getKey))
-                .limit(3)
-                .map(entry -> stats.displayByNormalized().getOrDefault(entry.getKey(), entry.getKey()))
+                .limit(limit)
+                .map(entry -> new RawCompetitorMention(
+                        stats.displayByNormalized().getOrDefault(entry.getKey(), entry.getKey()),
+                        entry.getValue(),
+                        entry.getKey()
+                ))
+                .toList();
+    }
+
+    public List<ExtractedCompetitor> extractTopCompetitorStatsFromBatch1(Long versionId, String brandName) {
+        return extractTopRawCompetitorMentions(versionId, brandName, 3).stream()
+                .map(item -> new ExtractedCompetitor(item.name(), item.mentionCount(), List.of(item.name())))
                 .toList();
     }
 
@@ -121,5 +140,14 @@ public class PresaleCompetitorAggregator {
             Map<String, String> displayByNormalized,
             int denominatorRows
     ) {
+    }
+
+    public record RawCompetitorMention(String name, int mentionCount, String normalizedName) {
+    }
+
+    public record ExtractedCompetitor(String name, int mentionCount, List<String> aliases) {
+        public ExtractedCompetitor {
+            aliases = aliases == null ? List.of() : List.copyOf(aliases);
+        }
     }
 }
