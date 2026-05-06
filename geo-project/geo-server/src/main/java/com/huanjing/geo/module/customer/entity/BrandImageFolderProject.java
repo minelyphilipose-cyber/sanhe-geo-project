@@ -8,19 +8,11 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("brand_material")
-public class BrandMaterial {
+@TableName("brand_image_folder_project")
+public class BrandImageFolderProject {
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long brandId;
     private Long folderId;
-    private String category;
-    private String fileName;
-    private String fileType;
-    private String fileUrl;
-    private String objectKey;
-    private Long fileSize;
-    private Long createdBy;
+    private Long projectId;
     private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
 }

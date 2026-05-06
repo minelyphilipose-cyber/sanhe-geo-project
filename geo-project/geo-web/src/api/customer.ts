@@ -4,6 +4,7 @@ import type {
   PageResult,
   Company,
   Brand,
+  BrandImageFolder,
   BrandMaterial,
   BrandProfileVersion,
   CompanyAccount,
@@ -95,17 +96,53 @@ export function deleteBrand(id: number) {
   return request.delete<R<void>>(`/brands/${id}`)
 }
 
-export function uploadBrandMaterial(brandId: number, category: string, file: File) {
+export function uploadBrandMaterial(brandId: number, category: string, file: File, folderId?: number) {
   const formData = new FormData()
   formData.append('category', category)
+  if (folderId) {
+    formData.append('folderId', String(folderId))
+  }
   formData.append('file', file)
   return request.post<R<BrandMaterial>>(`/brands/${brandId}/materials/upload`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
 }
 
-export function getBrandMaterials(brandId: number, category?: string) {
-  return request.get<R<BrandMaterial[]>>(`/brands/${brandId}/materials`, { params: { category } })
+export function getBrandMaterials(brandId: number, category?: string, folderId?: number) {
+  return request.get<R<BrandMaterial[]>>(`/brands/${brandId}/materials`, { params: { category, folderId } })
+}
+
+export function getBrandImageFolders(brandId: number, params?: {
+  projectId?: number
+  tag?: string
+  activeOnly?: boolean
+  includeMaterials?: boolean
+}) {
+  return request.get<R<BrandImageFolder[]>>(`/brands/${brandId}/image-folders`, { params })
+}
+
+export function createBrandImageFolder(brandId: number, data: {
+  folderName: string
+  description?: string
+  status?: string
+  projectIds?: number[]
+  tags?: string[]
+}) {
+  return request.post<R<BrandImageFolder>>(`/brands/${brandId}/image-folders`, data)
+}
+
+export function updateBrandImageFolder(brandId: number, folderId: number, data: {
+  folderName: string
+  description?: string
+  status?: string
+  projectIds?: number[]
+  tags?: string[]
+}) {
+  return request.put<R<BrandImageFolder>>(`/brands/${brandId}/image-folders/${folderId}`, data)
+}
+
+export function suggestBrandImageFolderTags(brandId: number, keyword?: string) {
+  return request.get<R<string[]>>(`/brands/${brandId}/image-folder-tags`, { params: { keyword } })
 }
 
 export function deleteBrandMaterial(brandId: number, materialId: number) {

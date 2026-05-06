@@ -42,9 +42,10 @@ public class ProjectController {
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String stage,
-            @RequestParam(required = false) Long partnerId
+            @RequestParam(required = false) Long partnerId,
+            @RequestParam(required = false) Long brandId
     ) {
-        return R.ok(projectService.page(current, size, keyword, status, stage, partnerId));
+        return R.ok(projectService.page(current, size, keyword, status, stage, partnerId, brandId));
     }
 
     @GetMapping("/{id}")

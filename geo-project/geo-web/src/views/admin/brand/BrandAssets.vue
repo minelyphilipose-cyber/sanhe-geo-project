@@ -71,14 +71,51 @@
       </el-card>
     </div>
 
+    <el-card v-loading="foldersLoading" shadow="never">
+      <template #header>
+        <div class="flex items-center justify-between">
+          <span class="text-sm font-medium">图库文件夹</span>
+          <el-button v-if="canUploadMaterial" type="primary" size="small" @click="openCreateFolder">新建文件夹</el-button>
+        </div>
+      </template>
+      <DataState :loading="foldersLoading" :empty="!foldersLoading && imageFolders.length === 0" empty-text="暂无图库文件夹">
+        <div class="grid grid-cols-4 gap-3">
+          <div
+            v-for="folder in imageFolders"
+            :key="folder.id"
+            class="folder-card"
+            :class="{ 'folder-card-active': selectedFolderId === folder.id }"
+            @click="selectFolder(folder.id)"
+          >
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <div class="font-medium truncate">{{ folder.folderName }}</div>
+                <div class="text-xs text-gray-400 mt-1">{{ folderImageCount(folder.id) }} 张图片</div>
+              </div>
+              <el-tag size="small" :type="folder.status === 'active' ? 'success' : 'info'">
+                {{ folder.status === 'active' ? '启用' : '停用' }}
+              </el-tag>
+            </div>
+            <div v-if="folder.tags?.length" class="flex flex-wrap gap-1 mt-2">
+              <el-tag v-for="tag in folder.tags" :key="tag" size="small" type="info">{{ tag }}</el-tag>
+            </div>
+            <div v-if="folder.projectIds?.length" class="text-xs text-gray-500 mt-2">关联项目：{{ formatFolderProjects(folder.projectIds) }}</div>
+            <div class="flex justify-end gap-2 mt-3">
+              <el-button v-if="canUploadMaterial" size="small" @click.stop="openEditFolder(folder)">编辑</el-button>
+            </div>
+          </div>
+        </div>
+      </DataState>
+    </el-card>
+
     <el-card v-loading="materialsLoading" shadow="never">
       <template #header>
         <div class="flex items-center justify-between">
-          <span class="text-sm font-medium">素材管理</span>
+          <div>
+            <span class="text-sm font-medium">{{ selectedFolderName }}图片</span>
+            <span class="ml-2 text-xs text-gray-400">共 {{ selectedFolderMaterials.length }} 张</span>
+          </div>
           <div class="flex items-center gap-3">
-            <el-select v-model="materialFilter" placeholder="全部分类" clearable size="small" style="width: 130px">
-              <el-option v-for="cat in materialCategories" :key="cat.value" :label="cat.label" :value="cat.value" />
-            </el-select>
             <el-input v-model="searchKeyword" placeholder="搜索文件名" clearable size="small" style="width: 180px" :prefix-icon="Search" />
             <el-radio-group v-model="viewMode" size="small">
               <el-radio-button value="grid">
@@ -88,29 +125,17 @@
                 <el-icon><List /></el-icon>
               </el-radio-button>
             </el-radio-group>
-            <el-dropdown v-if="canUploadMaterial" @command="handleUploadCategory">
-              <el-button type="primary" size="small">
-                上传素材
-                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item v-for="cat in materialCategories" :key="cat.value" :command="cat.value">
-                    {{ cat.label }}
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+            <el-button v-if="canUploadMaterial" type="primary" size="small" @click="handleImageUpload">上传图片</el-button>
           </div>
         </div>
       </template>
 
-      <input ref="fileInputRef" type="file" multiple class="hidden" @change="onFileSelected" />
+      <input ref="fileInputRef" type="file" multiple class="hidden" :accept="uploadAccept" @change="onFileSelected" />
 
-      <DataState :loading="materialsLoading" :empty="!materialsLoading && filteredMaterials.length === 0" empty-text="暂无素材">
+      <DataState :loading="materialsLoading" :empty="!materialsLoading && visibleMaterials.length === 0" empty-text="暂无图片">
         <div v-if="viewMode === 'grid'" class="grid grid-cols-5 gap-4">
           <div
-            v-for="mat in filteredMaterials"
+            v-for="mat in visibleMaterials"
             :key="mat.id"
             class="group relative border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden hover:shadow-md transition-shadow cursor-pointer"
             @click="handleMaterialCardClick(mat)"
@@ -129,19 +154,16 @@
             </div>
             <div class="p-2">
               <div class="text-xs font-medium text-gray-700 dark:text-gray-300 truncate" :title="mat.fileName">{{ mat.fileName }}</div>
-              <div class="text-xs text-gray-400 mt-0.5">{{ categoryLabel(mat.category) }} · {{ formatFileSize(mat.fileSize) }}</div>
+              <div class="text-xs text-gray-400 mt-0.5">{{ folderName(mat.folderId) }} · {{ formatFileSize(mat.fileSize) }}</div>
             </div>
             <div class="absolute top-1 right-1 hidden group-hover:flex gap-1">
               <el-button circle size="small" type="primary" :icon="Download" @click.stop="downloadMaterial(mat)" />
               <el-button v-if="canDeleteMaterial" circle size="small" type="danger" :icon="Delete" @click.stop="confirmDeleteMaterial(mat)" />
             </div>
-            <el-tag class="absolute top-1 left-1" size="small" :type="categoryTagType(mat.category)" effect="dark">
-              {{ categoryLabel(mat.category) }}
-            </el-tag>
           </div>
         </div>
 
-        <el-table v-if="viewMode === 'list'" :data="filteredMaterials" border>
+        <el-table v-if="viewMode === 'list'" :data="visibleMaterials" border>
           <el-table-column label="文件名" min-width="240">
             <template #default="{ row }">
               <div class="flex items-center gap-2">
@@ -155,10 +177,8 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="分类" width="110">
-            <template #default="{ row }">
-              <el-tag size="small" :type="categoryTagType(row.category)">{{ categoryLabel(row.category) }}</el-tag>
-            </template>
+          <el-table-column label="文件夹" width="140">
+            <template #default="{ row }">{{ folderName(row.folderId) }}</template>
           </el-table-column>
           <el-table-column label="类型" width="80">
             <template #default="{ row }">
@@ -189,6 +209,16 @@
             </template>
           </el-table-column>
         </el-table>
+
+        <div v-if="selectedFolderMaterials.length > MATERIAL_COLLAPSED_LIMIT" class="folder-toggle">
+          <button type="button" class="folder-toggle-btn" @click="folderExpanded = !folderExpanded">
+            <span>{{ folderExpanded ? '收起' : '加载更多' }}</span>
+            <span class="folder-toggle-chevrons" :class="{ 'folder-toggle-chevrons-up': folderExpanded }">
+              <el-icon><ArrowDown /></el-icon>
+              <el-icon><ArrowDown /></el-icon>
+            </span>
+          </button>
+        </div>
       </DataState>
 
       <div v-if="materials.length > 0" class="flex items-center gap-4 mt-4 pt-3 border-t border-gray-100">
@@ -198,6 +228,122 @@
         </span>
       </div>
     </el-card>
+
+    <el-card v-loading="materialsLoading" shadow="never">
+      <template #header>
+        <div class="flex items-center justify-between">
+          <div>
+            <span class="text-sm font-medium">案例与资质资料</span>
+            <span class="ml-2 text-xs text-gray-400">共 {{ documentMaterials.length }} 个</span>
+          </div>
+          <el-dropdown v-if="canUploadMaterial" @command="handleDocumentUploadCategory">
+            <el-button type="primary" size="small">
+              上传资料
+              <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+            </el-button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-for="cat in documentCategories" :key="cat.value" :command="cat.value">
+                  {{ cat.label }}
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
+      </template>
+      <DataState :loading="materialsLoading" :empty="!materialsLoading && documentMaterials.length === 0" empty-text="暂无资料">
+        <el-table :data="documentMaterials" border>
+          <el-table-column label="文件名" min-width="260">
+            <template #default="{ row }">
+              <div class="flex items-center gap-2">
+                <el-icon :size="20" color="#6B7280"><component :is="fileIcon(row.fileType)" /></el-icon>
+                <span class="truncate">{{ row.fileName }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="类型" width="110">
+            <template #default="{ row }">
+              <el-tag size="small" :type="categoryTagType(row.category)">{{ categoryLabel(row.category) }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="格式" width="90">
+            <template #default="{ row }">
+              <span class="text-xs text-gray-500 uppercase">{{ row.fileType || '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="大小" width="110">
+            <template #default="{ row }">{{ formatFileSize(row.fileSize) }}</template>
+          </el-table-column>
+          <el-table-column prop="createdAt" label="上传时间" width="170" />
+          <el-table-column label="操作" width="160" fixed="right">
+            <template #default="{ row }">
+              <el-button v-if="isPreviewableType(row.fileType)" link type="primary" :loading="row._previewing" @click="previewMaterial(row)">预览</el-button>
+              <el-button link type="primary" :loading="row._downloading" @click="downloadMaterial(row)">下载</el-button>
+              <el-popconfirm v-if="canDeleteMaterial" title="确定删除此资料？" @confirm="removeMaterial(row)">
+                <template #reference>
+                  <el-button link type="danger">删除</el-button>
+                </template>
+              </el-popconfirm>
+            </template>
+          </el-table-column>
+        </el-table>
+      </DataState>
+    </el-card>
+
+    <el-dialog v-model="folderDialogVisible" :title="editingFolderId ? '编辑图库文件夹' : '新建图库文件夹'" width="520px">
+      <el-form :model="folderForm" label-width="90px">
+        <el-form-item label="名称" required>
+          <el-input v-model="folderForm.folderName" maxlength="128" show-word-limit />
+        </el-form-item>
+        <el-form-item label="状态">
+          <el-radio-group v-model="folderForm.status">
+            <el-radio-button label="active">启用</el-radio-button>
+            <el-radio-button label="disabled">停用</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item label="标签">
+          <el-select
+            v-model="folderForm.tags"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            remote
+            reserve-keyword
+            :remote-method="searchFolderTags"
+            placeholder="输入或选择标签，单个不超过10字"
+            style="width: 100%"
+          >
+            <el-option v-for="tag in folderTagOptions" :key="tag" :label="tag" :value="tag" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="关联项目">
+          <el-select
+            v-model="folderForm.projectIds"
+            multiple
+            filterable
+            clearable
+            :loading="projectsLoading"
+            placeholder="请选择当前品牌项目"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="project in brandProjects"
+              :key="project.id"
+              :label="project.projectName"
+              :value="project.id"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="说明">
+          <el-input v-model="folderForm.description" type="textarea" :rows="3" maxlength="500" show-word-limit />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="folderDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="folderSaving" @click="saveFolder">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -205,18 +351,23 @@
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Download, Delete, Grid, List } from '@element-plus/icons-vue'
+import { Search, Download, Delete, Grid, List, ArrowDown } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import {
   getBrandDetail,
+  getBrandImageFolders,
   getBrandMaterials,
   getBrandMaterialStream,
   getBrandStatementDetail,
   uploadBrandMaterial,
   deleteBrandMaterial,
   getBrandVersions,
+  createBrandImageFolder,
+  updateBrandImageFolder,
+  suggestBrandImageFolderTags,
 } from '@/api/customer'
-import type { Brand, BrandMaterial, BrandStatementView } from '@/types'
+import { getProjectList } from '@/api/project'
+import type { Brand, BrandImageFolder, BrandMaterial, BrandStatementView, Project } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 
 const route = useRoute()
@@ -238,17 +389,44 @@ type BrandMaterialExt = BrandMaterial & {
 const brand = ref<Brand | null>(null)
 const statement = ref<BrandStatementView | null>(null)
 const materials = ref<BrandMaterialExt[]>([])
+const imageFolders = ref<BrandImageFolder[]>([])
+const brandProjects = ref<Project[]>([])
+const foldersLoading = ref(false)
 const materialsLoading = ref(false)
-const materialFilter = ref('')
+const projectsLoading = ref(false)
+const selectedFolderId = ref<number | null>(null)
+const folderExpanded = ref(false)
 const searchKeyword = ref('')
 const viewMode = ref<'grid' | 'list'>('grid')
 const uploadingCategory = ref('')
+const uploadMode = ref<'image' | 'document'>('image')
 const fileInputRef = ref<HTMLInputElement>()
 const versionsTotal = ref(0)
+const folderDialogVisible = ref(false)
+const folderSaving = ref(false)
+const editingFolderId = ref<number | null>(null)
+
+type FolderForm = {
+  folderName: string
+  status: string
+  description: string
+  tags: string[]
+  projectIds: number[]
+}
+
+const folderForm = ref<FolderForm>({
+  folderName: '',
+  status: 'active',
+  description: '',
+  tags: [],
+  projectIds: [],
+})
+const folderTagOptions = ref<string[]>([])
 const thumbUrls = ref<string[]>([]) // 用于 cleanup
 let thumbRequestId = 0
 
 const MAX_UPLOAD_SIZE = 10 * 1024 * 1024
+const MATERIAL_COLLAPSED_LIMIT = 4
 
 const materialCategories = [
   { label: '品牌形象', value: 'brand_image' },
@@ -256,6 +434,8 @@ const materialCategories = [
   { label: '资质', value: 'qualification' },
   { label: '其他', value: 'other' },
 ]
+
+const documentCategories = materialCategories.filter((cat) => cat.value !== 'brand_image')
 
 // ────────── 仪表盘计算 ──────────
 const imageCount = computed(() => materials.value.filter((m) => isImageType(m.fileType)).length)
@@ -358,18 +538,34 @@ const latestUpdatedMeta = computed(() => {
   }
 })
 
+const selectedFolder = computed(() => {
+  if (!selectedFolderId.value) return null
+  return imageFolders.value.find((folder) => folder.id === selectedFolderId.value) || null
+})
+
+const selectedFolderName = computed(() => selectedFolder.value?.folderName || '图库')
+
+const uploadAccept = computed(() => uploadMode.value === 'image' ? 'image/*' : undefined)
+
 // ────────── 素材筛选 ──────────
-const filteredMaterials = computed(() => {
-  let list = materials.value
-  if (materialFilter.value) {
-    list = list.filter((m) => m.category === materialFilter.value)
-  }
+const selectedFolderMaterials = computed(() => {
+  let list = selectedFolderId.value
+    ? materials.value.filter((m) => m.folderId === selectedFolderId.value && m.category === 'brand_image' && isImageType(m.fileType))
+    : []
   if (searchKeyword.value.trim()) {
     const kw = searchKeyword.value.trim().toLowerCase()
     list = list.filter((m) => m.fileName?.toLowerCase().includes(kw))
   }
   return list
 })
+
+const visibleMaterials = computed(() => (
+  folderExpanded.value
+    ? selectedFolderMaterials.value
+    : selectedFolderMaterials.value.slice(0, MATERIAL_COLLAPSED_LIMIT)
+))
+
+const documentMaterials = computed(() => materials.value.filter((m) => m.category !== 'brand_image'))
 
 // ────────── 数据加载 ──────────
 async function loadBrand() {
@@ -405,6 +601,39 @@ async function loadMaterials() {
     materials.value = []
   } finally {
     materialsLoading.value = false
+  }
+}
+
+async function loadFolders() {
+  foldersLoading.value = true
+  try {
+    const { data } = await getBrandImageFolders(brandId.value, { includeMaterials: false })
+    imageFolders.value = data.data || []
+    if (!selectedFolderId.value || !imageFolders.value.some((folder) => folder.id === selectedFolderId.value)) {
+      selectedFolderId.value = imageFolders.value[0]?.id || null
+      folderExpanded.value = false
+    }
+  } catch {
+    imageFolders.value = []
+    selectedFolderId.value = null
+  } finally {
+    foldersLoading.value = false
+  }
+}
+
+async function loadBrandProjects() {
+  projectsLoading.value = true
+  try {
+    const { data } = await getProjectList({
+      current: 1,
+      size: 500,
+      brandId: brandId.value,
+    })
+    brandProjects.value = data.data?.records || []
+  } catch {
+    brandProjects.value = []
+  } finally {
+    projectsLoading.value = false
   }
 }
 
@@ -446,6 +675,12 @@ function cleanupThumbs() {
   thumbUrls.value = []
 }
 
+function selectFolder(folderId: number) {
+  if (selectedFolderId.value === folderId) return
+  selectedFolderId.value = folderId
+  folderExpanded.value = false
+}
+
 async function loadVersionsCount() {
   try {
     const { data } = await getBrandVersions(brandId.value, { current: 1, size: 1 })
@@ -456,7 +691,25 @@ async function loadVersionsCount() {
 }
 
 // ────────── 上传 ──────────
-function handleUploadCategory(category: string) {
+function handleImageUpload() {
+  uploadMode.value = 'image'
+  uploadingCategory.value = 'brand_image'
+  if (!selectedFolderId.value) {
+    selectedFolderId.value = imageFolders.value.find((folder) => folder.status === 'active')?.id || null
+  }
+  if (!selectedFolderId.value) {
+    ElMessage.warning('请先创建或选择一个启用的图库文件夹')
+    return
+  }
+  if (selectedFolder.value?.status !== 'active') {
+    ElMessage.warning('停用的图库文件夹不能上传素材')
+    return
+  }
+  fileInputRef.value?.click()
+}
+
+function handleDocumentUploadCategory(category: string) {
+  uploadMode.value = 'document'
   uploadingCategory.value = category
   fileInputRef.value?.click()
 }
@@ -476,8 +729,13 @@ async function onFileSelected(e: Event) {
       ElMessage.error(`文件「${file.name}」超过 10MB，已跳过`)
       continue
     }
+    if (uploadMode.value === 'image' && !file.type.startsWith('image/')) {
+      ElMessage.error(`文件「${file.name}」不是图片，已跳过`)
+      continue
+    }
     try {
-      await uploadBrandMaterial(brandId.value, uploadingCategory.value, file)
+      const folderId = uploadMode.value === 'image' ? selectedFolderId.value || undefined : undefined
+      await uploadBrandMaterial(brandId.value, uploadingCategory.value, file, folderId)
       successCount++
     } catch (err: any) {
       ElMessage.error(`「${file.name}」上传失败：${err?.response?.data?.message || '未知错误'}`)
@@ -486,7 +744,73 @@ async function onFileSelected(e: Event) {
   input.value = ''
   if (successCount > 0) {
     ElMessage.success(`成功上传 ${successCount} 个文件`)
-    await loadMaterials()
+    await Promise.all([loadFolders(), loadMaterials()])
+  }
+}
+
+function openCreateFolder() {
+  editingFolderId.value = null
+  folderForm.value = { folderName: '', status: 'active', description: '', tags: [], projectIds: [] }
+  searchFolderTags('')
+  folderDialogVisible.value = true
+}
+
+function openEditFolder(folder: BrandImageFolder) {
+  editingFolderId.value = folder.id
+  folderForm.value = {
+    folderName: folder.folderName,
+    status: folder.status || 'active',
+    description: folder.description || '',
+    tags: [...(folder.tags || [])],
+    projectIds: [...(folder.projectIds || [])],
+  }
+  searchFolderTags('')
+  folderDialogVisible.value = true
+}
+
+async function searchFolderTags(keyword: string) {
+  try {
+    const { data } = await suggestBrandImageFolderTags(brandId.value, keyword)
+    const selected = folderForm.value.tags || []
+    folderTagOptions.value = Array.from(new Set([...selected, ...(data.data || [])]))
+  } catch {
+    folderTagOptions.value = [...(folderForm.value.tags || [])]
+  }
+}
+
+async function saveFolder() {
+  const name = folderForm.value.folderName.trim()
+  if (!name) {
+    ElMessage.warning('请输入文件夹名称')
+    return
+  }
+  const tags = Array.from(new Set(folderForm.value.tags.map((item) => item.trim()).filter(Boolean)))
+  if (tags.some((tag) => tag.length > 10)) {
+    ElMessage.warning('单个标签不能超过10个字')
+    return
+  }
+  const projectIds = Array.from(new Set(folderForm.value.projectIds.filter((item) => Number.isFinite(item) && item > 0)))
+  folderSaving.value = true
+  try {
+    const payload = {
+      folderName: name,
+      status: folderForm.value.status,
+      description: folderForm.value.description.trim() || undefined,
+      tags,
+      projectIds,
+    }
+    if (editingFolderId.value) {
+      await updateBrandImageFolder(brandId.value, editingFolderId.value, payload)
+    } else {
+      await createBrandImageFolder(brandId.value, payload)
+    }
+    ElMessage.success('图库文件夹已保存')
+    folderDialogVisible.value = false
+    await loadFolders()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || '保存失败')
+  } finally {
+    folderSaving.value = false
   }
 }
 
@@ -557,10 +881,23 @@ async function removeMaterial(row: BrandMaterial) {
   try {
     await deleteBrandMaterial(brandId.value, row.id)
     ElMessage.success('已删除')
-    await loadMaterials()
+    await Promise.all([loadFolders(), loadMaterials()])
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.message || '删除失败')
   }
+}
+
+function folderName(folderId?: number | null) {
+  return imageFolders.value.find((folder) => folder.id === folderId)?.folderName || '默认图库'
+}
+
+function folderImageCount(folderId: number) {
+  return materials.value.filter((material) => material.folderId === folderId && material.category === 'brand_image' && isImageType(material.fileType)).length
+}
+
+function formatFolderProjects(projectIds: number[]) {
+  const projectNameMap = new Map(brandProjects.value.map((project) => [project.id, project.projectName]))
+  return projectIds.map((id) => projectNameMap.get(id) || `项目 ${id}`).join('、')
 }
 
 // ────────── 工具函数 ──────────
@@ -622,14 +959,15 @@ async function loadAll() {
   }
   thumbRequestId++
   cleanupThumbs()
-  await Promise.all([loadBrand(), loadStatement(), loadMaterials(), loadVersionsCount()])
+  await Promise.all([loadBrand(), loadStatement(), loadFolders(), loadMaterials(), loadBrandProjects(), loadVersionsCount()])
 }
 
 onMounted(loadAll)
 
 watch(() => route.params.id, (newId, oldId) => {
   if (newId !== oldId && newId) {
-    materialFilter.value = ''
+    selectedFolderId.value = null
+    folderExpanded.value = false
     searchKeyword.value = ''
     viewMode.value = 'grid'
     thumbRequestId++
@@ -673,5 +1011,62 @@ export default {}
 <style scoped>
 .stat-card :deep(.el-card__body) {
   padding: 16px;
+}
+
+.folder-card {
+  min-height: 112px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background-color 0.16s ease;
+}
+
+.folder-card:hover {
+  border-color: #f59e0b;
+}
+
+.folder-card-active {
+  border-color: #f97316;
+  background: #fff7ed;
+  box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.14);
+}
+
+.folder-toggle {
+  display: flex;
+  justify-content: center;
+  padding-top: 14px;
+}
+
+.folder-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: #f97316;
+  font-size: 14px;
+  line-height: 20px;
+  cursor: pointer;
+}
+
+.folder-toggle-btn:hover {
+  color: #ea580c;
+}
+
+.folder-toggle-chevrons {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+}
+
+.folder-toggle-chevrons :deep(.el-icon) {
+  margin-left: -4px;
+  font-size: 14px;
+}
+
+.folder-toggle-chevrons-up :deep(.el-icon) {
+  transform: rotate(180deg);
 }
 </style>

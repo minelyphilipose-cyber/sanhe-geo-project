@@ -3,6 +3,8 @@ package com.huanjing.geo.module.customer.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.customer.dto.BrandCreateRequest;
+import com.huanjing.geo.module.customer.dto.BrandImageFolderRequest;
+import com.huanjing.geo.module.customer.dto.BrandImageFolderVO;
 import com.huanjing.geo.module.customer.dto.BrandStatementRegenerateRequest;
 import com.huanjing.geo.module.customer.dto.BrandStatementUpdateRequest;
 import com.huanjing.geo.module.customer.dto.BrandUpdateRequest;
@@ -12,6 +14,7 @@ import com.huanjing.geo.module.customer.entity.BrandProfileVersion;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
 import com.huanjing.geo.module.dispatch.service.BrandStatementDispatchService;
 import com.huanjing.geo.module.customer.service.BrandService;
+import com.huanjing.geo.module.customer.service.BrandImageFolderService;
 import com.huanjing.geo.module.customer.service.BrandProfileService;
 import com.huanjing.geo.module.customer.service.BrandStatementService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -35,6 +38,7 @@ import java.nio.charset.StandardCharsets;
 public class BrandController {
 
     private final BrandService brandService;
+    private final BrandImageFolderService brandImageFolderService;
     private final BrandProfileService brandProfileService;
     private final BrandStatementService brandStatementService;
     private final BrandStatementDispatchService brandStatementDispatchService;
@@ -102,17 +106,49 @@ public class BrandController {
     public R<BrandMaterial> uploadMaterial(
             @PathVariable Long id,
             @RequestParam String category,
+            @RequestParam(required = false) Long folderId,
             @RequestPart("file") MultipartFile file
     ) {
-        return R.ok(brandProfileService.uploadMaterial(id, category, file));
+        return R.ok(brandProfileService.uploadMaterial(id, category, folderId, file));
     }
 
     @GetMapping("/{id}/materials")
     public R<List<BrandMaterial>> listMaterials(
             @PathVariable Long id,
-            @RequestParam(required = false) String category
+            @RequestParam(required = false) String category,
+            @RequestParam(required = false) Long folderId
     ) {
-        return R.ok(brandProfileService.listMaterials(id, category));
+        return R.ok(brandProfileService.listMaterials(id, category, folderId));
+    }
+
+    @GetMapping("/{id}/image-folders")
+    public R<List<BrandImageFolderVO>> listImageFolders(
+            @PathVariable Long id,
+            @RequestParam(required = false) Long projectId,
+            @RequestParam(required = false) String tag,
+            @RequestParam(defaultValue = "false") boolean activeOnly,
+            @RequestParam(defaultValue = "true") boolean includeMaterials
+    ) {
+        return R.ok(brandImageFolderService.listFolders(id, projectId, tag, activeOnly, includeMaterials));
+    }
+
+    @PostMapping("/{id}/image-folders")
+    public R<BrandImageFolderVO> createImageFolder(@PathVariable Long id,
+                                                   @Valid @RequestBody BrandImageFolderRequest req) {
+        return R.ok(brandImageFolderService.createFolder(id, req));
+    }
+
+    @PutMapping("/{id}/image-folders/{folderId}")
+    public R<BrandImageFolderVO> updateImageFolder(@PathVariable Long id,
+                                                   @PathVariable Long folderId,
+                                                   @Valid @RequestBody BrandImageFolderRequest req) {
+        return R.ok(brandImageFolderService.updateFolder(id, folderId, req));
+    }
+
+    @GetMapping("/{id}/image-folder-tags")
+    public R<List<String>> suggestImageFolderTags(@PathVariable Long id,
+                                                  @RequestParam(required = false) String keyword) {
+        return R.ok(brandImageFolderService.suggestTags(id, keyword));
     }
 
     @DeleteMapping("/{brandId}/materials/{materialId}")

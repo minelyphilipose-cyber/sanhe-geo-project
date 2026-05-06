@@ -8,6 +8,7 @@ import com.huanjing.geo.module.content.entity.SelfMediaMaterialMapping;
 import com.huanjing.geo.module.content.mapper.SelfMediaMaterialMappingMapper;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
+import com.huanjing.geo.module.customer.service.BrandImageFolderService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -37,6 +38,7 @@ public class WechatMediaService {
     private static final Set<String> IMAGE_TYPES = Set.of("jpg", "jpeg", "png", "gif", "bmp");
 
     private final BrandMaterialMapper brandMaterialMapper;
+    private final BrandImageFolderService brandImageFolderService;
     private final SelfMediaMaterialMappingMapper mappingMapper;
     private final MinioStorageService minioStorageService;
     private final WechatAuthorizerTokenService tokenService;
@@ -94,6 +96,7 @@ public class WechatMediaService {
         if (material == null || !brandId.equals(material.getBrandId())) {
             throw new BizException(404, "cover material not found");
         }
+        brandImageFolderService.requireActiveFolderForSelection(brandId, material.getFolderId());
         String type = material.getFileType() == null ? "" : material.getFileType().trim().toLowerCase(Locale.ROOT);
         if (!IMAGE_TYPES.contains(type)) {
             throw new BizException(400, "cover_type_invalid");

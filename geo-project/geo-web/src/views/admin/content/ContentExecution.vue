@@ -265,6 +265,26 @@
             <span>选择公众号封面</span>
             <el-tag size="small" type="info">{{ imageMaterials.length }} 张图片</el-tag>
           </div>
+          <div class="folder-toolbar">
+            <el-radio-group v-model="imageFolderScope" size="small" @change="handleFolderScopeChange">
+              <el-radio-button label="project">项目关联</el-radio-button>
+              <el-radio-button label="all">品牌全部</el-radio-button>
+            </el-radio-group>
+          </div>
+          <div v-if="displayImageFolders.length" class="folder-list">
+            <button
+              v-for="folder in displayImageFolders"
+              :key="folder.id"
+              type="button"
+              class="folder-item"
+              :class="{ selected: selectedImageFolderId === folder.id }"
+              @click="selectImageFolder(folder.id)"
+            >
+              <span>{{ folder.folderName }}</span>
+              <el-tag v-if="folder.projectRelated" size="small" type="success">项目</el-tag>
+              <el-tag size="small" type="info">{{ folder.materialCount || folder.materials.length }}</el-tag>
+            </button>
+          </div>
           <el-empty v-if="!imageMaterials.length" description="当前品牌暂无可用图片素材" />
           <div v-else class="cover-grid">
             <button
@@ -285,6 +305,26 @@
           <div class="cover-picker-header">
             <span>选择抖音图文图片</span>
             <el-tag size="small" type="info">{{ selectedDouyinImageMaterialIds.length }}/30</el-tag>
+          </div>
+          <div class="folder-toolbar">
+            <el-radio-group v-model="imageFolderScope" size="small" @change="handleFolderScopeChange">
+              <el-radio-button label="project">项目关联</el-radio-button>
+              <el-radio-button label="all">品牌全部</el-radio-button>
+            </el-radio-group>
+          </div>
+          <div v-if="displayImageFolders.length" class="folder-list">
+            <button
+              v-for="folder in displayImageFolders"
+              :key="folder.id"
+              type="button"
+              class="folder-item"
+              :class="{ selected: selectedImageFolderId === folder.id }"
+              @click="selectImageFolder(folder.id)"
+            >
+              <span>{{ folder.folderName }}</span>
+              <el-tag v-if="folder.projectRelated" size="small" type="success">项目</el-tag>
+              <el-tag size="small" type="info">{{ folder.materialCount || folder.materials.length }}</el-tag>
+            </button>
           </div>
           <el-empty v-if="!douyinImageMaterials.length" description="当前品牌暂无 JPG/PNG 图片素材" />
           <div v-else class="cover-grid">
@@ -415,7 +455,7 @@ import { ElMessage } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
-import type { ArticleDetailResponse, ArticleDraft, BrandMaterial, DistributionTask, DouyinCapability, SelfMediaAccount, RecommendedSite, WechatMpCapability } from '@/types'
+import type { ArticleDetailResponse, ArticleDraft, BrandImageFolder, BrandMaterial, DistributionTask, DouyinCapability, SelfMediaAccount, RecommendedSite, WechatMpCapability } from '@/types'
 import {
   checkSelfMediaAccountAuth,
   distributeContentArticle,
@@ -436,7 +476,7 @@ import {
   reviewContentArticle,
   saveContentArticleRevision,
 } from '@/api/content'
-import { getBrandDetail, getBrandMaterials } from '@/api/customer'
+import { getBrandDetail, getBrandImageFolders } from '@/api/customer'
 
 const userStore = useUserStore()
 const dictStore = useDictStore()
@@ -495,7 +535,9 @@ const douyinCapability = ref<DouyinCapability | null>(null)
 const wechatAccounts = ref<SelfMediaAccount[]>([])
 const douyinAccounts = ref<SelfMediaAccount[]>([])
 const checkingSelfMediaAccountId = ref<number | null>(null)
-const brandMaterials = ref<BrandMaterial[]>([])
+const brandImageFolders = ref<BrandImageFolder[]>([])
+const imageFolderScope = ref<'project' | 'all'>('project')
+const selectedImageFolderId = ref<number | null>(null)
 const selectedMediaPlatform = ref<'wechat_mp' | 'douyin'>('wechat_mp')
 const selectedSelfMediaAccountId = ref<number | null>(null)
 const selectedCoverMaterialId = ref<number | null>(null)
@@ -543,11 +585,20 @@ const douyinStatusTagType = computed<'success' | 'warning' | 'info'>(() => {
   return douyinActive.value ? 'success' : 'info'
 })
 const currentPlatformAccounts = computed(() => selectedMediaPlatform.value === 'douyin' ? douyinAccounts.value : wechatAccounts.value)
-const imageMaterials = computed(() => brandMaterials.value.filter((item) => {
+const projectImageFolders = computed(() => brandImageFolders.value.filter((folder) => folder.projectRelated))
+const displayImageFolders = computed(() => {
+  if (imageFolderScope.value === 'project' && projectImageFolders.value.length) {
+    return projectImageFolders.value
+  }
+  return brandImageFolders.value
+})
+const selectedImageFolder = computed(() => displayImageFolders.value.find((folder) => folder.id === selectedImageFolderId.value) || null)
+const currentFolderMaterials = computed(() => selectedImageFolder.value?.materials || [])
+const imageMaterials = computed(() => currentFolderMaterials.value.filter((item) => {
   const type = (item.fileType || '').toLowerCase()
   return ['jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(type)
 }))
-const douyinImageMaterials = computed(() => brandMaterials.value.filter((item) => {
+const douyinImageMaterials = computed(() => currentFolderMaterials.value.filter((item) => {
   const type = (item.fileType || '').toLowerCase()
   return ['jpg', 'jpeg', 'png'].includes(type)
 }))
@@ -733,7 +784,9 @@ async function openMediaDistribute(row: ArticleDraft) {
   selectedMediaPlatform.value = 'wechat_mp'
   wechatAccounts.value = []
   douyinAccounts.value = []
-  brandMaterials.value = []
+  brandImageFolders.value = []
+  imageFolderScope.value = 'project'
+  selectedImageFolderId.value = null
   selectedSelfMediaAccountId.value = null
   selectedCoverMaterialId.value = null
   selectedDouyinImageMaterialIds.value = []
@@ -755,14 +808,19 @@ async function openMediaDistribute(row: ArticleDraft) {
     wechatCapability.value = wechatCapabilityRes.data.data
     douyinCapability.value = douyinCapabilityRes.data.data
     distributionAttempts.value = distributionRes.data.data.attempts || []
-    const [accountRes, materialRes] = await Promise.all([
+    const [accountRes, folderRes] = await Promise.all([
       getSelfMediaAccountsByBrand(brandId),
-      getBrandMaterials(brandId),
+      getBrandImageFolders(brandId, {
+        projectId: row.projectId,
+        activeOnly: true,
+        includeMaterials: true,
+      }),
     ])
     const accounts = accountRes.data.data || []
     wechatAccounts.value = accounts.filter((account) => account.platform === 'wechat_mp')
     douyinAccounts.value = accounts.filter((account) => account.platform === 'douyin')
-    brandMaterials.value = materialRes.data.data || []
+    brandImageFolders.value = folderRes.data.data || []
+    ensureSelectedImageFolder()
     mediaDistributeVisible.value = true
   } catch {
     ElMessage.error('加载自媒体账号失败')
@@ -795,6 +853,7 @@ async function handleWechatPlatformClick() {
 function startWechatDraft(account: SelfMediaAccount) {
   selectedMediaPlatform.value = 'wechat_mp'
   selectedSelfMediaAccountId.value = account.id
+  ensureSelectedImageFolder()
   selectedCoverMaterialId.value = imageMaterials.value[0]?.id || null
 }
 
@@ -827,6 +886,30 @@ async function handleDouyinPlatformClick() {
 function startDouyinImageText(account: SelfMediaAccount) {
   selectedMediaPlatform.value = 'douyin'
   selectedSelfMediaAccountId.value = account.id
+  ensureSelectedImageFolder()
+}
+
+function handleFolderScopeChange() {
+  ensureSelectedImageFolder()
+  selectedCoverMaterialId.value = selectedMediaPlatform.value === 'wechat_mp' ? imageMaterials.value[0]?.id || null : null
+  selectedDouyinImageMaterialIds.value = selectedDouyinImageMaterialIds.value.filter((id) => douyinImageMaterials.value.some((item) => item.id === id))
+}
+
+function selectImageFolder(folderId: number) {
+  selectedImageFolderId.value = folderId
+  selectedCoverMaterialId.value = selectedMediaPlatform.value === 'wechat_mp' ? imageMaterials.value[0]?.id || null : null
+  selectedDouyinImageMaterialIds.value = selectedDouyinImageMaterialIds.value.filter((id) => douyinImageMaterials.value.some((item) => item.id === id))
+}
+
+function ensureSelectedImageFolder() {
+  const folders = displayImageFolders.value
+  if (!folders.length) {
+    selectedImageFolderId.value = null
+    return
+  }
+  if (!folders.some((folder) => folder.id === selectedImageFolderId.value)) {
+    selectedImageFolderId.value = folders[0].id
+  }
 }
 
 function toggleDouyinImage(materialId: number) {
@@ -1427,6 +1510,38 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   font-size: 14px;
   font-weight: 600;
   color: var(--el-text-color-primary);
+}
+
+.folder-toolbar {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 10px;
+}
+
+.folder-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.folder-item {
+  min-height: 34px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: #fff;
+  color: var(--el-text-color-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.folder-item.selected {
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
 }
 
 .cover-grid {

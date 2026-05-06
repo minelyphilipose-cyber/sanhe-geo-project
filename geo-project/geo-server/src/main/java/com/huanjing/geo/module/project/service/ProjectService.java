@@ -151,7 +151,7 @@ public class ProjectService {
     private final ActivityLogService activityLogService;
     private final BrandStatementDispatchService brandStatementDispatchService;
 
-    public Page<Project> page(long current, long size, String keyword, String status, String stage, Long partnerId) {
+    public Page<Project> page(long current, long size, String keyword, String status, String stage, Long partnerId, Long brandId) {
         SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
         LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<Project>()
@@ -166,6 +166,9 @@ public class ProjectService {
         }
         if (StringUtils.hasText(stage)) {
             wrapper.eq(Project::getStage, stage);
+        }
+        if (brandId != null) {
+            wrapper.eq(Project::getBrandId, brandId);
         }
 
         Long scopePartnerId = currentUserService.resolvePartnerQueryScope(user, partnerId);

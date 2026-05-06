@@ -20,6 +20,7 @@ export function getProjectList(params: {
   status?: string
   stage?: string
   partnerId?: number
+  brandId?: number
 }) {
   return request.get<R<PageResult<Project>>>('/projects', { params })
 }

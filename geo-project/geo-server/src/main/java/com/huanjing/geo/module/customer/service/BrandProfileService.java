@@ -39,15 +39,24 @@ public class BrandProfileService {
     private final CurrentUserService currentUserService;
     private final ActivityLogService activityLogService;
     private final MinioStorageService minioStorageService;
+    private final BrandImageFolderService brandImageFolderService;
     private final ObjectMapper objectMapper;
 
     public List<BrandMaterial> listMaterials(Long brandId, String category) {
+        return listMaterials(brandId, category, null);
+    }
+
+    public List<BrandMaterial> listMaterials(Long brandId, String category, Long folderId) {
         Brand brand = requireAccessibleBrand(brandId, true);
         LambdaQueryWrapper<BrandMaterial> wrapper = new LambdaQueryWrapper<BrandMaterial>()
                 .eq(BrandMaterial::getBrandId, brand.getId())
                 .orderByDesc(BrandMaterial::getCreatedAt);
         if (StringUtils.hasText(category)) {
             wrapper.eq(BrandMaterial::getCategory, category.trim());
+        }
+        if (folderId != null) {
+            brandImageFolderService.requireFolder(brand.getId(), folderId);
+            wrapper.eq(BrandMaterial::getFolderId, folderId);
         }
         return brandMaterialMapper.selectList(wrapper);
     }
@@ -71,10 +80,23 @@ public class BrandProfileService {
 
     @Transactional
     public BrandMaterial uploadMaterial(Long brandId, String category, MultipartFile file) {
+        return uploadMaterial(brandId, category, null, file);
+    }
+
+    @Transactional
+    public BrandMaterial uploadMaterial(Long brandId, String category, Long folderId, MultipartFile file) {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("brand.material.upload");
         Brand brand = requireAccessibleBrand(brandId, false);
         validateCategory(category);
+        Long targetFolderId = null;
+        if ("brand_image".equals(category)) {
+            targetFolderId = folderId == null
+                    ? brandImageFolderService.requireActiveFolderForSelection(
+                            brand.getId(),
+                            brandImageFolderService.ensureDefaultFolder(brandId, operator.getId()).getId()).getId()
+                    : brandImageFolderService.requireActiveFolderForSelection(brand.getId(), folderId).getId();
+        }
         if (file == null || file.isEmpty()) {
             throw new BizException(400, "Upload file is empty");
         }
@@ -90,6 +112,7 @@ public class BrandProfileService {
 
         BrandMaterial material = new BrandMaterial();
         material.setBrandId(brandId);
+        material.setFolderId(targetFolderId);
         material.setCategory(category);
         material.setFileName(safeFileName);
         material.setFileType(safeFileType);

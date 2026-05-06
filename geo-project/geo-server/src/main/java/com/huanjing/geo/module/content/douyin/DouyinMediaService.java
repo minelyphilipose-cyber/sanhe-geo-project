@@ -12,6 +12,7 @@ import com.huanjing.geo.module.content.entity.SelfMediaMaterialMapping;
 import com.huanjing.geo.module.content.mapper.SelfMediaMaterialMappingMapper;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
+import com.huanjing.geo.module.customer.service.BrandImageFolderService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -36,6 +37,7 @@ public class DouyinMediaService {
     private static final Set<String> SUPPORTED_IMAGE_TYPES = Set.of("jpg", "jpeg", "png");
 
     private final BrandMaterialMapper brandMaterialMapper;
+    private final BrandImageFolderService brandImageFolderService;
     private final SelfMediaMaterialMappingMapper mappingMapper;
     private final MinioStorageService minioStorageService;
     private final DouyinTokenService douyinTokenService;
@@ -138,6 +140,7 @@ public class DouyinMediaService {
         if (material == null || !brandId.equals(material.getBrandId())) {
             throw new BizException(404, "brand material not found");
         }
+        brandImageFolderService.requireActiveFolderForSelection(brandId, material.getFolderId());
         String type = normalizeType(material.getFileType());
         if (!SUPPORTED_IMAGE_TYPES.contains(type)) {
             throw new BizException(400, "douyin_image_type_invalid");

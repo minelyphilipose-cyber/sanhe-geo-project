@@ -177,6 +177,7 @@ export interface Brand {
 export interface BrandMaterial {
   id: number
   brandId: number
+  folderId?: number | null
   category: string
   fileName: string
   fileType?: string | null
@@ -186,6 +187,22 @@ export interface BrandMaterial {
   createdBy: number
   createdAt: string
   updatedAt: string
+}
+
+export interface BrandImageFolder {
+  id: number
+  brandId: number
+  folderName: string
+  description?: string | null
+  status: 'active' | 'disabled' | string
+  isDefault?: boolean
+  projectIds: number[]
+  tags: string[]
+  materials: BrandMaterial[]
+  materialCount?: number
+  projectRelated?: boolean
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface BrandProfileVersion {
