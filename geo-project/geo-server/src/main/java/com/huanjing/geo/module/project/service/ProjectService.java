@@ -14,7 +14,6 @@ import com.huanjing.geo.module.content.entity.ArticleQuestionRel;
 import com.huanjing.geo.module.content.entity.ArticleReviewLog;
 import com.huanjing.geo.module.content.entity.ContentQuestionRotation;
 import com.huanjing.geo.module.content.entity.DistributionTask;
-import com.huanjing.geo.module.content.entity.ProjectPublishQuota;
 import com.huanjing.geo.module.content.mapper.ArticleBatchMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
@@ -24,15 +23,11 @@ import com.huanjing.geo.module.content.mapper.ArticleQuestionRelMapper;
 import com.huanjing.geo.module.content.mapper.ArticleReviewLogMapper;
 import com.huanjing.geo.module.content.mapper.ContentQuestionRotationMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
-import com.huanjing.geo.module.content.mapper.ProjectPublishQuotaMapper;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
-import com.huanjing.geo.module.customer.entity.CompanyAccount;
-import com.huanjing.geo.module.customer.entity.CompanyAccountTxn;
-import com.huanjing.geo.module.customer.mapper.CompanyAccountMapper;
-import com.huanjing.geo.module.customer.mapper.CompanyAccountTxnMapper;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
+import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.dashboard.entity.ProjectDashboardShare;
 import com.huanjing.geo.module.dashboard.entity.ProjectDashboardSnapshot;
 import com.huanjing.geo.module.dashboard.mapper.ProjectDashboardShareMapper;
@@ -49,12 +44,6 @@ import com.huanjing.geo.module.dispatch.mapper.PollBatchMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollDailyStatMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.dispatch.mapper.ProjectPollRotationMapper;
-import com.huanjing.geo.module.partner.entity.Partner;
-import com.huanjing.geo.module.partner.entity.PartnerAccount;
-import com.huanjing.geo.module.partner.entity.PartnerAccountTxn;
-import com.huanjing.geo.module.partner.mapper.PartnerAccountMapper;
-import com.huanjing.geo.module.partner.mapper.PartnerAccountTxnMapper;
-import com.huanjing.geo.module.partner.mapper.PartnerMapper;
 import com.huanjing.geo.module.project.dto.ProjectCreateRequest;
 import com.huanjing.geo.module.project.dto.ProjectFlowUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectPlatformOptionVO;
@@ -89,7 +78,6 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.ArrayList;
@@ -113,12 +101,7 @@ public class ProjectService {
     private final ProjectMapper projectMapper;
     private final BrandMapper brandMapper;
     private final CompanyMapper companyMapper;
-    private final CompanyAccountMapper companyAccountMapper;
-    private final CompanyAccountTxnMapper companyAccountTxnMapper;
-    private final PartnerMapper partnerMapper;
-    private final PartnerAccountMapper partnerAccountMapper;
-    private final PartnerAccountTxnMapper partnerAccountTxnMapper;
-    private final PackagePlanService packagePlanService;
+    private final CompanyPackageBindingService companyPackageBindingService;
     private final QuestionPoolService questionPoolService;
     private final KeywordGroupService keywordGroupService;
     private final ArticleBatchMapper articleBatchMapper;
@@ -130,7 +113,6 @@ public class ProjectService {
     private final ArticleReviewLogMapper articleReviewLogMapper;
     private final ContentQuestionRotationMapper contentQuestionRotationMapper;
     private final DistributionTaskMapper distributionTaskMapper;
-    private final ProjectPublishQuotaMapper projectPublishQuotaMapper;
     private final ProjectDashboardShareMapper projectDashboardShareMapper;
     private final ProjectDashboardSnapshotMapper projectDashboardSnapshotMapper;
     private final DispatchAlertMapper dispatchAlertMapper;
@@ -238,10 +220,9 @@ public class ProjectService {
         String ownerType = resolveOwnerTypeByCompany(company);
         Long partnerId = resolvePartnerIdByCompany(company);
         validateOwnerBinding(ownerType, partnerId);
-        validateProjectBase(req.getPackageType());
+        companyPackageBindingService.requireActiveBinding(company.getId());
         validateProjectCompanyPartnerConsistency(ownerType, partnerId, company.getPartnerId());
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "project");
-        com.huanjing.geo.module.project.entity.PackagePlan packagePlan = packagePlanService.requireEnabledByType(req.getPackageType());
 
         Project project = new Project();
         project.setCompanyId(req.getCompanyId());
@@ -251,10 +232,6 @@ public class ProjectService {
         project.setBrandName(resolveBrandName(req.getBrandId()));
         project.setProjectName(req.getProjectName());
         project.setProjectAliases(normalizeAliases(req.getProjectAliases()));
-        project.setPackageType(req.getPackageType());
-        project.setPackagePrice(packagePlan.getStandardPrice());
-        project.setServiceMonths(packagePlan.getServiceMonths());
-        applyPackageSnapshot(project, packagePlan);
         project.setStatus("paused");
         project.setStage("pending_start");
         project.setOwnerType(ownerType);
@@ -282,15 +259,6 @@ public class ProjectService {
         project.setCreatedBy(operator.getId());
         project.setRemark(req.getRemark());
         projectMapper.insert(project);
-        replacePlatformSelections(
-                project.getId(),
-                project.getPlanPlatformP0Count(),
-                project.getPlanPlatformP1Count(),
-                project.getPlanPlatformP2Count(),
-                req.getSelectedPlatformCodesP0(),
-                req.getSelectedPlatformCodesP1(),
-                req.getSelectedPlatformCodesP2()
-        );
         replaceKeywordGroupSelections(project.getId(), project.getCompanyId(), req.getKeywordGroupIds());
         attachPlatformSelections(Collections.singletonList(project));
         attachKeywordGroupSelections(Collections.singletonList(project));
@@ -329,9 +297,7 @@ public class ProjectService {
         currentUserService.ensurePartnerResourceAccess(operator, partnerId, "project");
         Map<String, Object> before = snapshotProject(project);
         validateProjectCompanyPartnerConsistency(ownerType, partnerId, company.getPartnerId());
-        if (StringUtils.hasText(req.getPackageType()) && !req.getPackageType().equals(project.getPackageType())) {
-            throw new BizException(400, "Project package can only be changed through package change flow");
-        }
+        companyPackageBindingService.requireActiveBinding(company.getId());
 
         project.setCompanyId(company.getId());
         project.setCompanyName(company.getCompanyName());
@@ -359,15 +325,6 @@ public class ProjectService {
         );
         project.setRemark(req.getRemark());
         projectMapper.updateById(project);
-        replacePlatformSelections(
-                project.getId(),
-                project.getPlanPlatformP0Count(),
-                project.getPlanPlatformP1Count(),
-                project.getPlanPlatformP2Count(),
-                req.getSelectedPlatformCodesP0(),
-                req.getSelectedPlatformCodesP1(),
-                req.getSelectedPlatformCodesP2()
-        );
         replaceKeywordGroupSelections(project.getId(), project.getCompanyId(), req.getKeywordGroupIds());
         attachPlatformSelections(Collections.singletonList(project));
         attachKeywordGroupSelections(Collections.singletonList(project));
@@ -438,7 +395,6 @@ public class ProjectService {
         }
         String fromStatus = project.getStatus();
         if (isActivating(fromStatus, req.getStatus())) {
-            activateAndDeduct(project, operator);
             markActivatedIfNeeded(project);
         }
         project.setStatus(req.getStatus());
@@ -486,7 +442,6 @@ public class ProjectService {
 
         Map<String, Object> before = Map.of("status", project.getStatus(), "stage", project.getStage());
         if (isActivating(project.getStatus(), req.getStatus())) {
-            activateAndDeduct(project, operator);
             markActivatedIfNeeded(project);
         }
         project.setStatus(req.getStatus());
@@ -567,9 +522,6 @@ public class ProjectService {
                 .eq(ArticleGenerationLog::getProjectId, projectId));
         contentQuestionRotationMapper.delete(new LambdaQueryWrapper<ContentQuestionRotation>()
                 .eq(ContentQuestionRotation::getProjectId, projectId));
-        projectPublishQuotaMapper.delete(new LambdaQueryWrapper<ProjectPublishQuota>()
-                .eq(ProjectPublishQuota::getProjectId, projectId));
-
         projectDashboardSnapshotMapper.delete(new LambdaQueryWrapper<ProjectDashboardSnapshot>()
                 .eq(ProjectDashboardSnapshot::getProjectId, projectId));
         projectDashboardShareMapper.delete(new LambdaQueryWrapper<ProjectDashboardShare>()
@@ -644,55 +596,6 @@ public class ProjectService {
         return company;
     }
 
-    private Partner requireActivePartner(Long partnerId) {
-        Partner partner = partnerMapper.selectById(partnerId);
-        if (partner == null) {
-            throw new BizException(404, "Partner not found");
-        }
-        if (!"active".equals(partner.getStatus())) {
-            throw new BizException(400, "Partner status is not active");
-        }
-        return partner;
-    }
-
-    private PartnerAccount lockPartnerAccount(Long partnerId) {
-        PartnerAccount account = partnerAccountMapper.selectOne(
-                new LambdaQueryWrapper<PartnerAccount>()
-                        .eq(PartnerAccount::getPartnerId, partnerId)
-                        .last("FOR UPDATE")
-        );
-        if (account == null) {
-            throw new BizException(404, "Partner account not found");
-        }
-        if (!"active".equals(account.getStatus())) {
-            throw new BizException(400, "Partner account is not active");
-        }
-        return account;
-    }
-
-    private CompanyAccount lockCompanyAccount(Long companyId) {
-        CompanyAccount account = companyAccountMapper.selectOne(
-                new LambdaQueryWrapper<CompanyAccount>()
-                        .eq(CompanyAccount::getCompanyId, companyId)
-                        .last("FOR UPDATE")
-        );
-        if (account == null) {
-            account = new CompanyAccount();
-            account.setCompanyId(companyId);
-            account.setCurrentBalance(BigDecimal.ZERO);
-            account.setTotalRecharge(BigDecimal.ZERO);
-            account.setTotalDeduction(BigDecimal.ZERO);
-            account.setCurrency("CNY");
-            account.setStatus("active");
-            companyAccountMapper.insert(account);
-            return account;
-        }
-        if (!"active".equals(account.getStatus())) {
-            throw new BizException(400, "Customer account is not active");
-        }
-        return account;
-    }
-
     private void validateOwnerBinding(String ownerType, Long partnerId) {
         if (!OWNER_TYPES.contains(ownerType)) {
             throw new BizException(400, "Invalid owner_type");
@@ -703,24 +606,6 @@ public class ProjectService {
         if (("partner".equals(ownerType) || "joint".equals(ownerType)) && partnerId == null) {
             throw new BizException(400, "partner/joint project must bind partner_id");
         }
-    }
-
-    private void validateProjectBase(String packageType) {
-        if (!StringUtils.hasText(packageType)) {
-            throw new BizException(400, "package_type is required");
-        }
-    }
-
-    private BigDecimal calcDeduction(BigDecimal packagePrice, BigDecimal discountRate) {
-        if (packagePrice == null || packagePrice.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new BizException(400, "Invalid package_price for deduction");
-        }
-        if (discountRate == null || discountRate.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new BizException(400, "Invalid partner discount_rate");
-        }
-        return packagePrice
-                .multiply(discountRate)
-                .setScale(2, RoundingMode.HALF_UP);
     }
 
     private void validateStatus(String status) {
@@ -851,116 +736,8 @@ public class ProjectService {
         }
     }
 
-    private void activateAndDeduct(Project project, SysUser operator) {
-        if (StringUtils.hasText(project.getDeductionTxnNo())) {
-            return;
-        }
-        if ("direct".equals(project.getOwnerType())) {
-            activateDirectProject(project, operator);
-            return;
-        }
-        if ("partner".equals(project.getOwnerType()) || "joint".equals(project.getOwnerType())) {
-            activatePartnerProject(project, operator);
-        }
-    }
-
-    private void activateDirectProject(Project project, SysUser operator) {
-        CompanyAccount account = lockCompanyAccount(project.getCompanyId());
-        BigDecimal deductionAmount = project.getPackagePrice().setScale(2, RoundingMode.HALF_UP);
-        if (account.getCurrentBalance().compareTo(deductionAmount) < 0) {
-            throw new BizException(400, "客户余额不足，请先充值后再激活项目");
-        }
-
-        BigDecimal before = account.getCurrentBalance();
-        BigDecimal after = before.subtract(deductionAmount);
-        account.setCurrentBalance(after);
-        account.setTotalDeduction(account.getTotalDeduction().add(deductionAmount));
-        companyAccountMapper.updateById(account);
-
-        String txnNo = buildCustomerTxnNo("D");
-        CompanyAccountTxn txn = new CompanyAccountTxn();
-        txn.setCompanyId(project.getCompanyId());
-        txn.setAccountId(account.getId());
-        txn.setTxnNo(txnNo);
-        txn.setTxnType("deduction");
-        txn.setBizType("project_signing");
-        txn.setAmount(deductionAmount.negate());
-        txn.setBalanceBefore(before);
-        txn.setBalanceAfter(after);
-        txn.setRelatedProjectId(project.getId());
-        txn.setOperatorUserId(operator.getId());
-        txn.setReason("project activation auto deduction");
-        txn.setRemark("project activation auto deduction");
-        companyAccountTxnMapper.insert(txn);
-
-        project.setDeductionAmount(deductionAmount);
-        project.setDeductionTxnNo(txnNo);
-
-        activityLogService.logAction(
-                operator.getId(),
-                "project.sign_and_deduct",
-                "project",
-                project.getId(),
-                null,
-                Map.of("projectId", project.getId(), "deductionAmount", deductionAmount, "txnNo", txnNo),
-                Map.of("accountType", "company", "companyId", project.getCompanyId(), "balanceBefore", before, "balanceAfter", after)
-        );
-    }
-
-    private void activatePartnerProject(Project project, SysUser operator) {
-        Partner partner = requireActivePartner(project.getPartnerId());
-        PartnerAccount account = lockPartnerAccount(project.getPartnerId());
-        BigDecimal deductionAmount = calcDeduction(project.getPackagePrice(), partner.getDiscountRate());
-        if (account.getCurrentBalance().compareTo(deductionAmount) < 0) {
-            throw new BizException(400, "合伙人余额不足，请先充值后再激活项目");
-        }
-
-        BigDecimal before = account.getCurrentBalance();
-        BigDecimal after = before.subtract(deductionAmount);
-        account.setCurrentBalance(after);
-        account.setTotalDeduction(account.getTotalDeduction().add(deductionAmount));
-        partnerAccountMapper.updateById(account);
-
-        String txnNo = buildTxnNo("D");
-        PartnerAccountTxn txn = new PartnerAccountTxn();
-        txn.setPartnerId(partner.getId());
-        txn.setAccountId(account.getId());
-        txn.setTxnNo(txnNo);
-        txn.setTxnType("deduction");
-        txn.setBizType("project_signing");
-        txn.setAmount(deductionAmount.negate());
-        txn.setBalanceBefore(before);
-        txn.setBalanceAfter(after);
-        txn.setRelatedProjectId(project.getId());
-        txn.setOperatorUserId(operator.getId());
-        txn.setRemark("project activation auto deduction");
-        partnerAccountTxnMapper.insert(txn);
-
-        project.setDiscountRateSnapshot(partner.getDiscountRate());
-        project.setDeductionAmount(deductionAmount);
-        project.setDeductionTxnNo(txnNo);
-
-        activityLogService.logAction(
-                operator.getId(),
-                "project.sign_and_deduct",
-                "project",
-                project.getId(),
-                null,
-                Map.of("projectId", project.getId(), "deductionAmount", deductionAmount, "txnNo", txnNo),
-                Map.of("accountType", "partner", "partnerId", partner.getId(), "balanceBefore", before, "balanceAfter", after)
-        );
-    }
-
     private String buildProjectCode() {
         return "PRJ" + System.currentTimeMillis() + RandomUtil.randomNumbers(4);
-    }
-
-    private String buildTxnNo(String prefix) {
-        return "PT" + prefix + System.currentTimeMillis() + RandomUtil.randomNumbers(6);
-    }
-
-    private String buildCustomerTxnNo(String prefix) {
-        return "CT" + prefix + System.currentTimeMillis() + RandomUtil.randomNumbers(6);
     }
 
     private void attachPlatformSelections(List<Project> projects) {
@@ -1187,18 +964,8 @@ public class ProjectService {
         snapshot.put("activatedAt", project.getActivatedAt());
         snapshot.put("biweeklyAnchorDate", project.getBiweeklyAnchorDate());
         snapshot.put("expiredAt", project.getExpiredAt());
-        snapshot.put("packageType", project.getPackageType());
-        snapshot.put("packagePrice", project.getPackagePrice());
-        snapshot.put("serviceMonths", project.getServiceMonths());
         snapshot.put("planQuestionPoolSize", project.getPlanQuestionPoolSize());
         snapshot.put("planCoreQuestionCount", project.getPlanCoreQuestionCount());
-        snapshot.put("planPlatformP0Count", project.getPlanPlatformP0Count());
-        snapshot.put("planPlatformP1Count", project.getPlanPlatformP1Count());
-        snapshot.put("planPlatformP2Count", project.getPlanPlatformP2Count());
-        snapshot.put("planPerQuestionPlatformCalls", project.getPlanPerQuestionPlatformCalls());
-        snapshot.put("planPerQuestionCallsP0", project.getPlanPerQuestionCallsP0());
-        snapshot.put("planPerQuestionCallsP1", project.getPlanPerQuestionCallsP1());
-        snapshot.put("planPerQuestionCallsP2", project.getPlanPerQuestionCallsP2());
         snapshot.put("planBiweeklyFrequency", project.getPlanBiweeklyFrequency());
         snapshot.put("planMonthlyReportDepth", project.getPlanMonthlyReportDepth());
         snapshot.put("planQuarterlyReportDepth", project.getPlanQuarterlyReportDepth());
@@ -1287,28 +1054,6 @@ public class ProjectService {
                 .distinct()
                 .collect(Collectors.joining(","));
         return StringUtils.hasText(joined) ? joined : null;
-    }
-
-    private void applyPackageSnapshot(Project project, com.huanjing.geo.module.project.entity.PackagePlan packagePlan) {
-        project.setPlanQuestionPoolSize(packagePlan.getQuestionPoolSize());
-        project.setPlanCoreQuestionCount(packagePlan.getCoreQuestionCount());
-        project.setPlanPlatformP0Count(packagePlan.getPlatformP0Count());
-        project.setPlanPlatformP1Count(packagePlan.getPlatformP1Count());
-        project.setPlanPlatformP2Count(packagePlan.getPlatformP2Count());
-        project.setPlanPerQuestionPlatformCalls(packagePlan.getPerQuestionPlatformCalls());
-        project.setPlanPerQuestionCallsP0(packagePlan.getPerQuestionCallsP0() != null ? packagePlan.getPerQuestionCallsP0() : packagePlan.getPerQuestionPlatformCalls());
-        project.setPlanPerQuestionCallsP1(packagePlan.getPerQuestionCallsP1() != null ? packagePlan.getPerQuestionCallsP1() : packagePlan.getPerQuestionPlatformCalls());
-        project.setPlanPerQuestionCallsP2(packagePlan.getPerQuestionCallsP2() != null ? packagePlan.getPerQuestionCallsP2() : packagePlan.getPerQuestionPlatformCalls());
-        project.setPlanBiweeklyFrequency(packagePlan.getBiweeklyFrequency());
-        project.setPlanMonthlyReportDepth(packagePlan.getMonthlyReportDepth());
-        project.setPlanQuarterlyReportDepth(packagePlan.getQuarterlyReportDepth());
-        project.setPlanConsultantIntensity(packagePlan.getConsultantIntensity());
-        project.setPlanCompetitorInsightDepth(packagePlan.getCompetitorInsightDepth());
-        project.setPlanMediaDistributionIntensity(packagePlan.getMediaDistributionIntensity());
-        project.setPlanCommitmentTargetIntensity(packagePlan.getCommitmentTargetIntensity());
-        project.setPlanTargetMetricType(packagePlan.getTargetMetricType());
-        project.setPlanTargetMetricValue(packagePlan.getTargetMetricValue());
-        project.setPlanTargetWindowDays(packagePlan.getTargetWindowDays());
     }
 
     private String resolveBrandName(Long brandId) {

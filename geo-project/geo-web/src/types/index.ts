@@ -222,18 +222,8 @@ export interface Project {
   brandId: number | null
   projectName: string
   projectAliases?: string | null
-  packageType: PackageType
-  packagePrice?: number
-  serviceMonths?: number
   planQuestionPoolSize?: number | null
   planCoreQuestionCount?: number | null
-  planPlatformP0Count?: number | null
-  planPlatformP1Count?: number | null
-  planPlatformP2Count?: number | null
-  planPerQuestionPlatformCalls?: number | null
-  planPerQuestionCallsP0?: number | null
-  planPerQuestionCallsP1?: number | null
-  planPerQuestionCallsP2?: number | null
   planBiweeklyFrequency?: number | null
   planMonthlyReportDepth?: string | null
   planQuarterlyReportDepth?: string | null
@@ -272,9 +262,6 @@ export interface Project {
   deliveryMode: string
   remark?: string | null
   createdAt: string
-  selectedPlatformCodesP0?: string[]
-  selectedPlatformCodesP1?: string[]
-  selectedPlatformCodesP2?: string[]
   selectedKeywordGroupIds?: number[]
   selectedKeywordGroupCount?: number
   selectedKeywordSavedKeywords?: number
@@ -1037,13 +1024,6 @@ export interface PackagePlan {
   serviceMonths: number
   questionPoolSize: number
   coreQuestionCount: number
-  platformP0Count: number
-  platformP1Count: number
-  platformP2Count: number
-  perQuestionPlatformCalls: number
-  perQuestionCallsP0: number
-  perQuestionCallsP1: number
-  perQuestionCallsP2: number
   biweeklyFrequency: number
   monthlyReportDepth: string
   quarterlyReportDepth: string
@@ -1057,7 +1037,18 @@ export interface PackagePlan {
   enabled: boolean
   sortOrder: number
   remark?: string | null
-  contentConfigs?: PackageContentConfig[]
+  channelQuotaConfigs?: PackageChannelQuotaConfig[]
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface PackageChannelQuotaConfig {
+  id?: number
+  packagePlanId?: number
+  channelCode: 'official_site' | 'industry_site' | 'self_media' | 'authority_media' | string
+  periodType: 'day' | 'week' | 'month' | 'total' | string
+  quotaLimit: number
+  enabled: boolean
   createdAt?: string
   updatedAt?: string
 }

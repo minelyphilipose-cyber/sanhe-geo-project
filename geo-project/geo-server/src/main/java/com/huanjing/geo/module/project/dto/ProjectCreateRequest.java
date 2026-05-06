@@ -6,7 +6,6 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
-import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -19,10 +18,6 @@ public class ProjectCreateRequest {
     @NotBlank
     private String projectName;
     private String projectAliases;
-    @NotBlank
-    private String packageType;
-    private BigDecimal packagePrice;
-    private Integer serviceMonths;
     private String ownerType;
     private Long partnerId;
     private String provinceCode;
@@ -44,9 +39,6 @@ public class ProjectCreateRequest {
     private List<String> extraForbiddenPhrases;
     private String contentNote;
     private String remark;
-    private List<String> selectedPlatformCodesP0;
-    private List<String> selectedPlatformCodesP1;
-    private List<String> selectedPlatformCodesP2;
     @NotEmpty
     @Size(max = 10)
     private List<Long> keywordGroupIds;

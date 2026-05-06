@@ -1,5 +1,12 @@
 import request from './request'
-import type { PackageContentConfig, PackagePlan, PageResult, R } from '@/types'
+import type { PackageChannelQuotaConfig, PackagePlan, PageResult, R } from '@/types'
+
+export interface PackageChannelQuotaPayload {
+  channelCode: string
+  periodType: 'day' | 'week' | 'month' | 'total' | string
+  quotaLimit: number
+  enabled: boolean
+}
 
 export function getEnabledPackagePlans() {
   return request.get<R<PackagePlan[]>>('/package-plans/enabled')
@@ -21,13 +28,6 @@ export function createPackagePlan(data: {
   serviceMonths: number
   questionPoolSize: number
   coreQuestionCount: number
-  platformP0Count: number
-  platformP1Count: number
-  platformP2Count: number
-  perQuestionPlatformCalls: number
-  perQuestionCallsP0: number
-  perQuestionCallsP1: number
-  perQuestionCallsP2: number
   biweeklyFrequency: number
   monthlyReportDepth: string
   quarterlyReportDepth: string
@@ -41,6 +41,7 @@ export function createPackagePlan(data: {
   enabled: boolean
   sortOrder: number
   remark?: string
+  channelQuotaConfigs?: PackageChannelQuotaPayload[]
 }) {
   return request.post<R<PackagePlan>>('/admin/package-plans', data)
 }
@@ -51,13 +52,6 @@ export function updatePackagePlan(id: number, data: {
   serviceMonths: number
   questionPoolSize: number
   coreQuestionCount: number
-  platformP0Count: number
-  platformP1Count: number
-  platformP2Count: number
-  perQuestionPlatformCalls: number
-  perQuestionCallsP0: number
-  perQuestionCallsP1: number
-  perQuestionCallsP2: number
   biweeklyFrequency: number
   monthlyReportDepth: string
   quarterlyReportDepth: string
@@ -70,6 +64,7 @@ export function updatePackagePlan(id: number, data: {
   targetWindowDays: number
   sortOrder: number
   remark?: string
+  channelQuotaConfigs?: PackageChannelQuotaPayload[]
 }) {
   return request.put<R<PackagePlan>>(`/admin/package-plans/${id}`, data)
 }
@@ -78,17 +73,10 @@ export function updatePackagePlanStatus(id: number, enabled: boolean) {
   return request.put<R<void>>(`/admin/package-plans/${id}/status`, { enabled })
 }
 
-export function getPackageContentConfigs(id: number) {
-  return request.get<R<PackageContentConfig[]>>(`/admin/package-plans/${id}/content-configs`)
+export function getPackageChannelQuotas(id: number) {
+  return request.get<R<PackageChannelQuotaConfig[]>>(`/admin/package-plans/${id}/channel-quotas`)
 }
 
-export function updatePackageContentConfigs(id: number, data: Array<{
-  articleType: string
-  articlesPerBatch: number
-  questionsPerArticle: number
-  publishSiteTier: string
-  publishSiteCount: number
-  isActive: boolean
-}>) {
-  return request.put<R<PackageContentConfig[]>>(`/admin/package-plans/${id}/content-configs`, data)
+export function updatePackageChannelQuotas(id: number, data: PackageChannelQuotaPayload[]) {
+  return request.put<R<PackageChannelQuotaConfig[]>>(`/admin/package-plans/${id}/channel-quotas`, data)
 }

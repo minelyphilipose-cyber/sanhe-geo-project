@@ -18,8 +18,10 @@ import com.huanjing.geo.module.content.service.GeoPromptBuilder;
 import com.huanjing.geo.module.content.service.ArticleGenerationPersistenceService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
+import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
+import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.customer.service.BrandStatementService;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
 import com.huanjing.geo.module.dispatch.entity.PollBatch;
@@ -110,6 +112,7 @@ public class DispatchExecutionService {
     private final ProjectPollRotationMapper projectPollRotationMapper;
     private final CompanyMapper companyMapper;
     private final BrandMapper brandMapper;
+    private final CompanyPackageBindingService companyPackageBindingService;
     private final BrandStatementService brandStatementService;
     private final SysDictItemMapper sysDictItemMapper;
     private final DispatchProperties dispatchProperties;
@@ -171,7 +174,8 @@ public class DispatchExecutionService {
             return;
         }
 
-        int planCap = project.getPlanQuestionPoolSize() == null ? 0 : project.getPlanQuestionPoolSize();
+        CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(project.getCompanyId());
+        int planCap = binding.getQuestionPoolLimit() == null ? 0 : binding.getQuestionPoolLimit();
         int takeCount = planCap > 0 ? Math.min(planCap, allKeywords.size()) : allKeywords.size();
         List<PollKeywordCandidate> selected = selectRotatedKeywords(project.getId(), "KW", allKeywords, takeCount);
 
@@ -330,14 +334,15 @@ public class DispatchExecutionService {
             return;
         }
 
+        CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(project.getCompanyId());
         List<PackageContentConfig> configs = packageContentConfigMapper.selectList(
                 new LambdaQueryWrapper<PackageContentConfig>()
-                        .eq(PackageContentConfig::getPackageType, project.getPackageType())
+                        .eq(PackageContentConfig::getPackageType, binding.getPackageType())
                         .eq(PackageContentConfig::getIsActive, true)
                         .orderByAsc(PackageContentConfig::getArticleType)
         );
         if (configs.isEmpty()) {
-            log.info("Skip CONTENT_GENERATION task {}, no config for package {}", task.getId(), project.getPackageType());
+            log.info("Skip CONTENT_GENERATION task {}, no config for package {}", task.getId(), binding.getPackageType());
             return;
         }
         geoPromptBuilder.ensureHasSavedKeywords(project.getId());
@@ -386,7 +391,7 @@ public class DispatchExecutionService {
                     promptSnapshot.put("userPrompt", prompt.userPrompt());
                     Map<String, Object> inputSnapshot = new LinkedHashMap<>();
                     inputSnapshot.put("projectName", project.getProjectName());
-                    inputSnapshot.put("packageType", project.getPackageType());
+                inputSnapshot.put("packageType", binding.getPackageType());
                     inputSnapshot.put("source", "keyword_group");
                     articleGenerationPersistenceService.persistGeneratedArticle(
                             batch.getId(),

@@ -2,11 +2,11 @@ package com.huanjing.geo.module.project.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
-import com.huanjing.geo.module.content.entity.PackageContentConfig;
-import com.huanjing.geo.module.project.dto.PackageContentConfigRequest;
+import com.huanjing.geo.module.project.dto.PackageChannelQuotaConfigRequest;
 import com.huanjing.geo.module.project.dto.PackagePlanCreateRequest;
 import com.huanjing.geo.module.project.dto.PackagePlanStatusUpdateRequest;
 import com.huanjing.geo.module.project.dto.PackagePlanUpdateRequest;
+import com.huanjing.geo.module.project.entity.PackageChannelQuotaConfig;
 import com.huanjing.geo.module.project.entity.PackagePlan;
 import com.huanjing.geo.module.project.service.PackagePlanService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -50,14 +50,14 @@ public class PackagePlanAdminController {
         return R.ok();
     }
 
-    @GetMapping("/{id}/content-configs")
-    public R<List<PackageContentConfig>> contentConfigs(@PathVariable Long id) {
-        return R.ok(packagePlanService.listContentConfigs(id));
+    @GetMapping("/{id}/channel-quotas")
+    public R<List<PackageChannelQuotaConfig>> channelQuotas(@PathVariable Long id) {
+        return R.ok(packagePlanService.listChannelQuotaConfigs(id));
     }
 
-    @PutMapping("/{id}/content-configs")
-    public R<List<PackageContentConfig>> updateContentConfigs(@PathVariable Long id,
-                                                              @RequestBody(required = false) List<PackageContentConfigRequest> req) {
-        return R.ok(packagePlanService.saveContentConfigsByPlanId(id, req));
+    @PutMapping("/{id}/channel-quotas")
+    public R<List<PackageChannelQuotaConfig>> updateChannelQuotas(@PathVariable Long id,
+                                                                  @RequestBody(required = false) List<PackageChannelQuotaConfigRequest> req) {
+        return R.ok(packagePlanService.saveChannelQuotaConfigsByPlanId(id, req));
     }
 }

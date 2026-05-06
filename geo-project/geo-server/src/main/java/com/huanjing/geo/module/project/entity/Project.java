@@ -23,18 +23,14 @@ public class Project {
     private String brandName;
     private String projectName;
     private String projectAliases;
+    @TableField(exist = false)
     private String packageType;
+    @TableField(exist = false)
     private BigDecimal packagePrice;
+    @TableField(exist = false)
     private Integer serviceMonths;
     private Integer planQuestionPoolSize;
     private Integer planCoreQuestionCount;
-    private Integer planPlatformP0Count;
-    private Integer planPlatformP1Count;
-    private Integer planPlatformP2Count;
-    private Integer planPerQuestionPlatformCalls;
-    private Integer planPerQuestionCallsP0;
-    private Integer planPerQuestionCallsP1;
-    private Integer planPerQuestionCallsP2;
     private Integer planBiweeklyFrequency;
     private String planMonthlyReportDepth;
     private String planQuarterlyReportDepth;

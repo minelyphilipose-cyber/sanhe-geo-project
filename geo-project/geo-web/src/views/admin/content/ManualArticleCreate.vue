@@ -60,7 +60,7 @@
                   <div class="project-meta">
                     <span class="project-name">{{ selectedProject.projectName }}</span>
                     <span class="project-desc">
-                      #{{ selectedProject.id }} · 品牌：{{ selectedProject.brandName || '-' }} · 套餐：{{ selectedProject.packageType }}
+                      #{{ selectedProject.id }} · 品牌：{{ selectedProject.brandName || '-' }}
                     </span>
                   </div>
                 </div>

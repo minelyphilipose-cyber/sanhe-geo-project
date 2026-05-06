@@ -31,12 +31,8 @@ public class BrandOfficialSiteVO {
     private LocalDateTime updatedAt;
     // credentialsCipher: intentionally omitted - never expose to API consumers
     // createdBy: intentionally omitted - internal audit field
-    // Quota fields (monthlyQuotaUsed / monthlyLimit) intentionally NOT included:
-    // quota in this system is at the project level (project_publish_quota table),
-    // not at the brand_official_site level. A brand can own multiple projects, so
-    // surfacing "site quota" in this VO has no well-defined semantics.
-    // For quota display, callers should use GET /api/content/projects/{id}/publish-quota
-    // against the article's projectId.
+    // Quota fields intentionally omitted: publishing quota is owned by the
+    // customer's active package binding and channel snapshot, not by a site row.
 
     public static BrandOfficialSiteVO from(BrandOfficialSite entity) {
         if (entity == null) {

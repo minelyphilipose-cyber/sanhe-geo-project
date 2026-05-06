@@ -4,11 +4,14 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.customer.dto.CompanyCreateRequest;
 import com.huanjing.geo.module.customer.dto.CompanyDeductRequest;
+import com.huanjing.geo.module.customer.dto.CompanyPackageBindRequest;
 import com.huanjing.geo.module.customer.dto.CompanyRechargeRequest;
 import com.huanjing.geo.module.customer.dto.CompanyUpdateRequest;
 import com.huanjing.geo.module.customer.entity.CompanyAccount;
 import com.huanjing.geo.module.customer.entity.CompanyAccountTxn;
 import com.huanjing.geo.module.customer.entity.Company;
+import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
+import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.customer.service.CompanyService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -22,6 +25,7 @@ import org.springframework.web.bind.annotation.*;
 public class CompanyController {
 
     private final CompanyService companyService;
+    private final CompanyPackageBindingService companyPackageBindingService;
 
     @GetMapping
     public R<Page<Company>> page(
@@ -81,5 +85,26 @@ public class CompanyController {
     @PostMapping("/{id}/account/deduct")
     public R<CompanyAccountTxn> deduct(@PathVariable Long id, @Valid @RequestBody CompanyDeductRequest req) {
         return R.ok(companyService.deduct(id, req));
+    }
+
+    @GetMapping("/{id}/package-bindings")
+    public R<java.util.List<CompanyPackageBinding>> packageBindings(@PathVariable Long id) {
+        return R.ok(companyPackageBindingService.bindings(id));
+    }
+
+    @GetMapping("/{id}/package-binding/active")
+    public R<CompanyPackageBinding> activePackageBinding(@PathVariable Long id) {
+        return R.ok(companyPackageBindingService.activeBinding(id));
+    }
+
+    @PostMapping("/{id}/package-binding")
+    public R<CompanyPackageBinding> bindPackage(@PathVariable Long id, @Valid @RequestBody CompanyPackageBindRequest req) {
+        return R.ok(companyPackageBindingService.bind(id, req.getPackagePlanId()));
+    }
+
+    @DeleteMapping("/{id}/package-binding")
+    public R<Void> unbindPackage(@PathVariable Long id) {
+        companyPackageBindingService.unbind(id);
+        return R.ok();
     }
 }

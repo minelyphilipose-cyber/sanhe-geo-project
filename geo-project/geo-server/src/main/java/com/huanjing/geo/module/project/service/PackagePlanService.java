@@ -3,12 +3,12 @@ package com.huanjing.geo.module.project.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
-import com.huanjing.geo.module.content.entity.PackageContentConfig;
-import com.huanjing.geo.module.content.mapper.PackageContentConfigMapper;
-import com.huanjing.geo.module.project.dto.PackageContentConfigRequest;
+import com.huanjing.geo.module.project.dto.PackageChannelQuotaConfigRequest;
 import com.huanjing.geo.module.project.dto.PackagePlanCreateRequest;
 import com.huanjing.geo.module.project.dto.PackagePlanUpdateRequest;
+import com.huanjing.geo.module.project.entity.PackageChannelQuotaConfig;
 import com.huanjing.geo.module.project.entity.PackagePlan;
+import com.huanjing.geo.module.project.mapper.PackageChannelQuotaConfigMapper;
 import com.huanjing.geo.module.project.mapper.PackagePlanMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +16,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -33,12 +32,17 @@ public class PackagePlanService {
     private static final Pattern PACKAGE_TYPE_PATTERN = Pattern.compile("^[a-z][a-z0-9_]{2,31}$");
     private static final Set<String> INTENSITY_LEVELS = Set.of("L1", "L2", "L3");
     private static final Set<Integer> BIWEEKLY_FREQUENCY_VALUES = Set.of(1, 2);
-    private static final Set<String> CONTENT_ARTICLE_TYPES = Set.of("faq", "scenario_content", "industry_article", "stage_advice");
-    private static final Set<String> PUBLISH_SITE_TIERS = Set.of("S0", "S1", "S2");
-    private static final List<String> DEFAULT_CONTENT_ARTICLE_TYPE_ORDER = List.of("faq", "scenario_content", "industry_article", "stage_advice");
+    private static final Set<String> CHANNEL_CODES = Set.of("official_site", "industry_site", "self_media", "authority_media");
+    private static final Set<String> PERIOD_TYPES = Set.of("day", "week", "month", "total");
+    private static final Map<String, String> DEFAULT_PERIOD_BY_CHANNEL = Map.of(
+            "official_site", "week",
+            "industry_site", "week",
+            "self_media", "week",
+            "authority_media", "total"
+    );
 
     private final PackagePlanMapper packagePlanMapper;
-    private final PackageContentConfigMapper packageContentConfigMapper;
+    private final PackageChannelQuotaConfigMapper packageChannelQuotaConfigMapper;
     private final CurrentUserService currentUserService;
 
     public Page<PackagePlan> page(long current, long size, String keyword, Boolean enabled) {
@@ -55,7 +59,7 @@ public class PackagePlanService {
         }
         Page<PackagePlan> result = packagePlanMapper.selectPage(new Page<>(current, size), wrapper);
         normalizeLegacyPrices(result.getRecords());
-        attachContentConfigs(result.getRecords());
+        attachChannelQuotaConfigs(result.getRecords());
         return result;
     }
 
@@ -68,7 +72,7 @@ public class PackagePlanService {
                         .orderByAsc(PackagePlan::getId)
         );
         normalizeLegacyPrices(plans);
-        attachContentConfigs(plans);
+        attachChannelQuotaConfigs(plans);
         return plans;
     }
 
@@ -79,13 +83,6 @@ public class PackagePlanService {
         validateBusinessFields(
                 req.getQuestionPoolSize(),
                 req.getCoreQuestionCount(),
-                req.getPlatformP0Count(),
-                req.getPlatformP1Count(),
-                req.getPlatformP2Count(),
-                req.getPerQuestionPlatformCalls(),
-                req.getPerQuestionCallsP0(),
-                req.getPerQuestionCallsP1(),
-                req.getPerQuestionCallsP2(),
                 req.getBiweeklyFrequency(),
                 req.getMonthlyReportDepth(),
                 req.getQuarterlyReportDepth(),
@@ -110,18 +107,6 @@ public class PackagePlanService {
         plan.setServiceMonths(req.getServiceMonths());
         plan.setQuestionPoolSize(req.getQuestionPoolSize());
         plan.setCoreQuestionCount(req.getCoreQuestionCount());
-        plan.setPlatformP0Count(req.getPlatformP0Count());
-        plan.setPlatformP1Count(req.getPlatformP1Count());
-        plan.setPlatformP2Count(req.getPlatformP2Count());
-        plan.setPerQuestionPlatformCalls(resolveUnifiedPerQuestionCalls(
-                req.getPerQuestionPlatformCalls(),
-                req.getPerQuestionCallsP0(),
-                req.getPerQuestionCallsP1(),
-                req.getPerQuestionCallsP2()
-        ));
-        plan.setPerQuestionCallsP0(req.getPerQuestionCallsP0());
-        plan.setPerQuestionCallsP1(req.getPerQuestionCallsP1());
-        plan.setPerQuestionCallsP2(req.getPerQuestionCallsP2());
         plan.setBiweeklyFrequency(req.getBiweeklyFrequency());
         plan.setMonthlyReportDepth(req.getMonthlyReportDepth().trim());
         plan.setQuarterlyReportDepth(req.getQuarterlyReportDepth().trim());
@@ -136,8 +121,8 @@ public class PackagePlanService {
         plan.setSortOrder(req.getSortOrder());
         plan.setRemark(req.getRemark());
         packagePlanMapper.insert(plan);
-        saveContentConfigs(plan.getPackageType(), req.getContentConfigs());
-        attachContentConfigs(List.of(plan));
+        saveChannelQuotaConfigs(plan.getId(), req.getChannelQuotaConfigs());
+        attachChannelQuotaConfigs(List.of(plan));
         return plan;
     }
 
@@ -147,13 +132,6 @@ public class PackagePlanService {
         validateBusinessFields(
                 req.getQuestionPoolSize(),
                 req.getCoreQuestionCount(),
-                req.getPlatformP0Count(),
-                req.getPlatformP1Count(),
-                req.getPlatformP2Count(),
-                req.getPerQuestionPlatformCalls(),
-                req.getPerQuestionCallsP0(),
-                req.getPerQuestionCallsP1(),
-                req.getPerQuestionCallsP2(),
                 req.getBiweeklyFrequency(),
                 req.getMonthlyReportDepth(),
                 req.getQuarterlyReportDepth(),
@@ -171,18 +149,6 @@ public class PackagePlanService {
         plan.setServiceMonths(req.getServiceMonths());
         plan.setQuestionPoolSize(req.getQuestionPoolSize());
         plan.setCoreQuestionCount(req.getCoreQuestionCount());
-        plan.setPlatformP0Count(req.getPlatformP0Count());
-        plan.setPlatformP1Count(req.getPlatformP1Count());
-        plan.setPlatformP2Count(req.getPlatformP2Count());
-        plan.setPerQuestionPlatformCalls(resolveUnifiedPerQuestionCalls(
-                req.getPerQuestionPlatformCalls(),
-                req.getPerQuestionCallsP0(),
-                req.getPerQuestionCallsP1(),
-                req.getPerQuestionCallsP2()
-        ));
-        plan.setPerQuestionCallsP0(req.getPerQuestionCallsP0());
-        plan.setPerQuestionCallsP1(req.getPerQuestionCallsP1());
-        plan.setPerQuestionCallsP2(req.getPerQuestionCallsP2());
         plan.setBiweeklyFrequency(req.getBiweeklyFrequency());
         plan.setMonthlyReportDepth(req.getMonthlyReportDepth().trim());
         plan.setQuarterlyReportDepth(req.getQuarterlyReportDepth().trim());
@@ -196,8 +162,8 @@ public class PackagePlanService {
         plan.setSortOrder(req.getSortOrder());
         plan.setRemark(req.getRemark());
         packagePlanMapper.updateById(plan);
-        saveContentConfigs(plan.getPackageType(), req.getContentConfigs());
-        attachContentConfigs(List.of(plan));
+        saveChannelQuotaConfigs(plan.getId(), req.getChannelQuotaConfigs());
+        attachChannelQuotaConfigs(List.of(plan));
         return plan;
     }
 
@@ -221,17 +187,17 @@ public class PackagePlanService {
         return plan;
     }
 
-    public List<PackageContentConfig> listContentConfigs(Long packagePlanId) {
+    public List<PackageChannelQuotaConfig> listChannelQuotaConfigs(Long packagePlanId) {
         currentUserService.ensurePermission("user.manage");
         PackagePlan plan = requireById(packagePlanId);
-        return findContentConfigsByPackageType(plan.getPackageType());
+        return findChannelQuotaConfigs(plan.getId());
     }
 
-    public List<PackageContentConfig> saveContentConfigsByPlanId(Long packagePlanId, List<PackageContentConfigRequest> configs) {
+    public List<PackageChannelQuotaConfig> saveChannelQuotaConfigsByPlanId(Long packagePlanId, List<PackageChannelQuotaConfigRequest> configs) {
         currentUserService.ensurePermission("user.manage");
         PackagePlan plan = requireById(packagePlanId);
-        saveContentConfigs(plan.getPackageType(), configs);
-        return findContentConfigsByPackageType(plan.getPackageType());
+        saveChannelQuotaConfigs(plan.getId(), configs);
+        return findChannelQuotaConfigs(plan.getId());
     }
 
     private void normalizeLegacyPrices(List<PackagePlan> plans) {
@@ -288,133 +254,109 @@ public class PackagePlanService {
         }
     }
 
-    private void validateContentConfigs(List<PackageContentConfigRequest> configs) {
-        if (configs == null || configs.isEmpty()) {
-            return;
-        }
-        Map<String, Integer> articleTypeCount = new LinkedHashMap<>();
-        for (PackageContentConfigRequest cfg : configs) {
-            if (cfg == null || !StringUtils.hasText(cfg.getArticleType())) {
-                throw new BizException(400, "content_configs.article_type is required");
-            }
-            String articleType = cfg.getArticleType().trim().toLowerCase(Locale.ROOT);
-            if (!CONTENT_ARTICLE_TYPES.contains(articleType)) {
-                throw new BizException(400, "Unsupported article_type: " + cfg.getArticleType());
-            }
-            articleTypeCount.put(articleType, articleTypeCount.getOrDefault(articleType, 0) + 1);
-            if (cfg.getArticlesPerBatch() == null || cfg.getArticlesPerBatch() <= 0) {
-                throw new BizException(400, "articles_per_batch must be positive");
-            }
-            if (cfg.getQuestionsPerArticle() == null || cfg.getQuestionsPerArticle() <= 0) {
-                throw new BizException(400, "questions_per_article must be positive");
-            }
-            if (!StringUtils.hasText(cfg.getPublishSiteTier())) {
-                throw new BizException(400, "publish_site_tier is required");
-            }
-            String publishSiteTier = cfg.getPublishSiteTier().trim().toUpperCase(Locale.ROOT);
-            if (!PUBLISH_SITE_TIERS.contains(publishSiteTier)) {
-                throw new BizException(400, "Unsupported publish_site_tier: " + cfg.getPublishSiteTier());
-            }
-            if (cfg.getPublishSiteCount() == null || cfg.getPublishSiteCount() <= 0) {
-                throw new BizException(400, "publish_site_count must be positive");
-            }
-            if (cfg.getIsActive() == null) {
-                throw new BizException(400, "is_active is required");
-            }
-        }
-        for (Map.Entry<String, Integer> entry : articleTypeCount.entrySet()) {
-            if (entry.getValue() > 1) {
-                throw new BizException(400, "Duplicate article_type in content configs: " + entry.getKey());
-            }
-        }
-    }
+    private void saveChannelQuotaConfigs(Long packagePlanId, List<PackageChannelQuotaConfigRequest> configs) {
+        List<PackageChannelQuotaConfigRequest> normalizedInput = normalizeChannelQuotaInput(configs);
+        validateChannelQuotaConfigs(normalizedInput);
 
-    private void saveContentConfigs(String packageType, List<PackageContentConfigRequest> configs) {
-        List<PackageContentConfigRequest> normalizedInput = normalizeContentConfigInput(configs);
-        validateContentConfigs(normalizedInput);
-
-        packageContentConfigMapper.delete(
-                new LambdaQueryWrapper<PackageContentConfig>()
-                        .eq(PackageContentConfig::getPackageType, packageType)
+        packageChannelQuotaConfigMapper.delete(
+                new LambdaQueryWrapper<PackageChannelQuotaConfig>()
+                        .eq(PackageChannelQuotaConfig::getPackagePlanId, packagePlanId)
         );
 
-        for (PackageContentConfigRequest req : normalizedInput) {
-            PackageContentConfig entity = new PackageContentConfig();
-            entity.setPackageType(packageType);
-            entity.setArticleType(req.getArticleType().trim().toLowerCase(Locale.ROOT));
-            entity.setArticlesPerBatch(req.getArticlesPerBatch());
-            entity.setQuestionsPerArticle(req.getQuestionsPerArticle());
-            entity.setPublishSiteTier(req.getPublishSiteTier().trim().toUpperCase(Locale.ROOT));
-            entity.setPublishSiteCount(req.getPublishSiteCount());
-            entity.setIsActive(req.getIsActive());
-            packageContentConfigMapper.insert(entity);
+        for (PackageChannelQuotaConfigRequest req : normalizedInput) {
+            PackageChannelQuotaConfig entity = new PackageChannelQuotaConfig();
+            entity.setPackagePlanId(packagePlanId);
+            entity.setChannelCode(normalizeChannel(req.getChannelCode()));
+            entity.setPeriodType(normalizePeriod(req.getPeriodType()));
+            entity.setQuotaLimit(req.getQuotaLimit());
+            entity.setEnabled(req.getEnabled());
+            packageChannelQuotaConfigMapper.insert(entity);
         }
     }
 
-    private List<PackageContentConfigRequest> normalizeContentConfigInput(List<PackageContentConfigRequest> configs) {
+    private List<PackageChannelQuotaConfigRequest> normalizeChannelQuotaInput(List<PackageChannelQuotaConfigRequest> configs) {
         if (configs != null && !configs.isEmpty()) {
             return configs;
         }
-        List<PackageContentConfigRequest> defaults = new ArrayList<>();
-        for (String articleType : DEFAULT_CONTENT_ARTICLE_TYPE_ORDER) {
-            PackageContentConfigRequest req = new PackageContentConfigRequest();
-            req.setArticleType(articleType);
-            req.setArticlesPerBatch(1);
-            req.setQuestionsPerArticle(3);
-            req.setPublishSiteTier("S1");
-            req.setPublishSiteCount(1);
-            req.setIsActive(true);
-            defaults.add(req);
-        }
-        return defaults;
+        return DEFAULT_PERIOD_BY_CHANNEL.entrySet().stream().map(entry -> {
+            PackageChannelQuotaConfigRequest req = new PackageChannelQuotaConfigRequest();
+            req.setChannelCode(entry.getKey());
+            req.setPeriodType(entry.getValue());
+            req.setQuotaLimit("authority_media".equals(entry.getKey()) ? 0 : 1);
+            req.setEnabled(true);
+            return req;
+        }).collect(Collectors.toList());
     }
 
-    private List<PackageContentConfig> findContentConfigsByPackageType(String packageType) {
-        List<PackageContentConfig> list = packageContentConfigMapper.selectList(
-                new LambdaQueryWrapper<PackageContentConfig>()
-                        .eq(PackageContentConfig::getPackageType, packageType)
-                        .orderByAsc(PackageContentConfig::getArticleType, PackageContentConfig::getId)
+    private void validateChannelQuotaConfigs(List<PackageChannelQuotaConfigRequest> configs) {
+        Map<String, Integer> seen = new LinkedHashMap<>();
+        for (PackageChannelQuotaConfigRequest cfg : configs) {
+            String channel = normalizeChannel(cfg.getChannelCode());
+            String period = normalizePeriod(cfg.getPeriodType());
+            if (!CHANNEL_CODES.contains(channel)) {
+                throw new BizException(400, "Unsupported channel_code: " + cfg.getChannelCode());
+            }
+            if (!PERIOD_TYPES.contains(period)) {
+                throw new BizException(400, "Unsupported period_type: " + cfg.getPeriodType());
+            }
+            if ("authority_media".equals(channel) && !"total".equals(period)) {
+                throw new BizException(400, "authority_media period_type must be total");
+            }
+            if (!"authority_media".equals(channel) && "total".equals(period)) {
+                throw new BizException(400, channel + " period_type cannot be total");
+            }
+            if (cfg.getQuotaLimit() == null || cfg.getQuotaLimit() < 0) {
+                throw new BizException(400, "quota_limit must be >= 0");
+            }
+            if (cfg.getEnabled() == null) {
+                throw new BizException(400, "channel quota enabled is required");
+            }
+            String key = channel + ":" + period;
+            seen.put(key, seen.getOrDefault(key, 0) + 1);
+        }
+        for (Map.Entry<String, Integer> entry : seen.entrySet()) {
+            if (entry.getValue() > 1) {
+                throw new BizException(400, "Duplicate channel quota config: " + entry.getKey());
+            }
+        }
+    }
+
+    private List<PackageChannelQuotaConfig> findChannelQuotaConfigs(Long packagePlanId) {
+        List<PackageChannelQuotaConfig> list = packageChannelQuotaConfigMapper.selectList(
+                new LambdaQueryWrapper<PackageChannelQuotaConfig>()
+                        .eq(PackageChannelQuotaConfig::getPackagePlanId, packagePlanId)
+                        .orderByAsc(PackageChannelQuotaConfig::getChannelCode, PackageChannelQuotaConfig::getPeriodType, PackageChannelQuotaConfig::getId)
         );
-        if (list == null || list.isEmpty()) {
-            return List.of();
-        }
-        return list;
+        return list == null ? List.of() : list;
     }
 
-    private void attachContentConfigs(List<PackagePlan> plans) {
+    private void attachChannelQuotaConfigs(List<PackagePlan> plans) {
         if (plans == null || plans.isEmpty()) {
             return;
         }
-        List<String> packageTypes = plans.stream()
-                .map(PackagePlan::getPackageType)
-                .filter(StringUtils::hasText)
+        List<Long> packagePlanIds = plans.stream()
+                .map(PackagePlan::getId)
+                .filter(id -> id != null && id > 0)
                 .distinct()
                 .collect(Collectors.toList());
-        if (packageTypes.isEmpty()) {
+        if (packagePlanIds.isEmpty()) {
             return;
         }
-        List<PackageContentConfig> allConfigs = packageContentConfigMapper.selectList(
-                new LambdaQueryWrapper<PackageContentConfig>()
-                        .in(PackageContentConfig::getPackageType, packageTypes)
-                        .orderByAsc(PackageContentConfig::getPackageType, PackageContentConfig::getArticleType, PackageContentConfig::getId)
+        List<PackageChannelQuotaConfig> allConfigs = packageChannelQuotaConfigMapper.selectList(
+                new LambdaQueryWrapper<PackageChannelQuotaConfig>()
+                        .in(PackageChannelQuotaConfig::getPackagePlanId, packagePlanIds)
+                        .orderByAsc(PackageChannelQuotaConfig::getPackagePlanId, PackageChannelQuotaConfig::getChannelCode, PackageChannelQuotaConfig::getPeriodType)
         );
-        Map<String, List<PackageContentConfig>> grouped = allConfigs.stream()
-                .collect(Collectors.groupingBy(PackageContentConfig::getPackageType, LinkedHashMap::new, Collectors.toList()));
+        Map<Long, List<PackageChannelQuotaConfig>> grouped = allConfigs.stream()
+                .collect(Collectors.groupingBy(PackageChannelQuotaConfig::getPackagePlanId, LinkedHashMap::new, Collectors.toList()));
         for (PackagePlan plan : plans) {
-            plan.setContentConfigs(grouped.getOrDefault(plan.getPackageType(), List.of()));
+            plan.setChannelQuotaConfigs(grouped.getOrDefault(plan.getId(), List.of()));
         }
     }
 
     private void validateBusinessFields(
             Integer questionPoolSize,
             Integer coreQuestionCount,
-            Integer platformP0Count,
-            Integer platformP1Count,
-            Integer platformP2Count,
-            Integer perQuestionPlatformCalls,
-            Integer perQuestionCallsP0,
-            Integer perQuestionCallsP1,
-            Integer perQuestionCallsP2,
             Integer biweeklyFrequency,
             String monthlyReportDepth,
             String quarterlyReportDepth,
@@ -434,19 +376,6 @@ public class PackagePlanService {
         }
         if (coreQuestionCount > questionPoolSize) {
             throw new BizException(400, "core_question_count cannot exceed question_pool_size");
-        }
-        if (platformP0Count == null || platformP0Count < 0
-                || platformP1Count == null || platformP1Count < 0
-                || platformP2Count == null || platformP2Count < 0) {
-            throw new BizException(400, "platform P0/P1/P2 counts must be >= 0");
-        }
-        if (perQuestionPlatformCalls == null || perQuestionPlatformCalls <= 0) {
-            throw new BizException(400, "per_question_platform_calls must be positive");
-        }
-        if (perQuestionCallsP0 == null || perQuestionCallsP0 <= 0
-                || perQuestionCallsP1 == null || perQuestionCallsP1 <= 0
-                || perQuestionCallsP2 == null || perQuestionCallsP2 <= 0) {
-            throw new BizException(400, "per_question_calls_p0/p1/p2 must be positive");
         }
         if (biweeklyFrequency == null || !BIWEEKLY_FREQUENCY_VALUES.contains(biweeklyFrequency)) {
             throw new BizException(400, "biweekly_frequency must be 1 or 2");
@@ -474,15 +403,17 @@ public class PackagePlanService {
         }
     }
 
-    private Integer resolveUnifiedPerQuestionCalls(
-            Integer legacyPerQuestionPlatformCalls,
-            Integer perQuestionCallsP0,
-            Integer perQuestionCallsP1,
-            Integer perQuestionCallsP2
-    ) {
-        if (legacyPerQuestionPlatformCalls != null && legacyPerQuestionPlatformCalls > 0) {
-            return legacyPerQuestionPlatformCalls;
+    private String normalizeChannel(String channelCode) {
+        if (!StringUtils.hasText(channelCode)) {
+            throw new BizException(400, "channel_code is required");
         }
-        return Math.max(Math.max(perQuestionCallsP0, perQuestionCallsP1), perQuestionCallsP2);
+        return channelCode.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private String normalizePeriod(String periodType) {
+        if (!StringUtils.hasText(periodType)) {
+            throw new BizException(400, "period_type is required");
+        }
+        return periodType.trim().toLowerCase(Locale.ROOT);
     }
 }

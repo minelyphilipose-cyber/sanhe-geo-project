@@ -20,9 +20,6 @@
         <el-descriptions-item label="客户名称">{{ project?.companyName || '-' }}</el-descriptions-item>
         <el-descriptions-item label="品牌名称">{{ project?.brandName || '-' }}</el-descriptions-item>
         <el-descriptions-item label="拓词组">{{ `已选 ${project?.selectedKeywordGroupCount || 0} 个，已入库 ${project?.selectedKeywordSavedKeywords || 0} 条关键词` }}</el-descriptions-item>
-        <el-descriptions-item label="套餐">{{ dictStore.label('package_type', project?.packageType) }}</el-descriptions-item>
-        <el-descriptions-item label="签约价(元)">{{ centsToYuan(project?.packagePrice) }}</el-descriptions-item>
-        <el-descriptions-item label="服务月数">{{ project?.serviceMonths }}</el-descriptions-item>
         <el-descriptions-item label="归属类型">{{ dictStore.label('owner_type', project?.ownerType) }}</el-descriptions-item>
         <el-descriptions-item label="合伙人">{{ project?.ownerType === 'direct' ? '-' : '已绑定' }}</el-descriptions-item>
         <el-descriptions-item label="所在地区">{{ regionText(project) }}</el-descriptions-item>
@@ -45,30 +42,6 @@
         <el-descriptions-item label="项目定制表述" :span="2">{{ project.customStatement || '-' }}</el-descriptions-item>
         <el-descriptions-item label="补充禁用词" :span="2">{{ joinArray(project.extraForbiddenPhrases) }}</el-descriptions-item>
         <el-descriptions-item label="内容备注" :span="2">{{ project.contentNote || '-' }}</el-descriptions-item>
-      </el-descriptions>
-    </el-card>
-
-    <el-card v-if="project">
-      <template #header><span>签约套餐快照</span></template>
-      <el-descriptions :column="3" border>
-        <el-descriptions-item label="问题池(总/核心/普通)">
-          {{ project.planQuestionPoolSize ?? '-' }}/{{ project.planCoreQuestionCount ?? '-' }}/{{ normalQuestionCount }}
-        </el-descriptions-item>
-        <el-descriptions-item label="平台监测(P0/P1/P2)">
-          {{ project.planPlatformP0Count ?? '-' }}/{{ project.planPlatformP1Count ?? '-' }}/{{ project.planPlatformP2Count ?? '-' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="每问题调用(P0/P1/P2)">
-          {{ project.planPerQuestionCallsP0 ?? project.planPerQuestionPlatformCalls ?? '-' }}/{{ project.planPerQuestionCallsP1 ?? project.planPerQuestionPlatformCalls ?? '-' }}/{{ project.planPerQuestionCallsP2 ?? project.planPerQuestionPlatformCalls ?? '-' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="双周简报频率">{{ biweeklyLabel(project.planBiweeklyFrequency) }}</el-descriptions-item>
-        <el-descriptions-item label="月报深度">{{ intensityLabel(project.planMonthlyReportDepth) }}</el-descriptions-item>
-        <el-descriptions-item label="季报深度">{{ intensityLabel(project.planQuarterlyReportDepth) }}</el-descriptions-item>
-        <el-descriptions-item label="顾问参与强度">{{ intensityLabel(project.planConsultantIntensity) }}</el-descriptions-item>
-        <el-descriptions-item label="竞品观察深度">{{ intensityLabel(project.planCompetitorInsightDepth) }}</el-descriptions-item>
-        <el-descriptions-item label="媒体分发强度">{{ intensityLabel(project.planMediaDistributionIntensity) }}</el-descriptions-item>
-        <el-descriptions-item label="承诺目标强度">{{ intensityLabel(project.planCommitmentTargetIntensity) }}</el-descriptions-item>
-        <el-descriptions-item label="目标指标">{{ targetMetricLabel(project.planTargetMetricType) }}</el-descriptions-item>
-        <el-descriptions-item label="目标值 / 窗口">{{ formatMetricValue(project.planTargetMetricValue) }} / {{ project.planTargetWindowDays ?? '-' }} 天</el-descriptions-item>
       </el-descriptions>
     </el-card>
 
@@ -109,36 +82,11 @@ const saving = ref(false)
 const project = ref<Project | null>(null)
 
 const activationConfirmed = ref(false)
-const normalQuestionCount = computed(() => {
-  if (!project.value) return '-'
-  const total = project.value.planQuestionPoolSize ?? 0
-  const core = project.value.planCoreQuestionCount ?? 0
-  return Math.max(total - core, 0)
-})
 const showActivationGuide = computed(() => route.query.activate === '1' && project.value?.status === 'paused')
 
 function centsToYuan(v?: number | null) {
   if (v == null) return '-'
   return Number(v).toFixed(2)
-}
-
-function intensityLabel(v?: string | null) {
-  return dictStore.label('intensity_level', v)
-}
-
-function biweeklyLabel(v?: number | null) {
-  if (v == null) return '-'
-  return dictStore.label('biweekly_frequency', String(v))
-}
-
-function targetMetricLabel(v?: string | null) {
-  return dictStore.label('target_metric_type', v)
-}
-
-function formatMetricValue(v?: number | null) {
-  if (v == null) return '-'
-  if (v <= 1) return `${(v * 100).toFixed(2)}%`
-  return v.toFixed(4)
 }
 
 function regionText(p?: Project | null) {

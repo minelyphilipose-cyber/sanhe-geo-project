@@ -21,6 +21,8 @@ import com.huanjing.geo.module.content.service.adapter.SelfMediaAdapter;
 import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import com.huanjing.geo.module.content.service.adapter.ValidationResult;
 import com.huanjing.geo.module.customer.entity.Brand;
+import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
+import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.customer.service.BrandService;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
@@ -39,7 +41,6 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.*;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -49,8 +50,7 @@ import java.util.stream.Collectors;
 public class ContentDistributionService {
 
     private static final ZoneId SH_ZONE = ZoneId.of("Asia/Shanghai");
-    private static final DateTimeFormatter MONTH_FMT = DateTimeFormatter.ofPattern("yyyy-MM");
-    private static final Set<String> SUCCESS_TASK_STATUS = Set.of("submitted", "confirmed");
+    private static final Set<String> SUCCESS_TASK_STATUS = Set.of("submitted", "confirmed", "published");
     private static final Set<String> ACTIVE_ARTICLE_STATUS = Set.of("approved", "unpublished");
     private static final Set<String> DISTRIBUTE_ALLOWED_ROLES = Set.of("super_admin", "manager", "delivery_manager", "operator");
     private static final String GENERAL_INDUSTRY = "general";
@@ -60,7 +60,6 @@ public class ContentDistributionService {
     private final DistributionTaskMapper distributionTaskMapper;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final PackagePublishConfigMapper packagePublishConfigMapper;
-    private final ProjectPublishQuotaMapper projectPublishQuotaMapper;
     private final ProjectMapper projectMapper;
     private final PublishSiteMapper publishSiteMapper;
     private final CurrentUserService currentUserService;
@@ -68,54 +67,15 @@ public class ContentDistributionService {
     private final List<SiteAdapter> siteAdapters;
     private final List<SelfMediaAdapter> selfMediaAdapters;
     private final BrandService brandService;
-    private final ProjectPublishQuotaService projectPublishQuotaService;
+    private final CompanyPackageBindingService companyPackageBindingService;
+    private final CompanyChannelQuotaService companyChannelQuotaService;
 
     @Transactional
     public DistributionTask distribute(Long articleId, Long siteId) {
-        SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.write");
-        ensureDistributeRole(operator);
-        ArticleDraft article = requireArticle(articleId);
-        if (!ACTIVE_ARTICLE_STATUS.contains(article.getStatus())) {
-            throw new BizException(400, "Only approved/unpublished article can distribute");
-        }
-        Project project = requireProject(article.getProjectId());
-        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
-
-        PublishSite site = requireSite(siteId);
-        if (!"active".equalsIgnoreCase(site.getStatus())) {
-            throw new BizException(400, "Site status is not active");
-        }
-
-        PackagePublishConfig packageConfig = requirePackagePublishConfig(project.getPackageType());
-        List<String> allowedTiers = parseJsonArray(packageConfig.getAllowedSiteTiers());
-        if (!allowedTiers.contains(site.getTier())) {
-            throw new BizException(400, "Current package does not include " + site.getTier() + " tier sites");
-        }
-        String brandIndustry = requireProjectBrandIndustry(project);
-        if (!matchIndustry(site, brandIndustry)) {
-            throw new BizException(400, "该站点不适用于当前品牌行业");
-        }
-
-        String content = requireLatestContent(article.getId());
-        ValidationResult validation = validateByMethod(article, content, site);
-        if (!validation.isPassed()) {
-            throw new BizException(400, String.join("; ", validation.getErrors()));
-        }
-
-        QuotaContext quota = validateQuota(project, packageConfig);
-        DistributionTask task = createAttempt(article, site, operator.getId(), 1);
-        article.setStatus("distributing");
-        articleDraftMapper.updateById(article);
-
-        if ("manual".equalsIgnoreCase(site.getIntegrationMethod())) {
-            return task;
-        }
-        SubmitResult submitResult = executeByAdapter(article, site, content);
-        finalizeExecution(task, article, project, submitResult, quota);
-        return distributionTaskMapper.selectById(task.getId());
+        throw new BizException(400, "Legacy site distribution is deprecated; use explicit channel targets");
     }
 
+    @Transactional
     public DistributionTask distributeTo(Long articleId, TargetContext target) {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.write");
@@ -135,7 +95,7 @@ public class ContentDistributionService {
             return distributeToBrandGeoSite(article, project, operator, brandGeoTarget);
         }
         if (target instanceof TargetContext.SiteTarget) {
-            throw new BizException(400, "Use distribute(articleId, siteId) for legacy site targets");
+            throw new BizException(400, "Legacy site target is deprecated; use explicit channel targets");
         }
         if (target instanceof TargetContext.SelfMediaTarget selfMediaTarget) {
             return distributeToSelfMedia(article, project, operator, selfMediaTarget);
@@ -145,42 +105,7 @@ public class ContentDistributionService {
 
     @Transactional
     public DistributionTask retry(Long taskId) {
-        SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.write");
-        ensureDistributeRole(operator);
-        DistributionTask oldTask = requireTask(taskId);
-        if (!"failed".equalsIgnoreCase(oldTask.getStatus())) {
-            throw new BizException(400, "Only failed task can retry");
-        }
-        ArticleDraft article = requireArticle(oldTask.getArticleId());
-        Project project = requireProject(oldTask.getProjectId());
-        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
-        PublishSite site = requireSite(oldTask.getSiteId());
-        if (!"active".equalsIgnoreCase(site.getStatus())) {
-            throw new BizException(400, "Site status is not active");
-        }
-        PackagePublishConfig packageConfig = requirePackagePublishConfig(project.getPackageType());
-        String brandIndustry = requireProjectBrandIndustry(project);
-        if (!matchIndustry(site, brandIndustry)) {
-            throw new BizException(400, "该站点不适用于当前品牌行业");
-        }
-        QuotaContext quota = validateQuota(project, packageConfig);
-        String content = requireLatestContent(article.getId());
-        ValidationResult validation = validateByMethod(article, content, site);
-        if (!validation.isPassed()) {
-            throw new BizException(400, String.join("; ", validation.getErrors()));
-        }
-
-        DistributionTask task = createAttempt(article, site, operator.getId(), Optional.ofNullable(oldTask.getRetryCount()).orElse(0) + 1);
-        article.setStatus("distributing");
-        articleDraftMapper.updateById(article);
-        if ("manual".equalsIgnoreCase(site.getIntegrationMethod())) {
-            return task;
-        }
-
-        SubmitResult submitResult = executeByAdapter(article, site, content);
-        finalizeExecution(task, article, project, submitResult, quota);
-        return distributionTaskMapper.selectById(task.getId());
+        throw new BizException(400, "Legacy site retry is deprecated; use explicit channel retry flow");
     }
 
     @Transactional
@@ -198,8 +123,11 @@ public class ContentDistributionService {
         ArticleDraft article = requireArticle(task.getArticleId());
         Project project = requireProject(task.getProjectId());
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
-        PackagePublishConfig packageConfig = requirePackagePublishConfig(project.getPackageType());
-        QuotaContext quota = validateQuota(project, packageConfig);
+        if (!StringUtils.hasText(task.getTargetKind())) {
+            throw new BizException(400, "Legacy manual site task cannot be confirmed under company package channel quota");
+        }
+        String targetKind = task.getTargetKind();
+        companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), targetKind, task.getId());
 
         task.setStatus("submitted");
         task.setPublishedUrl(publishedUrl.trim());
@@ -211,7 +139,7 @@ public class ContentDistributionService {
         article.setStatus("distributed");
         article.setPublishedAt(LocalDateTime.now());
         articleDraftMapper.updateById(article);
-        increaseMonthlyQuota(quota.monthQuota);
+        companyChannelQuotaService.confirmDistribution(task.getId());
         return distributionTaskMapper.selectById(taskId);
     }
 
@@ -263,20 +191,7 @@ public class ContentDistributionService {
     }
 
     public PublishQuotaVO quota(Long projectId) {
-        SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.read");
-        Project project = requireProject(projectId);
-        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
-        PackagePublishConfig config = requirePackagePublishConfig(project.getPackageType());
-        QuotaContext quota = resolveQuota(project, config);
-        PublishQuotaVO vo = new PublishQuotaVO();
-        vo.setMonth(quota.monthKey);
-        vo.setMonthUsed(quota.monthQuota.getUsedCount());
-        vo.setMonthLimit(quota.monthQuota.getMonthlyLimit());
-        vo.setWeekUsed(quota.weekUsed);
-        vo.setWeekLimit(config.getWeeklyPublishLimit());
-        vo.setAllowedSiteTiers(parseJsonArray(config.getAllowedSiteTiers()));
-        return vo;
+        throw new BizException(410, "Project publish quota endpoint is deprecated; use customer channel quota APIs");
     }
 
     public RecommendedSitesResponseVO recommendedSites(Long projectId) {
@@ -284,7 +199,7 @@ public class ContentDistributionService {
         currentUserService.ensurePermission("project.read");
         Project project = requireProject(projectId);
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
-        PackagePublishConfig config = requirePackagePublishConfig(project.getPackageType());
+        PackagePublishConfig config = requirePackagePublishConfig(activePackageType(project));
         String brandIndustry = requireProjectBrandIndustry(project);
         List<String> allowedTiers = parseJsonArray(config.getAllowedSiteTiers());
 
@@ -360,8 +275,7 @@ public class ContentDistributionService {
     private void finalizeExecution(DistributionTask task,
                                    ArticleDraft article,
                                    Project project,
-                                   SubmitResult submitResult,
-                                   QuotaContext quota) {
+                                   SubmitResult submitResult) {
         task.setStatus(submitResult.isSuccess() ? "submitted" : "failed");
         task.setRequestPayload(submitResult.getRequestPayload());
         task.setResponsePayload(submitResult.getResponseBody());
@@ -374,9 +288,10 @@ public class ContentDistributionService {
             article.setStatus("distributed");
             article.setPublishedAt(LocalDateTime.now());
             articleDraftMapper.updateById(article);
-            increaseMonthlyQuota(quota.monthQuota);
+            companyChannelQuotaService.confirmDistribution(task.getId());
             return;
         }
+        companyChannelQuotaService.refundDistribution(task.getId());
         article.setStatus("approved");
         articleDraftMapper.updateById(article);
         systemAlertService.createAlert(
@@ -426,9 +341,8 @@ public class ContentDistributionService {
         currentUserService.ensureBrandAccess(operator, site.getBrandId(), "official_site");
 
         String content = requireLatestContent(article.getId());
-        PackagePublishConfig packageConfig = requirePackagePublishConfig(project.getPackageType());
-        String monthKey = LocalDate.now(SH_ZONE).format(MONTH_FMT);
-        DistributionTask task = beginAttemptForBrandOfficialSite(article, project, site, operator.getId(), monthKey, packageConfig);
+        DistributionTask task = createAttemptForBrandOfficialSite(article, site, operator.getId());
+        companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.BRAND_OFFICIAL_SITE, task.getId());
 
         article.setStatus("distributing");
         articleDraftMapper.updateById(article);
@@ -450,6 +364,11 @@ public class ContentDistributionService {
 
         finalizeAttemptForBrandOfficialSite(task.getId(), submitResult);
         finalizeArticleStatus(article, submitResult);
+        if (submitResult.isSuccess()) {
+            companyChannelQuotaService.confirmDistribution(task.getId());
+        } else {
+            companyChannelQuotaService.refundDistribution(task.getId());
+        }
         return distributionTaskMapper.selectById(task.getId());
     }
 
@@ -462,15 +381,8 @@ public class ContentDistributionService {
         currentUserService.ensureBrandAccess(operator, brand.getId(), "brand_geo_site");
 
         String content = requireLatestContent(article.getId());
-        PackagePublishConfig packageConfig = requirePackagePublishConfig(project.getPackageType());
-        String monthKey = LocalDate.now(SH_ZONE).format(MONTH_FMT);
-        projectPublishQuotaService.reserve(
-                project.getId(),
-                monthKey,
-                Optional.ofNullable(packageConfig.getMonthlyPublishLimit()).orElse(0)
-        );
-
         DistributionTask task = createAttemptForBrandGeoSite(article, brand, operator.getId());
+        companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.BRAND_GEO_SITE, task.getId());
         article.setStatus("distributing");
         articleDraftMapper.updateById(article);
 
@@ -491,8 +403,10 @@ public class ContentDistributionService {
 
         finalizeAttemptForBrandGeoSite(task.getId(), submitResult);
         finalizeArticleStatus(article, submitResult);
-        if (!submitResult.isSuccess()) {
-            projectPublishQuotaService.refund(project.getId(), monthKey);
+        if (submitResult.isSuccess()) {
+            companyChannelQuotaService.confirmDistribution(task.getId());
+        } else {
+            companyChannelQuotaService.refundDistribution(task.getId());
         }
         return distributionTaskMapper.selectById(task.getId());
     }
@@ -525,15 +439,8 @@ public class ContentDistributionService {
         currentUserService.ensureBrandAccess(operator, account.getBrandId(), "self_media_account");
 
         String content = requireLatestContent(article.getId());
-        PackagePublishConfig packageConfig = requirePackagePublishConfig(project.getPackageType());
-        String monthKey = LocalDate.now(SH_ZONE).format(MONTH_FMT);
-        projectPublishQuotaService.reserve(
-                project.getId(),
-                monthKey,
-                Optional.ofNullable(packageConfig.getMonthlyPublishLimit()).orElse(0)
-        );
-
         DistributionTask task = createAttemptForSelfMedia(article, account, operator.getId(), mpTarget.requestId().trim());
+        companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.MP_ACCOUNT, task.getId());
         article.setStatus("distributing");
         articleDraftMapper.updateById(article);
 
@@ -546,8 +453,10 @@ public class ContentDistributionService {
         }
         finalizeAttemptForSelfMedia(task.getId(), submitResult);
         finalizeArticleStatusForDraft(article, submitResult);
-        if (!submitResult.isSuccess()) {
-            projectPublishQuotaService.refund(project.getId(), monthKey);
+        if (submitResult.isSuccess()) {
+            companyChannelQuotaService.confirmDistribution(task.getId());
+        } else {
+            companyChannelQuotaService.refundDistribution(task.getId());
         }
         return distributionTaskMapper.selectById(task.getId());
     }
@@ -560,39 +469,6 @@ public class ContentDistributionService {
             throw new BizException(400, "Brand GEO site is not active");
         }
         return brand.getGeoSiteCode().trim();
-    }
-
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    protected DistributionTask beginAttemptForBrandOfficialSite(ArticleDraft article,
-                                                                Project project,
-                                                                BrandOfficialSite site,
-                                                                Long operatorId,
-                                                                String monthKey,
-                                                                PackagePublishConfig packageConfig) {
-        Integer monthlyLimit = Optional.ofNullable(packageConfig.getMonthlyPublishLimit()).orElse(0);
-        ensureQuotaRow(project.getId(), monthKey, monthlyLimit);
-        int affected = projectPublishQuotaMapper.tryReserve(project.getId(), monthKey, monthlyLimit);
-        if (affected == 0) {
-            throw new BizException(400, "Monthly publishing quota exhausted (project=" + project.getId() + ", month=" + monthKey + ")");
-        }
-        return createAttemptForBrandOfficialSite(article, site, operatorId);
-    }
-
-    private void ensureQuotaRow(Long projectId, String monthKey, Integer monthlyLimit) {
-        ProjectPublishQuota existing = projectPublishQuotaMapper.selectOne(
-                new LambdaQueryWrapper<ProjectPublishQuota>()
-                        .eq(ProjectPublishQuota::getProjectId, projectId)
-                        .eq(ProjectPublishQuota::getQuotaMonth, monthKey)
-                        .last("LIMIT 1")
-        );
-        if (existing == null) {
-            ProjectPublishQuota newRow = new ProjectPublishQuota();
-            newRow.setProjectId(projectId);
-            newRow.setQuotaMonth(monthKey);
-            newRow.setUsedCount(0);
-            newRow.setMonthlyLimit(monthlyLimit);
-            projectPublishQuotaMapper.insert(newRow);
-        }
     }
 
     private DistributionTask createAttemptForBrandOfficialSite(ArticleDraft article, BrandOfficialSite site, Long operatorId) {
@@ -793,57 +669,6 @@ public class ContentDistributionService {
                 .filter(adapter -> adapter.supportsPlatform(platform))
                 .findFirst()
                 .orElseThrow(() -> new BizException(501, "Self-media platform not implemented: " + platform));
-    }
-
-    private QuotaContext validateQuota(Project project, PackagePublishConfig config) {
-        QuotaContext quota = resolveQuota(project, config);
-        if (quota.monthQuota.getUsedCount() >= quota.monthQuota.getMonthlyLimit()) {
-            throw new BizException(400, "Monthly publishing quota exhausted (" + quota.monthQuota.getUsedCount() + "/" + quota.monthQuota.getMonthlyLimit() + ")");
-        }
-        if (quota.weekUsed >= config.getWeeklyPublishLimit()) {
-            throw new BizException(400, "Weekly publishing quota exhausted (" + quota.weekUsed + "/" + config.getWeeklyPublishLimit() + ")");
-        }
-        return quota;
-    }
-
-    private QuotaContext resolveQuota(Project project, PackagePublishConfig config) {
-        LocalDate today = LocalDate.now(SH_ZONE);
-        String monthKey = today.format(MONTH_FMT);
-        ProjectPublishQuota monthQuota = projectPublishQuotaMapper.selectOne(
-                new LambdaQueryWrapper<ProjectPublishQuota>()
-                        .eq(ProjectPublishQuota::getProjectId, project.getId())
-                        .eq(ProjectPublishQuota::getQuotaMonth, monthKey)
-                        .last("LIMIT 1")
-        );
-        if (monthQuota == null) {
-            monthQuota = new ProjectPublishQuota();
-            monthQuota.setProjectId(project.getId());
-            monthQuota.setQuotaMonth(monthKey);
-            monthQuota.setUsedCount(0);
-            monthQuota.setMonthlyLimit(Optional.ofNullable(config.getMonthlyPublishLimit()).orElse(0));
-            projectPublishQuotaMapper.insert(monthQuota);
-        }
-
-        LocalDate monday = today.with(DayOfWeek.MONDAY);
-        LocalDateTime weekStart = monday.atStartOfDay();
-        LocalDateTime weekEnd = monday.plusDays(6).atTime(LocalTime.of(23, 59, 59));
-        long weekUsed = distributionTaskMapper.selectCount(
-                new LambdaQueryWrapper<DistributionTask>()
-                        .eq(DistributionTask::getProjectId, project.getId())
-                        .in(DistributionTask::getStatus, SUCCESS_TASK_STATUS)
-                        .between(DistributionTask::getCreatedAt, weekStart, weekEnd)
-        );
-
-        QuotaContext context = new QuotaContext();
-        context.monthKey = monthKey;
-        context.monthQuota = monthQuota;
-        context.weekUsed = (int) weekUsed;
-        return context;
-    }
-
-    private void increaseMonthlyQuota(ProjectPublishQuota monthQuota) {
-        monthQuota.setUsedCount(Optional.ofNullable(monthQuota.getUsedCount()).orElse(0) + 1);
-        projectPublishQuotaMapper.updateById(monthQuota);
     }
 
     private ValidationResult validateByMethod(ArticleDraft article, String content, PublishSite site) {
@@ -1048,6 +873,11 @@ public class ContentDistributionService {
         return project;
     }
 
+    private String activePackageType(Project project) {
+        CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(project.getCompanyId());
+        return binding.getPackageType();
+    }
+
     private PublishSite requireSite(Long siteId) {
         PublishSite site = publishSiteMapper.selectById(siteId);
         if (site == null) {
@@ -1072,11 +902,5 @@ public class ContentDistributionService {
         if (user == null || !DISTRIBUTE_ALLOWED_ROLES.contains(user.getRole())) {
             throw new BizException(403, "No permission to distribute article");
         }
-    }
-
-    private static class QuotaContext {
-        private String monthKey;
-        private ProjectPublishQuota monthQuota;
-        private int weekUsed;
     }
 }

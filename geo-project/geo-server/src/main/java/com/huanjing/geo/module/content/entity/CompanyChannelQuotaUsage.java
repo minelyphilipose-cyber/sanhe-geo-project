@@ -8,14 +8,16 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("project_publish_quota")
-public class ProjectPublishQuota {
+@TableName("company_channel_quota_usage")
+public class CompanyChannelQuotaUsage {
     @TableId(type = IdType.AUTO)
     private Long id;
-    private Long projectId;
-    private String quotaMonth;
+    private Long companyId;
+    private String channelCode;
+    private String periodType;
+    private String periodKey;
+    private Integer quotaLimit;
     private Integer usedCount;
-    private Integer monthlyLimit;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

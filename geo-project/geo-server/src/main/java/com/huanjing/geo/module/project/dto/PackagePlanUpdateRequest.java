@@ -26,27 +26,6 @@ public class PackagePlanUpdateRequest {
     @Min(1)
     private Integer coreQuestionCount;
     @NotNull
-    @Min(0)
-    private Integer platformP0Count;
-    @NotNull
-    @Min(0)
-    private Integer platformP1Count;
-    @NotNull
-    @Min(0)
-    private Integer platformP2Count;
-    @NotNull
-    @Min(1)
-    private Integer perQuestionPlatformCalls;
-    @NotNull
-    @Min(1)
-    private Integer perQuestionCallsP0;
-    @NotNull
-    @Min(1)
-    private Integer perQuestionCallsP1;
-    @NotNull
-    @Min(1)
-    private Integer perQuestionCallsP2;
-    @NotNull
     private Integer biweeklyFrequency;
     @NotBlank
     private String monthlyReportDepth;
@@ -68,5 +47,5 @@ public class PackagePlanUpdateRequest {
     @Min(1)
     private Integer targetWindowDays;
     private String remark;
-    private List<PackageContentConfigRequest> contentConfigs;
+    private List<PackageChannelQuotaConfigRequest> channelQuotaConfigs;
 }

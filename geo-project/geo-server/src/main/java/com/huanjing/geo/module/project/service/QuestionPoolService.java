@@ -4,6 +4,8 @@ import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
+import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
 import com.huanjing.geo.module.dispatch.service.QuestionStrategyDispatchService;
 import com.huanjing.geo.module.project.dto.QuestionPoolItemRequest;
@@ -48,6 +50,7 @@ public class QuestionPoolService {
     private final ProjectMapper projectMapper;
     private final CurrentUserService currentUserService;
     private final QuestionStrategyDispatchService questionStrategyDispatchService;
+    private final CompanyPackageBindingService companyPackageBindingService;
 
     @Transactional
     public QuestionPoolVersion createVersion(
@@ -58,6 +61,7 @@ public class QuestionPoolService {
     ) {
         List<QuestionPoolItemRequest> items = requestItems == null ? List.of() : requestItems;
         validateItems(items);
+        validateCompanyQuestionPoolQuota(projectId, items.size());
 
         QuestionPoolVersion latest = questionPoolVersionMapper.selectOne(
                 new LambdaQueryWrapper<QuestionPoolVersion>()
@@ -89,6 +93,19 @@ public class QuestionPoolService {
         }
         questionStrategyDispatchService.enqueueBatchForProject(projectId, "question_pool_confirm", false);
         return version;
+    }
+
+    private void validateCompanyQuestionPoolQuota(Long projectId, int newProjectQuestionCount) {
+        Project project = projectMapper.selectById(projectId);
+        if (project == null || project.getDeletedAt() != null) {
+            throw new BizException(404, "Project not found");
+        }
+        CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(project.getCompanyId());
+        int otherProjectCount = questionPoolItemMapper.countLatestItemsByCompanyExcludingProject(project.getCompanyId(), projectId);
+        int limit = binding.getQuestionPoolLimit() == null ? 0 : binding.getQuestionPoolLimit();
+        if (otherProjectCount + newProjectQuestionCount > limit) {
+            throw new BizException(400, "Customer question pool quota exceeded");
+        }
     }
 
     @Transactional

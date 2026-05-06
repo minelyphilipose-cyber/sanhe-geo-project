@@ -25,12 +25,6 @@
               {{ scope.row.selectedKeywordGroupCount || 0 }}组/{{ scope.row.selectedKeywordSavedKeywords || 0 }}条
             </template>
           </el-table-column>
-          <el-table-column label="套餐" width="150">
-            <template #default="scope">{{ dictStore.label('package_type', scope.row.packageType) }}</template>
-          </el-table-column>
-          <el-table-column label="签约价(元)" width="120">
-            <template #default="scope">{{ centsToYuan(scope.row.packagePrice) }}</template>
-          </el-table-column>
           <el-table-column label="归属" width="100">
             <template #default="scope">{{ dictStore.label('owner_type', scope.row.ownerType) }}</template>
           </el-table-column>
@@ -129,80 +123,6 @@
             <div class="keyword-summary">{{ keywordGroupSummary }}</div>
           </div>
         </el-form-item>
-        <el-form-item label="套餐" required>
-          <el-select v-model="form.packageType" style="width: 100%" @change="onPackageChange">
-            <el-option
-              v-for="pkg in packagePlanOptions"
-              :key="pkg.packageType"
-              :label="dictStore.label('package_type', pkg.packageType)"
-              :value="pkg.packageType"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="签约价(元)" required>
-          <el-input-number v-model="form.packagePriceYuan" :disabled="true" :precision="2" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="服务月数" required>
-          <el-input-number v-model="form.serviceMonths" :disabled="true" style="width: 100%" />
-        </el-form-item>
-        <el-divider content-position="left">平台选择（按套餐要求）</el-divider>
-        <el-form-item :label="`P0平台（需${form.requiredPlatformP0Count}个）`" required>
-          <el-select
-            v-model="form.selectedPlatformCodesP0"
-            multiple
-            collapse-tags
-            collapse-tags-tooltip
-            :multiple-limit="form.requiredPlatformP0Count"
-            :disabled="form.requiredPlatformP0Count === 0"
-            placeholder="选择 P0 平台"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="item in platformOptions.P0"
-              :key="item.platformCode"
-              :label="`${item.platformName} (${item.platformCode})`"
-              :value="item.platformCode"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="`P1平台（需${form.requiredPlatformP1Count}个）`" required>
-          <el-select
-            v-model="form.selectedPlatformCodesP1"
-            multiple
-            collapse-tags
-            collapse-tags-tooltip
-            :multiple-limit="form.requiredPlatformP1Count"
-            :disabled="form.requiredPlatformP1Count === 0"
-            placeholder="选择 P1 平台"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="item in platformOptions.P1"
-              :key="item.platformCode"
-              :label="`${item.platformName} (${item.platformCode})`"
-              :value="item.platformCode"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="`P2平台（需${form.requiredPlatformP2Count}个）`" required>
-          <el-select
-            v-model="form.selectedPlatformCodesP2"
-            multiple
-            collapse-tags
-            collapse-tags-tooltip
-            :multiple-limit="form.requiredPlatformP2Count"
-            :disabled="form.requiredPlatformP2Count === 0"
-            placeholder="选择 P2 平台"
-            style="width: 100%"
-          >
-            <el-option
-              v-for="item in platformOptions.P2"
-              :key="item.platformCode"
-              :label="`${item.platformName} (${item.platformCode})`"
-              :value="item.platformCode"
-            />
-          </el-select>
-        </el-form-item>
         <el-form-item label="归属类型">
           <el-input :value="companyOwnerTypeLabel" disabled />
         </el-form-item>
@@ -295,14 +215,12 @@ import {
   getProjectList,
   createProject,
   deleteProject,
-  getProjectPlatformOptions,
   getKeywordGroupPage,
   updateProject,
   updateProjectStatus,
 } from '@/api/project'
 import { getBrandList, getCompanyList } from '@/api/customer'
-import { getEnabledPackagePlans } from '@/api/packagePlan'
-import type { Brand, Company, KeywordGroup, PackagePlan, Project, ProjectPlatformOption } from '@/types'
+import type { Brand, Company, KeywordGroup, Project } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
@@ -344,12 +262,6 @@ const rows = ref<Project[]>([])
 const companyOptions = ref<Company[]>([])
 const brandOptions = ref<Brand[]>([])
 const keywordGroupOptions = ref<KeywordGroup[]>([])
-const packagePlans = ref<PackagePlan[]>([])
-const platformOptions = ref<Record<'P0' | 'P1' | 'P2', ProjectPlatformOption[]>>({
-  P0: [],
-  P1: [],
-  P2: [],
-})
 const page = reactive({ current: 1, size: 10, total: 0 })
 const query = reactive({ keyword: '', status: '' })
 
@@ -365,15 +277,6 @@ const form = reactive({
   companyId: null as number | null,
   brandId: null as number | null,
   keywordGroupIds: [] as number[],
-  packageType: '',
-  packagePriceYuan: 0,
-  serviceMonths: 0,
-  requiredPlatformP0Count: 0,
-  requiredPlatformP1Count: 0,
-  requiredPlatformP2Count: 0,
-  selectedPlatformCodesP0: [] as string[],
-  selectedPlatformCodesP1: [] as string[],
-  selectedPlatformCodesP2: [] as string[],
   status: 'paused' as 'active' | 'paused',
   regionCodes: [] as string[],
   deliveryMode: 'managed',
@@ -404,36 +307,6 @@ const rules: FormRules = {
   companyId: [{ required: true, message: '请选择客户', trigger: 'change' }],
   brandId: [{ required: true, message: '请选择品牌', trigger: 'change' }],
   keywordGroupIds: [{ required: true, type: 'array', min: 1, message: '至少选择 1 个拓词组', trigger: 'change' }],
-  packageType: [{ required: true, message: '请选择套餐', trigger: 'change' }],
-  packagePriceYuan: [{ required: true, message: '请输入签约价', trigger: 'change' }],
-  serviceMonths: [{ required: true, message: '请输入服务月数', trigger: 'change' }],
-}
-
-const packagePlanOptions = computed(() => {
-  if (!form.packageType) {
-    return packagePlans.value
-  }
-  const exists = packagePlans.value.some((p) => p.packageType === form.packageType)
-  if (exists) {
-    return packagePlans.value
-  }
-  return [
-    ...packagePlans.value,
-    {
-      id: -1,
-      packageType: form.packageType,
-      packageName: '已下架套餐',
-      standardPrice: Number(form.packagePriceYuan.toFixed(2)),
-      serviceMonths: form.serviceMonths,
-      enabled: false,
-      sortOrder: 9999,
-    } as PackagePlan,
-  ]
-})
-
-function centsToYuan(v?: number | null) {
-  if (v == null) return '-'
-  return Number(v).toFixed(2)
 }
 
 function regionDisplay(project: Project) {
@@ -488,49 +361,12 @@ function extractBrandBaseStatement(brand: Brand | null) {
   return brand.standardBrandStatement || brand.businessStandardStatement || ''
 }
 
-function yuanToCents(v: number) {
-  return Number(v.toFixed(2))
-}
-
-function onPackageChange(v: string) {
-  const plan = packagePlans.value.find((x) => x.packageType === v)
-  if (!plan) return
-  form.packagePriceYuan = Number(plan.standardPrice)
-  form.serviceMonths = plan.serviceMonths
-  form.requiredPlatformP0Count = plan.platformP0Count || 0
-  form.requiredPlatformP1Count = plan.platformP1Count || 0
-  form.requiredPlatformP2Count = plan.platformP2Count || 0
-  form.selectedPlatformCodesP0 = []
-  form.selectedPlatformCodesP1 = []
-  form.selectedPlatformCodesP2 = []
-}
-
-function applyDefaultPackage() {
-  const firstPlan = packagePlans.value[0]
-  if (!firstPlan) {
-    form.packageType = ''
-    form.packagePriceYuan = 0
-    form.serviceMonths = 0
-    return
-  }
-  form.packageType = firstPlan.packageType
-  form.packagePriceYuan = Number(firstPlan.standardPrice)
-  form.serviceMonths = firstPlan.serviceMonths
-  form.requiredPlatformP0Count = firstPlan.platformP0Count || 0
-  form.requiredPlatformP1Count = firstPlan.platformP1Count || 0
-  form.requiredPlatformP2Count = firstPlan.platformP2Count || 0
-}
-
 function resetForm() {
   form.projectName = ''
   form.projectAliases = ''
   form.companyId = fromCustomerBrandPath.value ? presetCompanyId.value : null
   form.brandId = fromCustomerBrandPath.value ? presetBrandId.value : null
   form.keywordGroupIds = []
-  applyDefaultPackage()
-  form.selectedPlatformCodesP0 = []
-  form.selectedPlatformCodesP1 = []
-  form.selectedPlatformCodesP2 = []
   form.status = 'paused'
   form.regionCodes = []
   form.deliveryMode = 'managed'
@@ -604,28 +440,6 @@ async function onCompanyChange(nextCompanyId: number) {
   await Promise.all([loadBrands(nextCompanyId), loadKeywordGroups(nextCompanyId)])
 }
 
-async function loadPackagePlans() {
-  try {
-    const { data } = await getEnabledPackagePlans()
-    packagePlans.value = data.data || []
-  } catch {
-    packagePlans.value = []
-  }
-}
-
-async function loadPlatformOptions() {
-  try {
-    const { data } = await getProjectPlatformOptions()
-    platformOptions.value = {
-      P0: data.data.P0 || [],
-      P1: data.data.P1 || [],
-      P2: data.data.P2 || [],
-    }
-  } catch {
-    platformOptions.value = { P0: [], P1: [], P2: [] }
-  }
-}
-
 async function load() {
   loading.value = true
   try {
@@ -679,15 +493,6 @@ async function openEdit(row: Project) {
   form.companyId = row.companyId || null
   form.brandId = row.brandId
   form.keywordGroupIds = [...(row.selectedKeywordGroupIds || [])]
-  form.packageType = row.packageType
-  form.packagePriceYuan = Number(row.packagePrice || 0)
-  form.serviceMonths = row.serviceMonths || 1
-  form.requiredPlatformP0Count = row.planPlatformP0Count || 0
-  form.requiredPlatformP1Count = row.planPlatformP1Count || 0
-  form.requiredPlatformP2Count = row.planPlatformP2Count || 0
-  form.selectedPlatformCodesP0 = [...(row.selectedPlatformCodesP0 || [])]
-  form.selectedPlatformCodesP1 = [...(row.selectedPlatformCodesP1 || [])]
-  form.selectedPlatformCodesP2 = [...(row.selectedPlatformCodesP2 || [])]
   form.status = row.status === 'active' ? 'active' : 'paused'
   originalStatus.value = form.status
   form.regionCodes = regionCodesFromPayload(row)
@@ -726,30 +531,6 @@ async function submit() {
     ElMessage.warning('拓词组最多选择 10 个')
     return
   }
-  if (form.selectedPlatformCodesP0.length !== form.requiredPlatformP0Count) {
-    ElMessage.warning(`P0 平台需选择 ${form.requiredPlatformP0Count} 个`)
-    return
-  }
-  if (form.selectedPlatformCodesP1.length !== form.requiredPlatformP1Count) {
-    ElMessage.warning(`P1 平台需选择 ${form.requiredPlatformP1Count} 个`)
-    return
-  }
-  if (form.selectedPlatformCodesP2.length !== form.requiredPlatformP2Count) {
-    ElMessage.warning(`P2 平台需选择 ${form.requiredPlatformP2Count} 个`)
-    return
-  }
-  const selectedTotal =
-    form.selectedPlatformCodesP0.length + form.selectedPlatformCodesP1.length + form.selectedPlatformCodesP2.length
-  const uniquePlatforms = new Set([
-    ...form.selectedPlatformCodesP0,
-    ...form.selectedPlatformCodesP1,
-    ...form.selectedPlatformCodesP2,
-  ])
-  if (uniquePlatforms.size !== selectedTotal) {
-    ElMessage.warning('同一平台不能同时出现在 P0/P1/P2')
-    return
-  }
-
   saving.value = true
   try {
     const region = regionPayloadFromCodes(form.regionCodes)
@@ -765,12 +546,6 @@ async function submit() {
       companyId: form.companyId,
       brandId: form.brandId,
       keywordGroupIds: form.keywordGroupIds,
-      packageType: form.packageType,
-      packagePrice: yuanToCents(form.packagePriceYuan),
-      serviceMonths: form.serviceMonths,
-      selectedPlatformCodesP0: form.selectedPlatformCodesP0,
-      selectedPlatformCodesP1: form.selectedPlatformCodesP1,
-      selectedPlatformCodesP2: form.selectedPlatformCodesP2,
       deliveryMode: form.deliveryMode || 'managed',
       primaryGoal: form.primaryGoal || undefined,
       targetRegions: form.targetRegions,
@@ -854,9 +629,6 @@ async function removeProject(row: Project) {
 
 onMounted(async () => {
   await dictStore.ensureLoaded()
-  await loadPackagePlans()
-  await loadPlatformOptions()
-  applyDefaultPackage()
   await loadCompanies()
   await loadBrands(form.companyId)
   await loadKeywordGroups(form.companyId)
