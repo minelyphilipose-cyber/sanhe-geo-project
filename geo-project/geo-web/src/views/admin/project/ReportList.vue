@@ -23,6 +23,14 @@
           >
             {{ activeShare ? '重新生成分享链接' : '生成分享链接' }}
           </el-button>
+          <el-button
+            v-if="canManageDashboard && activeShare"
+            :disabled="refreshCooldown > 0"
+            :loading="refreshSubmitting"
+            @click="refreshDashboardSnapshot"
+          >
+            {{ refreshCooldown > 0 ? `刷新冷却 ${refreshCooldown}s` : '刷新看板数据' }}
+          </el-button>
         </div>
 
         <el-alert
@@ -50,6 +58,7 @@
             </div>
           </el-descriptions-item>
           <el-descriptions-item label="生成时间">{{ activeShare.createdAt }}</el-descriptions-item>
+          <el-descriptions-item label="看板数据更新时间">{{ dashboardRefreshedAt || '-' }}</el-descriptions-item>
         </el-descriptions>
 
         <el-empty v-else description="当前还没有有效的统计看板分享链接" />
@@ -81,6 +90,68 @@
             </el-table-column>
           </el-table>
         </DataState>
+      </div>
+    </el-card>
+
+    <el-card v-if="canManageDashboard">
+      <div class="space-y-4">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <div class="font-medium">服务观察与下阶段动作</div>
+            <div class="text-sm text-gray-500">保存为草稿后仅内部可见，发布后展示到客户售后看板。</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <el-tag :type="adviceStatus === 'published' ? 'success' : 'info'">
+              {{ adviceStatus === 'published' ? '已发布' : '草稿' }}
+            </el-tag>
+            <span class="text-xs text-gray-400">{{ adviceUpdatedAt || '-' }}</span>
+          </div>
+        </div>
+
+        <el-form label-position="top">
+          <el-form-item label="服务概述">
+            <el-input
+              v-model="adviceForm.summary"
+              type="textarea"
+              :rows="3"
+              maxlength="2000"
+              show-word-limit
+              placeholder="概括当前售后服务进展、已产生的价值和整体判断。"
+            />
+          </el-form-item>
+          <el-form-item label="服务亮点">
+            <el-input
+              v-model="adviceForm.highlightsText"
+              type="textarea"
+              :rows="4"
+              placeholder="每行一条，例如：核心品牌词在豆包、通义等平台保持稳定命中。"
+            />
+            <div class="text-xs text-gray-400 mt-1">最多保留 8 条，超过部分保存时会自动忽略。</div>
+          </el-form-item>
+          <el-form-item label="待加强方向">
+            <el-input
+              v-model="adviceForm.improvementDirectionsText"
+              type="textarea"
+              :rows="4"
+              placeholder="每行一条，使用客户可读的中性表达，不写内部风险判断。"
+            />
+            <div class="text-xs text-gray-400 mt-1">最多保留 8 条，超过部分保存时会自动忽略。</div>
+          </el-form-item>
+          <el-form-item label="下阶段动作">
+            <el-input
+              v-model="adviceForm.nextActionsText"
+              type="textarea"
+              :rows="4"
+              placeholder="每行一条，例如：补充长尾问题覆盖，优先优化官网联系方式曝光。"
+            />
+            <div class="text-xs text-gray-400 mt-1">最多保留 8 条，超过部分保存时会自动忽略。</div>
+          </el-form-item>
+        </el-form>
+
+        <div class="flex items-center justify-end gap-2">
+          <el-button :loading="adviceSubmitting" @click="saveAdviceDraft">保存草稿</el-button>
+          <el-button type="primary" :loading="adviceSubmitting" @click="publishAdvice">发布到客户看板</el-button>
+        </div>
       </div>
     </el-card>
 
@@ -126,14 +197,23 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
-import { createProjectDashboardShare, disableProjectDashboardShare, getProjectDashboardShares } from '@/api/projectDashboard'
+import {
+  createProjectDashboardShare,
+  disableProjectDashboardShare,
+  getProjectDashboardAdvice,
+  getProjectDashboardSnapshotStatus,
+  getProjectDashboardShares,
+  publishProjectDashboardAdvice,
+  refreshProjectDashboardSnapshot,
+  saveProjectDashboardAdvice,
+} from '@/api/projectDashboard'
 import { getReportList } from '@/api/report'
 import { useUserStore } from '@/stores/user'
-import type { ProjectDashboardShare, Report } from '@/types'
+import type { ProjectDashboardAdvice, ProjectDashboardShare, Report } from '@/types'
 import { REPORT_STATUS_MAP, REPORT_TYPE_MAP } from '@/utils/constants'
 
 const route = useRoute()
@@ -143,8 +223,23 @@ const projectId = Number(route.params.id)
 
 const loading = ref(false)
 const shareSubmitting = ref(false)
+const refreshSubmitting = ref(false)
+const adviceSubmitting = ref(false)
+const refreshCooldown = ref(0)
+const dashboardRefreshedAt = ref('')
+const adviceStatus = ref('draft')
+const adviceUpdatedAt = ref('')
 const shares = ref<ProjectDashboardShare[]>([])
 const reports = ref<Report[]>([])
+let refreshCooldownTimer: ReturnType<typeof window.setInterval> | null = null
+const MAX_ADVICE_ITEMS = 8
+
+const adviceForm = ref({
+  summary: '',
+  highlightsText: '',
+  improvementDirectionsText: '',
+  nextActionsText: '',
+})
 
 const canManageDashboard = computed(() => userStore.hasPermission('project.report.export'))
 const activeShare = computed(() => shares.value.find((item) => item.status === 'active') || null)
@@ -158,8 +253,86 @@ async function loadAll() {
     ])
     shares.value = shareResp.data.data || []
     reports.value = reportResp.data.data.records || []
+    await loadDashboardSummary()
+    if (canManageDashboard.value) {
+      await loadDashboardAdvice()
+    }
   } finally {
     loading.value = false
+  }
+}
+
+async function loadDashboardSummary() {
+  const active = activeShare.value
+  if (!active) {
+    dashboardRefreshedAt.value = ''
+    return
+  }
+  try {
+    const { data } = await getProjectDashboardSnapshotStatus(projectId)
+    dashboardRefreshedAt.value = data.data?.refreshedAt || ''
+  } catch {
+    dashboardRefreshedAt.value = ''
+  }
+}
+
+async function loadDashboardAdvice() {
+  try {
+    const { data } = await getProjectDashboardAdvice(projectId)
+    fillAdviceForm(data.data || null)
+  } catch {
+    fillAdviceForm(null)
+  }
+}
+
+function fillAdviceForm(advice: ProjectDashboardAdvice | null) {
+  adviceForm.value = {
+    summary: advice?.summary || '',
+    highlightsText: joinLines(advice?.highlights),
+    improvementDirectionsText: joinLines(advice?.improvementDirections),
+    nextActionsText: joinLines(advice?.nextActions),
+  }
+  adviceStatus.value = advice?.status || 'draft'
+  adviceUpdatedAt.value = advice?.updatedAt || ''
+}
+
+function buildAdvicePayload(): ProjectDashboardAdvice {
+  return {
+    summary: adviceForm.value.summary,
+    highlights: splitLines(adviceForm.value.highlightsText),
+    improvementDirections: splitLines(adviceForm.value.improvementDirectionsText),
+    nextActions: splitLines(adviceForm.value.nextActionsText),
+  }
+}
+
+async function saveAdviceDraft() {
+  adviceSubmitting.value = true
+  try {
+    const { data } = await saveProjectDashboardAdvice(projectId, buildAdvicePayload())
+    fillAdviceForm(data.data || null)
+    ElMessage.success('服务观察草稿已保存')
+  } finally {
+    adviceSubmitting.value = false
+  }
+}
+
+async function publishAdvice() {
+  try {
+    await ElMessageBox.confirm('发布后客户将在售后看板中看到这些内容，请确认文案均为客户可见表达。', '发布确认', {
+      type: 'warning',
+      confirmButtonText: '发布',
+      cancelButtonText: '取消',
+    })
+    adviceSubmitting.value = true
+    const { data } = await publishProjectDashboardAdvice(projectId, buildAdvicePayload())
+    fillAdviceForm(data.data || null)
+    ElMessage.success('服务观察已发布到客户看板')
+  } catch (err: any) {
+    if (err !== 'cancel' && err !== 'close') {
+      ElMessage.error(err?.message || '发布失败')
+    }
+  } finally {
+    adviceSubmitting.value = false
   }
 }
 
@@ -194,6 +367,42 @@ async function disableShare(id: number) {
   }
 }
 
+async function refreshDashboardSnapshot() {
+  if (refreshCooldown.value > 0) return
+  refreshSubmitting.value = true
+  try {
+    const { data } = await refreshProjectDashboardSnapshot(projectId)
+    const result = data.data
+    if (result?.status === 'RUNNING') {
+      ElMessage.info(result.startedAt ? `看板数据刷新进行中，开始时间：${result.startedAt}` : '看板数据刷新进行中，请稍候')
+    } else {
+      dashboardRefreshedAt.value = result?.refreshedAt || ''
+      ElMessage.success('看板数据已刷新')
+      await loadAll()
+    }
+    startRefreshCooldown()
+  } catch {
+    ElMessage.error('看板数据刷新失败，请稍后重试')
+    startRefreshCooldown()
+  } finally {
+    refreshSubmitting.value = false
+  }
+}
+
+function startRefreshCooldown() {
+  refreshCooldown.value = 30
+  if (refreshCooldownTimer) {
+    window.clearInterval(refreshCooldownTimer)
+  }
+  refreshCooldownTimer = window.setInterval(() => {
+    refreshCooldown.value -= 1
+    if (refreshCooldown.value <= 0 && refreshCooldownTimer) {
+      window.clearInterval(refreshCooldownTimer)
+      refreshCooldownTimer = null
+    }
+  }, 1000)
+}
+
 function previewReport(id: number) {
   router.push(`/admin/reports/${id}`)
 }
@@ -204,6 +413,18 @@ function dashboardUrl(shareCode: string) {
 
 function reportShareUrl(token: string) {
   return `${window.location.origin}/r/${token}`
+}
+
+function splitLines(value: string) {
+  return value
+    .split('\n')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, MAX_ADVICE_ITEMS)
+}
+
+function joinLines(values?: string[]) {
+  return (values || []).join('\n')
 }
 
 async function copyDashboardUrl(shareCode: string) {
@@ -227,6 +448,12 @@ function reportTypeLabel(v?: string) {
 function reportStatusLabel(v?: string) {
   return REPORT_STATUS_MAP[v as keyof typeof REPORT_STATUS_MAP]?.label || v || '-'
 }
+
+onUnmounted(() => {
+  if (refreshCooldownTimer) {
+    window.clearInterval(refreshCooldownTimer)
+  }
+})
 
 void loadAll()
 </script>

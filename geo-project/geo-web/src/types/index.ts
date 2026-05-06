@@ -440,12 +440,9 @@ export interface ProjectDashboardShare {
 
 export interface ProjectDashboardSummary {
   hitTotal: number
-  hitToday: number
   platformCount: number
   contactTotal: number
-  contactToday: number
   siteTotal: number
-  siteToday: number
 }
 
 export interface ProjectDashboardPlatformItem {
@@ -461,11 +458,43 @@ export interface ProjectDashboardWordItem {
   frequency: number
 }
 
+export interface ProjectDashboardContentProgressItem {
+  key: 'generated' | 'approved' | 'distributed' | 'published' | 'pending' | 'generation_failed' | 'distribution_failed' | string
+  label: string
+  value: number
+  description?: string
+}
+
+export interface ProjectDashboardContentProgress {
+  generatedCount: number
+  approvedCount: number
+  distributedCount: number
+  publishedCount: number
+  pendingCount: number
+  generationFailureCount?: number
+  distributionFailureCount?: number
+  items: ProjectDashboardContentProgressItem[]
+}
+
+export interface ProjectDashboardAdvice {
+  id?: number
+  projectId?: number
+  summary?: string
+  highlights?: string[]
+  improvementDirections?: string[]
+  nextActions?: string[]
+  status?: 'draft' | 'published' | string
+  publishedAt?: string
+  updatedAt?: string
+}
+
 export interface ProjectDashboardTrendItem {
   date: string
   articleCreated: number
   articlePublished: number
   hitCount: number
+  contactCount?: number
+  siteCount?: number
 }
 
 export interface ProjectDashboardDetailItem {
@@ -481,10 +510,30 @@ export interface ProjectDashboardDetailItem {
 export interface ProjectDashboardSummaryResponse {
   projectName: string
   brandName?: string | null
+  projectStage?: string | null
+  startDate?: string | null
+  endDate?: string | null
+  monitorPlatformCount?: number
+  monitorQuestionCount?: number
+  days?: number
   summary: ProjectDashboardSummary
   platforms: ProjectDashboardPlatformItem[]
   wordCloud: ProjectDashboardWordItem[]
+  contentProgress?: ProjectDashboardContentProgress
+  advice?: ProjectDashboardAdvice | null
   refreshedAt?: string | null
+}
+
+export interface ProjectDashboardRefreshResponse {
+  status: 'SUCCESS' | 'RUNNING' | string
+  message?: string
+  startedAt?: string
+  refreshedAt?: string
+}
+
+export interface ProjectDashboardSnapshotStatusResponse {
+  projectId: number
+  refreshedAt?: string
 }
 
 export interface ProjectDashboardTrendResponse {

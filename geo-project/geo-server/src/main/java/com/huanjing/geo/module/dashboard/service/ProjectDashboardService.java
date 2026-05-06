@@ -5,16 +5,24 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.dashboard.dto.ProjectDashboardAdviceRequest;
+import com.huanjing.geo.module.dashboard.dto.ProjectDashboardAdviceVO;
+import com.huanjing.geo.module.dashboard.entity.ProjectDashboardAdvice;
 import com.huanjing.geo.module.dashboard.entity.ProjectDashboardShare;
 import com.huanjing.geo.module.dashboard.entity.ProjectDashboardSnapshot;
+import com.huanjing.geo.module.dashboard.mapper.ProjectDashboardAdviceMapper;
 import com.huanjing.geo.module.dashboard.mapper.ProjectDashboardShareMapper;
 import com.huanjing.geo.module.dashboard.mapper.ProjectDashboardSnapshotMapper;
 import com.huanjing.geo.module.dispatch.entity.PollResult;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.entity.ProjectPlatformBinding;
 import com.huanjing.geo.module.project.entity.QuestionPoolItem;
+import com.huanjing.geo.module.project.entity.QuestionPoolVersion;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.project.mapper.ProjectPlatformBindingMapper;
 import com.huanjing.geo.module.project.mapper.QuestionPoolItemMapper;
+import com.huanjing.geo.module.project.mapper.QuestionPoolVersionMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -22,6 +30,7 @@ import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -33,19 +42,76 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ProjectDashboardService {
 
     private static final int MAX_VIEWABLE = 5000;
+    private static final int DEFAULT_DAYS = 30;
+    private static final int MAX_ADVICE_ITEMS = 8;
+    private static final int MAX_ADVICE_SUMMARY_LENGTH = 2000;
 
+    private final ProjectDashboardAdviceMapper adviceMapper;
     private final ProjectDashboardShareMapper shareMapper;
     private final ProjectDashboardSnapshotMapper snapshotMapper;
     private final ProjectMapper projectMapper;
+    private final ProjectPlatformBindingMapper projectPlatformBindingMapper;
+    private final QuestionPoolVersionMapper questionPoolVersionMapper;
     private final QuestionPoolItemMapper questionPoolItemMapper;
     private final PollResultMapper pollResultMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final SysDictItemMapper sysDictItemMapper;
     private final CurrentUserService currentUserService;
     private final ProjectDashboardSnapshotService snapshotService;
+
+    public ProjectDashboardAdviceVO getAdvice(Long projectId) {
+        Project project = requireReadableProject(projectId);
+        ProjectDashboardAdvice draft = selectAdvice(project.getId(), "draft");
+        return toAdviceVO(draft != null ? draft : selectAdvice(project.getId(), "published"));
+    }
+
+    @Transactional
+    public ProjectDashboardAdviceVO saveAdvice(Long projectId, ProjectDashboardAdviceRequest req) {
+        Project project = requireWritableProject(projectId);
+        validateAdviceRequest(req, false);
+        SysUser user = currentUserService.requireCurrentUser();
+        return toAdviceVO(saveAdviceEntity(project.getId(), req, user));
+    }
+
+    @Transactional
+    public ProjectDashboardAdviceVO publishAdvice(Long projectId, ProjectDashboardAdviceRequest req) {
+        Project project = requireWritableProject(projectId);
+        validateAdviceRequest(req, true);
+        SysUser user = currentUserService.requireCurrentUser();
+        ProjectDashboardAdvice draft = saveAdviceEntity(project.getId(), req, user);
+        LocalDateTime now = LocalDateTime.now();
+        ProjectDashboardAdvice published = selectAdvice(project.getId(), "published");
+        if (published == null) {
+            published = new ProjectDashboardAdvice();
+            published.setProjectId(project.getId());
+            published.setStatus("published");
+            published.setCreatedBy(user.getId());
+            published.setCreatedAt(now);
+        }
+        copyAdvicePayload(draft, published);
+        published.setPublishedAt(now);
+        published.setUpdatedBy(user.getId());
+        published.setUpdatedAt(now);
+        if (published.getId() == null) {
+            adviceMapper.insert(published);
+        } else {
+            adviceMapper.updateById(published);
+        }
+        adviceMapper.deleteById(draft.getId());
+        log.info("Project dashboard advice published, projectId={}, operatorId={}, publishedAt={}, summaryLength={}, highlights={}, improvementDirections={}, nextActions={}",
+                project.getId(),
+                user.getId(),
+                now,
+                published.getSummary() == null ? 0 : published.getSummary().length(),
+                parseTextList(published.getHighlights()).size(),
+                parseTextList(published.getImprovementDirections()).size(),
+                parseTextList(published.getNextActions()).size());
+        return toAdviceVO(published);
+    }
 
     public List<ProjectDashboardShare> listShares(Long projectId) {
         Project project = requireReadableProject(projectId);
@@ -83,17 +149,26 @@ public class ProjectDashboardService {
         shareMapper.updateById(share);
     }
 
-    public Map<String, Object> getSummary(String shareCode) {
+    public Map<String, Object> getSummary(String shareCode, Integer days) {
         ProjectDashboardShare share = requireActiveShare(shareCode);
         Project project = requireProject(share.getProjectId());
         ensureSnapshotsReady(project.getId());
+        int safeDays = normalizeDays(days);
 
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("projectName", project.getProjectName());
         payload.put("brandName", project.getBrandName());
-        payload.put("summary", readSummary(project.getId()));
-        payload.put("platforms", readPlatformSnapshots(project.getId()));
+        payload.put("projectStage", project.getStage());
+        payload.put("startDate", project.getStartDate());
+        payload.put("endDate", project.getEndDate());
+        payload.put("monitorPlatformCount", countMonitorPlatforms(project.getId()));
+        payload.put("monitorQuestionCount", countMonitorQuestions(project.getId()));
+        payload.put("days", safeDays);
+        payload.put("summary", readSummary(project.getId(), safeDays));
+        payload.put("platforms", readPlatformSnapshots(project.getId(), safeDays));
         payload.put("wordCloud", readWordCloud(project.getId()));
+        payload.put("contentProgress", readContentProgress(project.getId()));
+        payload.put("advice", readPublishedAdvice(project.getId()));
         payload.put("refreshedAt", resolveRefreshedAt(project.getId()));
         return payload;
     }
@@ -101,7 +176,7 @@ public class ProjectDashboardService {
     public Map<String, Object> getTrend(String shareCode, Integer days) {
         ProjectDashboardShare share = requireActiveShare(shareCode);
         ensureSnapshotsReady(share.getProjectId());
-        int safeDays = days == null || days <= 0 ? 30 : Math.min(days, 90);
+        int safeDays = normalizeDays(days);
         LocalDate startDate = LocalDate.now().minusDays(safeDays - 1L);
 
         List<Map<String, Object>> items = snapshotMapper.selectList(
@@ -116,6 +191,19 @@ public class ProjectDashboardService {
             return row;
         }).toList();
         return Map.of("items", items);
+    }
+
+    public Map<String, Object> refreshSnapshot(Long projectId) {
+        Project project = requireWritableProject(projectId);
+        return snapshotService.refreshProjectWithLock(project.getId());
+    }
+
+    public Map<String, Object> getSnapshotStatus(Long projectId) {
+        Project project = requireReadableProject(projectId);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("projectId", project.getId());
+        payload.put("refreshedAt", Optional.ofNullable(resolveRefreshedAt(project.getId())).map(LocalDateTime::toString).orElse(""));
+        return payload;
     }
 
     public Map<String, Object> getDetails(String shareCode,
@@ -211,28 +299,80 @@ public class ProjectDashboardService {
                 new LambdaQueryWrapper<ProjectDashboardSnapshot>()
                         .eq(ProjectDashboardSnapshot::getProjectId, projectId)
         );
-        if (count == 0) {
-            snapshotService.refreshProject(projectId);
+        if (count == 0 || isSnapshotStale(projectId)) {
+            snapshotService.refreshProjectWithLock(projectId);
         }
     }
 
-    private Map<String, Object> readSummary(Long projectId) {
-        ProjectDashboardSnapshot snapshot = snapshotMapper.selectOne(
+    private Map<String, Object> readSummary(Long projectId, int days) {
+        LocalDate startDate = LocalDate.now().minusDays(days - 1L);
+        List<ProjectDashboardSnapshot> snapshots = snapshotMapper.selectList(
                 new LambdaQueryWrapper<ProjectDashboardSnapshot>()
                         .eq(ProjectDashboardSnapshot::getProjectId, projectId)
-                        .eq(ProjectDashboardSnapshot::getSnapshotType, "summary")
-                        .last("LIMIT 1")
+                        .eq(ProjectDashboardSnapshot::getSnapshotType, "daily_trend")
+                        .ge(ProjectDashboardSnapshot::getSnapshotDate, startDate)
         );
-        return snapshot == null ? Map.of() : parseObject(snapshot.getSnapshotValue());
+        long hitTotal = 0;
+        long contactTotal = 0;
+        long siteTotal = 0;
+        Set<String> platformCodes = new LinkedHashSet<>();
+        for (ProjectDashboardSnapshot snapshot : snapshots) {
+            Map<String, Object> value = parseObject(snapshot.getSnapshotValue());
+            hitTotal += longValue(value.get("hitCount"));
+            contactTotal += longValue(value.get("contactCount"));
+            siteTotal += longValue(value.get("siteCount"));
+            Object codes = value.get("hitPlatformCodes");
+            if (codes instanceof Collection<?> collection) {
+                for (Object code : collection) {
+                    if (code != null && StringUtils.hasText(String.valueOf(code))) {
+                        platformCodes.add(String.valueOf(code));
+                    }
+                }
+            }
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("hitTotal", hitTotal);
+        payload.put("platformCount", platformCodes.size());
+        payload.put("contactTotal", contactTotal);
+        payload.put("siteTotal", siteTotal);
+        return payload;
     }
 
-    private List<Map<String, Object>> readPlatformSnapshots(Long projectId) {
-        return snapshotMapper.selectList(
+    private List<Map<String, Object>> readPlatformSnapshots(Long projectId, int days) {
+        LocalDate startDate = LocalDate.now().minusDays(days - 1L);
+        Map<String, Map<String, Object>> merged = new LinkedHashMap<>();
+        List<ProjectDashboardSnapshot> snapshots = snapshotMapper.selectList(
                 new LambdaQueryWrapper<ProjectDashboardSnapshot>()
                         .eq(ProjectDashboardSnapshot::getProjectId, projectId)
-                        .eq(ProjectDashboardSnapshot::getSnapshotType, "platform")
-                        .orderByAsc(ProjectDashboardSnapshot::getId)
-        ).stream().map(snapshot -> parseObject(snapshot.getSnapshotValue())).toList();
+                        .eq(ProjectDashboardSnapshot::getSnapshotType, "daily_platform")
+                        .ge(ProjectDashboardSnapshot::getSnapshotDate, startDate)
+                        .orderByAsc(ProjectDashboardSnapshot::getSnapshotDate, ProjectDashboardSnapshot::getId)
+        );
+        for (ProjectDashboardSnapshot snapshot : snapshots) {
+            Map<String, Object> value = parseObject(snapshot.getSnapshotValue());
+            String code = String.valueOf(value.getOrDefault("platformCode", snapshot.getSnapshotKey()));
+            if (!StringUtils.hasText(code)) {
+                continue;
+            }
+            Map<String, Object> row = merged.computeIfAbsent(code, ignored -> {
+                Map<String, Object> initial = new LinkedHashMap<>();
+                initial.put("platformCode", code);
+                initial.put("platformName", stringValue(value.get("platformName")));
+                initial.put("hitCount", 0L);
+                initial.put("contactCount", 0L);
+                initial.put("siteCount", 0L);
+                return initial;
+            });
+            row.put("hitCount", longValue(row.get("hitCount")) + longValue(value.get("hitCount")));
+            row.put("contactCount", longValue(row.get("contactCount")) + longValue(value.get("contactCount")));
+            row.put("siteCount", longValue(row.get("siteCount")) + longValue(value.get("siteCount")));
+            if (!StringUtils.hasText(String.valueOf(row.get("platformName"))) && StringUtils.hasText(stringValue(value.get("platformName")))) {
+                row.put("platformName", stringValue(value.get("platformName")));
+            }
+        }
+        return merged.values().stream()
+                .sorted((a, b) -> Long.compare(longValue(b.get("hitCount")), longValue(a.get("hitCount"))))
+                .toList();
     }
 
     private List<Map<String, Object>> readWordCloud(Long projectId) {
@@ -249,6 +389,30 @@ public class ProjectDashboardService {
         }).toList();
     }
 
+    private Map<String, Object> readContentProgress(Long projectId) {
+        return snapshotMapper.selectList(
+                new LambdaQueryWrapper<ProjectDashboardSnapshot>()
+                        .eq(ProjectDashboardSnapshot::getProjectId, projectId)
+                        .eq(ProjectDashboardSnapshot::getSnapshotType, "content_progress")
+                        .last("LIMIT 1")
+        ).stream().findFirst().map(snapshot -> parseObject(snapshot.getSnapshotValue())).orElseGet(() -> {
+            Map<String, Object> empty = new LinkedHashMap<>();
+            empty.put("generatedCount", 0L);
+            empty.put("approvedCount", 0L);
+            empty.put("distributedCount", 0L);
+            empty.put("publishedCount", 0L);
+            empty.put("pendingCount", 0L);
+            empty.put("generationFailureCount", 0L);
+            empty.put("distributionFailureCount", 0L);
+            empty.put("items", List.of());
+            return empty;
+        });
+    }
+
+    private ProjectDashboardAdviceVO readPublishedAdvice(Long projectId) {
+        return toAdviceVO(selectAdvice(projectId, "published"));
+    }
+
     private LocalDateTime resolveRefreshedAt(Long projectId) {
         return snapshotMapper.selectList(
                 new LambdaQueryWrapper<ProjectDashboardSnapshot>()
@@ -256,6 +420,47 @@ public class ProjectDashboardService {
                         .orderByDesc(ProjectDashboardSnapshot::getRefreshedAt)
                         .last("LIMIT 1")
         ).stream().findFirst().map(ProjectDashboardSnapshot::getRefreshedAt).orElse(null);
+    }
+
+    private boolean isSnapshotStale(Long projectId) {
+        LocalDate latestTrendDate = snapshotMapper.selectList(
+                new LambdaQueryWrapper<ProjectDashboardSnapshot>()
+                        .eq(ProjectDashboardSnapshot::getProjectId, projectId)
+                        .eq(ProjectDashboardSnapshot::getSnapshotType, "daily_trend")
+                        .orderByDesc(ProjectDashboardSnapshot::getSnapshotDate)
+                        .last("LIMIT 1")
+        ).stream().findFirst().map(ProjectDashboardSnapshot::getSnapshotDate).orElse(null);
+        return latestTrendDate == null || latestTrendDate.isBefore(LocalDate.now());
+    }
+
+    private int normalizeDays(Integer days) {
+        if (days != null && (days == 7 || days == 30 || days == 90)) {
+            return days;
+        }
+        return DEFAULT_DAYS;
+    }
+
+    private long countMonitorPlatforms(Long projectId) {
+        return projectPlatformBindingMapper.selectList(
+                new LambdaQueryWrapper<ProjectPlatformBinding>()
+                        .eq(ProjectPlatformBinding::getProjectId, projectId)
+                        .select(ProjectPlatformBinding::getPlatformCode)
+        ).stream().map(ProjectPlatformBinding::getPlatformCode).filter(StringUtils::hasText).distinct().count();
+    }
+
+    private long countMonitorQuestions(Long projectId) {
+        QuestionPoolVersion latest = questionPoolVersionMapper.selectOne(
+                new LambdaQueryWrapper<QuestionPoolVersion>()
+                        .eq(QuestionPoolVersion::getProjectId, projectId)
+                        .orderByDesc(QuestionPoolVersion::getVersionNo, QuestionPoolVersion::getId)
+                        .last("LIMIT 1")
+        );
+        LambdaQueryWrapper<QuestionPoolItem> wrapper = new LambdaQueryWrapper<QuestionPoolItem>()
+                .eq(QuestionPoolItem::getProjectId, projectId);
+        if (latest != null) {
+            wrapper.eq(QuestionPoolItem::getVersionId, latest.getId());
+        }
+        return questionPoolItemMapper.selectCount(wrapper);
     }
 
     private void disableActiveShares(Long projectId) {
@@ -269,6 +474,124 @@ public class ProjectDashboardService {
             share.setStatus("disabled");
             share.setDisabledAt(now);
             shareMapper.updateById(share);
+        }
+    }
+
+    private ProjectDashboardAdvice selectAdvice(Long projectId, String status) {
+        return adviceMapper.selectOne(
+                new LambdaQueryWrapper<ProjectDashboardAdvice>()
+                        .eq(ProjectDashboardAdvice::getProjectId, projectId)
+                        .eq(ProjectDashboardAdvice::getStatus, status)
+                        .last("LIMIT 1")
+        );
+    }
+
+    private ProjectDashboardAdvice saveAdviceEntity(Long projectId, ProjectDashboardAdviceRequest req, SysUser user) {
+        ProjectDashboardAdvice advice = selectAdvice(projectId, "draft");
+        LocalDateTime now = LocalDateTime.now();
+        if (advice == null) {
+            advice = new ProjectDashboardAdvice();
+            advice.setProjectId(projectId);
+            advice.setStatus("draft");
+            advice.setCreatedBy(user.getId());
+            advice.setCreatedAt(now);
+        }
+        applyAdvicePayload(advice, req);
+        advice.setUpdatedBy(user.getId());
+        advice.setUpdatedAt(now);
+        if (advice.getId() == null) {
+            adviceMapper.insert(advice);
+        } else {
+            adviceMapper.updateById(advice);
+        }
+        return advice;
+    }
+
+    private void applyAdvicePayload(ProjectDashboardAdvice advice, ProjectDashboardAdviceRequest req) {
+        advice.setSummary(normalizeSummary(req.getSummary()));
+        advice.setHighlights(JSONUtil.toJsonStr(normalizeTextList(req.getHighlights())));
+        advice.setImprovementDirections(JSONUtil.toJsonStr(normalizeTextList(req.getImprovementDirections())));
+        advice.setNextActions(JSONUtil.toJsonStr(normalizeTextList(req.getNextActions())));
+    }
+
+    private void copyAdvicePayload(ProjectDashboardAdvice source, ProjectDashboardAdvice target) {
+        target.setSummary(source.getSummary());
+        target.setHighlights(source.getHighlights());
+        target.setImprovementDirections(source.getImprovementDirections());
+        target.setNextActions(source.getNextActions());
+    }
+
+    private void validateAdviceRequest(ProjectDashboardAdviceRequest req, boolean requireContent) {
+        if (req == null) {
+            throw new BizException(400, "Dashboard advice payload is required");
+        }
+        String summary = normalizeText(req.getSummary());
+        if (summary.length() > MAX_ADVICE_SUMMARY_LENGTH) {
+            throw new BizException(400, "Service summary is too long");
+        }
+        if (requireContent
+                && !StringUtils.hasText(summary)
+                && normalizeTextList(req.getHighlights()).isEmpty()
+                && normalizeTextList(req.getImprovementDirections()).isEmpty()
+                && normalizeTextList(req.getNextActions()).isEmpty()) {
+            throw new BizException(400, "Dashboard advice content is required before publishing");
+        }
+    }
+
+    private ProjectDashboardAdviceVO toAdviceVO(ProjectDashboardAdvice advice) {
+        if (advice == null) {
+            return null;
+        }
+        ProjectDashboardAdviceVO vo = new ProjectDashboardAdviceVO();
+        vo.setId(advice.getId());
+        vo.setProjectId(advice.getProjectId());
+        vo.setSummary(advice.getSummary());
+        vo.setHighlights(parseTextList(advice.getHighlights()));
+        vo.setImprovementDirections(parseTextList(advice.getImprovementDirections()));
+        vo.setNextActions(parseTextList(advice.getNextActions()));
+        vo.setStatus(advice.getStatus());
+        vo.setPublishedAt(advice.getPublishedAt());
+        vo.setUpdatedAt(advice.getUpdatedAt());
+        return vo;
+    }
+
+    private List<String> normalizeTextList(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        return values.stream()
+                .map(this::normalizeText)
+                .filter(StringUtils::hasText)
+                .limit(MAX_ADVICE_ITEMS)
+                .toList();
+    }
+
+    private String normalizeText(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        return value.trim();
+    }
+
+    private String normalizeSummary(String value) {
+        String summary = normalizeText(value);
+        if (summary.length() > MAX_ADVICE_SUMMARY_LENGTH) {
+            throw new BizException(400, "Service summary is too long");
+        }
+        return summary;
+    }
+
+    private List<String> parseTextList(String json) {
+        if (!StringUtils.hasText(json)) {
+            return List.of();
+        }
+        try {
+            return JSONUtil.parseArray(json).stream()
+                    .map(item -> item == null ? "" : String.valueOf(item).trim())
+                    .filter(StringUtils::hasText)
+                    .toList();
+        } catch (Exception ignored) {
+            return List.of();
         }
     }
 
@@ -360,6 +683,24 @@ public class ProjectDashboardService {
                         .in(SysDictItem::getDictKey, platformCodes)
                         .select(SysDictItem::getDictKey, SysDictItem::getDictValue)
         ).stream().collect(Collectors.toMap(SysDictItem::getDictKey, SysDictItem::getDictValue, (a, b) -> a));
+    }
+
+    private long longValue(Object value) {
+        if (value == null) {
+            return 0L;
+        }
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            return 0L;
+        }
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
     }
 
     @SuppressWarnings("unchecked")

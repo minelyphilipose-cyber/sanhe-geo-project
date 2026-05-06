@@ -19,8 +19,9 @@ public class ProjectDashboardPublicController {
     private final ProjectDashboardService projectDashboardService;
 
     @GetMapping("/{shareCode}/summary")
-    public R<Map<String, Object>> summary(@PathVariable String shareCode) {
-        return R.ok(projectDashboardService.getSummary(shareCode));
+    public R<Map<String, Object>> summary(@PathVariable String shareCode,
+                                          @RequestParam(defaultValue = "30") Integer days) {
+        return R.ok(projectDashboardService.getSummary(shareCode, days));
     }
 
     @GetMapping("/{shareCode}/trend")
