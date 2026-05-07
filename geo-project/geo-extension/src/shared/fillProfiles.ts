@@ -14,7 +14,7 @@ export interface PlatformFillProfile {
 
 export const FILL_PROFILES: Record<string, PlatformFillProfile> = {
   toutiao: profile('toutiao', 'mp.toutiao.com', 'toutiao.com'),
-  zhihu: profile('zhihu', 'www.zhihu.com', 'zhihu.com'),
+  zhihu: profile('zhihu', 'zhuanlan.zhihu.com', 'zhihu.com'),
 }
 
 function profile(platform: string, host: string, domain: string): PlatformFillProfile {

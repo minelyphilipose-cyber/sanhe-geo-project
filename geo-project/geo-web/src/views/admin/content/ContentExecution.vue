@@ -224,6 +224,26 @@
             <span class="media-name">抖音图文</span>
             <el-tag size="small" :type="douyinStatusTagType">{{ douyinStatusLabel }}</el-tag>
           </button>
+          <button
+            class="media-platform"
+            :class="{ active: selectedMediaPlatform === 'toutiao', disabled: !toutiaoAccounts.length }"
+            type="button"
+            @click="handleSemiAutoPlatformClick('toutiao')"
+          >
+            <span class="toutiao-mark">头</span>
+            <span class="media-name">头条</span>
+            <el-tag size="small" :type="semiAutoStatusTagType(toutiaoAccounts)">{{ semiAutoStatusLabel(toutiaoAccounts) }}</el-tag>
+          </button>
+          <button
+            class="media-platform"
+            :class="{ active: selectedMediaPlatform === 'zhihu', disabled: !zhihuAccounts.length }"
+            type="button"
+            @click="handleSemiAutoPlatformClick('zhihu')"
+          >
+            <span class="zhihu-mark">知</span>
+            <span class="media-name">知乎</span>
+            <el-tag size="small" :type="semiAutoStatusTagType(zhihuAccounts)">{{ semiAutoStatusLabel(zhihuAccounts) }}</el-tag>
+          </button>
         </div>
 
         <div v-if="currentPlatformAccounts.length" class="self-media-account-list">
@@ -257,8 +277,21 @@
             >
               选择账号
             </el-button>
+            <el-button
+              v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active'"
+              size="small"
+              type="primary"
+              :loading="selfMediaSubmitting && selectedSelfMediaAccountId === account.id"
+              @click="submitSemiAutoExtensionTask(account)"
+            >
+              创建扩展任务
+            </el-button>
           </div>
         </div>
+        <el-empty
+          v-else-if="isSemiAutoPlatform(selectedMediaPlatform)"
+          description="当前品牌暂无可用的头条/知乎账号"
+        />
 
         <div v-if="selectedMediaPlatform === 'wechat_mp' && selectedSelfMediaAccountId" class="cover-picker">
           <div class="cover-picker-header">
@@ -478,6 +511,9 @@ import {
 } from '@/api/content'
 import { getBrandDetail, getBrandImageFolders } from '@/api/customer'
 
+type MediaPlatform = 'wechat_mp' | 'douyin' | 'toutiao' | 'zhihu'
+type SemiAutoPlatform = 'toutiao' | 'zhihu'
+
 const userStore = useUserStore()
 const dictStore = useDictStore()
 const route = useRoute()
@@ -534,11 +570,13 @@ const wechatCapability = ref<WechatMpCapability | null>(null)
 const douyinCapability = ref<DouyinCapability | null>(null)
 const wechatAccounts = ref<SelfMediaAccount[]>([])
 const douyinAccounts = ref<SelfMediaAccount[]>([])
+const toutiaoAccounts = ref<SelfMediaAccount[]>([])
+const zhihuAccounts = ref<SelfMediaAccount[]>([])
 const checkingSelfMediaAccountId = ref<number | null>(null)
 const brandImageFolders = ref<BrandImageFolder[]>([])
 const imageFolderScope = ref<'project' | 'all'>('project')
 const selectedImageFolderId = ref<number | null>(null)
-const selectedMediaPlatform = ref<'wechat_mp' | 'douyin'>('wechat_mp')
+const selectedMediaPlatform = ref<MediaPlatform>('wechat_mp')
 const selectedSelfMediaAccountId = ref<number | null>(null)
 const selectedCoverMaterialId = ref<number | null>(null)
 const selectedDouyinImageMaterialIds = ref<number[]>([])
@@ -584,7 +622,18 @@ const douyinStatusTagType = computed<'success' | 'warning' | 'info'>(() => {
   if (!douyinCapability.value?.enabled) return 'warning'
   return douyinActive.value ? 'success' : 'info'
 })
-const currentPlatformAccounts = computed(() => selectedMediaPlatform.value === 'douyin' ? douyinAccounts.value : wechatAccounts.value)
+const currentPlatformAccounts = computed(() => {
+  switch (selectedMediaPlatform.value) {
+    case 'douyin':
+      return douyinAccounts.value
+    case 'toutiao':
+      return toutiaoAccounts.value
+    case 'zhihu':
+      return zhihuAccounts.value
+    default:
+      return wechatAccounts.value
+  }
+})
 const projectImageFolders = computed(() => brandImageFolders.value.filter((folder) => folder.projectRelated))
 const displayImageFolders = computed(() => {
   if (imageFolderScope.value === 'project' && projectImageFolders.value.length) {
@@ -784,6 +833,8 @@ async function openMediaDistribute(row: ArticleDraft) {
   selectedMediaPlatform.value = 'wechat_mp'
   wechatAccounts.value = []
   douyinAccounts.value = []
+  toutiaoAccounts.value = []
+  zhihuAccounts.value = []
   brandImageFolders.value = []
   imageFolderScope.value = 'project'
   selectedImageFolderId.value = null
@@ -819,6 +870,8 @@ async function openMediaDistribute(row: ArticleDraft) {
     const accounts = accountRes.data.data || []
     wechatAccounts.value = accounts.filter((account) => account.platform === 'wechat_mp')
     douyinAccounts.value = accounts.filter((account) => account.platform === 'douyin')
+    toutiaoAccounts.value = accounts.filter((account) => account.platform === 'toutiao')
+    zhihuAccounts.value = accounts.filter((account) => account.platform === 'zhihu')
     brandImageFolders.value = folderRes.data.data || []
     ensureSelectedImageFolder()
     mediaDistributeVisible.value = true
@@ -887,6 +940,31 @@ function startDouyinImageText(account: SelfMediaAccount) {
   selectedMediaPlatform.value = 'douyin'
   selectedSelfMediaAccountId.value = account.id
   ensureSelectedImageFolder()
+}
+
+function isSemiAutoPlatform(platform: MediaPlatform): platform is SemiAutoPlatform {
+  return platform === 'toutiao' || platform === 'zhihu'
+}
+
+function semiAutoStatusLabel(accounts: SelfMediaAccount[]) {
+  if (!accounts.length) return '未配置'
+  return accounts.some((account) => account.status === 'active') ? '可创建任务' : '不可用'
+}
+
+function semiAutoStatusTagType(accounts: SelfMediaAccount[]): 'success' | 'warning' | 'info' {
+  if (!accounts.length) return 'info'
+  return accounts.some((account) => account.status === 'active') ? 'success' : 'warning'
+}
+
+function handleSemiAutoPlatformClick(platform: SemiAutoPlatform) {
+  selectedMediaPlatform.value = platform
+  selectedSelfMediaAccountId.value = null
+  selectedCoverMaterialId.value = null
+  selectedDouyinImageMaterialIds.value = []
+  const accounts = platform === 'toutiao' ? toutiaoAccounts.value : zhihuAccounts.value
+  if (!accounts.length) {
+    ElMessage.info(`当前品牌暂无${platform === 'toutiao' ? '头条' : '知乎'}账号`)
+  }
 }
 
 function handleFolderScopeChange() {
@@ -992,6 +1070,31 @@ async function submitDouyinImageText() {
       return
     }
     ElMessage.error(task.errorMessage || '抖音图文提交失败')
+  } finally {
+    selfMediaSubmitting.value = false
+  }
+}
+
+async function submitSemiAutoExtensionTask(account: SelfMediaAccount) {
+  if (!mediaDistributeArticleId.value) {
+    ElMessage.warning('请选择文章')
+    return
+  }
+  selectedSelfMediaAccountId.value = account.id
+  selfMediaSubmitting.value = true
+  try {
+    const result = await distributeContentArticleToSelfMediaAccount(mediaDistributeArticleId.value, {
+      selfMediaAccountId: account.id,
+      requestId: createRequestId(account.platform),
+    })
+    const task = result.data.data
+    if (['token_issued', 'filling', 'filled', 'published'].includes(task.status)) {
+      ElMessage.success('已创建扩展任务，请打开浏览器扩展继续填写')
+      await refreshDistributionHistory()
+      await load()
+      return
+    }
+    ElMessage.error(task.errorMessage || '创建扩展任务失败')
   } finally {
     selfMediaSubmitting.value = false
   }
@@ -1464,6 +1567,27 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   justify-content: center;
   font-size: 22px;
   font-weight: 700;
+}
+
+.toutiao-mark,
+.zhihu-mark {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.toutiao-mark {
+  background: #d92323;
+}
+
+.zhihu-mark {
+  background: #1677ff;
 }
 
 .media-name {
