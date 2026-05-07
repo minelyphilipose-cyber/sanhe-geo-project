@@ -2,8 +2,14 @@ package com.huanjing.geo.module.content.service;
 
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.audit.AuditMode;
+import com.huanjing.geo.module.audit.AuditResult;
+import com.huanjing.geo.module.audit.dto.AuditEvent;
+import com.huanjing.geo.module.audit.service.AuditService;
+import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.dto.ArticlePublishRequest;
 import com.huanjing.geo.module.content.dto.ArticleResubmitRequest;
@@ -12,6 +18,8 @@ import com.huanjing.geo.module.content.dto.ArticleRevisionSaveRequest;
 import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
 import com.huanjing.geo.module.content.entity.*;
 import com.huanjing.geo.module.content.mapper.*;
+import com.huanjing.geo.module.customer.access.BrandAccessAction;
+import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.project.entity.Project;
@@ -46,6 +54,9 @@ public class ContentArticleService {
     private final SysDictItemMapper sysDictItemMapper;
     private final CurrentUserService currentUserService;
     private final MarkdownImageReferenceValidator markdownImageReferenceValidator;
+    private final ArticleHtmlSanitizer articleHtmlSanitizer;
+    private final BrandAccessService brandAccessService;
+    private final AuditService auditService;
 
     public Page<ArticleDraft> page(Long projectId, String status, String articleType, long current, long size) {
         SysUser operator = currentUserService.requireCurrentUser();
@@ -115,15 +126,16 @@ public class ContentArticleService {
         currentUserService.ensurePermission("project.update");
         Project project = requireProject(req.getProjectId());
         ensureProjectAccess(operator, project, true);
+        brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
 
         String articleType = StringUtils.hasText(req.getArticleType()) ? req.getArticleType().trim() : "";
         if (!ArticleTypes.isSupported(articleType)) {
-            throw new BizException(400, "Invalid article type");
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid article type");
         }
-        String content = req.getContentMarkdown().trim();
+        String content = articleHtmlSanitizer.clean(req.getContentMarkdown().trim());
         String title = StringUtils.hasText(req.getTitle()) ? req.getTitle().trim() : "";
         if (!StringUtils.hasText(title)) {
-            throw new BizException(400, "Title is required");
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Title is required");
         }
         markdownImageReferenceValidator.validate(project, content);
 
@@ -157,6 +169,7 @@ public class ContentArticleService {
         draft.setDuplicateArticleId(duplicateResult.articleId);
         articleDraftMapper.updateById(draft);
         draft.setProjectName(project.getProjectName());
+        auditArticleTransition("ARTICLE_CREATED", AuditResult.SUCCESS, operator, project, draft, null, "pending_review", "manual create", null);
         return draft;
     }
 
@@ -167,8 +180,10 @@ public class ContentArticleService {
         ArticleDraft article = requireArticle(articleId);
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
+        brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
 
-        String content = req.getContentMarkdown().trim();
+        String oldStatus = article.getStatus();
+        String content = articleHtmlSanitizer.clean(req.getContentMarkdown().trim());
         String title = StringUtils.hasText(req.getTitle()) ? req.getTitle().trim() : extractTitle(content);
         int nextVersion = Optional.ofNullable(article.getCurrentVersionNo()).orElse(1) + 1;
         markdownImageReferenceValidator.validate(project, content);
@@ -184,16 +199,23 @@ public class ContentArticleService {
 
         RiskResult riskResult = scanRisk(project, content);
         DuplicateResult duplicateResult = checkDuplicate(article, title);
-        article.setTitle(title);
-        article.setCurrentVersionNo(nextVersion);
-        article.setStatus("under_revision");
-        article.setHasRisk(riskResult.hasRisk);
-        article.setRiskSeverity(riskResult.severity);
-        article.setRiskWordsJson(riskResult.wordsJson);
-        article.setIsDuplicateTitle(duplicateResult.duplicate);
-        article.setDuplicateScore(duplicateResult.score);
-        article.setDuplicateArticleId(duplicateResult.articleId);
-        articleDraftMapper.updateById(article);
+        int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
+                .eq(ArticleDraft::getId, articleId)
+                .eq(ArticleDraft::getStatus, oldStatus)
+                .set(ArticleDraft::getTitle, title)
+                .set(ArticleDraft::getCurrentVersionNo, nextVersion)
+                .set(ArticleDraft::getStatus, "under_revision")
+                .set(ArticleDraft::getHasRisk, riskResult.hasRisk)
+                .set(ArticleDraft::getRiskSeverity, riskResult.severity)
+                .set(ArticleDraft::getRiskWordsJson, riskResult.wordsJson)
+                .set(ArticleDraft::getIsDuplicateTitle, duplicateResult.duplicate)
+                .set(ArticleDraft::getDuplicateScore, duplicateResult.score)
+                .set(ArticleDraft::getDuplicateArticleId, duplicateResult.articleId));
+        if (updated != 1) {
+            auditArticleTransition("ARTICLE_REVISION_SAVED", AuditResult.DENIED, operator, project, article, oldStatus, "under_revision", "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
+            throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
+        }
+        auditArticleTransition("ARTICLE_REVISION_SAVED", AuditResult.SUCCESS, operator, project, article, oldStatus, "under_revision", req.getNote(), null);
 
         if (StringUtils.hasText(req.getNote())) {
             ArticleReviewLog log = new ArticleReviewLog();
@@ -213,11 +235,20 @@ public class ContentArticleService {
         ArticleDraft article = requireArticle(articleId);
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
+        brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
         if (!Set.of("under_revision", "rejected").contains(article.getStatus())) {
-            throw new BizException(400, "Only under_revision/rejected article can resubmit");
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Only under_revision/rejected article can resubmit");
         }
-        article.setStatus("pending_review");
-        articleDraftMapper.updateById(article);
+        String oldStatus = article.getStatus();
+        int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
+                .eq(ArticleDraft::getId, articleId)
+                .eq(ArticleDraft::getStatus, oldStatus)
+                .set(ArticleDraft::getStatus, "pending_review"));
+        if (updated != 1) {
+            auditArticleTransition("ARTICLE_RESUBMITTED", AuditResult.DENIED, operator, project, article, oldStatus, "pending_review", "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
+            throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
+        }
+        auditArticleTransition("ARTICLE_RESUBMITTED", AuditResult.SUCCESS, operator, project, article, oldStatus, "pending_review", req == null ? null : req.getComment(), null);
 
         ArticleReviewLog log = new ArticleReviewLog();
         log.setArticleId(articleId);
@@ -235,37 +266,49 @@ public class ContentArticleService {
         ArticleDraft article = requireArticle(articleId);
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
+        brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
+        ensureReviewerIsNotAuthor(article, operator);
 
         String action = req.getAction().trim().toLowerCase(Locale.ROOT);
         if (!Set.of("approve", "reject", "return_for_revision").contains(action)) {
-            throw new BizException(400, "Invalid review action");
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid review action");
         }
         boolean needComment = "reject".equals(action) || "return_for_revision".equals(action);
         boolean riskOverridden = false;
         if (needComment && !StringUtils.hasText(req.getComment())) {
-            throw new BizException(400, "Comment is required");
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Comment is required");
         }
         if ("approve".equals(action) && Boolean.TRUE.equals(article.getHasRisk())) {
             String severity = Optional.ofNullable(article.getRiskSeverity()).orElse("none");
             if ("block".equalsIgnoreCase(severity)) {
-                throw new BizException(400, "Please resolve block risk words before approve");
+                throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Please resolve block risk words before approve");
             }
             if ("warn".equalsIgnoreCase(severity)) {
                 if (!StringUtils.hasText(req.getComment())) {
-                    throw new BizException(400, "Warn risk approve requires comment");
+                    throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Warn risk approve requires comment");
                 }
                 riskOverridden = true;
             }
         }
 
+        String oldStatus = article.getStatus();
+        String newStatus;
         if ("approve".equals(action)) {
-            article.setStatus("approved");
+            newStatus = "approved";
         } else if ("reject".equals(action)) {
-            article.setStatus("rejected");
+            newStatus = "rejected";
         } else {
-            article.setStatus("under_revision");
+            newStatus = "under_revision";
         }
-        articleDraftMapper.updateById(article);
+        int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
+                .eq(ArticleDraft::getId, articleId)
+                .eq(ArticleDraft::getStatus, "pending_review")
+                .set(ArticleDraft::getStatus, newStatus));
+        if (updated != 1) {
+            auditArticleTransition("ARTICLE_REVIEWED", AuditResult.DENIED, operator, project, article, oldStatus, newStatus, "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
+            throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
+        }
+        auditArticleTransition("ARTICLE_REVIEWED", AuditResult.SUCCESS, operator, project, article, oldStatus, newStatus, req.getComment(), null);
 
         ArticleReviewLog log = new ArticleReviewLog();
         log.setArticleId(articleId);
@@ -285,19 +328,29 @@ public class ContentArticleService {
         ensureProjectAccess(operator, project, true);
         String action = req.getPublishAction().trim().toLowerCase(Locale.ROOT);
         if (!Set.of("publish", "unpublish").contains(action)) {
-            throw new BizException(400, "Invalid publish action");
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid publish action");
         }
         if ("publish".equals(action) && !Set.of("approved", "unpublished").contains(article.getStatus())) {
-            throw new BizException(400, "Only approved/unpublished article can publish");
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Only approved/unpublished article can publish");
         }
         if ("unpublish".equals(action) && !Set.of("published", "distributed").contains(article.getStatus())) {
-            throw new BizException(400, "Only published/distributed article can unpublish");
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Only published/distributed article can unpublish");
         }
-        article.setStatus("publish".equals(action) ? "published" : "unpublished");
+        String oldStatus = article.getStatus();
+        String newStatus = "publish".equals(action) ? "published" : "unpublished";
+        LambdaUpdateWrapper<ArticleDraft> update = new LambdaUpdateWrapper<ArticleDraft>()
+                .eq(ArticleDraft::getId, articleId)
+                .eq(ArticleDraft::getStatus, oldStatus)
+                .set(ArticleDraft::getStatus, newStatus);
         if ("publish".equals(action)) {
-            article.setPublishedAt(LocalDateTime.now());
+            update.set(ArticleDraft::getPublishedAt, LocalDateTime.now());
         }
-        articleDraftMapper.updateById(article);
+        int updated = articleDraftMapper.update(null, update);
+        if (updated != 1) {
+            auditArticleTransition("ARTICLE_PUBLISH_STATE_CHANGED", AuditResult.DENIED, operator, project, article, oldStatus, newStatus, "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
+            throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
+        }
+        auditArticleTransition("ARTICLE_PUBLISH_STATE_CHANGED", AuditResult.SUCCESS, operator, project, article, oldStatus, newStatus, req.getNote(), null);
 
         ArticlePublishLog log = new ArticlePublishLog();
         log.setArticleId(articleId);
@@ -319,7 +372,8 @@ public class ContentArticleService {
                                              String inputSnapshot,
                                              String platformCode,
                                              String modelId,
-                                             List<QuestionPoolItem> questions) {
+                                            List<QuestionPoolItem> questions) {
+        contentMarkdown = articleHtmlSanitizer.clean(contentMarkdown);
         markdownImageReferenceValidator.validate(project, contentMarkdown);
         ArticleDraft draft = new ArticleDraft();
         draft.setBatchId(batchId);
@@ -371,7 +425,7 @@ public class ContentArticleService {
     private ArticleDraft requireArticle(Long articleId) {
         ArticleDraft article = articleDraftMapper.selectById(articleId);
         if (article == null) {
-            throw new BizException(404, "Article not found");
+            throw new BizException(ContentErrorCodes.ARTICLE_NOT_FOUND, "Article not found");
         }
         return article;
     }
@@ -413,6 +467,58 @@ public class ContentArticleService {
         if (write) {
             currentUserService.ensurePermission("project.update");
         }
+    }
+
+    private void ensureReviewerIsNotAuthor(ArticleDraft article, SysUser operator) {
+        ArticleDraftVersion version = articleDraftVersionMapper.selectOne(
+                new LambdaQueryWrapper<ArticleDraftVersion>()
+                        .eq(ArticleDraftVersion::getArticleId, article.getId())
+                        .eq(article.getCurrentVersionNo() != null, ArticleDraftVersion::getVersionNo, article.getCurrentVersionNo())
+                        .orderByDesc(ArticleDraftVersion::getVersionNo)
+                        .last("LIMIT 1")
+        );
+        Long authorId = version == null ? null : version.getCreatedBy();
+        if (authorId != null && authorId.equals(operator.getId())) {
+            throw new BizException(ContentErrorCodes.ARTICLE_AUTHOR_CANNOT_REVIEW, "Article author cannot review their own article");
+        }
+    }
+
+    private void auditArticleTransition(
+            String eventType,
+            AuditResult result,
+            SysUser operator,
+            Project project,
+            ArticleDraft article,
+            String oldStatus,
+            String newStatus,
+            String reason,
+            Integer errorCode
+    ) {
+        AuditEvent event = new AuditEvent();
+        event.setEventType(eventType);
+        event.setMode(AuditMode.SYNC);
+        event.setSensitive(false);
+        event.setResult(result);
+        event.setActorId(operator == null ? null : operator.getId());
+        event.setBrandId(project == null ? null : project.getBrandId());
+        event.setTargetType("ARTICLE");
+        event.setTargetId(article == null || article.getId() == null ? null : String.valueOf(article.getId()));
+        Map<String, Object> detail = new LinkedHashMap<>();
+        if (article != null) {
+            detail.put("articleId", article.getId());
+            detail.put("projectId", article.getProjectId());
+        }
+        detail.put("oldStatus", oldStatus);
+        detail.put("newStatus", newStatus);
+        if (StringUtils.hasText(reason)) {
+            detail.put("reason", reason);
+        }
+        event.setDetail(detail);
+        if (errorCode != null) {
+            event.setErrorCode(String.valueOf(errorCode));
+            event.setErrorMessage(reason);
+        }
+        auditService.record(event);
     }
 
     private String extractTitle(String content) {
