@@ -6,18 +6,21 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.module.customer.dto.CompanyDeductRequest;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.dto.CompanyCreateRequest;
+import com.huanjing.geo.module.customer.dto.CompanyQuestionPoolQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyRechargeRequest;
 import com.huanjing.geo.module.customer.dto.CompanyUpdateRequest;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.CompanyAccount;
 import com.huanjing.geo.module.customer.entity.CompanyAccountTxn;
 import com.huanjing.geo.module.customer.entity.Company;
+import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import com.huanjing.geo.module.customer.mapper.CompanyAccountMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyAccountTxnMapper;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.partner.entity.Partner;
 import com.huanjing.geo.module.partner.mapper.PartnerMapper;
+import com.huanjing.geo.module.project.mapper.QuestionPoolItemMapper;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
@@ -58,6 +61,8 @@ public class CompanyService {
     private final PartnerMapper partnerMapper;
     private final SysDictItemMapper sysDictItemMapper;
     private final CurrentUserService currentUserService;
+    private final CompanyPackageBindingService companyPackageBindingService;
+    private final QuestionPoolItemMapper questionPoolItemMapper;
     private final ActivityLogService activityLogService;
 
     public Page<Company> page(long current, long size, String keyword, String ownerType, Long partnerId) {
@@ -93,6 +98,29 @@ public class CompanyService {
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "company");
         ensureSalesCompanyAccess(user, company);
         return company;
+    }
+
+    public CompanyQuestionPoolQuotaVO questionPoolQuota(Long companyId) {
+        SysUser user = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission("company.read");
+        Company company = requireCompany(companyId);
+        currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "company");
+        ensureSalesCompanyAccess(user, company);
+
+        CompanyPackageBinding binding = companyPackageBindingService.activeBinding(companyId);
+        int usedCount = questionPoolItemMapper.countLatestItemsByCompany(companyId);
+        int quotaLimit = binding == null || binding.getQuestionPoolLimit() == null ? 0 : binding.getQuestionPoolLimit();
+
+        CompanyQuestionPoolQuotaVO vo = new CompanyQuestionPoolQuotaVO();
+        vo.setCompanyId(companyId);
+        vo.setPackageBindingId(binding == null ? null : binding.getId());
+        vo.setPackageName(binding == null ? null : binding.getPackageName());
+        vo.setActiveBinding(binding != null);
+        vo.setQuotaLimit(quotaLimit);
+        vo.setUsedCount(usedCount);
+        vo.setRemainingCount(Math.max(quotaLimit - usedCount, 0));
+        vo.setUsageRate(quotaLimit <= 0 ? 0D : Math.min(1D, usedCount * 1D / quotaLimit));
+        return vo;
     }
 
     @Transactional

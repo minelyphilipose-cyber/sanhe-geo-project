@@ -352,6 +352,7 @@ import { getBrandImageFolders } from '@/api/customer'
 import { getProjectDetail, getProjectList } from '@/api/project'
 import { useDictStore } from '@/stores/dict'
 import DataState from '@/components/ui/DataState.vue'
+import { errorMessage } from '@/utils/error'
 
 interface ManualSection {
   id: number
@@ -700,11 +701,6 @@ function isImageType(fileType?: string | null) {
   return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(fileType.toLowerCase())
 }
 
-function getErrorMessage(err: unknown) {
-  const response = (err as { response?: { data?: { message?: string } } })?.response
-  return response?.data?.message || '提交失败，请重试'
-}
-
 async function submitManualCreate() {
   if (!manualForm.projectId) {
     ElMessage.warning('请选择绑定项目')
@@ -738,7 +734,7 @@ async function submitManualCreate() {
     })
   } catch (err) {
     console.error(err)
-    ElMessage.error(getErrorMessage(err))
+    ElMessage.error(errorMessage(err, '提交失败，请重试'))
   } finally {
     submitting.value = false
   }

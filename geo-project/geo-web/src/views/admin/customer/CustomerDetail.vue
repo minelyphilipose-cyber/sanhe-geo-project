@@ -42,6 +42,22 @@
           <el-descriptions-item label="绑定时间">{{ activePackageBinding.boundAt || '-' }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ packageStatusLabel(activePackageBinding.status) }}</el-descriptions-item>
         </el-descriptions>
+        <div v-loading="questionPoolQuotaLoading" class="quota-panel">
+          <div class="quota-panel__header">
+            <span>问题池额度</span>
+            <span>{{ questionPoolQuotaText }}</span>
+          </div>
+          <el-progress
+            :percentage="questionPoolQuotaPercentage"
+            :status="questionPoolQuotaStatus"
+            :stroke-width="10"
+          />
+          <div class="quota-panel__meta">
+            <span v-if="isQuestionPoolOverQuota">超出额度 {{ questionPoolOverflow }}</span>
+            <span v-else>剩余额度 {{ questionPoolQuota?.remainingCount ?? 0 }}</span>
+            <span>统计客户下所有项目最新问题池版本</span>
+          </div>
+        </div>
         <el-table class="mt-4" :data="activeQuotaSnapshot" border>
           <el-table-column label="渠道" min-width="140">
             <template #default="scope">{{ channelLabel(scope.row.channelCode) }}</template>
@@ -321,6 +337,7 @@ import {
   getCompanyAccountTxns,
   getCompanyDetail,
   getCompanyPackageBindings,
+  getCompanyQuestionPoolQuota,
   rechargeCompanyAccount,
   unbindCompanyPackage,
   updateBrand,
@@ -328,10 +345,11 @@ import {
 } from '@/api/customer'
 import { getEnabledPackagePlans } from '@/api/packagePlan'
 import { getPartnerList, type PartnerItem } from '@/api/partner'
-import type { Brand, Company, CompanyAccount, CompanyAccountTxn, CompanyPackageBinding, PackagePlan } from '@/types'
+import type { Brand, Company, CompanyAccount, CompanyAccountTxn, CompanyPackageBinding, CompanyQuestionPoolQuota, PackagePlan } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
+import { errorMessage } from '@/utils/error'
 
 const route = useRoute()
 const router = useRouter()
@@ -352,6 +370,7 @@ const loading = ref(false)
 const brandLoading = ref(false)
 const accountLoading = ref(false)
 const packageLoading = ref(false)
+const questionPoolQuotaLoading = ref(false)
 const saving = ref(false)
 const brandSaving = ref(false)
 const accountSubmitting = ref(false)
@@ -363,6 +382,7 @@ const partnerOptions = ref<PartnerItem[]>([])
 const account = ref<CompanyAccount | null>(null)
 const txns = ref<CompanyAccountTxn[]>([])
 const activePackageBinding = ref<CompanyPackageBinding | null>(null)
+const questionPoolQuota = ref<CompanyQuestionPoolQuota | null>(null)
 const packageBindingHistory = ref<CompanyPackageBinding[]>([])
 const packagePlanOptions = ref<PackagePlan[]>([])
 const txnPage = reactive({ current: 1, size: 10, total: 0 })
@@ -469,6 +489,45 @@ function periodLabel(value?: string | null) {
 }
 
 const activeQuotaSnapshot = computed(() => parseQuotaSnapshot(activePackageBinding.value?.channelQuotaSnapshot))
+const hasActiveQuestionPoolQuota = computed(() => !!questionPoolQuota.value?.activeBinding)
+const isQuestionPoolOverQuota = computed(() => {
+  const quota = questionPoolQuota.value
+  return !!quota?.activeBinding && quota.usedCount > quota.quotaLimit
+})
+const questionPoolOverflow = computed(() => {
+  const quota = questionPoolQuota.value
+  if (!quota?.activeBinding) return 0
+  return Math.max(quota.usedCount - quota.quotaLimit, 0)
+})
+const questionPoolQuotaText = computed(() => {
+  const quota = questionPoolQuota.value
+  if (!quota?.activeBinding) {
+    return '未绑定套餐'
+  }
+  return `${quota.usedCount}/${quota.quotaLimit}`
+})
+const questionPoolQuotaPercentage = computed(() => {
+  const quota = questionPoolQuota.value
+  if (!quota?.activeBinding) {
+    return 0
+  }
+  if (quota.quotaLimit <= 0) {
+    return quota.usedCount > 0 ? 100 : 0
+  }
+  return Math.min(100, Math.round(quota.usedCount * 100 / quota.quotaLimit))
+})
+const questionPoolQuotaStatus = computed(() => {
+  if (!hasActiveQuestionPoolQuota.value) {
+    return undefined
+  }
+  if (isQuestionPoolOverQuota.value) {
+    return 'exception'
+  }
+  if (questionPoolQuotaPercentage.value >= 90) {
+    return 'warning'
+  }
+  return undefined
+})
 
 function companyRegion(value?: Company | null) {
   if (!value) return '-'
@@ -639,29 +698,33 @@ async function loadPackageBinding() {
   try {
     const activeRes = await getActiveCompanyPackageBinding(companyId)
     activePackageBinding.value = activeRes.data.data
+    if (!canManagePackageBinding.value) {
+      packageBindingHistory.value = []
+      return
+    }
+    try {
+      const historyRes = await getCompanyPackageBindings(companyId)
+      packageBindingHistory.value = (historyRes.data.data || []).filter((item) => item.status !== 'active')
+    } catch (err) {
+      ElMessage.error(errorMessage(err, '加载客户套餐历史失败'))
+    }
   } catch (err) {
     ElMessage.error(errorMessage(err, '加载客户套餐信息失败'))
-    packageLoading.value = false
-    return
-  }
-  if (!canManagePackageBinding.value) {
-    packageBindingHistory.value = []
-    packageLoading.value = false
-    return
-  }
-  try {
-    const historyRes = await getCompanyPackageBindings(companyId)
-    packageBindingHistory.value = (historyRes.data.data || []).filter((item) => item.status !== 'active')
-  } catch (err) {
-    ElMessage.error(errorMessage(err, '加载客户套餐历史失败'))
   } finally {
     packageLoading.value = false
   }
 }
 
-function errorMessage(err: unknown, fallback: string) {
-  const data = (err as any)?.response?.data
-  return data?.message || data?.msg || (err as any)?.message || fallback
+async function loadQuestionPoolQuota() {
+  questionPoolQuotaLoading.value = true
+  try {
+    const { data } = await getCompanyQuestionPoolQuota(companyId)
+    questionPoolQuota.value = data.data
+  } catch (err) {
+    ElMessage.error(errorMessage(err, '加载问题池额度失败'))
+  } finally {
+    questionPoolQuotaLoading.value = false
+  }
 }
 
 async function loadPackagePlanOptions() {
@@ -690,7 +753,7 @@ async function submitPackageBind() {
     await bindCompanyPackage(companyId, packageBindForm.packagePlanId)
     ElMessage.success('客户套餐已绑定')
     packageBindVisible.value = false
-    await loadPackageBinding()
+    await Promise.all([loadPackageBinding(), loadQuestionPoolQuota()])
   } catch (err) {
     ElMessage.error(errorMessage(err, '绑定套餐失败'))
   } finally {
@@ -713,7 +776,7 @@ async function confirmUnbindPackage() {
   try {
     await unbindCompanyPackage(companyId)
     ElMessage.success('客户套餐已解绑')
-    await loadPackageBinding()
+    await Promise.all([loadPackageBinding(), loadQuestionPoolQuota()])
   } catch (err) {
     ElMessage.error(errorMessage(err, '解绑套餐失败'))
   } finally {
@@ -895,6 +958,34 @@ onMounted(async () => {
   await dictStore.ensureLoaded()
   await loadPartners()
   await loadCompany()
-  await Promise.all([loadBrands(), loadAccount(), loadPackageBinding()])
+  await Promise.all([loadBrands(), loadAccount(), loadPackageBinding(), loadQuestionPoolQuota()])
 })
 </script>
+
+<style scoped>
+.quota-panel {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+}
+
+.quota-panel__header,
+.quota-panel__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.quota-panel__header {
+  margin-bottom: 10px;
+  font-weight: 600;
+}
+
+.quota-panel__meta {
+  margin-top: 8px;
+  color: #606266;
+  font-size: 12px;
+}
+</style>

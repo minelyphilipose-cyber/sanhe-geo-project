@@ -1064,6 +1064,17 @@ export interface PackageChannelQuotaConfig {
   updatedAt?: string
 }
 
+export interface CompanyQuestionPoolQuota {
+  companyId: number
+  packageBindingId?: number | null
+  packageName?: string | null
+  activeBinding: boolean
+  quotaLimit: number
+  usedCount: number
+  remainingCount: number
+  usageRate: number
+}
+
 export interface PackageContentConfig {
   id?: number
   packageType?: string

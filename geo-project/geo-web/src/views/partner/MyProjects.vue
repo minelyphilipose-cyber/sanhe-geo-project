@@ -123,6 +123,7 @@ import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionPayloadFromCodes } from '@/constants/region'
 import { useDictStore } from '@/stores/dict'
 import { useUserStore } from '@/stores/user'
+import { errorMessage } from '@/utils/error'
 
 const dictStore = useDictStore()
 const userStore = useUserStore()
@@ -341,11 +342,6 @@ async function load() {
   } finally {
     loading.value = false
   }
-}
-
-function errorMessage(err: unknown, fallback: string) {
-  const data = (err as any)?.response?.data
-  return data?.message || data?.msg || (err as any)?.message || fallback
 }
 
 onMounted(async () => {
