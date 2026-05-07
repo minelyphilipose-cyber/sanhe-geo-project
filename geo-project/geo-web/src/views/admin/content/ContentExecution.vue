@@ -252,7 +252,9 @@
               <div class="self-media-account-title">{{ account.accountName }}</div>
               <div class="self-media-account-meta">{{ account.platformAccountId }}</div>
             </div>
-            <el-tag size="small" :type="selfMediaAccountStatusTag(account.status)">{{ selfMediaAccountStatusLabel(account.status) }}</el-tag>
+            <el-tag size="small" :type="selfMediaAccountStatusTag(account)">
+              {{ selfMediaAccountStatusLabel(account) }}
+            </el-tag>
             <el-tag
               v-if="isSemiAutoPlatform(selectedMediaPlatform)"
               size="small"
@@ -1164,20 +1166,26 @@ async function checkWechatAccount(id: number) {
   }
 }
 
-function selfMediaAccountStatusLabel(status: string) {
+function selfMediaAccountStatusLabel(account: SelfMediaAccount) {
+  if (isSemiAutoPlatform(account.platform as MediaPlatform)) {
+    return account.status === 'active' ? '启用' : '停用'
+  }
   const map: Record<string, string> = {
     active: '已登录',
     expired: '已过期',
     revoked: '已取消',
     disabled: '不可用',
   }
-  return map[status] || status
+  return map[account.status] || account.status
 }
 
-function selfMediaAccountStatusTag(status: string): 'success' | 'warning' | 'danger' | 'info' {
-  if (status === 'active') return 'success'
-  if (status === 'expired') return 'warning'
-  if (status === 'revoked' || status === 'disabled') return 'danger'
+function selfMediaAccountStatusTag(account: SelfMediaAccount): 'success' | 'warning' | 'danger' | 'info' {
+  if (isSemiAutoPlatform(account.platform as MediaPlatform)) {
+    return account.status === 'active' ? 'info' : 'danger'
+  }
+  if (account.status === 'active') return 'success'
+  if (account.status === 'expired') return 'warning'
+  if (account.status === 'revoked' || account.status === 'disabled') return 'danger'
   return 'info'
 }
 
