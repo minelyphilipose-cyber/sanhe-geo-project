@@ -1,5 +1,6 @@
 import { mount } from '@vue/test-utils'
 import { describe, expect, it, vi } from 'vitest'
+import { ExtensionApiError, extensionApi } from '@/shared/api'
 import App from './App.vue'
 
 vi.mock('@/shared/env', () => ({
@@ -38,6 +39,18 @@ describe('popup task list', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('暂无可处理的半自动发布任务')
+  })
+
+  it('does not append rebind hint for non-auth task errors', async () => {
+    vi.mocked(extensionApi.tasks).mockRejectedValueOnce(
+      new ExtensionApiError(429, 70013, 'rate limited'),
+    )
+
+    const wrapper = mount(App)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('操作过于频繁，请稍后再试。')
+    expect(wrapper.text()).not.toContain('请重新绑定后再试')
   })
 })
 

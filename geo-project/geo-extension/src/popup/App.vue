@@ -91,13 +91,15 @@ async function refreshTasks() {
     const tasks = await extensionApi.tasks(session.value.token)
     mergeTasks(taskState, tasks, now.value)
   } catch (error) {
-    message.value = `${friendlyErrorMessage(error)} 请重新绑定后再试。`
     if (error instanceof ExtensionApiError && error.status === 401) {
+      message.value = `${friendlyErrorMessage(error)} 请重新绑定后再试。`
       status.value = 'unbound'
       session.value = null
       taskState.tasks = []
       taskState.expandedTaskId = null
       stopTaskRefresh()
+    } else {
+      message.value = friendlyErrorMessage(error)
     }
   } finally {
     tasksLoading.value = false
