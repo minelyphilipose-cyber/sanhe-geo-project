@@ -253,6 +253,13 @@
               <div class="self-media-account-meta">{{ account.platformAccountId }}</div>
             </div>
             <el-tag size="small" :type="selfMediaAccountStatusTag(account.status)">{{ selfMediaAccountStatusLabel(account.status) }}</el-tag>
+            <el-tag
+              v-if="isSemiAutoPlatform(selectedMediaPlatform)"
+              size="small"
+              :type="semiAutoCredentialTagType(account)"
+            >
+              {{ semiAutoCredentialLabel(account) }}
+            </el-tag>
             <el-button
               v-if="selectedMediaPlatform === 'wechat_mp' && account.status === 'active'"
               size="small"
@@ -281,10 +288,11 @@
               v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active'"
               size="small"
               type="primary"
+              :disabled="!hasActiveCookieCredential(account)"
               :loading="selfMediaSubmitting && selectedSelfMediaAccountId === account.id"
               @click="submitSemiAutoExtensionTask(account)"
             >
-              创建扩展任务
+              {{ hasActiveCookieCredential(account) ? '创建扩展任务' : '先捕获凭证' }}
             </el-button>
           </div>
         </div>
@@ -513,6 +521,11 @@ import { getBrandDetail, getBrandImageFolders } from '@/api/customer'
 
 type MediaPlatform = 'wechat_mp' | 'douyin' | 'toutiao' | 'zhihu'
 type SemiAutoPlatform = 'toutiao' | 'zhihu'
+type SelfMediaAccountWithCredential = SelfMediaAccount & {
+  cookieCredentialStatus?: string | null
+  cookieCredentialVersion?: number | null
+  cookieCredentialCapturedAt?: string | null
+}
 
 const userStore = useUserStore()
 const dictStore = useDictStore()
@@ -948,12 +961,30 @@ function isSemiAutoPlatform(platform: MediaPlatform): platform is SemiAutoPlatfo
 
 function semiAutoStatusLabel(accounts: SelfMediaAccount[]) {
   if (!accounts.length) return '未配置'
-  return accounts.some((account) => account.status === 'active') ? '可创建任务' : '不可用'
+  if (!accounts.some((account) => account.status === 'active')) return '不可用'
+  return accounts.some(hasActiveCookieCredential) ? '可创建任务' : '待捕获凭证'
 }
 
 function semiAutoStatusTagType(accounts: SelfMediaAccount[]): 'success' | 'warning' | 'info' {
   if (!accounts.length) return 'info'
-  return accounts.some((account) => account.status === 'active') ? 'success' : 'warning'
+  return accounts.some((account) => account.status === 'active' && hasActiveCookieCredential(account)) ? 'success' : 'warning'
+}
+
+function hasActiveCookieCredential(account: SelfMediaAccount) {
+  return (account as SelfMediaAccountWithCredential).cookieCredentialStatus === 'active'
+}
+
+function semiAutoCredentialLabel(account: SelfMediaAccount) {
+  const credential = account as SelfMediaAccountWithCredential
+  if (credential.cookieCredentialStatus === 'active') {
+    return credential.cookieCredentialVersion ? `凭证 v${credential.cookieCredentialVersion}` : '凭证已捕获'
+  }
+  return '未捕获凭证'
+}
+
+function semiAutoCredentialTagType(account: SelfMediaAccount): 'success' | 'warning' | 'info' {
+  if (hasActiveCookieCredential(account)) return 'success'
+  return account.status === 'active' ? 'warning' : 'info'
 }
 
 function handleSemiAutoPlatformClick(platform: SemiAutoPlatform) {
@@ -1078,6 +1109,10 @@ async function submitDouyinImageText() {
 async function submitSemiAutoExtensionTask(account: SelfMediaAccount) {
   if (!mediaDistributeArticleId.value) {
     ElMessage.warning('请选择文章')
+    return
+  }
+  if (!hasActiveCookieCredential(account)) {
+    ElMessage.warning('该账号尚未捕获登录凭证。请先打开浏览器扩展，在目标平台登录后捕获凭证。')
     return
   }
   selectedSelfMediaAccountId.value = account.id

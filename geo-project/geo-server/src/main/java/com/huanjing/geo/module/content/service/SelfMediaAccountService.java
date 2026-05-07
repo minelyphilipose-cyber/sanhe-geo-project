@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.config.WechatMpClientProperties;
 import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
+import com.huanjing.geo.module.content.credential.dto.CookieCredentialMeta;
+import com.huanjing.geo.module.content.credential.service.CredentialVaultService;
 import com.huanjing.geo.module.content.dto.WechatMpDevSeedRequest;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
@@ -29,6 +31,7 @@ public class SelfMediaAccountService {
     private final WechatMpClientProperties clientProperties;
     private final MpCredentialCipherService cipherService;
     private final WechatAuthorizerTokenService authorizerTokenService;
+    private final CredentialVaultService credentialVaultService;
 
     public WechatMpCapabilityVO capability() {
         String reason = openPlatformProperties.isDraftDistributionEnabled()
@@ -45,9 +48,9 @@ public class SelfMediaAccountService {
         return selfMediaAccountMapper.selectList(new LambdaQueryWrapper<SelfMediaAccount>()
                         .eq(SelfMediaAccount::getBrandId, brandId)
                         .orderByAsc(SelfMediaAccount::getPlatform)
-                        .orderByDesc(SelfMediaAccount::getUpdatedAt))
+                .orderByDesc(SelfMediaAccount::getUpdatedAt))
                 .stream()
-                .map(SelfMediaAccountVO::from)
+                .map(this::toVoWithCredentialStatus)
                 .toList();
     }
 
@@ -129,6 +132,21 @@ public class SelfMediaAccountService {
             throw new BizException(404, "self media account not found");
         }
         return account;
+    }
+
+    private SelfMediaAccountVO toVoWithCredentialStatus(SelfMediaAccount account) {
+        SelfMediaAccountVO vo = SelfMediaAccountVO.from(account);
+        if ("COOKIE".equalsIgnoreCase(account.getAuthMode())) {
+            CookieCredentialMeta credential = credentialVaultService.getActiveCredentialMeta(account.getId());
+            if (credential == null) {
+                vo.setCookieCredentialStatus("missing");
+            } else {
+                vo.setCookieCredentialStatus("active");
+                vo.setCookieCredentialVersion(credential.version());
+                vo.setCookieCredentialCapturedAt(credential.capturedAt());
+            }
+        }
+        return vo;
     }
 
 }

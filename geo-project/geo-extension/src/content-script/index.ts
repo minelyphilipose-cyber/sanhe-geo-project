@@ -4,7 +4,7 @@ import { profileForUrl } from '@/shared/fillProfiles'
 import { fillEditor } from './fillEditor'
 import { activatePublishListener, handlePublishClick } from './publishListener'
 
-const CAPTURE_HOSTS = new Set(['mp.toutiao.com', 'www.zhihu.com'])
+const CAPTURE_HOSTS = new Set(['mp.toutiao.com', 'www.zhihu.com', 'zhuanlan.zhihu.com'])
 
 if (CAPTURE_HOSTS.has(window.location.hostname)) {
   chrome.runtime.sendMessage({

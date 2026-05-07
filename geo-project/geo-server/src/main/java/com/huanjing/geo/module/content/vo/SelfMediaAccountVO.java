@@ -17,6 +17,9 @@ public class SelfMediaAccountVO {
     private String status;
     private LocalDateTime lastAuthCheckedAt;
     private String lastAuthError;
+    private String cookieCredentialStatus;
+    private Integer cookieCredentialVersion;
+    private LocalDateTime cookieCredentialCapturedAt;
 
     public static SelfMediaAccountVO from(SelfMediaAccount account) {
         SelfMediaAccountVO vo = new SelfMediaAccountVO();

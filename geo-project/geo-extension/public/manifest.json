@@ -19,7 +19,7 @@
   ],
   "content_scripts": [
     {
-      "matches": ["https://mp.toutiao.com/*", "https://zhuanlan.zhihu.com/*"],
+      "matches": ["https://mp.toutiao.com/*", "https://www.zhihu.com/*", "https://zhuanlan.zhihu.com/*"],
       "js": ["assets/content-script.js"],
       "run_at": "document_idle"
     }
