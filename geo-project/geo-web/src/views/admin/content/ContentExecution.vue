@@ -289,8 +289,7 @@
             <el-button
               v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active'"
               size="small"
-              type="primary"
-              :disabled="!hasActiveCookieCredential(account)"
+              :type="hasActiveCookieCredential(account) ? 'primary' : 'warning'"
               :loading="selfMediaSubmitting && selectedSelfMediaAccountId === account.id"
               @click="submitSemiAutoExtensionTask(account)"
             >
