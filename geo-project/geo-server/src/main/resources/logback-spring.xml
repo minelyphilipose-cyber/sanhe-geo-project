@@ -80,13 +80,33 @@
         </encoder>
     </appender>
 
+    <appender name="AUDIT_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOG_HOME}/${APP_NAME}/audit.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${LOG_HOME}/${APP_NAME}/archive/audit.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>100MB</maxFileSize>
+            <maxHistory>180</maxHistory>
+            <totalSizeCap>20GB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} %msg%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
     <logger name="http.access" level="INFO" additivity="false">
         <appender-ref ref="HTTP_ACCESS_FILE"/>
         <appender-ref ref="CONSOLE"/>
     </logger>
 
+    <logger name="security.audit" level="INFO" additivity="false">
+        <appender-ref ref="AUDIT_FILE"/>
+    </logger>
+
     <logger name="org.springframework.web" level="INFO"/>
+    <logger name="org.springframework.web.servlet.mvc.method.annotation" level="INFO"/>
     <logger name="org.springframework.security" level="INFO"/>
+    <logger name="com.fasterxml.jackson" level="WARN"/>
     <logger name="org.flywaydb" level="INFO"/>
     <logger name="com.baomidou.mybatisplus" level="INFO"/>
     <logger name="com.huanjing.geo" level="INFO"/>

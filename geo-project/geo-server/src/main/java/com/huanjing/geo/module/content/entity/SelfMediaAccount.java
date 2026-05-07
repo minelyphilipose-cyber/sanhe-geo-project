@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableLogic;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import lombok.Data;
@@ -18,6 +19,7 @@ public class SelfMediaAccount {
     private String platformAccountId;
     private String accountName;
     private String status;
+    private String authMode;
     private String scopeJson;
     @JsonIgnore
     private String accessTokenCipher;
@@ -34,4 +36,7 @@ public class SelfMediaAccount {
     private Long createdBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    @TableLogic(value = "null", delval = "NOW()")
+    private LocalDateTime deletedAt;
+    private Long deletedBy;
 }

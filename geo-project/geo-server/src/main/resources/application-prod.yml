@@ -1,0 +1,103 @@
+server:
+  shutdown: graceful
+
+spring:
+  lifecycle:
+    timeout-per-shutdown-phase: ${SPRING_SHUTDOWN_TIMEOUT:45s}
+
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:mysql}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:geo_delivery}?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:geo_app}
+    password: ${MYSQL_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      maximum-pool-size: ${DB_HIKARI_MAX_POOL_SIZE:10}
+      minimum-idle: ${DB_HIKARI_MIN_IDLE:2}
+      connection-timeout: ${DB_HIKARI_CONNECTION_TIMEOUT_MS:30000}
+
+  data:
+    redis:
+      host: ${REDIS_HOST:redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+      database: ${REDIS_DATABASE:0}
+
+  flyway:
+    validate-on-migrate: ${FLYWAY_VALIDATE_ON_MIGRATE:true}
+
+  servlet:
+    multipart:
+      max-file-size: ${UPLOAD_MAX_FILE_SIZE:50MB}
+      max-request-size: ${UPLOAD_MAX_REQUEST_SIZE:50MB}
+
+springdoc:
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:false}
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:false}
+
+knife4j:
+  enable: ${SWAGGER_ENABLED:false}
+
+management:
+  endpoint:
+    health:
+      show-details: ${ACTUATOR_HEALTH_DETAILS:never}
+  endpoints:
+    web:
+      exposure:
+        include: ${ACTUATOR_EXPOSURE:health}
+
+logging:
+  level:
+    com.huanjing.geo: ${APP_LOG_LEVEL:info}
+    org.springframework.security: warn
+    org.flywaydb: info
+
+geo:
+  brand-geo-site:
+    endpoint: ${BRAND_GEO_SITE_ENDPOINT}
+    connect-timeout-ms: ${BRAND_GEO_SITE_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${BRAND_GEO_SITE_READ_TIMEOUT_MS:30000}
+  report:
+    web-base-url: ${REPORT_WEB_BASE_URL:http://geo-web}
+    render-timeout-ms: ${REPORT_RENDER_TIMEOUT_MS:30000}
+  minio:
+    endpoint: ${MINIO_INTERNAL_ENDPOINT:http://minio:9000}
+    public-endpoint: ${MINIO_PUBLIC_ENDPOINT:${MINIO_INTERNAL_ENDPOINT:http://minio:9000}}
+    access-key: ${MINIO_APP_ACCESS_KEY}
+    secret-key: ${MINIO_APP_SECRET_KEY}
+    bucket: ${MINIO_BUCKET:geo-files}
+  jwt:
+    secret: ${JWT_SECRET}
+    access-token-expire: ${JWT_ACCESS_TOKEN_EXPIRE:7200}
+    refresh-token-expire: ${JWT_REFRESH_TOKEN_EXPIRE:604800}
+  dispatch:
+    api-key-aes-secret: ${DISPATCH_API_KEY_AES_SECRET}
+  mp:
+    credential:
+      aes-secret: ${MP_CREDENTIAL_AES_SECRET}
+  wechat:
+    client:
+      mode: ${WECHAT_CLIENT_MODE:real}
+      fault: ""
+    open-platform:
+      component-appid: ${WECHAT_COMPONENT_APPID}
+      component-app-secret: ${WECHAT_COMPONENT_SECRET}
+      token: ${WECHAT_TOKEN}
+      encoding-aes-key: ${WECHAT_ENCODING_AES_KEY}
+      draft-distribution-enabled: ${WECHAT_DRAFT_DISTRIBUTION_ENABLED:false}
+      func-scope-strict-mode: ${WECHAT_FUNC_SCOPE_STRICT_MODE:true}
+      required-draft-func-scopes: [1, 13]
+      auth-type: ${WECHAT_AUTH_TYPE:1}
+      backend-auth-callback-url: ${WECHAT_BACKEND_AUTH_CALLBACK_URL}
+      frontend-callback-url: ${WECHAT_FRONTEND_CALLBACK_URL}
+
+presale:
+  security:
+    role-override: false
+  generate:
+    mock: ${PRESALE_GENERATE_MOCK:false}
+    allow-synthetic-fallback:
+      mock: false
+      real: ${PRESALE_ALLOW_SYNTHETIC_FALLBACK:false}

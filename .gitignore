@@ -1,6 +1,10 @@
 node_modules/
 dist/
 
+# Local deployment secrets
+.env
+*.env.local
+
 # Build artifacts (Maven, frontend bundle, TS incremental cache)
 target/
 **/target/
@@ -17,3 +21,4 @@ geo-project/geo-server/target/poc/
 
 # IDE configs (per-developer)
 .vscode/
+*.diff

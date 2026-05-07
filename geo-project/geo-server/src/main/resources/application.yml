@@ -63,6 +63,73 @@ logging:
     org.springframework.security: info
     org.flywaydb: info
 
+# Security audit executor. CallerRunsPolicy is used when the queue is full so audit events are not dropped.
+audit:
+  threadpool:
+    core-pool-size: ${AUDIT_THREADPOOL_CORE_SIZE:2}
+    max-pool-size: ${AUDIT_THREADPOOL_MAX_SIZE:4}
+    queue-capacity: ${AUDIT_THREADPOOL_QUEUE_CAPACITY:1000}
+
+semi-auto:
+  platforms:
+    profiles:
+      toutiao:
+        publish-url: ${SEMI_AUTO_TOUTIAO_PUBLISH_URL:https://mp.toutiao.com/profile_v4/graphic/publish}
+        cookie-domains:
+          - ".toutiao.com"
+          - ".bytedance.com"
+          - ".snssdk.com"
+        required-cookie-names:
+          - sessionid
+          - sessionid_ss
+          - sid_tt
+          - sid_guard
+        editor-selectors:
+          title: "input[placeholder*='标题']"
+          content: ".ProseMirror"
+          cover: "input[type='file']"
+        allowed-html-tags:
+          - p
+          - br
+          - strong
+          - em
+          - u
+          - h1
+          - h2
+          - h3
+          - ul
+          - ol
+          - li
+          - blockquote
+          - a
+          - img
+      zhihu:
+        publish-url: ${SEMI_AUTO_ZHIHU_PUBLISH_URL:https://zhuanlan.zhihu.com/write}
+        cookie-domains:
+          - ".zhihu.com"
+        required-cookie-names:
+          - z_c0
+          - d_c0
+          - _zap
+        editor-selectors:
+          title: ".WriteIndex-titleInput textarea"
+          content: ".public-DraftEditor-content"
+        allowed-html-tags:
+          - p
+          - br
+          - strong
+          - em
+          - u
+          - h1
+          - h2
+          - h3
+          - ul
+          - ol
+          - li
+          - blockquote
+          - a
+          - img
+
 geo:
   brand-geo-site:
     endpoint: ${BRAND_GEO_SITE_ENDPOINT:}
@@ -129,6 +196,20 @@ geo:
     model-connect-timeout-ms: 10000
     model-request-timeout-ms: 180000
     api-key-aes-secret: ${DISPATCH_API_KEY_AES_SECRET:geo-dispatch-key}
+  extension:
+    fill-token:
+      hmac-secret: ${FILL_TOKEN_HMAC_SECRET:__REQUIRED_FILL_TOKEN_HMAC_SECRET__}
+      ttl-seconds: ${EXTENSION_FILL_TOKEN_TTL_SECONDS:300}
+    long-token:
+      ttl-days: ${EXTENSION_LONG_TOKEN_TTL_DAYS:7}
+      slide-renew-threshold-days: ${EXTENSION_LONG_TOKEN_SLIDE_RENEW_THRESHOLD_DAYS:1}
+    bind-code:
+      length: ${EXTENSION_BIND_CODE_LENGTH:8}
+      ttl-seconds: ${EXTENSION_BIND_CODE_TTL_SECONDS:600}
+      brand-rate-limit-per-5min: ${EXTENSION_BIND_CODE_BRAND_LIMIT_PER_5MIN:5}
+      ip-rate-limit-per-5min: ${EXTENSION_BIND_CODE_IP_LIMIT_PER_5MIN:20}
+    version:
+      allow-prerelease: ${EXTENSION_VERSION_ALLOW_PRERELEASE:false}
 
 presale:
   prompt:

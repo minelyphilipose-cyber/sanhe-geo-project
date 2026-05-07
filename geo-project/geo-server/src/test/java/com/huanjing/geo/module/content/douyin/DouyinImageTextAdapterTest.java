@@ -16,6 +16,7 @@ import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.service.adapter.FailureKind;
+import com.huanjing.geo.module.content.service.adapter.AutoSelfMediaAdapter;
 import com.huanjing.geo.module.content.service.adapter.ReviewStatusResult;
 import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import org.junit.jupiter.api.BeforeEach;
@@ -29,6 +30,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -66,6 +68,7 @@ class DouyinImageTextAdapterTest {
     void identity_matchesDouyinPlatform() {
         assertEquals("douyin", adapter.platform());
         assertTrue(adapter.supportsPlatform("douyin"));
+        assertInstanceOf(AutoSelfMediaAdapter.class, adapter);
     }
 
     @Test

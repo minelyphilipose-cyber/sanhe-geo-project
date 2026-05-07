@@ -53,6 +53,12 @@ geo:
       image-text:
         enabled: false
 
+  cookie:
+    master-key-id: local-dev-v1
+    # Required in every environment. Generate locally with: openssl rand -base64 32
+    # Do not commit actual master keys.
+    master-key-base64: ${GEO_COOKIE_MASTER_KEY_BASE64:__REQUIRED_GEO_COOKIE_MASTER_KEY_BASE64__}
+
   jwt:
     secret: "huanjing-geo-2024-jwt-secret-key-must-be-at-least-256-bits-long"
     access-token-expire: 7200        # 2小时(秒)

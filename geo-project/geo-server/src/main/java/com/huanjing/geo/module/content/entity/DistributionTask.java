@@ -36,7 +36,9 @@ public class DistributionTask {
     private Integer attemptNo;
     private String status;
     private String integrationMethod;
+    private String dispatchMode;
     private String requestPayload;
+    private String fillPayload;
     private String responsePayload;
     private String publishedUrl;
     // V93: post-publish identifier returned by external platform
@@ -50,6 +52,11 @@ public class DistributionTask {
     // V93: retry & locking for Outbox state machine (IC-4)
     private LocalDateTime nextRetryAt;
     private LocalDateTime lockedUntil;
+    private LocalDateTime fillTokenIssuedAt;
+    private LocalDateTime filledAt;
+    private LocalDateTime publishedAt;
+    private Long publishedBy;
+    private LocalDateTime lastHeartbeatAt;
     private Integer retryCount;
     private Long operatorId;
     private String requestId;

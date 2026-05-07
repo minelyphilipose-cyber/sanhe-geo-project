@@ -3,7 +3,14 @@ package com.huanjing.geo.module.content.service;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.audit.ActorType;
+import com.huanjing.geo.module.audit.AuditMode;
+import com.huanjing.geo.module.audit.AuditResult;
+import com.huanjing.geo.module.audit.dto.AuditEvent;
+import com.huanjing.geo.module.audit.service.AuditService;
 import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.dto.DistributionAttemptVO;
@@ -17,13 +24,19 @@ import com.huanjing.geo.module.content.service.adapter.FailureKind;
 import com.huanjing.geo.module.content.service.adapter.OfficialCmsSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.ReviewStatusResult;
 import com.huanjing.geo.module.content.service.adapter.SiteAdapter;
-import com.huanjing.geo.module.content.service.adapter.SelfMediaAdapter;
+import com.huanjing.geo.module.content.service.adapter.AutoSelfMediaAdapter;
+import com.huanjing.geo.module.content.service.adapter.SemiAutoFillTask;
+import com.huanjing.geo.module.content.service.adapter.SemiAutoSelfMediaAdapter;
 import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import com.huanjing.geo.module.content.service.adapter.ValidationResult;
+import com.huanjing.geo.module.customer.access.BrandAccessAction;
+import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.customer.service.BrandService;
+import com.huanjing.geo.module.extension.dto.FillTokenIssueResponse;
+import com.huanjing.geo.module.extension.service.FillTokenService;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.PublishSite;
@@ -54,6 +67,8 @@ public class ContentDistributionService {
     private static final Set<String> ACTIVE_ARTICLE_STATUS = Set.of("approved", "unpublished");
     private static final Set<String> DISTRIBUTE_ALLOWED_ROLES = Set.of("super_admin", "manager", "delivery_manager", "operator");
     private static final String GENERAL_INDUSTRY = "general";
+    private static final String AUTH_MODE_COOKIE = "COOKIE";
+    private static final int MAX_FILL_PAYLOAD_BYTES = 16 * 1024;
 
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
@@ -65,10 +80,15 @@ public class ContentDistributionService {
     private final CurrentUserService currentUserService;
     private final SystemAlertService systemAlertService;
     private final List<SiteAdapter> siteAdapters;
-    private final List<SelfMediaAdapter> selfMediaAdapters;
+    private final List<AutoSelfMediaAdapter> selfMediaAdapters;
+    private final List<SemiAutoSelfMediaAdapter> semiAutoSelfMediaAdapters;
     private final BrandService brandService;
     private final CompanyPackageBindingService companyPackageBindingService;
     private final CompanyChannelQuotaService companyChannelQuotaService;
+    private final BrandAccessService brandAccessService;
+    private final FillTokenService fillTokenService;
+    private final AuditService auditService;
+    private final ObjectMapper objectMapper;
 
     @Transactional
     public DistributionTask distribute(Long articleId, Long siteId) {
@@ -175,7 +195,7 @@ public class ContentDistributionService {
         if (account == null) {
             throw new BizException(404, "self media account not found");
         }
-        SelfMediaAdapter adapter = resolveSelfMediaAdapter(account.getPlatform());
+        AutoSelfMediaAdapter adapter = resolveSelfMediaAdapter(account.getPlatform());
         ReviewStatusResult result = adapter.refreshReviewStatus(task, account);
         if (result != null
                 && result.status() != null
@@ -437,6 +457,9 @@ public class ContentDistributionService {
             throw new BizException(403, "自媒体账号与文章品牌不匹配");
         }
         currentUserService.ensureBrandAccess(operator, account.getBrandId(), "self_media_account");
+        if (AUTH_MODE_COOKIE.equalsIgnoreCase(account.getAuthMode())) {
+            return createSemiAutoSelfMediaTask(article, project, operator, account, mpTarget);
+        }
 
         String content = requireLatestContent(article.getId());
         DistributionTask task = createAttemptForSelfMedia(article, account, operator.getId(), mpTarget.requestId().trim());
@@ -444,7 +467,7 @@ public class ContentDistributionService {
         article.setStatus("distributing");
         articleDraftMapper.updateById(article);
 
-        SelfMediaAdapter adapter = resolveSelfMediaAdapter(account.getPlatform());
+        AutoSelfMediaAdapter adapter = resolveSelfMediaAdapter(account.getPlatform());
         SubmitResult submitResult;
         try {
             submitResult = adapter.submitToTarget(article, content, mpTarget);
@@ -459,6 +482,67 @@ public class ContentDistributionService {
             companyChannelQuotaService.refundDistribution(task.getId());
         }
         return distributionTaskMapper.selectById(task.getId());
+    }
+
+    private DistributionTask createSemiAutoSelfMediaTask(ArticleDraft article,
+                                                        Project project,
+                                                        SysUser operator,
+                                                        SelfMediaAccount account,
+                                                        TargetContext.SelfMediaTarget mpTarget) {
+        brandAccessService.requireBrandAccess(account.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
+        String content = requireLatestContent(article.getId());
+        SemiAutoSelfMediaAdapter adapter = resolveSemiAutoSelfMediaAdapter(account.getPlatform());
+        SemiAutoFillTask fillTask = adapter.prepareFillTask(article, content, adapter.fillProfile());
+        String fillPayload = toFillPayload(fillTask);
+        DistributionTask task = createAttemptForSelfMedia(article, account, operator.getId(), mpTarget.requestId().trim());
+        updateSemiAutoTaskPrepared(task.getId(), fillPayload);
+
+        companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.MP_ACCOUNT, task.getId());
+        FillTokenIssueResponse token = fillTokenService.issue(
+                account.getId(),
+                account.getBrandId(),
+                operator.getId(),
+                task.getId(),
+                "chrome",
+                null
+        );
+        LocalDateTime issuedAt = LocalDateTime.now(SH_ZONE);
+        updateSemiAutoTaskTokenIssued(task.getId(), issuedAt);
+        task.setDispatchMode("SEMI_AUTO");
+        task.setStatus("token_issued");
+        task.setFillPayload(fillPayload);
+        task.setFillTokenIssuedAt(issuedAt);
+        task.setLockedUntil(null);
+
+        article.setStatus("distributing");
+        articleDraftMapper.updateById(article);
+        auditSemiAutoTaskCreated(article, account, operator, task, token);
+
+        DistributionTask returned = distributionTaskMapper.selectById(task.getId());
+        if (returned == null) {
+            returned = task;
+        }
+        returned.setRequestPayload(toTransientFillTokenPayload(token));
+        return returned;
+    }
+
+    private void updateSemiAutoTaskPrepared(Long taskId, String fillPayload) {
+        LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
+                .eq(DistributionTask::getId, taskId)
+                .set(DistributionTask::getDispatchMode, "SEMI_AUTO")
+                .set(DistributionTask::getStatus, "pending")
+                .set(DistributionTask::getFillPayload, fillPayload)
+                .set(DistributionTask::getLockedUntil, null);
+        distributionTaskMapper.update(null, wrapper);
+    }
+
+    private void updateSemiAutoTaskTokenIssued(Long taskId, LocalDateTime issuedAt) {
+        LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
+                .eq(DistributionTask::getId, taskId)
+                .eq(DistributionTask::getDispatchMode, "SEMI_AUTO")
+                .set(DistributionTask::getStatus, "token_issued")
+                .set(DistributionTask::getFillTokenIssuedAt, issuedAt);
+        distributionTaskMapper.update(null, wrapper);
     }
 
     private String validateBrandGeoSite(Brand brand) {
@@ -661,7 +745,7 @@ public class ContentDistributionService {
                 .orElseThrow(() -> new BizException(500, "BrandGeoSiteAdapter not registered"));
     }
 
-    private SelfMediaAdapter resolveSelfMediaAdapter(String platform) {
+    private AutoSelfMediaAdapter resolveSelfMediaAdapter(String platform) {
         if (!StringUtils.hasText(platform)) {
             throw new BizException(400, "Missing self-media platform");
         }
@@ -669,6 +753,66 @@ public class ContentDistributionService {
                 .filter(adapter -> adapter.supportsPlatform(platform))
                 .findFirst()
                 .orElseThrow(() -> new BizException(501, "Self-media platform not implemented: " + platform));
+    }
+
+    private SemiAutoSelfMediaAdapter resolveSemiAutoSelfMediaAdapter(String platform) {
+        if (!StringUtils.hasText(platform)) {
+            throw new BizException(400, "Missing semi-auto self-media platform");
+        }
+        return semiAutoSelfMediaAdapters.stream()
+                .filter(adapter -> adapter.supportsPlatform(platform))
+                .findFirst()
+                .orElseThrow(() -> new BizException(501, "Semi-auto self-media platform not implemented: " + platform));
+    }
+
+    private String toFillPayload(SemiAutoFillTask fillTask) {
+        try {
+            String payload = objectMapper.writeValueAsString(fillTask);
+            if (payload.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_FILL_PAYLOAD_BYTES) {
+                throw new BizException(400, "semi-auto fill payload too large");
+            }
+            return payload;
+        } catch (JsonProcessingException ex) {
+            throw new BizException(500, "semi-auto fill payload serialization failed", ex);
+        }
+    }
+
+    private String toTransientFillTokenPayload(FillTokenIssueResponse token) {
+        try {
+            return objectMapper.writeValueAsString(Map.of(
+                    "fillToken", token.fillToken(),
+                    "expiresAt", token.expiresAt(),
+                    "nonce", token.nonce()
+            ));
+        } catch (JsonProcessingException ex) {
+            throw new BizException(500, "fill token response serialization failed", ex);
+        }
+    }
+
+    private void auditSemiAutoTaskCreated(ArticleDraft article,
+                                          SelfMediaAccount account,
+                                          SysUser operator,
+                                          DistributionTask task,
+                                          FillTokenIssueResponse token) {
+        AuditEvent event = new AuditEvent();
+        event.setEventType("SEMI_AUTO_TASK_CREATED");
+        event.setActorType(ActorType.OPERATOR);
+        event.setActorId(operator.getId());
+        event.setBrandId(account.getBrandId());
+        event.setAccountId(account.getId());
+        event.setTaskId(task.getId());
+        event.setTargetType("DISTRIBUTION_TASK");
+        event.setTargetId(String.valueOf(task.getId()));
+        event.setResult(AuditResult.SUCCESS);
+        event.setMode(AuditMode.SYNC);
+        event.setSensitive(false);
+        event.setDetail(Map.of(
+                "articleId", article.getId(),
+                "platform", account.getPlatform(),
+                "fillTokenExpiresAt", token.expiresAt(),
+                "fillTokenNonce", token.nonce()
+        ));
+        auditService.record(event);
     }
 
     private ValidationResult validateByMethod(ArticleDraft article, String content, PublishSite site) {
@@ -903,4 +1047,5 @@ public class ContentDistributionService {
             throw new BizException(403, "No permission to distribute article");
         }
     }
+
 }

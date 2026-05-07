@@ -18,6 +18,9 @@ public class ArticleDraft {
     private Long projectId;
     private String articleType;
     private String title;
+    private String coverImageUrl;
+    private String tagsJson;
+    private String category;
     private String status;
     private Boolean hasRisk;
     private String riskSeverity;
