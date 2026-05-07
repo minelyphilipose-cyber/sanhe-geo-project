@@ -13,6 +13,7 @@ class WechatMpAdapterTest {
 
     @Test
     void selfMediaIdentity_matchesWechatPlatform() {
+        assertInstanceOf(AutoSelfMediaAdapter.class, adapter);
         assertEquals("wechat_mp", adapter.platform());
         assertTrue(adapter.supportsPlatform("wechat_mp"));
         assertInstanceOf(AutoSelfMediaAdapter.class, adapter);

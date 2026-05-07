@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 @Component
 @RequiredArgsConstructor
 public class ToutiaoSemiAutoAdapter implements SemiAutoSelfMediaAdapter {
+
     public static final String PLATFORM = "toutiao";
 
     private final SemiAutoPlatformProperties platformProperties;

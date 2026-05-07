@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 @Component
 @RequiredArgsConstructor
 public class ZhihuSemiAutoAdapter implements SemiAutoSelfMediaAdapter {
+
     public static final String PLATFORM = "zhihu";
 
     private final SemiAutoPlatformProperties platformProperties;
