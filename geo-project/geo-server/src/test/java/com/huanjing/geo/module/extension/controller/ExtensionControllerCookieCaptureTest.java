@@ -22,17 +22,8 @@ class ExtensionControllerCookieCaptureTest {
         session.setId(77L);
         session.setOperatorId(99L);
         when(sessionService.requireActiveSession("ext.token")).thenReturn(session);
-        ExtensionController controller = new ExtensionController(
-                null,
-                sessionService,
-                versionService,
-                null,
-                null,
-                captureService,
-                null,
-                null,
-                null
-        );
+        ExtensionController controller = new ExtensionController(null, sessionService, versionService,
+                null, null, captureService, null, null, null);
 
         controller.captureCookies("ext.token", request());
 
@@ -42,9 +33,7 @@ class ExtensionControllerCookieCaptureTest {
     }
 
     private ExtensionCookieCaptureRequest request() {
-        return new ExtensionCookieCaptureRequest(
-                10L, 20L, "toutiao", "0.1.0", "install-1",
-                true, "nonce-1", "[]", null, null, null
-        );
+        return new ExtensionCookieCaptureRequest(10L, 20L, "toutiao", "0.1.0", "install-1",
+                true, "nonce-1", "[]", null, null, null);
     }
 }

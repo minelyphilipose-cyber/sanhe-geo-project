@@ -49,13 +49,8 @@ class ExtensionCookieCaptureServiceTest {
         credentialVaultService = mock(CredentialVaultService.class);
         redisStore = mock(ExtensionRedisStore.class);
         auditSupport = mock(ExtensionAuditSupport.class);
-        service = new ExtensionCookieCaptureService(
-                accountMapper,
-                brandAccessService,
-                credentialVaultService,
-                redisStore,
-                auditSupport
-        );
+        service = new ExtensionCookieCaptureService(accountMapper, brandAccessService,
+                credentialVaultService, redisStore, auditSupport);
     }
 
     @Test
@@ -64,11 +59,10 @@ class ExtensionCookieCaptureServiceTest {
         when(redisStore.tryLock(eq("geo:extension:cookie-capture:nonce:99:nonce-1"), eq("1"), any(Duration.class)))
                 .thenReturn(true);
         LocalDateTime capturedAt = LocalDateTime.of(2026, 5, 7, 12, 0);
-        when(credentialVaultService.storeCapturedCookies(any())).thenReturn(new CookieCredentialMeta(
-                88L, 20L, 10L, "toutiao", 3, null, null, null, null,
-                "Mozilla/5.0", "{\"browser\":\"chrome\"}", "{\"sessionid\":\"present\"}",
-                99L, capturedAt, capturedAt, null, null, capturedAt
-        ));
+        when(credentialVaultService.storeCapturedCookies(any())).thenReturn(new CookieCredentialMeta(88L,
+                20L, 10L, "toutiao", 3, null, null, null, null, "Mozilla/5.0",
+                "{\"browser\":\"chrome\"}", "{\"sessionid\":\"present\"}", 99L,
+                capturedAt, capturedAt, null, null, capturedAt));
 
         ExtensionCookieCaptureResponse response = service.capture(request(true, 10L, 20L), 99L, 77L);
 
@@ -142,19 +136,9 @@ class ExtensionCookieCaptureServiceTest {
     }
 
     private ExtensionCookieCaptureRequest request(boolean confirmed, Long brandId, Long accountId) {
-        return new ExtensionCookieCaptureRequest(
-                brandId,
-                accountId,
-                "toutiao",
-                "0.1.0",
-                "install-1",
-                confirmed,
-                "nonce-1",
-                COOKIE_JSON,
-                "Mozilla/5.0",
-                "{\"sessionid\":\"present\"}",
-                "{\"browser\":\"chrome\"}"
-        );
+        return new ExtensionCookieCaptureRequest(brandId, accountId, "toutiao", "0.1.0", "install-1",
+                confirmed, "nonce-1", COOKIE_JSON, "Mozilla/5.0",
+                "{\"sessionid\":\"present\"}", "{\"browser\":\"chrome\"}");
     }
 
     private SelfMediaAccount account(Long accountId, Long brandId, String platform) {
