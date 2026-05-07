@@ -41,7 +41,10 @@ import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-@SpringBootTest(properties = "spring.flyway.validate-on-migrate=false")
+@SpringBootTest(properties = {
+        "spring.flyway.validate-on-migrate=false",
+        "geo.extension.fill-token.hmac-secret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+})
 @Transactional
 class PresaleGenerateEndToEndIntegrationTest {
 

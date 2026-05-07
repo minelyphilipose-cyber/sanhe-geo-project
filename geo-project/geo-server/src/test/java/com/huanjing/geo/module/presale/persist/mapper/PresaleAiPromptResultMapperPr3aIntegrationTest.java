@@ -2,12 +2,14 @@ package com.huanjing.geo.module.presale.persist.mapper;
 
 import com.huanjing.geo.module.presale.generate.PlatformIntentJudgeAggregateRow;
 import com.huanjing.geo.module.presale.generate.PlatformIntentSampleRow;
+import com.huanjing.geo.module.content.credential.crypto.LocalMasterKeyProvider;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptJudgeResult;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersionPromptTemplate;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -16,7 +18,10 @@ import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest
+@SpringBootTest(properties = {
+        "spring.flyway.validate-on-migrate=false",
+        "geo.extension.fill-token.hmac-secret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+})
 @Transactional
 class PresaleAiPromptResultMapperPr3aIntegrationTest {
 
@@ -26,6 +31,8 @@ class PresaleAiPromptResultMapperPr3aIntegrationTest {
     private PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
     @Autowired
     private PresaleAiPromptJudgeResultMapper judgeResultMapper;
+    @MockBean
+    private LocalMasterKeyProvider localMasterKeyProvider;
 
     @Test
     void selectIntentSamplesByVersionId_shouldSplitBatchByCategory() {

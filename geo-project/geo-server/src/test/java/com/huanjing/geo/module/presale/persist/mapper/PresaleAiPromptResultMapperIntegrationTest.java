@@ -1,9 +1,11 @@
 package com.huanjing.geo.module.presale.persist.mapper;
 
 import com.huanjing.geo.module.presale.generate.PromptTemplateIntentStatRow;
+import com.huanjing.geo.module.content.credential.crypto.LocalMasterKeyProvider;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.jdbc.Sql;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -11,12 +13,17 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest
+@SpringBootTest(properties = {
+        "spring.flyway.validate-on-migrate=false",
+        "geo.extension.fill-token.hmac-secret=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+})
 @Transactional
 class PresaleAiPromptResultMapperIntegrationTest {
 
     @Autowired
     private PresaleAiPromptResultMapper mapper;
+    @MockBean
+    private LocalMasterKeyProvider localMasterKeyProvider;
 
     @Test
     @Sql(scripts = "/sql/presale_prompt_template_c5_cleanup.sql", executionPhase = Sql.ExecutionPhase.BEFORE_TEST_METHOD)
