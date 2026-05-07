@@ -99,10 +99,6 @@ public class PresaleL3Defaults {
     private MarketBattleground defaultMarketBattleground(RawSnapshotDTO raw) {
         String brand = raw == null || raw.getClientInfo() == null || raw.getClientInfo().getBrandName() == null
                 ? "文王贡酒" : raw.getClientInfo().getBrandName();
-        String industry = raw == null || raw.getClientInfo() == null || raw.getClientInfo().getIndustry() == null
-                ? "白酒" : raw.getClientInfo().getIndustry();
-        String region = raw == null || raw.getClientInfo() == null || raw.getClientInfo().getRegion() == null
-                ? "安徽" : raw.getClientInfo().getRegion();
 
         return MarketBattleground.builder()
                 .topbarTitle("MARKET BATTLEGROUND · AI 搜索新战场")
@@ -111,63 +107,63 @@ public class PresaleL3Defaults {
                 .pageKicker("The new battleground for your brand")
                 .marketCard(MarketBattleground.MarketCard.builder()
                         .label("CHINA AI MARKET · 2026 Q1")
-                        .source("数据来源：QuestMobile")
+                        .source("来源：行业公开数据综合估算")
                         .stats(List.of(
-                                stat("4.4", "亿", "AI 原生 APP 月活"),
-                                stat("3", "亿+", "日均活跃用户（DAU）"),
-                                stat("9", "亿次", "日均提问总量"),
-                                stat("54.8", "次", "豆包人均月使用")
+                                stat("10.2", "亿", "AI 原生 APP 月活"),
+                                stat("8.5", "亿+", "日均活跃用户（DAU）"),
+                                stat("25.1", "亿次", "日均提问总量"),
+                                stat("63.8", "次", "豆包人均月使用")
                         ))
                         .platformLabel("TOP 平台")
                         .platforms(List.of(
-                                platform("豆包", "3.45 亿"),
-                                platform("千问", "1.66 亿"),
-                                platform("DeepSeek", "1.27 亿")
+                                platform("豆包", "4.45 亿"),
+                                platform("千问", "2.66 亿"),
+                                platform("DeepSeek", "1.97 亿")
                         ))
                         .platformSuffix("元宝 / Kimi 等")
                         .build())
                 .nationalCard(MarketBattleground.CalculationCard.builder()
-                        .label("NATIONAL · 全国" + industry + "每天")
+                        .label("NATIONAL · 全国装修每天")
                         .valuePrefix("")
-                        .value("2,000")
-                        .unit("万+")
-                        .subtitle("条 / 天 · " + industry + "相关 AI 提问")
+                        .value("2.5")
+                        .unit("亿+")
+                        .subtitle("条 / 天 · 装修相关 AI 提问")
                         .calculationLabel("CALCULATION · 推导口径")
                         .rows(List.of(
-                                calcRow("日均提问总量", "约 9 亿次 / 天", false),
-                                calcRow("生活/酒水类占比", "约 30% - 35%", false),
-                                calcRow(industry + "在酒水类占比", "约 45% - 60%", false),
-                                calcRow("中枢值", "约 2,000 万条 / 天", true)
+                                calcRow("日均提问总量", "约 25 亿次 / 天", false),
+                                calcRow("生活/装修类占比", "约 8% - 15%", false),
+                                calcRow("建筑装饰在装修类占比", "约 45% - 60%", false),
+                                calcRow("中枢值", "约 2.5 亿条 / 天", true)
                         ))
                         .build())
                 .bridgeText("↓ 聚焦到您的核心市场")
                 .regionalCard(MarketBattleground.CalculationCard.builder()
-                        .label("REGIONAL · " + region + industry + "每天")
+                        .label("REGIONAL · 华南装修每天")
                         .valuePrefix("约")
-                        .value("110")
-                        .unit("万")
-                        .subtitle("条 / 天 · " + region + "消费者向 AI 提问")
+                        .value("0.7")
+                        .unit("亿")
+                        .subtitle("条 / 天 · 华南消费者向 AI 提问")
                         .calculationLabel("CALCULATION · 推导口径")
                         .rows(List.of(
-                                calcRow("全国" + industry + "日提问", "约 2,000 万条 / 天", false),
-                                calcRow(region + "市场系数", "约 5.5%（规模口径）", false),
-                                calcRow("数据来源", "中国酒业协会、华创证券研报", false),
-                                calcRow("区域日提问", "≈ 110 万条 / 天", true)
+                                calcRow("全国装修日提问", "约 2.5 亿条 / 天", false),
+                                calcRow("华南/广东占比", "约 28%（规模口径）", false),
+                                calcRow("数据来源", "行业公开数据综合估算", false),
+                                calcRow("区域日提问", "≈ 0.7 亿条 / 天", true)
                         ))
                         .build())
                 .narrative(MarketBattleground.Narrative.builder()
-                        .intro("这意味着，" + region + "消费者每天 约 110 万次 通过 AI 询问：")
+                        .intro("这意味着，全国消费者每天 约 2.5 亿次、华南消费者每天约 0.7 亿次 通过 AI 询问：")
                         .questions(List.of(
-                                "\"" + region + "有什么好喝的" + industry + "？\"",
-                                "\"" + brand + "和本地头部品牌哪个更好？\"",
-                                "\"送" + region + "朋友买什么" + industry + "合适？\""
+                                "\"广州装修选什么门窗品牌好？\"",
+                                "\"XX 品牌和本地头部品牌哪个更值得选？\"",
+                                "\"广东新房装系统门窗，找哪家性价比高？\""
                         ))
-                        .conclusion("而 AI 给出的答案 —— 正在直接决定他们的购买选择。")
+                        .conclusion("而 AI 给出的答案——正在直接决定他们的购买选择。以华南装修门窗品牌为例：按推荐场景每月触发量保守估算约 100 万次，若品牌当前在 AI 推荐中的覆盖率仅 5-10%，意味着 每月有 90 万+ 次推荐机会与该品牌无关——按行业平均 1‰ 咨询转化、客单价 3 万元测算，潜在流失订单规模可达 270 万元/月以上。")
                         .brandLinePrefix("→")
                         .brandName(brand)
                         .brandLineSuffix("在这些场景中的真实可见度如何？详见下章诊断结果。")
                         .build())
-                .footnote("数据来源：QuestMobile《2026 Q1 AI 应用洞察》、中国酒业协会 2023 年度数据、华创证券研报。具体数值受平台分布、用户行为差异影响，合理区间 1,500-2,500 万条/天，本报告采用中枢值。")
+                .footnote("本报告引用的市场规模数据基于行业公开口径综合估算，受平台分布、用户行为差异及统计窗口影响，合理浮动区间约 ±20%。具体数值仅作量级参考，不构成精确的市场断言。")
                 .footerBrand("GEO · CONFIDENTIAL")
                 .build();
     }

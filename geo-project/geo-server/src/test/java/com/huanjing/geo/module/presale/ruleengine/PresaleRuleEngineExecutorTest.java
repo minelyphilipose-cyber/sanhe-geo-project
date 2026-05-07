@@ -1,7 +1,7 @@
 package com.huanjing.geo.module.presale.ruleengine;
 
 import com.huanjing.geo.module.presale.dto.snapshot.computed.ComputedSnapshotDTO;
-import com.huanjing.geo.module.presale.dto.snapshot.computed.IntentBreakdown;
+import com.huanjing.geo.module.presale.dto.snapshot.common.SceneCoverageGroup;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.OptimizationFinding;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.Scores;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
@@ -76,6 +76,35 @@ class PresaleRuleEngineExecutorTest {
         assertThat(f.getRuleCode()).isEqualTo(RuleCodes.RULE_BRAND_AWARENESS_LOW);
         assertThat(f.getPriority()).isEqualTo(OptimizationFinding.Priority.HIGH);
         assertThat(f.getEvidenceData()).containsEntry("overall_score", 42L);
+    }
+
+    @Test
+    void execute_coverageLowRecommend_highValueSceneCoverageExpressionHits() {
+        PresaleOptimizationRule rule = rule(
+                1, RuleCodes.RULE_COVERAGE_LOW_RECOMMEND, "基础设施", "HIGH",
+                "#l2.sceneCoverage.highValue.coverageRate < 80", 101);
+        Mockito.when(ruleService.loadEnabledRulesOrdered()).thenReturn(List.of(rule));
+
+        ComputedSnapshotDTO l2 = new ComputedSnapshotDTO();
+        l2.setSceneCoverage(ComputedSnapshotDTO.SceneCoverage.builder()
+                .highValue(SceneCoverageGroup.builder()
+                        .total(22)
+                        .covered(8)
+                        .coverageRate(36.3636)
+                        .build())
+                .build());
+
+        RuleEngineResult result = executor.execute(new RawSnapshotDTO(), l2);
+
+        assertThat(result.getErrors()).isEmpty();
+        assertThat(result.getFindings()).hasSize(1);
+        OptimizationFinding f = result.getFindings().get(0);
+        assertThat(f.getRuleCode()).isEqualTo(RuleCodes.RULE_COVERAGE_LOW_RECOMMEND);
+        assertThat(f.getEvidenceData()).containsEntry("coverage_rate", 36L);
+        assertThat(f.getEvidenceData()).containsEntry("total_prompts", 22);
+        assertThat(f.getEvidenceData()).containsEntry("covered_prompts", 8);
+        assertThat(f.getEvidenceData()).containsEntry("missed_count", 14);
+        assertThat(f.getEvidenceData()).doesNotContainKey("top_competitor_coverage_rate");
     }
 
     @Test

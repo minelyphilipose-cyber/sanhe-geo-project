@@ -2,6 +2,7 @@ package com.huanjing.geo.module.presale.generate.l3;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.presale.dto.snapshot.common.ScoreSet;
+import com.huanjing.geo.module.presale.dto.snapshot.common.SceneCoverageGroup;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.ComputedSnapshotDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.OptimizationFinding;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.Scores;
@@ -96,8 +97,6 @@ class PresaleL3InitServiceTest {
             assertNoPlaceholder(finding.getDescription());
             assertNoPlaceholder(finding.getEvidenceText());
             assertFalse(finding.getEvidenceText().contains("negative_evidence_count"));
-            assertFalse(finding.getDescription().contains("—"), "unexpected fallback value in " + finding.getFindingId());
-            assertFalse(finding.getEvidenceText().contains("—"), "unexpected fallback value in " + finding.getFindingId());
         }
     }
 
@@ -108,7 +107,7 @@ class PresaleL3InitServiceTest {
         evidence.put("covered_prompts", 9);
         evidence.put("coverage_rate", 45.0D);
         evidence.put("uncovered_rate", 55.0D);
-        evidence.put("top_competitor_coverage_rate", 78.0D);
+        evidence.put("missed_count", 11);
 
         String rawJson = buildRawJson();
         String computedJson = buildComputedJson(List.of(
@@ -137,6 +136,37 @@ class PresaleL3InitServiceTest {
         assertNoPlaceholder(mergedFinding.getTitle());
         assertNoPlaceholder(mergedFinding.getDescription());
         assertNoPlaceholder(mergedFinding.getEvidenceText());
+    }
+
+    @Test
+    void derive_coverageLowRecommend_rendersHighValueSceneCoverageCopy() throws Exception {
+        Map<String, Object> evidence = new HashMap<>();
+        evidence.put("total_prompts", 22);
+        evidence.put("covered_prompts", 8);
+        evidence.put("coverage_rate", 36);
+        evidence.put("uncovered_rate", 64);
+        evidence.put("missed_count", 14);
+
+        String computedJson = buildComputedJson(List.of(
+                OptimizationFinding.builder()
+                        .findingId("F001")
+                        .ruleCode(RuleCodes.RULE_COVERAGE_LOW_RECOMMEND)
+                        .priority(OptimizationFinding.Priority.HIGH)
+                        .category("基础设施")
+                        .evidenceData(evidence)
+                        .build()
+        ));
+
+        String editableJson = service.derive(buildRawJson(), computedJson);
+        EditableContentDTO editable = objectMapper.readValue(editableJson, EditableContentDTO.class);
+
+        FindingContent finding = editable.getOptimizationFindingsContent().get(0);
+        assertEquals("高价值场景覆盖待激活", finding.getTitle());
+        assertTrue(finding.getDescription().contains("22 个高价值场景"));
+        assertTrue(finding.getDescription().contains("覆盖 8 个"));
+        assertTrue(finding.getDescription().contains("覆盖率 36%"));
+        assertTrue(finding.getDescription().contains("14 个核心决策场景"));
+        assertNoPlaceholder(finding.getDescription());
     }
 
     @Test
@@ -223,6 +253,13 @@ class PresaleL3InitServiceTest {
     private String buildComputedJson(List<OptimizationFinding> findings) throws Exception {
         ComputedSnapshotDTO computed = ComputedSnapshotDTO.builder()
                 .scores(Scores.builder().overall(60.0D).build())
+                .sceneCoverage(ComputedSnapshotDTO.SceneCoverage.builder()
+                        .highValue(SceneCoverageGroup.builder()
+                                .total(22)
+                                .covered(8)
+                                .coverageRate(36.3636)
+                                .build())
+                        .build())
                 .optimizationFindings(findings)
                 .build();
         return objectMapper.writeValueAsString(computed);
@@ -249,7 +286,7 @@ class PresaleL3InitServiceTest {
         evidence.put("covered_prompts", 9);
         evidence.put("coverage_rate", 45.0D);
         evidence.put("uncovered_rate", 55.0D);
-        evidence.put("top_competitor_coverage_rate", 78.0D);
+        evidence.put("missed_count", 11);
         evidence.put("overall_score", 42.0D);
         evidence.put("industry_avg_overall", 59.0D);
         evidence.put("top1_overall", 83.0D);

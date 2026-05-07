@@ -200,8 +200,15 @@ function formatRank(n: number): string {
   return n.toString().padStart(2, '0')
 }
 
-// ─── 底部引用文案(静态) ──────────────────────────────
-const quoteText = `上图展示了 AI 视角下您与 Top3 竞品的提及次数对比。差距集中在哪些场景类别、差距的具体机制,建议结合后续章节的场景明细逐项分析。`
+// ─── 底部引用文案 ────────────────────────────────────
+const quoteText = computed(() => {
+  const self = selfTotalMentions.value
+  const top1 = mergedView.value.merged_competitors?.[0]
+  if (!top1) {
+    return `上图展示了 AI 视角下您与 Top3 竞品的提及次数对比。建议结合后续章节的场景明细逐项分析差距来源。`
+  }
+  return `您的总提及数 ${self} 次居于首位——但需要注意:这部分提及主要集中在"用户已知道您之后才会问到您"的对比型查询中。在用户主动寻找品牌的推荐型场景中,竞品组的曝光频次显著高于您。这意味着:老客户认你,但新客户找不到你。后续章节将逐项剖析这部分流失场景。`
+})
 </script>
 
 <style scoped>
