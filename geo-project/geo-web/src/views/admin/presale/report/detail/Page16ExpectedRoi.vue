@@ -63,7 +63,7 @@
           <div class="p16-impact-grid">
             <!-- 格子 1:AI 渠道月度品牌曝光(基于 current/target 动态估算) -->
             <div class="p16-impact-item">
-              <div class="p16-impact-caption">AI 渠道月度品牌曝光</div>
+              <div class="p16-impact-caption">月度新客触达</div>
               <div class="p16-impact-value">
                 <span class="mono p16-impact-after">{{ exposureUpliftDisplay }}</span>
               </div>
@@ -71,7 +71,7 @@
 
             <!-- 格子 2:高价值查询场景覆盖(真实契约) -->
             <div class="p16-impact-item">
-              <div class="p16-impact-caption">高价值查询场景覆盖</div>
+              <div class="p16-impact-caption">决策场景占位</div>
               <div class="p16-impact-value">
                 <span class="mono">{{ highValueCoverage.before }}</span>
                 <span class="p16-impact-arrow">→</span>
@@ -81,7 +81,7 @@
 
             <!-- 格子 3:主推荐次数(基于 current/target 动态估算) -->
             <div class="p16-impact-item">
-              <div class="p16-impact-caption">主推荐次数</div>
+              <div class="p16-impact-caption">AI 主动推荐次数</div>
               <div class="p16-impact-value">
                 <span class="mono p16-impact-after">{{ primaryRecUpliftDisplay }}</span>
               </div>
@@ -89,7 +89,7 @@
 
             <!-- 格子 4:对标竞品差距(真实契约) -->
             <div class="p16-impact-item">
-              <div class="p16-impact-caption">对标竞品差距</div>
+              <div class="p16-impact-caption">与 Top1 竞品差距收窄</div>
               <div class="p16-impact-value">
                 <span class="mono">{{ competitorGap.before }}</span>
                 <span class="p16-impact-arrow">→</span>
