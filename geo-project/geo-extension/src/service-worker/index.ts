@@ -4,7 +4,7 @@ import { logger } from '@/shared/logger'
 import { sessionStorage } from '@/shared/storage'
 import { captureCookiesForAccount } from './cookieCapture'
 import { startFillTask } from './fillFlow'
-import { publishActiveTask } from './taskLifecycle'
+import { HEARTBEAT_ALARM_NAME, handleTaskHeartbeatAlarm, handleTaskTabRemoved, publishActiveTask } from './taskLifecycle'
 import type { ExtensionMessage, ExtensionSelfMediaAccount, ExtensionTaskListItem } from '@/types/extension'
 
 const REFRESH_ALARM = 'geo-token-refresh'
@@ -23,6 +23,10 @@ chrome.runtime.onStartup.addListener(() => {
 })
 
 chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === HEARTBEAT_ALARM_NAME) {
+    await handleTaskHeartbeatAlarm()
+    return
+  }
   if (alarm.name !== REFRESH_ALARM) return
   const session = await sessionStorage.get()
   if (!session) return
@@ -55,6 +59,10 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     }
     logger.warn('token refresh failed', error instanceof Error ? error.message : error)
   }
+})
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  void handleTaskTabRemoved(tabId)
 })
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {

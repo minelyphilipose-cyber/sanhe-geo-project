@@ -3,66 +3,88 @@ import { sessionStorage } from '@/shared/storage'
 import type { TaskLifecycleEvent } from '@/types/extension'
 
 export const HEARTBEAT_INTERVAL_MS = 30_000
+export const HEARTBEAT_ALARM_NAME = 'geo-task-heartbeat'
+export const ACTIVE_TASK_KEY = 'geo:active-task'
+const HEARTBEAT_PERIOD_MINUTES = HEARTBEAT_INTERVAL_MS / 60_000
+const MAX_ACTIVE_TASK_AGE_MS = 2 * 60 * 60 * 1000
 
-interface ActiveTask {
+export interface PersistedActiveTask {
   taskId: number
   tabId: number
   token: string
-  timer: ReturnType<typeof setInterval>
-  onRemoved: (tabId: number) => void
+  startedAt: number
 }
 
-let activeTask: ActiveTask | null = null
-
-export function startTaskLifecycle(taskId: number, tabId: number, token: string) {
-  stopTaskLifecycle()
-  const onRemoved = (closedTabId: number) => {
-    if (closedTabId === tabId) stopTaskLifecycle()
-  }
-  activeTask = {
-    taskId,
-    tabId,
-    token,
-    timer: setInterval(() => {
-      void heartbeat(taskId)
-    }, HEARTBEAT_INTERVAL_MS),
-    onRemoved,
-  }
-  chrome.tabs.onRemoved.addListener(onRemoved)
+export async function startTaskLifecycle(taskId: number, tabId: number, token: string) {
+  await chrome.storage.session.set({
+    [ACTIVE_TASK_KEY]: {
+      taskId,
+      tabId,
+      token,
+      startedAt: Date.now(),
+    } satisfies PersistedActiveTask,
+  })
+  chrome.alarms.create(HEARTBEAT_ALARM_NAME, { periodInMinutes: HEARTBEAT_PERIOD_MINUTES })
 }
 
-export function stopTaskLifecycle() {
-  if (!activeTask) return
-  clearInterval(activeTask.timer)
-  chrome.tabs.onRemoved.removeListener(activeTask.onRemoved)
-  activeTask = null
+export async function stopTaskLifecycle() {
+  await chrome.storage.session.remove(ACTIVE_TASK_KEY)
+  await chrome.alarms.clear(HEARTBEAT_ALARM_NAME)
 }
 
 export async function publishActiveTask(taskId: number) {
-  if (!activeTask || activeTask.taskId !== taskId) return
-  const task = activeTask
+  const task = await getActiveTask()
+  if (!task || task.taskId !== taskId) return
   await extensionApi.publishedTask(task.token, taskId)
-  stopTaskLifecycle()
+  await stopTaskLifecycle()
   notifyPopup({ taskId, kind: 'published', message: '任务已上报 published。' })
 }
 
-async function heartbeat(taskId: number) {
-  const task = activeTask
-  if (!task || task.taskId !== taskId) return
+export async function handleTaskHeartbeatAlarm() {
+  const active = await getActiveTask()
+  if (!active) {
+    await chrome.alarms.clear(HEARTBEAT_ALARM_NAME)
+    return
+  }
+  if (!active.token || Date.now() - active.startedAt > MAX_ACTIVE_TASK_AGE_MS) {
+    await stopTaskLifecycle()
+    notifyPopup({ taskId: active.taskId, kind: 'stopped', message: '任务填充已超时，已停止 heartbeat。' })
+    return
+  }
   try {
-    await extensionApi.heartbeatTask(task.token, taskId)
+    await chrome.tabs.get(active.tabId)
+  } catch {
+    await stopTaskLifecycle()
+    return
+  }
+  await heartbeat(active)
+}
+
+export async function handleTaskTabRemoved(closedTabId: number) {
+  const active = await getActiveTask()
+  if (active?.tabId === closedTabId) await stopTaskLifecycle()
+}
+
+async function getActiveTask(): Promise<PersistedActiveTask | null> {
+  const stored = await chrome.storage.session.get(ACTIVE_TASK_KEY)
+  return (stored[ACTIVE_TASK_KEY] as PersistedActiveTask | undefined) ?? null
+}
+
+async function heartbeat(task: PersistedActiveTask) {
+  try {
+    await extensionApi.heartbeatTask(task.token, task.taskId)
   } catch (error) {
     if (!(error instanceof ExtensionApiError)) return
     if (error.code === 70013) return
     if (error.code === 70002 || error.code === 70004) {
       await sessionStorage.clear()
-      stopTaskLifecycle()
-      notifyPopup({ taskId, kind: 'auth_required', message: '扩展登录已失效，请重新绑定。' })
+      await stopTaskLifecycle()
+      notifyPopup({ taskId: task.taskId, kind: 'auth_required', message: '扩展登录已失效，请重新绑定。' })
       return
     }
     if (error.code === 70011 || error.code === 70012) {
-      stopTaskLifecycle()
-      notifyPopup({ taskId, kind: 'stopped', message: '任务状态已变化，已停止 heartbeat。' })
+      await stopTaskLifecycle()
+      notifyPopup({ taskId: task.taskId, kind: 'stopped', message: '任务状态已变化，已停止 heartbeat。' })
     }
   }
 }

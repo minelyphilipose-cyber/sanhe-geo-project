@@ -56,7 +56,7 @@ export async function startFillTask(task: ExtensionTaskListItem): Promise<Extens
   )
   if (!result?.ok) throw new Error(result?.message || '编辑器填充失败')
   const acked = await extensionApi.ackTask(session.token, task.taskId)
-  startTaskLifecycle(task.taskId, tab.id, session.token)
+  await startTaskLifecycle(task.taskId, tab.id, session.token)
   return acked
 }
 

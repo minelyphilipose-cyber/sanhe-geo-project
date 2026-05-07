@@ -27,7 +27,7 @@ function profile(platform: string, host: string, domain: string): PlatformFillPr
     coverSelectors: ['[data-geo-fill="cover"]', 'input[type="url"][name*="cover"]'],
     tagsSelectors: ['[data-geo-fill="tags"]', 'input[placeholder*="标签"]'],
     categorySelectors: ['[data-geo-fill="category"]', 'input[placeholder*="分类"]'],
-    publishButtonSelectors: ['[data-geo-publish]', 'button[type="submit"]', 'button.publish', '.publish-button'],
+    publishButtonSelectors: ['[data-geo-publish]'],
   }
 }
 
@@ -57,8 +57,14 @@ export function sanitizeTitle(value: string | null | undefined): string {
 
 export function sanitizeContentHtml(value: string | null | undefined): string {
   return DOMPurify.sanitize(value ?? '', {
-    ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'b', 'i', 'ul', 'ol', 'li', 'a', 'img', 'h1', 'h2', 'h3', 'blockquote'],
-    ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'target', 'rel'],
+    ALLOWED_TAGS: [
+      'p', 'br', 'strong', 'em', 'b', 'i', 'ul', 'ol', 'li', 'a', 'img', 'h1', 'h2', 'h3', 'blockquote',
+      'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption',
+      'pre', 'code',
+      'details', 'summary',
+      'h4', 'h5', 'h6', 'hr', 'span', 'div',
+    ],
+    ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'target', 'rel', 'colspan', 'rowspan', 'class'],
     ALLOWED_URI_REGEXP: /^(?:(?:https?):|data:image\/(?:png|jpeg|jpg|gif|webp);base64,|[^a-z])/i,
   }).trim()
 }
