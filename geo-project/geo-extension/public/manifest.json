@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "GEO Semi-auto Publisher",
+  "version": "0.1.0",
+  "description": "Semi-auto publishing companion for GEO self-media tasks.",
+  "action": {
+    "default_popup": "index.html",
+    "default_title": "GEO"
+  },
+  "background": {
+    "service_worker": "assets/service-worker.js",
+    "type": "module"
+  },
+  "permissions": ["alarms", "cookies", "storage", "tabs", "scripting"],
+  "host_permissions": [
+    "http://localhost:8080/*",
+    "https://mp.toutiao.com/*",
+    "https://www.zhihu.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://mp.toutiao.com/*", "https://www.zhihu.com/*"],
+      "js": ["assets/content-script.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

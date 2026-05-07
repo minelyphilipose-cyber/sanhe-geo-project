@@ -1,0 +1,37 @@
+html,
+body {
+  margin: 0;
+  min-width: 320px;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color: #172033;
+}
+
+.popup {
+  padding: 16px;
+}
+
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+header span {
+  color: #667085;
+  font-size: 12px;
+}
+
+.status {
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  background: #f8fafc;
+}
+
+.status.bound {
+  border-color: #9ae6b4;
+  background: #f0fff4;
+}
