@@ -65,7 +65,7 @@ describe('popup task list', () => {
     const wrapper = mount(App)
     await flushPromises()
 
-    expect(wrapper.text()).toContain('操作过于频繁，请稍后再试。')
+    expect(wrapper.text()).toContain('操作太频繁，系统正在保护任务状态，请稍后再试。')
     expect(wrapper.text()).not.toContain('请重新绑定后再试')
   })
 

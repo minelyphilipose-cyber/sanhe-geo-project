@@ -38,7 +38,7 @@ public interface DistributionTaskMapper extends BaseMapper<DistributionTask> {
             UPDATE distribution_tasks
             SET last_heartbeat_at = #{heartbeatAt}
             WHERE id = #{taskId}
-              AND status = 'filling'
+              AND status IN ('filling', 'filled')
               AND dispatch_mode = 'SEMI_AUTO'
             """)
     int touchSemiAutoHeartbeat(@Param("taskId") Long taskId, @Param("heartbeatAt") LocalDateTime heartbeatAt);

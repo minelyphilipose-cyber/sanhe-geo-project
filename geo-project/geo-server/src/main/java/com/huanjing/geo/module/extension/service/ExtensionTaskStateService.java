@@ -85,7 +85,11 @@ public class ExtensionTaskStateService {
             auditDenied("SEMI_AUTO_TASK_HEARTBEAT_DENIED", context, operatorId, extensionSessionId, "STALE_STATE");
             throw new BizException(TASK_STATE_CONFLICT, "task state conflict");
         }
-        return new ExtensionTaskStateResponse(taskId, STATUS_FILLING);
+        if (shouldAuditHeartbeatStarted(context.task())) {
+            auditSuccess("SEMI_AUTO_TASK_HEARTBEAT_STARTED", context, operatorId, extensionSessionId,
+                    detail("heartbeatStartedAt", now));
+        }
+        return new ExtensionTaskStateResponse(taskId, context.task().getStatus());
     }
 
     @Transactional
@@ -302,6 +306,10 @@ public class ExtensionTaskStateService {
             return AuditResult.DENIED;
         }
         return AuditResult.FAILURE;
+    }
+
+    private boolean shouldAuditHeartbeatStarted(DistributionTask task) {
+        return task.getLastHeartbeatAt() == null;
     }
 
     private void auditReclaimed(

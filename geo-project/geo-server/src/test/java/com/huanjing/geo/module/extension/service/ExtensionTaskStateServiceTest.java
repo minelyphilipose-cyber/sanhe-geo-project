@@ -151,7 +151,7 @@ class ExtensionTaskStateServiceTest {
     }
 
     @Test
-    void heartbeatTouchesFillingTaskWithoutSuccessAudit() {
+    void firstHeartbeatTouchesFillingTaskAndAuditsStart() {
         stubTask("filling");
         when(redisStore.incrementWithTtl(eq("extension:task:heartbeat:30"), any(Duration.class))).thenReturn(1L);
         when(taskMapper.touchSemiAutoHeartbeat(eq(30L), any())).thenReturn(1);
@@ -159,6 +159,22 @@ class ExtensionTaskStateServiceTest {
         assertEquals("filling", service.heartbeat(30L, 99L, 7L).status());
 
         verify(taskMapper).touchSemiAutoHeartbeat(eq(30L), any());
+        verify(auditSupport).record(
+                eq("SEMI_AUTO_TASK_HEARTBEAT_STARTED"),
+                eq(AuditResult.SUCCESS),
+                eq(AuditMode.SYNC),
+                eq(false),
+                eq(99L),
+                eq(10L),
+                eq(20L),
+                eq(30L),
+                eq(7L),
+                eq("DISTRIBUTION_TASK"),
+                eq("30"),
+                eq(null),
+                eq(null),
+                any()
+        );
         verify(auditSupport, never()).record(eq("SEMI_AUTO_TASK_HEARTBEAT_DENIED"), any(), any(), any(Boolean.class),
                 any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
@@ -172,6 +188,25 @@ class ExtensionTaskStateServiceTest {
 
         assertEquals(ExtensionErrorCodes.TASK_RATE_LIMITED, ex.getCode());
         verify(taskMapper, never()).touchSemiAutoHeartbeat(any(), any());
+    }
+
+    @Test
+    void heartbeatAcceptsFilledTaskAfterAckAndKeepsFilledStatus() {
+        DistributionTask task = task("filled");
+        task.setFilledAt(LocalDateTime.now());
+        when(taskMapper.selectById(30L)).thenReturn(task);
+        Project project = new Project();
+        project.setId(40L);
+        project.setBrandId(10L);
+        when(projectMapper.selectById(40L)).thenReturn(project);
+        when(redisStore.incrementWithTtl(eq("extension:task:heartbeat:30"), any(Duration.class))).thenReturn(1L);
+        when(taskMapper.touchSemiAutoHeartbeat(eq(30L), any())).thenReturn(1);
+
+        assertEquals("filled", service.heartbeat(30L, 99L, 7L).status());
+
+        verify(taskMapper).touchSemiAutoHeartbeat(eq(30L), any());
+        verify(auditSupport).record(eq("SEMI_AUTO_TASK_HEARTBEAT_STARTED"), eq(AuditResult.SUCCESS), any(),
+                any(Boolean.class), any(), any(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
