@@ -1,5 +1,5 @@
 import { API_BASE_URL } from './env'
-import type { ApiErrorBody, BindResponse, VersionCheckResponse } from '@/types/extension'
+import type { ApiErrorBody, BindResponse, TokenRefreshResponse, VersionCheckResponse } from '@/types/extension'
 
 export class ExtensionApiError extends Error {
   constructor(
@@ -41,9 +41,15 @@ export const extensionApi = {
   },
 
   refresh(token: string, extensionVersion: string) {
-    return request('/api/v1/extension/token/refresh', {
+    return request<TokenRefreshResponse>('/api/v1/extension/token/refresh', {
       method: 'POST',
       body: JSON.stringify({ extensionVersion }),
+    }, token)
+  },
+
+  revoke(token: string, sessionId: number) {
+    return request<void>(`/api/v1/extension/token/${sessionId}/revoke`, {
+      method: 'POST',
     }, token)
   },
 }

@@ -2,8 +2,10 @@ export type ExtensionStatus = 'unbound' | 'bound'
 
 export interface StoredSession {
   token: string
+  sessionId: number
   operatorId?: number
   extensionVersion: string
+  expiresAt: string
   boundAt: string
 }
 
@@ -22,10 +24,16 @@ export interface VersionCheckResponse {
 }
 
 export interface BindResponse {
-  extensionToken: string
-  operatorId: number
+  token: string
   expiresAt: string
-  extensionVersion: string
+  sessionId: number
+}
+
+export interface TokenRefreshResponse {
+  token?: string | null
+  renewed: boolean
+  expiresAt: string
+  sessionId: number
 }
 
 export interface ExtensionMessage<T = unknown> {
