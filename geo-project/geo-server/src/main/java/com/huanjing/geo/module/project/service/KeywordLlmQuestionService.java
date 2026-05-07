@@ -2,13 +2,15 @@ package com.huanjing.geo.module.project.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.llm.LlmInvokeResult;
+import com.huanjing.geo.common.llm.LlmInvoker;
+import com.huanjing.geo.common.llm.LlmModelConfig;
+import com.huanjing.geo.common.llm.LlmProperties;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
-import com.huanjing.geo.module.presale.generate.llm.PresaleLlmHttpClient;
 import com.huanjing.geo.module.project.dto.KeywordLlmQuestionGenerateVO;
 import com.huanjing.geo.module.project.dto.LlmQuestionItemDTO;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
@@ -23,7 +25,6 @@ import org.springframework.util.StringUtils;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -37,7 +38,6 @@ public class KeywordLlmQuestionService {
     private static final int MAX_TARGET_COUNT = 50;
     private static final int DEFAULT_TARGET_COUNT = 30;
     private static final int DEFAULT_COUNT = 100;
-    private static final int TIMEOUT_MS = 30_000;
     private static final Duration TOKEN_TTL = Duration.ofMinutes(30);
     private static final String HEX = "0123456789abcdef";
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -49,7 +49,8 @@ public class KeywordLlmQuestionService {
     private final CompanyMapper companyMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
-    private final PresaleLlmHttpClient httpClient;
+    private final LlmInvoker llmInvoker;
+    private final LlmProperties llmProperties;
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
     private final CurrentUserService currentUserService;
@@ -160,24 +161,23 @@ public class KeywordLlmQuestionService {
             throw new IllegalStateException("Missing API key");
         }
 
-        String body = buildRequestBody(modelId, renderPrompt(seed, targetCount));
-        Map<String, String> headers = new LinkedHashMap<>();
-        headers.put("Content-Type", "application/json");
-        headers.put("Authorization", "Bearer " + apiKey);
-        headers.put("api-key", apiKey);
-        headers.put("x-api-key", apiKey);
-
-        PresaleLlmHttpClient.HttpResponse response = httpClient.postJson(
-                normalizeChatCompletionsUrl(config.getApiUrl()),
-                headers,
-                body,
-                TIMEOUT_MS,
-                TIMEOUT_MS
-        );
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IllegalStateException("HTTP " + response.statusCode());
-        }
-        return normalizeQuestions(extractText(response.body()));
+        LlmInvokeResult response = llmInvoker.invoke(renderPrompt(seed, targetCount), new LlmModelConfig(
+                config.getPlatformCode(),
+                config.getPlatformName(),
+                modelId,
+                config.getModelName(),
+                config.getApiUrl(),
+                apiKey,
+                "你是一个中文搜索与AI问答场景的问题扩写助手。",
+                0.4D,
+                llmProperties.getConnectTimeoutMs(),
+                llmProperties.getRequestTimeoutMs(),
+                0,
+                Math.max(1, config.getRateLimitQps() == null ? 1 : config.getRateLimitQps()),
+                null,
+                false
+        ));
+        return normalizeQuestions(response.rawResponse());
     }
 
     private AiPlatformConfig requirePlatformConfig() {
@@ -194,17 +194,6 @@ public class KeywordLlmQuestionService {
         return config;
     }
 
-    private String buildRequestBody(String modelId, String prompt) throws Exception {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("model", modelId);
-        payload.put("temperature", 0.4D);
-        payload.put("messages", List.of(
-                Map.of("role", "system", "content", "你是一个中文搜索与AI问答场景的问题扩写助手。"),
-                Map.of("role", "user", "content", prompt)
-        ));
-        return objectMapper.writeValueAsString(payload);
-    }
-
     private String renderPrompt(String seed, int targetCount) {
         return """
                 请基于以下种子词生成 %d 条用户向搜索引擎/AI 提问的常见问题：%s
@@ -216,27 +205,6 @@ public class KeywordLlmQuestionService {
                 4. 自然口语化
                 输出格式:严格的 JSON 数组,不要任何其他内容。
                 """.formatted(targetCount, seed);
-    }
-
-    private String extractText(String body) throws Exception {
-        JsonNode root = objectMapper.readTree(body);
-        JsonNode choices = root.get("choices");
-        if (choices != null && choices.isArray() && !choices.isEmpty()) {
-            JsonNode first = choices.get(0);
-            JsonNode message = first.get("message");
-            if (message != null && message.get("content") != null && message.get("content").isTextual()) {
-                return message.get("content").asText();
-            }
-            JsonNode text = first.get("text");
-            if (text != null && text.isTextual()) {
-                return text.asText();
-            }
-        }
-        JsonNode outputText = root.get("output_text");
-        if (outputText != null && outputText.isTextual()) {
-            return outputText.asText();
-        }
-        return body;
     }
 
     private List<String> normalizeQuestions(String rawText) throws Exception {
@@ -265,17 +233,6 @@ public class KeywordLlmQuestionService {
             }
         }
         return trimmed;
-    }
-
-    private String normalizeChatCompletionsUrl(String apiUrl) {
-        String trimmed = apiUrl.trim();
-        if (trimmed.endsWith("/chat/completions")) {
-            return trimmed;
-        }
-        if (trimmed.endsWith("/")) {
-            return trimmed + "chat/completions";
-        }
-        return trimmed + "/chat/completions";
     }
 
     private void requireCompany(Long companyId) {

@@ -3,10 +3,14 @@ package com.huanjing.geo.module.presale.service;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.llm.LlmCallStatus;
+import com.huanjing.geo.common.llm.LlmInvokeResult;
+import com.huanjing.geo.common.llm.LlmInvoker;
+import com.huanjing.geo.common.llm.LlmModelConfig;
+import com.huanjing.geo.common.llm.LlmProperties;
 import com.huanjing.geo.module.presale.dto.PresalePromptCategoryCode;
 import com.huanjing.geo.module.presale.dto.request.LlmPromptQuestionGenerateRequest;
 import com.huanjing.geo.module.presale.dto.response.LlmPromptQuestionGenerateVO;
-import com.huanjing.geo.module.presale.generate.llm.PresaleLlmHttpClient;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
@@ -26,8 +30,6 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -40,7 +42,7 @@ class PresaleLlmPromptQuestionServiceTest {
     @Mock
     private PlatformCredentialService platformCredentialService;
     @Mock
-    private PresaleLlmHttpClient httpClient;
+    private LlmInvoker llmInvoker;
     @Mock
     private CurrentUserService currentUserService;
     @Mock
@@ -53,7 +55,8 @@ class PresaleLlmPromptQuestionServiceTest {
         service = new PresaleLlmPromptQuestionService(
                 aiPlatformConfigMapper,
                 platformCredentialService,
-                httpClient,
+                llmInvoker,
+                new LlmProperties(),
                 new ObjectMapper(),
                 currentUserService,
                 rateLimiter,
@@ -71,24 +74,22 @@ class PresaleLlmPromptQuestionServiceTest {
         when(aiPlatformConfigMapper.selectList(any(Wrapper.class))).thenReturn(List.of(first, second));
         when(platformCredentialService.resolveApiKey("aaa", null, "key-aaa")).thenReturn("key-aaa");
         when(platformCredentialService.resolveApiKey("bbb", null, "key-bbb")).thenReturn("key-bbb");
-        when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
-                .thenReturn(new PresaleLlmHttpClient.HttpResponse(402, "{\"error\":\"insufficient balance\"}"))
-                .thenReturn(new PresaleLlmHttpClient.HttpResponse(200, successBody()));
+        when(llmInvoker.invoke(anyString(), any(LlmModelConfig.class)))
+                .thenThrow(new com.huanjing.geo.common.llm.LlmInvokeException("HTTP 402: insufficient balance"))
+                .thenReturn(successResult("bbb"));
 
         LlmPromptQuestionGenerateVO result = service.generate(request());
 
         assertEquals(2, result.getGeneratedTotal());
         assertEquals(0, result.getMissingTotal());
-        ArgumentCaptor<String> urlCaptor = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<String> bodyCaptor = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<Integer> requestTimeoutCaptor = ArgumentCaptor.forClass(Integer.class);
-        verify(httpClient, org.mockito.Mockito.times(2))
-                .postJson(urlCaptor.capture(), anyMap(), bodyCaptor.capture(), anyInt(), requestTimeoutCaptor.capture());
-        assertEquals(List.of("http://first.example/v1/chat/completions", "http://second.example/v1/chat/completions"),
-                urlCaptor.getAllValues());
-        assertEquals(true, bodyCaptor.getAllValues().get(0).contains("\"model\":\"low-model-aaa\""));
-        assertEquals(true, bodyCaptor.getAllValues().get(1).contains("\"model\":\"low-model-bbb\""));
-        assertEquals(List.of(60000, 60000), requestTimeoutCaptor.getAllValues());
+        ArgumentCaptor<LlmModelConfig> configCaptor = ArgumentCaptor.forClass(LlmModelConfig.class);
+        verify(llmInvoker, org.mockito.Mockito.times(2)).invoke(anyString(), configCaptor.capture());
+        assertEquals(List.of("http://first.example/v1", "http://second.example/v1"),
+                configCaptor.getAllValues().stream().map(LlmModelConfig::apiUrl).toList());
+        assertEquals(List.of("low-model-aaa", "low-model-bbb"),
+                configCaptor.getAllValues().stream().map(LlmModelConfig::modelId).toList());
+        assertEquals(List.of(30_000, 30_000),
+                configCaptor.getAllValues().stream().map(LlmModelConfig::requestTimeoutMs).toList());
     }
 
     @Test
@@ -96,8 +97,8 @@ class PresaleLlmPromptQuestionServiceTest {
         AiPlatformConfig first = platform("aaa", "http://first.example/v1");
         when(aiPlatformConfigMapper.selectList(any(Wrapper.class))).thenReturn(List.of(first));
         when(platformCredentialService.resolveApiKey("aaa", null, "key-aaa")).thenReturn("key-aaa");
-        when(httpClient.postJson(anyString(), anyMap(), anyString(), anyInt(), anyInt()))
-                .thenReturn(new PresaleLlmHttpClient.HttpResponse(402, "{\"error\":\"insufficient balance\"}"));
+        when(llmInvoker.invoke(anyString(), any(LlmModelConfig.class)))
+                .thenThrow(new com.huanjing.geo.common.llm.LlmInvokeException("HTTP 402: insufficient balance"));
 
         BizException ex = assertThrows(BizException.class, () -> service.generate(request()));
 
@@ -134,9 +135,19 @@ class PresaleLlmPromptQuestionServiceTest {
         return config;
     }
 
-    private static String successBody() {
-        return """
-                {"choices":[{"message":{"content":"[{\\\"categoryCode\\\":\\\"RECOMMENDATION\\\",\\\"promptContent\\\":\\\"广州门窗品牌哪家值得推荐?\\\"},{\\\"categoryCode\\\":\\\"COMPARISON\\\",\\\"promptContent\\\":\\\"诗帝尼和 {competitor} 哪个更适合装修?\\\"}]"}}]}
-                """;
+    private static LlmInvokeResult successResult(String platformCode) {
+        return new LlmInvokeResult(
+                "[{\"categoryCode\":\"RECOMMENDATION\",\"promptContent\":\"广州门窗品牌哪家值得推荐?\"},"
+                        + "{\"categoryCode\":\"COMPARISON\",\"promptContent\":\"诗帝尼和 {competitor} 哪个更适合装修?\"}]",
+                10,
+                20,
+                120L,
+                0,
+                LlmCallStatus.SUCCESS,
+                platformCode,
+                platformCode,
+                "low-model-" + platformCode,
+                "low-model-" + platformCode
+        );
     }
 }

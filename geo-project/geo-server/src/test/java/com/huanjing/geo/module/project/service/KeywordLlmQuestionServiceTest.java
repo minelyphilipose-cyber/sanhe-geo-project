@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.project.service;
 
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.llm.LlmProperties;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -10,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class KeywordLlmQuestionServiceTest {
 
     private final KeywordLlmQuestionService service = new KeywordLlmQuestionService(
-            null, null, null, null, null, null, null
+            null, null, null, null, new LlmProperties(), null, null, null
     );
 
     @Test

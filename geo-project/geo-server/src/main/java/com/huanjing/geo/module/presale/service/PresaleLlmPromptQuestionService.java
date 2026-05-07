@@ -1,17 +1,19 @@
 package com.huanjing.geo.module.presale.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.llm.LlmInvokeResult;
+import com.huanjing.geo.common.llm.LlmInvoker;
+import com.huanjing.geo.common.llm.LlmModelConfig;
+import com.huanjing.geo.common.llm.LlmProperties;
 import com.huanjing.geo.module.presale.dto.PresalePromptCategoryCode;
 import com.huanjing.geo.module.presale.dto.request.LlmPromptQuestionDraftRequest;
 import com.huanjing.geo.module.presale.dto.request.LlmPromptQuestionGenerateRequest;
 import com.huanjing.geo.module.presale.dto.request.LlmPromptQuestionPlanRequest;
 import com.huanjing.geo.module.presale.dto.response.LlmPromptQuestionDraftVO;
 import com.huanjing.geo.module.presale.dto.response.LlmPromptQuestionGenerateVO;
-import com.huanjing.geo.module.presale.generate.llm.PresaleLlmHttpClient;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
@@ -25,7 +27,6 @@ import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -37,12 +38,11 @@ import java.util.Set;
 public class PresaleLlmPromptQuestionService {
 
     private static final int CONNECT_TIMEOUT_MS = 30_000;
-    private static final int REQUEST_TIMEOUT_MS = 60_000;
-    private static final int ERROR_BODY_SNIPPET_LENGTH = 300;
 
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
-    private final PresaleLlmHttpClient httpClient;
+    private final LlmInvoker llmInvoker;
+    private final LlmProperties llmProperties;
     private final ObjectMapper objectMapper;
     private final CurrentUserService currentUserService;
     private final PresaleLlmQuestionRateLimiter rateLimiter;
@@ -214,34 +214,31 @@ public class PresaleLlmPromptQuestionService {
             throw new IllegalStateException("Missing API key");
         }
 
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("model", modelId);
-        payload.put("temperature", 0.4D);
-        payload.put("messages", List.of(
-                Map.of("role", "system", "content", resolveSystemPrompt()),
-                Map.of("role", "user", "content", userPrompt)
-        ));
-        Map<String, String> headers = new LinkedHashMap<>();
-        headers.put("Content-Type", "application/json");
-        headers.put("Authorization", "Bearer " + apiKey);
-        headers.put("api-key", apiKey);
-        headers.put("x-api-key", apiKey);
-
-        PresaleLlmHttpClient.HttpResponse response = httpClient.postJson(
-                normalizeChatCompletionsUrl(config.getApiUrl()),
-                headers,
-                objectMapper.writeValueAsString(payload),
-                CONNECT_TIMEOUT_MS,
-                REQUEST_TIMEOUT_MS
-        );
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+        try {
+            LlmInvokeResult response = llmInvoker.invoke(userPrompt, new LlmModelConfig(
+                config.getPlatformCode(),
+                config.getPlatformName(),
+                modelId,
+                config.getModelName(),
+                config.getApiUrl(),
+                apiKey,
+                resolveSystemPrompt(),
+                0.4D,
+                Math.max(CONNECT_TIMEOUT_MS, llmProperties.getConnectTimeoutMs()),
+                llmProperties.getRequestTimeoutMs(),
+                0,
+                Math.max(1, config.getRateLimitQps() == null ? 1 : config.getRateLimitQps()),
+                null,
+                false
+            ));
+            return response.rawResponse();
+        } catch (com.huanjing.geo.common.llm.LlmInvokeException ex) {
             throw new LlmQuestionProviderException(
                     config.getPlatformCode(),
-                    response.statusCode(),
-                    safeSnippet(response.body())
+                    extractHttpStatus(ex),
+                    safeSnippet(ex.getMessage())
             );
         }
-        return extractText(response.body());
     }
 
     private List<AiPlatformConfig> requirePlatformConfigs() {
@@ -421,27 +418,6 @@ public class PresaleLlmPromptQuestionService {
         return result;
     }
 
-    private String extractText(String body) throws JsonProcessingException {
-        JsonNode root = objectMapper.readTree(body);
-        JsonNode choices = root.get("choices");
-        if (choices != null && choices.isArray() && !choices.isEmpty()) {
-            JsonNode first = choices.get(0);
-            JsonNode message = first.get("message");
-            if (message != null && message.get("content") != null && message.get("content").isTextual()) {
-                return message.get("content").asText();
-            }
-            JsonNode text = first.get("text");
-            if (text != null && text.isTextual()) {
-                return text.asText();
-            }
-        }
-        JsonNode outputText = root.get("output_text");
-        if (outputText != null && outputText.isTextual()) {
-            return outputText.asText();
-        }
-        return body;
-    }
-
     private String stripMarkdownCodeFence(String text) {
         if (!StringUtils.hasText(text)) {
             return "[]";
@@ -457,17 +433,6 @@ public class PresaleLlmPromptQuestionService {
         return trimmed;
     }
 
-    private String normalizeChatCompletionsUrl(String apiUrl) {
-        String trimmed = apiUrl.trim();
-        if (trimmed.endsWith("/chat/completions")) {
-            return trimmed;
-        }
-        if (trimmed.endsWith("/")) {
-            return trimmed + "chat/completions";
-        }
-        return trimmed + "/chat/completions";
-    }
-
     private String safe(String value) {
         return value == null ? "" : value.trim();
     }
@@ -477,9 +442,24 @@ public class PresaleLlmPromptQuestionService {
             return "";
         }
         String trimmed = text.trim();
-        return trimmed.length() <= ERROR_BODY_SNIPPET_LENGTH
+        return trimmed.length() <= 300
                 ? trimmed
-                : trimmed.substring(0, ERROR_BODY_SNIPPET_LENGTH);
+                : trimmed.substring(0, 300);
+    }
+
+    private int extractHttpStatus(Exception ex) {
+        Throwable current = ex;
+        while (current != null) {
+            String message = current.getMessage();
+            if (StringUtils.hasText(message)) {
+                java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("HTTP (\\d{3})").matcher(message);
+                if (matcher.find()) {
+                    return Integer.parseInt(matcher.group(1));
+                }
+            }
+            current = current.getCause();
+        }
+        return 500;
     }
 
     private static final class LlmQuestionProviderException extends Exception {

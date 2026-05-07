@@ -2,25 +2,22 @@ package com.huanjing.geo.module.presale.generate.llm;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.llm.LlmInvokeResult;
+import com.huanjing.geo.common.llm.LlmInvoker;
+import com.huanjing.geo.common.llm.LlmModelConfig;
+import com.huanjing.geo.common.llm.LlmProperties;
 import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
 
     private static final String DEFAULT_QUERY_SYSTEM_PROMPT = "You are a GEO monitoring assistant.";
@@ -30,13 +27,46 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
 
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
-    private final PresaleLlmHttpClient httpClient;
+    private final LlmInvoker llmInvoker;
+    private final LlmProperties llmProperties;
     private final ObjectMapper objectMapper;
-
-    private final ConcurrentHashMap<String, PlatformThrottleState> throttleStates = new ConcurrentHashMap<>();
 
     @Value("${presale.generate.llm.connect-timeout-ms:10000}")
     private int connectTimeoutMs;
+
+    @Autowired
+    public OpenAiCompatiblePresaleLlmInvoker(AiPlatformConfigMapper aiPlatformConfigMapper,
+                                             PlatformCredentialService platformCredentialService,
+                                             LlmInvoker llmInvoker,
+                                             LlmProperties llmProperties,
+                                             ObjectMapper objectMapper) {
+        this.aiPlatformConfigMapper = aiPlatformConfigMapper;
+        this.platformCredentialService = platformCredentialService;
+        this.llmInvoker = llmInvoker;
+        this.llmProperties = llmProperties;
+        this.objectMapper = objectMapper;
+    }
+
+    OpenAiCompatiblePresaleLlmInvoker(AiPlatformConfigMapper aiPlatformConfigMapper,
+                                      PlatformCredentialService platformCredentialService,
+                                      PresaleLlmHttpClient httpClient,
+                                      ObjectMapper objectMapper) {
+        this(
+                aiPlatformConfigMapper,
+                platformCredentialService,
+                new com.huanjing.geo.common.llm.OpenAiCompatibleLlmInvoker(
+                        (url, headers, body, connectTimeoutMs, requestTimeoutMs) -> {
+                            PresaleLlmHttpClient.HttpResponse response = httpClient.postJson(
+                                    url, headers, body, connectTimeoutMs, requestTimeoutMs);
+                            return new com.huanjing.geo.common.llm.LlmHttpClient.HttpResponse(
+                                    response.statusCode(), response.body());
+                        },
+                        objectMapper
+                ),
+                new LlmProperties(),
+                objectMapper
+        );
+    }
 
     @Override
     public LlmCallResult query(PlatformCallContext ctx, String renderedPrompt) throws LlmInvokeException {
@@ -106,80 +136,38 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
             throw new LlmInvokeException("Missing API key for platform: " + ctx.platformCode());
         }
 
-        int maxRetry = normalize(config.getMaxRetry(), 2);
-        int timeoutMs = normalize(config.getTimeoutMs(), 60_000);
-        int qps = Math.max(1, normalize(config.getRateLimitQps(), 1));
-
-        Exception lastError = null;
-        for (int attempt = 0; attempt <= maxRetry; attempt++) {
-            long started = System.currentTimeMillis();
-            try {
-                throttle(config.getPlatformCode(), qps);
-                InvocationResponse response = invokeOnce(config, modelId, apiKey, systemPrompt, userPrompt, temperature, timeoutMs);
-                String responseText = response.text();
-                if (normalizeJsonOutput) {
-                    responseText = normalizeJsonText(responseText);
-                }
-                long durationMs = System.currentTimeMillis() - started;
-                if (durationMs <= 0) {
-                    log.warn("Non-positive LLM duration detected, platformCode={}, durationMs={}",
-                            config.getPlatformCode(), durationMs);
-                    durationMs = 1L;
-                }
-                return new LlmCallResult(
-                        responseText,
-                        response.promptTokens(),
-                        response.completionTokens(),
-                        durationMs,
-                        attempt,
-                        CallStatus.SUCCESS,
-                        config.getPlatformCode(),
-                        config.getPlatformName(),
-                        modelId,
-                        resolveModelDisplayName(config, modelId)
-                );
-            } catch (Exception ex) {
-                lastError = ex;
-                if (attempt == maxRetry) {
-                    break;
-                }
-            }
+        try {
+            LlmInvokeResult result = llmInvoker.invoke(userPrompt, new LlmModelConfig(
+                    config.getPlatformCode(),
+                    config.getPlatformName(),
+                    modelId,
+                    resolveModelDisplayName(config, modelId),
+                    config.getApiUrl(),
+                    apiKey,
+                    systemPrompt,
+                    temperature,
+                    Math.max(connectTimeoutMs, Math.max(DEFAULT_CONNECT_TIMEOUT_MS, llmProperties.getConnectTimeoutMs())),
+                    normalize(config.getTimeoutMs(), llmProperties.getRequestTimeoutMs()),
+                    normalize(config.getMaxRetry(), llmProperties.getMaxRetry()),
+                    Math.max(1, normalize(config.getRateLimitQps(), llmProperties.getRateLimitQps())),
+                    null,
+                    normalizeJsonOutput
+            ));
+            return new LlmCallResult(
+                    result.rawResponse(),
+                    result.promptTokens(),
+                    result.completionTokens(),
+                    result.durationMs(),
+                    result.retryCount(),
+                    CallStatus.SUCCESS,
+                    result.platformCode(),
+                    result.platformName(),
+                    result.modelId(),
+                    result.modelName()
+            );
+        } catch (com.huanjing.geo.common.llm.LlmInvokeException | IllegalArgumentException ex) {
+            throw new LlmInvokeException(ex.getMessage(), ex);
         }
-        String reason = lastError == null ? "unknown error" : lastError.getMessage();
-        throw new LlmInvokeException("LLM invoke failed after retries: " + reason, lastError);
-    }
-
-    private InvocationResponse invokeOnce(AiPlatformConfig config,
-                                          String modelId,
-                                          String apiKey,
-                                          String systemPrompt,
-                                          String userPrompt,
-                                          double temperature,
-                                          int timeoutMs) throws Exception {
-        String targetUrl = normalizeChatCompletionsUrl(config.getApiUrl());
-        String requestBody = buildRequestBody(modelId, systemPrompt, userPrompt, temperature);
-        Map<String, String> headers = new LinkedHashMap<>();
-        headers.put("Content-Type", "application/json");
-        headers.put("Authorization", "Bearer " + apiKey);
-        headers.put("api-key", apiKey);
-        headers.put("x-api-key", apiKey);
-
-        PresaleLlmHttpClient.HttpResponse response = httpClient.postJson(
-                targetUrl,
-                headers,
-                requestBody,
-                Math.max(connectTimeoutMs, DEFAULT_CONNECT_TIMEOUT_MS),
-                timeoutMs
-        );
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new LlmInvokeException("HTTP " + response.statusCode() + ": " + safeSnippet(response.body()));
-        }
-        InvocationResponse invocation = extractResponse(response.body());
-        String text = invocation.text();
-        if (!StringUtils.hasText(text)) {
-            throw new LlmInvokeException("Empty model response text");
-        }
-        return invocation;
     }
 
     private void validateAnalyzeJson(String responseText) throws AnalyzeParseException {
@@ -258,68 +246,6 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         }
     }
 
-    private String normalizeJsonText(String responseText) {
-        String stripped = stripMarkdownCodeFence(responseText);
-        try {
-            JsonNode node = objectMapper.readTree(stripped);
-            return objectMapper.writeValueAsString(node);
-        } catch (Exception ex) {
-            return stripped;
-        }
-    }
-
-    private InvocationResponse extractResponse(String body) {
-        if (!StringUtils.hasText(body)) {
-            return new InvocationResponse(null, null, null);
-        }
-        try {
-            JsonNode root = objectMapper.readTree(body);
-            Integer promptTokens = extractNullableInt(root.path("usage").path("prompt_tokens"));
-            Integer completionTokens = extractNullableInt(root.path("usage").path("completion_tokens"));
-            JsonNode choices = root.get("choices");
-            if (choices != null && choices.isArray() && !choices.isEmpty()) {
-                JsonNode first = choices.get(0);
-                JsonNode message = first.get("message");
-                if (message != null && message.get("content") != null && message.get("content").isTextual()) {
-                    return new InvocationResponse(message.get("content").asText(), promptTokens, completionTokens);
-                }
-                JsonNode text = first.get("text");
-                if (text != null && text.isTextual()) {
-                    return new InvocationResponse(text.asText(), promptTokens, completionTokens);
-                }
-            }
-            JsonNode outputText = root.get("output_text");
-            if (outputText != null && outputText.isTextual()) {
-                return new InvocationResponse(outputText.asText(), promptTokens, completionTokens);
-            }
-            return new InvocationResponse(body, promptTokens, completionTokens);
-        } catch (Exception ex) {
-            return new InvocationResponse(body, null, null);
-        }
-    }
-
-    private Integer extractNullableInt(JsonNode node) {
-        if (node == null || node.isMissingNode() || node.isNull() || !node.isNumber()) {
-            return null;
-        }
-        return node.asInt();
-    }
-
-    private String stripMarkdownCodeFence(String text) {
-        if (!StringUtils.hasText(text)) {
-            return text;
-        }
-        String trimmed = text.trim();
-        if (trimmed.startsWith("```")) {
-            int firstLineEnd = trimmed.indexOf('\n');
-            int lastFence = trimmed.lastIndexOf("```");
-            if (firstLineEnd > 0 && lastFence > firstLineEnd) {
-                return trimmed.substring(firstLineEnd + 1, lastFence).trim();
-            }
-        }
-        return trimmed;
-    }
-
     private AiPlatformConfig requireConfig(String platformCode) throws LlmInvokeException {
         AiPlatformConfig platform = aiPlatformConfigMapper.selectOne(
                 PresalePlatformConfigQueries.presaleEnabledWrapper()
@@ -380,72 +306,11 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         return temperature;
     }
 
-    private String buildRequestBody(String modelId, String systemPrompt, String userPrompt, double temperature)
-            throws Exception {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("model", modelId);
-        payload.put("temperature", temperature);
-        List<Map<String, String>> messages = new ArrayList<>();
-        if (StringUtils.hasText(systemPrompt)) {
-            messages.add(Map.of("role", "system", "content", systemPrompt));
-        }
-        messages.add(Map.of("role", "user", "content", userPrompt));
-        payload.put("messages", messages);
-        return objectMapper.writeValueAsString(payload);
-    }
-
-    private String normalizeChatCompletionsUrl(String apiUrl) {
-        String trimmed = apiUrl.trim();
-        if (trimmed.endsWith("/chat/completions")) {
-            return trimmed;
-        }
-        if (trimmed.endsWith("/")) {
-            return trimmed + "chat/completions";
-        }
-        return trimmed + "/chat/completions";
-    }
-
     private int normalize(Integer value, int fallback) {
         return value == null || value <= 0 ? fallback : value;
     }
 
-    private String safeSnippet(String text) {
-        if (!StringUtils.hasText(text)) {
-            return "";
-        }
-        return text.length() <= 300 ? text : text.substring(0, 300);
-    }
-
     private String safe(String text) {
         return text == null ? "" : text;
-    }
-
-    private void throttle(String platformCode, int qps) throws LlmInvokeException {
-        long minIntervalMs = Math.max(1L, 1000L / qps);
-        PlatformThrottleState state = throttleStates.computeIfAbsent(
-                platformCode, k -> new PlatformThrottleState());
-        synchronized (state) {
-            long now = System.currentTimeMillis();
-            long last = state.lastCallAtMillis;
-            if (last > 0L) {
-                long waitMs = minIntervalMs - (now - last);
-                if (waitMs > 0) {
-                    try {
-                        Thread.sleep(waitMs);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        throw new LlmInvokeException("Interrupted during rate limit throttle", e);
-                    }
-                }
-            }
-            state.lastCallAtMillis = System.currentTimeMillis();
-        }
-    }
-
-    private static final class PlatformThrottleState {
-        private volatile long lastCallAtMillis = 0L;
-    }
-
-    private record InvocationResponse(String text, Integer promptTokens, Integer completionTokens) {
     }
 }
