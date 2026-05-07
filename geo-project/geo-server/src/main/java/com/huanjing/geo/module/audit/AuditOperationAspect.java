@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.audit;
 
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.credential.CredentialErrorCodes;
 import com.huanjing.geo.module.customer.access.BrandAccessErrorCodes;
 import com.huanjing.geo.module.extension.ExtensionErrorCodes;
@@ -34,7 +35,9 @@ public class AuditOperationAspect {
             ExtensionErrorCodes.BIND_CODE_INVALID,
             ExtensionErrorCodes.BIND_RATE_LIMIT_EXCEEDED,
             ExtensionErrorCodes.TASK_STATE_CONFLICT,
-            ExtensionErrorCodes.TASK_RATE_LIMITED
+            ExtensionErrorCodes.TASK_RATE_LIMITED,
+            ContentErrorCodes.ARTICLE_STATE_CONFLICT,
+            ContentErrorCodes.ARTICLE_AUTHOR_CANNOT_REVIEW
     );
 
     private static final Set<Integer> NOT_FOUND_CODES = Set.of(
@@ -42,7 +45,8 @@ public class AuditOperationAspect {
             CredentialErrorCodes.CREDENTIAL_NOT_FOUND,
             BrandAccessErrorCodes.BRAND_ACCESS_NOT_FOUND,
             ExtensionErrorCodes.EXTENSION_NOT_FOUND,
-            ExtensionErrorCodes.TASK_NOT_FOUND
+            ExtensionErrorCodes.TASK_NOT_FOUND,
+            ContentErrorCodes.ARTICLE_NOT_FOUND
     );
 
     private final AuditService auditService;
