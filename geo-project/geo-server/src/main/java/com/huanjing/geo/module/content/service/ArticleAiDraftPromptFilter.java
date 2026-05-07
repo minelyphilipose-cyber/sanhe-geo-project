@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.*;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Service
@@ -20,7 +21,7 @@ public class ArticleAiDraftPromptFilter {
     private static final Pattern EMAIL = Pattern.compile("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}");
     private static final Pattern MOBILE = Pattern.compile("(?<!\\d)1[3-9]\\d{9}(?!\\d)");
     private static final Pattern ID_CARD = Pattern.compile("(?<![0-9A-Za-z])\\d{17}[0-9Xx](?![0-9A-Za-z])");
-    private static final Pattern BANK_CARD = Pattern.compile("(?<!\\d)\\d{13,19}(?!\\d)");
+    private static final Pattern BANK_CARD = Pattern.compile("(?<!\\d)(\\d{13,19})(?!\\d)");
 
     private final SysDictItemMapper sysDictItemMapper;
 
@@ -37,11 +38,38 @@ public class ArticleAiDraftPromptFilter {
     }
 
     private String redactPii(String value) {
-        return BANK_CARD.matcher(ID_CARD.matcher(MOBILE.matcher(EMAIL.matcher(value)
+        return redactBankCards(ID_CARD.matcher(MOBILE.matcher(EMAIL.matcher(value)
                 .replaceAll("[EMAIL_REDACTED]"))
                 .replaceAll("[PHONE_REDACTED]"))
-                .replaceAll("[ID_REDACTED]"))
-                .replaceAll("[NUMBER_REDACTED]");
+                .replaceAll("[ID_REDACTED]"));
+    }
+
+    private String redactBankCards(String value) {
+        Matcher matcher = BANK_CARD.matcher(value);
+        StringBuffer result = new StringBuffer();
+        while (matcher.find()) {
+            String digits = matcher.group(1);
+            matcher.appendReplacement(result, luhnValid(digits) ? "[NUMBER_REDACTED]" : digits);
+        }
+        matcher.appendTail(result);
+        return result.toString();
+    }
+
+    private boolean luhnValid(String digits) {
+        int sum = 0;
+        boolean doubleDigit = false;
+        for (int i = digits.length() - 1; i >= 0; i--) {
+            int n = digits.charAt(i) - '0';
+            if (doubleDigit) {
+                n *= 2;
+                if (n > 9) {
+                    n -= 9;
+                }
+            }
+            sum += n;
+            doubleDigit = !doubleDigit;
+        }
+        return sum % 10 == 0;
     }
 
     private List<String> sensitivePhrases(Project project, Brand brand) {

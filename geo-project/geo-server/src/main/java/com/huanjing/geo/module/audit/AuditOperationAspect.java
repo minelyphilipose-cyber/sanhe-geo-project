@@ -50,7 +50,8 @@ public class AuditOperationAspect {
             BrandAccessErrorCodes.BRAND_ACCESS_NOT_FOUND,
             ExtensionErrorCodes.EXTENSION_NOT_FOUND,
             ExtensionErrorCodes.TASK_NOT_FOUND,
-            ContentErrorCodes.ARTICLE_NOT_FOUND
+            ContentErrorCodes.ARTICLE_NOT_FOUND,
+            ContentErrorCodes.ARTICLE_AI_DRAFT_CONFIG_MISSING
     );
 
     private final AuditService auditService;
