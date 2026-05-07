@@ -9,6 +9,7 @@ import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.service.AuditService;
 import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
+import com.huanjing.geo.module.content.dto.ArticlePublishRequest;
 import com.huanjing.geo.module.content.dto.ArticleResubmitRequest;
 import com.huanjing.geo.module.content.dto.ArticleReviewRequest;
 import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
@@ -36,9 +37,7 @@ import org.mockito.ArgumentCaptor;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -46,6 +45,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -83,14 +83,13 @@ class ContentArticleServiceTest {
                 mock(SysDictItemMapper.class),
                 currentUserService,
                 mock(MarkdownImageReferenceValidator.class),
-                new ArticleHtmlSanitizer(),
                 brandAccessService,
                 auditService
         );
     }
 
     @Test
-    void createManualSanitizesHtmlAndRequiresOperateAccess() {
+    void createManualPreservesMarkdownAndRequiresOperateAccess() {
         doAnswer(invocation -> {
             ArticleDraft draft = invocation.getArgument(0);
             draft.setId(99L);
@@ -102,17 +101,15 @@ class ContentArticleServiceTest {
         request.setProjectId(10L);
         request.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
         request.setTitle("Manual title");
-        request.setContentMarkdown("hello <script>alert(1)</script><a href=\"javascript:bad\">bad</a><a href=\"https://ok.example\">ok</a>");
+        String markdown = "## Heading\n\n[official link](https://ok.example)\n\n- bullet";
+        request.setContentMarkdown(markdown);
 
         service.createManual(request);
 
         verify(brandAccessService).requireBrandAccess(20L, 7L, BrandAccessAction.OPERATE);
         ArgumentCaptor<ArticleDraftVersion> versionCaptor = ArgumentCaptor.forClass(ArticleDraftVersion.class);
         verify(articleDraftVersionMapper).insert(versionCaptor.capture());
-        String content = versionCaptor.getValue().getContentMarkdown();
-        assertFalse(content.contains("<script>"));
-        assertFalse(content.contains("javascript:"));
-        assertTrue(content.contains("https://ok.example"));
+        assertEquals(markdown, versionCaptor.getValue().getContentMarkdown());
         verifyAudit("ARTICLE_CREATED", AuditResult.SUCCESS);
     }
 
@@ -153,7 +150,7 @@ class ContentArticleServiceTest {
     void reviewStateConflictWritesDeniedAudit() {
         ArticleDraft article = article("pending_review");
         when(articleDraftMapper.selectById(99L)).thenReturn(article);
-        when(articleDraftVersionMapper.selectOne(any())).thenReturn(version(8L));
+        when(articleDraftVersionMapper.selectList(any())).thenReturn(List.of(version(8L)));
         when(articleDraftMapper.update(isNull(), any(Wrapper.class))).thenReturn(0);
 
         ArticleReviewRequest request = review("approve", null);
@@ -168,7 +165,7 @@ class ContentArticleServiceTest {
     void reviewerCannotReviewOwnArticle() {
         ArticleDraft article = article("pending_review");
         when(articleDraftMapper.selectById(99L)).thenReturn(article);
-        when(articleDraftVersionMapper.selectOne(any())).thenReturn(version(7L));
+        when(articleDraftVersionMapper.selectList(any())).thenReturn(List.of(version(8L), version(7L)));
 
         ArticleReviewRequest request = review("approve", null);
         BizException ex = assertThrows(BizException.class, () -> service.review(99L, request));
@@ -191,9 +188,24 @@ class ContentArticleServiceTest {
         verify(articleDraftMapper, never()).update(isNull(), any(Wrapper.class));
     }
 
+    @Test
+    void publishBrandAccessDeniedStopsBeforeUpdate() {
+        ArticleDraft article = article("approved");
+        when(articleDraftMapper.selectById(99L)).thenReturn(article);
+        doThrow(new BizException(BrandAccessErrorCodes.BRAND_ACCESS_DENIED, "denied"))
+                .when(brandAccessService).requireBrandAccess(20L, 7L, BrandAccessAction.OPERATE);
+
+        ArticlePublishRequest request = new ArticlePublishRequest();
+        request.setPublishAction("publish");
+        BizException ex = assertThrows(BizException.class, () -> service.publish(99L, request));
+
+        assertEquals(BrandAccessErrorCodes.BRAND_ACCESS_DENIED, ex.getCode());
+        verify(articleDraftMapper, never()).update(isNull(), any(Wrapper.class));
+    }
+
     private void verifyAudit(String eventType, AuditResult result) {
         ArgumentCaptor<AuditEvent> captor = ArgumentCaptor.forClass(AuditEvent.class);
-        verify(auditService).record(captor.capture());
+        verify(auditService, times(1)).record(captor.capture());
         AuditEvent event = captor.getValue();
         assertEquals(eventType, event.getEventType());
         assertEquals(result, event.getResult());

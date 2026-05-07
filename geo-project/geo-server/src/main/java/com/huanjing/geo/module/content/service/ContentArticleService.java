@@ -54,7 +54,6 @@ public class ContentArticleService {
     private final SysDictItemMapper sysDictItemMapper;
     private final CurrentUserService currentUserService;
     private final MarkdownImageReferenceValidator markdownImageReferenceValidator;
-    private final ArticleHtmlSanitizer articleHtmlSanitizer;
     private final BrandAccessService brandAccessService;
     private final AuditService auditService;
 
@@ -132,7 +131,7 @@ public class ContentArticleService {
         if (!ArticleTypes.isSupported(articleType)) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid article type");
         }
-        String content = articleHtmlSanitizer.clean(req.getContentMarkdown().trim());
+        String content = req.getContentMarkdown().trim();
         String title = StringUtils.hasText(req.getTitle()) ? req.getTitle().trim() : "";
         if (!StringUtils.hasText(title)) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Title is required");
@@ -183,7 +182,7 @@ public class ContentArticleService {
         brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
 
         String oldStatus = article.getStatus();
-        String content = articleHtmlSanitizer.clean(req.getContentMarkdown().trim());
+        String content = req.getContentMarkdown().trim();
         String title = StringUtils.hasText(req.getTitle()) ? req.getTitle().trim() : extractTitle(content);
         int nextVersion = Optional.ofNullable(article.getCurrentVersionNo()).orElse(1) + 1;
         markdownImageReferenceValidator.validate(project, content);
@@ -199,6 +198,8 @@ public class ContentArticleService {
 
         RiskResult riskResult = scanRisk(project, content);
         DuplicateResult duplicateResult = checkDuplicate(article, title);
+        // Entity is null intentionally; all updated columns are set explicitly in the wrapper,
+        // keeping the status predicate and mutation in one atomic UPDATE.
         int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
                 .eq(ArticleDraft::getId, articleId)
                 .eq(ArticleDraft::getStatus, oldStatus)
@@ -240,6 +241,8 @@ public class ContentArticleService {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Only under_revision/rejected article can resubmit");
         }
         String oldStatus = article.getStatus();
+        // Entity is null intentionally; all updated columns are set explicitly in the wrapper,
+        // keeping the status predicate and mutation in one atomic UPDATE.
         int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
                 .eq(ArticleDraft::getId, articleId)
                 .eq(ArticleDraft::getStatus, oldStatus)
@@ -300,6 +303,8 @@ public class ContentArticleService {
         } else {
             newStatus = "under_revision";
         }
+        // Entity is null intentionally; all updated columns are set explicitly in the wrapper,
+        // keeping the status predicate and mutation in one atomic UPDATE.
         int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
                 .eq(ArticleDraft::getId, articleId)
                 .eq(ArticleDraft::getStatus, "pending_review")
@@ -326,6 +331,7 @@ public class ContentArticleService {
         ArticleDraft article = requireArticle(articleId);
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
+        brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
         String action = req.getPublishAction().trim().toLowerCase(Locale.ROOT);
         if (!Set.of("publish", "unpublish").contains(action)) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid publish action");
@@ -345,6 +351,8 @@ public class ContentArticleService {
         if ("publish".equals(action)) {
             update.set(ArticleDraft::getPublishedAt, LocalDateTime.now());
         }
+        // Entity is null intentionally; all updated columns are set explicitly in the wrapper,
+        // keeping the status predicate and mutation in one atomic UPDATE.
         int updated = articleDraftMapper.update(null, update);
         if (updated != 1) {
             auditArticleTransition("ARTICLE_PUBLISH_STATE_CHANGED", AuditResult.DENIED, operator, project, article, oldStatus, newStatus, "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
@@ -373,7 +381,6 @@ public class ContentArticleService {
                                              String platformCode,
                                              String modelId,
                                             List<QuestionPoolItem> questions) {
-        contentMarkdown = articleHtmlSanitizer.clean(contentMarkdown);
         markdownImageReferenceValidator.validate(project, contentMarkdown);
         ArticleDraft draft = new ArticleDraft();
         draft.setBatchId(batchId);
@@ -470,15 +477,16 @@ public class ContentArticleService {
     }
 
     private void ensureReviewerIsNotAuthor(ArticleDraft article, SysUser operator) {
-        ArticleDraftVersion version = articleDraftVersionMapper.selectOne(
+        List<ArticleDraftVersion> versions = articleDraftVersionMapper.selectList(
                 new LambdaQueryWrapper<ArticleDraftVersion>()
                         .eq(ArticleDraftVersion::getArticleId, article.getId())
-                        .eq(article.getCurrentVersionNo() != null, ArticleDraftVersion::getVersionNo, article.getCurrentVersionNo())
-                        .orderByDesc(ArticleDraftVersion::getVersionNo)
-                        .last("LIMIT 1")
+                        .select(ArticleDraftVersion::getCreatedBy)
         );
-        Long authorId = version == null ? null : version.getCreatedBy();
-        if (authorId != null && authorId.equals(operator.getId())) {
+        boolean authoredByReviewer = versions != null && versions.stream()
+                .map(ArticleDraftVersion::getCreatedBy)
+                .filter(Objects::nonNull)
+                .anyMatch(operator.getId()::equals);
+        if (authoredByReviewer) {
             throw new BizException(ContentErrorCodes.ARTICLE_AUTHOR_CANNOT_REVIEW, "Article author cannot review their own article");
         }
     }
