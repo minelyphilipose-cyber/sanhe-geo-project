@@ -1075,6 +1075,28 @@ export interface CompanyQuestionPoolQuota {
   usageRate: number
 }
 
+export interface CompanyDistributionQuota {
+  companyId: number
+  hasLimitMismatch: boolean
+  items: CompanyDistributionQuotaItem[]
+}
+
+export interface CompanyDistributionQuotaItem {
+  channelCode: 'official_site' | 'industry_site' | 'self_media' | 'authority_media' | string
+  channelName: string
+  enabled: boolean
+  periodType?: 'day' | 'week' | 'month' | 'total' | string | null
+  periodKey?: string | null
+  quotaLimit: number
+  usageQuotaLimit?: number | null
+  limitMismatch: boolean
+  usedCount: number
+  remainingCount: number
+  usageRate: number
+  nextResetAt?: string | null
+  status: 'not_configured' | 'normal' | 'warning' | 'exceeded' | string
+}
+
 export interface PackageContentConfig {
   id?: number
   packageType?: string

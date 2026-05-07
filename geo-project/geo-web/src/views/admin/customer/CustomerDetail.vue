@@ -58,20 +58,69 @@
             <span>统计客户下所有项目最新问题池版本</span>
           </div>
         </div>
-        <el-table class="mt-4" :data="activeQuotaSnapshot" border>
-          <el-table-column label="渠道" min-width="140">
-            <template #default="scope">{{ channelLabel(scope.row.channelCode) }}</template>
-          </el-table-column>
-          <el-table-column label="周期" width="120">
-            <template #default="scope">{{ periodLabel(scope.row.periodType) }}</template>
-          </el-table-column>
-          <el-table-column prop="quotaLimit" label="额度" width="120" />
-          <el-table-column label="启用" width="100">
-            <template #default="scope">
-              <el-tag :type="scope.row.enabled ? 'success' : 'info'">{{ scope.row.enabled ? '启用' : '停用' }}</el-tag>
-            </template>
-          </el-table-column>
-        </el-table>
+        <div v-loading="distributionQuotaLoading" class="quota-panel">
+          <div class="quota-panel__header">
+            <span>分发额度</span>
+            <span>{{ distributionQuotaSummary }}</span>
+          </div>
+          <el-alert
+            v-if="distributionQuota?.hasLimitMismatch"
+            class="mb-3"
+            type="warning"
+            show-icon
+            :closable="false"
+            title="额度配置与当前周期扣减上限不一致，实际分发仍以当前周期 usage 上限为准。"
+          />
+          <el-table
+            :data="distributionQuotaItems"
+            border
+            :row-class-name="distributionQuotaRowClassName"
+          >
+            <el-table-column label="渠道" min-width="150">
+              <template #default="scope">
+                <div class="quota-channel-cell">
+                  <span>{{ scope.row.channelName || channelLabel(scope.row.channelCode) }}</span>
+                  <el-tag v-if="!scope.row.enabled" size="small" type="info">未开通</el-tag>
+                  <el-tag v-else-if="scope.row.status === 'exceeded'" size="small" type="danger">超额</el-tag>
+                  <el-tag v-else-if="scope.row.status === 'warning'" size="small" type="warning">预警</el-tag>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="周期" width="110">
+              <template #default="scope">{{ scope.row.enabled ? periodLabel(scope.row.periodType) : '-' }}</template>
+            </el-table-column>
+            <el-table-column label="已用 / 额度" min-width="180">
+              <template #default="scope">
+                <span v-if="!scope.row.enabled">未开通</span>
+                <div v-else class="quota-used-cell">
+                  <span>
+                    {{ scope.row.usedCount }} / {{ scope.row.quotaLimit }}
+                    <el-tooltip
+                      v-if="scope.row.limitMismatch"
+                      effect="dark"
+                      :content="limitMismatchText(scope.row)"
+                      placement="top"
+                    >
+                      <sup class="quota-limit-mark">*</sup>
+                    </el-tooltip>
+                  </span>
+                  <el-progress
+                    :percentage="distributionQuotaPercentage(scope.row)"
+                    :status="distributionQuotaProgressStatus(scope.row)"
+                    :show-text="false"
+                    :stroke-width="8"
+                  />
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="剩余额度" width="120">
+              <template #default="scope">{{ distributionQuotaRemainingText(scope.row) }}</template>
+            </el-table-column>
+            <el-table-column label="下次重置" width="150">
+              <template #default="scope">{{ nextResetText(scope.row) }}</template>
+            </el-table-column>
+          </el-table>
+        </div>
       </template>
       <el-empty v-else description="当前客户未绑定套餐" />
       <el-table v-if="packageBindingHistory.length" class="mt-4" :data="packageBindingHistory" border>
@@ -323,6 +372,7 @@
 import { computed, reactive, ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import dayjs from 'dayjs'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
 import {
@@ -336,6 +386,7 @@ import {
   getCompanyAccount,
   getCompanyAccountTxns,
   getCompanyDetail,
+  getCompanyDistributionQuotas,
   getCompanyPackageBindings,
   getCompanyQuestionPoolQuota,
   rechargeCompanyAccount,
@@ -345,7 +396,7 @@ import {
 } from '@/api/customer'
 import { getEnabledPackagePlans } from '@/api/packagePlan'
 import { getPartnerList, type PartnerItem } from '@/api/partner'
-import type { Brand, Company, CompanyAccount, CompanyAccountTxn, CompanyPackageBinding, CompanyQuestionPoolQuota, PackagePlan } from '@/types'
+import type { Brand, Company, CompanyAccount, CompanyAccountTxn, CompanyDistributionQuota, CompanyDistributionQuotaItem, CompanyPackageBinding, CompanyQuestionPoolQuota, PackagePlan } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
@@ -371,6 +422,7 @@ const brandLoading = ref(false)
 const accountLoading = ref(false)
 const packageLoading = ref(false)
 const questionPoolQuotaLoading = ref(false)
+const distributionQuotaLoading = ref(false)
 const saving = ref(false)
 const brandSaving = ref(false)
 const accountSubmitting = ref(false)
@@ -383,6 +435,7 @@ const account = ref<CompanyAccount | null>(null)
 const txns = ref<CompanyAccountTxn[]>([])
 const activePackageBinding = ref<CompanyPackageBinding | null>(null)
 const questionPoolQuota = ref<CompanyQuestionPoolQuota | null>(null)
+const distributionQuota = ref<CompanyDistributionQuota | null>(null)
 const packageBindingHistory = ref<CompanyPackageBinding[]>([])
 const packagePlanOptions = ref<PackagePlan[]>([])
 const txnPage = reactive({ current: 1, size: 10, total: 0 })
@@ -488,7 +541,11 @@ function periodLabel(value?: string | null) {
   return value ? mapping[value] || value : '-'
 }
 
-const activeQuotaSnapshot = computed(() => parseQuotaSnapshot(activePackageBinding.value?.channelQuotaSnapshot))
+const distributionQuotaItems = computed(() => distributionQuota.value?.items || [])
+const distributionQuotaSummary = computed(() => {
+  const opened = distributionQuotaItems.value.filter((item) => item.enabled).length
+  return `${opened}/4 个渠道已开通`
+})
 const hasActiveQuestionPoolQuota = computed(() => !!questionPoolQuota.value?.activeBinding)
 const isQuestionPoolOverQuota = computed(() => {
   const quota = questionPoolQuota.value
@@ -529,6 +586,49 @@ const questionPoolQuotaStatus = computed(() => {
   return undefined
 })
 
+function distributionQuotaPercentage(row: CompanyDistributionQuotaItem) {
+  if (!row.enabled) return 0
+  if (row.quotaLimit <= 0) {
+    return row.usedCount > 0 ? 100 : 0
+  }
+  return Math.min(100, Math.round(row.usedCount * 100 / row.quotaLimit))
+}
+
+function distributionQuotaProgressStatus(row: CompanyDistributionQuotaItem) {
+  if (!row.enabled) return undefined
+  if (row.status === 'exceeded') return 'exception'
+  if (row.status === 'warning') return 'warning'
+  return undefined
+}
+
+function distributionQuotaRemainingText(row: CompanyDistributionQuotaItem) {
+  if (!row.enabled) return '-'
+  if (row.status === 'exceeded') {
+    return `超出 ${Math.max(row.usedCount - row.quotaLimit, 0)}`
+  }
+  return String(row.remainingCount)
+}
+
+function nextResetText(row: CompanyDistributionQuotaItem) {
+  if (!row.enabled) return '-'
+  if (row.periodType === 'total') return '不重置'
+  if (!row.nextResetAt) return '-'
+  const date = dayjs(row.nextResetAt)
+  if (!date.isValid()) return '-'
+  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+  return `${date.format('M月D日')} ${weekdays[date.day()]}`
+}
+
+function limitMismatchText(row: CompanyDistributionQuotaItem) {
+  return `套餐配置已变更为 ${row.quotaLimit}，本周期实际上限仍为 ${row.usageQuotaLimit ?? '-'}，下周期生效`
+}
+
+function distributionQuotaRowClassName({ row }: { row: CompanyDistributionQuotaItem }) {
+  if (!row.enabled) return 'quota-row-disabled'
+  if (row.status === 'exceeded') return 'quota-row-exceeded'
+  return ''
+}
+
 function companyRegion(value?: Company | null) {
   if (!value) return '-'
   return regionDisplayFromPayload(value) || value.city || '-'
@@ -540,16 +640,6 @@ function brandRegion(value: Brand) {
 
 function parseIndustryTags(value?: string | string[] | null) {
   if (Array.isArray(value)) return value
-  if (!value) return []
-  try {
-    const parsed = JSON.parse(value)
-    return Array.isArray(parsed) ? parsed : []
-  } catch {
-    return []
-  }
-}
-
-function parseQuotaSnapshot(value?: string | null) {
   if (!value) return []
   try {
     const parsed = JSON.parse(value)
@@ -727,6 +817,18 @@ async function loadQuestionPoolQuota() {
   }
 }
 
+async function loadDistributionQuotas() {
+  distributionQuotaLoading.value = true
+  try {
+    const { data } = await getCompanyDistributionQuotas(companyId)
+    distributionQuota.value = data.data
+  } catch (err) {
+    ElMessage.error(errorMessage(err, '加载分发额度失败'))
+  } finally {
+    distributionQuotaLoading.value = false
+  }
+}
+
 async function loadPackagePlanOptions() {
   try {
     const { data } = await getEnabledPackagePlans()
@@ -753,7 +855,7 @@ async function submitPackageBind() {
     await bindCompanyPackage(companyId, packageBindForm.packagePlanId)
     ElMessage.success('客户套餐已绑定')
     packageBindVisible.value = false
-    await Promise.all([loadPackageBinding(), loadQuestionPoolQuota()])
+    await Promise.all([loadPackageBinding(), loadQuestionPoolQuota(), loadDistributionQuotas()])
   } catch (err) {
     ElMessage.error(errorMessage(err, '绑定套餐失败'))
   } finally {
@@ -776,7 +878,7 @@ async function confirmUnbindPackage() {
   try {
     await unbindCompanyPackage(companyId)
     ElMessage.success('客户套餐已解绑')
-    await Promise.all([loadPackageBinding(), loadQuestionPoolQuota()])
+    await Promise.all([loadPackageBinding(), loadQuestionPoolQuota(), loadDistributionQuotas()])
   } catch (err) {
     ElMessage.error(errorMessage(err, '解绑套餐失败'))
   } finally {
@@ -958,7 +1060,7 @@ onMounted(async () => {
   await dictStore.ensureLoaded()
   await loadPartners()
   await loadCompany()
-  await Promise.all([loadBrands(), loadAccount(), loadPackageBinding(), loadQuestionPoolQuota()])
+  await Promise.all([loadBrands(), loadAccount(), loadPackageBinding(), loadQuestionPoolQuota(), loadDistributionQuotas()])
 })
 </script>
 
@@ -987,5 +1089,26 @@ onMounted(async () => {
   margin-top: 8px;
   color: #606266;
   font-size: 12px;
+}
+
+.quota-channel-cell,
+.quota-used-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quota-limit-mark {
+  color: #e6a23c;
+  font-weight: 700;
+}
+
+:deep(.quota-row-disabled > td.el-table__cell) {
+  color: #909399;
+  background: #fafafa;
+}
+
+:deep(.quota-row-exceeded > td.el-table__cell) {
+  background: #fef0f0;
 }
 </style>

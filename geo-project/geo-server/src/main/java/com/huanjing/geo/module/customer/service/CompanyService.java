@@ -1,11 +1,17 @@
 package com.huanjing.geo.module.customer.service;
 
+import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.huanjing.geo.module.content.dto.ChannelQuotaSnapshotItem;
+import com.huanjing.geo.module.content.entity.CompanyChannelQuotaUsage;
+import com.huanjing.geo.module.content.mapper.CompanyChannelQuotaUsageMapper;
 import com.huanjing.geo.module.customer.dto.CompanyDeductRequest;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.dto.CompanyCreateRequest;
+import com.huanjing.geo.module.customer.dto.CompanyDistributionQuotaItemVO;
+import com.huanjing.geo.module.customer.dto.CompanyDistributionQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyQuestionPoolQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyRechargeRequest;
 import com.huanjing.geo.module.customer.dto.CompanyUpdateRequest;
@@ -27,6 +33,7 @@ import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -42,17 +49,31 @@ import java.util.Locale;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.YearMonth;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
+import java.time.temporal.WeekFields;
 import java.util.stream.Collectors;
 import cn.hutool.core.util.RandomUtil;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class CompanyService {
 
     private static final Set<String> OWNER_TYPES = Set.of("direct", "partner", "joint");
     private static final Set<String> SOURCE_TYPES = Set.of("internal", "partner");
     private static final Set<String> STATUSES = Set.of("potential", "signed", "inactive");
+    private static final Set<String> DISTRIBUTION_PERIOD_TYPES = Set.of("day", "week", "month", "total");
+    private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
+    private static final List<ChannelDefinition> DISTRIBUTION_CHANNELS = List.of(
+            new ChannelDefinition("official_site", "官网"),
+            new ChannelDefinition("industry_site", "行业资讯站"),
+            new ChannelDefinition("self_media", "自媒体平台"),
+            new ChannelDefinition("authority_media", "权重媒体平台")
+    );
 
     private final CompanyMapper companyMapper;
     private final CompanyAccountMapper companyAccountMapper;
@@ -62,6 +83,7 @@ public class CompanyService {
     private final SysDictItemMapper sysDictItemMapper;
     private final CurrentUserService currentUserService;
     private final CompanyPackageBindingService companyPackageBindingService;
+    private final CompanyChannelQuotaUsageMapper companyChannelQuotaUsageMapper;
     private final QuestionPoolItemMapper questionPoolItemMapper;
     private final ActivityLogService activityLogService;
 
@@ -120,6 +142,32 @@ public class CompanyService {
         vo.setUsedCount(usedCount);
         vo.setRemainingCount(Math.max(quotaLimit - usedCount, 0));
         vo.setUsageRate(quotaLimit <= 0 ? 0D : Math.min(1D, usedCount * 1D / quotaLimit));
+        return vo;
+    }
+
+    public CompanyDistributionQuotaVO distributionQuotas(Long companyId) {
+        SysUser user = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission("company.read");
+        Company company = requireCompany(companyId);
+        currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "company");
+        ensureSalesCompanyAccess(user, company);
+
+        CompanyPackageBinding binding = companyPackageBindingService.activeBinding(companyId);
+        Map<String, ChannelQuotaSnapshotItem> snapshot = parseChannelQuotaSnapshot(binding);
+        List<CompanyDistributionQuotaItemVO> items = new ArrayList<>();
+        boolean hasLimitMismatch = false;
+        for (ChannelDefinition channel : DISTRIBUTION_CHANNELS) {
+            CompanyDistributionQuotaItemVO item = buildDistributionQuotaItem(companyId, channel, snapshot.get(channel.code()));
+            if (Boolean.TRUE.equals(item.getLimitMismatch())) {
+                hasLimitMismatch = true;
+            }
+            items.add(item);
+        }
+
+        CompanyDistributionQuotaVO vo = new CompanyDistributionQuotaVO();
+        vo.setCompanyId(companyId);
+        vo.setHasLimitMismatch(hasLimitMismatch);
+        vo.setItems(items);
         return vo;
     }
 
@@ -400,6 +448,132 @@ public class CompanyService {
         );
     }
 
+    private Map<String, ChannelQuotaSnapshotItem> parseChannelQuotaSnapshot(CompanyPackageBinding binding) {
+        Map<String, ChannelQuotaSnapshotItem> snapshot = new LinkedHashMap<>();
+        if (binding == null || !StringUtils.hasText(binding.getChannelQuotaSnapshot())) {
+            return snapshot;
+        }
+        JSONArray arr = JSONUtil.parseArray(binding.getChannelQuotaSnapshot());
+        for (Object obj : arr) {
+            ChannelQuotaSnapshotItem item = JSONUtil.toBean(JSONUtil.parseObj(obj), ChannelQuotaSnapshotItem.class);
+            if (!StringUtils.hasText(item.getChannelCode())) {
+                continue;
+            }
+            snapshot.put(item.getChannelCode().trim(), item);
+        }
+        return snapshot;
+    }
+
+    private CompanyDistributionQuotaItemVO buildDistributionQuotaItem(Long companyId,
+                                                                      ChannelDefinition channel,
+                                                                      ChannelQuotaSnapshotItem snapshotItem) {
+        String periodType = normalizePeriodType(snapshotItem == null ? null : snapshotItem.getPeriodType());
+        boolean enabled = snapshotItem != null && snapshotItem.isEnabled() && periodType != null;
+        if (snapshotItem != null && snapshotItem.isEnabled() && periodType == null) {
+            log.warn("Invalid periodType in binding snapshot, treating as not_configured. companyId={}, channel={}, rawPeriodType={}",
+                    companyId, channel.code(), snapshotItem.getPeriodType());
+        }
+        CompanyDistributionQuotaItemVO vo = new CompanyDistributionQuotaItemVO();
+        vo.setChannelCode(channel.code());
+        vo.setChannelName(channel.name());
+        if (!enabled) {
+            vo.setEnabled(false);
+            vo.setPeriodType(null);
+            vo.setPeriodKey(null);
+            vo.setQuotaLimit(0);
+            vo.setUsageQuotaLimit(null);
+            vo.setLimitMismatch(false);
+            vo.setUsedCount(0);
+            vo.setRemainingCount(0);
+            vo.setUsageRate(0D);
+            vo.setNextResetAt(null);
+            vo.setStatus("not_configured");
+            return vo;
+        }
+
+        int quotaLimit = snapshotItem == null ? 0 : snapshotItem.getQuotaLimit();
+        String periodKey = distributionPeriodKey(periodType);
+        CompanyChannelQuotaUsage usage = selectDistributionUsage(companyId, channel.code(), periodType, periodKey);
+        Integer usageQuotaLimit = usage == null ? null : usage.getQuotaLimit();
+        int usedCount = usage == null || usage.getUsedCount() == null ? 0 : usage.getUsedCount();
+        boolean limitMismatch = usageQuotaLimit != null && usageQuotaLimit != quotaLimit;
+        int remainingCount = Math.max(quotaLimit - usedCount, 0);
+        double usageRate = quotaLimit <= 0 ? 0D : Math.min(1D, usedCount * 1D / quotaLimit);
+
+        vo.setEnabled(true);
+        vo.setPeriodType(periodType);
+        vo.setPeriodKey(periodKey);
+        vo.setQuotaLimit(quotaLimit);
+        vo.setUsageQuotaLimit(usageQuotaLimit);
+        vo.setLimitMismatch(limitMismatch);
+        vo.setUsedCount(usedCount);
+        vo.setRemainingCount(remainingCount);
+        vo.setUsageRate(usageRate);
+        vo.setNextResetAt(enabled && periodType != null ? nextResetAt(periodType) : null);
+        vo.setStatus(distributionQuotaStatus(enabled, quotaLimit, usedCount, usageRate));
+        return vo;
+    }
+
+    private CompanyChannelQuotaUsage selectDistributionUsage(Long companyId, String channelCode, String periodType, String periodKey) {
+        return companyChannelQuotaUsageMapper.selectOne(
+                new LambdaQueryWrapper<CompanyChannelQuotaUsage>()
+                        .eq(CompanyChannelQuotaUsage::getCompanyId, companyId)
+                        .eq(CompanyChannelQuotaUsage::getChannelCode, channelCode)
+                        .eq(CompanyChannelQuotaUsage::getPeriodType, periodType)
+                        .eq(CompanyChannelQuotaUsage::getPeriodKey, periodKey)
+                        .last("LIMIT 1")
+        );
+    }
+
+    private String distributionQuotaStatus(boolean enabled, int quotaLimit, int usedCount, double usageRate) {
+        if (!enabled) {
+            return "not_configured";
+        }
+        if (usedCount > quotaLimit || (quotaLimit <= 0 && usedCount > 0)) {
+            return "exceeded";
+        }
+        if (usageRate >= 0.9D) {
+            return "warning";
+        }
+        return "normal";
+    }
+
+    private String normalizePeriodType(String periodType) {
+        if (!StringUtils.hasText(periodType)) {
+            return null;
+        }
+        String normalized = periodType.trim().toLowerCase(Locale.ROOT);
+        return DISTRIBUTION_PERIOD_TYPES.contains(normalized) ? normalized : null;
+    }
+
+    private String distributionPeriodKey(String periodType) {
+        LocalDate today = LocalDate.now(BUSINESS_ZONE);
+        return switch (periodType) {
+            case "day" -> today.toString();
+            case "week" -> {
+                WeekFields weekFields = WeekFields.ISO;
+                int week = today.get(weekFields.weekOfWeekBasedYear());
+                int year = today.get(weekFields.weekBasedYear());
+                yield year + "-W" + String.format("%02d", week);
+            }
+            case "month" -> today.getYear() + "-" + String.format("%02d", today.getMonthValue());
+            case "total" -> "TOTAL";
+            default -> null;
+        };
+    }
+
+    private String nextResetAt(String periodType) {
+        LocalDate today = LocalDate.now(BUSINESS_ZONE);
+        // nextResetAt uses ZonedDateTime + WeekFields.ISO so JDK handles cross-year and zone-boundary rules.
+        ZonedDateTime resetAt = switch (periodType) {
+            case "day" -> today.plusDays(1).atStartOfDay(BUSINESS_ZONE);
+            case "week" -> today.with(WeekFields.ISO.dayOfWeek(), 1).plusWeeks(1).atStartOfDay(BUSINESS_ZONE);
+            case "month" -> YearMonth.from(today).plusMonths(1).atDay(1).atStartOfDay(BUSINESS_ZONE);
+            default -> null;
+        };
+        return resetAt == null ? null : resetAt.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+    }
+
     private Company requireCompany(Long id) {
         Company company = companyMapper.selectById(id);
         if (company == null || company.getDeletedAt() != null) {
@@ -675,5 +849,8 @@ public class CompanyService {
             throw new BizException(400, "客户行业至少选择一个");
         }
         return normalized;
+    }
+
+    private record ChannelDefinition(String code, String name) {
     }
 }

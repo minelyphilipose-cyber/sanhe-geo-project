@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.customer.dto.CompanyCreateRequest;
 import com.huanjing.geo.module.customer.dto.CompanyDeductRequest;
+import com.huanjing.geo.module.customer.dto.CompanyDistributionQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyPackageBindRequest;
 import com.huanjing.geo.module.customer.dto.CompanyQuestionPoolQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyRechargeRequest;
@@ -68,6 +69,11 @@ public class CompanyController {
     @GetMapping("/{id}/question-pool-quota")
     public R<CompanyQuestionPoolQuotaVO> questionPoolQuota(@PathVariable Long id) {
         return R.ok(companyService.questionPoolQuota(id));
+    }
+
+    @GetMapping("/{id}/distribution-quotas")
+    public R<CompanyDistributionQuotaVO> distributionQuotas(@PathVariable Long id) {
+        return R.ok(companyService.distributionQuotas(id));
     }
 
     @GetMapping("/{id}/account/txns")

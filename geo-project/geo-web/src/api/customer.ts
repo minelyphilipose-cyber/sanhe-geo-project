@@ -10,6 +10,7 @@ import type {
   CompanyAccount,
   CompanyAccountTxn,
   CompanyPackageBinding,
+  CompanyDistributionQuota,
   CompanyQuestionPoolQuota,
   BrandStatementView,
   DispatchTaskItem,
@@ -83,6 +84,10 @@ export function getActiveCompanyPackageBinding(id: number) {
 
 export function getCompanyQuestionPoolQuota(id: number) {
   return request.get<R<CompanyQuestionPoolQuota>>(`/companies/${id}/question-pool-quota`)
+}
+
+export function getCompanyDistributionQuotas(id: number) {
+  return request.get<R<CompanyDistributionQuota>>(`/companies/${id}/distribution-quotas`)
 }
 
 export function bindCompanyPackage(id: number, packagePlanId: number) {
