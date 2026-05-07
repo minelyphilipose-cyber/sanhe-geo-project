@@ -23,10 +23,7 @@
             class="p18-item"
           >
             <div class="display-serif p18-number">{{ formatOrder(idx + 1) }}</div>
-            <div class="p18-content">
-              <div class="chinese-serif p18-title">{{ t.title }}</div>
-              <div class="p18-description">{{ t.description }}</div>
-            </div>
+            <div class="chinese-serif p18-title">{{ t.title }}</div>
           </div>
         </div>
 
@@ -34,6 +31,24 @@
         <div v-else class="p18-empty">
           <div class="mono p18-empty-label">KEY TAKEAWAYS</div>
           <div class="p18-empty-text">本报告暂未生成关键发现总结,请联系运营补充。</div>
+        </div>
+
+        <div class="p18-cta">
+          <div class="p18-cta-icon" aria-hidden="true">🎯</div>
+          <div class="p18-cta-content">
+            <div class="chinese-serif p18-cta-title">下一步建议</div>
+            <div class="p18-cta-copy">
+              本报告仅为"诊断"——<strong>真正的可见度增长来自后续 60 天的精准执行</strong>。{{ ctaBrandPhrase }}《60 天 AI 可见度突破执行方案》，包含：
+            </div>
+            <ul class="p18-cta-list">
+              <li>60 天分阶段优化路线图与 KPI</li>
+              <li>高价值场景内容生产与平台分发执行</li>
+              <li>月度可见度监测与策略迭代</li>
+            </ul>
+            <div class="p18-cta-action">
+              📞 联系您的专属顾问预约方案讲解会（约 45 分钟）
+            </div>
+          </div>
         </div>
 
         <!-- Methodology note -->
@@ -95,6 +110,11 @@ const methodologyDate = computed<string>(() => {
   return `${y} 年 ${mo} 月 ${d} 日`
 })
 
+const ctaBrandPhrase = computed<string>(() => {
+  const brandName = mergedView.value.brand_name?.trim()
+  return brandName ? `我们已为 ${brandName} 准备了一份` : '我们已为您准备了一份'
+})
+
 /** 1 → "01" / 12 → "12"。 */
 function formatOrder(n: number): string {
   return n.toString().padStart(2, '0')
@@ -116,37 +136,29 @@ function formatOrder(n: number): string {
 }
 
 .p18-item {
-  display: flex;
-  gap: 24px;
-  padding: 24px 0;
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+  gap: 14px;
+  padding: 8px 0;
   border-bottom: 1px solid var(--presale-line);
 }
 
 .p18-number {
-  font-size: 64px;
+  font-size: 28px;
   font-weight: 900;
   color: var(--presale-primary);
   line-height: 0.9;
   font-style: italic;
-  min-width: 80px;
-}
-
-.p18-content {
-  flex: 1;
+  min-width: 42px;
 }
 
 .p18-title {
-  font-size: 20px;
-  font-weight: 700;
+  flex: 1;
+  font-size: 15px;
+  font-weight: 600;
   color: var(--presale-ink);
-  margin-bottom: 8px;
   line-height: 1.4;
-}
-
-.p18-description {
-  font-size: 13px;
-  color: var(--presale-ink-soft);
-  line-height: 1.8;
 }
 
 /* ─── 空态 ─────────────────────────────────────────────── */
@@ -167,6 +179,70 @@ function formatOrder(n: number): string {
 .p18-empty-text {
   font-size: 13px;
   color: var(--presale-muted);
+}
+
+/* ─── CTA ─────────────────────────────────────────────── */
+
+.p18-cta {
+  /* TODO: 后续若 P18 CTA 形态复用到其他页面,将深色渐变 token 抽到 report-theme.css。 */
+  --p18-cta-bg-start: var(--presale-ink);
+  --p18-cta-bg-end: #16264a;
+
+  margin-top: 24px;
+  padding: 24px 28px;
+  display: flex;
+  gap: 20px;
+  background: linear-gradient(135deg, var(--p18-cta-bg-start) 0%, var(--p18-cta-bg-end) 100%);
+  border-left: 4px solid var(--presale-accent);
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.p18-cta-icon {
+  flex: 0 0 32px;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.p18-cta-content {
+  flex: 1;
+}
+
+.p18-cta-title {
+  margin-bottom: 10px;
+  color: var(--presale-accent);
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.p18-cta-copy {
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.p18-cta-copy strong {
+  color: var(--presale-accent);
+  font-weight: 700;
+}
+
+.p18-cta-list {
+  margin: 10px 0 0 18px;
+  padding: 0;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 12px;
+  line-height: 1.9;
+}
+
+.p18-cta-action {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--presale-accent);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.7;
 }
 
 /* ─── Methodology note ────────────────────────────────── */
