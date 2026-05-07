@@ -11,6 +11,7 @@ import com.huanjing.geo.module.audit.AuditMode;
 import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.service.AuditService;
+import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.dto.DistributionAttemptVO;
@@ -109,6 +110,7 @@ public class ContentDistributionService {
         }
         Project project = requireProject(article.getProjectId());
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
+        requireDistributionAccess(operator, project.getBrandId());
 
         if (target instanceof TargetContext.BrandOfficialSiteTarget brandTarget) {
             return distributeToBrandOfficialSite(article, project, operator, brandTarget);
@@ -189,13 +191,23 @@ public class ContentDistributionService {
 
     @Transactional
     public DistributionTask refreshDistributionTaskReviewStatus(Long taskId) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission("project.write");
+        ensureDistributeRole(operator);
         DistributionTask task = requireTask(taskId);
         if (!DistributionTargetKind.MP_ACCOUNT.equals(task.getTargetKind()) || task.getSelfMediaAccountId() == null) {
             throw new BizException(400, "distribution task is not self-media");
         }
+        ArticleDraft article = requireArticle(task.getArticleId());
+        Project project = requireProject(article.getProjectId());
+        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
+        requireDistributionAccess(operator, project.getBrandId());
         SelfMediaAccount account = selfMediaAccountMapper.selectById(task.getSelfMediaAccountId());
         if (account == null) {
             throw new BizException(404, "self media account not found");
+        }
+        if (project.getBrandId() == null || !project.getBrandId().equals(account.getBrandId())) {
+            throw new BizException(403, "自媒体账号与文章品牌不匹配");
         }
         AutoSelfMediaAdapter adapter = resolveSelfMediaAdapter(account.getPlatform());
         ReviewStatusResult result = adapter.refreshReviewStatus(task, account);
@@ -361,15 +373,20 @@ public class ContentDistributionService {
             throw new BizException(400, "Brand official site is not active");
         }
         currentUserService.ensureBrandAccess(operator, site.getBrandId(), "official_site");
+        requireDistributionAccess(operator, site.getBrandId());
 
         String content = requireLatestContent(article.getId());
+        OfficialCmsSiteAdapter adapter = resolveOfficialCmsAdapter();
         DistributionTask task = createAttemptForBrandOfficialSite(article, site, operator.getId());
         companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.BRAND_OFFICIAL_SITE, task.getId());
 
-        article.setStatus("distributing");
-        articleDraftMapper.updateById(article);
+        try {
+            transitionArticleStatus(article, article.getStatus(), "distributing", false);
+        } catch (BizException ex) {
+            companyChannelQuotaService.refundDistribution(task.getId());
+            throw ex;
+        }
 
-        OfficialCmsSiteAdapter adapter = resolveOfficialCmsAdapter();
         SubmitResult submitResult;
         try {
             submitResult = adapter.submitToTarget(article, content, brandTarget);
@@ -398,17 +415,20 @@ public class ContentDistributionService {
                                                       Project project,
                                                       SysUser operator,
                                                       TargetContext.BrandGeoSiteTarget brandGeoTarget) {
-        Brand brand = brandService.requireBrandWithAccess(brandGeoTarget.brandId(), true);
+        Brand brand = brandAccessService.requireBrandAccess(brandGeoTarget.brandId(), operator.getId(), BrandAccessAction.OPERATE);
         String siteCode = validateBrandGeoSite(brand);
-        currentUserService.ensureBrandAccess(operator, brand.getId(), "brand_geo_site");
 
         String content = requireLatestContent(article.getId());
+        BrandGeoSiteAdapter adapter = resolveBrandGeoSiteAdapter();
         DistributionTask task = createAttemptForBrandGeoSite(article, brand, operator.getId());
         companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.BRAND_GEO_SITE, task.getId());
-        article.setStatus("distributing");
-        articleDraftMapper.updateById(article);
+        try {
+            transitionArticleStatus(article, article.getStatus(), "distributing", false);
+        } catch (BizException ex) {
+            companyChannelQuotaService.refundDistribution(task.getId());
+            throw ex;
+        }
 
-        BrandGeoSiteAdapter adapter = resolveBrandGeoSiteAdapter();
         SubmitResult submitResult;
         try {
             submitResult = adapter.submitToTarget(article, content, new TargetContext.BrandGeoSiteTarget(brand.getId(), siteCode));
@@ -444,6 +464,13 @@ public class ContentDistributionService {
         if (!StringUtils.hasText(mpTarget.requestId())) {
             throw new BizException(400, "requestId is required");
         }
+        if (!"active".equalsIgnoreCase(account.getStatus())) {
+            throw new BizException(400, "自媒体账号不可用，请重新授权");
+        }
+        if (project.getBrandId() == null || !project.getBrandId().equals(account.getBrandId())) {
+            throw new BizException(403, "自媒体账号与文章品牌不匹配");
+        }
+        requireDistributionAccess(operator, account.getBrandId());
         DistributionTask existed = distributionTaskMapper.selectOne(
                 new LambdaQueryWrapper<DistributionTask>()
                         .eq(DistributionTask::getRequestId, mpTarget.requestId().trim())
@@ -452,24 +479,21 @@ public class ContentDistributionService {
         if (existed != null) {
             return existed;
         }
-        if (!"active".equalsIgnoreCase(account.getStatus())) {
-            throw new BizException(400, "自媒体账号不可用，请重新授权");
-        }
-        if (project.getBrandId() == null || !project.getBrandId().equals(account.getBrandId())) {
-            throw new BizException(403, "自媒体账号与文章品牌不匹配");
-        }
-        currentUserService.ensureBrandAccess(operator, account.getBrandId(), "self_media_account");
         if (AUTH_MODE_COOKIE.equalsIgnoreCase(account.getAuthMode())) {
             return createSemiAutoSelfMediaTask(article, project, operator, account, mpTarget);
         }
 
         String content = requireLatestContent(article.getId());
+        AutoSelfMediaAdapter adapter = resolveSelfMediaAdapter(account.getPlatform());
         DistributionTask task = createAttemptForSelfMedia(article, account, operator.getId(), mpTarget.requestId().trim());
         companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.MP_ACCOUNT, task.getId());
-        article.setStatus("distributing");
-        articleDraftMapper.updateById(article);
+        try {
+            transitionArticleStatus(article, article.getStatus(), "distributing", false);
+        } catch (BizException ex) {
+            companyChannelQuotaService.refundDistribution(task.getId());
+            throw ex;
+        }
 
-        AutoSelfMediaAdapter adapter = resolveSelfMediaAdapter(account.getPlatform());
         SubmitResult submitResult;
         try {
             submitResult = adapter.submitToTarget(article, content, mpTarget);
@@ -521,8 +545,13 @@ public class ContentDistributionService {
         task.setFillTokenIssuedAt(issuedAt);
         task.setLockedUntil(null);
 
-        article.setStatus("distributing");
-        articleDraftMapper.updateById(article);
+        try {
+            transitionArticleStatus(article, article.getStatus(), "distributing", false);
+        } catch (BizException ex) {
+            companyChannelQuotaService.refundDistribution(task.getId());
+            auditSemiAutoTaskCreationFailed(article, account, operator, task, ex);
+            throw ex;
+        }
 
         DistributionTask returned = distributionTaskMapper.selectById(task.getId());
         if (returned == null) {
@@ -727,13 +756,35 @@ public class ContentDistributionService {
     }
 
     private void finalizeArticleStatus(ArticleDraft article, SubmitResult result) {
-        article.setStatus(result.isSuccess() ? "published" : "approved");
-        articleDraftMapper.updateById(article);
+        transitionArticleStatus(article, "distributing", result.isSuccess() ? "published" : "approved", result.isSuccess());
     }
 
     private void finalizeArticleStatusForDraft(ArticleDraft article, SubmitResult result) {
-        article.setStatus(result.isSuccess() ? "distributed" : "approved");
-        articleDraftMapper.updateById(article);
+        transitionArticleStatus(article, "distributing", result.isSuccess() ? "distributed" : "approved", result.isSuccess());
+    }
+
+    private void transitionArticleStatus(ArticleDraft article, String expectedStatus, String newStatus, boolean setPublishedAt) {
+        LambdaUpdateWrapper<ArticleDraft> wrapper = new LambdaUpdateWrapper<ArticleDraft>()
+                .eq(ArticleDraft::getId, article.getId())
+                .eq(ArticleDraft::getStatus, expectedStatus)
+                .set(ArticleDraft::getStatus, newStatus);
+        LocalDateTime publishedAt = null;
+        if (setPublishedAt) {
+            publishedAt = LocalDateTime.now(SH_ZONE);
+            wrapper.set(ArticleDraft::getPublishedAt, publishedAt);
+        }
+        int updated = articleDraftMapper.update(null, wrapper);
+        if (updated != 1) {
+            throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
+        }
+        article.setStatus(newStatus);
+        if (publishedAt != null) {
+            article.setPublishedAt(publishedAt);
+        }
+    }
+
+    private void requireDistributionAccess(SysUser operator, Long brandId) {
+        brandAccessService.requireBrandAccess(brandId, operator == null ? null : operator.getId(), BrandAccessAction.OPERATE);
     }
 
     private OfficialCmsSiteAdapter resolveOfficialCmsAdapter() {

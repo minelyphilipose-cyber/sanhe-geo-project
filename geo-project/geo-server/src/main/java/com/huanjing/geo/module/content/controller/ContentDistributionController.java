@@ -7,18 +7,13 @@ import com.huanjing.geo.module.content.dto.DistributionManualConfirmRequest;
 import com.huanjing.geo.module.content.dto.PublishQuotaVO;
 import com.huanjing.geo.module.content.dto.RecommendedSitesResponseVO;
 import com.huanjing.geo.module.content.dto.SelfMediaDistributeRequest;
-import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
-import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
-import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.service.ContentDistributionService;
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.service.BrandService;
-import com.huanjing.geo.common.exception.BizException;
-import com.huanjing.geo.module.project.entity.Project;
-import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -36,9 +31,6 @@ public class ContentDistributionController {
     private final ContentDistributionService contentDistributionService;
     private final BrandService brandService;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
-    private final DistributionTaskMapper distributionTaskMapper;
-    private final ArticleDraftMapper articleDraftMapper;
-    private final ProjectMapper projectMapper;
 
     @PostMapping("/articles/{articleId}/distribute")
     public R<DistributionTask> distribute(@PathVariable Long articleId, @Valid @RequestBody ArticleDistributeRequest req) {
@@ -49,8 +41,7 @@ public class ContentDistributionController {
     public R<DistributionTask> distributeToGeoSite(@PathVariable Long articleId,
                                                    @RequestParam Long brandId) {
         Brand brand = brandService.requireBrandWithAccess(brandId, true);
-        TargetContext.BrandGeoSiteTarget target =
-                new TargetContext.BrandGeoSiteTarget(brand.getId(), brand.getGeoSiteCode());
+        TargetContext.BrandGeoSiteTarget target = new TargetContext.BrandGeoSiteTarget(brand.getId(), brand.getGeoSiteCode());
         return R.ok(contentDistributionService.distributeTo(articleId, target));
     }
 
@@ -77,19 +68,6 @@ public class ContentDistributionController {
 
     @PostMapping("/distribution-tasks/{taskId}/refresh-review-status")
     public R<DistributionTask> refreshReviewStatus(@PathVariable Long taskId) {
-        DistributionTask task = distributionTaskMapper.selectById(taskId);
-        if (task == null) {
-            throw new BizException(404, "distribution task not found");
-        }
-        ArticleDraft article = articleDraftMapper.selectById(task.getArticleId());
-        if (article == null) {
-            throw new BizException(404, "Article not found");
-        }
-        Project project = projectMapper.selectById(article.getProjectId());
-        if (project == null || project.getDeletedAt() != null) {
-            throw new BizException(404, "Project not found");
-        }
-        brandService.requireBrandWithAccess(project.getBrandId(), true);
         return R.ok(contentDistributionService.refreshDistributionTaskReviewStatus(taskId));
     }
 

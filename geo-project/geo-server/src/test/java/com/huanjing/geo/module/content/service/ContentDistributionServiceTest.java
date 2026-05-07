@@ -26,6 +26,7 @@ import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import com.huanjing.geo.module.content.service.adapter.ValidationResult;
 import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import com.huanjing.geo.module.audit.service.AuditService;
+import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.service.BrandService;
@@ -45,7 +46,6 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -82,12 +82,11 @@ class ContentDistributionServiceTest {
     private FillTokenService fillTokenService;
     private AuditService auditService;
     private ContentDistributionService contentDistributionService;
-    private List<String> articleStatusUpdates;
 
     @BeforeEach
     void setUp() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), DistributionTask.class);
-        articleStatusUpdates = new ArrayList<>();
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticleDraft.class);
         articleDraftMapper = mock(ArticleDraftMapper.class);
         articleDraftVersionMapper = mock(ArticleDraftVersionMapper.class);
         distributionTaskMapper = mock(DistributionTaskMapper.class);
@@ -176,7 +175,7 @@ class ContentDistributionServiceTest {
 
         assertEquals(400, ex.getCode());
         verify(distributionTaskMapper).insert(any());
-        verify(articleDraftMapper, never()).updateById(articleWithStatus("distributing"));
+        verify(articleDraftMapper, never()).update(eq(null), any());
     }
 
     @Test
@@ -211,7 +210,8 @@ class ContentDistributionServiceTest {
     @Test
     void distributeTo_brandOfficialSite_brandAccessDenied_throws403() {
         givenCommonData();
-        doThrow(new BizException(403, "No permission")).when(currentUserService).ensureBrandAccess(any(SysUser.class), eq(30L), eq("official_site"));
+        doThrow(new BizException(403, "No permission"))
+                .when(brandAccessService).requireBrandAccess(eq(30L), eq(100L), eq(BrandAccessAction.OPERATE));
 
         BizException ex = assertThrows(BizException.class, () -> contentDistributionService.distributeTo(1L, target("active")));
 
@@ -321,7 +321,7 @@ class ContentDistributionServiceTest {
 
         assertEquals(400, ex.getCode());
         verify(distributionTaskMapper).insert(any());
-        verify(articleDraftMapper, never()).updateById(articleWithStatus("distributing"));
+        verify(articleDraftMapper, never()).update(eq(null), any());
     }
 
     @Test
@@ -359,6 +359,9 @@ class ContentDistributionServiceTest {
 
         assertEquals(501, ex.getCode());
         assertEquals("Self-media platform not implemented: douyin", ex.getMessage());
+        verify(companyChannelQuotaService, never()).reserveDistribution(any(), any(), any(), any());
+        verify(distributionTaskMapper, never()).insert(any());
+        verify(articleDraftMapper, never()).update(eq(null), any());
     }
 
     @Test
@@ -388,8 +391,10 @@ class ContentDistributionServiceTest {
 
     @Test
     void refreshDistributionTaskReviewStatus_publishedUpdatesReviewFields() {
+        givenCommonData();
         DistributionTask task = new DistributionTask();
         task.setId(700L);
+        task.setArticleId(1L);
         task.setTargetKind(DistributionTargetKind.MP_ACCOUNT);
         task.setSelfMediaAccountId(40L);
         task.setResponsePayload("{\"_mock_review_outcome\":\"passed\"}");
@@ -418,8 +423,10 @@ class ContentDistributionServiceTest {
 
     @Test
     void refreshDistributionTaskReviewStatus_unknownSkipsUpdate() {
+        givenCommonData();
         DistributionTask task = new DistributionTask();
         task.setId(701L);
+        task.setArticleId(1L);
         task.setTargetKind(DistributionTargetKind.MP_ACCOUNT);
         task.setSelfMediaAccountId(40L);
         SelfMediaAccount account = selfMediaAccount("douyin");
@@ -440,11 +447,7 @@ class ContentDistributionServiceTest {
         when(currentUserService.requireCurrentUser()).thenReturn(operator);
         ArticleDraft article = articleWithStatus("approved");
         when(articleDraftMapper.selectById(1L)).thenReturn(article);
-        when(articleDraftMapper.updateById(any(ArticleDraft.class))).thenAnswer(invocation -> {
-            ArticleDraft updated = invocation.getArgument(0);
-            articleStatusUpdates.add(updated.getStatus());
-            return 1;
-        });
+        when(articleDraftMapper.update(eq(null), any())).thenReturn(1);
         Project project = new Project();
         project.setId(20L);
         project.setCompanyId(10L);
@@ -508,7 +511,7 @@ class ContentDistributionServiceTest {
         brand.setId(30L);
         brand.setGeoSiteCode(siteCode);
         brand.setGeoSiteStatus(status);
-        when(brandService.requireBrandWithAccess(30L, true)).thenReturn(brand);
+        when(brandAccessService.requireBrandAccess(30L, 100L, BrandAccessAction.OPERATE)).thenReturn(brand);
     }
 
     private ArticleDraft articleWithStatus(String status) {
@@ -520,8 +523,15 @@ class ContentDistributionServiceTest {
     }
 
     private void assertArticleStatusTransitions(String first, String second) {
-        verify(articleDraftMapper, times(2)).updateById(any(ArticleDraft.class));
-        assertEquals(List.of(first, second), articleStatusUpdates);
+        ArgumentCaptor<LambdaUpdateWrapper<ArticleDraft>> updateCaptor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(articleDraftMapper, times(2)).update(eq(null), updateCaptor.capture());
+        List<LambdaUpdateWrapper<ArticleDraft>> updates = updateCaptor.getAllValues();
+        assertStatusMutation(updates.get(0), first);
+        assertStatusMutation(updates.get(1), second);
+    }
+
+    private void assertStatusMutation(LambdaUpdateWrapper<ArticleDraft> wrapper, String status) {
+        assertTrue(wrapper.getParamNameValuePairs().values().contains(status));
     }
 
     private DistributionTask task(String status) {

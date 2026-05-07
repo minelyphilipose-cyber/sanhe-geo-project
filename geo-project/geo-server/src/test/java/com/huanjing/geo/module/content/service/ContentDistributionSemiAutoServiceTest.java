@@ -55,6 +55,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -75,6 +76,7 @@ class ContentDistributionSemiAutoServiceTest {
     @BeforeEach
     void setUp() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), DistributionTask.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticleDraft.class);
         articleDraftMapper = mock(ArticleDraftMapper.class);
         articleDraftVersionMapper = mock(ArticleDraftVersionMapper.class);
         distributionTaskMapper = mock(DistributionTaskMapper.class);
@@ -85,6 +87,7 @@ class ContentDistributionSemiAutoServiceTest {
         fillTokenService = mock(FillTokenService.class);
         companyChannelQuotaService = mock(CompanyChannelQuotaService.class);
         auditService = mock(AuditService.class);
+        when(articleDraftMapper.update(eq(null), any())).thenReturn(1);
 
         service = newService(List.of(new TestSemiAutoAdapter()));
     }
@@ -166,7 +169,7 @@ class ContentDistributionSemiAutoServiceTest {
         assertEquals("ft.token", task.getFillToken());
         assertEquals(200L, task.getFillTokenExpiresAt());
         assertEquals("nonce", task.getFillTokenNonce());
-        verify(brandAccessService).requireBrandAccess(10L, 99L, BrandAccessAction.OPERATE);
+        verify(brandAccessService, times(3)).requireBrandAccess(10L, 99L, BrandAccessAction.OPERATE);
         verify(fillTokenService).issueInternalWithoutVersionCheck(60L, 10L, 99L, 50L);
         verify(autoSelfMediaAdapter, never()).submitToTarget(any(), any(), any());
         verify(auditService).record(argThat(event ->
