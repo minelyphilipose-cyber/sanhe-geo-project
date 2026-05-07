@@ -25,8 +25,6 @@ public class PackagePlanUpdateRequest {
     @NotNull
     @Min(1)
     private Integer coreQuestionCount;
-    @NotNull
-    private Integer biweeklyFrequency;
     @NotBlank
     private String monthlyReportDepth;
     @NotBlank

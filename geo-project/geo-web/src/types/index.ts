@@ -224,7 +224,6 @@ export interface Project {
   projectAliases?: string | null
   planQuestionPoolSize?: number | null
   planCoreQuestionCount?: number | null
-  planBiweeklyFrequency?: number | null
   planMonthlyReportDepth?: string | null
   planQuarterlyReportDepth?: string | null
   planConsultantIntensity?: string | null
@@ -1035,7 +1034,6 @@ export interface PackagePlan {
   serviceMonths: number
   questionPoolSize: number
   coreQuestionCount: number
-  biweeklyFrequency: number
   monthlyReportDepth: string
   quarterlyReportDepth: string
   consultantIntensity: string

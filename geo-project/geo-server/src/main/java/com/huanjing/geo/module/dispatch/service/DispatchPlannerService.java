@@ -100,9 +100,6 @@ public class DispatchPlannerService {
     }
 
     private void planBiWeekly(Project project, LocalDate today) {
-        if (project.getPlanBiweeklyFrequency() != null && project.getPlanBiweeklyFrequency() == 2) {
-            return;
-        }
         LocalDate anchor = project.getBiweeklyAnchorDate();
         if (anchor == null) {
             LocalDate firstMonday = DispatchScheduleCalculator.firstBiweeklyMonday(project.getActivatedAt().toLocalDate());

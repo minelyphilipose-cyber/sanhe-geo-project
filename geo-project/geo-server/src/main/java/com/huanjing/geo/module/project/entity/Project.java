@@ -31,7 +31,6 @@ public class Project {
     private Integer serviceMonths;
     private Integer planQuestionPoolSize;
     private Integer planCoreQuestionCount;
-    private Integer planBiweeklyFrequency;
     private String planMonthlyReportDepth;
     private String planQuarterlyReportDepth;
     private String planConsultantIntensity;

@@ -21,7 +21,6 @@ public class PackagePlan {
     private Integer serviceMonths;
     private Integer questionPoolSize;
     private Integer coreQuestionCount;
-    private Integer biweeklyFrequency;
     private String monthlyReportDepth;
     private String quarterlyReportDepth;
     private String consultantIntensity;

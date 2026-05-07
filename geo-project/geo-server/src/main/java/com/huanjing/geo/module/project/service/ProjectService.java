@@ -941,7 +941,6 @@ public class ProjectService {
         snapshot.put("expiredAt", project.getExpiredAt());
         snapshot.put("planQuestionPoolSize", project.getPlanQuestionPoolSize());
         snapshot.put("planCoreQuestionCount", project.getPlanCoreQuestionCount());
-        snapshot.put("planBiweeklyFrequency", project.getPlanBiweeklyFrequency());
         snapshot.put("planMonthlyReportDepth", project.getPlanMonthlyReportDepth());
         snapshot.put("planQuarterlyReportDepth", project.getPlanQuarterlyReportDepth());
         snapshot.put("planConsultantIntensity", project.getPlanConsultantIntensity());

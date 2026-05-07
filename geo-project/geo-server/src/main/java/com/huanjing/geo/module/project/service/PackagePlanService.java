@@ -31,7 +31,6 @@ public class PackagePlanService {
 
     private static final Pattern PACKAGE_TYPE_PATTERN = Pattern.compile("^[a-z][a-z0-9_]{2,31}$");
     private static final Set<String> INTENSITY_LEVELS = Set.of("L1", "L2", "L3");
-    private static final Set<Integer> BIWEEKLY_FREQUENCY_VALUES = Set.of(1, 2);
     private static final Set<String> CHANNEL_CODES = Set.of("official_site", "industry_site", "self_media", "authority_media");
     private static final Set<String> PERIOD_TYPES = Set.of("day", "week", "month", "total");
     private static final Map<String, String> DEFAULT_PERIOD_BY_CHANNEL = Map.of(
@@ -83,7 +82,6 @@ public class PackagePlanService {
         validateBusinessFields(
                 req.getQuestionPoolSize(),
                 req.getCoreQuestionCount(),
-                req.getBiweeklyFrequency(),
                 req.getMonthlyReportDepth(),
                 req.getQuarterlyReportDepth(),
                 req.getConsultantIntensity(),
@@ -107,7 +105,6 @@ public class PackagePlanService {
         plan.setServiceMonths(req.getServiceMonths());
         plan.setQuestionPoolSize(req.getQuestionPoolSize());
         plan.setCoreQuestionCount(req.getCoreQuestionCount());
-        plan.setBiweeklyFrequency(req.getBiweeklyFrequency());
         plan.setMonthlyReportDepth(req.getMonthlyReportDepth().trim());
         plan.setQuarterlyReportDepth(req.getQuarterlyReportDepth().trim());
         plan.setConsultantIntensity(req.getConsultantIntensity().trim());
@@ -132,7 +129,6 @@ public class PackagePlanService {
         validateBusinessFields(
                 req.getQuestionPoolSize(),
                 req.getCoreQuestionCount(),
-                req.getBiweeklyFrequency(),
                 req.getMonthlyReportDepth(),
                 req.getQuarterlyReportDepth(),
                 req.getConsultantIntensity(),
@@ -149,7 +145,6 @@ public class PackagePlanService {
         plan.setServiceMonths(req.getServiceMonths());
         plan.setQuestionPoolSize(req.getQuestionPoolSize());
         plan.setCoreQuestionCount(req.getCoreQuestionCount());
-        plan.setBiweeklyFrequency(req.getBiweeklyFrequency());
         plan.setMonthlyReportDepth(req.getMonthlyReportDepth().trim());
         plan.setQuarterlyReportDepth(req.getQuarterlyReportDepth().trim());
         plan.setConsultantIntensity(req.getConsultantIntensity().trim());
@@ -357,7 +352,6 @@ public class PackagePlanService {
     private void validateBusinessFields(
             Integer questionPoolSize,
             Integer coreQuestionCount,
-            Integer biweeklyFrequency,
             String monthlyReportDepth,
             String quarterlyReportDepth,
             String consultantIntensity,
@@ -376,9 +370,6 @@ public class PackagePlanService {
         }
         if (coreQuestionCount > questionPoolSize) {
             throw new BizException(400, "core_question_count cannot exceed question_pool_size");
-        }
-        if (biweeklyFrequency == null || !BIWEEKLY_FREQUENCY_VALUES.contains(biweeklyFrequency)) {
-            throw new BizException(400, "biweekly_frequency must be 1 or 2");
         }
         validateIntensityLevel(monthlyReportDepth, "monthly_report_depth");
         validateIntensityLevel(quarterlyReportDepth, "quarterly_report_depth");

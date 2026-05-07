@@ -117,20 +117,12 @@
         </el-table>
 
         <el-row :gutter="12" class="mt-4">
-          <el-col :xs="24" :sm="12" :lg="8">
-            <el-form-item label="双周服务频率" prop="biweeklyFrequency" required>
-              <el-select v-model="form.biweeklyFrequency" style="width: 100%">
-                <el-option label="包含双周简报" :value="1" />
-                <el-option label="不包含双周简报" :value="2" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :lg="8">
+          <el-col :xs="24" :sm="12">
             <el-form-item label="排序" prop="sortOrder" required>
               <el-input-number v-model="form.sortOrder" :min="0" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :xs="24" :sm="12" :lg="8">
+          <el-col :xs="24" :sm="12">
             <el-form-item label="状态" prop="enabled" required>
               <el-switch v-model="form.enabled" />
             </el-form-item>
@@ -178,7 +170,6 @@ const form = reactive({
   serviceMonths: 12,
   questionPoolSize: 100,
   coreQuestionCount: 20,
-  biweeklyFrequency: 1,
   monthlyReportDepth: 'L2',
   quarterlyReportDepth: 'L2',
   consultantIntensity: 'L2',
@@ -259,7 +250,6 @@ function resetForm() {
   form.serviceMonths = 12
   form.questionPoolSize = 100
   form.coreQuestionCount = 20
-  form.biweeklyFrequency = 1
   form.enabled = true
   form.sortOrder = 10
   form.remark = ''
@@ -303,7 +293,6 @@ function openEdit(row: PackagePlan) {
   form.serviceMonths = row.serviceMonths
   form.questionPoolSize = row.questionPoolSize
   form.coreQuestionCount = row.coreQuestionCount
-  form.biweeklyFrequency = row.biweeklyFrequency
   form.monthlyReportDepth = row.monthlyReportDepth
   form.quarterlyReportDepth = row.quarterlyReportDepth
   form.consultantIntensity = row.consultantIntensity
@@ -328,7 +317,6 @@ function buildPayload() {
     serviceMonths: form.serviceMonths,
     questionPoolSize: form.questionPoolSize,
     coreQuestionCount: form.coreQuestionCount,
-    biweeklyFrequency: form.biweeklyFrequency,
     monthlyReportDepth: form.monthlyReportDepth,
     quarterlyReportDepth: form.quarterlyReportDepth,
     consultantIntensity: form.consultantIntensity,

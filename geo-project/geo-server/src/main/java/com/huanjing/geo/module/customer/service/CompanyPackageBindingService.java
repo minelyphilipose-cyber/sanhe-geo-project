@@ -68,6 +68,7 @@ public class CompanyPackageBindingService {
     @Transactional
     public CompanyPackageBinding bind(Long companyId, Long packagePlanId) {
         currentUserService.ensurePermission("user.manage");
+        bindingMapper.clearInactiveActiveFlags(companyId);
         Company company = companyMapper.selectById(companyId);
         if (company == null || company.getDeletedAt() != null) {
             throw new BizException(404, "Company not found");
@@ -95,7 +96,10 @@ public class CompanyPackageBindingService {
             throw new BizException(400, "Customer has reserved distribution quota, cannot unbind package");
         }
         binding.markInactive();
-        bindingMapper.updateById(binding);
+        int updated = bindingMapper.markInactive(binding.getId(), binding.getUnboundAt());
+        if (updated != 1) {
+            throw new BizException(409, "Package binding status changed, please retry");
+        }
     }
 
     private CompanyPackageBinding buildBinding(Long companyId, PackagePlan plan, List<PackageChannelQuotaConfig> channelQuotas) {

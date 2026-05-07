@@ -28,7 +28,6 @@ export function createPackagePlan(data: {
   serviceMonths: number
   questionPoolSize: number
   coreQuestionCount: number
-  biweeklyFrequency: number
   monthlyReportDepth: string
   quarterlyReportDepth: string
   consultantIntensity: string
@@ -52,7 +51,6 @@ export function updatePackagePlan(id: number, data: {
   serviceMonths: number
   questionPoolSize: number
   coreQuestionCount: number
-  biweeklyFrequency: number
   monthlyReportDepth: string
   quarterlyReportDepth: string
   consultantIntensity: string
