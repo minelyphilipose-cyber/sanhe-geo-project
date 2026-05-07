@@ -9,6 +9,7 @@ export interface PlatformFillProfile {
   coverSelectors: string[]
   tagsSelectors: string[]
   categorySelectors: string[]
+  publishButtonSelectors: string[]
 }
 
 export const FILL_PROFILES: Record<string, PlatformFillProfile> = {
@@ -26,6 +27,7 @@ function profile(platform: string, host: string, domain: string): PlatformFillPr
     coverSelectors: ['[data-geo-fill="cover"]', 'input[type="url"][name*="cover"]'],
     tagsSelectors: ['[data-geo-fill="tags"]', 'input[placeholder*="标签"]'],
     categorySelectors: ['[data-geo-fill="category"]', 'input[placeholder*="分类"]'],
+    publishButtonSelectors: ['[data-geo-publish]', 'button[type="submit"]', 'button.publish', '.publish-button'],
   }
 }
 

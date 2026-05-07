@@ -103,4 +103,16 @@ export const extensionApi = {
       method: 'POST',
     }, token)
   },
+
+  heartbeatTask(token: string, taskId: number) {
+    return request<ExtensionTaskStateResponse>(`/api/v1/extension/tasks/${taskId}/heartbeat`, {
+      method: 'POST',
+    }, token)
+  },
+
+  publishedTask(token: string, taskId: number) {
+    return request<ExtensionTaskStateResponse>(`/api/v1/extension/tasks/${taskId}/published`, {
+      method: 'POST',
+    }, token)
+  },
 }

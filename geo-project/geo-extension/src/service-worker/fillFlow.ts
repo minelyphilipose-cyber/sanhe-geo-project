@@ -8,6 +8,7 @@ import {
   type PlatformFillProfile,
 } from '@/shared/fillProfiles'
 import { sessionStorage } from '@/shared/storage'
+import { startTaskLifecycle } from './taskLifecycle'
 import type {
   ExtensionMessage,
   ExtensionTaskListItem,
@@ -54,7 +55,9 @@ export async function startFillTask(task: ExtensionTaskListItem): Promise<Extens
     { type: 'GEO_FILL_TASK', payload: command },
   )
   if (!result?.ok) throw new Error(result?.message || '编辑器填充失败')
-  return extensionApi.ackTask(session.token, task.taskId)
+  const acked = await extensionApi.ackTask(session.token, task.taskId)
+  startTaskLifecycle(task.taskId, tab.id, session.token)
+  return acked
 }
 
 function buildFillCommand(taskId: number, fillPayload: string, profile: PlatformFillProfile): FillCommandPayload {

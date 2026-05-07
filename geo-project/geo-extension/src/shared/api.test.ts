@@ -107,6 +107,8 @@ describe('extensionApi', () => {
       extensionVersion: '0.1.0',
     })
     await extensionApi.ackTask('ext.secret', 30)
+    await extensionApi.heartbeatTask('ext.secret', 30)
+    await extensionApi.publishedTask('ext.secret', 30)
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
@@ -121,6 +123,16 @@ describe('extensionApi', () => {
     expect(fetch).toHaveBeenNthCalledWith(
       3,
       'http://localhost:8080/api/v1/extension/tasks/30/ack',
+      expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
+    )
+    expect(fetch).toHaveBeenNthCalledWith(
+      4,
+      'http://localhost:8080/api/v1/extension/tasks/30/heartbeat',
+      expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
+    )
+    expect(fetch).toHaveBeenNthCalledWith(
+      5,
+      'http://localhost:8080/api/v1/extension/tasks/30/published',
       expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
     )
   })

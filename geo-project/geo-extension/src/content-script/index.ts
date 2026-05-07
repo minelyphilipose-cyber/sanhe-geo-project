@@ -2,6 +2,7 @@ import type { ExtensionMessage } from '@/types/extension'
 import type { FillCommandPayload } from '@/types/extension'
 import { profileForUrl } from '@/shared/fillProfiles'
 import { fillEditor } from './fillEditor'
+import { activatePublishListener, handlePublishClick } from './publishListener'
 
 const CAPTURE_HOSTS = new Set(['mp.toutiao.com', 'www.zhihu.com'])
 
@@ -30,6 +31,14 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
 
   // Compliance requirement: the extension must never click the platform "Publish" button.
   // The operator must publish manually; this script may only fill fields and report state.
-  sendResponse(fillEditor(message.payload as FillCommandPayload))
+  const result = fillEditor(message.payload as FillCommandPayload)
+  if (result.ok) activatePublishListener((message.payload as FillCommandPayload).taskId)
+  sendResponse(result)
   return true
 })
+
+// Compliance requirement: this is a passive listener for the operator's manual publish action.
+// It must never simulate user interaction or invoke platform publish controls.
+document.addEventListener('click', event => {
+  handlePublishClick(event.target)
+}, true)

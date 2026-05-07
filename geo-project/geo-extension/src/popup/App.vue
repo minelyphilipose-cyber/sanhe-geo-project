@@ -10,13 +10,15 @@ import type {
   ExtensionStatus,
   ExtensionTaskListItem,
   ExtensionTaskStateResponse,
+  TaskLifecycleEvent,
   StoredSession,
 } from '@/types/extension'
 import { bindExtension, normalizeBindCode, unbindExtension, validateBindInput } from './bindFlow'
 import { createTaskListState, formatCountdown, isExpired, mergeTasks, toggleTaskExpanded } from './taskListStore'
 
 const status = ref<ExtensionStatus>('unbound')
-const message = ref('未绑定')
+const statusMessage = ref('未绑定')
+const errorMessage = ref('')
 const bindCode = ref('')
 const brandId = ref('')
 const loading = ref(false)
@@ -32,15 +34,17 @@ const now = ref(new Date())
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 
 const visibleTasks = computed(() => taskState.tasks.filter(task => !isExpired(task, now.value)))
+const displayMessage = computed(() => errorMessage.value || statusMessage.value)
 
 onMounted(async () => {
   session.value = await sessionStorage.get()
   status.value = session.value ? 'bound' : 'unbound'
-  message.value = session.value ? `已绑定，版本 ${session.value.extensionVersion}` : '请输入后台生成的绑定码完成绑定'
+  statusMessage.value = session.value ? `已绑定，版本 ${session.value.extensionVersion}` : '请输入后台生成的绑定码完成绑定'
+  chrome.runtime.onMessage.addListener(onRuntimeMessage)
   try {
     await extensionApi.versionCheck(EXTENSION_VERSION)
   } catch {
-    message.value = '版本检查失败，请确认服务端可用'
+    errorMessage.value = '版本检查失败，请确认服务端可用'
   }
   if (session.value) {
     await refreshAccounts()
@@ -51,6 +55,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   stopTaskRefresh()
+  chrome.runtime.onMessage.removeListener(onRuntimeMessage)
 })
 
 function onBindCodeInput(event: Event) {
@@ -65,13 +70,14 @@ async function bind() {
     loading.value = true
     session.value = await bindExtension({ bindCode: bindCode.value, brandId: brandId.value })
     status.value = 'bound'
-    message.value = `绑定成功，sessionId ${session.value.sessionId}`
+    errorMessage.value = ''
+    statusMessage.value = `绑定成功，sessionId ${session.value.sessionId}`
     await refreshAccounts()
     await refreshTasks()
     startTaskRefresh()
   } catch (error) {
     status.value = 'unbound'
-    message.value = friendlyErrorMessage(error)
+    errorMessage.value = friendlyErrorMessage(error)
   } finally {
     loading.value = false
   }
@@ -86,14 +92,15 @@ async function unbind() {
     await unbindExtension(session.value)
     session.value = null
     status.value = 'unbound'
-    message.value = '已解绑，请重新绑定后使用'
+    errorMessage.value = ''
+    statusMessage.value = '已解绑，请重新绑定后使用'
     taskState.tasks = []
     accounts.value = []
     selectedAccountId.value = null
     taskState.expandedTaskId = null
     stopTaskRefresh()
   } catch (error) {
-    message.value = friendlyErrorMessage(error)
+    errorMessage.value = friendlyErrorMessage(error)
   } finally {
     loading.value = false
   }
@@ -108,7 +115,7 @@ async function refreshAccounts() {
       selectedAccountId.value = accounts.value[0].accountId
     }
   } catch (error) {
-    message.value = friendlyErrorMessage(error)
+    errorMessage.value = friendlyErrorMessage(error)
   } finally {
     accountsLoading.value = false
   }
@@ -117,7 +124,7 @@ async function refreshAccounts() {
 async function captureCookies() {
   const account = accounts.value.find(item => item.accountId === selectedAccountId.value)
   if (!account) {
-    message.value = '请选择要捕获凭证的账号'
+    errorMessage.value = '请选择要捕获凭证的账号'
     return
   }
   if (!window.confirm(`为账号 ${account.accountName || account.accountId} 捕获 ${account.platform} 凭证？`)) return
@@ -128,9 +135,10 @@ async function captureCookies() {
       type: 'GEO_CAPTURE_COOKIES',
       payload: account,
     })
-    message.value = `凭证捕获成功，版本 ${result.version}`
+    errorMessage.value = ''
+    statusMessage.value = `凭证捕获成功，版本 ${result.version}`
   } catch (error) {
-    message.value = friendlyErrorMessage(error)
+    errorMessage.value = friendlyErrorMessage(error)
   } finally {
     captureLoading.value = false
   }
@@ -138,7 +146,7 @@ async function captureCookies() {
 
 async function startFill(task: ExtensionTaskListItem) {
   if (task.status !== 'token_issued') {
-    message.value = task.status === 'filled' ? '该任务已完成填充' : '该任务正在填充中'
+    errorMessage.value = task.status === 'filled' ? '该任务已完成填充' : '该任务正在填充中'
     return
   }
   fillLoadingTaskId.value = task.taskId
@@ -147,10 +155,11 @@ async function startFill(task: ExtensionTaskListItem) {
       type: 'GEO_START_FILL_TASK',
       payload: task,
     })
-    message.value = '已填充编辑器，请在平台页面人工确认并发布。'
+    errorMessage.value = ''
+    statusMessage.value = '已填充编辑器，请在平台页面人工确认并发布。'
     await refreshTasks()
   } catch (error) {
-    message.value = friendlyErrorMessage(error)
+    errorMessage.value = friendlyErrorMessage(error)
   } finally {
     fillLoadingTaskId.value = null
   }
@@ -178,10 +187,11 @@ async function refreshTasks() {
   now.value = new Date()
   try {
     const tasks = await extensionApi.tasks(session.value.token)
+    errorMessage.value = ''
     mergeTasks(taskState, tasks, now.value)
   } catch (error) {
     if (error instanceof ExtensionApiError && error.status === 401) {
-      message.value = `${friendlyErrorMessage(error)} 请重新绑定后再试。`
+      errorMessage.value = `${friendlyErrorMessage(error)} 请重新绑定后再试。`
       status.value = 'unbound'
       session.value = null
       taskState.tasks = []
@@ -190,7 +200,7 @@ async function refreshTasks() {
       selectedAccountId.value = null
       stopTaskRefresh()
     } else {
-      message.value = friendlyErrorMessage(error)
+      errorMessage.value = friendlyErrorMessage(error)
     }
   } finally {
     tasksLoading.value = false
@@ -214,6 +224,24 @@ function stopTaskRefresh() {
 function toggleTask(taskId: number) {
   toggleTaskExpanded(taskState, taskId)
 }
+
+function onRuntimeMessage(message: { type: string, payload?: TaskLifecycleEvent }) {
+  if (message.type !== 'GEO_TASK_LIFECYCLE_EVENT' || !message.payload) return false
+  if (message.payload.kind === 'auth_required') {
+    status.value = 'unbound'
+    session.value = null
+    taskState.tasks = []
+    accounts.value = []
+    selectedAccountId.value = null
+    stopTaskRefresh()
+  }
+  if (message.payload.kind === 'published') {
+    void refreshTasks()
+  }
+  errorMessage.value = message.payload.kind === 'published' ? '' : message.payload.message
+  statusMessage.value = message.payload.message
+  return false
+}
 </script>
 
 <template>
@@ -223,7 +251,7 @@ function toggleTask(taskId: number) {
       <span>{{ EXTENSION_VERSION }}</span>
     </header>
     <section :class="['status', status]">
-      {{ message }}
+      {{ displayMessage }}
     </section>
     <section v-if="status === 'unbound'" class="form">
       <label>

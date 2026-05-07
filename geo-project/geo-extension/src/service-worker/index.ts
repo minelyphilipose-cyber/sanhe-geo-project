@@ -4,6 +4,7 @@ import { logger } from '@/shared/logger'
 import { sessionStorage } from '@/shared/storage'
 import { captureCookiesForAccount } from './cookieCapture'
 import { startFillTask } from './fillFlow'
+import { publishActiveTask } from './taskLifecycle'
 import type { ExtensionMessage, ExtensionSelfMediaAccount, ExtensionTaskListItem } from '@/types/extension'
 
 const REFRESH_ALARM = 'geo-token-refresh'
@@ -43,10 +44,12 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       extensionVersion: EXTENSION_VERSION,
     })
   } catch (error) {
-    // TODO(B6): map 70002/70004 to an explicit rebind state in popup. Keeping the
-    // stale local session here does not grant access because the backend rejects it,
-    // but the UX needs a clear recovery path.
     if (error instanceof ExtensionApiError && (error.code === 70002 || error.code === 70004)) {
+      await sessionStorage.clear()
+      void chrome.runtime.sendMessage({
+        type: 'GEO_TASK_LIFECYCLE_EVENT',
+        payload: { kind: 'auth_required', message: '扩展登录已失效，请重新绑定。' },
+      }).catch(() => undefined)
       logger.warn('token refresh requires rebind', { code: error.code })
       return
     }
@@ -66,6 +69,15 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
       .catch(error => sendResponse({
         ok: false,
         message: error instanceof Error ? error.message : 'fill failed',
+      }))
+    return true
+  }
+  if (message.type === 'GEO_TASK_PUBLISHED') {
+    void publishActiveTask((message.payload as { taskId: number }).taskId)
+      .then(() => sendResponse({ ok: true }))
+      .catch(error => sendResponse({
+        ok: false,
+        message: error instanceof Error ? error.message : 'publish report failed',
       }))
     return true
   }

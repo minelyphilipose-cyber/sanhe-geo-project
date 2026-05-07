@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { extensionApi } from '@/shared/api'
 import { sessionStorage } from '@/shared/storage'
 import { startFillTask } from './fillFlow'
+import { startTaskLifecycle } from './taskLifecycle'
 
 vi.mock('@/shared/env', () => ({ EXTENSION_VERSION: '0.1.0' }))
 vi.mock('@/shared/storage', () => ({
@@ -13,6 +14,9 @@ vi.mock('@/shared/api', () => ({
     consumeFillToken: vi.fn(),
     ackTask: vi.fn(),
   },
+}))
+vi.mock('./taskLifecycle', () => ({
+  startTaskLifecycle: vi.fn(),
 }))
 
 let readyListener: ((message: unknown, sender: chrome.runtime.MessageSender) => void) | undefined
@@ -79,6 +83,7 @@ describe('fill service worker flow', () => {
       payload: expect.objectContaining({ title: 'Draft', contentHtml: '<p>Hello</p>' }),
     })
     expect(extensionApi.ackTask).toHaveBeenCalledWith('ext.secret', 30)
+    expect(startTaskLifecycle).toHaveBeenCalledWith(30, 9, 'ext.secret')
   })
 
   it('sanitizes XSS payload before sending fill command to content script', async () => {

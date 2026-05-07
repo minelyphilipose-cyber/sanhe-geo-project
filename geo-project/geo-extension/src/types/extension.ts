@@ -36,7 +36,7 @@ export interface TokenRefreshResponse {
   sessionId: number
 }
 
-export type ExtensionTaskStatus = 'token_issued' | 'filling' | 'filled'
+export type ExtensionTaskStatus = 'token_issued' | 'filling' | 'filled' | 'published'
 
 export interface ExtensionTaskListItem {
   taskId: number
@@ -120,4 +120,10 @@ export interface CookieCaptureResponse {
 export interface ExtensionMessage<T = unknown> {
   type: string
   payload?: T
+}
+
+export interface TaskLifecycleEvent {
+  taskId?: number
+  kind: 'published' | 'stopped' | 'auth_required'
+  message: string
 }
