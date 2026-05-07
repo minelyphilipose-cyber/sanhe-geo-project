@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.huanjing.geo.module.content.entity.DistributionTask;
+import com.huanjing.geo.module.extension.dto.ExtensionTaskListRow;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
@@ -72,6 +73,31 @@ public interface DistributionTaskMapper extends BaseMapper<DistributionTask> {
     List<DistributionTask> selectStaleSemiAutoTasks(
             @Param("tokenIssuedBefore") LocalDateTime tokenIssuedBefore,
             @Param("heartbeatBefore") LocalDateTime heartbeatBefore,
+            @Param("limit") int limit
+    );
+
+    @Select("""
+            SELECT t.id AS taskId,
+                   COALESCE(sma.platform, t.integration_method) AS platform,
+                   t.status AS status,
+                   t.published_url AS publishUrl,
+                   a.title AS title,
+                   t.created_at AS createdAt,
+                   t.fill_token_issued_at AS fillTokenIssuedAt,
+                   t.operator_id AS operatorId,
+                   p.brand_id AS brandId
+            FROM distribution_tasks t
+            INNER JOIN article_draft a ON a.id = t.article_id
+            INNER JOIN project p ON p.id = t.project_id
+            LEFT JOIN self_media_account sma ON sma.id = t.self_media_account_id
+            WHERE t.dispatch_mode = 'SEMI_AUTO'
+              AND t.operator_id = #{operatorId}
+              AND t.status IN ('token_issued', 'filling', 'filled')
+            ORDER BY t.fill_token_issued_at DESC
+            LIMIT #{limit}
+            """)
+    List<ExtensionTaskListRow> selectExtensionSemiAutoTasks(
+            @Param("operatorId") Long operatorId,
             @Param("limit") int limit
     );
 

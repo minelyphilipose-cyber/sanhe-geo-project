@@ -7,6 +7,7 @@ import com.huanjing.geo.module.extension.dto.ExtensionBindRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionBindResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshResponse;
+import com.huanjing.geo.module.extension.dto.ExtensionTaskListItemResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskStateResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionVersionCheckRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionVersionCheckResponse;
@@ -18,6 +19,7 @@ import com.huanjing.geo.module.extension.entity.ExtensionSession;
 import com.huanjing.geo.module.extension.service.ExtensionBindCodeService;
 import com.huanjing.geo.module.extension.service.ExtensionCredentialService;
 import com.huanjing.geo.module.extension.service.ExtensionSessionService;
+import com.huanjing.geo.module.extension.service.ExtensionTaskListService;
 import com.huanjing.geo.module.extension.service.ExtensionTaskStateService;
 import com.huanjing.geo.module.extension.service.ExtensionVersionService;
 import com.huanjing.geo.module.extension.service.FillTokenService;
@@ -29,6 +31,8 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @Tag(name = "Extension")
 @RestController
@@ -43,6 +47,7 @@ public class ExtensionController {
     private final ExtensionVersionService versionService;
     private final FillTokenService fillTokenService;
     private final ExtensionCredentialService credentialService;
+    private final ExtensionTaskListService taskListService;
     private final ExtensionTaskStateService taskStateService;
     private final CurrentUserService currentUserService;
 
@@ -129,6 +134,15 @@ public class ExtensionController {
                 session.getId(),
                 clientIp(servletRequest)
         ));
+    }
+
+    @GetMapping("/tasks")
+    public R<List<ExtensionTaskListItemResponse>> listTasks(
+            @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken
+    ) {
+        ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        versionService.requireSupported("chrome", session.getExtensionVersion());
+        return R.ok(taskListService.listTasksForSessionOperator(session.getOperatorId()));
     }
 
     @PostMapping("/tasks/{taskId}/ack")

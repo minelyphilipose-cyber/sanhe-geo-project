@@ -77,6 +77,14 @@ button.danger {
   background: #b42318;
 }
 
+button.secondary {
+  border: 1px solid #d0d5dd;
+  padding: 6px 9px;
+  color: #344054;
+  background: #fff;
+  font-size: 12px;
+}
+
 .confirm {
   margin: 0;
   color: #667085;
@@ -101,5 +109,79 @@ dt {
 
 dd {
   margin: 0;
+  word-break: break-all;
+}
+
+.tasks {
+  display: grid;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.tasks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.empty {
+  margin: 0;
+  border: 1px dashed #d0d5dd;
+  border-radius: 8px;
+  padding: 12px;
+  color: #667085;
+  font-size: 13px;
+  text-align: center;
+}
+
+.task-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-item {
+  border: 1px solid #d0d5dd;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.task-button {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+  padding: 10px;
+  color: #172033;
+  background: #fff;
+  text-align: left;
+}
+
+.task-title {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-meta {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+  color: #667085;
+  font-size: 12px;
+}
+
+.task-detail {
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid #eaecf0;
+  padding: 9px 10px;
+  color: #475467;
+  font-size: 12px;
   word-break: break-all;
 }

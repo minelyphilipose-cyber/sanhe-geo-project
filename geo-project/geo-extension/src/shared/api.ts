@@ -1,5 +1,11 @@
 import { API_BASE_URL } from './env'
-import type { ApiErrorBody, BindResponse, TokenRefreshResponse, VersionCheckResponse } from '@/types/extension'
+import type {
+  ApiErrorBody,
+  BindResponse,
+  ExtensionTaskListItem,
+  TokenRefreshResponse,
+  VersionCheckResponse,
+} from '@/types/extension'
 
 export class ExtensionApiError extends Error {
   constructor(
@@ -50,6 +56,12 @@ export const extensionApi = {
   revoke(token: string, sessionId: number) {
     return request<void>(`/api/v1/extension/token/${sessionId}/revoke`, {
       method: 'POST',
+    }, token)
+  },
+
+  tasks(token: string) {
+    return request<ExtensionTaskListItem[]>('/api/v1/extension/tasks', {
+      method: 'GET',
     }, token)
   },
 }

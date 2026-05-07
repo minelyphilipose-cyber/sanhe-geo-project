@@ -22,6 +22,7 @@ export function messageForErrorCode(code: number | undefined): string {
 
 export function friendlyErrorMessage(error: unknown): string {
   if (error instanceof ExtensionApiError) {
+    if (error.status === 401) return '扩展登录已失效，请重新绑定。'
     return messageForErrorCode(error.code)
   }
   return error instanceof Error ? error.message : '请求失败，请稍后重试。'

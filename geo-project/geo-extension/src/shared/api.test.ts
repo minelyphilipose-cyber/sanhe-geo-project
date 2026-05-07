@@ -55,4 +55,18 @@ describe('extensionApi', () => {
     expect(revokeHeaders.get('X-Ext-Token')).toBe('ext.secret')
     expect(vi.mocked(fetch).mock.calls[1][0]).not.toContain('ext.secret')
   })
+
+  it('gets task list with extension token header and no query string', async () => {
+    await extensionApi.tasks('ext.secret')
+
+    expect(fetch).toHaveBeenCalledWith(
+      'http://localhost:8080/api/v1/extension/tasks',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.any(Headers),
+      }),
+    )
+    const headers = (vi.mocked(fetch).mock.calls[0][1] as RequestInit).headers as Headers
+    expect(headers.get('X-Ext-Token')).toBe('ext.secret')
+  })
 })

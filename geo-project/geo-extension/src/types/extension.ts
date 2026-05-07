@@ -36,6 +36,19 @@ export interface TokenRefreshResponse {
   sessionId: number
 }
 
+export type ExtensionTaskStatus = 'token_issued' | 'filling' | 'filled'
+
+export interface ExtensionTaskListItem {
+  taskId: number
+  platform: string
+  status: ExtensionTaskStatus
+  publishUrl?: string | null
+  title?: string | null
+  createdAt: string
+  fillTokenIssuedAt: string
+  expiresAt: string
+}
+
 export interface ExtensionMessage<T = unknown> {
   type: string
   payload?: T
