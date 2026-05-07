@@ -47,6 +47,11 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * @deprecated 仅供 presale 现有测试兼容，新代码使用主构造器（依赖 LlmInvoker bean）。
+     *             计划在 Sprint 3 迁移 presale 测试后删除。
+     */
+    @Deprecated
     OpenAiCompatiblePresaleLlmInvoker(AiPlatformConfigMapper aiPlatformConfigMapper,
                                       PlatformCredentialService platformCredentialService,
                                       PresaleLlmHttpClient httpClient,
@@ -154,7 +159,7 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                     normalizeJsonOutput
             ));
             return new LlmCallResult(
-                    result.rawResponse(),
+                    result.responseText(),
                     result.promptTokens(),
                     result.completionTokens(),
                     result.durationMs(),

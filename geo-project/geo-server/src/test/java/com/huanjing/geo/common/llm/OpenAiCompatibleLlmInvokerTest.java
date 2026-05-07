@@ -22,7 +22,7 @@ class OpenAiCompatibleLlmInvokerTest {
 
         LlmInvokeResult result = invoker.invoke("hello", config(0, 10_000, 30_000, 1));
 
-        assertEquals("ok", result.rawResponse());
+        assertEquals("ok", result.responseText());
         assertEquals(7, result.promptTokens());
         assertEquals(11, result.completionTokens());
         assertEquals(1, result.retryCount());

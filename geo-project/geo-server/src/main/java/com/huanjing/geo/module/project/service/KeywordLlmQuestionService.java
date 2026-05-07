@@ -177,7 +177,7 @@ public class KeywordLlmQuestionService {
                 null,
                 false
         ));
-        return normalizeQuestions(response.rawResponse());
+        return normalizeQuestions(response.responseText());
     }
 
     private AiPlatformConfig requirePlatformConfig() {

@@ -1,6 +1,6 @@
 package com.huanjing.geo.common.llm;
 
-public record LlmInvokeResult(String rawResponse,
+public record LlmInvokeResult(String responseText,
                               Integer promptTokens,
                               Integer completionTokens,
                               Long durationMs,

@@ -231,7 +231,7 @@ public class PresaleLlmPromptQuestionService {
                 null,
                 false
             ));
-            return response.rawResponse();
+            return response.responseText();
         } catch (com.huanjing.geo.common.llm.LlmInvokeException ex) {
             throw new LlmQuestionProviderException(
                     config.getPlatformCode(),
