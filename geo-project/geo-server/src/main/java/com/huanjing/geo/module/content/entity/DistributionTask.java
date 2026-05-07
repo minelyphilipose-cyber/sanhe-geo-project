@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.content.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -62,4 +63,13 @@ public class DistributionTask {
     private String requestId;
     private LocalDateTime createdAt;
     private LocalDateTime finishedAt;
+
+    @TableField(exist = false)
+    private String fillToken;
+
+    @TableField(exist = false)
+    private Long fillTokenExpiresAt;
+
+    @TableField(exist = false)
+    private String fillTokenNonce;
 }

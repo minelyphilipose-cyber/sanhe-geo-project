@@ -74,8 +74,21 @@ public class FillTokenService {
         if (accountId == null || brandId == null || operatorId == null || taskTargetId == null) {
             throw new BizException(FILL_TOKEN_INVALID, "fill token issue context is required");
         }
-        if (StringUtils.hasText(extensionVersion)) {
-            versionService.requireSupported(platform, extensionVersion);
+        if (!StringUtils.hasText(platform) || !StringUtils.hasText(extensionVersion)) {
+            throw new BizException(FILL_TOKEN_INVALID, "extension platform and version are required");
+        }
+        versionService.requireSupported(platform, extensionVersion);
+        return issueInternalWithoutVersionCheck(accountId, brandId, operatorId, taskTargetId);
+    }
+
+    public FillTokenIssueResponse issueInternalWithoutVersionCheck(
+            Long accountId,
+            Long brandId,
+            Long operatorId,
+            Long taskTargetId
+    ) {
+        if (accountId == null || brandId == null || operatorId == null || taskTargetId == null) {
+            throw new BizException(FILL_TOKEN_INVALID, "fill token issue context is required");
         }
         brandAccessService.requireBrandAccess(brandId, operatorId, BrandAccessAction.OPERATE);
         long issuedAt = clock.instant().getEpochSecond();

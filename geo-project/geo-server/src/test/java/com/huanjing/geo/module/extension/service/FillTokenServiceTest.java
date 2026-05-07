@@ -72,6 +72,24 @@ class FillTokenServiceTest {
     }
 
     @Test
+    void publicIssueRequiresExtensionVersion() {
+        BizException ex = assertThrows(BizException.class,
+                () -> fillTokenService.issue(20L, 10L, 99L, 30L, "chrome", null));
+
+        assertEquals(FILL_TOKEN_INVALID, ex.getCode());
+        verify(redisStore, never()).set(any(), any(), any());
+    }
+
+    @Test
+    void internalIssueSkipsVersionCheckButKeepsBrandAccess() {
+        fillTokenService.issueInternalWithoutVersionCheck(20L, 10L, 99L, 30L);
+
+        verify(versionService, never()).requireSupported(any(), any());
+        verify(brandAccessService).requireBrandAccess(10L, 99L, BrandAccessAction.OPERATE);
+        verify(redisStore).set(any(), eq("1"), any());
+    }
+
+    @Test
     void tamperedTokenFailsSignatureCheck() {
         String token = fillTokenService.issue(20L, 10L, 99L, 30L, "chrome", "1.2.3").fillToken();
         String tampered = token.substring(0, token.length() - 2) + "xx";

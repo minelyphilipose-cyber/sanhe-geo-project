@@ -30,11 +30,13 @@ import com.huanjing.geo.module.content.service.adapter.SemiAutoSelfMediaAdapter;
 import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import com.huanjing.geo.module.content.service.adapter.ValidationResult;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
+import com.huanjing.geo.module.customer.access.BrandAccessErrorCodes;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.customer.service.BrandService;
+import com.huanjing.geo.module.extension.ExtensionErrorCodes;
 import com.huanjing.geo.module.extension.dto.FillTokenIssueResponse;
 import com.huanjing.geo.module.extension.service.FillTokenService;
 import com.huanjing.geo.module.project.entity.Project;
@@ -498,14 +500,19 @@ public class ContentDistributionService {
         updateSemiAutoTaskPrepared(task.getId(), fillPayload);
 
         companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.MP_ACCOUNT, task.getId());
-        FillTokenIssueResponse token = fillTokenService.issue(
-                account.getId(),
-                account.getBrandId(),
-                operator.getId(),
-                task.getId(),
-                "chrome",
-                null
-        );
+        FillTokenIssueResponse token;
+        try {
+            token = fillTokenService.issueInternalWithoutVersionCheck(
+                    account.getId(),
+                    account.getBrandId(),
+                    operator.getId(),
+                    task.getId()
+            );
+        } catch (BizException ex) {
+            companyChannelQuotaService.refundDistribution(task.getId());
+            auditSemiAutoTaskCreationFailed(article, account, operator, task, ex);
+            throw ex;
+        }
         LocalDateTime issuedAt = LocalDateTime.now(SH_ZONE);
         updateSemiAutoTaskTokenIssued(task.getId(), issuedAt);
         task.setDispatchMode("SEMI_AUTO");
@@ -516,13 +523,15 @@ public class ContentDistributionService {
 
         article.setStatus("distributing");
         articleDraftMapper.updateById(article);
-        auditSemiAutoTaskCreated(article, account, operator, task, token);
 
         DistributionTask returned = distributionTaskMapper.selectById(task.getId());
         if (returned == null) {
             returned = task;
         }
-        returned.setRequestPayload(toTransientFillTokenPayload(token));
+        returned.setFillToken(token.fillToken());
+        returned.setFillTokenExpiresAt(token.expiresAt());
+        returned.setFillTokenNonce(token.nonce());
+        auditSemiAutoTaskCreated(article, account, operator, task, token);
         return returned;
     }
 
@@ -777,18 +786,6 @@ public class ContentDistributionService {
         }
     }
 
-    private String toTransientFillTokenPayload(FillTokenIssueResponse token) {
-        try {
-            return objectMapper.writeValueAsString(Map.of(
-                    "fillToken", token.fillToken(),
-                    "expiresAt", token.expiresAt(),
-                    "nonce", token.nonce()
-            ));
-        } catch (JsonProcessingException ex) {
-            throw new BizException(500, "fill token response serialization failed", ex);
-        }
-    }
-
     private void auditSemiAutoTaskCreated(ArticleDraft article,
                                           SelfMediaAccount account,
                                           SysUser operator,
@@ -813,6 +810,48 @@ public class ContentDistributionService {
                 "fillTokenNonce", token.nonce()
         ));
         auditService.record(event);
+    }
+
+    private void auditSemiAutoTaskCreationFailed(ArticleDraft article,
+                                                 SelfMediaAccount account,
+                                                 SysUser operator,
+                                                 DistributionTask task,
+                                                 BizException ex) {
+        AuditEvent event = new AuditEvent();
+        event.setEventType("SEMI_AUTO_TASK_CREATION_FAILED");
+        event.setActorType(ActorType.OPERATOR);
+        event.setActorId(operator.getId());
+        event.setBrandId(account.getBrandId());
+        event.setAccountId(account.getId());
+        event.setTaskId(task.getId());
+        event.setTargetType("DISTRIBUTION_TASK");
+        event.setTargetId(String.valueOf(task.getId()));
+        event.setResult(auditResultForSemiAutoFailure(ex));
+        event.setMode(AuditMode.SYNC);
+        event.setSensitive(false);
+        event.setErrorCode(String.valueOf(ex.getCode()));
+        event.setErrorMessage(ex.getMessage());
+        event.setDetail(Map.of(
+                "articleId", article.getId(),
+                "platform", account.getPlatform()
+        ));
+        auditService.record(event);
+    }
+
+    private AuditResult auditResultForSemiAutoFailure(BizException ex) {
+        int code = ex.getCode();
+        if (code == BrandAccessErrorCodes.BRAND_ACCESS_NOT_FOUND || code == ExtensionErrorCodes.EXTENSION_NOT_FOUND) {
+            return AuditResult.NOT_FOUND;
+        }
+        if (code == BrandAccessErrorCodes.BRAND_ACCESS_UNAUTHORIZED
+                || code == BrandAccessErrorCodes.BRAND_ACCESS_DENIED
+                || code == ExtensionErrorCodes.EXTENSION_UNAUTHORIZED
+                || code == ExtensionErrorCodes.EXTENSION_DENIED
+                || code == ExtensionErrorCodes.FILL_TOKEN_INVALID
+                || code == ExtensionErrorCodes.FILL_TOKEN_USED_OR_EXPIRED) {
+            return AuditResult.DENIED;
+        }
+        return AuditResult.FAILURE;
     }
 
     private ValidationResult validateByMethod(ArticleDraft article, String content, PublishSite site) {
