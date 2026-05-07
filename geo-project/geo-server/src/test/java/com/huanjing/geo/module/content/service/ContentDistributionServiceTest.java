@@ -11,13 +11,11 @@ import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
 import com.huanjing.geo.module.content.entity.BrandOfficialSite;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.PackagePublishConfig;
-import com.huanjing.geo.module.content.entity.ProjectPublishQuota;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.mapper.PackagePublishConfigMapper;
-import com.huanjing.geo.module.content.mapper.ProjectPublishQuotaMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.service.adapter.BrandGeoSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.FailureKind;
@@ -27,9 +25,12 @@ import com.huanjing.geo.module.content.service.adapter.AutoSelfMediaAdapter;
 import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import com.huanjing.geo.module.content.service.adapter.ValidationResult;
 import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
-import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.audit.service.AuditService;
+import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.service.BrandService;
+import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
+import com.huanjing.geo.module.extension.service.FillTokenService;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.PublishSite;
@@ -37,15 +38,13 @@ import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.PublishSiteMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.SystemAlertService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.time.LocalDate;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -70,7 +69,6 @@ class ContentDistributionServiceTest {
     private DistributionTaskMapper distributionTaskMapper;
     private SelfMediaAccountMapper selfMediaAccountMapper;
     private PackagePublishConfigMapper packagePublishConfigMapper;
-    private ProjectPublishQuotaMapper projectPublishQuotaMapper;
     private ProjectMapper projectMapper;
     private PublishSiteMapper publishSiteMapper;
     private CurrentUserService currentUserService;
@@ -78,7 +76,11 @@ class ContentDistributionServiceTest {
     private TestBrandGeoSiteAdapter brandGeoSiteAdapter;
     private TestSelfMediaAdapter selfMediaAdapter;
     private BrandService brandService;
-    private ProjectPublishQuotaService projectPublishQuotaService;
+    private CompanyPackageBindingService companyPackageBindingService;
+    private CompanyChannelQuotaService companyChannelQuotaService;
+    private BrandAccessService brandAccessService;
+    private FillTokenService fillTokenService;
+    private AuditService auditService;
     private ContentDistributionService contentDistributionService;
     private List<String> articleStatusUpdates;
 
@@ -91,7 +93,6 @@ class ContentDistributionServiceTest {
         distributionTaskMapper = mock(DistributionTaskMapper.class);
         selfMediaAccountMapper = mock(SelfMediaAccountMapper.class);
         packagePublishConfigMapper = mock(PackagePublishConfigMapper.class);
-        projectPublishQuotaMapper = mock(ProjectPublishQuotaMapper.class);
         projectMapper = mock(ProjectMapper.class);
         publishSiteMapper = mock(PublishSiteMapper.class);
         currentUserService = mock(CurrentUserService.class);
@@ -99,22 +100,31 @@ class ContentDistributionServiceTest {
         brandGeoSiteAdapter = new TestBrandGeoSiteAdapter();
         selfMediaAdapter = new TestSelfMediaAdapter();
         brandService = mock(BrandService.class);
-        projectPublishQuotaService = mock(ProjectPublishQuotaService.class);
+        companyPackageBindingService = mock(CompanyPackageBindingService.class);
+        companyChannelQuotaService = mock(CompanyChannelQuotaService.class);
+        brandAccessService = mock(BrandAccessService.class);
+        fillTokenService = mock(FillTokenService.class);
+        auditService = mock(AuditService.class);
         contentDistributionService = new ContentDistributionService(
                 articleDraftMapper,
                 articleDraftVersionMapper,
                 distributionTaskMapper,
                 selfMediaAccountMapper,
                 packagePublishConfigMapper,
-                projectPublishQuotaMapper,
                 projectMapper,
                 publishSiteMapper,
                 currentUserService,
                 mock(SystemAlertService.class),
                 List.of(officialCmsSiteAdapter, brandGeoSiteAdapter),
                 List.of(selfMediaAdapter),
+                List.of(),
                 brandService,
-                projectPublishQuotaService
+                companyPackageBindingService,
+                companyChannelQuotaService,
+                brandAccessService,
+                fillTokenService,
+                auditService,
+                new ObjectMapper()
         );
     }
 
@@ -138,14 +148,14 @@ class ContentDistributionServiceTest {
     @Test
     void distributeTo_brandOfficialSite_success_writesSubmittedAndQuotaIncreased() {
         givenCommonData();
-        when(projectPublishQuotaMapper.tryReserve(20L, currentMonth(), 5)).thenReturn(1);
         officialCmsSiteAdapter.result = SubmitResult.success(201, "{}", "{\"id\":\"pa-1\"}", "https://site/article", "pa-1");
         when(distributionTaskMapper.selectById(300L)).thenReturn(task("submitted"));
 
         DistributionTask result = contentDistributionService.distributeTo(1L, target("active"));
 
         assertEquals("submitted", result.getStatus());
-        verify(projectPublishQuotaMapper).tryReserve(20L, currentMonth(), 5);
+        verify(companyChannelQuotaService).reserveDistribution(10L, 20L, DistributionTargetKind.BRAND_OFFICIAL_SITE, 300L);
+        verify(companyChannelQuotaService).confirmDistribution(300L);
         ArgumentCaptor<DistributionTask> inserted = ArgumentCaptor.forClass(DistributionTask.class);
         verify(distributionTaskMapper).insert(inserted.capture());
         assertEquals("submitting", inserted.getValue().getStatus());
@@ -159,26 +169,27 @@ class ContentDistributionServiceTest {
     @Test
     void distributeTo_brandOfficialSite_quotaExhausted_throws400() {
         givenCommonData();
-        when(projectPublishQuotaMapper.tryReserve(20L, currentMonth(), 5)).thenReturn(0);
+        doThrow(new BizException(400, "Distribution quota exhausted for channel official_site"))
+                .when(companyChannelQuotaService).reserveDistribution(10L, 20L, DistributionTargetKind.BRAND_OFFICIAL_SITE, 300L);
 
         BizException ex = assertThrows(BizException.class, () -> contentDistributionService.distributeTo(1L, target("active")));
 
         assertEquals(400, ex.getCode());
-        verify(distributionTaskMapper, never()).insert(any());
+        verify(distributionTaskMapper).insert(any());
         verify(articleDraftMapper, never()).updateById(articleWithStatus("distributing"));
     }
 
     @Test
     void distributeTo_brandOfficialSite_adapter401_writesAuthExpired() {
         givenCommonData();
-        when(projectPublishQuotaMapper.tryReserve(20L, currentMonth(), 5)).thenReturn(1);
         officialCmsSiteAdapter.result = SubmitResult.failure(401, "{}", "no", "HTTP 401", FailureKind.AUTH_EXPIRED, false);
         when(distributionTaskMapper.selectById(300L)).thenReturn(task("failed"));
 
         contentDistributionService.distributeTo(1L, target("active"));
 
         assertEquals(FailureKind.AUTH_EXPIRED, officialCmsSiteAdapter.result.getFailureKind());
-        verify(projectPublishQuotaMapper).tryReserve(20L, currentMonth(), 5);
+        verify(companyChannelQuotaService).reserveDistribution(10L, 20L, DistributionTargetKind.BRAND_OFFICIAL_SITE, 300L);
+        verify(companyChannelQuotaService).refundDistribution(300L);
         verify(distributionTaskMapper).update(eq(null), any());
         assertArticleStatusTransitions("distributing", "approved");
     }
@@ -186,7 +197,6 @@ class ContentDistributionServiceTest {
     @Test
     void distributeTo_brandOfficialSite_adapter5xx_writesServerErrorRetryable() {
         givenCommonData();
-        when(projectPublishQuotaMapper.tryReserve(20L, currentMonth(), 5)).thenReturn(1);
         officialCmsSiteAdapter.result = SubmitResult.failure(503, "{}", "down", "HTTP 503", FailureKind.SERVER_ERROR, true);
         when(distributionTaskMapper.selectById(300L)).thenReturn(task("failed"));
 
@@ -206,7 +216,7 @@ class ContentDistributionServiceTest {
         BizException ex = assertThrows(BizException.class, () -> contentDistributionService.distributeTo(1L, target("active")));
 
         assertEquals(403, ex.getCode());
-        verify(projectPublishQuotaMapper, never()).tryReserve(any(), any(), any());
+        verify(companyChannelQuotaService, never()).reserveDistribution(any(), any(), any(), any());
         verify(distributionTaskMapper, never()).insert(any());
     }
 
@@ -218,7 +228,7 @@ class ContentDistributionServiceTest {
 
         assertEquals(400, ex.getCode());
         assertEquals("Brand official site is not active", ex.getMessage());
-        verify(projectPublishQuotaMapper, never()).tryReserve(any(), any(), any());
+        verify(companyChannelQuotaService, never()).reserveDistribution(any(), any(), any(), any());
         verify(distributionTaskMapper, never()).insert(any());
     }
 
@@ -232,8 +242,9 @@ class ContentDistributionServiceTest {
         DistributionTask result = contentDistributionService.distributeTo(1L, new TargetContext.BrandGeoSiteTarget(30L, "ignored"));
 
         assertEquals("submitted", result.getStatus());
-        verify(projectPublishQuotaService).reserve(20L, currentMonth(), 5);
-        verify(projectPublishQuotaService, never()).refund(any(), any());
+        verify(companyChannelQuotaService).reserveDistribution(10L, 20L, DistributionTargetKind.BRAND_GEO_SITE, 300L);
+        verify(companyChannelQuotaService).confirmDistribution(300L);
+        verify(companyChannelQuotaService, never()).refundDistribution(any());
         ArgumentCaptor<DistributionTask> inserted = ArgumentCaptor.forClass(DistributionTask.class);
         verify(distributionTaskMapper).insert(inserted.capture());
         assertEquals("submitting", inserted.getValue().getStatus());
@@ -252,7 +263,7 @@ class ContentDistributionServiceTest {
         contentDistributionService.distributeTo(1L, new TargetContext.BrandGeoSiteTarget(30L, "ignored"));
 
         verify(distributionTaskMapper).update(eq(null), any());
-        verify(projectPublishQuotaService).refund(20L, currentMonth());
+        verify(companyChannelQuotaService).refundDistribution(300L);
         assertArticleStatusTransitions("distributing", "approved");
     }
 
@@ -266,7 +277,7 @@ class ContentDistributionServiceTest {
         contentDistributionService.distributeTo(1L, new TargetContext.BrandGeoSiteTarget(30L, "ignored"));
 
         verify(distributionTaskMapper).update(eq(null), any());
-        verify(projectPublishQuotaService).refund(20L, currentMonth());
+        verify(companyChannelQuotaService).refundDistribution(300L);
         assertArticleStatusTransitions("distributing", "approved");
     }
 
@@ -280,7 +291,7 @@ class ContentDistributionServiceTest {
 
         assertEquals(400, ex.getCode());
         assertEquals("Brand has no GEO site configured", ex.getMessage());
-        verify(projectPublishQuotaService, never()).reserve(any(), any(), any());
+        verify(companyChannelQuotaService, never()).reserveDistribution(any(), any(), any(), any());
         verify(distributionTaskMapper, never()).insert(any());
     }
 
@@ -294,7 +305,7 @@ class ContentDistributionServiceTest {
 
         assertEquals(400, ex.getCode());
         assertEquals("Brand GEO site is not active", ex.getMessage());
-        verify(projectPublishQuotaService, never()).reserve(any(), any(), any());
+        verify(companyChannelQuotaService, never()).reserveDistribution(any(), any(), any(), any());
         verify(distributionTaskMapper, never()).insert(any());
     }
 
@@ -303,13 +314,13 @@ class ContentDistributionServiceTest {
         givenCommonData();
         givenBrandGeoSite("ok", "active");
         doThrow(new BizException(400, "Monthly publishing quota exhausted"))
-                .when(projectPublishQuotaService).reserve(20L, currentMonth(), 5);
+                .when(companyChannelQuotaService).reserveDistribution(10L, 20L, DistributionTargetKind.BRAND_GEO_SITE, 300L);
 
         BizException ex = assertThrows(BizException.class,
                 () -> contentDistributionService.distributeTo(1L, new TargetContext.BrandGeoSiteTarget(30L, "ok")));
 
         assertEquals(400, ex.getCode());
-        verify(distributionTaskMapper, never()).insert(any());
+        verify(distributionTaskMapper).insert(any());
         verify(articleDraftMapper, never()).updateById(articleWithStatus("distributing"));
     }
 
@@ -436,6 +447,7 @@ class ContentDistributionServiceTest {
         });
         Project project = new Project();
         project.setId(20L);
+        project.setCompanyId(10L);
         project.setPartnerId(200L);
         project.setBrandId(30L);
         project.setPackageType("basic");
@@ -443,12 +455,6 @@ class ContentDistributionServiceTest {
         PackagePublishConfig config = new PackagePublishConfig();
         config.setMonthlyPublishLimit(5);
         when(packagePublishConfigMapper.selectOne(any())).thenReturn(config);
-        ProjectPublishQuota quota = new ProjectPublishQuota();
-        quota.setProjectId(20L);
-        quota.setQuotaMonth(currentMonth());
-        quota.setUsedCount(0);
-        quota.setMonthlyLimit(5);
-        when(projectPublishQuotaMapper.selectOne(any())).thenReturn(quota);
         ArticleDraftVersion version = new ArticleDraftVersion();
         version.setArticleId(1L);
         version.setContentMarkdown("markdown");
@@ -523,10 +529,6 @@ class ContentDistributionServiceTest {
         task.setId(300L);
         task.setStatus(status);
         return task;
-    }
-
-    private String currentMonth() {
-        return LocalDate.now(ZoneId.of("Asia/Shanghai")).format(DateTimeFormatter.ofPattern("yyyy-MM"));
     }
 
     private static class TestOfficialCmsSiteAdapter extends OfficialCmsSiteAdapter {

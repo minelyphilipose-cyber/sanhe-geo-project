@@ -199,10 +199,6 @@
                 <configuration>
                     <source>17</source>
                     <target>17</target>
-                    <testExcludes>
-                        <!-- Temporary: package-rebinding branch owns this legacy test update. -->
-                        <exclude>**/ContentDistributionServiceTest.java</exclude>
-                    </testExcludes>
                     <annotationProcessorPaths>
                         <path>
                             <groupId>org.projectlombok</groupId>
