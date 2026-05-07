@@ -205,6 +205,40 @@ class SceneCoverageCalculatorTest {
     }
 
     @Test
+    void duplicatePromptCodeUsesOnePromptCoveragePartition() {
+        SceneCoverageCalculator calculator = new SceneCoverageCalculator(
+                aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
+                platform("p1"), platform("p2")
+        ));
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
+                template(71L, "REC_001", "推荐型", "covered prompt"),
+                template(72L, "REC_002", "推荐型", "duplicate prompt missing copy"),
+                template(73L, "REC_002", "推荐型", "duplicate prompt covered copy")
+        ));
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of(
+                row(71L, "p1", 1, 1, null),
+                row(73L, "p1", 1, 1, null)
+        ));
+
+        Map<String, Integer> totals = Map.of(
+                "RECOMMENDATION", 2,
+                "COMPARISON", 0,
+                "INQUIRY", 0,
+                "COGNITIVE", 0,
+                "SCENARIO", 0
+        );
+
+        SceneAndIntentResult result = calculator.compute(7001L, raw(List.of(), List.of()), totals);
+
+        assertEquals(2, result.sceneCoverage().getHighValue().getTotal());
+        assertEquals(2, result.sceneCoverage().getHighValue().getCovered());
+        assertEquals(0, result.sceneCoverage().getHighValue().getMissingQueries().size());
+        assertEquals(2, result.sceneCoverage().getHighValue().getCovered()
+                + result.sceneCoverage().getHighValue().getMissingQueries().size());
+    }
+
+    @Test
     void comparisonCoverageRequiresScoreThresholdAndNonCompetitorStanceOnOneThirdPlatforms() {
         SceneCoverageCalculator calculator = new SceneCoverageCalculator(
                 aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());

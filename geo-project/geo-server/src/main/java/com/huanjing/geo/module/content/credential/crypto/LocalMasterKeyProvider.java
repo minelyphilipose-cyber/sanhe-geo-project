@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.credential.crypto;
 
 import com.huanjing.geo.common.exception.BizException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -30,6 +31,7 @@ public class LocalMasterKeyProvider implements MasterKeyProvider {
     private final String keyId;
     private final byte[] masterKey;
 
+    @Autowired
     public LocalMasterKeyProvider(
             @Value("${geo.cookie.master-key-id:local-v1}") String keyId,
             @Value("${geo.cookie.master-key-base64:}") String configuredMasterKeyBase64

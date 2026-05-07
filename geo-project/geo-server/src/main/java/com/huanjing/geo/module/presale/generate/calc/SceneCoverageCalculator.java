@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -175,19 +176,16 @@ public class SceneCoverageCalculator {
 
         SceneCoverageGroup highGroup = buildGroup(byIntent,
                 List.of(PresaleIntentCode.RECOMMENDATION, PresaleIntentCode.COMPARISON),
-                intentTotalPrompts,
                 topCompetitorDisplayNames,
                 rowsByTemplate,
                 renderedPromptByTemplate);
         SceneCoverageGroup midGroup = buildGroup(byIntent,
                 List.of(PresaleIntentCode.COGNITIVE, PresaleIntentCode.SCENARIO),
-                intentTotalPrompts,
                 topCompetitorDisplayNames,
                 rowsByTemplate,
                 renderedPromptByTemplate);
         SceneCoverageGroup lowGroup = buildGroup(byIntent,
                 List.of(PresaleIntentCode.INQUIRY),
-                intentTotalPrompts,
                 topCompetitorDisplayNames,
                 rowsByTemplate,
                 renderedPromptByTemplate);
@@ -265,38 +263,40 @@ public class SceneCoverageCalculator {
 
     private SceneCoverageGroup buildGroup(Map<PresaleIntentCode, List<TemplateWithCovered>> byIntent,
                                           List<PresaleIntentCode> intents,
-                                          Map<String, Integer> intentTotalPrompts,
                                           List<String> topCompetitorDisplayNames,
                                           Map<Long, List<PresaleAiPromptResult>> rowsByTemplate,
                                           Map<Long, String> renderedPromptByTemplate) {
         List<TemplateWithCovered> combined = intents.stream()
                 .flatMap(intent -> byIntent.getOrDefault(intent, List.of()).stream())
                 .toList();
+        List<PromptCoverage> prompts = buildPromptCoverage(combined);
 
-        int total = intents.stream().mapToInt(i -> intentTotalPrompts.getOrDefault(i.getCode(), 0)).sum();
-        int covered = (int) combined.stream().filter(TemplateWithCovered::covered).count();
+        int total = prompts.size();
+        int covered = (int) prompts.stream().filter(this::isPromptCovered).count();
         double coverageRate = total == 0 ? 0.0 : (covered * 100.0 / total);
 
-        List<SceneQueryItem> coveredQueries = combined.stream()
-                .filter(TemplateWithCovered::covered)
-                .map(item -> SceneQueryItem.builder()
-                        .promptCode(item.template().getSourcePromptCode())
-                        .promptContent(resolveRenderedPrompt(renderedPromptByTemplate, item.template().getId()))
-                        .category(item.intent().getLabel())
+        List<SceneQueryItem> coveredQueries = prompts.stream()
+                .filter(this::isPromptCovered)
+                .map(prompt -> SceneQueryItem.builder()
+                        .promptCode(prompt.primary().template().getSourcePromptCode())
+                        .promptContent(resolveRenderedPrompt(renderedPromptByTemplate, prompt.primary().template().getId()))
+                        .category(prompt.primary().intent().getLabel())
                         .build())
                 .toList();
 
-        List<SceneQueryMissing> missingQueries = combined.stream()
-                .filter(item -> !item.covered())
-                .map(item -> SceneQueryMissing.builder()
-                        .promptCode(item.template().getSourcePromptCode())
-                        .promptContent(resolveRenderedPrompt(renderedPromptByTemplate, item.template().getId()))
-                        .category(item.intent().getLabel())
+        List<SceneQueryMissing> missingQueries = prompts.stream()
+                .filter(prompt -> !isPromptCovered(prompt))
+                .map(prompt -> SceneQueryMissing.builder()
+                        .promptCode(prompt.primary().template().getSourcePromptCode())
+                        .promptContent(resolveRenderedPrompt(renderedPromptByTemplate, prompt.primary().template().getId()))
+                        .category(prompt.primary().intent().getLabel())
                         .topCompetitorCoverage(resolveTopCompetitorCoverage(
-                                rowsByTemplate.getOrDefault(item.template().getId(), List.of()),
+                                resolveRowsForPrompt(prompt, rowsByTemplate),
                                 topCompetitorDisplayNames))
                         .build())
                 .toList();
+
+        assertSceneCoveragePartition(total, covered, missingQueries.size(), intents, combined.size(), prompts.size());
 
         return SceneCoverageGroup.builder()
                 .total(total)
@@ -305,6 +305,56 @@ public class SceneCoverageCalculator {
                 .coveredQueries(coveredQueries)
                 .missingQueries(missingQueries)
                 .build();
+    }
+
+    private List<PromptCoverage> buildPromptCoverage(List<TemplateWithCovered> rows) {
+        Map<String, List<TemplateWithCovered>> byPrompt = new LinkedHashMap<>();
+        for (TemplateWithCovered row : rows) {
+            byPrompt.computeIfAbsent(promptKey(row.template()), ignored -> new ArrayList<>()).add(row);
+        }
+        return byPrompt.values().stream()
+                .map(PromptCoverage::new)
+                .toList();
+    }
+
+    private String promptKey(PresaleReportVersionPromptTemplate template) {
+        if (template == null) {
+            return "__null__";
+        }
+        String sourcePromptCode = template.getSourcePromptCode();
+        if (sourcePromptCode != null && !sourcePromptCode.isBlank()) {
+            return sourcePromptCode.trim();
+        }
+        return "template:" + template.getId();
+    }
+
+    private boolean isPromptCovered(PromptCoverage prompt) {
+        return prompt.rows().stream().anyMatch(TemplateWithCovered::covered);
+    }
+
+    private List<PresaleAiPromptResult> resolveRowsForPrompt(PromptCoverage prompt,
+                                                             Map<Long, List<PresaleAiPromptResult>> rowsByTemplate) {
+        return prompt.rows().stream()
+                .flatMap(row -> rowsByTemplate.getOrDefault(row.template().getId(), List.of()).stream())
+                .toList();
+    }
+
+    private void assertSceneCoveragePartition(int total,
+                                              int covered,
+                                              int missing,
+                                              List<PresaleIntentCode> intents,
+                                              int rawRowCount,
+                                              int promptCount) {
+        if (covered + missing != total) {
+            log.error("scene_coverage partition mismatch intents={} total={} covered={} missing={} sum={} rawRows={} uniquePrompts={}",
+                    intents.stream().map(PresaleIntentCode::getCode).toList(),
+                    total,
+                    covered,
+                    missing,
+                    covered + missing,
+                    rawRowCount,
+                    promptCount);
+        }
     }
 
     private String resolveRenderedPrompt(Map<Long, String> renderedPromptByTemplate, Long templateId) {
@@ -354,6 +404,12 @@ public class SceneCoverageCalculator {
     private record TemplateWithCovered(PresaleReportVersionPromptTemplate template,
                                        PresaleIntentCode intent,
                                        boolean covered) {
+    }
+
+    private record PromptCoverage(List<TemplateWithCovered> rows) {
+        TemplateWithCovered primary() {
+            return rows.get(0);
+        }
     }
 
     private static class IntentCoverage {
