@@ -40,7 +40,8 @@ public class AuditOperationAspect {
             ExtensionErrorCodes.COOKIE_CAPTURE_ACCOUNT_BRAND_MISMATCH,
             ExtensionErrorCodes.COOKIE_CAPTURE_NONCE_REPLAYED,
             ContentErrorCodes.ARTICLE_STATE_CONFLICT,
-            ContentErrorCodes.ARTICLE_AUTHOR_CANNOT_REVIEW
+            ContentErrorCodes.ARTICLE_AUTHOR_CANNOT_REVIEW,
+            ContentErrorCodes.ARTICLE_AI_DRAFT_RATE_LIMITED
     );
 
     private static final Set<Integer> NOT_FOUND_CODES = Set.of(
