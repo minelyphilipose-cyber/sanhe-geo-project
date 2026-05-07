@@ -50,6 +50,56 @@
       <template #header>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
+            <span>自媒体账号</span>
+            <el-tag type="info">头条 / 知乎</el-tag>
+          </div>
+          <el-button v-if="canUpdateBrand" type="primary" link @click="openSelfMediaAccountCreate">新增账号</el-button>
+        </div>
+      </template>
+      <el-alert
+        class="mb-3"
+        type="info"
+        show-icon
+        :closable="false"
+        title="头条、知乎使用浏览器扩展捕获登录凭证。账号建好后，请在扩展里选择账号并捕获凭证。"
+      />
+      <el-table v-loading="selfMediaAccountsLoading" :data="semiAutoSelfMediaAccounts" border>
+        <el-table-column prop="platform" label="平台" width="110">
+          <template #default="{ row }">{{ selfMediaPlatformLabel(row.platform) }}</template>
+        </el-table-column>
+        <el-table-column prop="accountName" label="账号名称" min-width="180" />
+        <el-table-column prop="platformAccountId" label="账号标识" min-width="180">
+          <template #default="{ row }">{{ row.platformAccountId || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">
+              {{ row.status === 'active' ? '启用' : '停用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="凭证" width="130">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.cookieCredentialStatus === 'active' ? 'success' : 'warning'">
+              {{ row.cookieCredentialStatus === 'active' ? `v${row.cookieCredentialVersion || '-'}` : '未捕获' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="捕获时间" min-width="170">
+          <template #default="{ row }">{{ row.cookieCredentialCapturedAt || '-' }}</template>
+        </el-table-column>
+        <el-table-column v-if="canUpdateBrand" label="操作" width="100" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openSelfMediaAccountEdit(row)">编辑</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <el-card>
+      <template #header>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
             <span>品牌标准表达</span>
             <el-tag :type="statementTagType">{{ statementStatusLabel }}</el-tag>
             <el-tag v-if="statement?.statementVersion" type="info">v{{ statement?.statementVersion }}</el-tag>
@@ -158,6 +208,42 @@
         <el-button type="primary" :loading="saving" @click="submitBrand">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="selfMediaAccountVisible"
+      :title="editingSelfMediaAccount ? '编辑自媒体账号' : '新增自媒体账号'"
+      width="520px"
+    >
+      <el-form
+        ref="selfMediaAccountFormRef"
+        :model="selfMediaAccountForm"
+        :rules="selfMediaAccountRules"
+        label-width="100px"
+      >
+        <el-form-item label="平台" prop="platform" required>
+          <el-select v-model="selfMediaAccountForm.platform" style="width: 100%">
+            <el-option label="头条" value="toutiao" />
+            <el-option label="知乎" value="zhihu" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="账号名称" prop="accountName" required>
+          <el-input v-model="selfMediaAccountForm.accountName" placeholder="运营可识别的账号名称" maxlength="128" />
+        </el-form-item>
+        <el-form-item label="账号标识">
+          <el-input v-model="selfMediaAccountForm.platformAccountId" placeholder="可填主页 ID、用户名或内部备注" maxlength="128" />
+        </el-form-item>
+        <el-form-item label="状态" prop="status" required>
+          <el-select v-model="selfMediaAccountForm.status" style="width: 100%">
+            <el-option label="启用" value="active" />
+            <el-option label="停用" value="disabled" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="selfMediaAccountVisible = false">取消</el-button>
+        <el-button type="primary" :loading="selfMediaAccountSaving" @click="submitSelfMediaAccount">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -165,6 +251,11 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import {
+  createSelfMediaAccount,
+  getSelfMediaAccountsByBrand,
+  updateSelfMediaAccount,
+} from '@/api/content'
 import {
   getBrandDetail,
   updateBrand,
@@ -176,7 +267,7 @@ import {
   unlockBrandStatement,
   regenerateBrandStatement,
 } from '@/api/customer'
-import type { Brand, BrandStatementView } from '@/types'
+import type { Brand, BrandStatementView, SelfMediaAccount } from '@/types'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
@@ -200,16 +291,30 @@ const isPartnerRole = computed(() =>
 const canEditStatement = computed(() => canUpdateBrand.value && !isPartnerRole.value)
 const canRegenerateStatement = computed(() => canEditStatement.value)
 
+type SemiAutoPlatform = 'toutiao' | 'zhihu'
+type SemiAutoSelfMediaAccount = SelfMediaAccount & {
+  platform: SemiAutoPlatform | string
+  cookieCredentialStatus?: string | null
+  cookieCredentialVersion?: number | null
+  cookieCredentialCapturedAt?: string | null
+}
+
 const loading = ref(false)
 const saving = ref(false)
 const editVisible = ref(false)
 const statementVisible = ref(false)
 const statementSaving = ref(false)
+const selfMediaAccountsLoading = ref(false)
+const selfMediaAccountSaving = ref(false)
+const selfMediaAccountVisible = ref(false)
 const brand = ref<Brand | null>(null)
 const statement = ref<BrandStatementView | null>(null)
+const selfMediaAccounts = ref<SemiAutoSelfMediaAccount[]>([])
+const editingSelfMediaAccount = ref<SemiAutoSelfMediaAccount | null>(null)
 const companyName = ref('')
 const companyIndustryTags = ref<string[]>([])
 const brandFormRef = ref<FormInstance>()
+const selfMediaAccountFormRef = ref<FormInstance>()
 
 const brandForm = reactive({
   brandName: '',
@@ -240,6 +345,13 @@ const statementForm = reactive({
   brandParagraph: '',
 })
 
+const selfMediaAccountForm = reactive({
+  platform: 'toutiao' as SemiAutoPlatform,
+  accountName: '',
+  platformAccountId: '',
+  status: 'active' as 'active' | 'disabled',
+})
+
 const brandRules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
   brandSlug: [
@@ -249,6 +361,16 @@ const brandRules: FormRules = {
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
 }
+
+const selfMediaAccountRules: FormRules = {
+  platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
+  accountName: [{ required: true, message: '请输入账号名称', trigger: 'blur' }],
+  status: [{ required: true, message: '请选择状态', trigger: 'change' }],
+}
+
+const semiAutoSelfMediaAccounts = computed(() =>
+  selfMediaAccounts.value.filter((item) => item.platform === 'toutiao' || item.platform === 'zhihu'),
+)
 
 const regionText = computed(() => {
   if (!brand.value) return '-'
@@ -281,6 +403,12 @@ function geoSiteStatusLabel(value?: string | null) {
   if (value === 'active') return '启用'
   if (value === 'disabled') return '停用'
   return '-'
+}
+
+function selfMediaPlatformLabel(value?: string | null) {
+  if (value === 'toutiao') return '头条'
+  if (value === 'zhihu') return '知乎'
+  return value || '-'
 }
 
 function parseIndustryTags(value?: string | string[] | null) {
@@ -337,12 +465,66 @@ async function load() {
       companyName.value = ''
       companyIndustryTags.value = []
     }
+    await loadSelfMediaAccounts()
   } catch {
     brand.value = null
     statement.value = null
     companyName.value = ''
+    selfMediaAccounts.value = []
   } finally {
     loading.value = false
+  }
+}
+
+async function loadSelfMediaAccounts() {
+  selfMediaAccountsLoading.value = true
+  try {
+    const { data } = await getSelfMediaAccountsByBrand(brandId)
+    selfMediaAccounts.value = data.data as SemiAutoSelfMediaAccount[]
+  } finally {
+    selfMediaAccountsLoading.value = false
+  }
+}
+
+function openSelfMediaAccountCreate() {
+  editingSelfMediaAccount.value = null
+  selfMediaAccountForm.platform = 'toutiao'
+  selfMediaAccountForm.accountName = ''
+  selfMediaAccountForm.platformAccountId = ''
+  selfMediaAccountForm.status = 'active'
+  selfMediaAccountVisible.value = true
+}
+
+function openSelfMediaAccountEdit(account: SemiAutoSelfMediaAccount) {
+  editingSelfMediaAccount.value = account
+  selfMediaAccountForm.platform = account.platform === 'zhihu' ? 'zhihu' : 'toutiao'
+  selfMediaAccountForm.accountName = account.accountName || ''
+  selfMediaAccountForm.platformAccountId = account.platformAccountId || ''
+  selfMediaAccountForm.status = account.status === 'disabled' ? 'disabled' : 'active'
+  selfMediaAccountVisible.value = true
+}
+
+async function submitSelfMediaAccount() {
+  const valid = await selfMediaAccountFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+  selfMediaAccountSaving.value = true
+  try {
+    const payload = {
+      platform: selfMediaAccountForm.platform,
+      accountName: selfMediaAccountForm.accountName.trim(),
+      platformAccountId: selfMediaAccountForm.platformAccountId.trim() || undefined,
+      status: selfMediaAccountForm.status,
+    }
+    if (editingSelfMediaAccount.value) {
+      await updateSelfMediaAccount(editingSelfMediaAccount.value.id, payload)
+    } else {
+      await createSelfMediaAccount(brandId, payload)
+    }
+    ElMessage.success('自媒体账号已保存')
+    selfMediaAccountVisible.value = false
+    await loadSelfMediaAccounts()
+  } finally {
+    selfMediaAccountSaving.value = false
   }
 }
 

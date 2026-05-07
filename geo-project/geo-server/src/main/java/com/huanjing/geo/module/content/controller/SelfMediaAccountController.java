@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.content.controller;
 
 import com.huanjing.geo.common.result.R;
+import com.huanjing.geo.module.content.dto.SelfMediaAccountManageRequest;
 import com.huanjing.geo.module.content.service.SelfMediaAccountService;
 import com.huanjing.geo.module.content.vo.DouyinAuthUrlVO;
 import com.huanjing.geo.module.content.vo.DouyinCapabilityVO;
@@ -11,6 +12,7 @@ import com.huanjing.geo.module.content.douyin.DouyinAuthorizationService;
 import com.huanjing.geo.module.content.wechat.WechatMpAuthorizationService;
 import com.huanjing.geo.module.customer.service.BrandService;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -54,6 +56,18 @@ public class SelfMediaAccountController {
     public R<List<SelfMediaAccountVO>> listByBrand(@PathVariable Long brandId) {
         brandService.requireBrandWithAccess(brandId, true);
         return R.ok(selfMediaAccountService.listByBrand(brandId));
+    }
+
+    @PostMapping("/brands/{brandId}/self-media-accounts")
+    public R<SelfMediaAccountVO> create(@PathVariable Long brandId,
+                                        @Valid @RequestBody SelfMediaAccountManageRequest request) {
+        return R.ok(selfMediaAccountService.createCookieAccount(brandId, request));
+    }
+
+    @PutMapping("/self-media-accounts/{id}")
+    public R<SelfMediaAccountVO> update(@PathVariable Long id,
+                                        @Valid @RequestBody SelfMediaAccountManageRequest request) {
+        return R.ok(selfMediaAccountService.updateCookieAccount(id, request));
     }
 
     @PostMapping("/self-media-accounts/{id}/check-auth")

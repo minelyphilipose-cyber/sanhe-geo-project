@@ -121,6 +121,24 @@ export function getSelfMediaAccountsByBrand(brandId: number) {
   return request.get<R<SelfMediaAccount[]>>(`/content/brands/${brandId}/self-media-accounts`)
 }
 
+export function createSelfMediaAccount(brandId: number, data: {
+  platform: 'toutiao' | 'zhihu'
+  accountName: string
+  platformAccountId?: string
+  status?: 'active' | 'disabled'
+}) {
+  return request.post<R<SelfMediaAccount>>(`/content/brands/${brandId}/self-media-accounts`, data)
+}
+
+export function updateSelfMediaAccount(id: number, data: {
+  platform: 'toutiao' | 'zhihu'
+  accountName: string
+  platformAccountId?: string
+  status?: 'active' | 'disabled'
+}) {
+  return request.put<R<SelfMediaAccount>>(`/content/self-media-accounts/${id}`, data)
+}
+
 export function checkSelfMediaAccountAuth(id: number) {
   return request.post<R<SelfMediaAccount>>(`/content/self-media-accounts/${id}/check-auth`)
 }

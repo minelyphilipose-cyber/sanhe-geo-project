@@ -6,17 +6,24 @@ import com.huanjing.geo.module.content.config.WechatMpClientProperties;
 import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
 import com.huanjing.geo.module.content.credential.dto.CookieCredentialMeta;
 import com.huanjing.geo.module.content.credential.service.CredentialVaultService;
+import com.huanjing.geo.module.content.dto.SelfMediaAccountManageRequest;
 import com.huanjing.geo.module.content.dto.WechatMpDevSeedRequest;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.vo.SelfMediaAccountVO;
 import com.huanjing.geo.module.content.vo.WechatMpCapabilityVO;
+import com.huanjing.geo.module.customer.access.BrandAccessAction;
+import com.huanjing.geo.module.customer.access.BrandAccessService;
+import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.content.wechat.WechatAuthorizerTokenService;
 import com.huanjing.geo.module.content.wechat.WechatMpClient;
 import com.huanjing.geo.module.system.service.MpCredentialCipherService;
+import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -32,6 +39,8 @@ public class SelfMediaAccountService {
     private final MpCredentialCipherService cipherService;
     private final WechatAuthorizerTokenService authorizerTokenService;
     private final CredentialVaultService credentialVaultService;
+    private final BrandAccessService brandAccessService;
+    private final CurrentUserService currentUserService;
 
     public WechatMpCapabilityVO capability() {
         String reason = openPlatformProperties.isDraftDistributionEnabled()
@@ -73,6 +82,44 @@ public class SelfMediaAccountService {
         account.setLastAuthCheckedAt(LocalDateTime.now());
         selfMediaAccountMapper.updateById(account);
         return SelfMediaAccountVO.from(account);
+    }
+
+    @Transactional
+    public SelfMediaAccountVO createCookieAccount(Long brandId, SelfMediaAccountManageRequest request) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        brandAccessService.requireBrandAccess(brandId, operator.getId(), BrandAccessAction.MANAGE);
+        ensureNoDuplicateCookieAccount(null, brandId, request.platform(), request.platformAccountId());
+        LocalDateTime now = LocalDateTime.now();
+        SelfMediaAccount account = new SelfMediaAccount();
+        account.setBrandId(brandId);
+        account.setPlatform(request.platform());
+        account.setPlatformAccountId(trimToNull(request.platformAccountId()));
+        account.setAccountName(request.accountName().trim());
+        account.setStatus(normalizeStatus(request.status()));
+        account.setAuthMode("COOKIE");
+        account.setCreatedBy(operator.getId());
+        account.setCreatedAt(now);
+        account.setUpdatedAt(now);
+        selfMediaAccountMapper.insert(account);
+        return toVoWithCredentialStatus(account);
+    }
+
+    @Transactional
+    public SelfMediaAccountVO updateCookieAccount(Long id, SelfMediaAccountManageRequest request) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        SelfMediaAccount account = requireAccount(id);
+        if (!"COOKIE".equalsIgnoreCase(account.getAuthMode())) {
+            throw new BizException(400, "Only cookie self-media accounts can be managed here");
+        }
+        brandAccessService.requireBrandAccess(account.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
+        ensureNoDuplicateCookieAccount(account.getId(), account.getBrandId(), request.platform(), request.platformAccountId());
+        account.setPlatform(request.platform());
+        account.setPlatformAccountId(trimToNull(request.platformAccountId()));
+        account.setAccountName(request.accountName().trim());
+        account.setStatus(normalizeStatus(request.status()));
+        account.setUpdatedAt(LocalDateTime.now());
+        selfMediaAccountMapper.updateById(account);
+        return toVoWithCredentialStatus(account);
     }
 
     private void checkMaterialCount(SelfMediaAccount account) {
@@ -147,6 +194,30 @@ public class SelfMediaAccountService {
             }
         }
         return vo;
+    }
+
+    private void ensureNoDuplicateCookieAccount(Long currentId, Long brandId, String platform, String platformAccountId) {
+        String normalizedPlatformAccountId = trimToNull(platformAccountId);
+        if (!StringUtils.hasText(normalizedPlatformAccountId)) {
+            return;
+        }
+        SelfMediaAccount existing = selfMediaAccountMapper.selectOne(new LambdaQueryWrapper<SelfMediaAccount>()
+                .eq(SelfMediaAccount::getBrandId, brandId)
+                .eq(SelfMediaAccount::getPlatform, platform)
+                .eq(SelfMediaAccount::getPlatformAccountId, normalizedPlatformAccountId)
+                .isNull(SelfMediaAccount::getDeletedAt)
+                .last("LIMIT 1"));
+        if (existing != null && !existing.getId().equals(currentId)) {
+            throw new BizException(400, "self media account already exists");
+        }
+    }
+
+    private String normalizeStatus(String status) {
+        return StringUtils.hasText(status) ? status.trim() : "active";
+    }
+
+    private String trimToNull(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
     }
 
 }
