@@ -55,9 +55,15 @@ geo:
 
   cookie:
     master-key-id: local-dev-v1
-    # Required in every environment. Generate locally with: openssl rand -base64 32
-    # Do not commit actual master keys.
-    master-key-base64: ${GEO_COOKIE_MASTER_KEY_BASE64:__REQUIRED_GEO_COOKIE_MASTER_KEY_BASE64__}
+    # Dev-only fallback so local boot does not require exporting GEO_COOKIE_MASTER_KEY_BASE64.
+    # Prod keeps the required placeholder from application.yml and must inject a real secret.
+    master-key-base64: ${GEO_COOKIE_MASTER_KEY_BASE64:bG9jYWwtZGV2LWNvb2tpZS1tYXN0ZXIta2V5LTMyISE=}
+
+  extension:
+    fill-token:
+      # Dev-only fallback so local boot does not require exporting FILL_TOKEN_HMAC_SECRET.
+      # Prod keeps the required placeholder from application.yml and must inject a real secret.
+      hmac-secret: ${FILL_TOKEN_HMAC_SECRET:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
 
   jwt:
     secret: "huanjing-geo-2024-jwt-secret-key-must-be-at-least-256-bits-long"
