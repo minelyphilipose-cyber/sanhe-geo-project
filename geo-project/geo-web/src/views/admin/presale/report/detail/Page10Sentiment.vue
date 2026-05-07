@@ -65,15 +65,19 @@
         </div>
 
         <!-- 负面证据 -->
-        <div v-if="firstNegativeEvidence" class="p10-evidence-wrap">
+        <div v-if="negativeEvidenceList.length > 0" class="p10-evidence-wrap">
           <div class="evidence-tag p10-evidence-tag">⚠ NEGATIVE EVIDENCE · 负面提及证据</div>
-          <div class="evidence-box p10-evidence-box">
+          <div
+            v-for="(evidence, idx) in negativeEvidenceList"
+            :key="`${evidence.platform_code}-${evidence.tested_at}-${idx}`"
+            class="evidence-box p10-evidence-box"
+          >
             <div class="mono p10-evidence-meta">
-              {{ firstNegativeEvidence.platform_name }} ·
-              {{ formatEvidenceDate(firstNegativeEvidence.tested_at) }} ·
-              "{{ firstNegativeEvidence.query }}"
+              {{ evidence.platform_name }} ·
+              {{ formatEvidenceDate(evidence.tested_at) }} ·
+              "{{ evidence.query }}"
             </div>
-            <div class="p10-evidence-snippet">"{{ firstNegativeEvidence.snippet }}"</div>
+            <div class="p10-evidence-snippet">"{{ evidence.snippet }}"</div>
           </div>
         </div>
       </div>
@@ -98,11 +102,10 @@ import PresaleChart from './shared/PresaleChart.vue'
  *   - 3 条进度/数字:基于 positive/neutral/negative 三分类
  *   - 正面关键词:sentiment_detail.top_keywords?(可选,undefined 整块不渲染)
  *     字号用 keyword.weight 做视觉分级(1-5,最高 20px,最低 12px)
- *   - 负面证据:sentiment_detail.negative_evidence?.[0](取第一条,对齐原型)
+ *   - 负面证据:sentiment_detail.negative_evidence 最多展示 3 条
  *
  * 不做:
  *   - 原型"VS. 竞品"块(91% vs 82%):无 competitor_sentiment 契约,去掉
- *   - 多条负面证据的列表:原型只画一条,本批对齐
  */
 
 const { mergedView: mergedViewRef } = useMergedView()
@@ -288,11 +291,11 @@ const positiveKeywords = computed<KeywordChip[]>(() => {
   })
 })
 
-// ─── 负面证据(取第一条) ───────────────────────────────
-const firstNegativeEvidence = computed(() => {
+// ─── 负面证据(最多 3 条) ──────────────────────────────
+const negativeEvidenceList = computed(() => {
   const list = sentiment.value.negative_evidence
-  if (!list || list.length === 0) return null
-  return list[0]
+  if (!list || list.length === 0) return []
+  return list.slice(0, 3)
 })
 
 function formatEvidenceDate(isoStr: string): string {
@@ -400,6 +403,9 @@ function formatEvidenceDate(isoStr: string): string {
 .p10-evidence-box {
   border-color: #b91c1c !important;
   border-left: 3px solid #b91c1c !important;
+}
+.p10-evidence-box + .p10-evidence-box {
+  margin-top: 10px;
 }
 .p10-evidence-meta {
   font-size: 11px;
