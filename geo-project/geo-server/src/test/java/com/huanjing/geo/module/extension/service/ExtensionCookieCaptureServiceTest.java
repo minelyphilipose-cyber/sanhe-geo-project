@@ -17,11 +17,13 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 
 import static com.huanjing.geo.module.extension.ExtensionErrorCodes.COOKIE_CAPTURE_ACCOUNT_BRAND_MISMATCH;
 import static com.huanjing.geo.module.extension.ExtensionErrorCodes.COOKIE_CAPTURE_CONFIRM_REQUIRED;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -51,6 +53,42 @@ class ExtensionCookieCaptureServiceTest {
         auditSupport = mock(ExtensionAuditSupport.class);
         service = new ExtensionCookieCaptureService(accountMapper, brandAccessService,
                 credentialVaultService, redisStore, auditSupport);
+    }
+
+    @Test
+    void listAccountsUsesBrandAccessBrandIdsAndSqlLimit() {
+        when(brandAccessService.listAccessibleBrandIds(99L, BrandAccessAction.OPERATE))
+                .thenReturn(List.of(10L));
+        when(accountMapper.selectExtensionAccountsByBrandIds(List.of(10L), 200))
+                .thenReturn(List.of(account(20L, 10L, "toutiao")));
+
+        var accounts = service.listAccounts(99L);
+
+        assertEquals(1, accounts.size());
+        assertEquals(20L, accounts.get(0).accountId());
+        verify(accountMapper).selectExtensionAccountsByBrandIds(List.of(10L), 200);
+    }
+
+    @Test
+    void listAccountsReturnsEmptyWhenOperatorHasNoOperableBrands() {
+        when(brandAccessService.listAccessibleBrandIds(99L, BrandAccessAction.OPERATE))
+                .thenReturn(List.of());
+
+        assertTrue(service.listAccounts(99L).isEmpty());
+        verify(accountMapper, never()).selectExtensionAccountsByBrandIds(any(), any(Integer.class));
+    }
+
+    @Test
+    void listAccountsDoesNotRequestCrossBrandCandidates() {
+        when(brandAccessService.listAccessibleBrandIds(99L, BrandAccessAction.OPERATE))
+                .thenReturn(List.of(10L, 12L));
+        when(accountMapper.selectExtensionAccountsByBrandIds(List.of(10L, 12L), 200))
+                .thenReturn(List.of(account(20L, 10L, "toutiao"), account(30L, 12L, "zhihu")));
+
+        var accounts = service.listAccounts(99L);
+
+        assertEquals(List.of(10L, 12L), accounts.stream().map(a -> a.brandId()).toList());
+        verify(accountMapper).selectExtensionAccountsByBrandIds(List.of(10L, 12L), 200);
     }
 
     @Test

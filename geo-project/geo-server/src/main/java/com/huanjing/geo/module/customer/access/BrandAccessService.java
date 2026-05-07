@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -85,6 +86,26 @@ public class BrandAccessService {
         } catch (BizException ex) {
             return false;
         }
+    }
+
+    public List<Long> listAccessibleBrandIds(Long operatorId, BrandAccessAction action) {
+        if (operatorId == null) {
+            return List.of();
+        }
+        SysUser operator;
+        try {
+            operator = requireActiveOperator(operatorId, null, action, false);
+        } catch (BizException ex) {
+            return List.of();
+        }
+        BrandAccessAction resolved = action == null ? BrandAccessAction.READ : action;
+        if (!hasBasePermission(operator, resolved) || isPartnerUser(operator) && resolved != BrandAccessAction.READ) {
+            return List.of();
+        }
+        if (hasGlobalBrandRole(operator)) {
+            return brandMapper.selectActiveBrandIds();
+        }
+        return assignmentMapper.selectActiveBrandIdsByRoles(operatorId, assignmentRolesFor(resolved));
     }
 
     private Brand checkBrandAccess(Long brandId, Long operatorId, BrandAccessAction action, boolean auditDenied) {
@@ -152,6 +173,14 @@ public class BrandAccessService {
             case "SECONDARY" -> action != BrandAccessAction.MANAGE;
             case "VIEWER" -> action == BrandAccessAction.READ;
             default -> false;
+        };
+    }
+
+    private List<String> assignmentRolesFor(BrandAccessAction action) {
+        return switch (action) {
+            case MANAGE -> List.of("PRIMARY");
+            case OPERATE -> List.of("PRIMARY", "SECONDARY");
+            case READ -> List.of("PRIMARY", "SECONDARY", "VIEWER");
         };
     }
 

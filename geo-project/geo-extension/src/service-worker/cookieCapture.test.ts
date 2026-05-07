@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { extensionApi } from '@/shared/api'
+import { ExtensionApiError, extensionApi } from '@/shared/api'
 import { sessionStorage } from '@/shared/storage'
 import { captureCookiesForAccount, domainsForPlatform } from './cookieCapture'
 
@@ -26,6 +26,7 @@ vi.mock('@/shared/api', async () => {
 })
 
 beforeEach(() => {
+  vi.clearAllMocks()
   vi.mocked(sessionStorage.get).mockResolvedValue({
     token: 'ext.secret',
     sessionId: 88,
@@ -78,5 +79,20 @@ describe('cookie capture service worker flow', () => {
         cookiesJson: expect.stringContaining('sessionid'),
       }),
     )
+  })
+
+  it('does not retry business 4xx errors', async () => {
+    vi.mocked(extensionApi.captureCookies).mockRejectedValue(
+      new ExtensionApiError(409, 70016, 'cookie capture confirmation already used'),
+    )
+
+    await expect(captureCookiesForAccount({
+      accountId: 20,
+      brandId: 10,
+      platform: 'toutiao',
+      accountName: 'Toutiao Account',
+    })).rejects.toMatchObject({ code: 70016 })
+
+    expect(extensionApi.captureCookies).toHaveBeenCalledTimes(1)
   })
 })

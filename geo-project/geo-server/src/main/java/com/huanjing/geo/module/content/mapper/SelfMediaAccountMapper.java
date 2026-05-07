@@ -21,11 +21,18 @@ public interface SelfMediaAccountMapper extends BaseMapper<SelfMediaAccount> {
     Long lockById(@Param("id") Long id);
 
     @Select("""
+            <script>
             SELECT id, brand_id, platform, account_name, status
             FROM self_media_account
             WHERE deleted_at IS NULL
+              AND brand_id IN
+              <foreach collection="brandIds" item="brandId" open="(" separator="," close=")">
+                #{brandId}
+              </foreach>
             ORDER BY updated_at DESC, id DESC
             LIMIT #{limit}
+            </script>
             """)
-    List<SelfMediaAccount> selectExtensionAccountCandidates(@Param("limit") int limit);
+    List<SelfMediaAccount> selectExtensionAccountsByBrandIds(@Param("brandIds") List<Long> brandIds,
+                                                             @Param("limit") int limit);
 }

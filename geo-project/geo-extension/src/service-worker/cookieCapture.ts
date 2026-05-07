@@ -1,5 +1,5 @@
 import { EXTENSION_VERSION } from '@/shared/env'
-import { extensionApi } from '@/shared/api'
+import { ExtensionApiError, extensionApi } from '@/shared/api'
 import { sessionStorage } from '@/shared/storage'
 import type { CookieCaptureResponse, ExtensionSelfMediaAccount } from '@/types/extension'
 
@@ -67,6 +67,9 @@ async function withRetry<T>(fn: () => Promise<T>, maxAttempts: number): Promise<
       return await fn()
     } catch (error) {
       lastError = error
+      if (error instanceof ExtensionApiError && error.status >= 400 && error.status < 500) {
+        throw error
+      }
       if (attempt < maxAttempts) {
         await delay(100 * 2 ** (attempt - 1))
       }

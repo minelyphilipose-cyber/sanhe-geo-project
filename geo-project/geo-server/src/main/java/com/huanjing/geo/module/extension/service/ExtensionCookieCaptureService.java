@@ -31,7 +31,7 @@ import static com.huanjing.geo.module.extension.ExtensionErrorCodes.EXTENSION_NO
 @RequiredArgsConstructor
 public class ExtensionCookieCaptureService {
 
-    private static final int ACCOUNT_CANDIDATE_LIMIT = 500;
+    private static final int ACCOUNT_CANDIDATE_LIMIT = 200;
     private static final Duration NONCE_TTL = Duration.ofMinutes(10);
     private static final String NONCE_KEY_PREFIX = "geo:extension:cookie-capture:nonce:";
 
@@ -42,10 +42,12 @@ public class ExtensionCookieCaptureService {
     private final ExtensionAuditSupport auditSupport;
 
     public List<ExtensionSelfMediaAccountResponse> listAccounts(Long operatorId) {
-        return accountMapper.selectExtensionAccountCandidates(ACCOUNT_CANDIDATE_LIMIT)
+        List<Long> brandIds = brandAccessService.listAccessibleBrandIds(operatorId, BrandAccessAction.OPERATE);
+        if (brandIds.isEmpty()) {
+            return List.of();
+        }
+        return accountMapper.selectExtensionAccountsByBrandIds(brandIds, ACCOUNT_CANDIDATE_LIMIT)
                 .stream()
-                .filter(account -> brandAccessService.hasBrandAccess(
-                        account.getBrandId(), operatorId, BrandAccessAction.OPERATE))
                 .map(account -> new ExtensionSelfMediaAccountResponse(
                         account.getId(),
                         account.getPlatform(),
