@@ -49,6 +49,37 @@ export interface ExtensionTaskListItem {
   expiresAt: string
 }
 
+export interface ExtensionSelfMediaAccount {
+  accountId: number
+  platform: string
+  accountName?: string | null
+  brandId: number
+}
+
+export interface CookieCaptureRequest {
+  brandId: number
+  accountId: number
+  platform: string
+  extensionVersion: string
+  installId: string
+  operatorConfirmed: boolean
+  confirmNonce: string
+  cookiesJson: string
+  userAgent?: string
+  requiredCookieCheckJson?: string
+  capturedFingerprintJson?: string
+}
+
+export interface CookieCaptureResponse {
+  credentialId: number
+  accountId: number
+  brandId: number
+  platform: string
+  version: number
+  capturedAt: string
+  status: 'ACTIVE'
+}
+
 export interface ExtensionMessage<T = unknown> {
   type: string
   payload?: T

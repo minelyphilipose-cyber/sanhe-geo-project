@@ -5,6 +5,9 @@ import com.huanjing.geo.module.extension.dto.BindCodeCreateRequest;
 import com.huanjing.geo.module.extension.dto.BindCodeCreateResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionBindRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionBindResponse;
+import com.huanjing.geo.module.extension.dto.ExtensionCookieCaptureRequest;
+import com.huanjing.geo.module.extension.dto.ExtensionCookieCaptureResponse;
+import com.huanjing.geo.module.extension.dto.ExtensionSelfMediaAccountResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskListItemResponse;
@@ -18,6 +21,7 @@ import com.huanjing.geo.module.extension.dto.FillTokenIssueResponse;
 import com.huanjing.geo.module.extension.entity.ExtensionSession;
 import com.huanjing.geo.module.extension.service.ExtensionBindCodeService;
 import com.huanjing.geo.module.extension.service.ExtensionCredentialService;
+import com.huanjing.geo.module.extension.service.ExtensionCookieCaptureService;
 import com.huanjing.geo.module.extension.service.ExtensionSessionService;
 import com.huanjing.geo.module.extension.service.ExtensionTaskListService;
 import com.huanjing.geo.module.extension.service.ExtensionTaskStateService;
@@ -47,6 +51,7 @@ public class ExtensionController {
     private final ExtensionVersionService versionService;
     private final FillTokenService fillTokenService;
     private final ExtensionCredentialService credentialService;
+    private final ExtensionCookieCaptureService cookieCaptureService;
     private final ExtensionTaskListService taskListService;
     private final ExtensionTaskStateService taskStateService;
     private final CurrentUserService currentUserService;
@@ -143,6 +148,25 @@ public class ExtensionController {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
         versionService.requireSupported("chrome", session.getExtensionVersion());
         return R.ok(taskListService.listTasksForSessionOperator(session.getOperatorId()));
+    }
+
+    @GetMapping("/self-media-accounts")
+    public R<List<ExtensionSelfMediaAccountResponse>> listSelfMediaAccounts(
+            @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken
+    ) {
+        ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        versionService.requireSupported("chrome", session.getExtensionVersion());
+        return R.ok(cookieCaptureService.listAccounts(session.getOperatorId()));
+    }
+
+    @PostMapping("/cookies/capture")
+    public R<ExtensionCookieCaptureResponse> captureCookies(
+            @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
+            @Valid @RequestBody ExtensionCookieCaptureRequest request
+    ) {
+        ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        versionService.requireSupported(request.platform(), request.extensionVersion());
+        return R.ok(cookieCaptureService.capture(request, session.getOperatorId(), session.getId()));
     }
 
     @PostMapping("/tasks/{taskId}/ack")

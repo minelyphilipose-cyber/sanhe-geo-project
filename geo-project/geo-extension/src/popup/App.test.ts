@@ -26,6 +26,7 @@ vi.mock('@/shared/api', async () => {
     extensionApi: {
       versionCheck: vi.fn(async () => ({ supported: true })),
       tasks: vi.fn(async () => []),
+      selfMediaAccounts: vi.fn(async () => []),
       bind: vi.fn(),
       revoke: vi.fn(),
       refresh: vi.fn(),

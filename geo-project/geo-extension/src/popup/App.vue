@@ -4,7 +4,7 @@ import { EXTENSION_VERSION } from '@/shared/env'
 import { ExtensionApiError, extensionApi } from '@/shared/api'
 import { friendlyErrorMessage } from '@/shared/errorMessages'
 import { sessionStorage } from '@/shared/storage'
-import type { ExtensionStatus, StoredSession } from '@/types/extension'
+import type { CookieCaptureResponse, ExtensionSelfMediaAccount, ExtensionStatus, StoredSession } from '@/types/extension'
 import { bindExtension, normalizeBindCode, unbindExtension, validateBindInput } from './bindFlow'
 import { createTaskListState, formatCountdown, isExpired, mergeTasks, toggleTaskExpanded } from './taskListStore'
 
@@ -14,8 +14,12 @@ const bindCode = ref('')
 const brandId = ref('')
 const loading = ref(false)
 const tasksLoading = ref(false)
+const accountsLoading = ref(false)
+const captureLoading = ref(false)
 const session = ref<StoredSession | null>(null)
 const taskState = reactive(createTaskListState())
+const accounts = ref<ExtensionSelfMediaAccount[]>([])
+const selectedAccountId = ref<number | null>(null)
 const now = ref(new Date())
 let refreshTimer: ReturnType<typeof setInterval> | undefined
 
@@ -31,6 +35,7 @@ onMounted(async () => {
     message.value = '版本检查失败，请确认服务端可用'
   }
   if (session.value) {
+    await refreshAccounts()
     await refreshTasks()
     startTaskRefresh()
   }
@@ -53,6 +58,7 @@ async function bind() {
     session.value = await bindExtension({ bindCode: bindCode.value, brandId: brandId.value })
     status.value = 'bound'
     message.value = `绑定成功，sessionId ${session.value.sessionId}`
+    await refreshAccounts()
     await refreshTasks()
     startTaskRefresh()
   } catch (error) {
@@ -74,6 +80,8 @@ async function unbind() {
     status.value = 'unbound'
     message.value = '已解绑，请重新绑定后使用'
     taskState.tasks = []
+    accounts.value = []
+    selectedAccountId.value = null
     taskState.expandedTaskId = null
     stopTaskRefresh()
   } catch (error) {
@@ -81,6 +89,59 @@ async function unbind() {
   } finally {
     loading.value = false
   }
+}
+
+async function refreshAccounts() {
+  if (!session.value) return
+  accountsLoading.value = true
+  try {
+    accounts.value = await extensionApi.selfMediaAccounts(session.value.token)
+    if (!selectedAccountId.value && accounts.value.length > 0) {
+      selectedAccountId.value = accounts.value[0].accountId
+    }
+  } catch (error) {
+    message.value = friendlyErrorMessage(error)
+  } finally {
+    accountsLoading.value = false
+  }
+}
+
+async function captureCookies() {
+  const account = accounts.value.find(item => item.accountId === selectedAccountId.value)
+  if (!account) {
+    message.value = '请选择要捕获凭证的账号'
+    return
+  }
+  if (!window.confirm(`为账号 ${account.accountName || account.accountId} 捕获 ${account.platform} 凭证？`)) return
+
+  captureLoading.value = true
+  try {
+    const result = await sendRuntimeMessage<CookieCaptureResponse>({
+      type: 'GEO_CAPTURE_COOKIES',
+      payload: account,
+    })
+    message.value = `凭证捕获成功，版本 ${result.version}`
+  } catch (error) {
+    message.value = friendlyErrorMessage(error)
+  } finally {
+    captureLoading.value = false
+  }
+}
+
+function sendRuntimeMessage<T>(payload: unknown): Promise<T> {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(payload, (response?: { ok: boolean, result?: T, message?: string }) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message))
+        return
+      }
+      if (!response?.ok) {
+        reject(new Error(response?.message || '请求失败，请稍后重试。'))
+        return
+      }
+      resolve(response.result as T)
+    })
+  })
 }
 
 async function refreshTasks() {
@@ -97,6 +158,8 @@ async function refreshTasks() {
       session.value = null
       taskState.tasks = []
       taskState.expandedTaskId = null
+      accounts.value = []
+      selectedAccountId.value = null
       stopTaskRefresh()
     } else {
       message.value = friendlyErrorMessage(error)
@@ -165,6 +228,26 @@ function toggleTask(taskId: number) {
           <dd>{{ session?.expiresAt }}</dd>
         </div>
       </dl>
+      <section class="capture" aria-label="凭证捕获">
+        <div class="tasks-header">
+          <strong>捕获凭证</strong>
+          <button class="secondary" :disabled="accountsLoading" type="button" @click="refreshAccounts">
+            {{ accountsLoading ? '加载中...' : '刷新账号' }}
+          </button>
+        </div>
+        <label>
+          <span>账号</span>
+          <select v-model.number="selectedAccountId">
+            <option v-for="account in accounts" :key="account.accountId" :value="account.accountId">
+              {{ account.platform }} / {{ account.accountName || account.accountId }} / brand {{ account.brandId }}
+            </option>
+          </select>
+        </label>
+        <p class="confirm">请先打开目标平台并完成登录，再手动确认捕获。</p>
+        <button :disabled="captureLoading || accounts.length === 0" type="button" @click="captureCookies">
+          {{ captureLoading ? '捕获中...' : '捕获凭证' }}
+        </button>
+      </section>
       <section class="tasks" aria-label="任务列表">
         <div class="tasks-header">
           <strong>待处理任务</strong>

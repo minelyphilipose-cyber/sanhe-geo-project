@@ -2,6 +2,8 @@ import { EXTENSION_VERSION } from '@/shared/env'
 import { ExtensionApiError, extensionApi } from '@/shared/api'
 import { logger } from '@/shared/logger'
 import { sessionStorage } from '@/shared/storage'
+import { captureCookiesForAccount } from './cookieCapture'
+import type { ExtensionMessage, ExtensionSelfMediaAccount } from '@/types/extension'
 
 const REFRESH_ALARM = 'geo-token-refresh'
 
@@ -49,4 +51,20 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     }
     logger.warn('token refresh failed', error instanceof Error ? error.message : error)
   }
+})
+
+chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
+  if (message.type === 'GEO_COOKIE_DOMAIN_READY') {
+    sendResponse({ ok: true })
+    return true
+  }
+  if (message.type !== 'GEO_CAPTURE_COOKIES') return false
+
+  void captureCookiesForAccount(message.payload as ExtensionSelfMediaAccount)
+    .then(result => sendResponse({ ok: true, result }))
+    .catch(error => sendResponse({
+      ok: false,
+      message: error instanceof Error ? error.message : 'cookie capture failed',
+    }))
+  return true
 })

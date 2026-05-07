@@ -1,5 +1,17 @@
 import type { ExtensionMessage } from '@/types/extension'
 
+const CAPTURE_HOSTS = new Set(['mp.toutiao.com', 'www.zhihu.com'])
+
+if (CAPTURE_HOSTS.has(window.location.hostname)) {
+  chrome.runtime.sendMessage({
+    type: 'GEO_COOKIE_DOMAIN_READY',
+    payload: {
+      host: window.location.hostname,
+      href: window.location.href,
+    },
+  })
+}
+
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
   if (message.type !== 'GEO_FILL_TASK') return false
 

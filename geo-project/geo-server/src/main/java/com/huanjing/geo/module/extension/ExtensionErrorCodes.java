@@ -15,6 +15,9 @@ public final class ExtensionErrorCodes {
     public static final int TASK_NOT_FOUND = 70011;
     public static final int TASK_STATE_CONFLICT = 70012;
     public static final int TASK_RATE_LIMITED = 70013;
+    public static final int COOKIE_CAPTURE_CONFIRM_REQUIRED = 70014;
+    public static final int COOKIE_CAPTURE_ACCOUNT_BRAND_MISMATCH = 70015;
+    public static final int COOKIE_CAPTURE_NONCE_REPLAYED = 70016;
 
     private ExtensionErrorCodes() {
     }

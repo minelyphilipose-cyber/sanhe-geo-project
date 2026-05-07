@@ -69,4 +69,29 @@ describe('extensionApi', () => {
     const headers = (vi.mocked(fetch).mock.calls[0][1] as RequestInit).headers as Headers
     expect(headers.get('X-Ext-Token')).toBe('ext.secret')
   })
+
+  it('posts cookie capture with extension token header', async () => {
+    await extensionApi.captureCookies('ext.secret', {
+      brandId: 10,
+      accountId: 20,
+      platform: 'toutiao',
+      extensionVersion: '0.1.0',
+      installId: 'install-1',
+      operatorConfirmed: true,
+      confirmNonce: 'nonce-1',
+      cookiesJson: '[]',
+    })
+
+    expect(fetch).toHaveBeenCalledWith(
+      'http://localhost:8080/api/v1/extension/cookies/capture',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.any(Headers),
+      }),
+    )
+    const init = vi.mocked(fetch).mock.calls[0][1] as RequestInit
+    const headers = init.headers as Headers
+    expect(headers.get('X-Ext-Token')).toBe('ext.secret')
+    expect(init.body).toContain('"confirmNonce":"nonce-1"')
+  })
 })

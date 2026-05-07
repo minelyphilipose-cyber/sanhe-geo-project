@@ -36,6 +36,9 @@ public class AuditOperationAspect {
             ExtensionErrorCodes.BIND_RATE_LIMIT_EXCEEDED,
             ExtensionErrorCodes.TASK_STATE_CONFLICT,
             ExtensionErrorCodes.TASK_RATE_LIMITED,
+            ExtensionErrorCodes.COOKIE_CAPTURE_CONFIRM_REQUIRED,
+            ExtensionErrorCodes.COOKIE_CAPTURE_ACCOUNT_BRAND_MISMATCH,
+            ExtensionErrorCodes.COOKIE_CAPTURE_NONCE_REPLAYED,
             ContentErrorCodes.ARTICLE_STATE_CONFLICT,
             ContentErrorCodes.ARTICLE_AUTHOR_CANNOT_REVIEW
     );

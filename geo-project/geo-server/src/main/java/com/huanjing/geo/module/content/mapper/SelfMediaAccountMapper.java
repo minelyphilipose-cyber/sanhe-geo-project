@@ -6,6 +6,8 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
+import java.util.List;
+
 @Mapper
 public interface SelfMediaAccountMapper extends BaseMapper<SelfMediaAccount> {
 
@@ -17,4 +19,13 @@ public interface SelfMediaAccountMapper extends BaseMapper<SelfMediaAccount> {
             FOR UPDATE
             """)
     Long lockById(@Param("id") Long id);
+
+    @Select("""
+            SELECT id, brand_id, platform, account_name, status
+            FROM self_media_account
+            WHERE deleted_at IS NULL
+            ORDER BY updated_at DESC, id DESC
+            LIMIT #{limit}
+            """)
+    List<SelfMediaAccount> selectExtensionAccountCandidates(@Param("limit") int limit);
 }

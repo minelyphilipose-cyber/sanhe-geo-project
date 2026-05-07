@@ -2,6 +2,9 @@ import { API_BASE_URL } from './env'
 import type {
   ApiErrorBody,
   BindResponse,
+  CookieCaptureRequest,
+  CookieCaptureResponse,
+  ExtensionSelfMediaAccount,
   ExtensionTaskListItem,
   TokenRefreshResponse,
   VersionCheckResponse,
@@ -62,6 +65,19 @@ export const extensionApi = {
   tasks(token: string) {
     return request<ExtensionTaskListItem[]>('/api/v1/extension/tasks', {
       method: 'GET',
+    }, token)
+  },
+
+  selfMediaAccounts(token: string) {
+    return request<ExtensionSelfMediaAccount[]>('/api/v1/extension/self-media-accounts', {
+      method: 'GET',
+    }, token)
+  },
+
+  captureCookies(token: string, payload: CookieCaptureRequest) {
+    return request<CookieCaptureResponse>('/api/v1/extension/cookies/capture', {
+      method: 'POST',
+      body: JSON.stringify(payload),
     }, token)
   },
 }

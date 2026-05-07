@@ -14,6 +14,9 @@ const ERROR_MESSAGES: Record<number, string> = {
   70011: '任务不存在或已被回收。',
   70012: '任务状态已变化，请刷新任务。',
   70013: '操作过于频繁，请稍后再试。',
+  70014: '捕获凭证前需要确认授权。',
+  70015: '账号与品牌不匹配，请刷新账号列表。',
+  70016: '本次确认已使用，请重新确认后再试。',
 }
 
 export function messageForErrorCode(code: number | undefined): string {
