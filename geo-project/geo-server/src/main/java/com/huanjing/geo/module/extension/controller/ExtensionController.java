@@ -7,6 +7,7 @@ import com.huanjing.geo.module.extension.dto.ExtensionBindRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionBindResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshResponse;
+import com.huanjing.geo.module.extension.dto.ExtensionTaskStateResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionVersionCheckRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionVersionCheckResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionFillTokenConsumeResponse;
@@ -17,6 +18,7 @@ import com.huanjing.geo.module.extension.entity.ExtensionSession;
 import com.huanjing.geo.module.extension.service.ExtensionBindCodeService;
 import com.huanjing.geo.module.extension.service.ExtensionCredentialService;
 import com.huanjing.geo.module.extension.service.ExtensionSessionService;
+import com.huanjing.geo.module.extension.service.ExtensionTaskStateService;
 import com.huanjing.geo.module.extension.service.ExtensionVersionService;
 import com.huanjing.geo.module.extension.service.FillTokenService;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -41,6 +43,7 @@ public class ExtensionController {
     private final ExtensionVersionService versionService;
     private final FillTokenService fillTokenService;
     private final ExtensionCredentialService credentialService;
+    private final ExtensionTaskStateService taskStateService;
     private final CurrentUserService currentUserService;
 
     @PostMapping("/bind-codes")
@@ -126,6 +129,40 @@ public class ExtensionController {
                 session.getId(),
                 clientIp(servletRequest)
         ));
+    }
+
+    @PostMapping("/tasks/{taskId}/ack")
+    public R<ExtensionTaskStateResponse> ackTask(
+            @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
+            @PathVariable Long taskId
+    ) {
+        ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        versionService.requireSupported("chrome", session.getExtensionVersion());
+        return R.ok(taskStateService.ackFilled(taskId, session.getOperatorId(), session.getId()));
+    }
+
+    @PostMapping("/tasks/{taskId}/heartbeat")
+    public R<ExtensionTaskStateResponse> heartbeatTask(
+            @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
+            @PathVariable Long taskId
+    ) {
+        ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        versionService.requireSupported("chrome", session.getExtensionVersion());
+        return R.ok(taskStateService.heartbeat(
+                taskId,
+                session.getOperatorId(),
+                session.getId()
+        ));
+    }
+
+    @PostMapping("/tasks/{taskId}/published")
+    public R<ExtensionTaskStateResponse> publishTask(
+            @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
+            @PathVariable Long taskId
+    ) {
+        ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        versionService.requireSupported("chrome", session.getExtensionVersion());
+        return R.ok(taskStateService.published(taskId, session.getOperatorId(), session.getId()));
     }
 
     private String clientIp(HttpServletRequest request) {

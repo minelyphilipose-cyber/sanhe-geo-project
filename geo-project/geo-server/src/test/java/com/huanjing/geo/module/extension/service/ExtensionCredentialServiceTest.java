@@ -25,6 +25,7 @@ class ExtensionCredentialServiceTest {
 
     private FillTokenService fillTokenService;
     private CredentialVaultService credentialVaultService;
+    private ExtensionTaskStateService taskStateService;
     private ExtensionAuditSupport auditSupport;
     private ExtensionCredentialService service;
 
@@ -32,8 +33,9 @@ class ExtensionCredentialServiceTest {
     void setUp() {
         fillTokenService = mock(FillTokenService.class);
         credentialVaultService = mock(CredentialVaultService.class);
+        taskStateService = mock(ExtensionTaskStateService.class);
         auditSupport = mock(ExtensionAuditSupport.class);
-        service = new ExtensionCredentialService(fillTokenService, credentialVaultService, auditSupport);
+        service = new ExtensionCredentialService(fillTokenService, credentialVaultService, taskStateService, auditSupport);
     }
 
     @Test
@@ -64,6 +66,7 @@ class ExtensionCredentialServiceTest {
         assertEquals("toutiao", response.platform());
         assertEquals(3, response.credentialVersion());
         assertEquals("{\"cookies\":[]}", response.cookiesJson());
+        verify(taskStateService).markFillingFromFillTokenConsume(30L, 99L, 7L);
         verify(credentialVaultService).decryptActiveCookies(20L, 10L, 99L);
         verify(auditSupport).record(
                 eq("COOKIE_DECRYPT_VIA_FILL_TOKEN"),
@@ -150,6 +153,7 @@ class ExtensionCredentialServiceTest {
                 () -> service.consumeFillTokenAndDecrypt("fill-token", 99L, 7L, "127.0.0.1"));
 
         assertEquals(ExtensionErrorCodes.FILL_TOKEN_USED_OR_EXPIRED, ex.getCode());
+        verify(taskStateService, never()).markFillingFromFillTokenConsume(any(), any(), any());
         verify(auditSupport, never()).record(
                 eq("COOKIE_DECRYPT_VIA_FILL_TOKEN"),
                 any(),
@@ -166,5 +170,19 @@ class ExtensionCredentialServiceTest {
                 any(),
                 any()
         );
+    }
+
+    @Test
+    void credentialDecryptFailureDoesNotMarkTaskFilling() {
+        FillTokenConsumeResponse consumed = new FillTokenConsumeResponse(20L, 10L, 99L, 30L, 200L, "nonce-1");
+        when(fillTokenService.consume("fill-token", 99L, 7L)).thenReturn(consumed);
+        when(credentialVaultService.decryptActiveCookies(20L, 10L, 99L))
+                .thenThrow(new BizException(CredentialErrorCodes.CREDENTIAL_INTEGRITY_VIOLATION, "brand mismatch"));
+
+        BizException ex = assertThrows(BizException.class,
+                () -> service.consumeFillTokenAndDecrypt("fill-token", 99L, 7L, "127.0.0.1"));
+
+        assertEquals(CredentialErrorCodes.CREDENTIAL_INTEGRITY_VIOLATION, ex.getCode());
+        verify(taskStateService, never()).markFillingFromFillTokenConsume(any(), any(), any());
     }
 }

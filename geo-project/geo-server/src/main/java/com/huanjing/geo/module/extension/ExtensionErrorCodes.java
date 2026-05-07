@@ -12,6 +12,9 @@ public final class ExtensionErrorCodes {
     public static final int BIND_CODE_INVALID = 70008;
     public static final int BIND_RATE_LIMIT_EXCEEDED = 70009;
     public static final int EXTENSION_INTERNAL_ERROR = 70010;
+    public static final int TASK_NOT_FOUND = 70011;
+    public static final int TASK_STATE_CONFLICT = 70012;
+    public static final int TASK_RATE_LIMITED = 70013;
 
     private ExtensionErrorCodes() {
     }

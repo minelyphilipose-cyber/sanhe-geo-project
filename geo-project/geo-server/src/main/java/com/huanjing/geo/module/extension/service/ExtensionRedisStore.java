@@ -31,6 +31,14 @@ public class ExtensionRedisStore {
                     return count
                     """, Long.class);
 
+    private static final DefaultRedisScript<Long> RELEASE_LOCK_SCRIPT =
+            new DefaultRedisScript<>("""
+                    if redis.call('GET', KEYS[1]) == ARGV[1] then
+                        return redis.call('DEL', KEYS[1])
+                    end
+                    return 0
+                    """, Long.class);
+
     private final StringRedisTemplate stringRedisTemplate;
 
     public void set(String key, String value, Duration ttl) {
@@ -48,5 +56,15 @@ public class ExtensionRedisStore {
                 String.valueOf(ttl.toSeconds())
         );
         return count == null ? 0 : count;
+    }
+
+    public boolean tryLock(String key, String value, Duration ttl) {
+        Boolean acquired = stringRedisTemplate.opsForValue().setIfAbsent(key, value, ttl);
+        return Boolean.TRUE.equals(acquired);
+    }
+
+    public boolean releaseLock(String key, String value) {
+        Long released = stringRedisTemplate.execute(RELEASE_LOCK_SCRIPT, List.of(key), value);
+        return released != null && released > 0;
     }
 }

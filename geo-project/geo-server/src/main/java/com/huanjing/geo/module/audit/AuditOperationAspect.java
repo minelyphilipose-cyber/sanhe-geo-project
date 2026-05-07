@@ -32,14 +32,17 @@ public class AuditOperationAspect {
             ExtensionErrorCodes.FILL_TOKEN_INVALID,
             ExtensionErrorCodes.FILL_TOKEN_USED_OR_EXPIRED,
             ExtensionErrorCodes.BIND_CODE_INVALID,
-            ExtensionErrorCodes.BIND_RATE_LIMIT_EXCEEDED
+            ExtensionErrorCodes.BIND_RATE_LIMIT_EXCEEDED,
+            ExtensionErrorCodes.TASK_STATE_CONFLICT,
+            ExtensionErrorCodes.TASK_RATE_LIMITED
     );
 
     private static final Set<Integer> NOT_FOUND_CODES = Set.of(
             404,
             CredentialErrorCodes.CREDENTIAL_NOT_FOUND,
             BrandAccessErrorCodes.BRAND_ACCESS_NOT_FOUND,
-            ExtensionErrorCodes.EXTENSION_NOT_FOUND
+            ExtensionErrorCodes.EXTENSION_NOT_FOUND,
+            ExtensionErrorCodes.TASK_NOT_FOUND
     );
 
     private final AuditService auditService;

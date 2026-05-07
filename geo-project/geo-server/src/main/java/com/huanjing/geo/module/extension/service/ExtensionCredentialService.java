@@ -29,6 +29,7 @@ public class ExtensionCredentialService {
 
     private final FillTokenService fillTokenService;
     private final CredentialVaultService credentialVaultService;
+    private final ExtensionTaskStateService taskStateService;
     private final ExtensionAuditSupport auditSupport;
 
     public ExtensionFillTokenConsumeResponse consumeFillTokenAndDecrypt(
@@ -49,6 +50,11 @@ public class ExtensionCredentialService {
             auditCookieDecryptFailure(consumed, extensionSessionId, ipAddress, ex);
             throw ex;
         }
+        taskStateService.markFillingFromFillTokenConsume(
+                consumed.taskTargetId(),
+                consumed.operatorId(),
+                extensionSessionId
+        );
 
         auditSupport.record(
                 "COOKIE_DECRYPT_VIA_FILL_TOKEN",
