@@ -5,7 +5,10 @@ import type {
   CookieCaptureRequest,
   CookieCaptureResponse,
   ExtensionSelfMediaAccount,
+  ExtensionTaskStateResponse,
   ExtensionTaskListItem,
+  FillTokenConsumeResponse,
+  FillTokenIssueResponse,
   TokenRefreshResponse,
   VersionCheckResponse,
 } from '@/types/extension'
@@ -78,6 +81,26 @@ export const extensionApi = {
     return request<CookieCaptureResponse>('/api/v1/extension/cookies/capture', {
       method: 'POST',
       body: JSON.stringify(payload),
+    }, token)
+  },
+
+  issueFillToken(token: string, payload: { taskTargetId: number, platform: string, extensionVersion: string }) {
+    return request<FillTokenIssueResponse>('/api/v1/extension/fill-token/issue', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }, token)
+  },
+
+  consumeFillToken(token: string, payload: { fillToken: string, platform: string, extensionVersion: string }) {
+    return request<FillTokenConsumeResponse>('/api/v1/extension/fill-token/consume', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }, token)
+  },
+
+  ackTask(token: string, taskId: number) {
+    return request<ExtensionTaskStateResponse>(`/api/v1/extension/tasks/${taskId}/ack`, {
+      method: 'POST',
     }, token)
   },
 }

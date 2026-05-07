@@ -94,4 +94,34 @@ describe('extensionApi', () => {
     expect(headers.get('X-Ext-Token')).toBe('ext.secret')
     expect(init.body).toContain('"confirmNonce":"nonce-1"')
   })
+
+  it('issues, consumes, and acks fill flow with extension token header', async () => {
+    await extensionApi.issueFillToken('ext.secret', {
+      taskTargetId: 30,
+      platform: 'toutiao',
+      extensionVersion: '0.1.0',
+    })
+    await extensionApi.consumeFillToken('ext.secret', {
+      fillToken: 'fill-token',
+      platform: 'toutiao',
+      extensionVersion: '0.1.0',
+    })
+    await extensionApi.ackTask('ext.secret', 30)
+
+    expect(fetch).toHaveBeenNthCalledWith(
+      1,
+      'http://localhost:8080/api/v1/extension/fill-token/issue',
+      expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
+    )
+    expect(fetch).toHaveBeenNthCalledWith(
+      2,
+      'http://localhost:8080/api/v1/extension/fill-token/consume',
+      expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
+    )
+    expect(fetch).toHaveBeenNthCalledWith(
+      3,
+      'http://localhost:8080/api/v1/extension/tasks/30/ack',
+      expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
+    )
+  })
 })

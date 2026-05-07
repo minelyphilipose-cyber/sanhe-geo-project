@@ -4,7 +4,14 @@ import { EXTENSION_VERSION } from '@/shared/env'
 import { ExtensionApiError, extensionApi } from '@/shared/api'
 import { friendlyErrorMessage } from '@/shared/errorMessages'
 import { sessionStorage } from '@/shared/storage'
-import type { CookieCaptureResponse, ExtensionSelfMediaAccount, ExtensionStatus, StoredSession } from '@/types/extension'
+import type {
+  CookieCaptureResponse,
+  ExtensionSelfMediaAccount,
+  ExtensionStatus,
+  ExtensionTaskListItem,
+  ExtensionTaskStateResponse,
+  StoredSession,
+} from '@/types/extension'
 import { bindExtension, normalizeBindCode, unbindExtension, validateBindInput } from './bindFlow'
 import { createTaskListState, formatCountdown, isExpired, mergeTasks, toggleTaskExpanded } from './taskListStore'
 
@@ -16,6 +23,7 @@ const loading = ref(false)
 const tasksLoading = ref(false)
 const accountsLoading = ref(false)
 const captureLoading = ref(false)
+const fillLoadingTaskId = ref<number | null>(null)
 const session = ref<StoredSession | null>(null)
 const taskState = reactive(createTaskListState())
 const accounts = ref<ExtensionSelfMediaAccount[]>([])
@@ -125,6 +133,26 @@ async function captureCookies() {
     message.value = friendlyErrorMessage(error)
   } finally {
     captureLoading.value = false
+  }
+}
+
+async function startFill(task: ExtensionTaskListItem) {
+  if (task.status !== 'token_issued') {
+    message.value = task.status === 'filled' ? '该任务已完成填充' : '该任务正在填充中'
+    return
+  }
+  fillLoadingTaskId.value = task.taskId
+  try {
+    await sendRuntimeMessage<ExtensionTaskStateResponse>({
+      type: 'GEO_START_FILL_TASK',
+      payload: task,
+    })
+    message.value = '已填充编辑器，请在平台页面人工确认并发布。'
+    await refreshTasks()
+  } catch (error) {
+    message.value = friendlyErrorMessage(error)
+  } finally {
+    fillLoadingTaskId.value = null
   }
 }
 
@@ -258,14 +286,15 @@ function toggleTask(taskId: number) {
         <p v-if="!tasksLoading && visibleTasks.length === 0" class="empty">暂无可处理的半自动发布任务</p>
         <ul v-else class="task-list">
           <li v-for="task in visibleTasks" :key="task.taskId" class="task-item">
-            <button class="task-button" type="button" @click="toggleTask(task.taskId)">
+            <button class="task-button" :disabled="fillLoadingTaskId === task.taskId" type="button" @click="startFill(task)">
               <span class="task-title">{{ task.title || '未命名任务' }}</span>
               <span class="task-meta">
                 <span>{{ task.platform }}</span>
                 <span>{{ task.status }}</span>
-                <span>{{ formatCountdown(task.expiresAt, now) }}</span>
+                <span>{{ fillLoadingTaskId === task.taskId ? '填充中...' : formatCountdown(task.expiresAt, now) }}</span>
               </span>
             </button>
+            <button class="secondary" type="button" @click="toggleTask(task.taskId)">详情</button>
             <div v-if="taskState.expandedTaskId === task.taskId" class="task-detail">
               <span>任务 {{ task.taskId }}</span>
               <span>{{ task.publishUrl || '等待填写发布结果' }}</span>

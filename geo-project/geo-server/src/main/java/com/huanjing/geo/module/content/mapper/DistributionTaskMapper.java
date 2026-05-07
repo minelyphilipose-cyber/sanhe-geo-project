@@ -101,6 +101,13 @@ public interface DistributionTaskMapper extends BaseMapper<DistributionTask> {
             @Param("limit") int limit
     );
 
+    @Select("""
+            SELECT id, project_id, self_media_account_id, status, dispatch_mode, operator_id, fill_payload
+            FROM distribution_tasks
+            WHERE id = #{taskId}
+            """)
+    DistributionTask selectExtensionFillContext(@Param("taskId") Long taskId);
+
     @Update("""
             UPDATE distribution_tasks
             SET status = 'pending',

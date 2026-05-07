@@ -6,6 +6,8 @@ import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.content.credential.CredentialErrorCodes;
 import com.huanjing.geo.module.content.credential.dto.CookieCredentialPlaintext;
 import com.huanjing.geo.module.content.credential.service.CredentialVaultService;
+import com.huanjing.geo.module.content.entity.DistributionTask;
+import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.extension.ExtensionErrorCodes;
 import com.huanjing.geo.module.extension.dto.ExtensionFillTokenConsumeResponse;
 import com.huanjing.geo.module.extension.dto.FillTokenConsumeResponse;
@@ -25,6 +27,7 @@ class ExtensionCredentialServiceTest {
 
     private FillTokenService fillTokenService;
     private CredentialVaultService credentialVaultService;
+    private DistributionTaskMapper taskMapper;
     private ExtensionTaskStateService taskStateService;
     private ExtensionAuditSupport auditSupport;
     private ExtensionCredentialService service;
@@ -33,9 +36,11 @@ class ExtensionCredentialServiceTest {
     void setUp() {
         fillTokenService = mock(FillTokenService.class);
         credentialVaultService = mock(CredentialVaultService.class);
+        taskMapper = mock(DistributionTaskMapper.class);
         taskStateService = mock(ExtensionTaskStateService.class);
         auditSupport = mock(ExtensionAuditSupport.class);
-        service = new ExtensionCredentialService(fillTokenService, credentialVaultService, taskStateService, auditSupport);
+        service = new ExtensionCredentialService(
+                fillTokenService, credentialVaultService, taskMapper, taskStateService, auditSupport);
     }
 
     @Test
@@ -49,6 +54,7 @@ class ExtensionCredentialServiceTest {
                 "nonce-1"
         );
         when(fillTokenService.consume("fill-token", 99L, 7L)).thenReturn(consumed);
+        mockFillPayload();
         when(credentialVaultService.decryptActiveCookies(20L, 10L, 99L))
                 .thenReturn(new CookieCredentialPlaintext(
                         20L,
@@ -66,6 +72,7 @@ class ExtensionCredentialServiceTest {
         assertEquals("toutiao", response.platform());
         assertEquals(3, response.credentialVersion());
         assertEquals("{\"cookies\":[]}", response.cookiesJson());
+        assertEquals("{\"title\":\"draft\"}", response.fillPayload());
         verify(taskStateService).markFillingFromFillTokenConsume(30L, 99L, 7L);
         verify(credentialVaultService).decryptActiveCookies(20L, 10L, 99L);
         verify(auditSupport).record(
@@ -90,6 +97,7 @@ class ExtensionCredentialServiceTest {
     void credentialIntegrityFailureWritesDeniedAuditAndRethrows() {
         FillTokenConsumeResponse consumed = new FillTokenConsumeResponse(20L, 10L, 99L, 30L, 200L, "nonce-1");
         when(fillTokenService.consume("fill-token", 99L, 7L)).thenReturn(consumed);
+        mockFillPayload();
         when(credentialVaultService.decryptActiveCookies(20L, 10L, 99L))
                 .thenThrow(new BizException(CredentialErrorCodes.CREDENTIAL_INTEGRITY_VIOLATION, "brand mismatch"));
 
@@ -119,6 +127,7 @@ class ExtensionCredentialServiceTest {
     void credentialNotFoundWritesNotFoundAuditAndRethrows() {
         FillTokenConsumeResponse consumed = new FillTokenConsumeResponse(20L, 10L, 99L, 30L, 200L, "nonce-1");
         when(fillTokenService.consume("fill-token", 99L, 7L)).thenReturn(consumed);
+        mockFillPayload();
         when(credentialVaultService.decryptActiveCookies(20L, 10L, 99L))
                 .thenThrow(new BizException(CredentialErrorCodes.CREDENTIAL_NOT_FOUND, "not found"));
 
@@ -176,6 +185,7 @@ class ExtensionCredentialServiceTest {
     void credentialDecryptFailureDoesNotMarkTaskFilling() {
         FillTokenConsumeResponse consumed = new FillTokenConsumeResponse(20L, 10L, 99L, 30L, 200L, "nonce-1");
         when(fillTokenService.consume("fill-token", 99L, 7L)).thenReturn(consumed);
+        mockFillPayload();
         when(credentialVaultService.decryptActiveCookies(20L, 10L, 99L))
                 .thenThrow(new BizException(CredentialErrorCodes.CREDENTIAL_INTEGRITY_VIOLATION, "brand mismatch"));
 
@@ -184,5 +194,12 @@ class ExtensionCredentialServiceTest {
 
         assertEquals(CredentialErrorCodes.CREDENTIAL_INTEGRITY_VIOLATION, ex.getCode());
         verify(taskStateService, never()).markFillingFromFillTokenConsume(any(), any(), any());
+    }
+
+    private void mockFillPayload() {
+        DistributionTask task = new DistributionTask();
+        task.setId(30L);
+        task.setFillPayload("{\"title\":\"draft\"}");
+        when(taskMapper.selectExtensionFillContext(30L)).thenReturn(task);
     }
 }

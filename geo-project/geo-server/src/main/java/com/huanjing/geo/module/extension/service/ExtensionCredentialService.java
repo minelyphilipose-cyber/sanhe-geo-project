@@ -6,6 +6,8 @@ import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.content.credential.CredentialErrorCodes;
 import com.huanjing.geo.module.content.credential.dto.CookieCredentialPlaintext;
 import com.huanjing.geo.module.content.credential.service.CredentialVaultService;
+import com.huanjing.geo.module.content.entity.DistributionTask;
+import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.extension.dto.ExtensionFillTokenConsumeResponse;
 import com.huanjing.geo.module.extension.dto.FillTokenConsumeResponse;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +16,8 @@ import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+
+import static com.huanjing.geo.module.extension.ExtensionErrorCodes.TASK_NOT_FOUND;
 
 /**
  * Bridges extension fill-token verification to credential vault decryption.
@@ -29,6 +33,7 @@ public class ExtensionCredentialService {
 
     private final FillTokenService fillTokenService;
     private final CredentialVaultService credentialVaultService;
+    private final DistributionTaskMapper taskMapper;
     private final ExtensionTaskStateService taskStateService;
     private final ExtensionAuditSupport auditSupport;
 
@@ -39,6 +44,10 @@ public class ExtensionCredentialService {
             String ipAddress
     ) {
         FillTokenConsumeResponse consumed = fillTokenService.consume(fillToken, expectedOperatorId, extensionSessionId);
+        DistributionTask task = taskMapper.selectExtensionFillContext(consumed.taskTargetId());
+        if (task == null || !StringUtils.hasText(task.getFillPayload())) {
+            throw new BizException(TASK_NOT_FOUND, "fill payload not found");
+        }
         CookieCredentialPlaintext plaintext;
         try {
             plaintext = credentialVaultService.decryptActiveCookies(
@@ -81,7 +90,8 @@ public class ExtensionCredentialService {
                 plaintext.version(),
                 plaintext.cookiesJson(),
                 plaintext.userAgent(),
-                plaintext.requiredCookieCheckJson()
+                plaintext.requiredCookieCheckJson(),
+                task.getFillPayload()
         );
     }
 

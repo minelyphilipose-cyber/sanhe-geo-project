@@ -49,6 +49,43 @@ export interface ExtensionTaskListItem {
   expiresAt: string
 }
 
+export interface FillTokenIssueResponse { fillToken: string, expiresAt: number, nonce: string }
+
+export interface FillTokenConsumeResponse {
+  taskTargetId: number
+  expiresAt: number
+  nonce: string
+  platform: string
+  credentialVersion?: number
+  cookiesJson: string
+  userAgent?: string
+  requiredCookieCheckJson?: string
+  fillPayload: string
+}
+
+export interface ExtensionTaskStateResponse { taskId: number, status: ExtensionTaskStatus }
+
+export interface SemiAutoFillPayload {
+  platform: string
+  publishUrl: string
+  title?: string | null
+  renderedHtml?: string | null
+  coverImageUrl?: string | null
+  tags?: string[] | null
+  category?: string | null
+}
+
+export interface FillCommandPayload {
+  taskId: number
+  platform: string
+  publishUrl: string
+  title: string
+  contentHtml: string
+  coverImageUrl?: string | null
+  tags: string[]
+  category?: string | null
+}
+
 export interface ExtensionSelfMediaAccount {
   accountId: number
   platform: string

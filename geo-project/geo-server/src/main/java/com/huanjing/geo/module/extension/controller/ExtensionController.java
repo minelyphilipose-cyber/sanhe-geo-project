@@ -22,11 +22,11 @@ import com.huanjing.geo.module.extension.entity.ExtensionSession;
 import com.huanjing.geo.module.extension.service.ExtensionBindCodeService;
 import com.huanjing.geo.module.extension.service.ExtensionCredentialService;
 import com.huanjing.geo.module.extension.service.ExtensionCookieCaptureService;
+import com.huanjing.geo.module.extension.service.ExtensionFillTokenIssueService;
 import com.huanjing.geo.module.extension.service.ExtensionSessionService;
 import com.huanjing.geo.module.extension.service.ExtensionTaskListService;
 import com.huanjing.geo.module.extension.service.ExtensionTaskStateService;
 import com.huanjing.geo.module.extension.service.ExtensionVersionService;
-import com.huanjing.geo.module.extension.service.FillTokenService;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -49,7 +49,7 @@ public class ExtensionController {
     private final ExtensionBindCodeService bindCodeService;
     private final ExtensionSessionService sessionService;
     private final ExtensionVersionService versionService;
-    private final FillTokenService fillTokenService;
+    private final ExtensionFillTokenIssueService fillTokenIssueService;
     private final ExtensionCredentialService credentialService;
     private final ExtensionCookieCaptureService cookieCaptureService;
     private final ExtensionTaskListService taskListService;
@@ -111,11 +111,9 @@ public class ExtensionController {
         String version = StringUtils.hasText(request.extensionVersion())
                 ? request.extensionVersion()
                 : session.getExtensionVersion();
-        return R.ok(fillTokenService.issue(
-                request.accountId(),
-                request.brandId(),
+        return R.ok(fillTokenIssueService.issue(
+                request,
                 session.getOperatorId(),
-                request.taskTargetId(),
                 platform,
                 version
         ));

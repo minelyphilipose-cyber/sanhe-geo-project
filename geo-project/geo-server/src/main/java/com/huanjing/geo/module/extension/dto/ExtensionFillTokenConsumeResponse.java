@@ -20,6 +20,7 @@ public record ExtensionFillTokenConsumeResponse(
         Integer credentialVersion,
         String cookiesJson,
         String userAgent,
-        String requiredCookieCheckJson
+        String requiredCookieCheckJson,
+        String fillPayload
 ) {
 }

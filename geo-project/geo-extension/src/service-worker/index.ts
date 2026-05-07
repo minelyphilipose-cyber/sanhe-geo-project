@@ -3,7 +3,8 @@ import { ExtensionApiError, extensionApi } from '@/shared/api'
 import { logger } from '@/shared/logger'
 import { sessionStorage } from '@/shared/storage'
 import { captureCookiesForAccount } from './cookieCapture'
-import type { ExtensionMessage, ExtensionSelfMediaAccount } from '@/types/extension'
+import { startFillTask } from './fillFlow'
+import type { ExtensionMessage, ExtensionSelfMediaAccount, ExtensionTaskListItem } from '@/types/extension'
 
 const REFRESH_ALARM = 'geo-token-refresh'
 
@@ -54,8 +55,18 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
 })
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
-  if (message.type === 'GEO_COOKIE_DOMAIN_READY') {
+  if (message.type === 'GEO_COOKIE_DOMAIN_READY' || message.type === 'GEO_EDITOR_READY') {
     sendResponse({ ok: true })
+    return true
+  }
+  if (message.type === 'GEO_START_FILL_TASK') {
+    // Compliance requirement: B5a opens and fills the editor only. Publishing remains manual.
+    void startFillTask(message.payload as ExtensionTaskListItem)
+      .then(result => sendResponse({ ok: true, result }))
+      .catch(error => sendResponse({
+        ok: false,
+        message: error instanceof Error ? error.message : 'fill failed',
+      }))
     return true
   }
   if (message.type !== 'GEO_CAPTURE_COOKIES') return false
