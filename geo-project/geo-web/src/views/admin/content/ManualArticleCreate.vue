@@ -311,7 +311,7 @@
               :class="{ selected: selectedImageMaterialId === material.id }"
               @click="selectImageMaterial(material)"
             >
-              <img :src="material.fileUrl" :alt="material.fileName" loading="lazy" />
+              <img :src="materialThumbUrl(material)" :alt="material.fileName" loading="lazy" />
               <span>{{ material.fileName }}</span>
             </button>
           </div>
@@ -328,7 +328,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import { ElMessage } from 'element-plus'
@@ -348,7 +348,7 @@ import {
 } from '@element-plus/icons-vue'
 import type { BrandImageFolder, BrandMaterial, Project } from '@/types'
 import { createManualContentArticle } from '@/api/content'
-import { getBrandImageFolders } from '@/api/customer'
+import { getBrandImageFolders, getBrandMaterialStream } from '@/api/customer'
 import { getProjectDetail, getProjectList } from '@/api/project'
 import { useDictStore } from '@/stores/dict'
 import DataState from '@/components/ui/DataState.vue'
@@ -391,6 +391,8 @@ const previewMode = ref<'rendered' | 'markdown'>('rendered')
 const imagePickerVisible = ref(false)
 const imageFoldersLoading = ref(false)
 const imageFolders = ref<BrandImageFolder[]>([])
+const imageThumbUrls = ref<Record<number, string | null>>({})
+const imageThumbObjectUrls = ref<string[]>([])
 const selectedImageFolderId = ref<number | null>(null)
 const selectedImageMaterialId = ref<number | null>(null)
 const imageAltText = ref('')
@@ -611,6 +613,8 @@ async function openImagePicker() {
   imagePickerVisible.value = true
   if (!imageFolders.value.length) {
     await loadImageFolders()
+  } else if (!Object.keys(imageThumbUrls.value).length) {
+    await loadImageThumbs(selectedProject.value.brandId)
   }
 }
 
@@ -636,6 +640,7 @@ async function loadImageFolders() {
     if (!imageMaterials.value.some((material) => material.id === selectedImageMaterialId.value)) {
       selectedImageMaterialId.value = imageMaterials.value[0]?.id || null
     }
+    await loadImageThumbs(project.brandId)
   } catch (err) {
     console.error(err)
     imageFolders.value = []
@@ -652,6 +657,46 @@ function selectImageMaterial(material: BrandMaterial) {
   if (!imageAltText.value.trim()) {
     imageAltText.value = filenameWithoutExt(material.fileName)
   }
+}
+
+function materialThumbUrl(material: BrandMaterial) {
+  return imageThumbUrls.value[material.id] || material.fileUrl
+}
+
+async function loadImageThumbs(brandId: number) {
+  cleanupImageThumbs()
+  const seen = new Set<number>()
+  const targets = imageFolders.value
+    .flatMap((folder) => folder.materials || [])
+    .filter((material) => {
+      if (!isImageType(material.fileType) || seen.has(material.id)) return false
+      seen.add(material.id)
+      return true
+    })
+  const concurrency = Math.min(6, targets.length)
+  let cursor = 0
+
+  const worker = async () => {
+    while (cursor < targets.length) {
+      const material = targets[cursor++]
+      try {
+        const { data: blob } = await getBrandMaterialStream(brandId, material.id, false)
+        const url = URL.createObjectURL(blob)
+        imageThumbObjectUrls.value.push(url)
+        imageThumbUrls.value = { ...imageThumbUrls.value, [material.id]: url }
+      } catch {
+        imageThumbUrls.value = { ...imageThumbUrls.value, [material.id]: null }
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()))
+}
+
+function cleanupImageThumbs() {
+  imageThumbObjectUrls.value.forEach((url) => URL.revokeObjectURL(url))
+  imageThumbObjectUrls.value = []
+  imageThumbUrls.value = {}
 }
 
 function insertSelectedImage() {
@@ -766,6 +811,17 @@ watch(() => manualForm.projectId, () => {
   selectedImageFolderId.value = null
   selectedImageMaterialId.value = null
   imageAltText.value = ''
+  cleanupImageThumbs()
+})
+
+watch(imagePickerVisible, (visible) => {
+  if (!visible) {
+    cleanupImageThumbs()
+  }
+})
+
+onBeforeUnmount(() => {
+  cleanupImageThumbs()
 })
 </script>
 

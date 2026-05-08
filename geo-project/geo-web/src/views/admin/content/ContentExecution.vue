@@ -354,7 +354,7 @@
               :class="{ selected: selectedCoverMaterialId === material.id }"
               @click="selectedCoverMaterialId = material.id"
             >
-              <img :src="material.fileUrl" :alt="material.fileName" />
+              <img :src="materialThumbUrl(material)" :alt="material.fileName" loading="lazy" />
               <span>{{ material.fileName }}</span>
             </button>
           </div>
@@ -395,7 +395,7 @@
               :class="{ selected: selectedDouyinImageMaterialIds.includes(material.id) }"
               @click="toggleDouyinImage(material.id)"
             >
-              <img :src="material.fileUrl" :alt="material.fileName" />
+              <img :src="materialThumbUrl(material)" :alt="material.fileName" loading="lazy" />
               <span>{{ material.fileName }}</span>
             </button>
           </div>
@@ -507,10 +507,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
@@ -535,7 +535,7 @@ import {
   reviewContentArticle,
   saveContentArticleRevision,
 } from '@/api/content'
-import { getBrandDetail, getBrandImageFolders } from '@/api/customer'
+import { getBrandDetail, getBrandImageFolders, getBrandMaterialStream } from '@/api/customer'
 import { createExtensionBindCode, type ExtensionBindCode } from '@/api/extension'
 
 type MediaPlatform = 'wechat_mp' | 'douyin' | 'toutiao' | 'zhihu'
@@ -606,6 +606,8 @@ const toutiaoAccounts = ref<SelfMediaAccount[]>([])
 const zhihuAccounts = ref<SelfMediaAccount[]>([])
 const checkingSelfMediaAccountId = ref<number | null>(null)
 const brandImageFolders = ref<BrandImageFolder[]>([])
+const materialThumbUrls = ref<Record<number, string | null>>({})
+const materialThumbObjectUrls = ref<string[]>([])
 const imageFolderScope = ref<'project' | 'all'>('project')
 const selectedImageFolderId = ref<number | null>(null)
 const selectedMediaPlatform = ref<MediaPlatform>('wechat_mp')
@@ -910,6 +912,7 @@ async function openMediaDistribute(row: ArticleDraft) {
     zhihuAccounts.value = accounts.filter((account) => account.platform === 'zhihu')
     brandImageFolders.value = folderRes.data.data || []
     ensureSelectedImageFolder()
+    await loadMaterialThumbs()
     mediaDistributeVisible.value = true
   } catch {
     ElMessage.error('加载自媒体账号失败')
@@ -1051,6 +1054,55 @@ function ensureSelectedImageFolder() {
   }
 }
 
+function materialThumbUrl(material: BrandMaterial) {
+  return materialThumbUrls.value[material.id] || material.fileUrl
+}
+
+async function loadMaterialThumbs() {
+  const brandId = mediaDistributeBrandId.value
+  if (!brandId) {
+    cleanupMaterialThumbs()
+    return
+  }
+  cleanupMaterialThumbs()
+  const seen = new Set<number>()
+  const targets = brandImageFolders.value
+    .flatMap((folder) => folder.materials || [])
+    .filter((material) => {
+      if (!isImageFileType(material.fileType) || seen.has(material.id)) return false
+      seen.add(material.id)
+      return true
+    })
+  const concurrency = Math.min(6, targets.length)
+  let cursor = 0
+
+  const worker = async () => {
+    while (cursor < targets.length) {
+      const material = targets[cursor++]
+      try {
+        const { data: blob } = await getBrandMaterialStream(brandId, material.id, false)
+        const url = URL.createObjectURL(blob)
+        materialThumbObjectUrls.value.push(url)
+        materialThumbUrls.value = { ...materialThumbUrls.value, [material.id]: url }
+      } catch {
+        materialThumbUrls.value = { ...materialThumbUrls.value, [material.id]: null }
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()))
+}
+
+function cleanupMaterialThumbs() {
+  materialThumbObjectUrls.value.forEach((url) => URL.revokeObjectURL(url))
+  materialThumbObjectUrls.value = []
+  materialThumbUrls.value = {}
+}
+
+function isImageFileType(fileType?: string | null) {
+  return ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes((fileType || '').toLowerCase())
+}
+
 function toggleDouyinImage(materialId: number) {
   const index = selectedDouyinImageMaterialIds.value.indexOf(materialId)
   if (index >= 0) {
@@ -1176,6 +1228,18 @@ async function generateExtensionBindCodeForCapture(account: SelfMediaAccount) {
     const { data } = await createExtensionBindCode(mediaDistributeBrandId.value)
     extensionBindCode.value = data.data
     ElMessage.success('扩展绑定码已生成，请打开浏览器扩展继续绑定并捕获凭证')
+    await ElMessageBox.alert(
+      [
+        `扩展绑定码：${data.data.code}`,
+        `有效期：${formatTtlSeconds(data.data.expiresInSeconds)}`,
+        '',
+        '请打开 GEO 浏览器扩展，输入该绑定码完成绑定。绑定后，在同一浏览器登录目标平台，再回到扩展里捕获凭证。',
+      ].join('\n'),
+      '扩展绑定码',
+      {
+        confirmButtonText: '知道了',
+      },
+    )
   } finally {
     extensionBindCodeLoadingAccountId.value = null
   }
@@ -1396,6 +1460,16 @@ onMounted(async () => {
   await dictStore.ensureLoaded()
   await load()
   await openCreatedArticleDetail()
+})
+
+watch(mediaDistributeVisible, (visible) => {
+  if (!visible) {
+    cleanupMaterialThumbs()
+  }
+})
+
+onBeforeUnmount(() => {
+  cleanupMaterialThumbs()
 })
 
 function handleManualCreateResult() {
