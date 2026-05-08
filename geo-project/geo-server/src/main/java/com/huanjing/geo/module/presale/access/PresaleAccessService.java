@@ -16,8 +16,6 @@ import org.springframework.stereotype.Service;
 public class PresaleAccessService {
 
     private static final String PERM_MANAGE = "presale.report.manage";
-    private static final String PERM_EDIT = "presale.report.edit_content";
-
     private final PresaleReportMapper reportMapper;
     private final PresaleReportVersionMapper versionMapper;
     private final CurrentUserService currentUserService;
@@ -60,7 +58,7 @@ public class PresaleAccessService {
     }
 
     public boolean canEditCurrentUser(PresaleReport report) {
-        if (report == null || !currentUserService.hasPermission(PERM_EDIT)) {
+        if (report == null) {
             return false;
         }
         if (getAccessScope() == AccessScope.ALL) {

@@ -172,7 +172,7 @@ const adminRoutes: RouteRecordRaw = {
       meta: {
         title: '编辑售前报告',
         hidden: true,
-        permissions: ['presale.report.edit_content', 'presale.report.manage'],
+        permissions: ['presale.report.view'],
       },
     },
     {

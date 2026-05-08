@@ -38,8 +38,6 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class PresaleReportExportService {
     private static final String PERM_VIEW = "presale.report.view";
-    private static final String PERM_EXPORT = "presale.report.export";
-    private static final String PERM_DOWNLOAD = "presale.report.download";
     private static final int CODE_EXPORT_IN_PROGRESS = 40901;
     private static final int CODE_FILE_PURGED = 41003;
     private static final int CODE_FILE_EXPIRED = 41004;
@@ -58,7 +56,6 @@ public class PresaleReportExportService {
 
     @Transactional
     public PresaleExportResponse create(Long reportId, PresaleExportCreateRequest req) {
-        currentUserService.ensurePermission(PERM_EXPORT);
         Long userId = currentUserService.requireCurrentUser().getId();
         PresaleReport report = accessService.requireReportWithAccess(reportId);
         PresaleReportVersion version = versionMapper.selectById(req.getVersionId());
@@ -157,7 +154,6 @@ public class PresaleReportExportService {
     }
 
     private PresaleReportExport requireDownloadableExport(Long reportId, Long exportId) {
-        currentUserService.ensurePermission(PERM_DOWNLOAD);
         Long userId = currentUserService.requireCurrentUser().getId();
         accessService.requireReportWithAccess(reportId);
         PresaleReportExport task = requireExport(reportId, exportId);
@@ -180,7 +176,6 @@ public class PresaleReportExportService {
 
     @Transactional
     public PresaleExportResponse retry(Long reportId, Long exportId) {
-        currentUserService.ensurePermission(PERM_EXPORT);
         accessService.requireReportWithAccess(reportId);
         PresaleReportExport task = exportMapper.selectByIdForUpdate(exportId);
         if (task == null || !reportId.equals(task.getReportId())) {

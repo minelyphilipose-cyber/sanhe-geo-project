@@ -4,7 +4,6 @@ import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.export.dto.PresaleExportResponse;
 import com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport;
 import com.huanjing.geo.common.exception.BizException;
-import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -13,9 +12,7 @@ import org.springframework.stereotype.Service;
 @Service
 @RequiredArgsConstructor
 public class PresaleReportExportCancelService {
-    private static final String PERM_EXPORT = "presale.report.export";
 
-    private final CurrentUserService currentUserService;
     private final PresaleAccessService accessService;
     private final PresaleReportExportCancelDbService cancelDbService;
     private final PresaleExportCancellationRegistry cancellationRegistry;
@@ -23,7 +20,6 @@ public class PresaleReportExportCancelService {
     private final PresaleReportExportService exportService;
 
     public PresaleExportResponse cancel(Long reportId, Long exportId) {
-        currentUserService.ensurePermission(PERM_EXPORT);
         accessService.requireReportWithAccess(reportId);
 
         // 阶段 1: DB 事务先落 CANCELED。DB 是真理之源,用户可立即发起新导出。

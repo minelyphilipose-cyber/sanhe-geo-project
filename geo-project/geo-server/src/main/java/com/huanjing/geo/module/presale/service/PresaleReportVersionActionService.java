@@ -58,7 +58,7 @@ import java.util.Set;
  *
  * <p>权限 key 约定:
  * <ul>
- *   <li>{@code presale.report.edit_content} —— edit/derive/freeze/retry(沿用 V62 已有 seed)</li>
+ *   <li>编辑类操作 —— manager 或报告创建者本人可执行</li>
  *   <li>{@code presale.report.manage} —— unfreeze/delete,V65 新增 seed(见 V65__seed_presale_manage_permission.sql)</li>
  * </ul>
  * 所有异常消息使用英文,对齐仓库现状(CurrentUserService 同风格),避免跨平台编码风险。
@@ -70,12 +70,6 @@ import java.util.Set;
 @Service
 @RequiredArgsConstructor
 public class PresaleReportVersionActionService {
-
-    /**
-     * 对齐 V62 已有 seed:presale.report.edit_content。
-     * edit/derive/freeze/retry 都归属"内容编辑类"操作,复用同一权限 key。
-     */
-    private static final String PERM_EDIT = "presale.report.edit_content";
 
     /**
      * V65 新增 seed:presale.report.manage。
@@ -107,9 +101,7 @@ public class PresaleReportVersionActionService {
     @Transactional
     public VersionActionResponse editContent(Long reportId, Integer versionNo,
                                              EditVersionContentRequest req) {
-        currentUserService.ensurePermission(PERM_EDIT);
-
-        PresaleReport report = accessService.requireReportWithAccess(reportId);
+        PresaleReport report = requireEditableReport(reportId);
         PresaleReportVersion version = accessService.requireVersionWithAccess(report.getId(), versionNo);
 
         if (version.getFrozenAt() != null) {
@@ -148,6 +140,14 @@ public class PresaleReportVersionActionService {
 
     private BizException editConflict(String errorCode, String message) {
         return new BizException(409, message, 200, Map.of("errorCode", errorCode));
+    }
+
+    private PresaleReport requireEditableReport(Long reportId) {
+        PresaleReport report = accessService.requireReportWithAccess(reportId);
+        if (!accessService.canEditCurrentUser(report)) {
+            throw new BizException(403, "No edit access to this report");
+        }
+        return report;
     }
 
     private void validateEditableContentJson(String json, boolean requireAllTopLevelFields) {
@@ -405,11 +405,10 @@ public class PresaleReportVersionActionService {
     @Transactional
     public DeriveVersionResponse derive(Long reportId, Integer versionNo,
                                         DeriveVersionRequest req) {
-        currentUserService.ensurePermission(PERM_EDIT);
+        PresaleReport report = requireEditableReport(reportId);
         SysUser user = currentUserService.requireCurrentUser();
         LocalDateTime now = LocalDateTime.now();
 
-        PresaleReport report = accessService.requireReportWithAccess(reportId);
         PresaleReportVersion source = accessService.requireVersionWithAccess(report.getId(), versionNo);
 
         if (!PresaleGenerateStatus.DONE.name().equals(source.getGenerationStatus())) {
@@ -479,16 +478,15 @@ public class PresaleReportVersionActionService {
     }
 
     // ---------------------------------------------------------------
-    // 3. POST freeze -- sales/manager 皆可(edit_content 权限)
+    // 3. POST freeze -- manager 或报告创建者本人可执行
     // ---------------------------------------------------------------
 
     @Transactional
     public VersionActionResponse freeze(Long reportId, Integer versionNo,
                                         FreezeVersionRequest req) {
-        currentUserService.ensurePermission(PERM_EDIT);
+        PresaleReport report = requireEditableReport(reportId);
         SysUser user = currentUserService.requireCurrentUser();
 
-        PresaleReport report = accessService.requireReportWithAccess(reportId);
         PresaleReportVersion version = accessService.requireVersionWithAccess(report.getId(), versionNo);
 
         if (version.getFrozenAt() != null) {
@@ -609,10 +607,9 @@ public class PresaleReportVersionActionService {
 
     @Transactional
     public RetryVersionResponse retry(Long reportId, Integer versionNo) {
-        currentUserService.ensurePermission(PERM_EDIT);
+        PresaleReport report = requireEditableReport(reportId);
         SysUser user = currentUserService.requireCurrentUser();
 
-        PresaleReport report = accessService.requireReportWithAccess(reportId);
         PresaleReportVersion version = accessService.requireVersionWithAccess(report.getId(), versionNo);
 
         if (!PresaleGenerateStatus.FAILED.name().equals(version.getGenerationStatus())) {
@@ -651,10 +648,9 @@ public class PresaleReportVersionActionService {
 
     @Transactional
     public RetryVersionResponse regenerate(Long reportId, Integer versionNo) {
-        currentUserService.ensurePermission(PERM_EDIT);
+        PresaleReport report = requireEditableReport(reportId);
         SysUser user = currentUserService.requireCurrentUser();
 
-        PresaleReport report = accessService.requireReportWithAccess(reportId);
         PresaleReportVersion version = accessService.requireVersionWithAccess(report.getId(), versionNo);
         if (!PresaleGenerateStatus.DONE.name().equals(version.getGenerationStatus())
                 && !PresaleGenerateStatus.FAILED.name().equals(version.getGenerationStatus())) {

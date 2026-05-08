@@ -97,6 +97,26 @@ class PresaleAccessServiceTest {
     }
 
     @Test
+    void canEditCurrentUser_ownerCanEditWithoutEditPermission() {
+        SysUser owner = user(OWNER_USER_ID);
+        PresaleReport report = report(REPORT_ID, OWNER_USER_ID);
+        when(currentUserService.requireCurrentUser()).thenReturn(owner);
+        when(currentUserService.hasPermission("presale.report.manage")).thenReturn(false);
+
+        assertEquals(true, accessService.canEditCurrentUser(report));
+    }
+
+    @Test
+    void canEditCurrentUser_nonOwnerCannotEditWithoutManagePermission() {
+        SysUser nonOwner = user(OTHER_USER_ID);
+        PresaleReport report = report(REPORT_ID, OWNER_USER_ID);
+        when(currentUserService.requireCurrentUser()).thenReturn(nonOwner);
+        when(currentUserService.hasPermission("presale.report.manage")).thenReturn(false);
+
+        assertEquals(false, accessService.canEditCurrentUser(report));
+    }
+
+    @Test
     void requireReportWithAccess_reportNotFoundReturns404() {
         when(reportMapper.selectById(REPORT_ID)).thenReturn(null);
 
