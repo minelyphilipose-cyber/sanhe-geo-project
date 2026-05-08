@@ -8,7 +8,7 @@ const ALLOWED_API_BASES = [
 ] as const
 
 function normalizeApiBase(value: string | undefined): string {
-  const fallback = import.meta.env.PROD ? 'https://api.example.com' : 'http://localhost:8080'
+  const fallback = 'http://localhost:8080'
   return (value || fallback).replace(/\/$/, '')
 }
 
@@ -16,7 +16,8 @@ function validateApiBase(value: string): string {
   if (!ALLOWED_API_BASES.includes(value as (typeof ALLOWED_API_BASES)[number])) {
     throw new Error(`VITE_GEO_API_BASE_URL is not allowed: ${value}`)
   }
-  if (import.meta.env.PROD && value.startsWith('http://')) {
+  const isLocalhost = value === 'http://localhost:8080'
+  if (import.meta.env.PROD && value.startsWith('http://') && !isLocalhost) {
     throw new Error('Production extension API base must use HTTPS')
   }
   return value
