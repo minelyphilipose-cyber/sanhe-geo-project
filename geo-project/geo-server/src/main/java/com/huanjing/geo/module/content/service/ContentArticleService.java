@@ -477,15 +477,19 @@ public class ContentArticleService {
     }
 
     private void ensureReviewerIsNotAuthor(ArticleDraft article, SysUser operator) {
+        Long reviewerId = operator == null ? null : operator.getId();
+        if (reviewerId == null) {
+            return;
+        }
         List<ArticleDraftVersion> versions = articleDraftVersionMapper.selectList(
                 new LambdaQueryWrapper<ArticleDraftVersion>()
                         .eq(ArticleDraftVersion::getArticleId, article.getId())
                         .select(ArticleDraftVersion::getCreatedBy)
         );
         boolean authoredByReviewer = versions != null && versions.stream()
-                .map(ArticleDraftVersion::getCreatedBy)
                 .filter(Objects::nonNull)
-                .anyMatch(operator.getId()::equals);
+                .map(ArticleDraftVersion::getCreatedBy)
+                .anyMatch(reviewerId::equals);
         if (authoredByReviewer) {
             throw new BizException(ContentErrorCodes.ARTICLE_AUTHOR_CANNOT_REVIEW, "Article author cannot review their own article");
         }

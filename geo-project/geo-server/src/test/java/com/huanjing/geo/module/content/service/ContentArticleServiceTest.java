@@ -34,6 +34,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -172,6 +173,19 @@ class ContentArticleServiceTest {
 
         assertEquals(ContentErrorCodes.ARTICLE_AUTHOR_CANNOT_REVIEW, ex.getCode());
         verify(articleDraftMapper, never()).update(isNull(), any(Wrapper.class));
+    }
+
+    @Test
+    void reviewIgnoresNullHistoricalVersionAuthors() {
+        ArticleDraft article = article("pending_review");
+        when(articleDraftMapper.selectById(99L)).thenReturn(article);
+        when(articleDraftVersionMapper.selectList(any())).thenReturn(Arrays.asList(null, version(null), version(8L)));
+        when(articleDraftMapper.update(isNull(), any(Wrapper.class))).thenReturn(1);
+
+        service.review(99L, review("approve", null));
+
+        verify(articleDraftMapper).update(isNull(), any(Wrapper.class));
+        verifyAudit("ARTICLE_REVIEWED", AuditResult.SUCCESS);
     }
 
     @Test
