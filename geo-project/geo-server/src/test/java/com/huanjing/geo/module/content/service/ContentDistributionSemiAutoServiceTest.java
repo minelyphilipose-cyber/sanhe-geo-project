@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.audit.AuditMode;
 import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.audit.service.AuditService;
 import com.huanjing.geo.module.content.distribution.TargetContext;
@@ -175,6 +176,7 @@ class ContentDistributionSemiAutoServiceTest {
         verify(auditService).record(argThat(event ->
                 "SEMI_AUTO_TASK_CREATED".equals(event.getEventType())
                         && AuditResult.SUCCESS == event.getResult()
+                        && AuditMode.ASYNC == event.getMode()
                         && Long.valueOf(50L).equals(event.getTaskId())
         ));
     }
@@ -249,6 +251,7 @@ class ContentDistributionSemiAutoServiceTest {
         verify(auditService).record(argThat(event ->
                 "SEMI_AUTO_TASK_CREATION_FAILED".equals(event.getEventType())
                         && AuditResult.DENIED == event.getResult()
+                        && AuditMode.ASYNC == event.getMode()
                         && String.valueOf(ExtensionErrorCodes.FILL_TOKEN_INVALID).equals(event.getErrorCode())
                         && Long.valueOf(50L).equals(event.getTaskId())
         ));

@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.extension.service;
 
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.audit.AuditMode;
+import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.extension.config.ExtensionProperties;
@@ -87,6 +89,22 @@ class FillTokenServiceTest {
         verify(versionService, never()).requireSupported(any(), any());
         verify(brandAccessService).requireBrandAccess(10L, 99L, BrandAccessAction.OPERATE);
         verify(redisStore).set(any(), eq("1"), any());
+        verify(auditSupport).record(
+                eq("FILL_TOKEN_ISSUE"),
+                eq(AuditResult.SUCCESS),
+                eq(AuditMode.ASYNC),
+                eq(true),
+                eq(99L),
+                eq(10L),
+                eq(20L),
+                eq(30L),
+                eq(null),
+                eq("FILL_TOKEN"),
+                any(),
+                eq(null),
+                eq(null),
+                any()
+        );
     }
 
     @Test

@@ -111,7 +111,7 @@ public class FillTokenService {
         auditSupport.record(
                 "FILL_TOKEN_ISSUE",
                 AuditResult.SUCCESS,
-                AuditMode.SYNC,
+                AuditMode.ASYNC,
                 true,
                 operatorId,
                 brandId,

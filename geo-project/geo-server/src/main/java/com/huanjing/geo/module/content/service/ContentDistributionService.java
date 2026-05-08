@@ -852,7 +852,7 @@ public class ContentDistributionService {
         event.setTargetType("DISTRIBUTION_TASK");
         event.setTargetId(String.valueOf(task.getId()));
         event.setResult(AuditResult.SUCCESS);
-        event.setMode(AuditMode.SYNC);
+        event.setMode(AuditMode.ASYNC);
         event.setSensitive(false);
         event.setDetail(Map.of(
                 "articleId", article.getId(),
@@ -878,7 +878,7 @@ public class ContentDistributionService {
         event.setTargetType("DISTRIBUTION_TASK");
         event.setTargetId(String.valueOf(task.getId()));
         event.setResult(auditResultForSemiAutoFailure(ex));
-        event.setMode(AuditMode.SYNC);
+        event.setMode(AuditMode.ASYNC);
         event.setSensitive(false);
         event.setErrorCode(String.valueOf(ex.getCode()));
         event.setErrorMessage(ex.getMessage());
