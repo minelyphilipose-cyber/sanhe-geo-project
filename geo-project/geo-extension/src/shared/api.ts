@@ -24,17 +24,37 @@ export class ExtensionApiError extends Error {
   }
 }
 
+interface ApiResponseEnvelope<T> {
+  code?: number
+  message?: string
+  data?: T
+}
+
+const REQUEST_TIMEOUT_MS = 15_000
+
 async function request<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
   const headers = new Headers(init.headers)
   headers.set('Content-Type', 'application/json')
   if (token) headers.set('X-Ext-Token', token)
 
-  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers })
-  if (!response.ok) {
-    const body = (await response.json().catch(() => ({}))) as ApiErrorBody
-    throw new ExtensionApiError(response.status, body.code, body.message || 'Request failed')
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers, signal: controller.signal })
+    const body = (await response.json().catch(() => ({}))) as ApiResponseEnvelope<T> & ApiErrorBody
+    if (!response.ok || (body.code !== undefined && body.code !== 0)) {
+      throw new ExtensionApiError(response.status, body.code, body.message || 'Request failed')
+    }
+    return body.data as T
+  } catch (error) {
+    if (error instanceof ExtensionApiError) throw error
+    if (error instanceof DOMException && error.name === 'AbortError') {
+      throw new Error('请求服务端超时，请确认后端服务可用后重试。')
+    }
+    throw error
+  } finally {
+    clearTimeout(timeout)
   }
-  return (await response.json()).data as T
 }
 
 export const extensionApi = {

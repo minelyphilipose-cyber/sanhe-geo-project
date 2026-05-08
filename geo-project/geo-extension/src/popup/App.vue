@@ -69,6 +69,8 @@ async function bind() {
     loading.value = true
     session.value = await bindExtension({ bindCode: bindCode.value })
     status.value = 'bound'
+    bindCode.value = ''
+    loading.value = false
     errorMessage.value = ''
     statusMessage.value = `绑定成功，sessionId ${session.value.sessionId}`
     await refreshAccounts()

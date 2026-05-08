@@ -29,6 +29,22 @@ describe('extensionApi', () => {
     )
   })
 
+  it('treats non-zero response code as an API error even when HTTP status is 200', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        code: 70008,
+        message: 'bind code invalid',
+      }),
+    })))
+
+    await expect(extensionApi.bind('ABCDEFGH', 'install-1', '0.1.0')).rejects.toMatchObject({
+      status: 200,
+      code: 70008,
+    })
+  })
+
   it('uses auth header for token refresh and revoke without leaking token in URL', async () => {
     await extensionApi.refresh('ext.secret', '0.1.0')
     await extensionApi.revoke('ext.secret', 88)

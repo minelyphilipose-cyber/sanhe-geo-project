@@ -1,6 +1,7 @@
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ExtensionApiError, extensionApi } from '@/shared/api'
+import { sessionStorage } from '@/shared/storage'
 import App from './App.vue'
 
 let runtimeListener: ((message: unknown) => boolean) | undefined
@@ -18,6 +19,9 @@ vi.mock('@/shared/storage', () => ({
       expiresAt: '2026-05-14T00:00:00Z',
       boundAt: '2026-05-07T00:00:00Z',
     })),
+    set: vi.fn(),
+    clear: vi.fn(),
+    getOrCreateInstallId: vi.fn(async () => 'install-1'),
   },
 }))
 
@@ -38,6 +42,20 @@ vi.mock('@/shared/api', async () => {
 
 beforeEach(() => {
   runtimeListener = undefined
+  vi.mocked(sessionStorage.get).mockResolvedValue({
+    token: 'ext.secret',
+    sessionId: 88,
+    extensionVersion: '0.1.0',
+    expiresAt: '2026-05-14T00:00:00Z',
+    boundAt: '2026-05-07T00:00:00Z',
+  })
+  vi.mocked(sessionStorage.set).mockResolvedValue(undefined)
+  vi.mocked(sessionStorage.clear).mockResolvedValue(undefined)
+  vi.mocked(sessionStorage.getOrCreateInstallId).mockResolvedValue('install-1')
+  vi.mocked(extensionApi.bind).mockReset()
+  vi.mocked(extensionApi.tasks).mockResolvedValue([])
+  vi.mocked(extensionApi.selfMediaAccounts).mockResolvedValue([])
+  vi.stubGlobal('confirm', vi.fn(() => true))
   vi.stubGlobal('chrome', {
     runtime: {
       onMessage: {
@@ -80,6 +98,26 @@ describe('popup task list', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('任务已上报 published。')
+  })
+
+  it('leaves binding state immediately after bind succeeds even if account refresh is slow', async () => {
+    vi.mocked(sessionStorage.get).mockResolvedValueOnce(null)
+    vi.mocked(extensionApi.bind).mockResolvedValueOnce({
+      token: 'ext.new',
+      sessionId: 90,
+      expiresAt: '2026-05-15T00:00:00Z',
+    })
+    vi.mocked(extensionApi.selfMediaAccounts).mockReturnValueOnce(new Promise(() => []))
+
+    const wrapper = mount(App)
+    await flushPromises()
+
+    await wrapper.find('input').setValue('ABCD-EFGH')
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('绑定成功，sessionId 90')
+    expect(wrapper.text()).not.toContain('绑定中...')
   })
 })
 
