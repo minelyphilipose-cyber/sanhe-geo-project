@@ -20,7 +20,13 @@ export async function captureCookiesForAccount(
   if (!session) throw new Error('扩展登录已失效，请重新绑定。')
   const installId = await sessionStorage.getOrCreateInstallId()
   const cookies = await readPlatformCookies(account.platform)
-  const payload = {
+  const cookiesJson = JSON.stringify(cookies)
+  const requiredCookieCheckJson = JSON.stringify(requiredCookieCheck(account.platform, cookies))
+  const capturedFingerprintJson = JSON.stringify({
+    browser: 'chrome',
+    domains: domainsForPlatform(account.platform),
+  })
+  return withRetry(() => extensionApi.captureCookies(session.token, {
     brandId: account.brandId,
     accountId: account.accountId,
     platform: account.platform,
@@ -28,15 +34,11 @@ export async function captureCookiesForAccount(
     installId,
     operatorConfirmed: true,
     confirmNonce: crypto.randomUUID(),
-    cookiesJson: JSON.stringify(cookies),
+    cookiesJson,
     userAgent: navigator.userAgent,
-    requiredCookieCheckJson: JSON.stringify(requiredCookieCheck(account.platform, cookies)),
-    capturedFingerprintJson: JSON.stringify({
-      browser: 'chrome',
-      domains: domainsForPlatform(account.platform),
-    }),
-  }
-  return withRetry(() => extensionApi.captureCookies(session.token, payload), 3)
+    requiredCookieCheckJson,
+    capturedFingerprintJson,
+  }), 3)
 }
 
 export function domainsForPlatform(platform: string): string[] {

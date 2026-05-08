@@ -3,7 +3,6 @@ import { extensionApi } from '@/shared/api'
 import {
   isAllowedPublishUrl,
   profileForPlatform,
-  sanitizeContentHtml,
   sanitizeTitle,
   type PlatformFillProfile,
 } from '@/shared/fillProfiles'
@@ -28,9 +27,6 @@ export async function startFillTask(task: ExtensionTaskListItem): Promise<Extens
   const session = await sessionStorage.get()
   if (!session) throw new Error('扩展登录已失效，请重新绑定。')
   const profile = profileForPlatform(task.platform)
-  if (!task.publishUrl || !isAllowedPublishUrl(task.platform, task.publishUrl)) {
-    throw new Error('发布地址不在平台白名单内')
-  }
 
   const issue = await extensionApi.issueFillToken(session.token, {
     taskTargetId: task.taskId,
@@ -71,7 +67,7 @@ function buildFillCommand(taskId: number, fillPayload: string, profile: Platform
     platform: profile.platform,
     publishUrl,
     title: sanitizeTitle(payload.title),
-    contentHtml: sanitizeContentHtml(payload.renderedHtml),
+    contentHtml: payload.renderedHtml ?? '',
     coverImageUrl: payload.coverImageUrl ?? null,
     tags: payload.tags ?? [],
     category: payload.category ?? null,

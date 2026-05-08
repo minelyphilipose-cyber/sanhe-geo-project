@@ -80,13 +80,13 @@ describe('fill service worker flow', () => {
     expect(JSON.stringify(vi.mocked(chrome.tabs.sendMessage).mock.calls[0][1])).not.toContain('secret-cookie')
     expect(vi.mocked(chrome.tabs.sendMessage).mock.calls[0][1]).toMatchObject({
       type: 'GEO_FILL_TASK',
-      payload: expect.objectContaining({ title: 'Draft', contentHtml: '<p>Hello</p>' }),
+      payload: expect.objectContaining({ title: 'Draft', contentHtml: '<p>Hello</p><script>bad()</script>' }),
     })
     expect(extensionApi.ackTask).toHaveBeenCalledWith('ext.secret', 30)
     expect(startTaskLifecycle).toHaveBeenCalledWith(30, 9, 'ext.secret')
   })
 
-  it('sanitizes XSS payload before sending fill command to content script', async () => {
+  it('passes content html to content script without invoking DOMPurify in the service worker', async () => {
     vi.mocked(extensionApi.consumeFillToken).mockResolvedValue({
       taskTargetId: 30,
       expiresAt: 200,
@@ -107,10 +107,8 @@ describe('fill service worker flow', () => {
     await promise
 
     const message = JSON.stringify(vi.mocked(chrome.tabs.sendMessage).mock.calls[0][1]).toLowerCase()
-    expect(message).not.toContain('onload')
-    expect(message).not.toContain('javascript:')
-    expect(message).not.toContain('<iframe')
-    expect(message).not.toContain('<form')
+    expect(message).toContain('onload')
+    expect(message).toContain('javascript:')
   })
 
   it('does not retry consume failure or set cookies', async () => {
@@ -122,10 +120,36 @@ describe('fill service worker flow', () => {
     expect(chrome.cookies.set).not.toHaveBeenCalled()
   })
 
-  it('rejects publishUrl outside platform whitelist before issuing token', async () => {
-    await expect(startFillTask({ ...task(), publishUrl: 'https://evil.example/editor' })).rejects.toThrow('白名单')
+  it('ignores task list publishUrl and validates fill payload publishUrl after consuming token', async () => {
+    const promise = startFillTask({ ...task(), publishUrl: 'https://evil.example/editor' })
+    await vi.waitFor(() => expect(readyListener).toBeTypeOf('function'))
+    readyListener?.({ type: 'GEO_EDITOR_READY' }, { tab: { id: 9 } } as chrome.runtime.MessageSender)
 
-    expect(extensionApi.issueFillToken).not.toHaveBeenCalled()
+    await expect(promise).resolves.toMatchObject({ status: 'filled' })
+
+    expect(extensionApi.issueFillToken).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects fill payload publishUrl outside platform whitelist after consuming token', async () => {
+    vi.mocked(extensionApi.consumeFillToken).mockResolvedValue({
+      taskTargetId: 30,
+      expiresAt: 200,
+      nonce: 'nonce-1',
+      platform: 'toutiao',
+      cookiesJson: '[]',
+      fillPayload: JSON.stringify({
+        platform: 'toutiao',
+        publishUrl: 'https://evil.example/editor',
+        title: 'Draft',
+        renderedHtml: '<p>Hello</p>',
+      }),
+    })
+
+    await expect(startFillTask(task())).rejects.toThrow('白名单')
+
+    expect(extensionApi.issueFillToken).toHaveBeenCalledTimes(1)
+    expect(extensionApi.consumeFillToken).toHaveBeenCalledTimes(1)
+    expect(chrome.cookies.set).not.toHaveBeenCalled()
   })
 
   it('validates all cookie domains before writing any cookie', async () => {

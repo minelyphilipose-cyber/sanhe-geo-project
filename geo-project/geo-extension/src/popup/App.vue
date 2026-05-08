@@ -38,7 +38,7 @@ const displayMessage = computed(() => errorMessage.value || statusMessage.value)
 onMounted(async () => {
   session.value = await sessionStorage.get()
   status.value = session.value ? 'bound' : 'unbound'
-  statusMessage.value = session.value ? `已绑定，版本 ${session.value.extensionVersion}` : '请输入后台生成的绑定码完成绑定'
+  statusMessage.value = session.value ? `已绑定，版本 ${session.value.extensionVersion}` : '请输入绑定码完成绑定'
   chrome.runtime.onMessage.addListener(onRuntimeMessage)
   try {
     await extensionApi.versionCheck(EXTENSION_VERSION)
@@ -69,10 +69,10 @@ async function bind() {
     loading.value = true
     session.value = await bindExtension({ bindCode: bindCode.value })
     status.value = 'bound'
-    bindCode.value = ''
-    loading.value = false
     errorMessage.value = ''
     statusMessage.value = `绑定成功，sessionId ${session.value.sessionId}`
+    bindCode.value = ''
+    loading.value = false
     await refreshAccounts()
     await refreshTasks()
     startTaskRefresh()
@@ -248,7 +248,7 @@ function onRuntimeMessage(message: { type: string, payload?: TaskLifecycleEvent 
 <template>
   <main class="popup">
     <header>
-      <strong>GEO 半自动发布</strong>
+      <strong>三合星链自媒体助手</strong>
       <span>{{ EXTENSION_VERSION }}</span>
     </header>
     <section :class="['status', status]">
@@ -265,7 +265,6 @@ function onRuntimeMessage(message: { type: string, payload?: TaskLifecycleEvent 
           @input="onBindCodeInput"
         >
       </label>
-      <p class="confirm">绑定码由后台品牌详情页生成，扩展会自动绑定到对应品牌。</p>
       <button :disabled="loading" type="button" @click="bind">
         {{ loading ? '绑定中...' : '绑定' }}
       </button>

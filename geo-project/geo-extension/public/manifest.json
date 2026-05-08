@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "GEO Semi-auto Publisher",
+  "name": "三合星链自媒体助手",
   "version": "0.1.0",
   "description": "Semi-auto publishing companion for GEO self-media tasks.",
   "action": {

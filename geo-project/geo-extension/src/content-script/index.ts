@@ -1,6 +1,6 @@
 import type { ExtensionMessage } from '@/types/extension'
 import type { FillCommandPayload } from '@/types/extension'
-import { profileForUrl } from '@/shared/fillProfiles'
+import { profileForUrl } from './contentProfiles'
 import { fillEditor } from './fillEditor'
 import { activatePublishListener, handlePublishClick } from './publishListener'
 
@@ -31,9 +31,18 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
 
   // Compliance requirement: the extension must never click the platform "Publish" button.
   // The operator must publish manually; this script may only fill fields and report state.
-  const result = fillEditor(message.payload as FillCommandPayload)
-  if (result.ok) activatePublishListener((message.payload as FillCommandPayload).taskId)
-  sendResponse(result)
+  fillEditor(message.payload as FillCommandPayload)
+    .then(result => {
+      if (result.ok) activatePublishListener((message.payload as FillCommandPayload).taskId)
+      sendResponse(result)
+    })
+    .catch(error => {
+      sendResponse({
+        ok: false,
+        errorCode: 'FILL_FAILED',
+        message: error instanceof Error ? error.message : 'fill failed',
+      })
+    })
   return true
 })
 

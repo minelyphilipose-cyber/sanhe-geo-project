@@ -1,4 +1,4 @@
-import { profileForUrl } from '@/shared/fillProfiles'
+import { profileForUrl } from './contentProfiles'
 
 let activeTaskId: number | null = null
 

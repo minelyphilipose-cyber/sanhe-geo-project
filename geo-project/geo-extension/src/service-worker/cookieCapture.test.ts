@@ -95,4 +95,31 @@ describe('cookie capture service worker flow', () => {
 
     expect(extensionApi.captureCookies).toHaveBeenCalledTimes(1)
   })
+
+  it('uses a fresh confirmNonce for retried transient failures', async () => {
+    let nonce = 0
+    vi.stubGlobal('crypto', { randomUUID: () => `nonce-${++nonce}` })
+    vi.mocked(extensionApi.captureCookies)
+      .mockRejectedValueOnce(new Error('network timeout'))
+      .mockResolvedValueOnce({
+        credentialId: 1,
+        accountId: 20,
+        brandId: 10,
+        platform: 'toutiao',
+        version: 3,
+        capturedAt: '2026-05-07T12:00:00',
+        status: 'ACTIVE',
+      })
+
+    await captureCookiesForAccount({
+      accountId: 20,
+      brandId: 10,
+      platform: 'toutiao',
+      accountName: 'Toutiao Account',
+    })
+
+    expect(extensionApi.captureCookies).toHaveBeenCalledTimes(2)
+    expect(vi.mocked(extensionApi.captureCookies).mock.calls[0][1].confirmNonce).toBe('nonce-1')
+    expect(vi.mocked(extensionApi.captureCookies).mock.calls[1][1].confirmNonce).toBe('nonce-2')
+  })
 })
