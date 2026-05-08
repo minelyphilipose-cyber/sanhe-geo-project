@@ -13,6 +13,7 @@
   },
   "permissions": ["alarms", "cookies", "storage", "tabs", "scripting"],
   "host_permissions": [
+    "http://127.0.0.1:8080/*",
     "http://localhost:8080/*",
     "https://*.toutiao.com/*",
     "https://*.zhihu.com/*"

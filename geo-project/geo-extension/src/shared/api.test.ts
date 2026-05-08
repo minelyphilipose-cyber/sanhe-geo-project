@@ -21,7 +21,7 @@ describe('extensionApi', () => {
 
     expect(result.supported).toBe(true)
     expect(fetch).toHaveBeenCalledWith(
-      'http://localhost:8080/api/v1/extension/version-check',
+      'http://127.0.0.1:8080/api/v1/extension/version-check',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ platform: 'chrome', currentVersion: '0.1.0' }),
@@ -51,7 +51,7 @@ describe('extensionApi', () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      'http://localhost:8080/api/v1/extension/token/refresh',
+      'http://127.0.0.1:8080/api/v1/extension/token/refresh',
       expect.objectContaining({
         method: 'POST',
         headers: expect.any(Headers),
@@ -59,7 +59,7 @@ describe('extensionApi', () => {
     )
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      'http://localhost:8080/api/v1/extension/token/88/revoke',
+      'http://127.0.0.1:8080/api/v1/extension/token/88/revoke',
       expect.objectContaining({
         method: 'POST',
         headers: expect.any(Headers),
@@ -76,7 +76,7 @@ describe('extensionApi', () => {
     await extensionApi.tasks('ext.secret')
 
     expect(fetch).toHaveBeenCalledWith(
-      'http://localhost:8080/api/v1/extension/tasks',
+      'http://127.0.0.1:8080/api/v1/extension/tasks',
       expect.objectContaining({
         method: 'GET',
         headers: expect.any(Headers),
@@ -99,7 +99,7 @@ describe('extensionApi', () => {
     })
 
     expect(fetch).toHaveBeenCalledWith(
-      'http://localhost:8080/api/v1/extension/cookies/capture',
+      'http://127.0.0.1:8080/api/v1/extension/cookies/capture',
       expect.objectContaining({
         method: 'POST',
         headers: expect.any(Headers),
@@ -128,27 +128,27 @@ describe('extensionApi', () => {
 
     expect(fetch).toHaveBeenNthCalledWith(
       1,
-      'http://localhost:8080/api/v1/extension/fill-token/issue',
+      'http://127.0.0.1:8080/api/v1/extension/fill-token/issue',
       expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
     )
     expect(fetch).toHaveBeenNthCalledWith(
       2,
-      'http://localhost:8080/api/v1/extension/fill-token/consume',
+      'http://127.0.0.1:8080/api/v1/extension/fill-token/consume',
       expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
     )
     expect(fetch).toHaveBeenNthCalledWith(
       3,
-      'http://localhost:8080/api/v1/extension/tasks/30/ack',
+      'http://127.0.0.1:8080/api/v1/extension/tasks/30/ack',
       expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
     )
     expect(fetch).toHaveBeenNthCalledWith(
       4,
-      'http://localhost:8080/api/v1/extension/tasks/30/heartbeat',
+      'http://127.0.0.1:8080/api/v1/extension/tasks/30/heartbeat',
       expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
     )
     expect(fetch).toHaveBeenNthCalledWith(
       5,
-      'http://localhost:8080/api/v1/extension/tasks/30/published',
+      'http://127.0.0.1:8080/api/v1/extension/tasks/30/published',
       expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
     )
   })
