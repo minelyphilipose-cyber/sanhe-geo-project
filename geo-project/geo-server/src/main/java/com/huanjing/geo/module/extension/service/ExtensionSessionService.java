@@ -71,7 +71,7 @@ public class ExtensionSessionService {
         auditSupport.record(
                 "EXTENSION_BIND",
                 AuditResult.SUCCESS,
-                AuditMode.SYNC,
+                AuditMode.ASYNC,
                 true,
                 operatorId,
                 brandId,

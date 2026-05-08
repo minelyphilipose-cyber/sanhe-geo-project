@@ -63,6 +63,28 @@ class ExtensionSessionServiceTest {
     }
 
     @Test
+    void createBoundSessionAuditsAsyncSoDbLockDoesNotBlockBindResponse() {
+        ExtensionBindResponse response = service.createBoundSession(10L, 99L, "install-1", "fp", "1.2.3", "ua");
+
+        verify(auditSupport).record(
+                eq("EXTENSION_BIND"),
+                eq(AuditResult.SUCCESS),
+                eq(AuditMode.ASYNC),
+                eq(true),
+                eq(99L),
+                eq(10L),
+                eq(null),
+                eq(null),
+                eq(response.sessionId()),
+                eq("EXTENSION_SESSION"),
+                eq(String.valueOf(response.sessionId())),
+                eq(null),
+                eq(null),
+                any()
+        );
+    }
+
+    @Test
     void samePlaintextHasSameLookupButDifferentSaltedHash() {
         String plaintext = "ext.same-token";
         String salt1 = "00112233445566778899aabbccddeeff";
