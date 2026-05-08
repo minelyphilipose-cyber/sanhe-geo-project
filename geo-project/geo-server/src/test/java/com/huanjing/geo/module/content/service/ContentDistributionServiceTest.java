@@ -26,6 +26,7 @@ import com.huanjing.geo.module.content.service.adapter.SubmitResult;
 import com.huanjing.geo.module.content.service.adapter.ValidationResult;
 import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import com.huanjing.geo.module.audit.service.AuditService;
+import com.huanjing.geo.module.content.authoritymedia.AuthorityMediaDistributionAdapter;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -123,7 +124,8 @@ class ContentDistributionServiceTest {
                 brandAccessService,
                 fillTokenService,
                 auditService,
-                new ObjectMapper()
+                new ObjectMapper(),
+                mock(AuthorityMediaDistributionAdapter.class)
         );
     }
 

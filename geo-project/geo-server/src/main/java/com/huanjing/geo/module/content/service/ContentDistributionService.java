@@ -12,6 +12,7 @@ import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.service.AuditService;
 import com.huanjing.geo.module.content.ContentErrorCodes;
+import com.huanjing.geo.module.content.authoritymedia.AuthorityMediaDistributionAdapter;
 import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.dto.DistributionAttemptVO;
@@ -58,6 +59,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.*;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 @Service
@@ -72,6 +74,7 @@ public class ContentDistributionService {
     private static final String GENERAL_INDUSTRY = "general";
     private static final String AUTH_MODE_COOKIE = "COOKIE";
     private static final int MAX_FILL_PAYLOAD_BYTES = 16 * 1024;
+    private static final ConcurrentHashMap<String, Object> AUTHORITY_MEDIA_LOCKS = new ConcurrentHashMap<>();
 
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
@@ -92,6 +95,7 @@ public class ContentDistributionService {
     private final FillTokenService fillTokenService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
+    private final AuthorityMediaDistributionAdapter authorityMediaDistributionAdapter;
 
     @Transactional
     public DistributionTask distribute(Long articleId, Long siteId) {
@@ -123,6 +127,9 @@ public class ContentDistributionService {
         }
         if (target instanceof TargetContext.SelfMediaTarget selfMediaTarget) {
             return distributeToSelfMedia(article, project, operator, selfMediaTarget);
+        }
+        if (target instanceof TargetContext.AuthorityMediaTarget authorityMediaTarget) {
+            return distributeToAuthorityMedia(article, project, operator, authorityMediaTarget);
         }
         throw new IllegalArgumentException("Unsupported TargetContext type: " + target.getClass().getSimpleName());
     }
@@ -510,6 +517,55 @@ public class ContentDistributionService {
         return distributionTaskMapper.selectById(task.getId());
     }
 
+    private DistributionTask distributeToAuthorityMedia(ArticleDraft article,
+                                                        Project project,
+                                                        SysUser operator,
+                                                        TargetContext.AuthorityMediaTarget target) {
+        if (target.resourceId() == null) {
+            throw new BizException(400, "authority media resourceId is required");
+        }
+        String lockKey = article.getId() + ":" + target.resourceId();
+        Object lock = AUTHORITY_MEDIA_LOCKS.computeIfAbsent(lockKey, ignored -> new Object());
+        synchronized (lock) {
+            try {
+                return doDistributeToAuthorityMedia(article, project, operator, target);
+            } finally {
+                AUTHORITY_MEDIA_LOCKS.remove(lockKey, lock);
+            }
+        }
+    }
+
+    private DistributionTask doDistributeToAuthorityMedia(ArticleDraft article,
+                                                          Project project,
+                                                          SysUser operator,
+                                                          TargetContext.AuthorityMediaTarget target) {
+        authorityMediaDistributionAdapter.validateBeforeCreatingTask(article, target);
+        String content = requireLatestContent(article.getId());
+        DistributionTask task = createAttemptForAuthorityMedia(article, target.resourceId(), operator.getId());
+        companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.AUTHORITY_MEDIA, task.getId());
+        try {
+            transitionArticleStatus(article, article.getStatus(), "distributing", false);
+        } catch (BizException ex) {
+            companyChannelQuotaService.refundDistribution(task.getId());
+            throw ex;
+        }
+
+        SubmitResult submitResult;
+        try {
+            submitResult = authorityMediaDistributionAdapter.submitNewsMedia(article, project, task, operator.getId(), target, content);
+        } catch (Exception ex) {
+            submitResult = SubmitResult.failure(500, null, null, trimError(ex.getMessage()), FailureKind.UNKNOWN, false);
+        }
+        finalizeAttemptForAuthorityMedia(task.getId(), submitResult);
+        finalizeArticleStatusForDraft(article, submitResult);
+        if (submitResult.isSuccess()) {
+            companyChannelQuotaService.confirmDistribution(task.getId());
+        } else {
+            companyChannelQuotaService.refundDistribution(task.getId());
+        }
+        return distributionTaskMapper.selectById(task.getId());
+    }
+
     private DistributionTask createSemiAutoSelfMediaTask(ArticleDraft article,
                                                         Project project,
                                                         SysUser operator,
@@ -663,6 +719,29 @@ public class ContentDistributionService {
         return task;
     }
 
+    private DistributionTask createAttemptForAuthorityMedia(ArticleDraft article, Long authorityMediaResourceId, Long operatorId) {
+        Integer maxAttempt = distributionTaskMapper.selectList(
+                new LambdaQueryWrapper<DistributionTask>()
+                        .eq(DistributionTask::getArticleId, article.getId())
+                        .eq(DistributionTask::getAuthorityMediaId, authorityMediaResourceId)
+        ).stream().map(DistributionTask::getAttemptNo).max(Integer::compareTo).orElse(0);
+
+        DistributionTask task = new DistributionTask();
+        task.setArticleId(article.getId());
+        task.setProjectId(article.getProjectId());
+        task.setSiteId(null);
+        task.setTargetKind(DistributionTargetKind.AUTHORITY_MEDIA);
+        task.setAuthorityMediaId(authorityMediaResourceId);
+        task.setAttemptNo(maxAttempt + 1);
+        task.setStatus("submitting");
+        task.setIntegrationMethod("meititejia_news_media");
+        task.setRetryCount(0);
+        task.setOperatorId(operatorId);
+        task.setLockedUntil(LocalDateTime.now(SH_ZONE).plusMinutes(5));
+        distributionTaskMapper.insert(task);
+        return task;
+    }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     protected void finalizeAttemptForBrandOfficialSite(Long taskId, SubmitResult result) {
         LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
@@ -752,6 +831,39 @@ public class ContentDistributionService {
         int affected = distributionTaskMapper.update(null, wrapper);
         if (affected == 0) {
             log.warn("finalizeAttemptForSelfMedia: task {} state changed concurrently, skipped finalize", taskId);
+        }
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    protected void finalizeAttemptForAuthorityMedia(Long taskId, SubmitResult result) {
+        LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
+                .eq(DistributionTask::getId, taskId)
+                .eq(DistributionTask::getStatus, "submitting")
+                .set(DistributionTask::getLockedUntil, null)
+                .set(DistributionTask::getFinishedAt, LocalDateTime.now(SH_ZONE))
+                .set(DistributionTask::getRequestPayload, result.getRequestPayload())
+                .set(DistributionTask::getResponsePayload, result.getResponseBody())
+                .set(DistributionTask::getExternalStatus, result.getExternalStatus());
+
+        if (result.isSuccess()) {
+            wrapper.set(DistributionTask::getStatus, "submitted")
+                    .set(DistributionTask::getPlatformArticleId, result.getPlatformArticleId())
+                    .set(DistributionTask::getFailureKind, null)
+                    .set(DistributionTask::getErrorMessage, null)
+                    .set(DistributionTask::getNextRetryAt, null);
+        } else {
+            LocalDateTime nextRetryAt = result.isRetryable()
+                    ? LocalDateTime.now(SH_ZONE).plusMinutes(5)
+                    : null;
+            wrapper.set(DistributionTask::getStatus, "failed")
+                    .set(DistributionTask::getFailureKind, result.getFailureKind())
+                    .set(DistributionTask::getErrorMessage, trimError(result.getErrorMessage()))
+                    .set(DistributionTask::getNextRetryAt, nextRetryAt);
+        }
+
+        int affected = distributionTaskMapper.update(null, wrapper);
+        if (affected == 0) {
+            log.warn("finalizeAttemptForAuthorityMedia: task {} state changed concurrently, skipped finalize", taskId);
         }
     }
 

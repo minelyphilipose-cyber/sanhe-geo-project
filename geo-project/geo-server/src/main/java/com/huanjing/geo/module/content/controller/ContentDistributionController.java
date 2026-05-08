@@ -3,6 +3,7 @@ package com.huanjing.geo.module.content.controller;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.dto.ArticleDistributeRequest;
+import com.huanjing.geo.module.content.dto.AuthorityMediaDistributeRequest;
 import com.huanjing.geo.module.content.dto.DistributionManualConfirmRequest;
 import com.huanjing.geo.module.content.dto.PublishQuotaVO;
 import com.huanjing.geo.module.content.dto.RecommendedSitesResponseVO;
@@ -63,6 +64,19 @@ public class ContentDistributionController {
                         req.getRequestId(),
                         req.getPlatformOptions()
                 );
+        return R.ok(contentDistributionService.distributeTo(articleId, target));
+    }
+
+    @PostMapping("/articles/{articleId}/distribute-to-authority-media")
+    public R<DistributionTask> distributeToAuthorityMedia(@PathVariable Long articleId,
+                                                          @Valid @RequestBody AuthorityMediaDistributeRequest req) {
+        TargetContext.AuthorityMediaTarget target = new TargetContext.AuthorityMediaTarget(
+                req.getResourceId(),
+                req.getSalingPrice(),
+                req.getPreviewUrl(),
+                req.getPublishedAt(),
+                req.getRemark()
+        );
         return R.ok(contentDistributionService.distributeTo(articleId, target));
     }
 

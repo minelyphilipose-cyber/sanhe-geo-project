@@ -119,4 +119,35 @@ public interface DistributionTaskMapper extends BaseMapper<DistributionTask> {
               AND dispatch_mode = 'SEMI_AUTO'
             """)
     int reclaimSemiAutoTask(@Param("taskId") Long taskId, @Param("expectedStatus") String expectedStatus);
+
+    @Update("""
+            UPDATE distribution_tasks
+            SET status = 'published',
+                published_url = #{publishedUrl},
+                published_at = #{publishedAt},
+                finished_at = #{publishedAt},
+                error_message = NULL,
+                failure_kind = NULL
+            WHERE id = #{taskId}
+              AND target_kind = 'authority_media'
+              AND status = 'submitted'
+            """)
+    int markAuthorityMediaPublished(@Param("taskId") Long taskId,
+                                    @Param("publishedUrl") String publishedUrl,
+                                    @Param("publishedAt") LocalDateTime publishedAt);
+
+    @Update("""
+            UPDATE distribution_tasks
+            SET status = 'failed',
+                failure_kind = #{failureKind},
+                error_message = #{errorMessage},
+                finished_at = #{failedAt}
+            WHERE id = #{taskId}
+              AND target_kind = 'authority_media'
+              AND status = 'submitted'
+            """)
+    int markAuthorityMediaFailed(@Param("taskId") Long taskId,
+                                 @Param("failureKind") String failureKind,
+                                 @Param("errorMessage") String errorMessage,
+                                 @Param("failedAt") LocalDateTime failedAt);
 }

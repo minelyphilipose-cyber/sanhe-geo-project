@@ -24,6 +24,11 @@ public interface CompanyChannelQuotaLedgerMapper extends BaseMapper<CompanyChann
                                  @Param("now") LocalDateTime now);
 
     @Update("UPDATE company_channel_quota_ledger " +
+            "SET status = 'refunded', refunded_at = #{now} " +
+            "WHERE id = #{id} AND status = 'confirmed'")
+    int refundConfirmed(@Param("id") Long id, @Param("now") LocalDateTime now);
+
+    @Update("UPDATE company_channel_quota_ledger " +
             "SET expire_checked_at = #{now} " +
             "WHERE id = #{id} AND status = 'reserved'")
     int touchExpireCheckedAt(@Param("id") Long id,

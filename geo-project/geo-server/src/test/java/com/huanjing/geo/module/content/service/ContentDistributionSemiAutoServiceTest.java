@@ -7,6 +7,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.audit.AuditMode;
 import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.audit.service.AuditService;
+import com.huanjing.geo.module.content.authoritymedia.AuthorityMediaDistributionAdapter;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
@@ -113,7 +114,8 @@ class ContentDistributionSemiAutoServiceTest {
                 brandAccessService,
                 fillTokenService,
                 auditService,
-                new ObjectMapper()
+                new ObjectMapper(),
+                mock(AuthorityMediaDistributionAdapter.class)
         );
     }
 

@@ -104,6 +104,20 @@ public class CompanyChannelQuotaService {
         releaseUsage(ledger);
     }
 
+    @Transactional
+    public void refundConfirmedDistribution(Long distributionTaskId) {
+        CompanyChannelQuotaLedger ledger = findDistributionLedger(distributionTaskId);
+        if (ledger == null || !"confirmed".equals(ledger.getStatus())) {
+            return;
+        }
+        int updated = ledgerMapper.refundConfirmed(ledger.getId(), LocalDateTime.now(BUSINESS_ZONE));
+        if (updated != 1) {
+            return;
+        }
+        ledger.setStatus("refunded");
+        releaseUsage(ledger);
+    }
+
     public DistributionQuotaView distributionQuota(Long companyId, String targetKind) {
         String channel = mapTargetKind(targetKind);
         CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(companyId);
@@ -155,19 +169,23 @@ public class CompanyChannelQuotaService {
     }
 
     private CompanyChannelQuotaLedger updateReservedLedger(Long distributionTaskId, String targetStatus) {
+        CompanyChannelQuotaLedger ledger = findDistributionLedger(distributionTaskId);
+        if (ledger == null) {
+            return null;
+        }
+        return updateLedgerStatusFromReserved(ledger, targetStatus);
+    }
+
+    private CompanyChannelQuotaLedger findDistributionLedger(Long distributionTaskId) {
         if (distributionTaskId == null) {
             return null;
         }
-        CompanyChannelQuotaLedger ledger = ledgerMapper.selectOne(
+        return ledgerMapper.selectOne(
                 new LambdaQueryWrapper<CompanyChannelQuotaLedger>()
                         .eq(CompanyChannelQuotaLedger::getBizType, BIZ_TYPE_DISTRIBUTION)
                         .eq(CompanyChannelQuotaLedger::getBizId, String.valueOf(distributionTaskId))
                         .last("LIMIT 1")
         );
-        if (ledger == null) {
-            return null;
-        }
-        return updateLedgerStatusFromReserved(ledger, targetStatus);
     }
 
     private CompanyChannelQuotaLedger updateLedgerStatusFromReserved(CompanyChannelQuotaLedger ledger, String targetStatus) {

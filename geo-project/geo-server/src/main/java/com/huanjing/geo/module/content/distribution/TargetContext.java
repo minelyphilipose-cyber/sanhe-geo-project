@@ -4,6 +4,7 @@ import com.huanjing.geo.module.content.entity.BrandOfficialSite;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.system.entity.PublishSite;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -12,7 +13,8 @@ import java.util.Map;
  */
 public sealed interface TargetContext
         permits TargetContext.SiteTarget, TargetContext.BrandOfficialSiteTarget,
-        TargetContext.BrandGeoSiteTarget, TargetContext.SelfMediaTarget {
+        TargetContext.BrandGeoSiteTarget, TargetContext.SelfMediaTarget,
+        TargetContext.AuthorityMediaTarget {
 
     record SiteTarget(PublishSite site) implements TargetContext {}
 
@@ -28,4 +30,10 @@ public sealed interface TargetContext
     record BrandOfficialSiteTarget(BrandOfficialSite site) implements TargetContext {}
 
     record BrandGeoSiteTarget(Long brandId, String siteCode) implements TargetContext {}
+
+    record AuthorityMediaTarget(Long resourceId,
+                                BigDecimal salingPrice,
+                                String previewUrl,
+                                String publishedAt,
+                                String remark) implements TargetContext {}
 }

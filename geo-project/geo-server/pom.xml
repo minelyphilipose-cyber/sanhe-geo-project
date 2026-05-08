@@ -18,6 +18,9 @@
     <description>幻境AI GEO 托管交付系统 - 后端</description>
 
     <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <maven.compiler.encoding>UTF-8</maven.compiler.encoding>
         <java.version>17</java.version>
         <mybatis-plus.version>3.5.6</mybatis-plus.version>
         <jjwt.version>0.12.5</jjwt.version>
