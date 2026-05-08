@@ -29,6 +29,25 @@ public interface SelfMediaCookieCredentialMapper extends BaseMapper<SelfMediaCoo
     SelfMediaCookieCredential selectActiveMetaByAccountId(@Param("accountId") Long accountId);
 
     @Select("""
+            <script>
+            SELECT id, self_media_account_id, brand_id, platform, version,
+                   master_key_id, cipher_alg, cookie_iv_base64, aad_context, user_agent,
+                   captured_fingerprint_json, required_cookie_status,
+                   captured_by, captured_at, valid_from, valid_until,
+                   destroyed_at, created_at
+            FROM self_media_cookie_credential
+            WHERE valid_until IS NULL
+              AND destroyed_at IS NULL
+              AND self_media_account_id IN
+              <foreach collection="accountIds" item="accountId" open="(" separator="," close=")">
+                #{accountId}
+              </foreach>
+            ORDER BY self_media_account_id ASC, version DESC
+            </script>
+            """)
+    List<SelfMediaCookieCredential> selectActiveMetaByAccountIds(@Param("accountIds") List<Long> accountIds);
+
+    @Select("""
             SELECT *
             FROM self_media_cookie_credential
             WHERE self_media_account_id = #{accountId}

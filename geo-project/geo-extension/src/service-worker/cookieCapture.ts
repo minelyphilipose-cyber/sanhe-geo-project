@@ -1,7 +1,7 @@
 import { EXTENSION_VERSION } from '@/shared/env'
 import { ExtensionApiError, extensionApi } from '@/shared/api'
 import { sessionStorage } from '@/shared/storage'
-import type { CookieCaptureResponse, ExtensionSelfMediaAccount } from '@/types/extension'
+import type { CookieCaptureResponse, CookieCaptureStartedResponse, ExtensionSelfMediaAccount } from '@/types/extension'
 
 const PLATFORM_DOMAINS: Record<string, string[]> = {
   toutiao: ['toutiao.com'],
@@ -12,6 +12,13 @@ const REQUIRED_COOKIE_NAMES: Record<string, string[]> = {
   toutiao: ['sessionid'],
   zhihu: ['z_c0'],
 }
+
+const PLATFORM_LOGIN_URLS: Record<string, string> = {
+  toutiao: 'https://mp.toutiao.com/',
+  zhihu: 'https://www.zhihu.com/signin',
+}
+
+const PENDING_CAPTURE_KEY = 'geo.extension.pendingCookieCapture'
 
 export async function captureCookiesForAccount(
   account: ExtensionSelfMediaAccount,
@@ -41,8 +48,61 @@ export async function captureCookiesForAccount(
   }), 3)
 }
 
+export async function startCookieCaptureForAccount(
+  account: ExtensionSelfMediaAccount,
+): Promise<CookieCaptureStartedResponse> {
+  await requireBoundSession()
+  ensureSupportedPlatform(account.platform)
+  if (await hasRequiredCookies(account.platform)) {
+    const captured = await captureCookiesForAccount(account)
+    await clearPendingCookieCapture()
+    return {
+      accountId: captured.accountId,
+      platform: captured.platform,
+      status: 'captured',
+      message: '已检测到登录状态并自动捕获凭证。',
+    }
+  }
+
+  await savePendingCookieCapture(account)
+  await chrome.tabs.create({ url: loginUrlForPlatform(account.platform) })
+  return {
+    accountId: account.accountId,
+    platform: account.platform,
+    status: 'opening_login',
+    message: '已打开平台登录页，请完成登录；登录成功后扩展会自动捕获凭证。',
+  }
+}
+
+export async function handleCookieDomainReady(host: string): Promise<CookieCaptureStartedResponse | null> {
+  const pending = await getPendingCookieCapture()
+  if (!pending || !domainsForPlatform(pending.platform).some(domain => host === domain || host.endsWith(`.${domain}`))) {
+    return null
+  }
+  if (!await hasRequiredCookies(pending.platform)) {
+    return {
+      accountId: pending.accountId,
+      platform: pending.platform,
+      status: 'waiting_login',
+      message: '已进入平台页面，等待登录完成后自动捕获凭证。',
+    }
+  }
+  const captured = await captureCookiesForAccount(pending)
+  await clearPendingCookieCapture()
+  return {
+    accountId: captured.accountId,
+    platform: captured.platform,
+    status: 'captured',
+    message: '平台登录状态已捕获，后台账号状态将自动刷新。',
+  }
+}
+
 export function domainsForPlatform(platform: string): string[] {
   return PLATFORM_DOMAINS[platform] ?? []
+}
+
+export function requiredCookieNamesForPlatform(platform: string): string[] {
+  return REQUIRED_COOKIE_NAMES[platform] ?? []
 }
 
 async function readPlatformCookies(platform: string): Promise<chrome.cookies.Cookie[]> {
@@ -60,6 +120,44 @@ function requiredCookieCheck(platform: string, cookies: chrome.cookies.Cookie[])
     name,
     names.has(name) ? 'present' : 'missing',
   ]))
+}
+
+async function hasRequiredCookies(platform: string): Promise<boolean> {
+  const requiredNames = requiredCookieNamesForPlatform(platform)
+  if (requiredNames.length === 0) return false
+  const cookies = await readPlatformCookies(platform)
+  const names = new Set(cookies.map(cookie => cookie.name))
+  return requiredNames.every(name => names.has(name))
+}
+
+async function requireBoundSession() {
+  const session = await sessionStorage.get()
+  if (!session) throw new Error('扩展登录已失效，请重新绑定。')
+}
+
+function ensureSupportedPlatform(platform: string) {
+  if (domainsForPlatform(platform).length === 0 || !PLATFORM_LOGIN_URLS[platform]) {
+    throw new Error('暂不支持该平台的自动登录捕获')
+  }
+}
+
+function loginUrlForPlatform(platform: string) {
+  const url = PLATFORM_LOGIN_URLS[platform]
+  if (!url) throw new Error('暂不支持该平台的自动登录捕获')
+  return url
+}
+
+async function savePendingCookieCapture(account: ExtensionSelfMediaAccount) {
+  await chrome.storage.local.set({ [PENDING_CAPTURE_KEY]: account })
+}
+
+async function getPendingCookieCapture(): Promise<ExtensionSelfMediaAccount | null> {
+  const result = await chrome.storage.local.get(PENDING_CAPTURE_KEY)
+  return (result[PENDING_CAPTURE_KEY] as ExtensionSelfMediaAccount | undefined) ?? null
+}
+
+async function clearPendingCookieCapture() {
+  await chrome.storage.local.remove(PENDING_CAPTURE_KEY)
 }
 
 async function withRetry<T>(fn: () => Promise<T>, maxAttempts: number): Promise<T> {

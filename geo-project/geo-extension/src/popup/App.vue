@@ -91,20 +91,25 @@ async function unbind() {
   loading.value = true
   try {
     await unbindExtension(session.value)
-    session.value = null
-    status.value = 'unbound'
-    errorMessage.value = ''
-    statusMessage.value = '已解绑，请重新绑定后使用'
-    taskState.tasks = []
-    accounts.value = []
-    selectedAccountId.value = null
-    taskState.expandedTaskId = null
-    stopTaskRefresh()
+    resetBoundState('已解绑，请重新绑定后使用')
   } catch (error) {
-    errorMessage.value = friendlyErrorMessage(error)
+    resetBoundState('本地已解绑，请重新绑定后使用')
+    errorMessage.value = `${friendlyErrorMessage(error)} 本地已解绑。`
   } finally {
     loading.value = false
   }
+}
+
+function resetBoundState(message: string) {
+  session.value = null
+  status.value = 'unbound'
+  errorMessage.value = ''
+  statusMessage.value = message
+  taskState.tasks = []
+  accounts.value = []
+  selectedAccountId.value = null
+  taskState.expandedTaskId = null
+  stopTaskRefresh()
 }
 
 async function refreshAccounts() {
@@ -192,14 +197,9 @@ async function refreshTasks() {
     mergeTasks(taskState, tasks, now.value)
   } catch (error) {
     if (error instanceof ExtensionApiError && error.status === 401) {
+      resetBoundState('请重新绑定后再试')
       errorMessage.value = `${friendlyErrorMessage(error)} 请重新绑定后再试。`
-      status.value = 'unbound'
-      session.value = null
-      taskState.tasks = []
-      taskState.expandedTaskId = null
-      accounts.value = []
-      selectedAccountId.value = null
-      stopTaskRefresh()
+      void sessionStorage.clear()
     } else {
       errorMessage.value = friendlyErrorMessage(error)
     }
@@ -229,12 +229,8 @@ function toggleTask(taskId: number) {
 function onRuntimeMessage(message: { type: string, payload?: TaskLifecycleEvent }) {
   if (message.type !== 'GEO_TASK_LIFECYCLE_EVENT' || !message.payload) return false
   if (message.payload.kind === 'auth_required') {
-    status.value = 'unbound'
-    session.value = null
-    taskState.tasks = []
-    accounts.value = []
-    selectedAccountId.value = null
-    stopTaskRefresh()
+    resetBoundState(message.payload.message)
+    void sessionStorage.clear()
   }
   if (message.payload.kind === 'published') {
     void refreshTasks()
@@ -242,6 +238,12 @@ function onRuntimeMessage(message: { type: string, payload?: TaskLifecycleEvent 
   errorMessage.value = message.payload.kind === 'published' ? '' : message.payload.message
   statusMessage.value = message.payload.message
   return false
+}
+
+function formatAccountOption(account: ExtensionSelfMediaAccount) {
+  const accountLabel = account.accountName || `账号 ${account.accountId}`
+  const brandLabel = account.brandName || `brand ${account.brandId}`
+  return `${account.platform} / ${accountLabel} / ${brandLabel}`
 }
 </script>
 
@@ -291,7 +293,7 @@ function onRuntimeMessage(message: { type: string, payload?: TaskLifecycleEvent 
           <span>账号</span>
           <select v-model.number="selectedAccountId">
             <option v-for="account in accounts" :key="account.accountId" :value="account.accountId">
-              {{ account.platform }} / {{ account.accountName || account.accountId }} / brand {{ account.brandId }}
+              {{ formatAccountOption(account) }}
             </option>
           </select>
         </label>

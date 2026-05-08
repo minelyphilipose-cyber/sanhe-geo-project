@@ -8,6 +8,7 @@ import type {
   RecommendedSitesResponse,
   R,
   SelfMediaAccount,
+  SelfMediaCookieStatusBatchResponse,
   DouyinAuthUrl,
   DouyinCapability,
   DouyinPlatformOptions,
@@ -27,6 +28,13 @@ export function getContentArticles(params: {
 
 export function getContentArticleDetail(articleId: number) {
   return request.get<R<ArticleDetailResponse>>(`/content/articles/${articleId}`)
+}
+
+export function getSelfMediaCookieStatusBatch(data: {
+  articleIds: number[]
+  platforms: string[]
+}) {
+  return request.post<R<SelfMediaCookieStatusBatchResponse>>('/content/articles/self-media-cookie-status/batch', data)
 }
 
 export function createManualContentArticle(data: {

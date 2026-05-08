@@ -23,6 +23,11 @@
       "matches": ["https://mp.toutiao.com/*", "https://www.zhihu.com/*", "https://zhuanlan.zhihu.com/*"],
       "js": ["assets/content-script.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["http://localhost:3000/*", "http://127.0.0.1:3000/*", "http://localhost:5173/*", "http://127.0.0.1:5173/*", "http://*/*"],
+      "js": ["assets/admin-bridge-content-script.js"],
+      "run_at": "document_start"
     }
   ]
 }

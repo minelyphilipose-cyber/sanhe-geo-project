@@ -91,6 +91,14 @@ export interface ExtensionSelfMediaAccount {
   platform: string
   accountName?: string | null
   brandId: number
+  brandName?: string | null
+}
+
+export interface CookieCaptureStartedResponse {
+  accountId: number
+  platform: string
+  status: 'captured' | 'opening_login' | 'waiting_login'
+  message: string
 }
 
 export interface CookieCaptureRequest {

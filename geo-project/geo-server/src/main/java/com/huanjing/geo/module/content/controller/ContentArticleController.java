@@ -9,8 +9,11 @@ import com.huanjing.geo.module.content.dto.ArticleResubmitRequest;
 import com.huanjing.geo.module.content.dto.ArticleReviewRequest;
 import com.huanjing.geo.module.content.dto.ArticleRevisionSaveRequest;
 import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
+import com.huanjing.geo.module.content.dto.SelfMediaCookieStatusBatchRequest;
+import com.huanjing.geo.module.content.dto.SelfMediaCookieStatusBatchResponse;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.service.ArticleAiDraftService;
+import com.huanjing.geo.module.content.service.ArticleSelfMediaCookieStatusService;
 import com.huanjing.geo.module.content.service.ContentArticleService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -28,6 +31,7 @@ public class ContentArticleController {
 
     private final ContentArticleService contentArticleService;
     private final ArticleAiDraftService articleAiDraftService;
+    private final ArticleSelfMediaCookieStatusService selfMediaCookieStatusService;
 
     @GetMapping
     public R<Page<ArticleDraft>> page(@RequestParam(required = false) Long projectId,
@@ -46,6 +50,13 @@ public class ContentArticleController {
     @PostMapping("/ai-draft")
     public CompletableFuture<R<ArticleAiDraftResponse>> createAiDraft(@Valid @RequestBody ArticleAiDraftRequest req) {
         return articleAiDraftService.generate(req).thenApply(R::ok);
+    }
+
+    @PostMapping("/self-media-cookie-status/batch")
+    public R<SelfMediaCookieStatusBatchResponse> selfMediaCookieStatusBatch(
+            @Valid @RequestBody SelfMediaCookieStatusBatchRequest req
+    ) {
+        return R.ok(selfMediaCookieStatusService.batch(req));
     }
 
     @GetMapping("/{articleId}")

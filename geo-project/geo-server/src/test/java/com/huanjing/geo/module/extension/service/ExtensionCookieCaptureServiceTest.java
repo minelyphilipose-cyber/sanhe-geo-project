@@ -10,6 +10,8 @@ import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessErrorCodes;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
+import com.huanjing.geo.module.customer.entity.Brand;
+import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.extension.dto.ExtensionCookieCaptureRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionCookieCaptureResponse;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +40,7 @@ class ExtensionCookieCaptureServiceTest {
     private static final String COOKIE_JSON = "[{\"name\":\"sessionid\",\"value\":\"secret-cookie-value\"}]";
 
     private SelfMediaAccountMapper accountMapper;
+    private BrandMapper brandMapper;
     private BrandAccessService brandAccessService;
     private CredentialVaultService credentialVaultService;
     private ExtensionRedisStore redisStore;
@@ -47,11 +50,12 @@ class ExtensionCookieCaptureServiceTest {
     @BeforeEach
     void setUp() {
         accountMapper = mock(SelfMediaAccountMapper.class);
+        brandMapper = mock(BrandMapper.class);
         brandAccessService = mock(BrandAccessService.class);
         credentialVaultService = mock(CredentialVaultService.class);
         redisStore = mock(ExtensionRedisStore.class);
         auditSupport = mock(ExtensionAuditSupport.class);
-        service = new ExtensionCookieCaptureService(accountMapper, brandAccessService,
+        service = new ExtensionCookieCaptureService(accountMapper, brandMapper, brandAccessService,
                 credentialVaultService, redisStore, auditSupport);
     }
 
@@ -61,11 +65,13 @@ class ExtensionCookieCaptureServiceTest {
                 .thenReturn(List.of(10L));
         when(accountMapper.selectExtensionAccountsByBrandIds(List.of(10L), 200))
                 .thenReturn(List.of(account(20L, 10L, "toutiao")));
+        when(brandMapper.selectBatchIds(List.of(10L))).thenReturn(List.of(brand(10L, "三合星链")));
 
         var accounts = service.listAccounts(99L);
 
         assertEquals(1, accounts.size());
         assertEquals(20L, accounts.get(0).accountId());
+        assertEquals("三合星链", accounts.get(0).brandName());
         verify(accountMapper).selectExtensionAccountsByBrandIds(List.of(10L), 200);
     }
 
@@ -84,10 +90,13 @@ class ExtensionCookieCaptureServiceTest {
                 .thenReturn(List.of(10L, 12L));
         when(accountMapper.selectExtensionAccountsByBrandIds(List.of(10L, 12L), 200))
                 .thenReturn(List.of(account(20L, 10L, "toutiao"), account(30L, 12L, "zhihu")));
+        when(brandMapper.selectBatchIds(List.of(10L, 12L)))
+                .thenReturn(List.of(brand(10L, "三合星链"), brand(12L, "品牌十二")));
 
         var accounts = service.listAccounts(99L);
 
         assertEquals(List.of(10L, 12L), accounts.stream().map(a -> a.brandId()).toList());
+        assertEquals(List.of("三合星链", "品牌十二"), accounts.stream().map(a -> a.brandName()).toList());
         verify(accountMapper).selectExtensionAccountsByBrandIds(List.of(10L, 12L), 200);
     }
 
@@ -186,5 +195,12 @@ class ExtensionCookieCaptureServiceTest {
         account.setPlatform(platform);
         account.setAccountName("Toutiao Account");
         return account;
+    }
+
+    private Brand brand(Long brandId, String brandName) {
+        Brand brand = new Brand();
+        brand.setId(brandId);
+        brand.setBrandName(brandName);
+        return brand;
     }
 }

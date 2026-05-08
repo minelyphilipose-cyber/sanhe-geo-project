@@ -61,4 +61,28 @@ describe('bind flow', () => {
     expect(revoke).toHaveBeenCalledWith('ext.old', 9)
     expect(clear).toHaveBeenCalled()
   })
+
+  it('clears stored token even when revoke fails', async () => {
+    const revoke = vi.fn(async () => {
+      throw new Error('network failed')
+    })
+    const clear = vi.fn()
+
+    await expect(unbindExtension(
+      {
+        token: 'ext.old',
+        sessionId: 9,
+        extensionVersion: '0.1.0',
+        expiresAt: '2026-05-14T00:00:00Z',
+        boundAt: '2026-05-07T00:00:00Z',
+      },
+      {
+        api: { bind: vi.fn(), revoke },
+        storage: { set: vi.fn(), clear, getOrCreateInstallId: vi.fn() },
+      },
+    )).rejects.toThrow('network failed')
+
+    expect(revoke).toHaveBeenCalledWith('ext.old', 9)
+    expect(clear).toHaveBeenCalled()
+  })
 })

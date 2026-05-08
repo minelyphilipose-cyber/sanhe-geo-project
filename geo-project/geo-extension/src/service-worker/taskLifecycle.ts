@@ -65,7 +65,7 @@ export async function handleTaskTabRemoved(closedTabId: number) {
   if (active?.tabId === closedTabId) await stopTaskLifecycle()
 }
 
-async function getActiveTask(): Promise<PersistedActiveTask | null> {
+export async function getActiveTask(): Promise<PersistedActiveTask | null> {
   const stored = await chrome.storage.session.get(ACTIVE_TASK_KEY)
   return (stored[ACTIVE_TASK_KEY] as PersistedActiveTask | undefined) ?? null
 }

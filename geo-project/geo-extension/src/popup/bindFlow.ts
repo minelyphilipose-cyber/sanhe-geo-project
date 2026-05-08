@@ -52,6 +52,9 @@ export async function bindExtension(input: BindInput, deps: BindDependencies = d
 }
 
 export async function unbindExtension(session: StoredSession, deps: BindDependencies = defaultDeps): Promise<void> {
-  await deps.api.revoke(session.token, session.sessionId)
-  await deps.storage.clear()
+  try {
+    await deps.api.revoke(session.token, session.sessionId)
+  } finally {
+    await deps.storage.clear()
+  }
 }

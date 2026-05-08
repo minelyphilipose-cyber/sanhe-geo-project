@@ -10,6 +10,8 @@ import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
+import com.huanjing.geo.module.customer.entity.Brand;
+import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.extension.dto.ExtensionCookieCaptureRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionCookieCaptureResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionSelfMediaAccountResponse;
@@ -18,9 +20,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static com.huanjing.geo.module.extension.ExtensionErrorCodes.COOKIE_CAPTURE_ACCOUNT_BRAND_MISMATCH;
 import static com.huanjing.geo.module.extension.ExtensionErrorCodes.COOKIE_CAPTURE_CONFIRM_REQUIRED;
@@ -36,6 +40,7 @@ public class ExtensionCookieCaptureService {
     private static final String NONCE_KEY_PREFIX = "geo:extension:cookie-capture:nonce:";
 
     private final SelfMediaAccountMapper accountMapper;
+    private final BrandMapper brandMapper;
     private final BrandAccessService brandAccessService;
     private final CredentialVaultService credentialVaultService;
     private final ExtensionRedisStore redisStore;
@@ -46,15 +51,36 @@ public class ExtensionCookieCaptureService {
         if (brandIds.isEmpty()) {
             return List.of();
         }
-        return accountMapper.selectExtensionAccountsByBrandIds(brandIds, ACCOUNT_CANDIDATE_LIMIT)
+        List<SelfMediaAccount> accounts = accountMapper.selectExtensionAccountsByBrandIds(brandIds, ACCOUNT_CANDIDATE_LIMIT);
+        Map<Long, String> brandNameById = resolveBrandNames(accounts);
+        return accounts
                 .stream()
                 .map(account -> new ExtensionSelfMediaAccountResponse(
                         account.getId(),
                         account.getPlatform(),
                         account.getAccountName(),
-                        account.getBrandId()
+                        account.getBrandId(),
+                        brandNameById.get(account.getBrandId())
                 ))
                 .toList();
+    }
+
+    private Map<Long, String> resolveBrandNames(List<SelfMediaAccount> accounts) {
+        List<Long> accountBrandIds = accounts.stream()
+                .map(SelfMediaAccount::getBrandId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (accountBrandIds.isEmpty()) {
+            return Map.of();
+        }
+        Map<Long, String> result = new HashMap<>();
+        for (Brand brand : brandMapper.selectBatchIds(accountBrandIds)) {
+            if (brand.getDeletedAt() == null && StringUtils.hasText(brand.getBrandName())) {
+                result.put(brand.getId(), brand.getBrandName());
+            }
+        }
+        return result;
     }
 
     public ExtensionCookieCaptureResponse capture(ExtensionCookieCaptureRequest request,

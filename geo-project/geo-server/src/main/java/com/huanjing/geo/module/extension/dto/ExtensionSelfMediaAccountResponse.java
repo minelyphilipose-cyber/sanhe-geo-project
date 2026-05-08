@@ -4,6 +4,7 @@ public record ExtensionSelfMediaAccountResponse(
         Long accountId,
         String platform,
         String accountName,
-        Long brandId
+        Long brandId,
+        String brandName
 ) {
 }

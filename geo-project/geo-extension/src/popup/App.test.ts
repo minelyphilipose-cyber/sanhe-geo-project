@@ -53,6 +53,7 @@ beforeEach(() => {
   vi.mocked(sessionStorage.clear).mockResolvedValue(undefined)
   vi.mocked(sessionStorage.getOrCreateInstallId).mockResolvedValue('install-1')
   vi.mocked(extensionApi.bind).mockReset()
+  vi.mocked(extensionApi.revoke).mockResolvedValue(undefined)
   vi.mocked(extensionApi.tasks).mockResolvedValue([])
   vi.mocked(extensionApi.selfMediaAccounts).mockResolvedValue([])
   vi.stubGlobal('confirm', vi.fn(() => true))
@@ -100,6 +101,24 @@ describe('popup task list', () => {
     expect(wrapper.text()).toContain('任务已上报 published。')
   })
 
+  it('renders account brand name instead of raw brand id', async () => {
+    vi.mocked(extensionApi.selfMediaAccounts).mockResolvedValueOnce([
+      {
+        accountId: 20,
+        platform: 'toutiao',
+        accountName: '头条账号',
+        brandId: 8,
+        brandName: '三合星链',
+      },
+    ])
+
+    const wrapper = mount(App)
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('toutiao / 头条账号 / 三合星链')
+    expect(wrapper.text()).not.toContain('brand 8')
+  })
+
   it('leaves binding state immediately after bind succeeds even if account refresh is slow', async () => {
     vi.mocked(sessionStorage.get).mockResolvedValueOnce(null)
     vi.mocked(extensionApi.bind).mockResolvedValueOnce({
@@ -118,6 +137,24 @@ describe('popup task list', () => {
 
     expect(wrapper.text()).toContain('绑定成功，sessionId 90')
     expect(wrapper.text()).not.toContain('绑定中...')
+  })
+
+  it('returns to bind form after unbind even when remote revoke fails', async () => {
+    vi.mocked(extensionApi.revoke).mockRejectedValueOnce(new Error('network failed'))
+
+    const wrapper = mount(App)
+    await flushPromises()
+
+    const unbindButton = wrapper.findAll('button').find(button => button.text() === '解绑')
+    expect(unbindButton).toBeTruthy()
+    await unbindButton!.trigger('click')
+    await flushPromises()
+
+    expect(sessionStorage.clear).toHaveBeenCalled()
+    expect(wrapper.text()).toContain('绑定码')
+    expect(wrapper.text()).toContain('本地已解绑')
+    expect(wrapper.text()).not.toContain('Session88')
+    expect(wrapper.text()).not.toContain('捕获凭证')
   })
 })
 

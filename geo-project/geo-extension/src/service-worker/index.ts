@@ -2,9 +2,10 @@ import { EXTENSION_VERSION } from '@/shared/env'
 import { ExtensionApiError, extensionApi } from '@/shared/api'
 import { logger } from '@/shared/logger'
 import { sessionStorage } from '@/shared/storage'
-import { captureCookiesForAccount } from './cookieCapture'
+import { captureCookiesForAccount, handleCookieDomainReady, startCookieCaptureForAccount } from './cookieCapture'
 import { startFillTask } from './fillFlow'
-import { HEARTBEAT_ALARM_NAME, handleTaskHeartbeatAlarm, handleTaskTabRemoved, publishActiveTask } from './taskLifecycle'
+import { getActiveTask, HEARTBEAT_ALARM_NAME, handleTaskHeartbeatAlarm, handleTaskTabRemoved, publishActiveTask } from './taskLifecycle'
+import { BRIDGE_CHANNEL, pongMessage, type AdminBridgeMessage, type AdminStartCookieCapturePayload, type AdminStartFillPayload } from '@/admin-bridge/bridgeMessages'
 import type { ExtensionMessage, ExtensionSelfMediaAccount, ExtensionTaskListItem } from '@/types/extension'
 
 const REFRESH_ALARM = 'geo-token-refresh'
@@ -66,7 +67,28 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 })
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
-  if (message.type === 'GEO_COOKIE_DOMAIN_READY' || message.type === 'GEO_EDITOR_READY') {
+  if (isAdminBridgeMessage(message)) {
+    void handleAdminBridgeMessage(message as AdminBridgeMessage)
+      .then(sendResponse)
+      .catch(error => sendResponse({
+        type: 'GEO_FILL_ERROR',
+        payload: {
+          code: 'SERVICE_WORKER_ERROR',
+          message: error instanceof Error ? error.message : '扩展后台处理失败',
+        },
+      }))
+    return true
+  }
+  if (message.type === 'GEO_COOKIE_DOMAIN_READY') {
+    void handleCookieDomainReady((message.payload as { host?: string } | undefined)?.host || '')
+      .then(result => sendResponse({ ok: true, result }))
+      .catch(error => sendResponse({
+        ok: false,
+        message: error instanceof Error ? error.message : 'cookie capture failed',
+      }))
+    return true
+  }
+  if (message.type === 'GEO_EDITOR_READY') {
     sendResponse({ ok: true })
     return true
   }
@@ -99,3 +121,107 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
     }))
   return true
 })
+
+function isAdminBridgeMessage(message: ExtensionMessage): boolean {
+  return (message as AdminBridgeMessage).channel === BRIDGE_CHANNEL
+}
+
+export async function handleAdminBridgeMessage(message: AdminBridgeMessage) {
+  if (message.type === 'GEO_PING') {
+    return pongMessage(message.requestId, Boolean(await sessionStorage.get()))
+  }
+  if (message.type === 'GEO_START_COOKIE_CAPTURE') {
+    return handleAdminCookieCapture(message)
+  }
+  if (message.type !== 'GEO_START_FILL') {
+    return {
+      type: 'GEO_FILL_ERROR',
+      payload: {
+        code: 'UNSUPPORTED_BRIDGE_MESSAGE',
+        message: '不支持的后台扩展命令',
+      },
+    }
+  }
+  const session = await sessionStorage.get()
+  if (!session) {
+    return {
+      type: 'GEO_FILL_ERROR',
+      payload: {
+        code: 'EXTENSION_UNBOUND',
+        message: '扩展未绑定，请先在扩展中完成绑定。',
+      },
+    }
+  }
+  const payload = message.payload as AdminStartFillPayload | undefined
+  if (!payload?.taskId || !payload.platform) {
+    return {
+      type: 'GEO_FILL_ERROR',
+      payload: {
+        code: 'BAD_START_FILL_PAYLOAD',
+        message: '后台启动填充参数不完整。',
+      },
+    }
+  }
+  const activeTask = await getActiveTask()
+  if (activeTask) {
+    return {
+      type: 'GEO_FILL_ERROR',
+      payload: {
+        taskId: payload.taskId,
+        code: 'ACTIVE_TASK_EXISTS',
+        message: '已有填充任务正在处理中，请完成或关闭后再启动新的任务。',
+      },
+    }
+  }
+
+  const task: ExtensionTaskListItem = {
+    taskId: payload.taskId,
+    platform: payload.platform,
+    status: 'token_issued',
+    createdAt: new Date().toISOString(),
+    fillTokenIssuedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+  }
+  await startFillTask(task)
+  return {
+    type: 'GEO_FILL_STATUS',
+    payload: {
+      taskId: payload.taskId,
+      status: 'filled',
+      message: '已打开编辑器并完成填充，请在平台页面人工确认并发布。',
+    },
+  }
+}
+
+async function handleAdminCookieCapture(message: AdminBridgeMessage) {
+  const session = await sessionStorage.get()
+  if (!session) {
+    return {
+      type: 'GEO_FILL_ERROR',
+      payload: {
+        code: 'EXTENSION_UNBOUND',
+        message: '扩展未绑定，请先在扩展中完成绑定。',
+      },
+    }
+  }
+  const payload = message.payload as AdminStartCookieCapturePayload | undefined
+  if (!payload?.brandId || !payload.accountId || !payload.platform) {
+    return {
+      type: 'GEO_FILL_ERROR',
+      payload: {
+        code: 'BAD_COOKIE_CAPTURE_PAYLOAD',
+        message: '后台启动凭证捕获参数不完整。',
+      },
+    }
+  }
+  const result = await startCookieCaptureForAccount({
+    brandId: payload.brandId,
+    accountId: payload.accountId,
+    platform: payload.platform,
+    accountName: payload.accountName ?? null,
+  })
+  return {
+    type: 'GEO_COOKIE_CAPTURE_STATUS',
+    payload: result,
+  }
+}

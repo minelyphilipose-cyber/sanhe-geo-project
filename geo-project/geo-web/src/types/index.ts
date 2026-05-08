@@ -890,6 +890,28 @@ export interface ArticleDetailResponse {
   publishLogs: ArticlePublishLog[]
 }
 
+export interface SelfMediaCookieStatusAccount {
+  accountId: number
+  platform: 'toutiao' | 'zhihu' | string
+  accountName: string
+  platformAccountId?: string | null
+  accountStatus: string
+  credentialStatus: 'VALID' | 'MISSING' | 'EXPIRED' | 'UNKNOWN' | string
+  lastCapturedAt?: string | null
+  canStartFill: boolean
+  reason?: string | null
+}
+
+export interface SelfMediaCookieStatusItem {
+  articleId: number
+  brandId: number
+  accounts: SelfMediaCookieStatusAccount[]
+}
+
+export interface SelfMediaCookieStatusBatchResponse {
+  items: SelfMediaCookieStatusItem[]
+}
+
 export interface DistributionTask {
   id: number
   articleId?: number

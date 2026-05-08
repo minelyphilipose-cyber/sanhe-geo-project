@@ -16,7 +16,9 @@
           <el-button type="primary" @click="search">查询</el-button>
           <el-button @click="resetQuery">重置</el-button>
         </div>
-        <el-button v-if="canWrite" type="primary" @click="goManualCreate">手动生成文章</el-button>
+        <div class="toolbar-right">
+          <el-button v-if="canWrite" type="primary" @click="goManualCreate">手动生成文章</el-button>
+        </div>
       </div>
     </el-card>
 
@@ -37,7 +39,7 @@
             </template>
           </el-table-column>
           <el-table-column prop="createdAt" label="创建时间" width="180" />
-          <el-table-column label="操作" width="540" fixed="right">
+          <el-table-column label="操作" width="430" fixed="right">
             <template #default="scope">
               <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
               <el-button v-if="canWrite && canReview(scope.row.status)" link type="primary" @click="openReview(scope.row)">审核</el-button>
@@ -287,13 +289,13 @@
               选择账号
             </el-button>
             <el-button
-              v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active'"
+              v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active' && !hasActiveCookieCredential(account)"
               size="small"
-              :type="hasActiveCookieCredential(account) ? 'primary' : 'warning'"
+              type="warning"
               :loading="semiAutoAccountActionLoading(account)"
               @click="submitSemiAutoExtensionTask(account)"
             >
-              {{ hasActiveCookieCredential(account) ? '创建扩展任务' : '先捕获凭证' }}
+              去登录并捕获
             </el-button>
           </div>
         </div>
@@ -537,9 +539,11 @@ import {
 } from '@/api/content'
 import { getBrandDetail, getBrandImageFolders, getBrandMaterialStream } from '@/api/customer'
 import { createExtensionBindCode, type ExtensionBindCode } from '@/api/extension'
+import { pingExtensionBridge, startExtensionCookieCapture, startExtensionFill } from '@/composables/useExtensionBridge'
 
 type MediaPlatform = 'wechat_mp' | 'douyin' | 'toutiao' | 'zhihu'
 type SemiAutoPlatform = 'toutiao' | 'zhihu'
+type ExtensionBridgeStatus = 'unknown' | 'checking' | 'bound' | 'unbound' | 'missing' | 'error'
 type SelfMediaAccountWithCredential = SelfMediaAccount & {
   cookieCredentialStatus?: string | null
   cookieCredentialVersion?: number | null
@@ -620,6 +624,14 @@ const refreshingReviewTaskId = ref<number | null>(null)
 const selfMediaSubmitting = ref(false)
 const extensionBindCode = ref<ExtensionBindCode | null>(null)
 const extensionBindCodeLoadingAccountId = ref<number | null>(null)
+const semiAutoCookieCaptureLoadingAccountId = ref<number | null>(null)
+const pendingCookieCaptureAccountId = ref<number | null>(null)
+const extensionBridgeChecking = ref(false)
+const extensionBridgeState = reactive({
+  status: 'unknown' as ExtensionBridgeStatus,
+  message: '正在等待检测浏览器扩展状态',
+  extensionVersion: '',
+})
 
 const publishVisible = ref(false)
 const publishForm = reactive({
@@ -628,6 +640,8 @@ const publishForm = reactive({
   channelUrl: '',
   note: '',
 })
+
+let cookieCapturePollTimer: number | null = null
 
 const markdown = new MarkdownIt({
   html: false,
@@ -905,11 +919,7 @@ async function openMediaDistribute(row: ArticleDraft) {
         includeMaterials: true,
       }),
     ])
-    const accounts = accountRes.data.data || []
-    wechatAccounts.value = accounts.filter((account) => account.platform === 'wechat_mp')
-    douyinAccounts.value = accounts.filter((account) => account.platform === 'douyin')
-    toutiaoAccounts.value = accounts.filter((account) => account.platform === 'toutiao')
-    zhihuAccounts.value = accounts.filter((account) => account.platform === 'zhihu')
+    applySelfMediaAccounts(accountRes.data.data || [])
     brandImageFolders.value = folderRes.data.data || []
     ensureSelectedImageFolder()
     await loadMaterialThumbs()
@@ -917,6 +927,19 @@ async function openMediaDistribute(row: ArticleDraft) {
   } catch {
     ElMessage.error('加载自媒体账号失败')
   }
+}
+
+function applySelfMediaAccounts(accounts: SelfMediaAccount[]) {
+  wechatAccounts.value = accounts.filter((account) => account.platform === 'wechat_mp')
+  douyinAccounts.value = accounts.filter((account) => account.platform === 'douyin')
+  toutiaoAccounts.value = accounts.filter((account) => account.platform === 'toutiao')
+  zhihuAccounts.value = accounts.filter((account) => account.platform === 'zhihu')
+}
+
+async function refreshSelfMediaAccounts() {
+  if (!mediaDistributeBrandId.value) return
+  const { data } = await getSelfMediaAccountsByBrand(mediaDistributeBrandId.value)
+  applySelfMediaAccounts(data.data || [])
 }
 
 async function handleWechatPlatformClick() {
@@ -988,7 +1011,7 @@ function isSemiAutoPlatform(platform: MediaPlatform): platform is SemiAutoPlatfo
 function semiAutoStatusLabel(accounts: SelfMediaAccount[]) {
   if (!accounts.length) return '未配置'
   if (!accounts.some((account) => account.status === 'active')) return '不可用'
-  return accounts.some(hasActiveCookieCredential) ? '可创建任务' : '待捕获凭证'
+  return accounts.some(hasActiveCookieCredential) ? '可自动填表' : '待登录捕获'
 }
 
 function semiAutoStatusTagType(accounts: SelfMediaAccount[]): 'success' | 'warning' | 'info' {
@@ -1017,7 +1040,7 @@ function semiAutoAccountActionLoading(account: SelfMediaAccount) {
   if (hasActiveCookieCredential(account)) {
     return selfMediaSubmitting.value && selectedSelfMediaAccountId.value === account.id
   }
-  return extensionBindCodeLoadingAccountId.value === account.id
+  return semiAutoCookieCaptureLoadingAccountId.value === account.id || extensionBindCodeLoadingAccountId.value === account.id
 }
 
 function handleSemiAutoPlatformClick(platform: SemiAutoPlatform) {
@@ -1028,6 +1051,16 @@ function handleSemiAutoPlatformClick(platform: SemiAutoPlatform) {
   const accounts = platform === 'toutiao' ? toutiaoAccounts.value : zhihuAccounts.value
   if (!accounts.length) {
     ElMessage.info(`当前品牌暂无${platform === 'toutiao' ? '头条' : '知乎'}账号`)
+    return
+  }
+  const readyAccount = accounts.find((account) => account.status === 'active' && hasActiveCookieCredential(account))
+  if (readyAccount) {
+    void submitSemiAutoExtensionTask(readyAccount)
+    return
+  }
+  const loginAccount = accounts.find((account) => account.status === 'active')
+  if (loginAccount) {
+    void startSemiAutoCookieCapture(loginAccount)
   }
 }
 
@@ -1194,26 +1227,208 @@ async function submitSemiAutoExtensionTask(account: SelfMediaAccount) {
     return
   }
   if (!hasActiveCookieCredential(account)) {
-    await generateExtensionBindCodeForCapture(account)
+    await startSemiAutoCookieCapture(account)
     return
   }
   selectedSelfMediaAccountId.value = account.id
   selfMediaSubmitting.value = true
   try {
-    const result = await distributeContentArticleToSelfMediaAccount(mediaDistributeArticleId.value, {
-      selfMediaAccountId: account.id,
-      requestId: createRequestId(account.platform),
-    })
-    const task = result.data.data
-    if (['token_issued', 'filling', 'filled', 'published'].includes(task.status)) {
-      ElMessage.success('已创建扩展任务，请打开浏览器扩展继续填写')
-      await refreshDistributionHistory()
-      await load()
-      return
-    }
-    ElMessage.error(task.errorMessage || '创建扩展任务失败')
+    await startSemiAutoExtensionTask(mediaDistributeArticleId.value, account.id, account.platform)
   } finally {
     selfMediaSubmitting.value = false
+  }
+}
+
+async function startSemiAutoCookieCapture(account: SelfMediaAccount) {
+  if (!mediaDistributeBrandId.value) {
+    ElMessage.error('当前文章未绑定品牌，无法捕获自媒体登录状态')
+    return
+  }
+  if (!await ensureExtensionBridgeReady()) {
+    await generateExtensionBindCodeForCapture(account)
+    return
+  }
+  selectedSelfMediaAccountId.value = account.id
+  pendingCookieCaptureAccountId.value = account.id
+  semiAutoCookieCaptureLoadingAccountId.value = account.id
+  try {
+    const bridgeResult = await startExtensionCookieCapture({
+      type: 'GEO_START_COOKIE_CAPTURE',
+      requestId: createRequestId(`capture_${account.platform}`),
+      brandId: mediaDistributeBrandId.value,
+      accountId: account.id,
+      platform: account.platform,
+      accountName: account.accountName,
+    })
+    if (bridgeResult.type === 'GEO_FILL_ERROR') {
+      ElMessage.warning(bridgeResult.payload?.message || '暂时无法打开登录页，请确认扩展已安装并绑定')
+      return
+    }
+    if (bridgeResult.payload?.status === 'captured') {
+      ElMessage.success(bridgeResult.payload.message || '已自动捕获登录凭证')
+      await refreshSelfMediaAccountsAfterCookieCapture(account.id, true)
+      return
+    }
+    ElMessage.info(bridgeResult.payload?.message || '已打开登录页，登录成功后将自动捕获凭证')
+    startCookieCaptureStatusPolling(account.id)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '扩展桥接失败'
+    ElMessage.warning(`${message}；请确认扩展已安装并启用。`)
+  } finally {
+    semiAutoCookieCaptureLoadingAccountId.value = null
+  }
+}
+
+function startCookieCaptureStatusPolling(accountId: number) {
+  stopCookieCaptureStatusPolling()
+  pendingCookieCaptureAccountId.value = accountId
+  let attempts = 0
+  const poll = async () => {
+    attempts += 1
+    try {
+      if (await refreshSelfMediaAccountsAfterCookieCapture(accountId, true)) {
+        return
+      }
+    } catch {
+      // The next poll will retry while the operator is completing platform login.
+    }
+    if (attempts >= 60 || !mediaDistributeVisible.value) {
+      stopCookieCaptureStatusPolling()
+      return
+    }
+    cookieCapturePollTimer = window.setTimeout(poll, 3_000)
+  }
+  cookieCapturePollTimer = window.setTimeout(poll, 3_000)
+}
+
+function stopCookieCaptureStatusPolling() {
+  if (cookieCapturePollTimer !== null) {
+    window.clearTimeout(cookieCapturePollTimer)
+    cookieCapturePollTimer = null
+  }
+}
+
+async function refreshSelfMediaAccountsAfterCookieCapture(accountId: number, notify: boolean) {
+  await refreshSelfMediaAccounts()
+  const account = [...toutiaoAccounts.value, ...zhihuAccounts.value].find(item => item.id === accountId)
+  if (!account || !hasActiveCookieCredential(account)) return false
+  selectedSelfMediaAccountId.value = account.id
+  pendingCookieCaptureAccountId.value = null
+  semiAutoCookieCaptureLoadingAccountId.value = null
+  stopCookieCaptureStatusPolling()
+  if (notify) {
+    ElMessage.success('自媒体登录状态已刷新，可以再次点击平台进行文章分发')
+  }
+  return true
+}
+
+async function refreshPendingCookieCaptureStatus() {
+  if (!mediaDistributeVisible.value || !pendingCookieCaptureAccountId.value) return
+  try {
+    await refreshSelfMediaAccountsAfterCookieCapture(pendingCookieCaptureAccountId.value, true)
+  } catch {
+    // Keep the polling path alive; transient refresh failures should not interrupt login capture.
+  }
+}
+
+function handleWindowFocusForCookieCapture() {
+  void refreshPendingCookieCaptureStatus()
+}
+
+function handleVisibilityChangeForCookieCapture() {
+  if (document.visibilityState === 'visible') {
+    void refreshPendingCookieCaptureStatus()
+  }
+}
+
+async function startSemiAutoExtensionTask(articleId: number, accountId: number, platform: string) {
+  if (!await ensureExtensionBridgeReady()) {
+    return
+  }
+  const requestId = createRequestId(platform)
+  const result = await distributeContentArticleToSelfMediaAccount(articleId, {
+    selfMediaAccountId: accountId,
+    requestId,
+  })
+  const task = result.data.data
+  if (task.status === 'token_issued') {
+    try {
+      const bridgeResult = await startExtensionFill({
+        type: 'GEO_START_FILL',
+        requestId,
+        taskId: task.id,
+        articleId,
+        accountId,
+        platform,
+      })
+      if (bridgeResult.type === 'GEO_FILL_ERROR') {
+        ElMessage.warning(bridgeResult.payload?.message || '扩展未能自动打开发布页，请打开浏览器扩展继续处理')
+      } else {
+        ElMessage.success(bridgeResult.payload?.message || '已打开发布页并完成填表，请人工确认后发布')
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '扩展桥接失败'
+      ElMessage.warning(`${message}；发布请求已生成，可打开浏览器扩展继续处理。`)
+    }
+    if (mediaDistributeArticleId.value === articleId) {
+      await refreshDistributionHistory()
+    }
+    await load()
+    return
+  }
+  if (['filling', 'filled', 'published'].includes(task.status)) {
+    ElMessage.info('该发布页已在处理中，请在浏览器扩展或已打开的平台页面继续处理')
+    if (mediaDistributeArticleId.value === articleId) {
+      await refreshDistributionHistory()
+    }
+    await load()
+    return
+  }
+  ElMessage.error(task.errorMessage || '打开发布页失败')
+}
+
+async function ensureExtensionBridgeReady() {
+  if (await refreshExtensionBridgeStatus(false)) {
+    return true
+  }
+  ElMessage.warning(extensionBridgeState.message)
+  return false
+}
+
+async function refreshExtensionBridgeStatus(showMessage = false) {
+  extensionBridgeChecking.value = true
+  extensionBridgeState.status = 'checking'
+  extensionBridgeState.message = '正在检测浏览器扩展状态'
+  try {
+    const bridgeResult = await pingExtensionBridge()
+    if (bridgeResult.type === 'GEO_PONG' && bridgeResult.payload?.bound) {
+      extensionBridgeState.status = 'bound'
+      extensionBridgeState.extensionVersion = bridgeResult.payload.extensionVersion || ''
+      extensionBridgeState.message = bridgeResult.payload.extensionVersion
+        ? `扩展已安装并绑定，版本 ${bridgeResult.payload.extensionVersion}`
+        : '扩展已安装并绑定'
+      if (showMessage) ElMessage.success(extensionBridgeState.message)
+      return true
+    }
+    if (bridgeResult.type === 'GEO_PONG') {
+      extensionBridgeState.status = 'unbound'
+      extensionBridgeState.extensionVersion = bridgeResult.payload?.extensionVersion || ''
+      extensionBridgeState.message = '已检测到浏览器扩展，但扩展尚未绑定，请先打开扩展完成绑定。'
+      if (showMessage) ElMessage.warning(extensionBridgeState.message)
+      return false
+    }
+    extensionBridgeState.status = 'error'
+    extensionBridgeState.message = bridgeResult.payload?.message || '扩展当前不可用，请打开浏览器扩展检查状态。'
+    if (showMessage) ElMessage.warning(extensionBridgeState.message)
+    return false
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '未检测到浏览器扩展'
+    extensionBridgeState.status = 'missing'
+    extensionBridgeState.message = `${message}；请先安装并启用 GEO 浏览器扩展。`
+    if (showMessage) ElMessage.warning(extensionBridgeState.message)
+    return false
+  } finally {
+    extensionBridgeChecking.value = false
   }
 }
 
@@ -1223,9 +1438,13 @@ async function generateExtensionBindCodeForCapture(account: SelfMediaAccount) {
     return
   }
   selectedSelfMediaAccountId.value = account.id
-  extensionBindCodeLoadingAccountId.value = account.id
+  await generateExtensionBindCode(mediaDistributeBrandId.value, account.id)
+}
+
+async function generateExtensionBindCode(brandId: number, accountId: number) {
+  extensionBindCodeLoadingAccountId.value = accountId
   try {
-    const { data } = await createExtensionBindCode(mediaDistributeBrandId.value)
+    const { data } = await createExtensionBindCode(brandId)
     extensionBindCode.value = data.data
     ElMessage.success('扩展绑定码已生成，请打开浏览器扩展继续绑定并捕获凭证')
     await ElMessageBox.alert(
@@ -1464,11 +1683,20 @@ onMounted(async () => {
 
 watch(mediaDistributeVisible, (visible) => {
   if (!visible) {
+    stopCookieCaptureStatusPolling()
+    pendingCookieCaptureAccountId.value = null
+    semiAutoCookieCaptureLoadingAccountId.value = null
     cleanupMaterialThumbs()
   }
 })
 
+window.addEventListener('focus', handleWindowFocusForCookieCapture)
+document.addEventListener('visibilitychange', handleVisibilityChangeForCookieCapture)
+
 onBeforeUnmount(() => {
+  window.removeEventListener('focus', handleWindowFocusForCookieCapture)
+  document.removeEventListener('visibilitychange', handleVisibilityChangeForCookieCapture)
+  stopCookieCaptureStatusPolling()
   cleanupMaterialThumbs()
 })
 
@@ -1555,6 +1783,14 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 .toolbar-left {
   display: flex;
   align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.toolbar-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
 }
