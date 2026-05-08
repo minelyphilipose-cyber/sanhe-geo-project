@@ -100,6 +100,40 @@
       <template #header>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
+            <span>浏览器扩展绑定</span>
+            <el-tag type="info">头条 / 知乎凭证捕获</el-tag>
+          </div>
+          <el-button v-if="canUpdateBrand" type="primary" link :loading="extensionBindCodeLoading" @click="generateExtensionBindCode">
+            生成绑定码
+          </el-button>
+        </div>
+      </template>
+      <el-alert
+        class="mb-3"
+        type="info"
+        show-icon
+        :closable="false"
+        title="运营安装并打开 GEO 扩展后，需要输入绑定码和 brandId。绑定成功后，才能在扩展里捕获头条/知乎登录凭证。"
+      />
+      <el-descriptions :column="3" border>
+        <el-descriptions-item label="brandId">{{ brandId }}</el-descriptions-item>
+        <el-descriptions-item label="绑定码">
+          <span class="font-mono text-lg">{{ extensionBindCode?.bindCode || '尚未生成' }}</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="有效期">
+          {{ extensionBindCode ? `${formatTtlSeconds(extensionBindCode.ttlSeconds)} 内有效` : '-' }}
+        </el-descriptions-item>
+      </el-descriptions>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <el-button :disabled="!extensionBindCode" @click="copyExtensionBindInfo('code')">复制绑定码</el-button>
+        <el-button :disabled="!extensionBindCode" @click="copyExtensionBindInfo('all')">复制绑定信息</el-button>
+      </div>
+    </el-card>
+
+    <el-card>
+      <template #header>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
             <span>品牌标准表达</span>
             <el-tag :type="statementTagType">{{ statementStatusLabel }}</el-tag>
             <el-tag v-if="statement?.statementVersion" type="info">v{{ statement?.statementVersion }}</el-tag>
@@ -256,6 +290,7 @@ import {
   getSelfMediaAccountsByBrand,
   updateSelfMediaAccount,
 } from '@/api/content'
+import { createExtensionBindCode, type ExtensionBindCode } from '@/api/extension'
 import {
   getBrandDetail,
   updateBrand,
@@ -307,9 +342,11 @@ const statementSaving = ref(false)
 const selfMediaAccountsLoading = ref(false)
 const selfMediaAccountSaving = ref(false)
 const selfMediaAccountVisible = ref(false)
+const extensionBindCodeLoading = ref(false)
 const brand = ref<Brand | null>(null)
 const statement = ref<BrandStatementView | null>(null)
 const selfMediaAccounts = ref<SemiAutoSelfMediaAccount[]>([])
+const extensionBindCode = ref<ExtensionBindCode | null>(null)
 const editingSelfMediaAccount = ref<SemiAutoSelfMediaAccount | null>(null)
 const companyName = ref('')
 const companyIndustryTags = ref<string[]>([])
@@ -409,6 +446,49 @@ function selfMediaPlatformLabel(value?: string | null) {
   if (value === 'toutiao') return '头条'
   if (value === 'zhihu') return '知乎'
   return value || '-'
+}
+
+function formatTtlSeconds(seconds: number) {
+  if (seconds >= 60 && seconds % 60 === 0) {
+    return `${seconds / 60} 分钟`
+  }
+  return `${seconds} 秒`
+}
+
+async function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'readonly')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textarea)
+}
+
+async function generateExtensionBindCode() {
+  extensionBindCodeLoading.value = true
+  try {
+    const { data } = await createExtensionBindCode(brandId)
+    extensionBindCode.value = data.data
+    ElMessage.success('扩展绑定码已生成')
+  } finally {
+    extensionBindCodeLoading.value = false
+  }
+}
+
+async function copyExtensionBindInfo(mode: 'code' | 'all') {
+  if (!extensionBindCode.value) return
+  const text = mode === 'code'
+    ? extensionBindCode.value.bindCode
+    : `绑定码：${extensionBindCode.value.bindCode}\nbrandId：${extensionBindCode.value.brandId}`
+  await copyText(text)
+  ElMessage.success('已复制')
 }
 
 function parseIndustryTags(value?: string | string[] | null) {
