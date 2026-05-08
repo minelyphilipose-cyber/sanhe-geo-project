@@ -8,8 +8,7 @@ describe('bind flow', () => {
   })
 
   it('rejects invalid bind code and brand id', () => {
-    expect(() => validateBindInput({ bindCode: 'abc', brandId: '1' })).toThrow('绑定码')
-    expect(() => validateBindInput({ bindCode: 'ABCDEFGH', brandId: '0' })).toThrow('brandId')
+    expect(() => validateBindInput({ bindCode: 'abc' })).toThrow('绑定码')
   })
 
   it('binds extension and saves stored session', async () => {
@@ -21,7 +20,7 @@ describe('bind flow', () => {
     }))
 
     const session = await bindExtension(
-      { bindCode: 'abcd efgh', brandId: '1001' },
+      { bindCode: 'abcd efgh' },
       {
         api: { bind, revoke: vi.fn() },
         storage: {
@@ -32,7 +31,7 @@ describe('bind flow', () => {
       },
     )
 
-    expect(bind).toHaveBeenCalledWith('ABCDEFGH', 1001, 'install-1', '0.1.0')
+    expect(bind).toHaveBeenCalledWith('ABCDEFGH', 'install-1', '0.1.0')
     expect(set).toHaveBeenCalledWith(expect.objectContaining({
       token: 'ext.new',
       sessionId: 12,

@@ -2,10 +2,10 @@ import request from './request'
 import type { R } from '@/types'
 
 export interface ExtensionBindCode {
-  bindCode: string
+  code: string
   brandId: number
   operatorId: number
-  ttlSeconds: number
+  expiresInSeconds: number
 }
 
 export function createExtensionBindCode(brandId: number) {

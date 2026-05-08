@@ -20,7 +20,6 @@ const status = ref<ExtensionStatus>('unbound')
 const statusMessage = ref('未绑定')
 const errorMessage = ref('')
 const bindCode = ref('')
-const brandId = ref('')
 const loading = ref(false)
 const tasksLoading = ref(false)
 const accountsLoading = ref(false)
@@ -64,11 +63,11 @@ function onBindCodeInput(event: Event) {
 
 async function bind() {
   try {
-    const validated = validateBindInput({ bindCode: bindCode.value, brandId: brandId.value })
-    if (!window.confirm(`确认将扩展绑定到 brandId ${validated.brandId}？`)) return
+    validateBindInput({ bindCode: bindCode.value })
+    if (!window.confirm('确认使用该绑定码绑定 GEO 扩展？')) return
 
     loading.value = true
-    session.value = await bindExtension({ bindCode: bindCode.value, brandId: brandId.value })
+    session.value = await bindExtension({ bindCode: bindCode.value })
     status.value = 'bound'
     errorMessage.value = ''
     statusMessage.value = `绑定成功，sessionId ${session.value.sessionId}`
@@ -264,11 +263,7 @@ function onRuntimeMessage(message: { type: string, payload?: TaskLifecycleEvent 
           @input="onBindCodeInput"
         >
       </label>
-      <label>
-        <span>brandId</span>
-        <input v-model.trim="brandId" inputmode="numeric" pattern="[0-9]*" placeholder="例如 1001">
-      </label>
-      <p class="confirm">提交前请确认绑定到 brandId：{{ brandId || '未填写' }}</p>
+      <p class="confirm">绑定码由后台品牌详情页生成，扩展会自动绑定到对应品牌。</p>
       <button :disabled="loading" type="button" @click="bind">
         {{ loading ? '绑定中...' : '绑定' }}
       </button>

@@ -113,15 +113,15 @@
         type="info"
         show-icon
         :closable="false"
-        title="运营安装并打开 GEO 扩展后，需要输入绑定码和 brandId。绑定成功后，才能在扩展里捕获头条/知乎登录凭证。"
+        title="运营安装并打开 GEO 扩展后，只需输入绑定码。绑定成功后，扩展会自动关联当前品牌，并可捕获头条/知乎登录凭证。"
       />
       <el-descriptions :column="3" border>
         <el-descriptions-item label="brandId">{{ brandId }}</el-descriptions-item>
         <el-descriptions-item label="绑定码">
-          <span class="font-mono text-lg">{{ extensionBindCode?.bindCode || '尚未生成' }}</span>
+          <span class="font-mono text-lg">{{ extensionBindCode?.code || '尚未生成' }}</span>
         </el-descriptions-item>
         <el-descriptions-item label="有效期">
-          {{ extensionBindCode ? `${formatTtlSeconds(extensionBindCode.ttlSeconds)} 内有效` : '-' }}
+          {{ extensionBindCode ? `${formatTtlSeconds(extensionBindCode.expiresInSeconds)} 内有效` : '-' }}
         </el-descriptions-item>
       </el-descriptions>
       <div class="mt-3 flex flex-wrap gap-2">
@@ -485,8 +485,8 @@ async function generateExtensionBindCode() {
 async function copyExtensionBindInfo(mode: 'code' | 'all') {
   if (!extensionBindCode.value) return
   const text = mode === 'code'
-    ? extensionBindCode.value.bindCode
-    : `绑定码：${extensionBindCode.value.bindCode}\nbrandId：${extensionBindCode.value.brandId}`
+    ? extensionBindCode.value.code
+    : `绑定码：${extensionBindCode.value.code}\n品牌：${brand.value?.brandName || brandId}`
   await copyText(text)
   ElMessage.success('已复制')
 }

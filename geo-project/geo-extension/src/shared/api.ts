@@ -45,10 +45,10 @@ export const extensionApi = {
     })
   },
 
-  bind(bindCode: string, brandId: number, installId: string, extensionVersion: string) {
+  bind(bindCode: string, installId: string, extensionVersion: string) {
     return request<BindResponse>('/api/v1/extension/bind', {
       method: 'POST',
-      body: JSON.stringify({ bindCode, brandId, installId, extensionVersion }),
+      body: JSON.stringify({ bindCode, installId, extensionVersion }),
     })
   },
 

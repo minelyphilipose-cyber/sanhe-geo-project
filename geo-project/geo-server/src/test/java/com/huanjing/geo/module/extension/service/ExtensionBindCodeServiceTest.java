@@ -106,4 +106,19 @@ class ExtensionBindCodeServiceTest {
 
         verify(brandAccessService).requireBrandAccess(eq(10L), eq(99L), eq(BrandAccessAction.MANAGE));
     }
+
+    @Test
+    void consumeCanResolveBrandIdFromBindCodePayload() throws Exception {
+        String payload = new ObjectMapper().writeValueAsString(
+                new ExtensionBindCodeService.BindCodePayload(10L, 99L, Long.MAX_VALUE)
+        );
+        when(redisStore.incrementWithTtl(any(), any())).thenReturn(1L);
+        when(redisStore.getAndDelete("bind_code:ABCDEFGH")).thenReturn(payload);
+
+        ExtensionBindCodeService.BindCodePayload result = service.consume("ABCD-EFGH", null, "127.0.0.1");
+
+        assertEquals(10L, result.brandId());
+        assertEquals(99L, result.operatorId());
+        verify(brandAccessService).requireBrandAccess(eq(10L), eq(99L), eq(BrandAccessAction.MANAGE));
+    }
 }

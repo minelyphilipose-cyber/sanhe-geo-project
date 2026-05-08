@@ -64,12 +64,12 @@ public class ExtensionBindCodeService {
     }
 
     public BindCodePayload consume(String code, Long expectedBrandId, String ipAddress) {
-        if (expectedBrandId == null) {
-            throw new BizException(BIND_CODE_INVALID, "brandId is required");
-        }
         String normalized = normalizeCode(code);
         try {
-            enforceRateLimit(expectedBrandId, ipAddress);
+            if (expectedBrandId != null) {
+                enforceBrandRateLimit(expectedBrandId, ipAddress);
+            }
+            enforceIpRateLimit(ipAddress);
         } catch (BizException ex) {
             auditSupport.record(
                     "BIND_RATE_LIMIT_EXCEEDED",
@@ -95,12 +95,15 @@ public class ExtensionBindCodeService {
             throw new BizException(BIND_CODE_INVALID, "bind code invalid or expired");
         }
         BindCodePayload payload = fromJson(json);
-        if (!payload.brandId().equals(expectedBrandId)) {
+        if (expectedBrandId != null && !payload.brandId().equals(expectedBrandId)) {
             auditBindConsumeDenied(expectedBrandId, payload.operatorId(), ipAddress, "BRAND_MISMATCH");
             throw new BizException(BIND_CODE_INVALID, "bind code brand mismatch");
         }
+        if (expectedBrandId == null) {
+            enforceBrandRateLimit(payload.brandId(), ipAddress);
+        }
         if (payload.expiresAt() <= clock.instant().getEpochSecond()) {
-            auditBindConsumeDenied(expectedBrandId, payload.operatorId(), ipAddress, "EXPIRED");
+            auditBindConsumeDenied(payload.brandId(), payload.operatorId(), ipAddress, "EXPIRED");
             throw new BizException(BIND_CODE_INVALID, "bind code invalid or expired");
         }
         brandAccessService.requireBrandAccess(payload.brandId(), payload.operatorId(), BrandAccessAction.MANAGE);
@@ -123,7 +126,7 @@ public class ExtensionBindCodeService {
         return payload;
     }
 
-    private void enforceRateLimit(Long brandId, String ipAddress) {
+    private void enforceBrandRateLimit(Long brandId, String ipAddress) {
         long window = clock.instant().getEpochSecond() / 300;
         long brandAttempts = redisStore.incrementWithTtl(
                 "bind_attempts:brand:" + brandId + ":" + window,
@@ -133,10 +136,14 @@ public class ExtensionBindCodeService {
             auditRateLimitDenied(brandId, ipAddress, "BRAND", brandAttempts);
             throw new BizException(BIND_RATE_LIMIT_EXCEEDED, "bind code attempts exceeded");
         }
+    }
+
+    private void enforceIpRateLimit(String ipAddress) {
+        long window = clock.instant().getEpochSecond() / 300;
         String ip = StringUtils.hasText(ipAddress) ? ipAddress : "unknown";
         long ipAttempts = redisStore.incrementWithTtl("bind_attempts:ip:" + ip + ":" + window, RATE_LIMIT_TTL);
         if (ipAttempts > properties.getBindCode().getIpRateLimitPer5min()) {
-            auditRateLimitDenied(brandId, ipAddress, "IP", ipAttempts);
+            auditRateLimitDenied(null, ipAddress, "IP", ipAttempts);
             throw new BizException(BIND_RATE_LIMIT_EXCEEDED, "bind code attempts exceeded");
         }
     }
