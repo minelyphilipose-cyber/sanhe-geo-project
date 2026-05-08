@@ -290,7 +290,7 @@
               v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active'"
               size="small"
               :type="hasActiveCookieCredential(account) ? 'primary' : 'warning'"
-              :loading="selfMediaSubmitting && selectedSelfMediaAccountId === account.id"
+              :loading="semiAutoAccountActionLoading(account)"
               @click="submitSemiAutoExtensionTask(account)"
             >
               {{ hasActiveCookieCredential(account) ? '创建扩展任务' : '先捕获凭证' }}
@@ -301,6 +301,23 @@
           v-else-if="isSemiAutoPlatform(selectedMediaPlatform)"
           description="当前品牌暂无可用的头条/知乎账号"
         />
+
+        <el-alert
+          v-if="extensionBindCode"
+          class="extension-bind-guide"
+          type="success"
+          show-icon
+          :closable="false"
+        >
+          <template #title>
+            <span>扩展绑定码：<strong class="bind-code">{{ extensionBindCode.code }}</strong></span>
+          </template>
+          <div class="extension-bind-content">
+            <span>请打开 GEO 浏览器扩展，输入绑定码完成绑定；然后在同一浏览器登录目标平台，回到扩展里捕获凭证。</span>
+            <span>有效期：{{ formatTtlSeconds(extensionBindCode.expiresInSeconds) }}</span>
+            <el-button size="small" type="success" link @click="copyExtensionBindCode">复制绑定码</el-button>
+          </div>
+        </el-alert>
 
         <div v-if="selectedMediaPlatform === 'wechat_mp' && selectedSelfMediaAccountId" class="cover-picker">
           <div class="cover-picker-header">
@@ -519,6 +536,7 @@ import {
   saveContentArticleRevision,
 } from '@/api/content'
 import { getBrandDetail, getBrandImageFolders } from '@/api/customer'
+import { createExtensionBindCode, type ExtensionBindCode } from '@/api/extension'
 
 type MediaPlatform = 'wechat_mp' | 'douyin' | 'toutiao' | 'zhihu'
 type SemiAutoPlatform = 'toutiao' | 'zhihu'
@@ -598,6 +616,8 @@ const douyinText = ref('')
 const distributionAttempts = ref<DistributionTask[]>([])
 const refreshingReviewTaskId = ref<number | null>(null)
 const selfMediaSubmitting = ref(false)
+const extensionBindCode = ref<ExtensionBindCode | null>(null)
+const extensionBindCodeLoadingAccountId = ref<number | null>(null)
 
 const publishVisible = ref(false)
 const publishForm = reactive({
@@ -857,6 +877,8 @@ async function openMediaDistribute(row: ArticleDraft) {
   selectedDouyinImageMaterialIds.value = []
   douyinText.value = row.title || ''
   distributionAttempts.value = []
+  extensionBindCode.value = null
+  extensionBindCodeLoadingAccountId.value = null
   try {
     const [detailRes, wechatCapabilityRes, douyinCapabilityRes, distributionRes] = await Promise.all([
       getContentArticleDetail(row.id),
@@ -988,6 +1010,13 @@ function semiAutoCredentialTagType(account: SelfMediaAccount): 'success' | 'warn
   return account.status === 'active' ? 'warning' : 'info'
 }
 
+function semiAutoAccountActionLoading(account: SelfMediaAccount) {
+  if (hasActiveCookieCredential(account)) {
+    return selfMediaSubmitting.value && selectedSelfMediaAccountId.value === account.id
+  }
+  return extensionBindCodeLoadingAccountId.value === account.id
+}
+
 function handleSemiAutoPlatformClick(platform: SemiAutoPlatform) {
   selectedMediaPlatform.value = platform
   selectedSelfMediaAccountId.value = null
@@ -1113,7 +1142,7 @@ async function submitSemiAutoExtensionTask(account: SelfMediaAccount) {
     return
   }
   if (!hasActiveCookieCredential(account)) {
-    ElMessage.warning('该账号尚未捕获登录凭证。请先打开浏览器扩展，在目标平台登录后捕获凭证。')
+    await generateExtensionBindCodeForCapture(account)
     return
   }
   selectedSelfMediaAccountId.value = account.id
@@ -1134,6 +1163,51 @@ async function submitSemiAutoExtensionTask(account: SelfMediaAccount) {
   } finally {
     selfMediaSubmitting.value = false
   }
+}
+
+async function generateExtensionBindCodeForCapture(account: SelfMediaAccount) {
+  if (!mediaDistributeBrandId.value) {
+    ElMessage.error('当前文章未绑定品牌，无法生成扩展绑定码')
+    return
+  }
+  selectedSelfMediaAccountId.value = account.id
+  extensionBindCodeLoadingAccountId.value = account.id
+  try {
+    const { data } = await createExtensionBindCode(mediaDistributeBrandId.value)
+    extensionBindCode.value = data.data
+    ElMessage.success('扩展绑定码已生成，请打开浏览器扩展继续绑定并捕获凭证')
+  } finally {
+    extensionBindCodeLoadingAccountId.value = null
+  }
+}
+
+function formatTtlSeconds(seconds: number) {
+  if (seconds >= 60 && seconds % 60 === 0) {
+    return `${seconds / 60} 分钟`
+  }
+  return `${seconds} 秒`
+}
+
+async function copyExtensionBindCode() {
+  if (!extensionBindCode.value) return
+  await copyText(extensionBindCode.value.code)
+  ElMessage.success('绑定码已复制')
+}
+
+async function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'readonly')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textarea)
 }
 
 async function refreshDistributionHistory() {
@@ -1667,6 +1741,23 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   margin-top: 2px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+.extension-bind-guide {
+  margin-top: 12px;
+}
+
+.extension-bind-content {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  line-height: 1.7;
+}
+
+.bind-code {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  letter-spacing: 0;
 }
 
 .cover-picker {
