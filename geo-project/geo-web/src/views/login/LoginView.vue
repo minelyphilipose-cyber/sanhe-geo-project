@@ -17,8 +17,7 @@
             <div class="login-card__brand-subtitle">FANTASY GEO</div>
           </div>
         </div>
-        <h1 class="login-card__title">交付系统</h1>
-        <p class="login-card__subtitle">内部运营平台</p>
+        <h1 class="login-card__title">交付系统 · 内部运营平台</h1>
       </div>
 
       <el-form
@@ -196,6 +195,7 @@ async function handleLogin() {
 }
 
 .login-card__brand-copy {
+  width: 140px;
   text-align: left;
 }
 
@@ -204,7 +204,8 @@ async function handleLogin() {
   font-weight: 900;
   line-height: 1;
   color: #0f172a;
-  letter-spacing: -0.03em;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
 }
 
 .login-card__brand-subtitle {
@@ -214,21 +215,16 @@ async function handleLogin() {
   font-weight: 700;
   line-height: 1;
   color: #2563eb;
-  letter-spacing: 0.26em;
+  letter-spacing: 0.2em;
+  white-space: nowrap;
 }
 
 .login-card__title {
-  font-size: 22px;
-  font-weight: 800;
+  font-size: 20px;
+  font-weight: 700;
   color: #0F172A;
-  margin: 0 0 4px;
-  letter-spacing: -0.02em;
-}
-
-.login-card__subtitle {
-  font-size: 14px;
-  color: #64748B;
   margin: 0;
+  letter-spacing: -0.02em;
 }
 
 .login-card__btn {
