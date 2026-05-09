@@ -6,6 +6,7 @@ import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Mapper
@@ -36,4 +37,32 @@ public interface PresaleReportVersionMapper extends BaseMapper<PresaleReportVers
             " GROUP BY report_id" +
             "</script>")
     List<java.util.Map<String, Object>> countByReportIds(@Param("reportIds") List<Long> reportIds);
+
+    @Select("<script>" +
+            "SELECT COUNT(*) " +
+            "FROM presale_report r " +
+            "JOIN presale_report_version v ON v.id = r.current_version_id " +
+            "WHERE r.deleted_at IS NULL " +
+            "AND v.generation_status = 'DONE' " +
+            "AND v.updated_at &gt;= #{startAt} " +
+            "AND v.updated_at &lt;= #{endAt} " +
+            "<if test='createdBy != null'>AND r.created_by = #{createdBy}</if>" +
+            "</script>")
+    Long countGeneratedCurrentReports(@Param("startAt") LocalDateTime startAt,
+                                      @Param("endAt") LocalDateTime endAt,
+                                      @Param("createdBy") Long createdBy);
+
+    @Select("<script>" +
+            "SELECT v.updated_at " +
+            "FROM presale_report r " +
+            "JOIN presale_report_version v ON v.id = r.current_version_id " +
+            "WHERE r.deleted_at IS NULL " +
+            "AND v.generation_status = 'DONE' " +
+            "AND v.updated_at &gt;= #{startAt} " +
+            "AND v.updated_at &lt;= #{endAt} " +
+            "<if test='createdBy != null'>AND r.created_by = #{createdBy}</if>" +
+            "</script>")
+    List<LocalDateTime> selectGeneratedCurrentReportTimes(@Param("startAt") LocalDateTime startAt,
+                                                          @Param("endAt") LocalDateTime endAt,
+                                                          @Param("createdBy") Long createdBy);
 }

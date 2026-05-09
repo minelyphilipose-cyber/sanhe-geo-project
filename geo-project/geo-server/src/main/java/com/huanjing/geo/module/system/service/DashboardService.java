@@ -6,6 +6,7 @@ import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.dispatch.entity.DispatchAlert;
 import com.huanjing.geo.module.dispatch.mapper.DispatchAlertMapper;
 import com.huanjing.geo.module.partner.mapper.PartnerMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.report.entity.Report;
@@ -70,6 +71,7 @@ public class DashboardService {
     private final CompanyMapper companyMapper;
     private final ProjectMapper projectMapper;
     private final ReportMapper reportMapper;
+    private final PresaleReportVersionMapper presaleReportVersionMapper;
     private final PartnerMapper partnerMapper;
     private final DispatchAlertMapper dispatchAlertMapper;
 
@@ -109,13 +111,13 @@ public class DashboardService {
         if (scopePartnerId != null) {
             List<Long> projectIds = loadProjectIdsByPartner(scopePartnerId);
             if (projectIds.isEmpty()) {
-                vo.setMonthlyReports(0L);
+                vo.setMonthlyReports(countMonthlyPresaleReports(user, monthStart));
             } else {
                 reportWrapper.in(Report::getProjectId, projectIds);
-                vo.setMonthlyReports(reportMapper.selectCount(reportWrapper));
+                vo.setMonthlyReports(reportMapper.selectCount(reportWrapper) + countMonthlyPresaleReports(user, monthStart));
             }
         } else {
-            vo.setMonthlyReports(reportMapper.selectCount(reportWrapper));
+            vo.setMonthlyReports(reportMapper.selectCount(reportWrapper) + countMonthlyPresaleReports(user, monthStart));
         }
 
         if (scopePartnerId == null) {
@@ -312,6 +314,15 @@ public class DashboardService {
         Map<LocalDate, Long> dailyCount = reports.stream()
                 .filter(report -> report.getCreatedAt() != null)
                 .collect(Collectors.groupingBy(report -> report.getCreatedAt().toLocalDate(), Collectors.counting()));
+        List<LocalDateTime> presaleGeneratedTimes = presaleReportVersionMapper.selectGeneratedCurrentReportTimes(
+                startDate.atStartOfDay(),
+                today.atTime(LocalTime.MAX),
+                presaleCreatedByFilter(user)
+        );
+        presaleGeneratedTimes.stream()
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.groupingBy(LocalDateTime::toLocalDate, Collectors.counting()))
+                .forEach((date, count) -> dailyCount.merge(date, count, Long::sum));
 
         List<ReportTrendVO> result = new ArrayList<>(safeDays);
         for (LocalDate date = startDate; !date.isAfter(today); date = date.plusDays(1)) {
@@ -321,6 +332,22 @@ public class DashboardService {
             result.add(vo);
         }
         return result;
+    }
+
+    private Long countMonthlyPresaleReports(SysUser user, LocalDateTime monthStart) {
+        Long count = presaleReportVersionMapper.countGeneratedCurrentReports(
+                monthStart,
+                LocalDateTime.now(),
+                presaleCreatedByFilter(user)
+        );
+        return count == null ? 0L : count;
+    }
+
+    private Long presaleCreatedByFilter(SysUser user) {
+        if (currentUserService.hasPermission("presale.report.manage")) {
+            return null;
+        }
+        return user.getId();
     }
 
     private List<Long> loadProjectIdsByPartner(Long partnerId) {
