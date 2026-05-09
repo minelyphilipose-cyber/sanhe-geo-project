@@ -1,0 +1,23 @@
+<svg width="96" height="96" viewBox="0 0 96 96" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">幻境AI Logo Symbol</title>
+  <desc id="desc">A blue G-shaped geo engine mark with a forward arrow.</desc>
+  <defs>
+    <linearGradient id="geoMark" x1="20%" y1="20%" x2="100%" y2="80%">
+      <stop offset="0%" stop-color="#0EA5E9"/>
+      <stop offset="100%" stop-color="#1E40AF"/>
+    </linearGradient>
+    <linearGradient id="geoArrow" x1="20%" y1="20%" x2="100%" y2="80%">
+      <stop offset="0%" stop-color="#0EA5E9"/>
+      <stop offset="100%" stop-color="#1E40AF"/>
+    </linearGradient>
+    <filter id="softGlow" x="0" y="0" width="96" height="96" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#020617" flood-opacity="0.14"/>
+    </filter>
+  </defs>
+  <g filter="url(#softGlow)">
+    <g transform="translate(48 48) scale(0.86)">
+      <path fill-rule="evenodd" clip-rule="evenodd" d="M38.04 -12.36A40 40 0 1 0 38.04 12.36L26.63 4.32A28 28 0 1 1 26.63 -4.32Z" fill="url(#geoMark)"/>
+      <path d="M8 -4H36V-12L54 0L36 12V4H8Z" fill="url(#geoArrow)"/>
+    </g>
+  </g>
+</svg>

@@ -10,12 +10,14 @@
     <!-- 登录卡片 -->
     <div class="login-card glass-card">
       <div class="login-card__header">
-        <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" class="login-card__logo">
-          <rect width="40" height="40" rx="10" fill="#2563EB"/>
-          <path d="M10 20L17.5 12.5L25 20L17.5 27.5Z" fill="white" opacity="0.9"/>
-          <path d="M17.5 20L25 12.5L32.5 20L25 27.5Z" fill="white" opacity="0.6"/>
-        </svg>
-        <h1 class="login-card__title">幻境AI · GEO 交付系统</h1>
+        <div class="login-card__brand">
+          <img class="login-card__logo" :src="logoSymbolUrl" alt="幻境AI">
+          <div class="login-card__brand-copy">
+            <div class="login-card__brand-name">幻境AI</div>
+            <div class="login-card__brand-subtitle">FANTASY GEO</div>
+          </div>
+        </div>
+        <h1 class="login-card__title">交付系统</h1>
         <p class="login-card__subtitle">内部运营平台</p>
       </div>
 
@@ -62,6 +64,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import logoSymbolUrl from '@/assets/brand/logo-symbol.svg'
 import { useUserStore } from '@/stores/user'
 import type { FormInstance, FormRules } from 'element-plus'
 import { resolvePostLoginPath } from '@/utils/navigation'
@@ -167,20 +170,51 @@ async function handleLogin() {
 /* 卡片 */
 .login-card {
   width: 400px;
-  padding: 40px 36px 32px;
+  padding: 38px 36px 32px;
   position: relative;
   z-index: 10;
 }
 
 .login-card__header {
   text-align: center;
-  margin-bottom: 32px;
+  margin-bottom: 30px;
+}
+
+.login-card__brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin-bottom: 24px;
 }
 
 .login-card__logo {
-  width: 48px;
-  height: 48px;
-  margin-bottom: 16px;
+  width: 58px;
+  height: 58px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.login-card__brand-copy {
+  text-align: left;
+}
+
+.login-card__brand-name {
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1;
+  color: #0f172a;
+  letter-spacing: -0.03em;
+}
+
+.login-card__brand-subtitle {
+  margin-top: 7px;
+  font-family: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  color: #2563eb;
+  letter-spacing: 0.26em;
 }
 
 .login-card__title {

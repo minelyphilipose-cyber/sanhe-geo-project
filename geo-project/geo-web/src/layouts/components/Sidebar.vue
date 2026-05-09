@@ -1,16 +1,12 @@
 ﻿<template>
   <div class="sidebar" :class="{ 'sidebar--collapsed': collapsed }">
     <div class="sidebar__logo">
-      <div class="sidebar__logo-icon">
-        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <rect width="32" height="32" rx="8" fill="#2563EB" />
-          <path d="M8 16L14 10L20 16L14 22Z" fill="white" opacity="0.9" />
-          <path d="M14 16L20 10L26 16L20 22Z" fill="white" opacity="0.6" />
-        </svg>
-      </div>
-      <transition name="fade">
-        <span v-show="!collapsed" class="sidebar__logo-text">幻境AI | GEO</span>
-      </transition>
+      <img
+        class="sidebar__brand"
+        :class="{ 'sidebar__brand--collapsed': collapsed }"
+        :src="collapsed ? logoSymbolUrl : logoHorizontalUrl"
+        alt="幻境AI FANTASY GEO"
+      >
     </div>
 
     <el-scrollbar class="sidebar__menu-wrap">
@@ -56,6 +52,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import logoHorizontalUrl from '@/assets/brand/logo-horizontal.svg'
+import logoSymbolUrl from '@/assets/brand/logo-symbol.svg'
 import { useUserStore } from '@/stores/user'
 import type { RoleType } from '@/types'
 
@@ -140,23 +138,27 @@ const visibleGroups = computed(() =>
   display: flex;
   align-items: center;
   padding: 0 16px;
-  gap: 10px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   flex-shrink: 0;
 }
 
-.sidebar__logo-icon svg {
-  width: 32px;
-  height: 32px;
+.sidebar--collapsed .sidebar__logo {
+  justify-content: center;
+  padding: 0;
+}
+
+.sidebar__brand {
+  width: 188px;
+  height: 48px;
+  object-fit: contain;
+  object-position: left center;
   flex-shrink: 0;
 }
 
-.sidebar__logo-text {
-  font-size: 15px;
-  font-weight: 700;
-  color: #f1f5f9;
-  white-space: nowrap;
-  letter-spacing: -0.02em;
+.sidebar__brand--collapsed {
+  width: 36px;
+  height: 36px;
+  object-position: center;
 }
 
 .sidebar__menu-wrap {
@@ -238,12 +240,4 @@ const visibleGroups = computed(() =>
   color: #e2e8f0;
 }
 
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
 </style>
