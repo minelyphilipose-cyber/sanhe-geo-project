@@ -55,22 +55,13 @@ public class ContentArticleService {
     private final BrandAccessService brandAccessService;
     private final AuditService auditService;
 
-    public Page<ArticleDraft> page(Long projectId, String status, String articleType, long current, long size) {
+    public Page<ArticleDraft> page(String projectName, String status, String articleType, long current, long size) {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
         LambdaQueryWrapper<ArticleDraft> wrapper = new LambdaQueryWrapper<ArticleDraft>()
                 .orderByDesc(ArticleDraft::getCreatedAt);
-        if (projectId != null) {
-            Project project = requireProject(projectId);
-            ensureProjectAccess(operator, project, false);
-            wrapper.eq(ArticleDraft::getProjectId, projectId);
-        } else if (currentUserService.isPartnerUser(operator)) {
-            List<Long> projectIds = projectMapper.selectList(
-                    new LambdaQueryWrapper<Project>()
-                            .isNull(Project::getDeletedAt)
-                            .eq(Project::getPartnerId, operator.getPartnerId())
-                            .select(Project::getId)
-            ).stream().map(Project::getId).collect(Collectors.toList());
+        if (StringUtils.hasText(projectName) || currentUserService.isPartnerUser(operator)) {
+            List<Long> projectIds = resolveReadableProjectIds(operator, projectName);
             if (projectIds.isEmpty()) {
                 return new Page<>(current, size);
             }
@@ -85,6 +76,41 @@ public class ContentArticleService {
         Page<ArticleDraft> pageData = articleDraftMapper.selectPage(new Page<>(current, size), wrapper);
         fillProjectNames(pageData.getRecords());
         return pageData;
+    }
+
+    public String publicPreviewHtml(Long articleId) {
+        ArticleDraft article = requireArticle(articleId);
+        if (!Set.of("approved", "distributing", "distributed", "published", "unpublished").contains(article.getStatus())) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Article is not available for public preview");
+        }
+        ArticleDraftVersion version = articleDraftVersionMapper.selectOne(
+                new LambdaQueryWrapper<ArticleDraftVersion>()
+                        .eq(ArticleDraftVersion::getArticleId, articleId)
+                        .orderByDesc(ArticleDraftVersion::getVersionNo)
+                        .last("limit 1")
+        );
+        if (version == null) {
+            throw new BizException(ContentErrorCodes.ARTICLE_NOT_FOUND, "Article version not found");
+        }
+        String title = StringUtils.hasText(version.getTitle()) ? version.getTitle() : article.getTitle();
+        String content = Optional.ofNullable(version.getContentMarkdown()).orElse("");
+        return """
+                <!doctype html>
+                <html lang="zh-CN">
+                <head>
+                  <meta charset="utf-8">
+                  <meta name="viewport" content="width=device-width, initial-scale=1">
+                  <title>%s</title>
+                  <style>
+                    body{margin:0;background:#f8fafc;color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.75}
+                    main{max-width:820px;margin:0 auto;padding:40px 20px 64px;background:#fff;min-height:100vh}
+                    h1{font-size:28px;line-height:1.35;margin:0 0 24px}
+                    pre{white-space:pre-wrap;word-break:break-word;font:inherit;margin:0}
+                  </style>
+                </head>
+                <body><main><h1>%s</h1><pre>%s</pre></main></body>
+                </html>
+                """.formatted(escapeHtml(title), escapeHtml(title), escapeHtml(content));
     }
 
     public Map<String, Object> detail(Long articleId) {
@@ -426,13 +452,13 @@ public class ContentArticleService {
                                              String title,
                                              String contentMarkdown,
                                              String promptSnapshot,
-                                             String inputSnapshot,
-                                             String platformCode,
-                                             String modelId,
-                                             String targetChannel,
-                                             String periodType,
-                                             String periodKey,
-                                             Integer generationSlotNo) {
+                                              String inputSnapshot,
+                                              String platformCode,
+                                              String modelId,
+                                              String targetChannel,
+                                              String periodType,
+                                              String periodKey,
+                                              Integer generationSlotNo) {
         markdownImageReferenceValidator.validate(project, contentMarkdown);
         ArticleDraft draft = new ArticleDraft();
         draft.setBatchId(batchId);
@@ -512,6 +538,22 @@ public class ContentArticleService {
         for (ArticleDraft article : articles) {
             article.setProjectName(projectNameMap.getOrDefault(article.getProjectId(), "-"));
         }
+    }
+
+    private List<Long> resolveReadableProjectIds(SysUser operator, String projectName) {
+        LambdaQueryWrapper<Project> projectWrapper = new LambdaQueryWrapper<Project>()
+                .isNull(Project::getDeletedAt)
+                .select(Project::getId);
+        if (StringUtils.hasText(projectName)) {
+            projectWrapper.like(Project::getProjectName, projectName.trim());
+        }
+        if (currentUserService.isPartnerUser(operator)) {
+            projectWrapper.eq(Project::getPartnerId, operator.getPartnerId());
+        }
+        return projectMapper.selectList(projectWrapper).stream()
+                .map(Project::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toList());
     }
 
     private void ensureProjectAccess(SysUser operator, Project project, boolean write) {
@@ -718,6 +760,17 @@ public class ContentArticleService {
             }
         }
         return dp[n][m];
+    }
+
+    private String escapeHtml(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        return raw.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&#39;");
     }
 
     private record RiskResult(boolean hasRisk, String severity, String wordsJson) {}

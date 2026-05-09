@@ -4,9 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.util.HttpClientUtil;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
-import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -21,7 +19,6 @@ import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
-@Slf4j
 public class MeititejiaClient {
 
     private static final int DEFAULT_LIMIT = 200;
@@ -30,16 +27,6 @@ public class MeititejiaClient {
     private final PlatformCredentialService platformCredentialService;
     private final ObjectMapper objectMapper;
     private final SimpleRateLimiter rateLimiter = new SimpleRateLimiter();
-
-    @PostConstruct
-    void checkSecretConfiguration() {
-        if (properties.isEnabled()
-                && !properties.isMockMode()
-                && !StringUtils.hasText(properties.getSecretKeyRef())
-                && StringUtils.hasText(properties.getSecretKey())) {
-            log.warn("geo.meititejia.secret-key is configured without secret-key-ref; production must use secret-key-ref and environment injection");
-        }
-    }
 
     public JsonNode userInfo() {
         return postSigned("userInfo", Map.of());

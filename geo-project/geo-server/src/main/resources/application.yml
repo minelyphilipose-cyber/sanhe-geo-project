@@ -135,6 +135,30 @@ geo:
     endpoint: ${BRAND_GEO_SITE_ENDPOINT:}
     connect-timeout-ms: ${BRAND_GEO_SITE_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${BRAND_GEO_SITE_READ_TIMEOUT_MS:30000}
+  meititejia:
+    enabled: true
+    mock-mode: false
+    base-url: https://www.meititejia.com/meijieapi/daili3
+    secret-id: "cee24f7b210eeb87ea5d19148f052233"
+    secret-key: "bb02bde2518e7c7fcb68640c2d3233d5"
+    preview-url-base: ""
+    sync-enabled: true
+    order-status-check-enabled: true
+    sync-page-limit: 200
+    order-status-batch-size: 50
+    news-media-incremental-cron: "0 0 * * * *"
+    news-media-full-cron: "0 30 2 * * *"
+    news-media-reconcile-cron: "0 30 3 * * *"
+    order-status-check-ms: 60000
+    connect-timeout-ms: 5000
+    request-timeout-ms: 30000
+    retry-max-attempts: 3
+    retry-backoff-ms: 1000
+    rate-limit-qps: 2
+    resource-staleness-threshold-minutes: 60
+    quota-check-threshold: 0
+    balance-safety-factor: 1.1
+    content-mode: LINK_ONLY
   report:
     web-base-url: ${REPORT_WEB_BASE_URL:http://127.0.0.1:3000}
     render-timeout-ms: ${REPORT_RENDER_TIMEOUT_MS:30000}

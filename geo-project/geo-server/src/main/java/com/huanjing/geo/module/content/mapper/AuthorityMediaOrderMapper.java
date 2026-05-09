@@ -21,7 +21,8 @@ public interface AuthorityMediaOrderMapper extends BaseMapper<AuthorityMediaOrde
             FROM authority_media_order
             WHERE article_id = #{articleId}
               AND resource_id = #{resourceId}
-              AND submit_status IN ('created', 'submitting', 'submitted', 'submit_failed')
+              AND submit_status IN ('created', 'submitting', 'submitted')
+              AND (remote_status IS NULL OR remote_status IN (0, 1))
             ORDER BY id DESC
             LIMIT 1
             """)

@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.content.controller;
 
 import com.huanjing.geo.common.result.R;
+import com.huanjing.geo.module.content.authoritymedia.MeititejiaProperties;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.dto.ArticleDistributeRequest;
 import com.huanjing.geo.module.content.dto.AuthorityMediaDistributeRequest;
@@ -16,6 +17,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.service.BrandService;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -32,6 +34,7 @@ public class ContentDistributionController {
     private final ContentDistributionService contentDistributionService;
     private final BrandService brandService;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
+    private final MeititejiaProperties meititejiaProperties;
 
     @PostMapping("/articles/{articleId}/distribute")
     public R<DistributionTask> distribute(@PathVariable Long articleId, @Valid @RequestBody ArticleDistributeRequest req) {
@@ -69,11 +72,12 @@ public class ContentDistributionController {
 
     @PostMapping("/articles/{articleId}/distribute-to-authority-media")
     public R<DistributionTask> distributeToAuthorityMedia(@PathVariable Long articleId,
-                                                          @Valid @RequestBody AuthorityMediaDistributeRequest req) {
+                                                          @Valid @RequestBody AuthorityMediaDistributeRequest req,
+                                                          HttpServletRequest servletRequest) {
         TargetContext.AuthorityMediaTarget target = new TargetContext.AuthorityMediaTarget(
                 req.getResourceId(),
                 req.getSalingPrice(),
-                req.getPreviewUrl(),
+                resolvePreviewUrl(articleId, req.getPreviewUrl(), servletRequest),
                 req.getPublishedAt(),
                 req.getRemark()
         );
@@ -119,5 +123,24 @@ public class ContentDistributionController {
         } catch (NumberFormatException ex) {
             throw new BizException(400, fieldName + " must be an integer");
         }
+    }
+
+    private String resolvePreviewUrl(Long articleId, String previewUrl, HttpServletRequest request) {
+        if (StringUtils.hasText(previewUrl)) {
+            return previewUrl.trim();
+        }
+        String base = meititejiaProperties.getPreviewUrlBase();
+        if (!StringUtils.hasText(base)) {
+            String scheme = request.getHeader("X-Forwarded-Proto");
+            if (!StringUtils.hasText(scheme)) {
+                scheme = request.getScheme();
+            }
+            String host = request.getHeader("X-Forwarded-Host");
+            if (!StringUtils.hasText(host)) {
+                host = request.getHeader("Host");
+            }
+            base = scheme + "://" + host;
+        }
+        return base.replaceAll("/+$", "") + "/api/public/content/articles/" + articleId + "/preview";
     }
 }

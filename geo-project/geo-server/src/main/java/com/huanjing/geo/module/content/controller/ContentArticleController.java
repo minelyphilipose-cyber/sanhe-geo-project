@@ -37,12 +37,12 @@ public class ContentArticleController {
     private final ArticleSelfMediaCookieStatusService selfMediaCookieStatusService;
 
     @GetMapping
-    public R<Page<ArticleDraft>> page(@RequestParam(required = false) Long projectId,
+    public R<Page<ArticleDraft>> page(@RequestParam(required = false) String projectName,
                                       @RequestParam(required = false) String status,
                                       @RequestParam(required = false) String articleType,
                                       @RequestParam(defaultValue = "1") Long current,
                                       @RequestParam(defaultValue = "10") Long size) {
-        return R.ok(contentArticleService.page(projectId, status, articleType, current, size));
+        return R.ok(contentArticleService.page(projectName, status, articleType, current, size));
     }
 
     @PostMapping("/manual")

@@ -2,6 +2,7 @@ import request from './request'
 import type {
   ArticleDraft,
   ArticleDetailResponse,
+  AuthorityMediaResource,
   DistributionTask,
   PageResult,
   PublishQuota,
@@ -17,7 +18,7 @@ import type {
 } from '@/types'
 
 export function getContentArticles(params: {
-  projectId?: number
+  projectName?: string
   status?: string
   articleType?: string
   current?: number
@@ -115,6 +116,37 @@ export function distributeContentArticleToGeoSite(articleId: number, brandId: nu
   return request.post<R<DistributionTask>>(`/content/articles/${articleId}/distribute-to-geo-site`, null, {
     params: { brandId },
   })
+}
+
+export function distributeContentArticleToAgentSite(articleId: number, brandId: number) {
+  return distributeContentArticleToGeoSite(articleId, brandId)
+}
+
+export function getAuthorityMediaResources(params?: {
+  keyword?: string
+  industry?: string
+  province?: string
+  entranceLevel?: number
+  newsResource?: number
+  includeCondition?: number
+  weekendPublish?: number
+  minPrice?: number
+  maxPrice?: number
+  minPcWeight?: number
+  minMWeight?: number
+  current?: number
+  size?: number
+}) {
+  return request.get<R<PageResult<AuthorityMediaResource>>>('/content/authority-media/resources', { params })
+}
+
+export function distributeContentArticleToAuthorityMedia(articleId: number, data: {
+  resourceId: number
+  salingPrice: number
+  publishedAt?: string
+  remark?: string
+}) {
+  return request.post<R<DistributionTask>>(`/content/articles/${articleId}/distribute-to-authority-media`, data)
 }
 
 export function getArticleDistribution(articleId: number) {

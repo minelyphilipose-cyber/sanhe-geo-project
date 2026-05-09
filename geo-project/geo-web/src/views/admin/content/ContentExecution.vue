@@ -3,7 +3,7 @@
     <el-card shadow="never" class="mb-3">
       <div class="toolbar">
         <div class="toolbar-left">
-          <el-input-number v-model="query.projectId" :min="1" :controls="false" placeholder="项目ID" style="width: 140px" />
+          <el-input v-model="query.projectName" clearable placeholder="项目名称" style="width: 220px" @keyup.enter="search" />
           <el-select v-model="query.articleType" clearable placeholder="文章类型" style="width: 160px">
             <el-option label="FAQ" value="faq" />
             <el-option label="场景内容" value="scenario_content" />
@@ -39,16 +39,13 @@
             </template>
           </el-table-column>
           <el-table-column prop="createdAt" label="创建时间" width="180" />
-          <el-table-column label="操作" width="430" fixed="right">
+          <el-table-column label="操作" width="300" fixed="right">
             <template #default="scope">
               <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
               <el-button v-if="canWrite && canReview(scope.row.status)" link type="primary" @click="openReview(scope.row)">审核</el-button>
               <el-button v-if="canWrite && canEdit(scope.row.status)" link type="primary" @click="openRevision(scope.row)">修订</el-button>
               <el-button v-if="canWrite && canResubmit(scope.row.status)" link type="primary" @click="openResubmit(scope.row)">重新提交</el-button>
-              <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openDistribute(scope.row)">分发到站点</el-button>
-              <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="publishToGeoSite(scope.row)">分发到GEO站点</el-button>
-              <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openMediaDistribute(scope.row)">自媒体分发</el-button>
-              <el-button v-if="canWrite && canPublish(scope.row.status)" link type="info" @click="openPublish(scope.row)">Legacy发布</el-button>
+              <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openDistributionChannel(scope.row)">分发</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -158,33 +155,140 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="distributeVisible" title="分发到站点" width="760px">
-      <div class="distribute-wrap">
-        <el-alert v-if="fallbackToGeneral" type="warning" :closable="false" show-icon title="暂无本行业专属站点，以下为综合类站点" />
-        <el-table :data="sites" border max-height="320">
-          <el-table-column width="52">
-            <template #default="scope">
-              <el-radio :model-value="distributeForm.siteId" :label="scope.row.siteId" @change="() => (distributeForm.siteId = scope.row.siteId)" />
-            </template>
-          </el-table-column>
-          <el-table-column prop="siteName" label="站点" min-width="130" />
-          <el-table-column prop="domain" label="域名" min-width="160" />
-          <el-table-column prop="tier" label="层级" width="80" />
-          <el-table-column prop="integrationMethod" label="方式" width="100" />
-          <el-table-column label="行业匹配" width="140">
-            <template #default="scope">
-              <el-tag v-if="scope.row.matchType === 'exact'" type="success">{{ firstIndustryLabel(scope.row.industryTags) }}</el-tag>
-              <el-tag v-else type="info">综合</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="近30天成功率" width="120">
-            <template #default="scope">{{ percent(scope.row.successRate30d) }}</template>
-          </el-table-column>
-        </el-table>
+    <el-dialog v-model="distributionChannelVisible" title="选择分发渠道" width="720px">
+      <div class="distribution-channel-grid">
+        <button
+          v-for="channel in distributionChannels"
+          :key="channel.value"
+          type="button"
+          class="distribution-channel-card"
+          :class="{ disabled: channel.disabled }"
+          @click="selectDistributionChannel(channel.value)"
+        >
+          <span class="distribution-channel-title">{{ channel.label }}</span>
+          <span class="distribution-channel-desc">{{ channel.description }}</span>
+          <el-tag size="small" :type="channel.disabled ? 'info' : 'success'">
+            {{ channel.disabled ? '待接入' : '可分发' }}
+          </el-tag>
+        </button>
       </div>
       <template #footer>
-        <el-button @click="distributeVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" :disabled="!distributeForm.siteId" @click="submitDistribute">确认分发</el-button>
+        <el-button @click="distributionChannelVisible = false">取消</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="authorityMediaVisible" title="权威媒体分发" width="1080px">
+      <div class="authority-media-dialog">
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+          title="当前接入特价网新闻媒体资源。提交后将创建权威媒体订单，出稿状态由系统定时同步。"
+        />
+        <div class="authority-filter">
+          <el-input v-model="authorityQuery.keyword" clearable placeholder="媒体名称" style="width: 180px" @keyup.enter="searchAuthorityMedia" />
+          <el-input v-model="authorityQuery.industry" clearable placeholder="频道/行业" style="width: 160px" @keyup.enter="searchAuthorityMedia" />
+          <el-input v-model="authorityQuery.province" clearable placeholder="地区" style="width: 140px" @keyup.enter="searchAuthorityMedia" />
+          <el-select v-model="authorityQuery.entranceLevel" clearable placeholder="入口级别" style="width: 130px">
+            <el-option label="无入口" :value="0" />
+            <el-option label="首页入口" :value="1" />
+            <el-option label="频道入口" :value="2" />
+            <el-option label="上级入口" :value="3" />
+          </el-select>
+          <el-select v-model="authorityQuery.newsResource" clearable placeholder="新闻源" style="width: 150px">
+            <el-option label="非新闻源" :value="0" />
+            <el-option label="百度新闻源" :value="1" />
+            <el-option label="头条新闻源" :value="2" />
+            <el-option label="百度&头条" :value="3" />
+          </el-select>
+          <el-select v-model="authorityQuery.includeCondition" clearable placeholder="收录" style="width: 130px">
+            <el-option label="不包收录" :value="0" />
+            <el-option label="百度包收录" :value="1" />
+            <el-option label="头条包收录" :value="2" />
+          </el-select>
+          <el-button type="primary" @click="searchAuthorityMedia">查询</el-button>
+          <el-button @click="resetAuthorityMediaQuery">重置</el-button>
+        </div>
+        <el-table
+          :data="authorityResources"
+          border
+          max-height="360"
+          v-loading="authorityLoading"
+          highlight-current-row
+          @current-change="selectAuthorityResource"
+        >
+          <el-table-column width="52">
+            <template #default="scope">
+              <el-radio :model-value="authorityForm.resourceId" :label="scope.row.id" @change="selectAuthorityResource(scope.row)" />
+            </template>
+          </el-table-column>
+          <el-table-column prop="name" label="媒体名称" min-width="170" show-overflow-tooltip />
+          <el-table-column prop="industry" label="频道/行业" width="120" show-overflow-tooltip />
+          <el-table-column prop="province" label="地区" width="100" show-overflow-tooltip />
+          <el-table-column label="价格" width="95">
+            <template #default="scope">￥{{ money(scope.row.price) }}</template>
+          </el-table-column>
+          <el-table-column label="入口" width="90">
+            <template #default="scope">{{ entranceLevelLabel(scope.row.entranceLevel) }}</template>
+          </el-table-column>
+          <el-table-column label="新闻源" width="120">
+            <template #default="scope">{{ newsResourceLabel(scope.row.newsResource) }}</template>
+          </el-table-column>
+          <el-table-column label="收录" width="110">
+            <template #default="scope">{{ includeConditionLabel(scope.row.includeCondition) }}</template>
+          </el-table-column>
+          <el-table-column label="权重" width="90">
+            <template #default="scope">PC {{ scope.row.pcWeight ?? '-' }} / M {{ scope.row.mWeight ?? '-' }}</template>
+          </el-table-column>
+          <el-table-column label="链接" width="120">
+            <template #default="scope">
+              <el-button v-if="scope.row.caseLink" link type="primary" @click.stop="openExternalLink(scope.row.caseLink)">案例</el-button>
+              <el-button v-if="scope.row.entranceLink" link type="primary" @click.stop="openExternalLink(scope.row.entranceLink)">入口</el-button>
+            </template>
+          </el-table-column>
+          <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
+        </el-table>
+        <div class="pager compact">
+          <el-pagination
+            background
+            layout="prev, pager, next, total"
+            :current-page="authorityPage.current"
+            :page-size="authorityPage.size"
+            :total="authorityPage.total"
+            @current-change="onAuthorityPageChange"
+          />
+        </div>
+        <div v-if="selectedAuthorityResource" class="authority-confirm">
+          <div class="authority-selected">
+            <strong>{{ selectedAuthorityResource.name }}</strong>
+            <span>底价 ￥{{ money(selectedAuthorityResource.price) }}</span>
+            <span>{{ entranceLevelLabel(selectedAuthorityResource.entranceLevel) }}</span>
+            <span>{{ newsResourceLabel(selectedAuthorityResource.newsResource) }}</span>
+          </div>
+          <el-form :model="authorityForm" label-width="100px" class="authority-form">
+            <el-form-item label="订单售价" required>
+              <el-input-number v-model="authorityForm.salingPrice" :min="Number(selectedAuthorityResource.price || 0)" :precision="2" :controls="false" style="width: 180px" />
+            </el-form-item>
+            <el-form-item label="限时发布">
+              <el-date-picker
+                v-model="authorityForm.publishedAt"
+                type="datetime"
+                value-format="YYYY-MM-DD HH:mm:ss"
+                placeholder="可选，需晚于当前1小时"
+                style="width: 220px"
+              />
+            </el-form-item>
+            <el-form-item label="订单备注">
+              <el-input v-model="authorityForm.remark" type="textarea" :rows="2" maxlength="100" show-word-limit />
+            </el-form-item>
+          </el-form>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="authorityMediaVisible = false">取消</el-button>
+        <el-button type="primary" :loading="authoritySubmitting" :disabled="!authorityForm.resourceId" @click="submitAuthorityMedia">
+          提交权威媒体订单
+        </el-button>
       </template>
     </el-dialog>
 
@@ -482,29 +586,6 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="publishVisible" title="Legacy发布记录" width="560px">
-      <el-form :model="publishForm" label-width="100px">
-        <el-form-item label="动作" required>
-          <el-select v-model="publishForm.publishAction" style="width: 100%">
-            <el-option label="发布" value="publish" />
-            <el-option label="下架" value="unpublish" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="渠道名称">
-          <el-input v-model="publishForm.channelName" placeholder="例如：官网、公众号、小红书" />
-        </el-form-item>
-        <el-form-item label="渠道链接">
-          <el-input v-model="publishForm.channelUrl" placeholder="发布后的页面地址" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="publishForm.note" type="textarea" :rows="3" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="publishVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitPublish">提交</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
@@ -515,23 +596,21 @@ import MarkdownIt from 'markdown-it'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { useUserStore } from '@/stores/user'
-import { useDictStore } from '@/stores/dict'
-import type { ArticleDetailResponse, ArticleDraft, BrandImageFolder, BrandMaterial, DistributionTask, DouyinCapability, SelfMediaAccount, RecommendedSite, WechatMpCapability } from '@/types'
+import type { ArticleDetailResponse, ArticleDraft, AuthorityMediaResource, BrandImageFolder, BrandMaterial, DistributionTask, DouyinCapability, SelfMediaAccount, WechatMpCapability } from '@/types'
 import {
   checkSelfMediaAccountAuth,
-  distributeContentArticle,
-  distributeContentArticleToGeoSite,
+  distributeContentArticleToAgentSite,
+  distributeContentArticleToAuthorityMedia,
   distributeContentArticleToSelfMediaAccount,
   getArticleDistribution,
+  getAuthorityMediaResources,
   getContentArticleDetail,
   getContentArticles,
   getDouyinAuthUrl,
   getDouyinCapability,
   getSelfMediaAccountsByBrand,
-  getRecommendedSites,
   getWechatMpAuthUrl,
   getWechatMpCapability,
-  publishContentArticle,
   refreshDistributionTaskReviewStatus,
   resubmitContentArticle,
   reviewContentArticle,
@@ -539,11 +618,13 @@ import {
 } from '@/api/content'
 import { getBrandDetail, getBrandImageFolders, getBrandMaterialStream } from '@/api/customer'
 import { createExtensionBindCode, type ExtensionBindCode } from '@/api/extension'
+import { getProjectDetail } from '@/api/project'
 import { pingExtensionBridge, startExtensionCookieCapture, startExtensionFill } from '@/composables/useExtensionBridge'
 
 type MediaPlatform = 'wechat_mp' | 'douyin' | 'toutiao' | 'zhihu'
 type SemiAutoPlatform = 'toutiao' | 'zhihu'
 type ExtensionBridgeStatus = 'unknown' | 'checking' | 'bound' | 'unbound' | 'missing' | 'error'
+type DistributionChannel = 'official_site' | 'industry_site' | 'self_media' | 'authority_media'
 type SelfMediaAccountWithCredential = SelfMediaAccount & {
   cookieCredentialStatus?: string | null
   cookieCredentialVersion?: number | null
@@ -551,7 +632,6 @@ type SelfMediaAccountWithCredential = SelfMediaAccount & {
 }
 
 const userStore = useUserStore()
-const dictStore = useDictStore()
 const route = useRoute()
 const router = useRouter()
 const canWrite = computed(() => userStore.hasPermission('project.write'))
@@ -561,7 +641,7 @@ const submitting = ref(false)
 const rows = ref<ArticleDraft[]>([])
 const page = reactive({ current: 1, size: 10, total: 0 })
 const query = reactive({
-  projectId: undefined as number | undefined,
+  projectName: '',
   status: '',
   articleType: '',
 })
@@ -590,13 +670,47 @@ const revisionForm = reactive({
 const resubmitVisible = ref(false)
 const resubmitForm = reactive({ comment: '' })
 
-const distributeVisible = ref(false)
-const fallbackToGeneral = ref(false)
-const sites = ref<RecommendedSite[]>([])
-const distributeForm = reactive({
+const distributionChannelVisible = ref(false)
+const distributionChannelArticle = ref<ArticleDraft | null>(null)
+const distributionChannels: Array<{
+  value: DistributionChannel
+  label: string
+  description: string
+  disabled?: boolean
+}> = [
+  { value: 'official_site', label: 'Agent 官网', description: '发布到项目品牌的 Agent 官网站点。' },
+  { value: 'industry_site', label: '行业资讯站', description: '行业资讯站分发通道待接入。', disabled: true },
+  { value: 'self_media', label: '自媒体平台', description: '分发到微信公众号、抖音、头条、知乎等账号。' },
+  { value: 'authority_media', label: '权威媒体', description: '选择特价网新闻媒体资源并创建出稿订单。' },
+]
+
+const authorityMediaVisible = ref(false)
+const authorityLoading = ref(false)
+const authoritySubmitting = ref(false)
+const authorityResources = ref<AuthorityMediaResource[]>([])
+const selectedAuthorityResource = ref<AuthorityMediaResource | null>(null)
+const authorityPage = reactive({ current: 1, size: 10, total: 0 })
+const authorityQuery = reactive<{
+  keyword: string
+  industry: string
+  province: string
+  entranceLevel?: number
+  newsResource?: number
+  includeCondition?: number
+}>({
+  keyword: '',
+  industry: '',
+  province: '',
+  entranceLevel: undefined,
+  newsResource: undefined,
+  includeCondition: undefined,
+})
+const authorityForm = reactive({
   articleId: 0,
-  projectId: 0,
-  siteId: 0,
+  resourceId: 0,
+  salingPrice: 0,
+  publishedAt: '',
+  remark: '',
 })
 
 const mediaDistributeVisible = ref(false)
@@ -631,14 +745,6 @@ const extensionBridgeState = reactive({
   status: 'unknown' as ExtensionBridgeStatus,
   message: '正在等待检测浏览器扩展状态',
   extensionVersion: '',
-})
-
-const publishVisible = ref(false)
-const publishForm = reactive({
-  publishAction: 'publish' as 'publish' | 'unpublish',
-  channelName: '',
-  channelUrl: '',
-  note: '',
 })
 
 let cookieCapturePollTimer: number | null = null
@@ -750,28 +856,13 @@ function canDistribute(status: string) {
   return status === 'approved' || status === 'unpublished'
 }
 
-function canPublish(status: string) {
-  return status === 'approved' || status === 'published' || status === 'unpublished'
-}
-
-function percent(v: number | undefined) {
-  const n = Number(v || 0)
-  return `${(n * 100).toFixed(1)}%`
-}
-
-function firstIndustryLabel(tags?: string[] | null) {
-  const value = (tags || [])[0]
-  if (!value) return '-'
-  return dictStore.label('industry_tag', value) || value
-}
-
 async function load() {
   loading.value = true
   try {
     const { data } = await getContentArticles({
       current: page.current,
       size: page.size,
-      projectId: query.projectId,
+      projectName: query.projectName.trim() || undefined,
       status: query.status || undefined,
       articleType: query.articleType || undefined,
     })
@@ -792,7 +883,7 @@ function search() {
 }
 
 function resetQuery() {
-  query.projectId = undefined
+  query.projectName = ''
   query.status = ''
   query.articleType = ''
   search()
@@ -807,7 +898,6 @@ function goManualCreate() {
   router.push({
     path: '/admin/content/articles/manual-create',
     query: {
-      projectId: query.projectId || undefined,
       articleType: query.articleType || undefined,
     },
   })
@@ -853,27 +943,113 @@ function openResubmit(row: ArticleDraft) {
   resubmitVisible.value = true
 }
 
-function openPublish(row: ArticleDraft) {
-  currentArticleId.value = row.id
-  publishForm.publishAction = row.status === 'published' ? 'unpublish' : 'publish'
-  publishForm.channelName = ''
-  publishForm.channelUrl = ''
-  publishForm.note = ''
-  publishVisible.value = true
+function openDistributionChannel(row: ArticleDraft) {
+  distributionChannelArticle.value = row
+  distributionChannelVisible.value = true
 }
 
-async function openDistribute(row: ArticleDraft) {
-  distributeForm.articleId = row.id
-  distributeForm.projectId = row.projectId
-  distributeForm.siteId = 0
-  fallbackToGeneral.value = false
+async function selectDistributionChannel(channel: DistributionChannel) {
+  const row = distributionChannelArticle.value
+  if (!row) return
+  if (channel === 'industry_site') {
+    ElMessage.info('行业资讯站分发通道待接入')
+    return
+  }
+  distributionChannelVisible.value = false
+  if (channel === 'official_site') {
+    await distributeToAgentSite(row)
+    return
+  }
+  if (channel === 'self_media') {
+    await openMediaDistribute(row)
+    return
+  }
+  await openAuthorityMedia(row)
+}
+
+async function openAuthorityMedia(row: ArticleDraft) {
+  authorityForm.articleId = row.id
+  authorityForm.resourceId = 0
+  authorityForm.salingPrice = 0
+  authorityForm.publishedAt = ''
+  authorityForm.remark = ''
+  selectedAuthorityResource.value = null
+  authorityMediaVisible.value = true
+  authorityPage.current = 1
+  await loadAuthorityMediaResources()
+}
+
+async function loadAuthorityMediaResources() {
+  authorityLoading.value = true
   try {
-    const { data } = await getRecommendedSites(row.projectId)
-    fallbackToGeneral.value = !!data.data.fallbackToGeneral
-    sites.value = data.data.sites || []
-    distributeVisible.value = true
+    const { data } = await getAuthorityMediaResources({
+      current: authorityPage.current,
+      size: authorityPage.size,
+      keyword: authorityQuery.keyword.trim() || undefined,
+      industry: authorityQuery.industry.trim() || undefined,
+      province: authorityQuery.province.trim() || undefined,
+      entranceLevel: authorityQuery.entranceLevel,
+      newsResource: authorityQuery.newsResource,
+      includeCondition: authorityQuery.includeCondition,
+    })
+    authorityResources.value = data.data.records || []
+    authorityPage.total = data.data.total || 0
   } catch {
-    ElMessage.error('加载分发站点失败')
+    authorityResources.value = []
+    authorityPage.total = 0
+    ElMessage.error('加载权威媒体资源失败')
+  } finally {
+    authorityLoading.value = false
+  }
+}
+
+function searchAuthorityMedia() {
+  authorityPage.current = 1
+  loadAuthorityMediaResources()
+}
+
+function resetAuthorityMediaQuery() {
+  authorityQuery.keyword = ''
+  authorityQuery.industry = ''
+  authorityQuery.province = ''
+  authorityQuery.entranceLevel = undefined
+  authorityQuery.newsResource = undefined
+  authorityQuery.includeCondition = undefined
+  searchAuthorityMedia()
+}
+
+function onAuthorityPageChange(v: number) {
+  authorityPage.current = v
+  loadAuthorityMediaResources()
+}
+
+function selectAuthorityResource(row?: AuthorityMediaResource) {
+  if (!row) return
+  selectedAuthorityResource.value = row
+  authorityForm.resourceId = row.id
+  authorityForm.salingPrice = Number(row.price || 0)
+}
+
+async function submitAuthorityMedia() {
+  if (!authorityForm.articleId || !authorityForm.resourceId) return
+  authoritySubmitting.value = true
+  try {
+    const result = await distributeContentArticleToAuthorityMedia(authorityForm.articleId, {
+      resourceId: authorityForm.resourceId,
+      salingPrice: authorityForm.salingPrice,
+      publishedAt: authorityForm.publishedAt || undefined,
+      remark: authorityForm.remark || undefined,
+    })
+    const task = result.data.data
+    if (task.status === 'submitted') {
+      ElMessage.success('权威媒体订单已提交，等待出稿')
+      authorityMediaVisible.value = false
+      await load()
+      return
+    }
+    ElMessage.error(task.errorMessage || '权威媒体订单提交失败')
+  } finally {
+    authoritySubmitting.value = false
   }
 }
 
@@ -1552,31 +1728,70 @@ function createRequestId(prefix = 'self_media') {
   return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`
 }
 
-async function publishToGeoSite(row: ArticleDraft) {
+function money(value: number | string | null | undefined) {
+  const n = Number(value || 0)
+  return Number.isFinite(n) ? n.toFixed(2) : '0.00'
+}
+
+function entranceLevelLabel(value?: number | null) {
+  const map: Record<number, string> = {
+    0: '无入口',
+    1: '首页入口',
+    2: '频道入口',
+    3: '上级入口',
+  }
+  return value == null ? '-' : (map[value] || String(value))
+}
+
+function newsResourceLabel(value?: number | null) {
+  const map: Record<number, string> = {
+    0: '非新闻源',
+    1: '百度新闻源',
+    2: '头条新闻源',
+    3: '百度&头条',
+  }
+  return value == null ? '-' : (map[value] || String(value))
+}
+
+function includeConditionLabel(value?: number | null) {
+  const map: Record<number, string> = {
+    0: '不包收录',
+    1: '百度包收录',
+    2: '头条包收录',
+  }
+  return value == null ? '-' : (map[value] || String(value))
+}
+
+function openExternalLink(url?: string | null) {
+  if (!url) return
+  window.open(url, '_blank', 'noopener,noreferrer')
+}
+
+async function distributeToAgentSite(row: ArticleDraft) {
   submitting.value = true
   try {
     const detailRes = await getContentArticleDetail(row.id)
     const brandId = detailRes.data.data.project?.brandId
     if (!brandId) {
-      ElMessage.error('当前文章未绑定品牌，无法分发到GEO站点')
+      ElMessage.error('当前文章未绑定品牌，无法分发到 Agent 官网')
       return
     }
     const brandRes = await getBrandDetail(brandId)
     const brand = brandRes.data.data
     if (!brand.geoSiteCode) {
-      ElMessage.warning('该品牌未配置GEO站点，请先在品牌配置页填写')
+      ElMessage.warning('该品牌未配置 Agent 官网，请先在品牌配置页填写')
       return
     }
     if (brand.geoSiteStatus !== 'active') {
-      ElMessage.warning('该品牌GEO站点已停用')
+      ElMessage.warning('该品牌 Agent 官网已停用')
       return
     }
-    const result = await distributeContentArticleToGeoSite(row.id, brandId)
+    const result = await distributeContentArticleToAgentSite(row.id, brandId)
     const task = result.data.data
     if (task.status === 'submitted') {
       ElMessage.success(`已分发到 https://www.${brand.geoSiteCode}.com`)
     } else {
-      ElMessage.error(task.errorMessage || 'GEO站点分发失败')
+      ElMessage.error(task.errorMessage || 'Agent 官网分发失败')
     }
     await load()
   } finally {
@@ -1641,42 +1856,10 @@ async function submitResubmit() {
   }
 }
 
-async function submitDistribute() {
-  if (!distributeForm.articleId || !distributeForm.siteId) return
-  submitting.value = true
-  try {
-    await distributeContentArticle(distributeForm.articleId, distributeForm.siteId)
-    distributeVisible.value = false
-    ElMessage.success('分发任务已触发')
-    await load()
-  } finally {
-    submitting.value = false
-  }
-}
-
-async function submitPublish() {
-  if (!currentArticleId.value) return
-  submitting.value = true
-  try {
-    await publishContentArticle(currentArticleId.value, {
-      publishAction: publishForm.publishAction,
-      channelName: publishForm.channelName || undefined,
-      channelUrl: publishForm.channelUrl || undefined,
-      note: publishForm.note || undefined,
-    })
-    publishVisible.value = false
-    ElMessage.success('发布记录已保存')
-    await load()
-  } finally {
-    submitting.value = false
-  }
-}
-
 onMounted(async () => {
   handleWechatAuthResult()
   handleDouyinAuthResult()
-  handleManualCreateResult()
-  await dictStore.ensureLoaded()
+  await handleManualCreateResult()
   await load()
   await openCreatedArticleDetail()
 })
@@ -1700,10 +1883,15 @@ onBeforeUnmount(() => {
   cleanupMaterialThumbs()
 })
 
-function handleManualCreateResult() {
+async function handleManualCreateResult() {
   const projectId = Number(route.query.projectId || 0)
   if (projectId > 0) {
-    query.projectId = projectId
+    try {
+      const { data } = await getProjectDetail(projectId)
+      query.projectName = data.data.projectName || ''
+    } catch {
+      query.projectName = ''
+    }
   }
   const articleType = String(route.query.articleType || '')
   if (articleType) {
@@ -1803,6 +1991,10 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   margin-top: 12px;
   display: flex;
   justify-content: flex-end;
+}
+
+.pager.compact {
+  margin-top: 8px;
 }
 
 .detail-wrap {
@@ -1922,10 +2114,79 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   min-height: 360px;
 }
 
-.distribute-wrap {
+.distribution-channel-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.distribution-channel-card {
+  min-height: 112px;
+  padding: 14px;
+  border: 1px solid #dcdfe6;
+  border-radius: 8px;
+  background: #fff;
+  color: var(--el-text-color-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.distribution-channel-card:hover {
+  border-color: var(--el-color-success);
+  box-shadow: 0 4px 14px rgb(0 0 0 / 8%);
+}
+
+.distribution-channel-card.disabled {
+  background: #fafafa;
+}
+
+.distribution-channel-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.distribution-channel-desc {
+  min-height: 34px;
+  color: var(--el-text-color-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.authority-media-dialog {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.authority-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.authority-confirm {
+  padding: 12px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.authority-selected {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: var(--el-text-color-regular);
+}
+
+.authority-form {
+  max-width: 760px;
 }
 
 .media-distribute {
