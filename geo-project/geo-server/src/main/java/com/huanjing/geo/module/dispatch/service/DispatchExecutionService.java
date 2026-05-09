@@ -5,6 +5,7 @@ import cn.hutool.json.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.util.HttpClientUtil;
+import com.huanjing.geo.common.util.QuotaPeriodResolver;
 import com.huanjing.geo.module.content.entity.ArticleBatch;
 import com.huanjing.geo.module.content.entity.ArticleGenerationLog;
 import com.huanjing.geo.module.content.entity.PackageContentConfig;
@@ -335,69 +336,80 @@ public class DispatchExecutionService {
 
         LocalDate batchDate = resolveBatchDate(task);
         int batchNo = resolveBatchNo(task);
-        ArticleBatch batch = articleGenerationPersistenceService.ensureArticleBatch(task.getId(), project.getId(), batchDate, batchNo);
+        if (!hasContentGenerationMetadata(task)) {
+            log.warn("Skip legacy CONTENT_GENERATION task {}, missing channel/period/slot metadata", task.getId());
+            return;
+        }
+        String targetChannel = resolveTargetChannel(task);
+        Integer generationSlotNo = resolveGenerationSlotNo(task);
+        String periodType = resolvePeriodType(task);
+        String periodKey = QuotaPeriodResolver.periodKey(periodType, task.getWindowStart());
+        ArticleBatch batch = articleGenerationPersistenceService.ensureArticleBatch(
+                task.getId(), project.getId(), batchDate, batchNo, targetChannel, generationSlotNo);
 
         Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
 
         int total = 0;
         int completed = 0;
         int failed = 0;
-        int platformCursor = 0;
-        int globalArticleIndex = 0;
-        for (PackageContentConfig cfg : configs) {
-            int articleCount = Math.max(1, Optional.ofNullable(cfg.getArticlesPerBatch()).orElse(1));
-            for (int i = 0; i < articleCount; i++) {
-                total++;
-                platformCursor++;
-                globalArticleIndex++;
-                int articleIndex = globalArticleIndex - 1;
-                int platformIndex = platformCursor - 1;
-                try {
-                    GeoPromptBuilder.PromptPair prompt = geoPromptBuilder.buildContentPrompt(
-                            project, brand, cfg.getArticleType(), articleIndex
-                    );
-                    String articleAngle = geoPromptBuilder.resolveArticleAngle(project, articleIndex);
-                    InvocationResult result = invokeContentWithOrderedPlatforms(
-                            platformConfigs,
-                            task,
-                            prompt.systemPrompt(),
-                            prompt.userPrompt(),
-                            platformIndex
-                    );
-                    if (!result.success) {
-                        failed++;
-                        log.warn("CONTENT_GENERATION failed task={}, type={}, err={}", task.getId(), cfg.getArticleType(), result.errorMessage);
-                        continue;
-                    }
-                    String content = normalizeGeneratedContent(result.responseText);
-                    String title = extractGeneratedTitle(content, cfg.getArticleType(), project.getProjectName());
-                    Map<String, Object> promptSnapshot = new LinkedHashMap<>();
-                    promptSnapshot.put("articleType", cfg.getArticleType());
-                    promptSnapshot.put("systemPrompt", prompt.systemPrompt());
-                    promptSnapshot.put("userPrompt", prompt.userPrompt());
-                    Map<String, Object> inputSnapshot = new LinkedHashMap<>();
-                    inputSnapshot.put("projectName", project.getProjectName());
+        int articleIndex = Math.max(generationSlotNo == null ? 1 : generationSlotNo, 1) - 1;
+        int platformIndex = articleIndex;
+        PackageContentConfig cfg = configs.get(Math.floorMod(articleIndex, configs.size()));
+        total++;
+        try {
+            GeoPromptBuilder.PromptPair prompt = geoPromptBuilder.buildContentPrompt(
+                    project, brand, cfg.getArticleType(), articleIndex
+            );
+            String articleAngle = geoPromptBuilder.resolveArticleAngle(project, articleIndex);
+            InvocationResult result = invokeContentWithOrderedPlatforms(
+                    platformConfigs,
+                    task,
+                    prompt.systemPrompt(),
+                    prompt.userPrompt(),
+                    platformIndex
+            );
+            if (!result.success) {
+                failed++;
+                log.warn("CONTENT_GENERATION failed task={}, type={}, err={}", task.getId(), cfg.getArticleType(), result.errorMessage);
+            } else {
+                String content = normalizeGeneratedContent(result.responseText);
+                String title = extractGeneratedTitle(content, cfg.getArticleType(), project.getProjectName());
+                Map<String, Object> promptSnapshot = new LinkedHashMap<>();
+                promptSnapshot.put("articleType", cfg.getArticleType());
+                promptSnapshot.put("targetChannel", targetChannel);
+                promptSnapshot.put("generationSlotNo", generationSlotNo);
+                promptSnapshot.put("systemPrompt", prompt.systemPrompt());
+                promptSnapshot.put("userPrompt", prompt.userPrompt());
+                Map<String, Object> inputSnapshot = new LinkedHashMap<>();
+                inputSnapshot.put("projectName", project.getProjectName());
                 inputSnapshot.put("packageType", binding.getPackageType());
-                    inputSnapshot.put("source", "keyword_group");
-                    articleGenerationPersistenceService.persistGeneratedArticle(
-                            batch.getId(),
-                            project,
-                            cfg.getArticleType(),
-                            title,
-                            content,
-                            JSONUtil.toJsonStr(promptSnapshot),
-                            JSONUtil.toJsonStr(inputSnapshot),
-                            result.platformCode,
-                            resolveModelIdByPlatform(result.platformCode),
-                            articleAngle
-                    );
-                    completed++;
-                } catch (Exception ex) {
-                    failed++;
-                    log.warn("CONTENT_GENERATION article failed task={}, type={}, articleIndex={}, err={}",
-                            task.getId(), cfg.getArticleType(), articleIndex, ex.getMessage(), ex);
-                }
+                inputSnapshot.put("source", "keyword_group");
+                inputSnapshot.put("targetChannel", targetChannel);
+                inputSnapshot.put("periodType", periodType);
+                inputSnapshot.put("periodKey", periodKey);
+                inputSnapshot.put("generationSlotNo", generationSlotNo);
+                articleGenerationPersistenceService.persistGeneratedArticle(
+                        batch.getId(),
+                        project,
+                        cfg.getArticleType(),
+                        title,
+                        content,
+                        JSONUtil.toJsonStr(promptSnapshot),
+                        JSONUtil.toJsonStr(inputSnapshot),
+                        result.platformCode,
+                        resolveModelIdByPlatform(result.platformCode),
+                        articleAngle,
+                        targetChannel,
+                        periodType,
+                        periodKey,
+                        generationSlotNo
+                );
+                completed++;
             }
+        } catch (Exception ex) {
+            failed++;
+            log.warn("CONTENT_GENERATION article failed task={}, type={}, articleIndex={}, err={}",
+                    task.getId(), cfg.getArticleType(), articleIndex, ex.getMessage(), ex);
         }
         articleGenerationPersistenceService.completeBatch(batch.getId(), total, completed, failed);
         if (completed <= 0 && failed > 0) {
@@ -786,6 +798,47 @@ public class DispatchExecutionService {
         } catch (NumberFormatException ex) {
             return 1;
         }
+    }
+
+    private boolean hasContentGenerationMetadata(DispatchTask task) {
+        return task.getWindowStart() != null
+                && StringUtils.hasText(resolveTargetChannel(task))
+                && StringUtils.hasText(resolvePeriodType(task))
+                && resolveGenerationSlotNo(task) != null;
+    }
+
+    private String resolveTargetChannel(DispatchTask task) {
+        if (StringUtils.hasText(task.getTargetChannel())) {
+            return task.getTargetChannel().trim();
+        }
+        Object value = parsePayload(task).get("targetChannel");
+        if (value != null && StringUtils.hasText(String.valueOf(value))) {
+            return String.valueOf(value).trim();
+        }
+        return null;
+    }
+
+    private String resolvePeriodType(DispatchTask task) {
+        Object value = parsePayload(task).get("periodType");
+        if (value != null && StringUtils.hasText(String.valueOf(value))) {
+            return String.valueOf(value).trim();
+        }
+        return null;
+    }
+
+    private Integer resolveGenerationSlotNo(DispatchTask task) {
+        if (task.getGenerationSlotNo() != null && task.getGenerationSlotNo() > 0) {
+            return task.getGenerationSlotNo();
+        }
+        Object value = parsePayload(task).get("generationSlotNo");
+        if (value != null) {
+            try {
+                return Math.max(1, Integer.parseInt(String.valueOf(value)));
+            } catch (NumberFormatException ignore) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private Map<String, Object> parsePayload(DispatchTask task) {

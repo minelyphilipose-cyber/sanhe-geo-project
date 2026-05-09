@@ -15,6 +15,8 @@ public class ArticleBatch {
     private Long id;
     private Long dispatchTaskId;
     private Long projectId;
+    private String targetChannel;
+    private Integer generationSlotNo;
     private LocalDate batchDate;
     private Integer batchNo;
     private String status;
@@ -24,4 +26,3 @@ public class ArticleBatch {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
-

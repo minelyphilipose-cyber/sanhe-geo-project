@@ -428,11 +428,19 @@ public class ContentArticleService {
                                              String promptSnapshot,
                                              String inputSnapshot,
                                              String platformCode,
-                                             String modelId) {
+                                             String modelId,
+                                             String targetChannel,
+                                             String periodType,
+                                             String periodKey,
+                                             Integer generationSlotNo) {
         markdownImageReferenceValidator.validate(project, contentMarkdown);
         ArticleDraft draft = new ArticleDraft();
         draft.setBatchId(batchId);
         draft.setProjectId(project.getId());
+        draft.setTargetChannel(targetChannel);
+        draft.setPeriodType(periodType);
+        draft.setPeriodKey(periodKey);
+        draft.setGenerationSlotNo(generationSlotNo);
         draft.setArticleType(articleType);
         draft.setTitle(title);
         draft.setStatus("pending_review");

@@ -16,6 +16,10 @@ public class ArticleDraft {
     private Long id;
     private Long batchId;
     private Long projectId;
+    private String targetChannel;
+    private String periodType;
+    private String periodKey;
+    private Integer generationSlotNo;
     private String articleType;
     private String title;
     private String coverImageUrl;

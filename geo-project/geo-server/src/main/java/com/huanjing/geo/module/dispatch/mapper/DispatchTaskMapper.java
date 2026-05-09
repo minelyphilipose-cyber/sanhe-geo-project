@@ -4,10 +4,41 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.List;
 
 @Mapper
 public interface DispatchTaskMapper extends BaseMapper<DispatchTask> {
+
+    @Select("""
+            SELECT *
+            FROM dispatch_task
+            WHERE id = #{taskId}
+            FOR UPDATE
+            """)
+    DispatchTask selectByIdForUpdate(@Param("taskId") Long taskId);
+
+    @Select("""
+            SELECT generation_slot_no
+            FROM dispatch_task
+            WHERE project_id = #{projectId}
+              AND task_type = #{taskType}
+              AND target_channel = #{targetChannel}
+              AND window_start = #{windowStart}
+              AND window_end = #{windowEnd}
+              AND status <> 'cancelled'
+              AND generation_slot_no IS NOT NULL
+            FOR UPDATE
+            """)
+    List<Integer> selectOccupiedGenerationSlotsForUpdate(@Param("projectId") Long projectId,
+                                                         @Param("taskType") String taskType,
+                                                         @Param("targetChannel") String targetChannel,
+                                                         @Param("windowStart") LocalDate windowStart,
+                                                         @Param("windowEnd") LocalDate windowEnd);
 
     @Update("""
             UPDATE dispatch_task
@@ -24,7 +55,7 @@ public interface DispatchTaskMapper extends BaseMapper<DispatchTask> {
     int claimTimedOutRunningTask(@Param("taskId") Long taskId,
                                  @Param("expectedStatus") String expectedStatus,
                                  @Param("targetStatus") String targetStatus,
-                                 @Param("finishedAt") java.time.LocalDateTime finishedAt,
+                                 @Param("finishedAt") LocalDateTime finishedAt,
                                  @Param("lastError") String lastError,
                                  @Param("errorContext") String errorContext);
 }

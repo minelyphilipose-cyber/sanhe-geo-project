@@ -10,6 +10,9 @@ import com.huanjing.geo.module.dispatch.enums.DispatchAlertSeverity;
 import com.huanjing.geo.module.dispatch.enums.DispatchTaskStatus;
 import com.huanjing.geo.module.dispatch.enums.DispatchTaskType;
 import com.huanjing.geo.module.dispatch.mapper.DispatchTaskMapper;
+import com.huanjing.geo.module.system.entity.SysUser;
+import com.huanjing.geo.module.system.service.ActivityLogService;
+import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
@@ -33,6 +36,8 @@ public class DispatchTaskService {
     private final DispatchExecutionService dispatchExecutionService;
     private final DispatchProperties dispatchProperties;
     private final DispatchTaskStateService dispatchTaskStateService;
+    private final CurrentUserService currentUserService;
+    private final ActivityLogService activityLogService;
 
     @Transactional
     public DispatchTask createTaskAndEnqueue(Long projectId,
@@ -41,10 +46,30 @@ public class DispatchTaskService {
                                              LocalDate windowEnd,
                                              LocalDateTime dueTime,
                                              Map<String, Object> payload) {
+        String idempotencyKey = defaultIdempotencyKey(taskType, payload);
+        return createTaskAndEnqueue(projectId, taskType, windowStart, windowEnd, dueTime, payload, idempotencyKey, null, null);
+    }
+
+    @Transactional
+    public DispatchTask createTaskAndEnqueue(Long projectId,
+                                             DispatchTaskType taskType,
+                                             LocalDate windowStart,
+                                             LocalDate windowEnd,
+                                             LocalDateTime dueTime,
+                                             Map<String, Object> payload,
+                                             String idempotencyKey,
+                                             String targetChannel,
+                                             Integer generationSlotNo) {
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            throw new BizException(400, "dispatch task idempotency_key is required");
+        }
         DispatchTask task = new DispatchTask();
         task.setTaskNo("TSK" + System.currentTimeMillis() + RandomUtil.randomNumbers(5));
         task.setProjectId(projectId);
         task.setTaskType(taskType.name());
+        task.setIdempotencyKey(idempotencyKey.trim());
+        task.setTargetChannel(targetChannel);
+        task.setGenerationSlotNo(generationSlotNo);
         task.setPriorityLevel(taskType.getPriorityLevel());
         task.setStatus(DispatchTaskStatus.PENDING.value());
         task.setWindowStart(windowStart);
@@ -62,6 +87,7 @@ public class DispatchTaskService {
                     new LambdaQueryWrapper<DispatchTask>()
                             .eq(DispatchTask::getProjectId, projectId)
                             .eq(DispatchTask::getTaskType, taskType.name())
+                            .eq(DispatchTask::getIdempotencyKey, idempotencyKey.trim())
                             .eq(DispatchTask::getWindowStart, windowStart)
                             .eq(DispatchTask::getWindowEnd, windowEnd)
                             .last("LIMIT 1")
@@ -89,7 +115,9 @@ public class DispatchTaskService {
                     safeEnqueue(existing);
                     return existing;
                 }
-                safeEnqueue(existing);
+                if (!DispatchTaskStatus.CANCELLED.value().equals(existing.getStatus())) {
+                    safeEnqueue(existing);
+                }
                 return existing;
             }
             throw ex;
@@ -104,7 +132,8 @@ public class DispatchTaskService {
             return;
         }
         if (DispatchTaskStatus.COMPLETED.value().equals(task.getStatus()) ||
-                DispatchTaskStatus.DEAD_LETTER.value().equals(task.getStatus())) {
+                DispatchTaskStatus.DEAD_LETTER.value().equals(task.getStatus()) ||
+                DispatchTaskStatus.CANCELLED.value().equals(task.getStatus())) {
             return;
         }
         dispatchQueueService.enqueueTask(task.getId(), task.getPriorityLevel(), task.getCreatedAt() == null ? System.currentTimeMillis() : task.getCreatedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli());
@@ -127,7 +156,9 @@ public class DispatchTaskService {
             dispatchQueueService.clearQueueMark(taskId);
             return;
         }
-        if (DispatchTaskStatus.COMPLETED.value().equals(task.getStatus()) || DispatchTaskStatus.DEAD_LETTER.value().equals(task.getStatus())) {
+        if (DispatchTaskStatus.COMPLETED.value().equals(task.getStatus())
+                || DispatchTaskStatus.DEAD_LETTER.value().equals(task.getStatus())
+                || DispatchTaskStatus.CANCELLED.value().equals(task.getStatus())) {
             dispatchQueueService.clearQueueMark(taskId);
             return;
         }
@@ -232,11 +263,70 @@ public class DispatchTaskService {
         }
     }
 
+    @Transactional
+    public void releaseTask(Long taskId, String reason) {
+        currentUserService.ensurePermission("dispatch.task.release");
+        SysUser operator = currentUserService.requireCurrentUser();
+        DispatchTask task = dispatchTaskMapper.selectByIdForUpdate(taskId);
+        if (task == null) {
+            throw new BizException(404, "Task not found");
+        }
+        if (!DispatchTaskType.CONTENT_GENERATION.name().equalsIgnoreCase(task.getTaskType())) {
+            throw new BizException(400, "Only CONTENT_GENERATION task can be released");
+        }
+        if (DispatchTaskStatus.CANCELLED.value().equals(task.getStatus())) {
+            throw new BizException(400, "Task already cancelled");
+        }
+        if (DispatchTaskStatus.COMPLETED.value().equals(task.getStatus())) {
+            throw new BizException(400, "Completed task cannot be released");
+        }
+
+        String oldStatus = task.getStatus();
+        String oldKey = task.getIdempotencyKey();
+        String normalizedKey = oldKey == null || oldKey.isBlank() ? "_legacy" : oldKey.trim();
+        String normalizedReason = trimError(reason == null || reason.isBlank() ? "manual release" : reason);
+        LocalDateTime now = LocalDateTime.now();
+        task.setStatus(DispatchTaskStatus.CANCELLED.value());
+        task.setFinishedAt(now);
+        task.setNextRetryAt(null);
+        task.setTimeoutAt(null);
+        task.setLastError(normalizedReason);
+        task.setErrorContext(JSONUtil.toJsonStr(buildErrorContext(
+                normalizedReason,
+                null,
+                task.getCurrentChannel(),
+                task.getPlatformCode(),
+                now
+        )));
+        task.setIdempotencyKey("cancelled:" + normalizedKey + ":" + task.getId());
+        dispatchTaskMapper.updateById(task);
+        dispatchQueueService.clearQueueMark(task.getId());
+
+        activityLogService.logAction(
+                operator.getId(),
+                "dispatch.task.release",
+                "dispatch_task",
+                task.getId(),
+                Map.of("status", oldStatus, "idempotencyKey", normalizedKey),
+                Map.of("status", task.getStatus(), "idempotencyKey", task.getIdempotencyKey()),
+                Map.of(
+                        "projectId", task.getProjectId(),
+                        "targetChannel", task.getTargetChannel(),
+                        "generationSlotNo", task.getGenerationSlotNo(),
+                        "reason", normalizedReason
+                )
+        );
+    }
+
     public void cleanupHistory() {
         LocalDateTime deadline = LocalDateTime.now().minusDays(dispatchProperties.getTaskRetentionDays());
         dispatchTaskMapper.delete(
                 new LambdaQueryWrapper<DispatchTask>()
-                        .in(DispatchTask::getStatus, List.of(DispatchTaskStatus.COMPLETED.value(), DispatchTaskStatus.FAILED.value(), DispatchTaskStatus.DEAD_LETTER.value()))
+                        .in(DispatchTask::getStatus, List.of(
+                                DispatchTaskStatus.COMPLETED.value(),
+                                DispatchTaskStatus.FAILED.value(),
+                                DispatchTaskStatus.DEAD_LETTER.value(),
+                                DispatchTaskStatus.CANCELLED.value()))
                         .le(DispatchTask::getUpdatedAt, deadline)
         );
     }
@@ -324,6 +414,16 @@ public class DispatchTaskService {
             return "unknown error";
         }
         return message.length() <= 900 ? message : message.substring(0, 900);
+    }
+
+    private String defaultIdempotencyKey(DispatchTaskType taskType, Map<String, Object> payload) {
+        if (taskType == DispatchTaskType.BRAND_STATEMENT_GENERATION && payload != null && payload.get("brandId") != null) {
+            return "brand:" + payload.get("brandId");
+        }
+        if (payload != null && payload.get("mode") != null) {
+            return String.valueOf(payload.get("mode"));
+        }
+        return taskType.name();
     }
 
     private Map<String, Object> buildErrorContext(String error,

@@ -31,7 +31,8 @@ public class DispatchTaskStateService {
             return null;
         }
         if (DispatchTaskStatus.COMPLETED.value().equals(task.getStatus())
-                || DispatchTaskStatus.DEAD_LETTER.value().equals(task.getStatus())) {
+                || DispatchTaskStatus.DEAD_LETTER.value().equals(task.getStatus())
+                || DispatchTaskStatus.CANCELLED.value().equals(task.getStatus())) {
             dispatchQueueService.clearQueueMark(taskId);
             return task;
         }

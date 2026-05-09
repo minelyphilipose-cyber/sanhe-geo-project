@@ -18,6 +18,9 @@ public class DispatchTask {
     private String platformCode;
     private String currentChannel;
     private String taskType;
+    private String idempotencyKey;
+    private String targetChannel;
+    private Integer generationSlotNo;
     private Integer priorityLevel;
     private String status;
     private LocalDate windowStart;

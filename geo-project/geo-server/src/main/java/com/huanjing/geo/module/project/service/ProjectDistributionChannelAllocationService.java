@@ -184,6 +184,19 @@ public class ProjectDistributionChannelAllocationService {
         }
     }
 
+    public List<ProjectChannelAllocation> contentGenerationAllocations(Long projectId) {
+        if (projectId == null) {
+            return List.of();
+        }
+        return allocationMapper.selectList(
+                new LambdaQueryWrapper<ProjectChannelAllocation>()
+                        .eq(ProjectChannelAllocation::getProjectId, projectId)
+                        .in(ProjectChannelAllocation::getChannelCode, List.of(OFFICIAL_SITE, INDUSTRY_SITE))
+                        .gt(ProjectChannelAllocation::getAllocatedCount, 0)
+                        .orderByAsc(ProjectChannelAllocation::getChannelCode)
+        );
+    }
+
     @Transactional(propagation = Propagation.MANDATORY)
     public void deleteProjectAllocations(Long projectId) {
         allocationMapper.delete(new LambdaQueryWrapper<ProjectChannelAllocation>()

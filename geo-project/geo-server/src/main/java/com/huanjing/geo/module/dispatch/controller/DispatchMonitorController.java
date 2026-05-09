@@ -7,7 +7,9 @@ import com.huanjing.geo.module.dispatch.dto.DispatchAlertVO;
 import com.huanjing.geo.module.dispatch.dto.DispatchDashboardVO;
 import com.huanjing.geo.module.dispatch.dto.DispatchPlatformHealthVO;
 import com.huanjing.geo.module.dispatch.dto.DispatchTaskMonitorVO;
+import com.huanjing.geo.module.dispatch.dto.DispatchTaskReleaseRequest;
 import com.huanjing.geo.module.dispatch.service.DispatchMonitorService;
+import com.huanjing.geo.module.dispatch.service.DispatchTaskService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +26,7 @@ import java.util.List;
 public class DispatchMonitorController {
 
     private final DispatchMonitorService dispatchMonitorService;
+    private final DispatchTaskService dispatchTaskService;
 
     @GetMapping("/dashboard")
     public R<DispatchDashboardVO> dashboard(
@@ -53,6 +56,13 @@ public class DispatchMonitorController {
     @GetMapping("/tasks/{taskId}")
     public R<DispatchTaskMonitorVO> taskDetail(@PathVariable Long taskId) {
         return R.ok(dispatchMonitorService.taskDetail(taskId));
+    }
+
+    @PostMapping("/tasks/{taskId}/release")
+    public R<Void> releaseTask(@PathVariable Long taskId,
+                               @RequestBody(required = false) DispatchTaskReleaseRequest req) {
+        dispatchTaskService.releaseTask(taskId, req == null ? null : req.getReason());
+        return R.ok();
     }
 
     @GetMapping("/platforms")

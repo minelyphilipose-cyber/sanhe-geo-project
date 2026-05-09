@@ -6,7 +6,8 @@ public enum DispatchTaskStatus {
     RETRY_PENDING("retry_pending"),
     COMPLETED("completed"),
     FAILED("failed"),
-    DEAD_LETTER("dead_letter");
+    DEAD_LETTER("dead_letter"),
+    CANCELLED("cancelled");
 
     private final String value;
 

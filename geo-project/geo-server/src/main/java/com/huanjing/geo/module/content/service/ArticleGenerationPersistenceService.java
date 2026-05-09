@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.content.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.entity.ArticleBatch;
 import com.huanjing.geo.module.content.entity.ArticleGenerationLog;
 import com.huanjing.geo.module.content.mapper.ArticleBatchMapper;
@@ -12,6 +13,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Objects;
 
 @Service
@@ -23,26 +25,32 @@ public class ArticleGenerationPersistenceService {
     private final ContentArticleService contentArticleService;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public ArticleBatch ensureArticleBatch(Long taskId, Long projectId, LocalDate batchDate, int batchNo) {
-        ArticleBatch existing = articleBatchMapper.selectOne(
+    public ArticleBatch ensureArticleBatch(Long taskId,
+                                           Long projectId,
+                                           LocalDate batchDate,
+                                           int batchNo,
+                                           String targetChannel,
+                                           Integer generationSlotNo) {
+        List<ArticleBatch> existingBatches = articleBatchMapper.selectList(
                 new LambdaQueryWrapper<ArticleBatch>()
-                        .eq(ArticleBatch::getProjectId, projectId)
-                        .eq(ArticleBatch::getBatchDate, batchDate)
-                        .eq(ArticleBatch::getBatchNo, batchNo)
-                        .last("LIMIT 1")
+                        .eq(ArticleBatch::getDispatchTaskId, taskId)
+                        .ne(ArticleBatch::getStatus, "superseded")
+                        .orderByAsc(ArticleBatch::getId)
         );
-        int actualBatchNo = batchNo;
-        if (existing != null) {
-            existing.setStatus("superseded");
-            articleBatchMapper.updateById(existing);
-            actualBatchNo = resolveNextArticleBatchNo(projectId, batchDate);
+        if (existingBatches.size() == 1) {
+            return existingBatches.get(0);
+        }
+        if (existingBatches.size() >= 2) {
+            throw new BizException(500, "AMBIGUOUS_ARTICLE_BATCH_FOR_TASK");
         }
 
         ArticleBatch batch = new ArticleBatch();
         batch.setDispatchTaskId(taskId);
         batch.setProjectId(projectId);
+        batch.setTargetChannel(targetChannel);
+        batch.setGenerationSlotNo(generationSlotNo);
         batch.setBatchDate(batchDate);
-        batch.setBatchNo(actualBatchNo);
+        batch.setBatchNo(batchNo);
         batch.setStatus("running");
         batch.setTotalCount(0);
         batch.setCompletedCount(0);
@@ -61,7 +69,11 @@ public class ArticleGenerationPersistenceService {
                                         String inputSnapshot,
                                         String platformCode,
                                         String modelId,
-                                        String articleAngle) {
+                                        String articleAngle,
+                                        String targetChannel,
+                                        String periodType,
+                                        String periodKey,
+                                        Integer generationSlotNo) {
         contentArticleService.createGeneratedDraft(
                 batchId,
                 project,
@@ -71,7 +83,11 @@ public class ArticleGenerationPersistenceService {
                 promptSnapshot,
                 inputSnapshot,
                 platformCode,
-                modelId
+                modelId,
+                targetChannel,
+                periodType,
+                periodKey,
+                generationSlotNo
         );
 
         ArticleGenerationLog row = new ArticleGenerationLog();

@@ -1,10 +1,13 @@
 package com.huanjing.geo.module.dispatch.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.huanjing.geo.common.util.QuotaPeriodResolver;
 import com.huanjing.geo.module.dispatch.enums.DispatchTaskType;
 import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.entity.ProjectChannelAllocation;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.project.service.ProjectDistributionChannelAllocationService;
+import com.huanjing.geo.module.dispatch.mapper.DispatchTaskMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -14,8 +17,10 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Slf4j
 @Service
@@ -25,6 +30,7 @@ public class DispatchPlannerService {
     private final ProjectMapper projectMapper;
     private final DispatchTaskService dispatchTaskService;
     private final ProjectDistributionChannelAllocationService channelAllocationService;
+    private final DispatchTaskMapper dispatchTaskMapper;
 
     @Transactional
     public void scanAndPlan(LocalDate today) {
@@ -88,21 +94,54 @@ public class DispatchPlannerService {
         if (Boolean.FALSE.equals(project.getContentGenerationEnabled())) {
             return;
         }
-        if (!DispatchScheduleCalculator.isBiDailyDue(project.getActivatedAt().toLocalDate(), today)) {
-            return;
+        for (ProjectChannelAllocation allocation : channelAllocationService.contentGenerationAllocations(project.getId())) {
+            String channel = allocation.getChannelCode();
+            String periodType = allocation.getPeriodTypeSnapshot();
+            if (!isContentGenerationDue(project, today, periodType)) {
+                continue;
+            }
+            QuotaPeriodResolver.PeriodWindow window = QuotaPeriodResolver.periodWindow(periodType, today);
+            Set<Integer> occupied = new HashSet<>(dispatchTaskMapper.selectOccupiedGenerationSlotsForUpdate(
+                    project.getId(),
+                    DispatchTaskType.CONTENT_GENERATION.name(),
+                    channel,
+                    window.start(),
+                    window.end()
+            ));
+            int allocatedCount = allocation.getAllocatedCount() == null ? 0 : allocation.getAllocatedCount();
+            for (int slotNo = 1; slotNo <= allocatedCount; slotNo++) {
+                if (occupied.contains(slotNo)) {
+                    continue;
+                }
+                Map<String, Object> payload = new HashMap<>();
+                payload.put("mode", "content-generation");
+                payload.put("batchDate", today.toString());
+                payload.put("batchNo", slotNo);
+                payload.put("targetChannel", channel);
+                payload.put("periodType", periodType);
+                payload.put("periodKey", QuotaPeriodResolver.periodKey(periodType, window.start()));
+                payload.put("generationSlotNo", slotNo);
+                dispatchTaskService.createTaskAndEnqueue(
+                        project.getId(),
+                        DispatchTaskType.CONTENT_GENERATION,
+                        window.start(),
+                        window.end(),
+                        LocalDateTime.now(),
+                        payload,
+                        "content:" + channel + ":" + slotNo,
+                        channel,
+                        slotNo
+                );
+                occupied.add(slotNo);
+            }
         }
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("mode", "content-generation");
-        payload.put("batchDate", today.toString());
-        payload.put("batchNo", 1);
-        dispatchTaskService.createTaskAndEnqueue(
-                project.getId(),
-                DispatchTaskType.CONTENT_GENERATION,
-                today.minusDays(1),
-                today,
-                LocalDateTime.now(),
-                payload
-        );
+    }
+
+    private boolean isContentGenerationDue(Project project, LocalDate today, String periodType) {
+        if ("day".equalsIgnoreCase(periodType)) {
+            return true;
+        }
+        return DispatchScheduleCalculator.isBiDailyDue(project.getActivatedAt().toLocalDate(), today);
     }
 
     private void planBiWeekly(Project project, LocalDate today) {
