@@ -7,6 +7,8 @@ import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.entity.AuditLog;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
@@ -57,10 +59,33 @@ public class AuditService {
         }
         AuditLog auditLog = toEntity(event, detailJson);
         if (event.getMode() == AuditMode.SYNC) {
+            if (isTransactionSynchronizationAvailable()) {
+                auditLogWriter.writeFileOnly(event, detailJson);
+                runAfterCommit(() -> auditLogWriter.writeDbOnly(event, auditLog));
+                return;
+            }
             auditLogWriter.writeDbAndFile(event, auditLog, detailJson);
             return;
         }
+        if (isTransactionSynchronizationAvailable()) {
+            runAfterCommit(() -> auditExecutor.execute(() -> auditLogWriter.writeDbAndFile(event, auditLog, detailJson)));
+            return;
+        }
         auditExecutor.execute(() -> auditLogWriter.writeDbAndFile(event, auditLog, detailJson));
+    }
+
+    private boolean isTransactionSynchronizationAvailable() {
+        return TransactionSynchronizationManager.isActualTransactionActive()
+                && TransactionSynchronizationManager.isSynchronizationActive();
+    }
+
+    private void runAfterCommit(Runnable task) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                task.run();
+            }
+        });
     }
 
     String toBoundedDetailJson(Map<String, Object> detail) {

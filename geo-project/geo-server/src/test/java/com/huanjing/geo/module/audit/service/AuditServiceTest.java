@@ -6,6 +6,8 @@ import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.util.Map;
 import java.util.concurrent.Executor;
@@ -13,6 +15,7 @@ import java.util.concurrent.Executor;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
@@ -62,5 +65,61 @@ class AuditServiceTest {
         assertDoesNotThrow(() -> auditService.record(event));
 
         verify(auditLogWriter).writeDbAndFile(any(), any(), any());
+    }
+
+    @Test
+    void syncAuditInsideTransactionWritesFileImmediatelyAndDefersDbUntilCommit() {
+        initTransactionSynchronization();
+        try {
+            AuditEvent event = new AuditEvent();
+            event.setEventType("TEST_AUDIT");
+            event.setMode(AuditMode.SYNC);
+            event.setResult(AuditResult.SUCCESS);
+
+            auditService.record(event);
+
+            verify(auditLogWriter).writeFileOnly(any(), any());
+            verify(auditLogWriter, never()).writeDbOnly(any(), any());
+
+            TransactionSynchronizationManager.getSynchronizations()
+                    .forEach(TransactionSynchronization::afterCommit);
+
+            verify(auditLogWriter).writeDbOnly(any(), any());
+            verify(auditLogWriter, never()).writeDbAndFile(any(), any(), any());
+        } finally {
+            clearTransactionSynchronization();
+        }
+    }
+
+    @Test
+    void asyncAuditInsideTransactionDefersDbAndFileUntilCommit() {
+        initTransactionSynchronization();
+        try {
+            AuditEvent event = new AuditEvent();
+            event.setEventType("TEST_AUDIT");
+            event.setMode(AuditMode.ASYNC);
+            event.setResult(AuditResult.SUCCESS);
+
+            auditService.record(event);
+
+            verify(auditLogWriter, never()).writeDbAndFile(any(), any(), any());
+
+            TransactionSynchronizationManager.getSynchronizations()
+                    .forEach(TransactionSynchronization::afterCommit);
+
+            verify(auditLogWriter).writeDbAndFile(any(), any(), any());
+        } finally {
+            clearTransactionSynchronization();
+        }
+    }
+
+    private void initTransactionSynchronization() {
+        TransactionSynchronizationManager.initSynchronization();
+        TransactionSynchronizationManager.setActualTransactionActive(true);
+    }
+
+    private void clearTransactionSynchronization() {
+        TransactionSynchronizationManager.clearSynchronization();
+        TransactionSynchronizationManager.setActualTransactionActive(false);
     }
 }
