@@ -44,6 +44,7 @@ import com.huanjing.geo.module.dispatch.mapper.PollDailyStatMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.dispatch.mapper.ProjectPollRotationMapper;
 import com.huanjing.geo.module.project.dto.ProjectCreateRequest;
+import com.huanjing.geo.module.project.dto.ProjectChannelAllocationQuotaVO;
 import com.huanjing.geo.module.project.dto.ProjectFlowUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectStageUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectStatusUpdateRequest;
@@ -127,6 +128,7 @@ public class ProjectService {
     private final ProjectStateGuard projectStateGuard;
     private final ActivityLogService activityLogService;
     private final BrandStatementDispatchService brandStatementDispatchService;
+    private final ProjectDistributionChannelAllocationService channelAllocationService;
 
     public Page<Project> page(long current, long size, String keyword, String status, String stage, Long partnerId, Long brandId) {
         SysUser user = currentUserService.requireCurrentUser();
@@ -169,6 +171,7 @@ public class ProjectService {
         Page<Project> page = projectMapper.selectPage(new Page<>(current, size), wrapper);
         attachPlatformSelections(page.getRecords());
         attachKeywordGroupSelections(page.getRecords());
+        channelAllocationService.attachAllocations(page.getRecords());
         return page;
     }
 
@@ -180,6 +183,7 @@ public class ProjectService {
         ensureSalesProjectAccess(user, project);
         attachPlatformSelections(Collections.singletonList(project));
         attachKeywordGroupSelections(Collections.singletonList(project));
+        channelAllocationService.attachAllocations(Collections.singletonList(project));
         return project;
     }
 
@@ -231,8 +235,11 @@ public class ProjectService {
         project.setRemark(req.getRemark());
         projectMapper.insert(project);
         replaceKeywordGroupSelections(project.getId(), project.getCompanyId(), req.getKeywordGroupIds());
+        channelAllocationService.replaceAllocations(project, req.getChannelAllocations(), req.getAllocationVersion(),
+                operator.getId(), "project.create");
         attachPlatformSelections(Collections.singletonList(project));
         attachKeywordGroupSelections(Collections.singletonList(project));
+        channelAllocationService.attachAllocations(Collections.singletonList(project));
 
         activityLogService.logAction(
                 operator.getId(),
@@ -288,11 +295,15 @@ public class ProjectService {
         project.setRemark(req.getRemark());
         projectMapper.updateById(project);
         replaceKeywordGroupSelections(project.getId(), project.getCompanyId(), req.getKeywordGroupIds());
+        channelAllocationService.replaceAllocations(project, req.getChannelAllocations(), req.getAllocationVersion(),
+                operator.getId(), "project.update");
         if ("active".equals(project.getStatus())) {
             validateKeywordGroupQuota(project);
+            channelAllocationService.validateActivation(project);
         }
         attachPlatformSelections(Collections.singletonList(project));
         attachKeywordGroupSelections(Collections.singletonList(project));
+        channelAllocationService.attachAllocations(Collections.singletonList(project));
         activityLogService.logAction(
                 operator.getId(),
                 "project.update",
@@ -342,7 +353,12 @@ public class ProjectService {
         String fromStatus = project.getStatus();
         if (isActivating(fromStatus, req.getStatus())) {
             validateKeywordGroupQuota(project);
+            channelAllocationService.validateActivation(project);
+            channelAllocationService.auditCurrentAllocations(project, operator.getId(), "project.activate", false);
             markActivatedIfNeeded(project);
+        } else if (isReleasingActiveAllocation(fromStatus, req.getStatus())) {
+            channelAllocationService.lockCompany(project.getCompanyId());
+            channelAllocationService.auditCurrentAllocations(project, operator.getId(), "project.pause", true);
         }
         project.setStatus(req.getStatus());
         projectMapper.updateById(project);
@@ -390,7 +406,12 @@ public class ProjectService {
         Map<String, Object> before = Map.of("status", project.getStatus(), "stage", project.getStage());
         if (isActivating(project.getStatus(), req.getStatus())) {
             validateKeywordGroupQuota(project);
+            channelAllocationService.validateActivation(project);
+            channelAllocationService.auditCurrentAllocations(project, operator.getId(), "project.activate", false);
             markActivatedIfNeeded(project);
+        } else if (isReleasingActiveAllocation(project.getStatus(), req.getStatus())) {
+            channelAllocationService.lockCompany(project.getCompanyId());
+            channelAllocationService.auditCurrentAllocations(project, operator.getId(), "project.pause", true);
         }
         project.setStatus(req.getStatus());
         project.setStage(req.getStage());
@@ -420,6 +441,10 @@ public class ProjectService {
         SysUser operator = currentUserService.requireCurrentUser();
         Project project = requireProject(id);
         projectStateGuard.ensureCanDelete(project, operator);
+        if ("active".equals(project.getStatus())) {
+            channelAllocationService.lockCompany(project.getCompanyId());
+            channelAllocationService.auditCurrentAllocations(project, operator.getId(), "project.delete", true);
+        }
         project.setDeletedAt(LocalDateTime.now());
         project.setDeletedBy(operator.getId());
         projectMapper.updateById(project);
@@ -474,6 +499,7 @@ public class ProjectService {
                 .eq(ProjectDashboardShare::getProjectId, projectId));
         projectKeywordGroupRelMapper.delete(new LambdaQueryWrapper<ProjectKeywordGroupRel>()
                 .eq(ProjectKeywordGroupRel::getProjectId, projectId));
+        channelAllocationService.deleteProjectAllocations(projectId);
         projectPlatformBindingMapper.delete(new LambdaQueryWrapper<ProjectPlatformBinding>()
                 .eq(ProjectPlatformBinding::getProjectId, projectId));
         projectPollRotationMapper.delete(new LambdaQueryWrapper<ProjectPollRotation>()
@@ -648,6 +674,26 @@ public class ProjectService {
 
     private boolean isActivating(String fromStatus, String targetStatus) {
         return !"active".equals(fromStatus) && "active".equals(targetStatus);
+    }
+
+    private boolean isReleasingActiveAllocation(String fromStatus, String targetStatus) {
+        return "active".equals(fromStatus) && !"active".equals(targetStatus);
+    }
+
+    public ProjectChannelAllocationQuotaVO channelAllocationQuota(Long companyId, Long excludeProjectId) {
+        SysUser user = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission("project.read");
+        Company company = validateCompany(companyId);
+        currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "company");
+        if ("sales".equals(user.getRole())) {
+            if (company.getSalesOwnerId() == null || !company.getSalesOwnerId().equals(user.getId())) {
+                throw new BizException(403, "No permission to access this company");
+            }
+            if (!"signed".equals(company.getStatus())) {
+                throw new BizException(403, "Sales can only access signed companies");
+            }
+        }
+        return channelAllocationService.quota(companyId, excludeProjectId);
     }
 
     private void markActivatedIfNeeded(Project project) {

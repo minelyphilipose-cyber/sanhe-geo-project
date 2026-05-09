@@ -11,17 +11,22 @@ import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyPackageBindingMapper;
+import com.huanjing.geo.module.project.dto.ProjectChannelAllocationProjectRow;
 import com.huanjing.geo.module.project.entity.PackageChannelQuotaConfig;
 import com.huanjing.geo.module.project.entity.PackagePlan;
 import com.huanjing.geo.module.project.mapper.PackageChannelQuotaConfigMapper;
 import com.huanjing.geo.module.project.mapper.PackagePlanMapper;
+import com.huanjing.geo.module.project.mapper.ProjectChannelAllocationMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -33,6 +38,7 @@ public class CompanyPackageBindingService {
     private final PackageChannelQuotaConfigMapper channelQuotaConfigMapper;
     private final CompanyChannelQuotaUsageMapper quotaUsageMapper;
     private final CompanyChannelQuotaLedgerMapper quotaLedgerMapper;
+    private final ProjectChannelAllocationMapper projectChannelAllocationMapper;
     private final CurrentUserService currentUserService;
 
     public CompanyPackageBinding requireActiveBinding(Long companyId) {
@@ -68,6 +74,7 @@ public class CompanyPackageBindingService {
     @Transactional
     public CompanyPackageBinding bind(Long companyId, Long packagePlanId) {
         currentUserService.ensurePermission("user.manage");
+        lockCompany(companyId);
         bindingMapper.clearInactiveActiveFlags(companyId);
         Company company = companyMapper.selectById(companyId);
         if (company == null || company.getDeletedAt() != null) {
@@ -81,6 +88,7 @@ public class CompanyPackageBindingService {
             throw new BizException(400, "Package plan not found or disabled");
         }
         List<PackageChannelQuotaConfig> channelQuotas = activeChannelQuotas(packagePlanId);
+        validateActiveProjectAllocationsAgainstPackage(companyId, channelQuotas);
         CompanyPackageBinding binding = buildBinding(companyId, plan, channelQuotas);
         bindingMapper.insert(binding);
         initTotalUsage(binding, channelQuotas);
@@ -90,6 +98,7 @@ public class CompanyPackageBindingService {
     @Transactional
     public void unbind(Long companyId) {
         currentUserService.ensurePermission("user.manage");
+        lockCompany(companyId);
         CompanyPackageBinding binding = requireActiveBinding(companyId);
         long reserved = quotaLedgerMapper.countReservedByCompany(companyId);
         if (reserved > 0) {
@@ -123,6 +132,61 @@ public class CompanyPackageBindingService {
                         .eq(PackageChannelQuotaConfig::getPackagePlanId, packagePlanId)
                         .eq(PackageChannelQuotaConfig::getEnabled, true)
         );
+    }
+
+    private void lockCompany(Long companyId) {
+        Long locked = companyMapper.lockCompanyForUpdate(companyId);
+        if (locked == null) {
+            throw new BizException(404, "Company not found");
+        }
+    }
+
+    private void validateActiveProjectAllocationsAgainstPackage(Long companyId, List<PackageChannelQuotaConfig> channelQuotas) {
+        Map<String, Integer> quotaByChannel = channelQuotas.stream()
+                .filter(cfg -> Boolean.TRUE.equals(cfg.getEnabled()))
+                .collect(Collectors.toMap(
+                        PackageChannelQuotaConfig::getChannelCode,
+                        cfg -> cfg.getQuotaLimit() == null ? 0 : cfg.getQuotaLimit(),
+                        Math::max,
+                        LinkedHashMap::new
+                ));
+        List<Map<String, Object>> exceeded = new java.util.ArrayList<>();
+        for (String channel : List.of("official_site", "industry_site", "self_media", "authority_media")) {
+            int quotaLimit = quotaByChannel.getOrDefault(channel, 0);
+            List<ProjectChannelAllocationProjectRow> activeProjects =
+                    projectChannelAllocationMapper.activeProjectRowsForUpdate(companyId, channel, null);
+            long allocated = activeProjects.stream()
+                    .map(ProjectChannelAllocationProjectRow::getAllocatedCount)
+                    .filter(java.util.Objects::nonNull)
+                    .mapToLong(Integer::longValue)
+                    .sum();
+            if (allocated <= quotaLimit) {
+                continue;
+            }
+            List<Map<String, Object>> projects = activeProjects.stream()
+                    .map(row -> {
+                        Map<String, Object> map = new LinkedHashMap<>();
+                        map.put("projectId", row.getProjectId());
+                        map.put("projectName", row.getProjectName());
+                        map.put("allocatedCount", row.getAllocatedCount());
+                        return map;
+                    })
+                    .toList();
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("channelCode", channel);
+            item.put("newQuotaLimit", quotaLimit);
+            item.put("allocatedTotal", allocated);
+            item.put("exceededBy", allocated - quotaLimit);
+            item.put("projects", projects);
+            exceeded.add(item);
+        }
+        if (!exceeded.isEmpty()) {
+            throw new BizException(400, "PACKAGE_CHANNEL_ALLOCATION_EXCEEDED", 200,
+                    Map.of(
+                            "errorCode", "PACKAGE_CHANNEL_ALLOCATION_EXCEEDED",
+                            "channels", exceeded
+                    ));
+        }
     }
 
     private List<ChannelQuotaSnapshotItem> toSnapshot(List<PackageChannelQuotaConfig> channelQuotas) {

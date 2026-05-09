@@ -4,6 +4,7 @@ import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.huanjing.geo.common.util.QuotaPeriodResolver;
 import com.huanjing.geo.module.content.dto.ChannelQuotaSnapshotItem;
 import com.huanjing.geo.module.content.entity.CompanyChannelQuotaUsage;
 import com.huanjing.geo.module.content.mapper.CompanyChannelQuotaUsageMapper;
@@ -548,19 +549,7 @@ public class CompanyService {
     }
 
     private String distributionPeriodKey(String periodType) {
-        LocalDate today = LocalDate.now(BUSINESS_ZONE);
-        return switch (periodType) {
-            case "day" -> today.toString();
-            case "week" -> {
-                WeekFields weekFields = WeekFields.ISO;
-                int week = today.get(weekFields.weekOfWeekBasedYear());
-                int year = today.get(weekFields.weekBasedYear());
-                yield year + "-W" + String.format("%02d", week);
-            }
-            case "month" -> today.getYear() + "-" + String.format("%02d", today.getMonthValue());
-            case "total" -> "TOTAL";
-            default -> null;
-        };
+        return QuotaPeriodResolver.periodKeyOrNull(periodType);
     }
 
     private String nextResetAt(String periodType) {

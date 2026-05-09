@@ -4,6 +4,7 @@ import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.util.QuotaPeriodResolver;
 import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
 import com.huanjing.geo.module.content.dto.ChannelQuotaSnapshotItem;
 import com.huanjing.geo.module.content.entity.CompanyChannelQuotaUsage;
@@ -23,10 +24,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.temporal.WeekFields;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
@@ -36,7 +34,7 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class CompanyChannelQuotaService {
 
-    private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
+    private static final java.time.ZoneId BUSINESS_ZONE = QuotaPeriodResolver.BUSINESS_ZONE;
     private static final String BIZ_TYPE_DISTRIBUTION = "distribution";
     private static final int RESERVED_TIMEOUT_MINUTES = 30;
     private static final int RESERVED_SCAN_BATCH_SIZE = 200;
@@ -268,19 +266,11 @@ public class CompanyChannelQuotaService {
     }
 
     private String periodKey(String periodType) {
-        LocalDate today = LocalDate.now(BUSINESS_ZONE);
-        return switch (periodType) {
-            case "day" -> today.toString();
-            case "week" -> {
-                WeekFields weekFields = WeekFields.ISO;
-                int week = today.get(weekFields.weekOfWeekBasedYear());
-                int year = today.get(weekFields.weekBasedYear());
-                yield year + "-W" + String.format("%02d", week);
-            }
-            case "month" -> today.getYear() + "-" + String.format("%02d", today.getMonthValue());
-            case "total" -> "TOTAL";
-            default -> throw new BizException(400, "Unsupported period_type: " + periodType);
-        };
+        try {
+            return QuotaPeriodResolver.periodKey(periodType);
+        } catch (IllegalArgumentException ex) {
+            throw new BizException(400, ex.getMessage());
+        }
     }
 
     private record SnapshotQuota(String periodType, int quotaLimit) {

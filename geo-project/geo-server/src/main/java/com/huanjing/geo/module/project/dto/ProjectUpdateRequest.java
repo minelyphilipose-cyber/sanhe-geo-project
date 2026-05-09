@@ -42,4 +42,6 @@ public class ProjectUpdateRequest {
     @NotEmpty
     @Size(max = 10)
     private List<Long> keywordGroupIds;
+    private Long allocationVersion;
+    private List<ProjectChannelAllocationRequest> channelAllocations;
 }

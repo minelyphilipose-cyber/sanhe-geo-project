@@ -123,6 +123,24 @@
             <div class="keyword-summary">{{ keywordGroupSummary }}</div>
           </div>
         </el-form-item>
+        <el-form-item label="分发渠道">
+          <div class="channel-allocation-panel">
+            <div class="channel-note">剩余额度不含草稿/暂停项目，项目启动时会再次校验</div>
+            <div v-for="item in channelQuotaItems" :key="item.channelCode" class="channel-row">
+              <div class="channel-meta">
+                <span>{{ item.channelName }}</span>
+                <small>{{ channelQuotaText(item) }}</small>
+              </div>
+              <el-input-number
+                v-model="form.channelAllocations[item.channelCode]"
+                :min="0"
+                :max="channelInputMax(item)"
+                :disabled="!item.enabled"
+                controls-position="right"
+              />
+            </div>
+          </div>
+        </el-form-item>
         <el-form-item label="归属类型">
           <el-input :value="companyOwnerTypeLabel" disabled />
         </el-form-item>
@@ -215,12 +233,13 @@ import {
   getProjectList,
   createProject,
   deleteProject,
+  getProjectChannelAllocationQuota,
   getKeywordGroupPage,
   updateProject,
   updateProjectStatus,
 } from '@/api/project'
 import { getBrandList, getCompanyList } from '@/api/customer'
-import type { Brand, Company, KeywordGroup, Project } from '@/types'
+import type { Brand, Company, KeywordGroup, Project, ProjectChannelAllocationItem } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
@@ -262,6 +281,8 @@ const rows = ref<Project[]>([])
 const companyOptions = ref<Company[]>([])
 const brandOptions = ref<Brand[]>([])
 const keywordGroupOptions = ref<KeywordGroup[]>([])
+const channelQuotaItems = ref<ProjectChannelAllocationItem[]>([])
+const allocationVersion = ref<number | null>(null)
 const page = reactive({ current: 1, size: 10, total: 0 })
 const query = reactive({ keyword: '', status: '' })
 
@@ -277,6 +298,7 @@ const form = reactive({
   companyId: null as number | null,
   brandId: null as number | null,
   keywordGroupIds: [] as number[],
+  channelAllocations: {} as Record<string, number>,
   status: 'paused' as 'active' | 'paused',
   regionCodes: [] as string[],
   deliveryMode: 'managed',
@@ -367,6 +389,9 @@ function resetForm() {
   form.companyId = fromCustomerBrandPath.value ? presetCompanyId.value : null
   form.brandId = fromCustomerBrandPath.value ? presetBrandId.value : null
   form.keywordGroupIds = []
+  form.channelAllocations = {}
+  channelQuotaItems.value = []
+  allocationVersion.value = null
   form.status = 'paused'
   form.regionCodes = []
   form.deliveryMode = 'managed'
@@ -437,7 +462,39 @@ async function onCompanyChange(nextCompanyId: number) {
   form.companyId = nextCompanyId
   form.brandId = null
   form.keywordGroupIds = []
-  await Promise.all([loadBrands(nextCompanyId), loadKeywordGroups(nextCompanyId)])
+  await Promise.all([loadBrands(nextCompanyId), loadKeywordGroups(nextCompanyId), loadChannelAllocationQuota(nextCompanyId)])
+}
+
+async function loadChannelAllocationQuota(companyId?: number | null, excludeProjectId?: number | null) {
+  if (!companyId) {
+    channelQuotaItems.value = []
+    allocationVersion.value = null
+    form.channelAllocations = {}
+    return
+  }
+  const { data } = await getProjectChannelAllocationQuota({
+    companyId,
+    excludeProjectId: excludeProjectId || undefined,
+  })
+  channelQuotaItems.value = data.data.items || []
+  allocationVersion.value = data.data.allocationVersion
+  const next: Record<string, number> = {}
+  for (const item of channelQuotaItems.value) {
+    next[item.channelCode] = item.currentProjectAllocatedCount || 0
+  }
+  form.channelAllocations = next
+}
+
+function channelInputMax(item: ProjectChannelAllocationItem) {
+  return Math.max(item.inputMax ?? item.remainingCount ?? 0, 0)
+}
+
+function channelQuotaText(item: ProjectChannelAllocationItem) {
+  if (!item.enabled) {
+    return '套餐未启用'
+  }
+  const periodType = item.periodType === 'none' ? '-' : item.periodType || '-'
+  return `剩余 ${item.remainingCount || 0} / 总量 ${item.quotaLimit}（${periodType}）`
 }
 
 async function load() {
@@ -469,7 +526,7 @@ async function openCreate() {
   editingId.value = null
   resetForm()
   if (form.companyId) {
-    await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId)])
+    await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId), loadChannelAllocationQuota(form.companyId)])
     if (lockCompanyBrandSelection.value) {
       const hasPresetBrand = brandOptions.value.some((b) => b.id === presetBrandId.value)
       if (!hasPresetBrand) {
@@ -506,7 +563,7 @@ async function openEdit(row: Project) {
   form.extraForbiddenPhrases = parseStringArray(row.extraForbiddenPhrases)
   form.contentNote = row.contentNote || ''
   form.remark = (row as any).remark || ''
-  await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId)])
+  await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId), loadChannelAllocationQuota(form.companyId, editingId.value)])
   formVisible.value = true
 }
 
@@ -546,6 +603,11 @@ async function submit() {
       companyId: form.companyId,
       brandId: form.brandId,
       keywordGroupIds: form.keywordGroupIds,
+      allocationVersion: allocationVersion.value,
+      channelAllocations: Object.entries(form.channelAllocations).map(([channelCode, allocatedCount]) => ({
+        channelCode,
+        allocatedCount,
+      })),
       deliveryMode: form.deliveryMode || 'managed',
       primaryGoal: form.primaryGoal || undefined,
       targetRegions: form.targetRegions,
@@ -650,6 +712,29 @@ onMounted(async () => {
   margin-top: 8px;
   font-size: 12px;
   color: #606266;
+}
+.channel-allocation-panel {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+}
+.channel-note {
+  font-size: 12px;
+  color: #909399;
+}
+.channel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.channel-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.channel-meta small {
+  color: #909399;
 }
 .form-tip {
   margin-top: 8px;

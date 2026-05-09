@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.huanjing.geo.module.project.dto.ProjectChannelAllocationVO;
 import lombok.Data;
 
 import java.math.BigDecimal;
@@ -87,4 +88,8 @@ public class Project {
     private Integer selectedKeywordGroupCount;
     @TableField(exist = false)
     private Long selectedKeywordSavedKeywords;
+    @TableField(exist = false)
+    private List<ProjectChannelAllocationVO> channelAllocations;
+    @TableField(exist = false)
+    private Long allocationVersion;
 }

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.module.dispatch.enums.DispatchTaskType;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.project.service.ProjectDistributionChannelAllocationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -23,6 +24,7 @@ public class DispatchPlannerService {
 
     private final ProjectMapper projectMapper;
     private final DispatchTaskService dispatchTaskService;
+    private final ProjectDistributionChannelAllocationService channelAllocationService;
 
     @Transactional
     public void scanAndPlan(LocalDate today) {
@@ -47,6 +49,10 @@ public class DispatchPlannerService {
             return false;
         }
         if (!"expired".equals(project.getStatus())) {
+            if ("active".equals(project.getStatus())) {
+                channelAllocationService.lockCompany(project.getCompanyId());
+                channelAllocationService.auditCurrentAllocations(project, null, "project.expire", true);
+            }
             Project update = new Project();
             update.setId(project.getId());
             update.setStatus("expired");

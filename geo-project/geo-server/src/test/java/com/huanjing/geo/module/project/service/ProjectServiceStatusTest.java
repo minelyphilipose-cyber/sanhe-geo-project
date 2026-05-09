@@ -47,6 +47,8 @@ class ProjectServiceStatusTest {
     private ActivityLogService activityLogService;
     @Mock
     private BrandStatementDispatchService brandStatementDispatchService;
+    @Mock
+    private ProjectDistributionChannelAllocationService channelAllocationService;
 
     @InjectMocks
     private ProjectService projectService;

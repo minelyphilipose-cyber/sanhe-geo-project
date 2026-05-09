@@ -256,9 +256,31 @@ export interface Project {
   selectedKeywordGroupIds?: number[]
   selectedKeywordGroupCount?: number
   selectedKeywordSavedKeywords?: number
+  channelAllocations?: ProjectChannelAllocationItem[]
+  allocationVersion?: number
   // 鍏宠仈灞曠ず瀛楁
   brandName?: string
   companyName?: string
+}
+
+export interface ProjectChannelAllocationItem {
+  channelCode: string
+  channelName: string
+  periodType?: string | null
+  enabled: boolean
+  quotaLimit: number
+  activeAllocatedCount?: number
+  currentProjectAllocatedCount: number
+  remainingCount?: number
+  inputMax?: number
+}
+
+export interface ProjectChannelAllocationQuota {
+  companyId: number
+  excludeProjectId?: number | null
+  allocationVersion: number
+  note?: string | null
+  items: ProjectChannelAllocationItem[]
 }
 
 export interface CompanyAccount {
@@ -864,6 +886,7 @@ export interface DistributionTask {
   targetBrandId?: number | null
   brandOfficialSiteId?: number | null
   selfMediaAccountId?: number | null
+  authorityMediaId?: number | null
   platformArticleId?: string | null
   externalStatus?: string | null
   reviewStatus?: string | null
@@ -878,6 +901,37 @@ export interface DistributionTask {
   operatorId?: number
   createdAt?: string
   finishedAt?: string | null
+}
+
+export interface AuthorityMediaResource {
+  id: number
+  resourceType: 'NEWS_MEDIA' | string
+  externalResourceId: string
+  name: string
+  platform?: string | null
+  industry?: string | null
+  province?: string | null
+  price: number
+  status: number
+  pcWeight?: number | null
+  mWeight?: number | null
+  newsResource?: number | null
+  entranceLevel?: number | null
+  includeCondition?: number | null
+  publicationTime?: number | null
+  weekendPublish?: number | null
+  publishRate?: string | null
+  inclusionRate?: number | null
+  remark?: string | null
+  entranceLink?: string | null
+  caseLink?: string | null
+  noDisclaimer?: number | null
+  canSign?: number | null
+  firstPublish?: number | null
+  keep3Month?: number | null
+  focalPic?: string | null
+  uptime?: number | null
+  updatedAt?: string | null
 }
 
 export interface WechatMpCapability {

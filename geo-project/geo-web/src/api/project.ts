@@ -8,6 +8,7 @@ import type {
   KeywordGroupPayload,
   KeywordPreviewResult,
   KeywordTypeConfig,
+  ProjectChannelAllocationQuota,
 } from '@/types'
 
 export function getProjectList(params: {
@@ -24,6 +25,10 @@ export function getProjectList(params: {
 
 export function getProjectDetail(id: number) {
   return request.get<R<Project>>(`/projects/${id}`)
+}
+
+export function getProjectChannelAllocationQuota(params: { companyId: number; excludeProjectId?: number }) {
+  return request.get<R<ProjectChannelAllocationQuota>>('/projects/channel-allocation-quota', { params })
 }
 
 export function createProject(data: Record<string, any>) {

@@ -2,6 +2,7 @@ package com.huanjing.geo.module.project.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
+import com.huanjing.geo.module.project.dto.ProjectChannelAllocationQuotaVO;
 import com.huanjing.geo.module.project.dto.ProjectCreateRequest;
 import com.huanjing.geo.module.project.dto.ProjectFlowUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectStatusUpdateRequest;
@@ -33,6 +34,12 @@ public class ProjectController {
             @RequestParam(required = false) Long brandId
     ) {
         return R.ok(projectService.page(current, size, keyword, status, stage, partnerId, brandId));
+    }
+
+    @GetMapping("/channel-allocation-quota")
+    public R<ProjectChannelAllocationQuotaVO> channelAllocationQuota(@RequestParam Long companyId,
+                                                                    @RequestParam(required = false) Long excludeProjectId) {
+        return R.ok(projectService.channelAllocationQuota(companyId, excludeProjectId));
     }
 
     @GetMapping("/{id}")
