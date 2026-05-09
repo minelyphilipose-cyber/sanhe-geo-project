@@ -2,6 +2,7 @@ package com.huanjing.geo.module.presale.generate;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.presale.generate.l3.PresaleL3InitService;
+import com.huanjing.geo.module.presale.generate.l3.PresalePage03DoubaoService;
 import com.huanjing.geo.module.presale.generate.llm.CallStatus;
 import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
 import com.huanjing.geo.module.presale.generate.llm.LlmInvokeException;
@@ -103,6 +104,8 @@ class PresaleGenerateOrchestratorTest {
     @Mock
     private PresaleL3InitService l3InitService;
     @Mock
+    private PresalePage03DoubaoService page03DoubaoService;
+    @Mock
     private PresaleCompetitorAggregator competitorAggregator;
     @Mock
     private PresaleJudgeService presaleJudgeService;
@@ -139,6 +142,8 @@ class PresaleGenerateOrchestratorTest {
         lenient().when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
                 .thenReturn("{}");
         lenient().when(l3InitService.derive(anyString(), anyString())).thenReturn("{}");
+        lenient().when(page03DoubaoService.generateAndApply(anyLong(), anyString(), anyString(), any(), anyBoolean()))
+                .thenAnswer(inv -> inv.getArgument(2, String.class));
     }
 
     @AfterEach
@@ -344,7 +349,7 @@ class PresaleGenerateOrchestratorTest {
                 .orElseThrow();
         assertEquals("BATCH1", runningUpdate.getGenerationStage());
         assertEquals(450, runningUpdate.getBatch1TotalCalls());
-        assertEquals(810, runningUpdate.getTotalLlmCalls());
+        assertEquals(811, runningUpdate.getTotalLlmCalls());
         assertEquals(0, runningUpdate.getCompletedLlmCalls());
     }
 

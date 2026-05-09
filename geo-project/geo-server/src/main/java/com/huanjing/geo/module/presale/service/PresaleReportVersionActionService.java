@@ -22,11 +22,18 @@ import com.huanjing.geo.module.presale.dto.snapshot.editable.PhaseDescription;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateStatus;
+import com.huanjing.geo.module.presale.generate.l3.MarketBattlegroundValidator;
 import com.huanjing.geo.module.presale.generate.l3.PresaleL3Defaults;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptJudgeResultMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
+import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
+import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptJudgeResult;
+import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
@@ -82,10 +89,14 @@ public class PresaleReportVersionActionService {
 
     private final PresaleReportMapper reportMapper;
     private final PresaleReportVersionMapper versionMapper;
+    private final PresaleAiCallMapper aiCallMapper;
+    private final PresaleAiPromptResultMapper aiPromptResultMapper;
+    private final PresaleAiPromptJudgeResultMapper aiPromptJudgeResultMapper;
     private final CurrentUserService currentUserService;
     private final PresaleAccessService accessService;
     private final ObjectMapper objectMapper;
     private final PresaleL3Defaults l3Defaults;
+    private final MarketBattlegroundValidator marketBattlegroundValidator;
 
     /**
      * P1·F·1·a 已存在的 Mock Orchestrator,retry 时重新触发生成。
@@ -162,6 +173,7 @@ public class PresaleReportVersionActionService {
         if (root == null || !root.isObject()) {
             throw new BizException(400, "Invalid editable content JSON");
         }
+        marketBattlegroundValidator.validateRawJson(root.get("market_battleground"));
         if (requireAllTopLevelFields) {
             requireTopLevelFields(root);
         }
@@ -222,20 +234,7 @@ public class PresaleReportVersionActionService {
     }
 
     private void validateMarketBattleground(MarketBattleground value) {
-        if (value == null) {
-            return;
-        }
-        validateText("market_battleground.topbar_title", value.getTopbarTitle(), 40);
-        validateText("market_battleground.topbar_right", value.getTopbarRight(), 24);
-        validateText("market_battleground.page_title", value.getPageTitle(), 34);
-        validateText("market_battleground.page_kicker", value.getPageKicker(), 48);
-        validateMarketCard(value.getMarketCard());
-        validateCalculationCard("market_battleground.national_card", value.getNationalCard());
-        validateText("market_battleground.bridge_text", value.getBridgeText(), 20);
-        validateCalculationCard("market_battleground.regional_card", value.getRegionalCard());
-        validateNarrative(value.getNarrative());
-        validateText("market_battleground.footnote", value.getFootnote(), 150);
-        validateText("market_battleground.footer_brand", value.getFooterBrand(), 24);
+        marketBattlegroundValidator.validate(value);
     }
 
     private void validateMarketCard(MarketBattleground.MarketCard value) {
@@ -660,6 +659,8 @@ public class PresaleReportVersionActionService {
             throw new BizException(409, "Frozen version cannot be regenerated");
         }
 
+        clearGeneratedRunData(version.getId());
+
         LambdaUpdateWrapper<PresaleReportVersion> update = new LambdaUpdateWrapper<PresaleReportVersion>()
                 .eq(PresaleReportVersion::getId, version.getId())
                 .set(PresaleReportVersion::getGenerationStatus, PresaleGenerateStatus.QUEUED.name())
@@ -683,6 +684,15 @@ public class PresaleReportVersionActionService {
                 .versionNo(version.getVersionNo())
                 .generationStatus(PresaleGenerateStatus.QUEUED.name())
                 .build();
+    }
+
+    private void clearGeneratedRunData(Long versionId) {
+        aiPromptJudgeResultMapper.delete(new LambdaQueryWrapper<PresaleAiPromptJudgeResult>()
+                .eq(PresaleAiPromptJudgeResult::getVersionId, versionId));
+        aiPromptResultMapper.delete(new LambdaQueryWrapper<PresaleAiPromptResult>()
+                .eq(PresaleAiPromptResult::getVersionId, versionId));
+        aiCallMapper.delete(new LambdaQueryWrapper<PresaleAiCall>()
+                .eq(PresaleAiCall::getVersionId, versionId));
     }
 
     private void triggerGenerateAfterCommit(Long versionId, Long userId, boolean canManageCurrentUser) {

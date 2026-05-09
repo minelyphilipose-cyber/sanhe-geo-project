@@ -167,6 +167,64 @@ class SceneCoverageCalculatorTest {
     }
 
     @Test
+    void sampleIntentCoverage_prefersDoubaoMentionBeforeMajorityThreshold() {
+        SceneCoverageCalculator calculator = new SceneCoverageCalculator(
+                aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
+                platform("doubao"), platform("kimi"), platform("deepseek"), platform("qianwen")
+        ));
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
+                template(81L, "REC_081", "推荐型", "doubao covered")
+        ));
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of(
+                row(81L, "doubao", 1, 1, null)
+        ));
+
+        Map<String, Integer> totals = Map.of(
+                "RECOMMENDATION", 1,
+                "COMPARISON", 0,
+                "INQUIRY", 0,
+                "COGNITIVE", 0,
+                "SCENARIO", 0
+        );
+
+        SceneAndIntentResult result = calculator.compute(8101L, raw(List.of(), List.of()), totals);
+
+        assertEquals(1, result.sceneCoverage().getHighValue().getCovered());
+        assertEquals(1, result.intentBreakdown().stream()
+                .filter(i -> "推荐型".equals(i.getCategory()))
+                .findFirst().orElseThrow().getCoveredPrompts());
+    }
+
+    @Test
+    void sampleIntentCoverage_fallsBackToPreviousThresholdWhenDoubaoMissing() {
+        SceneCoverageCalculator calculator = new SceneCoverageCalculator(
+                aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
+                platform("doubao"), platform("kimi"), platform("deepseek"), platform("qianwen")
+        ));
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
+                template(82L, "REC_082", "推荐型", "fallback covered")
+        ));
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of(
+                row(82L, "kimi", 1, 1, null),
+                row(82L, "deepseek", 1, 2, null)
+        ));
+
+        Map<String, Integer> totals = Map.of(
+                "RECOMMENDATION", 1,
+                "COMPARISON", 0,
+                "INQUIRY", 0,
+                "COGNITIVE", 0,
+                "SCENARIO", 0
+        );
+
+        SceneAndIntentResult result = calculator.compute(8201L, raw(List.of(), List.of()), totals);
+
+        assertEquals(1, result.sceneCoverage().getHighValue().getCovered());
+    }
+
+    @Test
     void missingQueriesWithTopCompetitors_returnsMatchedDisplayNames() {
         SceneCoverageCalculator calculator = new SceneCoverageCalculator(
                 aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());

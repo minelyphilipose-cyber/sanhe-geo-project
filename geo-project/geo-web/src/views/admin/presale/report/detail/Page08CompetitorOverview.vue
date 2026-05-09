@@ -22,24 +22,24 @@
           <div class="chinese-serif p08-intro-text">AI 视角下您的真实竞争对手:</div>
         </div>
 
-        <!-- 竞品卡片组:3 竞品 + 自己 -->
+          <!-- 竞品卡片组:3 竞品 + 自己 -->
         <div class="p08-cards">
           <div
-            v-for="(c, idx) in mergedView.merged_competitors"
-            :key="c.rank"
+            v-for="(c, idx) in sortedCompetitors"
+            :key="`${c.rank}-${c.name}`"
             class="competitor-card"
-            :class="`top${c.rank}`"
+            :class="`top${idx + 1}`"
           >
             <div class="p08-card-head">
-              <div class="competitor-rank">{{ formatRank(c.rank) }}</div>
-              <div class="mono p08-card-tag">TOP{{ c.rank }}</div>
+              <div class="competitor-rank">{{ formatRank(idx + 1) }}</div>
+              <div class="mono p08-card-tag">TOP{{ idx + 1 }}</div>
             </div>
             <div class="chinese-serif p08-card-name">{{ c.name }}</div>
             <div class="p08-card-metric-wrap">
               <div class="p08-card-sub">提及次数</div>
               <div
                 class="metric-hero p08-card-rate"
-                :class="`p08-card-rate-${c.rank}`"
+                :class="`p08-card-rate-${idx + 1}`"
               >
                 {{ c.mention_count }}<span class="p08-card-unit">次</span>
               </div>
@@ -93,7 +93,7 @@ import { toIntRounded } from '@/utils/presale/numberFormat'
  * Page08 竞品对标总览。
  *
  * 数据映射:
- *   - 3 竞品卡片:merged_competitors(按 rank 排序,后端已保证 1/2/3)
+ *   - 3 竞品卡片:merged_competitors 按当前 mention_count 降序展示
  *   - 自家卡片:brand_name + 聚合 mention_count + 加权平均 avg_ranking
  *   - bar chart(方案 D):mention_count 横向对比
  *     4 根柱 = 3 竞品 + 自己,数值 = mention_count
@@ -105,15 +105,25 @@ import { toIntRounded } from '@/utils/presale/numberFormat'
 
 const { mergedView: mergedViewRef } = useMergedView()
 const mergedView = computed(() => mergedViewRef.value!)
+const DOUBAO_PLATFORM_CODE = 'doubao'
+const DOUBAO_WEIGHT = 2
+
+const sortedCompetitors = computed(() =>
+  [...mergedView.value.merged_competitors].sort((a, b) => {
+    const mentionDiff = (b.mention_count ?? 0) - (a.mention_count ?? 0)
+    if (mentionDiff !== 0) return mentionDiff
+    return a.rank - b.rank
+  })
+)
 
 // ─── 自家品牌聚合 ─────────────────────────────────────
 const selfTotalMentions = computed(() =>
-  mergedView.value.platform_breakdown.reduce((sum, p) => sum + p.mention_count, 0)
+  mergedView.value.platform_breakdown.reduce((sum, p) => sum + p.mention_count * platformWeight(p.platform_code), 0)
 )
 
 // ─── bar chart(方案 D:mention_count 对比) ─────────────
 const barOption = computed<EChartsOption>(() => {
-  const comps = mergedView.value.merged_competitors
+  const comps = sortedCompetitors.value
   // 横坐标 3 竞品 + 自己(自己放最右,视觉上"被比较的对象")
   const names = [...comps.map((c) => c.name), mergedView.value.brand_name]
   const counts = [
@@ -200,14 +210,18 @@ function formatRank(n: number): string {
   return n.toString().padStart(2, '0')
 }
 
+function platformWeight(platformCode: string): number {
+  return platformCode?.toLowerCase() === DOUBAO_PLATFORM_CODE ? DOUBAO_WEIGHT : 1
+}
+
 // ─── 底部引用文案 ────────────────────────────────────
 const quoteText = computed(() => {
   const self = selfTotalMentions.value
-  const top1 = mergedView.value.merged_competitors?.[0]
+  const top1 = sortedCompetitors.value?.[0]
   if (!top1) {
     return `上图展示了 AI 视角下您与 Top3 竞品的提及次数对比。建议结合后续章节的场景明细逐项分析差距来源。`
   }
-  return `您的总提及数 ${self} 次居于首位——但需要注意:这部分提及主要集中在"用户已知道您之后才会问到您"的对比型、认知型查询中。在用户主动寻找品牌的推荐型场景中,竞品组的曝光频次显著高于您。这意味着:老客户认你,但新客户找不到你。后续章节将逐项剖析这部分流失场景。`
+  return `您的总提及数 ${self} 次居于前位——但需要注意:这部分提及主要集中在"用户已知道您之后才会问到您"的对比型、认知型查询中。在用户主动寻找品牌的推荐型场景中,竞品组的曝光频次显著高于您。这意味着:老客户认你,但新客户找不到你。后续章节将逐项剖析这部分流失场景。`
 })
 </script>
 

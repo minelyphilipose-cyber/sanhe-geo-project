@@ -14,13 +14,15 @@ public class ScoresCalculator {
     private static final double W_RANKING = 0.25;
     private static final double W_SENTIMENT = 0.15;
     private static final double W_COVERAGE = 0.30;
+    private static final String PLATFORM_DOUBAO = "doubao";
+    private static final int DOUBAO_WEIGHT = 2;
 
     public Scores compute(RawSnapshotDTO raw, SceneAndIntentResult scenes, RankingStats rankingStats) {
         List<PlatformBreakdown> platforms = raw == null || raw.getPlatformBreakdown() == null
                 ? List.of() : raw.getPlatformBreakdown();
 
-        int sumMention = platforms.stream().mapToInt(p -> safeInt(p.getMentionCount())).sum();
-        int sumTests = platforms.stream().mapToInt(p -> safeInt(p.getTotalTests())).sum();
+        int sumMention = platforms.stream().mapToInt(p -> safeInt(p.getMentionCount()) * platformWeight(p)).sum();
+        int sumTests = platforms.stream().mapToInt(p -> safeInt(p.getTotalTests()) * platformWeight(p)).sum();
         double mention = sumTests == 0 ? 0.0 : (sumMention * 100.0 / sumTests);
 
         RankingStats stats = rankingStats == null ? new RankingStats(0, 0, 0, 0, 0, 0) : rankingStats;
@@ -93,5 +95,12 @@ public class ScoresCalculator {
 
     private int safeInt(Integer value) {
         return value == null ? 0 : value;
+    }
+
+    private int platformWeight(PlatformBreakdown platform) {
+        if (platform == null || platform.getPlatformCode() == null) {
+            return 1;
+        }
+        return PLATFORM_DOUBAO.equalsIgnoreCase(platform.getPlatformCode()) ? DOUBAO_WEIGHT : 1;
     }
 }

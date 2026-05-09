@@ -48,6 +48,10 @@ public class RawSnapshotDTO {
     @JsonProperty("group_scene_advantages")
     private List<String> groupSceneAdvantages;
 
+    /** 用于报告 Page03 展示的真实决策型问题样本。 */
+    @JsonProperty("sample_prompts")
+    private List<SamplePrompt> samplePrompts;
+
     /** 情感明细(两轮合计)。 */
     @JsonProperty("sentiment_detail")
     private SentimentDetail sentimentDetail;

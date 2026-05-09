@@ -66,7 +66,7 @@
         <el-row :gutter="12" class="mt-3">
           <el-col :xs="24" :sm="12" :md="6"><el-statistic title="官网提及数" :value="num(summary.site_mention_count)" /></el-col>
           <el-col :xs="24" :sm="12" :md="6"><el-statistic title="联系方式提及数" :value="num(summary.contact_mention_count)" /></el-col>
-          <el-col :xs="24" :sm="12" :md="6"><el-statistic title="核心问题覆盖率" :value="num(summary.core_question_coverage_rate)" suffix="%" /></el-col>
+          <el-col :xs="24" :sm="12" :md="6"><el-statistic title="关键词覆盖率" :value="num(summary.keyword_coverage_rate)" suffix="%" /></el-col>
           <el-col :xs="24" :sm="12" :md="6"><el-statistic :title="compareLabel + '命中率变化'" :value="num(summaryVs.hit_rate_change)" suffix="%" /></el-col>
         </el-row>
 

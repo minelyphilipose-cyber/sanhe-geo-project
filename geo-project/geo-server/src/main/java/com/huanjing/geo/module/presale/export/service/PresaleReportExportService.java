@@ -153,6 +153,15 @@ public class PresaleReportExportService {
         return storageService.readObject(task.getFileKey());
     }
 
+    public String downloadFileName(Long reportId, Long exportId) {
+        PresaleReport report = accessService.requireReportWithAccess(reportId);
+        requireDownloadableExport(reportId, exportId);
+        String brandName = StringUtils.hasText(report.getBrandName())
+                ? report.getBrandName().trim()
+                : "report-" + reportId;
+        return "AI 可见度诊断报告_" + sanitizeFileNamePart(brandName) + ".pdf";
+    }
+
     private PresaleReportExport requireDownloadableExport(Long reportId, Long exportId) {
         Long userId = currentUserService.requireCurrentUser().getId();
         accessService.requireReportWithAccess(reportId);
@@ -172,6 +181,11 @@ public class PresaleReportExportService {
         log.info("Presale export download: userId={}, reportId={}, exportId={}, fileKey={}",
                 userId, reportId, exportId, task.getFileKey());
         return task;
+    }
+
+    private String sanitizeFileNamePart(String value) {
+        String sanitized = value.replaceAll("[\\\\/:*?\"<>|\\r\\n\\t]", "_").trim();
+        return StringUtils.hasText(sanitized) ? sanitized : "未命名品牌";
     }
 
     @Transactional

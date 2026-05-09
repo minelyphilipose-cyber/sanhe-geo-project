@@ -10,6 +10,7 @@ import com.huanjing.geo.module.presale.dto.response.LlmPromptQuestionGenerateVO;
 import com.huanjing.geo.module.presale.dto.response.PresalePromptTraceDetailVO;
 import com.huanjing.geo.module.presale.dto.response.PresalePromptTracePageVO;
 import com.huanjing.geo.module.presale.dto.response.PromptTemplateVO;
+import com.huanjing.geo.module.presale.dto.response.RegenerateDraftVO;
 import com.huanjing.geo.module.presale.dto.response.ReportDetailVO;
 import com.huanjing.geo.module.presale.dto.response.ReportListItemVO;
 import com.huanjing.geo.module.presale.dto.response.ReportScopePreviewVO;
@@ -87,6 +88,11 @@ public class PresaleReportController {
     @GetMapping("/prompt-templates")
     public R<List<PromptTemplateVO>> listPromptTemplates() {
         return R.ok(reportService.listPromptTemplates());
+    }
+
+    @GetMapping("/{id}/regenerate-draft")
+    public R<RegenerateDraftVO> getRegenerateDraft(@PathVariable("id") Long id) {
+        return R.ok(reportService.buildRegenerateDraft(id));
     }
 
     @PostMapping("/llm-prompt-questions/generate")

@@ -44,7 +44,7 @@ public class PresaleReportExportController {
     public ResponseEntity<byte[]> download(@PathVariable Long reportId,
                                            @PathVariable Long exportId) {
         byte[] bytes = exportService.downloadBytes(reportId, exportId);
-        String fileName = "presale-report-" + reportId + "-" + exportId + ".pdf";
+        String fileName = exportService.downloadFileName(reportId, exportId);
         return ResponseEntity.ok()
                 .contentType(MediaType.APPLICATION_PDF)
                 .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.attachment()

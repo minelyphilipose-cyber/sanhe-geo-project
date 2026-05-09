@@ -44,6 +44,7 @@ public class SceneCoverageCalculator {
     private static final int COMPARISON_COVERAGE_THRESHOLD = 10;
     private static final int JUDGE_INTENT_COVERAGE_PLATFORM_DIVISOR = 3;
     private static final String COMPARISON_STANCE_COMPETITOR = "competitor";
+    private static final String PRIORITY_PLATFORM_DOUBAO = "doubao";
 
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
     private final PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
@@ -91,6 +92,7 @@ public class SceneCoverageCalculator {
         );
 
         Map<Long, Set<String>> hitPlatformsByTemplate = new HashMap<>();
+        Set<Long> doubaoMentionedTemplates = new HashSet<>();
         Map<Long, List<Integer>> rankingsByTemplate = new HashMap<>();
         Map<Long, List<PresaleAiPromptResult>> rowsByTemplate = new HashMap<>();
         Map<Long, String> renderedPromptByTemplate = new HashMap<>();
@@ -112,6 +114,9 @@ public class SceneCoverageCalculator {
             hitPlatformsByTemplate
                     .computeIfAbsent(row.getPromptTemplateId(), ignored -> new HashSet<>())
                     .add(row.getPlatformCode());
+            if (PRIORITY_PLATFORM_DOUBAO.equalsIgnoreCase(row.getPlatformCode())) {
+                doubaoMentionedTemplates.add(row.getPromptTemplateId());
+            }
             if (row.getRanking() != null) {
                 rankingsByTemplate.computeIfAbsent(row.getPromptTemplateId(), ignored -> new ArrayList<>())
                         .add(row.getRanking());
@@ -137,7 +142,8 @@ public class SceneCoverageCalculator {
             int hitCount = hitPlatformsByTemplate.getOrDefault(template.getId(), Set.of()).size();
             boolean covered = isJudgeIntent(intent)
                     ? judgeCoverageByIntent.getOrDefault(intent, IntentCoverage.empty()).isCovered()
-                    : hitCount >= threshold;
+                    : isSampleIntentCoveredByPriorityPlatform(template.getId(), doubaoMentionedTemplates)
+                    || hitCount >= threshold;
             byIntent.get(intent).add(new TemplateWithCovered(template, intent, covered));
         }
 
@@ -259,6 +265,10 @@ public class SceneCoverageCalculator {
 
     private boolean isJudgeIntent(PresaleIntentCode intent) {
         return intent == PresaleIntentCode.COGNITIVE || intent == PresaleIntentCode.COMPARISON;
+    }
+
+    private boolean isSampleIntentCoveredByPriorityPlatform(Long templateId, Set<Long> doubaoMentionedTemplates) {
+        return templateId != null && doubaoMentionedTemplates.contains(templateId);
     }
 
     private SceneCoverageGroup buildGroup(Map<PresaleIntentCode, List<TemplateWithCovered>> byIntent,

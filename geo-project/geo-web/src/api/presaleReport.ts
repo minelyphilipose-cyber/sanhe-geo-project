@@ -95,6 +95,24 @@ export interface ReportScopePreviewVO {
   dimensionCount: number
 }
 
+export interface RegenerateDraftVO {
+  reportId: number
+  brandName: string
+  industry: string
+  industryRole: string
+  region: string
+  userDemand?: string | null
+  userType?: string | null
+  promptSourceMode: PromptSourceMode
+  promptTemplates?: Array<{
+    sourceTemplateId: number
+    sourcePromptCode?: string | null
+    promptContent: string
+  }>
+  llmQuestionPlan?: LlmPromptQuestionPlan | null
+  llmPromptQuestions?: LlmPromptQuestionDraft[]
+}
+
 export interface PromptTemplateVO {
   id: number
   promptCode: string
@@ -381,6 +399,12 @@ export function getReportScopePreview() {
 export function listPromptTemplates() {
   return unwrap(
     request.get<R<PromptTemplateVO[]>>('/presale/reports/prompt-templates')
+  )
+}
+
+export function getRegenerateDraft(reportId: number) {
+  return unwrap(
+    request.get<R<RegenerateDraftVO>>(`/presale/reports/${reportId}/regenerate-draft`)
   )
 }
 

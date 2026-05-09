@@ -28,4 +28,10 @@ public interface PresaleLlmInvoker {
      */
     LlmCallResult normalizeCompetitors(PlatformCallContext ctx, String normalizationPrompt)
             throws LlmInvokeException;
+
+    /**
+     * 阶段 3:Page03 AI 搜索新战场内容生成。
+     */
+    LlmCallResult marketBattleground(PlatformCallContext ctx, String marketBattlegroundPrompt)
+            throws LlmInvokeException;
 }

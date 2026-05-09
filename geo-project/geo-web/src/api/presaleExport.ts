@@ -72,9 +72,22 @@ export async function downloadPresaleExportPdf(reportId: number, exportId: numbe
   const url = window.URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `presale-report-${reportId}-${exportId}.pdf`
+  link.download = resolveDownloadFileName(response.headers['content-disposition'], reportId, exportId)
   document.body.appendChild(link)
   link.click()
   link.remove()
   window.URL.revokeObjectURL(url)
+}
+
+function resolveDownloadFileName(contentDisposition: unknown, reportId: number, exportId: number): string {
+  const header = typeof contentDisposition === 'string' ? contentDisposition : ''
+  const utf8Match = header.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1])
+  }
+  const quotedMatch = header.match(/filename="([^"]+)"/i)
+  if (quotedMatch?.[1]) {
+    return quotedMatch[1]
+  }
+  return `AI 可见度诊断报告_${reportId}-${exportId}.pdf`
 }

@@ -8,11 +8,14 @@ import com.huanjing.geo.module.presale.dto.snapshot.computed.ComputedSnapshotDTO
 import com.huanjing.geo.module.presale.dto.snapshot.editable.EditableContentDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.MarketBattleground;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
+import com.huanjing.geo.module.presale.dto.snapshot.raw.SamplePrompt;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * L3 默认值、字段元数据和 schema 归一化的后端权威源。
@@ -99,12 +102,18 @@ public class PresaleL3Defaults {
     private MarketBattleground defaultMarketBattleground(RawSnapshotDTO raw) {
         String brand = raw == null || raw.getClientInfo() == null || raw.getClientInfo().getBrandName() == null
                 ? "文王贡酒" : raw.getClientInfo().getBrandName();
+        String region = raw == null || raw.getClientInfo() == null || isBlank(raw.getClientInfo().getRegion())
+                ? "本地" : raw.getClientInfo().getRegion();
+        String industry = raw == null || raw.getClientInfo() == null
+                ? null : raw.getClientInfo().getIndustry();
+        IndustryProfile profile = resolveIndustryProfile(industry);
+        MarketScale scale = estimateMarketScale(region, profile);
 
         return MarketBattleground.builder()
-                .topbarTitle("MARKET BATTLEGROUND · AI 搜索新战场")
-                .topbarRight("GEO · CONFIDENTIAL")
+                .topbarTitle(MarketBattlegroundValidator.TOPBAR_TITLE)
+                .topbarRight(MarketBattlegroundValidator.TOPBAR_RIGHT)
                 .pageTitle("每天，有数千万次消费决策正在 AI 上发生")
-                .pageKicker("The new battleground for your brand")
+                .pageKicker(MarketBattlegroundValidator.PAGE_KICKER)
                 .marketCard(MarketBattleground.MarketCard.builder()
                         .label("CHINA AI MARKET · 2026 Q1")
                         .source("来源：行业公开数据综合估算")
@@ -114,52 +123,48 @@ public class PresaleL3Defaults {
                                 stat("25.1", "亿次", "日均提问总量"),
                                 stat("63.8", "次", "豆包人均月使用")
                         ))
-                        .platformLabel("TOP 平台")
+                        .platformLabel(MarketBattlegroundValidator.PLATFORM_LABEL)
                         .platforms(List.of(
                                 platform("豆包", "4.45 亿"),
                                 platform("千问", "2.66 亿"),
                                 platform("DeepSeek", "1.97 亿")
                         ))
-                        .platformSuffix("元宝 / Kimi 等")
+                        .platformSuffix(MarketBattlegroundValidator.PLATFORM_SUFFIX)
                         .build())
                 .nationalCard(MarketBattleground.CalculationCard.builder()
-                        .label("NATIONAL · 全国装修每天")
-                        .valuePrefix("")
-                        .value("2.5")
-                        .unit("亿+")
-                        .subtitle("条 / 天 · 装修相关 AI 提问")
+                        .label("NATIONAL · 全国" + profile.industryLabel() + "每天")
+                        .valuePrefix("约")
+                        .value(scale.nationalValue())
+                        .unit(scale.nationalUnit())
+                        .subtitle("条 / 天 · " + profile.industryLabel() + "相关 AI 提问")
                         .calculationLabel("CALCULATION · 推导口径")
                         .rows(List.of(
                                 calcRow("日均提问总量", "约 25 亿次 / 天", false),
-                                calcRow("生活/装修类占比", "约 8% - 15%", false),
-                                calcRow("建筑装饰在装修类占比", "约 45% - 60%", false),
-                                calcRow("中枢值", "约 2.5 亿条 / 天", true)
+                                calcRow(profile.parentCategory() + "类占比", profile.parentShareRange(), false),
+                                calcRow(profile.industryLabel() + "占比", profile.industryShareRange(), false),
+                                calcRow("中枢值", scale.nationalTotalText(), true)
                         ))
                         .build())
-                .bridgeText("↓ 聚焦到您的核心市场")
+                .bridgeText(MarketBattlegroundValidator.BRIDGE_TEXT)
                 .regionalCard(MarketBattleground.CalculationCard.builder()
-                        .label("REGIONAL · 华南装修每天")
+                        .label("REGIONAL · " + region + profile.industryLabel() + "每天")
                         .valuePrefix("约")
-                        .value("0.7")
-                        .unit("亿")
-                        .subtitle("条 / 天 · 华南消费者向 AI 提问")
+                        .value(scale.regionalValue())
+                        .unit(scale.regionalUnit())
+                        .subtitle("条 / 天 · " + region + "消费者向 AI 提问")
                         .calculationLabel("CALCULATION · 推导口径")
                         .rows(List.of(
-                                calcRow("全国装修日提问", "约 2.5 亿条 / 天", false),
-                                calcRow("华南/广东占比", "约 28%（规模口径）", false),
+                                calcRow("全国" + profile.industryLabel() + "日提问", scale.nationalTotalText(), false),
+                                calcRow(region + "占比", scale.regionShareText(), false),
                                 calcRow("数据来源", "行业公开数据综合估算", false),
-                                calcRow("区域日提问", "≈ 0.7 亿条 / 天", true)
+                                calcRow("区域日提问", scale.regionalTotalText(), true)
                         ))
                         .build())
                 .narrative(MarketBattleground.Narrative.builder()
-                        .intro("这意味着，全国消费者每天 约 2.5 亿次、华南消费者每天约 0.7 亿次 通过 AI 询问：")
-                        .questions(List.of(
-                                "\"广州装修选什么门窗品牌好？\"",
-                                "\"XX 品牌和本地头部品牌哪个更值得选？\"",
-                                "\"广东新房装系统门窗，找哪家性价比高？\""
-                        ))
-                        .conclusion("而 AI 给出的答案——正在直接决定他们的购买选择。以华南装修门窗品牌为例：按推荐场景每月触发量保守估算约 100 万次，若品牌当前在 AI 推荐中的覆盖率仅 5-10%，意味着 每月有 90 万+ 次推荐机会与该品牌无关——按行业平均 1‰ 咨询转化、客单价 3 万元测算，潜在流失订单规模可达 270 万元/月以上。")
-                        .brandLinePrefix("→")
+                        .intro("这意味着，消费者正在通过 AI 持续询问：")
+                        .questions(buildDecisionQuestions(raw, region, profile))
+                        .conclusion("而 AI 给出的答案，正在影响他们下一步选择。")
+                        .brandLinePrefix(MarketBattlegroundValidator.BRAND_LINE_PREFIX)
                         .brandName(brand)
                         .brandLineSuffix("在这些场景中的真实可见度如何？详见下章诊断结果。")
                         .build())
@@ -168,19 +173,246 @@ public class PresaleL3Defaults {
                 .build();
     }
 
+    private IndustryProfile resolveIndustryProfile(String industry) {
+        String key = industry == null ? "" : industry.trim().toLowerCase();
+        return switch (key) {
+            case "medical_beauty", "medical_beauty_hospital", "医美", "医疗美容" ->
+                    new IndustryProfile("医美", "生活/美容", "约 0.8% - 2.0%", "约 12% - 25%",
+                            List.of("做双眼皮哪家更自然？", "光子嫩肤选哪家性价比高？", "面部填充推荐哪家医生？"));
+            case "dental", "口腔" ->
+                    new IndustryProfile("口腔", "医疗/健康", "约 1.0% - 2.5%", "约 8% - 18%",
+                            List.of("种植牙哪家机构更靠谱？", "牙齿矫正选哪家性价比高？", "儿童齿科推荐哪家医生？"));
+            case "hair_transplant", "植发" ->
+                    new IndustryProfile("植发", "医疗/美容", "约 0.8% - 2.0%", "约 3% - 8%",
+                            List.of("植发哪家机构成活率高？", "发际线种植选哪家更自然？", "脱发治疗推荐哪家医生？"));
+            case "home_decoration", "decoration", "家装", "装修" ->
+                    new IndustryProfile("家装", "生活/居住", "约 1.5% - 3.5%", "约 18% - 35%",
+                            List.of("装修公司哪家更靠谱？", "全屋装修选哪家性价比高？", "装修避坑找哪家公司？"));
+            case "education", "教培", "教育" ->
+                    new IndustryProfile("教培", "教育/学习", "约 1.5% - 4.0%", "约 10% - 28%",
+                            List.of("课程培训哪家更有效？", "辅导机构选哪家性价比高？", "孩子补课推荐哪家老师？"));
+            case "local_food", "restaurant", "餐饮", "本地餐饮" ->
+                    new IndustryProfile("餐饮", "生活/消费", "约 2.0% - 5.0%", "约 15% - 35%",
+                            List.of("聚餐去哪家更合适？", "附近哪家餐厅性价比高？", "请客吃饭推荐哪家店？"));
+            case "auto_service", "汽车服务" ->
+                    new IndustryProfile("汽车服务", "生活/出行", "约 1.0% - 2.5%", "约 12% - 25%",
+                            List.of("汽车保养哪家门店靠谱？", "修车选哪家性价比高？", "洗美养护推荐哪家店？"));
+            default ->
+                    new IndustryProfile(isBlank(industry) ? "本地服务" : industry, "生活/服务",
+                            "约 0.8% - 3.0%", "约 5% - 25%",
+                            List.of("服务机构哪家更靠谱？", "选哪家性价比更高？", "本地推荐哪家更合适？"));
+        };
+    }
+
+    private MarketScale estimateMarketScale(String region, IndustryProfile profile) {
+        double dailyQuestions = 2_500_000_000D;
+        double national = dailyQuestions * midpoint(profile.parentShareRange()) * midpoint(profile.industryShareRange());
+        double regionShare = estimateRegionShare(region);
+        double regional = national * regionShare;
+        return new MarketScale(
+                compactValue(national),
+                compactUnit(national, true),
+                totalText(national),
+                compactValue(regional),
+                compactUnit(regional, false),
+                totalText(regional),
+                "约 " + formatPercent(regionShare)
+        );
+    }
+
+    private List<String> buildDecisionQuestions(RawSnapshotDTO raw, String region, IndustryProfile profile) {
+        List<String> samplePrompts = raw == null || raw.getSamplePrompts() == null
+                ? List.of()
+                : raw.getSamplePrompts().stream()
+                .filter(item -> item != null && !isBlank(item.getPromptContent()))
+                .map(SamplePrompt::getPromptContent)
+                .distinct()
+                .limit(3)
+                .toList();
+        if (samplePrompts.size() == 3) {
+            return samplePrompts.stream()
+                    .map(this::quoteQuestion)
+                    .toList();
+        }
+        return profile.questionSuffixes().stream()
+                .map(question -> "\"" + region + question + "\"")
+                .toList();
+    }
+
+    private String quoteQuestion(String value) {
+        String text = value.trim();
+        if ((text.startsWith("\"") && text.endsWith("\""))
+                || (text.startsWith("“") && text.endsWith("”"))) {
+            return text;
+        }
+        return "\"" + text + "\"";
+    }
+
+    private double midpoint(String rangeText) {
+        Matcher matcher = Pattern.compile("(\\d+(?:\\.\\d+)?)%").matcher(rangeText);
+        List<Double> values = new ArrayList<>();
+        while (matcher.find()) {
+            values.add(Double.parseDouble(matcher.group(1)) / 100D);
+        }
+        if (values.size() >= 2) {
+            return (values.get(0) + values.get(1)) / 2D;
+        }
+        if (values.size() == 1) {
+            return values.get(0);
+        }
+        return 0.01D;
+    }
+
+    private double estimateRegionShare(String region) {
+        String value = region == null ? "" : region;
+        if (value.contains("北京") || value.contains("上海") || value.contains("广州") || value.contains("深圳")) {
+            return 0.012D;
+        }
+        if (value.contains("阜阳")) {
+            return 0.0006D;
+        }
+        if (value.contains("县")) {
+            return 0.0003D;
+        }
+        return 0.0008D;
+    }
+
+    private String compactValue(double value) {
+        if (value >= 100_000_000D) {
+            return formatOneDecimal(value / 100_000_000D);
+        }
+        return formatOneDecimal(value / 10_000D);
+    }
+
+    private String compactUnit(double value, boolean national) {
+        if (value >= 100_000_000D) {
+            return national ? "亿+" : "亿";
+        }
+        return national ? "万+" : "万";
+    }
+
+    private String totalText(double value) {
+        return "约 " + compactValue(value) + " " + (value >= 100_000_000D ? "亿" : "万") + "条 / 天";
+    }
+
+    private String formatPercent(double value) {
+        double percent = value * 100D;
+        if (percent >= 1D) {
+            return formatOneDecimal(percent) + "%";
+        }
+        return String.format(java.util.Locale.ROOT, "%.2f%%", percent);
+    }
+
+    private String formatOneDecimal(double value) {
+        String text = String.format(java.util.Locale.ROOT, "%.1f", value);
+        return text.endsWith(".0") ? text.substring(0, text.length() - 2) : text;
+    }
+
+    private String formatOneDecimalFixed(double value) {
+        return String.format(java.util.Locale.ROOT, "%.1f", value);
+    }
+
     private MarketBattleground normalizeMarket(MarketBattleground value, MarketBattleground defaults) {
-        value.setTopbarTitle(coalesce(value.getTopbarTitle(), defaults.getTopbarTitle()));
-        value.setTopbarRight(coalesce(value.getTopbarRight(), defaults.getTopbarRight()));
+        value.setTopbarTitle(defaults.getTopbarTitle());
+        value.setTopbarRight(defaults.getTopbarRight());
         value.setPageTitle(coalesce(value.getPageTitle(), defaults.getPageTitle()));
-        value.setPageKicker(coalesce(value.getPageKicker(), defaults.getPageKicker()));
+        value.setPageKicker(defaults.getPageKicker());
         value.setMarketCard(normalizeMarketCard(value.getMarketCard(), defaults.getMarketCard()));
         value.setNationalCard(normalizeCard(value.getNationalCard(), defaults.getNationalCard()));
-        value.setBridgeText(coalesce(value.getBridgeText(), defaults.getBridgeText()));
+        value.setBridgeText(defaults.getBridgeText());
         value.setRegionalCard(normalizeCard(value.getRegionalCard(), defaults.getRegionalCard()));
         value.setNarrative(normalizeNarrative(value.getNarrative(), defaults.getNarrative()));
         value.setFootnote(coalesce(value.getFootnote(), defaults.getFootnote()));
         value.setFooterBrand(coalesce(value.getFooterBrand(), defaults.getFooterBrand()));
+        recalculateMarketTraffic(value);
         return value;
+    }
+
+    private void recalculateMarketTraffic(MarketBattleground value) {
+        if (value == null
+                || value.getNationalCard() == null
+                || value.getRegionalCard() == null
+                || value.getNationalCard().getRows() == null
+                || value.getRegionalCard().getRows() == null
+                || value.getNationalCard().getRows().size() < 4
+                || value.getRegionalCard().getRows().size() < 4) {
+            return;
+        }
+
+        List<MarketBattleground.CalculationRow> nationalRows = value.getNationalCard().getRows();
+        List<MarketBattleground.CalculationRow> regionalRows = value.getRegionalCard().getRows();
+        Double dailyQuestionCount = parseCount(nationalRows.get(0).getValue());
+        Double parentCategoryShare = parsePercent(nationalRows.get(1).getValue());
+        Double industryShare = parsePercent(nationalRows.get(2).getValue());
+        Double regionShare = parsePercent(regionalRows.get(1).getValue());
+        if (dailyQuestionCount == null || parentCategoryShare == null || industryShare == null || regionShare == null) {
+            return;
+        }
+
+        double nationalTotal = dailyQuestionCount * parentCategoryShare * industryShare;
+        double regionalTotal = nationalTotal * regionShare;
+        if (nationalTotal <= 0D || regionalTotal <= 0D
+                || Double.isNaN(nationalTotal) || Double.isNaN(regionalTotal)
+                || Double.isInfinite(nationalTotal) || Double.isInfinite(regionalTotal)) {
+            return;
+        }
+
+        FormattedTraffic national = formatTraffic(nationalTotal);
+        FormattedTraffic regional = formatTraffic(regionalTotal);
+        value.getNationalCard().setValue(national.value());
+        value.getNationalCard().setUnit(national.unit());
+        nationalRows.get(3).setValue(national.text());
+
+        value.getRegionalCard().setValue(regional.value());
+        value.getRegionalCard().setUnit(regional.unit());
+        regionalRows.get(0).setValue(national.text());
+        regionalRows.get(3).setValue(regional.text());
+    }
+
+    private Double parseCount(String text) {
+        Double number = firstNumber(text);
+        if (number == null) {
+            return null;
+        }
+        String value = text == null ? "" : text.replace(" ", "");
+        if (value.contains("亿")) {
+            return number * 100_000_000D;
+        }
+        if (value.contains("万")) {
+            return number * 10_000D;
+        }
+        return null;
+    }
+
+    private Double parsePercent(String text) {
+        if (text == null || !text.contains("%")) {
+            return null;
+        }
+        Double number = firstNumber(text);
+        if (number == null) {
+            return null;
+        }
+        return number / 100D;
+    }
+
+    private Double firstNumber(String text) {
+        if (text == null) {
+            return null;
+        }
+        Matcher matcher = Pattern.compile("(\\d+(?:\\.\\d+)?)").matcher(text);
+        if (!matcher.find()) {
+            return null;
+        }
+        return Double.parseDouble(matcher.group(1));
+    }
+
+    private FormattedTraffic formatTraffic(double count) {
+        if (count >= 10_000D) {
+            String value = formatOneDecimalFixed(count / 10_000D);
+            return new FormattedTraffic(value, "万次", value + "万次");
+        }
+        String value = String.valueOf(Math.round(count));
+        return new FormattedTraffic(value, "次", value + "次");
     }
 
     private MarketBattleground.MarketCard normalizeMarketCard(MarketBattleground.MarketCard value,
@@ -189,9 +421,9 @@ public class PresaleL3Defaults {
         value.setLabel(coalesce(value.getLabel(), defaults.getLabel()));
         value.setSource(coalesce(value.getSource(), defaults.getSource()));
         value.setStats(normalizeList(value.getStats(), defaults.getStats(), this::normalizeStat));
-        value.setPlatformLabel(coalesce(value.getPlatformLabel(), defaults.getPlatformLabel()));
+        value.setPlatformLabel(defaults.getPlatformLabel());
         value.setPlatforms(normalizeList(value.getPlatforms(), defaults.getPlatforms(), this::normalizePlatform));
-        value.setPlatformSuffix(coalesce(value.getPlatformSuffix(), defaults.getPlatformSuffix()));
+        value.setPlatformSuffix(defaults.getPlatformSuffix());
         return value;
     }
 
@@ -239,7 +471,7 @@ public class PresaleL3Defaults {
         value.setIntro(coalesce(value.getIntro(), defaults.getIntro()));
         value.setQuestions(normalizeStringList(value.getQuestions(), defaults.getQuestions()));
         value.setConclusion(coalesce(value.getConclusion(), defaults.getConclusion()));
-        value.setBrandLinePrefix(coalesce(value.getBrandLinePrefix(), defaults.getBrandLinePrefix()));
+        value.setBrandLinePrefix(defaults.getBrandLinePrefix());
         value.setBrandName(coalesce(value.getBrandName(), defaults.getBrandName()));
         value.setBrandLineSuffix(coalesce(value.getBrandLineSuffix(), defaults.getBrandLineSuffix()));
         return value;
@@ -267,6 +499,10 @@ public class PresaleL3Defaults {
         return value == null ? defaultValue : value;
     }
 
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
+
     private MarketBattleground.Stat stat(String value, String unit, String label) {
         return MarketBattleground.Stat.builder().value(value).unit(unit).label(label).build();
     }
@@ -288,5 +524,24 @@ public class PresaleL3Defaults {
                 .maxLength(maxLength)
                 .warnLength(warnLength)
                 .build());
+    }
+
+    private record IndustryProfile(String industryLabel,
+                                   String parentCategory,
+                                   String parentShareRange,
+                                   String industryShareRange,
+                                   List<String> questionSuffixes) {
+    }
+
+    private record MarketScale(String nationalValue,
+                               String nationalUnit,
+                               String nationalTotalText,
+                               String regionalValue,
+                               String regionalUnit,
+                               String regionalTotalText,
+                               String regionShareText) {
+    }
+
+    private record FormattedTraffic(String value, String unit, String text) {
     }
 }

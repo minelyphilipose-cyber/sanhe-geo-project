@@ -138,7 +138,15 @@ const MAX_VISIBLE_MISSING_ROWS = 8
 
 // ─── 竞品名列表(动态,不硬编码) ──────────────────────
 const competitorNames = computed(() =>
-  mergedView.value.merged_competitors.map((c) => c.name)
+  sortedCompetitors.value.map((c) => c.name)
+)
+
+const sortedCompetitors = computed(() =>
+  [...mergedView.value.merged_competitors].sort((a, b) => {
+    const mentionDiff = (b.mention_count ?? 0) - (a.mention_count ?? 0)
+    if (mentionDiff !== 0) return mentionDiff
+    return a.rank - b.rank
+  })
 )
 
 // 长名字截断(表头空间有限,保留可识别性)
@@ -222,7 +230,7 @@ const lowGapCount = computed(
 
 // ─── 底部引用:竞品组优势优先,否则 Top1 竞品 scene_advantages ────────────
 const topCompetitor = computed(() =>
-  mergedView.value.merged_competitors.find((c) => c.rank === 1) ?? null
+  sortedCompetitors.value[0] ?? null
 )
 const groupSceneAdvantages = computed(() =>
   mergedView.value.group_scene_advantages?.filter((item) => item && item.trim()) ?? []

@@ -4,7 +4,7 @@
       <div>
         <el-breadcrumb separator="/">
           <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">售前报告</el-breadcrumb-item>
-          <el-breadcrumb-item :to="{ path: promptListPath }">Prompt 调用记录</el-breadcrumb-item>
+          <el-breadcrumb-item :to="promptListLocation">Prompt 调用记录</el-breadcrumb-item>
           <el-breadcrumb-item>调用详情</el-breadcrumb-item>
         </el-breadcrumb>
         <h2 class="page-title">Prompt 调用详情</h2>
@@ -184,6 +184,10 @@ const promptResultId = computed(() => Number(route.params.promptResultId))
 const promptListPath = computed(() =>
   `/admin/presale/report/${reportId.value}/versions/${versionNo.value}/prompts`
 )
+const promptListLocation = computed(() => ({
+  path: promptListPath.value,
+  query: route.query
+}))
 
 const loading = ref(false)
 const detail = ref<PresalePromptTraceDetailVO | null>(null)
@@ -213,7 +217,7 @@ async function load() {
 }
 
 function goList() {
-  router.push(promptListPath.value)
+  router.push(promptListLocation.value)
 }
 
 function stripMarkdownJsonFence(value: string) {

@@ -444,50 +444,47 @@ function renderDefaultPhaseDescription(phase: RoiPhase): string {
 /**
  * 合并 L1 competitors × L3 competitor_scene_descriptions。
  *
- * **强制按 rank 1/2/3 顺序输出**,不依赖输入数组顺序。L1 最多 3 个竞品(schema maxItems=3),
- * 实际存在几个就输出几个,但顺序严格 1 → 2 → 3。
+ * 按当前提及次数 mention_count 降序输出,并重新生成展示 rank。
+ * L1 最多 3 个竞品(schema maxItems=3),实际存在几个就输出几个。
  *
  * 特殊回退:L3.scene_advantages_polished 为 null 时回退 L1.scene_advantages_raw。
  * 这是 L3 唯一一处向 L1(非默认模板)回退的字段。
  *
  * 实现策略:
- * 1. 将 L1 按 rank 建 map(最多 3 条),L3 按 competitor_rank 建 map
- * 2. 遍历固定序 [1, 2, 3],L1 map 里存在才输出,不存在则跳过(客户填报不足 3 个竞品的正常场景)
+ * 1. L3 按 competitor_rank 建 map,保证场景描述仍按原始竞品 rank 关联
+ * 2. L1 按 mention_count 降序排序,同分时按原始 rank 升序稳定兜底
+ * 3. 输出时将展示 rank 重排为 1/2/3
  *
- * 契约意义:后端 MergeService 必须做同样的顺序保证。
+ * 契约意义:后端 MergeService 必须做同样的排序和展示 rank 重排。
  */
 export function mergeCompetitors(
   l1Competitors: Competitor[],
   l3Descriptions: CompetitorSceneDescription[]
 ): MergedCompetitor[] {
-  const l1ByRank = new Map<number, Competitor>();
-  for (const c of l1Competitors) {
-    l1ByRank.set(c.rank, c);
-  }
   const l3ByRank = new Map<number, CompetitorSceneDescription>();
   for (const d of l3Descriptions) {
     l3ByRank.set(d.competitor_rank, d);
   }
 
-  const ORDER: ReadonlyArray<1 | 2 | 3> = [1, 2, 3];
-  const result: MergedCompetitor[] = [];
-  for (const rank of ORDER) {
-    const c = l1ByRank.get(rank);
-    if (c == null) continue; // 客户填报不足 3 个,该 rank 无竞品,跳过
+  return [...l1Competitors]
+    .sort((a, b) => {
+      const mentionDiff = (b.mention_count ?? 0) - (a.mention_count ?? 0);
+      if (mentionDiff !== 0) return mentionDiff;
+      return a.rank - b.rank;
+    })
+    .map((c, index) => {
+      const l3 = l3ByRank.get(c.rank);
+      const polished = l3?.scene_advantages_polished;
+      const useL3 = polished != null;
 
-    const l3 = l3ByRank.get(rank);
-    const polished = l3?.scene_advantages_polished;
-    const useL3 = polished != null;
-
-    result.push({
-      rank: c.rank,
-      name: c.name,
-      mention_count: c.mention_count,
-      mention_rate: c.mention_rate,
-      avg_ranking: c.avg_ranking,
-      scene_advantages: useL3 ? polished! : c.scene_advantages_raw ?? [],
-      scene_is_polished: useL3,
+      return {
+        rank: (index + 1) as 1 | 2 | 3,
+        name: c.name,
+        mention_count: c.mention_count,
+        mention_rate: c.mention_rate,
+        avg_ranking: c.avg_ranking,
+        scene_advantages: useL3 ? polished! : c.scene_advantages_raw ?? [],
+        scene_is_polished: useL3,
+      };
     });
-  }
-  return result;
 }

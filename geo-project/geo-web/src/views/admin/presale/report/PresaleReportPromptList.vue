@@ -141,8 +141,8 @@
           :page-sizes="[20, 50, 100]"
           :total="pagination.total"
           layout="total, sizes, prev, pager, next, jumper"
-          @size-change="loadList"
-          @current-change="loadList"
+          @size-change="onPageSizeChange"
+          @current-change="onCurrentChange"
         />
       </div>
     </el-card>
@@ -217,13 +217,22 @@ async function loadList() {
 
 function onSearch() {
   pagination.current = 1
-  loadList()
+  syncQueryAndLoad()
 }
 
 function onReset() {
   resetFilter()
   pagination.current = 1
-  loadList()
+  syncQueryAndLoad()
+}
+
+function onPageSizeChange() {
+  pagination.current = 1
+  syncQueryAndLoad()
+}
+
+function onCurrentChange() {
+  syncQueryAndLoad()
 }
 
 function resetFilter() {
@@ -237,7 +246,10 @@ function resetFilter() {
 function switchVersion(value: number | string) {
   const next = Number(value)
   if (!Number.isFinite(next) || next === versionNo.value) return
-  router.push(`/admin/presale/report/${reportId.value}/versions/${next}/prompts`)
+  router.push({
+    path: `/admin/presale/report/${reportId.value}/versions/${next}/prompts`,
+    query: buildRouteQuery()
+  })
 }
 
 function goReportDetail() {
@@ -248,7 +260,10 @@ function goReportDetail() {
 }
 
 function goDetail(promptResultId: number) {
-  router.push(`/admin/presale/report/${reportId.value}/versions/${versionNo.value}/prompts/${promptResultId}`)
+  router.push({
+    path: `/admin/presale/report/${reportId.value}/versions/${versionNo.value}/prompts/${promptResultId}`,
+    query: buildRouteQuery()
+  })
 }
 
 function versionLabel(item: ReportVersionOptionVO) {
@@ -267,7 +282,65 @@ function statusTagType(status: PresalePromptTraceStatus) {
   return 'danger'
 }
 
+async function syncQueryAndLoad() {
+  await router.replace({
+    path: route.path,
+    query: buildRouteQuery()
+  })
+  await loadList()
+}
+
+function buildRouteQuery() {
+  return {
+    platformCode: filter.platformCode || undefined,
+    batchNo: filter.batchNo ? String(filter.batchNo) : undefined,
+    category: filter.category || undefined,
+    keyword: filter.keyword || undefined,
+    status: filter.status || undefined,
+    current: pagination.current > 1 ? String(pagination.current) : undefined,
+    size: pagination.size !== 20 ? String(pagination.size) : undefined
+  }
+}
+
+function restoreStateFromQuery() {
+  filter.platformCode = queryString('platformCode')
+  filter.batchNo = queryBatchNo()
+  filter.category = queryString('category')
+  filter.keyword = queryString('keyword')
+  filter.status = queryStatus()
+  pagination.current = queryPositiveInt('current', 1)
+  pagination.size = queryPageSize()
+}
+
+function queryString(key: string) {
+  const value = route.query[key]
+  return typeof value === 'string' ? value : ''
+}
+
+function queryBatchNo(): 1 | 2 | undefined {
+  const value = Number(queryString('batchNo'))
+  return value === 1 || value === 2 ? value : undefined
+}
+
+function queryStatus(): PresalePromptTraceStatus | undefined {
+  const value = queryString('status')
+  return value === 'SUCCESS' || value === 'ANALYZE_FAILED' || value === 'QUERY_FAILED'
+    ? value
+    : undefined
+}
+
+function queryPositiveInt(key: string, fallback: number) {
+  const value = Number(queryString(key))
+  return Number.isInteger(value) && value > 0 ? value : fallback
+}
+
+function queryPageSize() {
+  const value = queryPositiveInt('size', 20)
+  return [20, 50, 100].includes(value) ? value : 20
+}
+
 onMounted(async () => {
+  restoreStateFromQuery()
   await loadVersions()
   await loadList()
 })

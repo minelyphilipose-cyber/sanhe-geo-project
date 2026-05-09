@@ -383,12 +383,13 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { ArrowDown } from '@element-plus/icons-vue'
 import {
   createReport,
   generateLlmPromptQuestions,
+  getRegenerateDraft,
   getReportScopePreview,
   listPromptTemplates,
   type CreateReportRequest,
@@ -397,6 +398,7 @@ import {
   type PromptTemplateDraftRequest,
   type PromptTemplateVO,
   type PresalePromptCategoryCode,
+  type RegenerateDraftVO,
   type PromptSourceMode,
   type ReportScopePreviewVO
 } from '@/api/presaleReport'
@@ -439,6 +441,7 @@ const MAX_LLM_TOTAL_COUNT = 60
 const MAX_LLM_CATEGORY_COUNT = 30
 
 const router = useRouter()
+const route = useRoute()
 const formRef = ref<FormInstance>()
 const submitting = ref(false)
 const scopePreview = ref<ReportScopePreviewVO | null>(null)
@@ -659,6 +662,7 @@ async function loadPromptTemplates() {
     }))
     form.promptTemplateVersion = promptTemplateVersion.value
     applyDefaultLlmPlanFromTemplates()
+    await applyRegenerateDraftFromRoute()
   } catch {
     promptSources.value = []
     promptDrafts.value = []
@@ -666,6 +670,67 @@ async function loadPromptTemplates() {
   } finally {
     promptLoading.value = false
   }
+}
+
+async function applyRegenerateDraftFromRoute() {
+  const reportId = Number(route.query.regenerateFrom)
+  if (!Number.isFinite(reportId) || reportId <= 0) {
+    return
+  }
+  try {
+    const draft = await getRegenerateDraft(reportId)
+    applyRegenerateDraft(draft)
+    promptPanelOpen.value = true
+    ElMessage.success('已载入上一次报告的问题')
+  } catch (err: any) {
+    ElMessage.error(err?.message || '载入再次生成草稿失败')
+  }
+}
+
+function applyRegenerateDraft(draft: RegenerateDraftVO) {
+  form.brandName = draft.brandName || ''
+  form.industry = draft.industry || ''
+  form.industryRole = draft.industryRole || ''
+  form.region = draft.region || ''
+  form.userDemand = draft.userDemand || ''
+  form.userType = draft.userType || ''
+
+  if (draft.promptSourceMode === 'llm') {
+    activePromptTab.value = 'llm'
+    const plan = draft.llmQuestionPlan
+    if (plan) {
+      llmPlan.totalCount = plan.totalCount
+      Object.assign(llmPlan.categoryCounts, {
+        ...emptyCategoryCounts(),
+        ...plan.categoryCounts
+      })
+    }
+    llmQuestions.value = (draft.llmPromptQuestions || []).map((item) => ({
+      id: nextLlmQuestionId(),
+      categoryCode: item.categoryCode,
+      promptContent: item.promptContent
+    }))
+    llmBaseSnapshot.value = currentBaseSnapshot()
+    llmStale.value = false
+    return
+  }
+
+  activePromptTab.value = 'template'
+  const previousBySourceId = new Map(
+    (draft.promptTemplates || []).map((item) => [item.sourceTemplateId, item.promptContent])
+  )
+  const previousByPromptCode = new Map(
+    (draft.promptTemplates || [])
+      .filter((item) => item.sourcePromptCode)
+      .map((item) => [item.sourcePromptCode as string, item.promptContent])
+  )
+  promptDrafts.value = promptDrafts.value.map((item) => ({
+    ...item,
+    promptContent:
+      previousBySourceId.get(item.sourceTemplateId) ||
+      previousByPromptCode.get(promptSources.value.find((source) => source.id === item.sourceTemplateId)?.promptCode || '') ||
+      item.promptContent
+  }))
 }
 
 function onIndustryChange() {

@@ -12,6 +12,7 @@ import com.huanjing.geo.module.presale.dto.snapshot.editable.MarketBattleground;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.BenchmarksFrozen;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.ClientInfo;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
+import com.huanjing.geo.module.presale.dto.snapshot.raw.SamplePrompt;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.TestSummary;
 import com.huanjing.geo.module.presale.ruleengine.RuleCodes;
 import org.junit.jupiter.api.Test;
@@ -176,10 +177,47 @@ class PresaleL3InitServiceTest {
         EditableContentDTO editable = objectMapper.readValue(editableJson, EditableContentDTO.class);
         assertNotNull(editable.getMarketBattleground());
         assertEquals("每天，有数千万次消费决策正在 AI 上发生", editable.getMarketBattleground().getPageTitle());
+        assertEquals("THE NEW BATTLEGROUND FOR YOUR BRAND", editable.getMarketBattleground().getPageKicker());
+        assertEquals("→", editable.getMarketBattleground().getNarrative().getBrandLinePrefix());
         assertEquals(4, editable.getMarketBattleground().getMarketCard().getStats().size());
         assertEquals(3, editable.getMarketBattleground().getMarketCard().getPlatforms().size());
         assertEquals(4, editable.getMarketBattleground().getNationalCard().getRows().size());
         assertEquals(4, editable.getMarketBattleground().getRegionalCard().getRows().size());
+    }
+
+    @Test
+    void derive_populatesPage03QuestionsFromRawSamplePrompts() throws Exception {
+        RawSnapshotDTO raw = RawSnapshotDTO.builder()
+                .clientInfo(ClientInfo.builder()
+                        .brandName("无二火锅")
+                        .industry("restaurant")
+                        .industryRole("连锁品牌")
+                        .region("阜阳")
+                        .build())
+                .testSummary(TestSummary.builder()
+                        .totalPlatforms(5)
+                        .totalPrompts(25)
+                        .build())
+                .benchmarksFrozen(BenchmarksFrozen.builder()
+                        .industry("restaurant")
+                        .industryRole("_ALL_")
+                        .industryAvg(ScoreSet.builder().overall(50.0D).build())
+                        .build())
+                .competitors(List.of())
+                .samplePrompts(List.of(
+                        SamplePrompt.builder().category("推荐型").promptContent("阜阳火锅店哪家更好吃？").build(),
+                        SamplePrompt.builder().category("问题型").promptContent("阜阳吃火锅哪家性价比高？").build(),
+                        SamplePrompt.builder().category("场景型").promptContent("阜阳家庭聚餐吃火锅推荐哪家？").build()
+                ))
+                .build();
+
+        String editableJson = service.derive(objectMapper.writeValueAsString(raw), buildComputedJson(List.of()));
+
+        EditableContentDTO editable = objectMapper.readValue(editableJson, EditableContentDTO.class);
+        MarketBattleground market = editable.getMarketBattleground();
+        assertTrue(market.getNarrative().getQuestions().stream().allMatch(q -> q.contains("阜阳")));
+        assertTrue(market.getNarrative().getQuestions().stream().allMatch(q -> q.contains("火锅")));
+        assertTrue(market.getNarrative().getQuestions().stream().noneMatch(q -> q.contains("无二火锅")));
     }
 
     @Test
@@ -198,6 +236,55 @@ class PresaleL3InitServiceTest {
       MarketBattleground market = objectMapper.readValue(normalized, EditableContentDTO.class).getMarketBattleground();
       assertEquals("", market.getPageTitle());
       assertEquals("", market.getMarketCard().getStats().get(2).getLabel());
+    }
+
+    @Test
+    void normalizeJson_restoresFixedMarketBattlegroundFields() throws Exception {
+      EditableContentDTO editable = objectMapper.readValue(
+              service.derive(buildRawJson(), buildComputedJson(List.of())),
+              EditableContentDTO.class);
+      editable.getMarketBattleground().setPageKicker("The new battleground for your brand");
+      editable.getMarketBattleground().setBridgeText("custom bridge");
+      editable.getMarketBattleground().getNarrative().setBrandLinePrefix("-");
+
+        String normalized = l3Defaults.normalizeJson(
+                objectMapper.writeValueAsString(editable),
+                buildRawJson(),
+                buildComputedJson(List.of()));
+
+      MarketBattleground market = objectMapper.readValue(normalized, EditableContentDTO.class).getMarketBattleground();
+      assertEquals("THE NEW BATTLEGROUND FOR YOUR BRAND", market.getPageKicker());
+      assertEquals("↓ 聚焦到您的核心市场", market.getBridgeText());
+      assertEquals("→", market.getNarrative().getBrandLinePrefix());
+    }
+
+    @Test
+    void normalizeJson_recalculatesMarketTrafficFromDoubaoFactors() throws Exception {
+      EditableContentDTO editable = objectMapper.readValue(
+              service.derive(buildRawJson(), buildComputedJson(List.of())),
+              EditableContentDTO.class);
+      MarketBattleground market = editable.getMarketBattleground();
+      market.getNationalCard().getRows().get(0).setValue("15.0亿次");
+      market.getNationalCard().getRows().get(1).setValue("12.5%");
+      market.getNationalCard().getRows().get(2).setValue("1.5%");
+      market.getNationalCard().getRows().get(3).setValue("9999万次");
+      market.getRegionalCard().getRows().get(1).setValue("0.08%");
+      market.getRegionalCard().getRows().get(3).setValue("9999次");
+
+      String normalized = l3Defaults.normalizeJson(
+              objectMapper.writeValueAsString(editable),
+              buildRawJson(),
+              buildComputedJson(List.of()));
+
+      MarketBattleground normalizedMarket = objectMapper.readValue(normalized, EditableContentDTO.class)
+              .getMarketBattleground();
+      assertEquals("281.3", normalizedMarket.getNationalCard().getValue());
+      assertEquals("万次", normalizedMarket.getNationalCard().getUnit());
+      assertEquals("281.3万次", normalizedMarket.getNationalCard().getRows().get(3).getValue());
+      assertEquals("2250", normalizedMarket.getRegionalCard().getValue());
+      assertEquals("次", normalizedMarket.getRegionalCard().getUnit());
+      assertEquals("281.3万次", normalizedMarket.getRegionalCard().getRows().get(0).getValue());
+      assertEquals("2250次", normalizedMarket.getRegionalCard().getRows().get(3).getValue());
     }
 
     @Test

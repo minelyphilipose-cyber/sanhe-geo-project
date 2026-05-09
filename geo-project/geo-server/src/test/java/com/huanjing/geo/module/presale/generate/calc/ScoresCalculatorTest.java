@@ -61,6 +61,23 @@ class ScoresCalculatorTest {
     }
 
     @Test
+    void mentionScore_weightsDoubaoAsDoublePlatform() {
+        RawSnapshotDTO raw = new RawSnapshotDTO();
+        raw.setPlatformBreakdown(List.of(
+                platform("doubao", 4, 10, 0, 0, 0),
+                platform("kimi", 2, 10, 0, 0, 0)
+        ));
+        SceneAndIntentResult scenes = new SceneAndIntentResult(
+                ComputedSnapshotDTO.SceneCoverage.builder().build(),
+                List.of()
+        );
+
+        var scores = calculator.compute(raw, scenes, new RankingStats(0, 0, 0, 0, 0, 0));
+
+        assertEquals(33.3333, scores.getMention(), 0.01);
+    }
+
+    @Test
     void allMentionedAtRank1_rankingIsNinetyNotHundred() {
         RawSnapshotDTO raw = new RawSnapshotDTO();
         raw.setPlatformBreakdown(List.of(platform(1, 1, 1, 0, 0)));
@@ -106,7 +123,12 @@ class ScoresCalculatorTest {
     }
 
     private PlatformBreakdown platform(int mentionCount, int totalTests, int pos, int neu, int neg) {
+        return platform(null, mentionCount, totalTests, pos, neu, neg);
+    }
+
+    private PlatformBreakdown platform(String platformCode, int mentionCount, int totalTests, int pos, int neu, int neg) {
         return PlatformBreakdown.builder()
+                .platformCode(platformCode)
                 .mentionCount(mentionCount)
                 .totalTests(totalTests)
                 .sentimentDistribution(PlatformBreakdown.SentimentDistribution.builder()
@@ -117,4 +139,3 @@ class ScoresCalculatorTest {
                 .build();
     }
 }
-

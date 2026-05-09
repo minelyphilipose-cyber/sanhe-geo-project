@@ -135,6 +135,8 @@ import { toIntRounded } from '@/utils/presale/numberFormat'
 
 const { mergedView: mergedViewRef } = useMergedView()
 const mergedView = computed(() => mergedViewRef.value!)
+const DOUBAO_PLATFORM_CODE = 'doubao'
+const DOUBAO_WEIGHT = 2
 
 // ─── overall 维度 ────────────────────────────────────────
 const overallDelta = computed(() => {
@@ -158,10 +160,10 @@ const sortedKeyTakeaways = computed(() =>
 
 // ─── mention rate(计数直除) ─────────────────────────────
 const totalPrompts = computed(() =>
-  mergedView.value.platform_breakdown.reduce((sum, p) => sum + p.total_tests, 0)
+  mergedView.value.platform_breakdown.reduce((sum, p) => sum + p.total_tests * platformWeight(p.platform_code), 0)
 )
 const totalMentions = computed(() =>
-  mergedView.value.platform_breakdown.reduce((sum, p) => sum + p.mention_count, 0)
+  mergedView.value.platform_breakdown.reduce((sum, p) => sum + p.mention_count * platformWeight(p.platform_code), 0)
 )
 const mentionRatePct = computed(() => {
   if (totalPrompts.value === 0) return 0
@@ -206,6 +208,10 @@ const sentimentScore = computed(() => toIntRounded(mergedView.value.scores.senti
 // ─── key findings 编号格式化 ────────────────────────────
 function formatFindingNum(n: number): string {
   return n.toString().padStart(2, '0')
+}
+
+function platformWeight(platformCode: string): number {
+  return platformCode?.toLowerCase() === DOUBAO_PLATFORM_CODE ? DOUBAO_WEIGHT : 1
 }
 </script>
 

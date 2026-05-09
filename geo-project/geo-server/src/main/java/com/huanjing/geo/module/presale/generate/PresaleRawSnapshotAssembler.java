@@ -11,6 +11,7 @@ import com.huanjing.geo.module.presale.dto.snapshot.raw.Competitor;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.PlatformBreakdown;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawMeta;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
+import com.huanjing.geo.module.presale.dto.snapshot.raw.SamplePrompt;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.SentimentDetail;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.TestSummary;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
@@ -45,6 +46,7 @@ import java.util.stream.Collectors;
 public class PresaleRawSnapshotAssembler {
 
     private static final Logger log = LoggerFactory.getLogger(PresaleRawSnapshotAssembler.class);
+    private static final List<String> PAGE03_SAMPLE_CATEGORIES = List.of("推荐型", "问题型", "场景型");
     private static final String CATEGORY_COGNITIVE = "认知型";
     private static final String CATEGORY_COMPARISON = "对比型";
     private static final String STATUS_SUCCESS = "SUCCESS";
@@ -104,6 +106,7 @@ public class PresaleRawSnapshotAssembler {
             List<PlatformBreakdown> platformBreakdown = buildPlatformBreakdown(versionId, degradedPlatforms);
             List<Competitor> competitors = buildCompetitors(versionId, report, extractedCompetitors);
             List<String> groupSceneAdvantages = aggregateGroupSceneAdvantages(versionId, extractedCompetitorDisplayNames);
+            List<SamplePrompt> samplePrompts = buildSamplePrompts(versionId);
             SentimentDetail sentimentDetail = buildSentimentDetail(versionId);
             BenchmarksFrozen benchmarksFrozen = benchmarkResolver.resolve(
                     report.getIndustry(), report.getIndustryRole());
@@ -115,6 +118,7 @@ public class PresaleRawSnapshotAssembler {
                     .platformBreakdown(platformBreakdown)
                     .competitors(competitors)
                     .groupSceneAdvantages(groupSceneAdvantages)
+                    .samplePrompts(samplePrompts)
                     .sentimentDetail(sentimentDetail)
                     .benchmarksFrozen(benchmarksFrozen)
                     .build();
@@ -229,6 +233,62 @@ public class PresaleRawSnapshotAssembler {
                         .eq(PresaleAiCall::getCallStatus, status)
         );
         return count == null ? 0 : count.intValue();
+    }
+
+    private List<SamplePrompt> buildSamplePrompts(Long versionId) {
+        List<PresaleReportVersionPromptTemplate> templates = versionPromptTemplateMapper.selectList(
+                new LambdaQueryWrapper<PresaleReportVersionPromptTemplate>()
+                        .eq(PresaleReportVersionPromptTemplate::getReportVersionId, versionId)
+                        .in(PresaleReportVersionPromptTemplate::getCategory, PAGE03_SAMPLE_CATEGORIES)
+                        .eq(PresaleReportVersionPromptTemplate::getHasCompetitorVar, 0)
+                        .orderByAsc(PresaleReportVersionPromptTemplate::getSortOrderInVersion)
+                        .orderByAsc(PresaleReportVersionPromptTemplate::getId)
+        );
+        if (templates == null || templates.isEmpty()) {
+            return List.of();
+        }
+        List<SamplePrompt> out = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (String category : PAGE03_SAMPLE_CATEGORIES) {
+            templates.stream()
+                    .filter(item -> category.equals(item.getCategory()))
+                    .map(PresaleReportVersionPromptTemplate::getPromptContent)
+                    .map(this::normalizeSamplePrompt)
+                    .filter(text -> text != null && seen.add(text))
+                    .findFirst()
+                    .ifPresent(text -> out.add(SamplePrompt.builder()
+                            .category(category)
+                            .promptContent(text)
+                            .build()));
+        }
+        if (out.size() >= 3) {
+            return out;
+        }
+        for (PresaleReportVersionPromptTemplate template : templates) {
+            String text = normalizeSamplePrompt(template.getPromptContent());
+            if (text == null || !seen.add(text)) {
+                continue;
+            }
+            out.add(SamplePrompt.builder()
+                    .category(template.getCategory())
+                    .promptContent(text)
+                    .build());
+            if (out.size() >= 3) {
+                break;
+            }
+        }
+        return out;
+    }
+
+    private String normalizeSamplePrompt(String value) {
+        if (value == null) {
+            return null;
+        }
+        String text = value.trim();
+        if (text.isEmpty() || text.contains("{competitor}")) {
+            return null;
+        }
+        return text;
     }
 
     private List<PlatformBreakdown> buildPlatformBreakdown(Long versionId, Set<String> degradedPlatforms) {

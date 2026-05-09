@@ -9,7 +9,9 @@ import com.huanjing.geo.module.presale.export.service.PresaleExportStatuses;
 import com.huanjing.geo.module.presale.dto.PromptSourceMode;
 import com.huanjing.geo.module.presale.dto.request.CreateReportRequest;
 import com.huanjing.geo.module.presale.dto.request.ReportListQueryRequest;
+import com.huanjing.geo.module.presale.dto.PresalePromptCategoryCode;
 import com.huanjing.geo.module.presale.dto.response.PromptTemplateVO;
+import com.huanjing.geo.module.presale.dto.response.RegenerateDraftVO;
 import com.huanjing.geo.module.presale.dto.response.ReportScopePreviewVO;
 import com.huanjing.geo.module.presale.dto.response.ReportListItemVO;
 import com.huanjing.geo.module.presale.dto.response.ReportVersionMetaVO;
@@ -44,6 +46,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.EnumMap;
 import java.util.stream.Collectors;
 
 /**
@@ -266,6 +269,59 @@ public class PresaleReportService {
                 .toList();
     }
 
+    public RegenerateDraftVO buildRegenerateDraft(Long reportId) {
+        currentUserService.ensurePermission(PERM_CREATE);
+        PresaleReport report = accessService.requireReportWithAccess(reportId);
+        PresaleReportVersion version = report.getLatestVersionId() == null ? null
+                : versionMapper.selectById(report.getLatestVersionId());
+        if (version == null) {
+            throw new BizException(404, "Latest version not found");
+        }
+
+        List<PresaleReportVersionPromptTemplate> prompts = versionPromptTemplateMapper.selectList(
+                new LambdaQueryWrapper<PresaleReportVersionPromptTemplate>()
+                        .eq(PresaleReportVersionPromptTemplate::getReportVersionId, version.getId())
+                        .orderByAsc(PresaleReportVersionPromptTemplate::getSortOrderInVersion)
+                        .orderByAsc(PresaleReportVersionPromptTemplate::getId)
+        );
+        String sourceMode = prompts.stream().anyMatch(p -> "llm".equalsIgnoreCase(p.getSourceType()))
+                ? PromptSourceMode.LLM.toJson()
+                : PromptSourceMode.TEMPLATE.toJson();
+
+        RegenerateDraftVO.RegenerateDraftVOBuilder builder = RegenerateDraftVO.builder()
+                .reportId(report.getId())
+                .brandName(report.getBrandName())
+                .industry(report.getIndustry())
+                .industryRole(report.getIndustryRole())
+                .region(report.getRegion())
+                .userDemand(report.getUserDemand())
+                .userType(report.getUserType())
+                .promptSourceMode(sourceMode);
+
+        if (PromptSourceMode.LLM.toJson().equals(sourceMode)) {
+            builder.llmPromptQuestions(prompts.stream()
+                    .map(p -> RegenerateDraftVO.LlmQuestion.builder()
+                            .categoryCode(resolveCategoryCode(p.getCategory()))
+                            .promptContent(p.getPromptContent())
+                            .build())
+                    .toList());
+            builder.llmQuestionPlan(RegenerateDraftVO.LlmQuestionPlan.builder()
+                    .totalCount(prompts.size())
+                    .categoryCounts(countCategories(prompts))
+                    .build());
+        } else {
+            builder.promptTemplates(prompts.stream()
+                    .filter(p -> p.getSourceTemplateId() != null)
+                    .map(p -> RegenerateDraftVO.TemplateQuestion.builder()
+                            .sourceTemplateId(p.getSourceTemplateId())
+                            .sourcePromptCode(p.getSourcePromptCode())
+                            .promptContent(p.getPromptContent())
+                            .build())
+                    .toList());
+        }
+        return builder.build();
+    }
+
     private void triggerGenerateAfterCommit(Long versionId, Long userId, boolean canManageCurrentUser) {
         if (TransactionSynchronizationManager.isActualTransactionActive()
                 && TransactionSynchronizationManager.isSynchronizationActive()) {
@@ -278,6 +334,27 @@ public class PresaleReportService {
             return;
         }
         orchestrator.triggerGenerate(versionId, userId, canManageCurrentUser);
+    }
+
+    private Map<PresalePromptCategoryCode, Integer> countCategories(List<PresaleReportVersionPromptTemplate> prompts) {
+        Map<PresalePromptCategoryCode, Integer> counts = new EnumMap<>(PresalePromptCategoryCode.class);
+        for (PresalePromptCategoryCode code : PresalePromptCategoryCode.values()) {
+            counts.put(code, 0);
+        }
+        for (PresaleReportVersionPromptTemplate prompt : prompts) {
+            PresalePromptCategoryCode code = resolveCategoryCode(prompt.getCategory());
+            counts.put(code, counts.getOrDefault(code, 0) + 1);
+        }
+        return counts;
+    }
+
+    private PresalePromptCategoryCode resolveCategoryCode(String category) {
+        for (PresalePromptCategoryCode code : PresalePromptCategoryCode.values()) {
+            if (code.getDisplayName().equals(category)) {
+                return code;
+            }
+        }
+        throw new BizException(500, "Unsupported prompt category: " + category);
     }
 
     /**

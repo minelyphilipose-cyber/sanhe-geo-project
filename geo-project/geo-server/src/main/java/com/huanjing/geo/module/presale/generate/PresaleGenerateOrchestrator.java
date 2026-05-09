@@ -14,6 +14,7 @@ import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
 import com.huanjing.geo.module.presale.generate.llm.PromptTemplateRenderer;
 import com.huanjing.geo.module.presale.generate.l3.PresaleL3InitService;
+import com.huanjing.geo.module.presale.generate.l3.PresalePage03DoubaoService;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
@@ -80,6 +81,7 @@ public class PresaleGenerateOrchestrator {
     private static final String STAGE_L1_AGGREGATE = "L1_AGGREGATE";
     private static final String STAGE_L2_COMPUTE = "L2_COMPUTE";
     private static final String STAGE_L3_INIT = "L3_INIT";
+    private static final int PAGE03_DOUBAO_CALLS = 1;
     private static final String CATEGORY_COGNITIVE = "认知型";
     private static final String CATEGORY_COMPARISON = "对比型";
     private static final String FAILURE_CATEGORY_CONFIG_MISSING = "CONFIG_MISSING";
@@ -110,6 +112,7 @@ public class PresaleGenerateOrchestrator {
     private final PresaleRawSnapshotAssembler rawSnapshotAssembler;
     private final PresaleComputedSnapshotEnricher computedSnapshotEnricher;
     private final PresaleL3InitService l3InitService;
+    private final PresalePage03DoubaoService page03DoubaoService;
     private final PresaleCompetitorAggregator competitorAggregator;
     private final PresaleCompetitorNormalizationService competitorNormalizationService;
     private final PresaleJudgeService presaleJudgeService;
@@ -148,6 +151,7 @@ public class PresaleGenerateOrchestrator {
                                        PresaleRawSnapshotAssembler rawSnapshotAssembler,
                                        PresaleComputedSnapshotEnricher computedSnapshotEnricher,
                                        PresaleL3InitService l3InitService,
+                                       PresalePage03DoubaoService page03DoubaoService,
                                        PresaleCompetitorAggregator competitorAggregator,
                                        PresaleCompetitorNormalizationService competitorNormalizationService,
                                        PresaleJudgeService presaleJudgeService,
@@ -167,6 +171,7 @@ public class PresaleGenerateOrchestrator {
         this.rawSnapshotAssembler = rawSnapshotAssembler;
         this.computedSnapshotEnricher = computedSnapshotEnricher;
         this.l3InitService = l3InitService;
+        this.page03DoubaoService = page03DoubaoService;
         this.competitorAggregator = competitorAggregator;
         this.competitorNormalizationService = competitorNormalizationService;
         this.presaleJudgeService = presaleJudgeService;
@@ -391,6 +396,8 @@ public class PresaleGenerateOrchestrator {
         enterStage(versionId, STAGE_L3_INIT, "derive editable content");
         try {
             editableJson = l3InitService.derive(rawJson, computedJson);
+            editableJson = page03DoubaoService.generateAndApply(
+                    versionId, rawJson, editableJson, operatorUserId, isManager);
         } catch (BizException ex) {
             markFailed(versionId, FAILURE_CATEGORY_L3_INIT_ERROR,
                     truncateReason("L3 init failed: " + ex.getMessage()));
@@ -433,7 +440,8 @@ public class PresaleGenerateOrchestrator {
         int cognitiveJudgeTotalCalls = platformCount * cognitivePromptCount;
         int comparisonJudgeTotalCalls = platformCount * comparisonPromptCount;
         int totalUpperBoundCalls = batch1TotalCalls + cognitiveJudgeTotalCalls
-                + (platformCount * competitorPromptCount * 2) + comparisonJudgeTotalCalls;
+                + (platformCount * competitorPromptCount * 2) + comparisonJudgeTotalCalls
+                + PAGE03_DOUBAO_CALLS;
         return PreflightResult.success(platformCount, competitorPromptCount, batch1TotalCalls,
                 cognitiveJudgeTotalCalls, comparisonJudgeTotalCalls, totalUpperBoundCalls);
     }

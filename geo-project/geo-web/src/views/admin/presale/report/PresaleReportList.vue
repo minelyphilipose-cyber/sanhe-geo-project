@@ -134,7 +134,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="360" fixed="right">
           <template #default="{ row }">
             <el-button text type="primary" size="small" @click.stop="goDetail(row)">
               {{ isInProgress(row.latestVersion?.generationStatus) ? '查看进度' : '查看' }}
@@ -175,6 +175,15 @@
               </span>
             </el-tooltip>
             <el-button
+              text
+              type="primary"
+              size="small"
+              :disabled="!canRegenerate(row)"
+              @click.stop="goRegenerate(row)"
+            >
+              再次生成
+            </el-button>
+            <el-button
               v-if="canDeleteReportPermission"
               text
               type="danger"
@@ -207,6 +216,29 @@
         />
       </div>
     </el-card>
+
+    <el-dialog v-model="versionDialogVisible" title="选择报告版本" width="560px">
+      <el-table :data="viewableVersions" v-loading="versionLoading" stripe>
+        <el-table-column label="版本" width="90">
+          <template #default="{ row }">v{{ row.versionNo }}</template>
+        </el-table-column>
+        <el-table-column label="生成时间">
+          <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag :type="getStatusMeta(row.generationStatus).tagType" size="small">
+              {{ getStatusMeta(row.generationStatus).label }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="90" align="right">
+          <template #default="{ row }">
+            <el-button text type="primary" size="small" @click="openVersion(row.versionNo)">查看</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-dialog>
   </div>
 </template>
 
@@ -218,9 +250,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   deleteReport,
   deriveVersion,
+  listReportVersions,
   listReports,
   type ReportListItemVO,
-  type ReportListQueryRequest
+  type ReportListQueryRequest,
+  type ReportVersionOptionVO
 } from '@/api/presaleReport'
 import { useUserStore } from '@/stores/user'
 import { formatDateTime, toRfc3339Range } from '@/utils/presale/formatDateTime'
@@ -282,6 +316,10 @@ const tableData = ref<ReportListItemVO[]>([])
 const loading = ref(false)
 const deletingReportId = ref<number | null>(null)
 const derivingReportId = ref<number | null>(null)
+const versionDialogVisible = ref(false)
+const versionLoading = ref(false)
+const versionDialogReportId = ref<number | null>(null)
+const viewableVersions = ref<ReportVersionOptionVO[]>([])
 
 async function loadData() {
   loading.value = true
@@ -335,6 +373,10 @@ function canDelete(row: ReportListItemVO): boolean {
   return !isInProgress(row.latestVersion?.generationStatus)
 }
 
+function canRegenerate(row: ReportListItemVO): boolean {
+  return row.latestVersion?.generationStatus === 'DONE'
+}
+
 function canViewPrompts(row: ReportListItemVO): boolean {
   return row.latestVersion?.generationStatus === 'DONE' && Boolean(row.latestVersion?.versionNo)
 }
@@ -372,9 +414,39 @@ function goCreate() {
 function goDetail(row: ReportListItemVO) {
   if (isInProgress(row.latestVersion?.generationStatus)) {
     router.push(`/admin/presale/report/${row.reportId}/progress`)
+  } else if (row.versionCount > 1) {
+    void showVersionDialog(row)
   } else {
     router.push(`/admin/presale/report/${row.reportId}/detail`)
   }
+}
+
+async function showVersionDialog(row: ReportListItemVO) {
+  versionDialogReportId.value = row.reportId
+  versionDialogVisible.value = true
+  versionLoading.value = true
+  try {
+    const versions = await listReportVersions(row.reportId)
+    viewableVersions.value = versions
+      .filter((item) => item.generationStatus === 'DONE' && !item.disabled)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  } finally {
+    versionLoading.value = false
+  }
+}
+
+function openVersion(versionNo: number) {
+  if (!versionDialogReportId.value) return
+  versionDialogVisible.value = false
+  router.push(`/admin/presale/report/${versionDialogReportId.value}/detail?versionNo=${versionNo}`)
+}
+
+function goRegenerate(row: ReportListItemVO) {
+  if (!canRegenerate(row)) return
+  router.push({
+    path: '/admin/presale/report/create',
+    query: { regenerateFrom: String(row.reportId) }
+  })
 }
 
 function goPrompts(row: ReportListItemVO) {

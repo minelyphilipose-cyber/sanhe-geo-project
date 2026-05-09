@@ -127,6 +127,18 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
         );
     }
 
+    @Override
+    public LlmCallResult marketBattleground(PlatformCallContext ctx, String marketBattlegroundPrompt)
+            throws LlmInvokeException {
+        return invokeWithRetry(
+                ctx,
+                MarketBattlegroundPromptTemplates.SYSTEM_INSTRUCTION,
+                safe(marketBattlegroundPrompt),
+                0.2D,
+                true
+        );
+    }
+
     private LlmCallResult invokeWithRetry(PlatformCallContext ctx,
                                           String systemPrompt,
                                           String userPrompt,
