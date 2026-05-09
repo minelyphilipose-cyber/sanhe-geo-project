@@ -28,27 +28,16 @@
       <div class="sub-toolbar-left">
         <label class="inline-field">
           <span class="inline-label required">绑定项目</span>
-          <el-select
+          <el-cascader
             v-model="manualForm.projectId"
             filterable
-            remote
-            reserve-keyword
             clearable
-            :remote-method="searchProjects"
-            :loading="projectSearching"
-            placeholder="搜索项目名称"
+            :options="projectCascadeOptions"
+            :props="projectCascadeProps"
+            :loading="projectLoading"
+            placeholder="选择客户 / 品牌 / 项目"
             class="project-select"
-          >
-            <el-option
-              v-for="project in projectOptions"
-              :key="project.id"
-              :label="project.projectName"
-              :value="project.id"
-            >
-              <span>{{ project.projectName }}</span>
-              <span class="project-option-meta">#{{ project.id }} {{ project.brandName || '' }}</span>
-            </el-option>
-          </el-select>
+          />
         </label>
         <label class="inline-field">
           <span class="inline-label required">文章类型</span>
@@ -471,7 +460,7 @@ const dictStore = useDictStore()
 const createMode = ref<CreateMode>('manual')
 const submitting = ref(false)
 const generating = ref(false)
-const projectSearching = ref(false)
+const projectLoading = ref(false)
 const projectOptions = ref<Project[]>([])
 const focusedSectionId = ref<number | null>(null)
 const markdownOverride = ref('')
@@ -529,6 +518,13 @@ const articleTypeOptions = computed<ArticleTypeOption[]>(() => {
 const contentStyleOptions = computed(() => CONTENT_STYLE_OPTIONS)
 const toneOptions = computed(() => TONE_OPTIONS)
 const lengthOptions = computed(() => LENGTH_OPTIONS)
+const projectCascadeProps = {
+  value: 'value',
+  label: 'label',
+  children: 'children',
+  emitPath: false,
+}
+const projectCascadeOptions = computed(() => buildProjectCascadeOptions(projectOptions.value))
 const selectedProject = computed(() => projectOptions.value.find((project) => project.id === manualForm.projectId) || null)
 const selectedArticleTypeLabel = computed(() => articleTypeOptions.value.find((item) => item.value === manualForm.articleType)?.label || manualForm.articleType)
 const selectedContentStyleLabel = computed(() => contentStyleOptions.value.find((item) => item.value === aiForm.contentStyle)?.label || 'AI 风格')
@@ -601,13 +597,12 @@ function buildManualMarkdown() {
   return parts.join('\n\n')
 }
 
-async function searchProjects(keyword = '') {
-  projectSearching.value = true
+async function loadProjectOptions() {
+  projectLoading.value = true
   try {
     const { data } = await getProjectList({
       current: 1,
-      size: 20,
-      keyword: keyword || undefined,
+      size: 500,
       status: 'active',
     })
     projectOptions.value = mergeProjects(projectOptions.value, data.data.records || [])
@@ -616,7 +611,7 @@ async function searchProjects(keyword = '') {
     projectOptions.value = []
     ElMessage.error('加载项目失败')
   } finally {
-    projectSearching.value = false
+    projectLoading.value = false
   }
 }
 
@@ -637,6 +632,63 @@ function mergeProjects(primary: Project[], secondary: Project[]) {
     map.set(item.id, item)
   }
   return Array.from(map.values())
+}
+
+interface ProjectCascadeNode {
+  value: string | number
+  label: string
+  children?: ProjectCascadeNode[]
+}
+
+function buildProjectCascadeOptions(projects: Project[]): ProjectCascadeNode[] {
+  const companyMap = new Map<string, ProjectCascadeNode>()
+  const brandMap = new Map<string, ProjectCascadeNode>()
+  const sortedProjects = [...projects].sort(compareProjectsForCascade)
+
+  for (const project of sortedProjects) {
+    const companyKey = `company:${project.companyId ?? 'none'}:${project.companyName || '未归属客户'}`
+    let companyNode = companyMap.get(companyKey)
+    if (!companyNode) {
+      companyNode = {
+        value: companyKey,
+        label: project.companyName || '未归属客户',
+        children: [],
+      }
+      companyMap.set(companyKey, companyNode)
+    }
+
+    const brandKey = `${companyKey}:brand:${project.brandId ?? 'none'}:${project.brandName || '未绑定品牌'}`
+    let brandNode = brandMap.get(brandKey)
+    if (!brandNode) {
+      brandNode = {
+        value: brandKey,
+        label: project.brandName || '未绑定品牌',
+        children: [],
+      }
+      brandMap.set(brandKey, brandNode)
+      companyNode.children?.push(brandNode)
+    }
+
+    brandNode.children?.push({
+      value: project.id,
+      label: project.projectName || `项目 #${project.id}`,
+    })
+  }
+
+  return Array.from(companyMap.values())
+}
+
+function compareProjectsForCascade(a: Project, b: Project) {
+  return [
+    compareText(a.companyName, b.companyName),
+    compareText(a.brandName, b.brandName),
+    compareText(a.projectName, b.projectName),
+    a.id - b.id,
+  ].find((result) => result !== 0) || 0
+}
+
+function compareText(a?: string | null, b?: string | null) {
+  return (a || '').localeCompare(b || '', 'zh-Hans-CN')
 }
 
 function addSection() {
@@ -1028,7 +1080,7 @@ function goBack() {
 
 onMounted(async () => {
   await dictStore.ensureLoaded()
-  await searchProjects('')
+  await loadProjectOptions()
   const projectId = Number(route.query.projectId || 0)
   if (projectId > 0) {
     await loadInheritedProject(projectId)
