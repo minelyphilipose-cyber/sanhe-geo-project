@@ -1165,9 +1165,6 @@ public class DispatchExecutionService {
                 || type == DispatchTaskType.BRAND_STATEMENT_GENERATION) {
             return List.of("P1", "P0", "P2");
         }
-        if (type == DispatchTaskType.BIWEEKLY_REPORT) {
-            return List.of("P2", "P1", "P0");
-        }
         return List.of("P0", "P1", "P2");
     }
 

@@ -144,41 +144,6 @@ public class DispatchPlannerService {
         return DispatchScheduleCalculator.isBiDailyDue(project.getActivatedAt().toLocalDate(), today);
     }
 
-    private void planBiWeekly(Project project, LocalDate today) {
-        LocalDate anchor = project.getBiweeklyAnchorDate();
-        if (anchor == null) {
-            LocalDate firstMonday = DispatchScheduleCalculator.firstBiweeklyMonday(project.getActivatedAt().toLocalDate());
-            if (!today.equals(firstMonday)) {
-                return;
-            }
-            Project update = new Project();
-            update.setId(project.getId());
-            update.setBiweeklyAnchorDate(firstMonday);
-            projectMapper.updateById(update);
-            project.setBiweeklyAnchorDate(firstMonday);
-            anchor = firstMonday;
-        }
-
-        if (!DispatchScheduleCalculator.isBiweeklyDue(anchor, today)) {
-            return;
-        }
-
-        long coveredDays = java.time.temporal.ChronoUnit.DAYS.between(project.getActivatedAt().toLocalDate(), today) + 1;
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("mode", "biweekly");
-        payload.put("firstPeriod", coveredDays < 14);
-        payload.put("coveredDays", Math.min(coveredDays, 14));
-
-        dispatchTaskService.createTaskAndEnqueue(
-                project.getId(),
-                DispatchTaskType.BIWEEKLY_REPORT,
-                today.minusDays(13),
-                today,
-                LocalDateTime.now(),
-                payload
-        );
-    }
-
     private void planMonthly(Project project, LocalDate today) {
         if (today.getDayOfMonth() != 1) {
             return;

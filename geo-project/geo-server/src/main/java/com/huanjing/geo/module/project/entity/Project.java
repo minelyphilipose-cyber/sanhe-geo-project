@@ -65,7 +65,6 @@ public class Project {
     private String deliveryMode;
     private LocalDateTime signedAt;
     private LocalDateTime activatedAt;
-    private LocalDate biweeklyAnchorDate;
     private LocalDate startDate;
     private LocalDate endDate;
     private LocalDateTime expiredAt;

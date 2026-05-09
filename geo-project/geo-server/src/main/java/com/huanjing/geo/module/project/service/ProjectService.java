@@ -941,7 +941,6 @@ public class ProjectService {
         snapshot.put("status", project.getStatus());
         snapshot.put("stage", project.getStage());
         snapshot.put("activatedAt", project.getActivatedAt());
-        snapshot.put("biweeklyAnchorDate", project.getBiweeklyAnchorDate());
         snapshot.put("expiredAt", project.getExpiredAt());
         snapshot.put("planKeywordGroupLimit", project.getPlanKeywordGroupLimit());
         snapshot.put("planMonthlyReportDepth", project.getPlanMonthlyReportDepth());
