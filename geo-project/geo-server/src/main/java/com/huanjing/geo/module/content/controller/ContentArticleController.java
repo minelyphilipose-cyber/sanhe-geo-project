@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 @Tag(name = "ContentArticle")
 @RestController
@@ -55,10 +56,10 @@ public class ContentArticleController {
     }
 
     @PostMapping("/ai-draft/preview")
-    public CompletableFuture<R<ArticleAiDraftPreviewResponse>> previewAiDraft(
+    public R<ArticleAiDraftPreviewResponse> previewAiDraft(
             @Valid @RequestBody ArticleAiDraftPreviewRequest req
-    ) {
-        return articleAiDraftService.preview(req).thenApply(R::ok);
+    ) throws Exception {
+        return R.ok(await(articleAiDraftService.preview(req)));
     }
 
     @PostMapping("/self-media-cookie-status/batch")
@@ -89,6 +90,21 @@ public class ContentArticleController {
     public R<Void> review(@PathVariable Long articleId, @Valid @RequestBody ArticleReviewRequest req) {
         contentArticleService.review(articleId, req);
         return R.ok();
+    }
+
+    private <T> T await(CompletableFuture<T> future) throws Exception {
+        try {
+            return future.get();
+        } catch (ExecutionException ex) {
+            Throwable cause = ex.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            if (cause instanceof Exception exception) {
+                throw exception;
+            }
+            throw ex;
+        }
     }
 
     @PostMapping("/{articleId}/publish")

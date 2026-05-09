@@ -29,6 +29,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -187,10 +188,10 @@ public class ArticleAiDraftService {
         } catch (LlmInvokeException ex) {
             log.warn("AI article draft preview LLM invoke failed projectId={} platform={} model={} msg={}",
                     project.getId(), model.platformCode(), model.modelId(), ex.getMessage());
+            BizException mapped = mapLlmInvokeFailure(ex, "AI article draft preview failed");
             auditGenerated(AuditResult.FAILURE, operator, project, null, originalPrompt.length(),
-                    model.platformCode(), model.modelId(), elapsedMs(started), "preview_failed",
-                    ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED);
-            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI article draft preview failed");
+                    model.platformCode(), model.modelId(), elapsedMs(started), "preview_failed", mapped.getCode());
+            throw mapped;
         } catch (Exception ex) {
             log.warn("AI article draft preview failed projectId={} platform={} model={}",
                     project.getId(), model.platformCode(), model.modelId(), ex);
@@ -228,10 +229,10 @@ public class ArticleAiDraftService {
         } catch (LlmInvokeException ex) {
             log.warn("AI article draft LLM invoke failed projectId={} platform={} model={} msg={}",
                     project.getId(), model.platformCode(), model.modelId(), ex.getMessage());
+            BizException mapped = mapLlmInvokeFailure(ex, "AI article draft generation failed");
             auditGenerated(AuditResult.FAILURE, operator, project, null, originalPrompt.length(),
-                    model.platformCode(), model.modelId(), elapsedMs(started), "generation_failed",
-                    ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED);
-            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI article draft generation failed");
+                    model.platformCode(), model.modelId(), elapsedMs(started), "generation_failed", mapped.getCode());
+            throw mapped;
         } catch (Exception ex) {
             log.warn("AI article draft generation failed projectId={} platform={} model={}",
                     project.getId(), model.platformCode(), model.modelId(), ex);
@@ -360,6 +361,34 @@ public class ArticleAiDraftService {
 
     private int normalize(Integer value, int fallback) {
         return value == null || value <= 0 ? fallback : value;
+    }
+
+    private BizException mapLlmInvokeFailure(LlmInvokeException ex, String fallbackMessage) {
+        if (isLlmAuthFailure(ex)) {
+            return new BizException(
+                    ContentErrorCodes.ARTICLE_AI_DRAFT_CONFIG_MISSING,
+                    "AI 模型认证失败，请检查模型平台 API Key 配置"
+            );
+        }
+        return new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, fallbackMessage);
+    }
+
+    private boolean isLlmAuthFailure(Throwable ex) {
+        Throwable current = ex;
+        for (int depth = 0; current != null && depth < 8; depth++) {
+            String message = current.getMessage();
+            if (StringUtils.hasText(message)) {
+                String normalized = message.toLowerCase(Locale.ROOT);
+                if (normalized.contains("http 401")
+                        || normalized.contains("http 403")
+                        || normalized.contains("unauthorized")
+                        || normalized.contains("forbidden")) {
+                    return true;
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private String promptSnapshot(String originalPrompt, LlmInvokeResult result) {

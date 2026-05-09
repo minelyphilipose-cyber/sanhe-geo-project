@@ -74,7 +74,7 @@ export interface ArticleAiDraftPreviewResponse {
 
 export function previewAiContentArticleDraft(data: ArticleAiDraftPreviewRequest) {
   return request.post<R<ArticleAiDraftPreviewResponse>>('/content/articles/ai-draft/preview', data, {
-    timeout: 120000,
+    timeout: 180000,
   })
 }
 

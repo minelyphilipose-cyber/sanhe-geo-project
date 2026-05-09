@@ -115,7 +115,7 @@ request.interceptors.response.use(
           return request(originalRequest)
         } catch {
           await redirectToSessionExpired()
-          return Promise.reject(error)
+          return Promise.reject(buildApiError('登录状态已失效，请重新登录后重试', 401, error.response?.data, 401))
         } finally {
           isRefreshing = false
         }
@@ -153,7 +153,7 @@ request.interceptors.response.use(
             return request(originalRequest)
           } catch {
             await redirectToSessionExpired()
-            return Promise.reject(error)
+            return Promise.reject(buildApiError('登录状态已失效，请重新登录后重试', 401, error.response?.data, 401))
           } finally {
             isRefreshing = false
           }

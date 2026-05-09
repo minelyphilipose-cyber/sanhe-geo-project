@@ -10,8 +10,8 @@
       </div>
       <div class="toolbar-right">
         <el-radio-group v-model="createMode" size="small" class="mode-switch">
-          <el-radio-button label="manual">手动撰写</el-radio-button>
-          <el-radio-button label="auto">AI 生成</el-radio-button>
+          <el-radio-button label="manual">✎ 手动撰写</el-radio-button>
+          <el-radio-button label="auto">✦ AI 生成</el-radio-button>
         </el-radio-group>
         <span class="ready-state">
           <span class="ready-dot" :class="{ pending: !canSubmit }" />
@@ -24,104 +24,94 @@
       </div>
     </div>
 
-    <div class="page-body">
+    <div class="sub-toolbar">
+      <div class="sub-toolbar-left">
+        <label class="inline-field">
+          <span class="inline-label required">绑定项目</span>
+          <el-select
+            v-model="manualForm.projectId"
+            filterable
+            remote
+            reserve-keyword
+            clearable
+            :remote-method="searchProjects"
+            :loading="projectSearching"
+            placeholder="搜索项目名称"
+            class="project-select"
+          >
+            <el-option
+              v-for="project in projectOptions"
+              :key="project.id"
+              :label="project.projectName"
+              :value="project.id"
+            >
+              <span>{{ project.projectName }}</span>
+              <span class="project-option-meta">#{{ project.id }} {{ project.brandName || '' }}</span>
+            </el-option>
+          </el-select>
+        </label>
+        <label class="inline-field">
+          <span class="inline-label required">文章类型</span>
+          <el-select v-model="manualForm.articleType" class="article-type-select">
+            <el-option
+              v-for="item in articleTypeOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            >
+              <div class="article-type-option">
+                <span>{{ item.label }}</span>
+                <small>{{ item.desc }}</small>
+              </div>
+            </el-option>
+          </el-select>
+        </label>
+      </div>
+      <div class="sub-toolbar-spacer" />
+      <div class="sub-toolbar-actions">
+        <el-button size="small" :icon="Picture" :disabled="!selectedProject?.brandId" @click="openImagePicker">
+          品牌图库
+        </el-button>
+        <el-button size="small" :icon="Document" @click="sourceExpanded = true">
+          Markdown 源码
+        </el-button>
+      </div>
+    </div>
+
+    <div class="page-body" :class="{ 'is-ai-mode': createMode === 'auto' }">
       <section class="editor-pane">
-        <section class="section-card">
-          <header class="section-header">
-            <div class="section-header-left">
-              <span class="section-index">1</span>
-              <span class="section-title">基础信息</span>
-              <span class="section-desc">绑定项目用于后续分发到对应站点和自媒体</span>
-            </div>
-          </header>
-          <div class="section-body">
-            <div class="base-grid">
-              <div class="form-item">
-                <label class="form-label required">绑定项目</label>
-                <el-select
-                  v-model="manualForm.projectId"
-                  filterable
-                  remote
-                  reserve-keyword
-                  clearable
-                  :remote-method="searchProjects"
-                  :loading="projectSearching"
-                  placeholder="搜索项目名称"
-                  class="full-width"
-                >
-                  <el-option
-                    v-for="project in projectOptions"
-                    :key="project.id"
-                    :label="project.projectName"
-                    :value="project.id"
-                  >
-                    <span>{{ project.projectName }}</span>
-                    <span class="project-option-meta">#{{ project.id }} {{ project.brandName || '' }}</span>
-                  </el-option>
-                </el-select>
-                <div v-if="selectedProject" class="project-pill">
-                  <span class="project-icon">{{ projectInitial }}</span>
-                  <div class="project-meta">
-                    <span class="project-name">{{ selectedProject.projectName }}</span>
-                    <span class="project-desc">
-                      #{{ selectedProject.id }} · 品牌：{{ selectedProject.brandName || '-' }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              <div class="form-item">
-                <label class="form-label required">文章类型</label>
-                <div class="type-group">
-                  <button
-                    v-for="item in articleTypeOptions"
-                    :key="item.value"
-                    type="button"
-                    class="type-tile"
-                    :class="{ active: manualForm.articleType === item.value }"
-                    @click="manualForm.articleType = item.value"
-                  >
-                    <el-icon class="tile-icon"><component :is="item.icon" /></el-icon>
-                    <span class="tile-main">
-                      <span class="tile-name">{{ item.label }}</span>
-                      <span class="tile-desc">{{ item.desc }}</span>
-                    </span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
         <section v-if="createMode === 'auto'" class="section-card ai-card">
           <header class="section-header">
             <div class="section-header-left">
-              <span class="section-index ai-index">AI</span>
+              <span class="section-index">1</span>
               <span class="section-title">AI 生成设置</span>
               <span class="section-desc">生成后回填为可编辑草稿，不直接进入审核</span>
             </div>
-            <el-button type="primary" :loading="generating" :disabled="!canGenerate" @click="generateAiPreview">
+            <el-button class="generate-button" type="primary" :loading="generating" :disabled="!canGenerate" @click="generateAiPreview">
               {{ generating ? '生成中' : aiMetadata ? '重新生成' : '生成草稿' }}
             </el-button>
           </header>
           <div class="section-body">
-            <div class="ai-grid">
-              <div class="form-item topic-field">
-                <label class="form-label required">选题 / 主题</label>
-                <el-input
-                  v-model="aiForm.topic"
-                  type="textarea"
-                  :rows="3"
-                  maxlength="1000"
-                  show-word-limit
-                  placeholder="如：2026 年 RAG 在法律行业的落地路径"
-                />
-              </div>
+            <div class="form-item topic-field">
+              <label class="form-label required">选题 / 主题</label>
+              <el-input
+                v-model="aiForm.topic"
+                type="textarea"
+                :rows="3"
+                maxlength="1000"
+                show-word-limit
+                placeholder="如：2026 年 RAG 在法律行业的落地路径"
+              />
+            </div>
+
+            <div class="ai-control-grid">
               <div class="form-item">
                 <label class="form-label">语气</label>
-                <el-segmented v-model="aiForm.tone" :options="toneOptions" />
-                <label class="form-label length-label">篇幅</label>
-                <el-segmented v-model="aiForm.length" :options="lengthOptions" />
+                <el-segmented v-model="aiForm.tone" :options="toneOptions" block />
+              </div>
+              <div class="form-item">
+                <label class="form-label">篇幅</label>
+                <el-segmented v-model="aiForm.length" :options="lengthOptions" block />
               </div>
             </div>
 
@@ -141,13 +131,14 @@
                     <span class="style-name">{{ item.label }}</span>
                     <span class="style-desc">{{ item.desc }}</span>
                   </span>
+                  <el-icon v-if="aiForm.contentStyle === item.value" class="style-check"><Check /></el-icon>
                 </button>
               </div>
             </div>
 
             <el-collapse class="ai-extra-collapse">
               <el-collapse-item title="补充提示词与参考资料（可选）" name="extra">
-                <div class="ai-extra-grid">
+                <div class="ai-extra-stack">
                   <el-input
                     v-model="aiForm.extraPrompt"
                     type="textarea"
@@ -181,10 +172,13 @@
         <section class="section-card">
           <header class="section-header">
             <div class="section-header-left">
-              <span class="section-index">2</span>
+              <span class="section-index">{{ createMode === 'auto' ? '2' : '1' }}</span>
               <span class="section-title">文章结构</span>
               <span class="section-desc">{{ createMode === 'auto' ? 'AI 回填后仍可继续编辑' : '大标题 + 多个小标题段落，自动转 Markdown' }}</span>
             </div>
+            <button v-if="manualForm.sections.length > 1" type="button" class="fold-all-link" @click="toggleAllSections">
+              {{ allSectionsCollapsed ? '全部展开' : '全部折叠' }}
+            </button>
           </header>
           <div class="section-body">
             <el-alert
@@ -210,14 +204,14 @@
 
             <div class="paragraph-header">
               <label class="form-label">小标题段落</label>
-              <span class="form-help">共 {{ manualForm.sections.length }} 段 · 拖拽调整顺序</span>
+              <span class="form-help">共 {{ manualForm.sections.length }} 段 · 使用操作调整顺序</span>
             </div>
             <div class="paragraph-list">
               <article
                 v-for="(section, index) in manualForm.sections"
                 :key="section.id"
                 class="paragraph-block"
-                :class="{ focused: focusedSectionId === section.id }"
+                :class="{ focused: focusedSectionId === section.id, empty: !section.heading.trim() && !section.content.trim(), collapsed: section.collapsed }"
                 @focusin="focusedSectionId = section.id"
               >
                 <div class="paragraph-head">
@@ -232,16 +226,20 @@
                   <div class="paragraph-actions">
                     <el-button :icon="ArrowUp" text :disabled="index === 0" aria-label="上移" @click="moveSection(index, -1)" />
                     <el-button :icon="ArrowDown" text :disabled="index === manualForm.sections.length - 1" aria-label="下移" @click="moveSection(index, 1)" />
+                    <el-button :icon="ArrowDown" text aria-label="折叠" @click="toggleSection(section)" />
                     <el-button :icon="Delete" text :disabled="manualForm.sections.length === 1" aria-label="删除" @click="removeSection(index)" />
                   </div>
                 </div>
-                <div class="paragraph-body">
+                <div v-if="section.collapsed" class="paragraph-summary">
+                  {{ section.content.trim() || '尚未填写正文' }}
+                </div>
+                <div v-else class="paragraph-body">
                   <el-input
                     v-model="section.content"
                     type="textarea"
                     :rows="5"
                     maxlength="10000"
-                    placeholder="本段正文。匹配到的加粗字段会在 Markdown 中自动加粗。"
+                    placeholder="本段正文。"
                   />
                 </div>
               </article>
@@ -249,95 +247,10 @@
                 <el-icon><Plus /></el-icon>
                 添加小标题段落
               </button>
+              <div class="paragraph-summary-line">
+                共 {{ filledSectionCount }} 段 · {{ markdownStats.characters }} 字 · 使用 ⋮⋮ / 上下按钮调整顺序
+              </div>
             </div>
-          </div>
-        </section>
-
-        <section class="section-card">
-          <header class="section-header">
-            <div class="section-header-left">
-              <span class="section-index">3</span>
-              <span class="section-title">关键词加粗</span>
-              <span class="section-desc">正文中匹配到的关键词会自动用 **词** 包裹</span>
-            </div>
-          </header>
-          <div class="section-body">
-            <div class="bold-tags" @click="focusBoldInput">
-              <el-tag
-                v-for="tag in manualForm.boldTags"
-                :key="tag"
-                closable
-                type="primary"
-                effect="light"
-                @close="removeBoldTag(tag)"
-              >
-                {{ tag }}
-              </el-tag>
-              <input
-                ref="boldInputRef"
-                v-model="boldInput"
-                class="bold-input"
-                placeholder="输入关键词后回车 / 逗号"
-                @keydown.enter.prevent="commitBoldInput"
-                @input="handleBoldInput"
-              />
-            </div>
-            <div class="form-help">仅作用于正文段落，不会修改大标题与小标题。</div>
-          </div>
-        </section>
-
-        <section class="section-card">
-          <header class="section-header">
-            <div class="section-header-left">
-              <span class="section-index">4</span>
-              <span class="section-title">品牌图库插图</span>
-              <span class="section-desc">从当前项目品牌图库选图，写入长期访问 URL</span>
-            </div>
-            <el-button :icon="Picture" :disabled="!selectedProject?.brandId" @click="openImagePicker">
-              选择图片
-            </el-button>
-          </header>
-          <div class="section-body">
-            <div v-if="!selectedProject?.brandId" class="image-empty">选择绑定项目后可使用品牌图库插图。</div>
-            <div v-else class="image-hint">
-              图片将以 Markdown 语法插入正文，并使用素材库保存的完整访问路径。
-            </div>
-          </div>
-        </section>
-
-        <section class="source-card" :class="{ collapsed: !sourceExpanded, overridden: markdownOverridden }">
-          <header class="source-card-head" @click="sourceExpanded = !sourceExpanded">
-            <div class="source-title">
-              <el-icon class="source-chevron"><ArrowDown /></el-icon>
-              <span>Markdown 源码</span>
-              <span class="source-desc">高级 · 直接编辑会脱离结构化字段</span>
-            </div>
-            <el-button size="small" @click.stop="copyMarkdown">复制</el-button>
-          </header>
-          <div v-show="sourceExpanded" class="source-card-body">
-            <el-alert
-              v-if="markdownOverridden"
-              type="warning"
-              :closable="false"
-              show-icon
-              class="override-alert"
-            >
-              <template #title>
-                已直接编辑 Markdown，对上方字段的修改将不会自动同步。
-                <el-button size="small" @click="restoreFieldSync">恢复字段同步</el-button>
-              </template>
-            </el-alert>
-            <div class="source-card-toolbar">
-              <span>格式：CommonMark · 提交时将传递给后端</span>
-              <span>{{ markdownStats.characters }} 字符 / {{ markdownStats.lines }} 行</span>
-            </div>
-            <el-input
-              v-model="manualMarkdown"
-              type="textarea"
-              maxlength="50000"
-              class="source-textarea"
-              :rows="12"
-            />
           </div>
         </section>
       </section>
@@ -354,6 +267,7 @@
           <div class="paper-meta">
             <span>{{ selectedArticleTypeLabel }}</span>
             <span class="meta-dot" />
+            <span v-if="createMode === 'auto'" class="ai-preview-badge">✦ AI</span>
             <span v-if="createMode === 'auto'">{{ selectedContentStyleLabel }}</span>
             <span v-if="createMode === 'auto'" class="meta-dot" />
             <span>{{ selectedProject?.projectName || selectedProject?.brandName || '未绑定项目' }}</span>
@@ -365,16 +279,46 @@
         </article>
         <div class="preview-foot">
           <div class="preview-stats">
-            <span><strong>{{ filledSectionCount }}</strong> 段落</span>
-            <span><strong>{{ markdownStats.characters }}</strong> 字符</span>
-            <span><strong>{{ strongCount }}</strong> 处加粗</span>
+            <span>{{ filledSectionCount }} 段</span>
+            <span>{{ markdownStats.characters }} 字</span>
           </div>
           <div class="preview-status" :class="{ ok: canSubmit }">
-            {{ canSubmit ? '✓ 结构完整，可提交' : '请完善项目、标题和正文' }}
+            {{ canSubmit ? '可提交' : '请完善必填项' }}
           </div>
         </div>
       </aside>
     </div>
+
+    <el-drawer v-model="sourceExpanded" title="Markdown 源码" size="520px" append-to-body>
+      <div class="source-drawer">
+        <el-alert
+          v-if="markdownOverridden"
+          type="warning"
+          :closable="false"
+          show-icon
+          class="override-alert"
+        >
+          <template #title>
+            已直接编辑 Markdown，对上方字段的修改将不会自动同步。
+            <el-button size="small" @click="restoreFieldSync">恢复字段同步</el-button>
+          </template>
+        </el-alert>
+        <div class="source-card-toolbar">
+          <span>CommonMark · 提交时将传递给后端</span>
+          <span>{{ markdownStats.characters }} 字符 / {{ markdownStats.lines }} 行</span>
+        </div>
+        <el-input
+          v-model="manualMarkdown"
+          type="textarea"
+          maxlength="50000"
+          class="source-textarea"
+          :rows="18"
+        />
+        <div class="source-drawer-actions">
+          <el-button @click="copyMarkdown">复制</el-button>
+        </div>
+      </div>
+    </el-drawer>
 
     <el-dialog v-model="imagePickerVisible" title="选择品牌图片" width="860px">
       <div class="image-picker">
@@ -436,12 +380,9 @@ import {
   ArrowDown,
   ArrowUp,
   Back,
-  ChatLineRound,
   Check,
-  CircleCheck,
   Delete,
   Document,
-  Files,
   Picture,
   Plus,
   Rank,
@@ -462,13 +403,13 @@ interface ManualSection {
   id: number
   heading: string
   content: string
+  collapsed?: boolean
 }
 
 interface ArticleTypeOption {
   value: string
   label: string
   desc: string
-  icon: unknown
 }
 
 type CreateMode = 'manual' | 'auto'
@@ -495,10 +436,10 @@ interface ParsedArticle {
 }
 
 const ARTICLE_TYPE_FALLBACKS: ArticleTypeOption[] = [
-  { value: 'faq', label: 'FAQ', desc: '问答式短文', icon: ChatLineRound },
-  { value: 'scenario_content', label: '场景内容', desc: '使用场景介绍', icon: Files },
-  { value: 'industry_article', label: '行业文章', desc: '行业深度解读', icon: Document },
-  { value: 'stage_advice', label: '阶段建议', desc: '分阶段方案建议', icon: CircleCheck },
+  { value: 'faq', label: 'FAQ', desc: '问答式短文' },
+  { value: 'scenario_content', label: '场景内容', desc: '使用场景介绍' },
+  { value: 'industry_article', label: '行业文章', desc: '行业深度解读' },
+  { value: 'stage_advice', label: '阶段建议', desc: '分阶段方案建议' },
 ]
 
 const CONTENT_STYLE_OPTIONS: ContentStyleOption[] = [
@@ -514,13 +455,13 @@ const TONE_OPTIONS = [
   { label: '专业严谨', value: 'professional' },
   { label: '亲切自然', value: 'friendly' },
   { label: '观点鲜明', value: 'sharp' },
-  { label: '故事化', value: 'storytelling' },
+  { label: '故事化表达', value: 'storytelling' },
 ]
 
 const LENGTH_OPTIONS = [
-  { label: '短', value: 'short' },
-  { label: '中', value: 'medium' },
-  { label: '长', value: 'long' },
+  { label: '短 ~600 字', value: 'short' },
+  { label: '中 ~1500 字', value: 'medium' },
+  { label: '长 ~3000 字', value: 'long' },
 ]
 
 const route = useRoute()
@@ -533,8 +474,6 @@ const generating = ref(false)
 const projectSearching = ref(false)
 const projectOptions = ref<Project[]>([])
 const focusedSectionId = ref<number | null>(null)
-const boldInput = ref('')
-const boldInputRef = ref<HTMLInputElement | null>(null)
 const markdownOverride = ref('')
 const markdownOverridden = ref(false)
 const sourceExpanded = ref(false)
@@ -557,7 +496,6 @@ const manualForm = reactive({
   projectId: undefined as number | undefined,
   articleType: 'industry_article',
   title: '',
-  boldTags: [] as string[],
   sections: [createSection()],
 })
 
@@ -592,7 +530,6 @@ const contentStyleOptions = computed(() => CONTENT_STYLE_OPTIONS)
 const toneOptions = computed(() => TONE_OPTIONS)
 const lengthOptions = computed(() => LENGTH_OPTIONS)
 const selectedProject = computed(() => projectOptions.value.find((project) => project.id === manualForm.projectId) || null)
-const projectInitial = computed(() => selectedProject.value?.projectName?.trim().slice(0, 1) || '项')
 const selectedArticleTypeLabel = computed(() => articleTypeOptions.value.find((item) => item.value === manualForm.articleType)?.label || manualForm.articleType)
 const selectedContentStyleLabel = computed(() => contentStyleOptions.value.find((item) => item.value === aiForm.contentStyle)?.label || 'AI 风格')
 const generatedManualMarkdown = computed(() => buildManualMarkdown())
@@ -615,7 +552,7 @@ const markdownStats = computed(() => {
   }
 })
 const filledSectionCount = computed(() => manualForm.sections.filter((item) => item.heading.trim() || item.content.trim()).length)
-const strongCount = computed(() => (manualMarkdown.value.match(/\*\*[^*]+?\*\*/g) || []).length)
+const allSectionsCollapsed = computed(() => manualForm.sections.length > 0 && manualForm.sections.every((item) => item.collapsed))
 const canSubmit = computed(() => Boolean(manualForm.projectId && manualForm.title.trim() && manualMarkdown.value.trim()) && !generating.value)
 const canGenerate = computed(() => Boolean(manualForm.projectId && manualForm.articleType && aiForm.topic.trim()) && !generating.value)
 const todayText = computed(() => {
@@ -635,30 +572,13 @@ function createSection(): ManualSection {
     id: nextSectionId++,
     heading: '',
     content: '',
+    collapsed: false,
   }
 }
 
 function restoreFieldSync() {
   markdownOverridden.value = false
   markdownOverride.value = ''
-}
-
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-function applyBoldFields(content: string) {
-  if (!manualForm.boldTags.length) return content
-  const sortedTags = [...manualForm.boldTags].sort((a, b) => b.length - a.length)
-  return content.split(/(\*\*[^*]+?\*\*)/g).map((segment) => {
-    if (segment.startsWith('**') && segment.endsWith('**')) {
-      return segment
-    }
-    return sortedTags.reduce((result, word) => {
-      const pattern = new RegExp(escapeRegExp(word), 'g')
-      return result.replace(pattern, `**${word}**`)
-    }, segment)
-  }).join('')
 }
 
 function buildManualMarkdown() {
@@ -675,7 +595,7 @@ function buildManualMarkdown() {
       parts.push(`## ${heading}`)
     }
     if (content) {
-      parts.push(applyBoldFields(content))
+      parts.push(content)
     }
   }
   return parts.join('\n\n')
@@ -741,32 +661,15 @@ function formatSectionNo(index: number) {
   return String(index + 1).padStart(2, '0')
 }
 
-function focusBoldInput() {
-  boldInputRef.value?.focus()
+function toggleSection(section: ManualSection) {
+  section.collapsed = !section.collapsed
 }
 
-function handleBoldInput(event: Event) {
-  const target = event.target as HTMLInputElement
-  if (/[，,、]/.test(target.value)) {
-    commitBoldInput()
-  }
-}
-
-function commitBoldInput() {
-  const values = boldInput.value
-    .split(/[\n,，、]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-  for (const value of values) {
-    if (!manualForm.boldTags.includes(value)) {
-      manualForm.boldTags.push(value)
-    }
-  }
-  boldInput.value = ''
-}
-
-function removeBoldTag(tag: string) {
-  manualForm.boldTags = manualForm.boldTags.filter((item) => item !== tag)
+function toggleAllSections() {
+  const nextCollapsed = !allSectionsCollapsed.value
+  manualForm.sections.forEach((section) => {
+    section.collapsed = nextCollapsed
+  })
 }
 
 async function copyMarkdown() {
@@ -965,13 +868,25 @@ async function generateAiPreview() {
     console.error(err)
     generationNotice.value = {
       type: 'error',
-      title: 'AI 生成失败',
+      title: aiGenerationFailureTitle(err),
       description: errorMessage(err, '生成失败，请稍后重试。已保留当前生成设置。'),
     }
   } finally {
     generating.value = false
     clearStillGeneratingTimer()
   }
+}
+
+function aiGenerationFailureTitle(err: unknown) {
+  const status = (err as any)?.response?.status ?? (err as any)?.status
+  const code = (err as any)?.code ?? (err as any)?.response?.data?.code
+  if (status === 401 || code === 401) {
+    return '登录状态已失效'
+  }
+  if (code === 80201) {
+    return 'AI 模型配置异常'
+  }
+  return 'AI 生成失败'
 }
 
 function applyAiPreview(response: ArticleAiDraftPreviewResponse) {
@@ -1030,7 +945,7 @@ function parseGeneratedMarkdown(markdownText: string, fallbackTitle = ''): Parse
     }
     const h2 = line.match(/^##\s+(.+)$/)
     if (h2) {
-      current = { id: nextSectionId++, heading: h2[1].trim(), content: '' }
+      current = { id: nextSectionId++, heading: h2[1].trim(), content: '', collapsed: false }
       sections.push(current)
       continue
     }
@@ -1154,8 +1069,10 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .manual-article-page {
-  min-height: 100vh;
-  background: var(--el-bg-color-page);
+  height: 100vh;
+  overflow: hidden;
+  background: #f3f6fa;
+  color: #1f2937;
 }
 
 .page-toolbar {
@@ -1166,10 +1083,11 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 14px 24px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  background: color-mix(in srgb, var(--el-bg-color) 92%, transparent);
-  backdrop-filter: saturate(180%) blur(10px);
+  height: 68px;
+  padding: 0 30px;
+  border-bottom: 1px solid #e6ebf2;
+  background: #ffffff;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.02);
 }
 
 .toolbar-left,
@@ -1182,17 +1100,17 @@ onBeforeUnmount(() => {
 
 .toolbar-title h1 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: 17px;
+  font-weight: 700;
   line-height: 1.3;
-  color: var(--el-text-color-primary);
+  color: #111827;
 }
 
 .breadcrumb,
 .section-desc,
 .form-help,
 .source-desc {
-  color: var(--el-text-color-secondary);
+  color: #8b95a5;
   font-size: 12px;
 }
 
@@ -1200,7 +1118,7 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-right: 4px;
+  margin-right: 8px;
   color: var(--el-text-color-secondary);
   font-size: 12px;
 }
@@ -1220,52 +1138,80 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
+.manual-article-page :deep(.el-button) {
+  border-radius: 7px;
+}
+
+.manual-article-page :deep(.el-input__wrapper),
+.manual-article-page :deep(.el-textarea__inner) {
+  border-radius: 7px;
+  box-shadow: 0 0 0 1px #dfe6ef inset;
+}
+
+.manual-article-page :deep(.el-input__wrapper:hover),
+.manual-article-page :deep(.el-textarea__inner:hover) {
+  box-shadow: 0 0 0 1px #cbd5e1 inset;
+}
+
+.manual-article-page :deep(.el-input__wrapper.is-focus),
+.manual-article-page :deep(.el-textarea__inner:focus) {
+  box-shadow: 0 0 0 1px #3b82f6 inset;
+}
+
+.manual-article-page :deep(.el-segmented) {
+  --el-segmented-item-selected-bg-color: #2563eb;
+  --el-segmented-item-selected-color: #ffffff;
+  --el-segmented-border-radius: 7px;
+}
+
 .page-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  min-height: calc(100vh - 61px);
+  height: calc(100vh - 68px);
+  overflow: hidden;
 }
 
 .editor-pane,
 .preview-pane {
-  padding: 24px;
+  min-width: 0;
+  overflow: auto;
+  padding: 26px 30px 42px;
 }
 
 .editor-pane {
-  border-right: 1px solid var(--el-border-color-lighter);
+  border-right: 1px solid #e5ebf3;
 }
 
 .preview-pane {
-  background: var(--el-fill-color-light);
+  background: #f4f7fb;
 }
 
-.section-card,
-.source-card {
-  margin-bottom: 16px;
+.section-card {
+  margin-bottom: 18px;
   overflow: hidden;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  background: var(--el-bg-color);
-  transition: box-shadow 0.15s ease;
+  border: 1px solid #e4eaf2;
+  border-radius: 7px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.section-card:hover,
-.source-card:hover {
-  box-shadow: var(--el-box-shadow-light);
+.section-card:hover {
+  border-color: #d8e1ee;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.05);
 }
 
-.section-header,
-.source-card-head {
+.section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  min-height: 60px;
   padding: 14px 18px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
+  border-bottom: 1px solid #e8edf4;
 }
 
-.section-header-left,
-.source-title {
+.section-header-left {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1279,47 +1225,55 @@ onBeforeUnmount(() => {
   width: 22px;
   height: 22px;
   border-radius: 999px;
-  background: var(--el-color-primary-light-9);
-  color: var(--el-color-primary);
+  background: #eef5ff;
+  color: #2563eb;
   font-size: 12px;
   font-weight: 600;
   flex-shrink: 0;
 }
 
-.section-index.ai-index {
-  width: 26px;
-  background: var(--el-color-primary);
-  color: var(--el-color-white);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-
-.section-title,
-.source-title span:first-of-type {
-  color: var(--el-text-color-primary);
+.section-title {
+  color: #1f2937;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
-.section-body,
-.source-card-body {
-  padding: 18px;
-}
-
-.base-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 16px;
+.section-body {
+  padding: 20px 18px;
 }
 
 .ai-card {
-  border-color: var(--el-color-primary-light-7);
+  border-color: #bfdbfe;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.04), 0 12px 28px rgba(37, 99, 235, 0.07);
+}
+
+.ai-card .section-header {
+  border-bottom-color: #dbeafe;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.generate-button {
+  min-width: 96px;
+  height: 34px;
+  border-radius: 7px;
+  font-weight: 700;
+}
+
+.generate-button.is-disabled,
+.generate-button.is-disabled:hover,
+.generate-button.is-disabled:focus {
+  border-color: #dbe7f7;
+  background: #dbe7f7;
+  color: #ffffff;
+  box-shadow: none;
+  cursor: not-allowed;
 }
 
 .ai-grid,
 .ai-extra-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.6fr);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1.5fr) minmax(260px, 0.65fr);
+  gap: 18px;
 }
 
 .topic-field {
@@ -1337,33 +1291,34 @@ onBeforeUnmount(() => {
 .style-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  gap: 10px;
 }
 
 .style-tile {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: 8px;
-  min-height: 68px;
-  padding: 10px;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
-  background: var(--el-bg-color);
-  color: var(--el-text-color-primary);
+  min-height: 72px;
+  padding: 11px 12px;
+  border: 1px solid #dfe6ef;
+  border-radius: 7px;
+  background: #ffffff;
+  color: #1f2937;
   cursor: pointer;
   font-family: inherit;
   text-align: left;
-  transition: all 0.15s ease;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .style-tile:hover,
 .style-tile.active {
-  border-color: var(--el-color-primary);
+  border-color: #3b82f6;
 }
 
 .style-tile.active {
-  background: var(--el-color-primary-light-9);
-  box-shadow: 0 0 0 1px var(--el-color-primary-light-7) inset;
+  background: #eff6ff;
+  box-shadow: 0 0 0 1px #3b82f6 inset;
 }
 
 .style-icon {
@@ -1372,17 +1327,17 @@ onBeforeUnmount(() => {
   justify-content: center;
   width: 24px;
   height: 24px;
-  border-radius: 6px;
-  background: var(--el-fill-color);
-  color: var(--el-text-color-secondary);
+  border-radius: 5px;
+  background: #f1f5f9;
+  color: #8b95a5;
   font-size: 12px;
   font-weight: 700;
   flex-shrink: 0;
 }
 
 .style-tile.active .style-icon {
-  background: var(--el-color-primary);
-  color: var(--el-color-white);
+  background: #2563eb;
+  color: #ffffff;
 }
 
 .style-copy {
@@ -1393,14 +1348,23 @@ onBeforeUnmount(() => {
 }
 
 .style-name {
+  color: #1f2937;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .style-desc {
-  color: var(--el-text-color-secondary);
+  color: #8b95a5;
   font-size: 11px;
   line-height: 1.35;
+}
+
+.style-check {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  color: #2563eb;
+  font-size: 14px;
 }
 
 .ai-extra-collapse {
@@ -1431,9 +1395,9 @@ onBeforeUnmount(() => {
 }
 
 .form-label {
-  color: var(--el-text-color-regular);
+  color: #4b5563;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .form-label.required::before {
@@ -1453,107 +1417,6 @@ onBeforeUnmount(() => {
   font-size: 12px;
 }
 
-.project-pill {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  border: 1px solid var(--el-color-primary-light-7);
-  border-radius: var(--el-border-radius-base);
-  background: var(--el-color-primary-light-9);
-}
-
-.project-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  background: var(--el-color-primary);
-  color: var(--el-color-white);
-  font-size: 13px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.project-meta {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-}
-
-.project-name {
-  color: var(--el-text-color-primary);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.project-desc {
-  overflow: hidden;
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.type-group {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-}
-
-.type-tile {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-height: 70px;
-  padding: 12px;
-  border: 1px solid var(--el-border-color-light);
-  border-radius: 8px;
-  background: var(--el-bg-color);
-  color: var(--el-text-color-primary);
-  cursor: pointer;
-  font-family: inherit;
-  text-align: left;
-  transition: all 0.15s ease;
-}
-
-.type-tile:hover,
-.type-tile.active {
-  border-color: var(--el-color-primary);
-}
-
-.type-tile.active {
-  background: var(--el-color-primary-light-9);
-}
-
-.tile-icon {
-  margin-top: 1px;
-  color: var(--el-text-color-secondary);
-}
-
-.type-tile.active .tile-icon {
-  color: var(--el-color-primary);
-}
-
-.tile-main {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.tile-name {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.tile-desc {
-  color: var(--el-text-color-secondary);
-  font-size: 11px;
-  line-height: 1.4;
-}
 
 .title-field {
   margin-bottom: 18px;
@@ -1578,9 +1441,9 @@ onBeforeUnmount(() => {
 }
 
 .paragraph-block {
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  background: var(--el-fill-color-lighter);
+  border: 1px solid #e4eaf2;
+  border-radius: 7px;
+  background: #fbfcfe;
   transition: all 0.15s ease;
 }
 
@@ -1668,8 +1531,8 @@ onBeforeUnmount(() => {
   gap: 6px;
   width: 100%;
   padding: 10px;
-  border: 1px dashed var(--el-border-color);
-  border-radius: 8px;
+  border: 1px dashed #d8e1ec;
+  border-radius: 7px;
   background: transparent;
   color: var(--el-text-color-secondary);
   cursor: pointer;
@@ -1682,48 +1545,6 @@ onBeforeUnmount(() => {
   border-color: var(--el-color-primary);
   background: var(--el-color-primary-light-9);
   color: var(--el-color-primary);
-}
-
-.bold-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  min-height: 38px;
-  padding: 6px 8px;
-  border: 1px solid var(--el-border-color);
-  border-radius: var(--el-border-radius-base);
-  background: var(--el-bg-color);
-}
-
-.bold-tags:focus-within {
-  border-color: var(--el-color-primary);
-  box-shadow: 0 0 0 1px var(--el-color-primary-light-3);
-}
-
-.bold-input {
-  min-width: 120px;
-  flex: 1;
-  height: 24px;
-  border: 0;
-  outline: none;
-  background: transparent;
-  color: var(--el-text-color-primary);
-  font-family: inherit;
-  font-size: 13px;
-}
-
-.source-card-head {
-  cursor: pointer;
-  user-select: none;
-}
-
-.source-chevron {
-  transition: transform 0.2s ease;
-}
-
-.source-card.collapsed .source-chevron {
-  transform: rotate(-90deg);
 }
 
 .override-alert {
@@ -1767,24 +1588,24 @@ onBeforeUnmount(() => {
   gap: 12px;
   margin-bottom: 16px;
   padding-bottom: 8px;
-  background: color-mix(in srgb, var(--el-fill-color-light) 92%, transparent);
+  background: color-mix(in srgb, #f4f7fb 92%, transparent);
   backdrop-filter: blur(8px);
 }
 
 .preview-eyebrow {
-  color: var(--el-text-color-secondary);
-  font-size: 11px;
+  color: #8b95a5;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0;
 }
 
 .paper {
-  min-height: 600px;
-  padding: 56px 64px;
-  border: 1px solid var(--el-border-color-lighter);
+  min-height: calc(100vh - 220px);
+  padding: 58px 64px;
+  border: 1px solid #e4eaf2;
   border-radius: 4px;
-  background: var(--el-bg-color);
-  box-shadow: var(--el-box-shadow-light);
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
 }
 
 .paper-meta {
@@ -1793,8 +1614,8 @@ onBeforeUnmount(() => {
   gap: 8px;
   margin-bottom: 28px;
   padding-bottom: 12px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  color: var(--el-text-color-secondary);
+  border-bottom: 1px solid #e8edf4;
+  color: #8b95a5;
   font-size: 11px;
   font-weight: 500;
 }
@@ -1807,7 +1628,7 @@ onBeforeUnmount(() => {
 }
 
 .md-body {
-  color: var(--el-text-color-primary);
+  color: #1f2937;
   font-size: 15px;
   line-height: 1.7;
 }
@@ -1924,7 +1745,7 @@ onBeforeUnmount(() => {
 .preview-empty {
   padding: 80px 24px;
   text-align: center;
-  color: var(--el-text-color-placeholder);
+  color: #9aa4b2;
 }
 
 .raw-markdown {
@@ -1941,10 +1762,10 @@ onBeforeUnmount(() => {
   gap: 12px;
   margin-top: 16px;
   padding: 10px 14px;
-  border: 1px solid var(--el-border-color-lighter);
+  border: 1px solid #e4eaf2;
   border-radius: 6px;
-  background: var(--el-bg-color);
-  color: var(--el-text-color-secondary);
+  background: #ffffff;
+  color: #8b95a5;
   font-size: 12px;
 }
 
@@ -1962,17 +1783,25 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1100px) {
+  .manual-article-page {
+    height: auto;
+    overflow: visible;
+  }
+
   .page-body {
     grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
   }
 
   .editor-pane {
     border-right: 0;
-    border-bottom: 1px solid var(--el-border-color-lighter);
+    border-bottom: 1px solid #e5ebf3;
   }
 
-  .base-grid {
-    grid-template-columns: 1fr;
+  .editor-pane,
+  .preview-pane {
+    overflow: visible;
   }
 
   .ai-grid,
@@ -2016,6 +1845,531 @@ onBeforeUnmount(() => {
 
   .preview-stats {
     flex-wrap: wrap;
+  }
+}
+
+/* Manual article create UI repair pass: keep this block last so it overrides
+   older section/card styles left from the previous implementation. */
+.manual-article-page {
+  height: 100vh;
+  overflow: hidden;
+  background: #f3f6fa;
+}
+
+.page-toolbar {
+  height: 64px;
+  padding: 0 28px;
+}
+
+.sub-toolbar {
+  position: sticky;
+  top: 64px;
+  z-index: 19;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  padding: 0 30px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  background: var(--el-fill-color-light);
+}
+
+.sub-toolbar-left,
+.sub-toolbar-actions,
+.inline-field {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.sub-toolbar-left {
+  gap: 18px;
+}
+
+.sub-toolbar-spacer {
+  flex: 1;
+}
+
+.sub-toolbar-actions {
+  gap: 8px;
+}
+
+.inline-field {
+  gap: 8px;
+}
+
+.inline-label {
+  flex-shrink: 0;
+  color: var(--el-text-color-regular);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.inline-label.required::before {
+  content: "*";
+  margin-right: 3px;
+  color: var(--el-color-danger);
+}
+
+.project-select {
+  width: min(34vw, 420px);
+}
+
+.article-type-select {
+  width: 220px;
+}
+
+.article-type-option {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  line-height: 1.35;
+}
+
+.article-type-option span {
+  color: var(--el-text-color-primary);
+  font-weight: 600;
+}
+
+.article-type-option small {
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+}
+
+.mode-switch {
+  display: inline-flex;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--el-fill-color-light);
+}
+
+.mode-switch :deep(.el-radio-button__inner) {
+  border: 0 !important;
+  border-radius: 5px !important;
+  background: transparent;
+  color: var(--el-text-color-secondary);
+  box-shadow: none !important;
+  font-weight: 600;
+}
+
+.mode-switch :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
+  background: #ffffff;
+  color: var(--el-text-color-primary);
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12) !important;
+}
+
+.mode-switch :deep(.el-radio-button:last-child .el-radio-button__original-radio:checked + .el-radio-button__inner) {
+  color: var(--el-color-primary);
+}
+
+.page-body {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  height: calc(100vh - 112px);
+}
+
+.editor-pane,
+.preview-pane {
+  padding: 18px 22px 28px;
+}
+
+.section-card {
+  margin-bottom: 16px;
+  border-radius: 8px;
+}
+
+.section-header {
+  min-height: 50px;
+  padding: 12px 16px;
+}
+
+.section-index {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.section-body {
+  padding: 16px;
+}
+
+.ai-grid {
+  display: block;
+}
+
+.topic-field {
+  margin-bottom: 16px;
+}
+
+.ai-control-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.ai-control-grid :deep(.el-segmented) {
+  width: 100%;
+}
+
+.ai-control-grid :deep(.el-segmented__item) {
+  min-width: 0;
+}
+
+.ai-control-grid :deep(.el-segmented__item-label) {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.style-field {
+  margin-top: 0;
+}
+
+.style-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.style-tile {
+  min-height: 58px;
+  padding: 9px 10px;
+}
+
+.style-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+}
+
+.style-tile.active .style-icon {
+  background: var(--el-color-primary);
+  color: #ffffff;
+}
+
+.style-name {
+  font-size: 13px;
+}
+
+.style-desc {
+  font-size: 11px;
+}
+
+.ai-extra-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.generation-alert {
+  min-height: 38px;
+  margin: 12px 0 0;
+}
+
+.title-field {
+  margin-bottom: 14px;
+}
+
+.title-input :deep(.el-input__wrapper) {
+  min-height: 44px;
+  padding: 0;
+  border-radius: 0;
+  box-shadow: 0 2px 0 var(--el-border-color) !important;
+  background: transparent;
+}
+
+.title-input :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 2px 0 var(--el-color-primary) !important;
+}
+
+.title-input :deep(.el-input__inner) {
+  color: var(--el-text-color-primary);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.title-input :deep(.el-input__inner::placeholder) {
+  color: var(--el-text-color-placeholder);
+  font-weight: 400;
+}
+
+.fold-all-link {
+  border: 0;
+  background: transparent;
+  color: var(--el-color-primary);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.paragraph-list {
+  gap: 8px;
+}
+
+.paragraph-block {
+  border-color: var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.paragraph-block.empty {
+  border-style: dashed;
+  background: var(--el-fill-color-lighter);
+}
+
+.paragraph-block:hover {
+  border-color: var(--el-border-color);
+}
+
+.paragraph-head {
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.drag-handle,
+.paragraph-actions {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.paragraph-block:hover .drag-handle,
+.paragraph-block:hover .paragraph-actions,
+.paragraph-block.focused .drag-handle,
+.paragraph-block.focused .paragraph-actions {
+  opacity: 1;
+}
+
+.paragraph-actions {
+  gap: 0;
+}
+
+.paragraph-actions :deep(.el-button) {
+  width: 26px;
+  height: 26px;
+}
+
+.paragraph-block.collapsed .paragraph-actions :deep(.el-button:nth-child(3) .el-icon) {
+  transform: rotate(-90deg);
+}
+
+.paragraph-no {
+  min-width: 24px;
+  height: 22px;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-secondary);
+}
+
+.heading-input {
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 5px;
+  font-size: 13.5px;
+}
+
+.heading-input:focus {
+  background: var(--el-fill-color-light);
+}
+
+.paragraph-body {
+  padding: 0;
+}
+
+.paragraph-body :deep(.el-textarea__inner) {
+  padding: 12px;
+  border-radius: 0 0 8px 8px;
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+
+.paragraph-summary {
+  overflow: hidden;
+  padding: 0 12px 10px 58px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.paragraph-summary-line {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.preview-head {
+  top: 0;
+  margin-bottom: 12px;
+}
+
+.paper {
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 180px);
+  min-height: 0;
+  overflow: auto;
+  padding: 46px 54px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+}
+
+.paper-meta {
+  margin-bottom: 24px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+  font-size: 12px;
+}
+
+.ai-preview-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: #f3e8ff;
+  color: #7c3aed;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.md-body {
+  font-size: 14px;
+  line-height: 1.85;
+}
+
+.md-body :deep(h1) {
+  margin: 0 0 22px;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+.md-body :deep(h2) {
+  margin: 24px 0 8px;
+  padding-left: 0;
+  border-left: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.md-body :deep(p) {
+  margin: 0 0 14px;
+  line-height: 1.85;
+}
+
+.preview-foot {
+  height: 36px;
+  margin-top: 12px;
+  background: var(--el-fill-color-light);
+}
+
+.source-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.source-drawer-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+@media (max-width: 1280px) {
+  .style-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1024px) {
+  .manual-article-page {
+    height: auto;
+    overflow: visible;
+  }
+
+  .sub-toolbar {
+    position: sticky;
+    top: 64px;
+    height: auto;
+    min-height: 48px;
+    flex-wrap: wrap;
+    padding: 8px 18px;
+  }
+
+  .page-body {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+
+  .editor-pane,
+  .preview-pane {
+    overflow: visible;
+  }
+}
+
+@media (max-width: 768px) {
+  .page-toolbar {
+    height: auto;
+    min-height: 64px;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px 16px;
+  }
+
+  .toolbar-left,
+  .toolbar-right {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .toolbar-right {
+    align-items: center;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .toolbar-right :deep(.el-button) {
+    min-width: 76px;
+  }
+
+  .sub-toolbar {
+    position: static;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .sub-toolbar-left,
+  .inline-field,
+  .ai-control-grid {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .sub-toolbar-actions {
+    flex-direction: row;
+  }
+
+  .ai-control-grid {
+    display: flex;
+  }
+
+  .project-select,
+  .article-type-select {
+    width: 100%;
+  }
+
+  .style-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .paper {
+    position: static;
+    padding: 30px 24px;
   }
 }
 </style>
