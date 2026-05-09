@@ -15,11 +15,32 @@ public record LlmModelConfig(String platformCode,
                              Integer maxRetry,
                              Integer rateLimitQps,
                              Integer maxTokens,
-                             boolean normalizeJsonOutput) {
+                             boolean normalizeJsonOutput,
+                             Integer requestTimeoutMaxMs) {
 
     public static final int DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
     public static final int DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
     public static final int MAX_REQUEST_TIMEOUT_MS = 60_000;
+    public static final int LONG_FORM_MAX_REQUEST_TIMEOUT_MS = 180_000;
+
+    public LlmModelConfig(String platformCode,
+                          String platformName,
+                          String modelId,
+                          String modelName,
+                          String apiUrl,
+                          String apiKey,
+                          String systemPrompt,
+                          Double temperature,
+                          Integer connectTimeoutMs,
+                          Integer requestTimeoutMs,
+                          Integer maxRetry,
+                          Integer rateLimitQps,
+                          Integer maxTokens,
+                          boolean normalizeJsonOutput) {
+        this(platformCode, platformName, modelId, modelName, apiUrl, apiKey, systemPrompt, temperature,
+                connectTimeoutMs, requestTimeoutMs, maxRetry, rateLimitQps, maxTokens, normalizeJsonOutput,
+                MAX_REQUEST_TIMEOUT_MS);
+    }
 
     public LlmModelConfig {
         if (!StringUtils.hasText(platformCode)) {
@@ -36,8 +57,9 @@ public record LlmModelConfig(String platformCode,
         }
         connectTimeoutMs = positiveOrDefault(connectTimeoutMs, DEFAULT_CONNECT_TIMEOUT_MS);
         requestTimeoutMs = positiveOrDefault(requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS);
-        if (requestTimeoutMs > MAX_REQUEST_TIMEOUT_MS) {
-            throw new IllegalArgumentException("requestTimeoutMs must be <= " + MAX_REQUEST_TIMEOUT_MS);
+        requestTimeoutMaxMs = positiveOrDefault(requestTimeoutMaxMs, MAX_REQUEST_TIMEOUT_MS);
+        if (requestTimeoutMs > requestTimeoutMaxMs) {
+            throw new IllegalArgumentException("requestTimeoutMs must be <= " + requestTimeoutMaxMs);
         }
         maxRetry = Math.max(0, positiveOrDefault(maxRetry, 2));
         rateLimitQps = Math.max(1, positiveOrDefault(rateLimitQps, 1));

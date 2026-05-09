@@ -105,7 +105,7 @@ const adminRoutes: RouteRecordRaw = {
       path: 'content/articles/manual-create',
       name: 'ManualArticleCreate',
       component: () => import('@/views/admin/content/ManualArticleCreate.vue'),
-      meta: { title: '手动生成文章', hidden: true, permissions: ['project.read'] },
+      meta: { title: '生成文章', hidden: true, permissions: ['project.read'] },
     },
     {
       path: 'keyword-groups',

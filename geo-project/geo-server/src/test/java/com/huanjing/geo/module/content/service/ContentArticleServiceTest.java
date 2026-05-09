@@ -36,6 +36,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -112,6 +113,42 @@ class ContentArticleServiceTest {
         verify(articleDraftVersionMapper).insert(versionCaptor.capture());
         assertEquals(markdown, versionCaptor.getValue().getContentMarkdown());
         verifyAudit("ARTICLE_CREATED", AuditResult.SUCCESS);
+    }
+
+    @Test
+    void createManualStoresAiPreviewMetadataWhenProvided() {
+        doAnswer(invocation -> {
+            ArticleDraft draft = invocation.getArgument(0);
+            draft.setId(99L);
+            return 1;
+        }).when(articleDraftMapper).insert(any(ArticleDraft.class));
+        when(articleDraftMapper.selectList(any())).thenReturn(List.of());
+
+        ManualArticleCreateRequest request = new ManualArticleCreateRequest();
+        request.setProjectId(10L);
+        request.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
+        request.setTitle("AI edited title");
+        request.setContentMarkdown("# AI edited title\n\n## A\n\nbody");
+        request.setSource("ai_preview");
+        request.setAiMetadata(Map.of(
+                "inputSnapshot", "{\"topic\":\"test\"}",
+                "promptSnapshot", "{\"prompt\":\"test\"}",
+                "modelResponseSnapshot", "{\"responseText\":\"raw\"}",
+                "modelPlatformCode", "openai",
+                "modelId", "gpt-test",
+                "modelName", "GPT Test"
+        ));
+
+        service.createManual(request);
+
+        ArgumentCaptor<ArticleDraftVersion> versionCaptor = ArgumentCaptor.forClass(ArticleDraftVersion.class);
+        verify(articleDraftVersionMapper).insert(versionCaptor.capture());
+        ArticleDraftVersion version = versionCaptor.getValue();
+        assertEquals("ai_preview", version.getGeneratedBy());
+        assertEquals("{\"topic\":\"test\"}", version.getInputSnapshot());
+        assertEquals("openai", version.getModelPlatformCode());
+        assertEquals("gpt-test", version.getModelId());
+        org.junit.jupiter.api.Assertions.assertTrue(version.getPromptSnapshot().contains("modelResponseSnapshot"));
     }
 
     @Test

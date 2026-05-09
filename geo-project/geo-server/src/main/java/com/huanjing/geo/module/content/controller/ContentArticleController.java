@@ -2,6 +2,8 @@ package com.huanjing.geo.module.content.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
+import com.huanjing.geo.module.content.dto.ArticleAiDraftPreviewRequest;
+import com.huanjing.geo.module.content.dto.ArticleAiDraftPreviewResponse;
 import com.huanjing.geo.module.content.dto.ArticleAiDraftRequest;
 import com.huanjing.geo.module.content.dto.ArticleAiDraftResponse;
 import com.huanjing.geo.module.content.dto.ArticlePublishRequest;
@@ -50,6 +52,13 @@ public class ContentArticleController {
     @PostMapping("/ai-draft")
     public CompletableFuture<R<ArticleAiDraftResponse>> createAiDraft(@Valid @RequestBody ArticleAiDraftRequest req) {
         return articleAiDraftService.generate(req).thenApply(R::ok);
+    }
+
+    @PostMapping("/ai-draft/preview")
+    public CompletableFuture<R<ArticleAiDraftPreviewResponse>> previewAiDraft(
+            @Valid @RequestBody ArticleAiDraftPreviewRequest req
+    ) {
+        return articleAiDraftService.preview(req).thenApply(R::ok);
     }
 
     @PostMapping("/self-media-cookie-status/batch")

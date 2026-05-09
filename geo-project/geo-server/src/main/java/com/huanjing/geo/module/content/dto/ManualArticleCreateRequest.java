@@ -5,6 +5,8 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
+import java.util.Map;
+
 @Data
 public class ManualArticleCreateRequest {
     @NotNull
@@ -17,4 +19,9 @@ public class ManualArticleCreateRequest {
     @NotBlank
     @Size(max = 50000)
     private String contentMarkdown;
+
+    @Size(max = 16)
+    private String source;
+
+    private Map<String, Object> aiMetadata;
 }

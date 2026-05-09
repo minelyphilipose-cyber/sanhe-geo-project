@@ -4,18 +4,22 @@
       <div class="toolbar-left">
         <el-button class="back-button" :icon="Back" aria-label="返回" @click="goBack" />
         <div class="toolbar-title">
-          <h1>手动生成文章</h1>
+          <h1>生成文章</h1>
           <div class="breadcrumb">内容与执行 / 文章管理 / 新建</div>
         </div>
       </div>
       <div class="toolbar-right">
+        <el-radio-group v-model="createMode" size="small" class="mode-switch">
+          <el-radio-button label="manual">手动撰写</el-radio-button>
+          <el-radio-button label="auto">AI 生成</el-radio-button>
+        </el-radio-group>
         <span class="ready-state">
           <span class="ready-dot" :class="{ pending: !canSubmit }" />
           {{ canSubmit ? '字段已就绪' : '字段待完善' }}
         </span>
         <el-button @click="goBack">取消</el-button>
-        <el-button type="primary" :icon="Check" :loading="submitting" @click="submitManualCreate">
-          生成并提交审核
+        <el-button type="primary" :icon="Check" :loading="submitting" :disabled="!canSubmit" @click="submitManualCreate">
+          提交审核
         </el-button>
       </div>
     </div>
@@ -89,15 +93,109 @@
           </div>
         </section>
 
+        <section v-if="createMode === 'auto'" class="section-card ai-card">
+          <header class="section-header">
+            <div class="section-header-left">
+              <span class="section-index ai-index">AI</span>
+              <span class="section-title">AI 生成设置</span>
+              <span class="section-desc">生成后回填为可编辑草稿，不直接进入审核</span>
+            </div>
+            <el-button type="primary" :loading="generating" :disabled="!canGenerate" @click="generateAiPreview">
+              {{ generating ? '生成中' : aiMetadata ? '重新生成' : '生成草稿' }}
+            </el-button>
+          </header>
+          <div class="section-body">
+            <div class="ai-grid">
+              <div class="form-item topic-field">
+                <label class="form-label required">选题 / 主题</label>
+                <el-input
+                  v-model="aiForm.topic"
+                  type="textarea"
+                  :rows="3"
+                  maxlength="1000"
+                  show-word-limit
+                  placeholder="如：2026 年 RAG 在法律行业的落地路径"
+                />
+              </div>
+              <div class="form-item">
+                <label class="form-label">语气</label>
+                <el-segmented v-model="aiForm.tone" :options="toneOptions" />
+                <label class="form-label length-label">篇幅</label>
+                <el-segmented v-model="aiForm.length" :options="lengthOptions" />
+              </div>
+            </div>
+
+            <div class="form-item style-field">
+              <label class="form-label required">内容风格</label>
+              <div class="style-grid">
+                <button
+                  v-for="item in contentStyleOptions"
+                  :key="item.value"
+                  type="button"
+                  class="style-tile"
+                  :class="{ active: aiForm.contentStyle === item.value }"
+                  @click="aiForm.contentStyle = item.value"
+                >
+                  <span class="style-icon">{{ item.icon }}</span>
+                  <span class="style-copy">
+                    <span class="style-name">{{ item.label }}</span>
+                    <span class="style-desc">{{ item.desc }}</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <el-collapse class="ai-extra-collapse">
+              <el-collapse-item title="补充提示词与参考资料（可选）" name="extra">
+                <div class="ai-extra-grid">
+                  <el-input
+                    v-model="aiForm.extraPrompt"
+                    type="textarea"
+                    :rows="3"
+                    maxlength="3000"
+                    placeholder="如：避免空泛描述；多举具体案例；最后给出落地清单"
+                  />
+                  <el-input
+                    v-model="aiForm.referenceMaterials"
+                    type="textarea"
+                    :rows="3"
+                    maxlength="3000"
+                    placeholder="参考资料或链接，每行一条"
+                  />
+                </div>
+              </el-collapse-item>
+            </el-collapse>
+
+            <el-alert
+              v-if="generationNotice"
+              class="generation-alert"
+              :type="generationNotice.type"
+              :title="generationNotice.title"
+              :description="generationNotice.description"
+              show-icon
+              :closable="false"
+            />
+          </div>
+        </section>
+
         <section class="section-card">
           <header class="section-header">
             <div class="section-header-left">
               <span class="section-index">2</span>
               <span class="section-title">文章结构</span>
-              <span class="section-desc">大标题 + 多个小标题段落，自动转 Markdown</span>
+              <span class="section-desc">{{ createMode === 'auto' ? 'AI 回填后仍可继续编辑' : '大标题 + 多个小标题段落，自动转 Markdown' }}</span>
             </div>
           </header>
           <div class="section-body">
+            <el-alert
+              v-if="parseNotice"
+              class="generation-alert"
+              :type="parseNotice.type"
+              :title="parseNotice.title"
+              :description="parseNotice.description"
+              show-icon
+              :closable="false"
+            />
             <div class="form-item title-field">
               <label class="form-label required">大标题</label>
               <el-input
@@ -256,6 +354,8 @@
           <div class="paper-meta">
             <span>{{ selectedArticleTypeLabel }}</span>
             <span class="meta-dot" />
+            <span v-if="createMode === 'auto'">{{ selectedContentStyleLabel }}</span>
+            <span v-if="createMode === 'auto'" class="meta-dot" />
             <span>{{ selectedProject?.projectName || selectedProject?.brandName || '未绑定项目' }}</span>
             <span class="meta-dot" />
             <span>{{ todayText }}</span>
@@ -347,7 +447,11 @@ import {
   Rank,
 } from '@element-plus/icons-vue'
 import type { BrandImageFolder, BrandMaterial, Project } from '@/types'
-import { createManualContentArticle } from '@/api/content'
+import {
+  createManualContentArticle,
+  previewAiContentArticleDraft,
+  type ArticleAiDraftPreviewResponse,
+} from '@/api/content'
 import { getBrandImageFolders, getBrandMaterialStream } from '@/api/customer'
 import { getProjectDetail, getProjectList } from '@/api/project'
 import { useDictStore } from '@/stores/dict'
@@ -367,6 +471,29 @@ interface ArticleTypeOption {
   icon: unknown
 }
 
+type CreateMode = 'manual' | 'auto'
+type ParseStatus = 'success' | 'partial' | 'failed'
+type NoticeType = 'success' | 'warning' | 'error' | 'info'
+
+interface NoticeState {
+  type: NoticeType
+  title: string
+  description?: string
+}
+
+interface ContentStyleOption {
+  value: string
+  label: string
+  desc: string
+  icon: string
+}
+
+interface ParsedArticle {
+  status: ParseStatus
+  title: string
+  sections: ManualSection[]
+}
+
 const ARTICLE_TYPE_FALLBACKS: ArticleTypeOption[] = [
   { value: 'faq', label: 'FAQ', desc: '问答式短文', icon: ChatLineRound },
   { value: 'scenario_content', label: '场景内容', desc: '使用场景介绍', icon: Files },
@@ -374,11 +501,35 @@ const ARTICLE_TYPE_FALLBACKS: ArticleTypeOption[] = [
   { value: 'stage_advice', label: '阶段建议', desc: '分阶段方案建议', icon: CircleCheck },
 ]
 
+const CONTENT_STYLE_OPTIONS: ContentStyleOption[] = [
+  { value: 'wechat', label: '公众号风格', desc: '深度长文，结构完整', icon: '公' },
+  { value: 'toutiao', label: '头条风格', desc: '资讯密度高，结论前置', icon: '头' },
+  { value: 'douyin_image_text', label: '抖音图文', desc: '钩子开头，适合卡片拆分', icon: '抖' },
+  { value: 'zhihu', label: '知乎风格', desc: '问题导向，论据充分', icon: '知' },
+  { value: 'xiaohongshu', label: '小红书风格', desc: '自然种草，清单友好', icon: '红' },
+  { value: 'linkedin', label: '领英风格', desc: '商务专业，重视洞察', icon: '领' },
+]
+
+const TONE_OPTIONS = [
+  { label: '专业严谨', value: 'professional' },
+  { label: '亲切自然', value: 'friendly' },
+  { label: '观点鲜明', value: 'sharp' },
+  { label: '故事化', value: 'storytelling' },
+]
+
+const LENGTH_OPTIONS = [
+  { label: '短', value: 'short' },
+  { label: '中', value: 'medium' },
+  { label: '长', value: 'long' },
+]
+
 const route = useRoute()
 const router = useRouter()
 const dictStore = useDictStore()
 
+const createMode = ref<CreateMode>('manual')
 const submitting = ref(false)
+const generating = ref(false)
 const projectSearching = ref(false)
 const projectOptions = ref<Project[]>([])
 const focusedSectionId = ref<number | null>(null)
@@ -396,6 +547,10 @@ const imageThumbObjectUrls = ref<string[]>([])
 const selectedImageFolderId = ref<number | null>(null)
 const selectedImageMaterialId = ref<number | null>(null)
 const imageAltText = ref('')
+const generationNotice = ref<NoticeState | null>(null)
+const parseNotice = ref<NoticeState | null>(null)
+const aiMetadata = ref<Record<string, unknown> | null>(null)
+let stillGeneratingTimer: ReturnType<typeof setTimeout> | null = null
 let nextSectionId = 1
 
 const manualForm = reactive({
@@ -404,6 +559,15 @@ const manualForm = reactive({
   title: '',
   boldTags: [] as string[],
   sections: [createSection()],
+})
+
+const aiForm = reactive({
+  contentStyle: 'wechat',
+  tone: 'professional',
+  length: 'medium',
+  topic: '',
+  extraPrompt: '',
+  referenceMaterials: '',
 })
 
 const markdown = new MarkdownIt({
@@ -424,9 +588,13 @@ const articleTypeOptions = computed<ArticleTypeOption[]>(() => {
   })
 })
 
+const contentStyleOptions = computed(() => CONTENT_STYLE_OPTIONS)
+const toneOptions = computed(() => TONE_OPTIONS)
+const lengthOptions = computed(() => LENGTH_OPTIONS)
 const selectedProject = computed(() => projectOptions.value.find((project) => project.id === manualForm.projectId) || null)
 const projectInitial = computed(() => selectedProject.value?.projectName?.trim().slice(0, 1) || '项')
 const selectedArticleTypeLabel = computed(() => articleTypeOptions.value.find((item) => item.value === manualForm.articleType)?.label || manualForm.articleType)
+const selectedContentStyleLabel = computed(() => contentStyleOptions.value.find((item) => item.value === aiForm.contentStyle)?.label || 'AI 风格')
 const generatedManualMarkdown = computed(() => buildManualMarkdown())
 const manualMarkdown = computed({
   get: () => markdownOverridden.value ? markdownOverride.value : generatedManualMarkdown.value,
@@ -448,7 +616,8 @@ const markdownStats = computed(() => {
 })
 const filledSectionCount = computed(() => manualForm.sections.filter((item) => item.heading.trim() || item.content.trim()).length)
 const strongCount = computed(() => (manualMarkdown.value.match(/\*\*[^*]+?\*\*/g) || []).length)
-const canSubmit = computed(() => Boolean(manualForm.projectId && manualForm.title.trim() && manualMarkdown.value.trim()))
+const canSubmit = computed(() => Boolean(manualForm.projectId && manualForm.title.trim() && manualMarkdown.value.trim()) && !generating.value)
+const canGenerate = computed(() => Boolean(manualForm.projectId && manualForm.articleType && aiForm.topic.trim()) && !generating.value)
 const todayText = computed(() => {
   const now = new Date()
   const month = String(now.getMonth() + 1).padStart(2, '0')
@@ -746,6 +915,153 @@ function isImageType(fileType?: string | null) {
   return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(fileType.toLowerCase())
 }
 
+function clearStillGeneratingTimer() {
+  if (stillGeneratingTimer) {
+    clearTimeout(stillGeneratingTimer)
+    stillGeneratingTimer = null
+  }
+}
+
+async function generateAiPreview() {
+  if (!manualForm.projectId) {
+    ElMessage.warning('请选择绑定项目')
+    return
+  }
+  if (!aiForm.topic.trim()) {
+    ElMessage.warning('请填写选题 / 主题')
+    return
+  }
+  generating.value = true
+  generationNotice.value = {
+    type: 'info',
+    title: '正在生成草稿',
+    description: '模型生成可能需要几十秒，请保持当前页面打开。',
+  }
+  parseNotice.value = null
+  clearStillGeneratingTimer()
+  stillGeneratingTimer = setTimeout(() => {
+    if (generating.value) {
+      generationNotice.value = {
+        type: 'info',
+        title: '仍在生成中',
+        description: '当前请求仍在等待模型返回，已保留你的全部输入，可继续等待。',
+      }
+    }
+  }, 90000)
+
+  try {
+    const { data } = await previewAiContentArticleDraft({
+      projectId: manualForm.projectId,
+      articleType: manualForm.articleType,
+      contentStyle: aiForm.contentStyle,
+      tone: aiForm.tone,
+      length: aiForm.length,
+      topic: aiForm.topic.trim(),
+      extraPrompt: aiForm.extraPrompt.trim() || undefined,
+      referenceMaterials: aiForm.referenceMaterials.trim() || undefined,
+    })
+    applyAiPreview(data.data)
+  } catch (err) {
+    console.error(err)
+    generationNotice.value = {
+      type: 'error',
+      title: 'AI 生成失败',
+      description: errorMessage(err, '生成失败，请稍后重试。已保留当前生成设置。'),
+    }
+  } finally {
+    generating.value = false
+    clearStillGeneratingTimer()
+  }
+}
+
+function applyAiPreview(response: ArticleAiDraftPreviewResponse) {
+  const contentMarkdown = response.contentMarkdown || ''
+  const parsed = parseGeneratedMarkdown(contentMarkdown, response.title || '')
+  aiMetadata.value = {
+    inputSnapshot: response.inputSnapshot,
+    promptSnapshot: response.promptSnapshot,
+    modelResponseSnapshot: response.modelResponseSnapshot,
+    modelPlatformCode: response.modelPlatformCode,
+    modelId: response.modelId,
+    modelName: response.modelName,
+  }
+
+  if (parsed.status === 'failed') {
+    manualMarkdown.value = contentMarkdown
+    sourceExpanded.value = true
+    parseNotice.value = {
+      type: 'error',
+      title: '结构解析失败',
+      description: '已保留完整 Markdown 源码，请在源码区编辑或手动整理为标题和段落。',
+    }
+  } else {
+    manualForm.title = parsed.title || response.title || manualForm.title
+    manualForm.sections = parsed.sections.length ? parsed.sections : [createSection()]
+    restoreFieldSync()
+    if (parsed.status === 'partial') {
+      parseNotice.value = {
+        type: 'warning',
+        title: '结构解析部分成功',
+        description: '已回填可识别内容，但标题或小标题段落不完整，请提交前检查文章结构。',
+      }
+    } else {
+      parseNotice.value = null
+    }
+  }
+
+  generationNotice.value = {
+    type: 'success',
+    title: 'AI 草稿已生成',
+    description: '内容已回填到编辑区，可继续修改后提交审核。',
+  }
+}
+
+function parseGeneratedMarkdown(markdownText: string, fallbackTitle = ''): ParsedArticle {
+  const lines = markdownText.split(/\r?\n/)
+  let title = ''
+  const sections: ManualSection[] = []
+  let current: ManualSection | null = null
+
+  for (const line of lines) {
+    const h1 = line.match(/^#\s+(.+)$/)
+    if (h1 && !title) {
+      title = h1[1].trim()
+      continue
+    }
+    const h2 = line.match(/^##\s+(.+)$/)
+    if (h2) {
+      current = { id: nextSectionId++, heading: h2[1].trim(), content: '' }
+      sections.push(current)
+      continue
+    }
+    if (current) {
+      current.content = appendMarkdownLine(current.content, line)
+    }
+  }
+
+  title = title || fallbackTitle.trim()
+  const normalizedSections = sections
+    .map((section) => ({
+      ...section,
+      heading: section.heading.trim(),
+      content: section.content.trim(),
+    }))
+    .filter((section) => section.heading || section.content)
+
+  if (title && normalizedSections.length > 0) {
+    return { status: 'success', title, sections: normalizedSections }
+  }
+  if (title || normalizedSections.length > 0) {
+    return { status: 'partial', title, sections: normalizedSections }
+  }
+  return { status: 'failed', title: '', sections: [] }
+}
+
+function appendMarkdownLine(source: string, line: string) {
+  if (!source) return line
+  return `${source}\n${line}`
+}
+
 async function submitManualCreate() {
   if (!manualForm.projectId) {
     ElMessage.warning('请选择绑定项目')
@@ -767,6 +1083,8 @@ async function submitManualCreate() {
       articleType: manualForm.articleType,
       title: manualForm.title.trim(),
       contentMarkdown,
+      source: aiMetadata.value ? 'ai_preview' : 'manual',
+      aiMetadata: aiMetadata.value || undefined,
     })
     ElMessage.success('手动文章已生成，进入待审核')
     router.push({
@@ -814,6 +1132,14 @@ watch(() => manualForm.projectId, () => {
   cleanupImageThumbs()
 })
 
+watch(createMode, (mode) => {
+  if (mode === 'manual') {
+    aiMetadata.value = null
+    generationNotice.value = null
+    parseNotice.value = null
+  }
+})
+
 watch(imagePickerVisible, (visible) => {
   if (!visible) {
     cleanupImageThumbs()
@@ -821,6 +1147,7 @@ watch(imagePickerVisible, (visible) => {
 })
 
 onBeforeUnmount(() => {
+  clearStillGeneratingTimer()
   cleanupImageThumbs()
 })
 </script>
@@ -889,6 +1216,10 @@ onBeforeUnmount(() => {
   background: var(--el-color-warning);
 }
 
+.mode-switch {
+  flex-shrink: 0;
+}
+
 .page-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -955,6 +1286,13 @@ onBeforeUnmount(() => {
   flex-shrink: 0;
 }
 
+.section-index.ai-index {
+  width: 26px;
+  background: var(--el-color-primary);
+  color: var(--el-color-white);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 .section-title,
 .source-title span:first-of-type {
   color: var(--el-text-color-primary);
@@ -971,6 +1309,119 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
+}
+
+.ai-card {
+  border-color: var(--el-color-primary-light-7);
+}
+
+.ai-grid,
+.ai-extra-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.6fr);
+  gap: 16px;
+}
+
+.topic-field {
+  min-width: 0;
+}
+
+.length-label {
+  margin-top: 12px;
+}
+
+.style-field {
+  margin-top: 16px;
+}
+
+.style-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.style-tile {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-height: 68px;
+  padding: 10px;
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 8px;
+  background: var(--el-bg-color);
+  color: var(--el-text-color-primary);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.style-tile:hover,
+.style-tile.active {
+  border-color: var(--el-color-primary);
+}
+
+.style-tile.active {
+  background: var(--el-color-primary-light-9);
+  box-shadow: 0 0 0 1px var(--el-color-primary-light-7) inset;
+}
+
+.style-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--el-fill-color);
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.style-tile.active .style-icon {
+  background: var(--el-color-primary);
+  color: var(--el-color-white);
+}
+
+.style-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.style-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.style-desc {
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.ai-extra-collapse {
+  margin-top: 10px;
+  border-top: 0;
+  border-bottom: 0;
+}
+
+.ai-extra-collapse :deep(.el-collapse-item__header) {
+  height: 34px;
+  border-bottom: 0;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+}
+
+.ai-extra-collapse :deep(.el-collapse-item__wrap) {
+  border-bottom: 0;
+}
+
+.generation-alert {
+  margin: 0 0 14px;
 }
 
 .form-item {
@@ -1524,7 +1975,16 @@ onBeforeUnmount(() => {
     grid-template-columns: 1fr;
   }
 
+  .ai-grid,
+  .ai-extra-grid {
+    grid-template-columns: 1fr;
+  }
+
   .type-group {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .style-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 
@@ -1547,6 +2007,10 @@ onBeforeUnmount(() => {
   }
 
   .type-group {
+    grid-template-columns: 1fr;
+  }
+
+  .style-grid {
     grid-template-columns: 1fr;
   }
 

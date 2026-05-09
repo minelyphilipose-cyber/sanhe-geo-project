@@ -44,7 +44,7 @@ class OpenAiCompatibleLlmInvokerTest {
     }
 
     @Test
-    void modelConfig_rejectsRequestTimeoutOverSixtySeconds() {
+    void modelConfig_rejectsRequestTimeoutOverMaxLimit() {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> config(0, 10_000, 60_001, 0));
 

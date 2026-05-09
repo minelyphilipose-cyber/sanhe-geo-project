@@ -42,8 +42,40 @@ export function createManualContentArticle(data: {
   articleType: string
   title?: string
   contentMarkdown: string
+  source?: 'manual' | 'ai_preview' | string
+  aiMetadata?: Record<string, unknown>
 }) {
   return request.post<R<ArticleDraft>>('/content/articles/manual', data)
+}
+
+export interface ArticleAiDraftPreviewRequest {
+  projectId: number
+  articleType: string
+  contentStyle: string
+  tone: string
+  length: string
+  topic: string
+  extraPrompt?: string
+  referenceMaterials?: string
+  modelPlatformCode?: string
+  modelId?: string
+}
+
+export interface ArticleAiDraftPreviewResponse {
+  title: string
+  contentMarkdown: string
+  promptSnapshot?: string | null
+  inputSnapshot?: string | null
+  modelResponseSnapshot?: string | null
+  modelPlatformCode?: string | null
+  modelId?: string | null
+  modelName?: string | null
+}
+
+export function previewAiContentArticleDraft(data: ArticleAiDraftPreviewRequest) {
+  return request.post<R<ArticleAiDraftPreviewResponse>>('/content/articles/ai-draft/preview', data, {
+    timeout: 120000,
+  })
 }
 
 export function saveContentArticleRevision(articleId: number, data: {

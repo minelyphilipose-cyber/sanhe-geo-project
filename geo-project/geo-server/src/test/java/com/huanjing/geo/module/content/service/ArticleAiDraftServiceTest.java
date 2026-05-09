@@ -105,6 +105,48 @@ class ArticleAiDraftServiceTest {
     }
 
     @Test
+    void previewReturnsMarkdownAndDoesNotPersistDraft() throws Exception {
+        when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
+
+        ArticleAiDraftPreviewResponse response = service.preview(previewRequest()).get();
+
+        assertEquals("AI title", response.title());
+        assertEquals("# AI title\n\nbody", response.contentMarkdown());
+        assertEquals("openai", response.modelPlatformCode());
+        assertEquals("gpt-test", response.modelId());
+        assertFalse(response.inputSnapshot().isBlank());
+        assertTrue(response.modelResponseSnapshot().contains("responseText"));
+        verify(articleMapper, never()).insert(any());
+        verify(versionMapper, never()).insert(any());
+        verifyAudit(AuditResult.SUCCESS, "preview_generated");
+    }
+
+    @Test
+    void previewUsesAtLeastOneHundredTwentySecondModelTimeout() throws Exception {
+        when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
+        ArgumentCaptor<LlmModelConfig> configCaptor = ArgumentCaptor.forClass(LlmModelConfig.class);
+
+        service.preview(previewRequest()).get();
+
+        verify(llmInvoker).invoke(any(), configCaptor.capture());
+        assertTrue(configCaptor.getValue().requestTimeoutMs() >= 120_000);
+    }
+
+    @Test
+    void previewHonorsConfiguredTimeoutAboveMinimum() throws Exception {
+        AiPlatformConfig config = aiConfig();
+        config.setTimeoutMs(150_000);
+        when(configMapper.selectOne(any())).thenReturn(config);
+        when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
+        ArgumentCaptor<LlmModelConfig> configCaptor = ArgumentCaptor.forClass(LlmModelConfig.class);
+
+        service.preview(previewRequest()).get();
+
+        verify(llmInvoker).invoke(any(), configCaptor.capture());
+        assertEquals(150_000, configCaptor.getValue().requestTimeoutMs());
+    }
+
+    @Test
     void llmFailureDoesNotPersistDraft() throws Exception {
         when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenThrow(new LlmInvokeException("boom"));
 
@@ -190,6 +232,21 @@ class ArticleAiDraftServiceTest {
         req.setProjectId(10L);
         req.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
         req.setPrompt("write an article");
+        req.setModelPlatformCode("openai");
+        req.setModelId("gpt-test");
+        return req;
+    }
+
+    private ArticleAiDraftPreviewRequest previewRequest() {
+        ArticleAiDraftPreviewRequest req = new ArticleAiDraftPreviewRequest();
+        req.setProjectId(10L);
+        req.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
+        req.setContentStyle("wechat");
+        req.setTone("professional");
+        req.setLength("medium");
+        req.setTopic("AI topic");
+        req.setExtraPrompt("extra");
+        req.setReferenceMaterials("reference");
         req.setModelPlatformCode("openai");
         req.setModelId("gpt-test");
         return req;

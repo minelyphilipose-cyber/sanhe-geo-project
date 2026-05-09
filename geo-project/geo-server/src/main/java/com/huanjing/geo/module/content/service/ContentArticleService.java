@@ -154,7 +154,11 @@ public class ContentArticleService {
         version.setVersionNo(1);
         version.setTitle(title);
         version.setContentMarkdown(content);
-        version.setGeneratedBy("manual");
+        version.setPromptSnapshot(aiPromptSnapshot(req.getAiMetadata()));
+        version.setInputSnapshot(aiInputSnapshot(req.getAiMetadata()));
+        version.setModelPlatformCode(aiMetadataString(req.getAiMetadata(), "modelPlatformCode"));
+        version.setModelId(aiMetadataString(req.getAiMetadata(), "modelId"));
+        version.setGeneratedBy(normalizeCreateSource(req.getSource()));
         version.setCreatedBy(operator.getId());
         articleDraftVersionMapper.insert(version);
 
@@ -170,6 +174,53 @@ public class ContentArticleService {
         draft.setProjectName(project.getProjectName());
         auditArticleTransition("ARTICLE_CREATED", AuditResult.SUCCESS, operator, project, draft, null, "pending_review", "manual create", null);
         return draft;
+    }
+
+    private String normalizeCreateSource(String source) {
+        if (!StringUtils.hasText(source)) {
+            return "manual";
+        }
+        String value = source.trim();
+        if ("ai_preview".equals(value)) {
+            return value;
+        }
+        return "manual";
+    }
+
+    private String aiPromptSnapshot(Map<String, Object> aiMetadata) {
+        if (aiMetadata == null || aiMetadata.isEmpty()) {
+            return null;
+        }
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("contentSource", "AI_PREVIEW");
+        snapshot.put("promptSnapshot", aiMetadata.get("promptSnapshot"));
+        snapshot.put("modelResponseSnapshot", aiMetadata.get("modelResponseSnapshot"));
+        snapshot.put("modelPlatformCode", aiMetadata.get("modelPlatformCode"));
+        snapshot.put("modelId", aiMetadata.get("modelId"));
+        snapshot.put("modelName", aiMetadata.get("modelName"));
+        return JSONUtil.toJsonStr(snapshot);
+    }
+
+    private String aiInputSnapshot(Map<String, Object> aiMetadata) {
+        if (aiMetadata == null || aiMetadata.isEmpty()) {
+            return null;
+        }
+        Object inputSnapshot = aiMetadata.get("inputSnapshot");
+        if (inputSnapshot == null) {
+            return null;
+        }
+        return inputSnapshot instanceof String value ? value : JSONUtil.toJsonStr(inputSnapshot);
+    }
+
+    private String aiMetadataString(Map<String, Object> aiMetadata, String key) {
+        if (aiMetadata == null) {
+            return null;
+        }
+        Object value = aiMetadata.get(key);
+        if (value == null || !StringUtils.hasText(String.valueOf(value))) {
+            return null;
+        }
+        return String.valueOf(value).trim();
     }
 
     @Transactional
