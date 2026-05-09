@@ -35,7 +35,6 @@ public class DashboardService {
     private static final Set<String> ACTIVE_STAGES = Set.of(
             "collecting_materials",
             "baseline_diagnosis",
-            "building_questions",
             "executing",
             "needs_renewal",
             "high_risk",
@@ -46,7 +45,6 @@ public class DashboardService {
             "pending_start",
             "collecting_materials",
             "baseline_diagnosis",
-            "building_questions",
             "executing",
             "needs_renewal",
             "high_risk",
@@ -58,7 +56,6 @@ public class DashboardService {
             Map.entry("pending_start", "待启动"),
             Map.entry("collecting_materials", "资料收集中"),
             Map.entry("baseline_diagnosis", "基线诊断中"),
-            Map.entry("building_questions", "问题池构建"),
             Map.entry("executing", "执行中"),
             Map.entry("biweekly_feedback", "双周反馈"),
             Map.entry("monthly_report", "月报阶段"),

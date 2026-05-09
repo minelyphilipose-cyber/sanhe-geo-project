@@ -12,7 +12,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.dto.CompanyCreateRequest;
 import com.huanjing.geo.module.customer.dto.CompanyDistributionQuotaItemVO;
 import com.huanjing.geo.module.customer.dto.CompanyDistributionQuotaVO;
-import com.huanjing.geo.module.customer.dto.CompanyQuestionPoolQuotaVO;
+import com.huanjing.geo.module.customer.dto.CompanyKeywordGroupQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyRechargeRequest;
 import com.huanjing.geo.module.customer.dto.CompanyUpdateRequest;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -26,7 +26,7 @@ import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.partner.entity.Partner;
 import com.huanjing.geo.module.partner.mapper.PartnerMapper;
-import com.huanjing.geo.module.project.mapper.QuestionPoolItemMapper;
+import com.huanjing.geo.module.project.service.KeywordGroupService;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
@@ -84,7 +84,7 @@ public class CompanyService {
     private final CurrentUserService currentUserService;
     private final CompanyPackageBindingService companyPackageBindingService;
     private final CompanyChannelQuotaUsageMapper companyChannelQuotaUsageMapper;
-    private final QuestionPoolItemMapper questionPoolItemMapper;
+    private final KeywordGroupService keywordGroupService;
     private final ActivityLogService activityLogService;
 
     public Page<Company> page(long current, long size, String keyword, String ownerType, Long partnerId) {
@@ -122,7 +122,7 @@ public class CompanyService {
         return company;
     }
 
-    public CompanyQuestionPoolQuotaVO questionPoolQuota(Long companyId) {
+    public CompanyKeywordGroupQuotaVO keywordGroupQuota(Long companyId) {
         SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("company.read");
         Company company = requireCompany(companyId);
@@ -130,10 +130,11 @@ public class CompanyService {
         ensureSalesCompanyAccess(user, company);
 
         CompanyPackageBinding binding = companyPackageBindingService.activeBinding(companyId);
-        int usedCount = questionPoolItemMapper.countLatestItemsByCompany(companyId);
-        int quotaLimit = binding == null || binding.getQuestionPoolLimit() == null ? 0 : binding.getQuestionPoolLimit();
+        long usedKeywordCount = keywordGroupService.countActiveProjectSavedKeywords(companyId, null);
+        int usedCount = (int) Math.min(usedKeywordCount, Integer.MAX_VALUE);
+        int quotaLimit = binding == null || binding.getKeywordGroupLimit() == null ? 0 : binding.getKeywordGroupLimit();
 
-        CompanyQuestionPoolQuotaVO vo = new CompanyQuestionPoolQuotaVO();
+        CompanyKeywordGroupQuotaVO vo = new CompanyKeywordGroupQuotaVO();
         vo.setCompanyId(companyId);
         vo.setPackageBindingId(binding == null ? null : binding.getId());
         vo.setPackageName(binding == null ? null : binding.getPackageName());

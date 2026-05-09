@@ -5,8 +5,8 @@ import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.customer.dto.CompanyCreateRequest;
 import com.huanjing.geo.module.customer.dto.CompanyDeductRequest;
 import com.huanjing.geo.module.customer.dto.CompanyDistributionQuotaVO;
+import com.huanjing.geo.module.customer.dto.CompanyKeywordGroupQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyPackageBindRequest;
-import com.huanjing.geo.module.customer.dto.CompanyQuestionPoolQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyRechargeRequest;
 import com.huanjing.geo.module.customer.dto.CompanyUpdateRequest;
 import com.huanjing.geo.module.customer.entity.CompanyAccount;
@@ -66,9 +66,9 @@ public class CompanyController {
         return R.ok(companyService.account(id));
     }
 
-    @GetMapping("/{id}/question-pool-quota")
-    public R<CompanyQuestionPoolQuotaVO> questionPoolQuota(@PathVariable Long id) {
-        return R.ok(companyService.questionPoolQuota(id));
+    @GetMapping("/{id}/keyword-group-quota")
+    public R<CompanyKeywordGroupQuotaVO> keywordGroupQuota(@PathVariable Long id) {
+        return R.ok(companyService.keywordGroupQuota(id));
     }
 
     @GetMapping("/{id}/distribution-quotas")

@@ -11,7 +11,7 @@ import type {
   CompanyAccountTxn,
   CompanyPackageBinding,
   CompanyDistributionQuota,
-  CompanyQuestionPoolQuota,
+  CompanyKeywordGroupQuota,
   BrandStatementView,
   DispatchTaskItem,
 } from '@/types'
@@ -82,8 +82,8 @@ export function getActiveCompanyPackageBinding(id: number) {
   return request.get<R<CompanyPackageBinding | null>>(`/companies/${id}/package-binding/active`)
 }
 
-export function getCompanyQuestionPoolQuota(id: number) {
-  return request.get<R<CompanyQuestionPoolQuota>>(`/companies/${id}/question-pool-quota`)
+export function getCompanyKeywordGroupQuota(id: number) {
+  return request.get<R<CompanyKeywordGroupQuota>>(`/companies/${id}/keyword-group-quota`)
 }
 
 export function getCompanyDistributionQuotas(id: number) {

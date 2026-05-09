@@ -23,7 +23,6 @@ import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.project.entity.Project;
-import com.huanjing.geo.module.project.entity.QuestionPoolItem;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -46,7 +45,6 @@ public class ContentArticleService {
 
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
-    private final ArticleQuestionRelMapper articleQuestionRelMapper;
     private final ArticleReviewLogMapper articleReviewLogMapper;
     private final ArticlePublishLogMapper articlePublishLogMapper;
     private final BrandMapper brandMapper;
@@ -430,8 +428,7 @@ public class ContentArticleService {
                                              String promptSnapshot,
                                              String inputSnapshot,
                                              String platformCode,
-                                             String modelId,
-                                            List<QuestionPoolItem> questions) {
+                                             String modelId) {
         markdownImageReferenceValidator.validate(project, contentMarkdown);
         ArticleDraft draft = new ArticleDraft();
         draft.setBatchId(batchId);
@@ -456,17 +453,6 @@ public class ContentArticleService {
         version.setModelId(modelId);
         version.setGeneratedBy("system");
         articleDraftVersionMapper.insert(version);
-
-        int sort = 1;
-        for (QuestionPoolItem item : questions) {
-            ArticleQuestionRel rel = new ArticleQuestionRel();
-            rel.setArticleId(draft.getId());
-            rel.setVersionId(version.getId());
-            rel.setQuestionId(item.getId());
-            rel.setQuestionText(item.getQuestionText());
-            rel.setSortOrder(sort++);
-            articleQuestionRelMapper.insert(rel);
-        }
 
         RiskResult riskResult = scanRisk(project, contentMarkdown);
         DuplicateResult duplicateResult = checkDuplicate(draft, title);

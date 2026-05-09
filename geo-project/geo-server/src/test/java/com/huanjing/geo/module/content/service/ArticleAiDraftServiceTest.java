@@ -159,6 +159,21 @@ class ArticleAiDraftServiceTest {
     }
 
     @Test
+    void previewModelUnauthorizedReturnsConfigError() throws Exception {
+        when(llmInvoker.invoke(any(), any(LlmModelConfig.class)))
+                .thenThrow(new LlmInvokeException("LLM invoke failed after retries: HTTP 401: unauthorized"));
+
+        ExecutionException ex = assertThrows(ExecutionException.class, () -> service.preview(previewRequest()).get());
+
+        BizException cause = (BizException) ex.getCause();
+        assertEquals(ContentErrorCodes.ARTICLE_AI_DRAFT_CONFIG_MISSING, cause.getCode());
+        assertEquals("AI 模型认证失败，请检查模型平台 API Key 配置", cause.getMessage());
+        verify(articleMapper, never()).insert(any());
+        verify(versionMapper, never()).insert(any());
+        verifyAudit(AuditResult.FAILURE, "preview_failed");
+    }
+
+    @Test
     void brandAccessDeniedStopsBeforeRateLimitAndLlm() throws Exception {
         doThrow(new BizException(BrandAccessErrorCodes.BRAND_ACCESS_DENIED, "denied"))
                 .when(brandAccessService).requireBrandAccess(20L, 7L, BrandAccessAction.OPERATE);
@@ -198,7 +213,7 @@ class ArticleAiDraftServiceTest {
     }
 
     private ContentArticleService articleService() {
-        return new ContentArticleService(articleMapper, versionMapper, mock(ArticleQuestionRelMapper.class),
+        return new ContentArticleService(articleMapper, versionMapper,
                 mock(ArticleReviewLogMapper.class), mock(ArticlePublishLogMapper.class), mock(BrandMapper.class),
                 projectMapper, mock(SysDictItemMapper.class), currentUserService,
                 mock(MarkdownImageReferenceValidator.class), brandAccessService, mock(AuditService.class));

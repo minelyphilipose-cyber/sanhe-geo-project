@@ -26,8 +26,7 @@ export function createPackagePlan(data: {
   packageName: string
   standardPrice: number
   serviceMonths: number
-  questionPoolSize: number
-  coreQuestionCount: number
+  keywordGroupLimit: number
   monthlyReportDepth: string
   quarterlyReportDepth: string
   consultantIntensity: string
@@ -49,8 +48,7 @@ export function updatePackagePlan(id: number, data: {
   packageName: string
   standardPrice: number
   serviceMonths: number
-  questionPoolSize: number
-  coreQuestionCount: number
+  keywordGroupLimit: number
   monthlyReportDepth: string
   quarterlyReportDepth: string
   consultantIntensity: string

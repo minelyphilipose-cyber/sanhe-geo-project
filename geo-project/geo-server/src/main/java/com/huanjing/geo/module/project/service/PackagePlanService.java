@@ -80,8 +80,7 @@ public class PackagePlanService {
         validateType(req.getPackageType());
         validateBase(req.getStandardPrice(), req.getServiceMonths(), req.getSortOrder());
         validateBusinessFields(
-                req.getQuestionPoolSize(),
-                req.getCoreQuestionCount(),
+                req.getKeywordGroupLimit(),
                 req.getMonthlyReportDepth(),
                 req.getQuarterlyReportDepth(),
                 req.getConsultantIntensity(),
@@ -103,8 +102,7 @@ public class PackagePlanService {
         plan.setPackageName(req.getPackageName().trim());
         plan.setStandardPrice(req.getStandardPrice());
         plan.setServiceMonths(req.getServiceMonths());
-        plan.setQuestionPoolSize(req.getQuestionPoolSize());
-        plan.setCoreQuestionCount(req.getCoreQuestionCount());
+        plan.setKeywordGroupLimit(req.getKeywordGroupLimit());
         plan.setMonthlyReportDepth(req.getMonthlyReportDepth().trim());
         plan.setQuarterlyReportDepth(req.getQuarterlyReportDepth().trim());
         plan.setConsultantIntensity(req.getConsultantIntensity().trim());
@@ -127,8 +125,7 @@ public class PackagePlanService {
         currentUserService.ensurePermission("user.manage");
         validateBase(req.getStandardPrice(), req.getServiceMonths(), req.getSortOrder());
         validateBusinessFields(
-                req.getQuestionPoolSize(),
-                req.getCoreQuestionCount(),
+                req.getKeywordGroupLimit(),
                 req.getMonthlyReportDepth(),
                 req.getQuarterlyReportDepth(),
                 req.getConsultantIntensity(),
@@ -143,8 +140,7 @@ public class PackagePlanService {
         plan.setPackageName(req.getPackageName().trim());
         plan.setStandardPrice(req.getStandardPrice());
         plan.setServiceMonths(req.getServiceMonths());
-        plan.setQuestionPoolSize(req.getQuestionPoolSize());
-        plan.setCoreQuestionCount(req.getCoreQuestionCount());
+        plan.setKeywordGroupLimit(req.getKeywordGroupLimit());
         plan.setMonthlyReportDepth(req.getMonthlyReportDepth().trim());
         plan.setQuarterlyReportDepth(req.getQuarterlyReportDepth().trim());
         plan.setConsultantIntensity(req.getConsultantIntensity().trim());
@@ -350,8 +346,7 @@ public class PackagePlanService {
     }
 
     private void validateBusinessFields(
-            Integer questionPoolSize,
-            Integer coreQuestionCount,
+            Integer keywordGroupLimit,
             String monthlyReportDepth,
             String quarterlyReportDepth,
             String consultantIntensity,
@@ -362,14 +357,8 @@ public class PackagePlanService {
             BigDecimal targetMetricValue,
             Integer targetWindowDays
     ) {
-        if (questionPoolSize == null || questionPoolSize <= 0) {
-            throw new BizException(400, "question_pool_size must be positive");
-        }
-        if (coreQuestionCount == null || coreQuestionCount <= 0) {
-            throw new BizException(400, "core_question_count must be positive");
-        }
-        if (coreQuestionCount > questionPoolSize) {
-            throw new BizException(400, "core_question_count cannot exceed question_pool_size");
+        if (keywordGroupLimit == null || keywordGroupLimit <= 0) {
+            throw new BizException(400, "keyword_group_limit must be positive");
         }
         validateIntensityLevel(monthlyReportDepth, "monthly_report_depth");
         validateIntensityLevel(quarterlyReportDepth, "quarterly_report_depth");

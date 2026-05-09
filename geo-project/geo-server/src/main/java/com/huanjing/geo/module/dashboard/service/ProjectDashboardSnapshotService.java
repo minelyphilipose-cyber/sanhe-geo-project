@@ -17,8 +17,6 @@ import com.huanjing.geo.module.dispatch.entity.PollDailyStat;
 import com.huanjing.geo.module.dispatch.entity.PollResult;
 import com.huanjing.geo.module.dispatch.mapper.PollDailyStatMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
-import com.huanjing.geo.module.project.entity.QuestionPoolItem;
-import com.huanjing.geo.module.project.mapper.QuestionPoolItemMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -44,7 +42,6 @@ public class ProjectDashboardSnapshotService {
     private final ProjectDashboardSnapshotMapper snapshotMapper;
     private final PollDailyStatMapper pollDailyStatMapper;
     private final PollResultMapper pollResultMapper;
-    private final QuestionPoolItemMapper questionPoolItemMapper;
     private final ArticleBatchMapper articleBatchMapper;
     private final ArticleDraftMapper articleDraftMapper;
     private final DistributionTaskMapper distributionTaskMapper;
@@ -294,34 +291,6 @@ public class ProjectDashboardSnapshotService {
             String keywordText = stringValue(row.get("keywordText")).trim();
             if (!keywordText.isEmpty()) {
                 frequencyByText.merge(keywordText, longValue(row.get("hitCount")), Long::sum);
-            }
-        }
-
-        QueryWrapper<PollResult> legacyWrapper = new QueryWrapper<>();
-        legacyWrapper.select("question_id AS questionId", "COUNT(*) AS hitCount")
-                .eq("project_id", projectId)
-                .eq("is_hit", 1)
-                .isNull("keyword_text_snapshot")
-                .isNotNull("question_id")
-                .groupBy("question_id");
-        List<Map<String, Object>> legacyRows = pollResultMapper.selectMaps(legacyWrapper);
-        if (!legacyRows.isEmpty()) {
-            List<Long> questionIds = legacyRows.stream()
-                    .map(row -> longValue(row.get("questionId")))
-                    .filter(v -> v > 0)
-                    .distinct()
-                    .toList();
-            Map<Long, String> questionTextMap = questionPoolItemMapper.selectList(
-                    new LambdaQueryWrapper<QuestionPoolItem>()
-                            .in(QuestionPoolItem::getId, questionIds)
-                            .select(QuestionPoolItem::getId, QuestionPoolItem::getQuestionText)
-            ).stream().collect(Collectors.toMap(QuestionPoolItem::getId, QuestionPoolItem::getQuestionText, (a, b) -> a));
-            for (Map<String, Object> row : legacyRows) {
-                long questionId = longValue(row.get("questionId"));
-                String questionText = Optional.ofNullable(questionTextMap.get(questionId)).map(String::trim).orElse("");
-                if (!questionText.isEmpty()) {
-                    frequencyByText.merge(questionText, longValue(row.get("hitCount")), Long::sum);
-                }
             }
         }
 

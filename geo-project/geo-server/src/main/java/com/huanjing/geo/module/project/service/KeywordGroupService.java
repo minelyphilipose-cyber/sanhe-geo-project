@@ -246,6 +246,20 @@ public class KeywordGroupService {
         return finalMap;
     }
 
+    public long countSelectedSavedKeywords(Long projectId) {
+        if (projectId == null) {
+            return 0L;
+        }
+        return keywordGroupResultMapper.countSavedKeywordsByProject(projectId);
+    }
+
+    public long countActiveProjectSavedKeywords(Long companyId, Long excludeProjectId) {
+        if (companyId == null) {
+            return 0L;
+        }
+        return keywordGroupResultMapper.countSavedKeywordsByCompanyActiveProjects(companyId, excludeProjectId);
+    }
+
     private List<KeywordGroupWord> normalizeWordsForPersist(Long groupId, String type, KeywordGroupColumnsRequest columns) {
         Map<String, List<KeywordWordItemRequest>> sourceMap = new LinkedHashMap<>();
         if (isCompareType(type)) {

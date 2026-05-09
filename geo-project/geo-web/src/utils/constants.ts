@@ -1,5 +1,5 @@
 import type {
-  PackageType, ProjectStage, QuestionType, QuestionPriority,
+  PackageType, ProjectStage,
   PlatformPriority, ReportType, ReportStatus, RoleType,
   PlatformHealth, PartnerLevel, TrainingStatus, AlertSeverity,
 } from '@/types'
@@ -39,29 +39,11 @@ export const PROJECT_STAGE_MAP: Record<ProjectStage, {
   pending_start: { label: '待启动', color: '#94A3B8', order: 1 },
   collecting_materials: { label: '资料收集中', color: '#60A5FA', order: 2 },
   baseline_diagnosis: { label: '基线诊断中', color: '#38BDF8', order: 3 },
-  building_questions: { label: '问题池构建', color: '#818CF8', order: 4 },
   executing: { label: '执行中', color: '#2563EB', order: 5 },
   needs_renewal: { label: '待续费', color: '#F59E0B', order: 6 },
   high_risk: { label: '高风险', color: '#EF4444', order: 7 },
   dispute_handling: { label: '争议处理中', color: '#DC2626', order: 8 },
   completed: { label: '已结束', color: '#6B7280', order: 9 },
-}
-
-export const QUESTION_TYPE_MAP: Record<QuestionType, { label: string; color: string }> = {
-  brand: { label: '品牌词', color: '#2563EB' },
-  location: { label: '地域词', color: '#059669' },
-  industry: { label: '行业词', color: '#7C3AED' },
-  decision: { label: '决策词', color: '#DC2626' },
-  transaction: { label: '成交词', color: '#EA580C' },
-  qa: { label: '问答词', color: '#0891B2' },
-  comparison: { label: '对比词', color: '#CA8A04' },
-  competitor: { label: '竞品词', color: '#BE185D' },
-}
-
-export const QUESTION_PRIORITY_MAP: Record<QuestionPriority, { label: string; color: string; desc: string }> = {
-  A: { label: 'A 类', color: '#DC2626', desc: '承诺考核，高频监测' },
-  B: { label: 'B 类', color: '#F59E0B', desc: '重点观察，中频监测' },
-  C: { label: 'C 类', color: '#6B7280', desc: '长尾观察，低频监测' },
 }
 
 export interface PlatformMeta {

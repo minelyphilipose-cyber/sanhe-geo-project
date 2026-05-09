@@ -58,7 +58,6 @@
               <el-option label="季报" value="QUARTERLY_REPORT" />
               <el-option label="内容生成" value="CONTENT_GENERATION" />
               <el-option label="品牌标准表达生成" value="BRAND_STATEMENT_GENERATION" />
-              <el-option label="问题内容建议" value="QUESTION_STRATEGY_GENERATION" />
             </el-select>
             <el-select v-model="filters.status" clearable placeholder="任务状态" size="small" style="width: 120px" @change="onFilterChange">
               <el-option label="排队中" value="pending" />
@@ -236,7 +235,6 @@ function taskTypeLabel(type?: string) {
     BIWEEKLY_REPORT: '双周报',
     MONTHLY_REPORT: '月报',
     QUARTERLY_REPORT: '季报',
-    QUESTION_STRATEGY_GENERATION: '问题内容建议',
     CONTENT_GENERATION: '内容生成',
   }
   return map[type || ''] || type || '-'

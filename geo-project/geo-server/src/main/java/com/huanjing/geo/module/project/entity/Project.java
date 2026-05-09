@@ -29,8 +29,7 @@ public class Project {
     private BigDecimal packagePrice;
     @TableField(exist = false)
     private Integer serviceMonths;
-    private Integer planQuestionPoolSize;
-    private Integer planCoreQuestionCount;
+    private Integer planKeywordGroupLimit;
     private String planMonthlyReportDepth;
     private String planQuarterlyReportDepth;
     private String planConsultantIntensity;

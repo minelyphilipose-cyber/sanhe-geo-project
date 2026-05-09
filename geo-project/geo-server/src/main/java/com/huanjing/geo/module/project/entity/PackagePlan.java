@@ -19,8 +19,7 @@ public class PackagePlan {
     private String packageName;
     private BigDecimal standardPrice;
     private Integer serviceMonths;
-    private Integer questionPoolSize;
-    private Integer coreQuestionCount;
+    private Integer keywordGroupLimit;
     private String monthlyReportDepth;
     private String quarterlyReportDepth;
     private String consultantIntensity;

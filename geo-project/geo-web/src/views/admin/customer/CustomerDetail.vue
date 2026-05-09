@@ -38,24 +38,24 @@
           <el-descriptions-item label="套餐类型">{{ activePackageBinding.packageType }}</el-descriptions-item>
           <el-descriptions-item label="标准价格(元)">{{ moneyText(activePackageBinding.standardPrice) }}</el-descriptions-item>
           <el-descriptions-item label="服务周期">{{ activePackageBinding.serviceMonths }} 个月</el-descriptions-item>
-          <el-descriptions-item label="问题池总额度">{{ activePackageBinding.questionPoolLimit }}</el-descriptions-item>
+          <el-descriptions-item label="关键词组总额度">{{ activePackageBinding.keywordGroupLimit }}</el-descriptions-item>
           <el-descriptions-item label="绑定时间">{{ activePackageBinding.boundAt || '-' }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ packageStatusLabel(activePackageBinding.status) }}</el-descriptions-item>
         </el-descriptions>
-        <div v-loading="questionPoolQuotaLoading" class="quota-panel">
+        <div v-loading="keywordGroupQuotaLoading" class="quota-panel">
           <div class="quota-panel__header">
-            <span>问题池额度</span>
-            <span>{{ questionPoolQuotaText }}</span>
+            <span>关键词组额度</span>
+            <span>{{ keywordGroupQuotaText }}</span>
           </div>
           <el-progress
-            :percentage="questionPoolQuotaPercentage"
-            :status="questionPoolQuotaStatus"
+            :percentage="keywordGroupQuotaPercentage"
+            :status="keywordGroupQuotaStatus"
             :stroke-width="10"
           />
           <div class="quota-panel__meta">
-            <span v-if="isQuestionPoolOverQuota">超出额度 {{ questionPoolOverflow }}</span>
-            <span v-else>剩余额度 {{ questionPoolQuota?.remainingCount ?? 0 }}</span>
-            <span>统计客户下所有项目最新问题池版本</span>
+            <span v-if="isKeywordGroupOverQuota">超出额度 {{ keywordGroupOverflow }}</span>
+            <span v-else>剩余额度 {{ keywordGroupQuota?.remainingCount ?? 0 }}</span>
+            <span>统计客户下所有已激活项目选择的关键词组入库数</span>
           </div>
         </div>
         <div v-loading="distributionQuotaLoading" class="quota-panel">
@@ -326,7 +326,7 @@
             <el-option
               v-for="item in packagePlanOptions"
               :key="item.id"
-              :label="`${item.packageName} / ${moneyText(item.standardPrice)} 元 / ${item.questionPoolSize} 问题`"
+              :label="`${item.packageName} / ${moneyText(item.standardPrice)} 元 / ${item.keywordGroupLimit} 关键词`"
               :value="item.id"
             />
           </el-select>
@@ -388,7 +388,7 @@ import {
   getCompanyDetail,
   getCompanyDistributionQuotas,
   getCompanyPackageBindings,
-  getCompanyQuestionPoolQuota,
+  getCompanyKeywordGroupQuota,
   rechargeCompanyAccount,
   unbindCompanyPackage,
   updateBrand,
@@ -396,7 +396,7 @@ import {
 } from '@/api/customer'
 import { getEnabledPackagePlans } from '@/api/packagePlan'
 import { getPartnerList, type PartnerItem } from '@/api/partner'
-import type { Brand, Company, CompanyAccount, CompanyAccountTxn, CompanyDistributionQuota, CompanyDistributionQuotaItem, CompanyPackageBinding, CompanyQuestionPoolQuota, PackagePlan } from '@/types'
+import type { Brand, Company, CompanyAccount, CompanyAccountTxn, CompanyDistributionQuota, CompanyDistributionQuotaItem, CompanyPackageBinding, CompanyKeywordGroupQuota, PackagePlan } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
@@ -421,7 +421,7 @@ const loading = ref(false)
 const brandLoading = ref(false)
 const accountLoading = ref(false)
 const packageLoading = ref(false)
-const questionPoolQuotaLoading = ref(false)
+const keywordGroupQuotaLoading = ref(false)
 const distributionQuotaLoading = ref(false)
 const saving = ref(false)
 const brandSaving = ref(false)
@@ -434,7 +434,7 @@ const partnerOptions = ref<PartnerItem[]>([])
 const account = ref<CompanyAccount | null>(null)
 const txns = ref<CompanyAccountTxn[]>([])
 const activePackageBinding = ref<CompanyPackageBinding | null>(null)
-const questionPoolQuota = ref<CompanyQuestionPoolQuota | null>(null)
+const keywordGroupQuota = ref<CompanyKeywordGroupQuota | null>(null)
 const distributionQuota = ref<CompanyDistributionQuota | null>(null)
 const packageBindingHistory = ref<CompanyPackageBinding[]>([])
 const packagePlanOptions = ref<PackagePlan[]>([])
@@ -546,25 +546,25 @@ const distributionQuotaSummary = computed(() => {
   const opened = distributionQuotaItems.value.filter((item) => item.enabled).length
   return `${opened}/4 个渠道已开通`
 })
-const hasActiveQuestionPoolQuota = computed(() => !!questionPoolQuota.value?.activeBinding)
-const isQuestionPoolOverQuota = computed(() => {
-  const quota = questionPoolQuota.value
+const hasActiveKeywordGroupQuota = computed(() => !!keywordGroupQuota.value?.activeBinding)
+const isKeywordGroupOverQuota = computed(() => {
+  const quota = keywordGroupQuota.value
   return !!quota?.activeBinding && quota.usedCount > quota.quotaLimit
 })
-const questionPoolOverflow = computed(() => {
-  const quota = questionPoolQuota.value
+const keywordGroupOverflow = computed(() => {
+  const quota = keywordGroupQuota.value
   if (!quota?.activeBinding) return 0
   return Math.max(quota.usedCount - quota.quotaLimit, 0)
 })
-const questionPoolQuotaText = computed(() => {
-  const quota = questionPoolQuota.value
+const keywordGroupQuotaText = computed(() => {
+  const quota = keywordGroupQuota.value
   if (!quota?.activeBinding) {
     return '未绑定套餐'
   }
   return `${quota.usedCount}/${quota.quotaLimit}`
 })
-const questionPoolQuotaPercentage = computed(() => {
-  const quota = questionPoolQuota.value
+const keywordGroupQuotaPercentage = computed(() => {
+  const quota = keywordGroupQuota.value
   if (!quota?.activeBinding) {
     return 0
   }
@@ -573,14 +573,14 @@ const questionPoolQuotaPercentage = computed(() => {
   }
   return Math.min(100, Math.round(quota.usedCount * 100 / quota.quotaLimit))
 })
-const questionPoolQuotaStatus = computed(() => {
-  if (!hasActiveQuestionPoolQuota.value) {
+const keywordGroupQuotaStatus = computed(() => {
+  if (!hasActiveKeywordGroupQuota.value) {
     return undefined
   }
-  if (isQuestionPoolOverQuota.value) {
+  if (isKeywordGroupOverQuota.value) {
     return 'exception'
   }
-  if (questionPoolQuotaPercentage.value >= 90) {
+  if (keywordGroupQuotaPercentage.value >= 90) {
     return 'warning'
   }
   return undefined
@@ -805,15 +805,15 @@ async function loadPackageBinding() {
   }
 }
 
-async function loadQuestionPoolQuota() {
-  questionPoolQuotaLoading.value = true
+async function loadKeywordGroupQuota() {
+  keywordGroupQuotaLoading.value = true
   try {
-    const { data } = await getCompanyQuestionPoolQuota(companyId)
-    questionPoolQuota.value = data.data
+    const { data } = await getCompanyKeywordGroupQuota(companyId)
+    keywordGroupQuota.value = data.data
   } catch (err) {
-    ElMessage.error(errorMessage(err, '加载问题池额度失败'))
+    ElMessage.error(errorMessage(err, '加载关键词组额度失败'))
   } finally {
-    questionPoolQuotaLoading.value = false
+    keywordGroupQuotaLoading.value = false
   }
 }
 
@@ -855,7 +855,7 @@ async function submitPackageBind() {
     await bindCompanyPackage(companyId, packageBindForm.packagePlanId)
     ElMessage.success('客户套餐已绑定')
     packageBindVisible.value = false
-    await Promise.all([loadPackageBinding(), loadQuestionPoolQuota(), loadDistributionQuotas()])
+    await Promise.all([loadPackageBinding(), loadKeywordGroupQuota(), loadDistributionQuotas()])
   } catch (err) {
     ElMessage.error(errorMessage(err, '绑定套餐失败'))
   } finally {
@@ -866,7 +866,7 @@ async function submitPackageBind() {
 async function confirmUnbindPackage() {
   if (!activePackageBinding.value) return
   try {
-    await ElMessageBox.confirm(`确认解绑套餐「${activePackageBinding.value.packageName}」？解绑后该客户下项目将不能新增问题池或分发文章。`, '解绑确认', {
+    await ElMessageBox.confirm(`确认解绑套餐「${activePackageBinding.value.packageName}」？解绑后该客户下项目将不能激活或分发文章。`, '解绑确认', {
       type: 'warning',
       confirmButtonText: '确认解绑',
       cancelButtonText: '取消',
@@ -878,7 +878,7 @@ async function confirmUnbindPackage() {
   try {
     await unbindCompanyPackage(companyId)
     ElMessage.success('客户套餐已解绑')
-    await Promise.all([loadPackageBinding(), loadQuestionPoolQuota(), loadDistributionQuotas()])
+    await Promise.all([loadPackageBinding(), loadKeywordGroupQuota(), loadDistributionQuotas()])
   } catch (err) {
     ElMessage.error(errorMessage(err, '解绑套餐失败'))
   } finally {
@@ -1060,7 +1060,7 @@ onMounted(async () => {
   await dictStore.ensureLoaded()
   await loadPartners()
   await loadCompany()
-  await Promise.all([loadBrands(), loadAccount(), loadPackageBinding(), loadQuestionPoolQuota(), loadDistributionQuotas()])
+  await Promise.all([loadBrands(), loadAccount(), loadPackageBinding(), loadKeywordGroupQuota(), loadDistributionQuotas()])
 })
 </script>
 
@@ -1112,3 +1112,4 @@ onMounted(async () => {
   background: #fef0f0;
 }
 </style>
+

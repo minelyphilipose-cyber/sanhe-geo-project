@@ -110,7 +110,7 @@ public class CompanyPackageBindingService {
         binding.setPackageName(plan.getPackageName());
         binding.setStandardPrice(plan.getStandardPrice());
         binding.setServiceMonths(plan.getServiceMonths());
-        binding.setQuestionPoolLimit(plan.getQuestionPoolSize());
+        binding.setKeywordGroupLimit(plan.getKeywordGroupLimit());
         binding.setChannelQuotaSnapshot(JSONUtil.toJsonStr(toSnapshot(channelQuotas)));
         binding.markActive();
         binding.setBoundAt(LocalDateTime.now());

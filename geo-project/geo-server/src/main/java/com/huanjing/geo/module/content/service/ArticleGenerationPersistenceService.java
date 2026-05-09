@@ -6,14 +6,12 @@ import com.huanjing.geo.module.content.entity.ArticleGenerationLog;
 import com.huanjing.geo.module.content.mapper.ArticleBatchMapper;
 import com.huanjing.geo.module.content.mapper.ArticleGenerationLogMapper;
 import com.huanjing.geo.module.project.entity.Project;
-import com.huanjing.geo.module.project.entity.QuestionPoolItem;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
-import java.util.List;
 import java.util.Objects;
 
 @Service
@@ -63,8 +61,7 @@ public class ArticleGenerationPersistenceService {
                                         String inputSnapshot,
                                         String platformCode,
                                         String modelId,
-                                        String articleAngle,
-                                        List<QuestionPoolItem> questions) {
+                                        String articleAngle) {
         contentArticleService.createGeneratedDraft(
                 batchId,
                 project,
@@ -74,8 +71,7 @@ public class ArticleGenerationPersistenceService {
                 promptSnapshot,
                 inputSnapshot,
                 platformCode,
-                modelId,
-                questions
+                modelId
         );
 
         ArticleGenerationLog row = new ArticleGenerationLog();

@@ -10,7 +10,6 @@ import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
 import com.huanjing.geo.module.content.entity.ArticleGenerationLog;
 import com.huanjing.geo.module.content.entity.ArticlePublishLog;
-import com.huanjing.geo.module.content.entity.ArticleQuestionRel;
 import com.huanjing.geo.module.content.entity.ArticleReviewLog;
 import com.huanjing.geo.module.content.entity.ContentQuestionRotation;
 import com.huanjing.geo.module.content.entity.DistributionTask;
@@ -19,12 +18,12 @@ import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
 import com.huanjing.geo.module.content.mapper.ArticleGenerationLogMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePublishLogMapper;
-import com.huanjing.geo.module.content.mapper.ArticleQuestionRelMapper;
 import com.huanjing.geo.module.content.mapper.ArticleReviewLogMapper;
 import com.huanjing.geo.module.content.mapper.ContentQuestionRotationMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
+import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
@@ -49,7 +48,6 @@ import com.huanjing.geo.module.project.dto.ProjectFlowUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectStageUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectStatusUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectUpdateRequest;
-import com.huanjing.geo.module.project.dto.QuestionPoolItemRequest;
 import com.huanjing.geo.module.project.entity.KeywordGroup;
 import com.huanjing.geo.module.project.entity.ProjectPlatformBinding;
 import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
@@ -101,14 +99,12 @@ public class ProjectService {
     private final BrandMapper brandMapper;
     private final CompanyMapper companyMapper;
     private final CompanyPackageBindingService companyPackageBindingService;
-    private final QuestionPoolService questionPoolService;
     private final KeywordGroupService keywordGroupService;
     private final ArticleBatchMapper articleBatchMapper;
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
     private final ArticleGenerationLogMapper articleGenerationLogMapper;
     private final ArticlePublishLogMapper articlePublishLogMapper;
-    private final ArticleQuestionRelMapper articleQuestionRelMapper;
     private final ArticleReviewLogMapper articleReviewLogMapper;
     private final ContentQuestionRotationMapper contentQuestionRotationMapper;
     private final DistributionTaskMapper distributionTaskMapper;
@@ -248,15 +244,6 @@ public class ProjectService {
                 Map.of("companyId", project.getCompanyId(), "brandId", project.getBrandId())
         );
 
-        if (req.getQuestionPoolItems() != null) {
-            questionPoolService.createVersion(
-                    project.getId(),
-                    operator.getId(),
-                    "project.create",
-                    req.getQuestionPoolItems()
-            );
-        }
-
         return project;
     }
 
@@ -301,6 +288,9 @@ public class ProjectService {
         project.setRemark(req.getRemark());
         projectMapper.updateById(project);
         replaceKeywordGroupSelections(project.getId(), project.getCompanyId(), req.getKeywordGroupIds());
+        if ("active".equals(project.getStatus())) {
+            validateKeywordGroupQuota(project);
+        }
         attachPlatformSelections(Collections.singletonList(project));
         attachKeywordGroupSelections(Collections.singletonList(project));
         activityLogService.logAction(
@@ -312,25 +302,6 @@ public class ProjectService {
                 snapshotProject(project),
                 Map.of("companyId", project.getCompanyId(), "brandId", project.getBrandId())
         );
-
-        if (req.getQuestionPoolItems() != null) {
-            ensureQuestionPoolCorePermissions(project.getId(), req.getQuestionPoolItems());
-            var version = questionPoolService.createVersion(
-                    project.getId(),
-                    operator.getId(),
-                    StringUtils.hasText(req.getQuestionPoolChangeReason()) ? req.getQuestionPoolChangeReason() : "project.update",
-                    req.getQuestionPoolItems()
-            );
-            activityLogService.logAction(
-                    operator.getId(),
-                    "project.question_pool.update",
-                    "project",
-                    project.getId(),
-                    null,
-                    Map.of("versionNo", version.getVersionNo(), "itemCount", req.getQuestionPoolItems().size()),
-                    Map.of("reason", req.getQuestionPoolChangeReason())
-            );
-        }
 
         return project;
     }
@@ -370,6 +341,7 @@ public class ProjectService {
         }
         String fromStatus = project.getStatus();
         if (isActivating(fromStatus, req.getStatus())) {
+            validateKeywordGroupQuota(project);
             markActivatedIfNeeded(project);
         }
         project.setStatus(req.getStatus());
@@ -417,6 +389,7 @@ public class ProjectService {
 
         Map<String, Object> before = Map.of("status", project.getStatus(), "stage", project.getStage());
         if (isActivating(project.getStatus(), req.getStatus())) {
+            validateKeywordGroupQuota(project);
             markActivatedIfNeeded(project);
         }
         project.setStatus(req.getStatus());
@@ -485,8 +458,6 @@ public class ProjectService {
                     .in(ArticleDraftVersion::getArticleId, articleIds));
             articlePublishLogMapper.delete(new LambdaQueryWrapper<ArticlePublishLog>()
                     .in(ArticlePublishLog::getArticleId, articleIds));
-            articleQuestionRelMapper.delete(new LambdaQueryWrapper<ArticleQuestionRel>()
-                    .in(ArticleQuestionRel::getArticleId, articleIds));
             articleReviewLogMapper.delete(new LambdaQueryWrapper<ArticleReviewLog>()
                     .in(ArticleReviewLog::getArticleId, articleIds));
             distributionTaskMapper.delete(new LambdaQueryWrapper<DistributionTask>()
@@ -661,32 +632,6 @@ public class ProjectService {
         }
     }
 
-    private void ensureQuestionPoolCorePermissions(Long projectId, List<QuestionPoolItemRequest> requestItems) {
-        Set<String> previousCoreSet = questionPoolService.latestCoreQuestionTextSet(projectId);
-        Set<String> newCoreSet = requestItems == null
-                ? Set.of()
-                : requestItems.stream()
-                .filter(item -> item != null && Boolean.TRUE.equals(item.getIsCore()) && StringUtils.hasText(item.getQuestionText()))
-                .map(item -> item.getQuestionText().trim())
-                .collect(Collectors.toCollection(LinkedHashSet::new));
-
-        if (!currentUserService.hasPermission("question_pool.core.confirm")) {
-            Set<String> newlyConfirmedCore = new LinkedHashSet<>(newCoreSet);
-            newlyConfirmedCore.removeAll(previousCoreSet);
-            if (!newlyConfirmedCore.isEmpty()) {
-                throw new BizException(403, "No permission: question_pool.core.confirm");
-            }
-        }
-
-        if (!currentUserService.hasPermission("question_pool.core.delete")) {
-            Set<String> removedCore = new LinkedHashSet<>(previousCoreSet);
-            removedCore.removeAll(newCoreSet);
-            if (!removedCore.isEmpty()) {
-                throw new BizException(403, "No permission: question_pool.core.delete");
-            }
-        }
-    }
-
     private void ensureSalesProjectAccess(SysUser user, Project project) {
         if (!"sales".equals(user.getRole())) {
             return;
@@ -708,6 +653,19 @@ public class ProjectService {
     private void markActivatedIfNeeded(Project project) {
         if (project.getActivatedAt() == null) {
             project.setActivatedAt(LocalDateTime.now());
+        }
+    }
+
+    private void validateKeywordGroupQuota(Project project) {
+        CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(project.getCompanyId());
+        int quotaLimit = binding.getKeywordGroupLimit() == null ? 0 : binding.getKeywordGroupLimit();
+        long activeUsed = keywordGroupService.countActiveProjectSavedKeywords(project.getCompanyId(), project.getId());
+        long projectUsed = keywordGroupService.countSelectedSavedKeywords(project.getId());
+        long totalUsed = activeUsed + projectUsed;
+        if (totalUsed > quotaLimit) {
+            throw new BizException(400, "KEYWORD_GROUP_QUOTA_EXCEEDED: 关键词组额度不足，套餐限制 "
+                    + quotaLimit + " 条，当前已激活项目占用 " + activeUsed + " 条，本项目占用 "
+                    + projectUsed + " 条");
         }
     }
 
@@ -939,8 +897,7 @@ public class ProjectService {
         snapshot.put("activatedAt", project.getActivatedAt());
         snapshot.put("biweeklyAnchorDate", project.getBiweeklyAnchorDate());
         snapshot.put("expiredAt", project.getExpiredAt());
-        snapshot.put("planQuestionPoolSize", project.getPlanQuestionPoolSize());
-        snapshot.put("planCoreQuestionCount", project.getPlanCoreQuestionCount());
+        snapshot.put("planKeywordGroupLimit", project.getPlanKeywordGroupLimit());
         snapshot.put("planMonthlyReportDepth", project.getPlanMonthlyReportDepth());
         snapshot.put("planQuarterlyReportDepth", project.getPlanQuarterlyReportDepth());
         snapshot.put("planConsultantIntensity", project.getPlanConsultantIntensity());

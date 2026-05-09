@@ -18,7 +18,6 @@ import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePublishLogMapper;
-import com.huanjing.geo.module.content.mapper.ArticleQuestionRelMapper;
 import com.huanjing.geo.module.content.mapper.ArticleReviewLogMapper;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessErrorCodes;
@@ -77,7 +76,6 @@ class ContentArticleServiceTest {
         service = new ContentArticleService(
                 articleDraftMapper,
                 articleDraftVersionMapper,
-                mock(ArticleQuestionRelMapper.class),
                 mock(ArticleReviewLogMapper.class),
                 mock(ArticlePublishLogMapper.class),
                 mock(BrandMapper.class),

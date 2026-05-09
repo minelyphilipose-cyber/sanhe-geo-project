@@ -17,12 +17,9 @@ import com.huanjing.geo.module.dispatch.entity.PollResult;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.entity.ProjectPlatformBinding;
-import com.huanjing.geo.module.project.entity.QuestionPoolItem;
-import com.huanjing.geo.module.project.entity.QuestionPoolVersion;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.project.mapper.ProjectPlatformBindingMapper;
-import com.huanjing.geo.module.project.mapper.QuestionPoolItemMapper;
-import com.huanjing.geo.module.project.mapper.QuestionPoolVersionMapper;
+import com.huanjing.geo.module.project.service.KeywordGroupService;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -55,8 +52,7 @@ public class ProjectDashboardService {
     private final ProjectDashboardSnapshotMapper snapshotMapper;
     private final ProjectMapper projectMapper;
     private final ProjectPlatformBindingMapper projectPlatformBindingMapper;
-    private final QuestionPoolVersionMapper questionPoolVersionMapper;
-    private final QuestionPoolItemMapper questionPoolItemMapper;
+    private final KeywordGroupService keywordGroupService;
     private final PollResultMapper pollResultMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final SysDictItemMapper sysDictItemMapper;
@@ -234,16 +230,7 @@ public class ProjectDashboardService {
         }
         if (StringUtils.hasText(keyword)) {
             String trimmedKeyword = keyword.trim();
-            List<Long> questionIds = questionPoolItemMapper.selectList(
-                    new LambdaQueryWrapper<QuestionPoolItem>()
-                            .like(QuestionPoolItem::getQuestionText, trimmedKeyword)
-                            .select(QuestionPoolItem::getId)
-            ).stream().map(QuestionPoolItem::getId).toList();
-            if (questionIds.isEmpty()) {
-                wrapper.like("keyword_text_snapshot", trimmedKeyword);
-            } else {
-                wrapper.and(w -> w.like("keyword_text_snapshot", trimmedKeyword).or().in("question_id", questionIds));
-            }
+            wrapper.like("keyword_text_snapshot", trimmedKeyword);
         }
 
         long total = pollResultMapper.selectCount(wrapper);
@@ -255,14 +242,13 @@ public class ProjectDashboardService {
         long pageSize = Math.min(safeSize, MAX_VIEWABLE - offset);
         Page<PollResult> page = pollResultMapper.selectPage(new Page<>(safeCurrent, pageSize, false), wrapper);
         List<PollResult> records = page.getRecords();
-        Map<Long, String> questionTextMap = loadQuestionTextMap(records);
         Map<String, String> platformNameMap = loadPlatformNameMap(records);
         Map<String, String> platformUrlMap = loadPlatformUrlMap(records);
 
         List<Map<String, Object>> items = records.stream().map(record -> {
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("id", record.getId());
-            row.put("questionText", resolveDisplayText(record, questionTextMap));
+            row.put("questionText", resolveDisplayText(record));
             row.put("platformCode", record.getPlatformCode());
             row.put("platformName", platformNameMap.getOrDefault(record.getPlatformCode(), record.getPlatformCode()));
             row.put("batchDate", record.getBatchDate());
@@ -449,18 +435,7 @@ public class ProjectDashboardService {
     }
 
     private long countMonitorQuestions(Long projectId) {
-        QuestionPoolVersion latest = questionPoolVersionMapper.selectOne(
-                new LambdaQueryWrapper<QuestionPoolVersion>()
-                        .eq(QuestionPoolVersion::getProjectId, projectId)
-                        .orderByDesc(QuestionPoolVersion::getVersionNo, QuestionPoolVersion::getId)
-                        .last("LIMIT 1")
-        );
-        LambdaQueryWrapper<QuestionPoolItem> wrapper = new LambdaQueryWrapper<QuestionPoolItem>()
-                .eq(QuestionPoolItem::getProjectId, projectId);
-        if (latest != null) {
-            wrapper.eq(QuestionPoolItem::getVersionId, latest.getId());
-        }
-        return questionPoolItemMapper.selectCount(wrapper);
+        return keywordGroupService.countSelectedSavedKeywords(projectId);
     }
 
     private void disableActiveShares(Long projectId) {
@@ -640,23 +615,11 @@ public class ProjectDashboardService {
         return project;
     }
 
-    private Map<Long, String> loadQuestionTextMap(List<PollResult> records) {
-        List<Long> questionIds = records.stream().map(PollResult::getQuestionId).filter(Objects::nonNull).distinct().toList();
-        if (questionIds.isEmpty()) {
-            return Map.of();
-        }
-        return questionPoolItemMapper.selectList(
-                new LambdaQueryWrapper<QuestionPoolItem>()
-                        .in(QuestionPoolItem::getId, questionIds)
-                        .select(QuestionPoolItem::getId, QuestionPoolItem::getQuestionText)
-        ).stream().collect(Collectors.toMap(QuestionPoolItem::getId, QuestionPoolItem::getQuestionText, (a, b) -> a));
-    }
-
-    private String resolveDisplayText(PollResult record, Map<Long, String> questionTextMap) {
+    private String resolveDisplayText(PollResult record) {
         if (StringUtils.hasText(record.getKeywordTextSnapshot())) {
             return record.getKeywordTextSnapshot().trim();
         }
-        return questionTextMap.getOrDefault(record.getQuestionId(), "-");
+        return "-";
     }
 
     private Map<String, String> loadPlatformNameMap(List<PollResult> records) {

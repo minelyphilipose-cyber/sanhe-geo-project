@@ -3,8 +3,6 @@ import type {
   R,
   PageResult,
   Project,
-  QuestionPoolManageItemVO,
-  QuestionPoolVersionVO,
   KeywordGroup,
   KeywordLlmQuestionGenerateResult,
   KeywordGroupPayload,
@@ -50,38 +48,6 @@ export function updateProjectFlow(id: number, status: string, stage: string) {
 
 export function deleteProject(id: number) {
   return request.delete<R<void>>(`/projects/${id}`)
-}
-
-export function getCurrentQuestionPool(projectId: number) {
-  return request.get<R<QuestionPoolVersionVO | null>>(`/projects/${projectId}/question-pool/current`)
-}
-
-export function getQuestionPoolVersions(projectId: number, params: { current?: number; size?: number }) {
-  return request.get<R<PageResult<QuestionPoolVersionVO>>>(`/projects/${projectId}/question-pool/versions`, { params })
-}
-
-export function getQuestionPoolVersionDetail(projectId: number, versionNo: number) {
-  return request.get<R<QuestionPoolVersionVO>>(`/projects/${projectId}/question-pool/versions/${versionNo}`)
-}
-
-export function getQuestionPoolManagePage(params: { current?: number; size?: number; keyword?: string; projectId?: number }) {
-  return request.get<R<PageResult<QuestionPoolManageItemVO>>>('/question-pools', { params })
-}
-
-export function generateProjectQuestionStrategies(projectId: number) {
-  return request.post<R<any>>(`/projects/${projectId}/generate-question-strategies`)
-}
-
-export function generateSingleQuestionStrategy(questionId: number) {
-  return request.post<R<any>>(`/question-pools/questions/${questionId}/generate-strategy`)
-}
-
-export function updateQuestionStrategy(questionId: number, data: {
-  contentStrategy: string
-  strategyKeywords?: string[]
-  strategySuggestedType: 'faq' | 'scenario_content' | 'industry_article'
-}) {
-  return request.put<R<void>>(`/question-pools/questions/${questionId}/strategy`, data)
 }
 
 export function getKeywordGroupPage(params: { current?: number; size?: number; keyword?: string; companyId?: number; type?: string }) {

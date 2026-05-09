@@ -3,7 +3,7 @@ package com.huanjing.geo.module.customer.dto;
 import lombok.Data;
 
 @Data
-public class CompanyQuestionPoolQuotaVO {
+public class CompanyKeywordGroupQuotaVO {
     private Long companyId;
     private Long packageBindingId;
     private String packageName;

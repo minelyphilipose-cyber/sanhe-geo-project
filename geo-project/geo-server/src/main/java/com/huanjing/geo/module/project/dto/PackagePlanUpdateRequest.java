@@ -21,10 +21,7 @@ public class PackagePlanUpdateRequest {
     private Integer sortOrder;
     @NotNull
     @Min(1)
-    private Integer questionPoolSize;
-    @NotNull
-    @Min(1)
-    private Integer coreQuestionCount;
+    private Integer keywordGroupLimit;
     @NotBlank
     private String monthlyReportDepth;
     @NotBlank

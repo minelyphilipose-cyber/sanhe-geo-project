@@ -21,8 +21,8 @@
             <template #default="scope">{{ Number(scope.row.standardPrice || 0).toFixed(2) }}</template>
           </el-table-column>
           <el-table-column prop="serviceMonths" label="服务月数" width="100" />
-          <el-table-column label="问题池" width="130">
-            <template #default="scope">{{ scope.row.questionPoolSize }}/{{ scope.row.coreQuestionCount }}</template>
+          <el-table-column label="关键词组额度" width="130">
+            <template #default="scope">{{ scope.row.keywordGroupLimit }}</template>
           </el-table-column>
           <el-table-column label="渠道额度" min-width="260">
             <template #default="scope">{{ quotaSummary(scope.row.channelQuotaConfigs) }}</template>
@@ -83,13 +83,8 @@
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :lg="6">
-            <el-form-item label="问题池总数" prop="questionPoolSize" required>
-              <el-input-number v-model="form.questionPoolSize" :min="1" style="width: 100%" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :lg="6">
-            <el-form-item label="核心问题数" prop="coreQuestionCount" required>
-              <el-input-number v-model="form.coreQuestionCount" :min="1" style="width: 100%" />
+            <el-form-item label="关键词组总数" prop="keywordGroupLimit" required>
+              <el-input-number v-model="form.keywordGroupLimit" :min="1" style="width: 100%" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -168,8 +163,7 @@ const form = reactive({
   packageName: '',
   standardPrice: 0,
   serviceMonths: 12,
-  questionPoolSize: 100,
-  coreQuestionCount: 20,
+  keywordGroupLimit: 100,
   monthlyReportDepth: 'L2',
   quarterlyReportDepth: 'L2',
   consultantIntensity: 'L2',
@@ -190,8 +184,7 @@ const rules: FormRules = {
   packageName: [{ required: true, message: '请输入套餐名称', trigger: 'blur' }],
   standardPrice: [{ required: true, message: '请输入标准价', trigger: 'change' }],
   serviceMonths: [{ required: true, message: '请输入服务月数', trigger: 'change' }],
-  questionPoolSize: [{ required: true, message: '请输入问题池总数', trigger: 'change' }],
-  coreQuestionCount: [{ required: true, message: '请输入核心问题数', trigger: 'change' }],
+  keywordGroupLimit: [{ required: true, message: '请输入关键词组总数', trigger: 'change' }],
 }
 
 function defaultChannelQuotas(): PackageChannelQuotaConfig[] {
@@ -248,8 +241,7 @@ function resetForm() {
   form.packageName = ''
   form.standardPrice = 0
   form.serviceMonths = 12
-  form.questionPoolSize = 100
-  form.coreQuestionCount = 20
+  form.keywordGroupLimit = 100
   form.enabled = true
   form.sortOrder = 10
   form.remark = ''
@@ -291,8 +283,7 @@ function openEdit(row: PackagePlan) {
   form.packageName = row.packageName
   form.standardPrice = Number(row.standardPrice || 0)
   form.serviceMonths = row.serviceMonths
-  form.questionPoolSize = row.questionPoolSize
-  form.coreQuestionCount = row.coreQuestionCount
+  form.keywordGroupLimit = row.keywordGroupLimit
   form.monthlyReportDepth = row.monthlyReportDepth
   form.quarterlyReportDepth = row.quarterlyReportDepth
   form.consultantIntensity = row.consultantIntensity
@@ -315,8 +306,7 @@ function buildPayload() {
     packageName: form.packageName,
     standardPrice: form.standardPrice,
     serviceMonths: form.serviceMonths,
-    questionPoolSize: form.questionPoolSize,
-    coreQuestionCount: form.coreQuestionCount,
+    keywordGroupLimit: form.keywordGroupLimit,
     monthlyReportDepth: form.monthlyReportDepth,
     quarterlyReportDepth: form.quarterlyReportDepth,
     consultantIntensity: form.consultantIntensity,
@@ -341,10 +331,6 @@ function buildPayload() {
 async function submit() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
-  if (form.coreQuestionCount > form.questionPoolSize) {
-    ElMessage.warning('核心问题数不能超过问题池总数')
-    return
-  }
   saving.value = true
   try {
     const payload = buildPayload()

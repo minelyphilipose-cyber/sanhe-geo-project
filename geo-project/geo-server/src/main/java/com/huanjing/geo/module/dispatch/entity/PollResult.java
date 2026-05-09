@@ -16,7 +16,6 @@ public class PollResult {
     private Long batchId;
     private Long dispatchTaskId;
     private Long projectId;
-    private Long questionId;
     private Long keywordResultId;
     private String keywordTextSnapshot;
     private Long platformId;

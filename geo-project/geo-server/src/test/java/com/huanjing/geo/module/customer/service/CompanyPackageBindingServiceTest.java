@@ -88,7 +88,7 @@ class CompanyPackageBindingServiceTest {
         plan.setPackageName("Trial");
         plan.setStandardPrice(new BigDecimal("6980.00"));
         plan.setServiceMonths(3);
-        plan.setQuestionPoolSize(100);
+        plan.setKeywordGroupLimit(100);
         plan.setEnabled(true);
         when(companyMapper.selectById(7L)).thenReturn(company);
         when(packagePlanMapper.selectById(3L)).thenReturn(plan);

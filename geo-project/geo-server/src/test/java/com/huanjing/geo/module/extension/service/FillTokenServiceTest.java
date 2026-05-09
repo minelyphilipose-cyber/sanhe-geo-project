@@ -92,7 +92,7 @@ class FillTokenServiceTest {
         verify(auditSupport).record(
                 eq("FILL_TOKEN_ISSUE"),
                 eq(AuditResult.SUCCESS),
-                eq(AuditMode.ASYNC),
+                eq(AuditMode.SYNC),
                 eq(true),
                 eq(99L),
                 eq(10L),

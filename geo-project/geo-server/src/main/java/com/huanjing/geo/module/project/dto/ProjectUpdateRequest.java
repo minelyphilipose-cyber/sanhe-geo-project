@@ -42,6 +42,4 @@ public class ProjectUpdateRequest {
     @NotEmpty
     @Size(max = 10)
     private List<Long> keywordGroupIds;
-    private String questionPoolChangeReason;
-    private List<QuestionPoolItemRequest> questionPoolItems;
 }

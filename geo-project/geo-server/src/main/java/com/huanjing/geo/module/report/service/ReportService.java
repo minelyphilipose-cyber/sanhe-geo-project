@@ -15,9 +15,7 @@ import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.project.entity.Project;
-import com.huanjing.geo.module.project.entity.QuestionPoolItem;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
-import com.huanjing.geo.module.project.mapper.QuestionPoolItemMapper;
 import com.huanjing.geo.module.dispatch.entity.PollDailyStat;
 import com.huanjing.geo.module.dispatch.entity.PollResult;
 import com.huanjing.geo.module.dispatch.mapper.PollDailyStatMapper;
@@ -68,7 +66,6 @@ public class ReportService {
     private final PollResultMapper pollResultMapper;
     private final ArticleBatchMapper articleBatchMapper;
     private final DistributionTaskMapper distributionTaskMapper;
-    private final QuestionPoolItemMapper questionPoolItemMapper;
 
     public Page<Report> page(long current, long size, Long projectId, String keyword, String status) {
         currentUserService.ensurePermission("project.read");
@@ -446,7 +443,7 @@ public class ReportService {
         summary.put("contact_mention_count", current.contactMentionCount);
         summary.put("platform_coverage_count", current.platformCoverageCount);
         summary.put("platform_total_count", current.platformTotalCount);
-        summary.put("core_question_coverage_rate", current.coreCoverageRate);
+        summary.put("keyword_coverage_rate", current.keywordCoverageRate);
         summary.put("vs_previous", Map.of(
                 "hit_rate_change", percent(current.hitCount, current.completedCount).subtract(percent(previous.hitCount, previous.completedCount)),
                 "site_mention_change", current.siteMentionCount - previous.siteMentionCount,
@@ -517,24 +514,6 @@ public class ReportService {
                         .between(PollResult::getBatchDate, start, end)
                         .eq(PollResult::getStatus, "completed")
         );
-        Set<Long> questionIds = results.stream().map(PollResult::getQuestionId).filter(Objects::nonNull).collect(Collectors.toSet());
-        if (!questionIds.isEmpty()) {
-            List<QuestionPoolItem> items = questionPoolItemMapper.selectList(
-                    new LambdaQueryWrapper<QuestionPoolItem>().in(QuestionPoolItem::getId, questionIds)
-            );
-            Set<Long> coreIds = items.stream()
-                    .filter(q -> "A".equalsIgnoreCase(q.getPriority()))
-                    .map(QuestionPoolItem::getId)
-                    .collect(Collectors.toSet());
-            if (!coreIds.isEmpty()) {
-                long coreHit = results.stream()
-                        .filter(r -> coreIds.contains(r.getQuestionId()) && Boolean.TRUE.equals(r.getIsHit()))
-                        .map(PollResult::getQuestionId)
-                        .distinct()
-                        .count();
-                pack.coreCoverageRate = percent(coreHit, coreIds.size());
-            }
-        }
         return pack;
     }
 
@@ -568,20 +547,17 @@ public class ReportService {
                         .eq(PollResult::getProjectId, projectId)
                         .between(PollResult::getBatchDate, start, end)
         );
-        Map<Long, QuestionPoolItem> questionMap = questionPoolItemMapper.selectList(
-                new LambdaQueryWrapper<QuestionPoolItem>().in(!rows.isEmpty(), QuestionPoolItem::getId, rows.stream().map(PollResult::getQuestionId).collect(Collectors.toSet()))
-        ).stream().collect(Collectors.toMap(QuestionPoolItem::getId, q -> q, (a, b) -> a));
-        Map<Long, List<PollResult>> grouped = rows.stream().collect(Collectors.groupingBy(PollResult::getQuestionId, LinkedHashMap::new, Collectors.toList()));
+        Map<String, List<PollResult>> grouped = rows.stream()
+                .collect(Collectors.groupingBy(r -> nvlStr(r.getKeywordTextSnapshot()), LinkedHashMap::new, Collectors.toList()));
         List<Map<String, Object>> items = new ArrayList<>();
-        for (Map.Entry<Long, List<PollResult>> e : grouped.entrySet()) {
-            QuestionPoolItem q = questionMap.get(e.getKey());
+        for (Map.Entry<String, List<PollResult>> e : grouped.entrySet()) {
             List<PollResult> list = e.getValue();
             long hitPlatforms = list.stream().filter(r -> Boolean.TRUE.equals(r.getIsHit())).map(PollResult::getPlatformId).distinct().count();
             long allPlatforms = list.stream().map(PollResult::getPlatformId).distinct().count();
             Map<String, Object> row = new LinkedHashMap<>();
-            row.put("question_id", e.getKey());
-            row.put("question_content", q == null ? "-" : q.getQuestionText());
-            row.put("question_type", q == null ? null : q.getQuestionType());
+            row.put("keyword", StringUtils.hasText(e.getKey()) ? e.getKey() : "-");
+            row.put("question_content", StringUtils.hasText(e.getKey()) ? e.getKey() : "-");
+            row.put("question_type", null);
             row.put("platforms_hit", hitPlatforms);
             row.put("platforms_total", allPlatforms);
             row.put("site_mentioned", list.stream().anyMatch(r -> Boolean.TRUE.equals(r.getSiteMentioned())));
@@ -768,7 +744,7 @@ public class ReportService {
         private int contactMentionCount;
         private int platformCoverageCount;
         private int platformTotalCount;
-        private BigDecimal coreCoverageRate = BigDecimal.ZERO;
+        private BigDecimal keywordCoverageRate = BigDecimal.ZERO;
     }
     private Report requireReport(Long reportId) {
         Report report = reportMapper.selectById(reportId);

@@ -61,7 +61,6 @@ export type ProjectStage =
   | 'pending_start'
   | 'collecting_materials'
   | 'baseline_diagnosis'
-  | 'building_questions'
   | 'executing'
   | 'needs_renewal'
   | 'high_risk'
@@ -69,12 +68,6 @@ export type ProjectStage =
   | 'completed'
 
 export type OwnerType = 'direct' | 'partner' | 'joint'
-
-export type QuestionType =
-  | 'brand' | 'location' | 'industry' | 'decision'
-  | 'transaction' | 'qa' | 'comparison' | 'competitor'
-
-export type QuestionPriority = 'A' | 'B' | 'C'
 
 export type PlatformPriority = 'P0' | 'P1' | 'P2'
 
@@ -222,8 +215,7 @@ export interface Project {
   brandId: number | null
   projectName: string
   projectAliases?: string | null
-  planQuestionPoolSize?: number | null
-  planCoreQuestionCount?: number | null
+  planKeywordGroupLimit?: number | null
   planMonthlyReportDepth?: string | null
   planQuarterlyReportDepth?: string | null
   planConsultantIntensity?: string | null
@@ -269,20 +261,6 @@ export interface Project {
   companyName?: string
 }
 
-export interface Question {
-  id: number
-  versionId: number
-  content: string
-  questionType: QuestionType
-  priority: QuestionPriority
-  isCore: boolean
-  isPromisedScope: boolean
-  isObservationOnly: boolean
-  status: string
-  platformScope: string[]
-  terminalScope: string[]
-}
-
 export interface CompanyAccount {
   id: number
   companyId: number
@@ -319,7 +297,7 @@ export interface CompanyPackageBinding {
   packageName: string
   standardPrice: number
   serviceMonths: number
-  questionPoolLimit: number
+  keywordGroupLimit: number
   channelQuotaSnapshot: string
   status: 'active' | 'inactive' | string
   activeFlag?: number | null
@@ -327,47 +305,6 @@ export interface CompanyPackageBinding {
   unboundAt?: string | null
   createdAt?: string
   updatedAt?: string
-}
-
-export interface QuestionPoolItemInput {
-  questionText: string
-  questionType: string
-  priority: 'A' | 'B' | 'C'
-  isCore: boolean
-}
-
-export interface QuestionPoolItemVO extends QuestionPoolItemInput {
-  id: number
-  projectId: number
-  versionId: number
-  contentStrategy?: string | null
-  strategyKeywords?: string | null
-  strategySuggestedType?: 'faq' | 'scenario_content' | 'industry_article' | string | null
-  strategyGeneratedAt?: string | null
-  strategyStatus?: 'none' | 'generated' | 'edited' | string | null
-}
-
-export interface QuestionPoolVersionVO {
-  id: number
-  projectId: number
-  versionNo: number
-  changeReason?: string | null
-  createdBy: number
-  createdAt: string
-  totalQuestions: number
-  coreQuestions: number
-  items?: QuestionPoolItemVO[]
-}
-
-export interface QuestionPoolManageItemVO {
-  projectId: number
-  projectName: string
-  versionNo: number
-  totalQuestions: number
-  coreQuestions: number
-  changeReason?: string | null
-  createdBy: number
-  createdAt: string
 }
 
 export interface PlatformConfig {
@@ -1054,8 +991,7 @@ export interface PackagePlan {
   packageName: string
   standardPrice: number
   serviceMonths: number
-  questionPoolSize: number
-  coreQuestionCount: number
+  keywordGroupLimit: number
   monthlyReportDepth: string
   quarterlyReportDepth: string
   consultantIntensity: string
@@ -1084,7 +1020,7 @@ export interface PackageChannelQuotaConfig {
   updatedAt?: string
 }
 
-export interface CompanyQuestionPoolQuota {
+export interface CompanyKeywordGroupQuota {
   companyId: number
   packageBindingId?: number | null
   packageName?: string | null

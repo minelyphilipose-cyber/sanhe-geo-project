@@ -13,7 +13,6 @@ public final class ProjectFlowPolicy {
             "pending_start",
             "collecting_materials",
             "baseline_diagnosis",
-            "building_questions",
             "executing",
             "needs_renewal",
             "high_risk",

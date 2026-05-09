@@ -220,7 +220,6 @@ const STAGE_COLORS: Record<string, string> = {
   pending_start: '#94A3B8',
   collecting_materials: '#60A5FA',
   baseline_diagnosis: '#38BDF8',
-  building_questions: '#818CF8',
   executing: '#2563EB',
   biweekly_feedback: '#3B82F6',
   monthly_report: '#6366F1',

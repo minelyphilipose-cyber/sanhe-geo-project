@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.project.service;
 
 import com.huanjing.geo.module.dispatch.service.BrandStatementDispatchService;
+import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
+import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.partner.entity.PartnerAccount;
 import com.huanjing.geo.module.partner.entity.PartnerAccountTxn;
 import com.huanjing.geo.module.partner.mapper.PartnerAccountMapper;
@@ -30,6 +32,10 @@ class ProjectServiceStatusTest {
     @Mock
     private ProjectMapper projectMapper;
     @Mock
+    private CompanyPackageBindingService companyPackageBindingService;
+    @Mock
+    private KeywordGroupService keywordGroupService;
+    @Mock
     private PartnerAccountMapper partnerAccountMapper;
     @Mock
     private PartnerAccountTxnMapper partnerAccountTxnMapper;
@@ -52,6 +58,7 @@ class ProjectServiceStatusTest {
 
         Project project = new Project();
         project.setId(20L);
+        project.setCompanyId(30L);
         project.setStatus("paused");
         project.setStage("pending_start");
         project.setOwnerType("partner");
@@ -63,6 +70,11 @@ class ProjectServiceStatusTest {
 
         when(currentUserService.requireCurrentUser()).thenReturn(operator);
         when(projectMapper.selectById(20L)).thenReturn(project);
+        CompanyPackageBinding binding = new CompanyPackageBinding();
+        binding.setKeywordGroupLimit(100);
+        when(companyPackageBindingService.requireActiveBinding(30L)).thenReturn(binding);
+        when(keywordGroupService.countActiveProjectSavedKeywords(30L, 20L)).thenReturn(0L);
+        when(keywordGroupService.countSelectedSavedKeywords(20L)).thenReturn(0L);
 
         projectService.updateStatus(20L, request);
 

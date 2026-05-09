@@ -22,7 +22,7 @@ public class CompanyPackageBinding {
     private String packageName;
     private BigDecimal standardPrice;
     private Integer serviceMonths;
-    private Integer questionPoolLimit;
+    private Integer keywordGroupLimit;
     private String channelQuotaSnapshot;
     private String status;
     private Integer activeFlag;

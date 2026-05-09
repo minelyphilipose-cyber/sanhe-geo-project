@@ -79,7 +79,6 @@
           <el-select v-model="taskQuery.taskType" clearable placeholder="任务类型" style="width: 180px" @change="loadTasks">
             <el-option label="双日跑批" value="BI_DAILY_POLL" />
             <el-option label="品牌标准表达生成" value="BRAND_STATEMENT_GENERATION" />
-            <el-option label="问题场景内容建议" value="QUESTION_STRATEGY_GENERATION" />
             <el-option label="内容生成" value="CONTENT_GENERATION" />
           </el-select>
           <el-select v-model="taskQuery.status" clearable placeholder="任务状态" style="width: 150px" @change="loadTasks">
@@ -318,7 +317,6 @@ function taskTypeLabel(taskType?: string) {
   const map: Record<string, string> = {
     BI_DAILY_POLL: '双日跑批',
     BRAND_STATEMENT_GENERATION: '品牌标准表达生成',
-    QUESTION_STRATEGY_GENERATION: '问题场景内容建议',
     CONTENT_GENERATION: '内容生成',
   }
   return map[taskType || ''] || taskType || '-'
