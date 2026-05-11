@@ -1124,7 +1124,56 @@ public class DispatchExecutionService {
         if (type == DispatchTaskType.CONTENT_GENERATION) {
             return resolveArticlePlatformCandidates();
         }
+        if (type == DispatchTaskType.BRAND_STATEMENT_GENERATION) {
+            return resolveBrandStatementPlatformCandidates(projectId, type);
+        }
 
+        List<ProjectPlatformBinding> bindings = projectPlatformBindingMapper.selectList(
+                new LambdaQueryWrapper<ProjectPlatformBinding>()
+                        .eq(ProjectPlatformBinding::getProjectId, projectId)
+        );
+        if (bindings.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, String> levelByCode = bindings.stream()
+                .collect(Collectors.toMap(ProjectPlatformBinding::getPlatformCode, ProjectPlatformBinding::getPriorityLevel, (a, b) -> a));
+        List<AiPlatformConfig> configs = aiPlatformConfigMapper.selectList(
+                new LambdaQueryWrapper<AiPlatformConfig>()
+                        .in(AiPlatformConfig::getPlatformCode, levelByCode.keySet())
+                        .eq(AiPlatformConfig::getEnabled, true)
+        );
+
+        List<String> preferredLevels = preferredLevels(type);
+        return configs.stream()
+                .filter(cfg -> preferredLevels.contains(levelByCode.get(cfg.getPlatformCode())))
+                .sorted(Comparator.comparingInt(cfg -> preferredLevels.indexOf(levelByCode.get(cfg.getPlatformCode()))))
+                .collect(Collectors.toList());
+    }
+
+    private List<AiPlatformConfig> resolveBrandStatementPlatformCandidates(Long projectId, DispatchTaskType type) {
+        List<AiPlatformConfig> boundConfigs = resolveBoundPlatformCandidates(projectId, type);
+        if (!boundConfigs.isEmpty()) {
+            return boundConfigs;
+        }
+
+        List<String> preferredLevels = preferredLevels(type);
+        return aiPlatformConfigMapper.selectList(
+                        new LambdaQueryWrapper<AiPlatformConfig>()
+                                .eq(AiPlatformConfig::getEnabled, true)
+                                .eq(AiPlatformConfig::getEnabledForPresale, true)
+                ).stream()
+                .filter(cfg -> preferredLevels.contains(cfg.getPriorityLevel()))
+                .sorted(Comparator
+                        .comparingInt((AiPlatformConfig cfg) -> preferredLevels.indexOf(cfg.getPriorityLevel()))
+                        .thenComparing(AiPlatformConfig::getId, Comparator.nullsLast(Long::compareTo)))
+                .collect(Collectors.toList());
+    }
+
+    private List<AiPlatformConfig> resolveBoundPlatformCandidates(Long projectId, DispatchTaskType type) {
+        if (projectId == null) {
+            return List.of();
+        }
         List<ProjectPlatformBinding> bindings = projectPlatformBindingMapper.selectList(
                 new LambdaQueryWrapper<ProjectPlatformBinding>()
                         .eq(ProjectPlatformBinding::getProjectId, projectId)
