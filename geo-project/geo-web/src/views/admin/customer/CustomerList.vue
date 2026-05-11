@@ -116,7 +116,16 @@
             <el-option v-for="p in partnerOptions" :key="p.id" :label="p.partnerName" :value="p.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="销售ID"><el-input-number v-model="form.salesOwnerId" :min="1" style="width: 100%" /></el-form-item>
+        <el-form-item v-if="canSelectSalesOwner" label="销售人员">
+          <el-select v-model="form.salesOwnerId" clearable filterable placeholder="请选择销售人员" style="width: 100%">
+            <el-option
+              v-for="item in salesOwnerOptions"
+              :key="item.id"
+              :label="item.displayName"
+              :value="item.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="来源"><el-input v-model="form.referralSource" /></el-form-item>
         <el-form-item label="状态">
           <el-select v-model="form.status" style="width: 100%">
@@ -145,7 +154,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
-import { createCompany, deleteCompany, getCompanyList, updateCompany } from '@/api/customer'
+import { createCompany, deleteCompany, getCompanyList, getSalesOwnerOptions, updateCompany, type SalesOwnerOption } from '@/api/customer'
 import { getPartnerList, type PartnerItem } from '@/api/partner'
 import type { Company } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
@@ -158,11 +167,13 @@ const dictStore = useDictStore()
 const canCreateCompany = computed(() => userStore.hasPermission('company.create'))
 const canUpdateCompany = computed(() => userStore.hasPermission('company.update'))
 const canDeleteCompany = computed(() => userStore.hasPermission('company.delete'))
+const canSelectSalesOwner = computed(() => userStore.role !== 'sales' && (canCreateCompany.value || canUpdateCompany.value))
 
 const loading = ref(false)
 const saving = ref(false)
 const rows = ref<Company[]>([])
 const partnerOptions = ref<PartnerItem[]>([])
+const salesOwnerOptions = ref<SalesOwnerOption[]>([])
 const page = reactive({ current: 1, size: 10, total: 0 })
 const query = reactive({ keyword: '', ownerType: '' })
 
@@ -275,6 +286,19 @@ async function loadPartners() {
   }
 }
 
+async function loadSalesOwners() {
+  if (!canSelectSalesOwner.value) {
+    salesOwnerOptions.value = []
+    return
+  }
+  try {
+    const { data } = await getSalesOwnerOptions()
+    salesOwnerOptions.value = data.data || []
+  } catch {
+    salesOwnerOptions.value = []
+  }
+}
+
 function onPageChange(v: number) {
   page.current = v
   load()
@@ -348,7 +372,7 @@ async function submit() {
       districtName: region.districtName,
       ownerType: form.ownerType,
       partnerId: form.partnerId || undefined,
-      salesOwnerId: form.salesOwnerId || undefined,
+      salesOwnerId: canSelectSalesOwner.value ? form.salesOwnerId || undefined : undefined,
       referralSource: form.referralSource || undefined,
       status: form.status,
       remark: form.remark || undefined,
@@ -394,7 +418,7 @@ async function removeCompany(row: Company) {
 
 onMounted(async () => {
   await dictStore.ensureLoaded()
-  await loadPartners()
+  await Promise.all([loadPartners(), loadSalesOwners()])
   await load()
 })
 

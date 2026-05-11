@@ -16,6 +16,7 @@ import com.huanjing.geo.module.customer.dto.CompanyDistributionQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyKeywordGroupQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyRechargeRequest;
 import com.huanjing.geo.module.customer.dto.CompanyUpdateRequest;
+import com.huanjing.geo.module.customer.dto.SalesOwnerOptionVO;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.CompanyAccount;
 import com.huanjing.geo.module.customer.entity.CompanyAccountTxn;
@@ -31,6 +32,7 @@ import com.huanjing.geo.module.project.service.KeywordGroupService;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
+import com.huanjing.geo.module.system.mapper.SysUserMapper;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
@@ -82,6 +84,7 @@ public class CompanyService {
     private final BrandMapper brandMapper;
     private final PartnerMapper partnerMapper;
     private final SysDictItemMapper sysDictItemMapper;
+    private final SysUserMapper sysUserMapper;
     private final CurrentUserService currentUserService;
     private final CompanyPackageBindingService companyPackageBindingService;
     private final CompanyChannelQuotaUsageMapper companyChannelQuotaUsageMapper;
@@ -147,6 +150,26 @@ public class CompanyService {
         return vo;
     }
 
+    public List<SalesOwnerOptionVO> salesOwnerOptions() {
+        SysUser operator = currentUserService.requireCurrentUser();
+        if (!currentUserService.hasPermission("company.create") && !currentUserService.hasPermission("company.update")) {
+            throw new BizException(403, "No permission: company.create or company.update");
+        }
+        List<SysUser> users;
+        if ("sales".equals(operator.getRole())) {
+            users = List.of(operator);
+        } else {
+            users = sysUserMapper.selectList(
+                    new LambdaQueryWrapper<SysUser>()
+                            .eq(SysUser::getRole, "sales")
+                            .eq(SysUser::getIsActive, true)
+                            .orderByAsc(SysUser::getDisplayName)
+                            .orderByAsc(SysUser::getId)
+            );
+        }
+        return users.stream().map(this::toSalesOwnerOption).collect(Collectors.toList());
+    }
+
     public CompanyDistributionQuotaVO distributionQuotas(Long companyId) {
         SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("company.read");
@@ -208,7 +231,7 @@ public class CompanyService {
         company.setSourceType(sourceType);
         company.setPartnerId(partnerId);
         company.setPartnerName(resolvePartnerName(partnerId));
-        company.setSalesOwnerId(req.getSalesOwnerId());
+        company.setSalesOwnerId(resolveCreateSalesOwnerId(operator, req.getSalesOwnerId()));
         company.setReferralSource(req.getReferralSource());
         company.setStatus(status);
         company.setRemark(req.getRemark());
@@ -261,7 +284,7 @@ public class CompanyService {
         company.setSourceType(sourceType);
         company.setPartnerId(partnerId);
         company.setPartnerName(resolvePartnerName(partnerId));
-        company.setSalesOwnerId(req.getSalesOwnerId());
+        company.setSalesOwnerId(resolveUpdateSalesOwnerId(operator, req.getSalesOwnerId()));
         company.setReferralSource(req.getReferralSource());
         company.setStatus(req.getStatus());
         company.setRemark(req.getRemark());
@@ -799,6 +822,46 @@ public class CompanyService {
             throw new BizException(404, "Partner not found");
         }
         return partner.getPartnerName();
+    }
+
+    private Long resolveCreateSalesOwnerId(SysUser operator, Long requestedSalesOwnerId) {
+        if ("sales".equals(operator.getRole())) {
+            return operator.getId();
+        }
+        validateSalesOwnerId(requestedSalesOwnerId);
+        return requestedSalesOwnerId;
+    }
+
+    private Long resolveUpdateSalesOwnerId(SysUser operator, Long requestedSalesOwnerId) {
+        if ("sales".equals(operator.getRole())) {
+            return operator.getId();
+        }
+        validateSalesOwnerId(requestedSalesOwnerId);
+        return requestedSalesOwnerId;
+    }
+
+    private void validateSalesOwnerId(Long salesOwnerId) {
+        if (salesOwnerId == null) {
+            return;
+        }
+        SysUser sales = sysUserMapper.selectOne(
+                new LambdaQueryWrapper<SysUser>()
+                        .eq(SysUser::getId, salesOwnerId)
+                        .eq(SysUser::getRole, "sales")
+                        .eq(SysUser::getIsActive, true)
+                        .last("LIMIT 1")
+        );
+        if (sales == null) {
+            throw new BizException(400, "销售人员不存在或不是启用状态");
+        }
+    }
+
+    private SalesOwnerOptionVO toSalesOwnerOption(SysUser user) {
+        SalesOwnerOptionVO vo = new SalesOwnerOptionVO();
+        vo.setId(user.getId());
+        vo.setDisplayName(StringUtils.hasText(user.getDisplayName()) ? user.getDisplayName() : user.getUsername());
+        vo.setUsername(user.getUsername());
+        return vo;
     }
 
     private List<String> normalizeIndustryTags(List<String> industryTags, String legacyIndustry) {

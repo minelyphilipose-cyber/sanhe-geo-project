@@ -9,6 +9,7 @@ import com.huanjing.geo.module.customer.dto.CompanyKeywordGroupQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyPackageBindRequest;
 import com.huanjing.geo.module.customer.dto.CompanyRechargeRequest;
 import com.huanjing.geo.module.customer.dto.CompanyUpdateRequest;
+import com.huanjing.geo.module.customer.dto.SalesOwnerOptionVO;
 import com.huanjing.geo.module.customer.entity.CompanyAccount;
 import com.huanjing.geo.module.customer.entity.CompanyAccountTxn;
 import com.huanjing.geo.module.customer.entity.Company;
@@ -19,6 +20,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @Tag(name = "Company")
 @RestController
@@ -43,6 +46,11 @@ public class CompanyController {
     @GetMapping("/{id}")
     public R<Company> detail(@PathVariable Long id) {
         return R.ok(companyService.detail(id));
+    }
+
+    @GetMapping("/sales-owner-options")
+    public R<List<SalesOwnerOptionVO>> salesOwnerOptions() {
+        return R.ok(companyService.salesOwnerOptions());
     }
 
     @PostMapping

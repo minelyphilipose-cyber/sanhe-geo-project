@@ -256,7 +256,16 @@
             <el-option v-for="p in partnerOptions" :key="p.id" :label="p.partnerName" :value="p.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="销售负责人"><el-input-number v-model="companyForm.salesOwnerId" :min="1" style="width: 100%" /></el-form-item>
+        <el-form-item v-if="canSelectSalesOwner" label="销售负责人">
+          <el-select v-model="companyForm.salesOwnerId" clearable filterable placeholder="请选择销售人员" style="width: 100%">
+            <el-option
+              v-for="item in salesOwnerOptions"
+              :key="item.id"
+              :label="item.displayName"
+              :value="item.id"
+            />
+          </el-select>
+        </el-form-item>
         <el-form-item label="来源"><el-input v-model="companyForm.referralSource" /></el-form-item>
         <el-form-item label="状态">
           <el-select v-model="companyForm.status" style="width: 100%">
@@ -389,10 +398,12 @@ import {
   getCompanyDistributionQuotas,
   getCompanyPackageBindings,
   getCompanyKeywordGroupQuota,
+  getSalesOwnerOptions,
   rechargeCompanyAccount,
   unbindCompanyPackage,
   updateBrand,
   updateCompany,
+  type SalesOwnerOption,
 } from '@/api/customer'
 import { getEnabledPackagePlans } from '@/api/packagePlan'
 import { getPartnerList, type PartnerItem } from '@/api/partner'
@@ -414,6 +425,7 @@ const canUpdateBrand = computed(() => userStore.hasPermission('brand.update'))
 const canDeleteBrand = computed(() => userStore.hasPermission('brand.delete'))
 const canCreateProject = computed(() => userStore.hasPermission('project.create'))
 const canManagePackageBinding = computed(() => userStore.hasPermission('user.manage'))
+const canSelectSalesOwner = computed(() => userStore.role !== 'sales' && canUpdateCompany.value)
 const companyId = Number(route.params.id)
 const hasValidId = Number.isFinite(companyId) && companyId > 0
 
@@ -431,6 +443,7 @@ const packageSubmitting = ref(false)
 const company = ref<Company | null>(null)
 const brands = ref<Brand[]>([])
 const partnerOptions = ref<PartnerItem[]>([])
+const salesOwnerOptions = ref<SalesOwnerOption[]>([])
 const account = ref<CompanyAccount | null>(null)
 const txns = ref<CompanyAccountTxn[]>([])
 const activePackageBinding = ref<CompanyPackageBinding | null>(null)
@@ -766,7 +779,7 @@ async function submitCompany() {
       districtName: region.districtName,
       ownerType: companyForm.ownerType,
       partnerId: companyForm.partnerId || undefined,
-      salesOwnerId: companyForm.salesOwnerId || undefined,
+      salesOwnerId: canSelectSalesOwner.value ? companyForm.salesOwnerId || undefined : undefined,
       referralSource: companyForm.referralSource || undefined,
       status: companyForm.status,
       remark: companyForm.remark || undefined,
@@ -892,6 +905,19 @@ async function loadPartners() {
     partnerOptions.value = data.data.records || []
   } catch {
     partnerOptions.value = []
+  }
+}
+
+async function loadSalesOwners() {
+  if (!canSelectSalesOwner.value) {
+    salesOwnerOptions.value = []
+    return
+  }
+  try {
+    const { data } = await getSalesOwnerOptions()
+    salesOwnerOptions.value = data.data || []
+  } catch {
+    salesOwnerOptions.value = []
   }
 }
 
@@ -1058,7 +1084,7 @@ onMounted(async () => {
     return
   }
   await dictStore.ensureLoaded()
-  await loadPartners()
+  await Promise.all([loadPartners(), loadSalesOwners()])
   await loadCompany()
   await Promise.all([loadBrands(), loadAccount(), loadPackageBinding(), loadKeywordGroupQuota(), loadDistributionQuotas()])
 })

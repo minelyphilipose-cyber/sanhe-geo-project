@@ -42,6 +42,16 @@ export function deleteCompany(id: number) {
   return request.delete<R<void>>(`/companies/${id}`)
 }
 
+export interface SalesOwnerOption {
+  id: number
+  displayName: string
+  username: string
+}
+
+export function getSalesOwnerOptions() {
+  return request.get<R<SalesOwnerOption[]>>('/companies/sales-owner-options')
+}
+
 export function getCompanyAccount(id: number) {
   return request.get<R<CompanyAccount>>(`/companies/${id}/account`)
 }
