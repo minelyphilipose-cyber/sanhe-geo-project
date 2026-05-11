@@ -16,8 +16,6 @@ import com.huanjing.geo.module.customer.mapper.BrandProfileVersionMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
-import com.huanjing.geo.module.system.entity.SysDictItem;
-import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
@@ -53,7 +51,6 @@ public class BrandService {
     private final CurrentUserService currentUserService;
     private final ActivityLogService activityLogService;
     private final BrandProfileService brandProfileService;
-    private final SysDictItemMapper sysDictItemMapper;
 
     public Page<Brand> page(long current, long size, Long companyId, String keyword) {
         SysUser user = currentUserService.requireCurrentUser();
@@ -370,15 +367,11 @@ public class BrandService {
     }
 
     private void validateBrandIndustry(String industry, Company company) {
-        Set<String> validTags = queryEnabledIndustryTags();
-        if (!validTags.contains(industry)) {
-            throw new BizException(400, "品牌行业值不在行业字典范围内");
-        }
         Set<String> companyTags = parseCompanyIndustryTags(company.getIndustryTags());
         if (companyTags.isEmpty()) {
             throw new BizException(400, "所属客户未配置行业，请先完善客户行业");
         }
-        if (!companyTags.contains(industry)) {
+        if (!companyTags.contains(industry.toLowerCase(Locale.ROOT))) {
             throw new BizException(400, "品牌行业必须从所属客户行业中选择");
         }
     }
@@ -387,7 +380,7 @@ public class BrandService {
         if (!StringUtils.hasText(value)) {
             throw new BizException(400, "品牌行业不能为空");
         }
-        return value.trim().toLowerCase(Locale.ROOT);
+        return value.trim();
     }
 
     private String normalizeForbiddenPhrases(String raw) {
@@ -418,18 +411,6 @@ public class BrandService {
             return null;
         }
         return JSONUtil.toJsonStr(normalized);
-    }
-
-    private Set<String> queryEnabledIndustryTags() {
-        return sysDictItemMapper.selectList(new LambdaQueryWrapper<SysDictItem>()
-                        .eq(SysDictItem::getDictType, "industry_tag")
-                        .eq(SysDictItem::getEnabled, true)
-                        .select(SysDictItem::getDictKey))
-                .stream()
-                .map(SysDictItem::getDictKey)
-                .filter(StringUtils::hasText)
-                .map(item -> item.trim().toLowerCase(Locale.ROOT))
-                .collect(Collectors.toSet());
     }
 
     private Set<String> parseCompanyIndustryTags(String raw) {

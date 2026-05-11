@@ -68,7 +68,14 @@
         <el-form-item label="客户联系人"><el-input v-model="form.contactName" /></el-form-item>
         <el-form-item label="联系电话"><el-input v-model="form.contactPhone" /></el-form-item>
         <el-form-item label="行业" prop="industryTags">
-          <el-select v-model="form.industryTags" multiple filterable style="width: 100%">
+          <el-select
+            v-model="form.industryTags"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            style="width: 100%"
+          >
             <el-option
               v-for="item in dictStore.options('industry_tag')"
               :key="item.dictKey"
@@ -252,6 +259,17 @@ function parseIndustryTags(value?: string | string[] | null) {
   }
 }
 
+function normalizeIndustryTags(tags: string[]) {
+  const normalized: string[] = []
+  for (const tag of tags) {
+    const value = tag.trim()
+    if (value && !normalized.includes(value)) {
+      normalized.push(value)
+    }
+  }
+  return normalized
+}
+
 function industryLabels(company: Company) {
   const tags = parseIndustryTags(company.industryTags)
   if (!tags.length) return '-'
@@ -355,7 +373,7 @@ async function submit() {
       companyName: form.companyName,
       contactName: form.contactName || undefined,
       contactPhone: form.contactPhone || undefined,
-      industryTags: form.industryTags,
+      industryTags: normalizeIndustryTags(form.industryTags),
       businessDirection: form.businessDirection || undefined,
       serviceArea: serviceArea || undefined,
       competitors: form.competitors || undefined,

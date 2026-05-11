@@ -872,7 +872,7 @@ public class CompanyService {
         if (source.isEmpty()) {
             throw new BizException(400, "客户行业至少选择一个");
         }
-        Set<String> validKeys = sysDictItemMapper.selectList(
+        Map<String, String> dictKeyLookup = sysDictItemMapper.selectList(
                         new LambdaQueryWrapper<SysDictItem>()
                                 .eq(SysDictItem::getDictType, "industry_tag")
                                 .eq(SysDictItem::getEnabled, true)
@@ -880,22 +880,23 @@ public class CompanyService {
                 ).stream()
                 .map(SysDictItem::getDictKey)
                 .filter(StringUtils::hasText)
-                .map(item -> item.trim().toLowerCase(Locale.ROOT))
-                .collect(Collectors.toCollection(HashSet::new));
-        if (validKeys.isEmpty()) {
-            throw new BizException(500, "行业字典未配置");
-        }
+                .collect(Collectors.toMap(
+                        item -> item.trim().toLowerCase(Locale.ROOT),
+                        item -> item.trim(),
+                        (left, right) -> left
+                ));
         List<String> normalized = new ArrayList<>();
         for (String item : source) {
             if (!StringUtils.hasText(item)) {
                 continue;
             }
-            String key = item.trim().toLowerCase(Locale.ROOT);
-            if (!validKeys.contains(key)) {
-                throw new BizException(400, "存在无效行业标签: " + item);
-            }
-            if (!normalized.contains(key)) {
-                normalized.add(key);
+            String value = item.trim();
+            String normalizedKey = value.toLowerCase(Locale.ROOT);
+            String storedValue = dictKeyLookup.getOrDefault(normalizedKey, value);
+            boolean exists = normalized.stream()
+                    .anyMatch(existing -> existing.equalsIgnoreCase(storedValue));
+            if (!exists) {
+                normalized.add(storedValue);
             }
         }
         if (normalized.isEmpty()) {

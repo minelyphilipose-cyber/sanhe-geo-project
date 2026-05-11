@@ -227,7 +227,14 @@
       <el-form ref="companyFormRef" :model="companyForm" :rules="companyRules" label-width="100px">
         <el-form-item label="客户名称" required><el-input v-model="companyForm.companyName" /></el-form-item>
         <el-form-item label="行业" prop="industryTags">
-          <el-select v-model="companyForm.industryTags" multiple filterable style="width: 100%">
+          <el-select
+            v-model="companyForm.industryTags"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            style="width: 100%"
+          >
             <el-option
               v-for="item in dictStore.options('industry_tag')"
               :key="item.dictKey"
@@ -662,6 +669,17 @@ function parseIndustryTags(value?: string | string[] | null) {
   }
 }
 
+function normalizeIndustryTags(tags: string[]) {
+  const normalized: string[] = []
+  for (const tag of tags) {
+    const value = tag.trim()
+    if (value && !normalized.includes(value)) {
+      normalized.push(value)
+    }
+  }
+  return normalized
+}
+
 function fillCompanyForm(data: Company) {
   companyForm.companyName = data.companyName
   companyForm.industryTags = parseIndustryTags(data.industryTags)
@@ -768,7 +786,7 @@ async function submitCompany() {
     const serviceArea = regionPayloadFromCodes(companyForm.serviceAreaCodes).displayName || companyForm.serviceArea
     await updateCompany(companyId, {
       companyName: companyForm.companyName,
-      industryTags: companyForm.industryTags,
+      industryTags: normalizeIndustryTags(companyForm.industryTags),
       serviceArea: serviceArea || undefined,
       city: region.displayName,
       provinceCode: region.provinceCode,
