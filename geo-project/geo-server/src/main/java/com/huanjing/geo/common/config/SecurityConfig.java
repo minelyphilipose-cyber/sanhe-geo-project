@@ -56,7 +56,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/health").permitAll()
                 .requestMatchers("/api/share/**").permitAll()
                 .requestMatchers("/api/presale/exports/render/**").permitAll()
-                .requestMatchers("/api/public/content/**").permitAll()
+                .requestMatchers("/api/public/authority-media/previews/**").permitAll()
                 .requestMatchers("/api/public/dashboard/**").permitAll()
                 .requestMatchers("/api/wechat/open-platform/auth/callback").permitAll()
                 .requestMatchers("/api/wechat/open-platform/events/**").permitAll()

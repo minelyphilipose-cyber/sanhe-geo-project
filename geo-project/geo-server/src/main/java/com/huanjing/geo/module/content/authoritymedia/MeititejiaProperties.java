@@ -34,6 +34,7 @@ public class MeititejiaProperties {
     private long retryBackoffMs = 1000;
     private int rateLimitQps = 2;
     private int resourceStalenessThresholdMinutes = 60;
+    private int previewTokenTtlDays = 30;
     private BigDecimal quotaCheckThreshold = BigDecimal.ZERO;
     private BigDecimal balanceSafetyFactor = new BigDecimal("1.1");
     private ContentMode contentMode = ContentMode.LINK_ONLY;

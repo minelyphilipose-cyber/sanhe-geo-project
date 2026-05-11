@@ -42,6 +42,7 @@ public class AuthorityMediaDistributionAdapter {
     private final AuthorityMediaResourceSyncService resourceSyncService;
     private final AuthorityMediaResourceMapper resourceMapper;
     private final AuthorityMediaOrderMapper orderMapper;
+    private final AuthorityMediaPreviewTokenService previewTokenService;
     private final MeititejiaProperties properties;
     private final ObjectMapper objectMapper;
 
@@ -111,7 +112,8 @@ public class AuthorityMediaDistributionAdapter {
 
         AuthorityMediaOrder order = ensureOrder(article, project, task, resource, operatorId);
         String externalNo = ensureExternalNo(order);
-        String content = buildContent(contentMarkdown, target.previewUrl());
+        String previewUrl = previewTokenService.issuePreviewUrl(order, article, target.previewUrl());
+        String content = buildContent(contentMarkdown, previewUrl);
         MeititejiaClient.NewsMediaOrderRequest request = new MeititejiaClient.NewsMediaOrderRequest(
                 article.getTitle(),
                 content,
@@ -169,11 +171,8 @@ public class AuthorityMediaDistributionAdapter {
     private SubmitResult validateBeforeOrder(TargetContext.AuthorityMediaTarget target,
                                              AuthorityMediaResource resource,
                                              BigDecimal salingPrice) {
-        if (!StringUtils.hasText(target.previewUrl())) {
-            return failure(400, "previewUrl is required", FailureKind.VALIDATION, false);
-        }
-        if (!isValidHttpUrl(target.previewUrl())) {
-            return failure(400, "previewUrl is not a valid http(s) URL", FailureKind.VALIDATION, false);
+        if (StringUtils.hasText(target.previewUrl()) && !isValidHttpUrl(target.previewUrl())) {
+            return failure(400, "previewUrlBase is not a valid http(s) URL", FailureKind.VALIDATION, false);
         }
         if (!StringUtils.hasText(resource.getExternalResourceId()) || !resource.getExternalResourceId().matches("\\d+")) {
             return failure(400, "authority media resource id is invalid", FailureKind.VALIDATION, false);

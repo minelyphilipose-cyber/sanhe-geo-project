@@ -41,6 +41,8 @@ class AuthorityMediaDistributionAdapterTest {
     private AuthorityMediaResourceMapper resourceMapper;
     @Mock
     private AuthorityMediaOrderMapper orderMapper;
+    @Mock
+    private AuthorityMediaPreviewTokenService previewTokenService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private MeititejiaProperties properties;
@@ -50,7 +52,8 @@ class AuthorityMediaDistributionAdapterTest {
     void setUp() {
         properties = new MeititejiaProperties();
         properties.setBalanceSafetyFactor(new BigDecimal("1.1"));
-        adapter = new AuthorityMediaDistributionAdapter(client, resourceSyncService, resourceMapper, orderMapper, properties, objectMapper);
+        adapter = new AuthorityMediaDistributionAdapter(client, resourceSyncService, resourceMapper, orderMapper,
+                previewTokenService, properties, objectMapper);
     }
 
     @Test
@@ -65,6 +68,8 @@ class AuthorityMediaDistributionAdapterTest {
             order.setId(501L);
             return 1;
         }).when(orderMapper).insert(any(AuthorityMediaOrder.class));
+        when(previewTokenService.issuePreviewUrl(any(), any(), eq("https://preview.example/a")))
+                .thenReturn("https://preview.example/a/api/public/authority-media/previews/token");
         when(client.buildAuditPayload(any())).thenReturn(auditPayload());
         when(client.createNewsMediaOrder(any())).thenReturn(objectMapper.readTree("{\"code\":200,\"msg\":\"success\",\"data\":{}}"));
 
@@ -140,6 +145,8 @@ class AuthorityMediaDistributionAdapterTest {
             order.setId(502L);
             return 1;
         }).when(orderMapper).insert(any(AuthorityMediaOrder.class));
+        when(previewTokenService.issuePreviewUrl(any(), any(), eq("https://preview.example/a")))
+                .thenReturn("https://preview.example/a/api/public/authority-media/previews/token");
         when(client.buildAuditPayload(any())).thenReturn(auditPayload());
         when(client.createNewsMediaOrder(any())).thenThrow(new MeititejiaApiException(
                 200, 201, "余额不足", "create_media_order", "{\"code\":201,\"msg\":\"余额不足\"}", false, null

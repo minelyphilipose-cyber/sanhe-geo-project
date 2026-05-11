@@ -77,7 +77,7 @@ public class ContentDistributionController {
         TargetContext.AuthorityMediaTarget target = new TargetContext.AuthorityMediaTarget(
                 req.getResourceId(),
                 req.getSalingPrice(),
-                resolvePreviewUrl(articleId, req.getPreviewUrl(), servletRequest),
+                resolvePreviewUrlBase(req.getPreviewUrl(), servletRequest),
                 req.getPublishedAt(),
                 req.getRemark()
         );
@@ -125,9 +125,9 @@ public class ContentDistributionController {
         }
     }
 
-    private String resolvePreviewUrl(Long articleId, String previewUrl, HttpServletRequest request) {
-        if (StringUtils.hasText(previewUrl)) {
-            return previewUrl.trim();
+    private String resolvePreviewUrlBase(String previewUrlBase, HttpServletRequest request) {
+        if (StringUtils.hasText(previewUrlBase)) {
+            return previewUrlBase.trim().replaceAll("/+$", "");
         }
         String base = meititejiaProperties.getPreviewUrlBase();
         if (!StringUtils.hasText(base)) {
@@ -141,6 +141,6 @@ public class ContentDistributionController {
             }
             base = scheme + "://" + host;
         }
-        return base.replaceAll("/+$", "") + "/api/public/content/articles/" + articleId + "/preview";
+        return base.replaceAll("/+$", "");
     }
 }

@@ -156,6 +156,7 @@ geo:
     retry-backoff-ms: 1000
     rate-limit-qps: 2
     resource-staleness-threshold-minutes: 60
+    preview-token-ttl-days: 30
     quota-check-threshold: 0
     balance-safety-factor: 1.1
     content-mode: LINK_ONLY
