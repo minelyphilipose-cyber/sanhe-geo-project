@@ -25,6 +25,7 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 @Slf4j
 @Service
@@ -337,6 +338,31 @@ public class DispatchTaskService {
 
     private void handleFailure(DispatchTask task, Exception ex) {
         LocalDateTime now = LocalDateTime.now();
+        if (ex instanceof DispatchResourceBusyException) {
+            String lastError = trimError(ex.getMessage());
+            String errorContext = JSONUtil.toJsonStr(buildErrorContext(
+                    lastError,
+                    ex.getClass().getName(),
+                    task.getCurrentChannel(),
+                    task.getPlatformCode(),
+                    now
+            ));
+            int retryDelaySeconds = dispatchProperties.getResourceBusyRetryMinSeconds();
+            int retryJitterSeconds = dispatchProperties.getResourceBusyRetryJitterSeconds();
+            if (retryJitterSeconds > 0) {
+                retryDelaySeconds += ThreadLocalRandom.current().nextInt(retryJitterSeconds + 1);
+            }
+            dispatchTaskStateService.markResourceWaiting(
+                    task.getId(),
+                    now.plusSeconds(retryDelaySeconds),
+                    lastError,
+                    errorContext,
+                    task.getPayloadJson(),
+                    task.getProjectId()
+            );
+            log.info("Task {} postponed for shared LLM capacity", task.getId(), ex);
+            return;
+        }
         int nextRetryCount = (task.getRetryCount() == null ? 0 : task.getRetryCount()) + 1;
         task.setRetryCount(nextRetryCount);
         task.setLastError(trimError(ex.getMessage()));

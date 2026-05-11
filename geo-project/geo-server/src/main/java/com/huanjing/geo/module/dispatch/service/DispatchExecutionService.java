@@ -4,6 +4,13 @@ import cn.hutool.json.JSONUtil;
 import cn.hutool.json.JSONObject;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.llm.LlmModelConfig;
+import com.huanjing.geo.common.llm.router.LlmFeature;
+import com.huanjing.geo.common.llm.router.LlmRouteException;
+import com.huanjing.geo.common.llm.router.LlmRouteFailureKind;
+import com.huanjing.geo.common.llm.router.LlmRouteRequest;
+import com.huanjing.geo.common.llm.router.LlmRouteResult;
+import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
 import com.huanjing.geo.common.util.HttpClientUtil;
 import com.huanjing.geo.common.util.QuotaPeriodResolver;
 import com.huanjing.geo.module.content.entity.ArticleBatch;
@@ -89,6 +96,7 @@ public class DispatchExecutionService {
     private final PlatformCredentialService platformCredentialService;
     private final PlatformRateLimiterService platformRateLimiterService;
     private final PlatformConcurrencyLimiterService platformConcurrencyLimiterService;
+    private final LlmPlatformRouter llmPlatformRouter;
     private final ProjectMapper projectMapper;
     private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
     private final KeywordGroupResultMapper keywordGroupResultMapper;
@@ -98,6 +106,7 @@ public class DispatchExecutionService {
     private final ContentArticleService contentArticleService;
     private final GeoPromptBuilder geoPromptBuilder;
     private final ArticleGenerationPersistenceService articleGenerationPersistenceService;
+    private final ArticleGenerationWindowLockService articleGenerationWindowLockService;
     private final PollBatchMapper pollBatchMapper;
     private final PollResultMapper pollResultMapper;
     private final PollDailyStatMapper pollDailyStatMapper;
@@ -344,76 +353,90 @@ public class DispatchExecutionService {
         Integer generationSlotNo = resolveGenerationSlotNo(task);
         String periodType = resolvePeriodType(task);
         String periodKey = QuotaPeriodResolver.periodKey(periodType, task.getWindowStart());
-        ArticleBatch batch = articleGenerationPersistenceService.ensureArticleBatch(
-                task.getId(), project.getId(), batchDate, batchNo, targetChannel, generationSlotNo);
-
-        Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
-
-        int total = 0;
-        int completed = 0;
-        int failed = 0;
-        int articleIndex = Math.max(generationSlotNo == null ? 1 : generationSlotNo, 1) - 1;
-        int platformIndex = articleIndex;
-        PackageContentConfig cfg = configs.get(Math.floorMod(articleIndex, configs.size()));
-        total++;
-        try {
-            GeoPromptBuilder.PromptPair prompt = geoPromptBuilder.buildContentPrompt(
-                    project, brand, cfg.getArticleType(), articleIndex
+        ArticleGenerationWindowLockService.WindowLock windowLock =
+                articleGenerationWindowLockService.tryLock(project.getId(), targetChannel, periodKey);
+        if (windowLock == null) {
+            throw new DispatchResourceBusyException(
+                    "Article generation window is busy: project=" + project.getId()
+                            + ", channel=" + targetChannel
+                            + ", periodKey=" + periodKey,
+                    null
             );
-            String articleAngle = geoPromptBuilder.resolveArticleAngle(project, articleIndex);
-            InvocationResult result = invokeContentWithOrderedPlatforms(
-                    platformConfigs,
-                    task,
-                    prompt.systemPrompt(),
-                    prompt.userPrompt(),
-                    platformIndex
-            );
-            if (!result.success) {
-                failed++;
-                log.warn("CONTENT_GENERATION failed task={}, type={}, err={}", task.getId(), cfg.getArticleType(), result.errorMessage);
-            } else {
-                String content = normalizeGeneratedContent(result.responseText);
-                String title = extractGeneratedTitle(content, cfg.getArticleType(), project.getProjectName());
-                Map<String, Object> promptSnapshot = new LinkedHashMap<>();
-                promptSnapshot.put("articleType", cfg.getArticleType());
-                promptSnapshot.put("targetChannel", targetChannel);
-                promptSnapshot.put("generationSlotNo", generationSlotNo);
-                promptSnapshot.put("systemPrompt", prompt.systemPrompt());
-                promptSnapshot.put("userPrompt", prompt.userPrompt());
-                Map<String, Object> inputSnapshot = new LinkedHashMap<>();
-                inputSnapshot.put("projectName", project.getProjectName());
-                inputSnapshot.put("packageType", binding.getPackageType());
-                inputSnapshot.put("source", "keyword_group");
-                inputSnapshot.put("targetChannel", targetChannel);
-                inputSnapshot.put("periodType", periodType);
-                inputSnapshot.put("periodKey", periodKey);
-                inputSnapshot.put("generationSlotNo", generationSlotNo);
-                articleGenerationPersistenceService.persistGeneratedArticle(
-                        batch.getId(),
-                        project,
-                        cfg.getArticleType(),
-                        title,
-                        content,
-                        JSONUtil.toJsonStr(promptSnapshot),
-                        JSONUtil.toJsonStr(inputSnapshot),
-                        result.platformCode,
-                        resolveModelIdByPlatform(result.platformCode),
-                        articleAngle,
-                        targetChannel,
-                        periodType,
-                        periodKey,
-                        generationSlotNo
-                );
-                completed++;
-            }
-        } catch (Exception ex) {
-            failed++;
-            log.warn("CONTENT_GENERATION article failed task={}, type={}, articleIndex={}, err={}",
-                    task.getId(), cfg.getArticleType(), articleIndex, ex.getMessage(), ex);
         }
-        articleGenerationPersistenceService.completeBatch(batch.getId(), total, completed, failed);
-        if (completed <= 0 && failed > 0) {
-            throw new BizException(500, "Content generation failed for all articles");
+        try (windowLock) {
+            ArticleBatch batch = articleGenerationPersistenceService.ensureArticleBatch(
+                    task.getId(), project.getId(), batchDate, batchNo, targetChannel, generationSlotNo);
+
+            Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
+
+            int total = 0;
+            int completed = 0;
+            int failed = 0;
+            int articleIndex = Math.max(generationSlotNo == null ? 1 : generationSlotNo, 1) - 1;
+            int platformIndex = articleIndex;
+            PackageContentConfig cfg = configs.get(Math.floorMod(articleIndex, configs.size()));
+            total++;
+            try {
+                GeoPromptBuilder.PromptPair prompt = geoPromptBuilder.buildContentPrompt(
+                        project, brand, cfg.getArticleType(), articleIndex
+                );
+                String articleAngle = geoPromptBuilder.resolveArticleAngle(project, articleIndex);
+                InvocationResult result = invokeArticleContentWithRouter(
+                        platformConfigs,
+                        task,
+                        prompt.systemPrompt(),
+                        prompt.userPrompt(),
+                        platformIndex
+                );
+                if (!result.success) {
+                    failed++;
+                    log.warn("CONTENT_GENERATION failed task={}, type={}, err={}", task.getId(), cfg.getArticleType(), result.errorMessage);
+                } else {
+                    String content = normalizeGeneratedContent(result.responseText);
+                    String title = extractGeneratedTitle(content, cfg.getArticleType(), project.getProjectName());
+                    Map<String, Object> promptSnapshot = new LinkedHashMap<>();
+                    promptSnapshot.put("articleType", cfg.getArticleType());
+                    promptSnapshot.put("targetChannel", targetChannel);
+                    promptSnapshot.put("generationSlotNo", generationSlotNo);
+                    promptSnapshot.put("systemPrompt", prompt.systemPrompt());
+                    promptSnapshot.put("userPrompt", prompt.userPrompt());
+                    Map<String, Object> inputSnapshot = new LinkedHashMap<>();
+                    inputSnapshot.put("projectName", project.getProjectName());
+                    inputSnapshot.put("packageType", binding.getPackageType());
+                    inputSnapshot.put("source", "keyword_group");
+                    inputSnapshot.put("targetChannel", targetChannel);
+                    inputSnapshot.put("periodType", periodType);
+                    inputSnapshot.put("periodKey", periodKey);
+                    inputSnapshot.put("generationSlotNo", generationSlotNo);
+                    articleGenerationPersistenceService.persistGeneratedArticle(
+                            batch.getId(),
+                            project,
+                            cfg.getArticleType(),
+                            title,
+                            content,
+                            JSONUtil.toJsonStr(promptSnapshot),
+                            JSONUtil.toJsonStr(inputSnapshot),
+                            result.platformCode,
+                            resolveModelIdByPlatform(result.platformCode),
+                            articleAngle,
+                            targetChannel,
+                            periodType,
+                            periodKey,
+                            generationSlotNo
+                    );
+                    completed++;
+                }
+            } catch (DispatchResourceBusyException ex) {
+                throw ex;
+            } catch (Exception ex) {
+                failed++;
+                log.warn("CONTENT_GENERATION article failed task={}, type={}, articleIndex={}, err={}",
+                        task.getId(), cfg.getArticleType(), articleIndex, ex.getMessage(), ex);
+            }
+            articleGenerationPersistenceService.completeBatch(batch.getId(), total, completed, failed);
+            if (completed <= 0 && failed > 0) {
+                throw new BizException(500, "Content generation failed for all articles");
+            }
         }
     }
 
@@ -468,6 +491,52 @@ public class DispatchExecutionService {
             lastError = result.error;
         }
         return InvocationResult.failure("ALL_FAILED", lastError == null ? "all failed" : lastError.getMessage(), 0, lastError);
+    }
+
+    private InvocationResult invokeArticleContentWithRouter(List<AiPlatformConfig> platformConfigs,
+                                                            DispatchTask task,
+                                                            String systemPrompt,
+                                                            String userPrompt,
+                                                            int cursor) {
+        try {
+            LlmRouteResult routed = llmPlatformRouter.invoke(new LlmRouteRequest(
+                    LlmFeature.ARTICLE,
+                    systemPrompt,
+                    userPrompt,
+                    0.7D,
+                    dispatchProperties.getModelConnectTimeoutMs(),
+                    dispatchProperties.getModelRequestTimeoutMs(),
+                    LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS,
+                    0,
+                    null,
+                    false,
+                    1000,
+                    cursor,
+                    platformConfigs
+            ));
+            task.setPlatformCode(routed.platformCode());
+            task.setCurrentChannel(routed.channel());
+            log.info("Content generation task {} executed by platform={}, model={}, channel={}",
+                    task.getId(), routed.platformCode(), routed.modelId(), routed.channel());
+            return InvocationResult.success(
+                    routed.platformCode(),
+                    routed.channel(),
+                    routed.responseText(),
+                    Math.max(routed.durationMs(), 1L),
+                    routed.requestCount()
+            );
+        } catch (LlmRouteException ex) {
+            if (isCapacityFailure(ex.failureKind())) {
+                throw new DispatchResourceBusyException(ex.getMessage(), ex);
+            }
+            return InvocationResult.failure(ex.failureKind().name(), ex.getMessage(), ex.requestCount(), ex);
+        }
+    }
+
+    private boolean isCapacityFailure(LlmRouteFailureKind failureKind) {
+        return failureKind == LlmRouteFailureKind.ALL_RATE_LIMITED
+                || failureKind == LlmRouteFailureKind.ALL_PERMIT_BUSY
+                || failureKind == LlmRouteFailureKind.ALL_CIRCUIT_OPEN;
     }
 
     private String buildBrandInfo(Project project, Brand brand) {

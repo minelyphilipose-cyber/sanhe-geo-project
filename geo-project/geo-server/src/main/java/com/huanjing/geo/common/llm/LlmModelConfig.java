@@ -16,7 +16,10 @@ public record LlmModelConfig(String platformCode,
                              Integer rateLimitQps,
                              Integer maxTokens,
                              boolean normalizeJsonOutput,
-                             Integer requestTimeoutMaxMs) {
+                             Integer requestTimeoutMaxMs,
+                             String feature,
+                             Integer concurrencyLimit,
+                             boolean useExecutionGateway) {
 
     public static final int DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
     public static final int DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -39,7 +42,70 @@ public record LlmModelConfig(String platformCode,
                           boolean normalizeJsonOutput) {
         this(platformCode, platformName, modelId, modelName, apiUrl, apiKey, systemPrompt, temperature,
                 connectTimeoutMs, requestTimeoutMs, maxRetry, rateLimitQps, maxTokens, normalizeJsonOutput,
-                MAX_REQUEST_TIMEOUT_MS);
+                MAX_REQUEST_TIMEOUT_MS, "generic", 1, true);
+    }
+
+    public LlmModelConfig(String platformCode,
+                          String platformName,
+                          String modelId,
+                          String modelName,
+                          String apiUrl,
+                          String apiKey,
+                          String systemPrompt,
+                          Double temperature,
+                          Integer connectTimeoutMs,
+                          Integer requestTimeoutMs,
+                          Integer maxRetry,
+                          Integer rateLimitQps,
+                          Integer maxTokens,
+                          boolean normalizeJsonOutput,
+                          Integer requestTimeoutMaxMs) {
+        this(platformCode, platformName, modelId, modelName, apiUrl, apiKey, systemPrompt, temperature,
+                connectTimeoutMs, requestTimeoutMs, maxRetry, rateLimitQps, maxTokens, normalizeJsonOutput,
+                requestTimeoutMaxMs, "generic", 1, true);
+    }
+
+    public LlmModelConfig(String platformCode,
+                          String platformName,
+                          String modelId,
+                          String modelName,
+                          String apiUrl,
+                          String apiKey,
+                          String systemPrompt,
+                          Double temperature,
+                          Integer connectTimeoutMs,
+                          Integer requestTimeoutMs,
+                          Integer maxRetry,
+                          Integer rateLimitQps,
+                          Integer maxTokens,
+                          boolean normalizeJsonOutput,
+                          Integer requestTimeoutMaxMs,
+                          String feature) {
+        this(platformCode, platformName, modelId, modelName, apiUrl, apiKey, systemPrompt, temperature,
+                connectTimeoutMs, requestTimeoutMs, maxRetry, rateLimitQps, maxTokens, normalizeJsonOutput,
+                requestTimeoutMaxMs, feature, 1, true);
+    }
+
+    public LlmModelConfig(String platformCode,
+                          String platformName,
+                          String modelId,
+                          String modelName,
+                          String apiUrl,
+                          String apiKey,
+                          String systemPrompt,
+                          Double temperature,
+                          Integer connectTimeoutMs,
+                          Integer requestTimeoutMs,
+                          Integer maxRetry,
+                          Integer rateLimitQps,
+                          Integer maxTokens,
+                          boolean normalizeJsonOutput,
+                          Integer requestTimeoutMaxMs,
+                          String feature,
+                          Integer concurrencyLimit) {
+        this(platformCode, platformName, modelId, modelName, apiUrl, apiKey, systemPrompt, temperature,
+                connectTimeoutMs, requestTimeoutMs, maxRetry, rateLimitQps, maxTokens, normalizeJsonOutput,
+                requestTimeoutMaxMs, feature, concurrencyLimit, true);
     }
 
     public LlmModelConfig {
@@ -71,6 +137,11 @@ public record LlmModelConfig(String platformCode,
         modelName = trimToNull(modelName);
         apiUrl = apiUrl.trim();
         systemPrompt = trimToNull(systemPrompt);
+        feature = trimToNull(feature);
+        if (feature == null) {
+            feature = "generic";
+        }
+        concurrencyLimit = Math.max(1, positiveOrDefault(concurrencyLimit, 1));
     }
 
     private static int positiveOrDefault(Integer value, int fallback) {

@@ -24,7 +24,7 @@ public class DispatchWorkerService {
 
     @PostConstruct
     public void init() {
-        int concurrency = Math.max(dispatchProperties.getWorkerConcurrency(), 1);
+        int concurrency = Math.max(dispatchProperties.getWorkerPollConcurrency(), 1);
         this.executorService = Executors.newFixedThreadPool(concurrency);
     }
 
@@ -37,7 +37,7 @@ public class DispatchWorkerService {
 
     @Scheduled(fixedDelayString = "${geo.dispatch.worker-poll-ms:1000}")
     public void pollQueue() {
-        int concurrency = Math.max(dispatchProperties.getWorkerConcurrency(), 1);
+        int concurrency = Math.max(dispatchProperties.getWorkerPollConcurrency(), 1);
         for (int i = 0; i < concurrency; i++) {
             Long taskId = dispatchQueueService.popNextTaskId();
             if (taskId == null) {

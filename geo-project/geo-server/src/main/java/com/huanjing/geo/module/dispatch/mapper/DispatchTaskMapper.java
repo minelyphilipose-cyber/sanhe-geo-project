@@ -22,6 +22,29 @@ public interface DispatchTaskMapper extends BaseMapper<DispatchTask> {
             """)
     DispatchTask selectByIdForUpdate(@Param("taskId") Long taskId);
 
+    @Update("""
+            UPDATE dispatch_task
+            SET status = #{runningStatus},
+                last_started_at = #{startedAt},
+                first_started_at = COALESCE(first_started_at, #{startedAt}),
+                timeout_at = #{timeoutAt},
+                updated_at = NOW()
+            WHERE id = #{taskId}
+              AND (
+                    status = #{pendingStatus}
+                    OR (
+                        status = #{retryPendingStatus}
+                        AND (next_retry_at IS NULL OR next_retry_at <= #{startedAt})
+                    )
+                  )
+            """)
+    int claimRunnableTask(@Param("taskId") Long taskId,
+                          @Param("pendingStatus") String pendingStatus,
+                          @Param("retryPendingStatus") String retryPendingStatus,
+                          @Param("runningStatus") String runningStatus,
+                          @Param("startedAt") LocalDateTime startedAt,
+                          @Param("timeoutAt") LocalDateTime timeoutAt);
+
     @Select("""
             SELECT generation_slot_no
             FROM dispatch_task

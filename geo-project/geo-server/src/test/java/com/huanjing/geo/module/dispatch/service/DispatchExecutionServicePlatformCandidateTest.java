@@ -16,6 +16,7 @@ import com.huanjing.geo.module.dispatch.mapper.PollBatchMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollDailyStatMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.dispatch.mapper.ProjectPollRotationMapper;
+import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
@@ -88,6 +89,7 @@ class DispatchExecutionServicePlatformCandidateTest {
                 mock(PlatformCredentialService.class),
                 mock(PlatformRateLimiterService.class),
                 mock(PlatformConcurrencyLimiterService.class),
+                mock(LlmPlatformRouter.class),
                 mock(ProjectMapper.class),
                 mock(ProjectKeywordGroupRelMapper.class),
                 mock(KeywordGroupResultMapper.class),
@@ -97,6 +99,7 @@ class DispatchExecutionServicePlatformCandidateTest {
                 mock(ContentArticleService.class),
                 mock(GeoPromptBuilder.class),
                 mock(ArticleGenerationPersistenceService.class),
+                mock(ArticleGenerationWindowLockService.class),
                 mock(PollBatchMapper.class),
                 mock(PollResultMapper.class),
                 mock(PollDailyStatMapper.class),

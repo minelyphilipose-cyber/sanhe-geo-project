@@ -12,7 +12,7 @@ public class DispatchProperties {
     private String timezone = "Asia/Shanghai";
     private String lockKey = "geo:dispatch:scan:lock";
     private long lockTtlSeconds = 600;
-    private int workerConcurrency = 4;
+    private int workerPollConcurrency = 4;
     private long workerPollMs = 1000;
     private String queueKey = "geo:dispatch:queue:zset";
     private String retryDelays = "1m,5m,15m";
@@ -21,4 +21,14 @@ public class DispatchProperties {
     private int taskRetentionDays = 90;
     private int modelConnectTimeoutMs = 10000;
     private int modelRequestTimeoutMs = 45000;
+    private int resourceBusyRetryMinSeconds = 30;
+    private int resourceBusyRetryJitterSeconds = 30;
+
+    public void setResourceBusyRetryMinSeconds(int resourceBusyRetryMinSeconds) {
+        this.resourceBusyRetryMinSeconds = Math.max(1, resourceBusyRetryMinSeconds);
+    }
+
+    public void setResourceBusyRetryJitterSeconds(int resourceBusyRetryJitterSeconds) {
+        this.resourceBusyRetryJitterSeconds = Math.max(0, resourceBusyRetryJitterSeconds);
+    }
 }

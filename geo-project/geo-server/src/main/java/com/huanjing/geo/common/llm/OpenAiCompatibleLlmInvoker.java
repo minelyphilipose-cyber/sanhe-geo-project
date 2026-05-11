@@ -2,8 +2,13 @@ package com.huanjing.geo.common.llm;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.RequiredArgsConstructor;
+import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
+import com.huanjing.geo.common.llm.pool.LlmExecutionPermit;
+import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
+import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -15,12 +20,27 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
 
     private final LlmHttpClient httpClient;
     private final ObjectMapper objectMapper;
+    private final LlmExecutionGateway executionGateway;
     private final ConcurrentHashMap<String, PlatformThrottleState> throttleStates = new ConcurrentHashMap<>();
+
+    @Autowired
+    public OpenAiCompatibleLlmInvoker(LlmHttpClient httpClient,
+                                      ObjectMapper objectMapper,
+                                      ObjectProvider<LlmExecutionGateway> executionGatewayProvider) {
+        this.httpClient = httpClient;
+        this.objectMapper = objectMapper;
+        this.executionGateway = executionGatewayProvider.getIfAvailable();
+    }
+
+    public OpenAiCompatibleLlmInvoker(LlmHttpClient httpClient, ObjectMapper objectMapper) {
+        this.httpClient = httpClient;
+        this.objectMapper = objectMapper;
+        this.executionGateway = null;
+    }
 
     @Override
     public LlmInvokeResult invoke(String prompt, LlmModelConfig modelConfig) throws LlmInvokeException {
@@ -29,7 +49,14 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
             long started = System.currentTimeMillis();
             try {
                 throttle(modelConfig.platformCode(), modelConfig.rateLimitQps());
-                InvocationResponse response = invokeOnce(prompt == null ? "" : prompt, modelConfig);
+                InvocationResponse response;
+                if (executionGateway == null || !modelConfig.useExecutionGateway()) {
+                    response = invokeOnce(prompt == null ? "" : prompt, modelConfig);
+                } else {
+                    try (LlmExecutionPermit ignored = executionGateway.acquire(modelConfig.feature(), toPlatformConfig(modelConfig))) {
+                        response = invokeOnce(prompt == null ? "" : prompt, modelConfig);
+                    }
+                }
                 String responseText = modelConfig.normalizeJsonOutput()
                         ? normalizeJsonText(response.text())
                         : response.text();
@@ -46,6 +73,8 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
                         modelConfig.modelId(),
                         modelConfig.modelName()
                 );
+            } catch (LlmPermitUnavailableException ex) {
+                throw ex;
             } catch (Exception ex) {
                 lastError = ex;
                 if (attempt == modelConfig.maxRetry()) {
@@ -79,6 +108,14 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
             throw new LlmInvokeException("Empty model response text");
         }
         return invocation;
+    }
+
+    private AiPlatformConfig toPlatformConfig(LlmModelConfig modelConfig) {
+        AiPlatformConfig config = new AiPlatformConfig();
+        config.setPlatformCode(modelConfig.platformCode());
+        config.setPlatformName(modelConfig.platformName());
+        config.setConcurrencyLimit(modelConfig.concurrencyLimit());
+        return config;
     }
 
     private String buildRequestBody(String prompt, LlmModelConfig modelConfig) throws Exception {

@@ -26,27 +26,24 @@ public class DispatchTaskStateService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public DispatchTask markRunning(Long taskId, int timeoutMinutes) {
+        LocalDateTime now = LocalDateTime.now();
+        int updated = dispatchTaskMapper.claimRunnableTask(
+                taskId,
+                DispatchTaskStatus.PENDING.value(),
+                DispatchTaskStatus.RETRY_PENDING.value(),
+                DispatchTaskStatus.RUNNING.value(),
+                now,
+                now.plusMinutes(timeoutMinutes)
+        );
         DispatchTask task = dispatchTaskMapper.selectById(taskId);
         if (task == null) {
             return null;
         }
-        if (DispatchTaskStatus.COMPLETED.value().equals(task.getStatus())
-                || DispatchTaskStatus.DEAD_LETTER.value().equals(task.getStatus())
-                || DispatchTaskStatus.CANCELLED.value().equals(task.getStatus())) {
-            dispatchQueueService.clearQueueMark(taskId);
+        if (updated > 0) {
             return task;
         }
-        LocalDateTime now = LocalDateTime.now();
-        task.setStatus(DispatchTaskStatus.RUNNING.value());
-        task.setLastStartedAt(now);
-        if (task.getFirstStartedAt() == null) {
-            task.setFirstStartedAt(now);
-        }
-        if (task.getTimeoutAt() == null) {
-            task.setTimeoutAt(now.plusMinutes(timeoutMinutes));
-        }
-        dispatchTaskMapper.updateById(task);
-        return task;
+        dispatchQueueService.clearQueueMark(taskId);
+        return null;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -84,6 +81,8 @@ public class DispatchTaskStateService {
         task.setStatus(DispatchTaskStatus.RETRY_PENDING.value());
         task.setNextRetryAt(nextRetryAt);
         dispatchTaskMapper.updateById(task);
+        // Capacity backoff is intentionally re-enqueued by the recovery scanner once nextRetryAt is due.
+        // That keeps worker threads from spinning or blocking on shared LLM permits.
         dispatchQueueService.clearQueueMark(taskId);
         dispatchAlertService.createAlert(
                 taskId,
@@ -92,6 +91,35 @@ public class DispatchTaskStateService {
                 "Dispatch task failed and will retry",
                 lastError,
                 nextRetryCount,
+                payloadJson
+        );
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markResourceWaiting(Long taskId,
+                                    LocalDateTime nextRetryAt,
+                                    String lastError,
+                                    String errorContext,
+                                    String payloadJson,
+                                    Long projectId) {
+        DispatchTask task = dispatchTaskMapper.selectById(taskId);
+        if (task == null) {
+            dispatchQueueService.clearQueueMark(taskId);
+            return;
+        }
+        task.setLastError(lastError);
+        task.setErrorContext(errorContext);
+        task.setStatus(DispatchTaskStatus.RETRY_PENDING.value());
+        task.setNextRetryAt(nextRetryAt);
+        dispatchTaskMapper.updateById(task);
+        dispatchQueueService.clearQueueMark(taskId);
+        dispatchAlertService.createAlert(
+                taskId,
+                projectId,
+                DispatchAlertSeverity.WARN,
+                "Dispatch task postponed for shared LLM capacity",
+                lastError,
+                task.getRetryCount() == null ? 0 : task.getRetryCount(),
                 payloadJson
         );
     }

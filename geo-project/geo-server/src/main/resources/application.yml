@@ -213,7 +213,7 @@ geo:
     timezone: "Asia/Shanghai"
     lock-key: "geo:dispatch:scan:lock"
     lock-ttl-seconds: 600
-    worker-concurrency: ${WORKER_CONCURRENCY:4}
+    worker-poll-concurrency: ${WORKER_POLL_CONCURRENCY:4}
     worker-poll-ms: 1000
     retry-check-ms: 30000
     queue-key: "geo:dispatch:queue:zset"
@@ -223,7 +223,20 @@ geo:
     task-retention-days: 90
     model-connect-timeout-ms: 10000
     model-request-timeout-ms: 180000
+    resource-busy-retry-min-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_MIN_SECONDS:30}
+    resource-busy-retry-jitter-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_JITTER_SECONDS:30}
     api-key-aes-secret: ${DISPATCH_API_KEY_AES_SECRET:geo-dispatch-key}
+  llm:
+    pool:
+      enabled: ${GEO_LLM_POOL_ENABLED:false}
+      global-concurrency: ${GEO_LLM_POOL_GLOBAL_CONCURRENCY:8}
+      lease-ms: ${GEO_LLM_POOL_LEASE_MS:600000}
+      lease-renew-interval-ms: ${GEO_LLM_POOL_LEASE_RENEW_INTERVAL_MS:30000}
+      lease-safety-ms: ${GEO_LLM_POOL_LEASE_SAFETY_MS:60000}
+      shutdown-grace-ms: ${GEO_LLM_POOL_SHUTDOWN_GRACE_MS:30000}
+      permit-key-prefix: ${GEO_LLM_POOL_PERMIT_KEY_PREFIX:geo:llm:permit}
+      circuit-breaker-failure-threshold: ${GEO_LLM_POOL_CIRCUIT_BREAKER_FAILURE_THRESHOLD:5}
+      circuit-breaker-open-duration-ms: ${GEO_LLM_POOL_CIRCUIT_BREAKER_OPEN_DURATION_MS:60000}
   extension:
     fill-token:
       hmac-secret: ${FILL_TOKEN_HMAC_SECRET:__REQUIRED_FILL_TOKEN_HMAC_SECRET__}
