@@ -23,6 +23,9 @@ public class KeywordGroupVO {
     private java.util.List<LlmQuestionItemDTO> llmQuestions;
     private Long estimatedKeywordCount;
     private Long savedKeywordCount;
+    private Long savedKeywordCountA;
+    private Long savedKeywordCountB;
+    private Long savedKeywordCountC;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

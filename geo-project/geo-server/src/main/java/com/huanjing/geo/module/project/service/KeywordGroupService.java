@@ -7,8 +7,11 @@ import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.project.dto.KeywordGroupColumnsRequest;
 import com.huanjing.geo.module.project.dto.KeywordGroupColumnsVO;
+import com.huanjing.geo.module.project.dto.KeywordGroupImportResultVO;
 import com.huanjing.geo.module.project.dto.KeywordGroupListItemVO;
 import com.huanjing.geo.module.project.dto.KeywordGroupPayloadRequest;
+import com.huanjing.geo.module.project.dto.KeywordGroupQuestionUpdateRequest;
+import com.huanjing.geo.module.project.dto.KeywordGroupQuestionVO;
 import com.huanjing.geo.module.project.dto.KeywordGroupVO;
 import com.huanjing.geo.module.project.dto.KeywordPreviewItemVO;
 import com.huanjing.geo.module.project.dto.KeywordPreviewVO;
@@ -21,22 +24,37 @@ import com.huanjing.geo.module.project.entity.KeywordGroup;
 import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.entity.KeywordGroupWord;
 import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
 import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.KeywordGroupWordMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
+import org.apache.poi.ss.usermodel.Cell;
+import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.ss.usermodel.Row;
+import org.apache.poi.ss.usermodel.Sheet;
+import org.apache.poi.ss.usermodel.Workbook;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -48,14 +66,31 @@ public class KeywordGroupService {
     private static final int MAX_GENERATION = 1000;
     private static final Set<String> COLUMN_TYPE_SET = Set.of("area", "region", "prefix", "core", "industry", "suffix", "core_a", "compare", "core_b");
     private static final Set<String> SOURCE_SET = Set.of("system", "custom");
+    private static final Set<String> QUESTION_TIER_SET = Set.of("A", "B", "C");
+    private static final String DEFAULT_QUESTION_TIER = "A";
     private static final String RESULT_SOURCE_CARTESIAN = "cartesian";
     private static final String RESULT_SOURCE_LLM = "llm";
+    private static final String RESULT_SOURCE_IMPORT = "import";
+    private static final String IMPORTED_TYPE = "imported";
+    private static final List<String> IMPORT_HEADERS = List.of(
+            "question_id",
+            "question_text",
+            "question_scene",
+            "question_level",
+            "monitor_priority",
+            "commercial_value_score",
+            "conversion_distance_score",
+            "brand_binding_score",
+            "region_industry_score",
+            "phase_one_feasibility_score"
+    );
 
     private final KeywordGroupMapper keywordGroupMapper;
     private final KeywordGroupResultMapper keywordGroupResultMapper;
     private final KeywordGroupWordMapper keywordGroupWordMapper;
     private final CompanyMapper companyMapper;
     private final ProjectMapper projectMapper;
+    private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
     private final CurrentUserService currentUserService;
     private final KeywordTypeConfigService keywordTypeConfigService;
     private final KeywordLlmQuestionService keywordLlmQuestionService;
@@ -84,10 +119,11 @@ public class KeywordGroupService {
         Map<Long, String> companyNameMap = buildCompanyNameMap(page.getRecords().stream().map(KeywordGroup::getCompanyId).toList());
         Map<Long, Project> projectMap = buildProjectMap(page.getRecords().stream().map(KeywordGroup::getProjectId).toList());
         Map<Long, Long> savedCountMap = calcSavedCountsByGroupIds(groupIds);
+        Map<Long, KeywordTierCounts> tierCountMap = calcSavedTierCountsByGroupIds(groupIds);
 
         Page<KeywordGroupListItemVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         result.setRecords(page.getRecords().stream()
-                .map(group -> toListItemVO(group, companyNameMap.get(group.getCompanyId()), projectMap.get(group.getProjectId()), savedCountMap.get(group.getId())))
+                .map(group -> toListItemVO(group, companyNameMap.get(group.getCompanyId()), projectMap.get(group.getProjectId()), savedCountMap.get(group.getId()), tierCountMap.get(group.getId())))
                 .toList());
         return result;
     }
@@ -99,7 +135,8 @@ public class KeywordGroupService {
         Project project = group.getProjectId() == null ? null : projectMapper.selectById(group.getProjectId());
         Long estimatedCount = calcEstimatedCountsByGroupIds(List.of(group.getId())).getOrDefault(group.getId(), 0L);
         Long savedCount = calcSavedCountsByGroupIds(List.of(group.getId())).getOrDefault(group.getId(), 0L);
-        return toDetailVO(group, companyName, project, estimatedCount, savedCount);
+        KeywordTierCounts tierCounts = calcSavedTierCountsByGroupIds(List.of(group.getId())).get(group.getId());
+        return toDetailVO(group, companyName, project, estimatedCount, savedCount, tierCounts);
     }
 
     @Transactional
@@ -110,8 +147,10 @@ public class KeywordGroupService {
         }
 
         String type = normalizeType(req.getType());
-        Company company = requireCompany(req.getCompanyId());
-        Project project = resolveProject(req.getProjectId(), company.getId());
+        Scope scope = resolveScope(req, true);
+        Company company = scope.company();
+        Project project = scope.project();
+        validateProjectKeywordCountLimit(project, req.getCount());
         ensureNameUnique(company.getId(), req.getName().trim(), null);
 
         KeywordGroup group = new KeywordGroup();
@@ -131,8 +170,9 @@ public class KeywordGroupService {
         PreparedResults preparedResults = prepareResultsForPersist(req, candidateKeywords, null);
         saveWords(group.getId(), words);
         saveResults(group.getId(), preparedResults.items());
+        syncProjectRelation(group.getProjectId(), group.getId());
         keywordLlmQuestionService.deleteToken(req.getLlmGenerationToken());
-        return toDetailVO(requireGroup(group.getId()), company.getCompanyName(), project, calcEstimatedByWords(type, group.getAreaEnabled(), words) + preparedResults.llmCount(), (long) preparedResults.items().size());
+        return toDetailVO(requireGroup(group.getId()), company.getCompanyName(), project, calcEstimatedByWords(type, group.getAreaEnabled(), words) + preparedResults.llmCount(), (long) preparedResults.items().size(), tierCounts(preparedResults.items()));
     }
 
     @Transactional
@@ -143,8 +183,10 @@ public class KeywordGroupService {
         }
         KeywordGroup group = requireGroup(id);
         String type = normalizeType(req.getType());
-        Company company = requireCompany(req.getCompanyId());
-        Project project = resolveProject(req.getProjectId(), company.getId());
+        Scope scope = resolveScope(req, true);
+        Company company = scope.company();
+        Project project = scope.project();
+        validateProjectKeywordCountLimit(project, req.getCount());
         ensureNameUnique(company.getId(), req.getName().trim(), id);
 
         group.setCompanyId(company.getId());
@@ -162,8 +204,9 @@ public class KeywordGroupService {
         PreparedResults preparedResults = prepareResultsForPersist(req, candidateKeywords, id);
         saveWords(id, words);
         saveResults(id, preparedResults.items());
+        syncProjectRelation(group.getProjectId(), id);
         keywordLlmQuestionService.deleteToken(req.getLlmGenerationToken());
-        return toDetailVO(requireGroup(id), company.getCompanyName(), project, calcEstimatedByWords(type, group.getAreaEnabled(), words) + preparedResults.llmCount(), (long) preparedResults.items().size());
+        return toDetailVO(requireGroup(id), company.getCompanyName(), project, calcEstimatedByWords(type, group.getAreaEnabled(), words) + preparedResults.llmCount(), (long) preparedResults.items().size(), tierCounts(preparedResults.items()));
     }
 
     @Transactional
@@ -172,14 +215,109 @@ public class KeywordGroupService {
         KeywordGroup group = requireGroup(id);
         keywordGroupResultMapper.delete(new LambdaQueryWrapper<KeywordGroupResult>().eq(KeywordGroupResult::getGroupId, id));
         keywordGroupWordMapper.delete(new LambdaQueryWrapper<KeywordGroupWord>().eq(KeywordGroupWord::getGroupId, id));
+        projectKeywordGroupRelMapper.delete(new LambdaQueryWrapper<ProjectKeywordGroupRel>().eq(ProjectKeywordGroupRel::getKeywordGroupId, id));
         group.setName(group.getName() + "_deleted_" + id);
         group.setDeleted(true);
         keywordGroupMapper.updateById(group);
     }
 
+    @Transactional
+    public KeywordGroupImportResultVO importProjectKeywordGroup(Long projectId, MultipartFile file) {
+        currentUserService.ensurePermission("keyword_group.write");
+        Project project = requireProject(projectId);
+        if (!"paused".equals(project.getStatus())) {
+            throw new BizException(400, "只有未启动项目可以导入拓词组");
+        }
+        if (file == null || file.isEmpty()) {
+            throw new BizException(400, "请选择导入文件");
+        }
+        ensureProjectHasNoKeywordGroup(project);
+        List<ImportedQuestionRow> rows = readImportRows(file);
+        KeywordTierCounts expected = expectedTierCounts(project);
+        KeywordTierCounts actual = tierCountsFromImport(rows);
+        if (actual.a() != expected.a() || actual.b() != expected.b() || actual.c() != expected.c()) {
+            throw new BizException(400, "导入 A/B/C 数量必须与项目额度一致，项目额度 A/B/C="
+                    + expected.a() + "/" + expected.b() + "/" + expected.c()
+                    + "，导入 A/B/C=" + actual.a() + "/" + actual.b() + "/" + actual.c());
+        }
+
+        KeywordGroup group = new KeywordGroup();
+        group.setCompanyId(project.getCompanyId());
+        group.setProjectId(project.getId());
+        group.setName(defaultText(project.getProjectName(), "项目") + "导入问题池");
+        group.setType(IMPORTED_TYPE);
+        group.setAreaEnabled(false);
+        group.setRemark("Excel导入：" + file.getOriginalFilename());
+        group.setDeleted(false);
+        keywordGroupMapper.insert(group);
+
+        for (int i = 0; i < rows.size(); i++) {
+            keywordGroupResultMapper.insert(toImportedResult(group.getId(), rows.get(i), (i + 1) * 10));
+        }
+        syncProjectRelation(project.getId(), group.getId());
+
+        KeywordGroupImportResultVO vo = new KeywordGroupImportResultVO();
+        vo.setGroup(detail(group.getId()));
+        vo.setImportedCount(rows.size());
+        vo.setCountA((int) actual.a());
+        vo.setCountB((int) actual.b());
+        vo.setCountC((int) actual.c());
+        return vo;
+    }
+
+    public Page<KeywordGroupQuestionVO> questions(Long groupId, long current, long size, String tier) {
+        currentUserService.ensurePermission("keyword_group.read");
+        requireGroup(groupId);
+        long safeCurrent = Math.max(1L, current);
+        long safeSize = Math.max(1L, Math.min(size <= 0 ? 20L : size, 100L));
+        LambdaQueryWrapper<KeywordGroupResult> wrapper = new LambdaQueryWrapper<KeywordGroupResult>()
+                .eq(KeywordGroupResult::getGroupId, groupId)
+                .orderByAsc(KeywordGroupResult::getQuestionTier)
+                .orderByAsc(KeywordGroupResult::getSortOrder)
+                .orderByAsc(KeywordGroupResult::getId);
+        if (StringUtils.hasText(tier) && !"all".equalsIgnoreCase(tier)) {
+            wrapper.eq(KeywordGroupResult::getQuestionTier, normalizeQuestionTier(tier));
+        }
+        Page<KeywordGroupResult> page = keywordGroupResultMapper.selectPage(new Page<>(safeCurrent, safeSize), wrapper);
+        Page<KeywordGroupQuestionVO> vo = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        vo.setRecords(page.getRecords().stream().map(this::toQuestionVO).toList());
+        return vo;
+    }
+
+    @Transactional
+    public KeywordGroupQuestionVO updateQuestion(Long groupId, Long questionId, KeywordGroupQuestionUpdateRequest req) {
+        currentUserService.ensurePermission("keyword_group.write");
+        KeywordGroup group = requireGroup(groupId);
+        if (group.getProjectId() != null) {
+            Project project = requireProject(group.getProjectId());
+            if (!"paused".equals(project.getStatus())) {
+                throw new BizException(400, "项目已启动，不能编辑拓词组问题");
+            }
+        }
+        KeywordGroupResult result = keywordGroupResultMapper.selectById(questionId);
+        if (result == null || !groupId.equals(result.getGroupId())) {
+            throw new BizException(404, "Question not found");
+        }
+        result.setKeywordText(req.getQuestionText().trim());
+        result.setSceneCode(normalizeSceneCode(req.getSceneCode()));
+        result.setPriority(normalizePriority(req.getPriority()));
+        result.setScoreRelevance(req.getScoreRelevance());
+        result.setScoreIntent(req.getScoreIntent());
+        result.setScoreCompetition(req.getScoreCompetition());
+        result.setScoreConversion(req.getScoreConversion());
+        result.setScoreCoverage(req.getScoreCoverage());
+        result.setTotalScore(averageScore(req.getScoreRelevance(), req.getScoreIntent(), req.getScoreCompetition(), req.getScoreConversion(), req.getScoreCoverage()));
+        result.setArticleGenerationNote(normalizeNullable(req.getArticleGenerationNote()));
+        result.setUpdatedAt(LocalDateTime.now());
+        keywordGroupResultMapper.updateById(result);
+        return toQuestionVO(keywordGroupResultMapper.selectById(questionId));
+    }
+
     public KeywordPreviewVO preview(KeywordGroupPayloadRequest req) {
         currentUserService.ensurePermission("keyword_group.read");
         String type = normalizeType(req.getType());
+        Scope scope = resolveScope(req, true);
+        validateProjectKeywordCountLimit(scope.project(), req.getCount());
         int count = req.getCount() == null ? MAX_GENERATION : req.getCount();
         if (count <= 0) {
             throw new BizException(400, "count must be > 0");
@@ -242,6 +380,28 @@ public class KeywordGroupService {
         Map<Long, Long> finalMap = new HashMap<>();
         for (Long groupId : groupIds) {
             finalMap.put(groupId, countMap.getOrDefault(groupId, 0L));
+        }
+        return finalMap;
+    }
+
+    public Map<Long, KeywordTierCounts> calcSavedTierCountsByGroupIds(List<Long> groupIds) {
+        if (groupIds == null || groupIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        List<KeywordGroupResult> results = keywordGroupResultMapper.selectList(
+                new LambdaQueryWrapper<KeywordGroupResult>()
+                        .select(KeywordGroupResult::getGroupId, KeywordGroupResult::getQuestionTier)
+                        .in(KeywordGroupResult::getGroupId, groupIds)
+        );
+        Map<Long, MutableTierCounts> countMap = new HashMap<>();
+        for (KeywordGroupResult result : results) {
+            countMap.computeIfAbsent(result.getGroupId(), ignored -> new MutableTierCounts())
+                    .add(normalizeQuestionTier(result.getQuestionTier()));
+        }
+        Map<Long, KeywordTierCounts> finalMap = new HashMap<>();
+        for (Long groupId : groupIds) {
+            MutableTierCounts counts = countMap.getOrDefault(groupId, new MutableTierCounts());
+            finalMap.put(groupId, counts.toImmutable());
         }
         return finalMap;
     }
@@ -312,6 +472,7 @@ public class KeywordGroupService {
             result.setKeywordText(item.getText());
             result.setSourceType(normalizeResultSource(item.getSourceType()));
             result.setSeedText(RESULT_SOURCE_LLM.equals(normalizeResultSource(item.getSourceType())) ? normalizeNullable(item.getSeedText()) : null);
+            result.setQuestionTier(normalizeQuestionTier(item.getQuestionTier()));
             result.setSortOrder((i + 1) * 10);
             keywordGroupResultMapper.insert(result);
         }
@@ -328,7 +489,7 @@ public class KeywordGroupService {
         return group;
     }
 
-    private KeywordGroupListItemVO toListItemVO(KeywordGroup group, String companyName, Project project, Long savedCount) {
+    private KeywordGroupListItemVO toListItemVO(KeywordGroup group, String companyName, Project project, Long savedCount, KeywordTierCounts tierCounts) {
         KeywordGroupListItemVO vo = new KeywordGroupListItemVO();
         vo.setId(group.getId());
         vo.setCompanyId(group.getCompanyId());
@@ -341,11 +502,12 @@ public class KeywordGroupService {
         vo.setTypeLabel(keywordTypeConfigService.labelOf(group.getType()));
         vo.setLegacyType(keywordTypeConfigService.isLegacyType(group.getType()));
         vo.setSavedKeywordCount(savedCount == null ? 0L : savedCount);
+        applyTierCounts(vo, tierCounts);
         vo.setUpdatedAt(group.getUpdatedAt());
         return vo;
     }
 
-    private KeywordGroupVO toSummaryVO(KeywordGroup group, String companyName, Project project, Long estimatedCount, Long savedCount) {
+    private KeywordGroupVO toSummaryVO(KeywordGroup group, String companyName, Project project, Long estimatedCount, Long savedCount, KeywordTierCounts tierCounts) {
         KeywordGroupVO vo = new KeywordGroupVO();
         vo.setId(group.getId());
         vo.setCompanyId(group.getCompanyId());
@@ -362,13 +524,16 @@ public class KeywordGroupService {
         vo.setRemark(group.getRemark());
         vo.setEstimatedKeywordCount(estimatedCount == null ? 0L : estimatedCount);
         vo.setSavedKeywordCount(savedCount == null ? 0L : savedCount);
+        vo.setSavedKeywordCountA(tierCounts == null ? 0L : tierCounts.a());
+        vo.setSavedKeywordCountB(tierCounts == null ? 0L : tierCounts.b());
+        vo.setSavedKeywordCountC(tierCounts == null ? 0L : tierCounts.c());
         vo.setCreatedAt(group.getCreatedAt());
         vo.setUpdatedAt(group.getUpdatedAt());
         return vo;
     }
 
-    private KeywordGroupVO toDetailVO(KeywordGroup group, String companyName, Project project, Long estimatedCount, Long savedCount) {
-        KeywordGroupVO vo = toSummaryVO(group, companyName, project, estimatedCount, savedCount);
+    private KeywordGroupVO toDetailVO(KeywordGroup group, String companyName, Project project, Long estimatedCount, Long savedCount, KeywordTierCounts tierCounts) {
+        KeywordGroupVO vo = toSummaryVO(group, companyName, project, estimatedCount, savedCount, tierCounts);
         List<KeywordGroupWord> words = keywordGroupWordMapper.selectList(
                 new LambdaQueryWrapper<KeywordGroupWord>()
                         .eq(KeywordGroupWord::getGroupId, group.getId())
@@ -486,6 +651,9 @@ public class KeywordGroupService {
     }
 
     private Company requireCompany(Long companyId) {
+        if (companyId == null) {
+            throw new BizException(400, "companyId is required");
+        }
         Company company = companyMapper.selectById(companyId);
         if (company == null) {
             throw new BizException(404, "Company not found");
@@ -505,6 +673,63 @@ public class KeywordGroupService {
             throw new BizException(400, "Project does not belong to company");
         }
         return project;
+    }
+
+    private Scope resolveScope(KeywordGroupPayloadRequest req, boolean projectRequired) {
+        Project project = null;
+        Long companyId = req.getCompanyId();
+        if (req.getProjectId() != null) {
+            project = projectMapper.selectById(req.getProjectId());
+            if (project == null) {
+                throw new BizException(404, "Project not found");
+            }
+            if (project.getCompanyId() == null) {
+                throw new BizException(400, "Project company is missing");
+            }
+            if (companyId != null && !companyId.equals(project.getCompanyId())) {
+                throw new BizException(400, "Project does not belong to company");
+            }
+            companyId = project.getCompanyId();
+        } else if (projectRequired) {
+            throw new BizException(400, "projectId is required");
+        }
+        Company company = requireCompany(companyId);
+        return new Scope(company, project);
+    }
+
+    private void validateProjectKeywordCountLimit(Project project, Integer requestedCount) {
+        if (project == null) {
+            return;
+        }
+        int limit = projectKeywordLimit(project);
+        int count = requestedCount == null ? MAX_GENERATION : requestedCount;
+        if (limit <= 0) {
+            throw new BizException(400, "PROJECT_KEYWORD_QUOTA_EMPTY: 当前项目未配置问题额度");
+        }
+        if (count > limit) {
+            throw new BizException(400, "PROJECT_KEYWORD_QUOTA_EXCEEDED: 生成问题数量不能超过当前项目额度 " + limit);
+        }
+    }
+
+    private int projectKeywordLimit(Project project) {
+        int a = project.getPlanKeywordGroupLimitA() == null
+                ? (project.getPlanKeywordGroupLimit() == null ? 0 : project.getPlanKeywordGroupLimit())
+                : project.getPlanKeywordGroupLimitA();
+        int b = project.getPlanKeywordGroupLimitB() == null ? 0 : project.getPlanKeywordGroupLimitB();
+        int c = project.getPlanKeywordGroupLimitC() == null ? 0 : project.getPlanKeywordGroupLimitC();
+        return a + b + c;
+    }
+
+    private void syncProjectRelation(Long projectId, Long groupId) {
+        projectKeywordGroupRelMapper.delete(new LambdaQueryWrapper<ProjectKeywordGroupRel>()
+                .eq(ProjectKeywordGroupRel::getKeywordGroupId, groupId));
+        if (projectId == null) {
+            return;
+        }
+        ProjectKeywordGroupRel rel = new ProjectKeywordGroupRel();
+        rel.setProjectId(projectId);
+        rel.setKeywordGroupId(groupId);
+        projectKeywordGroupRelMapper.insert(rel);
     }
 
     private String normalizeType(String raw) {
@@ -636,6 +861,7 @@ public class KeywordGroupService {
                     || !equalsNullable(normalizeNullable(want.getSeedText()), normalizeNullable(actual.getSeedText()))) {
                 throw new BizException(400, "INVALID_RESULT_KEYWORDS: " + actual.getText());
             }
+            want.setQuestionTier(normalizeQuestionTier(actual.getQuestionTier()));
         }
         return expected;
     }
@@ -718,6 +944,7 @@ public class KeywordGroupService {
             if (seen.add(key)) {
                 KeywordPreviewItemVO normalized = new KeywordPreviewItemVO(text, sourceType);
                 normalized.setSeedText(seedText);
+                normalized.setQuestionTier(normalizeQuestionTier(item.getQuestionTier()));
                 items.add(normalized);
             }
         }
@@ -761,6 +988,289 @@ public class KeywordGroupService {
 
     private String normalizeResultSource(String sourceType) {
         return RESULT_SOURCE_LLM.equals(sourceType) ? RESULT_SOURCE_LLM : RESULT_SOURCE_CARTESIAN;
+    }
+
+    private Project requireProject(Long projectId) {
+        Project project = projectMapper.selectById(projectId);
+        if (project == null || project.getDeletedAt() != null) {
+            throw new BizException(404, "Project not found");
+        }
+        return project;
+    }
+
+    private void ensureProjectHasNoKeywordGroup(Project project) {
+        Long directCount = keywordGroupMapper.selectCount(new LambdaQueryWrapper<KeywordGroup>()
+                .eq(KeywordGroup::getProjectId, project.getId())
+                .eq(KeywordGroup::getCompanyId, project.getCompanyId())
+                .eq(KeywordGroup::getDeleted, false));
+        Long relCount = projectKeywordGroupRelMapper.selectCount(new LambdaQueryWrapper<ProjectKeywordGroupRel>()
+                .eq(ProjectKeywordGroupRel::getProjectId, project.getId()));
+        if ((directCount != null && directCount > 0) || (relCount != null && relCount > 0)) {
+            throw new BizException(400, "当前项目已绑定拓词组，不能重复导入");
+        }
+    }
+
+    public void validateProjectKeywordGroupComplete(Project project) {
+        KeywordTierCounts expected = expectedTierCounts(project);
+        List<ProjectKeywordGroupRel> rels = projectKeywordGroupRelMapper.selectList(
+                new LambdaQueryWrapper<ProjectKeywordGroupRel>().eq(ProjectKeywordGroupRel::getProjectId, project.getId()));
+        Set<Long> groupIds = rels.stream()
+                .map(ProjectKeywordGroupRel::getKeywordGroupId)
+                .filter(id -> id != null && id > 0)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        keywordGroupMapper.selectList(new LambdaQueryWrapper<KeywordGroup>()
+                .eq(KeywordGroup::getProjectId, project.getId())
+                .eq(KeywordGroup::getCompanyId, project.getCompanyId())
+                .eq(KeywordGroup::getDeleted, false))
+                .forEach(group -> groupIds.add(group.getId()));
+        if (groupIds.isEmpty()) {
+            throw new BizException(400, "KEYWORD_GROUP_REQUIRED: 项目启动前必须至少绑定一个关键词组");
+        }
+        KeywordTierCounts actual = aggregateSavedTierCounts(groupIds);
+        if (actual.a() != expected.a() || actual.b() != expected.b() || actual.c() != expected.c()) {
+            throw new BizException(400, "KEYWORD_GROUP_COUNT_MISMATCH: 项目拓词组 A/B/C 数量必须与项目额度一致，项目额度 A/B/C="
+                    + expected.a() + "/" + expected.b() + "/" + expected.c()
+                    + "，当前拓词组 A/B/C=" + actual.a() + "/" + actual.b() + "/" + actual.c());
+        }
+    }
+
+    private KeywordTierCounts aggregateSavedTierCounts(Set<Long> groupIds) {
+        MutableTierCounts counts = new MutableTierCounts();
+        if (groupIds == null || groupIds.isEmpty()) {
+            return counts.toImmutable();
+        }
+        keywordGroupResultMapper.selectList(new LambdaQueryWrapper<KeywordGroupResult>()
+                .select(KeywordGroupResult::getQuestionTier)
+                .in(KeywordGroupResult::getGroupId, groupIds))
+                .forEach(result -> counts.add(normalizeQuestionTier(result.getQuestionTier())));
+        return counts.toImmutable();
+    }
+
+    private KeywordTierCounts expectedTierCounts(Project project) {
+        int a = project.getPlanKeywordGroupLimitA() == null
+                ? (project.getPlanKeywordGroupLimit() == null ? 0 : project.getPlanKeywordGroupLimit())
+                : project.getPlanKeywordGroupLimitA();
+        int b = project.getPlanKeywordGroupLimitB() == null ? 0 : project.getPlanKeywordGroupLimitB();
+        int c = project.getPlanKeywordGroupLimitC() == null ? 0 : project.getPlanKeywordGroupLimitC();
+        return new KeywordTierCounts(a, b, c);
+    }
+
+    private List<ImportedQuestionRow> readImportRows(MultipartFile file) {
+        try (Workbook workbook = new XSSFWorkbook(file.getInputStream())) {
+            Sheet sheet = workbook.getNumberOfSheets() == 0 ? null : workbook.getSheetAt(0);
+            if (sheet == null || sheet.getLastRowNum() < 1) {
+                throw new BizException(400, "导入文件没有可读取的问题数据");
+            }
+            DataFormatter formatter = new DataFormatter();
+            validateImportHeader(sheet.getRow(0), formatter);
+            List<ImportedQuestionRow> rows = new ArrayList<>();
+            Set<String> codes = new HashSet<>();
+            Set<String> texts = new HashSet<>();
+            for (int rowIndex = 1; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
+                Row row = sheet.getRow(rowIndex);
+                if (row == null || isBlankRow(row, formatter)) {
+                    continue;
+                }
+                ImportedQuestionRow imported = parseImportRow(row, formatter, rowIndex + 1);
+                if (!codes.add(imported.questionCode())) {
+                    throw new BizException(400, "导入失败：question_id 重复，行 " + (rowIndex + 1));
+                }
+                if (!texts.add(imported.questionText())) {
+                    throw new BizException(400, "导入失败：question_text 重复，行 " + (rowIndex + 1));
+                }
+                rows.add(imported);
+            }
+            if (rows.isEmpty()) {
+                throw new BizException(400, "导入文件没有有效问题数据");
+            }
+            return rows;
+        } catch (IOException ex) {
+            throw new BizException("读取导入文件失败", ex);
+        }
+    }
+
+    private void validateImportHeader(Row header, DataFormatter formatter) {
+        if (header == null) {
+            throw new BizException(400, "导入文件缺少表头");
+        }
+        for (int i = 0; i < IMPORT_HEADERS.size(); i++) {
+            String actual = cellText(header.getCell(i), formatter);
+            String expected = IMPORT_HEADERS.get(i);
+            if (!expected.equals(actual)) {
+                throw new BizException(400, "导入模板表头不匹配，第 " + (i + 1) + " 列应为 " + expected);
+            }
+        }
+    }
+
+    private ImportedQuestionRow parseImportRow(Row row, DataFormatter formatter, int rowNo) {
+        String questionCode = requiredCell(row, formatter, 0, rowNo, "question_id");
+        String questionText = requiredCell(row, formatter, 1, rowNo, "question_text");
+        String sceneCode = normalizeSceneCode(requiredCell(row, formatter, 2, rowNo, "question_scene"));
+        String tier = normalizeQuestionTier(requiredCell(row, formatter, 3, rowNo, "question_level"));
+        if (!questionCode.toUpperCase(Locale.ROOT).startsWith(tier + "-")) {
+            throw new BizException(400, "导入失败：question_id 与 question_level 不一致，行 " + rowNo);
+        }
+        String priority = normalizePriority(requiredCell(row, formatter, 4, rowNo, "monitor_priority"));
+        BigDecimal scoreRelevance = scoreCell(row, formatter, 5, rowNo, "commercial_value_score");
+        BigDecimal scoreIntent = scoreCell(row, formatter, 6, rowNo, "conversion_distance_score");
+        BigDecimal scoreCompetition = scoreCell(row, formatter, 7, rowNo, "brand_binding_score");
+        BigDecimal scoreConversion = scoreCell(row, formatter, 8, rowNo, "region_industry_score");
+        BigDecimal scoreCoverage = scoreCell(row, formatter, 9, rowNo, "phase_one_feasibility_score");
+        return new ImportedQuestionRow(questionCode, questionText, sceneCode, tier, priority,
+                scoreRelevance, scoreIntent, scoreCompetition, scoreConversion, scoreCoverage);
+    }
+
+    private KeywordTierCounts tierCountsFromImport(List<ImportedQuestionRow> rows) {
+        MutableTierCounts counts = new MutableTierCounts();
+        rows.forEach(row -> counts.add(row.tier()));
+        return counts.toImmutable();
+    }
+
+    private KeywordGroupResult toImportedResult(Long groupId, ImportedQuestionRow row, int sortOrder) {
+        KeywordGroupResult result = new KeywordGroupResult();
+        result.setGroupId(groupId);
+        result.setKeywordText(row.questionText());
+        result.setQuestionCode(row.questionCode());
+        result.setSourceType(RESULT_SOURCE_IMPORT);
+        result.setQuestionTier(row.tier());
+        result.setSceneCode(row.sceneCode());
+        result.setPriority(row.priority());
+        result.setMonitorFrequency(defaultFrequency(row.tier()));
+        result.setScoreRelevance(row.scoreRelevance());
+        result.setScoreIntent(row.scoreIntent());
+        result.setScoreCompetition(row.scoreCompetition());
+        result.setScoreConversion(row.scoreConversion());
+        result.setScoreCoverage(row.scoreCoverage());
+        result.setTotalScore(averageScore(row.scoreRelevance(), row.scoreIntent(), row.scoreCompetition(), row.scoreConversion(), row.scoreCoverage()));
+        result.setSortOrder(sortOrder);
+        return result;
+    }
+
+    private KeywordGroupQuestionVO toQuestionVO(KeywordGroupResult result) {
+        KeywordGroupQuestionVO vo = new KeywordGroupQuestionVO();
+        vo.setId(result.getId());
+        vo.setGroupId(result.getGroupId());
+        vo.setQuestionCode(result.getQuestionCode());
+        vo.setQuestionText(result.getKeywordText());
+        vo.setSceneCode(result.getSceneCode());
+        vo.setQuestionTier(result.getQuestionTier());
+        vo.setPriority(result.getPriority());
+        vo.setMonitorFrequency(result.getMonitorFrequency());
+        vo.setScoreRelevance(result.getScoreRelevance());
+        vo.setScoreIntent(result.getScoreIntent());
+        vo.setScoreCompetition(result.getScoreCompetition());
+        vo.setScoreConversion(result.getScoreConversion());
+        vo.setScoreCoverage(result.getScoreCoverage());
+        vo.setTotalScore(result.getTotalScore());
+        vo.setArticleGenerationNote(result.getArticleGenerationNote());
+        vo.setSortOrder(result.getSortOrder());
+        vo.setCreatedAt(result.getCreatedAt());
+        vo.setUpdatedAt(result.getUpdatedAt());
+        return vo;
+    }
+
+    private boolean isBlankRow(Row row, DataFormatter formatter) {
+        for (int i = 0; i < IMPORT_HEADERS.size(); i++) {
+            if (StringUtils.hasText(cellText(row.getCell(i), formatter))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private String requiredCell(Row row, DataFormatter formatter, int index, int rowNo, String name) {
+        String value = cellText(row.getCell(index), formatter);
+        if (!StringUtils.hasText(value)) {
+            throw new BizException(400, "导入失败：" + name + " 不能为空，行 " + rowNo);
+        }
+        return value;
+    }
+
+    private String cellText(Cell cell, DataFormatter formatter) {
+        return cell == null ? "" : formatter.formatCellValue(cell).trim();
+    }
+
+    private BigDecimal scoreCell(Row row, DataFormatter formatter, int index, int rowNo, String name) {
+        String value = requiredCell(row, formatter, index, rowNo, name);
+        try {
+            BigDecimal score = new BigDecimal(value);
+            if (score.compareTo(BigDecimal.ONE) < 0 || score.compareTo(new BigDecimal("5")) > 0) {
+                throw new NumberFormatException("out of range");
+            }
+            return score.setScale(2, RoundingMode.HALF_UP);
+        } catch (NumberFormatException ex) {
+            throw new BizException(400, "导入失败：" + name + " 必须为 1-5 的数字，行 " + rowNo);
+        }
+    }
+
+    private String normalizeSceneCode(String value) {
+        String raw = normalizeNullable(value);
+        if (raw == null) {
+            return "brand";
+        }
+        return switch (raw) {
+            case "brand", "品牌", "品牌场景" -> "brand";
+            case "decision", "决策", "决策场景" -> "decision";
+            case "deal", "transaction", "成交", "成交场景" -> "deal";
+            case "compare", "comparison", "对比", "对比场景" -> "compare";
+            case "qa", "问答", "问答场景" -> "qa";
+            case "function", "功能", "功能场景" -> "function";
+            default -> throw new BizException(400, "未知问题场景：" + value);
+        };
+    }
+
+    private String normalizePriority(String value) {
+        String raw = normalizeNullable(value);
+        if (raw == null) {
+            return "medium";
+        }
+        String lower = raw.toLowerCase(Locale.ROOT);
+        return switch (lower) {
+            case "high", "高", "紧急" -> "high";
+            case "medium", "middle", "中" -> "medium";
+            case "low", "低" -> "low";
+            default -> throw new BizException(400, "未知监测优先级：" + value);
+        };
+    }
+
+    private String defaultFrequency(String tier) {
+        return switch (normalizeQuestionTier(tier)) {
+            case "A" -> "每周";
+            case "B" -> "双周";
+            default -> "月度抽样";
+        };
+    }
+
+    private BigDecimal averageScore(BigDecimal a, BigDecimal b, BigDecimal c, BigDecimal d, BigDecimal e) {
+        return a.add(b).add(c).add(d).add(e).divide(new BigDecimal("5"), 1, RoundingMode.HALF_UP);
+    }
+
+    private String defaultText(String value, String fallback) {
+        return StringUtils.hasText(value) ? value.trim() : fallback;
+    }
+
+    private String normalizeQuestionTier(String questionTier) {
+        if (!StringUtils.hasText(questionTier)) {
+            return DEFAULT_QUESTION_TIER;
+        }
+        String tier = questionTier.trim().toUpperCase();
+        return QUESTION_TIER_SET.contains(tier) ? tier : DEFAULT_QUESTION_TIER;
+    }
+
+    private KeywordTierCounts tierCounts(List<KeywordPreviewItemVO> items) {
+        MutableTierCounts counts = new MutableTierCounts();
+        if (items != null) {
+            for (KeywordPreviewItemVO item : items) {
+                counts.add(item == null ? null : item.getQuestionTier());
+            }
+        }
+        return counts.toImmutable();
+    }
+
+    private void applyTierCounts(KeywordGroupListItemVO vo, KeywordTierCounts tierCounts) {
+        vo.setSavedKeywordCountA(tierCounts == null ? 0L : tierCounts.a());
+        vo.setSavedKeywordCountB(tierCounts == null ? 0L : tierCounts.b());
+        vo.setSavedKeywordCountC(tierCounts == null ? 0L : tierCounts.c());
     }
 
     private long calcTotalEstimated(String type, Boolean areaEnabled, KeywordGroupColumnsRequest columns) {
@@ -887,5 +1397,46 @@ public class KeywordGroupService {
     }
 
     private record PreparedResults(List<KeywordPreviewItemVO> items, int llmCount) {
+    }
+
+    private record Scope(Company company, Project project) {
+    }
+
+    private record ImportedQuestionRow(String questionCode,
+                                       String questionText,
+                                       String sceneCode,
+                                       String tier,
+                                       String priority,
+                                       BigDecimal scoreRelevance,
+                                       BigDecimal scoreIntent,
+                                       BigDecimal scoreCompetition,
+                                       BigDecimal scoreConversion,
+                                       BigDecimal scoreCoverage) {
+    }
+
+    public record KeywordTierCounts(long a, long b, long c) {
+        public long total() {
+            return a + b + c;
+        }
+    }
+
+    private static final class MutableTierCounts {
+        private long a;
+        private long b;
+        private long c;
+
+        private void add(String tier) {
+            if ("B".equals(tier)) {
+                b++;
+            } else if ("C".equals(tier)) {
+                c++;
+            } else {
+                a++;
+            }
+        }
+
+        private KeywordTierCounts toImmutable() {
+            return new KeywordTierCounts(a, b, c);
+        }
     }
 }

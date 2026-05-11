@@ -14,12 +14,22 @@
         </div>
         <div class="keyword-tags">
           <span
-            v-for="(item, idx) in displayItems"
-            :key="`${idx}_${item.sourceType}_${item.text}`"
+            v-for="{ item, index } in displayItems"
+            :key="`${index}_${item.sourceType}_${item.text}`"
             class="keyword-tag"
             :class="item.sourceType === 'llm' ? 'keyword-tag-llm' : 'keyword-tag-cartesian'"
           >
-            {{ item.text }}
+            <span class="keyword-text">{{ item.text }}</span>
+            <el-select
+              :model-value="item.questionTier || 'A'"
+              size="small"
+              class="tier-select"
+              @change="(value: string) => updateTier(index, value)"
+            >
+              <el-option label="A档" value="A" />
+              <el-option label="B档" value="B" />
+              <el-option label="C档" value="C" />
+            </el-select>
           </span>
         </div>
         <div v-if="items.length > maxDisplay" class="show-more">
@@ -54,12 +64,21 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:visible', value: boolean): void
+  (e: 'update:items', value: KeywordPreviewItem[]): void
   (e: 'submit'): void
 }>()
 
 const maxDisplay = 50
 const showAll = ref(false)
-const displayItems = computed(() => (showAll.value ? props.items : props.items.slice(0, maxDisplay)))
+const displayItems = computed(() => {
+  const source = showAll.value ? props.items : props.items.slice(0, maxDisplay)
+  return source.map((item, index) => ({ item, index }))
+})
+
+function updateTier(index: number, questionTier: string) {
+  const next = props.items.map((item, idx) => (idx === index ? { ...item, questionTier } : item))
+  emit('update:items', next)
+}
 
 watch(() => props.visible, () => {
   showAll.value = false
@@ -137,9 +156,21 @@ watch(() => props.visible, () => {
 }
 
 .keyword-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
   border-radius: 16px;
-  padding: 5px 12px;
+  padding: 4px 6px 4px 12px;
+}
+
+.keyword-text {
+  max-width: 360px;
+  overflow-wrap: anywhere;
+}
+
+.tier-select {
+  width: 74px;
 }
 
 .keyword-tag-cartesian {

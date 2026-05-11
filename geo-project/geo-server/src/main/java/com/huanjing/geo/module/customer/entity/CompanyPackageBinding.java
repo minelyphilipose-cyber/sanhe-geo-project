@@ -23,6 +23,9 @@ public class CompanyPackageBinding {
     private BigDecimal standardPrice;
     private Integer serviceMonths;
     private Integer keywordGroupLimit;
+    private Integer keywordGroupLimitA;
+    private Integer keywordGroupLimitB;
+    private Integer keywordGroupLimitC;
     private String channelQuotaSnapshot;
     private String status;
     private Integer activeFlag;

@@ -17,5 +17,8 @@ public class KeywordGroupListItemVO {
     private String typeLabel;
     private Boolean legacyType;
     private Long savedKeywordCount;
+    private Long savedKeywordCountA;
+    private Long savedKeywordCountB;
+    private Long savedKeywordCountC;
     private LocalDateTime updatedAt;
 }

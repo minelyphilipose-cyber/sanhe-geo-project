@@ -472,6 +472,7 @@ const imageFoldersLoading = ref(false)
 const imageFolders = ref<BrandImageFolder[]>([])
 const imageThumbUrls = ref<Record<number, string | null>>({})
 const imageThumbObjectUrls = ref<string[]>([])
+const imagePreviewUrls = ref<Record<string, string>>({})
 const selectedImageFolderId = ref<number | null>(null)
 const selectedImageMaterialId = ref<number | null>(null)
 const imageAltText = ref('')
@@ -538,7 +539,7 @@ const manualMarkdown = computed({
 })
 const manualHtml = computed(() => {
   const content = manualMarkdown.value.trim()
-  return content ? markdown.render(content) : '<div class="preview-empty">填写左侧内容后将显示预览</div>'
+  return content ? renderPreviewMarkdown(content) : '<div class="preview-empty">填写左侧内容后将显示预览</div>'
 })
 const markdownStats = computed(() => {
   const content = manualMarkdown.value
@@ -784,7 +785,7 @@ function selectImageMaterial(material: BrandMaterial) {
 }
 
 function materialThumbUrl(material: BrandMaterial) {
-  return imageThumbUrls.value[material.id] || material.fileUrl
+  return imageThumbUrls.value[material.id] || previewImageUrl(material.fileUrl) || material.fileUrl
 }
 
 async function loadImageThumbs(brandId: number) {
@@ -808,6 +809,9 @@ async function loadImageThumbs(brandId: number) {
         const url = URL.createObjectURL(blob)
         imageThumbObjectUrls.value.push(url)
         imageThumbUrls.value = { ...imageThumbUrls.value, [material.id]: url }
+        if (material.fileUrl) {
+          imagePreviewUrls.value = { ...imagePreviewUrls.value, [material.fileUrl]: url }
+        }
       } catch {
         imageThumbUrls.value = { ...imageThumbUrls.value, [material.id]: null }
       }
@@ -821,6 +825,29 @@ function cleanupImageThumbs() {
   imageThumbObjectUrls.value.forEach((url) => URL.revokeObjectURL(url))
   imageThumbObjectUrls.value = []
   imageThumbUrls.value = {}
+  imagePreviewUrls.value = {}
+}
+
+function previewImageUrl(fileUrl: string) {
+  return imagePreviewUrls.value[fileUrl] || ''
+}
+
+function renderPreviewMarkdown(content: string) {
+  const html = markdown.render(content)
+  const previewUrls = imagePreviewUrls.value
+  if (!Object.keys(previewUrls).length) {
+    return html
+  }
+  const template = document.createElement('template')
+  template.innerHTML = html
+  template.content.querySelectorAll('img').forEach((image) => {
+    const fallbackUrl = previewUrls[image.getAttribute('src') || '']
+    if (fallbackUrl) {
+      image.setAttribute('data-source-src', image.getAttribute('src') || '')
+      image.setAttribute('src', fallbackUrl)
+    }
+  })
+  return template.innerHTML
 }
 
 function insertSelectedImage() {
@@ -1104,12 +1131,6 @@ watch(createMode, (mode) => {
     aiMetadata.value = null
     generationNotice.value = null
     parseNotice.value = null
-  }
-})
-
-watch(imagePickerVisible, (visible) => {
-  if (!visible) {
-    cleanupImageThumbs()
   }
 })
 

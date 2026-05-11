@@ -23,6 +23,7 @@
           <el-table-column label="拓词组" width="160">
             <template #default="scope">
               {{ scope.row.selectedKeywordGroupCount || 0 }}组/{{ scope.row.selectedKeywordSavedKeywords || 0 }}条
+              <div class="table-subtext">A{{ scope.row.selectedKeywordSavedKeywordsA || 0 }} / B{{ scope.row.selectedKeywordSavedKeywordsB || 0 }} / C{{ scope.row.selectedKeywordSavedKeywordsC || 0 }}</div>
             </template>
           </el-table-column>
           <el-table-column label="归属" width="100">
@@ -101,7 +102,7 @@
             <el-option v-for="b in brandOptions" :key="b.id" :label="b.brandName" :value="b.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="拓词组" required>
+        <el-form-item label="拓词组">
           <div class="w-full">
             <el-select
               v-model="form.keywordGroupIds"
@@ -111,7 +112,7 @@
               collapse-tags
               collapse-tags-tooltip
               :multiple-limit="10"
-              placeholder="请选择该客户下的拓词组（最多10组）"
+              placeholder="可选；项目启动前必须至少绑定 1 个拓词组"
             >
               <el-option
                 v-for="kg in keywordGroupOptions"
@@ -121,6 +122,26 @@
               />
             </el-select>
             <div class="keyword-summary">{{ keywordGroupSummary }}</div>
+          </div>
+        </el-form-item>
+        <el-form-item label="问题额度">
+          <div class="keyword-quota-panel">
+            <div class="channel-note">默认填入当前客户套餐 A/B/C 剩余额度，单档最大不可超过可分配数量</div>
+            <div class="quota-row">
+              <span>A档</span>
+              <el-input-number v-model="form.keywordGroupLimitA" :min="0" :max="keywordTierMax('A')" controls-position="right" />
+              <small>可分配 {{ keywordQuota?.inputMaxA ?? 0 }}</small>
+            </div>
+            <div class="quota-row">
+              <span>B档</span>
+              <el-input-number v-model="form.keywordGroupLimitB" :min="0" :max="keywordTierMax('B')" controls-position="right" />
+              <small>可分配 {{ keywordQuota?.inputMaxB ?? 0 }}</small>
+            </div>
+            <div class="quota-row">
+              <span>C档</span>
+              <el-input-number v-model="form.keywordGroupLimitC" :min="0" :max="keywordTierMax('C')" controls-position="right" />
+              <small>可分配 {{ keywordQuota?.inputMaxC ?? 0 }}</small>
+            </div>
           </div>
         </el-form-item>
         <el-form-item label="分发渠道">
@@ -234,12 +255,13 @@ import {
   createProject,
   deleteProject,
   getProjectChannelAllocationQuota,
+  getProjectKeywordGroupQuota,
   getKeywordGroupPage,
   updateProject,
   updateProjectStatus,
 } from '@/api/project'
 import { getBrandList, getCompanyList } from '@/api/customer'
-import type { Brand, Company, KeywordGroup, Project, ProjectChannelAllocationItem } from '@/types'
+import type { Brand, Company, KeywordGroup, Project, ProjectChannelAllocationItem, ProjectKeywordGroupQuota } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
@@ -282,6 +304,7 @@ const companyOptions = ref<Company[]>([])
 const brandOptions = ref<Brand[]>([])
 const keywordGroupOptions = ref<KeywordGroup[]>([])
 const channelQuotaItems = ref<ProjectChannelAllocationItem[]>([])
+const keywordQuota = ref<ProjectKeywordGroupQuota | null>(null)
 const allocationVersion = ref<number | null>(null)
 const page = reactive({ current: 1, size: 10, total: 0 })
 const query = reactive({ keyword: '', status: '' })
@@ -298,6 +321,9 @@ const form = reactive({
   companyId: null as number | null,
   brandId: null as number | null,
   keywordGroupIds: [] as number[],
+  keywordGroupLimitA: 0,
+  keywordGroupLimitB: 0,
+  keywordGroupLimitC: 0,
   channelAllocations: {} as Record<string, number>,
   status: 'paused' as 'active' | 'paused',
   regionCodes: [] as string[],
@@ -328,7 +354,6 @@ const rules: FormRules = {
   projectName: [{ required: true, message: '请输入项目名称', trigger: 'blur' }],
   companyId: [{ required: true, message: '请选择客户', trigger: 'change' }],
   brandId: [{ required: true, message: '请选择品牌', trigger: 'change' }],
-  keywordGroupIds: [{ required: true, type: 'array', min: 1, message: '至少选择 1 个拓词组', trigger: 'change' }],
 }
 
 function regionDisplay(project: Project) {
@@ -389,6 +414,10 @@ function resetForm() {
   form.companyId = fromCustomerBrandPath.value ? presetCompanyId.value : null
   form.brandId = fromCustomerBrandPath.value ? presetBrandId.value : null
   form.keywordGroupIds = []
+  form.keywordGroupLimitA = 0
+  form.keywordGroupLimitB = 0
+  form.keywordGroupLimitC = 0
+  keywordQuota.value = null
   form.channelAllocations = {}
   channelQuotaItems.value = []
   allocationVersion.value = null
@@ -462,7 +491,34 @@ async function onCompanyChange(nextCompanyId: number) {
   form.companyId = nextCompanyId
   form.brandId = null
   form.keywordGroupIds = []
-  await Promise.all([loadBrands(nextCompanyId), loadKeywordGroups(nextCompanyId), loadChannelAllocationQuota(nextCompanyId)])
+  await Promise.all([loadBrands(nextCompanyId), loadKeywordGroups(nextCompanyId), loadChannelAllocationQuota(nextCompanyId), loadKeywordGroupQuota(nextCompanyId)])
+}
+
+async function loadKeywordGroupQuota(companyId?: number | null, excludeProjectId?: number | null, applyDefault = true) {
+  if (!companyId) {
+    keywordQuota.value = null
+    form.keywordGroupLimitA = 0
+    form.keywordGroupLimitB = 0
+    form.keywordGroupLimitC = 0
+    return
+  }
+  const { data } = await getProjectKeywordGroupQuota({
+    companyId,
+    excludeProjectId: excludeProjectId || undefined,
+  })
+  keywordQuota.value = data.data
+  if (applyDefault) {
+    form.keywordGroupLimitA = data.data.remainingCountA || 0
+    form.keywordGroupLimitB = data.data.remainingCountB || 0
+    form.keywordGroupLimitC = data.data.remainingCountC || 0
+  }
+}
+
+function keywordTierMax(tier: 'A' | 'B' | 'C') {
+  if (!keywordQuota.value) return 0
+  if (tier === 'A') return Math.max(keywordQuota.value.inputMaxA || 0, 0)
+  if (tier === 'B') return Math.max(keywordQuota.value.inputMaxB || 0, 0)
+  return Math.max(keywordQuota.value.inputMaxC || 0, 0)
 }
 
 async function loadChannelAllocationQuota(companyId?: number | null, excludeProjectId?: number | null) {
@@ -526,7 +582,7 @@ async function openCreate() {
   editingId.value = null
   resetForm()
   if (form.companyId) {
-    await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId), loadChannelAllocationQuota(form.companyId)])
+    await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId), loadChannelAllocationQuota(form.companyId), loadKeywordGroupQuota(form.companyId)])
     if (lockCompanyBrandSelection.value) {
       const hasPresetBrand = brandOptions.value.some((b) => b.id === presetBrandId.value)
       if (!hasPresetBrand) {
@@ -550,6 +606,9 @@ async function openEdit(row: Project) {
   form.companyId = row.companyId || null
   form.brandId = row.brandId
   form.keywordGroupIds = [...(row.selectedKeywordGroupIds || [])]
+  form.keywordGroupLimitA = row.planKeywordGroupLimitA ?? row.planKeywordGroupLimit ?? 0
+  form.keywordGroupLimitB = row.planKeywordGroupLimitB ?? 0
+  form.keywordGroupLimitC = row.planKeywordGroupLimitC ?? 0
   form.status = row.status === 'active' ? 'active' : 'paused'
   originalStatus.value = form.status
   form.regionCodes = regionCodesFromPayload(row)
@@ -563,7 +622,7 @@ async function openEdit(row: Project) {
   form.extraForbiddenPhrases = parseStringArray(row.extraForbiddenPhrases)
   form.contentNote = row.contentNote || ''
   form.remark = (row as any).remark || ''
-  await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId), loadChannelAllocationQuota(form.companyId, editingId.value)])
+  await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId), loadChannelAllocationQuota(form.companyId, editingId.value), loadKeywordGroupQuota(form.companyId, editingId.value, false)])
   formVisible.value = true
 }
 
@@ -578,10 +637,6 @@ async function submit() {
   }
   if (!form.brandId) {
     ElMessage.warning('请选择品牌')
-    return
-  }
-  if (form.keywordGroupIds.length < 1) {
-    ElMessage.warning('至少选择 1 个拓词组')
     return
   }
   if (form.keywordGroupIds.length > 10) {
@@ -603,6 +658,9 @@ async function submit() {
       companyId: form.companyId,
       brandId: form.brandId,
       keywordGroupIds: form.keywordGroupIds,
+      keywordGroupLimitA: form.keywordGroupLimitA,
+      keywordGroupLimitB: form.keywordGroupLimitB,
+      keywordGroupLimitC: form.keywordGroupLimitC,
       allocationVersion: allocationVersion.value,
       channelAllocations: Object.entries(form.channelAllocations).map(([channelCode, allocatedCount]) => ({
         channelCode,
@@ -712,6 +770,25 @@ onMounted(async () => {
   margin-top: 8px;
   font-size: 12px;
   color: #606266;
+}
+.table-subtext {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #909399;
+}
+.keyword-quota-panel {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+}
+.quota-row {
+  display: grid;
+  grid-template-columns: 44px minmax(160px, 220px) 1fr;
+  align-items: center;
+  gap: 10px;
+}
+.quota-row small {
+  color: #909399;
 }
 .channel-allocation-panel {
   width: 100%;

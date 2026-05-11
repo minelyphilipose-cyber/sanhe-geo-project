@@ -104,6 +104,10 @@ public class KeywordTypeConfigService {
                 true, false, true, true,
                 columns(true, true, true, true, true, false, false),
                 required(false, false, true, false, false, false, false));
+        put(map, "imported", "导入问题池", "通过 Excel 模板导入的项目问题池", STRUCTURE_STANDARD,
+                false, false, false, false,
+                columns(false, false, false, false, false, false, false),
+                required(false, false, false, false, false, false, false));
         return Map.copyOf(map);
     }
 

@@ -7,15 +7,17 @@ import com.huanjing.geo.module.system.mapper.SysUserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
 /**
- * 应用启动时检查 admin 账户，如果密码无法验证则重置为 admin123
- * 仅在开发阶段使用，生产环境应移除或禁用
+ * 显式启用时检查 admin 账户，如果密码无法验证则重置为 admin123。
+ * 默认禁用，避免应用重启覆盖已设置的账号密码。
  */
 @Slf4j
 @Component
+@ConditionalOnProperty(prefix = "geo.security.init-admin-password", name = "enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class InitPasswordRunner implements CommandLineRunner {
 

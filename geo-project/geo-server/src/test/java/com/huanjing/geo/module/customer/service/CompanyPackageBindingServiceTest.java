@@ -13,6 +13,7 @@ import com.huanjing.geo.module.project.entity.PackagePlan;
 import com.huanjing.geo.module.project.mapper.PackageChannelQuotaConfigMapper;
 import com.huanjing.geo.module.project.mapper.PackagePlanMapper;
 import com.huanjing.geo.module.project.mapper.ProjectChannelAllocationMapper;
+import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,6 +36,7 @@ class CompanyPackageBindingServiceTest {
     private CompanyMapper companyMapper;
     private PackagePlanMapper packagePlanMapper;
     private PackageChannelQuotaConfigMapper channelQuotaConfigMapper;
+    private ProjectMapper projectMapper;
     private CompanyChannelQuotaUsageMapper quotaUsageMapper;
     private CompanyChannelQuotaLedgerMapper quotaLedgerMapper;
     private ProjectChannelAllocationMapper projectChannelAllocationMapper;
@@ -47,17 +49,20 @@ class CompanyPackageBindingServiceTest {
         companyMapper = mock(CompanyMapper.class);
         packagePlanMapper = mock(PackagePlanMapper.class);
         channelQuotaConfigMapper = mock(PackageChannelQuotaConfigMapper.class);
+        projectMapper = mock(ProjectMapper.class);
         quotaUsageMapper = mock(CompanyChannelQuotaUsageMapper.class);
         quotaLedgerMapper = mock(CompanyChannelQuotaLedgerMapper.class);
         projectChannelAllocationMapper = mock(ProjectChannelAllocationMapper.class);
         currentUserService = mock(CurrentUserService.class);
         when(companyMapper.lockCompanyForUpdate(any())).thenReturn(7L);
         when(projectChannelAllocationMapper.activeProjectRowsForUpdate(any(), any(), any())).thenReturn(List.of());
+        when(projectMapper.selectList(any())).thenReturn(List.of());
         service = new CompanyPackageBindingService(
                 bindingMapper,
                 companyMapper,
                 packagePlanMapper,
                 channelQuotaConfigMapper,
+                projectMapper,
                 quotaUsageMapper,
                 quotaLedgerMapper,
                 projectChannelAllocationMapper,

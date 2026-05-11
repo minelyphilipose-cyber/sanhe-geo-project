@@ -12,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Collection;
 import java.util.List;
 
@@ -75,6 +76,27 @@ class AuthorityMediaResourceSyncServiceTest {
         assertThat(first.getPrice()).isEqualByComparingTo("120.00");
         assertThat(first.getPcWeight()).isEqualTo(5);
         assertThat(first.getRawPayload()).contains("\"media_name\":\"Portal A\"");
+    }
+
+    @Test
+    void syncNewsMediaFull_acceptsVendorDateTimeStringForUptime() throws Exception {
+        when(client.listResources(NEWS_MEDIA, 1, 2, null, null)).thenReturn(json("""
+                {"code":200,"data":[
+                  {"id":50452,"media_name":"Portal Date","price":"120.00","status":1,"uptime":"2025-10-27 16:53:17"}
+                ]}
+                """));
+        when(resourceMapper.upsert(any())).thenReturn(1);
+
+        AuthorityMediaResourceSyncService.SyncResult result = service.syncNewsMediaFull();
+
+        assertThat(result.processed()).isEqualTo(1);
+        ArgumentCaptor<AuthorityMediaResource> captor = ArgumentCaptor.forClass(AuthorityMediaResource.class);
+        verify(resourceMapper).upsert(captor.capture());
+        assertThat(captor.getValue().getUptime()).isEqualTo(
+                LocalDateTime.of(2025, 10, 27, 16, 53, 17)
+                        .atZone(ZoneId.of("Asia/Shanghai"))
+                        .toEpochSecond()
+        );
     }
 
     @Test

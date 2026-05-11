@@ -1,6 +1,7 @@
 package com.huanjing.geo.common.util;
 
 import java.net.URI;
+import java.net.http.HttpTimeoutException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -9,7 +10,10 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 public final class HttpClientUtil {
 
@@ -71,7 +75,20 @@ public final class HttpClientUtil {
             builder.GET();
         }
 
-        HttpResponse<String> response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+        HttpRequest request = builder.build();
+        HttpResponse<String> response;
+        if (requestTimeoutMs > 0) {
+            int timeout = Math.max(requestTimeoutMs, 1000);
+            CompletableFuture<HttpResponse<String>> future = client.sendAsync(request, HttpResponse.BodyHandlers.ofString());
+            try {
+                response = future.get(timeout, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException ex) {
+                future.cancel(true);
+                throw new HttpTimeoutException("HTTP request timed out after " + timeout + "ms");
+            }
+        } else {
+            response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        }
         return new HttpResult(
                 response.statusCode(),
                 response.body(),

@@ -13,6 +13,9 @@ import org.springframework.util.StringUtils;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -27,6 +30,8 @@ public class AuthorityMediaResourceSyncService {
     private static final int DEFAULT_PAGE_LIMIT = 200;
     private static final long INCREMENTAL_LOOKBACK_SECONDS = 60L;
     private static final int LARGE_RECONCILE_ID_COUNT = 5000;
+    private static final ZoneId VENDOR_ZONE = ZoneId.of("Asia/Shanghai");
+    private static final DateTimeFormatter VENDOR_DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private final MeititejiaClient client;
     private final AuthorityMediaResourceMapper resourceMapper;
@@ -282,7 +287,24 @@ public class AuthorityMediaResourceSyncService {
         try {
             return Long.parseLong(child.asText().trim());
         } catch (NumberFormatException ex) {
+            Long timestamp = dateTimeAsEpochSecond(child.asText());
+            if (timestamp != null) {
+                return timestamp;
+            }
             log.warn("NEWS_MEDIA resource {} field={} has non-long value: {}", text(node, "id"), field, child.asText());
+            return null;
+        }
+    }
+
+    private Long dateTimeAsEpochSecond(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        try {
+            return LocalDateTime.parse(value.trim(), VENDOR_DATE_TIME)
+                    .atZone(VENDOR_ZONE)
+                    .toEpochSecond();
+        } catch (DateTimeParseException ex) {
             return null;
         }
     }

@@ -81,6 +81,9 @@ public class PackagePlanService {
         validateBase(req.getStandardPrice(), req.getServiceMonths(), req.getSortOrder());
         validateBusinessFields(
                 req.getKeywordGroupLimit(),
+                req.getKeywordGroupLimitA(),
+                req.getKeywordGroupLimitB(),
+                req.getKeywordGroupLimitC(),
                 req.getMonthlyReportDepth(),
                 req.getQuarterlyReportDepth(),
                 req.getConsultantIntensity(),
@@ -103,6 +106,9 @@ public class PackagePlanService {
         plan.setStandardPrice(req.getStandardPrice());
         plan.setServiceMonths(req.getServiceMonths());
         plan.setKeywordGroupLimit(req.getKeywordGroupLimit());
+        plan.setKeywordGroupLimitA(req.getKeywordGroupLimitA());
+        plan.setKeywordGroupLimitB(req.getKeywordGroupLimitB());
+        plan.setKeywordGroupLimitC(req.getKeywordGroupLimitC());
         plan.setMonthlyReportDepth(req.getMonthlyReportDepth().trim());
         plan.setQuarterlyReportDepth(req.getQuarterlyReportDepth().trim());
         plan.setConsultantIntensity(req.getConsultantIntensity().trim());
@@ -126,6 +132,9 @@ public class PackagePlanService {
         validateBase(req.getStandardPrice(), req.getServiceMonths(), req.getSortOrder());
         validateBusinessFields(
                 req.getKeywordGroupLimit(),
+                req.getKeywordGroupLimitA(),
+                req.getKeywordGroupLimitB(),
+                req.getKeywordGroupLimitC(),
                 req.getMonthlyReportDepth(),
                 req.getQuarterlyReportDepth(),
                 req.getConsultantIntensity(),
@@ -141,6 +150,9 @@ public class PackagePlanService {
         plan.setStandardPrice(req.getStandardPrice());
         plan.setServiceMonths(req.getServiceMonths());
         plan.setKeywordGroupLimit(req.getKeywordGroupLimit());
+        plan.setKeywordGroupLimitA(req.getKeywordGroupLimitA());
+        plan.setKeywordGroupLimitB(req.getKeywordGroupLimitB());
+        plan.setKeywordGroupLimitC(req.getKeywordGroupLimitC());
         plan.setMonthlyReportDepth(req.getMonthlyReportDepth().trim());
         plan.setQuarterlyReportDepth(req.getQuarterlyReportDepth().trim());
         plan.setConsultantIntensity(req.getConsultantIntensity().trim());
@@ -347,6 +359,9 @@ public class PackagePlanService {
 
     private void validateBusinessFields(
             Integer keywordGroupLimit,
+            Integer keywordGroupLimitA,
+            Integer keywordGroupLimitB,
+            Integer keywordGroupLimitC,
             String monthlyReportDepth,
             String quarterlyReportDepth,
             String consultantIntensity,
@@ -360,6 +375,7 @@ public class PackagePlanService {
         if (keywordGroupLimit == null || keywordGroupLimit <= 0) {
             throw new BizException(400, "keyword_group_limit must be positive");
         }
+        validateKeywordTierLimits(keywordGroupLimit, keywordGroupLimitA, keywordGroupLimitB, keywordGroupLimitC);
         validateIntensityLevel(monthlyReportDepth, "monthly_report_depth");
         validateIntensityLevel(quarterlyReportDepth, "quarterly_report_depth");
         validateIntensityLevel(consultantIntensity, "consultant_intensity");
@@ -374,6 +390,15 @@ public class PackagePlanService {
         }
         if (targetWindowDays == null || targetWindowDays <= 0) {
             throw new BizException(400, "target_window_days must be positive");
+        }
+    }
+
+    private void validateKeywordTierLimits(Integer total, Integer a, Integer b, Integer c) {
+        if (a == null || a < 0 || b == null || b < 0 || c == null || c < 0) {
+            throw new BizException(400, "keyword group tier limits must be >= 0");
+        }
+        if (a + b + c != total) {
+            throw new BizException(400, "KEYWORD_TIER_LIMIT_MISMATCH: A/B/C 额度之和必须等于关键词组总数");
         }
     }
 

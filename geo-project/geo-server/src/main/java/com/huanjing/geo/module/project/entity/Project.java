@@ -31,6 +31,9 @@ public class Project {
     @TableField(exist = false)
     private Integer serviceMonths;
     private Integer planKeywordGroupLimit;
+    private Integer planKeywordGroupLimitA;
+    private Integer planKeywordGroupLimitB;
+    private Integer planKeywordGroupLimitC;
     private String planMonthlyReportDepth;
     private String planQuarterlyReportDepth;
     private String planConsultantIntensity;
@@ -87,6 +90,14 @@ public class Project {
     private Integer selectedKeywordGroupCount;
     @TableField(exist = false)
     private Long selectedKeywordSavedKeywords;
+    @TableField(exist = false)
+    private Long selectedKeywordSavedKeywordsA;
+    @TableField(exist = false)
+    private Long selectedKeywordSavedKeywordsB;
+    @TableField(exist = false)
+    private Long selectedKeywordSavedKeywordsC;
+    @TableField(exist = false)
+    private List<com.huanjing.geo.module.project.dto.KeywordGroupListItemVO> selectedKeywordGroups;
     @TableField(exist = false)
     private List<ProjectChannelAllocationVO> channelAllocations;
     @TableField(exist = false)

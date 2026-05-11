@@ -216,6 +216,9 @@ export interface Project {
   projectName: string
   projectAliases?: string | null
   planKeywordGroupLimit?: number | null
+  planKeywordGroupLimitA?: number | null
+  planKeywordGroupLimitB?: number | null
+  planKeywordGroupLimitC?: number | null
   planMonthlyReportDepth?: string | null
   planQuarterlyReportDepth?: string | null
   planConsultantIntensity?: string | null
@@ -256,6 +259,10 @@ export interface Project {
   selectedKeywordGroupIds?: number[]
   selectedKeywordGroupCount?: number
   selectedKeywordSavedKeywords?: number
+  selectedKeywordSavedKeywordsA?: number
+  selectedKeywordSavedKeywordsB?: number
+  selectedKeywordSavedKeywordsC?: number
+  selectedKeywordGroups?: KeywordGroup[]
   channelAllocations?: ProjectChannelAllocationItem[]
   allocationVersion?: number
   // 鍏宠仈灞曠ず瀛楁
@@ -281,6 +288,30 @@ export interface ProjectChannelAllocationQuota {
   allocationVersion: number
   note?: string | null
   items: ProjectChannelAllocationItem[]
+}
+
+export interface ProjectKeywordGroupQuota {
+  companyId: number
+  excludeProjectId?: number | null
+  quotaLimit: number
+  quotaLimitA: number
+  quotaLimitB: number
+  quotaLimitC: number
+  activeAllocatedCount: number
+  activeAllocatedCountA: number
+  activeAllocatedCountB: number
+  activeAllocatedCountC: number
+  currentProjectAllocatedCount: number
+  currentProjectAllocatedCountA: number
+  currentProjectAllocatedCountB: number
+  currentProjectAllocatedCountC: number
+  remainingCount: number
+  remainingCountA: number
+  remainingCountB: number
+  remainingCountC: number
+  inputMaxA: number
+  inputMaxB: number
+  inputMaxC: number
 }
 
 export interface CompanyAccount {
@@ -320,6 +351,9 @@ export interface CompanyPackageBinding {
   standardPrice: number
   serviceMonths: number
   keywordGroupLimit: number
+  keywordGroupLimitA: number
+  keywordGroupLimitB: number
+  keywordGroupLimitC: number
   channelQuotaSnapshot: string
   status: 'active' | 'inactive' | string
   activeFlag?: number | null
@@ -639,6 +673,9 @@ export interface KeywordGroup {
   remark?: string | null
   estimatedKeywordCount?: number
   savedKeywordCount?: number
+  savedKeywordCountA?: number
+  savedKeywordCountB?: number
+  savedKeywordCountC?: number
   columns?: KeywordGroupColumns
   llmQuestions?: LlmQuestionItem[]
   createdAt: string
@@ -649,6 +686,36 @@ export interface KeywordPreviewItem {
   text: string
   sourceType: 'cartesian' | 'llm' | string
   seedText?: string | null
+  questionTier?: 'A' | 'B' | 'C' | string
+}
+
+export interface KeywordGroupQuestion {
+  id: number
+  groupId: number
+  questionCode?: string | null
+  questionText: string
+  sceneCode?: string | null
+  questionTier?: 'A' | 'B' | 'C' | string
+  priority?: string | null
+  monitorFrequency?: string | null
+  scoreRelevance?: number | null
+  scoreIntent?: number | null
+  scoreCompetition?: number | null
+  scoreConversion?: number | null
+  scoreCoverage?: number | null
+  totalScore?: number | null
+  articleGenerationNote?: string | null
+  sortOrder?: number | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface KeywordGroupImportResult {
+  group: KeywordGroup
+  importedCount: number
+  countA: number
+  countB: number
+  countC: number
 }
 
 export interface LlmQuestionItem {
@@ -1046,6 +1113,9 @@ export interface PackagePlan {
   standardPrice: number
   serviceMonths: number
   keywordGroupLimit: number
+  keywordGroupLimitA: number
+  keywordGroupLimitB: number
+  keywordGroupLimitC: number
   monthlyReportDepth: string
   quarterlyReportDepth: string
   consultantIntensity: string
@@ -1080,8 +1150,17 @@ export interface CompanyKeywordGroupQuota {
   packageName?: string | null
   activeBinding: boolean
   quotaLimit: number
+  quotaLimitA: number
+  quotaLimitB: number
+  quotaLimitC: number
   usedCount: number
+  usedCountA: number
+  usedCountB: number
+  usedCountC: number
   remainingCount: number
+  remainingCountA: number
+  remainingCountB: number
+  remainingCountC: number
   usageRate: number
 }
 

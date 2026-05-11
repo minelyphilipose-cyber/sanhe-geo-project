@@ -12,17 +12,13 @@ import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
 import com.huanjing.geo.module.customer.mapper.BrandProfileVersionMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
-import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.entity.SysUser;
-import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.mockito.ArgumentCaptor;
-
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -33,17 +29,14 @@ class BrandServiceTest {
     private BrandMapper brandMapper;
     private CompanyMapper companyMapper;
     private CurrentUserService currentUserService;
-    private SysDictItemMapper sysDictItemMapper;
     private BrandService brandService;
 
     @BeforeEach
     void setUp() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), Brand.class);
-        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), SysDictItem.class);
         brandMapper = mock(BrandMapper.class);
         companyMapper = mock(CompanyMapper.class);
         currentUserService = mock(CurrentUserService.class);
-        sysDictItemMapper = mock(SysDictItemMapper.class);
         brandService = new BrandService(
                 brandMapper,
                 mock(BrandMaterialMapper.class),
@@ -52,14 +45,12 @@ class BrandServiceTest {
                 mock(ProjectMapper.class),
                 currentUserService,
                 mock(ActivityLogService.class),
-                mock(BrandProfileService.class),
-                sysDictItemMapper
+                mock(BrandProfileService.class)
         );
         SysUser operator = new SysUser();
         operator.setId(100L);
         when(currentUserService.requireCurrentUser()).thenReturn(operator);
         when(companyMapper.selectById(10L)).thenReturn(company());
-        when(sysDictItemMapper.selectList(any())).thenReturn(List.of(dict("retail")));
     }
 
     @Test
@@ -181,9 +172,4 @@ class BrandServiceTest {
         return company;
     }
 
-    private SysDictItem dict(String key) {
-        SysDictItem item = new SysDictItem();
-        item.setDictKey(key);
-        return item;
-    }
 }

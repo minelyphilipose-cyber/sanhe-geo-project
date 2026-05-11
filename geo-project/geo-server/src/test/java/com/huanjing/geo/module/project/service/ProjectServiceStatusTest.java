@@ -72,11 +72,10 @@ class ProjectServiceStatusTest {
 
         when(currentUserService.requireCurrentUser()).thenReturn(operator);
         when(projectMapper.selectById(20L)).thenReturn(project);
+        when(projectMapper.selectList(any())).thenReturn(java.util.List.of());
         CompanyPackageBinding binding = new CompanyPackageBinding();
         binding.setKeywordGroupLimit(100);
         when(companyPackageBindingService.requireActiveBinding(30L)).thenReturn(binding);
-        when(keywordGroupService.countActiveProjectSavedKeywords(30L, 20L)).thenReturn(0L);
-        when(keywordGroupService.countSelectedSavedKeywords(20L)).thenReturn(0L);
 
         projectService.updateStatus(20L, request);
 

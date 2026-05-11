@@ -16,7 +16,7 @@
         <el-input-number
           v-model="targetCount"
           :min="5"
-          :max="50"
+          :max="targetMax"
           :step="5"
           controls-position="right"
           style="width: 110px"
@@ -77,10 +77,12 @@ import type { LlmQuestionItem } from '@/types'
 
 const props = defineProps<{
   companyId: number | null
+  projectId?: number | null
   seedText: string
   questions: LlmQuestionItem[]
   generationToken: string
   previewCount: number
+  quotaCount?: number
   disabled?: boolean
 }>()
 
@@ -115,6 +117,16 @@ const exceedHint = computed(() => {
   }
   return ''
 })
+const targetMax = computed(() => {
+  const quotaRemaining = props.quotaCount ? Math.max(props.quotaCount - props.questions.length, 0) : 50
+  return Math.max(5, Math.min(50, props.previewCount - props.questions.length, quotaRemaining))
+})
+
+watch(targetMax, (max) => {
+  if (targetCount.value > max) {
+    targetCount.value = max
+  }
+}, { immediate: true })
 
 watch(() => groupedQuestions.value.length, (count) => {
   if (count <= 1) {
@@ -123,8 +135,8 @@ watch(() => groupedQuestions.value.length, (count) => {
 }, { immediate: true })
 
 async function handleGenerate() {
-  if (!props.companyId) {
-    ElMessage.warning('请选择客户')
+  if (!props.projectId && !props.companyId) {
+    ElMessage.warning('请选择项目')
     return
   }
   const seed = props.seedText.trim()
@@ -140,10 +152,15 @@ async function handleGenerate() {
     ElMessage.warning(`生成 ${targetCount.value} 条后累积将达 ${props.questions.length + targetCount.value} 条,超过预览总数 ${props.previewCount}`)
     return
   }
+  if (props.quotaCount && props.questions.length + targetCount.value > props.quotaCount) {
+    ElMessage.warning(`生成 ${targetCount.value} 条后累积将达 ${props.questions.length + targetCount.value} 条,超过项目额度 ${props.quotaCount}`)
+    return
+  }
   generating.value = true
   try {
     const { data } = await generateKeywordGroupLlmQuestions({
-      companyId: props.companyId,
+      companyId: props.companyId || undefined,
+      projectId: props.projectId || undefined,
       seedText: seed,
       currentToken: props.generationToken || undefined,
       count: props.previewCount,

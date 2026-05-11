@@ -13,6 +13,8 @@ import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
 import com.huanjing.geo.module.project.dto.KeywordLlmQuestionGenerateVO;
 import com.huanjing.geo.module.project.dto.LlmQuestionItemDTO;
+import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
@@ -47,6 +49,7 @@ public class KeywordLlmQuestionService {
     };
 
     private final CompanyMapper companyMapper;
+    private final ProjectMapper projectMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
     private final LlmInvoker llmInvoker;
@@ -55,9 +58,11 @@ public class KeywordLlmQuestionService {
     private final StringRedisTemplate redisTemplate;
     private final CurrentUserService currentUserService;
 
-    public KeywordLlmQuestionGenerateVO generate(Long companyId, String seedText, String currentToken, Integer count, Integer currentLlmCount, Integer targetCount) {
+    public KeywordLlmQuestionGenerateVO generate(Long companyId, Long projectId, String seedText, String currentToken, Integer count, Integer currentLlmCount, Integer targetCount) {
         currentUserService.ensurePermission("keyword_group.read");
-        requireCompany(companyId);
+        Project project = resolveProject(projectId, companyId);
+        Long resolvedCompanyId = project == null ? companyId : project.getCompanyId();
+        requireCompany(resolvedCompanyId);
         String seed = parseSeed(seedText);
         int actualTarget = targetCount == null ? DEFAULT_TARGET_COUNT : targetCount;
         if (actualTarget < MIN_TARGET_COUNT || actualTarget > MAX_TARGET_COUNT) {
@@ -66,9 +71,16 @@ public class KeywordLlmQuestionService {
 
         String token = StringUtils.hasText(currentToken) ? currentToken.trim() : randomHex(32);
         List<LlmQuestionItemDTO> accumulated = StringUtils.hasText(currentToken) ? loadTokenItems(currentToken) : new ArrayList<>();
-        int finalCount = count == null ? DEFAULT_COUNT : count;
+        int projectLimit = project == null ? 0 : projectKeywordLimit(project);
+        int finalCount = count == null ? (projectLimit > 0 ? projectLimit : DEFAULT_COUNT) : count;
         if (finalCount <= 0) {
             throw new BizException(400, "count must be > 0");
+        }
+        if (project != null && projectLimit <= 0) {
+            throw coded("PROJECT_KEYWORD_QUOTA_EMPTY", "当前项目未配置问题额度");
+        }
+        if (project != null && finalCount > projectLimit) {
+            throw coded("PROJECT_KEYWORD_QUOTA_EXCEEDED", "生成问题数量不能超过当前项目额度 " + projectLimit);
         }
         int retainedCount = currentLlmCount == null ? accumulated.size() : Math.max(0, currentLlmCount);
         if (retainedCount + actualTarget > finalCount) {
@@ -236,10 +248,39 @@ public class KeywordLlmQuestionService {
     }
 
     private void requireCompany(Long companyId) {
+        if (companyId == null) {
+            throw new BizException(400, "companyId or projectId is required");
+        }
         Company company = companyMapper.selectOne(new LambdaQueryWrapper<Company>().eq(Company::getId, companyId).last("LIMIT 1"));
         if (company == null) {
             throw new BizException(404, "Company not found");
         }
+    }
+
+    private Project resolveProject(Long projectId, Long companyId) {
+        if (projectId == null) {
+            return null;
+        }
+        Project project = projectMapper.selectById(projectId);
+        if (project == null) {
+            throw new BizException(404, "Project not found");
+        }
+        if (project.getCompanyId() == null) {
+            throw new BizException(400, "Project company is missing");
+        }
+        if (companyId != null && !companyId.equals(project.getCompanyId())) {
+            throw new BizException(400, "Project does not belong to company");
+        }
+        return project;
+    }
+
+    private int projectKeywordLimit(Project project) {
+        int a = project.getPlanKeywordGroupLimitA() == null
+                ? (project.getPlanKeywordGroupLimit() == null ? 0 : project.getPlanKeywordGroupLimit())
+                : project.getPlanKeywordGroupLimitA();
+        int b = project.getPlanKeywordGroupLimitB() == null ? 0 : project.getPlanKeywordGroupLimitB();
+        int c = project.getPlanKeywordGroupLimitC() == null ? 0 : project.getPlanKeywordGroupLimitC();
+        return a + b + c;
     }
 
     private String randomHex(int length) {

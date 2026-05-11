@@ -110,8 +110,14 @@ const adminRoutes: RouteRecordRaw = {
     {
       path: 'keyword-groups',
       name: 'KeywordGroupManage',
-      component: () => import('@/views/admin/project/KeywordGroupManage.vue'),
-      meta: { title: '拓词管理', icon: 'MagicStick', permissions: ['keyword_group.read'] },
+      redirect: '/admin/layered-keyword-groups',
+      meta: { title: '拓词管理', hidden: true, permissions: ['keyword_group.read'] },
+    },
+    {
+      path: 'layered-keyword-groups',
+      name: 'LayeredKeywordGroupManage',
+      component: () => import('@/views/admin/project/LayeredKeywordGroupManage.vue'),
+      meta: { title: '分层拓词管理', icon: 'Collection', permissions: ['keyword_group.read'] },
     },
     {
       path: 'monitoring/platforms',

@@ -86,6 +86,26 @@
             <div class="keyword-summary">{{ keywordGroupSummary }}</div>
           </div>
         </el-form-item>
+        <el-form-item label="问题额度">
+          <div class="keyword-quota-panel">
+            <div class="channel-note">默认填入当前客户套餐 A/B/C 剩余额度，单档最大不可超过可分配数量</div>
+            <div class="quota-row">
+              <span>A档</span>
+              <el-input-number v-model="form.keywordGroupLimitA" :min="0" :max="keywordTierMax('A')" controls-position="right" />
+              <small>可分配 {{ keywordQuota?.inputMaxA ?? 0 }}</small>
+            </div>
+            <div class="quota-row">
+              <span>B档</span>
+              <el-input-number v-model="form.keywordGroupLimitB" :min="0" :max="keywordTierMax('B')" controls-position="right" />
+              <small>可分配 {{ keywordQuota?.inputMaxB ?? 0 }}</small>
+            </div>
+            <div class="quota-row">
+              <span>C档</span>
+              <el-input-number v-model="form.keywordGroupLimitC" :min="0" :max="keywordTierMax('C')" controls-position="right" />
+              <small>可分配 {{ keywordQuota?.inputMaxC ?? 0 }}</small>
+            </div>
+          </div>
+        </el-form-item>
         <el-form-item label="分发渠道">
           <div class="channel-allocation-panel">
             <div class="channel-note">剩余额度不含草稿/暂停项目，项目启动时会再次校验</div>
@@ -131,12 +151,13 @@ import { getBrandList, getCompanyList } from '@/api/customer'
 import {
   createProject,
   getProjectChannelAllocationQuota,
+  getProjectKeywordGroupQuota,
   getKeywordGroupPage,
   getProjectList,
   updateProject,
   updateProjectStatus,
 } from '@/api/project'
-import type { Brand, Company, KeywordGroup, Project, ProjectChannelAllocationItem } from '@/types'
+import type { Brand, Company, KeywordGroup, Project, ProjectChannelAllocationItem, ProjectKeywordGroupQuota } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionPayloadFromCodes } from '@/constants/region'
@@ -159,6 +180,7 @@ const companyOptions = ref<Company[]>([])
 const brandOptions = ref<Brand[]>([])
 const keywordGroupOptions = ref<KeywordGroup[]>([])
 const channelQuotaItems = ref<ProjectChannelAllocationItem[]>([])
+const keywordQuota = ref<ProjectKeywordGroupQuota | null>(null)
 const allocationVersion = ref<number | null>(null)
 
 const formVisible = ref(false)
@@ -173,6 +195,9 @@ const form = reactive({
   companyId: null as number | null,
   brandId: null as number | null,
   keywordGroupIds: [] as number[],
+  keywordGroupLimitA: 0,
+  keywordGroupLimitB: 0,
+  keywordGroupLimitC: 0,
   channelAllocations: {} as Record<string, number>,
   status: 'paused' as 'active' | 'paused',
   regionCodes: [] as string[],
@@ -207,6 +232,10 @@ function resetForm() {
   form.companyId = null
   form.brandId = null
   form.keywordGroupIds = []
+  form.keywordGroupLimitA = 0
+  form.keywordGroupLimitB = 0
+  form.keywordGroupLimitC = 0
+  keywordQuota.value = null
   form.channelAllocations = {}
   channelQuotaItems.value = []
   allocationVersion.value = null
@@ -225,6 +254,7 @@ async function onCompanyChange() {
     form.keywordGroupIds = []
     form.channelAllocations = {}
     channelQuotaItems.value = []
+    keywordQuota.value = null
     allocationVersion.value = null
     return
   }
@@ -232,7 +262,34 @@ async function onCompanyChange() {
     form.brandId = null
   }
   form.keywordGroupIds = []
-  await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId), loadChannelAllocationQuota(form.companyId)])
+  await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId), loadChannelAllocationQuota(form.companyId), loadKeywordGroupQuota(form.companyId)])
+}
+
+async function loadKeywordGroupQuota(companyId?: number | null, excludeProjectId?: number | null, applyDefault = true) {
+  if (!companyId) {
+    keywordQuota.value = null
+    form.keywordGroupLimitA = 0
+    form.keywordGroupLimitB = 0
+    form.keywordGroupLimitC = 0
+    return
+  }
+  const { data } = await getProjectKeywordGroupQuota({
+    companyId,
+    excludeProjectId: excludeProjectId || undefined,
+  })
+  keywordQuota.value = data.data
+  if (applyDefault) {
+    form.keywordGroupLimitA = data.data.remainingCountA || 0
+    form.keywordGroupLimitB = data.data.remainingCountB || 0
+    form.keywordGroupLimitC = data.data.remainingCountC || 0
+  }
+}
+
+function keywordTierMax(tier: 'A' | 'B' | 'C') {
+  if (!keywordQuota.value) return 0
+  if (tier === 'A') return Math.max(keywordQuota.value.inputMaxA || 0, 0)
+  if (tier === 'B') return Math.max(keywordQuota.value.inputMaxB || 0, 0)
+  return Math.max(keywordQuota.value.inputMaxC || 0, 0)
 }
 
 async function loadChannelAllocationQuota(companyId?: number | null, excludeProjectId?: number | null) {
@@ -282,13 +339,16 @@ async function openEdit(row: Project) {
   form.companyId = row.companyId || null
   form.brandId = row.brandId
   form.keywordGroupIds = [...(row.selectedKeywordGroupIds || [])]
+  form.keywordGroupLimitA = row.planKeywordGroupLimitA ?? row.planKeywordGroupLimit ?? 0
+  form.keywordGroupLimitB = row.planKeywordGroupLimitB ?? 0
+  form.keywordGroupLimitC = row.planKeywordGroupLimitC ?? 0
   form.status = row.status === 'active' ? 'active' : 'paused'
   originalStatus.value = form.status
   form.regionCodes = regionCodesFromPayload(row)
   form.deliveryMode = row.deliveryMode || 'managed'
   form.primaryGoal = row.primaryGoal || ''
   form.remark = row.remark || ''
-  await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId), loadChannelAllocationQuota(form.companyId, editingId.value)])
+  await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId), loadChannelAllocationQuota(form.companyId, editingId.value), loadKeywordGroupQuota(form.companyId, editingId.value, false)])
   formVisible.value = true
 }
 
@@ -314,6 +374,9 @@ async function submit() {
       companyId: form.companyId,
       brandId: form.brandId,
       keywordGroupIds: form.keywordGroupIds,
+      keywordGroupLimitA: form.keywordGroupLimitA,
+      keywordGroupLimitB: form.keywordGroupLimitB,
+      keywordGroupLimitC: form.keywordGroupLimitC,
       allocationVersion: allocationVersion.value,
       channelAllocations: Object.entries(form.channelAllocations).map(([channelCode, allocatedCount]) => ({
         channelCode,
@@ -421,6 +484,20 @@ onMounted(async () => {
   margin-top: 8px;
   font-size: 12px;
   color: #606266;
+}
+.keyword-quota-panel {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+}
+.quota-row {
+  display: grid;
+  grid-template-columns: 44px minmax(160px, 220px) 1fr;
+  align-items: center;
+  gap: 10px;
+}
+.quota-row small {
+  color: #909399;
 }
 .channel-allocation-panel {
   width: 100%;

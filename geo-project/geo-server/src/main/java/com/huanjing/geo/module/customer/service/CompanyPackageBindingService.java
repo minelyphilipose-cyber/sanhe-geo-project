@@ -17,6 +17,7 @@ import com.huanjing.geo.module.project.entity.PackagePlan;
 import com.huanjing.geo.module.project.mapper.PackageChannelQuotaConfigMapper;
 import com.huanjing.geo.module.project.mapper.PackagePlanMapper;
 import com.huanjing.geo.module.project.mapper.ProjectChannelAllocationMapper;
+import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -36,6 +37,7 @@ public class CompanyPackageBindingService {
     private final CompanyMapper companyMapper;
     private final PackagePlanMapper packagePlanMapper;
     private final PackageChannelQuotaConfigMapper channelQuotaConfigMapper;
+    private final ProjectMapper projectMapper;
     private final CompanyChannelQuotaUsageMapper quotaUsageMapper;
     private final CompanyChannelQuotaLedgerMapper quotaLedgerMapper;
     private final ProjectChannelAllocationMapper projectChannelAllocationMapper;
@@ -53,13 +55,15 @@ public class CompanyPackageBindingService {
         if (companyId == null) {
             return null;
         }
-        return bindingMapper.selectOne(
+        CompanyPackageBinding binding = bindingMapper.selectOne(
                 new LambdaQueryWrapper<CompanyPackageBinding>()
                         .eq(CompanyPackageBinding::getCompanyId, companyId)
                         .eq(CompanyPackageBinding::getStatus, CompanyPackageBinding.STATUS_ACTIVE)
                         .eq(CompanyPackageBinding::getActiveFlag, 1)
                         .last("LIMIT 1")
         );
+        hydrateKeywordLimitsFromCurrentPlan(binding);
+        return binding;
     }
 
     public List<CompanyPackageBinding> bindings(Long companyId) {
@@ -89,6 +93,7 @@ public class CompanyPackageBindingService {
         }
         List<PackageChannelQuotaConfig> channelQuotas = activeChannelQuotas(packagePlanId);
         validateActiveProjectAllocationsAgainstPackage(companyId, channelQuotas);
+        validateActiveProjectKeywordAllocationsAgainstPackage(companyId, plan);
         CompanyPackageBinding binding = buildBinding(companyId, plan, channelQuotas);
         bindingMapper.insert(binding);
         initTotalUsage(binding, channelQuotas);
@@ -120,10 +125,27 @@ public class CompanyPackageBindingService {
         binding.setStandardPrice(plan.getStandardPrice());
         binding.setServiceMonths(plan.getServiceMonths());
         binding.setKeywordGroupLimit(plan.getKeywordGroupLimit());
+        binding.setKeywordGroupLimitA(defaultInt(plan.getKeywordGroupLimitA(), plan.getKeywordGroupLimit()));
+        binding.setKeywordGroupLimitB(defaultInt(plan.getKeywordGroupLimitB(), 0));
+        binding.setKeywordGroupLimitC(defaultInt(plan.getKeywordGroupLimitC(), 0));
         binding.setChannelQuotaSnapshot(JSONUtil.toJsonStr(toSnapshot(channelQuotas)));
         binding.markActive();
         binding.setBoundAt(LocalDateTime.now());
         return binding;
+    }
+
+    private void hydrateKeywordLimitsFromCurrentPlan(CompanyPackageBinding binding) {
+        if (binding == null || binding.getPackagePlanId() == null) {
+            return;
+        }
+        PackagePlan plan = packagePlanMapper.selectById(binding.getPackagePlanId());
+        if (plan == null) {
+            return;
+        }
+        binding.setKeywordGroupLimit(defaultInt(plan.getKeywordGroupLimit(), binding.getKeywordGroupLimit()));
+        binding.setKeywordGroupLimitA(defaultInt(plan.getKeywordGroupLimitA(), binding.getKeywordGroupLimit()));
+        binding.setKeywordGroupLimitB(defaultInt(plan.getKeywordGroupLimitB(), 0));
+        binding.setKeywordGroupLimitC(defaultInt(plan.getKeywordGroupLimitC(), 0));
     }
 
     private List<PackageChannelQuotaConfig> activeChannelQuotas(Long packagePlanId) {
@@ -187,6 +209,37 @@ public class CompanyPackageBindingService {
                             "channels", exceeded
                     ));
         }
+    }
+
+    private void validateActiveProjectKeywordAllocationsAgainstPackage(Long companyId, PackagePlan plan) {
+        List<com.huanjing.geo.module.project.entity.Project> activeProjects = projectMapper.selectList(
+                new LambdaQueryWrapper<com.huanjing.geo.module.project.entity.Project>()
+                        .eq(com.huanjing.geo.module.project.entity.Project::getCompanyId, companyId)
+                        .eq(com.huanjing.geo.module.project.entity.Project::getStatus, "active")
+                        .isNull(com.huanjing.geo.module.project.entity.Project::getDeletedAt)
+        );
+        int usedA = activeProjects.stream().mapToInt(p -> defaultInt(p.getPlanKeywordGroupLimitA(), defaultInt(p.getPlanKeywordGroupLimit(), 0))).sum();
+        int usedB = activeProjects.stream().mapToInt(p -> defaultInt(p.getPlanKeywordGroupLimitB(), 0)).sum();
+        int usedC = activeProjects.stream().mapToInt(p -> defaultInt(p.getPlanKeywordGroupLimitC(), 0)).sum();
+        int limitA = defaultInt(plan.getKeywordGroupLimitA(), plan.getKeywordGroupLimit());
+        int limitB = defaultInt(plan.getKeywordGroupLimitB(), 0);
+        int limitC = defaultInt(plan.getKeywordGroupLimitC(), 0);
+        if (usedA > limitA || usedB > limitB || usedC > limitC) {
+            throw new BizException(400, "PACKAGE_KEYWORD_TIER_ALLOCATION_EXCEEDED", 200,
+                    Map.of(
+                            "errorCode", "PACKAGE_KEYWORD_TIER_ALLOCATION_EXCEEDED",
+                            "limitA", limitA,
+                            "limitB", limitB,
+                            "limitC", limitC,
+                            "usedA", usedA,
+                            "usedB", usedB,
+                            "usedC", usedC
+                    ));
+        }
+    }
+
+    private int defaultInt(Integer value, Integer fallback) {
+        return value == null ? (fallback == null ? 0 : fallback) : value;
     }
 
     private List<ChannelQuotaSnapshotItem> toSnapshot(List<PackageChannelQuotaConfig> channelQuotas) {

@@ -11,7 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class KeywordLlmQuestionServiceTest {
 
     private final KeywordLlmQuestionService service = new KeywordLlmQuestionService(
-            null, null, null, null, new LlmProperties(), null, null, null
+            null, null, null, null, null, new LlmProperties(), null, null, null
     );
 
     @Test

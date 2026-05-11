@@ -131,6 +131,9 @@ semi-auto:
           - img
 
 geo:
+  security:
+    init-admin-password:
+      enabled: ${GEO_INIT_ADMIN_PASSWORD_ENABLED:false}
   brand-geo-site:
     endpoint: ${BRAND_GEO_SITE_ENDPOINT:}
     connect-timeout-ms: ${BRAND_GEO_SITE_CONNECT_TIMEOUT_MS:5000}

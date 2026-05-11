@@ -2,6 +2,8 @@ package com.huanjing.geo.module.project.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
+import com.huanjing.geo.module.project.dto.KeywordGroupQuestionUpdateRequest;
+import com.huanjing.geo.module.project.dto.KeywordGroupQuestionVO;
 import com.huanjing.geo.module.project.dto.KeywordGroupListItemVO;
 import com.huanjing.geo.module.project.dto.KeywordGroupPayloadRequest;
 import com.huanjing.geo.module.project.dto.KeywordGroupVO;
@@ -51,6 +53,25 @@ public class KeywordGroupController {
         return R.ok(keywordGroupService.detail(id));
     }
 
+    @GetMapping("/{id:\\d+}/questions")
+    public R<Page<KeywordGroupQuestionVO>> questions(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "1") long current,
+            @RequestParam(defaultValue = "20") long size,
+            @RequestParam(required = false) String tier
+    ) {
+        return R.ok(keywordGroupService.questions(id, current, size, tier));
+    }
+
+    @PutMapping("/{groupId:\\d+}/questions/{questionId:\\d+}")
+    public R<KeywordGroupQuestionVO> updateQuestion(
+            @PathVariable Long groupId,
+            @PathVariable Long questionId,
+            @Valid @RequestBody KeywordGroupQuestionUpdateRequest req
+    ) {
+        return R.ok(keywordGroupService.updateQuestion(groupId, questionId, req));
+    }
+
     @PostMapping
     public R<KeywordGroupVO> create(@Valid @RequestBody KeywordGroupPayloadRequest req) {
         return R.ok(keywordGroupService.create(req));
@@ -74,6 +95,6 @@ public class KeywordGroupController {
 
     @PostMapping("/llm-questions/generate")
     public R<KeywordLlmQuestionGenerateVO> generateLlmQuestions(@Valid @RequestBody KeywordLlmQuestionGenerateRequest req) {
-        return R.ok(keywordLlmQuestionService.generate(req.getCompanyId(), req.getSeedText(), req.getCurrentToken(), req.getCount(), req.getCurrentLlmCount(), req.getTargetCount()));
+        return R.ok(keywordLlmQuestionService.generate(req.getCompanyId(), req.getProjectId(), req.getSeedText(), req.getCurrentToken(), req.getCount(), req.getCurrentLlmCount(), req.getTargetCount()));
     }
 }

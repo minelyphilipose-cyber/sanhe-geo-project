@@ -4,11 +4,14 @@ import type {
   PageResult,
   Project,
   KeywordGroup,
+  KeywordGroupImportResult,
   KeywordLlmQuestionGenerateResult,
+  KeywordGroupQuestion,
   KeywordGroupPayload,
   KeywordPreviewResult,
   KeywordTypeConfig,
   ProjectChannelAllocationQuota,
+  ProjectKeywordGroupQuota,
 } from '@/types'
 
 export function getProjectList(params: {
@@ -29,6 +32,10 @@ export function getProjectDetail(id: number) {
 
 export function getProjectChannelAllocationQuota(params: { companyId: number; excludeProjectId?: number }) {
   return request.get<R<ProjectChannelAllocationQuota>>('/projects/channel-allocation-quota', { params })
+}
+
+export function getProjectKeywordGroupQuota(params: { companyId: number; excludeProjectId?: number }) {
+  return request.get<R<ProjectKeywordGroupQuota>>('/projects/keyword-group-quota', { params })
 }
 
 export function createProject(data: Record<string, any>) {
@@ -55,7 +62,7 @@ export function deleteProject(id: number) {
   return request.delete<R<void>>(`/projects/${id}`)
 }
 
-export function getKeywordGroupPage(params: { current?: number; size?: number; keyword?: string; companyId?: number; type?: string }) {
+export function getKeywordGroupPage(params: { current?: number; size?: number; keyword?: string; companyId?: number; projectId?: number; type?: string }) {
   return request.get<R<PageResult<KeywordGroup>>>('/keyword-groups', { params })
 }
 
@@ -65,6 +72,22 @@ export function getKeywordGroupTypeConfigs() {
 
 export function getKeywordGroupDetail(id: number) {
   return request.get<R<KeywordGroup>>(`/keyword-groups/${id}`)
+}
+
+export function getKeywordGroupQuestions(id: number, params: { current?: number; size?: number; tier?: string }) {
+  return request.get<R<PageResult<KeywordGroupQuestion>>>(`/keyword-groups/${id}/questions`, { params })
+}
+
+export function updateKeywordGroupQuestion(groupId: number, questionId: number, data: Partial<KeywordGroupQuestion>) {
+  return request.put<R<KeywordGroupQuestion>>(`/keyword-groups/${groupId}/questions/${questionId}`, data)
+}
+
+export function importProjectKeywordGroup(projectId: number, file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request.post<R<KeywordGroupImportResult>>(`/projects/${projectId}/keyword-groups/import`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
 }
 
 export function createKeywordGroup(data: KeywordGroupPayload) {
@@ -83,7 +106,7 @@ export function previewKeywordGroup(data: KeywordGroupPayload) {
   return request.post<R<KeywordPreviewResult>>('/keyword-groups/preview', data)
 }
 
-export function generateKeywordGroupLlmQuestions(data: { companyId: number; seedText: string; currentToken?: string; count?: number; currentLlmCount?: number; targetCount?: number }) {
+export function generateKeywordGroupLlmQuestions(data: { companyId?: number; projectId?: number; seedText: string; currentToken?: string; count?: number; currentLlmCount?: number; targetCount?: number }) {
   return request.post<R<KeywordLlmQuestionGenerateResult>>('/keyword-groups/llm-questions/generate', data)
 }
 

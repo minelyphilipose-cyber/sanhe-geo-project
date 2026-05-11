@@ -29,6 +29,7 @@ import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.partner.entity.Partner;
 import com.huanjing.geo.module.partner.mapper.PartnerMapper;
 import com.huanjing.geo.module.project.service.KeywordGroupService;
+import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
@@ -89,6 +90,7 @@ public class CompanyService {
     private final CompanyPackageBindingService companyPackageBindingService;
     private final CompanyChannelQuotaUsageMapper companyChannelQuotaUsageMapper;
     private final KeywordGroupService keywordGroupService;
+    private final ProjectMapper projectMapper;
     private final ActivityLogService activityLogService;
 
     public Page<Company> page(long current, long size, String keyword, String ownerType, Long partnerId) {
@@ -134,9 +136,20 @@ public class CompanyService {
         ensureSalesCompanyAccess(user, company);
 
         CompanyPackageBinding binding = companyPackageBindingService.activeBinding(companyId);
-        long usedKeywordCount = keywordGroupService.countActiveProjectSavedKeywords(companyId, null);
-        int usedCount = (int) Math.min(usedKeywordCount, Integer.MAX_VALUE);
         int quotaLimit = binding == null || binding.getKeywordGroupLimit() == null ? 0 : binding.getKeywordGroupLimit();
+        List<com.huanjing.geo.module.project.entity.Project> activeProjects = projectMapper.selectList(
+                new LambdaQueryWrapper<com.huanjing.geo.module.project.entity.Project>()
+                        .eq(com.huanjing.geo.module.project.entity.Project::getCompanyId, companyId)
+                        .eq(com.huanjing.geo.module.project.entity.Project::getStatus, "active")
+                        .isNull(com.huanjing.geo.module.project.entity.Project::getDeletedAt)
+        );
+        int usedA = activeProjects.stream().mapToInt(p -> defaultInt(p.getPlanKeywordGroupLimitA(), defaultInt(p.getPlanKeywordGroupLimit(), 0))).sum();
+        int usedB = activeProjects.stream().mapToInt(p -> defaultInt(p.getPlanKeywordGroupLimitB(), 0)).sum();
+        int usedC = activeProjects.stream().mapToInt(p -> defaultInt(p.getPlanKeywordGroupLimitC(), 0)).sum();
+        int usedCount = usedA + usedB + usedC;
+        int quotaLimitA = binding == null ? 0 : defaultInt(binding.getKeywordGroupLimitA(), quotaLimit);
+        int quotaLimitB = binding == null ? 0 : defaultInt(binding.getKeywordGroupLimitB(), 0);
+        int quotaLimitC = binding == null ? 0 : defaultInt(binding.getKeywordGroupLimitC(), 0);
 
         CompanyKeywordGroupQuotaVO vo = new CompanyKeywordGroupQuotaVO();
         vo.setCompanyId(companyId);
@@ -144,10 +157,23 @@ public class CompanyService {
         vo.setPackageName(binding == null ? null : binding.getPackageName());
         vo.setActiveBinding(binding != null);
         vo.setQuotaLimit(quotaLimit);
+        vo.setQuotaLimitA(quotaLimitA);
+        vo.setQuotaLimitB(quotaLimitB);
+        vo.setQuotaLimitC(quotaLimitC);
         vo.setUsedCount(usedCount);
+        vo.setUsedCountA(usedA);
+        vo.setUsedCountB(usedB);
+        vo.setUsedCountC(usedC);
         vo.setRemainingCount(Math.max(quotaLimit - usedCount, 0));
+        vo.setRemainingCountA(Math.max(quotaLimitA - usedA, 0));
+        vo.setRemainingCountB(Math.max(quotaLimitB - usedB, 0));
+        vo.setRemainingCountC(Math.max(quotaLimitC - usedC, 0));
         vo.setUsageRate(quotaLimit <= 0 ? 0D : Math.min(1D, usedCount * 1D / quotaLimit));
         return vo;
+    }
+
+    private int defaultInt(Integer value, Integer fallback) {
+        return value == null ? (fallback == null ? 0 : fallback) : value;
     }
 
     public List<SalesOwnerOptionVO> salesOwnerOptions() {

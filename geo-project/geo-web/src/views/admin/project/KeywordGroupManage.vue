@@ -9,10 +9,21 @@
 
     <div class="form-grid">
       <div class="form-section">
-        <label class="form-label required">客户</label>
-        <el-select v-model="form.companyId" class="form-input" filterable placeholder="请选择客户">
-          <el-option v-for="item in companyOptions" :key="item.id" :label="item.companyName" :value="item.id" />
-        </el-select>
+        <label class="form-label required">绑定项目</label>
+        <el-cascader
+          v-model="form.projectId"
+          class="form-input"
+          filterable
+          clearable
+          :options="projectCascadeOptions"
+          :props="projectCascadeProps"
+          :loading="projectLoading"
+          placeholder="选择客户 / 品牌 / 项目"
+          @change="handleProjectChange"
+        />
+        <div v-if="selectedProject" class="form-tip">
+          {{ selectedProject.companyName || '未归属客户' }} / {{ selectedProject.brandName || '未绑定品牌' }}，项目问题额度 {{ selectedProjectQuota }} 条
+        </div>
       </div>
       <div class="form-section">
         <label class="form-label required">关键词组名称</label>
@@ -61,10 +72,12 @@
 
     <LlmQuestionPanel
       :company-id="form.companyId"
+      :project-id="form.projectId"
       :seed-text="form.llmSeedText"
       :questions="form.llmQuestions"
       :generation-token="form.llmGenerationToken"
       :preview-count="form.previewCount"
+      :quota-count="selectedProjectQuota"
       @update:seed-text="form.llmSeedText = $event"
       @update:questions="form.llmQuestions = $event"
       @update:generation-token="form.llmGenerationToken = $event"
@@ -86,6 +99,9 @@
         <el-table :data="rows" border>
           <el-table-column prop="name" label="拓词组名称" min-width="220" />
           <el-table-column prop="companyName" label="客户" min-width="180" />
+          <el-table-column prop="projectName" label="项目" min-width="180">
+            <template #default="{ row }">{{ row.projectName || '-' }}</template>
+          </el-table-column>
           <el-table-column label="类型" width="170">
             <template #default="{ row }">
               <el-tag v-if="row.legacyType" type="info" size="small" class="mr-1">历史</el-tag>
@@ -114,6 +130,7 @@
       :total-available="previewTotalAvailable"
       :preview-count="form.previewCount"
       :saving="saving"
+      @update:items="previewItems = $event"
       @submit="submit"
     />
   </div>
@@ -128,11 +145,11 @@ import KeywordColumnBuilder from './keyword-group/KeywordColumnBuilder.vue'
 import CompareKeywordBuilder from './keyword-group/CompareKeywordBuilder.vue'
 import KeywordPreviewPanel from './keyword-group/KeywordPreviewPanel.vue'
 import LlmQuestionPanel from './keyword-group/LlmQuestionPanel.vue'
-import { createKeywordGroup, deleteKeywordGroup, getKeywordGroupDetail, getKeywordGroupPage, getKeywordGroupTypeConfigs, previewKeywordGroup, updateKeywordGroup } from '@/api/project'
+import { createKeywordGroup, deleteKeywordGroup, getKeywordGroupDetail, getKeywordGroupPage, getKeywordGroupTypeConfigs, getProjectList, previewKeywordGroup, updateKeywordGroup } from '@/api/project'
 import { getKeywordAffixWordOptions } from '@/api/system'
 import { getCompanyList } from '@/api/customer'
 import { ERROR_CODE_HINTS, parseErrorCode } from '@/utils/errorCode'
-import type { Company, KeywordAffixWordOptionResult, KeywordGroup, KeywordGroupColumns, KeywordGroupPayload, KeywordPreviewItem, KeywordTypeConfig, KeywordTypeOption, KeywordWordItem } from '@/types'
+import type { Company, KeywordAffixWordOptionResult, KeywordGroup, KeywordGroupColumns, KeywordGroupPayload, KeywordPreviewItem, KeywordTypeConfig, KeywordTypeOption, KeywordWordItem, Project } from '@/types'
 import type { KeywordGroupFormState } from './keyword-group/types'
 
 const limit = 1000
@@ -145,6 +162,8 @@ const rows = ref<KeywordGroup[]>([])
 const previewItems = ref<KeywordPreviewItem[]>([])
 const previewTotalAvailable = ref(0)
 const companyOptions = ref<Company[]>([])
+const projectOptions = ref<Project[]>([])
+const projectLoading = ref(false)
 const typeConfigs = ref<KeywordTypeConfig[]>([])
 const editingId = ref<number | null>(null)
 const lastEditState = ref<Record<string, Partial<KeywordGroupFormState>>>({})
@@ -229,6 +248,22 @@ const typeSelectorOptions = computed<KeywordTypeOption[]>(() => {
 })
 
 const currentTypeConfig = computed(() => typeConfigs.value.find((item) => item.type === form.type) || legacyStandardConfig)
+const projectCascadeProps = {
+  value: 'value',
+  label: 'label',
+  children: 'children',
+  emitPath: false,
+}
+const projectCascadeOptions = computed(() => buildProjectCascadeOptions(projectOptions.value))
+const selectedProject = computed(() => projectOptions.value.find((project) => project.id === form.projectId) || null)
+const selectedProjectQuota = computed(() => {
+  const project = selectedProject.value
+  if (!project) return 0
+  const a = project.planKeywordGroupLimitA ?? project.planKeywordGroupLimit ?? 0
+  const b = project.planKeywordGroupLimitB ?? 0
+  const c = project.planKeywordGroupLimitC ?? 0
+  return a + b + c
+})
 
 const estimatedParts = computed(() => {
   const columns = buildColumns()
@@ -424,6 +459,75 @@ async function loadCompanies() {
   }
 }
 
+async function loadProjects() {
+  projectLoading.value = true
+  try {
+    const { data } = await getProjectList({ current: 1, size: 500 })
+    projectOptions.value = data.data.records || []
+  } catch {
+    projectOptions.value = []
+  } finally {
+    projectLoading.value = false
+  }
+}
+
+interface ProjectCascadeNode {
+  value: string | number
+  label: string
+  children?: ProjectCascadeNode[]
+}
+
+function buildProjectCascadeOptions(projects: Project[]): ProjectCascadeNode[] {
+  const companyMap = new Map<string, ProjectCascadeNode>()
+  const brandMap = new Map<string, ProjectCascadeNode>()
+  const sortedProjects = [...projects].sort(compareProjectsForCascade)
+  for (const project of sortedProjects) {
+    const companyKey = `company:${project.companyId ?? 'none'}:${project.companyName || '未归属客户'}`
+    let companyNode = companyMap.get(companyKey)
+    if (!companyNode) {
+      companyNode = { value: companyKey, label: project.companyName || '未归属客户', children: [] }
+      companyMap.set(companyKey, companyNode)
+    }
+    const brandKey = `${companyKey}:brand:${project.brandId ?? 'none'}:${project.brandName || '未绑定品牌'}`
+    let brandNode = brandMap.get(brandKey)
+    if (!brandNode) {
+      brandNode = { value: brandKey, label: project.brandName || '未绑定品牌', children: [] }
+      brandMap.set(brandKey, brandNode)
+      companyNode.children?.push(brandNode)
+    }
+    brandNode.children?.push({
+      value: project.id,
+      label: project.projectName || `项目 #${project.id}`,
+    })
+  }
+  return Array.from(companyMap.values())
+}
+
+function compareProjectsForCascade(a: Project, b: Project) {
+  return [
+    compareText(a.companyName, b.companyName),
+    compareText(a.brandName, b.brandName),
+    compareText(a.projectName, b.projectName),
+    a.id - b.id,
+  ].find((result) => result !== 0) || 0
+}
+
+function compareText(a?: string | null, b?: string | null) {
+  return (a || '').localeCompare(b || '', 'zh-Hans-CN')
+}
+
+function handleProjectChange(projectId: number | null) {
+  const project = projectOptions.value.find((item) => item.id === projectId)
+  form.projectId = project?.id || null
+  form.companyId = project?.companyId || null
+  if (project) {
+    const quota = selectedProjectQuota.value
+    if (quota > 0) {
+      form.previewCount = Math.min(quota, limit)
+    }
+  }
+}
+
 async function loadTypeConfigs() {
   const { data } = await getKeywordGroupTypeConfigs()
   typeConfigs.value = data.data || []
@@ -525,7 +629,7 @@ function hydrateForm(detail: KeywordGroup) {
   form.llmSeedText = ''
   form.llmGenerationToken = ''
   form.llmQuestions = [...(detail.llmQuestions || [])]
-  form.previewCount = 100
+  form.previewCount = detail.savedKeywordCount || selectedProjectQuota.value || 100
 
   const columns = detail.columns || emptyColumns()
   const areaWords = columns.areaWords?.length ? columns.areaWords : (columns.regionWords || [])
@@ -548,8 +652,8 @@ function emptyColumns(): KeywordGroupColumns {
 }
 
 function validateBase(forSave: boolean) {
-  if (!form.companyId) {
-    ElMessage.warning('请选择客户')
+  if (!form.projectId || !form.companyId) {
+    ElMessage.warning('请选择项目')
     return false
   }
   if (forSave && !form.name.trim()) {
@@ -593,6 +697,10 @@ function validateBase(forSave: boolean) {
     ElMessage.warning(overLimitText.value)
     return false
   }
+  if (selectedProjectQuota.value > 0 && form.previewCount > selectedProjectQuota.value) {
+    ElMessage.warning(`入库数不能超过当前项目问题额度 ${selectedProjectQuota.value}`)
+    return false
+  }
   if (form.previewCount < form.llmQuestions.length) {
     ElMessage.warning(`入库数 ${form.previewCount} 小于已生成 AI 问题数 ${form.llmQuestions.length}，请调整`)
     return false
@@ -613,7 +721,7 @@ async function doPreview() {
   previewing.value = true
   try {
     const { data } = await previewKeywordGroup(buildPayload())
-    previewItems.value = data.data.items || []
+    previewItems.value = normalizePreviewItems(data.data.items || [])
     previewTotalAvailable.value = data.data.totalAvailable || 0
     previewVisible.value = true
     if ((data.data.totalAvailable || 0) < form.previewCount) {
@@ -624,6 +732,10 @@ async function doPreview() {
   } finally {
     previewing.value = false
   }
+}
+
+function normalizePreviewItems(items: KeywordPreviewItem[]) {
+  return items.map((item) => ({ ...item, questionTier: item.questionTier || 'A' }))
 }
 
 async function submit() {
@@ -702,7 +814,7 @@ async function remove(row: KeywordGroup) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadCompanies(), loadTypeConfigs()])
+  await Promise.all([loadCompanies(), loadProjects(), loadTypeConfigs()])
   resetForm()
   await loadOptionsByType(form.type)
   await load()
@@ -761,6 +873,12 @@ onMounted(async () => {
 .form-input {
   width: 460px;
   max-width: 100%;
+}
+
+.form-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #64748b;
 }
 
 input.form-input {

@@ -9,7 +9,16 @@ public class CompanyKeywordGroupQuotaVO {
     private String packageName;
     private Boolean activeBinding;
     private Integer quotaLimit;
+    private Integer quotaLimitA;
+    private Integer quotaLimitB;
+    private Integer quotaLimitC;
     private Integer usedCount;
+    private Integer usedCountA;
+    private Integer usedCountB;
+    private Integer usedCountC;
     private Integer remainingCount;
+    private Integer remainingCountA;
+    private Integer remainingCountB;
+    private Integer remainingCountC;
     private Double usageRate;
 }

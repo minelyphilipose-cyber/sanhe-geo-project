@@ -55,7 +55,25 @@
           <div class="quota-panel__meta">
             <span v-if="isKeywordGroupOverQuota">超出额度 {{ keywordGroupOverflow }}</span>
             <span v-else>剩余额度 {{ keywordGroupQuota?.remainingCount ?? 0 }}</span>
-            <span>统计客户下所有已激活项目选择的关键词组入库数</span>
+            <span>统计客户下所有已激活项目分配的问题额度</span>
+          </div>
+          <div class="keyword-tier-list">
+            <div v-for="item in keywordGroupTierItems" :key="item.tier" class="keyword-tier-row">
+              <div class="keyword-tier-row__main">
+                <span>{{ item.label }}</span>
+                <strong>{{ item.used }} / {{ item.limit }}</strong>
+              </div>
+              <el-progress
+                :percentage="item.percentage"
+                :status="item.status"
+                :show-text="false"
+                :stroke-width="8"
+              />
+              <div class="keyword-tier-row__meta">
+                <span v-if="item.overflow > 0">超出 {{ item.overflow }}</span>
+                <span v-else>剩余 {{ item.remaining }}</span>
+              </div>
+            </div>
           </div>
         </div>
         <div v-loading="distributionQuotaLoading" class="quota-panel">
@@ -605,6 +623,38 @@ const keywordGroupQuotaStatus = computed(() => {
   }
   return undefined
 })
+const keywordGroupTierItems = computed(() => {
+  const quota = keywordGroupQuota.value
+  const tiers = [
+    {
+      tier: 'A',
+      label: 'A档问题',
+      limit: quota?.quotaLimitA ?? 0,
+      used: quota?.usedCountA ?? 0,
+      remaining: quota?.remainingCountA ?? 0,
+    },
+    {
+      tier: 'B',
+      label: 'B档问题',
+      limit: quota?.quotaLimitB ?? 0,
+      used: quota?.usedCountB ?? 0,
+      remaining: quota?.remainingCountB ?? 0,
+    },
+    {
+      tier: 'C',
+      label: 'C档问题',
+      limit: quota?.quotaLimitC ?? 0,
+      used: quota?.usedCountC ?? 0,
+      remaining: quota?.remainingCountC ?? 0,
+    },
+  ]
+  return tiers.map((item) => {
+    const overflow = Math.max(item.used - item.limit, 0)
+    const percentage = item.limit <= 0 ? (item.used > 0 ? 100 : 0) : Math.min(100, Math.round(item.used * 100 / item.limit))
+    const status = overflow > 0 ? 'exception' : (percentage >= 90 ? 'warning' : undefined)
+    return { ...item, overflow, percentage, status }
+  })
+})
 
 function distributionQuotaPercentage(row: CompanyDistributionQuotaItem) {
   if (!row.enabled) return 0
@@ -1133,6 +1183,37 @@ onMounted(async () => {
   margin-top: 8px;
   color: #606266;
   font-size: 12px;
+}
+
+.keyword-tier-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.keyword-tier-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 160px) minmax(180px, 1fr) 90px;
+  align-items: center;
+  gap: 12px;
+}
+
+.keyword-tier-row__main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.keyword-tier-row__main strong {
+  font-weight: 600;
+}
+
+.keyword-tier-row__meta {
+  font-size: 12px;
+  color: #606266;
+  text-align: right;
 }
 
 .quota-channel-cell,

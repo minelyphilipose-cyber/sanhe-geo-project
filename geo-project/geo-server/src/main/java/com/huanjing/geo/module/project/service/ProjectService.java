@@ -46,9 +46,11 @@ import com.huanjing.geo.module.dispatch.mapper.ProjectPollRotationMapper;
 import com.huanjing.geo.module.project.dto.ProjectCreateRequest;
 import com.huanjing.geo.module.project.dto.ProjectChannelAllocationQuotaVO;
 import com.huanjing.geo.module.project.dto.ProjectFlowUpdateRequest;
+import com.huanjing.geo.module.project.dto.ProjectKeywordGroupQuotaVO;
 import com.huanjing.geo.module.project.dto.ProjectStageUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectStatusUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectUpdateRequest;
+import com.huanjing.geo.module.project.dto.KeywordGroupListItemVO;
 import com.huanjing.geo.module.project.entity.KeywordGroup;
 import com.huanjing.geo.module.project.entity.ProjectPlatformBinding;
 import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
@@ -138,7 +140,11 @@ public class ProjectService {
                 .orderByDesc(Project::getCreatedAt);
 
         if (StringUtils.hasText(keyword)) {
-            wrapper.like(Project::getProjectName, keyword);
+            wrapper.and(w -> w.like(Project::getProjectName, keyword)
+                    .or()
+                    .like(Project::getCompanyName, keyword)
+                    .or()
+                    .like(Project::getBrandName, keyword));
         }
         if (StringUtils.hasText(status)) {
             wrapper.eq(Project::getStatus, status);
@@ -233,6 +239,8 @@ public class ProjectService {
         );
         project.setCreatedBy(operator.getId());
         project.setRemark(req.getRemark());
+        applyKeywordGroupAllocation(project, resolveKeywordGroupAllocation(company.getId(), null,
+                req.getKeywordGroupLimitA(), req.getKeywordGroupLimitB(), req.getKeywordGroupLimitC()));
         projectMapper.insert(project);
         replaceKeywordGroupSelections(project.getId(), project.getCompanyId(), req.getKeywordGroupIds());
         channelAllocationService.replaceAllocations(project, req.getChannelAllocations(), req.getAllocationVersion(),
@@ -293,6 +301,8 @@ public class ProjectService {
                 req.getContentNote()
         );
         project.setRemark(req.getRemark());
+        applyKeywordGroupAllocation(project, resolveKeywordGroupAllocation(company.getId(), project.getId(),
+                req.getKeywordGroupLimitA(), req.getKeywordGroupLimitB(), req.getKeywordGroupLimitC()));
         projectMapper.updateById(project);
         replaceKeywordGroupSelections(project.getId(), project.getCompanyId(), req.getKeywordGroupIds());
         channelAllocationService.replaceAllocations(project, req.getChannelAllocations(), req.getAllocationVersion(),
@@ -696,6 +706,49 @@ public class ProjectService {
         return channelAllocationService.quota(companyId, excludeProjectId);
     }
 
+    public ProjectKeywordGroupQuotaVO keywordGroupQuota(Long companyId, Long excludeProjectId) {
+        SysUser user = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission("project.read");
+        Company company = validateCompany(companyId);
+        currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "company");
+        if ("sales".equals(user.getRole())) {
+            if (company.getSalesOwnerId() == null || !company.getSalesOwnerId().equals(user.getId())) {
+                throw new BizException(403, "No permission to access this company");
+            }
+            if (!"signed".equals(company.getStatus())) {
+                throw new BizException(403, "Sales can only access signed companies");
+            }
+        }
+        CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(companyId);
+        KeywordAllocation used = activeKeywordAllocation(companyId, excludeProjectId);
+        KeywordAllocation current = currentProjectKeywordAllocation(excludeProjectId);
+        KeywordAllocation limit = bindingKeywordLimit(binding);
+
+        ProjectKeywordGroupQuotaVO vo = new ProjectKeywordGroupQuotaVO();
+        vo.setCompanyId(companyId);
+        vo.setExcludeProjectId(excludeProjectId);
+        vo.setQuotaLimit(defaultInt(binding.getKeywordGroupLimit(), 0));
+        vo.setQuotaLimitA(limit.a());
+        vo.setQuotaLimitB(limit.b());
+        vo.setQuotaLimitC(limit.c());
+        vo.setActiveAllocatedCount(used.total());
+        vo.setActiveAllocatedCountA(used.a());
+        vo.setActiveAllocatedCountB(used.b());
+        vo.setActiveAllocatedCountC(used.c());
+        vo.setCurrentProjectAllocatedCount(current.total());
+        vo.setCurrentProjectAllocatedCountA(current.a());
+        vo.setCurrentProjectAllocatedCountB(current.b());
+        vo.setCurrentProjectAllocatedCountC(current.c());
+        vo.setRemainingCount(Math.max(limit.total() - used.total(), 0));
+        vo.setRemainingCountA(Math.max(limit.a() - used.a(), 0));
+        vo.setRemainingCountB(Math.max(limit.b() - used.b(), 0));
+        vo.setRemainingCountC(Math.max(limit.c() - used.c(), 0));
+        vo.setInputMaxA(vo.getRemainingCountA());
+        vo.setInputMaxB(vo.getRemainingCountB());
+        vo.setInputMaxC(vo.getRemainingCountC());
+        return vo;
+    }
+
     private void markActivatedIfNeeded(Project project) {
         if (project.getActivatedAt() == null) {
             project.setActivatedAt(LocalDateTime.now());
@@ -703,16 +756,118 @@ public class ProjectService {
     }
 
     private void validateKeywordGroupQuota(Project project) {
+        keywordGroupService.validateProjectKeywordGroupComplete(project);
         CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(project.getCompanyId());
-        int quotaLimit = binding.getKeywordGroupLimit() == null ? 0 : binding.getKeywordGroupLimit();
-        long activeUsed = keywordGroupService.countActiveProjectSavedKeywords(project.getCompanyId(), project.getId());
-        long projectUsed = keywordGroupService.countSelectedSavedKeywords(project.getId());
-        long totalUsed = activeUsed + projectUsed;
-        if (totalUsed > quotaLimit) {
-            throw new BizException(400, "KEYWORD_GROUP_QUOTA_EXCEEDED: 关键词组额度不足，套餐限制 "
-                    + quotaLimit + " 条，当前已激活项目占用 " + activeUsed + " 条，本项目占用 "
-                    + projectUsed + " 条");
+        KeywordAllocation limit = bindingKeywordLimit(binding);
+        KeywordAllocation activeUsed = activeKeywordAllocation(project.getCompanyId(), project.getId());
+        KeywordAllocation projectUsed = projectKeywordAllocation(project);
+        KeywordAllocation totalUsed = activeUsed.plus(projectUsed);
+        if (totalUsed.a() > limit.a() || totalUsed.b() > limit.b() || totalUsed.c() > limit.c()) {
+            throw new BizException(400, "KEYWORD_GROUP_QUOTA_EXCEEDED: 关键词组额度不足，套餐限制 A/B/C="
+                    + limit.a() + "/" + limit.b() + "/" + limit.c()
+                    + "，当前已激活项目占用 A/B/C=" + activeUsed.a() + "/" + activeUsed.b() + "/" + activeUsed.c()
+                    + "，本项目占用 A/B/C=" + projectUsed.a() + "/" + projectUsed.b() + "/" + projectUsed.c());
         }
+    }
+
+    private void validateProjectHasKeywordGroup(Project project) {
+        List<ProjectKeywordGroupRel> rels = projectKeywordGroupRelMapper.selectList(
+                new LambdaQueryWrapper<ProjectKeywordGroupRel>()
+                        .eq(ProjectKeywordGroupRel::getProjectId, project.getId())
+        );
+        Set<Long> relGroupIds = rels.stream()
+                .map(ProjectKeywordGroupRel::getKeywordGroupId)
+                .filter(id -> id != null && id > 0)
+                .collect(Collectors.toSet());
+        Long relCount = relGroupIds.isEmpty() ? 0L : keywordGroupMapper.selectCount(
+                new LambdaQueryWrapper<KeywordGroup>()
+                        .in(KeywordGroup::getId, relGroupIds)
+                        .eq(KeywordGroup::getCompanyId, project.getCompanyId())
+                        .eq(KeywordGroup::getDeleted, false)
+        );
+        Long directCount = keywordGroupMapper.selectCount(
+                new LambdaQueryWrapper<KeywordGroup>()
+                        .eq(KeywordGroup::getProjectId, project.getId())
+                        .eq(KeywordGroup::getCompanyId, project.getCompanyId())
+                        .eq(KeywordGroup::getDeleted, false)
+        );
+        if ((relCount == null || relCount == 0) && (directCount == null || directCount == 0)) {
+            throw new BizException(400, "KEYWORD_GROUP_REQUIRED: 项目启动前必须至少绑定一个关键词组");
+        }
+    }
+
+    private KeywordAllocation resolveKeywordGroupAllocation(Long companyId, Long excludeProjectId, Integer requestedA, Integer requestedB, Integer requestedC) {
+        CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(companyId);
+        KeywordAllocation limit = bindingKeywordLimit(binding);
+        KeywordAllocation used = activeKeywordAllocation(companyId, excludeProjectId);
+        KeywordAllocation max = new KeywordAllocation(
+                Math.max(limit.a() - used.a(), 0),
+                Math.max(limit.b() - used.b(), 0),
+                Math.max(limit.c() - used.c(), 0)
+        );
+        int a = requestedA == null ? max.a() : requestedA;
+        int b = requestedB == null ? max.b() : requestedB;
+        int c = requestedC == null ? max.c() : requestedC;
+        if (a < 0 || b < 0 || c < 0) {
+            throw new BizException(400, "keyword group tier allocation must be >= 0");
+        }
+        if (a > max.a() || b > max.b() || c > max.c()) {
+            throw new BizException(400, "KEYWORD_GROUP_QUOTA_EXCEEDED: 项目 A/B/C 分配不能超过当前可分配数量 "
+                    + max.a() + "/" + max.b() + "/" + max.c());
+        }
+        return new KeywordAllocation(a, b, c);
+    }
+
+    private void applyKeywordGroupAllocation(Project project, KeywordAllocation allocation) {
+        project.setPlanKeywordGroupLimitA(allocation.a());
+        project.setPlanKeywordGroupLimitB(allocation.b());
+        project.setPlanKeywordGroupLimitC(allocation.c());
+        project.setPlanKeywordGroupLimit(allocation.total());
+    }
+
+    private KeywordAllocation activeKeywordAllocation(Long companyId, Long excludeProjectId) {
+        List<Project> projects = projectMapper.selectList(
+                new LambdaQueryWrapper<Project>()
+                        .eq(Project::getCompanyId, companyId)
+                        .eq(Project::getStatus, "active")
+                        .isNull(Project::getDeletedAt)
+                        .ne(excludeProjectId != null, Project::getId, excludeProjectId)
+        );
+        int a = projects.stream().mapToInt(p -> defaultInt(p.getPlanKeywordGroupLimitA(), defaultInt(p.getPlanKeywordGroupLimit(), 0))).sum();
+        int b = projects.stream().mapToInt(p -> defaultInt(p.getPlanKeywordGroupLimitB(), 0)).sum();
+        int c = projects.stream().mapToInt(p -> defaultInt(p.getPlanKeywordGroupLimitC(), 0)).sum();
+        return new KeywordAllocation(a, b, c);
+    }
+
+    private KeywordAllocation currentProjectKeywordAllocation(Long projectId) {
+        if (projectId == null) {
+            return new KeywordAllocation(0, 0, 0);
+        }
+        Project project = projectMapper.selectById(projectId);
+        if (project == null || project.getDeletedAt() != null) {
+            return new KeywordAllocation(0, 0, 0);
+        }
+        return projectKeywordAllocation(project);
+    }
+
+    private KeywordAllocation projectKeywordAllocation(Project project) {
+        return new KeywordAllocation(
+                defaultInt(project.getPlanKeywordGroupLimitA(), defaultInt(project.getPlanKeywordGroupLimit(), 0)),
+                defaultInt(project.getPlanKeywordGroupLimitB(), 0),
+                defaultInt(project.getPlanKeywordGroupLimitC(), 0)
+        );
+    }
+
+    private KeywordAllocation bindingKeywordLimit(CompanyPackageBinding binding) {
+        return new KeywordAllocation(
+                defaultInt(binding.getKeywordGroupLimitA(), defaultInt(binding.getKeywordGroupLimit(), 0)),
+                defaultInt(binding.getKeywordGroupLimitB(), 0),
+                defaultInt(binding.getKeywordGroupLimitC(), 0)
+        );
+    }
+
+    private int defaultInt(Integer value, Integer fallback) {
+        return value == null ? (fallback == null ? 0 : fallback) : value;
     }
 
     private String buildProjectCode() {
@@ -824,26 +979,27 @@ public class ProjectService {
 
     private void replaceKeywordGroupSelections(Long projectId, Long companyId, List<Long> selectedKeywordGroupIds) {
         List<Long> normalizedIds = normalizeKeywordGroupIds(selectedKeywordGroupIds);
-        if (normalizedIds.isEmpty()) {
-            throw new BizException(400, "At least one keyword group is required");
-        }
         if (normalizedIds.size() > 10) {
             throw new BizException(400, "Keyword group count must be <= 10");
-        }
-
-        List<KeywordGroup> groups = keywordGroupMapper.selectList(
-                new LambdaQueryWrapper<KeywordGroup>()
-                        .in(KeywordGroup::getId, normalizedIds)
-                        .eq(KeywordGroup::getCompanyId, companyId)
-        );
-        if (groups.size() != normalizedIds.size()) {
-            throw new BizException(400, "Selected keyword groups must belong to project company");
         }
 
         projectKeywordGroupRelMapper.delete(
                 new LambdaQueryWrapper<ProjectKeywordGroupRel>()
                         .eq(ProjectKeywordGroupRel::getProjectId, projectId)
         );
+        if (normalizedIds.isEmpty()) {
+            return;
+        }
+
+        List<KeywordGroup> groups = keywordGroupMapper.selectList(
+                new LambdaQueryWrapper<KeywordGroup>()
+                        .in(KeywordGroup::getId, normalizedIds)
+                        .eq(KeywordGroup::getCompanyId, companyId)
+                        .eq(KeywordGroup::getDeleted, false)
+        );
+        if (groups.size() != normalizedIds.size()) {
+            throw new BizException(400, "Selected keyword groups must belong to project company");
+        }
         for (Long groupId : normalizedIds) {
             ProjectKeywordGroupRel rel = new ProjectKeywordGroupRel();
             rel.setProjectId(projectId);
@@ -899,15 +1055,46 @@ public class ProjectService {
             allGroupIds.add(rel.getKeywordGroupId());
         }
         Map<Long, Long> savedCountMap = keywordGroupService.calcSavedCountsByGroupIds(new ArrayList<>(allGroupIds));
+        Map<Long, KeywordGroupService.KeywordTierCounts> tierCountMap = keywordGroupService.calcSavedTierCountsByGroupIds(new ArrayList<>(allGroupIds));
+        Map<Long, KeywordGroup> groupMap = allGroupIds.isEmpty() ? Map.of() : keywordGroupMapper.selectList(
+                new LambdaQueryWrapper<KeywordGroup>().in(KeywordGroup::getId, allGroupIds)
+        ).stream().collect(Collectors.toMap(KeywordGroup::getId, g -> g, (a, b) -> a, LinkedHashMap::new));
         for (Project project : projects) {
             List<Long> groupIds = projectGroupIdMap.getOrDefault(project.getId(), List.of());
             long totalSaved = 0L;
+            long totalA = 0L;
+            long totalB = 0L;
+            long totalC = 0L;
+            List<KeywordGroupListItemVO> groupItems = new ArrayList<>();
             for (Long groupId : groupIds) {
                 totalSaved += savedCountMap.getOrDefault(groupId, 0L);
+                KeywordGroupService.KeywordTierCounts tierCounts = tierCountMap.get(groupId);
+                totalA += tierCounts == null ? 0L : tierCounts.a();
+                totalB += tierCounts == null ? 0L : tierCounts.b();
+                totalC += tierCounts == null ? 0L : tierCounts.c();
+                KeywordGroup group = groupMap.get(groupId);
+                if (group != null) {
+                    KeywordGroupListItemVO item = new KeywordGroupListItemVO();
+                    item.setId(group.getId());
+                    item.setCompanyId(group.getCompanyId());
+                    item.setProjectId(group.getProjectId());
+                    item.setName(group.getName());
+                    item.setType(group.getType());
+                    item.setSavedKeywordCount(savedCountMap.getOrDefault(groupId, 0L));
+                    item.setSavedKeywordCountA(tierCounts == null ? 0L : tierCounts.a());
+                    item.setSavedKeywordCountB(tierCounts == null ? 0L : tierCounts.b());
+                    item.setSavedKeywordCountC(tierCounts == null ? 0L : tierCounts.c());
+                    item.setUpdatedAt(group.getUpdatedAt());
+                    groupItems.add(item);
+                }
             }
             project.setSelectedKeywordGroupIds(groupIds);
             project.setSelectedKeywordGroupCount(groupIds.size());
             project.setSelectedKeywordSavedKeywords(totalSaved);
+            project.setSelectedKeywordSavedKeywordsA(totalA);
+            project.setSelectedKeywordSavedKeywordsB(totalB);
+            project.setSelectedKeywordSavedKeywordsC(totalC);
+            project.setSelectedKeywordGroups(groupItems);
         }
     }
 
@@ -943,6 +1130,9 @@ public class ProjectService {
         snapshot.put("activatedAt", project.getActivatedAt());
         snapshot.put("expiredAt", project.getExpiredAt());
         snapshot.put("planKeywordGroupLimit", project.getPlanKeywordGroupLimit());
+        snapshot.put("planKeywordGroupLimitA", project.getPlanKeywordGroupLimitA());
+        snapshot.put("planKeywordGroupLimitB", project.getPlanKeywordGroupLimitB());
+        snapshot.put("planKeywordGroupLimitC", project.getPlanKeywordGroupLimitC());
         snapshot.put("planMonthlyReportDepth", project.getPlanMonthlyReportDepth());
         snapshot.put("planQuarterlyReportDepth", project.getPlanQuarterlyReportDepth());
         snapshot.put("planConsultantIntensity", project.getPlanConsultantIntensity());
@@ -1041,5 +1231,15 @@ public class ProjectService {
             throw new BizException(404, "Brand not found");
         }
         return brand.getBrandName();
+    }
+
+    private record KeywordAllocation(int a, int b, int c) {
+        private int total() {
+            return a + b + c;
+        }
+
+        private KeywordAllocation plus(KeywordAllocation other) {
+            return new KeywordAllocation(a + other.a, b + other.b, c + other.c);
+        }
     }
 }

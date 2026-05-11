@@ -22,6 +22,15 @@ public class PackagePlanUpdateRequest {
     @NotNull
     @Min(1)
     private Integer keywordGroupLimit;
+    @NotNull
+    @Min(0)
+    private Integer keywordGroupLimitA;
+    @NotNull
+    @Min(0)
+    private Integer keywordGroupLimitB;
+    @NotNull
+    @Min(0)
+    private Integer keywordGroupLimitC;
     @NotBlank
     private String monthlyReportDepth;
     @NotBlank

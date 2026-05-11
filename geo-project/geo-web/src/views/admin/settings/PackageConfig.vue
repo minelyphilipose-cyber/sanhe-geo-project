@@ -21,8 +21,10 @@
             <template #default="scope">{{ Number(scope.row.standardPrice || 0).toFixed(2) }}</template>
           </el-table-column>
           <el-table-column prop="serviceMonths" label="服务月数" width="100" />
-          <el-table-column label="关键词组额度" width="130">
-            <template #default="scope">{{ scope.row.keywordGroupLimit }}</template>
+          <el-table-column label="拓词问题额度" min-width="190">
+            <template #default="scope">
+              {{ scope.row.keywordGroupLimit }}（A {{ scope.row.keywordGroupLimitA ?? scope.row.keywordGroupLimit }} / B {{ scope.row.keywordGroupLimitB ?? 0 }} / C {{ scope.row.keywordGroupLimitC ?? 0 }}）
+            </template>
           </el-table-column>
           <el-table-column label="渠道额度" min-width="260">
             <template #default="scope">{{ quotaSummary(scope.row.channelQuotaConfigs) }}</template>
@@ -83,11 +85,32 @@
             </el-form-item>
           </el-col>
           <el-col :xs="24" :sm="12" :lg="6">
-            <el-form-item label="关键词组总数" prop="keywordGroupLimit" required>
+            <el-form-item label="拓词问题总数" prop="keywordGroupLimit" required>
               <el-input-number v-model="form.keywordGroupLimit" :min="1" style="width: 100%" />
             </el-form-item>
           </el-col>
         </el-row>
+
+        <el-row :gutter="12">
+          <el-col :xs="24" :sm="8">
+            <el-form-item label="A档问题数" prop="keywordGroupLimitA" required>
+              <el-input-number v-model="form.keywordGroupLimitA" :min="0" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <el-form-item label="B档问题数" prop="keywordGroupLimitB" required>
+              <el-input-number v-model="form.keywordGroupLimitB" :min="0" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="8">
+            <el-form-item label="C档问题数" prop="keywordGroupLimitC" required>
+              <el-input-number v-model="form.keywordGroupLimitC" :min="0" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+        <div class="tier-total-tip" :class="{ invalid: tierTotal !== form.keywordGroupLimit }">
+          A/B/C 合计 {{ tierTotal }}，需等于拓词问题总数 {{ form.keywordGroupLimit }}
+        </div>
 
         <el-divider content-position="left">分发渠道额度</el-divider>
         <el-table :data="form.channelQuotaConfigs" border>
@@ -164,6 +187,9 @@ const form = reactive({
   standardPrice: 0,
   serviceMonths: 12,
   keywordGroupLimit: 100,
+  keywordGroupLimitA: 100,
+  keywordGroupLimitB: 0,
+  keywordGroupLimitC: 0,
   monthlyReportDepth: 'L2',
   quarterlyReportDepth: 'L2',
   consultantIntensity: 'L2',
@@ -184,8 +210,13 @@ const rules: FormRules = {
   packageName: [{ required: true, message: '请输入套餐名称', trigger: 'blur' }],
   standardPrice: [{ required: true, message: '请输入标准价', trigger: 'change' }],
   serviceMonths: [{ required: true, message: '请输入服务月数', trigger: 'change' }],
-  keywordGroupLimit: [{ required: true, message: '请输入关键词组总数', trigger: 'change' }],
+  keywordGroupLimit: [{ required: true, message: '请输入拓词问题总数', trigger: 'change' }],
+  keywordGroupLimitA: [{ required: true, message: '请输入 A 档问题数', trigger: 'change' }],
+  keywordGroupLimitB: [{ required: true, message: '请输入 B 档问题数', trigger: 'change' }],
+  keywordGroupLimitC: [{ required: true, message: '请输入 C 档问题数', trigger: 'change' }],
 }
+
+const tierTotal = computed(() => Number(form.keywordGroupLimitA || 0) + Number(form.keywordGroupLimitB || 0) + Number(form.keywordGroupLimitC || 0))
 
 function defaultChannelQuotas(): PackageChannelQuotaConfig[] {
   return [
@@ -242,6 +273,9 @@ function resetForm() {
   form.standardPrice = 0
   form.serviceMonths = 12
   form.keywordGroupLimit = 100
+  form.keywordGroupLimitA = 100
+  form.keywordGroupLimitB = 0
+  form.keywordGroupLimitC = 0
   form.enabled = true
   form.sortOrder = 10
   form.remark = ''
@@ -284,6 +318,9 @@ function openEdit(row: PackagePlan) {
   form.standardPrice = Number(row.standardPrice || 0)
   form.serviceMonths = row.serviceMonths
   form.keywordGroupLimit = row.keywordGroupLimit
+  form.keywordGroupLimitA = row.keywordGroupLimitA ?? row.keywordGroupLimit
+  form.keywordGroupLimitB = row.keywordGroupLimitB ?? 0
+  form.keywordGroupLimitC = row.keywordGroupLimitC ?? 0
   form.monthlyReportDepth = row.monthlyReportDepth
   form.quarterlyReportDepth = row.quarterlyReportDepth
   form.consultantIntensity = row.consultantIntensity
@@ -307,6 +344,9 @@ function buildPayload() {
     standardPrice: form.standardPrice,
     serviceMonths: form.serviceMonths,
     keywordGroupLimit: form.keywordGroupLimit,
+    keywordGroupLimitA: form.keywordGroupLimitA,
+    keywordGroupLimitB: form.keywordGroupLimitB,
+    keywordGroupLimitC: form.keywordGroupLimitC,
     monthlyReportDepth: form.monthlyReportDepth,
     quarterlyReportDepth: form.quarterlyReportDepth,
     consultantIntensity: form.consultantIntensity,
@@ -331,6 +371,10 @@ function buildPayload() {
 async function submit() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
+  if (tierTotal.value !== Number(form.keywordGroupLimit || 0)) {
+    ElMessage.warning('A/B/C 问题数合计必须等于拓词问题总数')
+    return
+  }
   saving.value = true
   try {
     const payload = buildPayload()
@@ -361,3 +405,15 @@ async function toggleStatus(row: PackagePlan) {
 
 onMounted(load)
 </script>
+
+<style scoped>
+.tier-total-tip {
+  margin: -4px 0 14px;
+  font-size: 12px;
+  color: #606266;
+}
+
+.tier-total-tip.invalid {
+  color: #e6a23c;
+}
+</style>

@@ -27,6 +27,9 @@ export function createPackagePlan(data: {
   standardPrice: number
   serviceMonths: number
   keywordGroupLimit: number
+  keywordGroupLimitA: number
+  keywordGroupLimitB: number
+  keywordGroupLimitC: number
   monthlyReportDepth: string
   quarterlyReportDepth: string
   consultantIntensity: string
@@ -49,6 +52,9 @@ export function updatePackagePlan(id: number, data: {
   standardPrice: number
   serviceMonths: number
   keywordGroupLimit: number
+  keywordGroupLimitA: number
+  keywordGroupLimitB: number
+  keywordGroupLimitC: number
   monthlyReportDepth: string
   quarterlyReportDepth: string
   consultantIntensity: string

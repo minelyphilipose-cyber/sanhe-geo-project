@@ -20,6 +20,9 @@ public class PackagePlan {
     private BigDecimal standardPrice;
     private Integer serviceMonths;
     private Integer keywordGroupLimit;
+    private Integer keywordGroupLimitA;
+    private Integer keywordGroupLimitB;
+    private Integer keywordGroupLimitC;
     private String monthlyReportDepth;
     private String quarterlyReportDepth;
     private String consultantIntensity;

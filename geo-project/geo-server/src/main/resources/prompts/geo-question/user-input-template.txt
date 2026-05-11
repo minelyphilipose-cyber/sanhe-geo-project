@@ -1,0 +1,24 @@
+## 客户输入（本次任务变量）
+company_name:        {{company_name}}
+brand_name:          {{brand_name}}
+brand_relation:      {{brand_relation}}
+core_business:       {{core_business}}
+target_region:       {{target_region}}
+industry:            {{industry}}
+target_customer:     {{target_customer}}
+main_competitors:    {{main_competitors}}
+core_advantage:      {{core_advantage}}
+benchmark_specs:     {{benchmark_specs}}
+
+## 客户口头明确说出的核心需求（决定 A 类，最关键）
+{{core_needs}}
+
+## 数量与场景权重
+total_count:    {{total_count}}
+scene_weights:  {{scene_weights}}
+ABC_split:      {{abc_split}}
+
+## 输出要求
+请严格按 System Prompt 中定义的 JSON 数组格式输出，共 {{total_count}} 个元素。
+A 类数量必须为 {{batch_a}}，B 类数量必须为 {{batch_b}}，C 类数量必须为 {{batch_c}}。
+不要输出任何解释，不要 markdown 包裹，不要使用全角逗号。

@@ -1,7 +1,6 @@
 package com.huanjing.geo.module.project.dto;
 
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -39,9 +38,11 @@ public class ProjectCreateRequest {
     private List<String> extraForbiddenPhrases;
     private String contentNote;
     private String remark;
-    @NotEmpty
     @Size(max = 10)
     private List<Long> keywordGroupIds;
+    private Integer keywordGroupLimitA;
+    private Integer keywordGroupLimitB;
+    private Integer keywordGroupLimitC;
     private Long allocationVersion;
     private List<ProjectChannelAllocationRequest> channelAllocations;
 }
