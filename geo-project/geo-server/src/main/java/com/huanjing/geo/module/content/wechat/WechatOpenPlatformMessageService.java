@@ -24,6 +24,12 @@ public class WechatOpenPlatformMessageService {
     public String handleAuthorizerMessage(String authorizerAppid, String rawXml) {
         long startedAt = System.currentTimeMillis();
         Map<String, String> xml = WechatXmlParser.parse(rawXml);
+        String msgType = xml.get("MsgType");
+        if ("event".equals(msgType)) {
+            String event = xml.get("Event");
+            return WechatXmlParser.textReply(xml.get("FromUserName"), xml.get("ToUserName"),
+                    (event == null ? "" : event) + "from_callback");
+        }
         String content = xml.get("Content");
         if (DETECTION_TEXT.equals(content)) {
             return WechatXmlParser.textReply(xml.get("FromUserName"), xml.get("ToUserName"),
@@ -33,6 +39,10 @@ public class WechatOpenPlatformMessageService {
             handleQueryAuthCode(authorizerAppid, xml.get("FromUserName"),
                     content.substring(QUERY_AUTH_CODE_PREFIX.length()), startedAt);
             return "success";
+        }
+        if ("text".equals(msgType) && content != null) {
+            return WechatXmlParser.textReply(xml.get("FromUserName"), xml.get("ToUserName"),
+                    content + "_callback");
         }
         return "success";
     }
