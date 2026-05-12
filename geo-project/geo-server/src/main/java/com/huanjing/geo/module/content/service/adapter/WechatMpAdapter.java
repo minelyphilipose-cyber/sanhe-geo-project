@@ -11,7 +11,7 @@ import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import com.huanjing.geo.module.content.wechat.WechatHtmlRewriter;
 import com.huanjing.geo.module.content.wechat.WechatMediaService;
 import com.huanjing.geo.module.content.wechat.WechatMpClient;
-import com.huanjing.geo.module.content.wechat.WechatAuthorizerTokenService;
+import com.huanjing.geo.module.content.wechat.WechatTokenAwareExecutor;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.service.BrandService;
 import com.huanjing.geo.module.system.entity.PublishSite;
@@ -33,7 +33,7 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
     private final MarkdownToHtmlRenderer markdownRenderer;
     private final WechatHtmlRewriter htmlRewriter;
     private final WechatMediaService mediaService;
-    private final WechatAuthorizerTokenService tokenService;
+    private final WechatTokenAwareExecutor tokenAwareExecutor;
     private final WechatMpClient wechatMpClient;
     private final BrandService brandService;
     private final ObjectMapper objectMapper;
@@ -97,8 +97,8 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
             String wechatHtml = htmlRewriter.rewrite(html, src -> mediaService.ensureContentImageUrl(account, src));
             WechatMpClient.DraftArticle draftArticle = buildDraftArticle(article, brand, account, wechatHtml, thumbMediaId);
             requestPayload = buildRequestPayload(account, mpTarget.coverMaterialId(), draftArticle);
-            String accessToken = tokenService.getAccessToken(account);
-            WechatMpClient.DraftResult result = wechatMpClient.addDraft(accessToken, draftArticle);
+            WechatMpClient.DraftResult result =
+                    tokenAwareExecutor.execute(account, accessToken -> wechatMpClient.addDraft(accessToken, draftArticle));
             ObjectNode response = objectMapper.createObjectNode();
             response.put("media_id", result.mediaId());
             response.put("message", "saved_to_wechat_draft");

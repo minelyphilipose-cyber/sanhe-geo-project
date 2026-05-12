@@ -41,7 +41,7 @@ public class WechatMediaService {
     private final BrandImageFolderService brandImageFolderService;
     private final SelfMediaMaterialMappingMapper mappingMapper;
     private final MinioStorageService minioStorageService;
-    private final WechatAuthorizerTokenService tokenService;
+    private final WechatTokenAwareExecutor tokenAwareExecutor;
     private final WechatMpClient wechatMpClient;
     private final StringRedisTemplate redisTemplate;
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -59,9 +59,9 @@ public class WechatMediaService {
             return existed.getPlatformMediaId();
         }
 
-        String accessToken = tokenService.getAccessToken(account);
         WechatMpClient.MaterialResult result =
-                wechatMpClient.addThumbMaterial(accessToken, bytes, material.getFileName());
+                tokenAwareExecutor.execute(account, accessToken ->
+                        wechatMpClient.addThumbMaterial(accessToken, bytes, material.getFileName()));
         SelfMediaMaterialMapping row = new SelfMediaMaterialMapping();
         row.setSelfMediaAccountId(account.getId());
         row.setBrandMaterialId(material.getId());
@@ -182,9 +182,9 @@ public class WechatMediaService {
                 return existed.getPlatformUrl();
             }
             String filename = filenameFromUrl(normalizedUrl);
-            String accessToken = tokenService.getAccessToken(account);
             WechatMpClient.UploadImageResult result =
-                    wechatMpClient.uploadContentImage(accessToken, bytes, filename);
+                    tokenAwareExecutor.execute(account, accessToken ->
+                            wechatMpClient.uploadContentImage(accessToken, bytes, filename));
             SelfMediaMaterialMapping row = new SelfMediaMaterialMapping();
             row.setSelfMediaAccountId(account.getId());
             // MySQL unique indexes treat NULL brand_material_id values as distinct, so content
