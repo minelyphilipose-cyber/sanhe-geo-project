@@ -79,6 +79,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '项目报表', hidden: true, permissions: ['project.read'] },
     },
     {
+      path: 'projects/:id/baseline-report',
+      name: 'ProjectBaselineReport',
+      component: () => import('@/views/admin/project/BaselineReportPoll.vue'),
+      meta: { title: '基线检测报告', hidden: true, permissions: ['project.read'] },
+    },
+    {
       path: 'projects/:id/review',
       name: 'ReviewPanel',
       component: () => import('@/views/admin/project/ReviewPanel.vue'),

@@ -8,6 +8,7 @@
           <span>基础信息</span>
           <div class="space-x-2">
             <el-button size="small" @click="goReports">项目报表</el-button>
+            <el-button v-if="project?.status === 'active'" size="small" type="primary" plain @click="goBaselineReport">基线检测报告</el-button>
             <el-tag>{{ dictStore.label('project_status', project?.status) }}</el-tag>
             <el-tag type="info">{{ dictStore.label('project_stage', project?.stage) }}</el-tag>
           </div>
@@ -285,6 +286,10 @@ function joinArray(value?: string | string[] | null) {
 
 function goReports() {
   router.push(`/admin/projects/${projectId}/reports`)
+}
+
+function goBaselineReport() {
+  router.push(`/admin/projects/${projectId}/baseline-report`)
 }
 
 async function load() {

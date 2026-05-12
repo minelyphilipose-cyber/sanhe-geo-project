@@ -44,4 +44,29 @@ public interface KeywordGroupResultMapper extends BaseMapper<KeywordGroupResult>
               AND COALESCE(kg.deleted, 0) = 0
             """)
     long countSavedKeywordsByProject(@Param("projectId") Long projectId);
+
+    @Select("""
+            SELECT r.*
+            FROM project_keyword_group_rel rel
+            JOIN keyword_group kg ON kg.id = rel.keyword_group_id
+            JOIN keyword_group_result r ON r.group_id = rel.keyword_group_id
+            WHERE rel.project_id = #{projectId}
+              AND COALESCE(kg.deleted, 0) = 0
+              AND r.question_tier IN (${tiersSql})
+            ORDER BY FIELD(r.question_tier, 'A', 'B', 'C'), r.sort_order ASC, r.id ASC
+            """)
+    List<KeywordGroupResult> selectProjectQuestionsByTiers(@Param("projectId") Long projectId,
+                                                           @Param("tiersSql") String tiersSql);
+
+    @Select("""
+            SELECT r.question_tier AS tier, COUNT(1) AS questionCount
+            FROM project_keyword_group_rel rel
+            JOIN keyword_group kg ON kg.id = rel.keyword_group_id
+            JOIN keyword_group_result r ON r.group_id = rel.keyword_group_id
+            WHERE rel.project_id = #{projectId}
+              AND COALESCE(kg.deleted, 0) = 0
+              AND r.question_tier IN ('A', 'B', 'C')
+            GROUP BY r.question_tier
+            """)
+    List<com.huanjing.geo.module.project.dto.BaselinePollQuestionTierVO> countProjectQuestionsByTier(@Param("projectId") Long projectId);
 }
