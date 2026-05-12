@@ -82,7 +82,12 @@
           </header>
           <div class="section-body">
             <div class="form-item topic-field">
-              <label class="form-label required">选题 / 主题</label>
+              <div class="topic-label-row">
+                <label class="form-label required">选题 / 主题</label>
+                <el-button size="small" :icon="Search" :disabled="!manualForm.projectId" @click="openQuestionPicker">
+                  选择问题词
+                </el-button>
+              </div>
               <el-input
                 v-model="aiForm.topic"
                 type="textarea"
@@ -91,6 +96,9 @@
                 show-word-limit
                 placeholder="如：2026 年 RAG 在法律行业的落地路径"
               />
+              <div v-if="selectedQuestion" class="selected-question-line">
+                已选问题词：{{ selectedQuestion.questionText }}
+              </div>
             </div>
 
             <div class="ai-control-grid">
@@ -309,6 +317,76 @@
       </div>
     </el-drawer>
 
+    <el-dialog v-model="questionPickerVisible" title="选择项目问题词" width="980px" append-to-body>
+      <div class="question-picker">
+        <div class="question-picker-toolbar">
+          <el-select v-model="questionFilters.tier" placeholder="问题归属" style="width: 140px">
+            <el-option label="全部归属" value="all" />
+            <el-option label="A 类" value="A" />
+            <el-option label="B 类" value="B" />
+            <el-option label="C 类" value="C" />
+          </el-select>
+          <el-select v-model="questionFilters.scene" placeholder="问题场景" style="width: 180px">
+            <el-option label="全部场景" value="all" />
+            <el-option
+              v-for="item in questionSceneOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+          <el-input
+            v-model="questionFilters.keyword"
+            clearable
+            :prefix-icon="Search"
+            placeholder="模糊查询问题内容"
+            class="question-search-input"
+          />
+          <el-button :loading="questionPickerLoading" @click="reloadQuestionPicker">刷新</el-button>
+        </div>
+
+        <DataState :loading="questionPickerLoading" :empty="!questionPickerLoading && filteredQuestionRows.length === 0" empty-text="当前筛选条件下暂无问题词">
+          <el-table
+            :data="filteredQuestionRows"
+            border
+            height="420"
+            highlight-current-row
+            @row-click="selectQuestion"
+          >
+            <el-table-column width="52">
+              <template #default="{ row }">
+                <el-radio :model-value="selectedQuestionKey" :label="questionKey(row)" @change="selectQuestion(row)">
+                  <span class="sr-only">选择</span>
+                </el-radio>
+              </template>
+            </el-table-column>
+            <el-table-column prop="questionText" label="问题内容" min-width="300" show-overflow-tooltip />
+            <el-table-column label="问题归属" width="90">
+              <template #default="{ row }">
+                <el-tag :type="questionTierTagType(row.questionTier)" size="small">{{ row.questionTier || '-' }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="问题类型" width="120">
+              <template #default="{ row }">{{ questionSourceTypeLabel(row) }}</template>
+            </el-table-column>
+            <el-table-column label="拓词组" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.groupName }}</template>
+            </el-table-column>
+            <el-table-column label="问题场景" width="110">
+              <template #default="{ row }">{{ sceneLabel(row.sceneCode) }}</template>
+            </el-table-column>
+            <el-table-column prop="totalScore" label="总分" width="82" />
+          </el-table>
+        </DataState>
+      </div>
+      <template #footer>
+        <el-button @click="questionPickerVisible = false">取消</el-button>
+        <el-button type="primary" :disabled="!selectedQuestion" @click="confirmSelectedQuestion">
+          确认选择
+        </el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="imagePickerVisible" title="选择品牌图片" width="860px">
       <div class="image-picker">
         <div class="image-picker-toolbar">
@@ -364,7 +442,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowDown,
   ArrowUp,
@@ -375,15 +453,16 @@ import {
   Picture,
   Plus,
   Rank,
+  Search,
 } from '@element-plus/icons-vue'
-import type { BrandImageFolder, BrandMaterial, Project } from '@/types'
+import type { BrandImageFolder, BrandMaterial, KeywordGroup, KeywordGroupQuestion, Project } from '@/types'
 import {
   createManualContentArticle,
   previewAiContentArticleDraft,
   type ArticleAiDraftPreviewResponse,
 } from '@/api/content'
 import { getBrandImageFolders, getBrandMaterialStream } from '@/api/customer'
-import { getProjectDetail, getProjectList } from '@/api/project'
+import { getKeywordGroupQuestions, getProjectDetail, getProjectList } from '@/api/project'
 import { useDictStore } from '@/stores/dict'
 import DataState from '@/components/ui/DataState.vue'
 import { errorMessage } from '@/utils/error'
@@ -422,6 +501,17 @@ interface ParsedArticle {
   status: ParseStatus
   title: string
   sections: ManualSection[]
+}
+
+interface ArticleQuestionOption extends KeywordGroupQuestion {
+  groupName: string
+  groupType?: string | null
+  groupTypeLabel?: string | null
+}
+
+interface QuestionSceneOption {
+  value: string
+  label: string
 }
 
 const ARTICLE_TYPE_FALLBACKS: ArticleTypeOption[] = [
@@ -468,6 +558,8 @@ const markdownOverridden = ref(false)
 const sourceExpanded = ref(false)
 const previewMode = ref<'rendered' | 'markdown'>('rendered')
 const imagePickerVisible = ref(false)
+const questionPickerVisible = ref(false)
+const questionPickerLoading = ref(false)
 const imageFoldersLoading = ref(false)
 const imageFolders = ref<BrandImageFolder[]>([])
 const imageThumbUrls = ref<Record<number, string | null>>({})
@@ -479,6 +571,9 @@ const imageAltText = ref('')
 const generationNotice = ref<NoticeState | null>(null)
 const parseNotice = ref<NoticeState | null>(null)
 const aiMetadata = ref<Record<string, unknown> | null>(null)
+const questionRows = ref<ArticleQuestionOption[]>([])
+const selectedQuestionKey = ref('')
+const questionLoadedProjectId = ref<number | null>(null)
 let stillGeneratingTimer: ReturnType<typeof setTimeout> | null = null
 let nextSectionId = 1
 
@@ -496,6 +591,12 @@ const aiForm = reactive({
   topic: '',
   extraPrompt: '',
   referenceMaterials: '',
+})
+
+const questionFilters = reactive({
+  tier: 'all',
+  keyword: '',
+  scene: 'all',
 })
 
 const markdown = new MarkdownIt({
@@ -563,6 +664,24 @@ const imageMaterials = computed(() => {
   return (folder?.materials || []).filter((material) => material.category === 'brand_image' && isImageType(material.fileType) && Boolean(material.fileUrl))
 })
 const selectedImageMaterial = computed(() => imageMaterials.value.find((item) => item.id === selectedImageMaterialId.value) || null)
+const questionSceneOptions: QuestionSceneOption[] = [
+  { value: 'brand', label: '品牌场景' },
+  { value: 'decision', label: '决策场景' },
+  { value: 'deal', label: '成交场景' },
+  { value: 'compare', label: '对比场景' },
+  { value: 'qa', label: '问答场景' },
+  { value: 'function', label: '功能场景' },
+]
+const filteredQuestionRows = computed(() => {
+  const keyword = questionFilters.keyword.trim().toLowerCase()
+  return questionRows.value.filter((row) => {
+    if (questionFilters.tier !== 'all' && row.questionTier !== questionFilters.tier) return false
+    if (questionFilters.scene !== 'all' && row.sceneCode !== questionFilters.scene) return false
+    if (keyword && !row.questionText.toLowerCase().includes(keyword)) return false
+    return true
+  })
+})
+const selectedQuestion = computed(() => questionRows.value.find((row) => questionKey(row) === selectedQuestionKey.value) || null)
 
 function createSection(): ManualSection {
   return {
@@ -741,6 +860,123 @@ async function openImagePicker() {
   } else if (!Object.keys(imageThumbUrls.value).length) {
     await loadImageThumbs(selectedProject.value.brandId)
   }
+}
+
+async function openQuestionPicker() {
+  if (!manualForm.projectId) {
+    ElMessage.warning('请先选择绑定项目')
+    return
+  }
+  questionPickerVisible.value = true
+  if (questionLoadedProjectId.value !== manualForm.projectId || questionRows.value.length === 0) {
+    await loadQuestionPicker()
+  }
+}
+
+async function reloadQuestionPicker() {
+  if (!manualForm.projectId) return
+  await loadQuestionPicker()
+}
+
+async function loadQuestionPicker() {
+  const projectId = manualForm.projectId
+  if (!projectId) return
+  questionPickerLoading.value = true
+  try {
+    let project = selectedProject.value
+    if (!project?.selectedKeywordGroups?.length) {
+      const { data } = await getProjectDetail(projectId)
+      projectOptions.value = mergeProjects([data.data], projectOptions.value)
+      project = data.data
+    }
+
+    const groups = project?.selectedKeywordGroups || []
+    questionRows.value = await loadProjectQuestions(groups)
+    selectedQuestionKey.value = questionRows.value.some((row) => questionKey(row) === selectedQuestionKey.value)
+      ? selectedQuestionKey.value
+      : ''
+    questionLoadedProjectId.value = projectId
+  } catch (err) {
+    console.error(err)
+    questionRows.value = []
+    selectedQuestionKey.value = ''
+    ElMessage.error('加载项目问题词失败')
+  } finally {
+    questionPickerLoading.value = false
+  }
+}
+
+async function loadProjectQuestions(groups: KeywordGroup[]) {
+  const rows: ArticleQuestionOption[] = []
+  for (const group of groups) {
+    let current = 1
+    let total = 0
+    do {
+      const { data } = await getKeywordGroupQuestions(group.id, {
+        current,
+        size: 100,
+        tier: 'all',
+      })
+      const page = data.data
+      total = page.total || 0
+      rows.push(...(page.records || []).map((question) => ({
+        ...question,
+        groupName: group.name,
+        groupType: group.type,
+        groupTypeLabel: group.typeLabel,
+      })))
+      current += 1
+    } while ((current - 1) * 100 < total)
+  }
+  return rows
+}
+
+function selectQuestion(row: ArticleQuestionOption) {
+  selectedQuestionKey.value = questionKey(row)
+}
+
+async function confirmSelectedQuestion() {
+  const question = selectedQuestion.value
+  if (!question) return
+  try {
+    await ElMessageBox.confirm(
+      '当前选定问题词将作为主题回显，是否确认？',
+      '确认问题词',
+      { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' },
+    )
+    aiForm.topic = question.questionText
+    questionPickerVisible.value = false
+    ElMessage.success('问题词已回显至选题 / 主题')
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return
+  }
+}
+
+function questionKey(row: Pick<ArticleQuestionOption, 'groupId' | 'id'>) {
+  return `${row.groupId}:${row.id}`
+}
+
+function sceneLabel(value?: string | null) {
+  const labels: Record<string, string> = {
+    brand: '品牌场景',
+    decision: '决策场景',
+    deal: '成交场景',
+    compare: '对比场景',
+    qa: '问答场景',
+    function: '功能场景',
+  }
+  return value ? (labels[value] || value) : '-'
+}
+
+function questionTierTagType(value?: string | null) {
+  if (value === 'A') return 'danger'
+  if (value === 'B') return 'warning'
+  if (value === 'C') return 'info'
+  return 'info'
+}
+
+function questionSourceTypeLabel(row: ArticleQuestionOption) {
+  return row.groupType === 'imported' ? (row.groupTypeLabel || '导入') : '录入'
 }
 
 async function loadImageFolders() {
@@ -1123,6 +1359,9 @@ watch(() => manualForm.projectId, () => {
   selectedImageFolderId.value = null
   selectedImageMaterialId.value = null
   imageAltText.value = ''
+  questionRows.value = []
+  selectedQuestionKey.value = ''
+  questionLoadedProjectId.value = null
   cleanupImageThumbs()
 })
 
@@ -1351,6 +1590,25 @@ onBeforeUnmount(() => {
 
 .topic-field {
   min-width: 0;
+}
+
+.topic-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.topic-label-row .form-label {
+  margin-bottom: 0;
+}
+
+.selected-question-line {
+  margin-top: 8px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .length-label {
@@ -1758,6 +2016,34 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.question-picker {
+  min-height: 490px;
+}
+
+.question-picker-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.question-search-input {
+  flex: 1;
+  min-width: 220px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .image-picker-toolbar {
