@@ -49,8 +49,15 @@ public class WechatOpenPlatformCallbackController {
                                @RequestParam(required = false) String timestamp,
                                @RequestParam(required = false) String nonce,
                                @RequestBody String rawXml) {
-        String decrypted = cryptoService.decryptIfNeeded(rawXml, msgSignature, timestamp, nonce);
-        return eventService.handleComponentEvent(decrypted);
+        String decrypted = null;
+        try {
+            decrypted = cryptoService.decryptIfNeeded(rawXml, msgSignature, timestamp, nonce);
+            return eventService.handleComponentEvent(decrypted);
+        } catch (Exception ex) {
+            log.error("WeChat component event callback failed rawXml={} decryptedXml={}",
+                    rawXml, decrypted, ex);
+            return "success";
+        }
     }
 
     @GetMapping(value = "/messages/{authorizerAppid}", produces = MediaType.TEXT_PLAIN_VALUE)
@@ -65,9 +72,16 @@ public class WechatOpenPlatformCallbackController {
                                            @RequestParam(required = false) String timestamp,
                                            @RequestParam(required = false) String nonce,
                                            @RequestBody String rawXml) {
-        boolean encrypted = cryptoService.isEncrypted(rawXml);
-        String decrypted = cryptoService.decryptIfNeeded(rawXml, msgSignature, timestamp, nonce);
-        String response = messageService.handleAuthorizerMessage(authorizerAppid, decrypted);
-        return encrypted ? cryptoService.encryptReply(response, timestamp, nonce) : response;
+        String decrypted = null;
+        try {
+            boolean encrypted = cryptoService.isEncrypted(rawXml);
+            decrypted = cryptoService.decryptIfNeeded(rawXml, msgSignature, timestamp, nonce);
+            String response = messageService.handleAuthorizerMessage(authorizerAppid, decrypted);
+            return encrypted ? cryptoService.encryptReply(response, timestamp, nonce) : response;
+        } catch (Exception ex) {
+            log.error("WeChat authorizer message callback failed authorizerAppid={} rawXml={} decryptedXml={}",
+                    authorizerAppid, rawXml, decrypted, ex);
+            return "success";
+        }
     }
 }
