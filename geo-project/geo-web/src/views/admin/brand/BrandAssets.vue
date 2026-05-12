@@ -37,7 +37,7 @@
         <template #header><span class="text-sm font-medium">品牌资料完整度</span></template>
         <div class="space-y-2">
           <CheckItem label="品牌官网" :ok="!!brand?.website" />
-          <CheckItem label="联系方式（电话或微信）" :ok="!!(brand?.phone || brand?.wechat)" />
+          <CheckItem label="联系方式（公开电话/公开地址/电话/微信）" :ok="hasContactInfo" />
           <CheckItem label="品牌简介" :ok="!!brand?.description" />
           <CheckItem label="业务介绍" :ok="!!brand?.businessIntro" />
           <CheckItem label="标准表述" :ok="!!brand?.standardBrandStatement" />
@@ -462,9 +462,11 @@ function hasCategoryMaterial(category: string) {
   return materials.value.some((m) => m.category === category)
 }
 
+const hasContactInfo = computed(() => !!(brand.value?.publicPhone || brand.value?.publicAddress || brand.value?.phone || brand.value?.wechat))
+
 const completenessItems = computed(() => [
   !!brand.value?.website,
-  !!(brand.value?.phone || brand.value?.wechat),
+  hasContactInfo.value,
   !!brand.value?.description,
   !!brand.value?.businessIntro,
   !!brand.value?.standardBrandStatement,
@@ -502,8 +504,8 @@ const timelinessAlerts = computed(() => {
   if (!brand.value.website) {
     alerts.push({ title: '缺少品牌官网', description: '品牌官网是 GEO 监测的核心依据之一，建议尽快补充', type: 'warning' })
   }
-  if (!brand.value.phone && !brand.value.wechat) {
-    alerts.push({ title: '缺少联系方式', description: '缺少电话或微信，影响平台联系方式曝光的判定', type: 'warning' })
+  if (!hasContactInfo.value) {
+    alerts.push({ title: '缺少联系方式', description: '缺少对外公开电话、对外公开地址、电话或微信，影响平台联系方式曝光的判定', type: 'warning' })
   }
   if (!hasCategoryMaterial('brand_image')) {
     alerts.push({ title: '缺少品牌形象素材', description: '建议上传品牌 Logo、产品图等形象素材', type: 'info' })

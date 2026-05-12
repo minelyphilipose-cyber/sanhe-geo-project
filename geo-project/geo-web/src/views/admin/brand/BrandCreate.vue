@@ -48,6 +48,8 @@
 
         <el-divider content-position="left">联系方式与阵地</el-divider>
         <el-form-item label="联系电话"><el-input v-model="form.phone" /></el-form-item>
+        <el-form-item label="对外公开电话"><el-input v-model="form.publicPhone" /></el-form-item>
+        <el-form-item label="对外公开地址"><el-input v-model="form.publicAddress" /></el-form-item>
         <el-form-item label="微信"><el-input v-model="form.wechat" /></el-form-item>
         <el-form-item label="官网"><el-input v-model="form.website" /></el-form-item>
         <el-form-item label="公众号"><el-input v-model="form.officialAccount" /></el-form-item>
@@ -157,7 +159,7 @@ const route = useRoute()
 const router = useRouter()
 const dictStore = useDictStore()
 
-const companyId = Number(route.query.companyId || 0)
+const companyId = computed(() => Number(route.query.companyId || 0))
 const createdBrandId = ref<number | null>(null)
 const companyName = ref('')
 const companyIndustryTags = ref<string[]>([])
@@ -174,6 +176,8 @@ const form = reactive({
   serviceAreaCodes: [] as string[],
   regionCodes: [] as string[],
   phone: '',
+  publicPhone: '',
+  publicAddress: '',
   wechat: '',
   website: '',
   officialAccount: '',
@@ -297,9 +301,9 @@ async function downloadMaterial(item: BrandMaterial) {
 }
 
 async function loadCompany() {
-  if (!companyId) return
+  if (!companyId.value) return
   try {
-    const { data } = await getCompanyDetail(companyId)
+    const { data } = await getCompanyDetail(companyId.value)
     companyName.value = data.data.companyName || ''
     companyIndustryTags.value = parseIndustryTags((data.data as any).industryTags)
     if (!form.industry) {
@@ -325,7 +329,7 @@ function parseIndustryTags(value?: string | string[] | null) {
 async function submitBrand() {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
-  if (!companyId) {
+  if (!companyId.value) {
     ElMessage.error('缺少所属客户，无法创建品牌')
     return
   }
@@ -348,6 +352,8 @@ async function submitBrand() {
       districtCode: region.districtCode,
       districtName: region.districtName,
       phone: form.phone || undefined,
+      publicPhone: form.publicPhone || undefined,
+      publicAddress: form.publicAddress || undefined,
       wechat: form.wechat || undefined,
       website: form.website || undefined,
       officialAccount: form.officialAccount || undefined,
@@ -361,7 +367,7 @@ async function submitBrand() {
     }
 
     if (!createdBrandId.value) {
-      const { data } = await createBrand({ companyId, ...commonPayload })
+      const { data } = await createBrand({ companyId: companyId.value, ...commonPayload })
       createdBrandId.value = data.data.id
       ElMessage.success('品牌创建成功，可继续上传素材')
     } else {

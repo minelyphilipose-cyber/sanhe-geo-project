@@ -126,6 +126,8 @@ public class GeoPromptBuilder {
             appendLine(sb, "所属行业", brand.getIndustry());
             appendLine(sb, "主营业务", brand.getMainBusiness());
             appendLine(sb, "品牌简介", brand.getDescription());
+            appendLine(sb, "对外公开电话", brand.getPublicPhone());
+            appendLine(sb, "对外公开地址", brand.getPublicAddress());
             appendLine(sb, "品牌表述", resolveBrandStatement(project, brand));
         } else {
             appendLine(sb, "项目名称", project.getProjectName());

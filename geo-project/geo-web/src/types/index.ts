@@ -142,6 +142,8 @@ export interface Brand {
   videoAccount?: string | null
   douyinAccount?: string | null
   phone: string | null
+  publicPhone?: string | null
+  publicAddress?: string | null
   wechat: string | null
   description: string | null
   businessIntro?: string | null

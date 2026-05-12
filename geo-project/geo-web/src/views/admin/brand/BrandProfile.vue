@@ -49,6 +49,8 @@
             <el-descriptions-item label="公众号">{{ brand?.officialAccount || '-' }}</el-descriptions-item>
             <el-descriptions-item label="视频号">{{ brand?.videoAccount || '-' }}</el-descriptions-item>
             <el-descriptions-item label="抖音号">{{ brand?.douyinAccount || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="对外公开电话">{{ brand?.publicPhone || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="对外公开地址">{{ brand?.publicAddress || '-' }}</el-descriptions-item>
             <el-descriptions-item label="品牌简介" :span="3">{{ brand?.description || '-' }}</el-descriptions-item>
             <el-descriptions-item label="业务介绍" :span="3">{{ brand?.businessIntro || '-' }}</el-descriptions-item>
             <el-descriptions-item label="禁用词" :span="3">{{ brand?.forbiddenPhrases || '-' }}</el-descriptions-item>
@@ -87,6 +89,12 @@
               </el-form-item>
               <el-form-item label="微信">
                 <el-input v-model="infoForm.wechat" />
+              </el-form-item>
+              <el-form-item label="对外公开电话">
+                <el-input v-model="infoForm.publicPhone" />
+              </el-form-item>
+              <el-form-item label="对外公开地址">
+                <el-input v-model="infoForm.publicAddress" />
               </el-form-item>
               <el-form-item label="公众号">
                 <el-input v-model="infoForm.officialAccount" />
@@ -258,6 +266,8 @@ const infoForm = reactive({
   website: '',
   phone: '',
   wechat: '',
+  publicPhone: '',
+  publicAddress: '',
   officialAccount: '',
   videoAccount: '',
   douyinAccount: '',
@@ -312,6 +322,8 @@ function fillInfoForm(data: Brand) {
   infoForm.website = data.website || ''
   infoForm.phone = data.phone || ''
   infoForm.wechat = data.wechat || ''
+  infoForm.publicPhone = data.publicPhone || ''
+  infoForm.publicAddress = data.publicAddress || ''
   infoForm.officialAccount = data.officialAccount || ''
   infoForm.videoAccount = data.videoAccount || ''
   infoForm.douyinAccount = data.douyinAccount || ''
@@ -354,6 +366,8 @@ async function saveInfo() {
       website: infoForm.website || undefined,
       phone: infoForm.phone || undefined,
       wechat: infoForm.wechat || undefined,
+      publicPhone: infoForm.publicPhone || undefined,
+      publicAddress: infoForm.publicAddress || undefined,
       officialAccount: infoForm.officialAccount || undefined,
       videoAccount: infoForm.videoAccount || undefined,
       douyinAccount: infoForm.douyinAccount || undefined,

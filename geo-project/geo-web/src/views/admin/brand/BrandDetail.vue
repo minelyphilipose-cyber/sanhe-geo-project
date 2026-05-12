@@ -36,6 +36,8 @@
         <el-descriptions-item label="GEO站点域名">{{ brand?.geoSiteCode ? `https://www.${brand.geoSiteCode}.com` : '-' }}</el-descriptions-item>
         <el-descriptions-item label="抖音号">{{ brand?.douyinAccount || '-' }}</el-descriptions-item>
         <el-descriptions-item label="联系电话">{{ brand?.phone || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="对外公开电话">{{ brand?.publicPhone || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="对外公开地址">{{ brand?.publicAddress || '-' }}</el-descriptions-item>
         <el-descriptions-item label="微信">{{ brand?.wechat || '-' }}</el-descriptions-item>
 
         <el-descriptions-item label="品牌标准表述" :span="3">{{ brand?.standardBrandStatement || '-' }}</el-descriptions-item>
@@ -186,6 +188,8 @@
         <el-form-item label="视频号"><el-input v-model="brandForm.videoAccount" /></el-form-item>
         <el-form-item label="抖音号"><el-input v-model="brandForm.douyinAccount" /></el-form-item>
         <el-form-item label="联系电话"><el-input v-model="brandForm.phone" /></el-form-item>
+        <el-form-item label="对外公开电话"><el-input v-model="brandForm.publicPhone" /></el-form-item>
+        <el-form-item label="对外公开地址"><el-input v-model="brandForm.publicAddress" /></el-form-item>
         <el-form-item label="微信"><el-input v-model="brandForm.wechat" /></el-form-item>
         <el-form-item label="状态" required>
           <el-select v-model="brandForm.status" style="width: 100%">
@@ -329,6 +333,8 @@ const brandForm = reactive({
   videoAccount: '',
   douyinAccount: '',
   phone: '',
+  publicPhone: '',
+  publicAddress: '',
   wechat: '',
   status: 'active',
   description: '',
@@ -435,6 +441,8 @@ function fillForm(data: Brand) {
   brandForm.videoAccount = data.videoAccount || ''
   brandForm.douyinAccount = data.douyinAccount || ''
   brandForm.phone = data.phone || ''
+  brandForm.publicPhone = data.publicPhone || ''
+  brandForm.publicAddress = data.publicAddress || ''
   brandForm.wechat = data.wechat || ''
   brandForm.status = data.status || 'active'
   brandForm.description = data.description || ''
@@ -614,6 +622,8 @@ async function submitBrand() {
       videoAccount: brandForm.videoAccount || undefined,
       douyinAccount: brandForm.douyinAccount || undefined,
       phone: brandForm.phone || undefined,
+      publicPhone: brandForm.publicPhone || undefined,
+      publicAddress: brandForm.publicAddress || undefined,
       wechat: brandForm.wechat || undefined,
       status: brandForm.status,
       description: brandForm.description || undefined,

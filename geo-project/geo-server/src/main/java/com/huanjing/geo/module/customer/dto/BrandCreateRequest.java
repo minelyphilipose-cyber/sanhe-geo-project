@@ -27,6 +27,8 @@ public class BrandCreateRequest {
     private String videoAccount;
     private String douyinAccount;
     private String phone;
+    private String publicPhone;
+    private String publicAddress;
     private String wechat;
     private String description;
     private String businessIntro;

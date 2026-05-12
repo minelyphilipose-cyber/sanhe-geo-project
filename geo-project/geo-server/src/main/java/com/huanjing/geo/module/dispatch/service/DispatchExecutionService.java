@@ -183,6 +183,7 @@ public class DispatchExecutionService {
         Set<String> projectNames = resolveProjectNameSet(project);
         Set<String> siteDomains = resolveSiteDomains(project);
         Set<String> normalizedPhones = resolvePhones(project);
+        Set<String> contactTerms = resolveContactTerms(project);
 
         Map<Long, PlatformAgg> aggByPlatform = new LinkedHashMap<>();
         for (AiPlatformConfig platform : platformConfigs) {
@@ -193,7 +194,7 @@ public class DispatchExecutionService {
             PlatformAgg agg = aggByPlatform.get(platform.getId());
             for (PollKeywordCandidate keyword : selected) {
                 InvocationResult invokeResult = invokeWithFallback(platform, task, keyword.keywordText());
-                PollResult detail = buildPollResult(batch, task, project, platform, keyword, invokeResult, projectNames, siteDomains, normalizedPhones);
+                PollResult detail = buildPollResult(batch, task, project, platform, keyword, invokeResult, projectNames, siteDomains, normalizedPhones, contactTerms);
                 upsertPollResult(detail);
                 agg.questionCount += 1;
                 agg.requestCount += Math.max(detail.getRequestCount() == null ? 0 : detail.getRequestCount(), 0);
@@ -263,9 +264,10 @@ public class DispatchExecutionService {
                                        InvocationResult invokeResult,
                                        Set<String> projectNames,
                                        Set<String> siteDomains,
-                                       Set<String> normalizedPhones) {
+                                       Set<String> normalizedPhones,
+                                       Set<String> contactTerms) {
         MatchInfo match = invokeResult.success
-                ? analyzeMatch(projectNames, siteDomains, normalizedPhones, invokeResult.responseText)
+                ? analyzeMatch(projectNames, siteDomains, normalizedPhones, contactTerms, invokeResult.responseText)
                 : MatchInfo.empty();
 
         String recordType;
@@ -571,6 +573,8 @@ public class DispatchExecutionService {
                 sb.append("Brand Statement: ").append(promptStatement).append("\n");
             }
             sb.append("Brand Description: ").append(Optional.ofNullable(brand.getDescription()).orElse("")).append("\n");
+            sb.append("Public Phone: ").append(Optional.ofNullable(brand.getPublicPhone()).orElse("")).append("\n");
+            sb.append("Public Address: ").append(Optional.ofNullable(brand.getPublicAddress()).orElse("")).append("\n");
         }
         return sb.toString();
     }
@@ -1066,11 +1070,24 @@ public class DispatchExecutionService {
         if (brand != null && StringUtils.hasText(brand.getPhone())) {
             phones.add(normalizePhone(brand.getPhone()));
         }
+        if (brand != null && StringUtils.hasText(brand.getPublicPhone())) {
+            phones.add(normalizePhone(brand.getPublicPhone()));
+        }
         phones.removeIf(v -> !StringUtils.hasText(v));
         return phones;
     }
 
-    private MatchInfo analyzeMatch(Set<String> projectNames, Set<String> siteDomains, Set<String> phones, String responseText) {
+    private Set<String> resolveContactTerms(Project project) {
+        Set<String> terms = new HashSet<>();
+        Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
+        if (brand != null && StringUtils.hasText(brand.getPublicAddress())) {
+            terms.add(brand.getPublicAddress().trim());
+        }
+        terms.removeIf(v -> !StringUtils.hasText(v));
+        return terms;
+    }
+
+    private MatchInfo analyzeMatch(Set<String> projectNames, Set<String> siteDomains, Set<String> phones, Set<String> contactTerms, String responseText) {
         if (!StringUtils.hasText(responseText)) {
             return MatchInfo.empty();
         }
@@ -1098,7 +1115,9 @@ public class DispatchExecutionService {
         }
         boolean siteMentioned = siteDomains.stream().anyMatch(lower::contains);
         String normalizedResponseDigits = normalizePhone(raw);
-        boolean contactMentioned = phones.stream().anyMatch(p -> StringUtils.hasText(p) && normalizedResponseDigits.contains(p));
+        boolean phoneMentioned = phones.stream().anyMatch(p -> StringUtils.hasText(p) && normalizedResponseDigits.contains(p));
+        boolean contactTermMentioned = contactTerms.stream().anyMatch(term -> StringUtils.hasText(term) && raw.contains(term));
+        boolean contactMentioned = phoneMentioned || contactTermMentioned;
         return new MatchInfo(nameHit, matchType, siteMentioned, contactMentioned);
     }
 

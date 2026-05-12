@@ -127,6 +127,8 @@ public class BrandService {
         brand.setVideoAccount(req.getVideoAccount());
         brand.setDouyinAccount(req.getDouyinAccount());
         brand.setPhone(req.getPhone());
+        brand.setPublicPhone(req.getPublicPhone());
+        brand.setPublicAddress(req.getPublicAddress());
         brand.setWechat(req.getWechat());
         brand.setDescription(req.getDescription());
         brand.setBusinessIntro(req.getBusinessIntro());
@@ -186,6 +188,8 @@ public class BrandService {
         brand.setVideoAccount(req.getVideoAccount());
         brand.setDouyinAccount(req.getDouyinAccount());
         brand.setPhone(req.getPhone());
+        brand.setPublicPhone(req.getPublicPhone());
+        brand.setPublicAddress(req.getPublicAddress());
         brand.setWechat(req.getWechat());
         brand.setDescription(req.getDescription());
         brand.setBusinessIntro(req.getBusinessIntro());
@@ -327,6 +331,10 @@ public class BrandService {
         snapshot.put("officialAccount", brand.getOfficialAccount());
         snapshot.put("videoAccount", brand.getVideoAccount());
         snapshot.put("douyinAccount", brand.getDouyinAccount());
+        snapshot.put("phone", brand.getPhone());
+        snapshot.put("publicPhone", brand.getPublicPhone());
+        snapshot.put("publicAddress", brand.getPublicAddress());
+        snapshot.put("wechat", brand.getWechat());
         return snapshot;
     }
 

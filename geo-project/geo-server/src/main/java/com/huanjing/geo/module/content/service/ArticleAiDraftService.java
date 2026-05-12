@@ -465,6 +465,8 @@ public class ArticleAiDraftService {
                 - 项目 ID：%s
                 - 项目名称：%s
                 - 品牌：%s
+                - 对外公开电话：%s
+                - 对外公开地址：%s
                 - 文章类型：%s
 
                 # 写作要求
@@ -490,6 +492,8 @@ public class ArticleAiDraftService {
                 project.getId(),
                 nullToDash(project.getProjectName()),
                 brand == null ? "-" : nullToDash(brand.getBrandName()),
+                brand == null ? "-" : nullToDash(brand.getPublicPhone()),
+                brand == null ? "-" : nullToDash(brand.getPublicAddress()),
                 articleType,
                 styleLabel,
                 styleGuide,

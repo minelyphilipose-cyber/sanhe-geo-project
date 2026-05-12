@@ -304,6 +304,8 @@ public class BrandProfileService {
         snapshot.put("videoAccount", brand.getVideoAccount());
         snapshot.put("douyinAccount", brand.getDouyinAccount());
         snapshot.put("phone", brand.getPhone());
+        snapshot.put("publicPhone", brand.getPublicPhone());
+        snapshot.put("publicAddress", brand.getPublicAddress());
         snapshot.put("wechat", brand.getWechat());
         snapshot.put("description", brand.getDescription());
         snapshot.put("businessIntro", brand.getBusinessIntro());
