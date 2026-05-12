@@ -58,15 +58,25 @@ public class WechatMpAuthorizationService {
 
     public String handleCallback(String authCode, String state) {
         State decoded = consumeState(state);
-        String componentToken = componentAccessTokenService.getAccessToken();
         String componentAppid = require(properties.getComponentAppid(), "wechat component appid missing");
-        WechatOpenPlatformClient.QueryAuthResult queryAuth =
-                openPlatformClient.queryAuth(componentToken, componentAppid, authCode);
-        WechatOpenPlatformClient.AuthorizerInfoResult info =
-                openPlatformClient.getAuthorizerInfo(componentToken, componentAppid, queryAuth.authorizerAppid());
-        SelfMediaAccount account = saveAccount(decoded.brandId(), queryAuth, info);
+        SelfMediaAccount account = saveOrUpdateAuthorization(decoded.brandId(), componentAppid, authCode);
         String status = "active".equals(account.getStatus()) ? "success" : "permission_missing";
         return redirectUrl(decoded.brandId(), decoded.redirectArticleId(), account.getPlatformAccountId(), account.getStatus(), status);
+    }
+
+    public SelfMediaAccount saveOrUpdateAuthorization(String componentAppid, String authorizationCode) {
+        return saveOrUpdateAuthorization(null, componentAppid, authorizationCode);
+    }
+
+    public SelfMediaAccount saveOrUpdateAuthorization(Long brandId, String componentAppid, String authorizationCode) {
+        componentAppid = require(componentAppid, "wechat component appid missing");
+        authorizationCode = require(authorizationCode, "wechat authorization code missing");
+        String componentToken = componentAccessTokenService.getAccessToken();
+        WechatOpenPlatformClient.QueryAuthResult queryAuth =
+                openPlatformClient.queryAuth(componentToken, componentAppid, authorizationCode);
+        WechatOpenPlatformClient.AuthorizerInfoResult info =
+                openPlatformClient.getAuthorizerInfo(componentToken, componentAppid, queryAuth.authorizerAppid());
+        return saveAccount(brandId, queryAuth, info);
     }
 
     private SelfMediaAccount saveAccount(Long brandId,
@@ -81,7 +91,9 @@ public class WechatMpAuthorizationService {
             account = new SelfMediaAccount();
             account.setCreatedAt(now);
         }
-        account.setBrandId(brandId);
+        if (brandId != null) {
+            account.setBrandId(brandId);
+        }
         account.setPlatform("wechat_mp");
         account.setAccountName(StringUtils.hasText(info.accountName()) ? info.accountName() : queryAuth.authorizerAppid());
         account.setPlatformAccountId(queryAuth.authorizerAppid());
