@@ -138,6 +138,12 @@ geo:
     endpoint: ${BRAND_GEO_SITE_ENDPOINT:}
     connect-timeout-ms: ${BRAND_GEO_SITE_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${BRAND_GEO_SITE_READ_TIMEOUT_MS:30000}
+  douyin:
+    client:
+      mode: ${DOUYIN_CLIENT_MODE:mock}
+      base-url: ${DOUYIN_API_BASE_URL:https://open.douyin.com}
+      connect-timeout-ms: ${DOUYIN_CONNECT_TIMEOUT_MS:5000}
+      request-timeout-ms: ${DOUYIN_REQUEST_TIMEOUT_MS:30000}
   meititejia:
     enabled: true
     mock-mode: false

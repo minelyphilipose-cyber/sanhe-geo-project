@@ -9,6 +9,9 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "geo.douyin.client")
 public class DouyinClientProperties {
     private String mode = "mock";
+    private String baseUrl = "https://open.douyin.com";
+    private int connectTimeoutMs = 5000;
+    private int requestTimeoutMs = 30000;
     private Fault fault = new Fault();
 
     @Data

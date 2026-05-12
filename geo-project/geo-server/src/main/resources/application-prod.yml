@@ -59,6 +59,21 @@ geo:
     endpoint: ${BRAND_GEO_SITE_ENDPOINT}
     connect-timeout-ms: ${BRAND_GEO_SITE_CONNECT_TIMEOUT_MS:5000}
     read-timeout-ms: ${BRAND_GEO_SITE_READ_TIMEOUT_MS:30000}
+  douyin:
+    client:
+      mode: ${DOUYIN_CLIENT_MODE:real}
+      base-url: ${DOUYIN_API_BASE_URL:https://open.douyin.com}
+      connect-timeout-ms: ${DOUYIN_CONNECT_TIMEOUT_MS:5000}
+      request-timeout-ms: ${DOUYIN_REQUEST_TIMEOUT_MS:30000}
+    open-platform:
+      client-key: ${DOUYIN_CLIENT_KEY}
+      client-secret: ${DOUYIN_CLIENT_SECRET}
+      auth-callback-url: ${DOUYIN_BACKEND_AUTH_CALLBACK_URL}
+      frontend-callback-url: ${DOUYIN_FRONTEND_CALLBACK_URL}
+      required-scopes: [video.create.bind]
+    feature:
+      image-text:
+        enabled: ${DOUYIN_IMAGE_TEXT_ENABLED:false}
   report:
     web-base-url: ${REPORT_WEB_BASE_URL:http://geo-web}
     render-timeout-ms: ${REPORT_RENDER_TIMEOUT_MS:30000}
