@@ -21,6 +21,7 @@ public class WechatAuthorizerTokenService {
     private static final String LOCK_KEY_PREFIX = "wechat:refresh_lock:";
     private static final Duration LOCK_TTL = Duration.ofSeconds(10);
     private static final int REFRESH_MARGIN_SECONDS = 300;
+    private static final int REFRESH_TOKEN_EXPIRED_CODE = 61023;
 
     private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final WechatOpenPlatformProperties properties;
@@ -72,13 +73,20 @@ public class WechatAuthorizerTokenService {
             }
             String refreshToken = cipherService.decrypt(account.getRefreshTokenCipher());
             String componentToken = componentAccessTokenService.getAccessToken();
-            WechatOpenPlatformClient.AuthorizerTokenResult result =
-                    openPlatformClient.refreshAuthorizerToken(
-                            componentToken,
-                            properties.getComponentAppid(),
-                            appid,
-                            refreshToken
-                    );
+            WechatOpenPlatformClient.AuthorizerTokenResult result;
+            try {
+                result = openPlatformClient.refreshAuthorizerToken(
+                        componentToken,
+                        properties.getComponentAppid(),
+                        appid,
+                        refreshToken
+                );
+            } catch (BizException ex) {
+                if (ex.getCode() == REFRESH_TOKEN_EXPIRED_CODE) {
+                    markAccountExpired(account, tokenKey);
+                }
+                throw ex;
+            }
             int ttl = Math.max(60, result.expiresIn() - REFRESH_MARGIN_SECONDS);
             redisTemplate.opsForValue().set(tokenKey, result.authorizerAccessToken(), Duration.ofSeconds(ttl));
             if (StringUtils.hasText(result.authorizerRefreshToken())
@@ -95,6 +103,14 @@ public class WechatAuthorizerTokenService {
                 redisTemplate.delete(lockKey);
             }
         }
+    }
+
+    private void markAccountExpired(SelfMediaAccount account, String tokenKey) {
+        redisTemplate.delete(tokenKey);
+        account.setStatus("expired");
+        account.setLastAuthCheckedAt(LocalDateTime.now());
+        account.setLastAuthError("wechat refresh token expired, reauthorization required");
+        selfMediaAccountMapper.updateById(account);
     }
 
     private String require(String value, String message) {
