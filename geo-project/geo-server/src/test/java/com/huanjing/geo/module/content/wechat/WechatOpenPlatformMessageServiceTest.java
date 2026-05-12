@@ -1,26 +1,24 @@
 package com.huanjing.geo.module.content.wechat;
 
-import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 class WechatOpenPlatformMessageServiceTest {
 
+    private WechatQueryAuthCodeAsyncService queryAuthCodeAsyncService;
     private WechatOpenPlatformMessageService service;
 
     @BeforeEach
     void setUp() {
-        service = new WechatOpenPlatformMessageService(
-                mock(WechatMpClient.class),
-                mock(WechatOpenPlatformClient.class),
-                mock(WechatComponentAccessTokenService.class),
-                new WechatOpenPlatformProperties()
-        );
+        queryAuthCodeAsyncService = mock(WechatQueryAuthCodeAsyncService.class);
+        service = new WechatOpenPlatformMessageService(queryAuthCodeAsyncService);
     }
 
     @Test
@@ -65,6 +63,23 @@ class WechatOpenPlatformMessageServiceTest {
                 eventMessage("VIEW")));
 
         assertThat(reply.get("Content")).isEqualTo("VIEWfrom_callback");
+    }
+
+    @Test
+    void queryAuthCodeReturnsSuccessImmediatelyAndDelegatesAsyncHandling() {
+        long startedAt = System.currentTimeMillis();
+
+        String response = service.handleAuthorizerMessage("wx-authorizer",
+                textMessage("QUERY_AUTH_CODE:queryauthcode@@@12345678"));
+
+        assertThat(response).isEqualTo("success");
+        assertThat(System.currentTimeMillis() - startedAt).isLessThan(500);
+        verify(queryAuthCodeAsyncService).handle(
+                eq("wx-authorizer"),
+                eq("from-openid"),
+                eq("queryauthcode@@@12345678"),
+                org.mockito.ArgumentMatchers.anyLong()
+        );
     }
 
     private Map<String, String> parseReply(String reply) {

@@ -131,4 +131,19 @@ public class AsyncExecutorConfig {
         executor.initialize();
         return executor;
     }
+
+    @Bean("wechatCallbackExecutor")
+    public Executor wechatCallbackExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(100);
+        executor.setKeepAliveSeconds(60);
+        executor.setThreadNamePrefix("wechat-callback-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.AbortPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(8);
+        executor.initialize();
+        return executor;
+    }
 }
