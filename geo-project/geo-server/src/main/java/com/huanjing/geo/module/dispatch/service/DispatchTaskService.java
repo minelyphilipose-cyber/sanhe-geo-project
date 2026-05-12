@@ -360,7 +360,7 @@ public class DispatchTaskService {
                     task.getPayloadJson(),
                     task.getProjectId()
             );
-            log.info("Task {} postponed for shared LLM capacity", task.getId(), ex);
+            log.info("Task {} postponed for dispatch resource: {}", task.getId(), lastError);
             return;
         }
         int nextRetryCount = (task.getRetryCount() == null ? 0 : task.getRetryCount()) + 1;

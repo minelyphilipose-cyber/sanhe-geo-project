@@ -18,14 +18,16 @@ public class ArticleGenerationWindowLockService {
     private final LeaseRenewalService leaseRenewalService;
     private final LlmPoolProperties properties;
 
-    public WindowLock tryLock(Long projectId, String targetChannel, String periodKey) {
+    public WindowLock tryLock(Long projectId, String targetChannel, String periodKey, Integer generationSlotNo) {
         String key = properties.getPermitKeyPrefix()
                 + ":article-window:"
                 + projectId
                 + ":"
                 + normalize(targetChannel)
                 + ":"
-                + normalize(periodKey);
+                + normalize(periodKey)
+                + ":"
+                + normalizeSlot(generationSlotNo);
         String member = Thread.currentThread().getId() + ":" + UUID.randomUUID();
         long now = System.currentTimeMillis();
         long leaseUntil = now + properties.getLeaseMs();
@@ -49,6 +51,10 @@ public class ArticleGenerationWindowLockService {
             return "_";
         }
         return value.trim().replaceAll("[^A-Za-z0-9_.:-]", "_");
+    }
+
+    private String normalizeSlot(Integer generationSlotNo) {
+        return generationSlotNo == null || generationSlotNo <= 0 ? "_" : String.valueOf(generationSlotNo);
     }
 
     public final class WindowLock implements AutoCloseable {

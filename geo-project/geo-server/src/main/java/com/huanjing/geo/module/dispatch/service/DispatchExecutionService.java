@@ -354,12 +354,13 @@ public class DispatchExecutionService {
         String periodType = resolvePeriodType(task);
         String periodKey = QuotaPeriodResolver.periodKey(periodType, task.getWindowStart());
         ArticleGenerationWindowLockService.WindowLock windowLock =
-                articleGenerationWindowLockService.tryLock(project.getId(), targetChannel, periodKey);
+                articleGenerationWindowLockService.tryLock(project.getId(), targetChannel, periodKey, generationSlotNo);
         if (windowLock == null) {
             throw new DispatchResourceBusyException(
                     "Article generation window is busy: project=" + project.getId()
                             + ", channel=" + targetChannel
-                            + ", periodKey=" + periodKey,
+                            + ", periodKey=" + periodKey
+                            + ", generationSlotNo=" + generationSlotNo,
                     null
             );
         }

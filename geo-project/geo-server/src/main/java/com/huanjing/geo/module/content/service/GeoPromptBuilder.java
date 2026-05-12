@@ -97,9 +97,9 @@ public class GeoPromptBuilder {
                 - 文章结构清晰，只使用 Markdown 一级和二级标题
 
                 【GEO 优化规则】
-                - 标题必须自然包含主关键词
-                - 开头前 100 字内自然出现主关键词
-                - 二级标题尽量融入次关键词或相关表达
+                - 标题必须自然包含本篇问题词
+                - 开头前 100 字内自然出现本篇问题词
+                - 全文只围绕本篇问题词展开，不要同时覆盖其他问题词
                 - 品牌名全篇出现 3 到 5 次，分散在开头、中段和结尾
                 - 关键词使用保持自然，不堆砌，不做机械重复
                 - 不要使用“本文”“本公司”“我们公司”等自指表达，优先使用品牌名或第三人称
@@ -143,11 +143,9 @@ public class GeoPromptBuilder {
         appendLine(sb, "内容调性", project.getContentTone());
         appendLine(sb, "补充说明", project.getContentNote());
 
-        sb.append("\n【关键词】\n");
-        sb.append("主关键词：").append(keywords.primary()).append("\n");
-        if (!keywords.secondary().isEmpty()) {
-            sb.append("次关键词：").append(String.join("、", keywords.secondary())).append("\n");
-        }
+        sb.append("\n【问题词】\n");
+        sb.append("本篇问题词：").append(keywords.primary()).append("\n");
+        sb.append("请仅围绕该问题词生成文章，不要扩展为多个问题词合集。\n");
 
         sb.append("\n【写作任务】\n");
         sb.append("文章类型：").append(resolveArticleTypeLabel(articleType)).append("\n");
@@ -198,19 +196,7 @@ public class GeoPromptBuilder {
         }
         int primaryIdx = Math.floorMod(articleIndex, allKeywords.size());
         String primary = allKeywords.get(primaryIdx);
-        List<String> secondary = new ArrayList<>();
-        for (int offset = 1; offset <= 3 && secondary.size() < 5; offset++) {
-            addSecondaryKeyword(secondary, allKeywords, primaryIdx + offset, primary);
-            addSecondaryKeyword(secondary, allKeywords, primaryIdx - offset, primary);
-        }
-        return new KeywordSelection(primary, secondary);
-    }
-
-    private void addSecondaryKeyword(List<String> secondary, List<String> allKeywords, int index, String primary) {
-        String candidate = allKeywords.get(Math.floorMod(index, allKeywords.size()));
-        if (!candidate.equals(primary) && !secondary.contains(candidate) && secondary.size() < 5) {
-            secondary.add(candidate);
-        }
+        return new KeywordSelection(primary);
     }
 
     private List<String> resolveForbiddenPhrases(Project project, Brand brand) {
@@ -307,11 +293,11 @@ public class GeoPromptBuilder {
 
     private String resolveStructureRule(String articleType) {
         return switch (StringUtils.hasText(articleType) ? articleType.trim().toLowerCase(Locale.ROOT) : "") {
-            case "faq" -> "围绕主关键词设计 3-5 组问答，答案需具体且可执行";
+            case "faq" -> "围绕本篇问题词设计 3-5 组问答，答案需具体且可执行";
             case "scenario_content" -> "按场景痛点、解决方案、品牌建议、行动建议展开";
             case "industry_article" -> "按背景、分析、对比、建议的顺序展开";
             case "stage_advice" -> "按阶段现状、关键问题、优化建议、执行步骤展开";
-            default -> "围绕主关键词组织完整文章结构，包含分析与建议";
+            default -> "围绕本篇问题词组织完整文章结构，包含分析与建议";
         };
     }
 
@@ -321,7 +307,7 @@ public class GeoPromptBuilder {
         }
     }
 
-    private record KeywordSelection(String primary, List<String> secondary) {
+    private record KeywordSelection(String primary) {
     }
 
     public record PromptPair(String systemPrompt, String userPrompt) {
