@@ -13,7 +13,7 @@
   },
   "permissions": ["alarms", "cookies", "storage", "tabs", "scripting"],
   "host_permissions": [
-    "https://www.huanjingaigeo.com/*",
+    "http://119.45.154.127/*",
     "https://*.toutiao.com/*",
     "https://*.zhihu.com/*"
   ],
@@ -24,7 +24,7 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://www.xguiai.com/*"],
+      "matches": ["http://119.45.154.127/*"],
       "js": ["assets/admin-bridge-content-script.js"],
       "run_at": "document_start"
     }

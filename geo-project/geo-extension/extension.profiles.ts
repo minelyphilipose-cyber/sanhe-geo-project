@@ -27,12 +27,12 @@ export const EXTENSION_PROFILES: Record<ExtensionProfileName, ExtensionProfile> 
     ],
   },
   production: {
-    apiBaseUrl: 'https://www.huanjingaigeo.com',
+    apiBaseUrl: 'http://119.45.154.127',
     adminOrigins: [
-      'https://www.xguiai.com',
+      'http://119.45.154.127',
     ],
     hostPermissions: [
-      'https://www.huanjingaigeo.com/*',
+      'http://119.45.154.127/*',
       ...PLATFORM_HOST_PERMISSIONS,
     ],
   },

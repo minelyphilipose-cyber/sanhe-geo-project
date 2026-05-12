@@ -5,7 +5,7 @@ server:
 
 spring:
   profiles:
-    active: dev
+    active: prod
   application:
     name: geo-server
   servlet:
@@ -145,12 +145,12 @@ geo:
       connect-timeout-ms: ${DOUYIN_CONNECT_TIMEOUT_MS:5000}
       request-timeout-ms: ${DOUYIN_REQUEST_TIMEOUT_MS:30000}
   meititejia:
-    enabled: true
-    mock-mode: false
-    base-url: https://www.meititejia.com/meijieapi/daili3
-    secret-id: "cee24f7b210eeb87ea5d19148f052233"
-    secret-key: "bb02bde2518e7c7fcb68640c2d3233d5"
-    preview-url-base: ""
+    enabled: ${MEITITEJIA_ENABLED:true}
+    mock-mode: ${MEITITEJIA_MOCK_MODE:false}
+    base-url: ${MEITITEJIA_BASE_URL:https://www.meititejia.com/meijieapi/daili3}
+    secret-id: ${MEITITEJIA_SECRET_ID:}
+    secret-key: ${MEITITEJIA_SECRET_KEY:}
+    preview-url-base: ${MEITITEJIA_PREVIEW_URL_BASE:}
     sync-enabled: true
     order-status-check-enabled: true
     sync-page-limit: 200
@@ -215,7 +215,7 @@ geo:
       cron-jitter-ms: ${PRESALE_EXPORT_CLEANUP_CRON_JITTER_MS:60000}
       max-retry-count: ${PRESALE_EXPORT_CLEANUP_MAX_RETRY_COUNT:5}
   dispatch:
-    cron: "0 5 0 * * *"
+    cron: "0 45 10 * * *"
     timezone: "Asia/Shanghai"
     lock-key: "geo:dispatch:scan:lock"
     lock-ttl-seconds: 600

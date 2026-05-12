@@ -24,8 +24,8 @@ geo:
     open-platform:
       component-appid: ${WECHAT_COMPONENT_APPID:wx514c6537de79de97}
       component-app-secret: ${WECHAT_COMPONENT_SECRET:}
-      token: ${WECHAT_TOKEN:}
-      encoding-aes-key: ${WECHAT_ENCODING_AES_KEY:}
+      token: ${WECHAT_TOKEN:GeoWxToken2026A8x9kP3qR7nM}
+      encoding-aes-key: ${WECHAT_ENCODING_AES_KEY:Q8wE2rT5yU7iO9pA3sD6fG4hJ1kL8zX5cV2bN7mQ4wE}
       draft-distribution-enabled: false
       func-scope-strict-mode: false
       required-draft-func-scopes: [1, 13]

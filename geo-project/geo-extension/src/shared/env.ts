@@ -11,7 +11,9 @@ function validateApiBase(value: string): string {
   if (value !== EXTENSION_PROFILE.apiBaseUrl) {
     throw new Error(`VITE_GEO_API_BASE_URL is not allowed: ${value}`)
   }
-  if (import.meta.env.VITE_GEO_EXTENSION_PROFILE === 'production' && value.startsWith('http://')) {
+  if (import.meta.env.VITE_GEO_EXTENSION_PROFILE === 'production'
+    && value.startsWith('http://')
+    && !EXTENSION_PROFILE.apiBaseUrl.startsWith('http://')) {
     throw new Error('Production extension API base must use HTTPS')
   }
   return value

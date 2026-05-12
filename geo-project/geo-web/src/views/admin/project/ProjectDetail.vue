@@ -22,6 +22,7 @@
         <el-descriptions-item label="品牌名称">{{ project?.brandName || '-' }}</el-descriptions-item>
         <el-descriptions-item label="拓词组">{{ keywordSummary }}</el-descriptions-item>
         <el-descriptions-item label="问题额度">{{ keywordAllocationSummary }}</el-descriptions-item>
+        <el-descriptions-item label="分发渠道额度" :span="2">{{ channelAllocationSummary }}</el-descriptions-item>
         <el-descriptions-item label="归属类型">{{ dictStore.label('owner_type', project?.ownerType) }}</el-descriptions-item>
         <el-descriptions-item label="合伙人">{{ project?.ownerType === 'direct' ? '-' : '已绑定' }}</el-descriptions-item>
         <el-descriptions-item label="所在地区">{{ regionText(project) }}</el-descriptions-item>
@@ -32,6 +33,48 @@
         <el-descriptions-item label="扣款流水号">{{ project?.deductionTxnNo || '-' }}</el-descriptions-item>
         <el-descriptions-item label="主目标" :span="3">{{ project?.primaryGoal || '-' }}</el-descriptions-item>
       </el-descriptions>
+    </el-card>
+
+    <el-card v-if="project">
+      <template #header>
+        <div class="flex items-center justify-between">
+          <span>分发渠道额度</span>
+          <el-button v-if="canUpdateProject" size="small" type="primary" plain @click="openChannelAllocationEdit">调整额度</el-button>
+        </div>
+      </template>
+      <el-alert
+        type="info"
+        :closable="false"
+        class="mb-3"
+        title="官网、行业资讯站额度大于 0 时才会触发文章生成；可填范围为客户套餐总额度减去当前已激活项目占用。"
+      />
+      <el-table :data="project.channelAllocations || []" border empty-text="暂无渠道额度">
+        <el-table-column prop="channelName" label="渠道" min-width="140">
+          <template #default="{ row }">
+            <div class="channel-name">
+              <span>{{ row.channelName || row.channelCode }}</span>
+              <el-tag v-if="isArticleGenerationChannel(row.channelCode)" size="small" type="success">文章生成</el-tag>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="周期" width="100">
+          <template #default="{ row }">{{ periodLabel(row.periodType) }}</template>
+        </el-table-column>
+        <el-table-column label="套餐总额" width="110">
+          <template #default="{ row }">{{ row.quotaLimit || 0 }}</template>
+        </el-table-column>
+        <el-table-column label="已激活占用" width="120">
+          <template #default="{ row }">{{ row.activeAllocatedCount || 0 }}</template>
+        </el-table-column>
+        <el-table-column label="当前项目" width="120">
+          <template #default="{ row }">{{ row.currentProjectAllocatedCount || 0 }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="110">
+          <template #default="{ row }">
+            <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '可用' : '未启用' }}</el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
     </el-card>
 
     <el-card v-if="project">
@@ -196,6 +239,32 @@
         <el-button type="primary" :loading="questionSaving" @click="saveQuestion">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="channelEditVisible" title="调整分发渠道额度" width="640px">
+      <div class="channel-edit-note">官网、行业资讯站额度会参与文章生成调度；保存后若项目已启动，后端会再次校验客户剩余额度。</div>
+      <div v-loading="channelQuotaLoading" class="channel-allocation-panel">
+        <div v-for="item in channelQuotaItems" :key="item.channelCode" class="channel-row">
+          <div class="channel-meta">
+            <div class="channel-name">
+              <span>{{ item.channelName }}</span>
+              <el-tag v-if="isArticleGenerationChannel(item.channelCode)" size="small" type="success">文章生成</el-tag>
+            </div>
+            <small>{{ channelQuotaText(item) }}</small>
+          </div>
+          <el-input-number
+            v-model="channelAllocationForm[item.channelCode]"
+            :min="0"
+            :max="channelInputMax(item)"
+            :disabled="!item.enabled"
+            controls-position="right"
+          />
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="channelEditVisible = false">取消</el-button>
+        <el-button type="primary" :loading="channelSaving" @click="saveChannelAllocations">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -206,8 +275,17 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { UploadFile } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
-import { deleteProject, getProjectDetail, getKeywordGroupQuestions, importProjectKeywordGroup, updateKeywordGroupQuestion, updateProjectStatus } from '@/api/project'
-import type { KeywordGroup, KeywordGroupQuestion, PageResult, Project } from '@/types'
+import {
+  deleteProject,
+  getProjectChannelAllocationQuota,
+  getProjectDetail,
+  getKeywordGroupQuestions,
+  importProjectKeywordGroup,
+  updateKeywordGroupQuestion,
+  updateProject,
+  updateProjectStatus,
+} from '@/api/project'
+import type { KeywordGroup, KeywordGroupQuestion, PageResult, Project, ProjectChannelAllocationItem } from '@/types'
 import { regionDisplayFromPayload } from '@/constants/region'
 
 const route = useRoute()
@@ -215,6 +293,7 @@ const router = useRouter()
 const userStore = useUserStore()
 const dictStore = useDictStore()
 const canActivateProject = computed(() => userStore.hasPermission('project.start'))
+const canUpdateProject = computed(() => userStore.hasPermission('project.update'))
 const projectId = Number(route.params.id)
 const hasValidId = Number.isFinite(projectId) && projectId > 0
 
@@ -224,10 +303,16 @@ const importing = ref(false)
 const project = ref<Project | null>(null)
 const questionDrawerVisible = ref(false)
 const questionEditVisible = ref(false)
+const channelEditVisible = ref(false)
 const questionLoading = ref(false)
 const questionSaving = ref(false)
+const channelQuotaLoading = ref(false)
+const channelSaving = ref(false)
 const currentKeywordGroup = ref<KeywordGroup | null>(null)
 const currentQuestionId = ref<number | null>(null)
+const channelQuotaItems = ref<ProjectChannelAllocationItem[]>([])
+const allocationVersion = ref<number | null>(null)
+const channelAllocationForm = reactive<Record<string, number>>({})
 const questionTier = ref('all')
 const questionPage = reactive<PageResult<KeywordGroupQuestion>>({ records: [], total: 0, current: 1, size: 20 })
 const questionForm = reactive({
@@ -258,6 +343,12 @@ const keywordAllocationSummary = computed(() => {
   if (!current) return '-'
   return `总 ${current.planKeywordGroupLimit || 0}，A ${current.planKeywordGroupLimitA || 0} / B ${current.planKeywordGroupLimitB || 0} / C ${current.planKeywordGroupLimitC || 0}`
 })
+const channelAllocationSummary = computed(() => {
+  const rows = project.value?.channelAllocations || []
+  const targets = rows.filter((row) => isArticleGenerationChannel(row.channelCode))
+  if (!targets.length) return '-'
+  return targets.map((row) => `${row.channelName || row.channelCode} ${row.currentProjectAllocatedCount || 0}`).join(' / ')
+})
 
 function centsToYuan(v?: number | null) {
   if (v == null) return '-'
@@ -281,6 +372,130 @@ function joinArray(value?: string | string[] | null) {
     return Array.isArray(parsed) && parsed.length ? parsed.join('、') : '-'
   } catch {
     return value
+  }
+}
+
+function isArticleGenerationChannel(channelCode?: string | null) {
+  return channelCode === 'official_site' || channelCode === 'industry_site'
+}
+
+function periodLabel(value?: string | null) {
+  const labels: Record<string, string> = {
+    day: '日',
+    week: '周',
+    month: '月',
+    total: '总量',
+    none: '-',
+  }
+  return value ? (labels[value] || value) : '-'
+}
+
+function channelInputMax(item: ProjectChannelAllocationItem) {
+  return Math.max(item.inputMax ?? item.remainingCount ?? 0, 0)
+}
+
+function channelQuotaText(item: ProjectChannelAllocationItem) {
+  if (!item.enabled) {
+    return '套餐未启用'
+  }
+  return `可分配 ${channelInputMax(item)} / 套餐总额 ${item.quotaLimit || 0}（${periodLabel(item.periodType)}）`
+}
+
+function resetChannelAllocationForm() {
+  for (const key of Object.keys(channelAllocationForm)) {
+    delete channelAllocationForm[key]
+  }
+}
+
+async function openChannelAllocationEdit() {
+  const current = project.value
+  if (!current?.companyId) {
+    ElMessage.warning('项目信息缺少客户，无法调整渠道额度')
+    return
+  }
+  channelEditVisible.value = true
+  channelQuotaLoading.value = true
+  resetChannelAllocationForm()
+  try {
+    const { data } = await getProjectChannelAllocationQuota({
+      companyId: current.companyId,
+      excludeProjectId: current.id,
+    })
+    channelQuotaItems.value = data.data.items || []
+    allocationVersion.value = data.data.allocationVersion
+    for (const item of channelQuotaItems.value) {
+      channelAllocationForm[item.channelCode] = item.currentProjectAllocatedCount || 0
+    }
+  } finally {
+    channelQuotaLoading.value = false
+  }
+}
+
+function projectUpdatePayload(current: Project) {
+  return {
+    provinceCode: current.provinceCode,
+    provinceName: current.provinceName,
+    cityCode: current.cityCode,
+    cityName: current.cityName,
+    districtCode: current.districtCode,
+    districtName: current.districtName,
+    projectName: current.projectName,
+    projectAliases: current.projectAliases || undefined,
+    companyId: current.companyId,
+    brandId: current.brandId,
+    keywordGroupIds: current.selectedKeywordGroupIds || [],
+    keywordGroupLimitA: current.planKeywordGroupLimitA ?? current.planKeywordGroupLimit ?? 0,
+    keywordGroupLimitB: current.planKeywordGroupLimitB ?? 0,
+    keywordGroupLimitC: current.planKeywordGroupLimitC ?? 0,
+    allocationVersion: allocationVersion.value,
+    channelAllocations: channelQuotaItems.value.map((item) => ({
+      channelCode: item.channelCode,
+      allocatedCount: channelAllocationForm[item.channelCode] || 0,
+    })),
+    deliveryMode: current.deliveryMode || 'managed',
+    primaryGoal: current.primaryGoal || undefined,
+    targetRegions: parseStringArray(current.targetRegions),
+    targetAudience: current.targetAudience || undefined,
+    customStatement: current.customStatement || undefined,
+    contentTone: current.contentTone || undefined,
+    preferredAngles: parseStringArray(current.preferredAngles),
+    extraForbiddenPhrases: parseStringArray(current.extraForbiddenPhrases),
+    contentNote: current.contentNote || undefined,
+    remark: current.remark || undefined,
+  }
+}
+
+function parseStringArray(value?: string | string[] | null) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter((item, index, arr) => item.length > 0 && arr.indexOf(item) === index)
+  }
+  if (!value) {
+    return [] as string[]
+  }
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed)
+      ? parsed.map((item) => String(item).trim()).filter((item, index, arr) => item.length > 0 && arr.indexOf(item) === index)
+      : []
+  } catch {
+    return String(value)
+      .split(/[,，、;；\n\r]+/)
+      .map((item) => item.trim())
+      .filter((item, index, arr) => item.length > 0 && arr.indexOf(item) === index)
+  }
+}
+
+async function saveChannelAllocations() {
+  const current = project.value
+  if (!current) return
+  channelSaving.value = true
+  try {
+    await updateProject(current.id, projectUpdatePayload(current))
+    ElMessage.success('渠道额度已保存')
+    channelEditVisible.value = false
+    await load()
+  } finally {
+    channelSaving.value = false
   }
 }
 
@@ -447,5 +662,33 @@ onMounted(() => {
 <style scoped>
 .score-input {
   width: 220px;
+}
+.channel-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.channel-edit-note {
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: #606266;
+}
+.channel-allocation-panel {
+  display: grid;
+  gap: 12px;
+}
+.channel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.channel-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.channel-meta small {
+  color: #909399;
 }
 </style>

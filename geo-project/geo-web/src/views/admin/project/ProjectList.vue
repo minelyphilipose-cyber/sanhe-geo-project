@@ -146,7 +146,7 @@
         </el-form-item>
         <el-form-item label="分发渠道">
           <div class="channel-allocation-panel">
-            <div class="channel-note">剩余额度不含草稿/暂停项目，项目启动时会再次校验</div>
+            <div class="channel-note">官网、行业资讯站额度大于 0 时才会触发文章生成；可填范围为客户套餐总额度减去当前已激活项目占用</div>
             <div v-for="item in channelQuotaItems" :key="item.channelCode" class="channel-row">
               <div class="channel-meta">
                 <span>{{ item.channelName }}</span>

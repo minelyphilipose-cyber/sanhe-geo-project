@@ -17,6 +17,8 @@ services:
       - --log-bin-trust-function-creators=1   # ← 新增这一行
     expose:
       - "3306"
+    ports:
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:

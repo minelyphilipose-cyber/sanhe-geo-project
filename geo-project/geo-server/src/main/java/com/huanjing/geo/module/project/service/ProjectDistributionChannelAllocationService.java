@@ -175,8 +175,12 @@ public class ProjectDistributionChannelAllocationService {
                 vo.setPeriodType(row == null ? null : row.getPeriodTypeSnapshot());
                 vo.setEnabled(row != null && row.getPackageQuotaLimitSnapshot() != null && row.getPackageQuotaLimitSnapshot() > 0);
                 vo.setQuotaLimit(row == null || row.getPackageQuotaLimitSnapshot() == null ? 0 : row.getPackageQuotaLimitSnapshot());
+                long activeAllocated = allocationMapper.sumActiveAllocatedByCompanyAndChannel(
+                        project.getCompanyId(), channel.code(), project.getId());
                 vo.setCurrentProjectAllocatedCount(row == null || row.getAllocatedCount() == null ? 0 : row.getAllocatedCount());
-                vo.setInputMax(vo.getQuotaLimit());
+                vo.setActiveAllocatedCount(activeAllocated);
+                vo.setRemainingCount(Math.max(vo.getQuotaLimit() - activeAllocated, 0));
+                vo.setInputMax(vo.getRemainingCount());
                 return vo;
             }).toList();
             project.setChannelAllocations(vos);
