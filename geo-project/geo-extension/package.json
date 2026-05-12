@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3100",
     "build": "vue-tsc --noEmit && vite build",
+    "build:test": "vue-tsc --noEmit && vite build --mode test",
+    "build:prod": "vue-tsc --noEmit && vite build --mode production",
     "test": "vitest run",
     "preview": "vite preview --host 0.0.0.0 --port 3101"
   },

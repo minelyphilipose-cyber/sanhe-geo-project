@@ -5,8 +5,12 @@ import com.huanjing.geo.module.audit.AuditMode;
 import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.service.AuditService;
+import com.huanjing.geo.module.content.ContentErrorCodes;
+import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.DistributionTask;
+import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
+import com.huanjing.geo.module.content.service.CompanyChannelQuotaService;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessErrorCodes;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
@@ -15,25 +19,31 @@ import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class ExtensionTaskStateServiceTest {
 
     private DistributionTaskMapper taskMapper;
+    private ArticleDraftMapper articleDraftMapper;
     private ProjectMapper projectMapper;
     private BrandAccessService brandAccessService;
+    private CompanyChannelQuotaService companyChannelQuotaService;
     private ExtensionRedisStore redisStore;
     private ExtensionAuditSupport auditSupport;
     private AuditService auditService;
@@ -42,15 +52,19 @@ class ExtensionTaskStateServiceTest {
     @BeforeEach
     void setUp() {
         taskMapper = mock(DistributionTaskMapper.class);
+        articleDraftMapper = mock(ArticleDraftMapper.class);
         projectMapper = mock(ProjectMapper.class);
         brandAccessService = mock(BrandAccessService.class);
+        companyChannelQuotaService = mock(CompanyChannelQuotaService.class);
         redisStore = mock(ExtensionRedisStore.class);
         auditSupport = mock(ExtensionAuditSupport.class);
         auditService = mock(AuditService.class);
         service = new ExtensionTaskStateService(
                 taskMapper,
+                articleDraftMapper,
                 projectMapper,
                 brandAccessService,
+                companyChannelQuotaService,
                 redisStore,
                 auditSupport,
                 auditService
@@ -213,10 +227,16 @@ class ExtensionTaskStateServiceTest {
     void publishedUpdatesFilledTaskAndAuditsSuccess() {
         stubTask("filled");
         when(taskMapper.markSemiAutoPublished(eq(30L), any(), eq(99L))).thenReturn(1);
+        when(articleDraftMapper.update(any(), any())).thenReturn(1);
 
         assertEquals("published", service.published(30L, 99L, 7L).status());
 
         verify(taskMapper).markSemiAutoPublished(eq(30L), any(), eq(99L));
+        ArgumentCaptor<ArticleDraft> articleUpdate = forClass(ArticleDraft.class);
+        verify(articleDraftMapper).update(articleUpdate.capture(), any());
+        assertEquals("published", articleUpdate.getValue().getStatus());
+        assertNotNull(articleUpdate.getValue().getPublishedAt());
+        verify(companyChannelQuotaService).confirmDistribution(30L);
         verify(auditSupport).record(
                 eq("SEMI_AUTO_TASK_PUBLISHED"),
                 eq(AuditResult.SUCCESS),
@@ -243,31 +263,58 @@ class ExtensionTaskStateServiceTest {
         BizException ex = assertThrows(BizException.class, () -> service.published(30L, 99L, 7L));
 
         assertEquals(ExtensionErrorCodes.TASK_STATE_CONFLICT, ex.getCode());
+        verifyNoInteractions(articleDraftMapper);
+        verifyNoInteractions(companyChannelQuotaService);
     }
 
     @Test
-    void reclaimTokenIssuedStaleTaskReturnsItToPending() {
+    void publishedArticleStateConflictDoesNotConfirmQuota() {
+        stubTask("filled");
+        when(taskMapper.markSemiAutoPublished(eq(30L), any(), eq(99L))).thenReturn(1);
+        when(articleDraftMapper.update(any(), any())).thenReturn(0);
+
+        BizException ex = assertThrows(BizException.class, () -> service.published(30L, 99L, 7L));
+
+        assertEquals(ContentErrorCodes.ARTICLE_STATE_CONFLICT, ex.getCode());
+        verify(articleDraftMapper).update(any(), any());
+        verifyNoInteractions(companyChannelQuotaService);
+    }
+
+    @Test
+    void reclaimTokenIssuedStaleTaskReturnsItToTokenIssuedWithFreshIssuedAt() {
         DistributionTask task = task("token_issued");
         task.setFillTokenIssuedAt(LocalDateTime.now().minusMinutes(20));
         when(taskMapper.selectStaleSemiAutoTasks(any(), any(), eq(100))).thenReturn(List.of(task));
-        when(taskMapper.reclaimSemiAutoTask(30L, "token_issued")).thenReturn(1);
+        when(taskMapper.reclaimSemiAutoTask(eq(30L), eq("token_issued"), any())).thenReturn(1);
 
         assertEquals(1, service.reclaimStaleTasks());
 
-        verify(taskMapper).reclaimSemiAutoTask(30L, "token_issued");
+        verify(taskMapper).reclaimSemiAutoTask(eq(30L), eq("token_issued"), any());
         verify(auditService).record(any(AuditEvent.class));
     }
 
     @Test
-    void reclaimFillingStaleTaskReturnsItToPending() {
+    void reclaimFillingStaleTaskReturnsItToTokenIssued() {
         DistributionTask task = task("filling");
         task.setLastHeartbeatAt(LocalDateTime.now().minusMinutes(20));
         when(taskMapper.selectStaleSemiAutoTasks(any(), any(), eq(100))).thenReturn(List.of(task));
-        when(taskMapper.reclaimSemiAutoTask(30L, "filling")).thenReturn(1);
+        when(taskMapper.reclaimSemiAutoTask(eq(30L), eq("filling"), any())).thenReturn(1);
 
         assertEquals(1, service.reclaimStaleTasks());
 
-        verify(taskMapper).reclaimSemiAutoTask(30L, "filling");
+        verify(taskMapper).reclaimSemiAutoTask(eq(30L), eq("filling"), any());
+    }
+
+    @Test
+    void reclaimFilledStaleTaskReturnsItToTokenIssued() {
+        DistributionTask task = task("filled");
+        task.setFilledAt(LocalDateTime.now().minusMinutes(20));
+        when(taskMapper.selectStaleSemiAutoTasks(any(), any(), eq(100))).thenReturn(List.of(task));
+        when(taskMapper.reclaimSemiAutoTask(eq(30L), eq("filled"), any())).thenReturn(1);
+
+        assertEquals(1, service.reclaimStaleTasks());
+
+        verify(taskMapper).reclaimSemiAutoTask(eq(30L), eq("filled"), any());
     }
 
     @Test
@@ -276,7 +323,7 @@ class ExtensionTaskStateServiceTest {
 
         assertEquals(0, service.reclaimStaleTasks());
 
-        verify(taskMapper, never()).reclaimSemiAutoTask(any(), any());
+        verify(taskMapper, never()).reclaimSemiAutoTask(any(), any(), any());
     }
 
     private void stubTask(String status) {
@@ -290,6 +337,7 @@ class ExtensionTaskStateServiceTest {
     private DistributionTask task(String status) {
         DistributionTask task = new DistributionTask();
         task.setId(30L);
+        task.setArticleId(50L);
         task.setProjectId(40L);
         task.setSelfMediaAccountId(20L);
         task.setDispatchMode("SEMI_AUTO");

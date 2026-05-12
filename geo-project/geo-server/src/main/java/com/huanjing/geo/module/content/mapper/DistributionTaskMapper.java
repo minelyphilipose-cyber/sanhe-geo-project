@@ -47,7 +47,8 @@ public interface DistributionTaskMapper extends BaseMapper<DistributionTask> {
             UPDATE distribution_tasks
             SET status = 'published',
                 published_at = #{publishedAt},
-                published_by = #{publishedBy}
+                published_by = #{publishedBy},
+                finished_at = #{publishedAt}
             WHERE id = #{taskId}
               AND status = 'filled'
               AND dispatch_mode = 'SEMI_AUTO'
@@ -66,6 +67,7 @@ public interface DistributionTaskMapper extends BaseMapper<DistributionTask> {
               AND (
                     (status = 'token_issued' AND fill_token_issued_at < #{tokenIssuedBefore})
                  OR (status = 'filling' AND last_heartbeat_at < #{heartbeatBefore})
+                 OR (status = 'filled' AND filled_at < #{heartbeatBefore})
               )
             ORDER BY id ASC
             LIMIT #{limit}
@@ -110,15 +112,17 @@ public interface DistributionTaskMapper extends BaseMapper<DistributionTask> {
 
     @Update("""
             UPDATE distribution_tasks
-            SET status = 'pending',
-                fill_token_issued_at = NULL,
+            SET status = 'token_issued',
+                fill_token_issued_at = #{reissuedAt},
                 filled_at = NULL,
                 last_heartbeat_at = NULL
             WHERE id = #{taskId}
               AND status = #{expectedStatus}
               AND dispatch_mode = 'SEMI_AUTO'
             """)
-    int reclaimSemiAutoTask(@Param("taskId") Long taskId, @Param("expectedStatus") String expectedStatus);
+    int reclaimSemiAutoTask(@Param("taskId") Long taskId,
+                             @Param("expectedStatus") String expectedStatus,
+                             @Param("reissuedAt") LocalDateTime reissuedAt);
 
     @Update("""
             UPDATE distribution_tasks

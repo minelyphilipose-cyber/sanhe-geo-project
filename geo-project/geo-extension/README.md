@@ -8,9 +8,18 @@ Chrome MV3 companion extension for Sprint 2 semi-auto publishing.
 npm install
 npm test
 npm run build
+npm run build:test
+npm run build:prod
 ```
 
 Load `dist/` as an unpacked extension after `npm run build`.
+
+## Build Profiles
+
+- `npm run build:test`: uses local backend `http://127.0.0.1:8080` and local admin origins.
+- `npm run build:prod`: uses production backend `https://www.huanjingaigeo.com` and admin origin `https://www.xguiai.com`.
+
+The profile switch is `VITE_GEO_EXTENSION_PROFILE=test|production`; `npm run build` defaults to the production profile because Vite build mode is production.
 
 ## Security Contracts
 

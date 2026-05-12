@@ -1,17 +1,6 @@
-const DEV_ADMIN_ORIGINS = [
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-]
-
-const PROD_ADMIN_ORIGINS = [
-  import.meta.env.VITE_GEO_ADMIN_ORIGIN,
-].filter(Boolean)
+const EXTENSION_PROFILE = __EXTENSION_PROFILE__
+const ALLOWED_ADMIN_ORIGINS = EXTENSION_PROFILE.adminOrigins.map(origin => origin.replace(/\/$/, ''))
 
 export function isAllowedAdminOrigin(origin: string): boolean {
-  const allowed = import.meta.env.PROD && PROD_ADMIN_ORIGINS.length > 0
-    ? PROD_ADMIN_ORIGINS
-    : DEV_ADMIN_ORIGINS
-  return allowed.includes(origin)
+  return ALLOWED_ADMIN_ORIGINS.includes(origin)
 }

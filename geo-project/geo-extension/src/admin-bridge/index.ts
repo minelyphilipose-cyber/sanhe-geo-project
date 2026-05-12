@@ -10,34 +10,11 @@ interface AdminBridgeMessage<T = unknown> {
   payload?: T
 }
 
-const DEV_ADMIN_ORIGINS = [
-  'http://localhost:3000',
-  'http://127.0.0.1:3000',
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-]
-
-const configuredAdminOrigin = import.meta.env.VITE_GEO_ADMIN_ORIGIN?.replace(/\/$/, '')
+const EXTENSION_PROFILE = __EXTENSION_PROFILE__
+const ALLOWED_ADMIN_ORIGINS = EXTENSION_PROFILE.adminOrigins.map(origin => origin.replace(/\/$/, ''))
 
 function isAllowedAdminOrigin(origin: string): boolean {
-  if (configuredAdminOrigin) return origin === configuredAdminOrigin
-  if (DEV_ADMIN_ORIGINS.includes(origin)) return true
-  return isPrivateNetworkHttpOrigin(origin)
-}
-
-function isPrivateNetworkHttpOrigin(origin: string): boolean {
-  try {
-    const url = new URL(origin)
-    if (url.protocol !== 'http:') return false
-    const host = url.hostname
-    if (host === 'localhost') return true
-    return /^10\./.test(host)
-      || /^192\.168\./.test(host)
-      || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
-      || /^127\./.test(host)
-  } catch {
-    return false
-  }
+  return ALLOWED_ADMIN_ORIGINS.includes(origin)
 }
 
 window.addEventListener('message', event => {

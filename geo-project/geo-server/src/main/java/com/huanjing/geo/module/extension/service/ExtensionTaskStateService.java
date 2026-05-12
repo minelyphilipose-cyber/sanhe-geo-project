@@ -6,8 +6,12 @@ import com.huanjing.geo.module.audit.AuditMode;
 import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.service.AuditService;
+import com.huanjing.geo.module.content.ContentErrorCodes;
+import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.DistributionTask;
+import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
+import com.huanjing.geo.module.content.service.CompanyChannelQuotaService;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessErrorCodes;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
@@ -40,13 +44,16 @@ public class ExtensionTaskStateService {
     private static final String STATUS_FILLING = "filling";
     private static final String STATUS_FILLED = "filled";
     private static final String STATUS_PUBLISHED = "published";
+    private static final String ARTICLE_STATUS_DISTRIBUTING = "distributing";
     private static final Duration HEARTBEAT_RATE_LIMIT_TTL = Duration.ofSeconds(30);
     private static final Duration STALE_THRESHOLD = Duration.ofMinutes(10);
     private static final int RECLAIM_BATCH_LIMIT = 100;
 
     private final DistributionTaskMapper taskMapper;
+    private final ArticleDraftMapper articleDraftMapper;
     private final ProjectMapper projectMapper;
     private final BrandAccessService brandAccessService;
+    private final CompanyChannelQuotaService companyChannelQuotaService;
     private final ExtensionRedisStore redisStore;
     private final ExtensionAuditSupport auditSupport;
     private final AuditService auditService;
@@ -101,6 +108,8 @@ public class ExtensionTaskStateService {
             auditDenied("SEMI_AUTO_TASK_PUBLISHED", context, operatorId, extensionSessionId, "STALE_STATE");
             throw new BizException(TASK_STATE_CONFLICT, "task state conflict");
         }
+        markArticlePublished(context.task(), now);
+        companyChannelQuotaService.confirmDistribution(taskId);
         auditSuccess("SEMI_AUTO_TASK_PUBLISHED", context, operatorId, extensionSessionId, detail("publishedAt", now));
         return new ExtensionTaskStateResponse(taskId, STATUS_PUBLISHED);
     }
@@ -117,7 +126,7 @@ public class ExtensionTaskStateService {
         );
         int reclaimed = 0;
         for (DistributionTask task : staleTasks) {
-            int affected = taskMapper.reclaimSemiAutoTask(task.getId(), task.getStatus());
+            int affected = taskMapper.reclaimSemiAutoTask(task.getId(), task.getStatus(), now);
             if (affected == 1) {
                 reclaimed++;
                 auditReclaimed(task, tokenIssuedBefore, heartbeatBefore);
@@ -312,6 +321,22 @@ public class ExtensionTaskStateService {
         return task.getLastHeartbeatAt() == null;
     }
 
+    private void markArticlePublished(DistributionTask task, LocalDateTime publishedAt) {
+        if (task.getArticleId() == null) {
+            throw new BizException(TASK_NOT_FOUND, "task article not found");
+        }
+        ArticleDraft update = new ArticleDraft();
+        update.setStatus(STATUS_PUBLISHED);
+        update.setPublishedAt(publishedAt);
+        int updated = articleDraftMapper.update(update,
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ArticleDraft>()
+                        .eq(ArticleDraft::getId, task.getArticleId())
+                        .eq(ArticleDraft::getStatus, ARTICLE_STATUS_DISTRIBUTING));
+        if (updated != 1) {
+            throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
+        }
+    }
+
     private void auditReclaimed(
             DistributionTask task,
             LocalDateTime tokenIssuedBefore,
@@ -333,7 +358,9 @@ public class ExtensionTaskStateService {
                 "fillTokenIssuedAt", task.getFillTokenIssuedAt(),
                 "lastHeartbeatAt", task.getLastHeartbeatAt(),
                 "tokenIssuedBefore", tokenIssuedBefore,
-                "heartbeatBefore", heartbeatBefore
+                "heartbeatBefore", heartbeatBefore,
+                "newStatus", STATUS_TOKEN_ISSUED,
+                "tokenReissued", true
         ));
         auditService.record(event);
     }
