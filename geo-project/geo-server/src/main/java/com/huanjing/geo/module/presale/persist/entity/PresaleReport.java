@@ -41,6 +41,12 @@ public class PresaleReport {
     @TableField("current_version_id")
     private Long latestVersionId;
 
+    @TableField("current_version_no")
+    private Integer currentVersionNo;
+
+    /** DRAFT / GENERATING / DONE / FAILED / ARCHIVED。 */
+    private String status;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;

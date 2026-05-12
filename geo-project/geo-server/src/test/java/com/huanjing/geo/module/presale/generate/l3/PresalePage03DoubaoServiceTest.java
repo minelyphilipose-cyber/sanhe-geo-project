@@ -73,6 +73,66 @@ class PresalePage03DoubaoServiceTest {
         assertEquals("2250次", market.getRegionalCard().getRows().get(3).getValue());
     }
 
+    @Test
+    void generateAndApply_fillsBlankGeneratedMarketCardLabel() throws Exception {
+        RawSnapshotDTO raw = RawSnapshotDTO.builder()
+                .clientInfo(ClientInfo.builder()
+                        .brandName("无二火锅")
+                        .industry("restaurant")
+                        .industryRole("连锁品牌")
+                        .region("阜阳")
+                        .build())
+                .build();
+        String rawJson = objectMapper.writeValueAsString(raw);
+        String editableJson = objectMapper.writeValueAsString(l3Defaults.normalize(new EditableContentDTO(), raw, null));
+        String responseWithBlankLabel = doubaoResponse().replace(
+                "\"label\": \"AI 搜索大盘流量\"",
+                "\"label\": \"\""
+        );
+        when(llmInvoker.marketBattleground(any(PlatformCallContext.class), anyString()))
+                .thenReturn(new LlmCallResult(responseWithBlankLabel, 100, 200, 30L, 0,
+                        CallStatus.SUCCESS, "doubao", "豆包", "doubao-pro", "豆包 Pro"));
+
+        String resultJson = service.generateAndApply(290L, rawJson, editableJson, 1L, false);
+
+        MarketBattleground market = objectMapper.readValue(resultJson, EditableContentDTO.class).getMarketBattleground();
+        assertEquals("CHINA AI MARKET · 2026 Q1", market.getMarketCard().getLabel());
+    }
+
+    @Test
+    void generateAndApply_replacesOverlongNarrativeQuestion() throws Exception {
+        RawSnapshotDTO raw = RawSnapshotDTO.builder()
+                .clientInfo(ClientInfo.builder()
+                        .brandName("诗帝尼")
+                        .industry("门窗")
+                        .industryRole("manufacturer")
+                        .region("国内")
+                        .userDemand("了解诗帝尼在AI推荐中的真实表现")
+                        .build())
+                .samplePrompts(List.of(
+                        SamplePrompt.builder().category("问题型").promptContent("国内系统门窗加盟应该优先看哪些品牌的综合实力？").build(),
+                        SamplePrompt.builder().category("推荐型").promptContent("国内高端系统门窗加盟推荐哪类品牌？").build(),
+                        SamplePrompt.builder().category("场景型").promptContent("国内代理商选择门窗品牌时哪家更适合长期合作？").build()
+                ))
+                .build();
+        String rawJson = objectMapper.writeValueAsString(raw);
+        String editableJson = objectMapper.writeValueAsString(l3Defaults.normalize(new EditableContentDTO(), raw, null));
+        String responseWithLongQuestion = doubaoResponse()
+                .replace("\"无二火锅\"", "\"诗帝尼\"")
+                .replace("\"每天，火锅决策正在 AI 上发生\"", "\"每天，门窗决策正在 AI 上发生\"")
+                .replace("\"阜阳哪家火锅店适合聚会？\"",
+                        "\"国内系统门窗加盟应该优先看哪些品牌的综合实力和长期扶持能力？\"");
+        when(llmInvoker.marketBattleground(any(PlatformCallContext.class), anyString()))
+                .thenReturn(new LlmCallResult(responseWithLongQuestion, 100, 200, 30L, 0,
+                        CallStatus.SUCCESS, "doubao", "豆包", "doubao-pro", "豆包 Pro"));
+
+        String resultJson = service.generateAndApply(330L, rawJson, editableJson, 1L, false);
+
+        MarketBattleground market = objectMapper.readValue(resultJson, EditableContentDTO.class).getMarketBattleground();
+        assertTrue(market.getNarrative().getQuestions().stream()
+                .allMatch(question -> question.length() <= 34 && !question.contains("诗帝尼")));
+    }
+
     private String doubaoResponse() {
         return """
                 {

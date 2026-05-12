@@ -165,6 +165,9 @@ public class PresaleLlmPromptQuestionService {
                 continue;
             }
             item.setPromptContent(validator.normalizeQuestionText(item.getPromptContent()));
+            if (isProblemQuestionWithTargetBrand(item, req.getBrandName())) {
+                continue;
+            }
             if (!validator.validateQuestionOnly(item).isEmpty()) {
                 continue;
             }
@@ -176,6 +179,13 @@ public class PresaleLlmPromptQuestionService {
             acceptedCounts.merge(item.getCategoryCode(), 1, Integer::sum);
         }
         return accepted;
+    }
+
+    private boolean isProblemQuestionWithTargetBrand(LlmPromptQuestionDraftRequest item, String brandName) {
+        return item.getCategoryCode() == PresalePromptCategoryCode.PROBLEM
+                && StringUtils.hasText(brandName)
+                && StringUtils.hasText(item.getPromptContent())
+                && item.getPromptContent().contains(brandName.trim());
     }
 
     private String invokeOnce(String userPrompt) throws Exception {

@@ -63,7 +63,7 @@ public class PresalePage03DoubaoService {
             MarketBattleground market = objectMapper.treeToValue(marketNode, MarketBattleground.class);
 
             editable.setMarketBattleground(market);
-            EditableContentDTO normalized = l3Defaults.normalize(editable, raw, null);
+            EditableContentDTO normalized = l3Defaults.normalizeGenerated(editable, raw, null);
             marketBattlegroundValidator.validate(normalized.getMarketBattleground());
             return objectMapper.writeValueAsString(normalized);
         } catch (LlmInvokeException ex) {

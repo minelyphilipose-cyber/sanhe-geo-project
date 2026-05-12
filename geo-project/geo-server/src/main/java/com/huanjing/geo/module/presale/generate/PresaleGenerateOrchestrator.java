@@ -258,6 +258,7 @@ public class PresaleGenerateOrchestrator {
         update.setEditableContentJson(editableJson);
         update.setUpdatedAt(LocalDateTime.now());
         versionMapper.updateById(update);
+        syncReportGenerationStatus(versionId, PresaleGenerateStatus.DONE.name());
 
         log.info("Presale mock generate done, versionId={}", versionId);
     }
@@ -1137,6 +1138,7 @@ public class PresaleGenerateOrchestrator {
         update.setFailureCategory(null);
         update.setUpdatedAt(LocalDateTime.now());
         versionMapper.updateById(update);
+        syncReportGenerationStatus(versionId, "GENERATING");
     }
 
     private void markRunning(Long versionId, int totalLlmCalls, int batch1TotalCalls) {
@@ -1155,6 +1157,7 @@ public class PresaleGenerateOrchestrator {
         update.setFailureCategory(null);
         update.setUpdatedAt(LocalDateTime.now());
         versionMapper.updateById(update);
+        syncReportGenerationStatus(versionId, "GENERATING");
     }
 
     private void enterStage(Long versionId, String stage, String note) {
@@ -1189,6 +1192,7 @@ public class PresaleGenerateOrchestrator {
         update.setFailureReason(truncateReason(reason));
         update.setUpdatedAt(LocalDateTime.now());
         versionMapper.updateById(update);
+        syncReportGenerationStatus(versionId, PresaleGenerateStatus.FAILED.name());
         lastProgressUpdateAtByVersion.remove(versionId);
         logTerminalStageDuration(versionId, PresaleGenerateStatus.FAILED.name());
     }
@@ -1209,8 +1213,23 @@ public class PresaleGenerateOrchestrator {
         update.setFailureReason(null);
         update.setUpdatedAt(LocalDateTime.now());
         versionMapper.updateById(update);
+        syncReportGenerationStatus(versionId, PresaleGenerateStatus.DONE.name());
         lastProgressUpdateAtByVersion.remove(versionId);
         logTerminalStageDuration(versionId, PresaleGenerateStatus.DONE.name());
+    }
+
+    private void syncReportGenerationStatus(Long versionId, String reportStatus) {
+        PresaleReportVersion version = versionMapper.selectById(versionId);
+        if (version == null || version.getReportId() == null) {
+            return;
+        }
+        PresaleReport report = new PresaleReport();
+        report.setId(version.getReportId());
+        report.setLatestVersionId(version.getId());
+        report.setCurrentVersionNo(version.getVersionNo());
+        report.setStatus(reportStatus);
+        report.setUpdatedAt(LocalDateTime.now());
+        reportMapper.updateById(report);
     }
 
     private void logPreviousStageDuration(Long versionId, String nextStage) {
