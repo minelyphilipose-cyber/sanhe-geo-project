@@ -22,6 +22,7 @@ public class RealWechatOpenPlatformClient implements WechatOpenPlatformClient {
     private static final int REQUEST_TIMEOUT_MS = 15000;
 
     private final ObjectMapper objectMapper;
+    private final WechatApiErrorHandler errorHandler;
 
     @Override
     public ComponentAccessTokenResult getComponentAccessToken(String componentAppid, String componentAppSecret, String ticket) {
@@ -103,10 +104,7 @@ public class RealWechatOpenPlatformClient implements WechatOpenPlatformClient {
                     REQUEST_TIMEOUT_MS
             );
             JsonNode root = objectMapper.readTree(response.body() == null ? "{}" : response.body());
-            int errcode = root.path("errcode").asInt(0);
-            if (errcode != 0) {
-                throw new BizException(errcode, root.path("errmsg").asText("wechat api error"));
-            }
+            errorHandler.throwIfError(path, root);
             return root;
         } catch (BizException ex) {
             log.warn("WeChat open platform api failed path={} code={} message={}", path, ex.getCode(), ex.getMessage());

@@ -29,6 +29,7 @@ public class RealWechatMpClient implements WechatMpClient {
     private static final int REQUEST_TIMEOUT_MS = 15000;
 
     private final ObjectMapper objectMapper;
+    private final WechatApiErrorHandler errorHandler;
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(java.time.Duration.ofMillis(CONNECT_TIMEOUT_MS))
             .build();
@@ -228,10 +229,7 @@ public class RealWechatMpClient implements WechatMpClient {
 
     private JsonNode parse(String body) throws Exception {
         JsonNode root = objectMapper.readTree(body == null ? "{}" : body);
-        int errcode = root.path("errcode").asInt(0);
-        if (errcode != 0) {
-            throw new BizException(errcode, root.path("errmsg").asText("wechat api error"));
-        }
+        errorHandler.throwIfError("wechat-mp", root);
         return root;
     }
 }
