@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.wechat;
 
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -24,6 +25,7 @@ public class WechatOutboundIpService {
     private final Supplier<String> detector;
     private volatile String cachedIp = UNKNOWN;
 
+    @Autowired
     public WechatOutboundIpService(@Value("${WECHAT_OUTBOUND_IP:}") String configuredIp) {
         this(configuredIp, WechatOutboundIpService::detectViaIfconfig);
     }
