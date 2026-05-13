@@ -22,22 +22,35 @@ public class ArticleAiDraftPromptFilter {
     private static final Pattern MOBILE = Pattern.compile("(?<!\\d)1[3-9]\\d{9}(?!\\d)");
     private static final Pattern ID_CARD = Pattern.compile("(?<![0-9A-Za-z])\\d{17}[0-9Xx](?![0-9A-Za-z])");
     private static final Pattern BANK_CARD = Pattern.compile("(?<!\\d)(\\d{13,19})(?!\\d)");
+    private static final Pattern ADDRESS_LIKE = Pattern.compile(
+            "[^\\r\\n，,。；;]{0,30}(?:省|市|区|县)[^\\r\\n，,。；;]{0,30}(?:路|街|巷|号|栋|楼|室|门店|网点)[^\\r\\n，,。；;]{0,30}"
+    );
 
     private final SysDictItemMapper sysDictItemMapper;
 
     public String filterOutboundPrompt(String prompt, Project project, Brand brand) {
-        return restoreSensitiveDictionaryValues(redactPii(prompt == null ? "" : prompt));
+        return filterOutboundPrompt(prompt, project, brand, false);
+    }
+
+    public String filterOutboundPrompt(String prompt, Project project, Brand brand, boolean allowContactInfo) {
+        return restoreSensitiveDictionaryValues(redactPii(prompt == null ? "" : prompt, allowContactInfo));
     }
 
     public String filterGeneratedContent(String content, Project project, Brand brand) {
-        return filterOutboundPrompt(content, project, brand);
+        return filterGeneratedContent(content, project, brand, false);
     }
 
-    private String redactPii(String value) {
-        return redactBankCards(ID_CARD.matcher(MOBILE.matcher(EMAIL.matcher(value)
-                .replaceAll("[EMAIL_REDACTED]"))
-                .replaceAll("[PHONE_REDACTED]"))
-                .replaceAll("[ID_REDACTED]"));
+    public String filterGeneratedContent(String content, Project project, Brand brand, boolean allowContactInfo) {
+        return filterOutboundPrompt(content, project, brand, allowContactInfo);
+    }
+
+    private String redactPii(String value, boolean allowContactInfo) {
+        String redacted = EMAIL.matcher(value).replaceAll("[EMAIL_REDACTED]");
+        if (!allowContactInfo) {
+            redacted = MOBILE.matcher(redacted).replaceAll("[PHONE_REDACTED]");
+            redacted = ADDRESS_LIKE.matcher(redacted).replaceAll("[ADDRESS_REDACTED]");
+        }
+        return redactBankCards(ID_CARD.matcher(redacted).replaceAll("[ID_REDACTED]"));
     }
 
     private String redactBankCards(String value) {

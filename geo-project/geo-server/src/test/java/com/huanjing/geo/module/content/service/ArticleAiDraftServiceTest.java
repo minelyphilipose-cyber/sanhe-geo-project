@@ -72,7 +72,9 @@ class ArticleAiDraftServiceTest {
         when(configMapper.selectOne(any())).thenReturn(aiConfig());
         when(credentialService.resolveApiKey(eq("openai"), any(), any())).thenReturn("sk-test");
         when(promptFilter.filterOutboundPrompt(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
+        when(promptFilter.filterOutboundPrompt(any(), any(), any(), anyBoolean())).thenAnswer(i -> i.getArgument(0));
         when(promptFilter.filterGeneratedContent(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
+        when(promptFilter.filterGeneratedContent(any(), any(), any(), anyBoolean())).thenAnswer(i -> i.getArgument(0));
 
         service = new ArticleAiDraftService(projectMapper, brandMapper, articleMapper, versionMapper, configMapper,
                 currentUserService, brandAccessService, credentialService, llmInvoker,
@@ -130,6 +132,22 @@ class ArticleAiDraftServiceTest {
 
         verify(llmInvoker).invoke(any(), configCaptor.capture());
         assertTrue(configCaptor.getValue().requestTimeoutMs() >= 120_000);
+    }
+
+    @Test
+    void previewUsesIndustryObserverPromptAndContactGate() throws Exception {
+        when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<LlmModelConfig> configCaptor = ArgumentCaptor.forClass(LlmModelConfig.class);
+
+        service.preview(previewRequest()).get();
+
+        verify(llmInvoker).invoke(promptCaptor.capture(), configCaptor.capture());
+        assertTrue(configCaptor.getValue().systemPrompt().contains("行业观察者"));
+        assertTrue(promptCaptor.getValue().contains("如有必要可提及的品牌名"));
+        assertTrue(promptCaptor.getValue().contains("# 品牌处理规则"));
+        assertFalse(promptCaptor.getValue().contains("对外公开电话"));
+        assertFalse(promptCaptor.getValue().contains("对外公开地址"));
     }
 
     @Test
