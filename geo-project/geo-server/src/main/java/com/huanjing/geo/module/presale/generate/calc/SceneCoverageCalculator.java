@@ -14,6 +14,7 @@ import com.huanjing.geo.module.presale.dto.snapshot.raw.Competitor;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.generate.PresaleCompetitorAggregator;
 import com.huanjing.geo.module.presale.generate.PresalePlatformConfigQueries;
+import com.huanjing.geo.module.presale.generate.PromptJudgeSignalRow;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersionPromptTemplate;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
@@ -25,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
@@ -44,7 +46,9 @@ public class SceneCoverageCalculator {
     private static final int COMPARISON_COVERAGE_THRESHOLD = 10;
     private static final int JUDGE_INTENT_COVERAGE_PLATFORM_DIVISOR = 3;
     private static final String COMPARISON_STANCE_COMPETITOR = "competitor";
+    private static final String COMPARISON_PREFERRED_TARGET = "target";
     private static final String PRIORITY_PLATFORM_DOUBAO = "doubao";
+    private static final String JUDGE_STATUS_SUCCESS = "SUCCESS";
 
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
     private final PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
@@ -90,13 +94,14 @@ public class SceneCoverageCalculator {
                         .eq(PresaleAiPromptResult::getVersionId, versionId)
                         .in(PresaleAiPromptResult::getBatchNo, List.of(1, 2))
         );
+        List<PromptJudgeSignalRow> judgeSignalRows = aiPromptResultMapper.selectPromptJudgeSignalsByVersionId(versionId);
 
         Map<Long, Set<String>> hitPlatformsByTemplate = new HashMap<>();
         Set<Long> doubaoMentionedTemplates = new HashSet<>();
         Map<Long, List<Integer>> rankingsByTemplate = new HashMap<>();
         Map<Long, List<PresaleAiPromptResult>> rowsByTemplate = new HashMap<>();
         Map<Long, String> renderedPromptByTemplate = new HashMap<>();
-        for (PresaleAiPromptResult row : promptRows) {
+        for (PresaleAiPromptResult row : promptRows == null ? List.<PresaleAiPromptResult>of() : promptRows) {
             rowsByTemplate.computeIfAbsent(row.getPromptTemplateId(), ignored -> new ArrayList<>()).add(row);
             if (row.getPromptTemplateId() != null && row.getRequestPromptContent() != null
                     && !row.getRequestPromptContent().isBlank()) {
@@ -122,6 +127,8 @@ public class SceneCoverageCalculator {
                         .add(row.getRanking());
             }
         }
+        Map<Long, List<PromptJudgeSignalRow>> judgeSignalsByTemplate = buildJudgeSignalsByTemplate(
+                judgeSignalRows, effectivePlatforms);
 
         Map<PresaleIntentCode, List<TemplateWithCovered>> byIntent = new EnumMap<>(PresaleIntentCode.class);
         Map<PresaleIntentCode, IntentCoverage> judgeCoverageByIntent = buildJudgeCoverageByIntent(
@@ -141,7 +148,7 @@ public class SceneCoverageCalculator {
             }
             int hitCount = hitPlatformsByTemplate.getOrDefault(template.getId(), Set.of()).size();
             boolean covered = isJudgeIntent(intent)
-                    ? judgeCoverageByIntent.getOrDefault(intent, IntentCoverage.empty()).isCovered()
+                    ? isJudgePromptCovered(template.getId(), intent, hitPlatformsByTemplate, judgeSignalsByTemplate)
                     : isSampleIntentCoveredByPriorityPlatform(template.getId(), doubaoMentionedTemplates)
                     || hitCount >= threshold;
             byIntent.get(intent).add(new TemplateWithCovered(template, intent, covered));
@@ -246,6 +253,61 @@ public class SceneCoverageCalculator {
                     && !COMPARISON_STANCE_COMPETITOR.equals(cell.getStance());
         }
         return false;
+    }
+
+    private Map<Long, List<PromptJudgeSignalRow>> buildJudgeSignalsByTemplate(List<PromptJudgeSignalRow> rows,
+                                                                              Set<String> effectivePlatforms) {
+        Map<Long, List<PromptJudgeSignalRow>> result = new HashMap<>();
+        if (rows == null || rows.isEmpty()) {
+            return result;
+        }
+        for (PromptJudgeSignalRow row : rows) {
+            if (row == null || row.getPromptTemplateId() == null || row.getCategory() == null
+                    || !effectivePlatforms.contains(row.getPlatformCode())) {
+                continue;
+            }
+            result.computeIfAbsent(row.getPromptTemplateId(), ignored -> new ArrayList<>()).add(row);
+        }
+        return result;
+    }
+
+    private boolean isJudgePromptCovered(Long templateId,
+                                         PresaleIntentCode intent,
+                                         Map<Long, Set<String>> hitPlatformsByTemplate,
+                                         Map<Long, List<PromptJudgeSignalRow>> judgeSignalsByTemplate) {
+        if (templateId == null) {
+            return false;
+        }
+        if (intent == PresaleIntentCode.COGNITIVE
+                && !hitPlatformsByTemplate.getOrDefault(templateId, Set.of()).isEmpty()) {
+            return true;
+        }
+        List<PromptJudgeSignalRow> rows = judgeSignalsByTemplate.getOrDefault(templateId, List.of());
+        if (intent == PresaleIntentCode.COGNITIVE) {
+            return rows.stream().anyMatch(this::isCognitiveJudgeSignalCovered);
+        }
+        if (intent == PresaleIntentCode.COMPARISON) {
+            return rows.stream().anyMatch(this::isComparisonJudgeSignalCovered);
+        }
+        return false;
+    }
+
+    private boolean isCognitiveJudgeSignalCovered(PromptJudgeSignalRow row) {
+        return row != null
+                && "COGNITIVE".equals(row.getCategory())
+                && JUDGE_STATUS_SUCCESS.equals(row.getJudgeStatus())
+                && positive(row.getAttributeHitRate());
+    }
+
+    private boolean isComparisonJudgeSignalCovered(PromptJudgeSignalRow row) {
+        return row != null
+                && "COMPARISON".equals(row.getCategory())
+                && JUDGE_STATUS_SUCCESS.equals(row.getJudgeStatus())
+                && COMPARISON_PREFERRED_TARGET.equals(row.getPreferredBrand());
+    }
+
+    private boolean positive(BigDecimal value) {
+        return value != null && value.compareTo(BigDecimal.ZERO) > 0;
     }
 
     private int toPromptEquivalentCovered(int totalPrompts, IntentCoverage coverage) {

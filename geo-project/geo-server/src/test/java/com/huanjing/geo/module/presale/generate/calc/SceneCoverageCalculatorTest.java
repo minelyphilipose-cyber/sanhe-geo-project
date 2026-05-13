@@ -6,6 +6,7 @@ import com.huanjing.geo.module.presale.dto.snapshot.raw.Competitor;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.TestSummary;
 import com.huanjing.geo.module.presale.generate.PresaleCompetitorAggregator;
+import com.huanjing.geo.module.presale.generate.PromptJudgeSignalRow;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
@@ -17,6 +18,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -112,6 +114,10 @@ class SceneCoverageCalculatorTest {
         when(aiPromptResultMapper.selectList(any())).thenReturn(List.of(
                 row(62L, "p1", 1, 1, null),
                 row(64L, "p1", 1, 1, null)
+        ));
+        when(aiPromptResultMapper.selectPromptJudgeSignalsByVersionId(any())).thenReturn(List.of(
+                signal(61L, "p1", "COMPARISON", "SUCCESS", null, "target"),
+                signal(65L, "p1", "COGNITIVE", "SUCCESS", "0.2", null)
         ));
 
         Map<String, Integer> totals = Map.of(
@@ -310,6 +316,12 @@ class SceneCoverageCalculatorTest {
                 template(44L, "P44", "对比型", "comparison 4", 1)
         ));
         when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
+        when(aiPromptResultMapper.selectPromptJudgeSignalsByVersionId(any())).thenReturn(List.of(
+                signal(41L, "p1", "COMPARISON", "SUCCESS", null, "target"),
+                signal(42L, "p1", "COMPARISON", "SUCCESS", null, "target"),
+                signal(43L, "p1", "COMPARISON", "SUCCESS", null, "target"),
+                signal(44L, "p1", "COMPARISON", "SUCCESS", null, "target")
+        ));
 
         RawSnapshotDTO raw = raw(List.of(), List.of());
         Map<String, Integer> totals = Map.of(
@@ -376,6 +388,9 @@ class SceneCoverageCalculatorTest {
                 template(46L, "P46", "认知型", "cognitive")
         ));
         when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
+        when(aiPromptResultMapper.selectPromptJudgeSignalsByVersionId(any())).thenReturn(List.of(
+                signal(46L, "p1", "COGNITIVE", "SUCCESS", "0.1", null)
+        ));
 
         Map<String, Integer> totals = Map.of(
                 "RECOMMENDATION", 0,
@@ -395,6 +410,48 @@ class SceneCoverageCalculatorTest {
 
         assertEquals(1, result.sceneCoverage().getMidValue().getCovered());
         assertEquals(1, result.sceneCoverage().getMidValue().getCoveredQueries().size());
+    }
+
+    @Test
+    void cognitiveSceneCoverageRequiresPromptLevelMentionOrJudgeHit() {
+        SceneCoverageCalculator calculator = new SceneCoverageCalculator(
+                aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, competitorAggregator, new ObjectMapper());
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
+                platform("p1"), platform("p2"), platform("p3"), platform("p4")
+        ));
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
+                template(48L, "P48", "认知型", "market landscape")
+        ));
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of(
+                row(48L, "p1", 1, 0, null, null, "market landscape"),
+                row(48L, "p2", 1, 0, null, null, "market landscape")
+        ));
+        when(aiPromptResultMapper.selectPromptJudgeSignalsByVersionId(any())).thenReturn(List.of(
+                signal(48L, "p1", "COGNITIVE", "SUCCESS", "0.0", null),
+                signal(48L, "p2", "COGNITIVE", "SUCCESS", "0.0", null)
+        ));
+
+        Map<String, Integer> totals = Map.of(
+                "RECOMMENDATION", 0,
+                "COMPARISON", 0,
+                "INQUIRY", 0,
+                "COGNITIVE", 1,
+                "SCENARIO", 0
+        );
+        List<PlatformIntentCell> cells = List.of(
+                judgeCell("p1", "COGNITIVE", 10),
+                judgeCell("p2", "COGNITIVE", 40),
+                judgeCell("p3", "COGNITIVE", 9),
+                judgeCell("p4", "COGNITIVE", null)
+        );
+
+        SceneAndIntentResult result = calculator.compute(4801L, raw(List.of(), List.of()), totals, cells);
+
+        assertEquals(1, result.intentBreakdown().stream()
+                .filter(i -> "认知型".equals(i.getCategory()))
+                .findFirst().orElseThrow().getCoveredPrompts());
+        assertEquals(0, result.sceneCoverage().getMidValue().getCovered());
+        assertEquals(1, result.sceneCoverage().getMidValue().getMissingQueries().size());
     }
 
     @Test
@@ -441,6 +498,9 @@ class SceneCoverageCalculatorTest {
         ));
         when(aiPromptResultMapper.selectList(any())).thenReturn(List.of(
                 row(51L, "p1", 2, 1, null, null, "吾悦广场和万达广场相比有什么优势?")
+        ));
+        when(aiPromptResultMapper.selectPromptJudgeSignalsByVersionId(any())).thenReturn(List.of(
+                signal(51L, "p1", "COMPARISON", "SUCCESS", null, "target")
         ));
 
         Map<String, Integer> totals = Map.of(
@@ -523,6 +583,22 @@ class SceneCoverageCalculatorTest {
         row.setRanking(ranking);
         row.setMentionedCompetitors(mentionedCompetitors);
         row.setRequestPromptContent(requestPromptContent);
+        return row;
+    }
+
+    private PromptJudgeSignalRow signal(Long templateId,
+                                        String platformCode,
+                                        String category,
+                                        String judgeStatus,
+                                        String attributeHitRate,
+                                        String preferredBrand) {
+        PromptJudgeSignalRow row = new PromptJudgeSignalRow();
+        row.setPromptTemplateId(templateId);
+        row.setPlatformCode(platformCode);
+        row.setCategory(category);
+        row.setJudgeStatus(judgeStatus);
+        row.setAttributeHitRate(attributeHitRate == null ? null : new BigDecimal(attributeHitRate));
+        row.setPreferredBrand(preferredBrand);
         return row;
     }
 

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.huanjing.geo.module.presale.generate.PlatformIntentJudgeAggregateRow;
 import com.huanjing.geo.module.presale.generate.PlatformIntentSampleRow;
 import com.huanjing.geo.module.presale.generate.PresaleJudgeCandidateRow;
+import com.huanjing.geo.module.presale.generate.PromptJudgeSignalRow;
 import com.huanjing.geo.module.presale.generate.PromptTemplateIntentStatRow;
 import com.huanjing.geo.module.presale.dto.request.PresalePromptTraceQueryRequest;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
@@ -261,4 +262,16 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             ") agg " +
             "ORDER BY agg.platform_code ASC, agg.category ASC")
     List<PlatformIntentJudgeAggregateRow> selectJudgeAggregatesByVersionId(@Param("versionId") Long versionId);
+
+    @Select("SELECT " +
+            "prompt_template_id AS promptTemplateId, " +
+            "platform_code AS platformCode, " +
+            "category AS category, " +
+            "judge_status AS judgeStatus, " +
+            "attribute_hit_rate AS attributeHitRate, " +
+            "preferred_brand AS preferredBrand " +
+            "FROM presale_ai_prompt_judge_result " +
+            "WHERE version_id = #{versionId} " +
+            "AND category IN ('COGNITIVE', 'COMPARISON')")
+    List<PromptJudgeSignalRow> selectPromptJudgeSignalsByVersionId(@Param("versionId") Long versionId);
 }
