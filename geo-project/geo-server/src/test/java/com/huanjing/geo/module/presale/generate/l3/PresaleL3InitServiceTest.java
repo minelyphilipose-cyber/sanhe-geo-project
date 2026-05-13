@@ -14,6 +14,8 @@ import com.huanjing.geo.module.presale.dto.snapshot.raw.ClientInfo;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.SamplePrompt;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.TestSummary;
+import com.huanjing.geo.module.presale.persist.entity.PresalePage03MarketConfig;
+import com.huanjing.geo.module.presale.service.PresalePage03MarketConfigService;
 import com.huanjing.geo.module.presale.ruleengine.RuleCodes;
 import org.junit.jupiter.api.Test;
 
@@ -28,6 +30,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class PresaleL3InitServiceTest {
 
@@ -46,7 +50,8 @@ class PresaleL3InitServiceTest {
     );
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final PresaleL3Defaults l3Defaults = new PresaleL3Defaults(objectMapper);
+    private final PresalePage03MarketConfigService configService = mockConfigService();
+    private final PresaleL3Defaults l3Defaults = new PresaleL3Defaults(objectMapper, configService);
     private final PresaleL3InitService service = new PresaleL3InitService(objectMapper, new PresaleTextFormatter(), l3Defaults);
 
     @Test
@@ -410,5 +415,36 @@ class PresaleL3InitServiceTest {
 
     private void assertNoPlaceholder(String text) {
         assertFalse(PLACEHOLDER_PATTERN.matcher(text).find(), "placeholder remained in text: " + text);
+    }
+
+    private PresalePage03MarketConfigService mockConfigService() {
+        PresalePage03MarketConfigService service = mock(PresalePage03MarketConfigService.class);
+        when(service.getConfig()).thenReturn(defaultConfig());
+        return service;
+    }
+
+    private PresalePage03MarketConfig defaultConfig() {
+        PresalePage03MarketConfig out = new PresalePage03MarketConfig();
+        out.setMarketLabel("AI 搜索流量总览");
+        out.setMarketSource("来源：行业公开数据综合估算");
+        out.setAppMonthlyActiveValue("8.3");
+        out.setAppMonthlyActiveUnit("亿");
+        out.setDailyActiveUsersValue("7.2");
+        out.setDailyActiveUsersUnit("亿");
+        out.setDailyQuestionTotalValue("12");
+        out.setDailyQuestionTotalUnit("亿次");
+        out.setDoubaoMonthlyUsageValue("28");
+        out.setDoubaoMonthlyUsageUnit("次");
+        out.setPlatform1Name("豆包");
+        out.setPlatform1Value("5.8亿/月活");
+        out.setPlatform2Name("千问");
+        out.setPlatform2Value("4.2亿/月活");
+        out.setPlatform3Name("DeepSeek");
+        out.setPlatform3Value("3.1亿/月活");
+        out.setPlatformSuffix("元宝 / Kimi 等");
+        out.setPage03DataSource("公开口径综合测算");
+        out.setFootnote("注：以上数据基于行业公开数据与主流AI平台问答量综合估算，存在±20%合理浮动区间，仅作量级参考，不构成精确市场断言。");
+        out.setQuestionCount(3);
+        return out;
     }
 }

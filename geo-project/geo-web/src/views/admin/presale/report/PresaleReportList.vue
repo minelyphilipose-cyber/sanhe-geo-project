@@ -10,35 +10,49 @@
         <h2 class="page-title">报告列表</h2>
       </div>
       <div class="header-right">
+        <el-button v-if="canManagePage03Config" @click="goPage03Config">PAGE03 配置</el-button>
         <el-button v-if="canCreateReportPermission" type="primary" :icon="Plus" @click="goCreate">新建报告</el-button>
       </div>
     </div>
 
     <!-- 筛选工具栏 -->
     <el-card shadow="never" class="filter-card">
-      <el-form :model="filter" inline label-position="top">
+      <el-form :model="filter" class="filter-form" label-position="top">
         <el-form-item label="品牌名">
           <el-input
             v-model="filter.keyword"
             placeholder="搜索品牌名"
             clearable
-            style="width: 200px"
             @keyup.enter="onSearch"
           />
         </el-form-item>
         <el-form-item label="行业">
-          <el-select v-model="filter.industry" placeholder="全部" clearable style="width: 140px">
+          <el-select
+            v-model="filter.industry"
+            placeholder="全部 / 手动输入"
+            clearable
+            filterable
+            allow-create
+            default-first-option
+          >
             <el-option v-for="opt in industryOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
           </el-select>
         </el-form-item>
         <el-form-item label="身份">
-          <el-select v-model="filter.industryRole" placeholder="全部" clearable style="width: 140px">
+          <el-select
+            v-model="filter.industryRole"
+            placeholder="全部 / 手动输入"
+            clearable
+            filterable
+            allow-create
+            default-first-option
+          >
             <el-option v-for="opt in roleOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
           </el-select>
         </el-form-item>
         <el-form-item label="生成状态">
           <el-tooltip content="v1 暂不支持此筛选,仅用于展示" placement="top">
-            <el-select v-model="filter.generationStatus" placeholder="全部" clearable style="width: 140px" disabled>
+            <el-select v-model="filter.generationStatus" placeholder="全部" clearable disabled>
               <el-option label="已完成" value="DONE" />
               <el-option label="生成中" value="RUNNING" />
               <el-option label="失败" value="FAILED" />
@@ -61,10 +75,9 @@
             start-placeholder="开始"
             end-placeholder="结束"
             value-format="YYYY-MM-DD"
-            style="width: 280px"
           />
         </el-form-item>
-        <el-form-item label=" ">
+        <el-form-item class="filter-actions">
           <el-button type="primary" :icon="Search" @click="onSearch">搜索</el-button>
           <el-button @click="onReset">重置</el-button>
         </el-form-item>
@@ -268,6 +281,9 @@ const canCreateReportPermission = computed(() =>
 const canDeleteReportPermission = computed(() =>
   userStore.hasPermission('presale.report.delete')
 )
+const canManagePage03Config = computed(() =>
+  userStore.hasRole(['delivery_manager', 'manager', 'super_admin'])
+)
 
 // TODO: 这两份字典应该从 sys_dict_item(presale_industry / presale_industry_role)动态加载
 // v1 先写死,P1·F·1·b 补全字典加载逻辑
@@ -328,9 +344,9 @@ async function loadData() {
     const params: ReportListQueryRequest = {
       page: pagination.page,
       pageSize: pagination.pageSize,
-      keyword: filter.keyword || undefined,
-      industry: filter.industry || undefined,
-      industryRole: filter.industryRole || undefined,
+      keyword: filter.keyword?.trim() || undefined,
+      industry: filter.industry?.trim() || undefined,
+      industryRole: filter.industryRole?.trim() || undefined,
       ...dateParams
     }
     const page = await listReports(params)
@@ -411,6 +427,10 @@ function goCreate() {
   router.push('/admin/presale/report/create')
 }
 
+function goPage03Config() {
+  router.push('/admin/presale/report/page03-config')
+}
+
 function goDetail(row: ReportListItemVO) {
   if (isInProgress(row.latestVersion?.generationStatus)) {
     router.push(`/admin/presale/report/${row.reportId}/progress`)
@@ -488,15 +508,53 @@ onMounted(loadData)
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
+  gap: 16px;
   margin-bottom: 16px;
+}
+.header-left {
+  min-width: 0;
 }
 .page-title {
   margin: 8px 0 0 0;
   font-size: 22px;
   font-weight: 600;
 }
+.header-right {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
 .filter-card {
   margin-bottom: 16px;
+}
+.filter-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(140px, 164px) minmax(140px, 164px) minmax(140px, 164px) auto minmax(280px, 352px) auto;
+  gap: 20px 24px;
+  align-items: end;
+}
+.filter-form :deep(.el-form-item) {
+  min-width: 0;
+  margin-right: 0;
+  margin-bottom: 0;
+}
+.filter-form :deep(.el-form-item__label) {
+  padding-bottom: 8px;
+  color: #606266;
+  line-height: 1.2;
+}
+.filter-form :deep(.el-input),
+.filter-form :deep(.el-select),
+.filter-form :deep(.el-date-editor) {
+  width: 100%;
+}
+.filter-actions :deep(.el-form-item__content) {
+  display: flex;
+  gap: 12px;
+  flex-wrap: nowrap;
+}
+.filter-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 .table-card {
   margin-bottom: 16px;
@@ -527,5 +585,32 @@ onMounted(loadData)
   margin-top: 16px;
   display: flex;
   justify-content: flex-end;
+}
+
+@media (max-width: 1440px) {
+  .filter-form {
+    grid-template-columns: repeat(4, minmax(150px, 1fr));
+  }
+}
+
+@media (max-width: 960px) {
+  .page-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .filter-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .presale-report-list {
+    padding: 16px;
+  }
+
+  .filter-form {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

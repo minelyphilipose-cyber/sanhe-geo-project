@@ -158,6 +158,16 @@ const adminRoutes: RouteRecordRaw = {
       },
     },
     {
+      path: 'presale/report/page03-config',
+      name: 'PresalePage03Config',
+      component: () => import('@/views/admin/presale/report/PresalePage03Config.vue'),
+      meta: {
+        title: 'PAGE03 配置',
+        hidden: true,
+        roles: ['delivery_manager', 'manager', 'super_admin'],
+      },
+    },
+    {
       path: 'presale/report/:id/progress',
       name: 'PresaleReportProgress',
       component: () => import('@/views/admin/presale/report/PresaleReportProgress.vue'),

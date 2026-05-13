@@ -9,6 +9,8 @@ import com.huanjing.geo.module.presale.dto.snapshot.editable.EditableContentDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.MarketBattleground;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.SamplePrompt;
+import com.huanjing.geo.module.presale.persist.entity.PresalePage03MarketConfig;
+import com.huanjing.geo.module.presale.service.PresalePage03MarketConfigService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -27,6 +29,7 @@ public class PresaleL3Defaults {
     private static final int MARKET_NARRATIVE_QUESTION_MAX_LENGTH = 34;
 
     private final ObjectMapper objectMapper;
+    private final PresalePage03MarketConfigService page03MarketConfigService;
 
     public EditableContentDTO normalize(EditableContentDTO input, RawSnapshotDTO raw, ComputedSnapshotDTO computed) {
         return normalize(input, raw, computed, false);
@@ -124,7 +127,8 @@ public class PresaleL3Defaults {
         String industry = raw == null || raw.getClientInfo() == null
                 ? null : raw.getClientInfo().getIndustry();
         IndustryProfile profile = resolveIndustryProfile(industry);
-        MarketScale scale = estimateMarketScale(region, profile);
+        PresalePage03MarketConfig config = page03MarketConfigService.getConfig();
+        MarketScale scale = estimateMarketScale(region, profile, config);
 
         return MarketBattleground.builder()
                 .topbarTitle(MarketBattlegroundValidator.TOPBAR_TITLE)
@@ -132,21 +136,21 @@ public class PresaleL3Defaults {
                 .pageTitle("每天，有数千万次消费决策正在 AI 上发生")
                 .pageKicker(MarketBattlegroundValidator.PAGE_KICKER)
                 .marketCard(MarketBattleground.MarketCard.builder()
-                        .label("CHINA AI MARKET · 2026 Q1")
-                        .source("来源：行业公开数据综合估算")
+                        .label(config.getMarketLabel())
+                        .source(config.getMarketSource())
                         .stats(List.of(
-                                stat("10.2", "亿", "AI 原生 APP 月活"),
-                                stat("8.5", "亿+", "日均活跃用户（DAU）"),
-                                stat("25.1", "亿次", "日均提问总量"),
-                                stat("63.8", "次", "豆包人均月使用")
+                                stat(config.getAppMonthlyActiveValue(), config.getAppMonthlyActiveUnit(), "AI 原生 APP 月活"),
+                                stat(config.getDailyActiveUsersValue(), config.getDailyActiveUsersUnit(), "日均活跃用户"),
+                                stat(config.getDailyQuestionTotalValue(), config.getDailyQuestionTotalUnit(), "日均提问总量"),
+                                stat(config.getDoubaoMonthlyUsageValue(), config.getDoubaoMonthlyUsageUnit(), "豆包人均月使用")
                         ))
                         .platformLabel(MarketBattlegroundValidator.PLATFORM_LABEL)
                         .platforms(List.of(
-                                platform("豆包", "4.45 亿"),
-                                platform("千问", "2.66 亿"),
-                                platform("DeepSeek", "1.97 亿")
+                                platform(config.getPlatform1Name(), config.getPlatform1Value()),
+                                platform(config.getPlatform2Name(), config.getPlatform2Value()),
+                                platform(config.getPlatform3Name(), config.getPlatform3Value())
                         ))
-                        .platformSuffix(MarketBattlegroundValidator.PLATFORM_SUFFIX)
+                        .platformSuffix(config.getPlatformSuffix())
                         .build())
                 .nationalCard(MarketBattleground.CalculationCard.builder()
                         .label("NATIONAL · 全国" + profile.industryLabel() + "每天")
@@ -156,7 +160,7 @@ public class PresaleL3Defaults {
                         .subtitle("条 / 天 · " + profile.industryLabel() + "相关 AI 提问")
                         .calculationLabel("CALCULATION · 推导口径")
                         .rows(List.of(
-                                calcRow("日均提问总量", "约 25 亿次 / 天", false),
+                                calcRow("日均提问总量", "约 " + config.getDailyQuestionTotalValue() + config.getDailyQuestionTotalUnit() + " / 天", false),
                                 calcRow(profile.parentCategory() + "类占比", profile.parentShareRange(), false),
                                 calcRow(profile.industryLabel() + "占比", profile.industryShareRange(), false),
                                 calcRow("中枢值", scale.nationalTotalText(), true)
@@ -173,7 +177,7 @@ public class PresaleL3Defaults {
                         .rows(List.of(
                                 calcRow("全国" + profile.industryLabel() + "日提问", scale.nationalTotalText(), false),
                                 calcRow(region + "占比", scale.regionShareText(), false),
-                                calcRow("数据来源", "行业公开数据综合估算", false),
+                                calcRow("数据来源", config.getPage03DataSource(), false),
                                 calcRow("区域日提问", scale.regionalTotalText(), true)
                         ))
                         .build())
@@ -185,7 +189,7 @@ public class PresaleL3Defaults {
                         .brandName(brand)
                         .brandLineSuffix("在这些场景中的真实可见度如何？详见下章诊断结果。")
                         .build())
-                .footnote("本报告引用的市场规模数据基于行业公开口径综合估算，受平台分布、用户行为差异及统计窗口影响，合理浮动区间约 ±20%。具体数值仅作量级参考，不构成精确的市场断言。")
+                .footnote(config.getFootnote())
                 .footerBrand("GEO · CONFIDENTIAL")
                 .build();
     }
@@ -221,8 +225,8 @@ public class PresaleL3Defaults {
         };
     }
 
-    private MarketScale estimateMarketScale(String region, IndustryProfile profile) {
-        double dailyQuestions = 2_500_000_000D;
+    private MarketScale estimateMarketScale(String region, IndustryProfile profile, PresalePage03MarketConfig config) {
+        double dailyQuestions = configDailyQuestionCount(config);
         double national = dailyQuestions * midpoint(profile.parentShareRange()) * midpoint(profile.industryShareRange());
         double regionShare = estimateRegionShare(region);
         double regional = national * regionShare;
@@ -235,6 +239,11 @@ public class PresaleL3Defaults {
                 totalText(regional),
                 "约 " + formatPercent(regionShare)
         );
+    }
+
+    private double configDailyQuestionCount(PresalePage03MarketConfig config) {
+        Double parsed = parseCount(config.getDailyQuestionTotalValue() + config.getDailyQuestionTotalUnit());
+        return parsed == null ? 1_200_000_000D : parsed;
     }
 
     private List<String> buildDecisionQuestions(RawSnapshotDTO raw,

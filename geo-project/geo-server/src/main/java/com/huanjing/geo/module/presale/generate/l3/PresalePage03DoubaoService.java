@@ -16,10 +16,12 @@ import com.huanjing.geo.module.presale.generate.llm.MarketBattlegroundPromptTemp
 import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
 import com.huanjing.geo.module.presale.generate.PresaleEvaluationModelRouter;
+import com.huanjing.geo.module.presale.service.PresalePage03MarketConfigService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -37,6 +39,7 @@ public class PresalePage03DoubaoService {
     private final PresaleL3Defaults l3Defaults;
     private final MarketBattlegroundValidator marketBattlegroundValidator;
     private final PresaleEvaluationModelRouter evaluationModelRouter;
+    private final PresalePage03MarketConfigService page03MarketConfigService;
 
     public String generateAndApply(Long versionId,
                                    String rawSnapshotJson,
@@ -60,9 +63,8 @@ public class PresalePage03DoubaoService {
             );
 
             LlmCallResult result = marketBattlegroundWithEvaluationModel(sourceCtx, prompt);
-            JsonNode marketNode = objectMapper.readTree(result.rawResponse());
-            marketBattlegroundValidator.validateRawJson(marketNode);
-            MarketBattleground market = objectMapper.treeToValue(marketNode, MarketBattleground.class);
+            JsonNode aiNode = objectMapper.readTree(result.rawResponse());
+            MarketBattleground market = buildMarketPatch(raw, aiNode);
 
             editable.setMarketBattleground(market);
             EditableContentDTO normalized = l3Defaults.normalizeGenerated(editable, raw, null);
@@ -100,8 +102,78 @@ public class PresalePage03DoubaoService {
         input.put("industry_role", client == null ? null : client.getIndustryRole());
         input.put("region", client == null ? null : client.getRegion());
         input.put("user_demand", client == null ? null : client.getUserDemand());
+        input.put("question_count", page03MarketConfigService.getConfig().getQuestionCount());
+        input.put("question_max_length", 34);
         input.put("sample_prompts", buildSamplePromptInput(raw));
         return objectMapper.writeValueAsString(input);
+    }
+
+    private MarketBattleground buildMarketPatch(RawSnapshotDTO raw, JsonNode aiNode) {
+        if (aiNode == null || !aiNode.isObject()) {
+            throw new IllegalArgumentException("Page03 AI output must be a JSON object");
+        }
+        String parentShare = requiredPercent(aiNode, "parent_category_share");
+        String industryShare = requiredPercent(aiNode, "industry_share");
+        String regionShare = requiredPercent(aiNode, "region_share");
+        List<String> questions = requiredQuestions(aiNode, "questions", 3);
+
+        ClientInfo client = raw == null ? null : raw.getClientInfo();
+        String brand = client == null ? null : client.getBrandName();
+        String region = client == null ? null : client.getRegion();
+
+        return MarketBattleground.builder()
+                .nationalCard(MarketBattleground.CalculationCard.builder()
+                        .rows(List.of(
+                                calcRow(null, null, false),
+                                calcRow(null, parentShare, false),
+                                calcRow(null, industryShare, false),
+                                calcRow(null, null, true)
+                        ))
+                        .build())
+                .regionalCard(MarketBattleground.CalculationCard.builder()
+                        .rows(List.of(
+                                calcRow(null, null, false),
+                                calcRow(null, regionShare, false),
+                                calcRow("数据来源", null, false),
+                                calcRow(null, null, true)
+                        ))
+                        .build())
+                .narrative(MarketBattleground.Narrative.builder()
+                        .questions(questions)
+                        .brandName(brand)
+                        .build())
+                .build();
+    }
+
+    private String requiredText(JsonNode node, String field) {
+        JsonNode value = node.path(field);
+        if (!value.isTextual() || value.asText().isBlank()) {
+            throw new IllegalArgumentException("Page03 AI output missing " + field);
+        }
+        return value.asText().trim();
+    }
+
+    private String requiredPercent(JsonNode node, String field) {
+        String value = requiredText(node, field);
+        if (!value.contains("%")) {
+            throw new IllegalArgumentException("Page03 AI output " + field + " must contain percent sign");
+        }
+        return value;
+    }
+
+    private List<String> requiredQuestions(JsonNode node, String field, int size) {
+        JsonNode values = node.path(field);
+        if (!values.isArray() || values.size() != size) {
+            throw new IllegalArgumentException("Page03 AI output questions must contain exactly " + size + " items");
+        }
+        List<String> out = new ArrayList<>();
+        for (JsonNode item : values) {
+            if (!item.isTextual() || item.asText().isBlank()) {
+                throw new IllegalArgumentException("Page03 AI output questions item must not be blank");
+            }
+            out.add(item.asText().trim());
+        }
+        return out;
     }
 
     private List<Map<String, String>> buildSamplePromptInput(RawSnapshotDTO raw) {
@@ -120,5 +192,13 @@ public class PresalePage03DoubaoService {
         out.put("category", item.getCategory());
         out.put("prompt_content", item.getPromptContent());
         return out;
+    }
+
+    private MarketBattleground.CalculationRow calcRow(String label, String value, boolean isTotal) {
+        return MarketBattleground.CalculationRow.builder()
+                .label(label)
+                .value(value)
+                .isTotal(isTotal)
+                .build();
     }
 }

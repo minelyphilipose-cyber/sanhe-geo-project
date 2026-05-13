@@ -92,7 +92,7 @@ public class MarketBattlegroundValidator {
             requireText("market_battleground.market_card.platforms.name", item.getName(), 12);
             requireText("market_battleground.market_card.platforms.value", item.getValue(), 12);
         }
-        requireLiteral("market_battleground.market_card.platform_suffix", value.getPlatformSuffix(), PLATFORM_SUFFIX);
+        requireText("market_battleground.market_card.platform_suffix", value.getPlatformSuffix(), 18);
     }
 
     private void validateCalculationCard(String field, MarketBattleground.CalculationCard value) {
