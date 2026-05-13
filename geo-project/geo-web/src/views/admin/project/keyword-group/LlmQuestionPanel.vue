@@ -15,16 +15,17 @@
         <label class="form-label">生成条数</label>
         <el-input-number
           v-model="targetCount"
-          :min="5"
-          :max="targetMax"
+          :min="LLM_TARGET_MIN"
+          :max="targetInputMax"
           :step="5"
+          :disabled="disabled || !canGenerateMore"
           controls-position="right"
           style="width: 110px"
         />
         <div v-if="exceedHint" class="target-count-hint">{{ exceedHint }}</div>
       </div>
       <div class="llm-actions">
-        <el-button type="primary" :loading="generating" :disabled="disabled || !seedText.trim()" @click="handleGenerate">
+        <el-button type="primary" :loading="generating" :disabled="disabled || !seedText.trim() || !canGenerateMore" @click="handleGenerate">
           {{ questions.length ? `继续扩写 ${targetCount} 条` : `生成 ${targetCount} 条` }}
         </el-button>
         <el-button v-if="questions.length" :disabled="disabled" @click="clearAll">全部删除</el-button>
@@ -95,6 +96,8 @@ const emit = defineEmits<{
 const generating = ref(false)
 const targetCount = ref(30)
 const expandedSeeds = ref<Set<string>>(new Set())
+const LLM_TARGET_MIN = 5
+const LLM_TARGET_MAX = 50
 const groupedQuestions = computed(() => {
   const map = new Map<string, LlmQuestionItem[]>()
   for (const item of props.questions) {
@@ -112,19 +115,47 @@ const allExpanded = computed(() => (
 ))
 const exceedHint = computed(() => {
   const after = props.questions.length + targetCount.value
+  if (hasProjectQuotaLimit.value && props.quotaCount! <= 0) {
+    return '当前项目未配置问题额度'
+  }
+  if (remainingCapacity.value <= 0) {
+    return '已达到预览总数或项目额度'
+  }
+  if (remainingCapacity.value < LLM_TARGET_MIN) {
+    return `剩余可生成 ${remainingCapacity.value} 条，单次至少 ${LLM_TARGET_MIN} 条`
+  }
   if (after > props.previewCount) {
     return `累积将达 ${after} 条,超过预览总数`
   }
+  if (props.quotaCount && after > props.quotaCount) {
+    return `累积将达 ${after} 条,超过项目额度`
+  }
   return ''
 })
+const remainingCapacity = computed(() => {
+  const previewRemaining = Math.max(props.previewCount - props.questions.length, 0)
+  const quotaRemaining = hasProjectQuotaLimit.value
+    ? Math.max((props.quotaCount ?? 0) - props.questions.length, 0)
+    : previewRemaining
+  return Math.min(previewRemaining, quotaRemaining)
+})
+const hasProjectQuotaLimit = computed(() => Boolean(props.projectId) && props.quotaCount !== undefined)
 const targetMax = computed(() => {
-  const quotaRemaining = props.quotaCount ? Math.max(props.quotaCount - props.questions.length, 0) : 50
-  return Math.max(5, Math.min(50, props.previewCount - props.questions.length, quotaRemaining))
+  return Math.min(LLM_TARGET_MAX, remainingCapacity.value)
+})
+const targetInputMax = computed(() => Math.max(LLM_TARGET_MIN, targetMax.value))
+const canGenerateMore = computed(() => {
+  if (hasProjectQuotaLimit.value && props.quotaCount! <= 0) {
+    return false
+  }
+  return targetMax.value >= LLM_TARGET_MIN
 })
 
 watch(targetMax, (max) => {
-  if (targetCount.value > max) {
+  if (max >= LLM_TARGET_MIN && targetCount.value > max) {
     targetCount.value = max
+  } else if (max >= LLM_TARGET_MIN && targetCount.value < LLM_TARGET_MIN) {
+    targetCount.value = LLM_TARGET_MIN
   }
 }, { immediate: true })
 
@@ -146,6 +177,22 @@ async function handleGenerate() {
   }
   if (seed.length > 10) {
     ElMessage.warning('种子词长度不能超过 10 字')
+    return
+  }
+  if (hasProjectQuotaLimit.value && props.quotaCount! <= 0) {
+    ElMessage.warning('当前项目未配置问题额度')
+    return
+  }
+  if (!Number.isInteger(targetCount.value) || targetCount.value < LLM_TARGET_MIN || targetCount.value > LLM_TARGET_MAX) {
+    ElMessage.warning(`单次生成数量必须在 ${LLM_TARGET_MIN}-${LLM_TARGET_MAX} 条之间`)
+    return
+  }
+  if (targetCount.value > targetMax.value) {
+    if (remainingCapacity.value < LLM_TARGET_MIN) {
+      ElMessage.warning(`剩余可生成 ${remainingCapacity.value} 条，单次至少 ${LLM_TARGET_MIN} 条`)
+      return
+    }
+    ElMessage.warning(`本次最多可生成 ${targetMax.value} 条`)
     return
   }
   if (props.questions.length + targetCount.value > props.previewCount) {

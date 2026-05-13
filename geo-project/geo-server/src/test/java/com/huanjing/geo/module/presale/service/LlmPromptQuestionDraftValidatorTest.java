@@ -24,11 +24,15 @@ class LlmPromptQuestionDraftValidatorTest {
     void validate_rejectsComparisonWithoutCompetitorAndNonComparisonWithCompetitor() {
         LlmPromptQuestionPlanRequest plan = plan(Map.of(
                 PresalePromptCategoryCode.RECOMMENDATION, 1,
-                PresalePromptCategoryCode.COMPARISON, 1
+                PresalePromptCategoryCode.COMPARISON, 1,
+                PresalePromptCategoryCode.COGNITIVE, 3
         ));
         List<LlmPromptQuestionDraftRequest> questions = List.of(
                 question(PresalePromptCategoryCode.RECOMMENDATION, "海底捞和 {competitor} 哪个好?"),
-                question(PresalePromptCategoryCode.COMPARISON, "海底捞有什么优势?")
+                question(PresalePromptCategoryCode.COMPARISON, "海底捞有什么优势?"),
+                question(PresalePromptCategoryCode.COGNITIVE, "海底捞品牌怎么样?"),
+                question(PresalePromptCategoryCode.COGNITIVE, "海底捞服务口碑如何?"),
+                question(PresalePromptCategoryCode.COGNITIVE, "海底捞在火锅行业知名度如何?")
         );
 
         List<LlmPromptQuestionDraftValidator.ValidationError> errors = validator.validate(plan, questions);
@@ -41,11 +45,15 @@ class LlmPromptQuestionDraftValidatorTest {
     void buildSnapshots_mapsCodeToChineseCategoryAndLlmSource() {
         LlmPromptQuestionPlanRequest plan = plan(Map.of(
                 PresalePromptCategoryCode.RECOMMENDATION, 1,
-                PresalePromptCategoryCode.COMPARISON, 1
+                PresalePromptCategoryCode.COMPARISON, 1,
+                PresalePromptCategoryCode.COGNITIVE, 3
         ));
         List<LlmPromptQuestionDraftRequest> questions = List.of(
                 question(PresalePromptCategoryCode.RECOMMENDATION, "北京火锅店哪家适合家庭聚餐?"),
-                question(PresalePromptCategoryCode.COMPARISON, "海底捞和 {competitor} 相比如何?")
+                question(PresalePromptCategoryCode.COMPARISON, "海底捞和 {competitor} 相比如何?"),
+                question(PresalePromptCategoryCode.COGNITIVE, "海底捞品牌怎么样?"),
+                question(PresalePromptCategoryCode.COGNITIVE, "海底捞服务口碑如何?"),
+                question(PresalePromptCategoryCode.COGNITIVE, "海底捞在火锅行业知名度如何?")
         );
 
         List<PresaleReportVersionPromptTemplate> snapshots = validator.validateAndBuildSnapshots(
@@ -62,11 +70,15 @@ class LlmPromptQuestionDraftValidatorTest {
     void validate_rejectsNonCompetitorPlaceholders() {
         LlmPromptQuestionPlanRequest plan = plan(Map.of(
                 PresalePromptCategoryCode.RECOMMENDATION, 1,
-                PresalePromptCategoryCode.COMPARISON, 1
+                PresalePromptCategoryCode.COMPARISON, 1,
+                PresalePromptCategoryCode.COGNITIVE, 3
         ));
         List<LlmPromptQuestionDraftRequest> questions = List.of(
                 question(PresalePromptCategoryCode.RECOMMENDATION, "{brand} 在北京火锅里算推荐吗?"),
-                question(PresalePromptCategoryCode.COMPARISON, "海底捞和 {competitor} 哪个售后更靠谱?")
+                question(PresalePromptCategoryCode.COMPARISON, "海底捞和 {competitor} 哪个售后更靠谱?"),
+                question(PresalePromptCategoryCode.COGNITIVE, "海底捞品牌怎么样?"),
+                question(PresalePromptCategoryCode.COGNITIVE, "海底捞服务口碑如何?"),
+                question(PresalePromptCategoryCode.COGNITIVE, "海底捞在火锅行业知名度如何?")
         );
 
         List<LlmPromptQuestionDraftValidator.ValidationError> errors = validator.validate(plan, questions);
@@ -74,6 +86,28 @@ class LlmPromptQuestionDraftValidatorTest {
         assertFalse(errors.isEmpty());
         assertEquals(1, errors.stream()
                 .filter(e -> e.message().contains("除 {competitor} 外不能包含占位符"))
+                .count());
+    }
+
+    @Test
+    void validate_rejectsCognitiveCountBelowMinimum() {
+        LlmPromptQuestionPlanRequest plan = plan(Map.of(
+                PresalePromptCategoryCode.RECOMMENDATION, 1,
+                PresalePromptCategoryCode.COMPARISON, 1,
+                PresalePromptCategoryCode.COGNITIVE, 2
+        ));
+        List<LlmPromptQuestionDraftRequest> questions = List.of(
+                question(PresalePromptCategoryCode.RECOMMENDATION, "北京火锅店哪家适合家庭聚餐?"),
+                question(PresalePromptCategoryCode.COMPARISON, "海底捞和 {competitor} 相比如何?"),
+                question(PresalePromptCategoryCode.COGNITIVE, "海底捞品牌怎么样?"),
+                question(PresalePromptCategoryCode.COGNITIVE, "海底捞服务口碑如何?")
+        );
+
+        List<LlmPromptQuestionDraftValidator.ValidationError> errors = validator.validate(plan, questions);
+
+        assertFalse(errors.isEmpty());
+        assertEquals(1, errors.stream()
+                .filter(e -> "COGNITIVE".equals(e.field()) && e.message().contains("至少 3 条"))
                 .count());
     }
 

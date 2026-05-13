@@ -35,6 +35,13 @@
           <el-table-column prop="concurrencyLimit" label="并发上限" width="100">
             <template #default="scope">{{ scope.row.concurrencyLimit ?? 1 }}</template>
           </el-table-column>
+          <el-table-column label="售前评估" width="100">
+            <template #default="scope">
+              <el-tag :type="scope.row.presaleEvaluateEnabled ? 'success' : 'info'">
+                {{ scope.row.presaleEvaluateEnabled ? '启用' : '停用' }}
+              </el-tag>
+            </template>
+          </el-table-column>
           <el-table-column label="降级处理" width="100">
             <template #default="scope">
               <el-tag :type="scope.row.degraded ? 'warning' : 'info'">{{ scope.row.degraded ? '是' : '否' }}</el-tag>
@@ -189,6 +196,24 @@
               <el-switch v-model="form.enabled" active-text="启用" inactive-text="停用" />
             </el-form-item>
           </el-col>
+          <el-col :xs="24" :md="12">
+            <el-form-item label="售前能力">
+              <el-switch v-model="form.enabledForPresale" active-text="启用" inactive-text="停用" />
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-row :gutter="12">
+          <el-col :xs="24" :md="12">
+            <el-form-item label="售前评估模型">
+              <el-switch
+                v-model="form.presaleEvaluateEnabled"
+                active-text="启用"
+                inactive-text="停用"
+                :disabled="!canEnablePresaleEvaluate(form.platformCode)"
+              />
+            </el-form-item>
+          </el-col>
         </el-row>
 
         <el-row :gutter="12">
@@ -265,6 +290,8 @@ const form = reactive({
   modelName: '',
   concurrencyLimit: 1,
   enabled: true,
+  enabledForPresale: true,
+  presaleEvaluateEnabled: false,
   degraded: false,
   degradedReason: '',
   remark: '',
@@ -319,6 +346,8 @@ function resetForm() {
   form.modelName = ''
   form.concurrencyLimit = 1
   form.enabled = true
+  form.enabledForPresale = true
+  form.presaleEvaluateEnabled = false
   form.degraded = false
   form.degradedReason = ''
   form.remark = ''
@@ -374,6 +403,8 @@ function openEdit(row: AIPlatformConfigItem) {
   form.modelName = row.modelName
   form.concurrencyLimit = row.concurrencyLimit || 1
   form.enabled = row.enabled
+  form.enabledForPresale = row.enabledForPresale ?? true
+  form.presaleEvaluateEnabled = !!row.presaleEvaluateEnabled
   form.degraded = row.degraded
   form.degradedReason = row.degradedReason || ''
   form.remark = row.remark || ''
@@ -405,6 +436,8 @@ async function submit() {
       modelName: form.modelName.trim(),
       concurrencyLimit: form.concurrencyLimit,
       enabled: form.enabled,
+      enabledForPresale: form.enabledForPresale,
+      presaleEvaluateEnabled: form.presaleEvaluateEnabled,
       degraded: form.degraded,
       degradedReason: form.degraded ? form.degradedReason.trim() : undefined,
       remark: form.remark || undefined,
@@ -451,6 +484,12 @@ function presaleActionDisabled(row: AIPlatformConfigItem) {
 
 function presaleActionTooltip(row: AIPlatformConfigItem) {
   return presaleActionDisabled(row) ? '请先配置低性能模型(low_model_id)' : ''
+}
+
+const presaleEvaluateCodes = new Set(['deepseek', 'doubao', 'qwen', 'mimo', 'zhipu'])
+
+function canEnablePresaleEvaluate(platformCode: string) {
+  return presaleEvaluateCodes.has((platformCode || '').trim())
 }
 
 async function togglePresaleEnabled(row: AIPlatformConfigItem) {

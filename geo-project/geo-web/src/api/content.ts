@@ -112,6 +112,10 @@ export function distributeContentArticle(articleId: number, siteId: number) {
   return request.post<R<DistributionTask>>(`/content/articles/${articleId}/distribute`, { siteId })
 }
 
+export function distributeContentArticleToIndustrySite(articleId: number, siteId: number) {
+  return request.post<R<DistributionTask>>(`/content/articles/${articleId}/distribute-to-industry-site`, { siteId })
+}
+
 export function distributeContentArticleToGeoSite(articleId: number, brandId: number) {
   return request.post<R<DistributionTask>>(`/content/articles/${articleId}/distribute-to-geo-site`, null, {
     params: { brandId },

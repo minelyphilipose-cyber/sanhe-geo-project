@@ -14,6 +14,8 @@ public class LlmPoolProperties {
     private long leaseRenewIntervalMs = 30_000L;
     private long leaseSafetyMs = 60_000L;
     private long shutdownGraceMs = 30_000L;
+    private long permitWaitTimeoutMs = 120_000L;
+    private long permitRetryIntervalMs = 200L;
     private String permitKeyPrefix = "geo:llm:permit";
     private int circuitBreakerFailureThreshold = 5;
     private long circuitBreakerOpenDurationMs = 60_000L;
@@ -36,6 +38,14 @@ public class LlmPoolProperties {
 
     public void setShutdownGraceMs(long shutdownGraceMs) {
         this.shutdownGraceMs = Math.max(0L, shutdownGraceMs);
+    }
+
+    public void setPermitWaitTimeoutMs(long permitWaitTimeoutMs) {
+        this.permitWaitTimeoutMs = Math.max(0L, permitWaitTimeoutMs);
+    }
+
+    public void setPermitRetryIntervalMs(long permitRetryIntervalMs) {
+        this.permitRetryIntervalMs = Math.max(10L, permitRetryIntervalMs);
     }
 
     public void setCircuitBreakerFailureThreshold(int circuitBreakerFailureThreshold) {

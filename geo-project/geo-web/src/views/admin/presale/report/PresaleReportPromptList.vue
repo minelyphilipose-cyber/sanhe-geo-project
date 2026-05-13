@@ -72,10 +72,10 @@
             <el-option label="调用失败" value="QUERY_FAILED" />
           </el-select>
         </el-form-item>
-        <el-form-item label="关键词">
+        <el-form-item label="问题内容">
           <el-input
             v-model="filter.keyword"
-            placeholder="搜索 Prompt / 响应"
+            placeholder="搜索问题内容"
             clearable
             style="width: 220px"
             @keyup.enter="onSearch"

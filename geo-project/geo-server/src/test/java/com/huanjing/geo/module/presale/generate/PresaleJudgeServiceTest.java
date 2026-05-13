@@ -3,6 +3,7 @@ package com.huanjing.geo.module.presale.generate;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
 import com.huanjing.geo.module.presale.generate.llm.LlmInvokeException;
+import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptJudgeResult;
 import com.huanjing.geo.module.presale.persist.mapper.IndustryCoreAttributeConfigMapper;
@@ -51,6 +52,8 @@ class PresaleJudgeServiceTest {
     private PresaleLlmInvoker llmInvoker;
     @Mock
     private AiPlatformConfigMapper aiPlatformConfigMapper;
+    @Mock
+    private PresaleEvaluationModelRouter evaluationModelRouter;
 
     private PresaleJudgeService judgeService;
 
@@ -65,6 +68,7 @@ class PresaleJudgeServiceTest {
                 reportMapper,
                 llmInvoker,
                 aiPlatformConfigMapper,
+                evaluationModelRouter,
                 new ObjectMapper(),
                 directExecutor
         );
@@ -74,7 +78,9 @@ class PresaleJudgeServiceTest {
         AiPlatformConfig config = new AiPlatformConfig();
         config.setPlatformCode("kimi");
         config.setLowModelId("test-low-model");
-        when(aiPlatformConfigMapper.selectOne(any())).thenReturn(config);
+        lenient().when(aiPlatformConfigMapper.selectOne(any())).thenReturn(config);
+        lenient().when(evaluationModelRouter.routeContexts(any()))
+                .thenReturn(List.of(new PlatformCallContext(1L, 1, "deepseek", 101L, "", "目标品牌", 100L, true)));
         lenient().when(judgeResultMapper.selectCount(any())).thenReturn(0L);
     }
 

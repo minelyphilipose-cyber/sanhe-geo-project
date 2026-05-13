@@ -133,6 +133,10 @@ public class PresaleLlmPromptQuestionService {
         if (counts.getOrDefault(PresalePromptCategoryCode.COMPARISON, 0) <= 0) {
             errors.add(new LlmPromptQuestionDraftValidator.ValidationError(null, "COMPARISON", "对比型问题数量必须大于 0"));
         }
+        if (counts.getOrDefault(PresalePromptCategoryCode.COGNITIVE, 0) < LlmPromptQuestionDraftValidator.MIN_COGNITIVE_COUNT) {
+            errors.add(new LlmPromptQuestionDraftValidator.ValidationError(null, "COGNITIVE",
+                    "认知型问题数量必须至少 " + LlmPromptQuestionDraftValidator.MIN_COGNITIVE_COUNT + " 条"));
+        }
         return errors;
     }
 

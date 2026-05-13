@@ -94,14 +94,32 @@ class PresaleAiPromptResultMapperPr3aIntegrationTest {
         assertThat(cognitive.getStance()).isNull();
 
         PlatformIntentJudgeAggregateRow comparison = findRow(rows, "platform-cmp", "COMPARISON");
-        assertThat(comparison.getCellScore()).isEqualByComparingTo("58.82");
-        assertThat(comparison.getSampleCount()).isEqualTo(17);
+        assertThat(comparison.getCellScore()).isEqualByComparingTo("57.14");
+        assertThat(comparison.getSampleCount()).isEqualTo(21);
         assertThat(comparison.getStance()).isEqualTo("target");
 
         PlatformIntentJudgeAggregateRow fullUnclear = findRow(rows, "platform-unclear", "COMPARISON");
-        assertThat(fullUnclear.getCellScore()).isNull();
-        assertThat(fullUnclear.getSampleCount()).isEqualTo(0);
-        assertThat(fullUnclear.getStance()).isNull();
+        assertThat(fullUnclear.getCellScore()).isEqualByComparingTo("50.00");
+        assertThat(fullUnclear.getSampleCount()).isEqualTo(21);
+        assertThat(fullUnclear.getStance()).isEqualTo("tie");
+    }
+
+    @Test
+    void selectJudgeAggregatesByVersionId_shouldScoreCognitiveWhenValidSamplesAreBelowThree() {
+        long versionId = 991003L;
+
+        for (int i = 0; i < 2; i++) {
+            PresaleReportVersionPromptTemplate cogTemplate = insertTemplate(versionId, "认知型", 0, "UT_PR3A_COG_MIN_" + i);
+            PresaleAiPromptResult promptResult = insertPromptResult(versionId, 1, "platform-cog-min", cogTemplate.getId(), "", 7000L + i, 1);
+            insertJudge(promptResult, "COGNITIVE", "SUCCESS", BigDecimal.valueOf(i == 0 ? 0.4 : 0.0), null);
+        }
+
+        List<PlatformIntentJudgeAggregateRow> rows = resultMapper.selectJudgeAggregatesByVersionId(versionId);
+
+        PlatformIntentJudgeAggregateRow cognitive = findRow(rows, "platform-cog-min", "COGNITIVE");
+        assertThat(cognitive.getCellScore()).isEqualByComparingTo("60.00");
+        assertThat(cognitive.getSampleCount()).isEqualTo(2);
+        assertThat(cognitive.getStance()).isNull();
     }
 
     private PresaleReportVersionPromptTemplate insertTemplate(long versionId,

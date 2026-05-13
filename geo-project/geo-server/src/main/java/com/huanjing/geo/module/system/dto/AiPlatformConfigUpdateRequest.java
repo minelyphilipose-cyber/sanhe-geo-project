@@ -31,6 +31,7 @@ public class AiPlatformConfigUpdateRequest {
     @NotNull
     private Boolean enabled;
     private Boolean enabledForPresale;
+    private Boolean presaleEvaluateEnabled;
     private Boolean enabledForArticle;
     private Integer maxRetry;
     private Integer timeoutMs;

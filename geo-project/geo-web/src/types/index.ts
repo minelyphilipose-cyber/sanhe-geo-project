@@ -399,6 +399,7 @@ export interface AIPlatformConfigItem {
   concurrencyLimit?: number | null
   enabled: boolean
   enabledForPresale?: boolean
+  presaleEvaluateEnabled?: boolean
   enabledForArticle?: boolean
   maxRetry?: number | null
   timeoutMs?: number | null
@@ -1055,6 +1056,7 @@ export interface RecommendedSite {
   siteId: number
   siteName: string
   domain: string
+  iconUrl?: string | null
   tier: 'S0' | 'S1' | 'S2' | string
   status: string
   integrationMethod: 'rest_api' | 'ftp' | 'email' | 'manual' | string
@@ -1075,6 +1077,7 @@ export interface PublishSite {
   id: number
   siteName: string
   domain: string
+  iconUrl?: string | null
   industryTags?: string | string[] | null
   tier: 'S0' | 'S1' | 'S2' | string
   status: 'active' | 'suspended' | 'maintenance' | string

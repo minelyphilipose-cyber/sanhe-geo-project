@@ -80,7 +80,8 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                 DEFAULT_QUERY_SYSTEM_PROMPT,
                 renderedPrompt == null ? "" : renderedPrompt,
                 0.2D,
-                false
+                false,
+                "presale:QUERY"
         );
     }
 
@@ -97,7 +98,8 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                 AnalyzePromptTemplates.SYSTEM_INSTRUCTION,
                 userPrompt,
                 0.1D,
-                true
+                true,
+                "presale:ANALYZE"
         );
         validateAnalyzeJson(result.rawResponse());
         return result;
@@ -111,7 +113,8 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                 JudgePromptTemplates.SYSTEM_INSTRUCTION,
                 safe(judgePrompt),
                 normalizeJudgeTemperature(ctx, temperature),
-                true
+                true,
+                "presale:JUDGE"
         );
     }
 
@@ -123,7 +126,8 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                 CompetitorNormalizationPromptTemplates.SYSTEM_INSTRUCTION,
                 safe(normalizationPrompt),
                 normalizeJudgeTemperature(ctx, 0D),
-                true
+                true,
+                "presale:NORMALIZE_COMPETITORS"
         );
     }
 
@@ -135,7 +139,8 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                 MarketBattlegroundPromptTemplates.SYSTEM_INSTRUCTION,
                 safe(marketBattlegroundPrompt),
                 0.2D,
-                true
+                true,
+                "presale:MARKET_BATTLEGROUND"
         );
     }
 
@@ -143,7 +148,8 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                                           String systemPrompt,
                                           String userPrompt,
                                           double temperature,
-                                          boolean normalizeJsonOutput) throws LlmInvokeException {
+                                          boolean normalizeJsonOutput,
+                                          String feature) throws LlmInvokeException {
         AiPlatformConfig config = requireConfig(ctx.platformCode());
         String modelId = resolvePresaleModelId(config);
         String apiKey = platformCredentialService.resolveApiKey(
@@ -168,7 +174,10 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                     normalize(config.getMaxRetry(), llmProperties.getMaxRetry()),
                     Math.max(1, normalize(config.getRateLimitQps(), llmProperties.getRateLimitQps())),
                     null,
-                    normalizeJsonOutput
+                    normalizeJsonOutput,
+                    LlmModelConfig.MAX_REQUEST_TIMEOUT_MS,
+                    feature,
+                    config.getConcurrencyLimit()
             ));
             return new LlmCallResult(
                     result.responseText(),

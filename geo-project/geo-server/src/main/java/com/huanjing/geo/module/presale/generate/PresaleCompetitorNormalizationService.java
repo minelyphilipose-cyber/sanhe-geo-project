@@ -2,6 +2,7 @@ package com.huanjing.geo.module.presale.generate;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
 import com.huanjing.geo.module.presale.generate.PresaleCompetitorAggregator.ExtractedCompetitor;
 import com.huanjing.geo.module.presale.generate.PresaleCompetitorAggregator.RawCompetitorMention;
 import com.huanjing.geo.module.presale.generate.llm.CompetitorNormalizationPromptTemplates;
@@ -9,8 +10,6 @@ import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
 import com.huanjing.geo.module.presale.generate.llm.LlmInvokeException;
 import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
-import com.huanjing.geo.module.system.entity.AiPlatformConfig;
-import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
@@ -31,14 +30,14 @@ public class PresaleCompetitorNormalizationService {
     private static final int MAX_EXTRACTED_COMPETITORS = 3;
 
     private final PresaleLlmInvoker llmInvoker;
-    private final AiPlatformConfigMapper aiPlatformConfigMapper;
+    private final PresaleEvaluationModelRouter evaluationModelRouter;
     private final ObjectMapper objectMapper;
 
     public PresaleCompetitorNormalizationService(PresaleLlmInvoker llmInvoker,
-                                                 AiPlatformConfigMapper aiPlatformConfigMapper,
+                                                 PresaleEvaluationModelRouter evaluationModelRouter,
                                                  ObjectMapper objectMapper) {
         this.llmInvoker = llmInvoker;
-        this.aiPlatformConfigMapper = aiPlatformConfigMapper;
+        this.evaluationModelRouter = evaluationModelRouter;
         this.objectMapper = objectMapper;
     }
 
@@ -52,18 +51,18 @@ public class PresaleCompetitorNormalizationService {
         }
 
         List<ExtractedCompetitor> fallback = fallbackTop(rawMentions);
-        AiPlatformConfig platform = resolveNormalizationPlatform();
-        if (platform == null || !StringUtils.hasText(platform.getPlatformCode())) {
-            log.warn("skip competitor normalization by LLM, no presale platform available, versionId={}", versionId);
+        PlatformCallContext sourceCtx = new PlatformCallContext(
+                versionId, 1, "", null, "", brandName, operatorUserId, isManager);
+        List<PlatformCallContext> evaluationContexts = evaluationModelRouter.routeContexts(sourceCtx);
+        if (evaluationContexts.isEmpty()) {
+            log.warn("skip competitor normalization by LLM, no presale evaluation model available, versionId={}", versionId);
             return new NormalizationOutcome(fallback, false);
         }
 
         try {
             String candidatesJson = objectMapper.writeValueAsString(toCandidatePayload(rawMentions));
             String prompt = CompetitorNormalizationPromptTemplates.renderUserPrompt(brandName, candidatesJson);
-            PlatformCallContext ctx = new PlatformCallContext(
-                    versionId, 1, platform.getPlatformCode(), null, "", brandName, operatorUserId, isManager);
-            LlmCallResult result = llmInvoker.normalizeCompetitors(ctx, prompt);
+            LlmCallResult result = normalizeWithEvaluationModel(evaluationContexts, prompt, versionId);
             List<ExtractedCompetitor> normalized = parseAndValidate(result.rawResponse(), rawMentions);
             return new NormalizationOutcome(normalized.isEmpty() ? fallback : normalized, true);
         } catch (LlmInvokeException ex) {
@@ -77,13 +76,20 @@ public class PresaleCompetitorNormalizationService {
         }
     }
 
-    private AiPlatformConfig resolveNormalizationPlatform() {
-        List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(
-                PresalePlatformConfigQueries.presaleEnabledWrapper());
-        if (platforms == null || platforms.isEmpty()) {
-            return null;
+    private LlmCallResult normalizeWithEvaluationModel(List<PlatformCallContext> evaluationContexts,
+                                                       String prompt,
+                                                       Long versionId) throws LlmInvokeException {
+        LlmPermitUnavailableException lastBusy = null;
+        for (PlatformCallContext ctx : evaluationContexts) {
+            try {
+                return llmInvoker.normalizeCompetitors(ctx, prompt);
+            } catch (LlmPermitUnavailableException ex) {
+                lastBusy = ex;
+                log.debug("competitor normalization evaluation model busy, versionId={}, platformCode={}",
+                        versionId, ctx.platformCode());
+            }
         }
-        return platforms.get(0);
+        throw new LlmInvokeException("All presale evaluation models are busy", lastBusy);
     }
 
     private List<Map<String, Object>> toCandidatePayload(List<RawCompetitorMention> rawMentions) {

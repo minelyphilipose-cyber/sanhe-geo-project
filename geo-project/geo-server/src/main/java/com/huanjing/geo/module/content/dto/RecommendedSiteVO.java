@@ -10,6 +10,7 @@ public class RecommendedSiteVO {
     private Long siteId;
     private String siteName;
     private String domain;
+    private String iconUrl;
     private String tier;
     private String status;
     private String integrationMethod;

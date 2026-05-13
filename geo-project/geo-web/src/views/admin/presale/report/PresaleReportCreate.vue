@@ -272,7 +272,7 @@
                       <span>{{ cat.label }}</span>
                       <el-input-number
                         v-model="llmPlan.categoryCounts[cat.code]"
-                        :min="cat.code === 'COMPARISON' ? 1 : 0"
+                        :min="cat.code === 'COMPARISON' ? 1 : cat.code === 'COGNITIVE' ? 3 : 0"
                         :max="30"
                         size="small"
                         controls-position="right"
@@ -293,7 +293,7 @@
                   <el-button
                     type="primary"
                     :loading="llmGenerating"
-                    :disabled="!canGenerateLlm || (llmQuestions.length > 0 && llmMissingTotal === 0)"
+                    :disabled="!canGenerateLlm || (llmQuestions.length > 0 && llmMissingTotal === 0) || llmGenerationIssues.length > 0"
                     @click="generateLlmQuestions(false)"
                   >
                     {{ llmQuestions.length ? `补 ${llmMissingTotal} 条` : '生成 LLM 问题' }}
@@ -308,6 +308,14 @@
                 <el-alert
                   v-if="llmLastWarning"
                   :title="llmLastWarning"
+                  type="warning"
+                  :closable="false"
+                  class="prompt-alert"
+                />
+
+                <el-alert
+                  v-if="llmGenerationIssues.length"
+                  :title="llmGenerationIssues[0]"
                   type="warning"
                   :closable="false"
                   class="prompt-alert"
@@ -439,6 +447,8 @@ const ALLOWED_PROMPT_VARIABLES = new Set([
 ])
 const MAX_LLM_TOTAL_COUNT = 60
 const MAX_LLM_CATEGORY_COUNT = 30
+const MIN_LLM_COGNITIVE_COUNT = 3
+const MAX_LLM_EXISTING_QUESTIONS = 80
 
 const router = useRouter()
 const route = useRoute()
@@ -598,6 +608,8 @@ const llmActualCategoryCounts = computed<Record<PresalePromptCategoryCode, numbe
 const llmMissingTotal = computed(() => Math.max(0, Number(llmPlan.totalCount || 0) - llmQuestions.value.length))
 
 const llmSubmitIssues = computed(() => validateLlmSubmit(false))
+
+const llmGenerationIssues = computed(() => validateLlmGeneration(false, false))
 
 const canGenerateLlm = computed(() => {
   return canPreviewPrompts.value && !llmGenerating.value && validateLlmPlanConfig(false).length === 0
@@ -853,8 +865,36 @@ function validateLlmPlanConfig(showMessage: boolean) {
   if (Number(llmPlan.categoryCounts.COMPARISON || 0) < 1) {
     issues.push('对比型分类必须存在，数量至少为 1')
   }
+  if (Number(llmPlan.categoryCounts.COGNITIVE || 0) < MIN_LLM_COGNITIVE_COUNT) {
+    issues.push(`认知型分类数量至少为 ${MIN_LLM_COGNITIVE_COUNT}`)
+  }
   if (sum !== totalCount) {
     issues.push(`各分类数量之和需等于总问题数，当前为 ${sum}`)
+  }
+
+  if (showMessage && issues.length) {
+    ElMessage.warning(issues[0])
+  }
+  return issues
+}
+
+function validateLlmGeneration(reset: boolean, showMessage: boolean) {
+  const issues = validateLlmPlanConfig(false)
+  if (!reset) {
+    const totalCount = Number(llmPlan.totalCount || 0)
+    if (llmQuestions.value.length > MAX_LLM_EXISTING_QUESTIONS) {
+      issues.push(`已有 LLM 问题最多保留 ${MAX_LLM_EXISTING_QUESTIONS} 条，请删除多余问题后再补生成`)
+    }
+    if (llmQuestions.value.length > totalCount) {
+      issues.push(`已有 LLM 问题 ${llmQuestions.value.length} 条，超过总问题数 ${totalCount} 条，请调大总数、删除多余问题或重新生成`)
+    }
+    for (const cat of CATEGORY_OPTIONS) {
+      const actual = llmActualCategoryCounts.value[cat.code]
+      const target = Number(llmPlan.categoryCounts[cat.code] || 0)
+      if (actual > target) {
+        issues.push(`${cat.label}已有 ${actual} 条，超过目标 ${target} 条，请调大该分类数量、删除多余问题或重新生成`)
+      }
+    }
   }
 
   if (showMessage && issues.length) {
@@ -933,7 +973,7 @@ function buildLlmPromptQuestions(): LlmPromptQuestionDraft[] {
 async function generateLlmQuestions(reset: boolean) {
   if (!formRef.value) return
   const ok = await formRef.value.validate().catch(() => false)
-  if (!ok || validateLlmPlanConfig(true).length) {
+  if (!ok || validateLlmGeneration(reset, true).length) {
     return
   }
 

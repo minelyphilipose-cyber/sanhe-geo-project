@@ -160,6 +160,9 @@ public class PresalePromptTraceService {
         if (out.getSize() > 100) {
             out.setSize(100);
         }
+        if (hasText(out.getKeyword())) {
+            out.setKeyword(out.getKeyword().trim());
+        }
         return out;
     }
 

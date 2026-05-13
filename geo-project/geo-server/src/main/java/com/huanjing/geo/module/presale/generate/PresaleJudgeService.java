@@ -3,6 +3,7 @@ package com.huanjing.geo.module.presale.generate;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
 import com.huanjing.geo.module.presale.generate.llm.JudgePromptTemplates;
 import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
 import com.huanjing.geo.module.presale.generate.llm.LlmInvokeException;
@@ -63,6 +64,7 @@ public class PresaleJudgeService {
     private final PresaleReportMapper reportMapper;
     private final PresaleLlmInvoker llmInvoker;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
+    private final PresaleEvaluationModelRouter evaluationModelRouter;
     private final ObjectMapper objectMapper;
     private final Executor judgeExecutor;
 
@@ -79,6 +81,7 @@ public class PresaleJudgeService {
                                PresaleReportMapper reportMapper,
                                PresaleLlmInvoker llmInvoker,
                                AiPlatformConfigMapper aiPlatformConfigMapper,
+                               PresaleEvaluationModelRouter evaluationModelRouter,
                                ObjectMapper objectMapper,
                                @Qualifier("presaleJudgeExecutor") Executor judgeExecutor) {
         this.promptResultMapper = promptResultMapper;
@@ -88,6 +91,7 @@ public class PresaleJudgeService {
         this.reportMapper = reportMapper;
         this.llmInvoker = llmInvoker;
         this.aiPlatformConfigMapper = aiPlatformConfigMapper;
+        this.evaluationModelRouter = evaluationModelRouter;
         this.objectMapper = objectMapper;
         this.judgeExecutor = judgeExecutor;
     }
@@ -185,9 +189,8 @@ public class PresaleJudgeService {
             return JudgeOutcome.SKIPPED;
         }
 
-        String modelId = resolveModelId(candidate.getPlatformCode());
         if (!StringUtils.hasText(candidate.getQueryAnswer())) {
-            upsertJudgeFailure(candidate, category, 1, "QUERY_ANSWER_EMPTY", null, modelId);
+            upsertJudgeFailure(candidate, category, 1, "QUERY_ANSWER_EMPTY", null, null, null);
             return JudgeOutcome.FAILED;
         }
 
@@ -202,7 +205,7 @@ public class PresaleJudgeService {
             attemptsUsed = attempt;
             try {
                 List<PresaleAiPromptJudgeResult> successRows = invokeAndBuildSuccess(
-                        candidate, category, brandName, operatorUserId, isManager, judgePrompt, modelId, attempt, cognitiveAttributes
+                        candidate, category, brandName, operatorUserId, isManager, judgePrompt, attempt, cognitiveAttributes
                 );
                 cleanupLegacyComparisonGroupJudge(candidate, category);
                 for (PresaleAiPromptJudgeResult successRow : successRows) {
@@ -219,7 +222,9 @@ public class PresaleJudgeService {
 
         String errorMessage = lastError == null ? "JUDGE_UNKNOWN_ERROR" : lastError.getMessage();
         String rawResponse = lastError == null ? null : lastError.rawResponse();
-        upsertJudgeFailure(candidate, category, attemptsUsed, errorMessage, rawResponse, modelId);
+        String judgePlatformCode = lastError == null ? null : lastError.judgePlatformCode();
+        String modelId = StringUtils.hasText(judgePlatformCode) ? resolveModelId(judgePlatformCode) : null;
+        upsertJudgeFailure(candidate, category, attemptsUsed, errorMessage, rawResponse, judgePlatformCode, modelId);
         return JudgeOutcome.FAILED;
     }
 
@@ -229,11 +234,10 @@ public class PresaleJudgeService {
                                                                    Long operatorUserId,
                                                                    boolean isManager,
                                                                    String judgePrompt,
-                                                                   String modelId,
                                                                    int attempt,
                                                                    List<String> cognitiveAttributes) throws JudgeAttemptError {
         String competitorName = normalizeCompetitor(candidate.getCompetitorName());
-        PlatformCallContext ctx = new PlatformCallContext(
+        PlatformCallContext sourceCtx = new PlatformCallContext(
                 candidate.getVersionId(),
                 candidate.getBatchNo(),
                 candidate.getPlatformCode(),
@@ -244,8 +248,13 @@ public class PresaleJudgeService {
                 isManager
         );
         LlmCallResult result;
+        PlatformCallContext judgeCtx;
         try {
-            result = llmInvoker.judge(ctx, judgePrompt, judgeTemperature);
+            RoutedJudgeCall routed = judgeWithEvaluationModel(sourceCtx, judgePrompt);
+            judgeCtx = routed.ctx();
+            result = routed.result();
+        } catch (JudgeAttemptError ex) {
+            throw ex;
         } catch (LlmInvokeException ex) {
             throw new JudgeAttemptError(JudgeErrorCode.LLM_CALL_FAILED,
                     "JUDGE_LLM_CALL_FAILED: " + safeMessage(ex), null, ex);
@@ -253,24 +262,48 @@ public class PresaleJudgeService {
         JsonNode payload = parseJudgePayload(result.rawResponse());
         if (CATEGORY_COGNITIVE.equals(category)) {
             PresaleAiPromptJudgeResult row = initBaseJudgeRow(candidate, category);
-            applySuccessMeta(row, attempt, modelId, result.rawResponse(), payload);
+            applySuccessMeta(row, attempt, judgeCtx.platformCode(), result.modelId(), result.rawResponse(), payload);
             applyCognitivePayload(row, payload, cognitiveAttributes);
             return List.of(row);
         } else if (CATEGORY_COMPARISON.equals(category)) {
-            return buildComparisonRows(candidate, attempt, modelId, result.rawResponse(), payload);
+            return buildComparisonRows(candidate, attempt, judgeCtx.platformCode(), result.modelId(), result.rawResponse(), payload);
         } else {
             throw new JudgeAttemptError(JudgeErrorCode.UNSUPPORTED_CATEGORY,
                     "UNSUPPORTED_CATEGORY: " + category, result.rawResponse(), null);
         }
     }
 
+    private RoutedJudgeCall judgeWithEvaluationModel(PlatformCallContext sourceCtx, String judgePrompt)
+            throws LlmInvokeException, JudgeAttemptError {
+        List<PlatformCallContext> candidates = evaluationModelRouter.routeContexts(sourceCtx);
+        if (candidates.isEmpty()) {
+            throw new LlmInvokeException("No presale evaluation model enabled");
+        }
+        LlmPermitUnavailableException lastBusy = null;
+        String lastPlatformCode = null;
+        for (PlatformCallContext candidate : candidates) {
+            try {
+                return new RoutedJudgeCall(candidate, llmInvoker.judge(candidate, judgePrompt, judgeTemperature));
+            } catch (LlmPermitUnavailableException ex) {
+                lastBusy = ex;
+                lastPlatformCode = candidate.platformCode();
+                log.debug("presale judge evaluation model busy, versionId={}, sourcePlatform={}, judgePlatform={}",
+                        sourceCtx.versionId(), sourceCtx.platformCode(), candidate.platformCode());
+            }
+        }
+        throw new JudgeAttemptError(JudgeErrorCode.LLM_CALL_FAILED,
+                "JUDGE_LLM_PERMIT_BUSY: all presale evaluation models are busy", null, lastBusy, lastPlatformCode);
+    }
+
     private void applySuccessMeta(PresaleAiPromptJudgeResult row,
                                   int attempt,
+                                  String judgePlatformCode,
                                   String modelId,
                                   String rawResponse,
                                   JsonNode payload) {
         row.setJudgeStatus(STATUS_SUCCESS);
         row.setJudgeAttemptCount(attempt);
+        row.setJudgePlatformCode(judgePlatformCode);
         row.setJudgeModelId(modelId);
         row.setJudgeTemperature(BigDecimal.valueOf(judgeTemperature).setScale(2, RoundingMode.HALF_UP));
         row.setJudgeError(null);
@@ -334,6 +367,7 @@ public class PresaleJudgeService {
 
     private List<PresaleAiPromptJudgeResult> buildComparisonRows(PresaleJudgeCandidateRow candidate,
                                                                  int attempt,
+                                                                 String judgePlatformCode,
                                                                  String modelId,
                                                                  String rawResponse,
                                                                  JsonNode payload) throws JudgeAttemptError {
@@ -370,7 +404,7 @@ public class PresaleJudgeService {
             PresaleAiPromptJudgeResult row = initBaseJudgeRow(candidate, CATEGORY_COMPARISON);
             row.setCompetitorName(competitor);
             JsonNode verdict = verdictByCompetitor.get(competitor);
-            applySuccessMeta(row, attempt, modelId, rawResponse, verdict);
+            applySuccessMeta(row, attempt, judgePlatformCode, modelId, rawResponse, verdict);
             applyComparisonPayload(row, verdict);
             rows.add(row);
         }
@@ -512,10 +546,12 @@ public class PresaleJudgeService {
                                     int attemptCount,
                                     String errorMessage,
                                     String rawResponse,
+                                    String judgePlatformCode,
                                     String modelId) {
         PresaleAiPromptJudgeResult row = initBaseJudgeRow(candidate, category);
         row.setJudgeStatus(STATUS_FAILED);
         row.setJudgeAttemptCount(attemptCount);
+        row.setJudgePlatformCode(judgePlatformCode);
         row.setJudgeModelId(modelId);
         row.setJudgeTemperature(BigDecimal.valueOf(judgeTemperature).setScale(2, RoundingMode.HALF_UP));
         row.setJudgeError(truncate(errorMessage, JUDGE_ERROR_MAX_LEN));
@@ -740,11 +776,21 @@ public class PresaleJudgeService {
     private static final class JudgeAttemptError extends Exception {
         private final JudgeErrorCode code;
         private final String rawResponse;
+        private final String judgePlatformCode;
 
         private JudgeAttemptError(JudgeErrorCode code, String message, String rawResponse, Throwable cause) {
+            this(code, message, rawResponse, cause, null);
+        }
+
+        private JudgeAttemptError(JudgeErrorCode code,
+                                  String message,
+                                  String rawResponse,
+                                  Throwable cause,
+                                  String judgePlatformCode) {
             super(message, cause);
             this.code = code;
             this.rawResponse = rawResponse;
+            this.judgePlatformCode = judgePlatformCode;
         }
 
         private String rawResponse() {
@@ -754,5 +800,12 @@ public class PresaleJudgeService {
         private boolean retryableInOuterLoop() {
             return code != null && code.retryableInOuterLoop();
         }
+
+        private String judgePlatformCode() {
+            return judgePlatformCode;
+        }
+    }
+
+    private record RoutedJudgeCall(PlatformCallContext ctx, LlmCallResult result) {
     }
 }

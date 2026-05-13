@@ -10,6 +10,7 @@ import com.huanjing.geo.module.presale.generate.llm.CallStatus;
 import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
 import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
+import com.huanjing.geo.module.presale.generate.PresaleEvaluationModelRouter;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -28,8 +29,9 @@ class PresalePage03DoubaoServiceTest {
     private final PresaleLlmInvoker llmInvoker = mock(PresaleLlmInvoker.class);
     private final PresaleL3Defaults l3Defaults = new PresaleL3Defaults(objectMapper);
     private final MarketBattlegroundValidator validator = new MarketBattlegroundValidator();
+    private final PresaleEvaluationModelRouter evaluationModelRouter = mock(PresaleEvaluationModelRouter.class);
     private final PresalePage03DoubaoService service =
-            new PresalePage03DoubaoService(objectMapper, llmInvoker, l3Defaults, validator);
+            new PresalePage03DoubaoService(objectMapper, llmInvoker, l3Defaults, validator, evaluationModelRouter);
 
     @Test
     void generateAndApply_usesDoubaoAndRecalculatesTraffic() throws Exception {
@@ -52,6 +54,8 @@ class PresalePage03DoubaoServiceTest {
         when(llmInvoker.marketBattleground(any(PlatformCallContext.class), anyString()))
                 .thenReturn(new LlmCallResult(doubaoResponse(), 100, 200, 30L, 0,
                         CallStatus.SUCCESS, "doubao", "豆包", "doubao-pro", "豆包 Pro"));
+        when(evaluationModelRouter.routeContexts(any(PlatformCallContext.class)))
+                .thenReturn(List.of(new PlatformCallContext(290L, 3, "doubao", null, "", "无二火锅", 1L, false)));
 
         String resultJson = service.generateAndApply(290L, rawJson, editableJson, 1L, false);
 
@@ -92,6 +96,8 @@ class PresalePage03DoubaoServiceTest {
         when(llmInvoker.marketBattleground(any(PlatformCallContext.class), anyString()))
                 .thenReturn(new LlmCallResult(responseWithBlankLabel, 100, 200, 30L, 0,
                         CallStatus.SUCCESS, "doubao", "豆包", "doubao-pro", "豆包 Pro"));
+        when(evaluationModelRouter.routeContexts(any(PlatformCallContext.class)))
+                .thenReturn(List.of(new PlatformCallContext(290L, 3, "doubao", null, "", "无二火锅", 1L, false)));
 
         String resultJson = service.generateAndApply(290L, rawJson, editableJson, 1L, false);
 
@@ -125,6 +131,8 @@ class PresalePage03DoubaoServiceTest {
         when(llmInvoker.marketBattleground(any(PlatformCallContext.class), anyString()))
                 .thenReturn(new LlmCallResult(responseWithLongQuestion, 100, 200, 30L, 0,
                         CallStatus.SUCCESS, "doubao", "豆包", "doubao-pro", "豆包 Pro"));
+        when(evaluationModelRouter.routeContexts(any(PlatformCallContext.class)))
+                .thenReturn(List.of(new PlatformCallContext(330L, 3, "doubao", null, "", "诗帝尼", 1L, false)));
 
         String resultJson = service.generateAndApply(330L, rawJson, editableJson, 1L, false);
 

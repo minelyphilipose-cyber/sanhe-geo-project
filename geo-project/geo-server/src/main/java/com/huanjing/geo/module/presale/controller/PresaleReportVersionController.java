@@ -103,6 +103,15 @@ public class PresaleReportVersionController {
         return R.ok(actionService.retry(id, versionNo));
     }
 
+    @Operation(summary = "Cancel a QUEUED/RUNNING generation")
+    @PostMapping("/{id}/versions/{versionNo}/cancel-generation")
+    public R<RetryVersionResponse> cancelGeneration(
+            @PathVariable Long id,
+            @PathVariable Integer versionNo
+    ) {
+        return R.ok(actionService.cancelGeneration(id, versionNo));
+    }
+
     @Operation(summary = "Regenerate a DONE/FAILED version in place")
     @PostMapping("/{id}/versions/{versionNo}/regenerate")
     public R<RetryVersionResponse> regenerate(

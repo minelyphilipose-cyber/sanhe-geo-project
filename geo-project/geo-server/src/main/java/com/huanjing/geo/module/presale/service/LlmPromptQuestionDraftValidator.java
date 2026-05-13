@@ -23,6 +23,7 @@ public class LlmPromptQuestionDraftValidator {
 
     public static final int MAX_TOTAL_COUNT = 60;
     public static final int MAX_CATEGORY_COUNT = 30;
+    public static final int MIN_COGNITIVE_COUNT = 3;
     public static final int MAX_PROMPT_CONTENT_LENGTH = 1000;
     public static final int MAX_EXISTING_QUESTIONS = 80;
     private static final String COMPETITOR_VAR = "{competitor}";
@@ -102,6 +103,9 @@ public class LlmPromptQuestionDraftValidator {
         }
         if (categoryCounts.getOrDefault(PresalePromptCategoryCode.COMPARISON, 0) <= 0) {
             errors.add(new ValidationError(null, "COMPARISON", "对比型问题数量必须大于 0"));
+        }
+        if (categoryCounts.getOrDefault(PresalePromptCategoryCode.COGNITIVE, 0) < MIN_COGNITIVE_COUNT) {
+            errors.add(new ValidationError(null, "COGNITIVE", "认知型问题数量必须至少 " + MIN_COGNITIVE_COUNT + " 条"));
         }
         if (questions == null || questions.isEmpty()) {
             errors.add(new ValidationError(null, "llmPromptQuestions", "LLM 问题不能为空"));

@@ -3,12 +3,14 @@ package com.huanjing.geo.common.llm.pool;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import org.junit.jupiter.api.Test;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -38,6 +40,24 @@ class LlmExecutionGatewayTest {
         assertThrows(LlmPermitUnavailableException.class, () -> gateway.acquire("article", platform()));
 
         verify(store).release(eq("geo:llm:permit:global"), anyString(), anyLong(), eq(60_000L));
+    }
+
+    @Test
+    void acquireBlockingRetriesPermitBusyWithinTimeout() {
+        RedisLlmPermitStore store = mock(RedisLlmPermitStore.class);
+        when(store.acquire(eq("geo:llm:permit:global"), anyString(), eq(8), anyLong(), anyLong(), anyLong()))
+                .thenReturn(false, true);
+        when(store.acquire(eq("geo:llm:permit:platform:openai"), anyString(), eq(2), anyLong(), anyLong(), anyLong()))
+                .thenReturn(true);
+        LeaseRenewalService renewalService = mock(LeaseRenewalService.class);
+        LlmPoolProperties properties = enabledProperties();
+        properties.setPermitWaitTimeoutMs(200L);
+        properties.setPermitRetryIntervalMs(10L);
+        LlmExecutionGateway gateway = new LlmExecutionGateway(store, properties, renewalService, new LlmGatewayMetrics());
+
+        assertDoesNotThrow(() -> gateway.acquireBlocking("article", platform()).close());
+
+        verify(store, times(2)).acquire(eq("geo:llm:permit:global"), anyString(), eq(8), anyLong(), anyLong(), anyLong());
     }
 
     private static LlmPoolProperties enabledProperties() {

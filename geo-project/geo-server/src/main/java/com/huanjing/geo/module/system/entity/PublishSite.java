@@ -15,6 +15,7 @@ public class PublishSite {
     private Long id;
     private String siteName;
     private String domain;
+    private String iconUrl;
     private String industryTags;
     private String tier;
     private String status;

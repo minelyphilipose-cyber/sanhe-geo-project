@@ -177,6 +177,47 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="industrySiteVisible" title="行业资讯站分发" width="900px">
+      <DataState :loading="industrySiteLoading" :empty="!industrySiteLoading && industrySites.length === 0" empty-text="暂无可用行业资讯站">
+        <el-table :data="industrySites" border highlight-current-row @current-change="selectIndustrySite">
+          <el-table-column width="52">
+            <template #default="scope">
+              <el-radio :model-value="selectedIndustrySiteId" :label="scope.row.id" @change="selectIndustrySite(scope.row)" />
+            </template>
+          </el-table-column>
+          <el-table-column label="站点" min-width="180">
+            <template #default="scope">
+              <div class="site-cell">
+                <el-avatar v-if="scope.row.iconUrl" :src="scope.row.iconUrl" shape="square" :size="28" />
+                <div>
+                  <div class="site-name">{{ scope.row.siteName }}</div>
+                  <div class="site-domain">{{ scope.row.domain }}</div>
+                </div>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="行业分类" min-width="180">
+            <template #default="scope">
+              <div class="flex flex-wrap gap-1">
+                <el-tag v-for="tag in parseIndustryTags(scope.row.industryTags)" :key="`${scope.row.id}-${tag}`" type="info">
+                  {{ tag }}
+                </el-tag>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="接入方式" width="110">
+            <template #default="scope">{{ scope.row.integrationMethod === 'rest_api' ? 'REST API' : scope.row.integrationMethod }}</template>
+          </el-table-column>
+        </el-table>
+      </DataState>
+      <template #footer>
+        <el-button @click="industrySiteVisible = false">取消</el-button>
+        <el-button type="primary" :loading="industrySiteSubmitting" :disabled="!selectedIndustrySiteId" @click="submitIndustrySite">
+          确认分发
+        </el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="authorityMediaVisible" title="权威媒体分发" width="1080px">
       <div class="authority-media-dialog">
         <el-alert
@@ -596,11 +637,12 @@ import MarkdownIt from 'markdown-it'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { useUserStore } from '@/stores/user'
-import type { ArticleDetailResponse, ArticleDraft, AuthorityMediaResource, BrandImageFolder, BrandMaterial, DistributionTask, DouyinCapability, SelfMediaAccount, WechatMpCapability } from '@/types'
+import type { ArticleDetailResponse, ArticleDraft, AuthorityMediaResource, BrandImageFolder, BrandMaterial, DistributionTask, DouyinCapability, PublishSite, SelfMediaAccount, WechatMpCapability } from '@/types'
 import {
   checkSelfMediaAccountAuth,
   distributeContentArticleToAgentSite,
   distributeContentArticleToAuthorityMedia,
+  distributeContentArticleToIndustrySite,
   distributeContentArticleToSelfMediaAccount,
   getArticleDistribution,
   getAuthorityMediaResources,
@@ -616,6 +658,7 @@ import {
   reviewContentArticle,
   saveContentArticleRevision,
 } from '@/api/content'
+import { getPublishSites } from '@/api/publishSite'
 import { getBrandDetail, getBrandImageFolders, getBrandMaterialStream } from '@/api/customer'
 import { createExtensionBindCode, type ExtensionBindCode } from '@/api/extension'
 import { getProjectDetail } from '@/api/project'
@@ -679,10 +722,17 @@ const distributionChannels: Array<{
   disabled?: boolean
 }> = [
   { value: 'official_site', label: 'Agent 官网', description: '发布到项目品牌的 Agent 官网站点。' },
-  { value: 'industry_site', label: '行业资讯站', description: '行业资讯站分发通道待接入。', disabled: true },
+  { value: 'industry_site', label: '行业资讯站', description: '选择已启用的行业资讯站并发布。' },
   { value: 'self_media', label: '自媒体平台', description: '分发到微信公众号、抖音、头条、知乎等账号。' },
   { value: 'authority_media', label: '权威媒体', description: '选择特价网新闻媒体资源并创建出稿订单。' },
 ]
+
+const industrySiteVisible = ref(false)
+const industrySiteLoading = ref(false)
+const industrySiteSubmitting = ref(false)
+const industrySiteArticle = ref<ArticleDraft | null>(null)
+const industrySites = ref<PublishSite[]>([])
+const selectedIndustrySiteId = ref<number | null>(null)
 
 const authorityMediaVisible = ref(false)
 const authorityLoading = ref(false)
@@ -952,7 +1002,8 @@ async function selectDistributionChannel(channel: DistributionChannel) {
   const row = distributionChannelArticle.value
   if (!row) return
   if (channel === 'industry_site') {
-    ElMessage.info('行业资讯站分发通道待接入')
+    distributionChannelVisible.value = false
+    await openIndustrySiteDistribute(row)
     return
   }
   distributionChannelVisible.value = false
@@ -965,6 +1016,45 @@ async function selectDistributionChannel(channel: DistributionChannel) {
     return
   }
   await openAuthorityMedia(row)
+}
+
+async function openIndustrySiteDistribute(row: ArticleDraft) {
+  industrySiteArticle.value = row
+  selectedIndustrySiteId.value = null
+  industrySites.value = []
+  industrySiteVisible.value = true
+  industrySiteLoading.value = true
+  try {
+    const { data } = await getPublishSites({ status: 'active' })
+    industrySites.value = data.data || []
+  } catch {
+    ElMessage.error('加载行业资讯站失败')
+  } finally {
+    industrySiteLoading.value = false
+  }
+}
+
+function selectIndustrySite(row?: PublishSite) {
+  selectedIndustrySiteId.value = row?.id || null
+}
+
+async function submitIndustrySite() {
+  const row = industrySiteArticle.value
+  if (!row || !selectedIndustrySiteId.value) return
+  industrySiteSubmitting.value = true
+  try {
+    const result = await distributeContentArticleToIndustrySite(row.id, selectedIndustrySiteId.value)
+    const task = result.data.data
+    if (task.status === 'submitted') {
+      ElMessage.success('行业资讯站分发成功')
+      industrySiteVisible.value = false
+      await load()
+    } else {
+      ElMessage.error(task.errorMessage || '行业资讯站分发失败')
+    }
+  } finally {
+    industrySiteSubmitting.value = false
+  }
 }
 
 async function openAuthorityMedia(row: ArticleDraft) {
@@ -1733,6 +1823,17 @@ function money(value: number | string | null | undefined) {
   return Number.isFinite(n) ? n.toFixed(2) : '0.00'
 }
 
+function parseIndustryTags(raw?: string | string[] | null) {
+  if (Array.isArray(raw)) return raw
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
 function entranceLevelLabel(value?: number | null) {
   const map: Record<number, string> = {
     0: '无入口',
@@ -2467,6 +2568,25 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 .douyin-text-editor,
 .distribution-history {
   margin-top: 12px;
+}
+
+.site-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.site-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+
+.site-domain {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
 }
 
 </style>

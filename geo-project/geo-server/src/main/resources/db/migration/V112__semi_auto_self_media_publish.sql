@@ -273,7 +273,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
   target_type VARCHAR(64) NULL,
   target_id VARCHAR(128) NULL,
   result VARCHAR(16) NOT NULL COMMENT 'SUCCESS/FAILURE/DENIED',
-  sensitive TINYINT(1) NOT NULL DEFAULT 0,
+  `sensitive` TINYINT(1) NOT NULL DEFAULT 0,
   mode VARCHAR(16) NOT NULL DEFAULT 'ASYNC'
     COMMENT 'SYNC=sensitive DB+file before return; ASYNC=background DB+file; FILE_ONLY=high-volume file log',
   ip_address VARCHAR(45) NULL,

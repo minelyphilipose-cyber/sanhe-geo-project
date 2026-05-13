@@ -8,10 +8,10 @@
 # ============================================================
 
 # ============ Build Stage ============
-FROM maven:3.9-eclipse-temurin-17 AS builder
+FROM maven:3.9.9-eclipse-temurin-17-noble AS builder
 
 ARG MAVEN_MIRROR=https://maven.aliyun.com/repository/public
-ARG PLAYWRIGHT_DOWNLOAD_HOST=
+ARG PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
 
@@ -96,7 +96,19 @@ RUN set -eux; \
     libxshmfence1 \
     libxcb1 \
     libx11-6 \
+    libx11-xcb1 \
     libxss1 \
+    libflite1 \
+    libwebpdemux2 \
+    libavif13 \
+    libharfbuzz-icu0 \
+    libwebpmux3 \
+    libenchant-2-2 \
+    libsecret-1-0 \
+    libhyphen0 \
+    libmanette-0.2-0 \
+    libgles2 \
+    libx264-163 \
     fontconfig \
     fonts-noto-cjk \
     fonts-noto-cjk-extra \

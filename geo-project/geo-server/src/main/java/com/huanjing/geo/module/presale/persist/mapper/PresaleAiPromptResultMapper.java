@@ -91,9 +91,8 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "</if>",
             "<if test=\"req.keyword != null and req.keyword != ''\">",
             "  AND (r.request_prompt_content LIKE CONCAT('%', #{req.keyword}, '%') ",
-            "    OR qc.raw_response LIKE CONCAT('%', #{req.keyword}, '%') ",
-            "    OR qc.failure_reason LIKE CONCAT('%', #{req.keyword}, '%') ",
-            "    OR ac.failure_reason LIKE CONCAT('%', #{req.keyword}, '%')) ",
+            "    OR qc.request_prompt_content LIKE CONCAT('%', #{req.keyword}, '%') ",
+            "    OR pt.prompt_content LIKE CONCAT('%', #{req.keyword}, '%')) ",
             "</if>",
             PROMPT_TRACE_STATUS_FILTER,
             "ORDER BY r.batch_no ASC, r.platform_code ASC, r.prompt_template_id ASC, r.competitor_name ASC",
@@ -169,6 +168,15 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
     List<PromptTemplateIntentStatRow> selectTemplateIntentStats(@Param("templateVersion") String templateVersion);
 
     @Select("SELECT " +
+            "category AS intentLabel, " +
+            "has_competitor_var AS hasCompetitorVar, " +
+            "COUNT(*) AS templateCount " +
+            "FROM presale_report_version_prompt_template " +
+            "WHERE report_version_id = #{versionId} " +
+            "GROUP BY category, has_competitor_var")
+    List<PromptTemplateIntentStatRow> selectVersionPromptIntentStats(@Param("versionId") Long versionId);
+
+    @Select("SELECT " +
             "r.id AS promptResultId, " +
             "r.version_id AS versionId, " +
             "r.batch_no AS batchNo, " +
@@ -199,7 +207,7 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "  SELECT " +
             "    j.platform_code AS platform_code, " +
             "    'COGNITIVE' AS category, " +
-            "    CASE WHEN SUM(CASE WHEN j.judge_status = 'SUCCESS' AND j.attribute_hit_rate IS NOT NULL AND j.sentiment_score IS NOT NULL THEN 1 ELSE 0 END) < 3 " +
+            "    CASE WHEN SUM(CASE WHEN j.judge_status = 'SUCCESS' AND j.attribute_hit_rate IS NOT NULL AND j.sentiment_score IS NOT NULL THEN 1 ELSE 0 END) = 0 " +
             "         THEN NULL " +
             "         ELSE ROUND( " +
             "           AVG(CASE WHEN j.judge_status = 'SUCCESS' AND j.attribute_hit_rate IS NOT NULL AND j.sentiment_score IS NOT NULL THEN j.attribute_hit_rate END) " +
@@ -240,7 +248,8 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "    SELECT " +
             "      j.platform_code AS platform_code, " +
             "      SUM(CASE WHEN j.judge_status = 'SUCCESS' AND j.preferred_brand = 'target' THEN 1 ELSE 0 END) AS numer, " +
-            "      SUM(CASE WHEN j.judge_status = 'SUCCESS' AND j.preferred_brand IN ('target', 'competitor', 'tie') THEN 1 ELSE 0 END) AS denom, " +
+            // unclear 表示裁判无法判断倾向,按中立样本计入分母,避免整格展示为未测。
+            "      SUM(CASE WHEN j.judge_status = 'SUCCESS' AND j.preferred_brand IN ('target', 'competitor', 'tie', 'unclear') THEN 1 ELSE 0 END) AS denom, " +
             "      SUM(CASE WHEN j.judge_status = 'SUCCESS' AND j.preferred_brand = 'target' THEN 1 ELSE 0 END) AS target_cnt, " +
             "      SUM(CASE WHEN j.judge_status = 'SUCCESS' AND j.preferred_brand = 'competitor' THEN 1 ELSE 0 END) AS competitor_cnt, " +
             "      SUM(CASE WHEN j.judge_status = 'SUCCESS' AND j.preferred_brand = 'tie' THEN 1 ELSE 0 END) AS tie_cnt " +

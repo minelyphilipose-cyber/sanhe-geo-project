@@ -82,7 +82,7 @@ class PresaleLlmPromptQuestionServiceTest {
 
         LlmPromptQuestionGenerateVO result = service.generate(request());
 
-        assertEquals(2, result.getGeneratedTotal());
+        assertEquals(5, result.getGeneratedTotal());
         assertEquals(0, result.getMissingTotal());
         ArgumentCaptor<LlmModelConfig> configCaptor = ArgumentCaptor.forClass(LlmModelConfig.class);
         verify(llmInvoker, org.mockito.Mockito.times(2)).invoke(anyString(), configCaptor.capture());
@@ -117,13 +117,16 @@ class PresaleLlmPromptQuestionServiceTest {
                         [
                           {"categoryCode":"PROBLEM","promptContent":"广州诗帝尼门窗有限公司售后靠不靠谱?"},
                           {"categoryCode":"PROBLEM","promptContent":"广州装修选门窗时售后和安装怎么避坑?"},
-                          {"categoryCode":"COMPARISON","promptContent":"诗帝尼和 {competitor} 哪个更适合装修?"}
+                          {"categoryCode":"COMPARISON","promptContent":"诗帝尼和 {competitor} 哪个更适合装修?"},
+                          {"categoryCode":"COGNITIVE","promptContent":"诗帝尼门窗这个品牌怎么样?"},
+                          {"categoryCode":"COGNITIVE","promptContent":"诗帝尼门窗质量口碑如何?"},
+                          {"categoryCode":"COGNITIVE","promptContent":"诗帝尼在门窗行业知名度如何?"}
                         ]
                         """, "aaa"));
 
         LlmPromptQuestionGenerateVO result = service.generate(problemRequest());
 
-        assertEquals(2, result.getGeneratedTotal());
+        assertEquals(5, result.getGeneratedTotal());
         assertFalse(result.getQuestions().stream()
                 .anyMatch(q -> q.getCategoryCode() == PresalePromptCategoryCode.PROBLEM
                         && q.getPromptContent().contains("广州诗帝尼门窗有限公司")));
@@ -142,6 +145,7 @@ class PresaleLlmPromptQuestionServiceTest {
         }
         counts.put(PresalePromptCategoryCode.RECOMMENDATION, 1);
         counts.put(PresalePromptCategoryCode.COMPARISON, 1);
+        counts.put(PresalePromptCategoryCode.COGNITIVE, 3);
         LlmPromptQuestionGenerateRequest request = new LlmPromptQuestionGenerateRequest();
         request.setBrandName("广州诗帝尼门窗有限公司");
         request.setIndustry("建筑装饰");
@@ -149,7 +153,7 @@ class PresaleLlmPromptQuestionServiceTest {
         request.setRegion("全国");
         request.setUserType("装修客户");
         request.setUserDemand("了解品牌在 AI 搜索中的真实表现。");
-        request.setTotalCount(2);
+        request.setTotalCount(5);
         request.setCategoryCounts(counts);
         request.setExistingQuestions(List.of());
         return request;
@@ -163,8 +167,9 @@ class PresaleLlmPromptQuestionServiceTest {
         }
         counts.put(PresalePromptCategoryCode.PROBLEM, 1);
         counts.put(PresalePromptCategoryCode.COMPARISON, 1);
+        counts.put(PresalePromptCategoryCode.COGNITIVE, 3);
         request.setCategoryCounts(counts);
-        request.setTotalCount(2);
+        request.setTotalCount(5);
         return request;
     }
 
@@ -181,7 +186,10 @@ class PresaleLlmPromptQuestionServiceTest {
     private static LlmInvokeResult successResult(String platformCode) {
         return result(
                 "[{\"categoryCode\":\"RECOMMENDATION\",\"promptContent\":\"广州门窗品牌哪家值得推荐?\"},"
-                        + "{\"categoryCode\":\"COMPARISON\",\"promptContent\":\"诗帝尼和 {competitor} 哪个更适合装修?\"}]",
+                        + "{\"categoryCode\":\"COMPARISON\",\"promptContent\":\"诗帝尼和 {competitor} 哪个更适合装修?\"},"
+                        + "{\"categoryCode\":\"COGNITIVE\",\"promptContent\":\"诗帝尼门窗这个品牌怎么样?\"},"
+                        + "{\"categoryCode\":\"COGNITIVE\",\"promptContent\":\"诗帝尼门窗质量口碑如何?\"},"
+                        + "{\"categoryCode\":\"COGNITIVE\",\"promptContent\":\"诗帝尼在门窗行业知名度如何?\"}]",
                 platformCode
         );
     }

@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.EditableContentDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.MarketBattleground;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.ClientInfo;
@@ -14,6 +15,7 @@ import com.huanjing.geo.module.presale.generate.llm.LlmInvokeException;
 import com.huanjing.geo.module.presale.generate.llm.MarketBattlegroundPromptTemplates;
 import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
+import com.huanjing.geo.module.presale.generate.PresaleEvaluationModelRouter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -22,19 +24,19 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Page03 市场战场页固定使用豆包生成,后端负责结构校验与数值重算。
+ * Page03 市场战场页使用售前评估模型池生成,后端负责结构校验与数值重算。
  */
 @Service
 @RequiredArgsConstructor
 public class PresalePage03DoubaoService {
 
-    private static final String PLATFORM_DOUBAO = "doubao";
     private static final int BATCH_NO_PAGE03 = 3;
 
     private final ObjectMapper objectMapper;
     private final PresaleLlmInvoker llmInvoker;
     private final PresaleL3Defaults l3Defaults;
     private final MarketBattlegroundValidator marketBattlegroundValidator;
+    private final PresaleEvaluationModelRouter evaluationModelRouter;
 
     public String generateAndApply(Long versionId,
                                    String rawSnapshotJson,
@@ -46,10 +48,10 @@ public class PresalePage03DoubaoService {
             EditableContentDTO editable = objectMapper.readValue(editableContentJson, EditableContentDTO.class);
             String prompt = MarketBattlegroundPromptTemplates.renderUserPrompt(buildPromptInputJson(raw));
             String brandName = raw.getClientInfo() == null ? null : raw.getClientInfo().getBrandName();
-            PlatformCallContext ctx = new PlatformCallContext(
+            PlatformCallContext sourceCtx = new PlatformCallContext(
                     versionId,
                     BATCH_NO_PAGE03,
-                    PLATFORM_DOUBAO,
+                    "",
                     null,
                     "",
                     brandName,
@@ -57,7 +59,7 @@ public class PresalePage03DoubaoService {
                     operatorIsManager
             );
 
-            LlmCallResult result = llmInvoker.marketBattleground(ctx, prompt);
+            LlmCallResult result = marketBattlegroundWithEvaluationModel(sourceCtx, prompt);
             JsonNode marketNode = objectMapper.readTree(result.rawResponse());
             marketBattlegroundValidator.validateRawJson(marketNode);
             MarketBattleground market = objectMapper.treeToValue(marketNode, MarketBattleground.class);
@@ -71,6 +73,23 @@ public class PresalePage03DoubaoService {
         } catch (JsonProcessingException | IllegalArgumentException ex) {
             throw new BizException(500, "Page03 Doubao output invalid: " + ex.getMessage());
         }
+    }
+
+    private LlmCallResult marketBattlegroundWithEvaluationModel(PlatformCallContext sourceCtx, String prompt)
+            throws LlmInvokeException {
+        List<PlatformCallContext> candidates = evaluationModelRouter.routeContexts(sourceCtx);
+        if (candidates.isEmpty()) {
+            throw new LlmInvokeException("No presale evaluation model enabled");
+        }
+        LlmPermitUnavailableException lastBusy = null;
+        for (PlatformCallContext candidate : candidates) {
+            try {
+                return llmInvoker.marketBattleground(candidate, prompt);
+            } catch (LlmPermitUnavailableException ex) {
+                lastBusy = ex;
+            }
+        }
+        throw new LlmInvokeException("All presale evaluation models are busy", lastBusy);
     }
 
     private String buildPromptInputJson(RawSnapshotDTO raw) throws JsonProcessingException {

@@ -103,6 +103,12 @@ public class ContentDistributionService {
     }
 
     @Transactional
+    public DistributionTask distributeToIndustrySite(Long articleId, Long siteId) {
+        PublishSite site = requireSite(siteId);
+        return distributeTo(articleId, new TargetContext.IndustrySiteTarget(site));
+    }
+
+    @Transactional
     public DistributionTask distributeTo(Long articleId, TargetContext target) {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.write");
@@ -124,6 +130,9 @@ public class ContentDistributionService {
         }
         if (target instanceof TargetContext.SiteTarget) {
             throw new BizException(400, "Legacy site target is deprecated; use explicit channel targets");
+        }
+        if (target instanceof TargetContext.IndustrySiteTarget industrySiteTarget) {
+            return distributeToIndustrySite(article, project, operator, industrySiteTarget);
         }
         if (target instanceof TargetContext.SelfMediaTarget selfMediaTarget) {
             return distributeToSelfMedia(article, project, operator, selfMediaTarget);
@@ -186,8 +195,14 @@ public class ContentDistributionService {
                         .eq(DistributionTask::getArticleId, articleId)
                         .orderByDesc(DistributionTask::getCreatedAt, DistributionTask::getAttemptNo)
         );
-        Map<Long, PublishSite> siteMap = mapSites(tasks.stream().map(DistributionTask::getSiteId).collect(Collectors.toSet()));
-        List<DistributionAttemptVO> attempts = tasks.stream().map(task -> toAttemptVO(task, siteMap.get(task.getSiteId()))).collect(Collectors.toList());
+        Set<Long> targetSiteIds = tasks.stream()
+                .map(task -> task.getIndustrySiteId() != null ? task.getIndustrySiteId() : task.getSiteId())
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, PublishSite> siteMap = mapSites(targetSiteIds);
+        List<DistributionAttemptVO> attempts = tasks.stream()
+                .map(task -> toAttemptVO(task, siteMap.get(task.getIndustrySiteId() != null ? task.getIndustrySiteId() : task.getSiteId())))
+                .collect(Collectors.toList());
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("articleId", articleId);
@@ -270,6 +285,7 @@ public class ContentDistributionService {
             vo.setSiteId(site.getId());
             vo.setSiteName(site.getSiteName());
             vo.setDomain(site.getDomain());
+            vo.setIconUrl(site.getIconUrl());
             vo.setTier(site.getTier());
             vo.setStatus(site.getStatus());
             vo.setIntegrationMethod(site.getIntegrationMethod());
@@ -517,6 +533,48 @@ public class ContentDistributionService {
         return distributionTaskMapper.selectById(task.getId());
     }
 
+    private DistributionTask distributeToIndustrySite(ArticleDraft article,
+                                                      Project project,
+                                                      SysUser operator,
+                                                      TargetContext.IndustrySiteTarget target) {
+        PublishSite site = target.site();
+        if (site == null || site.getId() == null) {
+            throw new BizException(400, "Industry site is required");
+        }
+        if (!"active".equalsIgnoreCase(site.getStatus())) {
+            throw new BizException(400, "Industry site is not active");
+        }
+        if (site.getIsFramework() != null && site.getIsFramework() == 1) {
+            throw new BizException(400, "framework site is not a valid publish target");
+        }
+
+        String content = requireLatestContent(article.getId());
+        DistributionTask task = createAttemptForIndustrySite(article, site, operator.getId());
+        companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.INDUSTRY_SITE, task.getId());
+        try {
+            transitionArticleStatus(article, article.getStatus(), "distributing", false);
+        } catch (BizException ex) {
+            companyChannelQuotaService.refundDistribution(task.getId());
+            throw ex;
+        }
+
+        SubmitResult submitResult;
+        try {
+            submitResult = resolveIndustryNewsSiteAdapter()
+                    .submitToTarget(article, content, new TargetContext.IndustrySiteTarget(site, project));
+        } catch (Exception ex) {
+            submitResult = SubmitResult.failure(500, null, null, trimError(ex.getMessage()), FailureKind.UNKNOWN, false);
+        }
+        finalizeAttemptForIndustrySite(task.getId(), submitResult);
+        finalizeArticleStatusForDraft(article, submitResult);
+        if (submitResult.isSuccess()) {
+            companyChannelQuotaService.confirmDistribution(task.getId());
+        } else {
+            companyChannelQuotaService.refundDistribution(task.getId());
+        }
+        return distributionTaskMapper.selectById(task.getId());
+    }
+
     private DistributionTask distributeToAuthorityMedia(ArticleDraft article,
                                                         Project project,
                                                         SysUser operator,
@@ -719,6 +777,29 @@ public class ContentDistributionService {
         return task;
     }
 
+    private DistributionTask createAttemptForIndustrySite(ArticleDraft article, PublishSite site, Long operatorId) {
+        Integer maxAttempt = distributionTaskMapper.selectList(
+                new LambdaQueryWrapper<DistributionTask>()
+                        .eq(DistributionTask::getArticleId, article.getId())
+                        .eq(DistributionTask::getIndustrySiteId, site.getId())
+        ).stream().map(DistributionTask::getAttemptNo).max(Integer::compareTo).orElse(0);
+
+        DistributionTask task = new DistributionTask();
+        task.setArticleId(article.getId());
+        task.setProjectId(article.getProjectId());
+        task.setSiteId(null);
+        task.setTargetKind(DistributionTargetKind.INDUSTRY_SITE);
+        task.setIndustrySiteId(site.getId());
+        task.setAttemptNo(maxAttempt + 1);
+        task.setStatus("submitting");
+        task.setIntegrationMethod(site.getIntegrationMethod());
+        task.setRetryCount(0);
+        task.setOperatorId(operatorId);
+        task.setLockedUntil(LocalDateTime.now(SH_ZONE).plusMinutes(5));
+        distributionTaskMapper.insert(task);
+        return task;
+    }
+
     private DistributionTask createAttemptForAuthorityMedia(ArticleDraft article, Long authorityMediaResourceId, Long operatorId) {
         Integer maxAttempt = distributionTaskMapper.selectList(
                 new LambdaQueryWrapper<DistributionTask>()
@@ -834,6 +915,38 @@ public class ContentDistributionService {
         }
     }
 
+    private void finalizeAttemptForIndustrySite(Long taskId, SubmitResult result) {
+        LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
+                .eq(DistributionTask::getId, taskId)
+                .eq(DistributionTask::getStatus, "submitting")
+                .set(DistributionTask::getLockedUntil, null)
+                .set(DistributionTask::getFinishedAt, LocalDateTime.now(SH_ZONE))
+                .set(DistributionTask::getRequestPayload, result.getRequestPayload())
+                .set(DistributionTask::getResponsePayload, result.getResponseBody());
+
+        if (result.isSuccess()) {
+            wrapper.set(DistributionTask::getStatus, "submitted")
+                    .set(DistributionTask::getPublishedUrl, result.getPublishedUrl())
+                    .set(DistributionTask::getPlatformArticleId, result.getPlatformArticleId())
+                    .set(DistributionTask::getFailureKind, null)
+                    .set(DistributionTask::getErrorMessage, null)
+                    .set(DistributionTask::getNextRetryAt, null);
+        } else {
+            LocalDateTime nextRetryAt = result.isRetryable()
+                    ? LocalDateTime.now(SH_ZONE).plusMinutes(5)
+                    : null;
+            wrapper.set(DistributionTask::getStatus, "failed")
+                    .set(DistributionTask::getFailureKind, result.getFailureKind())
+                    .set(DistributionTask::getErrorMessage, trimError(result.getErrorMessage()))
+                    .set(DistributionTask::getNextRetryAt, nextRetryAt);
+        }
+
+        int affected = distributionTaskMapper.update(null, wrapper);
+        if (affected == 0) {
+            log.warn("finalizeAttemptForIndustrySite: task {} state changed concurrently, skipped finalize", taskId);
+        }
+    }
+
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     protected void finalizeAttemptForAuthorityMedia(Long taskId, SubmitResult result) {
         LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
@@ -915,6 +1028,13 @@ public class ContentDistributionService {
                 .map(BrandGeoSiteAdapter.class::cast)
                 .findFirst()
                 .orElseThrow(() -> new BizException(500, "BrandGeoSiteAdapter not registered"));
+    }
+
+    private SiteAdapter resolveIndustryNewsSiteAdapter() {
+        return siteAdapters.stream()
+                .filter(adapter -> adapter.supportsPlatform("industry_news_site"))
+                .findFirst()
+                .orElseThrow(() -> new BizException(500, "IndustryNewsSiteAdapter not registered"));
     }
 
     private AutoSelfMediaAdapter resolveSelfMediaAdapter(String platform) {
@@ -1051,7 +1171,7 @@ public class ContentDistributionService {
     private DistributionAttemptVO toAttemptVO(DistributionTask task, PublishSite site) {
         DistributionAttemptVO vo = new DistributionAttemptVO();
         vo.setId(task.getId());
-        vo.setSiteId(task.getSiteId());
+        vo.setSiteId(task.getIndustrySiteId() != null ? task.getIndustrySiteId() : task.getSiteId());
         vo.setSiteName(site == null ? null : site.getSiteName());
         vo.setDomain(site == null ? null : site.getDomain());
         vo.setTier(site == null ? null : site.getTier());
@@ -1078,14 +1198,16 @@ public class ContentDistributionService {
         LocalDateTime from = LocalDateTime.now(SH_ZONE).minusDays(30);
         List<DistributionTask> tasks = distributionTaskMapper.selectList(
                 new LambdaQueryWrapper<DistributionTask>()
-                        .in(DistributionTask::getSiteId, siteIds)
+                        .and(wrapper -> wrapper.in(DistributionTask::getSiteId, siteIds)
+                                .or()
+                                .in(DistributionTask::getIndustrySiteId, siteIds))
                         .ge(DistributionTask::getCreatedAt, from)
-                        .select(DistributionTask::getSiteId, DistributionTask::getStatus)
+                        .select(DistributionTask::getSiteId, DistributionTask::getIndustrySiteId, DistributionTask::getStatus)
         );
-        Map<Long, Long> total = tasks.stream().collect(Collectors.groupingBy(DistributionTask::getSiteId, Collectors.counting()));
+        Map<Long, Long> total = tasks.stream().collect(Collectors.groupingBy(this::siteMetricId, Collectors.counting()));
         Map<Long, Long> success = tasks.stream()
                 .filter(t -> SUCCESS_TASK_STATUS.contains(t.getStatus()))
-                .collect(Collectors.groupingBy(DistributionTask::getSiteId, Collectors.counting()));
+                .collect(Collectors.groupingBy(this::siteMetricId, Collectors.counting()));
         Map<Long, BigDecimal> result = new HashMap<>();
         for (Map.Entry<Long, Long> entry : total.entrySet()) {
             long siteTotal = entry.getValue();
@@ -1095,6 +1217,10 @@ public class ContentDistributionService {
             result.put(entry.getKey(), rate);
         }
         return result;
+    }
+
+    private Long siteMetricId(DistributionTask task) {
+        return task.getIndustrySiteId() != null ? task.getIndustrySiteId() : task.getSiteId();
     }
 
     private int tierRank(String tier) {

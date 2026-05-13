@@ -78,6 +78,31 @@ public class LlmExecutionGateway {
         return new LlmExecutionPermit(tokens, requestId, feature, now, this);
     }
 
+    public LlmExecutionPermit acquireBlocking(String feature, AiPlatformConfig platformConfig) {
+        long waitTimeoutMs = Math.max(0L, properties.getPermitWaitTimeoutMs());
+        long retryIntervalMs = Math.max(10L, properties.getPermitRetryIntervalMs());
+        long deadline = System.currentTimeMillis() + waitTimeoutMs;
+        LlmPermitUnavailableException lastBusy = null;
+
+        while (true) {
+            try {
+                return acquire(feature, platformConfig);
+            } catch (LlmPermitUnavailableException ex) {
+                lastBusy = ex;
+                if (waitTimeoutMs <= 0L || System.currentTimeMillis() >= deadline) {
+                    throw ex;
+                }
+                long sleepMs = Math.min(retryIntervalMs, Math.max(1L, deadline - System.currentTimeMillis()));
+                try {
+                    TimeUnit.MILLISECONDS.sleep(sleepMs);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw lastBusy;
+                }
+            }
+        }
+    }
+
     void release(LlmExecutionPermit permit) {
         List<LlmPermitToken> tokens = permit.tokens();
         renewalService.unregister(tokens);

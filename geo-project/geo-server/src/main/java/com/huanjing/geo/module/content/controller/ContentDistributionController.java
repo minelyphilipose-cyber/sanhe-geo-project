@@ -49,6 +49,12 @@ public class ContentDistributionController {
         return R.ok(contentDistributionService.distributeTo(articleId, target));
     }
 
+    @PostMapping("/articles/{articleId}/distribute-to-industry-site")
+    public R<DistributionTask> distributeToIndustrySite(@PathVariable Long articleId,
+                                                        @Valid @RequestBody ArticleDistributeRequest req) {
+        return R.ok(contentDistributionService.distributeToIndustrySite(articleId, req.getSiteId()));
+    }
+
     @PostMapping("/articles/{articleId}/distribute-to-self-media")
     public R<DistributionTask> distributeToSelfMedia(@PathVariable Long articleId,
                                                      @Valid @RequestBody SelfMediaDistributeRequest req) {

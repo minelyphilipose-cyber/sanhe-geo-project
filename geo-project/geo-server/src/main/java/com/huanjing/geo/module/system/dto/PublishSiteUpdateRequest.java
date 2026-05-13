@@ -11,6 +11,7 @@ public class PublishSiteUpdateRequest {
     private String siteName;
     @NotBlank
     private String domain;
+    private String iconUrl;
     private List<String> industryTags;
     @NotBlank
     private String tier;

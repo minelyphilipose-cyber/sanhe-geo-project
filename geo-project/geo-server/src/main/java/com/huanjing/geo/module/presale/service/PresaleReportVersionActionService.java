@@ -20,6 +20,7 @@ import com.huanjing.geo.module.presale.dto.snapshot.editable.KeyTakeaway;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.MarketBattleground;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.PhaseDescription;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
+import com.huanjing.geo.module.presale.generate.PresaleGenerateCancellationRegistry;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator;
 import com.huanjing.geo.module.presale.generate.PresaleGenerateStatus;
 import com.huanjing.geo.module.presale.generate.l3.MarketBattlegroundValidator;
@@ -97,6 +98,7 @@ public class PresaleReportVersionActionService {
     private final ObjectMapper objectMapper;
     private final PresaleL3Defaults l3Defaults;
     private final MarketBattlegroundValidator marketBattlegroundValidator;
+    private final PresaleGenerateCancellationRegistry cancellationRegistry;
 
     /**
      * P1·F·1·a 已存在的 Mock Orchestrator,retry 时重新触发生成。
@@ -614,6 +616,7 @@ public class PresaleReportVersionActionService {
         if (!PresaleGenerateStatus.FAILED.name().equals(version.getGenerationStatus())) {
             throw new BizException(409, "Only FAILED version can be retried");
         }
+        cancellationRegistry.clear(version.getId());
 
         // 重置失败态相关字段(保留 L1/L2/L3 JSON,避免重试期间前端看到空页)
         LambdaUpdateWrapper<PresaleReportVersion> update = new LambdaUpdateWrapper<PresaleReportVersion>()
@@ -658,6 +661,7 @@ public class PresaleReportVersionActionService {
         if (version.getFrozenAt() != null) {
             throw new BizException(409, "Frozen version cannot be regenerated");
         }
+        cancellationRegistry.clear(version.getId());
 
         clearGeneratedRunData(version.getId());
 
@@ -683,6 +687,44 @@ public class PresaleReportVersionActionService {
                 .versionId(version.getId())
                 .versionNo(version.getVersionNo())
                 .generationStatus(PresaleGenerateStatus.QUEUED.name())
+                .build();
+    }
+
+    @Transactional
+    public RetryVersionResponse cancelGeneration(Long reportId, Integer versionNo) {
+        PresaleReport report = requireEditableReport(reportId);
+        PresaleReportVersion version = accessService.requireVersionWithAccess(report.getId(), versionNo);
+        String status = version.getGenerationStatus();
+        if (!PresaleGenerateStatus.QUEUED.name().equals(status)
+                && !PresaleGenerateStatus.RUNNING.name().equals(status)) {
+            throw new BizException(409, "Only QUEUED or RUNNING version can be canceled");
+        }
+
+        cancellationRegistry.cancel(version.getId());
+        String reason = "Generation canceled by user";
+        LambdaUpdateWrapper<PresaleReportVersion> update = new LambdaUpdateWrapper<PresaleReportVersion>()
+                .eq(PresaleReportVersion::getId, version.getId())
+                .in(PresaleReportVersion::getGenerationStatus,
+                        PresaleGenerateStatus.QUEUED.name(), PresaleGenerateStatus.RUNNING.name())
+                .set(PresaleReportVersion::getGenerationStatus, PresaleGenerateStatus.FAILED.name())
+                .set(PresaleReportVersion::getFailureCategory, "MANUAL_CANCELED")
+                .set(PresaleReportVersion::getFailureReason, reason)
+                .set(PresaleReportVersion::getUpdatedAt, LocalDateTime.now());
+        int updated = versionMapper.update(null, update);
+        if (updated == 0) {
+            throw new BizException(409, "Version generation status changed, cancel rejected");
+        }
+
+        PresaleReport reportUpdate = new PresaleReport();
+        reportUpdate.setId(report.getId());
+        reportUpdate.setStatus(PresaleGenerateStatus.FAILED.name());
+        reportUpdate.setUpdatedAt(LocalDateTime.now());
+        reportMapper.updateById(reportUpdate);
+
+        return RetryVersionResponse.builder()
+                .versionId(version.getId())
+                .versionNo(version.getVersionNo())
+                .generationStatus(PresaleGenerateStatus.FAILED.name())
                 .build();
     }
 
