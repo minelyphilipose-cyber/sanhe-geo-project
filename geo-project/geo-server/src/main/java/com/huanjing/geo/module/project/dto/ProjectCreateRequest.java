@@ -30,6 +30,8 @@ public class ProjectCreateRequest {
     private LocalDate startDate;
     private LocalDate endDate;
     private String primaryGoal;
+    @Size(max = 20)
+    private List<String> customerRequirements;
     private List<String> targetRegions;
     private String targetAudience;
     private String customStatement;

@@ -236,6 +236,7 @@ export interface Project {
   activatedAt?: string | null
   endDate: string | null
   primaryGoal: string | null
+  customerRequirements?: string[]
   ownerType: OwnerType
   sourceType?: 'internal' | 'partner'
   partnerId: number | null

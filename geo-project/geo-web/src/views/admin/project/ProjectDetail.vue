@@ -37,6 +37,22 @@
 
     <el-card v-if="project">
       <template #header>
+        <div class="section-header">
+          <span>客户需求</span>
+          <el-button v-if="canUpdateProject" size="small" type="primary" plain @click="openRequirementEdit">维护需求</el-button>
+        </div>
+      </template>
+      <div v-if="project.customerRequirements?.length" class="requirement-view-list">
+        <div v-for="(item, index) in project.customerRequirements" :key="`${index}-${item}`" class="requirement-view-item">
+          <div class="requirement-view-index">{{ index + 1 }}</div>
+          <div class="requirement-view-text">{{ item }}</div>
+        </div>
+      </div>
+      <el-empty v-else description="暂无客户需求" :image-size="72" />
+    </el-card>
+
+    <el-card v-if="project">
+      <template #header>
         <div class="flex items-center justify-between">
           <span>分发渠道额度</span>
           <el-button v-if="canUpdateProject" size="small" type="primary" plain @click="openChannelAllocationEdit">调整额度</el-button>
@@ -79,17 +95,21 @@
 
     <el-card v-if="project">
       <template #header>
-        <div class="flex items-center justify-between">
+        <div class="keyword-group-header">
           <span>绑定拓词组</span>
-          <el-upload
-            v-if="canImportKeywordGroup"
-            :auto-upload="false"
-            :show-file-list="false"
-            accept=".xlsx"
-            :on-change="handleKeywordImport"
-          >
-            <el-button type="primary" size="small" :loading="importing">导入拓词组</el-button>
-          </el-upload>
+          <div class="keyword-group-actions">
+            <el-button v-if="canCreateKeywordGroup" type="primary" plain size="small" @click="goCreateKeywordGroup">创建拓词组</el-button>
+            <el-upload
+              v-if="canImportKeywordGroup"
+              class="keyword-import-upload"
+              :auto-upload="false"
+              :show-file-list="false"
+              accept=".xlsx"
+              :on-change="handleKeywordImport"
+            >
+              <el-button type="primary" size="small" :loading="importing">导入拓词组</el-button>
+            </el-upload>
+          </div>
         </div>
       </template>
       <el-alert
@@ -265,6 +285,31 @@
         <el-button type="primary" :loading="channelSaving" @click="saveChannelAllocations">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="requirementEditVisible" title="维护客户需求" width="720px">
+      <div class="requirement-editor">
+        <div v-for="(_, index) in requirementForm.items" :key="index" class="requirement-edit-item">
+          <div class="requirement-row-head">
+            <span>需求 {{ index + 1 }}</span>
+            <el-button link type="danger" :disabled="requirementForm.items.length <= 1" @click="removeRequirementItem(index)">删除</el-button>
+          </div>
+          <el-input
+            v-model="requirementForm.items[index]"
+            type="textarea"
+            :rows="3"
+            maxlength="100"
+            show-word-limit
+            resize="none"
+            placeholder="请输入 10-100 字客户需求"
+          />
+        </div>
+        <el-button class="requirement-add" plain @click="addRequirementItem">新增需求</el-button>
+      </div>
+      <template #footer>
+        <el-button @click="requirementEditVisible = false">取消</el-button>
+        <el-button type="primary" :loading="requirementSaving" @click="saveRequirements">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -294,6 +339,7 @@ const userStore = useUserStore()
 const dictStore = useDictStore()
 const canActivateProject = computed(() => userStore.hasPermission('project.start'))
 const canUpdateProject = computed(() => userStore.hasPermission('project.update'))
+const canCreateKeywordGroup = computed(() => project.value?.status === 'paused' && userStore.hasPermission('keyword_group.write'))
 const projectId = Number(route.params.id)
 const hasValidId = Number.isFinite(projectId) && projectId > 0
 
@@ -304,10 +350,12 @@ const project = ref<Project | null>(null)
 const questionDrawerVisible = ref(false)
 const questionEditVisible = ref(false)
 const channelEditVisible = ref(false)
+const requirementEditVisible = ref(false)
 const questionLoading = ref(false)
 const questionSaving = ref(false)
 const channelQuotaLoading = ref(false)
 const channelSaving = ref(false)
+const requirementSaving = ref(false)
 const currentKeywordGroup = ref<KeywordGroup | null>(null)
 const currentQuestionId = ref<number | null>(null)
 const channelQuotaItems = ref<ProjectChannelAllocationItem[]>([])
@@ -325,6 +373,9 @@ const questionForm = reactive({
   scoreConversion: 4,
   scoreCoverage: 4,
   articleGenerationNote: '',
+})
+const requirementForm = reactive({
+  items: [''],
 })
 
 const activationConfirmed = ref(false)
@@ -358,6 +409,40 @@ function centsToYuan(v?: number | null) {
 function regionText(p?: Project | null) {
   if (!p) return '-'
   return regionDisplayFromPayload(p) || '-'
+}
+
+function keywordExpectedCounts(current: Project) {
+  return {
+    a: current.planKeywordGroupLimitA ?? current.planKeywordGroupLimit ?? 0,
+    b: current.planKeywordGroupLimitB ?? 0,
+    c: current.planKeywordGroupLimitC ?? 0,
+  }
+}
+
+function keywordActualCounts(current: Project) {
+  return {
+    a: current.selectedKeywordSavedKeywordsA || 0,
+    b: current.selectedKeywordSavedKeywordsB || 0,
+    c: current.selectedKeywordSavedKeywordsC || 0,
+  }
+}
+
+function validateKeywordGroupCountsBeforeStart(current: Project) {
+  const expected = keywordExpectedCounts(current)
+  const actual = keywordActualCounts(current)
+  if ((current.selectedKeywordGroupCount || 0) <= 0) {
+    ElMessage.warning('项目启动前必须至少绑定一个拓词组')
+    return false
+  }
+  if (actual.a !== expected.a || actual.b !== expected.b || actual.c !== expected.c) {
+    ElMessage.warning(`拓词组问题数量需与项目额度一致：额度 A/B/C=${expected.a}/${expected.b}/${expected.c}，当前 A/B/C=${actual.a}/${actual.b}/${actual.c}`)
+    return false
+  }
+  return true
+}
+
+function goCreateKeywordGroup() {
+  router.push({ name: 'LayeredKeywordGroupManage', query: { projectId: String(projectId) } })
 }
 
 function joinArray(value?: string | string[] | null) {
@@ -432,6 +517,15 @@ async function openChannelAllocationEdit() {
 }
 
 function projectUpdatePayload(current: Project) {
+  const allocationRows = channelQuotaItems.value.length
+    ? channelQuotaItems.value.map((item) => ({
+        channelCode: item.channelCode,
+        allocatedCount: channelAllocationForm[item.channelCode] || 0,
+      }))
+    : (current.channelAllocations || []).map((item) => ({
+        channelCode: item.channelCode,
+        allocatedCount: item.currentProjectAllocatedCount || 0,
+      }))
   return {
     provinceCode: current.provinceCode,
     provinceName: current.provinceName,
@@ -447,13 +541,11 @@ function projectUpdatePayload(current: Project) {
     keywordGroupLimitA: current.planKeywordGroupLimitA ?? current.planKeywordGroupLimit ?? 0,
     keywordGroupLimitB: current.planKeywordGroupLimitB ?? 0,
     keywordGroupLimitC: current.planKeywordGroupLimitC ?? 0,
-    allocationVersion: allocationVersion.value,
-    channelAllocations: channelQuotaItems.value.map((item) => ({
-      channelCode: item.channelCode,
-      allocatedCount: channelAllocationForm[item.channelCode] || 0,
-    })),
+    allocationVersion: allocationVersion.value ?? current.allocationVersion,
+    channelAllocations: allocationRows,
     deliveryMode: current.deliveryMode || 'managed',
     primaryGoal: current.primaryGoal || undefined,
+    customerRequirements: current.customerRequirements || [],
     targetRegions: parseStringArray(current.targetRegions),
     targetAudience: current.targetAudience || undefined,
     customStatement: current.customStatement || undefined,
@@ -462,6 +554,70 @@ function projectUpdatePayload(current: Project) {
     extraForbiddenPhrases: parseStringArray(current.extraForbiddenPhrases),
     contentNote: current.contentNote || undefined,
     remark: current.remark || undefined,
+  }
+}
+
+function normalizeRequirementInputs(requirements?: string[] | null) {
+  const normalized = (requirements || [])
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+  return normalized.length ? normalized : ['']
+}
+
+function openRequirementEdit() {
+  requirementForm.items = normalizeRequirementInputs(project.value?.customerRequirements)
+  requirementEditVisible.value = true
+}
+
+function addRequirementItem() {
+  if (requirementForm.items.length >= 20) {
+    ElMessage.warning('客户需求最多录入 20 条')
+    return
+  }
+  requirementForm.items.push('')
+}
+
+function removeRequirementItem(index: number) {
+  if (requirementForm.items.length <= 1) {
+    return
+  }
+  requirementForm.items.splice(index, 1)
+}
+
+function buildRequirementPayload() {
+  const items = requirementForm.items.map((item) => item.trim()).filter(Boolean)
+  if (items.length > 20) {
+    ElMessage.warning('客户需求最多录入 20 条')
+    return null
+  }
+  for (const item of items) {
+    const length = Array.from(item).length
+    if (length < 10 || length > 100) {
+      ElMessage.warning('每条客户需求字数需在 10-100 之间')
+      return null
+    }
+  }
+  return items
+}
+
+async function saveRequirements() {
+  const current = project.value
+  if (!current) return
+  const customerRequirements = buildRequirementPayload()
+  if (!customerRequirements) {
+    return
+  }
+  requirementSaving.value = true
+  try {
+    await updateProject(current.id, {
+      ...projectUpdatePayload(current),
+      customerRequirements,
+    })
+    ElMessage.success('客户需求已保存')
+    requirementEditVisible.value = false
+    await load()
+  } finally {
+    requirementSaving.value = false
   }
 }
 
@@ -543,6 +699,9 @@ async function startProject() {
     }
     if (!activationConfirmed.value) {
       ElMessage.warning('请先勾选“已阅读并确认项目基础信息”后再激活')
+      return
+    }
+    if (!validateKeywordGroupCountsBeforeStart(current)) {
       return
     }
     await updateProjectStatus(projectId, 'active')
@@ -663,6 +822,86 @@ onMounted(() => {
 .score-input {
   width: 220px;
 }
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.keyword-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.keyword-group-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.keyword-import-upload {
+  display: inline-flex;
+}
+.keyword-import-upload :deep(.el-upload) {
+  display: inline-flex;
+}
+.requirement-view-list {
+  display: grid;
+  gap: 10px;
+}
+.requirement-view-item {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafafa;
+}
+.requirement-view-index {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #ecf5ff;
+  color: #409eff;
+  font-size: 12px;
+  font-weight: 600;
+}
+.requirement-view-text {
+  line-height: 1.6;
+  color: #303133;
+  word-break: break-word;
+}
+.requirement-editor {
+  display: grid;
+  gap: 12px;
+}
+.requirement-edit-item {
+  padding: 12px;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  background: #fafafa;
+}
+.requirement-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+}
+.requirement-add {
+  width: 100%;
+  border-style: dashed;
+}
 .channel-name {
   display: flex;
   align-items: center;
@@ -690,5 +929,15 @@ onMounted(() => {
 }
 .channel-meta small {
   color: #909399;
+}
+@media (max-width: 640px) {
+  .keyword-group-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .keyword-group-actions {
+    justify-content: flex-start;
+    width: 100%;
+  }
 }
 </style>

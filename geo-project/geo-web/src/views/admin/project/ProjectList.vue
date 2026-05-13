@@ -102,7 +102,7 @@
             <el-option v-for="b in brandOptions" :key="b.id" :label="b.brandName" :value="b.id" />
           </el-select>
         </el-form-item>
-        <el-form-item label="拓词组">
+        <el-form-item v-if="formMode === 'edit'" label="拓词组">
           <div class="w-full">
             <el-select
               v-model="form.keywordGroupIds"
@@ -112,7 +112,7 @@
               collapse-tags
               collapse-tags-tooltip
               :multiple-limit="10"
-              placeholder="可选；项目启动前必须至少绑定 1 个拓词组"
+              placeholder="项目启动前必须至少绑定 1 个拓词组"
             >
               <el-option
                 v-for="kg in keywordGroupOptions"
@@ -174,6 +174,26 @@
         </el-form-item>
         <el-form-item label="交付模式"><el-input v-model="form.deliveryMode" /></el-form-item>
         <el-form-item label="主目标"><el-input v-model="form.primaryGoal" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item label="客户需求">
+          <div class="customer-requirements">
+            <div v-for="(_, index) in form.customerRequirements" :key="index" class="customer-requirement-row">
+              <div class="requirement-row-head">
+                <span>需求 {{ index + 1 }}</span>
+                <el-button link type="danger" :disabled="form.customerRequirements.length <= 1" @click="removeCustomerRequirement(index)">删除</el-button>
+              </div>
+              <el-input
+                v-model="form.customerRequirements[index]"
+                type="textarea"
+                :rows="3"
+                maxlength="100"
+                show-word-limit
+                resize="none"
+                placeholder="请输入 10-100 字客户需求"
+              />
+            </div>
+            <el-button class="requirement-add" plain @click="addCustomerRequirement">新增需求</el-button>
+          </div>
+        </el-form-item>
         <el-divider content-position="left">内容策略配置（选填）</el-divider>
         <el-form-item label="目标区域词">
           <el-select
@@ -329,6 +349,7 @@ const form = reactive({
   regionCodes: [] as string[],
   deliveryMode: 'managed',
   primaryGoal: '',
+  customerRequirements: [''],
   targetRegions: [] as string[],
   targetAudience: '',
   customStatement: '',
@@ -425,6 +446,7 @@ function resetForm() {
   form.regionCodes = []
   form.deliveryMode = 'managed'
   form.primaryGoal = ''
+  form.customerRequirements = ['']
   form.targetRegions = []
   form.targetAudience = ''
   form.customStatement = ''
@@ -476,7 +498,7 @@ async function onCompanyChange(nextCompanyId: number) {
     form.brandId = presetBrandId.value
     return
   }
-  const hasSelectedGroups = form.keywordGroupIds.length > 0
+  const hasSelectedGroups = formMode.value === 'edit' && form.keywordGroupIds.length > 0
   if (hasSelectedGroups) {
     try {
       await ElMessageBox.confirm(
@@ -491,7 +513,15 @@ async function onCompanyChange(nextCompanyId: number) {
   form.companyId = nextCompanyId
   form.brandId = null
   form.keywordGroupIds = []
-  await Promise.all([loadBrands(nextCompanyId), loadKeywordGroups(nextCompanyId), loadChannelAllocationQuota(nextCompanyId), loadKeywordGroupQuota(nextCompanyId)])
+  const loadTasks = [
+    loadBrands(nextCompanyId),
+    loadChannelAllocationQuota(nextCompanyId),
+    loadKeywordGroupQuota(nextCompanyId),
+  ]
+  if (formMode.value === 'edit') {
+    loadTasks.push(loadKeywordGroups(nextCompanyId))
+  }
+  await Promise.all(loadTasks)
 }
 
 async function loadKeywordGroupQuota(companyId?: number | null, excludeProjectId?: number | null, applyDefault = true) {
@@ -582,7 +612,8 @@ async function openCreate() {
   editingId.value = null
   resetForm()
   if (form.companyId) {
-    await Promise.all([loadBrands(form.companyId), loadKeywordGroups(form.companyId), loadChannelAllocationQuota(form.companyId), loadKeywordGroupQuota(form.companyId)])
+    keywordGroupOptions.value = []
+    await Promise.all([loadBrands(form.companyId), loadChannelAllocationQuota(form.companyId), loadKeywordGroupQuota(form.companyId)])
     if (lockCompanyBrandSelection.value) {
       const hasPresetBrand = brandOptions.value.some((b) => b.id === presetBrandId.value)
       if (!hasPresetBrand) {
@@ -614,6 +645,7 @@ async function openEdit(row: Project) {
   form.regionCodes = regionCodesFromPayload(row)
   form.deliveryMode = row.deliveryMode || 'managed'
   form.primaryGoal = row.primaryGoal || ''
+  form.customerRequirements = normalizeCustomerRequirementInputs(row.customerRequirements)
   form.targetRegions = parseStringArray(row.targetRegions)
   form.targetAudience = row.targetAudience || ''
   form.customStatement = row.customStatement || ''
@@ -639,8 +671,12 @@ async function submit() {
     ElMessage.warning('请选择品牌')
     return
   }
-  if (form.keywordGroupIds.length > 10) {
+  if (formMode.value === 'edit' && form.keywordGroupIds.length > 10) {
     ElMessage.warning('拓词组最多选择 10 个')
+    return
+  }
+  const customerRequirements = buildCustomerRequirements()
+  if (!customerRequirements) {
     return
   }
   saving.value = true
@@ -657,7 +693,6 @@ async function submit() {
       projectAliases: form.projectAliases || undefined,
       companyId: form.companyId,
       brandId: form.brandId,
-      keywordGroupIds: form.keywordGroupIds,
       keywordGroupLimitA: form.keywordGroupLimitA,
       keywordGroupLimitB: form.keywordGroupLimitB,
       keywordGroupLimitC: form.keywordGroupLimitC,
@@ -668,6 +703,7 @@ async function submit() {
       })),
       deliveryMode: form.deliveryMode || 'managed',
       primaryGoal: form.primaryGoal || undefined,
+      customerRequirements,
       targetRegions: form.targetRegions,
       targetAudience: form.targetAudience || undefined,
       customStatement: form.customStatement || undefined,
@@ -680,6 +716,9 @@ async function submit() {
     if (lockCompanyBrandSelection.value) {
       payload.companyId = presetCompanyId.value
       payload.brandId = presetBrandId.value
+    }
+    if (formMode.value === 'edit') {
+      payload.keywordGroupIds = form.keywordGroupIds
     }
 
     if (formMode.value === 'create') {
@@ -708,6 +747,44 @@ async function submit() {
   } finally {
     saving.value = false
   }
+}
+
+function addCustomerRequirement() {
+  if (form.customerRequirements.length >= 20) {
+    ElMessage.warning('客户需求最多录入 20 条')
+    return
+  }
+  form.customerRequirements.push('')
+}
+
+function removeCustomerRequirement(index: number) {
+  if (form.customerRequirements.length <= 1) {
+    return
+  }
+  form.customerRequirements.splice(index, 1)
+}
+
+function normalizeCustomerRequirementInputs(requirements?: string[] | null) {
+  const normalized = (requirements || [])
+    .map((item) => String(item || '').trim())
+    .filter(Boolean)
+  return normalized.length ? normalized : ['']
+}
+
+function buildCustomerRequirements() {
+  const requirements = form.customerRequirements.map((item) => item.trim()).filter(Boolean)
+  if (requirements.length > 20) {
+    ElMessage.warning('客户需求最多录入 20 条')
+    return null
+  }
+  for (const requirement of requirements) {
+    const length = Array.from(requirement).length
+    if (length < 10 || length > 100) {
+      ElMessage.warning('每条客户需求字数需在 10-100 之间')
+      return null
+    }
+  }
+  return requirements
 }
 
 function goDetail(id: number) {
@@ -751,7 +828,6 @@ onMounted(async () => {
   await dictStore.ensureLoaded()
   await loadCompanies()
   await loadBrands(form.companyId)
-  await loadKeywordGroups(form.companyId)
   await load()
   if (fromCustomerBrandPath.value && canCreateProject.value) {
     await openCreate()
@@ -812,6 +888,30 @@ onMounted(async () => {
 }
 .channel-meta small {
   color: #909399;
+}
+.customer-requirements {
+  width: 100%;
+  display: grid;
+  gap: 12px;
+}
+.customer-requirement-row {
+  padding: 12px;
+  border: 1px solid #e4e7ed;
+  border-radius: 8px;
+  background: #fafafa;
+}
+.requirement-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #303133;
+}
+.requirement-add {
+  width: 100%;
+  border-style: dashed;
 }
 .form-tip {
   margin-top: 8px;

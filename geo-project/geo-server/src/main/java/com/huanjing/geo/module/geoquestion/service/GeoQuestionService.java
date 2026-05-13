@@ -23,8 +23,10 @@ import com.huanjing.geo.module.geoquestion.mapper.*;
 import com.huanjing.geo.module.project.entity.KeywordGroup;
 import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.entity.ProjectCustomerRequirement;
 import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
+import com.huanjing.geo.module.project.mapper.ProjectCustomerRequirementMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
@@ -78,6 +80,7 @@ public class GeoQuestionService {
     private final KeywordGroupMapper keywordGroupMapper;
     private final KeywordGroupResultMapper keywordGroupResultMapper;
     private final ProjectMapper projectMapper;
+    private final ProjectCustomerRequirementMapper projectCustomerRequirementMapper;
     private final ObjectMapper objectMapper;
     @Autowired
     @Qualifier("presaleGenerateExecutor")
@@ -312,6 +315,7 @@ public class GeoQuestionService {
         vo.setTargetRegion(projectRegion(project, vo.getTargetRegion()));
         vo.setTargetCustomer(defaultText(project.getTargetAudience(), vo.getTargetCustomer()));
         vo.setBenchmarkSpecs(defaultText(project.getCustomStatement(), vo.getBenchmarkSpecs()));
+        vo.setCoreNeeds(projectCoreNeeds(projectId));
         return vo;
     }
 
@@ -1274,6 +1278,27 @@ public class GeoQuestionService {
         if (StringUtils.hasText(project.getCityName())) parts.add(project.getCityName());
         if (StringUtils.hasText(project.getDistrictName())) parts.add(project.getDistrictName());
         return parts.isEmpty() ? fallback : String.join(" / ", parts);
+
+    private List<Map<String, Object>> projectCoreNeeds(Long projectId) {
+        List<ProjectCustomerRequirement> requirements = projectCustomerRequirementMapper.selectList(
+                new LambdaQueryWrapper<ProjectCustomerRequirement>()
+                        .eq(ProjectCustomerRequirement::getProjectId, projectId)
+                        .orderByDesc(ProjectCustomerRequirement::getCreatedAt)
+                        .orderByDesc(ProjectCustomerRequirement::getId)
+        );
+        List<Map<String, Object>> coreNeeds = new ArrayList<>();
+        for (ProjectCustomerRequirement requirement : requirements) {
+            if (!StringUtils.hasText(requirement.getRequirementText())) {
+                continue;
+            }
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("text", requirement.getRequirementText());
+            item.put("scene", "brand");
+            item.put("urgent", false);
+            coreNeeds.add(item);
+        }
+        return coreNeeds;
+    }
     }
 
     private String buildPromptSnapshot(GeoQuestionWorkorder workorder, BatchStartRequest req) {

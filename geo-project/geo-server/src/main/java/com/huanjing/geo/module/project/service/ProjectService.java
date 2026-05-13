@@ -53,9 +53,11 @@ import com.huanjing.geo.module.project.dto.ProjectUpdateRequest;
 import com.huanjing.geo.module.project.dto.KeywordGroupListItemVO;
 import com.huanjing.geo.module.project.entity.KeywordGroup;
 import com.huanjing.geo.module.project.entity.ProjectPlatformBinding;
+import com.huanjing.geo.module.project.entity.ProjectCustomerRequirement;
 import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
+import com.huanjing.geo.module.project.mapper.ProjectCustomerRequirementMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectPlatformBindingMapper;
@@ -97,6 +99,9 @@ import java.util.stream.Collectors;
 public class ProjectService {
 
     private static final Set<String> OWNER_TYPES = Set.of("direct", "partner", "joint");
+    private static final int CUSTOMER_REQUIREMENT_MAX_COUNT = 20;
+    private static final int CUSTOMER_REQUIREMENT_MIN_LENGTH = 10;
+    private static final int CUSTOMER_REQUIREMENT_MAX_LENGTH = 100;
 
     private final ProjectMapper projectMapper;
     private final BrandMapper brandMapper;
@@ -120,6 +125,7 @@ public class ProjectService {
     private final PollResultMapper pollResultMapper;
     private final ProjectPollRotationMapper projectPollRotationMapper;
     private final KeywordGroupMapper keywordGroupMapper;
+    private final ProjectCustomerRequirementMapper projectCustomerRequirementMapper;
     private final ProjectPlatformBindingMapper projectPlatformBindingMapper;
     private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
     private final PostsaleReportSnapshotMapper postsaleReportSnapshotMapper;
@@ -176,6 +182,7 @@ public class ProjectService {
 
         Page<Project> page = projectMapper.selectPage(new Page<>(current, size), wrapper);
         attachPlatformSelections(page.getRecords());
+        attachCustomerRequirements(page.getRecords());
         attachKeywordGroupSelections(page.getRecords());
         channelAllocationService.attachAllocations(page.getRecords());
         return page;
@@ -188,6 +195,7 @@ public class ProjectService {
         currentUserService.ensurePartnerResourceAccess(user, project.getPartnerId(), "project");
         ensureSalesProjectAccess(user, project);
         attachPlatformSelections(Collections.singletonList(project));
+        attachCustomerRequirements(Collections.singletonList(project));
         attachKeywordGroupSelections(Collections.singletonList(project));
         channelAllocationService.attachAllocations(Collections.singletonList(project));
         return project;
@@ -204,6 +212,9 @@ public class ProjectService {
         companyPackageBindingService.requireActiveBinding(company.getId());
         validateProjectCompanyPartnerConsistency(ownerType, partnerId, company.getPartnerId());
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "project");
+        if (req.getKeywordGroupIds() != null && !req.getKeywordGroupIds().isEmpty()) {
+            throw new BizException(400, "项目新建时不允许绑定拓词组，请先创建项目后再创建或导入拓词组");
+        }
 
         Project project = new Project();
         project.setCompanyId(req.getCompanyId());
@@ -242,10 +253,11 @@ public class ProjectService {
         applyKeywordGroupAllocation(project, resolveKeywordGroupAllocation(company.getId(), null,
                 req.getKeywordGroupLimitA(), req.getKeywordGroupLimitB(), req.getKeywordGroupLimitC()));
         projectMapper.insert(project);
-        replaceKeywordGroupSelections(project.getId(), project.getCompanyId(), req.getKeywordGroupIds());
+        replaceCustomerRequirements(project.getId(), req.getCustomerRequirements());
         channelAllocationService.replaceAllocations(project, req.getChannelAllocations(), req.getAllocationVersion(),
                 operator.getId(), "project.create");
         attachPlatformSelections(Collections.singletonList(project));
+        attachCustomerRequirements(Collections.singletonList(project));
         attachKeywordGroupSelections(Collections.singletonList(project));
         channelAllocationService.attachAllocations(Collections.singletonList(project));
 
@@ -272,6 +284,7 @@ public class ProjectService {
         Long partnerId = resolvePartnerIdByCompany(company);
         validateOwnerBinding(ownerType, partnerId);
         currentUserService.ensurePartnerResourceAccess(operator, partnerId, "project");
+        attachCustomerRequirements(Collections.singletonList(project));
         Map<String, Object> before = snapshotProject(project);
         validateProjectCompanyPartnerConsistency(ownerType, partnerId, company.getPartnerId());
         companyPackageBindingService.requireActiveBinding(company.getId());
@@ -304,6 +317,9 @@ public class ProjectService {
         applyKeywordGroupAllocation(project, resolveKeywordGroupAllocation(company.getId(), project.getId(),
                 req.getKeywordGroupLimitA(), req.getKeywordGroupLimitB(), req.getKeywordGroupLimitC()));
         projectMapper.updateById(project);
+        if (req.getCustomerRequirements() != null) {
+            replaceCustomerRequirements(project.getId(), req.getCustomerRequirements());
+        }
         replaceKeywordGroupSelections(project.getId(), project.getCompanyId(), req.getKeywordGroupIds());
         channelAllocationService.replaceAllocations(project, req.getChannelAllocations(), req.getAllocationVersion(),
                 operator.getId(), "project.update");
@@ -312,6 +328,7 @@ public class ProjectService {
             channelAllocationService.validateActivation(project);
         }
         attachPlatformSelections(Collections.singletonList(project));
+        attachCustomerRequirements(Collections.singletonList(project));
         attachKeywordGroupSelections(Collections.singletonList(project));
         channelAllocationService.attachAllocations(Collections.singletonList(project));
         activityLogService.logAction(
@@ -509,6 +526,8 @@ public class ProjectService {
                 .eq(ProjectDashboardShare::getProjectId, projectId));
         projectKeywordGroupRelMapper.delete(new LambdaQueryWrapper<ProjectKeywordGroupRel>()
                 .eq(ProjectKeywordGroupRel::getProjectId, projectId));
+        projectCustomerRequirementMapper.delete(new LambdaQueryWrapper<ProjectCustomerRequirement>()
+                .eq(ProjectCustomerRequirement::getProjectId, projectId));
         channelAllocationService.deleteProjectAllocations(projectId);
         projectPlatformBindingMapper.delete(new LambdaQueryWrapper<ProjectPlatformBinding>()
                 .eq(ProjectPlatformBinding::getProjectId, projectId));
@@ -1038,6 +1057,68 @@ public class ProjectService {
                 .collect(Collectors.toCollection(LinkedList::new));
     }
 
+    private void attachCustomerRequirements(List<Project> projects) {
+        if (projects == null || projects.isEmpty()) {
+            return;
+        }
+        List<Long> projectIds = projects.stream().map(Project::getId).collect(Collectors.toList());
+        List<ProjectCustomerRequirement> requirements = projectCustomerRequirementMapper.selectList(
+                new LambdaQueryWrapper<ProjectCustomerRequirement>()
+                        .in(ProjectCustomerRequirement::getProjectId, projectIds)
+                        .orderByDesc(ProjectCustomerRequirement::getCreatedAt)
+                        .orderByDesc(ProjectCustomerRequirement::getId)
+        );
+        Map<Long, List<String>> requirementMap = new LinkedHashMap<>();
+        for (ProjectCustomerRequirement requirement : requirements) {
+            requirementMap
+                    .computeIfAbsent(requirement.getProjectId(), k -> new ArrayList<>())
+                    .add(requirement.getRequirementText());
+        }
+        for (Project project : projects) {
+            project.setCustomerRequirements(requirementMap.getOrDefault(project.getId(), List.of()));
+        }
+    }
+
+    private void replaceCustomerRequirements(Long projectId, List<String> rawRequirements) {
+        List<String> requirements = normalizeCustomerRequirements(rawRequirements);
+        projectCustomerRequirementMapper.delete(new LambdaQueryWrapper<ProjectCustomerRequirement>()
+                .eq(ProjectCustomerRequirement::getProjectId, projectId));
+        if (requirements.isEmpty()) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        for (String text : requirements) {
+            ProjectCustomerRequirement requirement = new ProjectCustomerRequirement();
+            requirement.setProjectId(projectId);
+            requirement.setRequirementText(text);
+            requirement.setCreatedAt(now);
+            requirement.setUpdatedAt(now);
+            projectCustomerRequirementMapper.insert(requirement);
+        }
+    }
+
+    private List<String> normalizeCustomerRequirements(List<String> rawRequirements) {
+        if (rawRequirements == null || rawRequirements.isEmpty()) {
+            return List.of();
+        }
+        if (rawRequirements.size() > CUSTOMER_REQUIREMENT_MAX_COUNT) {
+            throw new BizException(400, "客户需求最多录入 " + CUSTOMER_REQUIREMENT_MAX_COUNT + " 条");
+        }
+        List<String> requirements = new ArrayList<>();
+        for (String raw : rawRequirements) {
+            if (!StringUtils.hasText(raw)) {
+                throw new BizException(400, "客户需求不能为空");
+            }
+            String text = raw.trim();
+            int length = text.codePointCount(0, text.length());
+            if (length < CUSTOMER_REQUIREMENT_MIN_LENGTH || length > CUSTOMER_REQUIREMENT_MAX_LENGTH) {
+                throw new BizException(400, "每条客户需求字数需在 10-100 之间");
+            }
+            requirements.add(text);
+        }
+        return requirements;
+    }
+
     private void attachKeywordGroupSelections(List<Project> projects) {
         if (projects == null || projects.isEmpty()) {
             return;
@@ -1125,6 +1206,7 @@ public class ProjectService {
         snapshot.put("preferredAngles", project.getPreferredAngles());
         snapshot.put("extraForbiddenPhrases", project.getExtraForbiddenPhrases());
         snapshot.put("contentNote", project.getContentNote());
+        snapshot.put("customerRequirements", project.getCustomerRequirements());
         snapshot.put("status", project.getStatus());
         snapshot.put("stage", project.getStage());
         snapshot.put("activatedAt", project.getActivatedAt());
