@@ -232,7 +232,8 @@ class ArticleAiDraftServiceTest {
 
     private ContentArticleService articleService() {
         return new ContentArticleService(articleMapper, versionMapper,
-                mock(ArticleReviewLogMapper.class), mock(ArticlePublishLogMapper.class), mock(BrandMapper.class),
+                mock(ArticleReviewLogMapper.class), mock(ArticlePublishLogMapper.class),
+                mock(BatchArticleGenerationTaskMapper.class), mock(BrandMapper.class),
                 projectMapper, mock(SysDictItemMapper.class), currentUserService,
                 mock(MarkdownImageReferenceValidator.class), brandAccessService, mock(AuditService.class));
     }

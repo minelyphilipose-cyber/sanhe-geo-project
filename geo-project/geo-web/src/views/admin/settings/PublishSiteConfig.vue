@@ -84,6 +84,11 @@
             </el-form-item>
           </el-col>
           <el-col :xs="24" :md="8">
+            <el-form-item label="站点唯一标识" prop="siteCode">
+              <el-input v-model="form.siteCode" placeholder="如 industry_news_site" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :md="8">
             <el-form-item label="域名" prop="domain">
               <el-input v-model="form.domain" placeholder="example.com" />
             </el-form-item>
@@ -182,6 +187,7 @@ const mode = ref<'create' | 'edit'>('create')
 const editingId = ref<number | null>(null)
 const form = reactive({
   siteName: '',
+  siteCode: '',
   domain: '',
   iconUrl: '',
   apiEndpoint: '',
@@ -193,6 +199,7 @@ const form = reactive({
 
 const rules: FormRules = {
   siteName: [{ required: true, message: '请输入站点名称', trigger: 'blur' }],
+  siteCode: [{ required: true, message: '请输入站点唯一标识', trigger: 'blur' }],
   domain: [{ required: true, message: '请输入域名', trigger: 'blur' }],
   apiEndpoint: [{ required: true, message: '请输入发布接口 URL', trigger: 'blur' }],
   industryTags: [{ required: true, message: '请选择或输入至少一个行业分类', trigger: 'change' }],
@@ -246,6 +253,7 @@ function statusLabel(v?: string) {
 
 function resetForm() {
   form.siteName = ''
+  form.siteCode = ''
   form.domain = ''
   form.iconUrl = ''
   form.apiEndpoint = ''
@@ -257,6 +265,7 @@ function resetForm() {
 
 function fillForm(row: PublishSite) {
   form.siteName = row.siteName
+  form.siteCode = row.siteCode || normalizeSiteCode(row.domain || row.siteName || `publish_site_${row.id}`)
   form.domain = row.domain
   form.iconUrl = row.iconUrl || ''
   form.apiEndpoint = row.apiEndpoint || ''
@@ -288,6 +297,15 @@ function openCreate() {
   dialogVisible.value = true
 }
 
+function normalizeSiteCode(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+}
+
 function openEdit(row: PublishSite) {
   mode.value = 'edit'
   editingId.value = row.id
@@ -311,6 +329,7 @@ async function submit() {
   try {
     const payload = {
       siteName: form.siteName.trim(),
+      siteCode: form.siteCode.trim(),
       domain: form.domain.trim(),
       iconUrl: form.iconUrl.trim() || undefined,
       industryTags: form.industryTags,

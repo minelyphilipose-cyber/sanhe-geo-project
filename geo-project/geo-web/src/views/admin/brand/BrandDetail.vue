@@ -31,14 +31,13 @@
         <el-descriptions-item label="官网">{{ brand?.website || '-' }}</el-descriptions-item>
         <el-descriptions-item label="公众号">{{ brand?.officialAccount || '-' }}</el-descriptions-item>
         <el-descriptions-item label="视频号">{{ brand?.videoAccount || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="GEO站点标识">{{ brand?.geoSiteCode || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="GEO站点状态">{{ geoSiteStatusLabel(brand?.geoSiteStatus) }}</el-descriptions-item>
-        <el-descriptions-item label="GEO站点域名">{{ brand?.geoSiteCode ? `https://www.${brand.geoSiteCode}.com` : '-' }}</el-descriptions-item>
         <el-descriptions-item label="抖音号">{{ brand?.douyinAccount || '-' }}</el-descriptions-item>
         <el-descriptions-item label="联系电话">{{ brand?.phone || '-' }}</el-descriptions-item>
         <el-descriptions-item label="对外公开电话">{{ brand?.publicPhone || '-' }}</el-descriptions-item>
         <el-descriptions-item label="对外公开地址">{{ brand?.publicAddress || '-' }}</el-descriptions-item>
         <el-descriptions-item label="微信">{{ brand?.wechat || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="资讯站名称">{{ brand?.industrySiteName || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="资讯站唯一标识">{{ brand?.industrySiteCode || '-' }}</el-descriptions-item>
 
         <el-descriptions-item label="品牌标准表述" :span="3">{{ brand?.standardBrandStatement || '-' }}</el-descriptions-item>
         <el-descriptions-item label="业务标准表述" :span="3">{{ brand?.businessStandardStatement || '-' }}</el-descriptions-item>
@@ -175,15 +174,6 @@
         <el-form-item label="主营业务"><el-input v-model="brandForm.mainBusiness" /></el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="brandForm.regionCodes" /></el-form-item>
         <el-form-item label="官网"><el-input v-model="brandForm.website" /></el-form-item>
-        <el-form-item label="GEO站点标识">
-          <el-input v-model="brandForm.geoSiteCode" placeholder="例如 ok / sanhexinglian" />
-        </el-form-item>
-        <el-form-item label="GEO站点状态">
-          <el-select v-model="brandForm.geoSiteStatus" style="width: 100%" clearable>
-            <el-option label="启用" value="active" />
-            <el-option label="停用" value="disabled" />
-          </el-select>
-        </el-form-item>
         <el-form-item label="公众号"><el-input v-model="brandForm.officialAccount" /></el-form-item>
         <el-form-item label="视频号"><el-input v-model="brandForm.videoAccount" /></el-form-item>
         <el-form-item label="抖音号"><el-input v-model="brandForm.douyinAccount" /></el-form-item>
@@ -191,6 +181,10 @@
         <el-form-item label="对外公开电话"><el-input v-model="brandForm.publicPhone" /></el-form-item>
         <el-form-item label="对外公开地址"><el-input v-model="brandForm.publicAddress" /></el-form-item>
         <el-form-item label="微信"><el-input v-model="brandForm.wechat" /></el-form-item>
+        <el-form-item label="资讯站名称"><el-input v-model="brandForm.industrySiteName" placeholder="用于展示和辅助匹配，可选" /></el-form-item>
+        <el-form-item label="资讯站唯一标识" prop="industrySiteCode">
+          <el-input v-model="brandForm.industrySiteCode" placeholder="与发布平台管理中的平台标识一致" />
+        </el-form-item>
         <el-form-item label="状态" required>
           <el-select v-model="brandForm.status" style="width: 100%">
             <el-option
@@ -327,8 +321,6 @@ const brandForm = reactive({
   mainBusiness: '',
   regionCodes: [] as string[],
   website: '',
-  geoSiteCode: '',
-  geoSiteStatus: 'active',
   officialAccount: '',
   videoAccount: '',
   douyinAccount: '',
@@ -342,6 +334,8 @@ const brandForm = reactive({
   standardBrandStatement: '',
   businessStandardStatement: '',
   forbiddenPhrases: '',
+  industrySiteName: '',
+  industrySiteCode: '',
 })
 
 const statementForm = reactive({
@@ -366,6 +360,9 @@ const brandRules: FormRules = {
   ],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
+  industrySiteCode: [
+    { pattern: /^[a-z0-9][a-z0-9_-]{1,127}$/, message: '标识需小写字母数字开头，可含 _ -', trigger: 'blur' },
+  ],
 }
 
 const selfMediaAccountRules: FormRules = {
@@ -405,12 +402,6 @@ function industryLabel(value?: string | null) {
   return dictStore.label('industry_tag', value) || value
 }
 
-function geoSiteStatusLabel(value?: string | null) {
-  if (value === 'active') return '启用'
-  if (value === 'disabled') return '停用'
-  return '-'
-}
-
 function selfMediaPlatformLabel(value?: string | null) {
   if (value === 'toutiao') return '头条'
   if (value === 'zhihu') return '知乎'
@@ -435,8 +426,6 @@ function fillForm(data: Brand) {
   brandForm.mainBusiness = data.mainBusiness || ''
   brandForm.regionCodes = regionCodesFromPayload(data)
   brandForm.website = data.website || ''
-  brandForm.geoSiteCode = data.geoSiteCode || ''
-  brandForm.geoSiteStatus = data.geoSiteCode ? (data.geoSiteStatus || 'active') : ''
   brandForm.officialAccount = data.officialAccount || ''
   brandForm.videoAccount = data.videoAccount || ''
   brandForm.douyinAccount = data.douyinAccount || ''
@@ -452,6 +441,8 @@ function fillForm(data: Brand) {
   brandForm.forbiddenPhrases = Array.isArray(data.forbiddenPhrases)
     ? data.forbiddenPhrases.join('，')
     : (data.forbiddenPhrases || '')
+  brandForm.industrySiteName = data.industrySiteName || ''
+  brandForm.industrySiteCode = data.industrySiteCode || ''
 }
 
 async function load() {
@@ -616,8 +607,6 @@ async function submitBrand() {
       districtCode: region.districtCode,
       districtName: region.districtName,
       website: brandForm.website || undefined,
-      geoSiteCode: brandForm.geoSiteCode || undefined,
-      geoSiteStatus: brandForm.geoSiteStatus || undefined,
       officialAccount: brandForm.officialAccount || undefined,
       videoAccount: brandForm.videoAccount || undefined,
       douyinAccount: brandForm.douyinAccount || undefined,
@@ -631,6 +620,8 @@ async function submitBrand() {
       standardBrandStatement: brandForm.standardBrandStatement || undefined,
       businessStandardStatement: brandForm.businessStandardStatement || undefined,
       forbiddenPhrases: brandForm.forbiddenPhrases || undefined,
+      industrySiteName: brandForm.industrySiteName || undefined,
+      industrySiteCode: brandForm.industrySiteCode || undefined,
     })
     ElMessage.success('品牌信息已更新')
     editVisible.value = false

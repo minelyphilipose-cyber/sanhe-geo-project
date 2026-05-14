@@ -114,6 +114,30 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '生成文章', hidden: true, permissions: ['project.read'] },
     },
     {
+      path: 'content/articles/batch-generate',
+      name: 'BatchArticleGenerate',
+      component: () => import('@/views/admin/content/BatchArticleGenerate.vue'),
+      meta: { title: '批量生成文章', hidden: true, permissions: ['project.read'] },
+    },
+    {
+      path: 'content/articles/batch-publish',
+      name: 'BatchArticlePublish',
+      component: () => import('@/views/admin/content/BatchArticlePublish.vue'),
+      meta: { title: '批量发布文章', hidden: true, permissions: ['project.read'] },
+    },
+    {
+      path: 'content/articles/batch-publish-jobs',
+      name: 'BatchArticlePublishJobs',
+      component: () => import('@/views/admin/content/BatchArticlePublishJobs.vue'),
+      meta: { title: '批量发布任务', hidden: true, permissions: ['project.read'] },
+    },
+    {
+      path: 'content/publish-platforms',
+      name: 'PublishPlatformManagement',
+      component: () => import('@/views/admin/content/PublishPlatformManagement.vue'),
+      meta: { title: '发布平台管理', hidden: true, permissions: ['project.read'] },
+    },
+    {
       path: 'keyword-groups',
       name: 'KeywordGroupManage',
       redirect: '/admin/layered-keyword-groups',
@@ -254,8 +278,8 @@ const adminRoutes: RouteRecordRaw = {
     {
       path: 'settings/publish-sites',
       name: 'PublishSiteConfig',
-      component: () => import('@/views/admin/settings/PublishSiteConfig.vue'),
-      meta: { title: '发布站点配置', permissions: ['user.manage'] },
+      redirect: '/admin/content/publish-platforms',
+      meta: { title: '发布站点配置', hidden: true, permissions: ['user.manage'] },
     },
     {
       path: 'settings/packages',

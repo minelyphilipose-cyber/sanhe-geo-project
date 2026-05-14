@@ -93,7 +93,6 @@ const sidebarGroups: MenuGroup[] = [
     title: '系统配置',
     menus: [
       { path: '/admin/settings/platforms', name: 'PlatformConfig', title: 'AI平台配置', icon: 'Setting', permissions: ['user.manage'] },
-      { path: '/admin/settings/publish-sites', name: 'PublishSiteConfig', title: '发布站点配置', icon: 'Promotion', permissions: ['user.manage'] },
       { path: '/admin/settings/packages', name: 'PackageConfig', title: '套餐配置', icon: 'CollectionTag', permissions: ['user.manage'] },
       { path: '/admin/settings/dicts', name: 'DictCenter', title: '字典中心', icon: 'Tickets', permissions: ['user.manage'] },
       { path: '/admin/settings/affix-words', name: 'KeywordAffixWordManage', title: '拓词信息维护', icon: 'EditPen', permissions: ['keyword_affix.manage'] },

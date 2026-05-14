@@ -1,10 +1,14 @@
 package com.huanjing.geo.module.content.controller;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.content.authoritymedia.MeititejiaProperties;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.dto.ArticleDistributeRequest;
 import com.huanjing.geo.module.content.dto.AuthorityMediaDistributeRequest;
+import com.huanjing.geo.module.content.dto.BatchArticlePublishRequest;
+import com.huanjing.geo.module.content.dto.BatchArticlePublishResponse;
+import com.huanjing.geo.module.content.dto.BatchArticlePublishJobSummary;
 import com.huanjing.geo.module.content.dto.DistributionManualConfirmRequest;
 import com.huanjing.geo.module.content.dto.PublishQuotaVO;
 import com.huanjing.geo.module.content.dto.RecommendedSitesResponseVO;
@@ -12,6 +16,7 @@ import com.huanjing.geo.module.content.dto.SelfMediaDistributeRequest;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
+import com.huanjing.geo.module.content.service.BatchArticlePublishService;
 import com.huanjing.geo.module.content.service.ContentDistributionService;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -32,6 +37,7 @@ import java.util.Map;
 public class ContentDistributionController {
 
     private final ContentDistributionService contentDistributionService;
+    private final BatchArticlePublishService batchArticlePublishService;
     private final BrandService brandService;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final MeititejiaProperties meititejiaProperties;
@@ -88,6 +94,23 @@ public class ContentDistributionController {
                 req.getRemark()
         );
         return R.ok(contentDistributionService.distributeTo(articleId, target));
+    }
+
+    @PostMapping("/articles/batch-publish")
+    public R<BatchArticlePublishResponse> batchPublish(@Valid @RequestBody BatchArticlePublishRequest req) {
+        return R.ok(batchArticlePublishService.submit(req));
+    }
+
+    @GetMapping("/articles/batch-publish")
+    public R<Page<BatchArticlePublishJobSummary>> batchPublishPage(@RequestParam(defaultValue = "1") Long current,
+                                                                   @RequestParam(defaultValue = "10") Long size,
+                                                                   @RequestParam(required = false) String status) {
+        return R.ok(batchArticlePublishService.page(current, size, status));
+    }
+
+    @GetMapping("/articles/batch-publish/{jobId}")
+    public R<BatchArticlePublishResponse> batchPublishDetail(@PathVariable Long jobId) {
+        return R.ok(batchArticlePublishService.response(jobId));
     }
 
     @PostMapping("/distribution-tasks/{taskId}/refresh-review-status")

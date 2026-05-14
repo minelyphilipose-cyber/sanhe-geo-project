@@ -112,6 +112,16 @@ public class ContentDistributionService {
     public DistributionTask distributeTo(Long articleId, TargetContext target) {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.write");
+        return distributeToWithOperator(articleId, target, operator);
+    }
+
+    @Transactional
+    public DistributionTask distributeToAsOperator(Long articleId, TargetContext target, Long operatorId) {
+        SysUser operator = currentUserService.requireById(operatorId);
+        return distributeToWithOperator(articleId, target, operator);
+    }
+
+    private DistributionTask distributeToWithOperator(Long articleId, TargetContext target, SysUser operator) {
         ensureDistributeRole(operator);
 
         ArticleDraft article = requireArticle(articleId);
@@ -698,13 +708,21 @@ public class ContentDistributionService {
     }
 
     private String validateBrandGeoSite(Brand brand) {
-        if (!StringUtils.hasText(brand.getGeoSiteCode())) {
-            throw new BizException(400, "Brand has no GEO site configured");
+        PublishSite agentSite = publishSiteMapper.selectOne(
+                new LambdaQueryWrapper<PublishSite>()
+                        .eq(PublishSite::getIntegrationMethod, BrandGeoSiteAdapter.PLATFORM)
+                        .eq(PublishSite::getStatus, "active")
+                        .eq(PublishSite::getIsFramework, 0)
+                        .orderByAsc(PublishSite::getId)
+                        .last("limit 1")
+        );
+        if (agentSite != null && StringUtils.hasText(agentSite.getSiteCode())) {
+            return agentSite.getSiteCode().trim();
         }
-        if (!"active".equalsIgnoreCase(brand.getGeoSiteStatus())) {
-            throw new BizException(400, "Brand GEO site is not active");
+        if (StringUtils.hasText(brand.getGeoSiteCode()) && "active".equalsIgnoreCase(brand.getGeoSiteStatus())) {
+            return brand.getGeoSiteCode().trim();
         }
-        return brand.getGeoSiteCode().trim();
+        throw new BizException(400, "Agent official site publish target is not configured");
     }
 
     private DistributionTask createAttemptForBrandOfficialSite(ArticleDraft article, BrandOfficialSite site, Long operatorId) {

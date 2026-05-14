@@ -79,6 +79,40 @@ export function previewAiContentArticleDraft(data: ArticleAiDraftPreviewRequest)
   })
 }
 
+export interface BatchArticleGeneratePlatform {
+  contentStyle: string
+  count: number
+  extraPrompt?: string
+}
+
+export interface BatchArticleGenerateTopic {
+  topic: string
+  topicAsQuestion?: string
+  keywordGroupId?: number
+  keywordGroupName?: string
+  platforms: BatchArticleGeneratePlatform[]
+}
+
+export interface BatchArticleGenerateRequest {
+  projectId: number
+  topicSource: 'keyword_group' | 'manual'
+  topics: BatchArticleGenerateTopic[]
+}
+
+export interface BatchArticleGenerateResponse {
+  batchId: number
+  totalCount: number
+  status: string
+}
+
+export function createBatchContentArticles(data: BatchArticleGenerateRequest) {
+  return request.post<R<BatchArticleGenerateResponse>>('/content/articles/batch-generate', data)
+}
+
+export function deleteContentArticle(articleId: number) {
+  return request.delete<R<void>>(`/content/articles/${articleId}`)
+}
+
 export function saveContentArticleRevision(articleId: number, data: {
   title?: string
   contentMarkdown: string
@@ -124,6 +158,69 @@ export function distributeContentArticleToGeoSite(articleId: number, brandId: nu
 
 export function distributeContentArticleToAgentSite(articleId: number, brandId: number) {
   return distributeContentArticleToGeoSite(articleId, brandId)
+}
+
+export interface BatchArticlePublishRequest {
+  articleIds: number[]
+  publishMode: 'now' | 'scheduled'
+  scheduledAt?: string
+  intervalMinutes: number
+  platformConcurrency: number
+  industrySiteId?: number
+}
+
+export interface BatchArticlePublishItem {
+  id: number
+  articleId: number
+  articleTitle?: string | null
+  projectName?: string | null
+  platformKey: 'agent_site' | 'industry_site' | string
+  contentStyle?: string | null
+  targetSiteId?: number | null
+  targetBrandId?: number | null
+  plannedAt: string
+  status: 'pending' | 'running' | 'success' | 'failed' | string
+  distributionTaskId?: number | null
+  errorMessage?: string | null
+}
+
+export interface BatchArticlePublishResponse {
+  jobId: number
+  publishMode: 'now' | 'scheduled' | string
+  status: string
+  scheduledAt?: string | null
+  intervalMinutes: number
+  totalCount: number
+  successCount: number
+  failedCount: number
+  items: BatchArticlePublishItem[]
+}
+
+export interface BatchArticlePublishJobSummary {
+  jobId: number
+  publishMode: 'now' | 'scheduled' | string
+  status: string
+  scheduledAt?: string | null
+  intervalMinutes: number
+  totalCount: number
+  successCount: number
+  failedCount: number
+  createdBy?: number | null
+  createdAt?: string | null
+  startedAt?: string | null
+  finishedAt?: string | null
+}
+
+export function submitBatchArticlePublish(data: BatchArticlePublishRequest) {
+  return request.post<R<BatchArticlePublishResponse>>('/content/articles/batch-publish', data)
+}
+
+export function getBatchArticlePublishJobs(params?: { current?: number; size?: number; status?: string }) {
+  return request.get<R<PageResult<BatchArticlePublishJobSummary>>>('/content/articles/batch-publish', { params })
+}
+
+export function getBatchArticlePublish(jobId: number) {
+  return request.get<R<BatchArticlePublishResponse>>(`/content/articles/batch-publish/${jobId}`)
 }
 
 export function getAuthorityMediaResources(params?: {

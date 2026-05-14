@@ -164,6 +164,8 @@ export interface Brand {
   forbiddenPhrases: string | string[] | null
   geoSiteCode?: string | null
   geoSiteStatus?: 'active' | 'disabled' | string | null
+  industrySiteName?: string | null
+  industrySiteCode?: string | null
   status?: string
   createdAt: string
   updatedAt: string
@@ -912,9 +914,33 @@ export interface ArticlePublishLog {
   createdAt: string
 }
 
+export interface BatchArticleGenerationTaskDetail {
+  id: number
+  batchId: number
+  projectId: number
+  articleId?: number | null
+  rowNo?: number | null
+  articleIndexInRow?: number | null
+  articleIndexInBatch?: number | null
+  articleType?: string | null
+  tone?: string | null
+  contentStyle?: string | null
+  length?: string | null
+  topic?: string | null
+  topicAsQuestion?: string | null
+  keywordGroupId?: number | null
+  keywordGroupName?: string | null
+  contentAngle?: string | null
+  audiencePerspective?: string | null
+  extraPrompt?: string | null
+  status?: string | null
+  qualityStatus?: string | null
+}
+
 export interface ArticleDetailResponse {
   article: ArticleDraft
   project: Project
+  batchGenerationTask?: BatchArticleGenerationTaskDetail | null
   versions: ArticleDraftVersion[]
   reviewLogs: ArticleReviewLog[]
   publishLogs: ArticlePublishLog[]
@@ -1077,6 +1103,7 @@ export interface RecommendedSitesResponse {
 export interface PublishSite {
   id: number
   siteName: string
+  siteCode: string
   domain: string
   iconUrl?: string | null
   industryTags?: string | string[] | null

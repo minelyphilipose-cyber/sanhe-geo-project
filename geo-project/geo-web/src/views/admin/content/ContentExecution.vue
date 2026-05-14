@@ -17,14 +17,21 @@
           <el-button @click="resetQuery">重置</el-button>
         </div>
         <div class="toolbar-right">
-          <el-button v-if="canWrite" type="primary" @click="goManualCreate">手动生成文章</el-button>
+          <el-button v-if="canWrite" :disabled="!selectedRows.length || batchPublishChecking" :loading="batchPublishChecking" @click="openBatchPublish">
+            批量发布
+          </el-button>
+          <el-button v-if="canWrite" @click="openBatchPublishJobs">发布任务</el-button>
+          <el-button v-if="canWrite" type="primary" @click="openBatchGeneration">批量生成文章</el-button>
+          <el-button v-if="canWrite" @click="goManualCreate">手动生成文章</el-button>
+          <el-button v-if="canWrite" @click="openPublishPlatformManagement">发布平台管理</el-button>
         </div>
       </div>
     </el-card>
 
     <el-card shadow="never">
       <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无文章数据">
-        <el-table :data="rows" border>
+        <el-table :data="rows" border @selection-change="onSelectionChange">
+          <el-table-column type="selection" width="48" :selectable="canSelectForBatchPublish" />
           <el-table-column prop="id" label="文章ID" width="90" />
           <el-table-column label="项目" min-width="180" show-overflow-tooltip>
             <template #default="scope">{{ scope.row.projectName || `#${scope.row.projectId}` }}</template>
@@ -39,13 +46,14 @@
             </template>
           </el-table-column>
           <el-table-column prop="createdAt" label="创建时间" width="180" />
-          <el-table-column label="操作" width="300" fixed="right">
+          <el-table-column label="操作" width="340" fixed="right">
             <template #default="scope">
               <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
               <el-button v-if="canWrite && canReview(scope.row.status)" link type="primary" @click="openReview(scope.row)">审核</el-button>
               <el-button v-if="canWrite && canEdit(scope.row.status)" link type="primary" @click="openRevision(scope.row)">修订</el-button>
               <el-button v-if="canWrite && canResubmit(scope.row.status)" link type="primary" @click="openResubmit(scope.row)">重新提交</el-button>
               <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openDistributionChannel(scope.row)">分发</el-button>
+              <el-button v-if="canWrite && canDeleteArticle(scope.row.status)" link type="danger" @click="deleteArticle(scope.row)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -70,6 +78,8 @@
           <el-descriptions-item label="项目">{{ detailData.project?.projectName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="文章类型">{{ articleTypeLabel(detailData.article.articleType) }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ statusLabel(detailData.article.status) }}</el-descriptions-item>
+          <el-descriptions-item label="平台风格">{{ contentStyleLabel(detailData.batchGenerationTask?.contentStyle) }}</el-descriptions-item>
+          <el-descriptions-item label="文章主题">{{ detailData.batchGenerationTask?.topic || '-' }}</el-descriptions-item>
           <el-descriptions-item label="标题" :span="2">{{ detailData.article.title }}</el-descriptions-item>
         </el-descriptions>
 
@@ -640,6 +650,7 @@ import { useUserStore } from '@/stores/user'
 import type { ArticleDetailResponse, ArticleDraft, AuthorityMediaResource, BrandImageFolder, BrandMaterial, DistributionTask, DouyinCapability, PublishSite, SelfMediaAccount, WechatMpCapability } from '@/types'
 import {
   checkSelfMediaAccountAuth,
+  deleteContentArticle,
   distributeContentArticleToAgentSite,
   distributeContentArticleToAuthorityMedia,
   distributeContentArticleToIndustrySite,
@@ -673,7 +684,6 @@ type SelfMediaAccountWithCredential = SelfMediaAccount & {
   cookieCredentialVersion?: number | null
   cookieCredentialCapturedAt?: string | null
 }
-
 const userStore = useUserStore()
 const route = useRoute()
 const router = useRouter()
@@ -682,6 +692,8 @@ const canWrite = computed(() => userStore.hasPermission('project.write'))
 const loading = ref(false)
 const submitting = ref(false)
 const rows = ref<ArticleDraft[]>([])
+const selectedRows = ref<ArticleDraft[]>([])
+const batchPublishChecking = ref(false)
 const page = reactive({ current: 1, size: 10, total: 0 })
 const query = reactive({
   projectName: '',
@@ -879,6 +891,23 @@ function articleTypeLabel(v: string) {
   return map[v] || v
 }
 
+function contentStyleLabel(v?: string | null) {
+  if (!v) return '-'
+  const map: Record<string, string> = {
+    toutiao: '今日头条',
+    wechat: '公众号',
+    zhihu: '知乎',
+    douyin_image_text: '抖音图文',
+    linkedin: '领英风格',
+    agent_site_article: 'Agent 官网文章',
+    industry_site: '行业资讯站',
+    authority_media: '权威媒体',
+    forum: '论坛',
+    xiaohongshu: '小红书',
+  }
+  return map[v] || v
+}
+
 function statusLabel(v: string) {
   return statusOptions.find((s) => s.value === v)?.label || v
 }
@@ -904,6 +933,33 @@ function canResubmit(status: string) {
 
 function canDistribute(status: string) {
   return status === 'approved' || status === 'unpublished'
+}
+
+function canDeleteArticle(status: string) {
+  return !['published', 'distributed', 'distributing'].includes(status)
+}
+
+async function deleteArticle(row: ArticleDraft) {
+  try {
+    await ElMessageBox.confirm(`确认删除文章「${row.title || row.id}」？删除后将不再显示在内容列表中。`, '删除文章', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      confirmButtonClass: 'el-button--danger',
+    })
+  } catch {
+    return
+  }
+  try {
+    await deleteContentArticle(row.id)
+    ElMessage.success('文章已删除')
+    if (rows.value.length === 1 && page.current > 1) {
+      page.current -= 1
+    }
+    await load()
+  } catch {
+    ElMessage.error('删除文章失败')
+  }
 }
 
 async function load() {
@@ -944,6 +1000,14 @@ function onPageChange(v: number) {
   load()
 }
 
+function onSelectionChange(selection: ArticleDraft[]) {
+  selectedRows.value = selection
+}
+
+function canSelectForBatchPublish(row: ArticleDraft) {
+  return canDistribute(row.status)
+}
+
 function goManualCreate() {
   router.push({
     path: '/admin/content/articles/manual-create',
@@ -951,6 +1015,68 @@ function goManualCreate() {
       articleType: query.articleType || undefined,
     },
   })
+}
+
+function openBatchGeneration() {
+  router.push({
+    path: '/admin/content/articles/batch-generate',
+  })
+}
+
+function openPublishPlatformManagement() {
+  router.push({
+    path: '/admin/content/publish-platforms',
+  })
+}
+
+function openBatchPublishJobs() {
+  router.push({
+    path: '/admin/content/articles/batch-publish-jobs',
+  })
+}
+
+async function openBatchPublish() {
+  const selected = selectedRows.value.filter((row) => canDistribute(row.status))
+  if (!selected.length) {
+    ElMessage.warning('请选择已审核通过或已下架的文章')
+    return
+  }
+  batchPublishChecking.value = true
+  try {
+    const details = await Promise.all(selected.map((row) => getContentArticleDetail(row.id).then((res) => res.data.data)))
+    const blocked = details
+      .map((detail) => {
+        const style = detail.batchGenerationTask?.contentStyle || ''
+        const reason = batchPublishBlockReason(style)
+        return reason ? `#${detail.article.id} ${detail.article.title || ''}：${reason}` : ''
+      })
+      .filter(Boolean)
+    if (blocked.length) {
+      await ElMessageBox.alert(blocked.join('\n'), '当前存在平台不满足自动发布，无法批量发布', {
+        confirmButtonText: '知道了',
+        customClass: 'batch-publish-block-alert',
+      })
+      return
+    }
+    router.push({
+      path: '/admin/content/articles/batch-publish',
+      query: { ids: selected.map((row) => row.id).join(',') },
+    })
+  } finally {
+    batchPublishChecking.value = false
+  }
+}
+
+function batchPublishBlockReason(contentStyle?: string | null) {
+  if (contentStyle === 'agent_site_article' || contentStyle === 'linkedin') return ''
+  if (contentStyle === 'industry_site') return ''
+  if (contentStyle === 'forum') return '论坛发布执行器暂未接入'
+  if (contentStyle === 'toutiao') return '今日头条不允许自动发布'
+  if (contentStyle === 'wechat') return '公众号不允许自动发布'
+  if (contentStyle === 'zhihu') return '知乎不允许自动发布'
+  if (contentStyle === 'douyin_image_text') return '抖音图文不允许自动发布'
+  if (contentStyle === 'authority_media') return '权威媒体不允许自动发布'
+  return '文章未绑定可自动发布的平台风格'
 }
 
 async function openDetail(articleId: number) {
@@ -1879,18 +2005,10 @@ async function distributeToAgentSite(row: ArticleDraft) {
     }
     const brandRes = await getBrandDetail(brandId)
     const brand = brandRes.data.data
-    if (!brand.geoSiteCode) {
-      ElMessage.warning('该品牌未配置 Agent 官网，请先在品牌配置页填写')
-      return
-    }
-    if (brand.geoSiteStatus !== 'active') {
-      ElMessage.warning('该品牌 Agent 官网已停用')
-      return
-    }
     const result = await distributeContentArticleToAgentSite(row.id, brandId)
     const task = result.data.data
     if (task.status === 'submitted') {
-      ElMessage.success(`已分发到 https://www.${brand.geoSiteCode}.com`)
+      ElMessage.success(`已分发到 ${brand.brandName || '品牌'} Agent 官网`)
     } else {
       ElMessage.error(task.errorMessage || 'Agent 官网分发失败')
     }

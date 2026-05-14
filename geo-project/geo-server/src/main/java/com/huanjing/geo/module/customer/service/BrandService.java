@@ -136,6 +136,7 @@ public class BrandService {
         brand.setBusinessStandardStatement(req.getBusinessStandardStatement());
         brand.setForbiddenPhrases(normalizeForbiddenPhrases(req.getForbiddenPhrases()));
         applyGeoSiteFields(brand, req.getGeoSiteCode(), req.getGeoSiteStatus(), null);
+        applyIndustrySiteFields(brand, req.getIndustrySiteName(), req.getIndustrySiteCode());
         brand.setStatus(StringUtils.hasText(req.getStatus()) ? req.getStatus() : "active");
         brandMapper.insert(brand);
         brandProfileService.createProfileVersionSnapshot(
@@ -197,6 +198,7 @@ public class BrandService {
         brand.setBusinessStandardStatement(req.getBusinessStandardStatement());
         brand.setForbiddenPhrases(normalizeForbiddenPhrases(req.getForbiddenPhrases()));
         applyGeoSiteFields(brand, req.getGeoSiteCode(), req.getGeoSiteStatus(), id);
+        applyIndustrySiteFields(brand, req.getIndustrySiteName(), req.getIndustrySiteCode());
         brand.setStatus(req.getStatus());
         brandMapper.updateById(brand);
         brandProfileService.createProfileVersionSnapshot(
@@ -310,6 +312,24 @@ public class BrandService {
         brand.setGeoSiteStatus(status);
     }
 
+    private void applyIndustrySiteFields(Brand brand, String rawName, String rawCode) {
+        String name = trimToNull(rawName);
+        String code = trimToNull(rawCode);
+        if (name == null && code == null) {
+            brand.setIndustrySiteName(null);
+            brand.setIndustrySiteCode(null);
+            return;
+        }
+        if (code == null) {
+            throw new BizException(400, "industry_site_code is required when industry site is configured");
+        }
+        if (!Pattern.compile("^[a-z0-9][a-z0-9_-]{1,127}$").matcher(code).matches()) {
+            throw new BizException(400, "Invalid industry_site_code");
+        }
+        brand.setIndustrySiteName(name);
+        brand.setIndustrySiteCode(code);
+    }
+
     private Map<String, Object> snapshotBrand(Brand brand) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("id", brand.getId());
@@ -328,6 +348,8 @@ public class BrandService {
         snapshot.put("businessStandardStatement", brand.getBusinessStandardStatement());
         snapshot.put("geoSiteCode", brand.getGeoSiteCode());
         snapshot.put("geoSiteStatus", brand.getGeoSiteStatus());
+        snapshot.put("industrySiteName", brand.getIndustrySiteName());
+        snapshot.put("industrySiteCode", brand.getIndustrySiteCode());
         snapshot.put("officialAccount", brand.getOfficialAccount());
         snapshot.put("videoAccount", brand.getVideoAccount());
         snapshot.put("douyinAccount", brand.getDouyinAccount());

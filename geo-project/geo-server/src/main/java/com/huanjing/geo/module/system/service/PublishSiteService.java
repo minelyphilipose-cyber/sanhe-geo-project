@@ -38,7 +38,7 @@ public class PublishSiteService {
     private static final Set<String> TIER_SET = Set.of("S0", "S1", "S2");
     private static final Set<String> STATUS_SET = Set.of("active", "suspended", "maintenance");
     private static final Set<String> HEALTH_SET = Set.of("normal", "slow", "high_failure", "degraded");
-    private static final Set<String> METHOD_SET = Set.of("rest_api", "ftp", "email", "manual");
+    private static final Set<String> METHOD_SET = Set.of("rest_api", "ftp", "email", "manual", "brand_geo_site");
     private static final Set<String> HTTP_METHOD_SET = Set.of("POST", "PUT");
     private static final Set<String> AUTH_SET = Set.of("api_key", "bearer_token", "basic_auth", "oauth2");
 
@@ -73,10 +73,10 @@ public class PublishSiteService {
 
     public PublishSite create(PublishSiteCreateRequest req) {
         ensureWriteRole();
-        validate(req.getSiteName(), req.getDomain(), req.getIndustryTags(), req.getTier(), req.getStatus(), req.getIntegrationMethod(),
+        validate(req.getSiteName(), req.getSiteCode(), req.getDomain(), req.getIndustryTags(), req.getTier(), req.getStatus(), req.getIntegrationMethod(),
                 req.getHttpMethod(), req.getAuthType(), req.getCurrentHealthStatus());
         PublishSite site = new PublishSite();
-        fill(site, req.getSiteName(), req.getDomain(), req.getIconUrl(), req.getIndustryTags(), req.getTier(), req.getStatus(),
+        fill(site, req.getSiteName(), req.getSiteCode(), req.getDomain(), req.getIconUrl(), req.getIndustryTags(), req.getTier(), req.getStatus(),
                 req.getIntegrationMethod(), req.getApiEndpoint(), req.getHttpMethod(), req.getAuthType(),
                 req.getCredentialRef(), req.getApiCredential(), req.getRequestHeaderTemplate(), req.getRequestBodyTemplate(),
                 req.getResponseUrlPath(), req.getContentConstraints(), req.getCurrentHealthStatus(), req.getRemark());
@@ -86,10 +86,10 @@ public class PublishSiteService {
 
     public PublishSite update(Long id, PublishSiteUpdateRequest req) {
         ensureWriteRole();
-        validate(req.getSiteName(), req.getDomain(), req.getIndustryTags(), req.getTier(), req.getStatus(), req.getIntegrationMethod(),
+        validate(req.getSiteName(), req.getSiteCode(), req.getDomain(), req.getIndustryTags(), req.getTier(), req.getStatus(), req.getIntegrationMethod(),
                 req.getHttpMethod(), req.getAuthType(), req.getCurrentHealthStatus());
         PublishSite site = requireById(id);
-        fill(site, req.getSiteName(), req.getDomain(), req.getIconUrl(), req.getIndustryTags(), req.getTier(), req.getStatus(),
+        fill(site, req.getSiteName(), req.getSiteCode(), req.getDomain(), req.getIconUrl(), req.getIndustryTags(), req.getTier(), req.getStatus(),
                 req.getIntegrationMethod(), req.getApiEndpoint(), req.getHttpMethod(), req.getAuthType(),
                 req.getCredentialRef(), req.getApiCredential(), req.getRequestHeaderTemplate(), req.getRequestBodyTemplate(),
                 req.getResponseUrlPath(), req.getContentConstraints(), req.getCurrentHealthStatus(), req.getRemark());
@@ -153,6 +153,7 @@ public class PublishSiteService {
 
     private void fill(PublishSite site,
                       String siteName,
+                      String siteCode,
                       String domain,
                       String iconUrl,
                       List<String> industryTags,
@@ -171,6 +172,7 @@ public class PublishSiteService {
                       String currentHealthStatus,
                       String remark) {
         site.setSiteName(siteName.trim());
+        site.setSiteCode(normalizeSiteCode(siteCode));
         site.setDomain(domain.trim().toLowerCase(Locale.ROOT));
         site.setIconUrl(StringUtils.hasText(iconUrl) ? iconUrl.trim() : null);
         site.setIndustryTags(normalizeJsonArray(industryTags));
@@ -191,6 +193,7 @@ public class PublishSiteService {
     }
 
     private void validate(String siteName,
+                          String siteCode,
                           String domain,
                           List<String> industryTags,
                           String tier,
@@ -202,6 +205,10 @@ public class PublishSiteService {
         if (!StringUtils.hasText(siteName)) {
             throw new BizException(400, "site_name is required");
         }
+        if (!StringUtils.hasText(siteCode)) {
+            throw new BizException(400, "site_code is required");
+        }
+        normalizeSiteCode(siteCode);
         if (!StringUtils.hasText(domain)) {
             throw new BizException(400, "domain is required");
         }
@@ -213,7 +220,7 @@ public class PublishSiteService {
             throw new BizException(400, "status must be active/suspended/maintenance");
         }
         if (!StringUtils.hasText(integrationMethod) || !METHOD_SET.contains(integrationMethod.trim().toLowerCase(Locale.ROOT))) {
-            throw new BizException(400, "integration_method must be rest_api/ftp/email/manual");
+            throw new BizException(400, "integration_method must be rest_api/ftp/email/manual/brand_geo_site");
         }
         if (StringUtils.hasText(httpMethod) && !HTTP_METHOD_SET.contains(httpMethod.trim().toUpperCase(Locale.ROOT))) {
             throw new BizException(400, "http_method must be POST/PUT");
@@ -276,6 +283,14 @@ public class PublishSiteService {
             }
             throw new BizException(400, "Invalid industry_tags");
         }
+    }
+
+    private String normalizeSiteCode(String value) {
+        String siteCode = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        if (!siteCode.matches("^[a-z0-9][a-z0-9_-]{1,127}$")) {
+            throw new BizException(400, "site_code must be 2-128 chars and only contain lowercase letters, numbers, underscores or hyphens");
+        }
+        return siteCode;
     }
 
     private String resolvePingHost(PublishSite site) {

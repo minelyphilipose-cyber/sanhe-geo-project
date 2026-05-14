@@ -10,6 +10,8 @@ public class PublishSiteUpdateRequest {
     @NotBlank
     private String siteName;
     @NotBlank
+    private String siteCode;
+    @NotBlank
     private String domain;
     private String iconUrl;
     private List<String> industryTags;

@@ -47,6 +47,7 @@ public class ContentArticleService {
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
     private final ArticleReviewLogMapper articleReviewLogMapper;
     private final ArticlePublishLogMapper articlePublishLogMapper;
+    private final BatchArticleGenerationTaskMapper batchArticleGenerationTaskMapper;
     private final BrandMapper brandMapper;
     private final ProjectMapper projectMapper;
     private final SysDictItemMapper sysDictItemMapper;
@@ -59,6 +60,7 @@ public class ContentArticleService {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
         LambdaQueryWrapper<ArticleDraft> wrapper = new LambdaQueryWrapper<ArticleDraft>()
+                .ne(ArticleDraft::getStatus, "deleted")
                 .orderByDesc(ArticleDraft::getCreatedAt);
         if (StringUtils.hasText(projectName) || currentUserService.isPartnerUser(operator)) {
             List<Long> projectIds = resolveReadableProjectIds(operator, projectName);
@@ -134,9 +136,16 @@ public class ContentArticleService {
                         .eq(ArticlePublishLog::getArticleId, articleId)
                         .orderByDesc(ArticlePublishLog::getCreatedAt)
         );
+        BatchArticleGenerationTask batchGenerationTask = batchArticleGenerationTaskMapper.selectOne(
+                new LambdaQueryWrapper<BatchArticleGenerationTask>()
+                        .eq(BatchArticleGenerationTask::getArticleId, articleId)
+                        .orderByDesc(BatchArticleGenerationTask::getId)
+                        .last("limit 1")
+        );
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("article", article);
         result.put("project", project);
+        result.put("batchGenerationTask", batchGenerationTask);
         result.put("versions", versions);
         result.put("reviewLogs", reviewLogs);
         result.put("publishLogs", publishLogs);
@@ -446,6 +455,31 @@ public class ContentArticleService {
     }
 
     @Transactional
+    public void deleteUnpublished(Long articleId) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission("project.update");
+        ArticleDraft article = requireArticle(articleId);
+        Project project = requireProject(article.getProjectId());
+        ensureProjectAccess(operator, project, true);
+        brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
+
+        String oldStatus = article.getStatus();
+        if (Set.of("published", "distributed", "distributing").contains(oldStatus)) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Published or distributing article cannot be deleted");
+        }
+
+        int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
+                .eq(ArticleDraft::getId, articleId)
+                .eq(ArticleDraft::getStatus, oldStatus)
+                .set(ArticleDraft::getStatus, "deleted"));
+        if (updated != 1) {
+            auditArticleTransition("ARTICLE_DELETED", AuditResult.DENIED, operator, project, article, oldStatus, "deleted", "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
+            throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
+        }
+        auditArticleTransition("ARTICLE_DELETED", AuditResult.SUCCESS, operator, project, article, oldStatus, "deleted", "delete unpublished article", null);
+    }
+
+    @Transactional
     public ArticleDraft createGeneratedDraft(Long batchId,
                                              Project project,
                                              String articleType,
@@ -502,7 +536,7 @@ public class ContentArticleService {
 
     private ArticleDraft requireArticle(Long articleId) {
         ArticleDraft article = articleDraftMapper.selectById(articleId);
-        if (article == null) {
+        if (article == null || "deleted".equals(article.getStatus())) {
             throw new BizException(ContentErrorCodes.ARTICLE_NOT_FOUND, "Article not found");
         }
         return article;

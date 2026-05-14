@@ -292,7 +292,7 @@ class ContentDistributionServiceTest {
                 () -> contentDistributionService.distributeTo(1L, new TargetContext.BrandGeoSiteTarget(30L, null)));
 
         assertEquals(400, ex.getCode());
-        assertEquals("Brand has no GEO site configured", ex.getMessage());
+        assertEquals("Agent official site publish target is not configured", ex.getMessage());
         verify(companyChannelQuotaService, never()).reserveDistribution(any(), any(), any(), any());
         verify(distributionTaskMapper, never()).insert(any());
     }
@@ -306,7 +306,7 @@ class ContentDistributionServiceTest {
                 () -> contentDistributionService.distributeTo(1L, new TargetContext.BrandGeoSiteTarget(30L, "ok")));
 
         assertEquals(400, ex.getCode());
-        assertEquals("Brand GEO site is not active", ex.getMessage());
+        assertEquals("Agent official site publish target is not configured", ex.getMessage());
         verify(companyChannelQuotaService, never()).reserveDistribution(any(), any(), any(), any());
         verify(distributionTaskMapper, never()).insert(any());
     }

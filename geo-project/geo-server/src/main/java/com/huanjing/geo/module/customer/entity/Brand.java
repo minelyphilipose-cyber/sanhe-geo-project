@@ -46,6 +46,8 @@ public class Brand {
     private String forbiddenPhrases;
     private String geoSiteCode;
     private String geoSiteStatus;
+    private String industrySiteName;
+    private String industrySiteCode;
     private String status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
