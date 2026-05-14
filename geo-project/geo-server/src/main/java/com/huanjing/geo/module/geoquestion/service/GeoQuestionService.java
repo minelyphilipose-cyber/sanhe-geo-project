@@ -355,6 +355,8 @@ public class GeoQuestionService {
     public List<ProviderVO> providers() {
         return aiPlatformConfigMapper.selectList(new LambdaQueryWrapper<AiPlatformConfig>()
                 .eq(AiPlatformConfig::getEnabled, true)
+                .isNotNull(AiPlatformConfig::getLowModelId)
+                .apply("TRIM(low_model_id) <> ''")
                 .orderByAsc(AiPlatformConfig::getPlatformCode)).stream().map(cfg -> {
             ProviderVO vo = new ProviderVO();
             vo.setId(cfg.getId());
@@ -882,6 +884,8 @@ public class GeoQuestionService {
     private AiPlatformConfig resolveBatchModel(GeoQuestionBatch batch) {
         LambdaQueryWrapper<AiPlatformConfig> wrapper = new LambdaQueryWrapper<AiPlatformConfig>()
                 .eq(AiPlatformConfig::getEnabled, true)
+                .isNotNull(AiPlatformConfig::getLowModelId)
+                .apply("TRIM(low_model_id) <> ''")
                 .last("LIMIT 1");
         if (StringUtils.hasText(batch.getModelProvider())) {
             wrapper.eq(AiPlatformConfig::getPlatformCode, batch.getModelProvider());
@@ -896,6 +900,8 @@ public class GeoQuestionService {
     private AiPlatformConfig resolveRequestedModel(BatchStartRequest req) {
         LambdaQueryWrapper<AiPlatformConfig> wrapper = new LambdaQueryWrapper<AiPlatformConfig>()
                 .eq(AiPlatformConfig::getEnabled, true)
+                .isNotNull(AiPlatformConfig::getLowModelId)
+                .apply("TRIM(low_model_id) <> ''")
                 .last("LIMIT 1");
         if (req.getModelConfigId() != null) {
             wrapper.eq(AiPlatformConfig::getId, req.getModelConfigId());
@@ -913,7 +919,7 @@ public class GeoQuestionService {
         if (config == null) {
             return null;
         }
-        return defaultText(config.getModelId(), null);
+        return defaultText(config.getLowModelId(), null);
     }
 
     private String generationModelName(AiPlatformConfig config, String modelId) {
