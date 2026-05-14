@@ -2,7 +2,7 @@
   <div class="layered-keyword-page">
     <div class="step-switcher">
       <span class="label">分层拓词管理</span>
-      <button v-for="s in steps" :key="s.no" class="step-btn" :class="{ active: activeStep === s.no }" @click="activeStep = s.no">
+      <button v-for="s in steps" :key="s.no" class="step-btn" :class="{ active: activeStep === s.no }" @click="goStep(s.no)">
         Step {{ s.no }} {{ s.title }}
       </button>
     </div>
@@ -209,7 +209,7 @@
         <section v-show="activeStep === 5">
           <div class="design-note"><strong>Step 5 说明：</strong>累积视图：本工单下所有批次的题目合并展示。重生成单条采用原地软替换，不破坏配额。入库需 A/B/C 全部满额（本期严格模式）。</div>
           <QuotaCard :quota="review?.workorder.quota || quota" title="工单累积统计" />
-          <div class="footer-bar quota-actions"><div v-if="!canCommit" class="warn">⚠ 三级配额未满，无法入库。剩余 A {{ quota?.remainingA || 0 }} / B {{ quota?.remainingB || 0 }} / C {{ quota?.remainingC || 0 }}</div><div><button class="btn btn-primary" :disabled="hasRunningBatch || workorder?.status !== 'draft'" @click="continueGenerate">+ 继续生成下一批</button><button class="btn" @click="exportHint">导出 Excel</button><button class="btn" :class="canCommit ? 'btn-primary' : 'btn-disabled'" :disabled="!canCommit" @click="commit">入库为正式版本（v1.0）</button></div></div>
+          <div class="footer-bar quota-actions"><div v-if="duplicateQuestionTexts.length" class="warn">⚠ 存在重复问题，请替换或删除后再入库：{{ duplicateQuestionTexts.slice(0, 3).join('；') }}</div><div v-else-if="!canCommit" class="warn">⚠ 三级配额未满，无法入库。剩余 A {{ quota?.remainingA || 0 }} / B {{ quota?.remainingB || 0 }} / C {{ quota?.remainingC || 0 }}</div><div><button class="btn btn-primary" :disabled="hasRunningBatch || workorder?.status !== 'draft'" @click="continueGenerate">+ 继续生成下一批</button><button class="btn" @click="exportHint">导出 Excel</button><button class="btn" :class="canCommit ? 'btn-primary' : 'btn-disabled'" :disabled="!canCommit" @click="commit">入库为正式版本（v1.0）</button></div></div>
           <div class="card">
             <div class="card-head"><span>本工单生成批次（{{ review?.batches.length || 0 }} 个）</span></div>
             <div class="card-body batch-list">
@@ -258,7 +258,33 @@
         <div class="modal-foot"><button class="btn" @click="editVisible = false">取消</button><button class="btn btn-primary" @click="saveEditQuestion">保存</button></div>
       </div>
     </div>
-  </div>
+    <div v-if="duplicateResolveVisible" class="modal-mask">
+      <div class="modal-card duplicate-modal">
+        <div class="modal-head">
+          <span>处理重复问题</span>
+          <button class="btn btn-sm" @click="duplicateResolveVisible = false">关闭</button>
+        </div>
+        <div class="modal-body">
+          <div class="duplicate-note">以下问题文本重复，需修改为唯一内容后才能入库。</div>
+          <div class="duplicate-group" v-for="group in duplicateQuestionGroups" :key="group.key">
+            <div class="duplicate-title">重复问题：{{ group.text }} <span>{{ group.items.length }} 条</span></div>
+            <div class="duplicate-row head"><div>ID</div><div>问题文本</div><div>分级</div><div>场景</div><div>批次</div></div>
+            <div class="duplicate-row" v-for="item in group.items" :key="item.id">
+              <div>{{ item.tier }}-{{ item.id }}</div>
+              <textarea v-model="duplicateEditForms[item.id]" class="text-input textarea duplicate-input"></textarea>
+              <div><span class="tag" :class="`tag-${item.tier.toLowerCase()}`">{{ item.tier }}</span></div>
+              <div>{{ sceneLabel(item.sceneCode) }}</div>
+              <div>{{ item.batchId }}</div>
+            </div>
+          </div>
+          <div v-if="duplicateResolveError" class="duplicate-error">{{ duplicateResolveError }}</div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" @click="duplicateResolveVisible = false">取消</button>
+          <button class="btn btn-primary" :disabled="duplicateSaving" @click="saveDuplicateEdits">{{ duplicateSaving ? '保存中...' : '保存修改并重新检查' }}</button>
+        </div>
+      </div>
+    </div>  </div>
 </template>
 
 <script setup lang="ts">
@@ -349,6 +375,10 @@ const questionLoading = ref(false)
 const workorderList = ref<WorkorderListItem[]>([])
 const editVisible = ref(false)
 const editingQuestionId = ref<number>()
+const duplicateResolveVisible = ref(false)
+const duplicateSaving = ref(false)
+const duplicateResolveError = ref('')
+const duplicateEditForms = reactive<Record<number, string>>({})
 const tierTab = ref<'all' | 'A' | 'B' | 'C'>('all')
 const questionTabs = ['all', 'A', 'B', 'C'] as const
 const syncToProfile = ref(false)
@@ -393,6 +423,8 @@ const progressObj = computed(() => {
 })
 const progressPercent = computed(() => Math.min(100, Math.round(((progressObj.value.generated || 0) / Math.max(progressObj.value.target || batchTotal.value || 1, 1)) * 100)))
 const pagedQuestions = computed(() => questionPage.value.records || [])
+const duplicateQuestionGroups = computed(() => findDuplicateQuestionGroups(review.value?.questions || []))
+const duplicateQuestionTexts = computed(() => duplicateQuestionGroups.value.map((group) => group.text))
 const canCommit = computed(() => !!quota.value && quota.value.remainingA === 0 && quota.value.remainingB === 0 && quota.value.remainingC === 0 && quota.value.runningReservedTotal === 0)
 
 onMounted(async () => { await Promise.all([dictStore.ensureLoaded(), loadProjects(), loadProviders()]); applyBaselineWeights() })
@@ -428,6 +460,10 @@ async function selectProject(item: Project) {
   workorder.value = data.data
   quota.value = data.data.quota
   await loadWorkorderList()
+  const resumableWorkorder = workorderList.value.find((row) => row.id === data.data.id && ['draft', 'paused'].includes(row.status) && row.countTotal > 0)
+  if (resumableWorkorder) {
+    await openWorkorderReview(resumableWorkorder)
+  }
 }
 async function loadWorkorderList() {
   if (!selectedProject.value) return
@@ -442,6 +478,18 @@ async function openWorkorderReview(item: WorkorderListItem) {
   questionPage.value = { ...questionPage.value, current: 1 }
   await loadQuestionPage(1)
   activeStep.value = 5
+}
+async function goStep(stepNo: number) {
+  if (stepNo === activeStep.value) return
+  if (stepNo > 1 && (!selectedProject.value || !workorder.value)) {
+    ElMessage.warning('请先选择项目')
+    return
+  }
+  if (stepNo === 2) {
+    await goStep2()
+    return
+  }
+  activeStep.value = stepNo
 }
 async function goStep2() {
   if (!selectedProject.value || !workorder.value) return
@@ -637,10 +685,24 @@ async function saveEditQuestion() {
   await updateGeoQuestion(editingQuestionId.value, editForm)
   ElMessage.success('问题已保存')
   editVisible.value = false
-  await loadQuestionPage(questionPage.value.current || 1)
+  await refreshReview()
 }
-async function commit() { if (!workorder.value) return; await commitGeoWorkorder(workorder.value.id, 'v1.0'); ElMessage.success('已入库为客户级正式版本'); await refreshReview() }
-async function exportHint() {
+async function commit() {
+  if (!workorder.value) return
+  await refreshReview()
+  if (duplicateQuestionTexts.value.length) {
+    ElMessage.warning(`问题池存在重复问题，请替换或删除后再入库：${duplicateQuestionTexts.value.slice(0, 5).join('；')}`)
+    openDuplicateResolveDialog()
+    return
+  }
+  if (!canCommit.value) {
+    ElMessage.warning('三级配额未满或存在运行中批次，无法入库')
+    return
+  }
+  await commitGeoWorkorder(workorder.value.id, 'v1.0')
+  ElMessage.success('已入库为客户级正式版本')
+  await refreshReview()
+}async function exportHint() {
   if (!workorder.value) return
   const response = await exportGeoWorkorder(workorder.value.id)
   const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' })
@@ -654,7 +716,76 @@ async function exportHint() {
 function batchReplaceCount(batchId: number) { return review.value?.batches.find((b) => b.id === batchId)?.replaceCountTotal || 0 }
 function sceneLabel(code?: string) { return sceneOptions.find((s) => s.code === code)?.label || code || '-' }
 function formatTime(value?: string) { return value ? value.replace('T', ' ').slice(0, 19) : '-' }
-function statusTagClass(status?: string) {
+function questionDedupeKey(value?: string | null) {
+  return (value || '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+function findDuplicateQuestionGroups(questions: QuestionVO[]) {
+  const groups = new Map<string, QuestionVO[]>()
+  questions.forEach((question) => {
+    const key = questionDedupeKey(question.questionText)
+    if (!key) return
+    groups.set(key, [...(groups.get(key) || []), question])
+  })
+  return Array.from(groups.entries())
+    .filter(([, items]) => items.length > 1)
+    .map(([key, items]) => ({ key, text: items[0].questionText.trim(), items }))
+}
+function openDuplicateResolveDialog() {
+  duplicateResolveError.value = ''
+  Object.keys(duplicateEditForms).forEach((id) => delete duplicateEditForms[Number(id)])
+  duplicateQuestionGroups.value.forEach((group) => {
+    group.items.forEach((item) => {
+      duplicateEditForms[item.id] = item.questionText
+    })
+  })
+  duplicateResolveVisible.value = true
+}
+async function saveDuplicateEdits() {
+  duplicateResolveError.value = ''
+  const allQuestions = review.value?.questions || []
+  const nextTexts = new Map<number, string>()
+  for (const question of allQuestions) {
+    const nextText = (duplicateEditForms[question.id] ?? question.questionText).trim()
+    if (!nextText) {
+      duplicateResolveError.value = `问题 ${question.tier}-${question.id} 的文本不能为空`
+      return
+    }
+    if (nextText.length > 500) {
+      duplicateResolveError.value = `问题 ${question.tier}-${question.id} 的文本最多 500 字`
+      return
+    }
+    nextTexts.set(question.id, nextText)
+  }
+  const duplicateAfterEdit = findDuplicateQuestionGroups(allQuestions.map((question) => ({ ...question, questionText: nextTexts.get(question.id) || question.questionText })))
+  if (duplicateAfterEdit.length) {
+    duplicateResolveError.value = `仍存在重复问题：${duplicateAfterEdit.map((group) => group.text).slice(0, 5).join('；')}`
+    return
+  }
+  const changedQuestions = allQuestions.filter((question) => {
+    const nextText = nextTexts.get(question.id)
+    return nextText !== undefined && nextText !== question.questionText
+  })
+  if (!changedQuestions.length) {
+    duplicateResolveError.value = '请先修改重复的问题文本'
+    return
+  }
+  duplicateSaving.value = true
+  try {
+    for (const question of changedQuestions) {
+      await updateGeoQuestion(question.id, { ...question, questionText: nextTexts.get(question.id) })
+    }
+    await refreshReview()
+    if (duplicateQuestionTexts.value.length) {
+      openDuplicateResolveDialog()
+      duplicateResolveError.value = `仍存在重复问题：${duplicateQuestionTexts.value.slice(0, 5).join('；')}`
+      return
+    }
+    duplicateResolveVisible.value = false
+    ElMessage.success('重复问题已处理，可以继续入库')
+  } finally {
+    duplicateSaving.value = false
+  }
+}function statusTagClass(status?: string) {
   if (status === 'committed') return 'tag-success'
   if (status === 'draft') return 'tag-primary'
   if (status === 'discarded') return 'tag-danger'
@@ -670,6 +801,7 @@ function statusTagClass(status?: string) {
 .card{background:var(--surface);border:1px solid var(--border);border-radius:4px;margin-bottom:16px}.card-head{padding:12px 20px;border-bottom:1px solid var(--border);font-size:14px;font-weight:600;display:flex;justify-content:space-between;align-items:center}.card-body{padding:20px}.design-note{background:#f0f5ff;border-left:3px solid var(--primary);border-top:0;border-right:0;border-bottom:0;border-radius:0 2px 2px 0;padding:10px 14px;margin-bottom:16px;color:var(--text-2)}.design-note strong{color:var(--primary)}.note{background:#fffbe6;border:1px dashed #ffe58f;border-radius:2px;padding:8px 12px;margin:12px 0 0;color:#874d00}.note-inline{display:inline-block;background:#fffbe6;border:1px dashed #ffe58f;padding:1px 8px;border-radius:2px;font-size:11px;color:#874d00;margin-left:8px;font-weight:400}.error-note{background:#fff1f0;border-color:#ffccc7;color:#a8071a}
 .btn{display:inline-block;padding:5px 14px;border:1px solid var(--border);border-radius:2px;background:#fff;color:var(--text);cursor:pointer;font-size:13px;margin-left:8px}.btn-primary{background:var(--primary);border-color:var(--primary);color:#fff}.btn-danger{color:var(--danger);border-color:#ffccc7}.btn-disabled,.btn:disabled{background:#f5f5f5;color:#bfbfbf;cursor:not-allowed}.btn-sm{padding:3px 10px;font-size:12px}.btn-text{border:0;background:transparent;color:var(--primary);cursor:pointer;margin-right:8px}.btn-text.danger{color:var(--danger)}
 .text-input{border:1px solid var(--border);background:#fff;padding:7px 10px;border-radius:2px;min-width:260px;font-size:13px}.text-input.short{min-width:100px;width:100px}.textarea{width:100%;min-height:64px}.textarea.large{min-height:110px}.mini-input{width:52px;border:1px dashed #bfbfbf;padding:4px 6px;text-align:center}.search-row{display:flex;gap:8px;margin-bottom:14px;align-items:center}.project-cascader{width:360px}.customer-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.customer-card{text-align:left;background:#fafafa;border:1px dashed #bfbfbf;border-radius:4px;padding:12px;cursor:pointer}.customer-card.selected{border-color:var(--primary);background:var(--primary-light)}.meta{color:var(--text-3);margin-top:6px}.selected-info{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}.item label,.overview-grid label{display:block;color:var(--text-3);font-size:12px}
+.duplicate-modal{width:920px;max-width:calc(100vw - 48px)}.duplicate-modal .modal-body{max-height:68vh;overflow:auto}.duplicate-note{background:#fffbe6;border:1px solid #ffe58f;color:#874d00;border-radius:4px;padding:10px 12px;margin-bottom:14px}.duplicate-group{border:1px solid var(--border);border-radius:4px;margin-bottom:14px;overflow:hidden}.duplicate-title{background:#fafafa;border-bottom:1px solid var(--border);padding:10px 12px;font-weight:600;display:flex;justify-content:space-between;gap:12px}.duplicate-title span{color:var(--danger);font-weight:400}.duplicate-row{display:grid;grid-template-columns:76px minmax(260px,1fr) 64px 80px 80px;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid #f0f0f0}.duplicate-row.head{border-top:0;background:#fff;color:var(--text-2);font-size:12px;font-weight:500}.duplicate-input{width:100%;min-width:0;min-height:54px;box-sizing:border-box}.duplicate-error{background:#fff1f0;border:1px solid #ffccc7;color:#a8071a;border-radius:4px;padding:10px 12px;margin-top:12px}
 .tag{display:inline-block;padding:1px 6px;border-radius:2px;background:#f0f2f5;font-size:12px;margin-left:6px}.tag-primary{background:#e6f4ff;color:var(--primary)}.tag-success{background:#f6ffed;color:#389e0d}.tag-warning{background:#fff7e6;color:#d48806}.tag-danger{background:#fff1f0;color:var(--danger)}.tag-a{background:#fff1f0;color:#cf1322}.tag-b{background:#fff7e6;color:#d48806}.tag-c{background:#f6ffed;color:#389e0d}
 .quota-table{width:100%;border-collapse:collapse;font-size:13px;background:#fff}.quota-table th,.quota-table td{padding:8px 16px;border:1px solid var(--border);text-align:center;vertical-align:middle}.quota-table th{background:#fafafa;color:var(--text-2);font-weight:600}.quota-table .label{background:#fafafa;font-weight:600;text-align:left}.quota-remain{font-weight:700;color:var(--primary);font-size:16px}.quota-table.small th,.quota-table.small td{padding:6px 8px}.ok{color:var(--success)}.bad,.warn{color:var(--warning)}
 .source-legend{display:flex;align-items:center;gap:20px;background:#fff;border:1px solid var(--border);padding:10px 16px;margin-bottom:16px}.src-icon{display:inline-block;width:16px;height:16px;border-radius:2px;text-align:center;line-height:16px;font-size:10px;margin-right:6px}.src-from-profile{background:#e6f4ff;color:var(--primary)}.src-modified{background:#fff7e6;color:var(--warning)}.src-missing{background:#fff1f0;color:var(--danger)}

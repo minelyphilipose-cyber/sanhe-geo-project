@@ -640,6 +640,21 @@ public class GeoQuestionService {
                 .orderByAsc(GeoQuestionItem::getId));
     }
 
+    private void validateNoDuplicateQuestions(List<GeoQuestionItem> questions) {
+        Set<String> seen = new HashSet<>();
+        List<String> duplicates = new ArrayList<>();
+        for (GeoQuestionItem item : questions) {
+            String key = dedupeQuestionText(item.getQuestionText());
+            if (!seen.add(key)) {
+                duplicates.add(item.getQuestionText());
+            }
+        }
+        if (!duplicates.isEmpty()) {
+            String duplicateText = duplicates.stream().distinct().limit(10).collect(Collectors.joining("；"));
+            throw new BizException(400, "问题池存在重复问题，请替换后再入库：" + duplicateText);
+        }
+    }
+
     private int sumBatchReplaceCount(Long batchId) {
         if (batchId == null) {
             return 0;
@@ -687,6 +702,8 @@ public class GeoQuestionService {
                 || !Objects.equals(snapshot.getWorkorderCountC(), snapshot.getQuotaC() - snapshot.getActiveUsedC())) {
             throw new BizException(400, "三级配额未满，无法入库");
         }
+        List<GeoQuestionItem> questions = allQuestions(workorderId);
+        validateNoDuplicateQuestions(questions);
         GeoQuestionVersion version = new GeoQuestionVersion();
         version.setWorkorderId(workorderId);
         version.setCompanyId(workorder.getCompanyId());
@@ -699,7 +716,7 @@ public class GeoQuestionService {
         version.setIsPartial(false);
         version.setCommitMode("strict");
         ReviewVO reviewSnapshot = review(workorderId);
-        reviewSnapshot.setQuestions(allQuestions(workorderId).stream().map(this::toQuestionVO).collect(Collectors.toList()));
+        reviewSnapshot.setQuestions(questions.stream().map(this::toQuestionVO).collect(Collectors.toList()));
         version.setSnapshotJson(writeJson(reviewSnapshot));
         version.setCommittedAt(LocalDateTime.now());
         version.setCreatedAt(LocalDateTime.now());
@@ -710,7 +727,7 @@ public class GeoQuestionService {
         group.setCompanyId(workorder.getCompanyId());
         group.setProjectId(workorder.getProjectId());
         group.setName("问题池工单-" + workorderId + "-" + version.getVersionLabel());
-        group.setType("geo_question_pool");
+        group.setType("imported");
         group.setAreaEnabled(false);
         group.setRemark("由分层拓词管理入库生成");
         group.setDeleted(false);
@@ -718,7 +735,6 @@ public class GeoQuestionService {
         group.setUpdatedAt(LocalDateTime.now());
         keywordGroupMapper.insert(group);
 
-        List<GeoQuestionItem> questions = allQuestions(workorderId);
         int sort = 1;
         for (GeoQuestionItem q : questions) {
             KeywordGroupResult result = new KeywordGroupResult();
@@ -1004,11 +1020,22 @@ public class GeoQuestionService {
     }
 
     private void validateGeneratedCounts(List<GeneratedQuestionSpec> specs, GeoQuestionBatch batch, int total) {
+        validateGeneratedQuestionDuplicates(specs);
         long a = specs.stream().filter(item -> "A".equals(item.tier())).count();
         long b = specs.stream().filter(item -> "B".equals(item.tier())).count();
         long c = specs.stream().filter(item -> "C".equals(item.tier())).count();
         if (specs.size() < total || a < n(batch.getRequestA()) || b < n(batch.getRequestB()) || c < n(batch.getRequestC())) {
             throw new BizException(500, "模型返回数量不足：A=" + a + " B=" + b + " C=" + c + "，请重试");
+        }
+    }
+
+    private void validateGeneratedQuestionDuplicates(List<GeneratedQuestionSpec> specs) {
+        Set<String> seen = new HashSet<>();
+        for (GeneratedQuestionSpec spec : specs) {
+            String key = dedupeQuestionText(spec.questionText());
+            if (!seen.add(key)) {
+                throw new BizException(500, "模型返回重复问题，请重试：" + spec.questionText());
+            }
         }
     }
 
@@ -1089,6 +1116,10 @@ public class GeoQuestionService {
         if (weights == null || weights.isEmpty()) throw new BizException(400, "场景权重不能为空");
         int sum = weights.values().stream().mapToInt(this::n).sum();
         if (sum != total) throw new BizException(400, "场景权重总和必须等于本批合计");
+    }
+
+    private String dedupeQuestionText(String value) {
+        return defaultText(value, "").trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
     }
 
     private Map<String, Integer> itemCounts(Long workorderId) {
