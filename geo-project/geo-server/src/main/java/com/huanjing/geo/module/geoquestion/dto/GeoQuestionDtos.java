@@ -162,6 +162,7 @@ public class GeoQuestionDtos {
         private Integer actualA;
         private Integer actualB;
         private Integer actualC;
+        private String batchType;
         private String modelName;
         private String status;
         private String progressJson;
@@ -234,6 +235,29 @@ public class GeoQuestionDtos {
 
     @Data
     public static class QuestionUpdateRequest {
+        private String questionText;
+        private String sceneCode;
+        private String tier;
+        private String priority;
+        private String monitorFrequency;
+        private BigDecimal scoreRelevance;
+        private BigDecimal scoreIntent;
+        private BigDecimal scoreCompetition;
+        private BigDecimal scoreConversion;
+        private BigDecimal scoreCoverage;
+        private BigDecimal totalScore;
+        private String relatedNeedText;
+        private String designReason;
+    }
+
+    @Data
+    public static class ManualQuestionCreateRequest {
+        private List<ManualQuestionItemRequest> items;
+        private String manualReason;
+    }
+
+    @Data
+    public static class ManualQuestionItemRequest {
         private String questionText;
         private String sceneCode;
         private String tier;

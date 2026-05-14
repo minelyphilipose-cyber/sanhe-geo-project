@@ -24,9 +24,11 @@ import com.huanjing.geo.module.project.entity.KeywordGroup;
 import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.entity.ProjectCustomerRequirement;
+import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
 import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.ProjectCustomerRequirementMapper;
+import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
@@ -79,6 +81,7 @@ public class GeoQuestionService {
     private final GeoQuestionBatchLogMapper logMapper;
     private final KeywordGroupMapper keywordGroupMapper;
     private final KeywordGroupResultMapper keywordGroupResultMapper;
+    private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
     private final ProjectMapper projectMapper;
     private final ProjectCustomerRequirementMapper projectCustomerRequirementMapper;
     private final ObjectMapper objectMapper;
@@ -603,7 +606,7 @@ public class GeoQuestionService {
                 .orderByDesc(GeoQuestionBatch::getCreatedAt)).stream().map(this::toBatchVO).collect(Collectors.toList());
         batches.forEach(batch -> batch.setReplaceCountTotal(sumBatchReplaceCount(batch.getId())));
         vo.setBatches(batches);
-        vo.setQuestions(List.of());
+        vo.setQuestions(allQuestions(workorderId).stream().map(this::toQuestionVO).collect(Collectors.toList()));
         return vo;
     }
 
@@ -629,6 +632,94 @@ public class GeoQuestionService {
         vo.setSize(page.getSize());
         vo.setPages(page.getPages());
         return vo;
+    }
+
+    @Transactional
+    public ReviewVO createManualQuestions(Long workorderId, ManualQuestionCreateRequest req) {
+        GeoQuestionWorkorder workorder = workorderMapper.selectById(workorderId);
+        if (workorder == null || !List.of("draft", "paused").contains(workorder.getStatus())) {
+            throw new BizException(404, "可录入的问题池工单不存在");
+        }
+        if (req == null || req.getItems() == null || req.getItems().isEmpty()) {
+            throw new BizException(400, "请至少录入 1 条问题");
+        }
+        if (req.getItems().size() > 100) {
+            throw new BizException(400, "单次手动录入最多 100 条");
+        }
+
+        workorderMapper.lockById(workorder.getId());
+        releaseStaleRunningFlags(workorder.getId());
+        if (runningBatch(workorder.getId()) != null) {
+            throw new BizException(400, "当前工单已有运行中批次，请等待完成后再手动录入");
+        }
+
+        List<ManualQuestionItemRequest> items = normalizeManualItems(req.getItems());
+        Map<String, Integer> tierCounts = countManualTiers(items);
+        QuotaSnapshot snapshot = quotaSnapshot(workorder);
+        if (tierCounts.get("A") > snapshot.getRemainingA()) throw new BizException(400, "A 类剩余仅 " + snapshot.getRemainingA());
+        if (tierCounts.get("B") > snapshot.getRemainingB()) throw new BizException(400, "B 类剩余仅 " + snapshot.getRemainingB());
+        if (tierCounts.get("C") > snapshot.getRemainingC()) throw new BizException(400, "C 类剩余仅 " + snapshot.getRemainingC());
+        validateManualQuestionDuplicates(workorder.getId(), items);
+
+        GeoQuestionBatch batch = new GeoQuestionBatch();
+        batch.setWorkorderId(workorder.getId());
+        batch.setBatchNo("MAN-" + System.currentTimeMillis());
+        batch.setRequestA(tierCounts.get("A"));
+        batch.setRequestB(tierCounts.get("B"));
+        batch.setRequestC(tierCounts.get("C"));
+        batch.setActualA(tierCounts.get("A"));
+        batch.setActualB(tierCounts.get("B"));
+        batch.setActualC(tierCounts.get("C"));
+        batch.setReservedA(0);
+        batch.setReservedB(0);
+        batch.setReservedC(0);
+        batch.setActiveRunningFlag(null);
+        batch.setModelProvider("manual");
+        batch.setModelId("manual");
+        batch.setModelName("手动录入");
+        batch.setSceneWeightsJson(writeJson(countManualScenes(items)));
+        batch.setTemperature(new BigDecimal("0.00"));
+        batch.setParamSnapshot(writeJson(req));
+        batch.setPromptSnapshot(defaultText(req.getManualReason(), "手动录入问题"));
+        batch.setStatus("completed");
+        batch.setProgressJson(progress("completed", null, null, items.size(), items.size(), 0, "手动录入完成"));
+        batch.setPartialFlag(false);
+        batch.setCancelRequested(false);
+        batch.setStartedAt(LocalDateTime.now());
+        batch.setFinishedAt(LocalDateTime.now());
+        batch.setCreatedAt(LocalDateTime.now());
+        batch.setUpdatedAt(LocalDateTime.now());
+        batchMapper.insert(batch);
+
+        int sort = maxQuestionSortOrder(workorder.getId()) + 1;
+        for (ManualQuestionItemRequest itemReq : items) {
+            GeoQuestionItem item = new GeoQuestionItem();
+            item.setWorkorderId(workorder.getId());
+            item.setBatchId(batch.getId());
+            item.setTier(itemReq.getTier());
+            item.setSceneCode(itemReq.getSceneCode());
+            item.setQuestionText(itemReq.getQuestionText());
+            item.setPriority(defaultText(itemReq.getPriority(), "medium"));
+            item.setMonitorFrequency(defaultText(itemReq.getMonitorFrequency(), "weekly"));
+            item.setScoreRelevance(itemReq.getScoreRelevance());
+            item.setScoreIntent(itemReq.getScoreIntent());
+            item.setScoreCompetition(itemReq.getScoreCompetition());
+            item.setScoreConversion(itemReq.getScoreConversion());
+            item.setScoreCoverage(itemReq.getScoreCoverage());
+            item.setTotalScore(defaultBigDecimal(itemReq.getTotalScore(), manualTotalScore(itemReq)));
+            item.setRelatedNeedText(defaultText(itemReq.getRelatedNeedText(), ""));
+            item.setDesignReason(defaultText(itemReq.getDesignReason(), defaultText(req.getManualReason(), "手动录入")));
+            item.setStatus("pending_review");
+            item.setReplaceCount(0);
+            item.setSortOrder(sort++);
+            item.setCreatedAt(LocalDateTime.now());
+            item.setUpdatedAt(LocalDateTime.now());
+            itemMapper.insert(item);
+        }
+        workorder.setUpdatedAt(LocalDateTime.now());
+        workorderMapper.updateById(workorder);
+        log(batch.getId(), "manual_questions_created", "手动录入问题 " + items.size() + " 条");
+        return review(workorder.getId());
     }
 
     private List<GeoQuestionItem> allQuestions(Long workorderId) {
@@ -696,6 +787,9 @@ public class GeoQuestionService {
     public GeoQuestionVersion commit(Long workorderId, CommitRequest req) {
         GeoQuestionWorkorder workorder = workorderMapper.selectById(workorderId);
         if (workorder == null) throw new BizException(404, "Workorder not found");
+        if (!List.of("draft", "paused").contains(workorder.getStatus())) {
+            throw new BizException(400, "当前工单已入库，不能重复提交");
+        }
         QuotaSnapshot snapshot = quotaSnapshot(workorder);
         if (!Objects.equals(snapshot.getWorkorderCountA(), snapshot.getQuotaA() - snapshot.getActiveUsedA())
                 || !Objects.equals(snapshot.getWorkorderCountB(), snapshot.getQuotaB() - snapshot.getActiveUsedB())
@@ -735,6 +829,8 @@ public class GeoQuestionService {
         group.setUpdatedAt(LocalDateTime.now());
         keywordGroupMapper.insert(group);
 
+        bindKeywordGroupToProject(workorder.getProjectId(), group.getId());
+
         int sort = 1;
         for (GeoQuestionItem q : questions) {
             KeywordGroupResult result = new KeywordGroupResult();
@@ -766,6 +862,25 @@ public class GeoQuestionService {
         workorder.setUpdatedAt(LocalDateTime.now());
         workorderMapper.updateById(workorder);
         return version;
+    }
+
+    private void bindKeywordGroupToProject(Long projectId, Long groupId) {
+        if (projectId == null || groupId == null) {
+            return;
+        }
+        Long count = projectKeywordGroupRelMapper.selectCount(
+                new LambdaQueryWrapper<ProjectKeywordGroupRel>()
+                        .eq(ProjectKeywordGroupRel::getProjectId, projectId)
+                        .eq(ProjectKeywordGroupRel::getKeywordGroupId, groupId)
+        );
+        if (count != null && count > 0) {
+            return;
+        }
+        ProjectKeywordGroupRel rel = new ProjectKeywordGroupRel();
+        rel.setProjectId(projectId);
+        rel.setKeywordGroupId(groupId);
+        rel.setCreatedAt(LocalDateTime.now());
+        projectKeywordGroupRelMapper.insert(rel);
     }
 
     private GeneratedQuestionSpec invokeQuestionReplacement(GeoQuestionItem item) {
@@ -1118,8 +1233,98 @@ public class GeoQuestionService {
         if (sum != total) throw new BizException(400, "场景权重总和必须等于本批合计");
     }
 
+    private List<ManualQuestionItemRequest> normalizeManualItems(List<ManualQuestionItemRequest> rawItems) {
+        List<ManualQuestionItemRequest> items = new ArrayList<>();
+        for (ManualQuestionItemRequest raw : rawItems) {
+            if (raw == null) continue;
+            String questionText = defaultText(raw.getQuestionText(), "").trim();
+            if (!StringUtils.hasText(questionText)) {
+                throw new BizException(400, "问题文本不能为空");
+            }
+            if (questionText.length() > 500) {
+                throw new BizException(400, "问题文本最多 500 字");
+            }
+            ManualQuestionItemRequest item = new ManualQuestionItemRequest();
+            item.setQuestionText(questionText);
+            item.setTier(normalizeTier(raw.getTier()));
+            item.setSceneCode(normalizeScene(raw.getSceneCode()));
+            item.setPriority(defaultText(raw.getPriority(), "medium").trim());
+            item.setMonitorFrequency(defaultText(raw.getMonitorFrequency(), "weekly").trim());
+            item.setScoreRelevance(raw.getScoreRelevance());
+            item.setScoreIntent(raw.getScoreIntent());
+            item.setScoreCompetition(raw.getScoreCompetition());
+            item.setScoreConversion(raw.getScoreConversion());
+            item.setScoreCoverage(raw.getScoreCoverage());
+            item.setTotalScore(raw.getTotalScore());
+            item.setRelatedNeedText(defaultText(raw.getRelatedNeedText(), "").trim());
+            item.setDesignReason(defaultText(raw.getDesignReason(), "").trim());
+            items.add(item);
+        }
+        if (items.isEmpty()) {
+            throw new BizException(400, "请至少录入 1 条有效问题");
+        }
+        return items;
+    }
+
+    private Map<String, Integer> countManualTiers(List<ManualQuestionItemRequest> items) {
+        Map<String, Integer> counts = new HashMap<>();
+        counts.put("A", 0); counts.put("B", 0); counts.put("C", 0);
+        for (ManualQuestionItemRequest item : items) {
+            counts.put(item.getTier(), counts.getOrDefault(item.getTier(), 0) + 1);
+        }
+        return counts;
+    }
+
+    private Map<String, Integer> countManualScenes(List<ManualQuestionItemRequest> items) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (String scene : SCENES) {
+            counts.put(scene, 0);
+        }
+        for (ManualQuestionItemRequest item : items) {
+            counts.put(item.getSceneCode(), counts.getOrDefault(item.getSceneCode(), 0) + 1);
+        }
+        return counts;
+    }
+
+    private void validateManualQuestionDuplicates(Long workorderId, List<ManualQuestionItemRequest> items) {
+        Set<String> existing = allQuestions(workorderId).stream()
+                .map(GeoQuestionItem::getQuestionText)
+                .map(this::dedupeQuestionText)
+                .collect(Collectors.toSet());
+        Set<String> current = new HashSet<>();
+        for (ManualQuestionItemRequest item : items) {
+            String key = dedupeQuestionText(item.getQuestionText());
+            if (existing.contains(key)) {
+                throw new BizException(400, "问题已存在：" + item.getQuestionText());
+            }
+            if (!current.add(key)) {
+                throw new BizException(400, "本次录入存在重复问题：" + item.getQuestionText());
+            }
+        }
+    }
+
     private String dedupeQuestionText(String value) {
         return defaultText(value, "").trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
+    }
+
+    private int maxQuestionSortOrder(Long workorderId) {
+        GeoQuestionItem latest = itemMapper.selectOne(new LambdaQueryWrapper<GeoQuestionItem>()
+                .eq(GeoQuestionItem::getWorkorderId, workorderId)
+                .ne(GeoQuestionItem::getStatus, "deleted")
+                .orderByDesc(GeoQuestionItem::getSortOrder)
+                .last("LIMIT 1"));
+        return latest == null ? 0 : n(latest.getSortOrder());
+    }
+
+    private BigDecimal manualTotalScore(ManualQuestionItemRequest req) {
+        List<BigDecimal> scores = new ArrayList<>();
+        if (req.getScoreRelevance() != null) scores.add(req.getScoreRelevance());
+        if (req.getScoreIntent() != null) scores.add(req.getScoreIntent());
+        if (req.getScoreCompetition() != null) scores.add(req.getScoreCompetition());
+        if (req.getScoreConversion() != null) scores.add(req.getScoreConversion());
+        if (req.getScoreCoverage() != null) scores.add(req.getScoreCoverage());
+        if (scores.isEmpty()) return null;
+        return scores.stream().reduce(BigDecimal.ZERO, BigDecimal::add);
     }
 
     private Map<String, Integer> itemCounts(Long workorderId) {
@@ -1175,6 +1380,7 @@ public class GeoQuestionService {
         vo.setActualA(n(batch.getActualA()));
         vo.setActualB(n(batch.getActualB()));
         vo.setActualC(n(batch.getActualC()));
+        vo.setBatchType("manual".equals(batch.getModelProvider()) ? "manual" : "ai");
         vo.setModelName(batch.getModelName());
         vo.setStatus(batch.getStatus());
         vo.setProgressJson(batch.getProgressJson());
@@ -1315,6 +1521,7 @@ public class GeoQuestionService {
         if (StringUtils.hasText(project.getCityName())) parts.add(project.getCityName());
         if (StringUtils.hasText(project.getDistrictName())) parts.add(project.getDistrictName());
         return parts.isEmpty() ? fallback : String.join(" / ", parts);
+    }
 
     private List<Map<String, Object>> projectCoreNeeds(Long projectId) {
         List<ProjectCustomerRequirement> requirements = projectCustomerRequirementMapper.selectList(
@@ -1335,7 +1542,6 @@ public class GeoQuestionService {
             coreNeeds.add(item);
         }
         return coreNeeds;
-    }
     }
 
     private String buildPromptSnapshot(GeoQuestionWorkorder workorder, BatchStartRequest req) {

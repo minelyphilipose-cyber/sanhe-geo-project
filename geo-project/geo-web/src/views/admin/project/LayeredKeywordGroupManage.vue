@@ -10,7 +10,7 @@
     <div class="wire-layout">
       <main class="main">
         <div class="breadcrumb">GEO 运营后台 <span class="sep">/</span> 问题池 <span class="sep">/</span> <span class="current">分层拓词管理</span></div>
-        <StepHeader :active-step="activeStep" />
+        <StepHeader :active-step="activeStep" :completed-steps="completedSteps" />
 
         <section v-show="activeStep === 1">
           <div class="design-note">
@@ -64,6 +64,19 @@
           </div>
 
           <QuotaCard :quota="quota" title="③ 配额信息" />
+
+          <div v-if="showManualEntry" class="card">
+            <div class="card-head">
+              <span>手动录入问题</span>
+              <button class="btn btn-sm btn-primary" :disabled="manualEntryDisabled" @click="openManualEntry">
+                {{ manualEntryDisabled ? manualEntryDisabledText : '手动录入问题' }}
+              </button>
+            </div>
+            <div class="card-body manual-entry-card">
+              <div>项目存在问题额度，可手动补充客户现场明确提出的问题。录入后会生成手动批次，并进入 Step 5 审核入库。</div>
+              <div class="meta">剩余可录入：A {{ quota?.remainingA || 0 }} / B {{ quota?.remainingB || 0 }} / C {{ quota?.remainingC || 0 }}</div>
+            </div>
+          </div>
 
           <div v-if="selectedProject" class="card">
             <div class="card-head">
@@ -258,6 +271,7 @@
         <div class="modal-foot"><button class="btn" @click="editVisible = false">取消</button><button class="btn btn-primary" @click="saveEditQuestion">保存</button></div>
       </div>
     </div>
+
     <div v-if="duplicateResolveVisible" class="modal-mask">
       <div class="modal-card duplicate-modal">
         <div class="modal-head">
@@ -277,23 +291,122 @@
               <div>{{ item.batchId }}</div>
             </div>
           </div>
-          <div v-if="duplicateResolveError" class="duplicate-error">{{ duplicateResolveError }}</div>
+          <div v-if="duplicateResolveError" class="manual-tip error-tip">
+            <el-icon><InfoFilled /></el-icon>
+            <span>{{ duplicateResolveError }}</span>
+          </div>
         </div>
         <div class="modal-foot">
           <button class="btn" @click="duplicateResolveVisible = false">取消</button>
           <button class="btn btn-primary" :disabled="duplicateSaving" @click="saveDuplicateEdits">{{ duplicateSaving ? '保存中...' : '保存修改并重新检查' }}</button>
         </div>
       </div>
-    </div>  </div>
+    </div>
+
+    <div v-if="manualVisible" class="modal-mask">
+      <div class="modal-card manual-modal">
+        <div class="modal-head">
+          <div class="manual-title">
+            <el-icon class="manual-title-icon"><EditPen /></el-icon>
+            <span>手动录入问题</span>
+            <span class="manual-subtitle">补充客户现场提出的真实问题</span>
+          </div>
+          <button class="btn btn-sm btn-with-icon" @click="manualVisible = false">
+            <el-icon><Close /></el-icon>
+            <span>关闭</span>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="manual-form-grid">
+            <div class="manual-form-item">
+              <label class="manual-label">录入说明</label>
+              <input v-model="manualReason" class="text-input manual-reason" placeholder="例如：补充客户现场访谈问题">
+            </div>
+            <div class="manual-form-item">
+              <label class="manual-label">默认场景</label>
+              <select v-model="manualDefaultScene" class="text-input manual-scene-select">
+                <option v-for="s in sceneOptions" :key="s.code" :value="s.code">{{ s.label }}</option>
+              </select>
+              <span class="manual-hint">可逐行覆盖</span>
+            </div>
+          </div>
+
+          <div class="manual-form-item manual-paste-row">
+            <label class="manual-label paste-label">批量粘贴</label>
+            <div class="manual-paste-body">
+              <textarea v-model="manualPasteText" class="text-input textarea" placeholder="每行一个问题，点击「拆分为问题」后加入下方表格" rows="3"></textarea>
+              <div class="manual-paste-footer">
+                <span class="manual-hint">支持每行一条问题，自动去重</span>
+                <button class="btn btn-sm btn-with-icon" @click="appendManualPaste">
+                  <el-icon><Download /></el-icon>
+                  <span>拆分为问题</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="manual-divider"></div>
+
+          <div class="manual-toolbar">
+            <div class="manual-stats">
+              <span class="manual-stats-label">本次录入</span>
+              <span class="manual-stats-count">{{ validManualRows.length }} 条</span>
+              <span class="manual-tier-pills">
+                <span class="tier-pill tier-a">A {{ manualTierCount.A }}</span>
+                <span class="tier-pill tier-b">B {{ manualTierCount.B }}</span>
+                <span class="tier-pill tier-c">C {{ manualTierCount.C }}</span>
+              </span>
+              <span class="manual-quota-remain">剩余额度 A {{ quota?.remainingA || 0 }} / B {{ quota?.remainingB || 0 }} / C {{ quota?.remainingC || 0 }}</span>
+            </div>
+            <button class="btn btn-sm btn-with-icon" @click="addManualRow">
+              <el-icon><Plus /></el-icon>
+              <span>增加一行</span>
+            </button>
+          </div>
+          <div class="manual-table">
+            <div class="manual-row head"><div>问题文本 <span class="required">*</span></div><div>分级</div><div>场景</div><div>优先级</div><div>频率</div><div>对应需求</div><div class="op-col">操作</div></div>
+            <div v-for="(row, idx) in manualRows" :key="row.key" class="manual-row">
+              <input v-model="row.questionText" class="text-input manual-question" placeholder="请输入用户可能提出的问题">
+              <select v-model="row.tier" class="text-input mini-select"><option value="A">A</option><option value="B">B</option><option value="C">C</option></select>
+              <select v-model="row.sceneCode" class="text-input mini-select"><option v-for="s in sceneOptions" :key="s.code" :value="s.code">{{ s.label }}</option></select>
+              <select v-model="row.priority" class="text-input mini-select"><option value="high">高</option><option value="medium">中</option><option value="low">低</option></select>
+              <select v-model="row.monitorFrequency" class="text-input mini-select"><option value="daily">每日</option><option value="weekly">每周</option><option value="monthly">每月</option></select>
+              <input v-model="row.relatedNeedText" class="text-input manual-need" placeholder="可选">
+              <div class="op-col">
+                <button class="btn-icon" :disabled="manualRows.length <= 1" aria-label="删除问题" @click="manualRows.splice(idx, 1)">
+                  <el-icon><Delete /></el-icon>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div v-if="manualValidationMessage" class="manual-tip error-tip">
+            <el-icon><InfoFilled /></el-icon>
+            <span>{{ manualValidationMessage }}</span>
+          </div>
+          <div v-else class="manual-tip info-tip">
+            <el-icon><InfoFilled /></el-icon>
+            <span>提交后将创建手动批次；额度未填满时可继续录入或调用 AI 生成，额度填满后进入 Step 5 审核入库。</span>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn" @click="manualVisible = false">取消</button>
+          <button class="btn btn-primary" :disabled="!!manualValidationMessage || manualSaving" @click="submitManualQuestions">{{ manualSaving ? '提交中...' : '提交并审核' }}</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed, defineComponent, h, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Close, Delete, Download, EditPen, InfoFilled, Plus } from '@element-plus/icons-vue'
 import { useDictStore } from '@/stores/dict'
 import {
   cancelGeoBatch,
   commitGeoWorkorder,
+  createManualGeoQuestions,
   createOrGetProjectWorkorder,
   deleteGeoBatch,
   deleteGeoQuestion,
@@ -310,6 +423,7 @@ import {
   startGeoBatch,
   updateGeoQuestion,
   type BatchVO,
+  type ManualQuestionInput,
   type ProfileVO,
   type ProviderVO,
   type QuestionPageVO,
@@ -324,12 +438,15 @@ import type { Project } from '@/types'
 
 defineOptions({ name: 'LayeredKeywordGroupManage' })
 
+type ManualQuestionRow = ManualQuestionInput & { key: number }
+const route = useRoute()
+
 const StepHeader = defineComponent({
-  props: { activeStep: { type: Number, required: true } },
+  props: { activeStep: { type: Number, required: true }, completedSteps: { type: Array as () => number[], default: () => [] } },
   setup(props) {
     const names = ['选择项目', '信息补全', '配置参数', '触发生成', '审核入库']
     const subtitles = ['读取项目额度', '复用+补全', '本批≤50', '异步任务', '累积+导出']
-    return () => h('div', { class: 'stepper' }, names.map((name, i) => h('div', { class: ['stepper-item', props.activeStep === i + 1 ? 'active' : '', props.activeStep > i + 1 ? 'done' : ''] }, [
+    return () => h('div', { class: 'stepper' }, names.map((name, i) => h('div', { class: ['stepper-item', props.activeStep === i + 1 ? 'active' : '', props.completedSteps.includes(i + 1) ? 'done' : ''] }, [
       h('div', { class: 'stepper-num' }, [h('span', String(i + 1))]),
       h('div', { class: 'stepper-text' }, [name, h('span', { class: 'subtitle' }, subtitles[i])]),
     ])))
@@ -379,9 +496,18 @@ const duplicateResolveVisible = ref(false)
 const duplicateSaving = ref(false)
 const duplicateResolveError = ref('')
 const duplicateEditForms = reactive<Record<number, string>>({})
+const manualVisible = ref(false)
+const manualSaving = ref(false)
+const manualReason = ref('')
+const manualDefaultScene = ref('brand')
+const manualPasteText = ref('')
+const manualRows = ref<ManualQuestionRow[]>([])
+const manualRowKey = ref(1)
 const tierTab = ref<'all' | 'A' | 'B' | 'C'>('all')
 const questionTabs = ['all', 'A', 'B', 'C'] as const
 const syncToProfile = ref(false)
+const profileDraftSaved = ref(false)
+const profileLoaded = ref(false)
 
 const profile = reactive<ProfileVO>({
   companyId: 0, companyName: '', brandName: '', brandRelation: '自营', coreBusiness: [], targetRegion: '', industry: '',
@@ -426,9 +552,52 @@ const pagedQuestions = computed(() => questionPage.value.records || [])
 const duplicateQuestionGroups = computed(() => findDuplicateQuestionGroups(review.value?.questions || []))
 const duplicateQuestionTexts = computed(() => duplicateQuestionGroups.value.map((group) => group.text))
 const canCommit = computed(() => !!quota.value && quota.value.remainingA === 0 && quota.value.remainingB === 0 && quota.value.remainingC === 0 && quota.value.runningReservedTotal === 0)
-const canContinueGenerate = computed(() => !!quota.value && (quota.value.remainingTotal || 0) > 0 && !hasRunningBatch.value && workorder.value?.status === 'draft')
+const canContinueGenerate = computed(() => !!quota.value && (quota.value.remainingTotal || 0) > 0 && !hasRunningBatch.value && ['draft', 'paused'].includes(workorder.value?.status || ''))
+const hasAiBatch = computed(() => (review.value?.batches || []).some((batch) => !isManualBatch(batch)))
+const currentAiBatch = computed(() => currentBatch.value && !isManualBatch(currentBatch.value) ? currentBatch.value : undefined)
+const completedSteps = computed(() => {
+  const stepsDone: number[] = []
+  if (workorder.value) stepsDone.push(1)
+  if (profileDraftSaved.value || hasAiBatch.value) stepsDone.push(2)
+  if (hasAiBatch.value || currentAiBatch.value) stepsDone.push(3)
+  if ((currentAiBatch.value && !['pending', 'running'].includes(currentAiBatch.value.status)) || (review.value?.batches || []).some((batch) => !isManualBatch(batch) && !['pending', 'running'].includes(batch.status))) stepsDone.push(4)
+  return stepsDone
+})
+const showManualEntry = computed(() => !!selectedProject.value && !!workorder.value && ['draft', 'paused'].includes(workorder.value.status) && projectQuotaTotal(selectedProject.value) > 0)
+const manualEntryDisabled = computed(() => !quota.value || quota.value.remainingTotal <= 0 || (quota.value.runningReservedTotal || 0) > 0 || hasRunningBatch.value)
+const manualEntryDisabledText = computed(() => {
+  if (!quota.value) return '等待配额'
+  if (quota.value.remainingTotal <= 0) return '额度已满'
+  if ((quota.value.runningReservedTotal || 0) > 0 || hasRunningBatch.value) return '批次运行中'
+  return '不可录入'
+})
+const validManualRows = computed(() => manualRows.value.filter((row) => row.questionText.trim()))
+const manualTierCount = computed(() => {
+  const counts = { A: 0, B: 0, C: 0 }
+  validManualRows.value.forEach((row) => { counts[row.tier] += 1 })
+  return counts
+})
+const manualValidationMessage = computed(() => {
+  if (!workorder.value) return '请先选择项目'
+  if (!validManualRows.value.length) return '请至少录入 1 条问题'
+  if (manualTierCount.value.A > (quota.value?.remainingA || 0)) return `A 类剩余仅 ${quota.value?.remainingA || 0}`
+  if (manualTierCount.value.B > (quota.value?.remainingB || 0)) return `B 类剩余仅 ${quota.value?.remainingB || 0}`
+  if (manualTierCount.value.C > (quota.value?.remainingC || 0)) return `C 类剩余仅 ${quota.value?.remainingC || 0}`
+  const seen = new Set<string>()
+  for (const row of validManualRows.value) {
+    if (row.questionText.trim().length > 500) return '单条问题最多 500 字'
+    const key = row.questionText.trim().replace(/\s+/g, ' ').toLowerCase()
+    if (seen.has(key)) return `本次录入存在重复问题：${row.questionText.trim()}`
+    seen.add(key)
+  }
+  return ''
+})
 
-onMounted(async () => { await Promise.all([dictStore.ensureLoaded(), loadProjects(), loadProviders()]); applyBaselineWeights() })
+onMounted(async () => {
+  await Promise.all([dictStore.ensureLoaded(), loadProjects(), loadProviders()])
+  applyBaselineWeights()
+  await selectRouteProject()
+})
 watch(batchTotal, () => applyBaselineWeights())
 watch(tierTab, () => loadQuestionPage(1))
 
@@ -439,6 +608,16 @@ async function loadProjects() {
     projectOptions.value = data.data.records || []
   } finally {
     projectLoading.value = false
+  }
+}
+async function selectRouteProject() {
+  const queryProjectId = Number(route.query.projectId)
+  if (!Number.isFinite(queryProjectId) || queryProjectId <= 0) {
+    return
+  }
+  const project = projectOptions.value.find((item) => item.id === queryProjectId)
+  if (project) {
+    await selectProject(project)
   }
 }
 async function loadProviders() {
@@ -457,6 +636,7 @@ async function handleProjectChange(projectId: number | null) {
 async function selectProject(item: Project) {
   selectedProjectId.value = item.id
   if (projectQuotaTotal(item) <= 0) { ElMessage.warning('当前项目未配置问题额度，不能进入分层拓词管理'); return }
+  resetWorkorderState()
   const { data } = await createOrGetProjectWorkorder(item.id)
   workorder.value = data.data
   quota.value = data.data.quota
@@ -471,11 +651,22 @@ async function loadWorkorderList() {
   const { data } = await getGeoProjectWorkorders(selectedProject.value.id)
   workorderList.value = data.data || []
 }
+function resetWorkorderState() {
+  profileDraftSaved.value = false
+  profileLoaded.value = false
+  review.value = undefined
+  currentBatch.value = undefined
+  questionPage.value = { ...questionPage.value, records: [], total: 0, current: 1, pages: 0 }
+  duplicateResolveVisible.value = false
+  duplicateResolveError.value = ''
+}
 async function openWorkorderReview(item: WorkorderListItem) {
   const { data } = await getGeoReview(item.id)
   review.value = data.data
   workorder.value = data.data.workorder
   quota.value = data.data.workorder.quota
+  profileDraftSaved.value = data.data.batches?.some((batch: BatchVO) => !isManualBatch(batch)) || false
+  profileLoaded.value = false
   questionPage.value = { ...questionPage.value, current: 1 }
   await loadQuestionPage(1)
   activeStep.value = 5
@@ -494,15 +685,21 @@ async function goStep(stepNo: number) {
 }
 async function goStep2() {
   if (!selectedProject.value || !workorder.value) return
+  if (profileLoaded.value) {
+    activeStep.value = 2
+    return
+  }
   const { data } = await getGeoProjectProfile(selectedProject.value.id)
   Object.assign(profile, data.data)
   if (!profile.competitors.length) addCompetitor()
   if (!profile.coreNeeds.length) { addNeed(); addNeed(); addNeed() }
+  profileLoaded.value = true
   activeStep.value = 2
 }
 async function saveDraft() {
   if (!workorder.value) return
   await saveGeoDraft({ workorderId: workorder.value.id, profileJson: JSON.stringify(profile), syncToCustomerProfile: syncToProfile.value, validationStatus: 'valid' })
+  profileDraftSaved.value = true
   ElMessage.success('草稿已保存')
 }
 async function goStep3() {
@@ -518,6 +715,69 @@ async function refreshQuota() {
 }
 function addCompetitor() { profile.competitors.push({ competitorName: '', advantages: '', disadvantages: '' }) }
 function addNeed() { profile.coreNeeds.push({ text: '', scene: 'brand', urgent: false }) }
+function defaultManualRow(questionText = ''): ManualQuestionRow {
+  return {
+    key: manualRowKey.value++,
+    questionText,
+    tier: 'C',
+    sceneCode: manualDefaultScene.value,
+    priority: 'medium',
+    monitorFrequency: 'weekly',
+    relatedNeedText: '',
+    designReason: '',
+  }
+}
+function openManualEntry() {
+  if (manualEntryDisabled.value) return
+  manualReason.value = ''
+  manualDefaultScene.value = 'brand'
+  manualPasteText.value = ''
+  manualRows.value = [defaultManualRow()]
+  manualVisible.value = true
+}
+function addManualRow() {
+  manualRows.value.push(defaultManualRow())
+}
+function appendManualPaste() {
+  const lines = manualPasteText.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  if (!lines.length) return
+  const blank = manualRows.value.length === 1 && !manualRows.value[0].questionText.trim()
+  if (blank) manualRows.value = []
+  lines.forEach((line) => manualRows.value.push(defaultManualRow(line)))
+  manualPasteText.value = ''
+}
+async function submitManualQuestions() {
+  if (!workorder.value || manualValidationMessage.value) return
+  manualSaving.value = true
+  try {
+    const payload = validManualRows.value.map((row) => ({
+      questionText: row.questionText.trim(),
+      tier: row.tier,
+      sceneCode: row.sceneCode,
+      priority: row.priority,
+      monitorFrequency: row.monitorFrequency,
+      relatedNeedText: row.relatedNeedText?.trim(),
+      designReason: row.designReason?.trim() || manualReason.value.trim(),
+    }))
+    const { data } = await createManualGeoQuestions(workorder.value.id, { items: payload, manualReason: manualReason.value.trim() || undefined })
+    review.value = data.data
+    workorder.value = data.data.workorder
+    quota.value = data.data.workorder.quota
+    manualVisible.value = false
+    tierTab.value = 'all'
+    await loadWorkorderList()
+    if ((quota.value?.remainingTotal || 0) > 0) {
+      activeStep.value = 1
+      ElMessage.success('手动录入问题已提交，可继续录入或进入信息补全生成')
+      return
+    }
+    await loadQuestionPage(1)
+    activeStep.value = 5
+    ElMessage.success('手动录入问题已提交，问题额度已填满，进入审核')
+  } finally {
+    manualSaving.value = false
+  }
+}
 function industryLabel(value?: string | null) {
   if (!value) return '-'
   return dictStore.label('industry_tag', value) || value
@@ -673,7 +933,14 @@ async function loadQuestionPage(current = 1) {
   }
 }
 function continueGenerate() {
-  if (!canContinueGenerate.value) return
+  if (!canContinueGenerate.value) {
+    return
+  }
+  if (!profileDraftSaved.value && !hasAiBatch.value) {
+    activeStep.value = 1
+    ElMessage.info('当前仅有手动录入批次，请在 Step 1 继续手动录入，或从下一步进入信息补全后调用 AI 生成')
+    return
+  }
   fillToLimit()
   activeStep.value = 3
 }
@@ -704,10 +971,34 @@ async function commit() {
     ElMessage.warning('三级配额未满或存在运行中批次，无法入库')
     return
   }
-  await commitGeoWorkorder(workorder.value.id, 'v1.0')
-  ElMessage.success('已入库为客户级正式版本')
-  await refreshReview()
-}async function exportHint() {
+  try {
+    await commitGeoWorkorder(workorder.value.id, 'v1.0')
+    ElMessage.success('已入库为客户级正式版本')
+    await resetAfterCommit()
+  } catch (error) {
+    if (isDuplicateCommitError(error)) {
+      await refreshReview()
+      if (duplicateQuestionTexts.value.length) {
+        openDuplicateResolveDialog()
+      }
+    }
+  }
+}
+async function resetAfterCommit() {
+  const project = selectedProject.value
+  if (!project) {
+    resetWorkorderState()
+    activeStep.value = 1
+    return
+  }
+  resetWorkorderState()
+  const { data } = await createOrGetProjectWorkorder(project.id)
+  workorder.value = data.data
+  quota.value = data.data.quota
+  await loadWorkorderList()
+  activeStep.value = 1
+}
+async function exportHint() {
   if (!workorder.value) return
   const response = await exportGeoWorkorder(workorder.value.id)
   const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8' })
@@ -721,6 +1012,10 @@ async function commit() {
 function batchReplaceCount(batchId: number) { return review.value?.batches.find((b) => b.id === batchId)?.replaceCountTotal || 0 }
 function sceneLabel(code?: string) { return sceneOptions.find((s) => s.code === code)?.label || code || '-' }
 function formatTime(value?: string) { return value ? value.replace('T', ' ').slice(0, 19) : '-' }
+function isDuplicateCommitError(error: unknown) {
+  const message = error instanceof Error ? error.message : ''
+  return message.includes('重复问题') || message.includes('Duplicate entry') || message.includes('uk_group_keyword')
+}
 function questionDedupeKey(value?: string | null) {
   return (value || '').trim().replace(/\s+/g, ' ').toLowerCase()
 }
@@ -790,7 +1085,12 @@ async function saveDuplicateEdits() {
   } finally {
     duplicateSaving.value = false
   }
-}function statusTagClass(status?: string) {
+}
+function isManualBatch(batch?: BatchVO | null) {
+  if (!batch) return false
+  return batch.batchType === 'manual' || batch.modelName === '手动录入' || batch.batchNo?.startsWith('MAN-')
+}
+function statusTagClass(status?: string) {
   if (status === 'committed') return 'tag-success'
   if (status === 'draft') return 'tag-primary'
   if (status === 'discarded') return 'tag-danger'
@@ -806,7 +1106,9 @@ async function saveDuplicateEdits() {
 .card{background:var(--surface);border:1px solid var(--border);border-radius:4px;margin-bottom:16px}.card-head{padding:12px 20px;border-bottom:1px solid var(--border);font-size:14px;font-weight:600;display:flex;justify-content:space-between;align-items:center}.card-body{padding:20px}.design-note{background:#f0f5ff;border-left:3px solid var(--primary);border-top:0;border-right:0;border-bottom:0;border-radius:0 2px 2px 0;padding:10px 14px;margin-bottom:16px;color:var(--text-2)}.design-note strong{color:var(--primary)}.note{background:#fffbe6;border:1px dashed #ffe58f;border-radius:2px;padding:8px 12px;margin:12px 0 0;color:#874d00}.note-inline{display:inline-block;background:#fffbe6;border:1px dashed #ffe58f;padding:1px 8px;border-radius:2px;font-size:11px;color:#874d00;margin-left:8px;font-weight:400}.error-note{background:#fff1f0;border-color:#ffccc7;color:#a8071a}
 .btn{display:inline-block;padding:5px 14px;border:1px solid var(--border);border-radius:2px;background:#fff;color:var(--text);cursor:pointer;font-size:13px;margin-left:8px}.btn-primary{background:var(--primary);border-color:var(--primary);color:#fff}.btn-danger{color:var(--danger);border-color:#ffccc7}.btn-disabled,.btn:disabled{background:#f5f5f5;color:#bfbfbf;cursor:not-allowed}.btn-sm{padding:3px 10px;font-size:12px}.btn-text{border:0;background:transparent;color:var(--primary);cursor:pointer;margin-right:8px}.btn-text.danger{color:var(--danger)}
 .text-input{border:1px solid var(--border);background:#fff;padding:7px 10px;border-radius:2px;min-width:260px;font-size:13px}.text-input.short{min-width:100px;width:100px}.textarea{width:100%;min-height:64px}.textarea.large{min-height:110px}.mini-input{width:52px;border:1px dashed #bfbfbf;padding:4px 6px;text-align:center}.search-row{display:flex;gap:8px;margin-bottom:14px;align-items:center}.project-cascader{width:360px}.customer-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.customer-card{text-align:left;background:#fafafa;border:1px dashed #bfbfbf;border-radius:4px;padding:12px;cursor:pointer}.customer-card.selected{border-color:var(--primary);background:var(--primary-light)}.meta{color:var(--text-3);margin-top:6px}.selected-info{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:16px}.item label,.overview-grid label{display:block;color:var(--text-3);font-size:12px}
-.duplicate-modal{width:920px;max-width:calc(100vw - 48px)}.duplicate-modal .modal-body{max-height:68vh;overflow:auto}.duplicate-note{background:#fffbe6;border:1px solid #ffe58f;color:#874d00;border-radius:4px;padding:10px 12px;margin-bottom:14px}.duplicate-group{border:1px solid var(--border);border-radius:4px;margin-bottom:14px;overflow:hidden}.duplicate-title{background:#fafafa;border-bottom:1px solid var(--border);padding:10px 12px;font-weight:600;display:flex;justify-content:space-between;gap:12px}.duplicate-title span{color:var(--danger);font-weight:400}.duplicate-row{display:grid;grid-template-columns:76px minmax(260px,1fr) 64px 80px 80px;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid #f0f0f0}.duplicate-row.head{border-top:0;background:#fff;color:var(--text-2);font-size:12px;font-weight:500}.duplicate-input{width:100%;min-width:0;min-height:54px;box-sizing:border-box}.duplicate-error{background:#fff1f0;border:1px solid #ffccc7;color:#a8071a;border-radius:4px;padding:10px 12px;margin-top:12px}
+.manual-entry-card{display:flex;justify-content:space-between;align-items:center;gap:16px}.manual-modal{width:960px;max-width:calc(100vw - 48px);border-radius:6px}.manual-modal .modal-head{padding:14px 24px}.manual-modal .modal-body{padding:22px 28px}.manual-modal .modal-foot{padding:14px 24px;gap:8px}.manual-modal .btn{display:inline-flex;align-items:center;gap:4px;margin-left:0}.manual-modal .text-input{box-sizing:border-box;min-width:0}.manual-title{display:flex;align-items:center;gap:10px}.manual-title-icon{font-size:18px;color:var(--text-2)}.manual-subtitle{font-size:12px;color:var(--text-3);padding:2px 8px;background:#f5f6f8;border-radius:4px;font-weight:400}.btn-with-icon .el-icon{font-size:14px}.manual-form-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:24px;margin-bottom:18px}.manual-form-item{display:flex;align-items:center;gap:12px}.manual-label{font-size:13px;color:var(--text-2);min-width:64px;text-align:right;flex-shrink:0;font-weight:400}.manual-form-item .text-input{flex:1}.manual-reason{width:100%}.manual-scene-select{flex:0 0 140px!important}.manual-hint{font-size:12px;color:var(--text-3);white-space:nowrap}.manual-paste-row{align-items:flex-start;margin-bottom:22px}.paste-label{padding-top:8px}.manual-paste-body{flex:1}.manual-paste-body .textarea{min-height:76px;resize:vertical}.manual-paste-footer{display:flex;justify-content:space-between;align-items:center;margin-top:10px}.manual-divider{height:1px;background:#f0f0f0;margin-bottom:18px}.manual-toolbar{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:#fafafa;border-radius:4px;margin:0 0 10px;color:var(--text-2);gap:12px}.manual-stats{display:flex;align-items:center;gap:16px;font-size:13px;flex-wrap:wrap}.manual-stats-label{color:var(--text-2)}.manual-stats-count{font-weight:500;font-size:14px;color:var(--text)}.manual-tier-pills{display:inline-flex;gap:6px;align-items:center}.tier-pill{padding:2px 10px;border-radius:10px;font-size:12px;font-weight:500}.tier-pill.tier-a{background:#fff1f0;color:#cf1322}.tier-pill.tier-b{background:#fff7e6;color:#d48806}.tier-pill.tier-c{background:#f6ffed;color:#389e0d}.manual-quota-remain{color:var(--text-3);font-size:12px;padding-left:12px;border-left:1px solid #e5e7eb}.manual-table{border:1px solid #e5e7eb;border-radius:4px;overflow:hidden}.manual-row{display:grid;grid-template-columns:minmax(0,1fr) 56px 72px 64px 72px 100px 40px;gap:8px;padding:8px 14px;align-items:center;border-top:1px solid #f0f0f0;min-height:48px}.manual-row:first-child{border-top:0}.manual-row.head{background:#fafafa;color:var(--text-2);font-weight:500;font-size:12px;padding:10px 14px;min-height:0}.manual-row.head .required{color:var(--danger)}.manual-row.head .op-col{text-align:center}.manual-row .text-input{height:32px;padding:6px 10px}.manual-question{width:100%}.manual-need{width:100%;padding:6px 8px!important}.mini-select{width:100%;padding:6px 2px!important;background:#fff}.op-col{display:flex;justify-content:center;align-items:center;height:32px}.btn-icon{border:0;background:transparent;color:var(--text-3);cursor:pointer;padding:4px 6px;border-radius:2px;transition:color .15s,background .15s}.btn-icon:hover:not(:disabled){color:var(--danger);background:#fff1f0}.btn-icon:disabled{color:var(--text-4);cursor:not-allowed}.manual-tip{display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:4px;font-size:12px;margin-top:16px}.manual-tip .el-icon{font-size:14px;flex-shrink:0}.info-tip{background:#fffbe6;border:1px solid #ffe58f;color:#874d00}.error-tip{background:#fff1f0;border:1px solid #ffccc7;color:#a8071a}
+.duplicate-modal{width:920px;max-width:calc(100vw - 48px)}.duplicate-modal .modal-body{max-height:68vh;overflow:auto}.duplicate-note{background:#fffbe6;border:1px solid #ffe58f;color:#874d00;border-radius:4px;padding:10px 12px;margin-bottom:14px}.duplicate-group{border:1px solid var(--border);border-radius:4px;margin-bottom:14px;overflow:hidden}.duplicate-title{background:#fafafa;border-bottom:1px solid var(--border);padding:10px 12px;font-weight:600;display:flex;justify-content:space-between;gap:12px}.duplicate-title span{color:var(--danger);font-weight:400}.duplicate-row{display:grid;grid-template-columns:76px minmax(260px,1fr) 64px 80px 80px;gap:10px;align-items:center;padding:10px 12px;border-top:1px solid #f0f0f0}.duplicate-row.head{border-top:0;background:#fff;color:var(--text-2);font-size:12px;font-weight:500}.duplicate-input{width:100%;min-width:0;min-height:54px;box-sizing:border-box}
+@media (max-width: 900px){.manual-form-grid{grid-template-columns:1fr}.manual-toolbar{align-items:flex-start;flex-direction:column}.manual-row{grid-template-columns:minmax(180px,1fr) 56px 72px 64px 72px 100px 40px;min-width:720px}.manual-table{overflow-x:auto}.manual-paste-footer{align-items:flex-start;flex-direction:column;gap:10px}.manual-paste-footer .btn{margin-left:0}}
 .tag{display:inline-block;padding:1px 6px;border-radius:2px;background:#f0f2f5;font-size:12px;margin-left:6px}.tag-primary{background:#e6f4ff;color:var(--primary)}.tag-success{background:#f6ffed;color:#389e0d}.tag-warning{background:#fff7e6;color:#d48806}.tag-danger{background:#fff1f0;color:var(--danger)}.tag-a{background:#fff1f0;color:#cf1322}.tag-b{background:#fff7e6;color:#d48806}.tag-c{background:#f6ffed;color:#389e0d}
 .quota-table{width:100%;border-collapse:collapse;font-size:13px;background:#fff}.quota-table th,.quota-table td{padding:8px 16px;border:1px solid var(--border);text-align:center;vertical-align:middle}.quota-table th{background:#fafafa;color:var(--text-2);font-weight:600}.quota-table .label{background:#fafafa;font-weight:600;text-align:left}.quota-remain{font-weight:700;color:var(--primary);font-size:16px}.quota-table.small th,.quota-table.small td{padding:6px 8px}.ok{color:var(--success)}.bad,.warn{color:var(--warning)}
 .source-legend{display:flex;align-items:center;gap:20px;background:#fff;border:1px solid var(--border);padding:10px 16px;margin-bottom:16px}.src-icon{display:inline-block;width:16px;height:16px;border-radius:2px;text-align:center;line-height:16px;font-size:10px;margin-right:6px}.src-from-profile{background:#e6f4ff;color:var(--primary)}.src-modified{background:#fff7e6;color:var(--warning)}.src-missing{background:#fff1f0;color:var(--danger)}
