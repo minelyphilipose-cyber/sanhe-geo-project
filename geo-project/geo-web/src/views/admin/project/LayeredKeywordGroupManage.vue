@@ -209,7 +209,7 @@
         <section v-show="activeStep === 5">
           <div class="design-note"><strong>Step 5 说明：</strong>累积视图：本工单下所有批次的题目合并展示。重生成单条采用原地软替换，不破坏配额。入库需 A/B/C 全部满额（本期严格模式）。</div>
           <QuotaCard :quota="review?.workorder.quota || quota" title="工单累积统计" />
-          <div class="footer-bar quota-actions"><div v-if="duplicateQuestionTexts.length" class="warn">⚠ 存在重复问题，请替换或删除后再入库：{{ duplicateQuestionTexts.slice(0, 3).join('；') }}</div><div v-else-if="!canCommit" class="warn">⚠ 三级配额未满，无法入库。剩余 A {{ quota?.remainingA || 0 }} / B {{ quota?.remainingB || 0 }} / C {{ quota?.remainingC || 0 }}</div><div><button class="btn btn-primary" :disabled="hasRunningBatch || workorder?.status !== 'draft'" @click="continueGenerate">+ 继续生成下一批</button><button class="btn" @click="exportHint">导出 Excel</button><button class="btn" :class="canCommit ? 'btn-primary' : 'btn-disabled'" :disabled="!canCommit" @click="commit">入库为正式版本（v1.0）</button></div></div>
+          <div class="footer-bar quota-actions"><div v-if="duplicateQuestionTexts.length" class="warn">⚠ 存在重复问题，请替换或删除后再入库：{{ duplicateQuestionTexts.slice(0, 3).join('；') }}</div><div v-else-if="!canCommit" class="warn">⚠ 三级配额未满，无法入库。剩余 A {{ quota?.remainingA || 0 }} / B {{ quota?.remainingB || 0 }} / C {{ quota?.remainingC || 0 }}</div><div><button class="btn btn-primary" :disabled="!canContinueGenerate" @click="continueGenerate">+ 继续生成下一批</button><button class="btn" @click="exportHint">导出 Excel</button><button class="btn" :class="canCommit ? 'btn-primary' : 'btn-disabled'" :disabled="!canCommit" @click="commit">入库为正式版本（v1.0）</button></div></div>
           <div class="card">
             <div class="card-head"><span>本工单生成批次（{{ review?.batches.length || 0 }} 个）</span></div>
             <div class="card-body batch-list">
@@ -426,6 +426,7 @@ const pagedQuestions = computed(() => questionPage.value.records || [])
 const duplicateQuestionGroups = computed(() => findDuplicateQuestionGroups(review.value?.questions || []))
 const duplicateQuestionTexts = computed(() => duplicateQuestionGroups.value.map((group) => group.text))
 const canCommit = computed(() => !!quota.value && quota.value.remainingA === 0 && quota.value.remainingB === 0 && quota.value.remainingC === 0 && quota.value.runningReservedTotal === 0)
+const canContinueGenerate = computed(() => !!quota.value && (quota.value.remainingTotal || 0) > 0 && !hasRunningBatch.value && workorder.value?.status === 'draft')
 
 onMounted(async () => { await Promise.all([dictStore.ensureLoaded(), loadProjects(), loadProviders()]); applyBaselineWeights() })
 watch(batchTotal, () => applyBaselineWeights())
@@ -671,7 +672,11 @@ async function loadQuestionPage(current = 1) {
     questionLoading.value = false
   }
 }
-function continueGenerate() { fillToLimit(); activeStep.value = 3 }
+function continueGenerate() {
+  if (!canContinueGenerate.value) return
+  fillToLimit()
+  activeStep.value = 3
+}
 async function removeBatch(id: number) { await ElMessageBox.confirm('确认软删除该批次并释放额度？'); await deleteGeoBatch(id); await refreshReview() }
 async function removeQuestion(id: number) { await ElMessageBox.confirm('确认软删除该题并释放所属层级 1 个额度？'); await deleteGeoQuestion(id); await refreshReview() }
 async function replaceQuestion(id: number) { const { data } = await regenerateGeoQuestion(id); if (data.data?.softWarning) ElMessage.warning(data.data.warningMessage); await refreshReview() }
