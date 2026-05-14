@@ -18,6 +18,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -70,6 +71,8 @@ class PresalePage03DoubaoServiceTest {
         assertTrue(promptCaptor.getValue().contains("\"brand_name\":\"无二火锅\""));
         assertTrue(promptCaptor.getValue().contains("\"question_max_length\":34"));
         assertTrue(promptCaptor.getValue().contains("\"parent_category_name\""));
+        assertTrue(promptCaptor.getValue().contains("在全部 AI 搜索/问答流量中"));
+        assertTrue(promptCaptor.getValue().contains("长度计算包含所有中文、英文、数字、标点和空格"));
 
         MarketBattleground market = objectMapper.readValue(resultJson, EditableContentDTO.class).getMarketBattleground();
         assertEquals("每天，有数千万次消费决策正在 AI 上发生", market.getPageTitle());
@@ -139,6 +142,33 @@ class PresalePage03DoubaoServiceTest {
         MarketBattleground market = objectMapper.readValue(resultJson, EditableContentDTO.class).getMarketBattleground();
         assertTrue(market.getNarrative().getQuestions().stream()
                 .allMatch(question -> question.length() <= 34 && !question.contains("诗帝尼")));
+    }
+
+    @Test
+    void generateAndApply_rejectsNonPurePercentText() throws Exception {
+        RawSnapshotDTO raw = RawSnapshotDTO.builder()
+                .clientInfo(ClientInfo.builder()
+                        .brandName("无二火锅")
+                        .industry("restaurant")
+                        .industryRole("连锁品牌")
+                        .region("阜阳")
+                        .build())
+                .build();
+        String rawJson = objectMapper.writeValueAsString(raw);
+        String editableJson = objectMapper.writeValueAsString(l3Defaults.normalize(new EditableContentDTO(), raw, null));
+        String responseWithApproxPercent = doubaoResponse().replace("\"12.5%\"", "\"约 12.5%\"");
+        when(llmInvoker.marketBattleground(any(PlatformCallContext.class), anyString()))
+                .thenReturn(new LlmCallResult(responseWithApproxPercent, 100, 200, 30L, 0,
+                        CallStatus.SUCCESS, "doubao", "豆包", "doubao-pro", "豆包 Pro"));
+        when(evaluationModelRouter.routeContexts(any(PlatformCallContext.class)))
+                .thenReturn(List.of(new PlatformCallContext(290L, 3, "doubao", null, "", "无二火锅", 1L, false)));
+
+        com.huanjing.geo.common.exception.BizException ex = assertThrows(
+                com.huanjing.geo.common.exception.BizException.class,
+                () -> service.generateAndApply(290L, rawJson, editableJson, 1L, false)
+        );
+        assertTrue(ex.getMessage().contains("parent_category_share"));
+        assertTrue(ex.getMessage().contains("^\\d+(\\.\\d{1,2})?%$"));
     }
 
     private String doubaoResponse() {

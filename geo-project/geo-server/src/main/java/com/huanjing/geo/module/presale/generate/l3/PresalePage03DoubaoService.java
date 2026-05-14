@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 /**
  * Page03 市场战场页使用售前评估模型池生成,后端负责结构校验与数值重算。
@@ -33,6 +34,7 @@ import java.util.Map;
 public class PresalePage03DoubaoService {
 
     private static final int BATCH_NO_PAGE03 = 3;
+    private static final Pattern PERCENT_PATTERN = Pattern.compile("^\\d+(\\.\\d{1,2})?%$");
 
     private final ObjectMapper objectMapper;
     private final PresaleLlmInvoker llmInvoker;
@@ -156,8 +158,9 @@ public class PresalePage03DoubaoService {
 
     private String requiredPercent(JsonNode node, String field) {
         String value = requiredText(node, field);
-        if (!value.contains("%")) {
-            throw new IllegalArgumentException("Page03 AI output " + field + " must contain percent sign");
+        if (!PERCENT_PATTERN.matcher(value).matches()) {
+            throw new IllegalArgumentException("Page03 AI output " + field
+                    + " must match ^\\d+(\\.\\d{1,2})?%$");
         }
         return value;
     }
