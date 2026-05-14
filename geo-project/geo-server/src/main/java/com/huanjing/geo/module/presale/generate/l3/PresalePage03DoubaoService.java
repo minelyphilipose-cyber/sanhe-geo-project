@@ -112,6 +112,7 @@ public class PresalePage03DoubaoService {
         if (aiNode == null || !aiNode.isObject()) {
             throw new IllegalArgumentException("Page03 AI output must be a JSON object");
         }
+        String parentCategoryName = requiredParentCategoryName(aiNode, "parent_category_name", raw);
         String parentShare = requiredPercent(aiNode, "parent_category_share");
         String industryShare = requiredPercent(aiNode, "industry_share");
         String regionShare = requiredPercent(aiNode, "region_share");
@@ -125,7 +126,7 @@ public class PresalePage03DoubaoService {
                 .nationalCard(MarketBattleground.CalculationCard.builder()
                         .rows(List.of(
                                 calcRow(null, null, false),
-                                calcRow(null, parentShare, false),
+                                calcRow(parentCategoryName + "类占比", parentShare, false),
                                 calcRow(null, industryShare, false),
                                 calcRow(null, null, true)
                         ))
@@ -161,6 +162,23 @@ public class PresalePage03DoubaoService {
         return value;
     }
 
+    private String requiredParentCategoryName(JsonNode node, String field, RawSnapshotDTO raw) {
+        String value = requiredText(node, field);
+        if (value.length() < 2 || value.length() > 6) {
+            throw new IllegalArgumentException("Page03 AI output " + field + " length must be between 2 and 6");
+        }
+        if (value.contains("类") || value.contains("占比") || value.contains("行业")) {
+            throw new IllegalArgumentException("Page03 AI output " + field + " must not contain suffix words");
+        }
+        ClientInfo client = raw == null ? null : raw.getClientInfo();
+        String brand = client == null ? null : client.getBrandName();
+        String region = client == null ? null : client.getRegion();
+        if (containsNonBlank(value, brand) || containsNonBlank(value, region)) {
+            throw new IllegalArgumentException("Page03 AI output " + field + " must not contain brand_name or region");
+        }
+        return value;
+    }
+
     private List<String> requiredQuestions(JsonNode node, String field, int size) {
         JsonNode values = node.path(field);
         if (!values.isArray() || values.size() != size) {
@@ -174,6 +192,10 @@ public class PresalePage03DoubaoService {
             out.add(item.asText().trim());
         }
         return out;
+    }
+
+    private boolean containsNonBlank(String value, String keyword) {
+        return keyword != null && !keyword.isBlank() && value.contains(keyword);
     }
 
     private List<Map<String, String>> buildSamplePromptInput(RawSnapshotDTO raw) {

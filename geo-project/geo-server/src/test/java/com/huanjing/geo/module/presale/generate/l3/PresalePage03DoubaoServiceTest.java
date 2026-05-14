@@ -69,9 +69,11 @@ class PresalePage03DoubaoServiceTest {
         assertEquals("doubao", ctxCaptor.getValue().platformCode());
         assertTrue(promptCaptor.getValue().contains("\"brand_name\":\"无二火锅\""));
         assertTrue(promptCaptor.getValue().contains("\"question_max_length\":34"));
+        assertTrue(promptCaptor.getValue().contains("\"parent_category_name\""));
 
         MarketBattleground market = objectMapper.readValue(resultJson, EditableContentDTO.class).getMarketBattleground();
         assertEquals("每天，有数千万次消费决策正在 AI 上发生", market.getPageTitle());
+        assertEquals("餐饮消费类占比", market.getNationalCard().getRows().get(1).getLabel());
         assertEquals("225.0", market.getNationalCard().getValue());
         assertEquals("万次", market.getNationalCard().getUnit());
         assertEquals("225.0万次", market.getNationalCard().getRows().get(3).getValue());
@@ -142,6 +144,7 @@ class PresalePage03DoubaoServiceTest {
     private String doubaoResponse() {
         return """
                 {
+                  "parent_category_name": "餐饮消费",
                   "parent_category_share": "12.5%",
                   "industry_share": "1.5%",
                   "region_share": "0.08%",
