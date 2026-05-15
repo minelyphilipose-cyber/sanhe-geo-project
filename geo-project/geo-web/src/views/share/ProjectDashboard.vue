@@ -190,7 +190,7 @@
           <div class="panel-header detail-header">
             <div>
               <h2>命中明细</h2>
-              <span>默认仅展示已命中记录，最多在线查看 {{ formatNum(details.maxViewable) }} 条</span>
+              <span>默认展示当前 {{ selectedDays }} 天窗口内的已命中记录，最多在线查看 {{ formatNum(details.maxViewable) }} 条</span>
             </div>
             <button class="filter-toggle" @click="filterExpanded = !filterExpanded">
               {{ filterExpanded ? '收起筛选' : '展开筛选' }}
@@ -204,8 +204,8 @@
                 {{ item.platformName || item.platformCode }}
               </option>
             </select>
-            <input v-model="detailQuery.startDate" type="date" />
-            <input v-model="detailQuery.endDate" type="date" />
+            <input v-model="detailQuery.startDate" type="date" :min="windowStartDate" :max="windowEndDate" />
+            <input v-model="detailQuery.endDate" type="date" :min="windowStartDate" :max="windowEndDate" />
             <input v-model="detailQuery.keyword" type="text" placeholder="搜索问题或关键词" @keyup.enter="searchDetails" />
             <button @click="searchDetails">查询</button>
           </div>
@@ -383,6 +383,12 @@ const projectStageLabel = computed(() => {
   const key = String(summary.projectStage || '')
   return PROJECT_STAGE_MAP[key as keyof typeof PROJECT_STAGE_MAP]?.label || key || '-'
 })
+const windowEndDate = computed(() => formatDate(new Date()))
+const windowStartDate = computed(() => {
+  const date = new Date()
+  date.setDate(date.getDate() - selectedDays.value + 1)
+  return formatDate(date)
+})
 const servicePeriod = computed(() => {
   if (!summary.startDate && !summary.endDate) return '-'
   const start = summary.startDate || '未设置'
@@ -405,6 +411,7 @@ async function loadTrend() {
 }
 
 async function loadDetails() {
+  ensureDetailDateWindow()
   const { data } = await getPublicProjectDashboardDetails(shareCode, {
     page: detailPage.page,
     size: detailPage.size,
@@ -418,7 +425,9 @@ async function loadDetails() {
 
 async function changeDays(days: number) {
   selectedDays.value = days
-  await Promise.all([loadSummary(), loadTrend()])
+  detailPage.page = 1
+  syncDetailDateWindow()
+  await Promise.all([loadSummary(), loadTrend(), loadDetails()])
 }
 
 function searchDetails() {
@@ -429,6 +438,31 @@ function searchDetails() {
 function onDetailPageChange(page: number) {
   detailPage.page = page
   void loadDetails()
+}
+
+function syncDetailDateWindow() {
+  detailQuery.startDate = windowStartDate.value
+  detailQuery.endDate = windowEndDate.value
+}
+
+function ensureDetailDateWindow() {
+  if (!detailQuery.startDate || detailQuery.startDate < windowStartDate.value) {
+    detailQuery.startDate = windowStartDate.value
+  }
+  if (!detailQuery.endDate || detailQuery.endDate > windowEndDate.value) {
+    detailQuery.endDate = windowEndDate.value
+  }
+  if (detailQuery.startDate > detailQuery.endDate) {
+    detailQuery.startDate = windowStartDate.value
+    detailQuery.endDate = windowEndDate.value
+  }
+}
+
+function formatDate(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function formatNum(value?: number | null) {
