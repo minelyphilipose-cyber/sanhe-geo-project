@@ -3,10 +3,10 @@
     <div class="edit-header">
       <div>
         <el-breadcrumb separator="/">
-          <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">售前报告</el-breadcrumb-item>
+          <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">AI可见度诊断报告</el-breadcrumb-item>
           <el-breadcrumb-item>编辑内容</el-breadcrumb-item>
         </el-breadcrumb>
-        <h2>{{ detail?.brandName || '售前报告' }} · v{{ detail?.version.versionNo || '-' }}</h2>
+        <h2>{{ detail?.brandName || 'AI可见度诊断报告' }} · v{{ detail?.version.versionNo || '-' }}</h2>
       </div>
       <div class="header-actions">
         <el-tag v-if="isDirty" type="warning" effect="plain">有未保存修改</el-tag>

@@ -1,64 +1,119 @@
 ﻿<template>
-  <div>
-    <div class="mb-4 flex items-center justify-between gap-3">
-      <div class="flex items-center gap-2">
+  <div class="admin-page">
+    <div class="admin-page-header">
+      <div>
+        <div class="admin-page-kicker">交付运营</div>
+        <h1 class="admin-page-title">项目管理</h1>
+        <div class="admin-page-subtitle">管理项目启动、拓词额度、内容分发与交付状态。</div>
+      </div>
+      <div class="admin-page-actions">
+        <el-button v-if="canCreateProject" type="primary" @click="openCreate">新建项目</el-button>
+      </div>
+    </div>
+
+    <div class="admin-filter-panel">
+      <div class="admin-filter-controls">
         <el-input v-model="query.keyword" placeholder="搜索项目名称" clearable style="width: 240px" @keyup.enter="load" />
         <el-select v-model="query.status" placeholder="状态" clearable style="width: 140px" @change="load">
           <el-option v-for="v in statusOptions" :key="v" :label="projectStatusLabel(v)" :value="v" />
         </el-select>
         <el-button @click="load">查询</el-button>
       </div>
-      <el-button v-if="canCreateProject" type="primary" @click="openCreate">新建项目</el-button>
     </div>
 
-    <el-card>
+    <div class="admin-metric-grid">
+      <div class="admin-metric-card" style="--metric-accent: #2563eb; --metric-tone: #eff6ff">
+        <span class="admin-metric-label">项目总数</span>
+        <strong class="admin-metric-value">{{ page.total }}</strong>
+        <span class="admin-metric-hint">当前筛选结果</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #059669; --metric-tone: #ecfdf5">
+        <span class="admin-metric-label">执行中</span>
+        <strong class="admin-metric-value">{{ activeCount }}</strong>
+        <span class="admin-metric-hint">本页可见</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #f59e0b; --metric-tone: #fffbeb">
+        <span class="admin-metric-label">待启动</span>
+        <strong class="admin-metric-value">{{ pendingCount }}</strong>
+        <span class="admin-metric-hint">需确认资料/额度</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #7c3aed; --metric-tone: #f5f3ff">
+        <span class="admin-metric-label">拓词问题</span>
+        <strong class="admin-metric-value">{{ visibleKeywordTotal }}</strong>
+        <span class="admin-metric-hint">本页已绑定问题数</span>
+      </div>
+    </div>
+
+    <el-card class="admin-table-card">
       <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无项目数据">
-        <el-table :data="rows" border>
-          <el-table-column prop="projectCode" label="编码" min-width="170" />
-          <el-table-column prop="projectName" label="项目名称" min-width="180" />
-          <el-table-column prop="companyName" label="客户名称" min-width="180" />
-          <el-table-column prop="brandName" label="品牌名称" min-width="180">
-            <template #default="scope">{{ scope.row.brandName || '-' }}</template>
+        <el-table class="project-list-table" :data="rows" border table-layout="fixed">
+          <el-table-column label="项目对象" min-width="300" show-overflow-tooltip>
+            <template #default="scope">
+              <div class="admin-entity-cell">
+                <div class="admin-entity-avatar project-avatar" :class="projectAvatarClass(scope.row.status)">
+                  {{ entityInitial(scope.row.projectName) }}
+                </div>
+                <div class="min-w-0">
+                  <div class="admin-entity-main">{{ scope.row.projectName }}</div>
+                  <div class="admin-entity-sub">{{ scope.row.brandName || '未绑定品牌' }}</div>
+                </div>
+              </div>
+            </template>
           </el-table-column>
-          <el-table-column label="拓词组" width="160">
+          <el-table-column prop="companyName" label="客户" min-width="180" show-overflow-tooltip>
+            <template #default="scope">
+              <div class="admin-cell-stack">
+                <span class="admin-cell-main">{{ scope.row.companyName || '-' }}</span>
+                <span class="admin-cell-sub">{{ projectCustomerLabel(scope.row) }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="拓词组" width="170">
             <template #default="scope">
               {{ scope.row.selectedKeywordGroupCount || 0 }}组/{{ scope.row.selectedKeywordSavedKeywords || 0 }}条
               <div class="table-subtext">A{{ scope.row.selectedKeywordSavedKeywordsA || 0 }} / B{{ scope.row.selectedKeywordSavedKeywordsB || 0 }} / C{{ scope.row.selectedKeywordSavedKeywordsC || 0 }}</div>
             </template>
           </el-table-column>
-          <el-table-column label="归属" width="100">
-            <template #default="scope">{{ dictStore.label('owner_type', scope.row.ownerType) }}</template>
-          </el-table-column>
-          <el-table-column prop="cityName" label="地区" min-width="200">
+          <el-table-column prop="cityName" label="地区" min-width="170" show-overflow-tooltip>
             <template #default="scope">{{ regionDisplay(scope.row) || '-' }}</template>
           </el-table-column>
           <el-table-column label="状态" width="120">
-            <template #default="scope">{{ projectStatusLabel(scope.row.status) }}</template>
-          </el-table-column>
-          <el-table-column label="操作" width="160" fixed="right">
             <template #default="scope">
-              <div class="op-actions">
+              <span class="project-status-text" :class="projectStatusClass(scope.row.status)">
+                <span class="project-status-dot" />
+                {{ projectStatusLabel(scope.row.status) }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="240" fixed="right">
+            <template #default="scope">
+              <div class="admin-row-actions">
                 <el-button link type="primary" @click="goDetail(scope.row.id)">详情</el-button>
-                <el-dropdown
-                  trigger="click"
-                  @command="(cmd: string | number | object) => onMoreCommand(scope.row, String(cmd))"
+                <el-button
+                  v-if="canStartProject(scope.row)"
+                  :class="{ 'is-wide': scope.row.status === 'paused' }"
+                  link
+                  type="primary"
+                  @click="goActivate(scope.row.id)"
                 >
-                  <el-button link type="primary">更多</el-button>
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <el-dropdown-item v-if="canStartProject(scope.row)" command="activate">{{ scope.row.status === 'paused' ? '再次启动' : '启动' }}</el-dropdown-item>
-                      <el-dropdown-item v-if="scope.row.status === 'active' && canCloseProject" command="pause">暂停</el-dropdown-item>
-                      <el-dropdown-item v-if="canUpdateProject" command="edit">编辑</el-dropdown-item>
-                      <el-dropdown-item v-if="canDeleteProject" command="delete">删除</el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
+                  {{ scope.row.status === 'paused' ? '再次启动' : '启动' }}
+                </el-button>
+                <el-button
+                  v-if="scope.row.status === 'active' && canCloseProject"
+                  class="project-neutral-action"
+                  link
+                  @click="pauseProject(scope.row)"
+                >
+                  暂停
+                </el-button>
+                <el-button v-if="canUpdateProject" class="project-neutral-action" link @click="openEdit(scope.row)">编辑</el-button>
+                <el-button v-if="canDeleteProject" link type="danger" @click="removeProject(scope.row)">删除</el-button>
               </div>
             </template>
           </el-table-column>
         </el-table>
 
-        <div class="mt-4 flex justify-end">
+        <div class="admin-table-footer">
           <el-pagination
             background
             layout="prev, pager, next, total"
@@ -71,8 +126,13 @@
       </DataState>
     </el-card>
 
-    <el-dialog v-model="formVisible" :title="formMode === 'create' ? '新建项目' : '编辑项目'" width="760px">
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
+    <el-dialog
+      v-model="formVisible"
+      :title="formMode === 'create' ? '新建项目' : '编辑项目'"
+      width="920px"
+      class="admin-editor-dialog"
+    >
+      <el-form ref="formRef" class="admin-dialog-form" :model="form" :rules="rules" label-width="110px">
         <el-form-item label="项目名称" required><el-input v-model="form.projectName" /></el-form-item>
         <el-form-item label="项目别名">
           <el-input v-model="form.projectAliases" placeholder="可选，多个别名用英文逗号分隔" />
@@ -100,7 +160,7 @@
             <el-option v-for="b in brandOptions" :key="b.id" :label="b.brandName" :value="b.id" />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="formMode === 'edit'" label="拓词组">
+        <el-form-item v-if="formMode === 'edit'" class="is-full" label="拓词组">
           <div class="w-full">
             <el-select
               v-model="form.keywordGroupIds"
@@ -122,7 +182,7 @@
             <div class="keyword-summary">{{ keywordGroupSummary }}</div>
           </div>
         </el-form-item>
-        <el-form-item label="问题额度">
+        <el-form-item class="is-full" label="问题额度">
           <div class="keyword-quota-panel">
             <div class="channel-note">默认填入当前客户套餐 A/B/C 剩余额度，单档最大不可超过可分配数量</div>
             <div class="quota-row">
@@ -142,7 +202,7 @@
             </div>
           </div>
         </el-form-item>
-        <el-form-item label="分发渠道">
+        <el-form-item class="is-full" label="分发渠道">
           <div class="channel-allocation-panel">
             <div class="channel-note">官网、行业资讯站额度大于 0 时才会触发文章生成；可填范围为客户套餐总额度减去当前已激活项目占用</div>
             <div v-for="item in channelQuotaItems" :key="item.channelCode" class="channel-row">
@@ -160,13 +220,9 @@
             </div>
           </div>
         </el-form-item>
-        <el-form-item label="归属类型">
-          <el-input :value="companyOwnerTypeLabel" disabled />
-        </el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="form.regionCodes" /></el-form-item>
-        <el-form-item label="交付模式"><el-input v-model="form.deliveryMode" /></el-form-item>
-        <el-form-item label="主目标"><el-input v-model="form.primaryGoal" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item label="客户需求">
+        <el-form-item class="is-full" label="主目标"><el-input v-model="form.primaryGoal" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="客户需求">
           <div class="customer-requirements">
             <div v-for="(_, index) in form.customerRequirements" :key="index" class="customer-requirement-row">
               <div class="requirement-row-head">
@@ -186,8 +242,8 @@
             <el-button class="requirement-add" plain @click="addCustomerRequirement">新增需求</el-button>
           </div>
         </el-form-item>
-        <el-divider content-position="left">内容策略配置（选填）</el-divider>
-        <el-form-item label="目标区域词">
+        <el-divider class="is-full" content-position="left">内容策略配置（选填）</el-divider>
+        <el-form-item class="is-full" label="目标区域词">
           <el-select
             v-model="form.targetRegions"
             multiple
@@ -201,10 +257,10 @@
         <el-form-item label="目标受众">
           <el-input v-model="form.targetAudience" placeholder="例如：装修业主、二手房翻新用户" />
         </el-form-item>
-        <el-form-item label="品牌基准表述">
+        <el-form-item class="is-full" label="品牌基准表述">
           <el-input :model-value="brandBaseStatement" type="textarea" :rows="4" readonly placeholder="当前品牌未配置基准表述" />
         </el-form-item>
-        <el-form-item label="项目定制表述">
+        <el-form-item class="is-full" label="项目定制表述">
           <div class="w-full">
             <el-input v-model="form.customStatement" type="textarea" :rows="4" placeholder="留空时生成内容将使用上方品牌基准表述" />
             <div class="form-tip">留空时生成内容将使用上方品牌基准表述</div>
@@ -213,7 +269,7 @@
         <el-form-item label="内容调性">
           <el-input v-model="form.contentTone" placeholder="例如：专业务实，强调可执行性" />
         </el-form-item>
-        <el-form-item label="优先写作角度">
+        <el-form-item class="is-full" label="优先写作角度">
           <el-select
             v-model="form.preferredAngles"
             multiple
@@ -224,7 +280,7 @@
             placeholder="输入并回车，例如：指南、成本、避坑"
           />
         </el-form-item>
-        <el-form-item label="品牌禁用词">
+        <el-form-item class="is-full" label="品牌禁用词">
           <div class="w-full">
             <div v-if="brandForbiddenPhraseList.length" class="tag-list">
               <el-tag v-for="item in brandForbiddenPhraseList" :key="item" type="info">{{ item }}</el-tag>
@@ -232,7 +288,7 @@
             <div v-else class="form-tip">当前品牌未配置禁用词</div>
           </div>
         </el-form-item>
-        <el-form-item label="补充禁用词">
+        <el-form-item class="is-full" label="补充禁用词">
           <el-select
             v-model="form.extraForbiddenPhrases"
             multiple
@@ -243,10 +299,10 @@
             placeholder="输入并回车，作为项目级补充禁用词"
           />
         </el-form-item>
-        <el-form-item label="内容备注">
+        <el-form-item class="is-full" label="内容备注">
           <el-input v-model="form.contentNote" type="textarea" :rows="3" placeholder="补充说明内容生成时需要强调或避免的点" />
         </el-form-item>
-        <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="备注"><el-input v-model="form.remark" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="formVisible = false">取消</el-button>
@@ -299,16 +355,16 @@ const fromCustomerBrandPath = computed(() => {
   return route.query.source === 'customer_brand' && !!presetCompanyId.value && !!presetBrandId.value
 })
 const lockCompanyBrandSelection = computed(() => formMode.value === 'create' && fromCustomerBrandPath.value)
-const companyOwnerTypeLabel = computed(() => {
-  const company = companyOptions.value.find((c) => c.id === form.companyId)
-  const key = company?.ownerType || (company?.partnerId ? 'partner' : 'direct')
-  return dictStore.label('owner_type', key) || '-'
-})
 const selectedBrand = computed(() => brandOptions.value.find((item) => item.id === form.brandId) || null)
 const brandBaseStatement = computed(() => extractBrandBaseStatement(selectedBrand.value))
 const brandForbiddenPhraseList = computed(() => parseStringArray(selectedBrand.value?.forbiddenPhrases))
 
 const statusOptions = computed(() => ['pending_start', 'active', 'paused', 'expired'])
+const activeCount = computed(() => rows.value.filter((row) => row.status === 'active').length)
+const pendingCount = computed(() => rows.value.filter((row) => row.status === 'pending_start').length)
+const visibleKeywordTotal = computed(() =>
+  rows.value.reduce((total, row) => total + Number(row.selectedKeywordSavedKeywords || 0), 0),
+)
 const loading = ref(false)
 const saving = ref(false)
 const rows = ref<Project[]>([])
@@ -368,7 +424,9 @@ const rules: FormRules = {
 }
 
 function regionDisplay(project: Project) {
-  return regionDisplayFromPayload(project)
+  const parts = [project.provinceName, project.cityName, project.districtName]
+    .filter((name): name is string => !!name && String(name).trim().length > 0)
+  return parts.length ? parts.join(' · ') : regionDisplayFromPayload(project)
 }
 
 function parseStringArray(value?: string | string[] | null) {
@@ -771,27 +829,33 @@ function goActivate(id: number) {
   router.push({ path: `/admin/projects/${id}`, query: { activate: '1' } })
 }
 
-function onMoreCommand(row: Project, command: string) {
-  if (command === 'activate') {
-    goActivate(row.id)
-    return
-  }
-  if (command === 'edit') {
-    openEdit(row)
-    return
-  }
-  if (command === 'pause') {
-    pauseProject(row)
-    return
-  }
-  if (command === 'delete') {
-    removeProject(row)
-  }
-}
-
 function projectStatusLabel(status?: string | null) {
   if (!status) return '-'
   return dictStore.label('project_status', status) || status
+}
+
+function projectCustomerLabel(project: Project) {
+  if (project.ownerType === 'direct') return '直营客户'
+  if (project.ownerType === 'partner' || project.sourceType === 'partner') return '合伙人客户'
+  if (project.ownerType === 'joint') return '合作客户'
+  return dictStore.label('owner_type', project.ownerType) || '客户'
+}
+
+function entityInitial(value?: string | null) {
+  const text = String(value || '').trim()
+  return text ? Array.from(text)[0] : '项'
+}
+
+function projectStatusClass(status?: string | null) {
+  if (status === 'active') return 'is-success'
+  if (status === 'paused' || status === 'pending_start') return 'is-warning'
+  return 'is-muted'
+}
+
+function projectAvatarClass(status?: string | null) {
+  if (status === 'active') return 'is-active'
+  if (status === 'expired') return 'is-expired'
+  return 'is-pending'
 }
 
 function canStartProject(row: Project) {
@@ -840,12 +904,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.op-actions {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
 .keyword-summary {
   margin-top: 8px;
   font-size: 12px;
@@ -856,6 +914,62 @@ onMounted(async () => {
   font-size: 12px;
   color: #909399;
 }
+
+.project-avatar.is-active {
+  background: linear-gradient(135deg, #0d9488, #2dd4bf);
+}
+
+.project-avatar.is-pending {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+}
+
+.project-avatar.is-expired {
+  background: linear-gradient(135deg, #475569, #64748b);
+}
+
+.project-status-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #92400e;
+  font-weight: 700;
+}
+
+.project-status-text.is-success {
+  color: #047857;
+}
+
+.project-status-text.is-muted {
+  color: #64748b;
+}
+
+.project-status-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.14);
+}
+
+.project-status-text.is-success .project-status-dot {
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.14);
+}
+
+.project-status-text.is-muted .project-status-dot {
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
+}
+
+.project-neutral-action {
+  color: #64748b;
+}
+
+.project-neutral-action:hover {
+  color: #334155;
+}
+
 .keyword-quota-panel {
   width: 100%;
   display: grid;

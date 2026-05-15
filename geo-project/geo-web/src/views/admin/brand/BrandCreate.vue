@@ -1,19 +1,26 @@
 ﻿<template>
-  <div class="space-y-4">
-    <el-page-header content="新建品牌" @back="$router.back()" />
+  <div class="admin-page">
+    <div class="admin-page-header">
+      <div>
+        <div class="admin-page-kicker">品牌资产</div>
+        <h1 class="admin-page-title">新建品牌</h1>
+        <div class="admin-page-subtitle">维护品牌基础资料、阵地账号、标准表述与素材资产。</div>
+      </div>
+      <div class="admin-page-actions">
+        <el-button @click="$router.back()">返回</el-button>
+        <el-button v-if="createdBrandId" @click="goBrandDetail">查看品牌详情</el-button>
+        <el-button type="primary" :loading="saving" @click="submitBrand">保存品牌</el-button>
+      </div>
+    </div>
 
-    <el-card>
+    <el-card class="admin-rich-card">
       <template #header>
         <div class="flex items-center justify-between">
           <span>品牌资料表单</span>
-          <div class="space-x-2">
-            <el-button v-if="createdBrandId" @click="goBrandDetail">查看品牌详情</el-button>
-            <el-button type="primary" :loading="saving" @click="submitBrand">保存品牌</el-button>
-          </div>
         </div>
       </template>
 
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="120px">
+      <el-form ref="formRef" class="admin-dialog-form" :model="form" :rules="rules" label-width="120px">
         <el-form-item label="所属客户" required>
           <el-input :model-value="companyName || '-'" disabled />
         </el-form-item>
@@ -40,13 +47,13 @@
           </el-select>
         </el-form-item>
 
-        <el-divider content-position="left">业务介绍录入</el-divider>
+        <el-divider class="is-full" content-position="left">业务介绍录入</el-divider>
         <el-form-item label="主营业务方向"><el-input v-model="form.mainBusiness" /></el-form-item>
-        <el-form-item label="业务介绍"><el-input v-model="form.businessIntro" type="textarea" :rows="4" /></el-form-item>
-        <el-form-item label="服务区域"><RegionCascader v-model="form.serviceAreaCodes" /></el-form-item>
-        <el-form-item label="所在地区"><RegionCascader v-model="form.regionCodes" /></el-form-item>
+        <el-form-item class="is-full" label="业务介绍"><el-input v-model="form.businessIntro" type="textarea" :rows="4" /></el-form-item>
+        <el-form-item class="is-full" label="服务区域"><RegionCascader v-model="form.serviceAreaCodes" /></el-form-item>
+        <el-form-item class="is-full" label="所在地区"><RegionCascader v-model="form.regionCodes" /></el-form-item>
 
-        <el-divider content-position="left">联系方式与阵地</el-divider>
+        <el-divider class="is-full" content-position="left">联系方式与阵地</el-divider>
         <el-form-item label="联系电话"><el-input v-model="form.phone" /></el-form-item>
         <el-form-item label="对外公开电话"><el-input v-model="form.publicPhone" /></el-form-item>
         <el-form-item label="对外公开地址"><el-input v-model="form.publicAddress" /></el-form-item>
@@ -56,16 +63,16 @@
         <el-form-item label="视频号"><el-input v-model="form.videoAccount" /></el-form-item>
         <el-form-item label="抖音号"><el-input v-model="form.douyinAccount" /></el-form-item>
 
-        <el-divider content-position="left">标准表述维护</el-divider>
-        <el-form-item label="品牌标准表述"><el-input v-model="form.standardBrandStatement" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item label="业务标准表述"><el-input v-model="form.businessStandardStatement" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item label="品牌描述"><el-input v-model="form.description" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item label="禁用词"><el-input v-model="form.forbiddenPhrases" type="textarea" :rows="3" /></el-form-item>
+        <el-divider class="is-full" content-position="left">标准表述维护</el-divider>
+        <el-form-item class="is-full" label="品牌标准表述"><el-input v-model="form.standardBrandStatement" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="业务标准表述"><el-input v-model="form.businessStandardStatement" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="品牌描述"><el-input v-model="form.description" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="禁用词"><el-input v-model="form.forbiddenPhrases" type="textarea" :rows="3" /></el-form-item>
         <el-form-item label="版本变更原因"><el-input v-model="form.versionChangeReason" placeholder="用于版本记录，建议填写" /></el-form-item>
       </el-form>
     </el-card>
 
-    <el-card>
+    <el-card class="admin-table-card">
       <template #header><span>素材上传（图片/案例/资质）</span></template>
       <div class="mb-3 flex items-center gap-2">
         <el-select v-model="uploadCategory" style="width: 220px" :disabled="!createdBrandId">
@@ -107,7 +114,7 @@
       </el-table>
     </el-card>
 
-    <el-card>
+    <el-card class="admin-table-card">
       <template #header><span>历史版本</span></template>
       <el-table :data="versions" border>
         <el-table-column prop="versionNo" label="版本号" width="100" />
@@ -116,7 +123,7 @@
       </el-table>
     </el-card>
 
-    <el-dialog v-model="previewVisible" title="文件预览" width="80%" @closed="onPreviewClosed">
+    <el-dialog v-model="previewVisible" title="文件预览" width="80%" class="admin-editor-dialog" @closed="onPreviewClosed">
       <div v-loading="previewLoading" style="min-height: 200px">
         <template v-if="previewMode === 'image' && previewImageUrl">
           <img :src="previewImageUrl" alt="preview" class="mx-auto max-w-full" />

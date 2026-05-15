@@ -2,7 +2,7 @@
   <div class="presale-report-progress">
     <div class="page-header">
       <el-breadcrumb separator="/">
-        <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">售前报告</el-breadcrumb-item>
+        <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">AI可见度诊断报告</el-breadcrumb-item>
         <el-breadcrumb-item>生成中</el-breadcrumb-item>
       </el-breadcrumb>
       <h2 class="page-title">报告生成进度</h2>

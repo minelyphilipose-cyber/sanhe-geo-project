@@ -1,8 +1,36 @@
 ﻿<template>
-  <div class="space-y-4">
+  <div class="admin-page">
     <el-page-header content="项目详情" @back="$router.back()" />
 
-    <el-card v-loading="loading">
+    <section v-if="project" class="admin-object-hero">
+      <div class="admin-object-hero-main">
+        <div>
+          <h1 class="admin-object-title">{{ project.projectName }}</h1>
+          <div class="admin-object-meta">
+            {{ project.companyName || '-' }} · {{ project.brandName || '-' }}
+          </div>
+        </div>
+        <span class="admin-status-tag" :class="projectStatusClass(project.status)">
+          {{ projectStatusLabel(project.status) }}
+        </span>
+      </div>
+      <div class="admin-object-kpis project-hero-kpis">
+        <div class="admin-object-kpi project-hero-kpi project-hero-kpi--keyword">
+          <span>拓词组</span>
+          <strong>{{ project.selectedKeywordGroups?.length || 0 }}</strong>
+        </div>
+        <div class="admin-object-kpi project-hero-kpi project-hero-kpi--quota">
+          <span>问题额度</span>
+          <strong>{{ keywordAllocationSummary }}</strong>
+        </div>
+        <div class="admin-object-kpi project-hero-kpi project-hero-kpi--channel">
+          <span>渠道额度</span>
+          <strong>{{ project.channelAllocations?.length || 0 }}</strong>
+        </div>
+      </div>
+    </section>
+
+    <el-card v-loading="loading" class="admin-rich-card">
       <template #header>
         <div class="flex items-center justify-between">
           <span>基础信息</span>
@@ -13,29 +41,20 @@
           </div>
         </div>
       </template>
-      <el-descriptions :column="3" border>
-        <el-descriptions-item label="项目编码">{{ project?.projectCode }}</el-descriptions-item>
-        <el-descriptions-item label="项目名称">{{ project?.projectName }}</el-descriptions-item>
-        <el-descriptions-item label="项目别名">{{ project?.projectAliases || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="客户名称">{{ project?.companyName || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="品牌名称">{{ project?.brandName || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="拓词组">{{ keywordSummary }}</el-descriptions-item>
-        <el-descriptions-item label="问题额度">{{ keywordAllocationSummary }}</el-descriptions-item>
-        <el-descriptions-item label="分发渠道额度" :span="2">{{ channelAllocationSummary }}</el-descriptions-item>
-        <el-descriptions-item label="归属类型">{{ dictStore.label('owner_type', project?.ownerType) }}</el-descriptions-item>
-        <el-descriptions-item label="合伙人">{{ project?.ownerType === 'direct' ? '-' : '已绑定' }}</el-descriptions-item>
-        <el-descriptions-item label="所在地区">{{ regionText(project) }}</el-descriptions-item>
-        <el-descriptions-item label="交付模式">{{ project?.deliveryMode || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="启动日期">{{ project?.activatedAt || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="有效期至">{{ project?.endDate || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="签约扣款(元)">{{ centsToYuan(project?.deductionAmount) }}</el-descriptions-item>
-        <el-descriptions-item label="折扣快照">{{ project?.discountRateSnapshot != null ? (project.discountRateSnapshot * 100).toFixed(2) + '%' : '-' }}</el-descriptions-item>
-        <el-descriptions-item label="扣款流水号">{{ project?.deductionTxnNo || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="主目标" :span="3">{{ project?.primaryGoal || '-' }}</el-descriptions-item>
-      </el-descriptions>
+      <div class="admin-info-grid">
+        <div
+          v-for="item in projectBasicInfoItems"
+          :key="item.label"
+          class="admin-info-item"
+          :class="{ 'is-wide': item.wide }"
+        >
+          <span class="admin-info-label">{{ item.label }}</span>
+          <strong class="admin-info-value">{{ item.value }}</strong>
+        </div>
+      </div>
     </el-card>
 
-    <el-card v-if="project">
+    <el-card v-if="project" class="admin-rich-card">
       <template #header>
         <div class="section-header">
           <span>客户需求</span>
@@ -51,7 +70,7 @@
       <el-empty v-else description="暂无客户需求" :image-size="72" />
     </el-card>
 
-    <el-card v-if="project">
+    <el-card v-if="project" class="admin-rich-card">
       <template #header>
         <div class="flex items-center justify-between">
           <span>分发渠道额度</span>
@@ -93,7 +112,7 @@
       </el-table>
     </el-card>
 
-    <el-card v-if="project">
+    <el-card v-if="project" class="admin-rich-card">
       <template #header>
         <div class="keyword-group-header">
           <span>绑定拓词组</span>
@@ -136,7 +155,7 @@
       </el-table>
     </el-card>
 
-    <el-card v-if="project">
+    <el-card v-if="project" class="admin-rich-card">
       <template #header><span>内容策略配置</span></template>
       <el-descriptions :column="2" border>
         <el-descriptions-item label="目标区域词">{{ joinArray(project.targetRegions) }}</el-descriptions-item>
@@ -149,7 +168,7 @@
       </el-descriptions>
     </el-card>
 
-    <el-card v-if="showActivationGuide">
+    <el-card v-if="showActivationGuide" class="admin-rich-card">
       <template #header><span>项目启动</span></template>
       <el-form label-width="120px" style="max-width: 540px">
         <el-form-item label="启动前确认">
@@ -206,9 +225,9 @@
       </div>
     </el-drawer>
 
-    <el-dialog v-model="questionEditVisible" title="编辑问题" width="720px">
-      <el-form label-width="130px">
-        <el-form-item label="问题文本" required>
+    <el-dialog v-model="questionEditVisible" title="编辑问题" width="820px" class="admin-editor-dialog">
+      <el-form class="admin-dialog-form" label-width="130px">
+        <el-form-item class="is-full" label="问题文本" required>
           <el-input v-model="questionForm.questionText" type="textarea" :rows="3" />
         </el-form-item>
         <el-form-item label="场景">
@@ -243,7 +262,7 @@
         <el-form-item label="一期可达评分">
           <el-input-number v-model="questionForm.scoreCoverage" class="score-input" :min="1" :max="5" :step="1" controls-position="right" />
         </el-form-item>
-        <el-form-item label="生成文章备注">
+        <el-form-item class="is-full" label="生成文章备注">
           <el-input
             v-model="questionForm.articleGenerationNote"
             type="textarea"
@@ -260,7 +279,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="channelEditVisible" title="调整分发渠道额度" width="640px">
+    <el-dialog v-model="channelEditVisible" title="调整分发渠道额度" width="720px" class="admin-editor-dialog">
       <div class="channel-edit-note">官网、行业资讯站额度会参与文章生成调度；保存后若项目已启动，后端会再次校验客户剩余额度。</div>
       <div v-loading="channelQuotaLoading" class="channel-allocation-panel">
         <div v-for="item in channelQuotaItems" :key="item.channelCode" class="channel-row">
@@ -286,7 +305,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="requirementEditVisible" title="维护客户需求" width="720px">
+    <el-dialog v-model="requirementEditVisible" title="维护客户需求" width="760px" class="admin-editor-dialog">
       <div class="requirement-editor">
         <div v-for="(_, index) in requirementForm.items" :key="index" class="requirement-edit-item">
           <div class="requirement-row-head">
@@ -401,11 +420,24 @@ const channelAllocationSummary = computed(() => {
   if (!targets.length) return '-'
   return targets.map((row) => `${row.channelName || row.channelCode} ${row.currentProjectAllocatedCount || 0}`).join(' / ')
 })
-
-function centsToYuan(v?: number | null) {
-  if (v == null) return '-'
-  return Number(v).toFixed(2)
-}
+const projectBasicInfoItems = computed(() => {
+  const current = project.value
+  return [
+    { label: '项目名称', value: current?.projectName || '-' },
+    { label: '项目别名', value: current?.projectAliases || '-' },
+    { label: '客户名称', value: current?.companyName || '-' },
+    { label: '品牌名称', value: current?.brandName || '-' },
+    { label: '拓词组', value: keywordSummary.value },
+    { label: '问题额度', value: keywordAllocationSummary.value },
+    { label: '分发渠道额度', value: channelAllocationSummary.value },
+    { label: '归属类型', value: dictStore.label('owner_type', current?.ownerType) || '-' },
+    { label: '合伙人', value: current?.ownerType === 'direct' ? '-' : '已绑定' },
+    { label: '所在地区', value: regionText(current) },
+    { label: '启动日期', value: current?.activatedAt || '-' },
+    { label: '有效期至', value: current?.endDate || '-' },
+    { label: '主目标', value: current?.primaryGoal || '-', wide: true },
+  ]
+})
 
 function regionText(p?: Project | null) {
   if (!p) return '-'
@@ -415,6 +447,13 @@ function regionText(p?: Project | null) {
 function projectStatusLabel(status?: string | null) {
   if (!status) return '-'
   return dictStore.label('project_status', status) || status
+}
+
+function projectStatusClass(status?: string | null) {
+  if (status === 'active') return 'is-success'
+  if (status === 'paused' || status === 'pending_start') return 'is-warning'
+  if (status === 'expired') return 'is-danger'
+  return 'is-muted'
 }
 
 function keywordExpectedCounts(current: Project) {
@@ -825,6 +864,69 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.project-hero-kpis {
+  gap: 12px;
+}
+
+.project-hero-kpi {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+.project-hero-kpi::after {
+  content: "";
+  position: absolute;
+  right: 14px;
+  bottom: -18px;
+  width: 74px;
+  height: 74px;
+  border-radius: 999px;
+  opacity: 0.16;
+}
+
+.project-hero-kpi span,
+.project-hero-kpi strong {
+  position: relative;
+  z-index: 1;
+}
+
+.project-hero-kpi--keyword {
+  background: linear-gradient(135deg, rgba(239, 246, 255, 0.96), rgba(255, 255, 255, 0.9));
+}
+
+.project-hero-kpi--keyword::after {
+  background: #2563eb;
+}
+
+.project-hero-kpi--keyword strong {
+  color: #2563eb;
+}
+
+.project-hero-kpi--quota {
+  background: linear-gradient(135deg, rgba(245, 243, 255, 0.96), rgba(255, 255, 255, 0.9));
+}
+
+.project-hero-kpi--quota::after {
+  background: #8b5cf6;
+}
+
+.project-hero-kpi--quota strong {
+  color: #6d28d9;
+}
+
+.project-hero-kpi--channel {
+  background: linear-gradient(135deg, rgba(236, 253, 245, 0.96), rgba(255, 255, 255, 0.9));
+}
+
+.project-hero-kpi--channel::after {
+  background: #10b981;
+}
+
+.project-hero-kpi--channel strong {
+  color: #059669;
+}
+
 .score-input {
   width: 220px;
 }

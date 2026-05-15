@@ -147,7 +147,7 @@ const adminRoutes: RouteRecordRaw = {
       path: 'layered-keyword-groups',
       name: 'LayeredKeywordGroupManage',
       component: () => import('@/views/admin/project/LayeredKeywordGroupManage.vue'),
-      meta: { title: '分层拓词管理', icon: 'Collection', permissions: ['keyword_group.read'] },
+      meta: { title: '拓词管理', icon: 'Collection', permissions: ['keyword_group.read'] },
     },
     {
       path: 'monitoring/platforms',
@@ -166,7 +166,7 @@ const adminRoutes: RouteRecordRaw = {
       name: 'PresaleReportList',
       component: () => import('@/views/admin/presale/report/PresaleReportList.vue'),
       meta: {
-        title: '售前报告',
+        title: 'AI可见度诊断报告',
         icon: 'Document',
         permissions: ['presale.report.list'],
       },
@@ -216,7 +216,7 @@ const adminRoutes: RouteRecordRaw = {
       name: 'PresaleReportEdit',
       component: () => import('@/views/admin/presale/report/PresaleReportEdit.vue'),
       meta: {
-        title: '编辑售前报告',
+        title: '编辑AI可见度诊断报告',
         hidden: true,
         permissions: ['presale.report.view'],
       },

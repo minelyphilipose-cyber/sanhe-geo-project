@@ -1,8 +1,36 @@
 ﻿<template>
-  <div class="space-y-4">
+  <div class="admin-page">
     <el-page-header content="客户详情" @back="$router.back()" />
 
-    <el-card v-loading="loading">
+    <section v-if="company" class="admin-object-hero customer-detail-hero" :class="customerHeroClass((company as any).status)">
+      <div class="admin-object-hero-main">
+        <div>
+          <h1 class="admin-object-title">{{ company.companyName }}</h1>
+          <div class="admin-object-meta">
+            {{ companyIndustryText }} · {{ companyRegion(company) }} · {{ dictStore.label('owner_type', company.ownerType) || '-' }}
+          </div>
+        </div>
+        <span class="admin-status-tag" :class="companyStatusClass((company as any).status)">
+          {{ dictStore.label('company_status', (company as any).status) || '-' }}
+        </span>
+      </div>
+      <div class="admin-object-kpis">
+        <div class="admin-object-kpi customer-hero-kpi customer-hero-kpi--brand">
+          <span>品牌数量</span>
+          <strong>{{ brands.length }}</strong>
+        </div>
+        <div class="admin-object-kpi customer-hero-kpi customer-hero-kpi--package">
+          <span>套餐状态</span>
+          <strong>{{ activePackageBinding ? '已绑定' : '未绑定' }}</strong>
+        </div>
+        <div class="admin-object-kpi customer-hero-kpi customer-hero-kpi--quota">
+          <span>关键词组额度</span>
+          <strong>{{ keywordGroupQuotaText }}</strong>
+        </div>
+      </div>
+    </section>
+
+    <el-card v-loading="loading" class="admin-rich-card">
       <template #header>
         <div class="flex items-center justify-between">
           <span>客户信息</span>
@@ -12,17 +40,15 @@
           </div>
         </div>
       </template>
-      <el-descriptions :column="3" border>
-        <el-descriptions-item label="客户名称">{{ company?.companyName }}</el-descriptions-item>
-        <el-descriptions-item label="行业">{{ companyIndustryText }}</el-descriptions-item>
-        <el-descriptions-item label="地区">{{ companyRegion(company) }}</el-descriptions-item>
-        <el-descriptions-item label="归属">{{ dictStore.label('owner_type', company?.ownerType) }}</el-descriptions-item>
-        <el-descriptions-item label="合伙人">{{ (company as any)?.partnerName || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="状态">{{ dictStore.label('company_status', (company as any)?.status) }}</el-descriptions-item>
-      </el-descriptions>
+      <div class="admin-info-grid">
+        <div v-for="item in customerBasicInfoItems" :key="item.label" class="admin-info-item">
+          <span class="admin-info-label">{{ item.label }}</span>
+          <strong class="admin-info-value">{{ item.value }}</strong>
+        </div>
+      </div>
     </el-card>
 
-    <el-card v-loading="packageLoading">
+    <el-card v-loading="packageLoading" class="admin-rich-card">
       <template #header>
         <div class="flex items-center justify-between">
           <span>客户套餐</span>
@@ -35,39 +61,52 @@
       <template v-if="activePackageBinding">
         <el-descriptions :column="4" border>
           <el-descriptions-item label="套餐名称">{{ activePackageBinding.packageName }}</el-descriptions-item>
-          <el-descriptions-item label="套餐类型">{{ activePackageBinding.packageType }}</el-descriptions-item>
-          <el-descriptions-item label="标准价格(元)">{{ moneyText(activePackageBinding.standardPrice) }}</el-descriptions-item>
           <el-descriptions-item label="服务周期">{{ activePackageBinding.serviceMonths }} 个月</el-descriptions-item>
           <el-descriptions-item label="关键词组总额度">{{ activePackageBinding.keywordGroupLimit }}</el-descriptions-item>
           <el-descriptions-item label="绑定时间">{{ activePackageBinding.boundAt || '-' }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ packageStatusLabel(activePackageBinding.status) }}</el-descriptions-item>
         </el-descriptions>
-        <div v-loading="keywordGroupQuotaLoading" class="quota-panel">
+        <div v-loading="keywordGroupQuotaLoading" class="quota-panel quota-panel--keyword">
           <div class="quota-panel__header">
-            <span>关键词组额度</span>
-            <span>{{ keywordGroupQuotaText }}</span>
+            <div>
+              <span>关键词组额度</span>
+              <small>统计客户下所有已激活项目分配的问题额度</small>
+            </div>
+            <strong>{{ keywordGroupQuotaText }}</strong>
           </div>
           <el-progress
+            class="keyword-total-progress"
             :percentage="keywordGroupQuotaPercentage"
             :status="keywordGroupQuotaStatus"
-            :stroke-width="10"
+            :color="keywordGroupQuotaColor"
+            :stroke-width="9"
+            :show-text="false"
           />
           <div class="quota-panel__meta">
             <span v-if="isKeywordGroupOverQuota">超出额度 {{ keywordGroupOverflow }}</span>
             <span v-else>剩余额度 {{ keywordGroupQuota?.remainingCount ?? 0 }}</span>
-            <span>统计客户下所有已激活项目分配的问题额度</span>
           </div>
           <div class="keyword-tier-list">
-            <div v-for="item in keywordGroupTierItems" :key="item.tier" class="keyword-tier-row">
+            <div
+              v-for="item in keywordGroupTierItems"
+              :key="item.tier"
+              class="keyword-tier-row"
+              :class="`keyword-tier-row--${item.tier.toLowerCase()}`"
+            >
               <div class="keyword-tier-row__main">
-                <span>{{ item.label }}</span>
-                <strong>{{ item.used }} / {{ item.limit }}</strong>
+                <div>
+                  <span>{{ item.label }}</span>
+                  <strong>{{ item.used }} / {{ item.limit }}</strong>
+                </div>
+                <em>{{ item.percentage }}%</em>
               </div>
               <el-progress
+                class="keyword-tier-progress"
                 :percentage="item.percentage"
                 :status="item.status"
+                :color="item.color"
                 :show-text="false"
-                :stroke-width="8"
+                :stroke-width="7"
               />
               <div class="keyword-tier-row__meta">
                 <span v-if="item.overflow > 0">超出 {{ item.overflow }}</span>
@@ -143,7 +182,6 @@
       <el-empty v-else description="当前客户未绑定套餐" />
       <el-table v-if="packageBindingHistory.length" class="mt-4" :data="packageBindingHistory" border>
         <el-table-column prop="packageName" label="历史套餐" min-width="180" />
-        <el-table-column prop="packageType" label="类型" min-width="150" />
         <el-table-column label="状态" width="110">
           <template #default="scope">{{ packageStatusLabel(scope.row.status) }}</template>
         </el-table-column>
@@ -152,7 +190,7 @@
       </el-table>
     </el-card>
 
-    <el-card v-loading="brandLoading">
+    <el-card v-loading="brandLoading" class="admin-rich-card">
       <template #header>
         <div class="flex items-center justify-between">
           <span>品牌列表</span>
@@ -191,10 +229,10 @@
       </DataState>
     </el-card>
 
-    <el-dialog v-model="editVisible" title="编辑客户" width="620px">
-      <el-form ref="companyFormRef" :model="companyForm" :rules="companyRules" label-width="100px">
+    <el-dialog v-model="editVisible" title="编辑客户" width="820px" class="admin-editor-dialog">
+      <el-form ref="companyFormRef" class="admin-dialog-form" :model="companyForm" :rules="companyRules" label-width="100px">
         <el-form-item label="客户名称" required><el-input v-model="companyForm.companyName" /></el-form-item>
-        <el-form-item label="行业" prop="industryTags">
+        <el-form-item class="is-full" label="行业" prop="industryTags">
           <el-select
             v-model="companyForm.industryTags"
             multiple
@@ -210,10 +248,6 @@
               :value="item.dictKey"
             />
           </el-select>
-        </el-form-item>
-        <el-form-item label="服务区域">
-          <RegionCascader v-model="companyForm.serviceAreaCodes" />
-          <div class="mt-1 text-xs text-gray-500">{{ companyServiceAreaPreview || '未选择' }}</div>
         </el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="companyForm.regionCodes" /></el-form-item>
         <el-form-item label="归属" required>
@@ -252,7 +286,7 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="备注"><el-input v-model="companyForm.remark" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="备注"><el-input v-model="companyForm.remark" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>
@@ -260,8 +294,8 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="brandVisible" :title="brandMode === 'create' ? '新增品牌' : '编辑品牌'" width="680px">
-      <el-form ref="brandFormRef" :model="brandForm" :rules="brandRules" label-width="120px">
+    <el-dialog v-model="brandVisible" :title="brandMode === 'create' ? '新增品牌' : '编辑品牌'" width="860px" class="admin-editor-dialog">
+      <el-form ref="brandFormRef" class="admin-dialog-form" :model="brandForm" :rules="brandRules" label-width="120px">
         <el-form-item label="品牌名称" required><el-input v-model="brandForm.brandName" /></el-form-item>
         <el-form-item label="品牌标识" required><el-input v-model="brandForm.brandSlug" /></el-form-item>
         <el-form-item label="品牌行业" prop="industry" required>
@@ -289,8 +323,8 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="品牌描述"><el-input v-model="brandForm.description" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item label="品牌标准表述"><el-input v-model="brandForm.standardBrandStatement" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="品牌描述"><el-input v-model="brandForm.description" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="品牌标准表述"><el-input v-model="brandForm.standardBrandStatement" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="brandVisible = false">取消</el-button>
@@ -298,9 +332,9 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="packageBindVisible" title="绑定客户套餐" width="520px">
-      <el-form label-width="100px">
-        <el-form-item label="套餐" required>
+    <el-dialog v-model="packageBindVisible" title="绑定客户套餐" width="560px" class="admin-editor-dialog">
+      <el-form class="admin-dialog-form" label-width="100px">
+        <el-form-item class="is-full" label="套餐" required>
           <el-select
             v-model="packageBindForm.packagePlanId"
             filterable
@@ -310,7 +344,7 @@
             <el-option
               v-for="item in packagePlanOptions"
               :key="item.id"
-              :label="`${item.packageName} / ${moneyText(item.standardPrice)} 元 / ${item.keywordGroupLimit} 关键词`"
+              :label="`${item.packageName} / ${item.keywordGroupLimit} 关键词`"
               :value="item.id"
             />
           </el-select>
@@ -401,8 +435,6 @@ const packageBindForm = reactive({
 const companyForm = reactive({
   companyName: '',
   industryTags: [] as string[],
-  serviceArea: '',
-  serviceAreaCodes: [] as string[],
   regionCodes: [] as string[],
   ownerType: 'direct',
   partnerId: null as number | null,
@@ -440,11 +472,6 @@ const brandRules: FormRules = {
     { pattern: /^[a-z0-9][a-z0-9_-]{1,127}$/, message: '品牌标识仅支持字母、数字、下划线、中划线', trigger: 'blur' },
   ],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
-}
-
-function moneyText(value?: number | null) {
-  if (value == null) return '-'
-  return Number(value).toFixed(2)
 }
 
 function packageStatusLabel(value?: string | null) {
@@ -511,6 +538,11 @@ const keywordGroupQuotaStatus = computed(() => {
   }
   return undefined
 })
+const keywordGroupQuotaColor = computed(() => {
+  if (isKeywordGroupOverQuota.value) return '#ef4444'
+  if (keywordGroupQuotaPercentage.value >= 90) return '#f59e0b'
+  return '#2563eb'
+})
 const keywordGroupTierItems = computed(() => {
   const quota = keywordGroupQuota.value
   const tiers = [
@@ -520,6 +552,7 @@ const keywordGroupTierItems = computed(() => {
       limit: quota?.quotaLimitA ?? 0,
       used: quota?.usedCountA ?? 0,
       remaining: quota?.remainingCountA ?? 0,
+      color: '#2563eb',
     },
     {
       tier: 'B',
@@ -527,6 +560,7 @@ const keywordGroupTierItems = computed(() => {
       limit: quota?.quotaLimitB ?? 0,
       used: quota?.usedCountB ?? 0,
       remaining: quota?.remainingCountB ?? 0,
+      color: '#10b981',
     },
     {
       tier: 'C',
@@ -534,6 +568,7 @@ const keywordGroupTierItems = computed(() => {
       limit: quota?.quotaLimitC ?? 0,
       used: quota?.usedCountC ?? 0,
       remaining: quota?.remainingCountC ?? 0,
+      color: '#8b5cf6',
     },
   ]
   return tiers.map((item) => {
@@ -592,6 +627,21 @@ function companyRegion(value?: Company | null) {
   return regionDisplayFromPayload(value) || value.city || '-'
 }
 
+function companyStatusClass(status?: string | null) {
+  const value = String(status || '')
+  if (['active', 'signed', 'deal', 'converted'].includes(value)) return 'is-success'
+  if (['disabled', 'lost', 'deleted'].includes(value)) return 'is-muted'
+  if (['risk', 'blocked'].includes(value)) return 'is-danger'
+  return 'is-warning'
+}
+
+function customerHeroClass(status?: string | null) {
+  const value = String(status || '')
+  if (['active', 'signed', 'deal', 'converted'].includes(value)) return 'is-signed'
+  if (['disabled', 'lost', 'deleted'].includes(value)) return 'is-disabled'
+  return 'is-potential'
+}
+
 function brandRegion(value: Brand) {
   return regionDisplayFromPayload(value) || value.serviceArea || '-'
 }
@@ -621,8 +671,6 @@ function normalizeIndustryTags(tags: string[]) {
 function fillCompanyForm(data: Company) {
   companyForm.companyName = data.companyName
   companyForm.industryTags = parseIndustryTags(data.industryTags)
-  companyForm.serviceArea = (data as any).serviceArea || ''
-  companyForm.serviceAreaCodes = []
   companyForm.regionCodes = regionCodesFromPayload(data)
   companyForm.ownerType = data.ownerType
   companyForm.partnerId = data.partnerId
@@ -697,11 +745,9 @@ async function submitCompany() {
   saving.value = true
   try {
     const region = regionPayloadFromCodes(companyForm.regionCodes)
-    const serviceArea = regionPayloadFromCodes(companyForm.serviceAreaCodes).displayName || companyForm.serviceArea
     await updateCompany(companyId, {
       companyName: companyForm.companyName,
       industryTags: normalizeIndustryTags(companyForm.industryTags),
-      serviceArea: serviceArea || undefined,
       city: region.displayName,
       provinceCode: region.provinceCode,
       provinceName: region.provinceName,
@@ -940,12 +986,6 @@ function goBrandDetail(brandId: number) {
   router.push(`/admin/brands/${brandId}`)
 }
 
-const companyServiceAreaPreview = computed(() => {
-  const selected = regionPayloadFromCodes(companyForm.serviceAreaCodes).displayName
-  if (selected) return selected
-  return companyForm.serviceArea
-})
-
 const availableBrandIndustries = computed(() => companyForm.industryTags || [])
 
 const companyIndustryText = computed(() => {
@@ -953,6 +993,14 @@ const companyIndustryText = computed(() => {
   if (!tags.length) return '-'
   return tags.map((tag) => dictStore.label('industry_tag', tag) || tag).join(' / ')
 })
+const customerBasicInfoItems = computed(() => [
+  { label: '客户名称', value: company.value?.companyName || '-' },
+  { label: '行业', value: companyIndustryText.value },
+  { label: '地区', value: companyRegion(company.value) },
+  { label: '归属', value: dictStore.label('owner_type', company.value?.ownerType) || '-' },
+  { label: '合伙人', value: (company.value as any)?.partnerName || '-' },
+  { label: '状态', value: dictStore.label('company_status', (company.value as any)?.status) || '-' },
+])
 
 onMounted(async () => {
   if (!hasValidId) {
@@ -967,11 +1015,86 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.customer-detail-hero {
+  border-color: rgba(147, 197, 253, 0.72);
+  background:
+    radial-gradient(circle at 88% 0%, rgba(34, 197, 94, 0.08), transparent 28%),
+    linear-gradient(135deg, #ffffff 0%, #f8fbff 45%, #effdf7 100%);
+}
+
+.customer-detail-hero::after {
+  width: 220px;
+  opacity: 0.42;
+}
+
+.customer-detail-hero.is-signed {
+  border-left: 4px solid #10b981;
+}
+
+.customer-detail-hero.is-potential {
+  border-left: 4px solid #f59e0b;
+}
+
+.customer-detail-hero.is-disabled {
+  border-left: 4px solid #94a3b8;
+}
+
+.customer-hero-kpi {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(191, 219, 254, 0.7);
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.customer-hero-kpi::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 3px;
+  border-radius: 999px;
+}
+
+.customer-hero-kpi--brand::before {
+  background: linear-gradient(90deg, #60a5fa, rgba(96, 165, 250, 0.08));
+}
+
+.customer-hero-kpi--brand strong {
+  color: #1d4ed8;
+}
+
+.customer-hero-kpi--package::before {
+  background: linear-gradient(90deg, #34d399, rgba(52, 211, 153, 0.08));
+}
+
+.customer-hero-kpi--package strong {
+  color: #047857;
+}
+
+.customer-hero-kpi--quota::before {
+  background: linear-gradient(90deg, #fbbf24, rgba(251, 191, 36, 0.08));
+}
+
+.customer-hero-kpi--quota strong {
+  color: #b45309;
+}
+
 .quota-panel {
   margin-top: 16px;
   padding: 14px 16px;
   border: 1px solid #e4e7ed;
   border-radius: 6px;
+}
+
+.quota-panel--keyword {
+  padding: 18px;
+  border-color: #dbeafe;
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.08), transparent 28%),
+    linear-gradient(135deg, #ffffff 0%, #f8fbff 58%, #f7f7ff 100%);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
 }
 
 .quota-panel__header,
@@ -987,23 +1110,56 @@ onMounted(async () => {
   font-weight: 600;
 }
 
+.quota-panel__header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.quota-panel__header small {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.quota-panel__header strong {
+  padding: 5px 12px;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
 .quota-panel__meta {
+  justify-content: flex-start;
   margin-top: 8px;
   color: #606266;
   font-size: 12px;
 }
 
+.keyword-total-progress {
+  width: min(560px, 100%);
+}
+
 .keyword-tier-list {
   display: grid;
-  gap: 10px;
-  margin-top: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
 }
 
 .keyword-tier-row {
-  display: grid;
-  grid-template-columns: minmax(120px, 160px) minmax(180px, 1fr) 90px;
-  align-items: center;
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .keyword-tier-row__main {
@@ -1014,14 +1170,51 @@ onMounted(async () => {
   font-size: 13px;
 }
 
+.keyword-tier-row__main > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.keyword-tier-row__main span {
+  color: #475569;
+}
+
 .keyword-tier-row__main strong {
+  color: #0f172a;
+  font-size: 18px;
+  line-height: 1.1;
   font-weight: 600;
+}
+
+.keyword-tier-row__main em {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.keyword-tier-progress {
+  width: 100%;
 }
 
 .keyword-tier-row__meta {
   font-size: 12px;
   color: #606266;
-  text-align: right;
+  text-align: left;
+}
+
+.keyword-tier-row--a {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(255, 255, 255, 0.92));
+}
+
+.keyword-tier-row--b {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.09), rgba(255, 255, 255, 0.92));
+}
+
+.keyword-tier-row--c {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.09), rgba(255, 255, 255, 0.92));
 }
 
 .quota-channel-cell,
@@ -1043,6 +1236,12 @@ onMounted(async () => {
 
 :deep(.quota-row-exceeded > td.el-table__cell) {
   background: #fef0f0;
+}
+
+@media (max-width: 1100px) {
+  .keyword-tier-list {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
 

@@ -1,0 +1,879 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GEO 系统 UI 优化方向样例</title>
+  <style>
+    :root {
+      --brand-50: #eff6ff;
+      --brand-100: #dbeafe;
+      --brand-600: #2563eb;
+      --brand-700: #1d4ed8;
+      --ink-900: #0f172a;
+      --ink-800: #1e293b;
+      --ink-700: #334155;
+      --ink-500: #64748b;
+      --ink-400: #94a3b8;
+      --line: #e2e8f0;
+      --line-soft: #eef2f7;
+      --page: #f8fafc;
+      --success: #059669;
+      --warning: #d97706;
+      --danger: #dc2626;
+      --violet: #7c3aed;
+      --radius: 8px;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink-800);
+      font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      letter-spacing: 0;
+    }
+
+    button, input, select { font: inherit; }
+
+    .shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 248px 1fr;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      background: linear-gradient(180deg, #0f172a 0%, #020617 100%);
+      color: #cbd5e1;
+      padding: 16px 12px;
+      overflow: hidden;
+    }
+
+    .brand {
+      height: 44px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 10px 16px;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      margin-bottom: 14px;
+    }
+
+    .brand-mark {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      display: grid;
+      place-items: center;
+      background: #fff;
+      color: var(--brand-700);
+      font-weight: 800;
+    }
+
+    .brand-title {
+      line-height: 1.1;
+      min-width: 0;
+    }
+
+    .brand-title strong {
+      display: block;
+      font-size: 14px;
+      color: #fff;
+    }
+
+    .brand-title span {
+      display: block;
+      margin-top: 3px;
+      font-size: 11px;
+      color: #94a3b8;
+    }
+
+    .nav-group {
+      margin: 16px 0;
+    }
+
+    .nav-label {
+      padding: 0 12px;
+      margin: 0 0 8px;
+      font-size: 12px;
+      color: #64748b;
+      font-weight: 700;
+    }
+
+    .nav-item {
+      height: 38px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 12px;
+      margin-bottom: 3px;
+      border-radius: var(--radius);
+      color: #94a3b8;
+      font-size: 14px;
+    }
+
+    .nav-item.active {
+      color: #fff;
+      background: rgba(37, 99, 235, .24);
+    }
+
+    .nav-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      opacity: .9;
+    }
+
+    .main {
+      min-width: 0;
+    }
+
+    .topbar {
+      height: 56px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 24px;
+      background: rgba(255,255,255,.92);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(12px);
+    }
+
+    .crumb {
+      font-size: 13px;
+      color: var(--ink-500);
+      white-space: nowrap;
+    }
+
+    .avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      background: var(--brand-600);
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      font-size: 13px;
+    }
+
+    .workspace {
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    .direction {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 12px 28px rgba(15, 23, 42, .04);
+    }
+
+    .direction-head {
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line-soft);
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .direction-head h2 {
+      margin: 0;
+      font-size: 18px;
+      color: var(--ink-900);
+    }
+
+    .direction-head p {
+      margin: 6px 0 0;
+      font-size: 13px;
+      color: var(--ink-500);
+      line-height: 1.55;
+    }
+
+    .score-pill {
+      border: 1px solid var(--line);
+      background: var(--page);
+      color: var(--ink-700);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .mock {
+      padding: 20px;
+      background: linear-gradient(180deg, #f8fafc 0%, #fff 100%);
+    }
+
+    .page-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    .page-head h3 {
+      margin: 0;
+      font-size: 20px;
+      color: var(--ink-900);
+    }
+
+    .page-head .sub {
+      margin-top: 5px;
+      font-size: 13px;
+      color: var(--ink-500);
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .btn {
+      height: 32px;
+      border-radius: 7px;
+      border: 1px solid var(--line);
+      padding: 0 12px;
+      color: var(--ink-700);
+      background: #fff;
+    }
+
+    .btn.primary {
+      border-color: var(--brand-600);
+      background: var(--brand-600);
+      color: #fff;
+    }
+
+    .btn.danger {
+      border-color: #fecaca;
+      color: var(--danger);
+      background: #fff5f5;
+    }
+
+    .filter-bar {
+      display: grid;
+      grid-template-columns: 1.2fr .7fr .7fr auto;
+      gap: 10px;
+      padding: 12px;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      margin-bottom: 12px;
+    }
+
+    .field {
+      min-width: 0;
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+      color: var(--ink-500);
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      font-size: 13px;
+    }
+
+    .table {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .tr {
+      display: grid;
+      grid-template-columns: 1.4fr .9fr .9fr .7fr 1fr;
+      min-height: 42px;
+      border-bottom: 1px solid var(--line-soft);
+      align-items: center;
+      font-size: 13px;
+    }
+
+    .tr:last-child { border-bottom: 0; }
+    .th { background: #f8fafc; color: var(--ink-500); font-weight: 700; }
+    .td { padding: 0 12px; min-width: 0; }
+    .strong { color: var(--ink-900); font-weight: 700; }
+    .muted { color: var(--ink-500); }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      height: 22px;
+      padding: 0 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      background: var(--brand-50);
+      color: var(--brand-700);
+      border: 1px solid var(--brand-100);
+      white-space: nowrap;
+    }
+
+    .tag.success { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
+    .tag.warn { color: #b45309; background: #fffbeb; border-color: #fde68a; }
+    .tag.danger { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
+    .tag.gray { color: var(--ink-500); background: #f8fafc; border-color: var(--line); }
+    .tag.violet { color: #6d28d9; background: #f5f3ff; border-color: #ddd6fe; }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+
+    .metric {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px;
+      min-height: 92px;
+    }
+
+    .metric .label {
+      color: var(--ink-500);
+      font-size: 13px;
+    }
+
+    .metric .num {
+      margin-top: 10px;
+      font-size: 26px;
+      font-weight: 800;
+      color: var(--ink-900);
+    }
+
+    .metric .hint {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--ink-500);
+    }
+
+    .ops-grid {
+      display: grid;
+      grid-template-columns: 1.3fr .9fr;
+      gap: 12px;
+    }
+
+    .panel {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .panel-title {
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line-soft);
+      font-size: 14px;
+      font-weight: 800;
+      color: var(--ink-900);
+    }
+
+    .todo {
+      display: grid;
+      grid-template-columns: 6px 1fr auto;
+      gap: 12px;
+      align-items: center;
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--line-soft);
+      font-size: 13px;
+    }
+
+    .todo:last-child { border-bottom: 0; }
+    .bar { height: 32px; border-radius: 999px; background: var(--brand-600); }
+    .bar.red { background: var(--danger); }
+    .bar.orange { background: var(--warning); }
+    .bar.green { background: var(--success); }
+
+    .split-layout {
+      display: grid;
+      grid-template-columns: 360px 1fr;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      min-height: 420px;
+      overflow: hidden;
+      background: #fff;
+    }
+
+    .list-pane {
+      border-right: 1px solid var(--line);
+      background: #f8fafc;
+    }
+
+    .list-item {
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      display: grid;
+      gap: 7px;
+    }
+
+    .list-item.active {
+      border-left: 3px solid var(--brand-600);
+      background: var(--brand-50);
+    }
+
+    .detail-pane {
+      padding: 16px;
+      min-width: 0;
+    }
+
+    .timeline {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      margin: 14px 0;
+    }
+
+    .step {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 10px;
+      background: #fff;
+      min-height: 76px;
+    }
+
+    .step.done { border-color: #a7f3d0; background: #f0fdf4; }
+    .step.active { border-color: #bfdbfe; background: var(--brand-50); box-shadow: inset 0 0 0 1px #bfdbfe; }
+    .step.fail { border-color: #fecaca; background: #fef2f2; }
+    .step strong { display: block; font-size: 13px; color: var(--ink-900); }
+    .step span { display: block; margin-top: 6px; font-size: 12px; color: var(--ink-500); }
+
+    .token-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    .swatches, .components {
+      display: grid;
+      gap: 10px;
+      padding: 14px;
+    }
+
+    .swatch {
+      display: grid;
+      grid-template-columns: 44px 1fr auto;
+      gap: 10px;
+      align-items: center;
+      font-size: 13px;
+    }
+
+    .chip {
+      width: 44px;
+      height: 28px;
+      border-radius: 7px;
+      border: 1px solid rgba(0,0,0,.08);
+    }
+
+    .mini-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: #fff;
+    }
+
+    .report-shell {
+      background: #2d2a26;
+      border-radius: var(--radius);
+      padding: 18px;
+      display: grid;
+      grid-template-columns: 180px minmax(0, 1fr);
+      gap: 18px;
+      color: #e7dfd2;
+      min-height: 500px;
+    }
+
+    .report-nav {
+      background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: var(--radius);
+      padding: 12px;
+      align-self: start;
+      position: sticky;
+      top: 80px;
+    }
+
+    .report-nav .item {
+      padding: 8px 10px;
+      border-radius: 6px;
+      color: #b8afa2;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .report-nav .item.active {
+      color: #fff;
+      background: rgba(255,255,255,.12);
+    }
+
+    .paper {
+      width: min(100%, 760px);
+      min-height: 460px;
+      margin: 0 auto;
+      background: #fbf7ef;
+      color: #211f1c;
+      box-shadow: 0 18px 40px rgba(0,0,0,.24);
+      border-radius: 3px;
+      padding: 34px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .paper-top {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #71695d;
+      border-bottom: 1px solid #ded4c5;
+      padding-bottom: 12px;
+    }
+
+    .paper h3 {
+      margin: 34px 0 8px;
+      font-size: 34px;
+      line-height: 1.15;
+      color: #171411;
+    }
+
+    .report-kpis {
+      margin-top: 28px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .report-kpi {
+      border: 1px solid #ded4c5;
+      padding: 14px;
+      border-radius: 6px;
+      background: rgba(255,255,255,.45);
+    }
+
+    .report-kpi span {
+      font-size: 12px;
+      color: #71695d;
+    }
+
+    .report-kpi strong {
+      display: block;
+      margin-top: 8px;
+      font-size: 24px;
+    }
+
+    .note-row {
+      margin-top: auto;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding-top: 24px;
+    }
+
+    @media (max-width: 1100px) {
+      .shell { grid-template-columns: 72px 1fr; }
+      .brand-title, .nav-label, .nav-item span { display: none; }
+      .sidebar { padding-inline: 10px; }
+      .nav-item { justify-content: center; padding: 0; }
+      .filter-bar { grid-template-columns: 1fr 1fr; }
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+      .ops-grid, .token-grid, .split-layout, .report-shell { grid-template-columns: 1fr; }
+      .report-nav { position: static; }
+    }
+
+    @media (max-width: 720px) {
+      .shell { display: block; }
+      .sidebar { display: none; }
+      .workspace { padding: 14px; }
+      .direction-head, .page-head { flex-direction: column; }
+      .filter-bar, .metrics, .timeline, .report-kpis { grid-template-columns: 1fr; }
+      .tr { grid-template-columns: 1fr; gap: 4px; padding: 10px 0; }
+      .th { display: none; }
+      .td { padding: 2px 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">G</div>
+        <div class="brand-title">
+          <strong>Fantasy GEO</strong>
+          <span>AI Visibility Platform</span>
+        </div>
+      </div>
+
+      <div class="nav-group">
+        <div class="nav-item active"><i class="nav-dot"></i><span>UI 样例方向</span></div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">业务操作</div>
+        <div class="nav-item"><i class="nav-dot"></i><span>售前报告</span></div>
+        <div class="nav-item"><i class="nav-dot"></i><span>项目管理</span></div>
+        <div class="nav-item"><i class="nav-dot"></i><span>内容与执行</span></div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">监控中心</div>
+        <div class="nav-item"><i class="nav-dot"></i><span>调度监控</span></div>
+        <div class="nav-item"><i class="nav-dot"></i><span>平台健康</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="crumb">管理后台 / UI 优化方向 / 样例评审</div>
+        <div class="avatar">管</div>
+      </header>
+
+      <div class="workspace">
+        <section class="direction">
+          <div class="direction-head">
+            <div>
+              <h2>方向一：统一后台页面骨架</h2>
+              <p>目标是让所有列表页、配置页、管理页形成一致的信息层级，降低学习成本。</p>
+            </div>
+            <div class="score-pill">适合：客户、项目、配置、报告列表</div>
+          </div>
+          <div class="mock">
+            <div class="page-head">
+              <div>
+                <h3>项目管理</h3>
+                <div class="sub">管理客户项目、拓词额度、地区和交付状态。</div>
+              </div>
+              <div class="btn-row">
+                <button class="btn">导出</button>
+                <button class="btn primary">新建项目</button>
+              </div>
+            </div>
+
+            <div class="filter-bar">
+              <div class="field">搜索项目名称 / 客户 / 品牌</div>
+              <div class="field">状态：全部</div>
+              <div class="field">归属：全部</div>
+              <button class="btn primary">查询</button>
+            </div>
+
+            <div class="table">
+              <div class="tr th">
+                <div class="td">项目</div><div class="td">客户</div><div class="td">拓词组</div><div class="td">状态</div><div class="td">操作</div>
+              </div>
+              <div class="tr">
+                <div class="td"><span class="strong">华东区域 GEO 增长项目</span><br><span class="muted">PRJ-2026-0418</span></div>
+                <div class="td">三禾智能门窗</div>
+                <div class="td">8 组 / 642 条</div>
+                <div class="td"><span class="tag success">执行中</span></div>
+                <div class="td"><button class="btn">详情</button></div>
+              </div>
+              <div class="tr">
+                <div class="td"><span class="strong">高端家装问答覆盖</span><br><span class="muted">PRJ-2026-0419</span></div>
+                <div class="td">城市更新研究院</div>
+                <div class="td">5 组 / 318 条</div>
+                <div class="td"><span class="tag warn">待启动</span></div>
+                <div class="td"><button class="btn">详情</button></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="direction">
+          <div class="direction-head">
+            <div>
+              <h2>方向二：运营驾驶舱工作台</h2>
+              <p>把工作台从统计面板升级为“今天该处理什么”的入口，突出风险、待办和业务漏斗。</p>
+            </div>
+            <div class="score-pill">适合：首页、负责人视图</div>
+          </div>
+          <div class="mock">
+            <div class="metrics">
+              <div class="metric"><div class="label">今日待处理</div><div class="num">18</div><div class="hint">7 个高优先级</div></div>
+              <div class="metric"><div class="label">生成中报告</div><div class="num">12</div><div class="hint">平均 3.1 分钟</div></div>
+              <div class="metric"><div class="label">待审核文章</div><div class="num">46</div><div class="hint">比昨日 +9</div></div>
+              <div class="metric"><div class="label">平台异常</div><div class="num" style="color:var(--danger)">3</div><div class="hint">需运营介入</div></div>
+            </div>
+            <div class="ops-grid">
+              <div class="panel">
+                <div class="panel-title">优先处理队列 <span class="tag danger">高风险</span></div>
+                <div class="todo"><i class="bar red"></i><div><span class="strong">百度 AI 检索结果降级</span><br><span class="muted">影响 4 个售前报告</span></div><button class="btn danger">处理</button></div>
+                <div class="todo"><i class="bar orange"></i><div><span class="strong">12 篇文章等待审核</span><br><span class="muted">内容与执行 / FAQ</span></div><button class="btn">查看</button></div>
+                <div class="todo"><i class="bar green"></i><div><span class="strong">3 个项目可生成月报</span><br><span class="muted">交付周期已达标</span></div><button class="btn">生成</button></div>
+              </div>
+              <div class="panel">
+                <div class="panel-title">业务漏斗</div>
+                <div class="todo"><i class="bar"></i><div>客户建档</div><span class="strong">128</span></div>
+                <div class="todo"><i class="bar"></i><div>活跃项目</div><span class="strong">73</span></div>
+                <div class="todo"><i class="bar"></i><div>已生成报告</div><span class="strong">251</span></div>
+                <div class="todo"><i class="bar"></i><div>内容分发中</div><span class="strong">1,420</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="direction">
+          <div class="direction-head">
+            <div>
+              <h2>方向三：分栏任务流页面</h2>
+              <p>适合操作复杂的页面，用左侧列表 + 右侧上下文详情替代多弹窗堆叠。</p>
+            </div>
+            <div class="score-pill">适合：内容与执行、报告审核、任务监控</div>
+          </div>
+          <div class="mock">
+            <div class="split-layout">
+              <div class="list-pane">
+                <div class="panel-title">文章队列 <span class="tag">46 条</span></div>
+                <div class="list-item active">
+                  <span class="strong">装修公司如何提升 AI 推荐率？</span>
+                  <span class="muted">三禾智能门窗 · FAQ · 待审核</span>
+                  <span><span class="tag warn">待审核</span></span>
+                </div>
+                <div class="list-item">
+                  <span class="strong">本地家装品牌 GEO 投放策略</span>
+                  <span class="muted">城市更新研究院 · 行业文章</span>
+                  <span><span class="tag success">可分发</span></span>
+                </div>
+                <div class="list-item">
+                  <span class="strong">AI 问答覆盖不足原因分析</span>
+                  <span class="muted">华东区域项目 · 场景内容</span>
+                  <span><span class="tag danger">驳回</span></span>
+                </div>
+              </div>
+              <div class="detail-pane">
+                <div class="page-head">
+                  <div>
+                    <h3>装修公司如何提升 AI 推荐率？</h3>
+                    <div class="sub">FAQ · 三禾智能门窗 · 生成于 2026-05-15 13:20</div>
+                  </div>
+                  <div class="btn-row">
+                    <button class="btn">修订</button>
+                    <button class="btn danger">驳回</button>
+                    <button class="btn primary">通过审核</button>
+                  </div>
+                </div>
+                <div class="timeline">
+                  <div class="step done"><strong>生成</strong><span>AI 初稿完成</span></div>
+                  <div class="step active"><strong>审核</strong><span>等待运营确认</span></div>
+                  <div class="step"><strong>修订</strong><span>可选</span></div>
+                  <div class="step"><strong>分发</strong><span>选择渠道</span></div>
+                  <div class="step"><strong>同步</strong><span>状态回写</span></div>
+                </div>
+                <div class="panel">
+                  <div class="panel-title">正文预览 <span class="tag gray">Markdown / Preview</span></div>
+                  <div style="padding:16px; line-height:1.75; font-size:14px;">
+                    <p><strong>核心判断：</strong>装修公司在 AI 搜索中的推荐率，主要取决于品牌实体清晰度、案例覆盖、地域相关性和第三方内容分发质量。</p>
+                    <p class="muted">当前版本存在 2 处风险提示：品牌名出现次数偏低，地区词覆盖不足。</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="direction">
+          <div class="direction-head">
+            <div>
+              <h2>方向四：设计 Token 与组件规范</h2>
+              <p>把颜色、状态、卡片、标签、表格操作沉淀为统一组件，避免页面各自写一套。</p>
+            </div>
+            <div class="score-pill">适合：Figma 组件库 + 前端组件库</div>
+          </div>
+          <div class="mock">
+            <div class="token-grid">
+              <div class="panel">
+                <div class="panel-title">状态色规范</div>
+                <div class="swatches">
+                  <div class="swatch"><i class="chip" style="background:#2563eb"></i><span>Primary / 主要操作</span><code>#2563EB</code></div>
+                  <div class="swatch"><i class="chip" style="background:#059669"></i><span>Success / 已完成</span><code>#059669</code></div>
+                  <div class="swatch"><i class="chip" style="background:#d97706"></i><span>Warning / 待处理</span><code>#D97706</code></div>
+                  <div class="swatch"><i class="chip" style="background:#dc2626"></i><span>Danger / 失败风险</span><code>#DC2626</code></div>
+                </div>
+              </div>
+              <div class="panel">
+                <div class="panel-title">组件样例</div>
+                <div class="components">
+                  <div class="mini-card"><span>报告生成状态</span><span class="tag success">已完成</span></div>
+                  <div class="mini-card"><span>报告生成状态</span><span class="tag warn">生成中</span></div>
+                  <div class="mini-card"><span>报告生成状态</span><span class="tag danger">失败</span></div>
+                  <div class="mini-card"><span>数据降级提示</span><span class="tag violet">回退基线</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="direction">
+          <div class="direction-head">
+            <div>
+              <h2>方向五：售前报告高价值交付体验</h2>
+              <p>报告页保留独立高级视觉，但增强目录、版本、导出、冻结、降级解释等产品能力。</p>
+            </div>
+            <div class="score-pill">适合：报告详情、编辑、导出预览</div>
+          </div>
+          <div class="mock">
+            <div class="page-head">
+              <div>
+                <h3>AI 可见度诊断报告</h3>
+                <div class="sub">三禾智能门窗 · v3 · 已冻结 · 最近导出 2026-05-15 13:42</div>
+              </div>
+              <div class="btn-row">
+                <button class="btn">切换版本</button>
+                <button class="btn">编辑内容</button>
+                <button class="btn primary">导出 PDF</button>
+              </div>
+            </div>
+            <div class="report-shell">
+              <div class="report-nav">
+                <div class="item active">01 封面</div>
+                <div class="item">04 执行摘要</div>
+                <div class="item">05 可见度评分</div>
+                <div class="item">13 高优先级机会</div>
+                <div class="item">17 分阶段路径</div>
+              </div>
+              <div class="paper">
+                <div class="paper-top">
+                  <span>GEO · 可见度诊断</span>
+                  <span>REPORT · GEO-128-V3</span>
+                </div>
+                <h3>AI 可见度<br>诊断报告</h3>
+                <p>专为 <strong>三禾智能门窗</strong> 定制。覆盖 8 个 AI 平台、120 条用户查询与 3 类竞品场景。</p>
+                <div class="report-kpis">
+                  <div class="report-kpi"><span>综合得分</span><strong>73</strong></div>
+                  <div class="report-kpi"><span>竞品差距</span><strong>-11%</strong></div>
+                  <div class="report-kpi"><span>高优机会</span><strong>9</strong></div>
+                </div>
+                <div class="note-row">
+                  <span class="tag warn">行业基线：回退匹配</span>
+                  <span class="tag danger">2 个平台降级</span>
+                  <span class="tag gray">已冻结</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

@@ -1,22 +1,20 @@
 <template>
-  <div class="presale-report-list">
+  <div class="presale-report-list admin-page">
     <!-- 页头 -->
-    <div class="page-header">
+    <div class="page-header admin-page-header">
       <div class="header-left">
-        <el-breadcrumb separator="/">
-          <el-breadcrumb-item :to="{ path: '/admin' }">管理后台</el-breadcrumb-item>
-          <el-breadcrumb-item>售前报告</el-breadcrumb-item>
-        </el-breadcrumb>
-        <h2 class="page-title">报告列表</h2>
+        <div class="admin-page-kicker">AI可见度诊断报告</div>
+        <h1 class="page-title admin-page-title">报告列表</h1>
+        <div class="admin-page-subtitle">跟踪报告生成状态、版本冻结与 Prompt 调用链路。</div>
       </div>
-      <div class="header-right">
+      <div class="header-right admin-page-actions">
         <el-button v-if="canManagePage03Config" @click="goPage03Config">PAGE03 配置</el-button>
         <el-button v-if="canCreateReportPermission" type="primary" :icon="Plus" @click="goCreate">新建报告</el-button>
       </div>
     </div>
 
     <!-- 筛选工具栏 -->
-    <el-card shadow="never" class="filter-card">
+    <el-card shadow="never" class="filter-card admin-surface">
       <el-form :model="filter" class="filter-form" label-position="top">
         <el-form-item label="品牌名">
           <el-input
@@ -85,128 +83,145 @@
     </el-card>
 
     <!-- 数据表格 -->
-    <el-card shadow="never" class="table-card">
+    <div class="admin-metric-grid">
+      <div class="admin-metric-card" style="--metric-accent: #2563eb; --metric-tone: #eff6ff">
+        <span class="admin-metric-label">报告总数</span>
+        <strong class="admin-metric-value">{{ pagination.total }}</strong>
+        <span class="admin-metric-hint">当前筛选结果</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #059669; --metric-tone: #ecfdf5">
+        <span class="admin-metric-label">已完成</span>
+        <strong class="admin-metric-value">{{ doneCount }}</strong>
+        <span class="admin-metric-hint">本页可见</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #f59e0b; --metric-tone: #fffbeb">
+        <span class="admin-metric-label">生成中</span>
+        <strong class="admin-metric-value">{{ runningCount }}</strong>
+        <span class="admin-metric-hint">本页可见</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #ef4444; --metric-tone: #fef2f2">
+        <span class="admin-metric-label">失败/需处理</span>
+        <strong class="admin-metric-value">{{ failedCount }}</strong>
+        <span class="admin-metric-hint">本页可见</span>
+      </div>
+    </div>
+
+    <el-card shadow="never" class="table-card admin-table-card">
       <el-table
+        class="presale-report-table"
         :data="tableData"
         v-loading="loading"
-        stripe
+        border
+        table-layout="fixed"
         highlight-current-row
         style="width: 100%"
         @row-click="onRowClick"
       >
-        <el-table-column prop="brandName" label="品牌" min-width="140">
+        <el-table-column label="报告对象" min-width="360" show-overflow-tooltip>
           <template #default="{ row }">
-            <span class="brand-name">{{ row.brandName }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="行业" width="120">
-          <template #default="{ row }">
-            <el-tag size="small" effect="plain">{{ industryLabel(row.industry) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="身份" width="120">
-          <template #default="{ row }">{{ roleLabel(row.industryRole) }}</template>
-        </el-table-column>
-        <el-table-column prop="region" label="地区" width="120" />
-        <el-table-column label="状态" width="120">
-          <template #default="{ row }">
-            <el-tag
-              :type="getStatusMeta(row.latestVersion?.generationStatus).tagType"
-              size="small"
-            >
-              <el-icon v-if="getStatusMeta(row.latestVersion?.generationStatus).loading" class="is-loading">
-                <Loading />
-              </el-icon>
-              {{ getStatusMeta(row.latestVersion?.generationStatus).label }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="冻结" width="80" align="center">
-          <template #default="{ row }">
-            <el-tooltip
-              v-if="row.latestVersion?.frozen"
-              :content="`冻结于 ${formatDateTime(row.latestVersion.frozenAt)}`"
-              placement="top"
-            >
-              <el-icon class="frozen-icon"><Lock /></el-icon>
-            </el-tooltip>
-            <span v-else class="text-muted">—</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="版本" width="80" align="center">
-          <template #default="{ row }">
-            <span class="version-badge">v{{ row.latestVersion?.versionNo ?? 1 }}</span>
-            <span v-if="row.versionCount > 1" class="version-count">({{ row.versionCount }})</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="创建时间" width="160">
-          <template #default="{ row }">
-            <div>{{ formatDateTime(row.createdAt) }}</div>
-            <div v-if="row.latestVersion?.exportSuccessAt" class="text-muted text-xs">
-              最近导出 {{ formatDateTime(row.latestVersion.exportSuccessAt) }}
+            <div class="admin-entity-cell">
+              <div class="admin-entity-avatar is-green">{{ entityInitial(row.brandName) }}</div>
+              <div class="min-w-0">
+                <div class="admin-entity-main">{{ row.brandName }}</div>
+                <div class="admin-entity-sub">
+                  {{ industryLabel(row.industry) }} · {{ roleLabel(row.industryRole) }} · {{ row.region || '未设置地区' }}
+                </div>
+              </div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="360" fixed="right">
+        <el-table-column label="报告记录" min-width="360">
           <template #default="{ row }">
-            <el-button text type="primary" size="small" @click.stop="goDetail(row)">
-              {{ isInProgress(row.latestVersion?.generationStatus) ? '查看进度' : '查看' }}
-            </el-button>
-            <el-tooltip
-              :disabled="canViewPrompts(row)"
-              content="报告生成完成后可查看 Prompt 详情"
-              placement="top"
-            >
-              <span>
-                <el-button
-                  text
-                  type="primary"
-                  size="small"
-                  :disabled="!canViewPrompts(row)"
-                  @click.stop="goPrompts(row)"
+            <div class="report-record-cell">
+              <div class="report-record-main">
+                <span class="version-badge">v{{ row.latestVersion?.versionNo ?? 1 }}</span>
+                <span v-if="row.versionCount > 1" class="version-count">共 {{ row.versionCount }} 版</span>
+                <span class="admin-status-tag" :class="reportStatusClass(row.latestVersion?.generationStatus)">
+                  <el-icon v-if="getStatusMeta(row.latestVersion?.generationStatus).loading" class="is-loading">
+                    <Loading />
+                  </el-icon>
+                  {{ getStatusMeta(row.latestVersion?.generationStatus).label }}
+                </span>
+                <span
+                  class="admin-mini-pill"
+                  :class="row.latestVersion?.frozen ? 'is-blue' : ''"
                 >
-                  查看 Prompt
-                </el-button>
-              </span>
-            </el-tooltip>
-            <el-tooltip
-              :disabled="canEdit(row)"
-              :content="editDisabledReason(row)"
-              placement="top"
-            >
-              <span>
-                <el-button
-                  text
-                  type="primary"
-                  size="small"
-                  :disabled="!canEdit(row)"
-                  :loading="derivingReportId === row.reportId"
-                  @click.stop="goEdit(row)"
-                >
-                  {{ editButtonText(row) }}
-                </el-button>
-              </span>
-            </el-tooltip>
-            <el-button
-              text
-              type="primary"
-              size="small"
-              :disabled="!canRegenerate(row)"
-              @click.stop="goRegenerate(row)"
-            >
-              再次生成
-            </el-button>
-            <el-button
-              v-if="canDeleteReportPermission"
-              text
-              type="danger"
-              size="small"
-              :disabled="!canDelete(row)"
-              :loading="deletingReportId === row.reportId"
-              @click.stop="confirmDelete(row)"
-            >
-              删除
-            </el-button>
+                  <el-icon v-if="row.latestVersion?.frozen"><Lock /></el-icon>
+                  {{ row.latestVersion?.frozen ? '已冻结' : '未冻结' }}
+                </span>
+              </div>
+              <div class="report-record-sub">
+                创建 {{ formatDateTime(row.createdAt) }}
+                <span v-if="row.latestVersion?.exportSuccessAt">
+                  · 最近导出 {{ formatDateTime(row.latestVersion.exportSuccessAt) }}
+                </span>
+              </div>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="280" fixed="right">
+          <template #default="{ row }">
+            <div class="admin-row-actions">
+              <el-button text type="primary" size="small" @click.stop="goDetail(row)">
+                {{ isInProgress(row.latestVersion?.generationStatus) ? '查看进度' : '查看' }}
+              </el-button>
+              <el-tooltip
+                :disabled="canViewPrompts(row)"
+                content="报告生成完成后可查看 Prompt 详情"
+                placement="top"
+              >
+                <span>
+                  <el-button
+                    text
+                    type="primary"
+                    size="small"
+                    :disabled="!canViewPrompts(row)"
+                    @click.stop="goPrompts(row)"
+                  >
+                    查看 Prompt
+                  </el-button>
+                </span>
+              </el-tooltip>
+              <el-tooltip
+                :disabled="canEdit(row)"
+                :content="editDisabledReason(row)"
+                placement="top"
+              >
+                <span>
+                  <el-button
+                    text
+                    type="primary"
+                    size="small"
+                    :disabled="!canEdit(row)"
+                    :loading="derivingReportId === row.reportId"
+                    @click.stop="goEdit(row)"
+                  >
+                    {{ editButtonText(row) }}
+                  </el-button>
+                </span>
+              </el-tooltip>
+              <el-button
+                v-if="canDeleteReportPermission"
+                text
+                type="danger"
+                size="small"
+                :disabled="!canDelete(row)"
+                :loading="deletingReportId === row.reportId"
+                @click.stop="confirmDelete(row)"
+              >
+                删除
+              </el-button>
+              <el-button
+                class="is-wide"
+                text
+                type="primary"
+                size="small"
+                :disabled="!canRegenerate(row)"
+                @click.stop="goRegenerate(row)"
+              >
+                再次生成
+              </el-button>
+            </div>
           </template>
         </el-table-column>
 
@@ -217,7 +232,7 @@
         </template>
       </el-table>
 
-      <div class="pagination-wrapper">
+      <div class="pagination-wrapper admin-table-footer">
         <el-pagination
           v-model:current-page="pagination.page"
           v-model:page-size="pagination.pageSize"
@@ -329,6 +344,15 @@ const pagination = reactive({
 })
 
 const tableData = ref<ReportListItemVO[]>([])
+const doneCount = computed(() =>
+  tableData.value.filter((row) => row.latestVersion?.generationStatus === 'DONE').length
+)
+const runningCount = computed(() =>
+  tableData.value.filter((row) => isInProgress(row.latestVersion?.generationStatus)).length
+)
+const failedCount = computed(() =>
+  tableData.value.filter((row) => row.latestVersion?.generationStatus === 'FAILED').length
+)
 const loading = ref(false)
 const deletingReportId = ref<number | null>(null)
 const derivingReportId = ref<number | null>(null)
@@ -336,6 +360,18 @@ const versionDialogVisible = ref(false)
 const versionLoading = ref(false)
 const versionDialogReportId = ref<number | null>(null)
 const viewableVersions = ref<ReportVersionOptionVO[]>([])
+
+function entityInitial(value?: string | null) {
+  const text = String(value || '').trim()
+  return text ? Array.from(text)[0] : '报'
+}
+
+function reportStatusClass(status?: string | null) {
+  if (status === 'DONE') return 'is-success'
+  if (status === 'FAILED') return 'is-danger'
+  if (isInProgress(status)) return 'is-warning'
+  return 'is-muted'
+}
 
 async function loadData() {
   loading.value = true
@@ -401,7 +437,7 @@ async function confirmDelete(row: ReportListItemVO) {
   if (!canDelete(row) || deletingReportId.value) return
   const confirmed = await ElMessageBox.confirm(
     `删除后「${row.brandName}」将从报告列表中移除。确认删除?`,
-    '删除售前报告',
+    '删除AI可见度诊断报告',
     { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
   ).catch(() => false)
   if (!confirmed) return
@@ -501,31 +537,13 @@ onMounted(loadData)
 </script>
 
 <style scoped>
-.presale-report-list {
-  padding: 16px 24px;
-}
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 16px;
-  margin-bottom: 16px;
-}
 .header-left {
   min-width: 0;
-}
-.page-title {
-  margin: 8px 0 0 0;
-  font-size: 22px;
-  font-weight: 600;
 }
 .header-right {
   display: flex;
   flex-shrink: 0;
   gap: 8px;
-}
-.filter-card {
-  margin-bottom: 16px;
 }
 .filter-form {
   display: grid;
@@ -556,24 +574,57 @@ onMounted(loadData)
 .filter-actions :deep(.el-button + .el-button) {
   margin-left: 0;
 }
-.table-card {
-  margin-bottom: 16px;
+.presale-report-table :deep(.admin-row-actions) {
+  grid-template-columns: repeat(4, minmax(44px, 1fr));
+  gap: 4px 8px;
 }
-.brand-name {
-  font-weight: 500;
+.presale-report-table :deep(.admin-row-actions .el-button) {
+  min-width: 0;
+}
+.report-record-cell {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+.report-record-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.report-record-sub {
+  min-width: 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.report-record-main .admin-mini-pill {
+  gap: 4px;
 }
 .frozen-icon {
   color: #409eff;
   font-size: 16px;
 }
 .version-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
   font-family: 'JetBrains Mono', Consolas, monospace;
   font-size: 13px;
+  font-weight: 700;
 }
 .version-count {
-  color: #909399;
+  color: #64748b;
   font-size: 12px;
-  margin-left: 4px;
 }
 .text-muted {
   color: #909399;
@@ -582,9 +633,12 @@ onMounted(loadData)
   font-size: 11px;
 }
 .pagination-wrapper {
-  margin-top: 16px;
   display: flex;
   justify-content: flex-end;
+}
+
+.admin-status-tag .el-icon {
+  margin-right: 4px;
 }
 
 @media (max-width: 1440px) {
@@ -594,21 +648,12 @@ onMounted(loadData)
 }
 
 @media (max-width: 960px) {
-  .page-header {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
   .filter-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 640px) {
-  .presale-report-list {
-    padding: 16px;
-  }
-
   .filter-form {
     grid-template-columns: 1fr;
   }

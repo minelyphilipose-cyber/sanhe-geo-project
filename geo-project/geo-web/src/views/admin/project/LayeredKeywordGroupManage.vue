@@ -1,25 +1,41 @@
 <template>
   <div class="layered-keyword-page">
-    <div class="step-switcher">
-      <span class="label">分层拓词管理</span>
-      <button v-for="s in steps" :key="s.no" class="step-btn" :class="{ active: activeStep === s.no }" @click="goStep(s.no)">
-        Step {{ s.no }} {{ s.title }}
-      </button>
+    <div class="step-switcher admin-page-header keyword-page-header">
+      <div class="keyword-title-block">
+        <div class="admin-page-kicker">问题池</div>
+        <h1 class="admin-page-title">拓词管理</h1>
+        <div class="admin-page-subtitle">选择项目、确认额度、生成问题词并审核入库。</div>
+      </div>
+      <div class="step-action-group">
+        <button v-for="s in steps" :key="s.no" class="step-btn" :class="{ active: activeStep === s.no, done: completedSteps.includes(s.no) }" @click="goStep(s.no)">
+          <span class="step-btn-no">{{ s.no }}</span>
+          <span>{{ s.title }}</span>
+        </button>
+      </div>
     </div>
 
     <div class="wire-layout">
       <main class="main">
-        <div class="breadcrumb">GEO 运营后台 <span class="sep">/</span> 问题池 <span class="sep">/</span> <span class="current">分层拓词管理</span></div>
         <StepHeader :active-step="activeStep" :completed-steps="completedSteps" />
+        <div class="keyword-context-bar" :class="{ empty: !selectedProject }">
+          <div class="context-main">
+            <span class="context-avatar">{{ selectedProject ? projectInitial(selectedProject) : '项' }}</span>
+            <div>
+              <strong>{{ selectedProject?.projectName || '请先选择项目' }}</strong>
+              <p>{{ selectedProject ? `${selectedProject.companyName || '未归属客户'} · ${selectedProject.brandName || '未绑定品牌'} · ${projectStatusLabel(selectedProject.status)}` : '选定项目后会读取项目额度、进行中工单与历史批次。' }}</p>
+            </div>
+          </div>
+          <div class="context-metrics">
+            <span><b>{{ workorder ? `WO-${workorder.id}` : '-' }}</b><em>当前工单</em></span>
+            <span><b>A {{ quota?.remainingA ?? 0 }}</b><em>A 剩余</em></span>
+            <span><b>B {{ quota?.remainingB ?? 0 }}</b><em>B 剩余</em></span>
+            <span><b>C {{ quota?.remainingC ?? 0 }}</b><em>C 剩余</em></span>
+          </div>
+        </div>
 
         <section v-show="activeStep === 1">
-          <div class="design-note">
-            <strong>Step 1 说明：</strong>
-            进入页面默认要求先选择项目。项目按客户 / 品牌 / 项目多级选择；选中项目后自动加载档案、项目问题额度、当前工单未删除题目数与 running 批次预占，计算三级剩余可生成。
-          </div>
-
-          <div class="card">
-            <div class="card-head"><span>① 选择项目</span><button class="btn btn-sm" @click="loadProjects">刷新</button></div>
+          <div class="card project-selector-card">
+            <div class="card-head"><span>选择项目</span><button class="btn btn-sm" @click="loadProjects">刷新</button></div>
             <div class="card-body">
               <div class="search-row">
                 <input v-model="keyword" class="text-input" placeholder="输入公司名 / 品牌名 / 项目名模糊搜索" @keyup.enter="loadProjects">
@@ -44,11 +60,14 @@
                   :class="{ selected: selectedProject?.id === item.id }"
                   @click="selectProject(item)"
                 >
-                  <div>
-                    <b>{{ item.projectName }}</b>
-                    <span class="tag tag-primary">额度 A{{ projectQuotaA(item) }} / B{{ projectQuotaB(item) }} / C{{ projectQuotaC(item) }}</span>
+                  <span class="project-avatar">{{ projectInitial(item) }}</span>
+                  <div class="project-card-main">
+                    <div class="project-card-title">
+                      <b>{{ item.projectName }}</b>
+                      <span class="tag tag-primary">A{{ projectQuotaA(item) }} / B{{ projectQuotaB(item) }} / C{{ projectQuotaC(item) }}</span>
+                    </div>
+                    <div class="meta">{{ item.companyName || '未归属客户' }} · {{ item.brandName || '未绑定品牌' }} · {{ projectStatusLabel(item.status) }}</div>
                   </div>
-                  <div class="meta">{{ item.companyName || '未归属客户' }} · {{ item.brandName || '未绑定品牌' }} · {{ projectStatusLabel(item.status) }}</div>
                 </button>
               </div>
               <div v-if="selectedProject" class="selected-info">
@@ -63,9 +82,9 @@
             </div>
           </div>
 
-          <QuotaCard :quota="quota" title="③ 配额信息" />
+          <QuotaCard :quota="quota" title="配额信息" />
 
-          <div v-if="showManualEntry" class="card">
+          <div v-if="showManualEntry" class="card manual-entry-panel">
             <div class="card-head">
               <span>手动录入问题</span>
               <button class="btn btn-sm btn-primary" :disabled="manualEntryDisabled" @click="openManualEntry">
@@ -78,7 +97,7 @@
             </div>
           </div>
 
-          <div v-if="selectedProject" class="card">
+          <div v-if="selectedProject" class="card workorder-panel">
             <div class="card-head">
               <span>④ 已生成拓词组列表</span>
               <button class="btn btn-sm" @click="loadWorkorderList">刷新</button>
@@ -117,7 +136,7 @@
             <span><i class="src-icon src-modified">✎</i> 已修改</span>
             <label class="switch-line"><input v-model="syncToProfile" type="checkbox"> 同步回客户档案</label>
           </div>
-          <div class="card">
+          <div class="card profile-card">
             <div class="card-head"><span>分组 A · 客户基本信息</span><span class="tag">9 个字段</span></div>
             <div class="card-body form-grid">
               <Field label="公司全称" required><input v-model="profile.companyName" class="text-input"></Field>
@@ -131,7 +150,7 @@
               <Field label="标杆参数"><textarea v-model="profile.benchmarkSpecs" class="text-input textarea"></textarea></Field>
             </div>
           </div>
-          <div class="card">
+          <div class="card competitor-card">
             <div class="card-head"><span>分组 B · 主竞品</span><span class="tag">至少 1 条，建议 ≤6 条</span></div>
             <div class="card-body">
               <div v-for="(c, idx) in profile.competitors" :key="idx" class="competitor-item">
@@ -143,7 +162,7 @@
               <button class="btn" @click="addCompetitor">+ 增加竞品</button>
             </div>
           </div>
-          <div class="card">
+          <div class="card needs-card">
             <div class="card-head"><span>分组 C · 客户口头明确说出的核心需求<span class="note-inline">决定 A 类生成 · 3–5 条</span></span></div>
             <div class="card-body">
               <div v-for="(n, idx) in profile.coreNeeds" :key="idx" class="need-item">
@@ -166,8 +185,8 @@
             <strong>Step 3 说明：</strong>
             本批生成 ABC 数量受三级配额硬约束；合计必须 ≤ 50；下游模型从已接入清单拉取；场景权重总和等于本批合计，整数补差用最大余数法。
           </div>
-          <QuotaCard :quota="quota" title="① 剩余可生成" compact />
-          <div class="card">
+          <QuotaCard :quota="quota" title="剩余可生成" compact />
+          <div class="card generation-config-card">
             <div class="card-head">
               <span>② 本次生成配置</span>
               <div><button class="btn btn-sm" @click="splitByRatio">按剩余等比例切分（≤50）</button><button class="btn btn-sm" @click="fillToLimit">一键填满到 50</button></div>
@@ -198,7 +217,7 @@
 
         <section v-show="activeStep === 4">
           <div class="design-note"><strong>Step 4 说明：</strong>异步任务。前端轮询批次详情拿结构化进度对象。中断走协作式：标记 cancel_requested，已生成部分保留落库（partial）。</div>
-          <div class="card">
+          <div class="card progress-card">
             <div class="card-head"><span>当前批次 {{ currentBatch?.batchNo || '-' }}</span><span class="tag tag-warning">{{ currentBatch?.status || '未开始' }}</span></div>
             <div class="card-body">
               <div class="overview-grid">
@@ -212,7 +231,7 @@
               <button class="btn btn-danger" :disabled="!currentBatch || !['pending','running'].includes(currentBatch.status)" @click="cancelBatch">中断生成</button>
             </div>
           </div>
-          <div class="card">
+          <div class="card log-card">
             <div class="card-head"><span>实时日志<span class="note-inline">关键节点级 · 用于审计与排障</span></span></div>
             <div class="card-body"><div class="log-area"><div v-for="log in currentBatch?.logs || []" :key="`${log.createdAt}-${log.eventCode}`"><span class="log-time">{{ formatTime(log.createdAt) }}</span><span class="log-info">[{{ log.eventCode }}] {{ log.message }}</span></div></div></div>
           </div>
@@ -223,14 +242,14 @@
           <div class="design-note"><strong>Step 5 说明：</strong>累积视图：本工单下所有批次的题目合并展示。重生成单条采用原地软替换，不破坏配额。入库需 A/B/C 全部满额（本期严格模式）。</div>
           <QuotaCard :quota="review?.workorder.quota || quota" title="工单累积统计" />
           <div class="footer-bar quota-actions"><div v-if="duplicateQuestionTexts.length" class="warn">⚠ 存在重复问题，请替换或删除后再入库：{{ duplicateQuestionTexts.slice(0, 3).join('；') }}</div><div v-else-if="!canCommit" class="warn">⚠ 三级配额未满，无法入库。剩余 A {{ quota?.remainingA || 0 }} / B {{ quota?.remainingB || 0 }} / C {{ quota?.remainingC || 0 }}</div><div><button class="btn btn-primary" :disabled="!canContinueGenerate" @click="continueGenerate">+ 继续生成下一批</button><button class="btn" @click="exportHint">导出 Excel</button><button class="btn" :class="canCommit ? 'btn-primary' : 'btn-disabled'" :disabled="!canCommit" @click="commit">入库为正式版本（v1.0）</button></div></div>
-          <div class="card">
+          <div class="card batch-review-card">
             <div class="card-head"><span>本工单生成批次（{{ review?.batches.length || 0 }} 个）</span></div>
             <div class="card-body batch-list">
               <div class="batch-row head"><div>批次号</div><div>生成时间 / 模型</div><div>本批数量</div><div>状态</div><div>替换次数</div><div>操作</div></div>
               <div v-for="b in review?.batches || []" :key="b.id" class="batch-row"><div>{{ b.batchNo }}</div><div>{{ formatTime(b.createdAt) }}<br>{{ b.modelName }}</div><div>A {{ b.actualA }} · B {{ b.actualB }} · C {{ b.actualC }}</div><div><span class="tag tag-success">{{ b.status }}</span></div><div>{{ batchReplaceCount(b.id) }}</div><div><button class="btn btn-sm" @click="currentBatch = b; activeStep = 4">查看</button><button class="btn btn-sm btn-danger" @click="removeBatch(b.id)">删除批次（软删除并释放额度）</button></div></div>
             </div>
           </div>
-          <div class="card">
+          <div class="card question-review-card">
             <div class="card-head"><span>问题清单（共 {{ questionPage.total }} 题）</span></div>
             <div class="card-body">
               <div class="tab-bar"><button v-for="t in questionTabs" :key="t" class="tab" :class="{ active: tierTab === t }" @click="tierTab = t">{{ t === 'all' ? '全部' : `${t} 类` }}</button></div>
@@ -464,11 +483,36 @@ const NumBox = defineComponent({
 const QuotaCard = defineComponent({
   props: { quota: Object, title: String, compact: Boolean },
   setup(props) {
-    const row = (name: string, key: 'A' | 'B' | 'C') => {
+    const tier = (name: string, desc: string, key: 'A' | 'B' | 'C') => {
       const q: any = props.quota || {}
-      return h('tr', [h('td', { class: 'label' }, name), h('td', q[`quota${key}`] || 0), h('td', q[`activeUsed${key}`] || 0), h('td', q[`workorderCount${key}`] || 0), h('td', q[`runningReserved${key}`] || 0), h('td', [h('span', { class: 'quota-remain' }, q[`remaining${key}`] || 0)])])
+      return h('div', { class: ['quota-tier-card', `quota-tier-${key.toLowerCase()}`] }, [
+        h('div', { class: 'quota-tier-head' }, [
+          h('span', { class: 'quota-tier-badge' }, key),
+          h('div', [h('strong', name), h('p', desc)]),
+        ]),
+        h('div', { class: 'quota-tier-main' }, [
+          h('strong', q[`remaining${key}`] || 0),
+          h('span', '剩余可生成'),
+        ]),
+        h('div', { class: 'quota-tier-grid' }, [
+          h('span', [h('b', q[`quota${key}`] || 0), h('em', '项目额度')]),
+          h('span', [h('b', q[`activeUsed${key}`] || 0), h('em', '已占用')]),
+          h('span', [h('b', q[`workorderCount${key}`] || 0), h('em', '当前工单')]),
+          h('span', [h('b', q[`runningReserved${key}`] || 0), h('em', '运行预占')]),
+        ]),
+      ])
     }
-    return () => h('div', { class: 'card' }, [h('div', { class: 'card-head' }, [h('span', props.title)]), h('div', { class: 'card-body' }, [h('table', { class: 'quota-table' }, [h('thead', [h('tr', ['维度', '项目额度', '已占用', '当前工单未删除题目数', 'running 批次预占', '剩余可生成'].map((x) => h('th', x)))]), h('tbody', [row('A 类（承诺考核）', 'A'), row('B 类（重点观察）', 'B'), row('C 类（长尾铺底）', 'C')])]), h('div', { class: 'note' }, '剩余可生成 = 项目额度 - 当前工单未删除题目数 - running 批次预占数')])])
+    return () => h('div', { class: ['card', 'quota-card', props.compact ? 'compact' : ''] }, [
+      h('div', { class: 'card-head' }, [h('span', props.title)]),
+      h('div', { class: 'card-body' }, [
+        h('div', { class: 'quota-card-list' }, [
+          tier('A 类', '高意图 / 承诺考核', 'A'),
+          tier('B 类', '重点观察 / 场景拓展', 'B'),
+          tier('C 类', '长尾铺底 / 覆盖补充', 'C'),
+        ]),
+        h('div', { class: 'note' }, '剩余可生成 = 项目额度 - 当前工单未删除题目数 - running 批次预占数'),
+      ]),
+    ])
   },
 })
 
@@ -635,7 +679,7 @@ async function handleProjectChange(projectId: number | null) {
 }
 async function selectProject(item: Project) {
   selectedProjectId.value = item.id
-  if (projectQuotaTotal(item) <= 0) { ElMessage.warning('当前项目未配置问题额度，不能进入分层拓词管理'); return }
+  if (projectQuotaTotal(item) <= 0) { ElMessage.warning('当前项目未配置问题额度，不能进入拓词管理'); return }
   resetWorkorderState()
   const { data } = await createOrGetProjectWorkorder(item.id)
   workorder.value = data.data
@@ -847,6 +891,10 @@ function projectQuotaC(project?: Project | null) {
 }
 function projectQuotaTotal(project?: Project | null) {
   return projectQuotaA(project) + projectQuotaB(project) + projectQuotaC(project)
+}
+function projectInitial(project?: Project | null) {
+  const text = (project?.projectName || project?.brandName || project?.companyName || '项').trim()
+  return text.slice(0, 1)
 }
 function normalizeTags(value: unknown): string[] {
   if (Array.isArray(value)) {
@@ -1149,4 +1197,1369 @@ function statusTagClass(status?: string) {
 .layered-keyword-page :deep(.num-input){width:88px;border:1px dashed #bfbfbf;padding:4px 8px;font-size:18px;font-weight:600}
 .layered-keyword-page :deep(.big-num){font-size:24px;font-weight:700;color:var(--primary)}
 .layered-keyword-page :deep(.remain-hint){font-size:12px;color:var(--text-3);margin-top:6px}
+
+/* Keyword management formal workspace pass. */
+.layered-keyword-page {
+  --bg: #f3f6fa;
+  --surface: #ffffff;
+  --border: #e2e8f0;
+  --text: #0f172a;
+  --text-2: #475569;
+  --text-3: #64748b;
+  --primary: #2563eb;
+  --primary-light: #eff6ff;
+  --success: #10b981;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  background:
+    linear-gradient(135deg, #f8fbff 0%, #f3f6fa 54%, #ecfdf5 100%);
+  font-size: 14px;
+}
+
+.step-switcher {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  min-height: 86px;
+  margin: -24px -24px 18px;
+  padding: 18px 28px;
+  border-bottom: 1px solid #dbeafe;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.96) 58%, rgba(236, 253, 245, 0.9));
+  box-shadow: 0 16px 36px rgba(37, 99, 235, 0.08);
+}
+
+.keyword-title-block {
+  min-width: 280px;
+}
+
+.keyword-title-block h1 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.keyword-title-block p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.step-action-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.step-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 104px;
+  padding: 8px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #475569;
+  font-weight: 700;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+}
+
+.step-btn:hover {
+  border-color: #bfdbfe;
+  color: #2563eb;
+}
+
+.step-btn.active {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.2);
+}
+
+.step-btn.done:not(.active) {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.step-btn-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  color: inherit;
+  font-size: 12px;
+}
+
+.step-btn.active .step-btn-no {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.main {
+  max-width: 1480px;
+  margin: 0 auto;
+}
+
+.breadcrumb {
+  margin-bottom: 10px;
+  color: #64748b;
+}
+
+.layered-keyword-page :deep(.stepper) {
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 14px 18px;
+  border-color: #dbeafe;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.045);
+}
+
+.layered-keyword-page :deep(.stepper-item) {
+  min-width: 0;
+}
+
+.layered-keyword-page :deep(.stepper-num) {
+  width: 28px;
+  height: 28px;
+  border-color: #dbeafe;
+  background: #f8fbff;
+  color: #64748b;
+}
+
+.layered-keyword-page :deep(.stepper-item.active .stepper-num),
+.layered-keyword-page :deep(.stepper-item.done .stepper-num) {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.layered-keyword-page :deep(.stepper-text) {
+  color: #334155;
+  font-weight: 700;
+}
+
+.layered-keyword-page :deep(.stepper-text .subtitle) {
+  margin-top: 2px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.keyword-context-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 16px;
+  padding: 16px 18px;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(248, 251, 255, 0.9));
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.055);
+}
+
+.keyword-context-bar.empty {
+  border-style: dashed;
+  box-shadow: none;
+}
+
+.context-main {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 12px;
+}
+
+.context-avatar,
+.project-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #2563eb, #0891b2);
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.context-main strong {
+  display: block;
+  color: #0f172a;
+  font-size: 17px;
+  line-height: 1.35;
+}
+
+.context-main p {
+  margin: 3px 0 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.context-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(86px, auto));
+  gap: 10px;
+}
+
+.context-metrics span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 86px;
+  padding: 8px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.context-metrics b {
+  color: #0f172a;
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.context-metrics em {
+  color: #94a3b8;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.design-note {
+  display: none;
+}
+
+.card {
+  overflow: hidden;
+  border-color: #dbeafe;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.055);
+}
+
+.card-head {
+  min-height: 54px;
+  padding: 14px 18px;
+  border-bottom-color: #e2e8f0;
+  background: linear-gradient(135deg, #ffffff, #f8fbff);
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.card-body {
+  padding: 18px;
+}
+
+.project-selector-card .card-body {
+  display: grid;
+  gap: 16px;
+}
+
+.search-row {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto minmax(320px, 420px);
+  gap: 10px;
+  margin-bottom: 0;
+}
+
+.text-input {
+  border-color: #dbe3ee;
+  border-radius: 10px;
+  min-height: 36px;
+}
+
+.text-input:focus,
+.mini-input:focus {
+  border-color: #2563eb;
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.project-cascader {
+  width: 100%;
+}
+
+.customer-list {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.customer-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  min-height: 84px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.035);
+}
+
+.customer-card:hover {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.customer-card.selected {
+  border-color: #2563eb;
+  background: linear-gradient(135deg, #eff6ff, #ffffff);
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.12);
+}
+
+.project-card-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.project-card-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.project-card-title b {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.selected-info {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0;
+  overflow: hidden;
+  margin-top: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+}
+
+.selected-info .item {
+  min-width: 0;
+  padding: 12px 14px;
+  border-left: 1px solid #eef2f7;
+  background: #fbfdff;
+}
+
+.selected-info .item:first-child {
+  border-left: 0;
+}
+
+.item label,
+.overview-grid label {
+  margin-bottom: 4px;
+  color: #94a3b8;
+}
+
+.tag {
+  border-radius: 999px;
+  margin-left: 0;
+  padding: 2px 8px;
+  font-weight: 700;
+}
+
+.tag-primary {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.quota-card-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.quota-tier-card {
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #ffffff;
+}
+
+.quota-tier-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.quota-tier-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.quota-tier-a .quota-tier-badge {
+  background: #2563eb;
+}
+
+.quota-tier-b .quota-tier-badge {
+  background: #0891b2;
+}
+
+.quota-tier-c .quota-tier-badge {
+  background: #64748b;
+}
+
+.quota-tier-head strong {
+  color: #0f172a;
+  font-size: 15px;
+}
+
+.quota-tier-head p {
+  margin: 2px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.quota-tier-main {
+  margin: 16px 0 14px;
+}
+
+.quota-tier-main strong {
+  color: #0f172a;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.quota-tier-main span {
+  margin-left: 8px;
+  color: #94a3b8;
+}
+
+.quota-tier-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quota-tier-grid span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 8px;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.quota-tier-grid b {
+  color: #334155;
+}
+
+.quota-tier-grid em {
+  color: #94a3b8;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.note {
+  border-color: #fde68a;
+  border-radius: 10px;
+  background: #fffbeb;
+}
+
+.manual-entry-card {
+  border-radius: 12px;
+  background: #fbfdff;
+}
+
+.workorder-row {
+  grid-template-columns: 1.2fr 1fr 1fr .7fr 1fr 1fr;
+  min-height: 64px;
+}
+
+.workorder-row.head,
+.batch-row.head {
+  background: #f8fbff;
+  color: #475569;
+}
+
+.footer-bar {
+  border-color: #dbeafe;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.btn {
+  border-color: #dbe3ee;
+  border-radius: 8px;
+  margin-left: 8px;
+  font-weight: 700;
+}
+
+.btn-primary {
+  border-color: #2563eb;
+  background: #2563eb;
+}
+
+/* Keyword management refinement pass. */
+.wire-layout {
+  padding: 24px 22px 32px;
+}
+
+.main {
+  max-width: 1520px;
+}
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  margin: 0 0 24px;
+  padding: 2px 2px 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #7b8ba3;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.breadcrumb .sep {
+  margin: 0;
+  color: #c0cada;
+}
+
+.breadcrumb .current {
+  color: #334155;
+  font-weight: 700;
+}
+
+.step-switcher {
+  min-height: 92px;
+  padding: 18px 30px;
+  border-bottom: 1px solid rgba(191, 219, 254, 0.9);
+  background:
+    radial-gradient(circle at 12% 28%, rgba(37, 99, 235, 0.13), transparent 28%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.96) 54%, rgba(236, 253, 245, 0.94));
+}
+
+.keyword-title-block h1 {
+  font-size: 24px;
+}
+
+.keyword-title-block p {
+  color: #5b6b84;
+}
+
+.step-action-group {
+  padding: 6px;
+  border: 1px solid rgba(219, 234, 254, 0.9);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.66);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.keyword-page-header {
+  position: relative;
+  top: auto;
+  z-index: 1;
+  align-items: center;
+  min-height: 96px;
+  margin: 0 0 18px;
+  padding: 18px 20px 18px 28px;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.94) 56%, rgba(236, 253, 245, 0.9));
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.06);
+}
+
+.keyword-title-block {
+  min-width: 260px;
+}
+
+.keyword-title-block .admin-page-kicker {
+  margin-bottom: 6px;
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.keyword-title-block .admin-page-title {
+  margin: 0;
+  color: #0f172a;
+  font-size: 26px;
+  font-weight: 800;
+  line-height: 1.25;
+  letter-spacing: 0;
+}
+
+.keyword-title-block .admin-page-subtitle {
+  margin-top: 6px;
+  color: #475569;
+  font-size: 14px;
+}
+
+.keyword-page-header .step-action-group {
+  padding: 4px;
+}
+
+.step-btn {
+  min-width: 118px;
+  padding: 7px 12px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
+.step-btn.active {
+  transform: translateY(-1px);
+}
+
+.layered-keyword-page :deep(.stepper) {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(191, 219, 254, 0.9);
+}
+
+.layered-keyword-page :deep(.stepper)::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 4px;
+  background: linear-gradient(180deg, #2563eb, #10b981);
+  content: "";
+}
+
+.layered-keyword-page :deep(.stepper-item:not(:last-child)::after) {
+  background: linear-gradient(90deg, #c7d2fe, #dbeafe);
+}
+
+.keyword-context-bar {
+  padding: 18px 20px;
+  border-color: rgba(191, 219, 254, 0.95);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 251, 255, 0.94)),
+    repeating-linear-gradient(135deg, rgba(37, 99, 235, 0.05) 0 1px, transparent 1px 11px);
+}
+
+.context-avatar,
+.project-avatar {
+  border-radius: 12px;
+  box-shadow: 0 10px 18px rgba(37, 99, 235, 0.18);
+}
+
+.context-metrics span {
+  position: relative;
+  overflow: hidden;
+  border-color: #e6edf7;
+}
+
+.context-metrics span::after {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: linear-gradient(90deg, #2563eb, #10b981);
+  content: "";
+  opacity: 0.72;
+}
+
+.card {
+  border-color: rgba(191, 219, 254, 0.82);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.065);
+}
+
+.card + .card,
+.card + .footer-bar,
+.footer-bar + .card {
+  margin-top: 18px;
+}
+
+.card-head {
+  position: relative;
+  border-bottom-color: #e8eef7;
+  background:
+    linear-gradient(135deg, #ffffff 0%, #f8fbff 64%, #f0fdf4 100%);
+}
+
+.card-head::before {
+  position: absolute;
+  left: 18px;
+  bottom: -1px;
+  width: 54px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2563eb, #10b981);
+  content: "";
+}
+
+.project-selector-card .card-body {
+  gap: 18px;
+}
+
+.search-row {
+  align-items: stretch;
+  padding: 12px;
+  border: 1px solid #e5eefb;
+  border-radius: 14px;
+  background: #fbfdff;
+}
+
+.search-row .btn {
+  min-width: 76px;
+  margin-left: 0;
+}
+
+.text-input {
+  min-height: 40px;
+  border-color: #d8e2f0;
+  background: #ffffff;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+}
+
+.layered-keyword-page :deep(.el-input__wrapper) {
+  min-height: 40px;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px #d8e2f0 inset;
+}
+
+.layered-keyword-page :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px #2563eb inset, 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.customer-list {
+  gap: 14px;
+}
+
+.customer-card {
+  position: relative;
+  min-height: 92px;
+  padding: 15px;
+  border-color: #e2e8f0;
+  background:
+    linear-gradient(135deg, #ffffff, #fbfdff);
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease, background 0.16s ease;
+}
+
+.customer-card::after {
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  background: rgba(37, 99, 235, 0.05);
+  content: "";
+}
+
+.customer-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 14px 26px rgba(37, 99, 235, 0.09);
+}
+
+.customer-card.selected::after {
+  background: rgba(16, 185, 129, 0.09);
+}
+
+.project-card-title .tag {
+  flex: 0 0 auto;
+}
+
+.selected-info {
+  background: #ffffff;
+}
+
+.selected-info .item {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 64px;
+}
+
+.quota-card .card-head {
+  background:
+    linear-gradient(135deg, #ffffff, #f8fbff 52%, #eef2ff);
+}
+
+.quota-card :deep(.card-body) {
+  padding: 18px;
+}
+
+.quota-card :deep(.quota-card-list) {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.quota-card :deep(.quota-tier-card) {
+  position: relative;
+  overflow: hidden;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background:
+    linear-gradient(145deg, #ffffff 0%, #fbfdff 100%);
+}
+
+.quota-card :deep(.quota-tier-card::before) {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  content: "";
+}
+
+.quota-card :deep(.quota-tier-a::before) {
+  background: linear-gradient(90deg, #2563eb, #60a5fa);
+}
+
+.quota-card :deep(.quota-tier-b::before) {
+  background: linear-gradient(90deg, #0891b2, #22d3ee);
+}
+
+.quota-card :deep(.quota-tier-c::before) {
+  background: linear-gradient(90deg, #64748b, #94a3b8);
+}
+
+.quota-card :deep(.quota-tier-head) {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.quota-card :deep(.quota-tier-badge) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.quota-card :deep(.quota-tier-a .quota-tier-badge) {
+  background: #2563eb;
+}
+
+.quota-card :deep(.quota-tier-b .quota-tier-badge) {
+  background: #0891b2;
+}
+
+.quota-card :deep(.quota-tier-c .quota-tier-badge) {
+  background: #64748b;
+}
+
+.quota-card :deep(.quota-tier-head strong) {
+  color: #0f172a;
+  font-size: 15px;
+}
+
+.quota-card :deep(.quota-tier-head p) {
+  margin: 2px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.quota-card :deep(.quota-tier-main) {
+  display: flex;
+  align-items: baseline;
+  margin: 16px 0 14px;
+}
+
+.quota-card :deep(.quota-tier-main strong) {
+  color: #0f172a;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.quota-card :deep(.quota-tier-main span) {
+  margin-left: 8px;
+  color: #94a3b8;
+}
+
+.quota-card :deep(.quota-tier-grid) {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.quota-card :deep(.quota-tier-grid span) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 8px;
+  border: 1px solid #edf2f7;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.quota-card :deep(.quota-tier-grid b) {
+  color: #334155;
+}
+
+.quota-card :deep(.quota-tier-grid em) {
+  color: #94a3b8;
+  font-size: 11px;
+  font-style: normal;
+}
+
+.quota-card :deep(.note) {
+  margin-top: 14px;
+  border-color: #fde68a;
+  border-radius: 10px;
+  background: #fffbeb;
+}
+
+.quota-card.compact .quota-tier-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.quota-card.compact :deep(.quota-tier-grid) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.quota-tier-card {
+  position: relative;
+  overflow: hidden;
+  border-color: #e2e8f0;
+  background:
+    linear-gradient(145deg, #ffffff 0%, #fbfdff 100%);
+}
+
+.quota-tier-card::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  content: "";
+}
+
+.quota-tier-a::before {
+  background: linear-gradient(90deg, #2563eb, #60a5fa);
+}
+
+.quota-tier-b::before {
+  background: linear-gradient(90deg, #0891b2, #22d3ee);
+}
+
+.quota-tier-c::before {
+  background: linear-gradient(90deg, #64748b, #94a3b8);
+}
+
+.quota-tier-main {
+  display: flex;
+  align-items: baseline;
+}
+
+.quota-tier-grid span {
+  border: 1px solid #edf2f7;
+  background: #f8fafc;
+}
+
+.manual-entry-panel .manual-entry-card {
+  border: 1px solid #e5eefb;
+  background:
+    linear-gradient(135deg, #fbfdff, #f8fbff);
+}
+
+.workorder-panel .batch-list,
+.batch-review-card .batch-list {
+  background: #ffffff;
+}
+
+.workorder-row,
+.batch-row {
+  padding: 13px 18px;
+  border-bottom-color: #edf2f7;
+}
+
+.workorder-row:not(.head):hover,
+.batch-row:not(.head):hover {
+  background: #f8fbff;
+}
+
+.workorder-row.head,
+.batch-row.head {
+  min-height: 48px;
+  color: #334155;
+  font-weight: 800;
+}
+
+.source-legend {
+  border-color: rgba(191, 219, 254, 0.85);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
+.profile-card .card-body,
+.competitor-card .card-body,
+.needs-card .card-body {
+  background: #ffffff;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 18px;
+}
+
+.form-grid .form-row {
+  margin-bottom: 0;
+}
+
+.form-grid .form-row:nth-last-child(-n + 3) {
+  grid-column: span 2;
+}
+
+.form-row {
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.form-label {
+  width: 112px;
+  padding-top: 10px;
+  color: #475569;
+  font-weight: 700;
+}
+
+.form-content {
+  min-width: 0;
+}
+
+.form-content .text-input:not(.short),
+.form-content .textarea,
+.form-content select.text-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+}
+
+.textarea {
+  border-radius: 12px;
+}
+
+.competitor-item,
+.need-item {
+  border-color: #e2e8f0;
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, #ffffff, #fbfdff);
+}
+
+.need-head {
+  align-items: center;
+}
+
+.batch-input-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.col-item {
+  position: relative;
+  overflow: hidden;
+  border-color: #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+}
+
+.col-item::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: #dbeafe;
+  content: "";
+}
+
+.col-item:nth-child(1)::before {
+  background: #60a5fa;
+}
+
+.col-item:nth-child(2)::before {
+  background: #22d3ee;
+}
+
+.col-item:nth-child(3)::before {
+  background: #94a3b8;
+}
+
+.col-item.total {
+  border-color: #bfdbfe;
+  background: linear-gradient(135deg, #eff6ff, #ffffff);
+}
+
+.num-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 42px;
+  border: 1px solid #d8e2f0;
+  border-radius: 10px;
+  background: #fbfdff;
+  text-align: left;
+}
+
+.generation-config-card .quota-table {
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: 14px;
+}
+
+.generation-config-card .quota-table th,
+.generation-config-card .quota-table td {
+  border-width: 0 1px 1px 0;
+  border-color: #edf2f7;
+}
+
+.generation-config-card .quota-table th {
+  background: #f8fbff;
+}
+
+.mini-input {
+  width: 64px;
+  height: 32px;
+  border: 1px solid #d8e2f0;
+  border-radius: 9px;
+  background: #ffffff;
+}
+
+.progress-card .overview-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.overview-grid > div {
+  min-height: 70px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #ffffff, #fbfdff);
+}
+
+.overview-grid b {
+  color: #0f172a;
+  font-size: 15px;
+}
+
+.progress-bar {
+  height: 14px;
+  border: 1px solid #dbeafe;
+  background: #eff6ff;
+}
+
+.progress-bar div {
+  background: linear-gradient(90deg, #2563eb, #10b981);
+}
+
+.progress-text {
+  display: inline-flex;
+  margin-bottom: 14px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f8fbff;
+  color: #475569;
+}
+
+.log-area {
+  border: 1px solid #1e293b;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, #0f172a, #111827);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.quota-actions {
+  gap: 16px;
+  border-color: #dbeafe;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(248, 251, 255, 0.92));
+}
+
+.tab-bar {
+  padding: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #f8fbff;
+  width: fit-content;
+}
+
+.tab {
+  border-color: transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: #475569;
+  font-weight: 700;
+}
+
+.tab.active {
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 8px 16px rgba(37, 99, 235, 0.18);
+}
+
+.question-review-card .card-body {
+  overflow-x: auto;
+}
+
+.table {
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-collapse: separate;
+  border-spacing: 0;
+  border-radius: 14px;
+  background: #ffffff;
+  font-size: 13px;
+}
+
+.table th,
+.table td {
+  border-bottom-color: #edf2f7;
+  padding: 11px 12px;
+}
+
+.table th {
+  background: #f0f7ff;
+  color: #334155;
+  font-weight: 800;
+}
+
+.table tbody tr:hover {
+  background: #f8fbff;
+}
+
+.qtext {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.reason {
+  color: #64748b;
+}
+
+.pager {
+  padding-top: 10px;
+}
+
+.modal-card {
+  overflow: hidden;
+  border-color: #dbeafe;
+  border-radius: 18px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+}
+
+.modal-head,
+.modal-foot {
+  padding: 16px 20px;
+  border-color: #e2e8f0;
+  background: linear-gradient(135deg, #ffffff, #f8fbff);
+}
+
+.modal-body {
+  background: #fbfdff;
+}
+
+.btn {
+  min-height: 34px;
+  padding: 6px 14px;
+  transition: border-color 0.16s ease, color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: #bfdbfe;
+  color: #2563eb;
+  box-shadow: 0 8px 16px rgba(37, 99, 235, 0.08);
+}
+
+.btn-primary:hover:not(:disabled) {
+  color: #ffffff;
+  background: #1d4ed8;
+}
+
+.btn-danger:hover:not(:disabled),
+.btn-text.danger:hover {
+  color: #dc2626;
+  background: #fff1f2;
+}
+
+@media (max-width: 1200px) {
+  .customer-list,
+  .quota-card-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .quota-card :deep(.quota-card-list) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-grid .form-row:nth-last-child(-n + 3) {
+    grid-column: span 1;
+  }
+
+  .batch-input-grid,
+  .progress-card .overview-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .selected-info {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .context-metrics {
+    grid-template-columns: repeat(2, minmax(86px, auto));
+  }
+}
+
+@media (max-width: 860px) {
+  .step-switcher,
+  .keyword-context-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .search-row,
+  .customer-list,
+  .quota-card-list,
+  .selected-info,
+  .batch-input-grid,
+  .progress-card .overview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .quota-card :deep(.quota-card-list) {
+    grid-template-columns: 1fr;
+  }
+
+  .context-metrics {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .wire-layout {
+    padding: 0 12px 24px;
+  }
+
+  .source-legend,
+  .footer-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
 </style>

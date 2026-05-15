@@ -1,8 +1,36 @@
 ﻿<template>
-  <div class="space-y-4">
+  <div class="admin-page">
     <el-page-header content="品牌详情" @back="$router.back()" />
 
-    <el-card v-loading="loading">
+    <section v-if="brand" class="admin-object-hero">
+      <div class="admin-object-hero-main">
+        <div>
+          <h1 class="admin-object-title">{{ brand.brandName }}</h1>
+          <div class="admin-object-meta">
+            {{ brand.brandSlug || '-' }} · {{ companyName || '-' }} · {{ industryLabel(brand.industry) }}
+          </div>
+        </div>
+        <span class="admin-status-tag" :class="brand?.status === 'active' ? 'is-success' : 'is-muted'">
+          {{ dictStore.label('brand_status', brand?.status) || '-' }}
+        </span>
+      </div>
+      <div class="admin-object-kpis">
+        <div class="admin-object-kpi">
+          <span>品牌行业</span>
+          <strong>{{ industryLabel(brand.industry) }}</strong>
+        </div>
+        <div class="admin-object-kpi">
+          <span>标准表达</span>
+          <strong>{{ statementStatusLabel }}</strong>
+        </div>
+        <div class="admin-object-kpi">
+          <span>自媒体账号</span>
+          <strong>{{ semiAutoSelfMediaAccounts.length }}</strong>
+        </div>
+      </div>
+    </section>
+
+    <el-card v-loading="loading" class="admin-rich-card">
       <template #header>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -18,36 +46,20 @@
         </div>
       </template>
 
-      <el-descriptions class="brand-basic-descriptions" :column="3" border>
-        <el-descriptions-item label="品牌名称"><EllipsisText :value="brand?.brandName" /></el-descriptions-item>
-        <el-descriptions-item label="品牌标识"><EllipsisText :value="brand?.brandSlug" /></el-descriptions-item>
-        <el-descriptions-item label="状态"><EllipsisText :value="dictStore.label('brand_status', brand?.status)" /></el-descriptions-item>
-
-        <el-descriptions-item label="所属客户"><EllipsisText :value="companyName" /></el-descriptions-item>
-        <el-descriptions-item label="品牌行业"><EllipsisText :value="industryLabel(brand?.industry)" /></el-descriptions-item>
-        <el-descriptions-item label="主营业务"><EllipsisText :value="brand?.mainBusiness" /></el-descriptions-item>
-        <el-descriptions-item label="所在地区"><EllipsisText :value="regionText" /></el-descriptions-item>
-
-        <el-descriptions-item label="官网"><EllipsisText :value="brand?.website" /></el-descriptions-item>
-        <el-descriptions-item label="公众号"><EllipsisText :value="brand?.officialAccount" /></el-descriptions-item>
-        <el-descriptions-item label="视频号"><EllipsisText :value="brand?.videoAccount" /></el-descriptions-item>
-        <el-descriptions-item label="抖音号"><EllipsisText :value="brand?.douyinAccount" /></el-descriptions-item>
-        <el-descriptions-item label="联系电话"><EllipsisText :value="brand?.phone" /></el-descriptions-item>
-        <el-descriptions-item label="对外公开电话"><EllipsisText :value="brand?.publicPhone" /></el-descriptions-item>
-        <el-descriptions-item label="对外公开地址"><EllipsisText :value="brand?.publicAddress" /></el-descriptions-item>
-        <el-descriptions-item label="微信"><EllipsisText :value="brand?.wechat" /></el-descriptions-item>
-        <el-descriptions-item label="资讯站名称"><EllipsisText :value="brand?.industrySiteName" /></el-descriptions-item>
-        <el-descriptions-item label="资讯站唯一标识"><EllipsisText :value="brand?.industrySiteCode" /></el-descriptions-item>
-
-        <el-descriptions-item label="品牌标准表述" :span="3"><EllipsisText :value="brand?.standardBrandStatement" /></el-descriptions-item>
-        <el-descriptions-item label="业务标准表述" :span="3"><EllipsisText :value="brand?.businessStandardStatement" /></el-descriptions-item>
-        <el-descriptions-item label="业务介绍" :span="3"><EllipsisText :value="brand?.businessIntro" /></el-descriptions-item>
-        <el-descriptions-item label="品牌描述" :span="3"><EllipsisText :value="brand?.description" /></el-descriptions-item>
-        <el-descriptions-item label="禁用词" :span="3"><EllipsisText :value="brand?.forbiddenPhrases" /></el-descriptions-item>
-      </el-descriptions>
+      <div class="admin-info-grid">
+        <div
+          v-for="item in brandBasicInfoItems"
+          :key="item.label"
+          class="admin-info-item"
+          :class="{ 'is-wide': item.wide }"
+        >
+          <span class="admin-info-label">{{ item.label }}</span>
+          <strong class="admin-info-value">{{ item.value }}</strong>
+        </div>
+      </div>
     </el-card>
 
-    <el-card>
+    <el-card class="admin-table-card">
       <template #header>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -94,7 +106,7 @@
       </el-table>
     </el-card>
 
-    <el-card>
+    <el-card class="admin-rich-card">
       <template #header>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
@@ -132,7 +144,7 @@
       </el-descriptions>
     </el-card>
 
-    <el-card>
+    <el-card class="admin-rich-card">
       <template #header><span>扩展入口</span></template>
       <div class="flex flex-wrap gap-3">
         <el-button @click="router.push(`/admin/brands/${brandId}/profile`)">品牌画像</el-button>
@@ -140,18 +152,18 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="statementVisible" title="编辑品牌标准表达" width="760px">
-      <el-form :model="statementForm" label-width="140px">
+    <el-dialog v-model="statementVisible" title="编辑品牌标准表达" width="820px" class="admin-editor-dialog">
+      <el-form class="admin-dialog-form" :model="statementForm" label-width="140px">
         <el-form-item label="一句话定位">
           <el-input v-model="statementForm.positioning" maxlength="20" show-word-limit />
         </el-form-item>
-        <el-form-item label="核心卖点（每行一条）">
+        <el-form-item class="is-full" label="核心卖点（每行一条）">
           <el-input v-model="statementForm.sellingPointsText" type="textarea" :rows="4" />
         </el-form-item>
-        <el-form-item label="差异化表达">
+        <el-form-item class="is-full" label="差异化表达">
           <el-input v-model="statementForm.differentiation" type="textarea" :rows="4" />
         </el-form-item>
-        <el-form-item label="推荐品牌介绍段落">
+        <el-form-item class="is-full" label="推荐品牌介绍段落">
           <el-input v-model="statementForm.brandParagraph" type="textarea" :rows="6" />
         </el-form-item>
       </el-form>
@@ -161,8 +173,8 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="editVisible" title="编辑品牌" width="680px">
-      <el-form ref="brandFormRef" :model="brandForm" :rules="brandRules" label-width="120px">
+    <el-dialog v-model="editVisible" title="编辑品牌" width="860px" class="admin-editor-dialog">
+      <el-form ref="brandFormRef" class="admin-dialog-form" :model="brandForm" :rules="brandRules" label-width="120px">
         <el-form-item label="品牌名称" required><el-input v-model="brandForm.brandName" /></el-form-item>
         <el-form-item label="品牌标识" required><el-input v-model="brandForm.brandSlug" /></el-form-item>
         <el-form-item label="品牌行业" prop="industry" required>
@@ -199,11 +211,11 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="品牌描述"><el-input v-model="brandForm.description" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item label="业务介绍"><el-input v-model="brandForm.businessIntro" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item label="标准口径"><el-input v-model="brandForm.standardBrandStatement" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item label="业务标准表述"><el-input v-model="brandForm.businessStandardStatement" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item label="禁用词"><el-input v-model="brandForm.forbiddenPhrases" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="品牌描述"><el-input v-model="brandForm.description" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="业务介绍"><el-input v-model="brandForm.businessIntro" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="标准口径"><el-input v-model="brandForm.standardBrandStatement" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="业务标准表述"><el-input v-model="brandForm.businessStandardStatement" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="禁用词"><el-input v-model="brandForm.forbiddenPhrases" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>
@@ -215,6 +227,7 @@
       v-model="selfMediaAccountVisible"
       :title="editingSelfMediaAccount ? '编辑自媒体账号' : '新增自媒体账号'"
       width="520px"
+      class="admin-editor-dialog"
     >
       <el-form
         ref="selfMediaAccountFormRef"
@@ -397,6 +410,30 @@ const statementTagType = computed<'success' | 'warning' | 'info'>(() => {
 })
 
 const availableBrandIndustries = computed(() => companyIndustryTags.value)
+const brandBasicInfoItems = computed(() => [
+  { label: '品牌名称', value: brand.value?.brandName || '-' },
+  { label: '品牌标识', value: brand.value?.brandSlug || '-' },
+  { label: '状态', value: dictStore.label('brand_status', brand.value?.status) || '-' },
+  { label: '所属客户', value: companyName.value || '-' },
+  { label: '品牌行业', value: industryLabel(brand.value?.industry) },
+  { label: '主营业务', value: brand.value?.mainBusiness || '-' },
+  { label: '所在地区', value: regionText.value },
+  { label: '官网', value: brand.value?.website || '-' },
+  { label: '公众号', value: brand.value?.officialAccount || '-' },
+  { label: '视频号', value: brand.value?.videoAccount || '-' },
+  { label: '抖音号', value: brand.value?.douyinAccount || '-' },
+  { label: '联系电话', value: brand.value?.phone || '-' },
+  { label: '对外公开电话', value: brand.value?.publicPhone || '-' },
+  { label: '对外公开地址', value: brand.value?.publicAddress || '-' },
+  { label: '微信', value: brand.value?.wechat || '-' },
+  { label: '资讯站名称', value: brand.value?.industrySiteName || '-' },
+  { label: '资讯站唯一标识', value: brand.value?.industrySiteCode || '-' },
+  { label: '品牌标准表述', value: brand.value?.standardBrandStatement || '-', wide: true },
+  { label: '业务标准表述', value: brand.value?.businessStandardStatement || '-', wide: true },
+  { label: '业务介绍', value: brand.value?.businessIntro || '-', wide: true },
+  { label: '品牌描述', value: brand.value?.description || '-', wide: true },
+  { label: '禁用词', value: brand.value?.forbiddenPhrases || '-', wide: true },
+])
 
 function industryLabel(value?: string | null) {
   if (!value) return '-'

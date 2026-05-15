@@ -510,7 +510,7 @@ const CalculationCardView = defineComponent({
 
 .calc-card-label {
   height: 16px;
-  margin-bottom: 14px;
+  margin-bottom: 25px;
   overflow: hidden;
   color: #6b6456;
   font-size: 10px;
@@ -539,7 +539,7 @@ const CalculationCardView = defineComponent({
 }
 
 .calc-big-num.main-num {
-  font-size: 64px;
+  font-size: 40px;
 }
 
 .calc-big-num.unit {

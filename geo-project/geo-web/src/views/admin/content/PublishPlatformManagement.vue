@@ -26,7 +26,7 @@
       </div>
 
       <section class="stats">
-        <div class="stat">
+        <div class="stat stat-blue">
           <div class="stat-content">
             <div class="stat-label">平台大类</div>
             <div class="stat-value">{{ categories.length }}<span class="unit">类</span></div>
@@ -34,7 +34,7 @@
           </div>
           <div class="stat-icon blue"><el-icon><Grid /></el-icon></div>
         </div>
-        <div class="stat">
+        <div class="stat stat-indigo">
           <div class="stat-content">
             <div class="stat-label">发布目标</div>
             <div class="stat-value">{{ targetStats.total }}<span class="unit">个</span></div>
@@ -42,7 +42,7 @@
           </div>
           <div class="stat-icon gray"><el-icon><Link /></el-icon></div>
         </div>
-        <div class="stat">
+        <div class="stat stat-green">
           <div class="stat-content">
             <div class="stat-label">自动发布</div>
             <div class="stat-value">{{ targetStats.autoPublish }}<span class="unit">个</span></div>
@@ -50,7 +50,7 @@
           </div>
           <div class="stat-icon green"><el-icon><Promotion /></el-icon></div>
         </div>
-        <div class="stat">
+        <div class="stat stat-amber">
           <div class="stat-content">
             <div class="stat-label">已启用</div>
             <div class="stat-value">{{ targetStats.enabled }}<span class="unit">个</span></div>
@@ -1246,6 +1246,7 @@ textarea {
   display: flex;
   align-items: baseline;
   gap: 6px;
+  color: var(--stat-accent, var(--text));
   font-size: 26px;
   font-weight: 700;
   line-height: 1;
@@ -1253,9 +1254,25 @@ textarea {
 }
 
 .stat-value .unit {
-  color: var(--text-faint);
+  color: color-mix(in oklch, var(--stat-accent, var(--text-faint)) 62%, var(--text-faint));
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 650;
+}
+
+.stat-blue {
+  --stat-accent: var(--accent-text);
+}
+
+.stat-indigo {
+  --stat-accent: oklch(52% 0.16 275);
+}
+
+.stat-green {
+  --stat-accent: var(--success);
+}
+
+.stat-amber {
+  --stat-accent: oklch(50% 0.14 75);
 }
 
 .stat-trend {

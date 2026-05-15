@@ -1,6 +1,14 @@
 <template>
-  <div class="content-execution-page">
-    <el-card shadow="never" class="mb-3">
+  <div class="content-execution-page admin-page">
+    <div class="admin-page-header">
+      <div>
+        <div class="admin-page-kicker">内容运营</div>
+        <h1 class="admin-page-title">内容与执行</h1>
+        <div class="admin-page-subtitle">集中处理文章生成、审核、修订、发布与分发状态。</div>
+      </div>
+    </div>
+
+    <el-card shadow="never" class="mb-3 admin-surface content-toolbar-card">
       <div class="toolbar">
         <div class="toolbar-left">
           <el-input v-model="query.projectName" clearable placeholder="项目名称" style="width: 220px" @keyup.enter="search" />
@@ -17,50 +25,92 @@
           <el-button @click="resetQuery">重置</el-button>
         </div>
         <div class="toolbar-right">
+          <el-button v-if="canWrite" type="primary" @click="openBatchGeneration">批量生成文章</el-button>
+          <el-button v-if="canWrite" @click="goManualCreate">手动生成文章</el-button>
           <el-button v-if="canWrite" :disabled="!selectedRows.length || batchPublishChecking" :loading="batchPublishChecking" @click="openBatchPublish">
             批量发布
           </el-button>
-          <el-button v-if="canWrite" @click="openBatchPublishJobs">发布任务</el-button>
-          <el-button v-if="canWrite" type="primary" @click="openBatchGeneration">批量生成文章</el-button>
-          <el-button v-if="canWrite" @click="goManualCreate">手动生成文章</el-button>
-          <el-button v-if="canWrite" @click="openPublishPlatformManagement">发布平台管理</el-button>
+          <span v-if="canWrite" class="toolbar-divider" />
+          <el-button v-if="canWrite" class="toolbar-minor-action" @click="openBatchPublishJobs">发布任务</el-button>
+          <el-button v-if="canWrite" class="toolbar-minor-action" @click="openPublishPlatformManagement">发布平台管理</el-button>
         </div>
       </div>
     </el-card>
 
-    <el-card shadow="never">
+    <div class="admin-metric-grid">
+      <div class="admin-metric-card" style="--metric-accent: #2563eb; --metric-tone: #eff6ff">
+        <span class="admin-metric-label">文章总数</span>
+        <strong class="admin-metric-value">{{ page.total }}</strong>
+        <span class="admin-metric-hint">当前筛选结果</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #f59e0b; --metric-tone: #fffbeb">
+        <span class="admin-metric-label">待审核</span>
+        <strong class="admin-metric-value">{{ reviewCount }}</strong>
+        <span class="admin-metric-hint">本页可见</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #059669; --metric-tone: #ecfdf5">
+        <span class="admin-metric-label">可分发</span>
+        <strong class="admin-metric-value">{{ distributableCount }}</strong>
+        <span class="admin-metric-hint">本页可见</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #ef4444; --metric-tone: #fef2f2">
+        <span class="admin-metric-label">需处理</span>
+        <strong class="admin-metric-value">{{ blockedCount }}</strong>
+        <span class="admin-metric-hint">驳回/失败/风险</span>
+      </div>
+    </div>
+
+    <el-card shadow="never" class="admin-table-card">
       <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无文章数据">
-        <el-table :data="rows" border @selection-change="onSelectionChange">
+        <el-table class="content-list-table" :data="rows" border table-layout="fixed" @selection-change="onSelectionChange">
           <el-table-column type="selection" width="48" :selectable="canSelectForBatchPublish" />
-          <el-table-column label="项目" min-width="180" show-overflow-tooltip>
-            <template #default="scope">{{ scope.row.projectName || `#${scope.row.projectId}` }}</template>
+          <el-table-column label="内容对象" min-width="280" show-overflow-tooltip>
+            <template #default="scope">
+              <div class="admin-entity-cell">
+                <div class="admin-entity-avatar content-avatar" :class="articleTypeClass(scope.row.articleType)">
+                  {{ articleTypeInitial(scope.row.articleType) }}
+                </div>
+                <div class="min-w-0">
+                  <div class="admin-entity-main">{{ scope.row.projectName || `#${scope.row.projectId}` }}</div>
+                  <div class="admin-entity-sub">
+                    {{ articleTypeLabel(scope.row.articleType) }} · {{ contentStyleLabel(scope.row.contentStyle) }}
+                  </div>
+                </div>
+              </div>
+            </template>
           </el-table-column>
-          <el-table-column label="文章类型" width="120">
-            <template #default="scope">{{ articleTypeLabel(scope.row.articleType) }}</template>
+          <el-table-column label="标题" min-width="360" show-overflow-tooltip>
+            <template #default="scope">
+              <div class="admin-cell-stack">
+                <span class="admin-cell-main">{{ scope.row.title || '-' }}</span>
+                <span class="admin-cell-sub">{{ contentStyleLabel(scope.row.contentStyle) }}</span>
+              </div>
+            </template>
           </el-table-column>
-          <el-table-column label="平台风格" width="130">
-            <template #default="scope">{{ contentStyleLabel(scope.row.contentStyle) }}</template>
-          </el-table-column>
-          <el-table-column prop="title" label="标题" min-width="240" show-overflow-tooltip />
           <el-table-column label="状态" width="120">
             <template #default="scope">
-              <el-tag :type="statusTagType(scope.row.status)">{{ statusLabel(scope.row.status) }}</el-tag>
+              <span class="content-status-text" :class="contentStatusClass(scope.row.status)">
+                <span class="content-status-dot" />
+                {{ statusLabel(scope.row.status) }}
+              </span>
             </template>
           </el-table-column>
           <el-table-column prop="createdAt" label="创建时间" width="180" />
-          <el-table-column label="操作" width="340" fixed="right">
+          <el-table-column label="操作" width="300" fixed="right">
             <template #default="scope">
-              <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
-              <el-button v-if="canWrite && canReview(scope.row.status)" link type="primary" @click="openReview(scope.row)">审核</el-button>
-              <el-button v-if="canWrite && canEdit(scope.row.status)" link type="primary" @click="openRevision(scope.row)">修订</el-button>
-              <el-button v-if="canWrite && canResubmit(scope.row.status)" link type="primary" @click="openResubmit(scope.row)">重新提交</el-button>
-              <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openDistributionChannel(scope.row)">分发</el-button>
-              <el-button v-if="canWrite && canDeleteArticle(scope.row.status)" link type="danger" @click="deleteArticle(scope.row)">删除</el-button>
+              <div class="admin-row-actions">
+                <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
+                <el-button v-if="canWrite && canReview(scope.row.status)" link type="primary" @click="openReview(scope.row)">审核</el-button>
+                <el-button v-if="canWrite && canEdit(scope.row.status)" class="content-neutral-action" link @click="openRevision(scope.row)">修订</el-button>
+                <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openDistributionChannel(scope.row)">分发</el-button>
+                <el-button v-if="canWrite && canDeleteArticle(scope.row.status)" link type="danger" @click="deleteArticle(scope.row)">删除</el-button>
+                <el-button v-if="canWrite && canResubmit(scope.row.status)" class="is-wide" link type="primary" @click="openResubmit(scope.row)">重新提交</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
 
-        <div class="pager">
+        <div class="admin-table-footer">
           <el-pagination
             background
             layout="prev, pager, next, total"
@@ -73,40 +123,53 @@
       </DataState>
     </el-card>
 
-    <el-drawer v-model="detailVisible" title="文章详情" size="70%">
+    <el-drawer v-model="detailVisible" title="文章详情" size="70%" class="content-detail-drawer">
       <div v-if="detailData" class="detail-wrap">
-        <el-descriptions :column="2" border>
-          <el-descriptions-item label="文章ID">{{ detailData.article.id }}</el-descriptions-item>
-          <el-descriptions-item label="项目">{{ detailData.project?.projectName || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="文章类型">{{ articleTypeLabel(detailData.article.articleType) }}</el-descriptions-item>
-          <el-descriptions-item label="状态">{{ statusLabel(detailData.article.status) }}</el-descriptions-item>
-          <el-descriptions-item label="平台风格">{{ contentStyleLabel(detailContentStyle(detailData)) }}</el-descriptions-item>
-          <el-descriptions-item label="文章主题">{{ detailTopic(detailData) || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="标题" :span="2">{{ detailData.article.title }}</el-descriptions-item>
-        </el-descriptions>
-
-        <h4 class="detail-title">版本记录</h4>
-        <el-table :data="detailData.versions" border>
-          <el-table-column prop="versionNo" label="版本" width="80" />
-          <el-table-column prop="title" label="标题" min-width="220" />
-          <el-table-column prop="generatedBy" label="来源" width="130" />
-          <el-table-column prop="createdAt" label="时间" width="180" />
-        </el-table>
-
-        <div class="detail-header">
-          <h4 class="detail-title">内容预览</h4>
-          <el-radio-group v-model="detailViewMode" size="small">
-            <el-radio-button label="preview">预览</el-radio-button>
-            <el-radio-button label="markdown">Markdown</el-radio-button>
-          </el-radio-group>
+        <div class="detail-summary-panel">
+          <div class="detail-summary-head">
+            <div>
+              <span class="detail-kicker">文章信息</span>
+              <h3>{{ detailData.article.title || '未命名文章' }}</h3>
+            </div>
+            <el-tag :type="statusTagType(detailData.article.status)">
+              {{ statusLabel(detailData.article.status) }}
+            </el-tag>
+          </div>
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="文章ID">{{ detailData.article.id }}</el-descriptions-item>
+            <el-descriptions-item label="项目">{{ detailData.project?.projectName || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="文章类型">{{ articleTypeLabel(detailData.article.articleType) }}</el-descriptions-item>
+            <el-descriptions-item label="平台风格">{{ contentStyleLabel(detailContentStyle(detailData)) }}</el-descriptions-item>
+            <el-descriptions-item label="文章主题" :span="2">{{ detailTopic(detailData) || '-' }}</el-descriptions-item>
+          </el-descriptions>
         </div>
-        <el-input v-if="detailViewMode === 'markdown'" type="textarea" :rows="14" :model-value="detailMarkdown" readonly />
-        <div v-else class="markdown-preview" v-html="detailHtml"></div>
+
+        <div class="detail-section-panel">
+          <h4 class="detail-title">版本记录</h4>
+          <el-table :data="detailData.versions" border>
+            <el-table-column prop="versionNo" label="版本" width="80" />
+            <el-table-column prop="title" label="标题" min-width="220" />
+            <el-table-column prop="generatedBy" label="来源" width="130" />
+            <el-table-column prop="createdAt" label="时间" width="180" />
+          </el-table>
+        </div>
+
+        <div class="detail-section-panel detail-preview-panel">
+          <div class="detail-header">
+            <h4 class="detail-title">内容预览</h4>
+            <el-radio-group v-model="detailViewMode" size="small">
+              <el-radio-button label="preview">预览</el-radio-button>
+              <el-radio-button label="markdown">Markdown</el-radio-button>
+            </el-radio-group>
+          </div>
+          <el-input v-if="detailViewMode === 'markdown'" type="textarea" :rows="14" :model-value="detailMarkdown" readonly />
+          <div v-else class="markdown-preview" v-html="detailHtml"></div>
+        </div>
       </div>
     </el-drawer>
 
-    <el-dialog v-model="reviewVisible" title="审核文章" width="540px">
-      <el-form :model="reviewForm" label-width="110px">
+    <el-dialog v-model="reviewVisible" title="审核文章" width="560px" class="admin-editor-dialog">
+      <el-form class="admin-dialog-form content-review-form" :model="reviewForm" label-width="110px">
         <el-form-item label="审核动作" required>
           <el-select v-model="reviewForm.action" style="width: 100%">
             <el-option label="通过" value="approve" />
@@ -127,12 +190,12 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="revisionVisible" title="修订文章" width="760px">
-      <el-form :model="revisionForm" label-width="90px">
+    <el-dialog v-model="revisionVisible" title="修订文章" width="840px" class="admin-editor-dialog">
+      <el-form class="admin-dialog-form content-revision-form" :model="revisionForm" label-width="90px">
         <el-form-item label="标题">
           <el-input v-model="revisionForm.title" />
         </el-form-item>
-        <el-form-item label="正文" required>
+        <el-form-item class="is-full" label="正文" required>
           <div class="editor-wrap">
             <div class="detail-header editor-header">
               <span class="editor-title">内容编辑</span>
@@ -145,7 +208,7 @@
             <div v-else class="markdown-preview editor-preview" v-html="revisionHtml"></div>
           </div>
         </el-form-item>
-        <el-form-item label="备注">
+        <el-form-item class="is-full" label="备注">
           <el-input v-model="revisionForm.note" />
         </el-form-item>
       </el-form>
@@ -167,7 +230,10 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="distributionChannelVisible" title="选择分发渠道" width="720px">
+    <el-dialog v-model="distributionChannelVisible" title="选择分发渠道" width="760px" class="distribution-channel-dialog">
+      <div class="distribution-channel-intro">
+        选择本篇文章的发布去向，后续会进入对应平台配置。
+      </div>
       <div class="distribution-channel-grid">
         <button
           v-for="channel in distributionChannels"
@@ -177,11 +243,16 @@
           :class="{ disabled: channel.disabled }"
           @click="selectDistributionChannel(channel.value)"
         >
+          <span class="distribution-channel-mark" :class="distributionChannelClass(channel.value)">
+            {{ distributionChannelInitial(channel.value) }}
+          </span>
+          <span class="distribution-channel-status" :class="{ disabled: channel.disabled }">
+            <span class="distribution-channel-status-dot" />
+            {{ channel.disabled ? '待接入' : '可分发' }}
+          </span>
           <span class="distribution-channel-title">{{ channel.label }}</span>
           <span class="distribution-channel-desc">{{ channel.description }}</span>
-          <el-tag size="small" :type="channel.disabled ? 'info' : 'success'">
-            {{ channel.disabled ? '待接入' : '可分发' }}
-          </el-tag>
+          <span class="distribution-channel-action">选择</span>
         </button>
       </div>
       <template #footer>
@@ -189,38 +260,46 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="industrySiteVisible" title="行业资讯站分发" width="900px">
+    <el-dialog v-model="industrySiteVisible" title="行业资讯站分发" width="900px" class="industry-site-dialog">
+      <div class="industry-site-intro">
+        选择一个已启用的行业资讯站，系统会将当前文章发布到对应站点。
+      </div>
       <DataState :loading="industrySiteLoading" :empty="!industrySiteLoading && industrySites.length === 0" empty-text="暂无可用行业资讯站">
-        <el-table :data="industrySites" border highlight-current-row @current-change="selectIndustrySite">
-          <el-table-column width="52">
-            <template #default="scope">
-              <el-radio :model-value="selectedIndustrySiteId" :label="scope.row.id" @change="selectIndustrySite(scope.row)" />
-            </template>
-          </el-table-column>
-          <el-table-column label="站点" min-width="180">
-            <template #default="scope">
-              <div class="site-cell">
-                <el-avatar v-if="scope.row.iconUrl" :src="scope.row.iconUrl" shape="square" :size="28" />
-                <div>
-                  <div class="site-name">{{ scope.row.siteName }}</div>
-                  <div class="site-domain">{{ scope.row.domain }}</div>
-                </div>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="行业分类" min-width="180">
-            <template #default="scope">
-              <div class="flex flex-wrap gap-1">
-                <el-tag v-for="tag in parseIndustryTags(scope.row.industryTags)" :key="`${scope.row.id}-${tag}`" type="info">
-                  {{ tag }}
-                </el-tag>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="接入方式" width="110">
-            <template #default="scope">{{ scope.row.integrationMethod === 'rest_api' ? 'REST API' : scope.row.integrationMethod }}</template>
-          </el-table-column>
-        </el-table>
+        <div class="industry-site-list">
+          <button
+            v-for="site in industrySites"
+            :key="site.id"
+            type="button"
+            class="industry-site-card"
+            :class="{ selected: selectedIndustrySiteId === site.id }"
+            @click="selectIndustrySite(site)"
+          >
+            <span class="industry-site-radio" :class="{ selected: selectedIndustrySiteId === site.id }" />
+            <span class="industry-site-content">
+              <span class="industry-site-head">
+                <span class="site-cell">
+                  <el-avatar v-if="site.iconUrl" :src="site.iconUrl" shape="square" :size="34" />
+                  <span v-else class="industry-site-avatar">{{ industrySiteInitial(site) }}</span>
+                  <span>
+                    <span class="site-name">{{ site.siteName }}</span>
+                    <span class="site-domain">{{ site.domain || '-' }}</span>
+                  </span>
+                </span>
+                <span v-if="selectedIndustrySiteId === site.id" class="industry-site-selected">已选择</span>
+              </span>
+              <span class="industry-site-meta">
+                <span>
+                  <span class="industry-site-meta-label">行业分类</span>
+                  {{ industrySiteTagText(site) }}
+                </span>
+                <span>
+                  <span class="industry-site-meta-label">接入方式</span>
+                  {{ distributionPlatformLabel(site.integrationMethod) }}
+                </span>
+              </span>
+            </span>
+          </button>
+        </div>
       </DataState>
       <template #footer>
         <el-button @click="industrySiteVisible = false">取消</el-button>
@@ -230,77 +309,101 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="authorityMediaVisible" title="权威媒体分发" width="1080px">
+    <el-dialog v-model="authorityMediaVisible" title="权威媒体分发" width="1080px" class="authority-media-modal">
       <div class="authority-media-dialog">
-        <el-alert
-          type="info"
-          :closable="false"
-          show-icon
-          title="当前接入特价网新闻媒体资源。提交后将创建权威媒体订单，出稿状态由系统定时同步。"
-        />
+        <div class="authority-media-notice">
+          <span class="authority-media-notice-icon">i</span>
+          <span>选择权威媒体资源并提交订单，出稿状态将由系统自动同步。</span>
+        </div>
         <div class="authority-filter">
-          <el-input v-model="authorityQuery.keyword" clearable placeholder="媒体名称" style="width: 180px" @keyup.enter="searchAuthorityMedia" />
-          <el-input v-model="authorityQuery.industry" clearable placeholder="频道/行业" style="width: 160px" @keyup.enter="searchAuthorityMedia" />
-          <el-input v-model="authorityQuery.province" clearable placeholder="地区" style="width: 140px" @keyup.enter="searchAuthorityMedia" />
-          <el-select v-model="authorityQuery.entranceLevel" clearable placeholder="入口级别" style="width: 130px">
+          <el-input v-model="authorityQuery.keyword" clearable placeholder="媒体名称" @keyup.enter="searchAuthorityMedia" />
+          <el-input v-model="authorityQuery.industry" clearable placeholder="频道/行业" @keyup.enter="searchAuthorityMedia" />
+          <el-input v-model="authorityQuery.province" clearable placeholder="地区" @keyup.enter="searchAuthorityMedia" />
+          <el-select v-model="authorityQuery.entranceLevel" clearable placeholder="入口级别">
             <el-option label="无入口" :value="0" />
             <el-option label="首页入口" :value="1" />
             <el-option label="频道入口" :value="2" />
             <el-option label="上级入口" :value="3" />
           </el-select>
-          <el-select v-model="authorityQuery.newsResource" clearable placeholder="新闻源" style="width: 150px">
+          <el-select v-model="authorityQuery.newsResource" clearable placeholder="新闻源">
             <el-option label="非新闻源" :value="0" />
             <el-option label="百度新闻源" :value="1" />
             <el-option label="头条新闻源" :value="2" />
             <el-option label="百度&头条" :value="3" />
           </el-select>
-          <el-select v-model="authorityQuery.includeCondition" clearable placeholder="收录" style="width: 130px">
+          <el-select v-model="authorityQuery.includeCondition" clearable placeholder="收录">
             <el-option label="不包收录" :value="0" />
             <el-option label="百度包收录" :value="1" />
             <el-option label="头条包收录" :value="2" />
           </el-select>
-          <el-button type="primary" @click="searchAuthorityMedia">查询</el-button>
-          <el-button @click="resetAuthorityMediaQuery">重置</el-button>
+          <div class="authority-filter-actions">
+            <el-button type="primary" @click="searchAuthorityMedia">查询</el-button>
+            <el-button @click="resetAuthorityMediaQuery">重置</el-button>
+          </div>
         </div>
-        <el-table
-          :data="authorityResources"
-          border
-          max-height="360"
-          v-loading="authorityLoading"
-          highlight-current-row
-          @current-change="selectAuthorityResource"
-        >
-          <el-table-column width="52">
-            <template #default="scope">
-              <el-radio :model-value="authorityForm.resourceId" :label="scope.row.id" @change="selectAuthorityResource(scope.row)" />
-            </template>
-          </el-table-column>
-          <el-table-column prop="name" label="媒体名称" min-width="170" show-overflow-tooltip />
-          <el-table-column prop="industry" label="频道/行业" width="120" show-overflow-tooltip />
-          <el-table-column prop="province" label="地区" width="100" show-overflow-tooltip />
-          <el-table-column label="价格" width="95">
-            <template #default="scope">￥{{ money(scope.row.price) }}</template>
-          </el-table-column>
-          <el-table-column label="入口" width="90">
-            <template #default="scope">{{ entranceLevelLabel(scope.row.entranceLevel) }}</template>
-          </el-table-column>
-          <el-table-column label="新闻源" width="120">
-            <template #default="scope">{{ newsResourceLabel(scope.row.newsResource) }}</template>
-          </el-table-column>
-          <el-table-column label="收录" width="110">
-            <template #default="scope">{{ includeConditionLabel(scope.row.includeCondition) }}</template>
-          </el-table-column>
-          <el-table-column label="权重" width="90">
-            <template #default="scope">PC {{ scope.row.pcWeight ?? '-' }} / M {{ scope.row.mWeight ?? '-' }}</template>
-          </el-table-column>
-          <el-table-column label="链接" width="120">
-            <template #default="scope">
-              <el-button v-if="scope.row.caseLink" link type="primary" @click.stop="openExternalLink(scope.row.caseLink)">案例</el-button>
-              <el-button v-if="scope.row.entranceLink" link type="primary" @click.stop="openExternalLink(scope.row.entranceLink)">入口</el-button>
-            </template>
-          </el-table-column>
-          <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
-        </el-table>
+        <div class="authority-table-wrap">
+          <el-table
+            :data="authorityResources"
+            border
+            max-height="360"
+            v-loading="authorityLoading"
+            highlight-current-row
+            :row-class-name="authorityRowClass"
+            @current-change="selectAuthorityResource"
+          >
+            <el-table-column width="52">
+              <template #default="scope">
+                <el-radio :model-value="authorityForm.resourceId" :label="scope.row.id" @change="selectAuthorityResource(scope.row)" />
+              </template>
+            </el-table-column>
+            <el-table-column label="媒体资源" min-width="230" show-overflow-tooltip>
+              <template #default="scope">
+                <div class="authority-media-cell">
+                  <span class="authority-media-avatar">{{ authorityMediaInitial(scope.row) }}</span>
+                  <span class="authority-media-main">
+                    <span class="authority-media-name">{{ scope.row.name }}</span>
+                    <span class="authority-media-sub">{{ scope.row.industry || '未分类' }} · {{ scope.row.province || '全国' }}</span>
+                  </span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="价格" width="110">
+              <template #default="scope">
+                <span class="authority-price">￥{{ money(scope.row.price) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="入口" width="110">
+              <template #default="scope">
+                <span class="authority-soft-chip">{{ entranceLevelLabel(scope.row.entranceLevel) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="新闻源" width="125">
+              <template #default="scope">
+                <span class="authority-soft-chip">{{ newsResourceLabel(scope.row.newsResource) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="收录" width="125">
+              <template #default="scope">
+                <span class="authority-soft-chip">{{ includeConditionLabel(scope.row.includeCondition) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="权重" width="115">
+              <template #default="scope">
+                <span class="authority-weight">{{ authorityWeightText(scope.row) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="链接" width="120">
+              <template #default="scope">
+                <div class="authority-link-actions">
+                  <el-button v-if="scope.row.caseLink" link type="primary" @click.stop="openExternalLink(scope.row.caseLink)">案例</el-button>
+                  <el-button v-if="scope.row.entranceLink" link type="primary" @click.stop="openExternalLink(scope.row.entranceLink)">入口</el-button>
+                  <span v-if="!scope.row.caseLink && !scope.row.entranceLink" class="authority-empty-link">-</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
+          </el-table>
+        </div>
         <div class="pager compact">
           <el-pagination
             background
@@ -312,11 +415,13 @@
           />
         </div>
         <div v-if="selectedAuthorityResource" class="authority-confirm">
-          <div class="authority-selected">
-            <strong>{{ selectedAuthorityResource.name }}</strong>
-            <span>底价 ￥{{ money(selectedAuthorityResource.price) }}</span>
-            <span>{{ entranceLevelLabel(selectedAuthorityResource.entranceLevel) }}</span>
-            <span>{{ newsResourceLabel(selectedAuthorityResource.newsResource) }}</span>
+          <div class="authority-confirm-head">
+            <div class="authority-selected">
+              <strong>{{ selectedAuthorityResource.name }}</strong>
+              <span>底价 ￥{{ money(selectedAuthorityResource.price) }}</span>
+              <span>{{ entranceLevelLabel(selectedAuthorityResource.entranceLevel) }}</span>
+              <span>{{ newsResourceLabel(selectedAuthorityResource.newsResource) }}</span>
+            </div>
           </div>
           <el-form :model="authorityForm" label-width="100px" class="authority-form">
             <el-form-item label="订单售价" required>
@@ -338,17 +443,31 @@
         </div>
       </div>
       <template #footer>
-        <el-button @click="authorityMediaVisible = false">取消</el-button>
-        <el-button type="primary" :loading="authoritySubmitting" :disabled="!authorityForm.resourceId" @click="submitAuthorityMedia">
-          提交权威媒体订单
-        </el-button>
+        <div class="authority-footer">
+          <div class="authority-footer-summary">
+            <template v-if="selectedAuthorityResource">
+              <span class="authority-footer-label">已选择</span>
+              <strong>{{ selectedAuthorityResource.name }}</strong>
+              <span>￥{{ money(authorityForm.salingPrice) }}</span>
+              <span>{{ entranceLevelLabel(selectedAuthorityResource.entranceLevel) }}</span>
+            </template>
+            <span v-else>请选择一个媒体资源后提交订单。</span>
+          </div>
+          <div class="authority-footer-actions">
+            <el-button @click="authorityMediaVisible = false">取消</el-button>
+            <el-button type="primary" :loading="authoritySubmitting" :disabled="!authorityForm.resourceId" @click="submitAuthorityMedia">
+              提交权威媒体订单
+            </el-button>
+          </div>
+        </div>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="mediaDistributeVisible" title="自媒体分发" width="860px">
+    <el-dialog v-model="mediaDistributeVisible" title="自媒体分发" width="980px" class="media-distribute-dialog">
       <div class="media-distribute">
         <el-alert
           v-if="wechatCapability && !wechatCapability.draftDistributionEnabled"
+          class="media-capability-alert"
           type="warning"
           :closable="false"
           show-icon
@@ -356,6 +475,7 @@
         />
         <el-alert
           v-if="douyinCapability && !douyinCapability.enabled"
+          class="media-capability-alert"
           type="warning"
           :closable="false"
           show-icon
@@ -587,9 +707,25 @@
             <span>分发记录</span>
             <el-tag size="small" type="info">{{ distributionAttempts.length }} 条</el-tag>
           </div>
-          <el-table :data="distributionAttempts" border max-height="220">
-            <el-table-column prop="integrationMethod" label="平台" width="110" />
-            <el-table-column prop="status" label="任务状态" width="100" />
+          <el-table class="distribution-history-table" :data="distributionAttempts" max-height="260">
+            <el-table-column label="平台" min-width="180">
+              <template #default="scope">
+                <div class="distribution-target-cell">
+                  <span class="distribution-target-avatar">{{ distributionPlatformInitial(scope.row.integrationMethod) }}</span>
+                  <span class="distribution-target-main">
+                    <span class="distribution-target-title">{{ distributionPlatformLabel(scope.row.integrationMethod) }}</span>
+                    <span class="distribution-target-sub">{{ scope.row.siteName || scope.row.domain || `任务 #${scope.row.id}` }}</span>
+                  </span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="任务状态" width="130">
+              <template #default="scope">
+                <el-tag size="small" :type="distributionStatusTag(scope.row.status)">
+                  {{ distributionStatusLabel(scope.row.status) }}
+                </el-tag>
+              </template>
+            </el-table-column>
             <el-table-column label="审核状态" width="120">
               <template #default="scope">
                 <el-tag v-if="scope.row.reviewStatus" size="small" :type="reviewStatusTag(scope.row.reviewStatus)">
@@ -598,19 +734,28 @@
                 <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column prop="externalStatus" label="平台状态" min-width="110" show-overflow-tooltip />
-            <el-table-column prop="errorMessage" label="错误" min-width="160" show-overflow-tooltip />
-            <el-table-column label="操作" width="100">
+            <el-table-column label="平台反馈" min-width="230" show-overflow-tooltip>
               <template #default="scope">
-                <el-button
-                  v-if="scope.row.reviewStatus === 'under_review'"
-                  link
-                  type="primary"
-                  :loading="refreshingReviewTaskId === scope.row.id"
-                  @click="refreshReviewStatus(scope.row)"
-                >
-                  刷新
-                </el-button>
+                <div class="distribution-feedback">
+                  <span class="distribution-feedback-main">{{ scope.row.externalStatus || '暂无平台状态' }}</span>
+                  <span v-if="scope.row.errorMessage" class="distribution-feedback-error">{{ scope.row.errorMessage }}</span>
+                  <span v-else class="distribution-feedback-muted">未返回错误</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="120" align="center">
+              <template #default="scope">
+                <div class="admin-row-actions distribution-actions">
+                  <el-button
+                    v-if="scope.row.reviewStatus === 'under_review'"
+                    link
+                    type="primary"
+                    :loading="refreshingReviewTaskId === scope.row.id"
+                    @click="refreshReviewStatus(scope.row)"
+                  >
+                    刷新
+                  </el-button>
+                </div>
               </template>
             </el-table-column>
           </el-table>
@@ -708,6 +853,9 @@ const query = reactive({
   status: '',
   articleType: '',
 })
+const reviewCount = computed(() => rows.value.filter((row) => ['pending_review', 'reviewing'].includes(row.status)).length)
+const distributableCount = computed(() => rows.value.filter((row) => canDistribute(row.status)).length)
+const blockedCount = computed(() => rows.value.filter((row) => ['rejected', 'failed', 'risk_blocked'].includes(row.status)).length)
 
 const detailVisible = ref(false)
 const detailData = ref<ArticleDetailResponse | null>(null)
@@ -899,6 +1047,26 @@ function articleTypeLabel(v: string) {
   return map[v] || v
 }
 
+function articleTypeInitial(v: string) {
+  const map: Record<string, string> = {
+    faq: '问',
+    scenario_content: '景',
+    industry_article: '文',
+    stage_advice: '议',
+  }
+  return map[v] || '文'
+}
+
+function articleTypeClass(v: string) {
+  const map: Record<string, string> = {
+    faq: 'is-faq',
+    scenario_content: 'is-scene',
+    industry_article: 'is-article',
+    stage_advice: 'is-advice',
+  }
+  return map[v] || 'is-article'
+}
+
 function contentStyleLabel(v?: string | null) {
   if (!v) return '-'
   const map: Record<string, string> = {
@@ -920,11 +1088,79 @@ function statusLabel(v: string) {
   return statusOptions.find((s) => s.value === v)?.label || v
 }
 
+function distributionPlatformLabel(v?: string | null) {
+  const map: Record<string, string> = {
+    wechat_mp: '微信公众号',
+    douyin: '抖音图文',
+    toutiao: '今日头条',
+    zhihu: '知乎',
+    rest_api: 'REST API',
+    ftp: 'FTP',
+    email: '邮件',
+    manual: '手动分发',
+    brand_geo_site: '品牌官网',
+    agent_official_site: 'Agent 官网',
+  }
+  return v ? map[v] || v : '-'
+}
+
+function distributionPlatformInitial(v?: string | null) {
+  const label = distributionPlatformLabel(v)
+  return label === '-' ? '发' : label.slice(0, 1)
+}
+
+function distributionChannelInitial(v: DistributionChannel) {
+  const map: Record<DistributionChannel, string> = {
+    official_site: '站',
+    industry_site: '讯',
+    self_media: '媒',
+    authority_media: '权',
+  }
+  return map[v]
+}
+
+function distributionChannelClass(v: DistributionChannel) {
+  const map: Record<DistributionChannel, string> = {
+    official_site: 'is-official',
+    industry_site: 'is-industry',
+    self_media: 'is-media',
+    authority_media: 'is-authority',
+  }
+  return map[v]
+}
+
+function distributionStatusLabel(v?: string | null) {
+  const map: Record<string, string> = {
+    pending: '待提交',
+    submitting: '提交中',
+    submitted: '已提交',
+    filled: '已填充',
+    failed: '失败',
+    confirmed: '已确认',
+    published: '已发布',
+  }
+  return v ? map[v] || v : '-'
+}
+
+function distributionStatusTag(v?: string | null): 'success' | 'warning' | 'danger' | 'info' {
+  if (v === 'submitted' || v === 'confirmed' || v === 'published' || v === 'filled') return 'success'
+  if (v === 'submitting' || v === 'pending') return 'warning'
+  if (v === 'failed') return 'danger'
+  return 'info'
+}
+
 function statusTagType(v: string): 'success' | 'warning' | 'danger' | 'info' {
   if (v === 'approved' || v === 'published') return 'success'
   if (v === 'rejected') return 'danger'
   if (v === 'under_revision' || v === 'unpublished') return 'warning'
   return 'info'
+}
+
+function contentStatusClass(v: string) {
+  if (v === 'approved' || v === 'published') return 'is-success'
+  if (v === 'rejected' || v === 'failed' || v === 'risk_blocked') return 'is-danger'
+  if (v === 'pending_review' || v === 'under_revision' || v === 'unpublished') return 'is-warning'
+  return 'is-muted'
 }
 
 function canReview(status: string) {
@@ -2014,6 +2250,16 @@ function parseIndustryTags(raw?: string | string[] | null) {
   }
 }
 
+function industrySiteInitial(site: PublishSite) {
+  const text = (site.siteName || site.domain || '站').trim()
+  return Array.from(text)[0] || '站'
+}
+
+function industrySiteTagText(site: PublishSite) {
+  const tags = parseIndustryTags(site.industryTags)
+  return tags.length ? tags.join(' / ') : '未分类'
+}
+
 function entranceLevelLabel(value?: number | null) {
   const map: Record<number, string> = {
     0: '无入口',
@@ -2041,6 +2287,19 @@ function includeConditionLabel(value?: number | null) {
     2: '头条包收录',
   }
   return value == null ? '-' : (map[value] || String(value))
+}
+
+function authorityMediaInitial(resource: AuthorityMediaResource) {
+  const text = (resource.name || resource.industry || '媒').trim()
+  return Array.from(text)[0] || '媒'
+}
+
+function authorityWeightText(resource: AuthorityMediaResource) {
+  return `PC ${resource.pcWeight ?? '-'} / M ${resource.mWeight ?? '-'}`
+}
+
+function authorityRowClass({ row }: { row: AuthorityMediaResource }) {
+  return row.id === authorityForm.resourceId ? 'is-selected-authority' : ''
 }
 
 function openExternalLink(url?: string | null) {
@@ -2256,24 +2515,156 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   flex-wrap: wrap;
 }
 
-.mb-3 {
-  margin-bottom: 12px;
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: #e2e8f0;
 }
 
-.pager {
-  margin-top: 12px;
-  display: flex;
-  justify-content: flex-end;
+.toolbar-minor-action {
+  color: #64748b;
+}
+
+.toolbar-minor-action:hover {
+  color: #334155;
+}
+
+.mb-3 {
+  margin-bottom: 12px;
 }
 
 .pager.compact {
   margin-top: 8px;
 }
 
+.content-avatar.is-faq {
+  background: linear-gradient(135deg, #2563eb, #0891b2);
+}
+
+.content-avatar.is-scene {
+  background: linear-gradient(135deg, #0d9488, #14b8a6);
+}
+
+.content-avatar.is-article {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+}
+
+.content-avatar.is-advice {
+  background: linear-gradient(135deg, #475569, #64748b);
+}
+
+.content-status-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #92400e;
+  font-weight: 700;
+}
+
+.content-status-text.is-success {
+  color: #047857;
+}
+
+.content-status-text.is-danger {
+  color: #b91c1c;
+}
+
+.content-status-text.is-muted {
+  color: #64748b;
+}
+
+.content-status-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.14);
+}
+
+.content-status-text.is-success .content-status-dot {
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.14);
+}
+
+.content-status-text.is-danger .content-status-dot {
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14);
+}
+
+.content-status-text.is-muted .content-status-dot {
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
+}
+
+.content-neutral-action {
+  color: #64748b;
+}
+
+.content-neutral-action:hover {
+  color: #334155;
+}
+
 .detail-wrap {
   display: flex;
   flex-direction: column;
+  gap: 16px;
+}
+
+.content-detail-drawer :deep(.el-drawer__header) {
+  margin-bottom: 0;
+  padding: 18px 22px;
+  border-bottom: 1px solid #e2e8f0;
+  background: linear-gradient(135deg, #f8fbff, #eff6ff 58%, #ecfdf5);
+}
+
+.content-detail-drawer :deep(.el-drawer__title) {
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.content-detail-drawer :deep(.el-drawer__body) {
+  padding: 18px 22px 24px;
+  background: #f7fbff;
+}
+
+.detail-summary-panel,
+.detail-section-panel {
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+
+.detail-summary-panel {
+  padding: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.08), transparent 30%),
+    linear-gradient(135deg, #ffffff, #f8fbff);
+}
+
+.detail-summary-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 14px;
+  margin-bottom: 14px;
+}
+
+.detail-summary-head h3 {
+  margin: 5px 0 0;
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.detail-kicker {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .detail-header {
@@ -2284,17 +2675,34 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 }
 
 .detail-title {
-  margin: 2px 0;
-  font-size: 14px;
-  font-weight: 600;
+  margin: 0;
+  padding: 14px 16px;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.detail-section-panel > .el-table {
+  border-top: 1px solid #e2e8f0;
+}
+
+.detail-preview-panel {
+  padding-bottom: 16px;
+}
+
+.detail-preview-panel .detail-header {
+  padding-right: 16px;
+  border-bottom: 1px solid #e2e8f0;
 }
 
 .markdown-preview {
   min-height: 360px;
-  padding: 16px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  background: #fff;
+  margin: 16px;
+  padding: 22px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, #ffffff 0%, #ffffff 74%, #f8fafc 100%);
   overflow: auto;
   line-height: 1.75;
   color: var(--el-text-color-primary);
@@ -2372,6 +2780,10 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 
 .editor-wrap {
   width: 100%;
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #f8fbff;
 }
 
 .editor-header {
@@ -2385,6 +2797,7 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 
 .editor-preview {
   min-height: 360px;
+  margin: 0;
 }
 
 .distribution-channel-grid {
@@ -2393,73 +2806,638 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   gap: 12px;
 }
 
+.distribution-channel-dialog :deep(.el-dialog__body) {
+  padding-top: 4px;
+}
+
+.distribution-channel-dialog :deep(.el-dialog__footer) {
+  padding: 14px 20px;
+  border-top: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #fff, #f8fafc);
+}
+
+.distribution-channel-intro {
+  margin: 0 0 14px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .distribution-channel-card {
-  min-height: 112px;
-  padding: 14px;
-  border: 1px solid #dcdfe6;
-  border-radius: 8px;
-  background: #fff;
-  color: var(--el-text-color-primary);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 8px;
+  position: relative;
+  min-height: 124px;
+  padding: 16px 18px 14px 64px;
+  border: 1px solid #dbe3ef;
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(248, 251, 255, 0.96), #fff 54%);
+  color: #0f172a;
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 
 .distribution-channel-card:hover {
-  border-color: var(--el-color-success);
-  box-shadow: 0 4px 14px rgb(0 0 0 / 8%);
+  border-color: #93c5fd;
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.1);
+  transform: translateY(-1px);
 }
 
 .distribution-channel-card.disabled {
-  background: #fafafa;
+  background: #f8fafc;
+  cursor: not-allowed;
+  opacity: 0.72;
 }
 
-.distribution-channel-title {
+.distribution-channel-card.disabled:hover {
+  border-color: #dbe3ef;
+  box-shadow: none;
+  transform: none;
+}
+
+.distribution-channel-mark {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: #fff;
   font-size: 15px;
+  font-weight: 800;
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.14);
+}
+
+.distribution-channel-mark.is-official {
+  background: linear-gradient(135deg, #2563eb, #0891b2);
+}
+
+.distribution-channel-mark.is-industry {
+  background: linear-gradient(135deg, #0d9488, #14b8a6);
+}
+
+.distribution-channel-mark.is-media {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+}
+
+.distribution-channel-mark.is-authority {
+  background: linear-gradient(135deg, #475569, #64748b);
+}
+
+.distribution-channel-status {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #047857;
+  font-size: 12px;
   font-weight: 700;
 }
 
+.distribution-channel-status.disabled {
+  color: #64748b;
+}
+
+.distribution-channel-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.14);
+}
+
+.distribution-channel-status.disabled .distribution-channel-status-dot {
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
+}
+
+.distribution-channel-title {
+  display: block;
+  margin: 4px 76px 8px 0;
+  font-size: 15px;
+  font-weight: 800;
+}
+
 .distribution-channel-desc {
-  min-height: 34px;
-  color: var(--el-text-color-secondary);
+  display: block;
+  min-height: 38px;
+  color: #64748b;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.distribution-channel-action {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 10px;
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.distribution-channel-action::after {
+  content: ">";
+  margin-left: 6px;
+}
+
+.industry-site-dialog :deep(.el-dialog__body) {
+  padding-top: 4px;
+}
+
+.industry-site-dialog :deep(.el-dialog__footer) {
+  padding: 14px 20px;
+  border-top: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #fff, #f8fafc);
+}
+
+.industry-site-intro {
+  margin: 0 0 14px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.industry-site-list {
+  display: grid;
+  gap: 12px;
+}
+
+.industry-site-card {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 12px;
+  width: 100%;
+  padding: 16px;
+  border: 1px solid #dbe3ef;
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(248, 251, 255, 0.96), #ffffff 58%);
+  color: #0f172a;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.industry-site-card:hover {
+  border-color: #93c5fd;
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.1);
+  transform: translateY(-1px);
+}
+
+.industry-site-card.selected {
+  border-color: #60a5fa;
+  background:
+    linear-gradient(135deg, #eff6ff, #ffffff 62%, #f0fdfa);
+  box-shadow:
+    0 14px 30px rgba(37, 99, 235, 0.12),
+    inset 0 0 0 1px rgba(96, 165, 250, 0.35);
+}
+
+.industry-site-radio {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  margin-top: 9px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #ffffff;
+  flex-shrink: 0;
+}
+
+.industry-site-radio.selected {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.industry-site-radio.selected::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: inherit;
+  background: #2563eb;
+}
+
+.industry-site-content,
+.industry-site-head,
+.industry-site-meta {
+  display: flex;
+  min-width: 0;
+}
+
+.industry-site-content {
+  flex-direction: column;
+  gap: 12px;
+}
+
+.industry-site-head {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.industry-site-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #0d9488, #14b8a6);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 800;
+  flex-shrink: 0;
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.12);
+}
+
+.industry-site-selected {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.industry-site-meta {
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.industry-site-meta-label {
+  margin-right: 6px;
+  color: #94a3b8;
+  font-weight: 700;
 }
 
 .authority-media-dialog {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
+}
+
+.authority-media-modal :deep(.el-dialog) {
+  overflow: hidden;
+  border-radius: 18px;
+  box-shadow: 0 28px 72px rgba(15, 23, 42, 0.18);
+}
+
+.authority-media-modal :deep(.el-dialog__header) {
+  margin: 0;
+  padding: 20px 24px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  background: linear-gradient(135deg, #ffffff, #eff6ff 62%, #ecfdf5);
+}
+
+.authority-media-modal :deep(.el-dialog__title) {
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.authority-media-modal :deep(.el-dialog__body) {
+  padding: 16px 20px 12px;
+  background: #f8fbff;
+}
+
+.authority-media-modal :deep(.el-dialog__footer) {
+  padding: 0;
+  border-top: 1px solid #e2e8f0;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.authority-media-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #eff6ff, #f8fbff);
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.authority-media-notice-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+  flex-shrink: 0;
 }
 
 .authority-filter {
+  display: grid;
+  grid-template-columns:
+    minmax(160px, 1.12fr)
+    minmax(140px, 1fr)
+    minmax(120px, 0.86fr)
+    minmax(120px, 0.86fr)
+    minmax(130px, 0.92fr)
+    minmax(120px, 0.86fr)
+    auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.045);
+}
+
+.authority-filter :deep(.el-input),
+.authority-filter :deep(.el-select) {
+  width: 100%;
+}
+
+.authority-filter :deep(.el-input__wrapper),
+.authority-filter :deep(.el-select__wrapper) {
+  min-height: 40px;
+  border-radius: 10px;
+}
+
+.authority-filter-actions {
   display: flex;
-  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.authority-filter-actions .el-button {
+  margin-left: 0;
+}
+
+.authority-table-wrap {
+  overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
+}
+
+.authority-table-wrap :deep(.el-table__header th) {
+  border-right-color: transparent;
+  background: #eff6ff;
+  color: #334155;
+  font-weight: 800;
+}
+
+.authority-table-wrap :deep(.el-table__body td) {
+  border-right-color: transparent;
+  border-bottom-color: #edf2f7;
+}
+
+.authority-table-wrap :deep(.el-table__row) {
+  cursor: pointer;
+}
+
+.authority-table-wrap :deep(.el-table__row:hover > td) {
+  background: #f8fbff !important;
+}
+
+.authority-table-wrap :deep(.el-table__row.is-selected-authority > td) {
+  background: #eff6ff !important;
+}
+
+.authority-table-wrap :deep(.el-table__row.is-selected-authority td:first-child) {
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.authority-media-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.authority-media-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #475569, #2563eb);
+  color: #ffffff;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.authority-media-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.authority-media-name {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authority-media-sub {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authority-price {
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.authority-soft-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.authority-weight {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.authority-link-actions {
+  display: flex;
+  align-items: center;
   gap: 8px;
 }
 
+.authority-link-actions .el-button {
+  margin-left: 0;
+}
+
+.authority-empty-link {
+  color: #94a3b8;
+}
+
 .authority-confirm {
-  padding: 12px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  background: #fafafa;
+  padding: 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, #eff6ff, #ffffff 64%);
+}
+
+.authority-confirm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
 .authority-selected {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 12px;
-  color: var(--el-text-color-regular);
+  gap: 8px;
+  color: #475569;
+}
+
+.authority-selected strong {
+  color: #0f172a;
+}
+
+.authority-selected span {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .authority-form {
-  max-width: 760px;
+  display: grid;
+  align-items: start;
+  gap: 0 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.authority-form .el-form-item:last-child {
+  grid-column: 1 / -1;
+}
+
+.authority-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 14px 20px;
+}
+
+.authority-footer-summary {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.authority-footer-summary strong {
+  max-width: 260px;
+  overflow: hidden;
+  color: #0f172a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authority-footer-summary span:not(.authority-footer-label) {
+  white-space: nowrap;
+}
+
+.authority-footer-label {
+  color: #2563eb;
+  font-weight: 800;
+}
+
+.authority-footer-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 10px;
+  max-width: 100%;
+}
+
+.authority-footer-actions .el-button {
+  margin-left: 0;
+  white-space: nowrap;
+}
+
+.media-distribute-dialog :deep(.el-dialog) {
+  overflow: hidden;
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.99), rgba(248, 251, 255, 0.98));
+  box-shadow: 0 28px 72px rgba(15, 23, 42, 0.18);
+}
+
+.media-distribute-dialog :deep(.el-dialog__header) {
+  margin: 0;
+  padding: 20px 24px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  background:
+    linear-gradient(135deg, #ffffff, #eff6ff 62%, #ecfdf5);
+}
+
+.media-distribute-dialog :deep(.el-dialog__title) {
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.media-distribute-dialog :deep(.el-dialog__body) {
+  padding: 18px 20px 20px;
+}
+
+.media-distribute-dialog :deep(.el-dialog__footer) {
+  padding: 14px 20px 18px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
 }
 
 .media-distribute {
@@ -2468,123 +3446,151 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   gap: 16px;
 }
 
+.media-capability-alert {
+  border: 1px solid #fed7aa;
+  border-radius: 12px;
+  background: #fff7ed;
+}
+
 .media-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .media-platform {
-  min-height: 118px;
-  border: 1px solid #dcdfe6;
-  border-radius: 8px;
-  background: #fff;
-  color: var(--el-text-color-primary);
+  position: relative;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  min-height: 128px;
+  padding: 16px 12px;
+  overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, #ffffff 0%, #ffffff 68%, #f8fbff 100%);
+  color: #0f172a;
   cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  flex-direction: column;
+  gap: 9px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.media-platform::after {
+  content: "";
+  position: absolute;
+  right: -34px;
+  bottom: -42px;
+  width: 110px;
+  height: 110px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.06);
+  pointer-events: none;
 }
 
 .media-platform:hover {
-  border-color: var(--el-color-success);
-  box-shadow: 0 4px 14px rgb(0 0 0 / 8%);
+  transform: translateY(-2px);
+  border-color: #93c5fd;
+  box-shadow: 0 18px 40px rgba(37, 99, 235, 0.1);
 }
 
 .media-platform.active {
-  border-color: var(--el-color-success);
+  border-color: #22c55e;
+  background:
+    linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%);
+  box-shadow:
+    0 18px 42px rgba(34, 197, 94, 0.13),
+    inset 0 0 0 1px rgba(34, 197, 94, 0.28);
 }
 
 .media-platform.disabled {
   cursor: not-allowed;
-  background: #fafafa;
+  background:
+    linear-gradient(135deg, #ffffff, #f8fafc);
+  color: #94a3b8;
+  opacity: 0.78;
+}
+
+.wechat-mark,
+.douyin-mark,
+.toutiao-mark,
+.zhihu-mark {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  color: #fff;
+  font-size: 23px;
+  font-weight: 800;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
 }
 
 .wechat-mark {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  background: #1aad19;
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  font-weight: 700;
+  background: linear-gradient(135deg, #16a34a, #22c55e);
 }
 
 .douyin-mark {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  background: #111827;
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  font-weight: 700;
-}
-
-.toutiao-mark,
-.zhihu-mark {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  font-weight: 700;
+  background: linear-gradient(135deg, #020617, #1e293b);
 }
 
 .toutiao-mark {
-  background: #d92323;
+  background: linear-gradient(135deg, #dc2626, #ef4444);
 }
 
 .zhihu-mark {
-  background: #1677ff;
+  background: linear-gradient(135deg, #2563eb, #3b82f6);
 }
 
 .media-name {
-  font-size: 14px;
-  font-weight: 600;
+  position: relative;
+  z-index: 1;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
 }
 
 .self-media-account-list {
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
   overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
 }
 
 .self-media-account-row {
-  min-height: 58px;
-  padding: 10px 12px;
   display: grid;
-  grid-template-columns: 1fr auto auto auto;
   align-items: center;
+  min-height: 64px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 12px;
-  border-bottom: 1px solid #ebeef5;
 }
 
 .self-media-account-row:last-child {
   border-bottom: 0;
 }
 
+.self-media-account-row:hover {
+  background: #f8fbff;
+}
+
 .self-media-account-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
 }
 
 .self-media-account-meta {
-  margin-top: 2px;
+  margin-top: 3px;
+  color: #64748b;
   font-size: 12px;
-  color: var(--el-text-color-secondary);
 }
 
 .extension-bind-guide {
@@ -2605,10 +3611,12 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 }
 
 .cover-picker {
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
-  padding: 12px;
-  background: #fafafa;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  padding: 14px;
+  background:
+    linear-gradient(180deg, #ffffff, #f8fbff);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
 }
 
 .cover-picker-header {
@@ -2742,6 +3750,96 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   margin-top: 12px;
 }
 
+.distribution-history {
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, #ffffff, #f8fbff);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
+}
+
+.distribution-history-table {
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.distribution-history-table :deep(.el-table__header th) {
+  border-right-color: transparent;
+  background: #eff6ff;
+  color: #334155;
+  font-weight: 800;
+}
+
+.distribution-history-table :deep(.el-table__body td) {
+  border-right-color: transparent;
+  border-bottom-color: #edf2f7;
+}
+
+.distribution-history-table :deep(.el-table__row:hover > td) {
+  background: #f8fbff !important;
+}
+
+.distribution-target-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.distribution-target-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #2563eb, #06b6d4);
+  color: #ffffff;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.distribution-target-main,
+.distribution-feedback {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.distribution-target-title,
+.distribution-feedback-main {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.distribution-target-sub,
+.distribution-feedback-muted {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.distribution-feedback-error {
+  overflow: hidden;
+  color: #ef4444;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.distribution-actions {
+  grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+}
+
 .site-cell {
   display: flex;
   align-items: center;
@@ -2750,15 +3848,23 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 }
 
 .site-name {
+  display: block;
+  overflow: hidden;
   font-size: 14px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
+  font-weight: 800;
+  color: #0f172a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .site-domain {
+  display: block;
+  overflow: hidden;
   margin-top: 2px;
   font-size: 12px;
-  color: var(--el-text-color-secondary);
+  color: #64748b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 :global(.batch-publish-block-alert) {

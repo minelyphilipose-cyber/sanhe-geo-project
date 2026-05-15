@@ -4,18 +4,20 @@
       <div class="toolbar-left">
         <el-button class="back-button" :icon="Back" aria-label="返回" @click="goBack" />
         <div class="toolbar-title">
-          <h1>生成文章</h1>
+          <h1>手动生成文章</h1>
           <div class="breadcrumb">内容与执行 / 文章管理 / 新建</div>
         </div>
       </div>
-      <div class="toolbar-right">
+      <div class="toolbar-mode">
         <el-radio-group v-model="createMode" size="small" class="mode-switch">
-          <el-radio-button label="manual">✎ 手动撰写</el-radio-button>
-          <el-radio-button label="auto">✦ AI 生成</el-radio-button>
+          <el-radio-button label="manual">手动撰写</el-radio-button>
+          <el-radio-button label="auto">AI 生成</el-radio-button>
         </el-radio-group>
+      </div>
+      <div class="toolbar-right">
         <span class="ready-state">
           <span class="ready-dot" :class="{ pending: !canSubmit }" />
-          {{ canSubmit ? '字段已就绪' : '字段待完善' }}
+          {{ submitStateText }}
         </span>
         <el-button @click="goBack">取消</el-button>
         <el-button type="primary" :icon="Check" :loading="submitting" :disabled="!canSubmit" @click="submitManualCreate">
@@ -41,7 +43,11 @@
         </label>
         <label class="inline-field">
           <span class="inline-label required">文章类型</span>
-          <el-select v-model="manualForm.articleType" class="article-type-select">
+          <el-select
+            v-model="manualForm.articleType"
+            class="article-type-select"
+            popper-class="article-type-popper"
+          >
             <el-option
               v-for="item in articleTypeOptions"
               :key="item.value"
@@ -78,14 +84,6 @@
         </label>
       </div>
       <div class="sub-toolbar-spacer" />
-      <div class="sub-toolbar-actions">
-        <el-button size="small" :icon="Picture" :disabled="!selectedProject?.brandId" @click="openImagePicker">
-          品牌图库
-        </el-button>
-        <el-button size="small" :icon="Document" @click="sourceExpanded = true">
-          Markdown 源码
-        </el-button>
-      </div>
     </div>
 
     <div class="page-body" :class="{ 'is-ai-mode': createMode === 'auto' }">
@@ -244,6 +242,7 @@
                   <div class="paragraph-actions">
                     <el-button :icon="ArrowUp" text :disabled="index === 0" aria-label="上移" @click="moveSection(index, -1)" />
                     <el-button :icon="ArrowDown" text :disabled="index === manualForm.sections.length - 1" aria-label="下移" @click="moveSection(index, 1)" />
+                    <el-button :icon="Document" text aria-label="复制" @click="duplicateSection(index)" />
                     <el-button :icon="ArrowDown" text aria-label="折叠" @click="toggleSection(section)" />
                     <el-button :icon="Delete" text :disabled="manualForm.sections.length === 1" aria-label="删除" @click="removeSection(index)" />
                   </div>
@@ -275,17 +274,28 @@
 
       <aside class="preview-pane">
         <div class="preview-head">
-          <span class="preview-eyebrow">实时预览</span>
-          <el-radio-group v-model="previewMode" size="small">
-            <el-radio-button label="rendered">渲染效果</el-radio-button>
-            <el-radio-button label="markdown">原始 Markdown</el-radio-button>
-          </el-radio-group>
+          <div class="preview-title-wrap">
+            <span class="preview-eyebrow">实时预览</span>
+            <span class="preview-subtitle">{{ previewHeaderText }}</span>
+          </div>
+          <div class="preview-tools">
+            <el-button size="small" :icon="Picture" :disabled="!selectedProject?.brandId" @click="openImagePicker">
+              品牌图库
+            </el-button>
+            <el-button size="small" :icon="Document" @click="sourceExpanded = true">
+              Markdown 源码
+            </el-button>
+            <el-radio-group v-model="previewMode" size="small">
+              <el-radio-button label="rendered">渲染效果</el-radio-button>
+              <el-radio-button label="markdown">原始 Markdown</el-radio-button>
+            </el-radio-group>
+          </div>
         </div>
         <article class="paper">
           <div class="paper-meta">
             <span>{{ selectedArticleTypeLabel }}</span>
             <span class="meta-dot" />
-            <span v-if="createMode === 'auto'" class="ai-preview-badge">✦ AI</span>
+            <span v-if="createMode === 'auto'" class="ai-preview-badge">AI</span>
             <span v-if="createMode === 'auto'">{{ selectedContentStyleLabel }}</span>
             <span v-if="createMode === 'auto'" class="meta-dot" />
             <span>{{ selectedProject?.projectName || selectedProject?.brandName || '未绑定项目' }}</span>
@@ -665,7 +675,27 @@ const manualMarkdown = computed({
 })
 const manualHtml = computed(() => {
   const content = manualMarkdown.value.trim()
-  return content ? renderPreviewMarkdown(content) : '<div class="preview-empty">填写左侧内容后将显示预览</div>'
+  if (content) return renderPreviewMarkdown(content)
+  if (createMode.value === 'auto') {
+    return `
+      <div class="preview-empty preview-empty-workflow">
+        <strong>生成草稿后，将在这里预览 AI 内容</strong>
+        <span>配置主题、语气和内容风格后点击生成草稿，确认内容后再提交审核。</span>
+        <ol>
+          <li>配置主题</li>
+          <li>生成草稿</li>
+          <li>编辑结构</li>
+          <li>提交审核</li>
+        </ol>
+      </div>
+    `
+  }
+  return `
+    <div class="preview-empty preview-empty-workflow">
+      <strong>完成标题和正文后，将在这里实时预览文章效果</strong>
+      <span>左侧内容会自动转换为 Markdown，并保持与预览同步。</span>
+    </div>
+  `
 })
 const markdownStats = computed(() => {
   const content = manualMarkdown.value
@@ -684,6 +714,12 @@ const canSubmit = computed(() => Boolean(
   && manualMarkdown.value.trim(),
 ) && !generating.value)
 const canGenerate = computed(() => Boolean(manualForm.projectId && manualForm.articleType && aiForm.topic.trim()) && !generating.value)
+const submitStateText = computed(() => {
+  if (canSubmit.value) return '字段已就绪'
+  if (createMode.value === 'auto' && aiMetadata.value && manualMarkdown.value.trim()) return '请确认 AI 草稿'
+  return '字段待完善'
+})
+const previewHeaderText = computed(() => createMode.value === 'auto' ? 'AI 草稿生成后自动进入预览' : '编辑内容时自动同步 Markdown')
 const todayText = computed(() => {
   const now = new Date()
   const month = String(now.getMonth() + 1).padStart(2, '0')
@@ -844,6 +880,17 @@ function compareText(a?: string | null, b?: string | null) {
 
 function addSection() {
   manualForm.sections.push(createSection())
+}
+
+function duplicateSection(index: number) {
+  const source = manualForm.sections[index]
+  if (!source) return
+  manualForm.sections.splice(index + 1, 0, {
+    id: nextSectionId++,
+    heading: source.heading,
+    content: source.content,
+    collapsed: false,
+  })
 }
 
 function removeSection(index: number) {
@@ -2332,6 +2379,8 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   justify-content: center;
+  gap: 3px;
+  min-width: 0;
   line-height: 1.35;
 }
 
@@ -2342,7 +2391,8 @@ onBeforeUnmount(() => {
 
 .article-type-option small {
   color: var(--el-text-color-secondary);
-  font-size: 11px;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .mode-switch {
@@ -2683,6 +2733,616 @@ onBeforeUnmount(() => {
 .source-drawer-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+/* Current admin visual polish pass. */
+.manual-article-page {
+  display: flex;
+  flex-direction: column;
+  background:
+    linear-gradient(135deg, rgba(248, 251, 255, 0.98) 0%, rgba(241, 245, 249, 0.96) 52%, rgba(236, 253, 245, 0.84) 100%);
+}
+
+.page-toolbar {
+  position: relative;
+  flex-shrink: 0;
+  height: 78px;
+  margin: 0 0 10px;
+  padding: 0 28px;
+  overflow: hidden;
+  border-bottom: 1px solid #dbeafe;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(239, 246, 255, 0.94) 58%, rgba(236, 253, 245, 0.86));
+  box-shadow: 0 16px 36px rgba(37, 99, 235, 0.08);
+}
+
+.page-toolbar::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: linear-gradient(180deg, #2563eb, #06b6d4 48%, #10b981);
+}
+
+.page-toolbar::after {
+  content: "";
+  position: absolute;
+  right: 28px;
+  top: -34px;
+  z-index: 0;
+  width: 300px;
+  height: 150px;
+  opacity: 0.42;
+  background-image: repeating-linear-gradient(135deg, rgba(37, 99, 235, 0.18) 0 1px, transparent 1px 12px);
+  pointer-events: none;
+}
+
+.toolbar-left,
+.toolbar-mode,
+.toolbar-right {
+  position: relative;
+  z-index: 2;
+}
+
+.back-button {
+  border-color: #bfdbfe;
+  background: #ffffff;
+  color: #2563eb;
+}
+
+.toolbar-title h1 {
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.breadcrumb {
+  color: #64748b;
+  margin-top: 4px;
+}
+
+.ready-state {
+  padding: 6px 11px;
+  border: 1px solid rgba(191, 219, 254, 0.95);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: #475569;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+}
+
+.sub-toolbar {
+  position: relative;
+  top: auto;
+  z-index: 10;
+  flex-shrink: 0;
+  height: auto;
+  min-height: 64px;
+  margin: 0 22px 14px;
+  padding: 12px 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 251, 255, 0.92));
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.06);
+  backdrop-filter: blur(10px);
+}
+
+.sub-toolbar-left {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.sub-toolbar-actions {
+  flex-wrap: wrap;
+}
+
+.inline-label {
+  color: #475569;
+  font-weight: 800;
+}
+
+.inline-field {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+}
+
+.inline-field :deep(.el-input__wrapper),
+.inline-field :deep(.el-select__wrapper),
+.inline-field :deep(.el-cascader__wrapper) {
+  box-shadow: none !important;
+  background: transparent;
+}
+
+.project-select {
+  width: min(32vw, 380px);
+}
+
+.article-type-select {
+  width: 180px;
+}
+
+.content-style-select {
+  width: 136px;
+}
+
+.topic-input {
+  width: min(22vw, 280px);
+}
+
+.mode-switch {
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.mode-switch :deep(.el-radio-button__inner) {
+  border-radius: 999px !important;
+}
+
+.mode-switch :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22) !important;
+}
+
+.page-body {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  grid-template-columns: minmax(0, 1.08fr) minmax(420px, 0.92fr);
+  gap: 18px;
+  padding: 0 22px 22px;
+  overflow: hidden;
+}
+
+.editor-pane {
+  padding: 0 0 18px;
+  border-right: 0;
+  background:
+    linear-gradient(180deg, rgba(248, 251, 255, 0.72), rgba(255, 255, 255, 0.36));
+}
+
+.preview-pane {
+  padding: 0 0 18px;
+  background:
+    linear-gradient(180deg, rgba(248, 251, 255, 0.78), rgba(244, 247, 251, 0.58));
+}
+
+.section-card {
+  border-color: #dbeafe;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.075);
+  backdrop-filter: blur(12px);
+}
+
+.section-card:hover {
+  border-color: #bfdbfe;
+  box-shadow: 0 20px 42px rgba(37, 99, 235, 0.1);
+}
+
+.section-header {
+  min-height: 56px;
+  border-bottom-color: #e2e8f0;
+  background: linear-gradient(135deg, #ffffff, #f8fbff 64%, #ecfdf5);
+}
+
+.section-index {
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.section-title {
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.section-desc,
+.form-help {
+  color: #64748b;
+}
+
+.paragraph-block {
+  border-color: #dbeafe;
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, #ffffff 0%, #ffffff 68%, #f8fbff 100%);
+  box-shadow: inset 3px 0 0 rgba(37, 99, 235, 0.18);
+}
+
+.paragraph-block.focused {
+  border-color: #93c5fd;
+  box-shadow:
+    inset 3px 0 0 #2563eb,
+    0 12px 28px rgba(37, 99, 235, 0.11);
+}
+
+.paragraph-block.empty {
+  border-color: #cbd5e1;
+  background:
+    linear-gradient(135deg, rgba(248, 250, 252, 0.92), rgba(239, 246, 255, 0.62));
+}
+
+.paragraph-no {
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-weight: 800;
+}
+
+.heading-input {
+  color: #0f172a;
+  font-weight: 700;
+}
+
+.add-paragraph-button {
+  border-color: #bfdbfe;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #ffffff, #eff6ff);
+  color: #2563eb;
+  font-weight: 800;
+}
+
+.preview-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 10px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(10px);
+}
+
+.preview-eyebrow {
+  color: #2563eb;
+  font-weight: 800;
+}
+
+.paper {
+  position: sticky;
+  top: 64px;
+  max-height: calc(100vh - 228px);
+  border-color: #dbeafe;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, #ffffff 0%, #ffffff 74%, #f8fafc 100%);
+  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.12);
+}
+
+.paper-meta {
+  color: #64748b;
+}
+
+.preview-foot {
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+/* Creation workspace refinement pass. */
+.page-toolbar {
+  display: grid;
+  grid-template-columns: minmax(300px, 1fr) auto minmax(300px, 1fr);
+  gap: 18px;
+}
+
+.toolbar-mode {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  justify-content: center;
+}
+
+.toolbar-right {
+  justify-content: flex-end;
+}
+
+.mode-switch {
+  padding: 3px;
+  border-color: rgba(191, 219, 254, 0.9);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.08);
+}
+
+.mode-switch :deep(.el-radio-button__inner) {
+  min-width: 86px;
+  padding: 6px 14px;
+  position: relative;
+  z-index: 1;
+  color: #64748b;
+  line-height: 18px;
+}
+
+.mode-switch :deep(.el-radio-button__original-radio:checked + .el-radio-button__inner) {
+  color: #ffffff !important;
+}
+
+:global(.article-type-popper .el-select-dropdown__item) {
+  height: auto;
+  min-height: 58px;
+  padding: 8px 24px;
+  line-height: normal;
+}
+
+:global(.article-type-popper .el-select-dropdown__item.is-selected) {
+  background: #f1f5f9;
+}
+
+:global(.article-type-popper .el-select-dropdown__item.hover),
+:global(.article-type-popper .el-select-dropdown__item:hover) {
+  background: #f8fbff;
+}
+
+.sub-toolbar {
+  min-height: 58px;
+  margin-bottom: 18px;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.045);
+}
+
+.sub-toolbar-actions {
+  display: none;
+}
+
+.page-body {
+  grid-template-columns: minmax(0, 1.14fr) minmax(420px, 0.86fr);
+  gap: 20px;
+}
+
+.editor-pane {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.38) transparent;
+}
+
+.editor-pane::-webkit-scrollbar,
+.paper::-webkit-scrollbar {
+  width: 7px;
+}
+
+.editor-pane::-webkit-scrollbar-track,
+.paper::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.editor-pane::-webkit-scrollbar-thumb,
+.paper::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.36);
+}
+
+.ai-card {
+  border-color: #d7e7ff;
+  box-shadow: 0 14px 30px rgba(37, 99, 235, 0.055);
+}
+
+.ai-card .section-header {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(248, 251, 255, 0.9));
+}
+
+.ai-control-grid {
+  gap: 12px;
+}
+
+.ai-control-grid .form-item {
+  padding: 10px;
+  border: 1px solid #edf2f7;
+  border-radius: 12px;
+  background: #fbfdff;
+}
+
+.style-grid {
+  gap: 8px;
+}
+
+.style-tile {
+  min-height: 56px;
+  border-color: #e4eaf2;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.style-tile:hover {
+  border-color: #cbd5e1;
+  background: #f8fbff;
+}
+
+.style-tile.active {
+  border-color: #2563eb;
+  background: #f6faff;
+  box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.18) inset;
+}
+
+.ai-extra-collapse {
+  margin-top: 14px;
+  overflow: hidden;
+  border: 1px dashed #cbd5e1;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(248, 250, 252, 0.92), rgba(255, 255, 255, 0.96));
+}
+
+.ai-extra-collapse :deep(.el-collapse-item__header) {
+  height: 42px;
+  padding: 0 14px;
+  background: transparent;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.ai-extra-collapse :deep(.el-collapse-item__content) {
+  padding: 0 14px 14px;
+}
+
+.section-card {
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.06);
+}
+
+.paragraph-block {
+  box-shadow: none;
+}
+
+.paragraph-block.focused {
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.09);
+}
+
+.paragraph-head {
+  min-height: 40px;
+  border-bottom: 1px solid transparent;
+}
+
+.paragraph-block.focused .paragraph-head {
+  border-bottom-color: #e8edf4;
+}
+
+.paragraph-actions :deep(.el-button) {
+  color: #64748b;
+}
+
+.paragraph-actions :deep(.el-button:hover) {
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.paragraph-actions :deep(.el-button:last-child:hover) {
+  color: #ef4444;
+  background: #fff1f2;
+}
+
+.paragraph-block.collapsed .paragraph-actions :deep(.el-button:nth-child(4) .el-icon) {
+  transform: rotate(-90deg);
+}
+
+.paragraph-no {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.add-paragraph-button {
+  width: auto;
+  min-width: 190px;
+  align-self: center;
+  padding: 8px 18px;
+  border-style: dashed;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 12px;
+}
+
+.preview-title-wrap {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.preview-subtitle {
+  overflow: hidden;
+  color: #94a3b8;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+
+.preview-tools :deep(.el-button) {
+  height: 28px;
+  padding: 0 10px;
+  border-color: #e2e8f0;
+  background: #ffffff;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.preview-tools .el-radio-group {
+  margin-left: 2px;
+}
+
+.paper {
+  top: 66px;
+  max-height: calc(100vh - 236px);
+  min-height: 330px;
+  padding: 42px 50px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+}
+
+.preview-empty {
+  min-height: 210px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #64748b;
+  text-align: center;
+}
+
+.preview-empty-workflow {
+  flex-direction: column;
+  gap: 12px;
+  padding: 34px 26px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(248, 250, 252, 0.92), rgba(255, 255, 255, 0.98)),
+    repeating-linear-gradient(135deg, rgba(37, 99, 235, 0.06) 0 1px, transparent 1px 12px);
+}
+
+.preview-empty-workflow strong {
+  color: #334155;
+  font-size: 15px;
+}
+
+.preview-empty-workflow span {
+  max-width: 420px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.preview-empty-workflow ol {
+  display: grid;
+  grid-template-columns: repeat(4, auto);
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.preview-empty-workflow li {
+  position: relative;
+  padding: 5px 10px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: #f8fbff;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.preview-foot {
+  min-height: 38px;
+  height: auto;
 }
 
 @media (max-width: 1280px) {

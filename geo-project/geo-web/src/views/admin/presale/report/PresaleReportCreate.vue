@@ -1,14 +1,18 @@
 <template>
-  <div class="presale-report-create">
-    <div class="page-header">
-      <el-breadcrumb separator="/">
-        <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">售前报告</el-breadcrumb-item>
-        <el-breadcrumb-item>新建报告</el-breadcrumb-item>
-      </el-breadcrumb>
-      <h2 class="page-title">新建报告</h2>
+  <div class="presale-report-create admin-page">
+    <div class="page-header admin-page-header">
+      <div>
+        <el-breadcrumb separator="/">
+          <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">AI可见度诊断报告</el-breadcrumb-item>
+          <el-breadcrumb-item>新建报告</el-breadcrumb-item>
+        </el-breadcrumb>
+        <div class="admin-page-kicker">报告生成</div>
+        <h2 class="page-title admin-page-title">新建报告</h2>
+        <div class="admin-page-subtitle">录入品牌基础信息，确认诊断范围与问题模板后提交生成。</div>
+      </div>
     </div>
 
-    <el-card shadow="never" class="form-card">
+    <el-card shadow="never" class="form-card admin-rich-card">
       <el-form
         ref="formRef"
         :model="form"
@@ -99,7 +103,7 @@
       </el-form>
 
       <el-divider />
-      <div class="scope-preview">
+      <div class="scope-preview admin-scope-preview">
         <div class="scope-title">诊断范围预览</div>
         <div class="scope-grid">
           <div class="scope-item">
@@ -1193,19 +1197,16 @@ function formatInt(value: number) {
 
 <style scoped>
 .presale-report-create {
-  padding: 16px 24px;
-  max-width: 1120px;
+  max-width: 1180px;
 }
 .page-header {
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 .page-title {
   margin: 8px 0 0 0;
-  font-size: 22px;
-  font-weight: 600;
 }
 .form-card {
-  padding: 12px 0;
+  padding: 0;
 }
 .form-tip {
   margin-left: 12px;
@@ -1213,11 +1214,13 @@ function formatInt(value: number) {
   font-size: 12px;
 }
 .scope-preview {
-  padding: 12px 0;
+  padding: 16px;
+  margin: 4px 0 14px;
 }
 .scope-title {
-  font-size: 14px;
-  color: #606266;
+  font-size: 15px;
+  color: #0f172a;
+  font-weight: 800;
   margin-bottom: 12px;
 }
 .scope-grid {
@@ -1230,13 +1233,14 @@ function formatInt(value: number) {
 .scope-item {
   text-align: center;
   padding: 16px;
-  background: #f5f7fa;
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
 }
 .scope-number {
   font-size: 28px;
-  font-weight: 600;
-  color: #409eff;
+  font-weight: 800;
+  color: #2563eb;
   font-family: 'JetBrains Mono', Consolas, monospace;
 }
 .scope-label {
@@ -1260,15 +1264,15 @@ function formatInt(value: number) {
   gap: 16px;
   align-items: center;
   padding: 14px 16px;
-  border: 1px solid #dcdfe6;
-  border-radius: 4px;
-  background: #fff;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #ffffff, #f8fbff);
   color: #303133;
   cursor: pointer;
   text-align: left;
 }
 .prompt-summary:hover {
-  border-color: #c6e2ff;
+  border-color: #93c5fd;
 }
 .prompt-summary:focus-visible {
   outline: 2px solid #409eff;

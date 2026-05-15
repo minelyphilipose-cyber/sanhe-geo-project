@@ -120,7 +120,7 @@ public class GeoQuestionService {
     public WorkorderVO createOrGet(Long companyId) {
         CompanyKeywordGroupQuotaVO quota = companyService.keywordGroupQuota(companyId);
         if (!Boolean.TRUE.equals(quota.getActiveBinding())) {
-            throw new BizException(400, "客户未绑定套餐，不能进入分层拓词管理");
+            throw new BizException(400, "客户未绑定套餐，不能进入拓词管理");
         }
         GeoQuestionWorkorder existing = workorderMapper.selectOne(new LambdaQueryWrapper<GeoQuestionWorkorder>()
                 .eq(GeoQuestionWorkorder::getCompanyId, companyId)
@@ -153,7 +153,7 @@ public class GeoQuestionService {
         }
         KeywordAllocation allocation = projectKeywordAllocation(project);
         if (allocation.total() <= 0) {
-            throw new BizException(400, "当前项目未配置问题额度，不能进入分层拓词管理");
+            throw new BizException(400, "当前项目未配置问题额度，不能进入拓词管理");
         }
         CompanyKeywordGroupQuotaVO quota = companyService.keywordGroupQuota(project.getCompanyId());
         GeoQuestionWorkorder existing = workorderMapper.selectOne(new LambdaQueryWrapper<GeoQuestionWorkorder>()
@@ -823,7 +823,7 @@ public class GeoQuestionService {
         group.setName("问题池工单-" + workorderId + "-" + version.getVersionLabel());
         group.setType("imported");
         group.setAreaEnabled(false);
-        group.setRemark("由分层拓词管理入库生成");
+        group.setRemark("由拓词管理入库生成");
         group.setDeleted(false);
         group.setCreatedAt(LocalDateTime.now());
         group.setUpdatedAt(LocalDateTime.now());
@@ -1500,7 +1500,7 @@ public class GeoQuestionService {
             throw new BizException(404, "Project not found");
         }
         if (project.getCompanyId() == null) {
-            throw new BizException(400, "项目未绑定客户，不能进入分层拓词管理");
+            throw new BizException(400, "项目未绑定客户，不能进入拓词管理");
         }
         return project;
     }

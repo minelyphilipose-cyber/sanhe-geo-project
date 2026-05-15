@@ -4,7 +4,7 @@
       <div>
         <div class="breadcrumb">
           管理后台 <span class="breadcrumb-sep">/</span>
-          售前报告 <span class="breadcrumb-sep">/</span>
+          AI可见度诊断报告 <span class="breadcrumb-sep">/</span>
           <span class="breadcrumb-current">PAGE03 配置</span>
         </div>
         <h2 class="page-title">AI 搜索新战场配置</h2>

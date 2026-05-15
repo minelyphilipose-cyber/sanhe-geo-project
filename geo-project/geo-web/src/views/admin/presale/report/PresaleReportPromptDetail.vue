@@ -1,15 +1,19 @@
 <template>
-  <div class="prompt-detail-page">
-    <div class="page-header">
+  <div class="prompt-detail-page admin-page">
+    <div class="page-header admin-page-header">
       <div>
         <el-breadcrumb separator="/">
-          <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">售前报告</el-breadcrumb-item>
+          <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">AI可见度诊断报告</el-breadcrumb-item>
           <el-breadcrumb-item :to="promptListLocation">Prompt 调用记录</el-breadcrumb-item>
           <el-breadcrumb-item>调用详情</el-breadcrumb-item>
         </el-breadcrumb>
-        <h2 class="page-title">Prompt 调用详情</h2>
+        <div class="admin-page-kicker">调用详情</div>
+        <h2 class="page-title admin-page-title">Prompt 调用详情</h2>
+        <div class="admin-page-subtitle">查看 Prompt 请求、模型原始回答、解析结果与失败原因。</div>
       </div>
-      <el-button @click="goList">返回列表</el-button>
+      <div class="admin-page-actions">
+        <el-button @click="goList">返回列表</el-button>
+      </div>
     </div>
 
     <div v-if="loading" class="state-panel">
@@ -18,7 +22,7 @@
     </div>
 
     <template v-else-if="detail">
-      <el-card shadow="never" class="summary-card">
+      <el-card shadow="never" class="summary-card admin-rich-card">
         <el-descriptions :column="3" border>
           <el-descriptions-item label="状态">
             <el-tag :type="statusTagType(detail.summary.traceStatus)">
@@ -73,18 +77,23 @@
         :title="detail.analyzeFailureReason || 'QUERY 调用成功，但解析失败'"
       />
 
-      <el-card shadow="never" class="content-card">
+      <el-card shadow="never" class="content-card admin-rich-card">
         <template #header>请求 Prompt</template>
         <div class="block-hint">业务 Prompt（变量替换后）</div>
         <pre class="text-block">{{ detail.summary.requestPromptContent || detail.queryPromptContent || '—' }}</pre>
       </el-card>
 
-      <el-card shadow="never" class="content-card">
+      <el-card shadow="never" class="content-card admin-rich-card">
         <template #header>大模型回答详情</template>
-        <pre class="text-block">{{ detail.queryRawResponse || detail.queryFailureReason || '—' }}</pre>
+        <div
+          v-if="renderedQueryResponse"
+          class="markdown-block"
+          v-html="renderedQueryResponse"
+        />
+        <pre v-else class="text-block">—</pre>
       </el-card>
 
-      <el-card shadow="never" class="content-card">
+      <el-card shadow="never" class="content-card admin-rich-card">
         <template #header>解析结果</template>
         <div class="parse-grid">
           <div class="parse-item">
@@ -150,7 +159,7 @@
         </div>
       </el-card>
 
-      <el-card shadow="never" class="content-card">
+      <el-card shadow="never" class="content-card admin-rich-card">
         <template #header>原始解析 JSON</template>
         <el-alert
           v-if="!formattedAnalyzeJson.isJson && detail.analyzeRawResponse"
@@ -170,11 +179,18 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { InfoFilled, Loading } from '@element-plus/icons-vue'
+import MarkdownIt from 'markdown-it'
 import {
   getReportPromptTraceDetail,
   type PresalePromptTraceDetailVO,
   type PresalePromptTraceStatus
 } from '@/api/presaleReport'
+
+const markdown = new MarkdownIt({
+  html: false,
+  linkify: true,
+  breaks: true
+})
 
 const route = useRoute()
 const router = useRouter()
@@ -191,6 +207,11 @@ const promptListLocation = computed(() => ({
 
 const loading = ref(false)
 const detail = ref<PresalePromptTraceDetailVO | null>(null)
+
+const renderedQueryResponse = computed(() => {
+  const raw = detail.value?.queryRawResponse || detail.value?.queryFailureReason || ''
+  return raw.trim() ? markdown.render(raw) : ''
+})
 
 const formattedAnalyzeJson = computed(() => {
   const raw = detail.value?.analyzeRawResponse || ''
@@ -289,6 +310,108 @@ onMounted(load)
   font-family: inherit;
   color: #303133;
   user-select: text;
+}
+.markdown-block {
+  padding: 16px 18px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  color: #1f2937;
+  line-height: 1.75;
+  word-break: break-word;
+  user-select: text;
+}
+.markdown-block :deep(*) {
+  box-sizing: border-box;
+}
+.markdown-block :deep(*:first-child) {
+  margin-top: 0;
+}
+.markdown-block :deep(*:last-child) {
+  margin-bottom: 0;
+}
+.markdown-block :deep(h1),
+.markdown-block :deep(h2),
+.markdown-block :deep(h3),
+.markdown-block :deep(h4) {
+  margin: 18px 0 10px;
+  color: #0f172a;
+  font-weight: 800;
+  line-height: 1.35;
+}
+.markdown-block :deep(h1) {
+  font-size: 22px;
+}
+.markdown-block :deep(h2) {
+  font-size: 19px;
+}
+.markdown-block :deep(h3) {
+  font-size: 17px;
+}
+.markdown-block :deep(p) {
+  margin: 8px 0;
+}
+.markdown-block :deep(ul),
+.markdown-block :deep(ol) {
+  margin: 8px 0 12px;
+  padding-left: 22px;
+}
+.markdown-block :deep(li) {
+  margin: 4px 0;
+}
+.markdown-block :deep(blockquote) {
+  margin: 12px 0;
+  padding: 10px 14px;
+  border-left: 4px solid #93c5fd;
+  border-radius: 0 8px 8px 0;
+  background: #eff6ff;
+  color: #475569;
+}
+.markdown-block :deep(code) {
+  padding: 2px 5px;
+  border-radius: 5px;
+  background: #eef2ff;
+  color: #1d4ed8;
+  font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 12px;
+}
+.markdown-block :deep(pre) {
+  overflow: auto;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e5e7eb;
+}
+.markdown-block :deep(pre code) {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
+.markdown-block :deep(table) {
+  width: 100%;
+  margin: 12px 0;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.markdown-block :deep(th),
+.markdown-block :deep(td) {
+  padding: 8px 10px;
+  border: 1px solid #dbe3ee;
+  text-align: left;
+}
+.markdown-block :deep(th) {
+  background: #eff6ff;
+  color: #334155;
+  font-weight: 800;
+}
+.markdown-block :deep(a) {
+  color: #2563eb;
+  text-decoration: none;
+}
+.markdown-block :deep(a:hover) {
+  text-decoration: underline;
 }
 .code-block {
   font-family: 'JetBrains Mono', Consolas, monospace;

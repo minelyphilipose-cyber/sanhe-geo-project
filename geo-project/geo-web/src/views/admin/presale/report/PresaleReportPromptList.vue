@@ -1,14 +1,16 @@
 <template>
-  <div class="prompt-list-page">
-    <div class="page-header">
+  <div class="prompt-list-page admin-page">
+    <div class="page-header admin-page-header">
       <div>
         <el-breadcrumb separator="/">
-          <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">售前报告</el-breadcrumb-item>
+          <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">AI可见度诊断报告</el-breadcrumb-item>
           <el-breadcrumb-item>Prompt 调用记录</el-breadcrumb-item>
         </el-breadcrumb>
-        <h2 class="page-title">Prompt 调用记录</h2>
+        <div class="admin-page-kicker">调用链路</div>
+        <h2 class="page-title admin-page-title">Prompt 调用记录</h2>
+        <div class="admin-page-subtitle">按平台、业务分类和执行状态追踪每次模型调用。</div>
       </div>
-      <div class="header-actions">
+      <div class="header-actions admin-page-actions">
         <el-select
           :model-value="versionNo"
           class="version-select"
@@ -37,10 +39,10 @@
       </div>
     </div>
 
-    <el-card shadow="never" class="filter-card">
-      <el-form :model="filter" inline label-position="top">
+    <el-card shadow="never" class="filter-card admin-surface">
+      <el-form :model="filter" class="filter-form" label-position="top">
         <el-form-item label="平台">
-          <el-select v-model="filter.platformCode" placeholder="全部平台" clearable style="width: 160px">
+          <el-select v-model="filter.platformCode" placeholder="全部平台" clearable>
             <el-option
               v-for="item in filterOptions.platforms"
               :key="item.value"
@@ -49,14 +51,8 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="Prompt 类型">
-          <el-select v-model="filter.batchNo" placeholder="全部类型" clearable style="width: 160px">
-            <el-option label="认知型 Prompt" :value="1" />
-            <el-option label="对比型 Prompt" :value="2" />
-          </el-select>
-        </el-form-item>
         <el-form-item label="业务分类">
-          <el-select v-model="filter.category" placeholder="全部分类" clearable style="width: 160px">
+          <el-select v-model="filter.category" placeholder="全部分类" clearable>
             <el-option
               v-for="item in filterOptions.categories"
               :key="item"
@@ -66,7 +62,7 @@
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
-          <el-select v-model="filter.status" placeholder="全部状态" clearable style="width: 160px">
+          <el-select v-model="filter.status" placeholder="全部状态" clearable>
             <el-option label="成功" value="SUCCESS" />
             <el-option label="解析失败" value="ANALYZE_FAILED" />
             <el-option label="调用失败" value="QUERY_FAILED" />
@@ -77,7 +73,6 @@
             v-model="filter.keyword"
             placeholder="搜索问题内容"
             clearable
-            style="width: 220px"
             @keyup.enter="onSearch"
           />
         </el-form-item>
@@ -88,45 +83,80 @@
       </el-form>
     </el-card>
 
-    <el-card shadow="never" class="table-card">
-      <el-table :data="records" v-loading="loading" stripe style="width: 100%">
-        <el-table-column label="Prompt 内容" min-width="280">
+    <div class="admin-metric-grid">
+      <div class="admin-metric-card" style="--metric-accent: #2563eb; --metric-tone: #eff6ff">
+        <span class="admin-metric-label">调用总数</span>
+        <strong class="admin-metric-value">{{ pagination.total }}</strong>
+        <span class="admin-metric-hint">当前筛选结果</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #059669; --metric-tone: #ecfdf5">
+        <span class="admin-metric-label">成功</span>
+        <strong class="admin-metric-value">{{ successCount }}</strong>
+        <span class="admin-metric-hint">本页可见</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #f59e0b; --metric-tone: #fffbeb">
+        <span class="admin-metric-label">解析失败</span>
+        <strong class="admin-metric-value">{{ analyzeFailedCount }}</strong>
+        <span class="admin-metric-hint">需关注</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #ef4444; --metric-tone: #fef2f2">
+        <span class="admin-metric-label">调用失败</span>
+        <strong class="admin-metric-value">{{ queryFailedCount }}</strong>
+        <span class="admin-metric-hint">需排查</span>
+      </div>
+    </div>
+
+    <el-card shadow="never" class="table-card admin-table-card">
+      <el-table
+        class="prompt-record-table"
+        :data="records"
+        v-loading="loading"
+        border
+        table-layout="fixed"
+        highlight-current-row
+        style="width: 100%"
+      >
+        <el-table-column label="Prompt 对象" min-width="300" show-overflow-tooltip>
           <template #default="{ row }">
-            <div class="multi-line">{{ row.requestPromptContent }}</div>
-          </template>
-        </el-table-column>
-        <el-table-column label="大模型响应" min-width="240">
-          <template #default="{ row }">
-            <div class="response-cell">
-              <el-tag size="small" :type="statusTagType(row.traceStatus)">
-                {{ row.traceStatusText }}
-              </el-tag>
-              <span class="brief">{{ row.queryAnswerBrief || '—' }}</span>
+            <div class="admin-entity-cell">
+              <div class="admin-entity-avatar is-violet">{{ promptInitial(row.category) }}</div>
+              <div class="min-w-0">
+                <div class="admin-entity-main">{{ row.category || '未分类 Prompt' }}</div>
+                <div class="admin-entity-sub">{{ row.platformName || '未知平台' }}</div>
+              </div>
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="请求模型" min-width="140">
+        <el-table-column label="内容摘要" min-width="360" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tooltip :disabled="!row.queryModelName" :content="row.queryModelName" placement="top">
-              <span class="model-name">{{ row.queryModelName || '—' }}</span>
-            </el-tooltip>
+            <div class="admin-cell-stack">
+              <span class="admin-cell-main">{{ row.requestPromptContent || '—' }}</span>
+              <span class="admin-cell-sub">响应：{{ row.queryAnswerBrief || '—' }}</span>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column label="解析模型" min-width="140">
+        <el-table-column label="模型/耗时" width="190" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tooltip :disabled="!row.analyzeModelName" :content="row.analyzeModelName" placement="top">
-              <span class="model-name">{{ row.analyzeModelName || '—' }}</span>
-            </el-tooltip>
+            <div class="admin-cell-stack">
+              <span class="admin-cell-main">{{ row.queryModelName || '—' }}</span>
+              <span class="admin-cell-sub">解析 {{ row.analyzeModelName || '—' }} · {{ formatDuration(row.totalDurationMs) }}</span>
+            </div>
           </template>
         </el-table-column>
-        <el-table-column label="耗用时间" width="120">
-          <template #default="{ row }">{{ formatDuration(row.totalDurationMs) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right">
+        <el-table-column label="状态" width="120" align="center" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-button text type="primary" size="small" @click="goDetail(row.promptResultId)">
-              查看详情
-            </el-button>
+            <span class="admin-status-tag" :class="promptStatusClass(row.traceStatus)">
+              {{ row.traceStatusText }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="140" fixed="right">
+          <template #default="{ row }">
+            <div class="admin-row-actions">
+              <el-button link type="primary" size="small" @click="goDetail(row.promptResultId)">
+                查看详情
+              </el-button>
+            </div>
           </template>
         </el-table-column>
         <template #empty>
@@ -134,7 +164,7 @@
         </template>
       </el-table>
 
-      <div class="pagination-wrapper">
+      <div class="pagination-wrapper admin-table-footer">
         <el-pagination
           v-model:current-page="pagination.current"
           v-model:page-size="pagination.size"
@@ -172,6 +202,9 @@ const versionNo = computed(() => Number(route.params.versionNo))
 const loading = ref(false)
 const versions = ref<ReportVersionOptionVO[]>([])
 const records = ref<PresalePromptTraceListItemVO[]>([])
+const successCount = computed(() => records.value.filter((row) => row.traceStatus === 'SUCCESS').length)
+const analyzeFailedCount = computed(() => records.value.filter((row) => row.traceStatus === 'ANALYZE_FAILED').length)
+const queryFailedCount = computed(() => records.value.filter((row) => row.traceStatus === 'QUERY_FAILED').length)
 const filterOptions = ref<PresalePromptTraceFilterOptionsVO>({
   platforms: [],
   categories: []
@@ -179,7 +212,6 @@ const filterOptions = ref<PresalePromptTraceFilterOptionsVO>({
 
 const filter = reactive<PresalePromptTraceQueryRequest>({
   platformCode: '',
-  batchNo: undefined,
   category: '',
   keyword: '',
   status: undefined
@@ -202,7 +234,6 @@ async function loadList() {
       current: pagination.current,
       size: pagination.size,
       platformCode: filter.platformCode || undefined,
-      batchNo: filter.batchNo,
       category: filter.category || undefined,
       keyword: filter.keyword || undefined,
       status: filter.status || undefined
@@ -237,7 +268,6 @@ function onCurrentChange() {
 
 function resetFilter() {
   filter.platformCode = ''
-  filter.batchNo = undefined
   filter.category = ''
   filter.keyword = ''
   filter.status = undefined
@@ -276,10 +306,15 @@ function formatDuration(value: number | null | undefined) {
   return `${(value / 1000).toFixed(1)}s`
 }
 
-function statusTagType(status: PresalePromptTraceStatus) {
-  if (status === 'SUCCESS') return 'success'
-  if (status === 'ANALYZE_FAILED') return 'warning'
-  return 'danger'
+function promptInitial(value?: string | null) {
+  const text = String(value || '').trim()
+  return text ? Array.from(text)[0] : 'P'
+}
+
+function promptStatusClass(status: PresalePromptTraceStatus) {
+  if (status === 'SUCCESS') return 'is-success'
+  if (status === 'ANALYZE_FAILED') return 'is-warning'
+  return 'is-danger'
 }
 
 async function syncQueryAndLoad() {
@@ -293,7 +328,6 @@ async function syncQueryAndLoad() {
 function buildRouteQuery() {
   return {
     platformCode: filter.platformCode || undefined,
-    batchNo: filter.batchNo ? String(filter.batchNo) : undefined,
     category: filter.category || undefined,
     keyword: filter.keyword || undefined,
     status: filter.status || undefined,
@@ -304,7 +338,6 @@ function buildRouteQuery() {
 
 function restoreStateFromQuery() {
   filter.platformCode = queryString('platformCode')
-  filter.batchNo = queryBatchNo()
   filter.category = queryString('category')
   filter.keyword = queryString('keyword')
   filter.status = queryStatus()
@@ -315,11 +348,6 @@ function restoreStateFromQuery() {
 function queryString(key: string) {
   const value = route.query[key]
   return typeof value === 'string' ? value : ''
-}
-
-function queryBatchNo(): 1 | 2 | undefined {
-  const value = Number(queryString('batchNo'))
-  return value === 1 || value === 2 ? value : undefined
 }
 
 function queryStatus(): PresalePromptTraceStatus | undefined {
@@ -361,21 +389,6 @@ watch([reportId, versionNo], async ([newReportId, newVersionNo], [oldReportId, o
 </script>
 
 <style scoped>
-.prompt-list-page {
-  padding: 16px 24px;
-}
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-end;
-  gap: 16px;
-  margin-bottom: 16px;
-}
-.page-title {
-  margin: 8px 0 0;
-  font-size: 22px;
-  font-weight: 600;
-}
 .header-actions {
   display: flex;
   align-items: center;
@@ -390,8 +403,25 @@ watch([reportId, versionNo], async ([newReportId, newVersionNo], [oldReportId, o
 .version-option.selected {
   font-weight: 600;
 }
-.filter-card {
-  margin-bottom: 16px;
+.filter-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr)) minmax(220px, 1.35fr) auto;
+  gap: 20px 24px;
+  align-items: end;
+}
+.filter-form :deep(.el-form-item) {
+  min-width: 0;
+  margin-right: 0;
+  margin-bottom: 0;
+}
+.filter-form :deep(.el-form-item__label) {
+  padding-bottom: 8px;
+  color: #606266;
+  line-height: 1.2;
+}
+.filter-form :deep(.el-input),
+.filter-form :deep(.el-select) {
+  width: 100%;
 }
 .multi-line {
   display: -webkit-box;
@@ -400,13 +430,9 @@ watch([reportId, versionNo], async ([newReportId, newVersionNo], [oldReportId, o
   -webkit-box-orient: vertical;
   line-height: 1.45;
 }
-.response-cell {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
 .brief {
+  display: inline-block;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -420,8 +446,34 @@ watch([reportId, versionNo], async ([newReportId, newVersionNo], [oldReportId, o
   vertical-align: bottom;
 }
 .pagination-wrapper {
-  margin-top: 16px;
   display: flex;
   justify-content: flex-end;
+}
+
+@media (max-width: 1440px) {
+  .filter-form {
+    grid-template-columns: repeat(3, minmax(150px, 1fr));
+  }
+}
+
+@media (max-width: 960px) {
+  .header-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .version-select {
+    width: 100%;
+  }
+
+  .filter-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .filter-form {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
