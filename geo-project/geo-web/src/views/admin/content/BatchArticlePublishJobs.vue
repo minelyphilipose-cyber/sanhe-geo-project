@@ -88,9 +88,6 @@
           </el-descriptions>
 
           <el-table :data="detail.items" border>
-            <el-table-column label="文章ID" width="90">
-              <template #default="{ row }">#{{ row.articleId }}</template>
-            </el-table-column>
             <el-table-column label="文章标题" min-width="240" show-overflow-tooltip>
               <template #default="{ row }">{{ row.articleTitle || '-' }}</template>
             </el-table-column>
