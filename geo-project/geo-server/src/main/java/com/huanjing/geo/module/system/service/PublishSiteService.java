@@ -4,7 +4,7 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
-import com.huanjing.geo.common.util.HttpClientUtil;
+import com.huanjing.geo.module.content.config.BrandGeoSiteProperties;
 import com.huanjing.geo.module.system.dto.PublishSiteCreateRequest;
 import com.huanjing.geo.module.system.dto.PublishSiteStatusUpdateRequest;
 import com.huanjing.geo.module.system.dto.PublishSiteUpdateRequest;
@@ -46,6 +46,7 @@ public class PublishSiteService {
     private final SysDictItemMapper sysDictItemMapper;
     private final CurrentUserService currentUserService;
     private final PlatformCredentialService platformCredentialService;
+    private final BrandGeoSiteProperties brandGeoSiteProperties;
 
     public List<PublishSite> list(String tier, String status, String industry) {
         ensureReadRole();
@@ -115,24 +116,40 @@ public class PublishSiteService {
         result.put("siteId", site.getId());
         result.put("siteName", site.getSiteName());
         result.put("domain", site.getDomain());
+        if ("brand_geo_site".equalsIgnoreCase(site.getIntegrationMethod())) {
+            return testBrandGeoSiteEndpoint(result);
+        }
         String host = resolvePingHost(site);
         result.put("host", host);
+        result.put("testType", "ping");
+        return pingHost(result, host);
+    }
+
+    private Map<String, Object> testBrandGeoSiteEndpoint(Map<String, Object> result) {
+        String endpoint = brandGeoSiteProperties.getEndpoint();
+        result.put("testType", "endpoint_ping");
+        result.put("endpoint", endpoint);
+        if (!StringUtils.hasText(endpoint)) {
+            result.put("success", false);
+            result.put("reachable", false);
+            result.put("message", "BRAND_GEO_SITE_ENDPOINT is not configured");
+            return result;
+        }
+        String host = resolveHost(endpoint.trim());
+        result.put("host", host);
+        return pingHost(result, host);
+    }
+
+    private Map<String, Object> pingHost(Map<String, Object> result, String host) {
         try {
             long startedAt = System.currentTimeMillis();
-            Process process = new ProcessBuilder(pingCommand(host))
-                    .redirectErrorStream(true)
-                    .start();
-            boolean finished = process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            boolean reachable = finished && process.exitValue() == 0;
+            PingResult ping = runPing(host);
+            boolean reachable = ping.reachable();
             result.put("success", reachable);
             result.put("reachable", reachable);
             result.put("elapsedMs", System.currentTimeMillis() - startedAt);
             if (!reachable) {
-                if (!finished) {
-                    process.destroyForcibly();
-                }
-                result.put("message", StringUtils.hasText(output) ? output.trim() : "ping unreachable");
+                result.put("message", StringUtils.hasText(ping.output()) ? ping.output().trim() : "ping unreachable");
             }
             return result;
         } catch (Exception ex) {
@@ -141,6 +158,18 @@ public class PublishSiteService {
             result.put("message", ex.getMessage());
             return result;
         }
+    }
+
+    protected PingResult runPing(String host) throws Exception {
+        Process process = new ProcessBuilder(pingCommand(host))
+                .redirectErrorStream(true)
+                .start();
+        boolean finished = process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        if (!finished) {
+            process.destroyForcibly();
+        }
+        return new PingResult(finished && process.exitValue() == 0, output);
     }
 
     private PublishSite requireById(Long id) {
@@ -298,6 +327,10 @@ public class PublishSiteService {
         if (!StringUtils.hasText(raw)) {
             throw new BizException(400, "domain is required");
         }
+        return resolveHost(raw);
+    }
+
+    private String resolveHost(String raw) {
         String value = raw.trim();
         try {
             URI uri = value.contains("://") ? URI.create(value) : URI.create("http://" + value);
@@ -320,6 +353,8 @@ public class PublishSiteService {
         }
         return value;
     }
+
+    protected record PingResult(boolean reachable, String output) {}
 
     private List<String> pingCommand(String host) {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
