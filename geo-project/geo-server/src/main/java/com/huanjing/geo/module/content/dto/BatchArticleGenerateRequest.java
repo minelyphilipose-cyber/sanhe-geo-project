@@ -51,7 +51,7 @@ public class BatchArticleGenerateRequest {
     public static class PlatformCount {
         @NotBlank
         @Size(max = 32)
-        @Pattern(regexp = "wechat|toutiao|douyin_image_text|zhihu|linkedin|industry_site|authority_media|forum|xiaohongshu")
+        @Pattern(regexp = "wechat|toutiao|douyin_image_text|zhihu|linkedin|agent_site_article|industry_site|authority_media|forum|xiaohongshu")
         private String contentStyle;
 
         @Min(0)

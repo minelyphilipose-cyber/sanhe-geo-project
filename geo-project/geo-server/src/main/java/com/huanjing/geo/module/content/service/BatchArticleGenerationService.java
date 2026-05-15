@@ -75,11 +75,11 @@ public class BatchArticleGenerationService {
     private static final int ARTICLE_REQUEST_TIMEOUT_MS = 120_000;
     private static final Set<String> SUPPORTED_CONTENT_STYLES = Set.of(
             "wechat", "toutiao", "douyin_image_text", "zhihu", "linkedin",
-            "industry_site", "authority_media", "forum", "xiaohongshu"
+            "agent_site_article", "industry_site", "authority_media", "forum", "xiaohongshu"
     );
     private static final Set<String> CREATABLE_CONTENT_STYLES = Set.of(
             "wechat", "toutiao", "douyin_image_text", "zhihu", "linkedin",
-            "industry_site", "authority_media", "forum"
+            "agent_site_article", "industry_site", "authority_media", "forum"
     );
 
     private final ProjectMapper projectMapper;

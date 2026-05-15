@@ -107,7 +107,7 @@
               <div class="section-desc">每个主题下按平台填写生成数量，0 表示本批次不生成该平台风格文章。</div>
             </div>
           </div>
-          <div class="section-body matrix-body">
+          <div v-loading="platformLoading" class="section-body matrix-body">
             <div v-if="selectedTopics.length" class="topic-matrix-list">
               <article v-for="topic in selectedTopics" :key="topic.id" class="topic-card">
                 <div class="topic-card-head">
@@ -123,19 +123,38 @@
                     <el-button link type="danger" :icon="Delete" @click="removeTopic(topic.id)">移除</el-button>
                   </div>
                 </div>
-                <div class="platform-grid">
-                  <div v-for="platform in platformOptions" :key="platform.value" class="platform-cell">
-                    <div class="platform-label">
-                      <span class="platform-icon">{{ platform.icon }}</span>
-                      <span>{{ platform.label }}</span>
+                <div class="platform-group-list">
+                  <section v-for="group in platformGroups" :key="group.key" class="platform-group">
+                    <div class="platform-group-head">
+                      <div>
+                        <div class="platform-group-title">{{ group.label }}</div>
+                        <div class="platform-group-desc">{{ group.desc }}</div>
+                      </div>
+                      <div class="platform-group-actions">
+                        <el-button link type="primary" @click="setPlatformGroupPreset(topic, group, 1)">本组每项 1 篇</el-button>
+                        <el-button link @click="clearPlatformGroupCounts(topic, group)">清空本组</el-button>
+                      </div>
                     </div>
-                    <el-input-number
-                      v-model="topic.platformCounts[platform.value]"
-                      :min="0"
-                      :max="MAX_BATCH_ARTICLE_COUNT"
-                      controls-position="right"
-                    />
-                  </div>
+                    <div class="platform-grid">
+                      <div v-for="platform in group.platforms" :key="platform.value" class="platform-cell" :class="{ 'is-disabled': platform.disabled }">
+                        <div class="platform-label">
+                          <img v-if="platform.iconUrl" class="platform-icon image-icon" :src="platform.iconUrl" :alt="platform.label" />
+                          <span v-else class="platform-icon">{{ platform.icon }}</span>
+                          <span>{{ platform.label }}</span>
+                        </div>
+                        <div class="platform-desc">{{ platform.desc }}</div>
+                        <div v-if="platform.meta" class="platform-meta">{{ platform.meta }}</div>
+                        <div v-if="platform.disabledReason" class="platform-disabled-reason">{{ platform.disabledReason }}</div>
+                        <el-input-number
+                          v-model="topic.platformCounts[platform.value]"
+                          :min="0"
+                          :max="MAX_BATCH_ARTICLE_COUNT"
+                          :disabled="platform.disabled"
+                          controls-position="right"
+                        />
+                      </div>
+                    </div>
+                  </section>
                 </div>
               </article>
             </div>
@@ -239,8 +258,10 @@ import { Back, Check, Delete } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { TableInstance } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
-import type { KeywordGroup, KeywordGroupQuestion, Project } from '@/types'
+import type { Brand, KeywordGroup, KeywordGroupQuestion, Project, PublishSite } from '@/types'
 import { createBatchContentArticles } from '@/api/content'
+import { getBrandDetail } from '@/api/customer'
+import { getPublishSites } from '@/api/publishSite'
 import { getKeywordGroupQuestions, getProjectDetail, getProjectList } from '@/api/project'
 
 interface ContentStyleOption {
@@ -248,6 +269,17 @@ interface ContentStyleOption {
   label: string
   desc: string
   icon: string
+  iconUrl?: string | null
+  meta?: string
+  disabled?: boolean
+  disabledReason?: string
+}
+
+interface PlatformGroup {
+  key: string
+  label: string
+  desc: string
+  platforms: ContentStyleOption[]
 }
 
 interface ProjectCascadeNode {
@@ -273,22 +305,43 @@ interface SelectedTopic {
   platformCounts: Record<string, number>
 }
 
-const PLATFORM_OPTIONS: ContentStyleOption[] = [
-  { value: 'toutiao', label: '今日头条', desc: '泛资讯阅读，结论前置', icon: '头' },
-  { value: 'wechat', label: '公众号', desc: '完整长文，结构稳', icon: '公' },
-  { value: 'zhihu', label: '知乎', desc: '问题回答，判断清晰', icon: '知' },
-  { value: 'douyin_image_text', label: '抖音图文', desc: '图文卡片式阅读', icon: '抖' },
-  { value: 'linkedin', label: '领英', desc: '商业观察，专业克制', icon: '领' },
-  { value: 'industry_site', label: '行业资讯站', desc: '客观中立，可引用', icon: '讯' },
-  { value: 'authority_media', label: '权威媒体', desc: '正式审慎，事实边界', icon: '权' },
-  { value: 'forum', label: '论坛', desc: '垂直社区讨论感', icon: '坛' },
+const STATIC_PLATFORM_GROUPS: PlatformGroup[] = [
+  {
+    key: 'self_media',
+    label: '自媒体平台',
+    desc: '面向账号内容分发，按平台阅读习惯生成不同表达。',
+    platforms: [
+      { value: 'toutiao', label: '今日头条', desc: '泛资讯阅读，结论前置', icon: '头' },
+      { value: 'wechat', label: '公众号', desc: '完整长文，结构稳', icon: '公' },
+      { value: 'zhihu', label: '知乎', desc: '问题回答，判断清晰', icon: '知' },
+      { value: 'douyin_image_text', label: '抖音图文', desc: '图文卡片式阅读', icon: '抖' },
+    ],
+  },
+  {
+    key: 'owned_site',
+    label: '站点平台',
+    desc: '用于官网或行业站点发布，强调可检索、可引用。',
+    platforms: [],
+  },
+  {
+    key: 'external_media',
+    label: '外部媒体与社区',
+    desc: '面向媒体投放、社区讨论或专业商务场景。',
+    platforms: [
+      { value: 'authority_media', label: '权威媒体', desc: '正式审慎，事实边界', icon: '权' },
+      { value: 'forum', label: '论坛', desc: '垂直社区讨论感', icon: '坛' },
+    ],
+  },
 ]
 const MAX_BATCH_ARTICLE_COUNT = 30
 
 const router = useRouter()
 const projectLoading = ref(false)
+const platformLoading = ref(false)
 const batchSubmitting = ref(false)
 const projectOptions = ref<Project[]>([])
+const publishSites = ref<PublishSite[]>([])
+const selectedBrand = ref<Brand | null>(null)
 const batchQuestionPickerVisible = ref(false)
 const batchQuestionPickerLoading = ref(false)
 const batchQuestionRows = ref<ArticleQuestionOption[]>([])
@@ -306,7 +359,9 @@ const batchQuestionFilters = reactive({
   scene: 'all',
 })
 
-const platformOptions = computed(() => PLATFORM_OPTIONS)
+const platformGroups = computed(() => buildPlatformGroups())
+const platformOptions = computed(() => platformGroups.value.flatMap((group) => group.platforms))
+const activePlatformOptions = computed(() => platformOptions.value.filter((platform) => !platform.disabled))
 const projectCascadeProps = {
   value: 'value',
   label: 'label',
@@ -325,10 +380,10 @@ const filteredBatchQuestionRows = computed(() => {
   })
 })
 const batchGeneratedTotal = computed(() => selectedTopics.value.reduce((total, topic) => (
-  total + platformOptions.value.reduce((sum, platform) => sum + Number(topic.platformCounts[platform.value] || 0), 0)
+  total + activePlatformOptions.value.reduce((sum, platform) => sum + Number(topic.platformCounts[platform.value] || 0), 0)
 ), 0))
 const isBatchCountExceeded = computed(() => batchGeneratedTotal.value > MAX_BATCH_ARTICLE_COUNT)
-const selectedPlatformLabels = computed(() => platformOptions.value
+const selectedPlatformLabels = computed(() => activePlatformOptions.value
   .filter((platform) => selectedTopics.value.some((topic) => Number(topic.platformCounts[platform.value] || 0) > 0))
   .map((platform) => platform.label)
   .join('、'))
@@ -347,11 +402,12 @@ function createPlatformCounts() {
   return Object.fromEntries(platformOptions.value.map((platform) => [platform.value, 0])) as Record<string, number>
 }
 
-function handleBatchProjectChange() {
+async function handleBatchProjectChange() {
   selectedTopics.value = []
   selectedQuestionRows.value = []
   batchQuestionRows.value = []
   manualTopicInput.value = ''
+  await loadSelectedBrand()
 }
 
 function addManualTopic() {
@@ -391,13 +447,25 @@ function removeTopic(topicId: string) {
 }
 
 function setTopicPreset(topic: SelectedTopic, count: number) {
-  for (const platform of platformOptions.value) {
+  for (const platform of activePlatformOptions.value) {
     topic.platformCounts[platform.value] = count
   }
 }
 
 function clearTopicCounts(topic: SelectedTopic) {
   for (const platform of platformOptions.value) {
+    topic.platformCounts[platform.value] = 0
+  }
+}
+
+function setPlatformGroupPreset(topic: SelectedTopic, group: PlatformGroup, count: number) {
+  for (const platform of group.platforms.filter((item) => !item.disabled)) {
+    topic.platformCounts[platform.value] = count
+  }
+}
+
+function clearPlatformGroupCounts(topic: SelectedTopic, group: PlatformGroup) {
+  for (const platform of group.platforms) {
     topic.platformCounts[platform.value] = 0
   }
 }
@@ -414,6 +482,105 @@ async function loadProjectOptions() {
   } finally {
     projectLoading.value = false
   }
+}
+
+async function loadPublishPlatformOptions() {
+  platformLoading.value = true
+  try {
+    const { data } = await getPublishSites({ status: 'active' })
+    publishSites.value = data.data || []
+  } catch (err) {
+    console.error(err)
+    publishSites.value = []
+    ElMessage.error('加载发布平台失败')
+  } finally {
+    platformLoading.value = false
+  }
+}
+
+async function loadSelectedBrand() {
+  const brandId = selectedBatchProject.value?.brandId
+  selectedBrand.value = null
+  if (!brandId) return
+  try {
+    const { data } = await getBrandDetail(brandId)
+    selectedBrand.value = data.data
+  } catch (err) {
+    console.error(err)
+    ElMessage.error('加载品牌绑定站点失败')
+  }
+}
+
+function buildPlatformGroups(): PlatformGroup[] {
+  const groups = STATIC_PLATFORM_GROUPS.map((group) => ({
+    ...group,
+    platforms: [...group.platforms],
+  }))
+  const ownedSiteGroup = groups.find((group) => group.key === 'owned_site')
+  if (ownedSiteGroup) {
+    ownedSiteGroup.platforms = [
+      buildAgentSiteOption(),
+      buildIndustrySiteOption(),
+    ]
+  }
+  return groups
+}
+
+function buildAgentSiteOption(): ContentStyleOption {
+  const agentSite = findAgentPublishSite()
+  const geoSiteCode = selectedBrand.value?.geoSiteCode?.trim()
+  const isActive = selectedBrand.value?.geoSiteStatus === 'active'
+  const disabled = !geoSiteCode || !isActive
+  return {
+    value: 'agent_site_article',
+    label: 'Agent 官网',
+    desc: '官网文章风格，适合品牌自有 GEO 站点发布',
+    icon: 'A',
+    iconUrl: agentSite?.iconUrl || null,
+    meta: geoSiteCode ? `绑定站点：${geoSiteCode}` : undefined,
+    disabled,
+    disabledReason: disabled ? '当前品牌未绑定可用 Agent 官网' : undefined,
+  }
+}
+
+function buildIndustrySiteOption(): ContentStyleOption {
+  const brand = selectedBrand.value
+  const site = findIndustryPublishSite(brand?.industrySiteCode, brand?.industrySiteName)
+  const label = brand?.industrySiteName || site?.siteName || '行业资讯站'
+  const disabled = !brand?.industrySiteCode && !brand?.industrySiteName
+  return {
+    value: 'industry_site',
+    label,
+    desc: '行业资讯站稿件，客观中立、可检索、可引用',
+    icon: '讯',
+    iconUrl: site?.iconUrl || null,
+    meta: buildSiteMeta(site, brand?.industrySiteCode),
+    disabled,
+    disabledReason: disabled ? '当前品牌未绑定行业资讯站' : undefined,
+  }
+}
+
+function findAgentPublishSite() {
+  return publishSites.value.find((site) => (
+    site.integrationMethod === 'brand_geo_site' || site.siteCode === 'agent_official_site'
+  )) || null
+}
+
+function findIndustryPublishSite(siteCode?: string | null, siteName?: string | null) {
+  const normalizedCode = siteCode?.trim().toLowerCase()
+  const normalizedName = siteName?.trim()
+  return publishSites.value.find((site) => (
+    site.integrationMethod !== 'brand_geo_site'
+    && site.siteCode !== 'agent_official_site'
+    && ((normalizedCode && site.siteCode === normalizedCode) || (normalizedName && site.siteName === normalizedName))
+  )) || null
+}
+
+function buildSiteMeta(site?: PublishSite | null, fallbackCode?: string | null) {
+  if (site?.domain) return `站点：${site.siteName}（${site.domain}）`
+  if (site?.siteName) return `站点：${site.siteName}`
+  if (fallbackCode) return `绑定站点：${fallbackCode}`
+  return undefined
 }
 
 function mergeProjects(primary: Project[], secondary: Project[]) {
@@ -613,7 +780,7 @@ async function submitBatchGeneration() {
     topicAsQuestion: topic.topicAsQuestion,
     keywordGroupId: topic.keywordGroupId,
     keywordGroupName: topic.keywordGroupName,
-    platforms: platformOptions.value.map((platform) => ({
+    platforms: activePlatformOptions.value.map((platform) => ({
       contentStyle: platform.value,
       count: Number(topic.platformCounts[platform.value] || 0),
     })),
@@ -641,6 +808,7 @@ function goBack() {
 
 onMounted(() => {
   loadProjectOptions()
+  loadPublishPlatformOptions()
 })
 </script>
 
@@ -674,6 +842,7 @@ onMounted(() => {
 .toolbar-right,
 .topic-actions,
 .topic-card-actions,
+.platform-group-actions,
 .question-picker-toolbar {
   display: flex;
   align-items: center;
@@ -908,8 +1077,51 @@ onMounted(() => {
   color: var(--text-secondary);
 }
 
-.platform-grid {
+.platform-group-list {
   padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.platform-group {
+  border: 1px solid #e8edf5;
+  border-radius: 8px;
+  background: #fbfcff;
+  overflow: hidden;
+}
+
+.platform-group-head {
+  padding: 12px 14px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #edf2f7;
+  background: #f8fafc;
+}
+
+.platform-group-title {
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.platform-group-desc {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.platform-group-actions {
+  justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
+.platform-grid {
+  padding: 14px;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
@@ -923,8 +1135,13 @@ onMounted(() => {
   background: #ffffff;
 }
 
+.platform-cell.is-disabled {
+  background: #f9fafb;
+  color: var(--text-tertiary);
+}
+
 .platform-label {
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -945,6 +1162,32 @@ onMounted(() => {
   color: #2563eb;
   font-size: 12px;
   font-weight: 700;
+}
+
+.image-icon {
+  object-fit: cover;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+}
+
+.platform-desc {
+  min-height: 34px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.platform-meta,
+.platform-disabled-reason {
+  margin: -4px 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-tertiary);
+}
+
+.platform-disabled-reason {
+  color: #b45309;
 }
 
 .platform-cell :deep(.el-input-number) {
@@ -1077,6 +1320,14 @@ onMounted(() => {
 
   .topic-card-head {
     flex-direction: column;
+  }
+
+  .platform-group-head {
+    flex-direction: column;
+  }
+
+  .platform-group-actions {
+    justify-content: flex-start;
   }
 }
 </style>
