@@ -26,7 +26,8 @@ public class ProjectStateGuard {
         if (StringUtils.hasText(project.getDeductionTxnNo())
                 || "active".equals(project.getStatus())
                 || "completed".equals(project.getStatus())
-                || "terminated".equals(project.getStatus())) {
+                || "terminated".equals(project.getStatus())
+                || "expired".equals(project.getStatus())) {
             throw new BizException(400, "Project package is locked after activation or deduction");
         }
     }
@@ -85,7 +86,7 @@ public class ProjectStateGuard {
     }
 
     private void ensureNotTerminal(Project project) {
-        if ("completed".equals(project.getStatus()) || "terminated".equals(project.getStatus())) {
+        if ("completed".equals(project.getStatus()) || "terminated".equals(project.getStatus()) || "expired".equals(project.getStatus())) {
             throw new BizException(400, "Terminal project cannot be edited");
         }
     }

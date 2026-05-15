@@ -18,26 +18,26 @@
 
     <el-card>
       <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无客户数据">
-        <el-table :data="rows" border>
-        <el-table-column prop="companyName" label="公司名称" min-width="220" />
-        <el-table-column label="联系人" min-width="160">
-          <template #default="scope">{{ scope.row.contactName || '-' }}{{ scope.row.contactPhone ? ` / ${scope.row.contactPhone}` : '' }}</template>
+        <el-table class="customer-list-table" :data="rows" border table-layout="fixed">
+        <el-table-column prop="companyName" label="公司名称" width="220" show-overflow-tooltip />
+        <el-table-column label="联系人" width="180" show-overflow-tooltip>
+          <template #default="scope">{{ contactText(scope.row) }}</template>
         </el-table-column>
-        <el-table-column label="行业" min-width="180">
+        <el-table-column label="行业" width="180" show-overflow-tooltip>
           <template #default="scope">{{ industryLabels(scope.row) }}</template>
         </el-table-column>
-        <el-table-column prop="businessDirection" label="主营方向" min-width="160" />
-        <el-table-column prop="city" label="地区" min-width="220">
+        <el-table-column prop="businessDirection" label="主营方向" width="160" show-overflow-tooltip />
+        <el-table-column prop="city" label="地区" width="220" show-overflow-tooltip>
           <template #default="scope">{{ companyRegion(scope.row) }}</template>
         </el-table-column>
-        <el-table-column label="归属" width="100">
+        <el-table-column label="归属" width="100" show-overflow-tooltip>
           <template #default="scope">{{ dictStore.label('owner_type', scope.row.ownerType) }}</template>
         </el-table-column>
-        <el-table-column label="来源" width="120">
+        <el-table-column label="来源" width="120" show-overflow-tooltip>
           <template #default="scope">{{ dictStore.label('company_source_type', scope.row.sourceType) || '-' }}</template>
         </el-table-column>
-        <el-table-column prop="partnerName" label="合伙人" width="160" />
-        <el-table-column label="状态" width="120">
+        <el-table-column prop="partnerName" label="合伙人" width="160" show-overflow-tooltip />
+        <el-table-column label="状态" width="120" show-overflow-tooltip>
           <template #default="scope">{{ dictStore.label('company_status', scope.row.status) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="180" fixed="right">
@@ -246,6 +246,13 @@ function resetForm() {
 
 function companyRegion(company: Company) {
   return regionDisplayFromPayload(company) || company.city || '-'
+}
+
+function contactText(company: Company) {
+  const name = company.contactName || ''
+  const phone = company.contactPhone || ''
+  if (name && phone) return `${name} / ${phone}`
+  return name || phone || '-'
 }
 
 function parseIndustryTags(value?: string | string[] | null) {

@@ -152,56 +152,6 @@
       </el-table>
     </el-card>
 
-    <el-card v-loading="accountLoading">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <span>客户余额</span>
-          <div class="space-x-2">
-            <el-button v-if="canAdjustCompanyAccount" type="primary" @click="rechargeVisible = true">充值</el-button>
-            <el-button v-if="canAdjustCompanyAccount" @click="deductVisible = true">扣款</el-button>
-          </div>
-        </div>
-      </template>
-      <el-descriptions :column="4" border>
-        <el-descriptions-item label="当前余额(元)">{{ centsToYuan(account?.currentBalance) }}</el-descriptions-item>
-        <el-descriptions-item label="累计充值(元)">{{ centsToYuan(account?.totalRecharge) }}</el-descriptions-item>
-        <el-descriptions-item label="累计扣款(元)">{{ centsToYuan(account?.totalDeduction) }}</el-descriptions-item>
-        <el-descriptions-item label="状态">{{ account?.status || '-' }}</el-descriptions-item>
-      </el-descriptions>
-      <DataState :loading="accountLoading" :empty="!accountLoading && txns.length === 0" empty-text="暂无交易记录">
-        <el-table class="mt-4" :data="txns" border>
-          <el-table-column prop="txnNo" label="流水号" min-width="220" />
-          <el-table-column label="类型" width="100">
-            <template #default="scope">{{ txnTypeLabel(scope.row.txnType) }}</template>
-          </el-table-column>
-          <el-table-column label="业务" width="120">
-            <template #default="scope">{{ bizTypeLabel(scope.row.bizType) }}</template>
-          </el-table-column>
-          <el-table-column label="金额(元)" width="120">
-            <template #default="scope">{{ centsToYuan(scope.row.amount) }}</template>
-          </el-table-column>
-          <el-table-column label="前余额(元)" width="120">
-            <template #default="scope">{{ centsToYuan(scope.row.balanceBefore) }}</template>
-          </el-table-column>
-          <el-table-column label="后余额(元)" width="120">
-            <template #default="scope">{{ centsToYuan(scope.row.balanceAfter) }}</template>
-          </el-table-column>
-          <el-table-column prop="reason" label="原因" min-width="180" />
-          <el-table-column prop="createdAt" label="时间" width="180" />
-        </el-table>
-        <div class="mt-4 flex justify-end">
-          <el-pagination
-            background
-            layout="prev, pager, next, total"
-            :current-page="txnPage.current"
-            :page-size="txnPage.size"
-            :total="txnPage.total"
-            @current-change="onTxnPageChange"
-          />
-        </div>
-      </DataState>
-    </el-card>
-
     <el-card v-loading="brandLoading">
       <template #header>
         <div class="flex items-center justify-between">
@@ -372,34 +322,6 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="rechargeVisible" title="客户充值" width="520px">
-      <el-form :model="rechargeForm" label-width="100px">
-        <el-form-item label="金额(元)" required>
-          <el-input-number v-model="rechargeForm.amountYuan" :min="0.01" :precision="2" :step="100" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="充值原因" required><el-input v-model="rechargeForm.reason" /></el-form-item>
-        <el-form-item label="线下凭证"><el-input v-model="rechargeForm.offlineReference" /></el-form-item>
-        <el-form-item label="备注"><el-input v-model="rechargeForm.remark" type="textarea" :rows="3" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="rechargeVisible = false">取消</el-button>
-        <el-button type="primary" :loading="accountSubmitting" @click="submitRecharge">确认</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="deductVisible" title="客户扣款" width="520px">
-      <el-form :model="deductForm" label-width="100px">
-        <el-form-item label="金额(元)" required>
-          <el-input-number v-model="deductForm.amountYuan" :min="0.01" :precision="2" :step="100" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="扣款原因" required><el-input v-model="deductForm.reason" /></el-form-item>
-        <el-form-item label="备注"><el-input v-model="deductForm.remark" type="textarea" :rows="3" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="deductVisible = false">取消</el-button>
-        <el-button type="primary" :loading="accountSubmitting" @click="submitDeduct">确认</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 <script setup lang="ts">
@@ -412,19 +334,15 @@ import { useDictStore } from '@/stores/dict'
 import {
   createBrand,
   bindCompanyPackage,
-  deductCompanyAccount,
   deleteBrand,
   deleteCompany,
   getActiveCompanyPackageBinding,
   getBrandList,
-  getCompanyAccount,
-  getCompanyAccountTxns,
   getCompanyDetail,
   getCompanyDistributionQuotas,
   getCompanyPackageBindings,
   getCompanyKeywordGroupQuota,
   getSalesOwnerOptions,
-  rechargeCompanyAccount,
   unbindCompanyPackage,
   updateBrand,
   updateCompany,
@@ -432,7 +350,7 @@ import {
 } from '@/api/customer'
 import { getEnabledPackagePlans } from '@/api/packagePlan'
 import { getPartnerList, type PartnerItem } from '@/api/partner'
-import type { Brand, Company, CompanyAccount, CompanyAccountTxn, CompanyDistributionQuota, CompanyDistributionQuotaItem, CompanyPackageBinding, CompanyKeywordGroupQuota, PackagePlan } from '@/types'
+import type { Brand, Company, CompanyDistributionQuota, CompanyDistributionQuotaItem, CompanyPackageBinding, CompanyKeywordGroupQuota, PackagePlan } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
@@ -444,7 +362,6 @@ const userStore = useUserStore()
 const dictStore = useDictStore()
 const canUpdateCompany = computed(() => userStore.hasPermission('company.update'))
 const canDeleteCompany = computed(() => userStore.hasPermission('company.delete'))
-const canAdjustCompanyAccount = computed(() => userStore.hasPermission('company.account.adjust'))
 const canCreateBrand = computed(() => userStore.hasPermission('brand.create'))
 const canUpdateBrand = computed(() => userStore.hasPermission('brand.update'))
 const canDeleteBrand = computed(() => userStore.hasPermission('brand.delete'))
@@ -456,27 +373,22 @@ const hasValidId = Number.isFinite(companyId) && companyId > 0
 
 const loading = ref(false)
 const brandLoading = ref(false)
-const accountLoading = ref(false)
 const packageLoading = ref(false)
 const keywordGroupQuotaLoading = ref(false)
 const distributionQuotaLoading = ref(false)
 const saving = ref(false)
 const brandSaving = ref(false)
-const accountSubmitting = ref(false)
 const packageSubmitting = ref(false)
 
 const company = ref<Company | null>(null)
 const brands = ref<Brand[]>([])
 const partnerOptions = ref<PartnerItem[]>([])
 const salesOwnerOptions = ref<SalesOwnerOption[]>([])
-const account = ref<CompanyAccount | null>(null)
-const txns = ref<CompanyAccountTxn[]>([])
 const activePackageBinding = ref<CompanyPackageBinding | null>(null)
 const keywordGroupQuota = ref<CompanyKeywordGroupQuota | null>(null)
 const distributionQuota = ref<CompanyDistributionQuota | null>(null)
 const packageBindingHistory = ref<CompanyPackageBinding[]>([])
 const packagePlanOptions = ref<PackagePlan[]>([])
-const txnPage = reactive({ current: 1, size: 10, total: 0 })
 
 const companyFormRef = ref<FormInstance>()
 const brandFormRef = ref<FormInstance>()
@@ -528,30 +440,6 @@ const brandRules: FormRules = {
     { pattern: /^[a-z0-9][a-z0-9_-]{1,127}$/, message: '品牌标识仅支持字母、数字、下划线、中划线', trigger: 'blur' },
   ],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
-}
-
-const rechargeVisible = ref(false)
-const deductVisible = ref(false)
-const rechargeForm = reactive({ amountYuan: 100, reason: '', offlineReference: '', remark: '' })
-const deductForm = reactive({ amountYuan: 100, reason: '', remark: '' })
-
-function centsToYuan(v?: number | null) {
-  if (v == null) return '-'
-  return Number(v).toFixed(2)
-}
-
-function yuanToCents(v: number) {
-  return Number(v.toFixed(2))
-}
-
-function txnTypeLabel(value: string) {
-  const mapping: Record<string, string> = { recharge: '充值', deduction: '扣款', manual_adjust: '调整' }
-  return mapping[value] || value
-}
-
-function bizTypeLabel(value: string) {
-  const mapping: Record<string, string> = { company_prepaid: '客户预存', project_signing: '项目签约', finance_adjust: '人工调整' }
-  return mapping[value] || value
 }
 
 function moneyText(value?: number | null) {
@@ -769,30 +657,6 @@ async function loadCompany() {
   } finally {
     loading.value = false
   }
-}
-
-async function loadAccount() {
-  accountLoading.value = true
-  try {
-    const [accountRes, txnRes] = await Promise.all([
-      getCompanyAccount(companyId),
-      getCompanyAccountTxns(companyId, { current: txnPage.current, size: txnPage.size }),
-    ])
-    account.value = accountRes.data.data
-    txns.value = txnRes.data.data.records || []
-    txnPage.total = txnRes.data.data.total || 0
-  } catch {
-    account.value = null
-    txns.value = []
-    txnPage.total = 0
-  } finally {
-    accountLoading.value = false
-  }
-}
-
-function onTxnPageChange(v: number) {
-  txnPage.current = v
-  loadAccount()
 }
 
 async function removeCurrentCompany() {
@@ -1061,62 +925,6 @@ async function removeBrand(row: Brand) {
   }
 }
 
-async function submitRecharge() {
-  if (!rechargeForm.amountYuan || rechargeForm.amountYuan <= 0) {
-    ElMessage.warning('充值金额需大于 0')
-    return
-  }
-  if (!rechargeForm.reason.trim()) {
-    ElMessage.warning('请填写原因')
-    return
-  }
-  accountSubmitting.value = true
-  try {
-    await rechargeCompanyAccount(companyId, {
-      amount: yuanToCents(rechargeForm.amountYuan),
-      reason: rechargeForm.reason.trim(),
-      offlineReference: rechargeForm.offlineReference || undefined,
-      remark: rechargeForm.remark || undefined,
-    })
-    ElMessage.success('充值成功')
-    rechargeVisible.value = false
-    rechargeForm.amountYuan = 100
-    rechargeForm.reason = ''
-    rechargeForm.offlineReference = ''
-    rechargeForm.remark = ''
-    await loadAccount()
-  } finally {
-    accountSubmitting.value = false
-  }
-}
-
-async function submitDeduct() {
-  if (!deductForm.amountYuan || deductForm.amountYuan <= 0) {
-    ElMessage.warning('扣款金额需大于 0')
-    return
-  }
-  if (!deductForm.reason.trim()) {
-    ElMessage.warning('请填写原因')
-    return
-  }
-  accountSubmitting.value = true
-  try {
-    await deductCompanyAccount(companyId, {
-      amount: yuanToCents(deductForm.amountYuan),
-      reason: deductForm.reason.trim(),
-      remark: deductForm.remark || undefined,
-    })
-    ElMessage.success('扣款成功')
-    deductVisible.value = false
-    deductForm.amountYuan = 100
-    deductForm.reason = ''
-    deductForm.remark = ''
-    await loadAccount()
-  } finally {
-    accountSubmitting.value = false
-  }
-}
-
 function goCreateProject(brandId: number) {
   router.push({
     path: '/admin/projects',
@@ -1154,7 +962,7 @@ onMounted(async () => {
   await dictStore.ensureLoaded()
   await Promise.all([loadPartners(), loadSalesOwners()])
   await loadCompany()
-  await Promise.all([loadBrands(), loadAccount(), loadPackageBinding(), loadKeywordGroupQuota(), loadDistributionQuotas()])
+  await Promise.all([loadBrands(), loadPackageBinding(), loadKeywordGroupQuota(), loadDistributionQuotas()])
 })
 </script>
 

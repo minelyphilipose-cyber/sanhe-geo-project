@@ -55,7 +55,7 @@ export type RoleType =
 
 export type PackageType = 'trial_6980' | 'standard_12800' | 'growth_26800'
 
-export type ProjectStatus = 'draft' | 'active' | 'paused' | 'dispute' | 'completed' | 'archived'
+export type ProjectStatus = 'pending_start' | 'active' | 'paused' | 'expired'
 
 export type ProjectStage =
   | 'pending_start'
@@ -237,6 +237,7 @@ export interface Project {
   startDate: string | null
   activatedAt?: string | null
   endDate: string | null
+  expiredAt?: string | null
   primaryGoal: string | null
   customerRequirements?: string[]
   ownerType: OwnerType
@@ -864,6 +865,9 @@ export interface ArticleDraft {
   projectId: number
   projectName?: string
   articleType: 'faq' | 'scenario_content' | 'industry_article' | 'stage_advice' | string
+  contentStyle?: string | null
+  topic?: string | null
+  topicAsQuestion?: string | null
   title: string
   status: 'pending_review' | 'approved' | 'rejected' | 'under_revision' | 'distributing' | 'distributed' | 'published' | 'unpublished' | string
   hasRisk: boolean

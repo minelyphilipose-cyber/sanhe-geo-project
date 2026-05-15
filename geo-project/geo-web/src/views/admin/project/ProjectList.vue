@@ -4,7 +4,7 @@
       <div class="flex items-center gap-2">
         <el-input v-model="query.keyword" placeholder="搜索项目名称" clearable style="width: 240px" @keyup.enter="load" />
         <el-select v-model="query.status" placeholder="状态" clearable style="width: 140px" @change="load">
-          <el-option v-for="v in statusOptions" :key="v" :label="dictStore.label('project_status', v)" :value="v" />
+          <el-option v-for="v in statusOptions" :key="v" :label="projectStatusLabel(v)" :value="v" />
         </el-select>
         <el-button @click="load">查询</el-button>
       </div>
@@ -33,10 +33,7 @@
             <template #default="scope">{{ regionDisplay(scope.row) || '-' }}</template>
           </el-table-column>
           <el-table-column label="状态" width="120">
-            <template #default="scope">{{ dictStore.label('project_status', scope.row.status) }}</template>
-          </el-table-column>
-          <el-table-column label="阶段" width="170">
-            <template #default="scope">{{ dictStore.label('project_stage', scope.row.stage) }}</template>
+            <template #default="scope">{{ projectStatusLabel(scope.row.status) }}</template>
           </el-table-column>
           <el-table-column label="操作" width="160" fixed="right">
             <template #default="scope">
@@ -49,7 +46,8 @@
                   <el-button link type="primary">更多</el-button>
                   <template #dropdown>
                     <el-dropdown-menu>
-                      <el-dropdown-item v-if="scope.row.status === 'paused' && canActivateProject" command="activate">去激活</el-dropdown-item>
+                      <el-dropdown-item v-if="canStartProject(scope.row)" command="activate">{{ scope.row.status === 'paused' ? '再次启动' : '启动' }}</el-dropdown-item>
+                      <el-dropdown-item v-if="scope.row.status === 'active' && canCloseProject" command="pause">暂停</el-dropdown-item>
                       <el-dropdown-item v-if="canUpdateProject" command="edit">编辑</el-dropdown-item>
                       <el-dropdown-item v-if="canDeleteProject" command="delete">删除</el-dropdown-item>
                     </el-dropdown-menu>
@@ -166,12 +164,6 @@
           <el-input :value="companyOwnerTypeLabel" disabled />
         </el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="form.regionCodes" /></el-form-item>
-        <el-form-item v-if="formMode === 'edit' && (canActivateProject || canCloseProject)" label="激活状态">
-          <el-select v-model="form.status" style="width: 100%">
-            <el-option v-if="canActivateProject" :label="dictStore.label('project_status', 'active')" value="active" />
-            <el-option v-if="canCloseProject" :label="dictStore.label('project_status', 'paused')" value="paused" />
-          </el-select>
-        </el-form-item>
         <el-form-item label="交付模式"><el-input v-model="form.deliveryMode" /></el-form-item>
         <el-form-item label="主目标"><el-input v-model="form.primaryGoal" type="textarea" :rows="3" /></el-form-item>
         <el-form-item label="客户需求">
@@ -316,7 +308,7 @@ const selectedBrand = computed(() => brandOptions.value.find((item) => item.id =
 const brandBaseStatement = computed(() => extractBrandBaseStatement(selectedBrand.value))
 const brandForbiddenPhraseList = computed(() => parseStringArray(selectedBrand.value?.forbiddenPhrases))
 
-const statusOptions = computed(() => ['active', 'paused'])
+const statusOptions = computed(() => ['pending_start', 'active', 'paused', 'expired'])
 const loading = ref(false)
 const saving = ref(false)
 const rows = ref<Project[]>([])
@@ -333,7 +325,6 @@ const formVisible = ref(false)
 const formRef = ref<FormInstance>()
 const formMode = ref<'create' | 'edit'>('create')
 const editingId = ref<number | null>(null)
-const originalStatus = ref<'active' | 'paused'>('paused')
 
 const form = reactive({
   projectName: '',
@@ -345,7 +336,6 @@ const form = reactive({
   keywordGroupLimitB: 0,
   keywordGroupLimitC: 0,
   channelAllocations: {} as Record<string, number>,
-  status: 'paused' as 'active' | 'paused',
   regionCodes: [] as string[],
   deliveryMode: 'managed',
   primaryGoal: '',
@@ -442,7 +432,6 @@ function resetForm() {
   form.channelAllocations = {}
   channelQuotaItems.value = []
   allocationVersion.value = null
-  form.status = 'paused'
   form.regionCodes = []
   form.deliveryMode = 'managed'
   form.primaryGoal = ''
@@ -640,8 +629,6 @@ async function openEdit(row: Project) {
   form.keywordGroupLimitA = row.planKeywordGroupLimitA ?? row.planKeywordGroupLimit ?? 0
   form.keywordGroupLimitB = row.planKeywordGroupLimitB ?? 0
   form.keywordGroupLimitC = row.planKeywordGroupLimitC ?? 0
-  form.status = row.status === 'active' ? 'active' : 'paused'
-  originalStatus.value = form.status
   form.regionCodes = regionCodesFromPayload(row)
   form.deliveryMode = row.deliveryMode || 'managed'
   form.primaryGoal = row.primaryGoal || ''
@@ -729,17 +716,6 @@ async function submit() {
       goDetail(data.data.id)
     } else if (editingId.value) {
       await updateProject(editingId.value, payload)
-      if (form.status !== originalStatus.value) {
-        if (form.status === 'active' && !canActivateProject.value) {
-          ElMessage.warning('当前账号无项目激活权限')
-          return
-        }
-        if (form.status === 'paused' && !canCloseProject.value) {
-          ElMessage.warning('当前账号无项目关闭权限')
-          return
-        }
-        await updateProjectStatus(editingId.value, form.status)
-      }
       ElMessage.success('保存成功')
       formVisible.value = false
       load()
@@ -804,8 +780,36 @@ function onMoreCommand(row: Project, command: string) {
     openEdit(row)
     return
   }
+  if (command === 'pause') {
+    pauseProject(row)
+    return
+  }
   if (command === 'delete') {
     removeProject(row)
+  }
+}
+
+function projectStatusLabel(status?: string | null) {
+  if (!status) return '-'
+  return dictStore.label('project_status', status) || status
+}
+
+function canStartProject(row: Project) {
+  return canActivateProject.value && (row.status === 'pending_start' || row.status === 'paused')
+}
+
+async function pauseProject(row: Project) {
+  try {
+    await ElMessageBox.confirm(
+      `确认暂停项目「${row.projectName}」？`,
+      '暂停确认',
+      { type: 'warning', confirmButtonText: '确认暂停', cancelButtonText: '取消' },
+    )
+    await updateProjectStatus(row.id, 'paused')
+    ElMessage.success('项目已暂停')
+    await load()
+  } catch {
+    // canceled
   }
 }
 

@@ -9,8 +9,7 @@
           <div class="space-x-2">
             <el-button size="small" @click="goReports">项目报表</el-button>
             <el-button v-if="project?.status === 'active'" size="small" type="primary" plain @click="goBaselineReport">基线检测报告</el-button>
-            <el-tag>{{ dictStore.label('project_status', project?.status) }}</el-tag>
-            <el-tag type="info">{{ dictStore.label('project_stage', project?.stage) }}</el-tag>
+            <el-tag>{{ projectStatusLabel(project?.status) }}</el-tag>
           </div>
         </div>
       </template>
@@ -28,6 +27,7 @@
         <el-descriptions-item label="所在地区">{{ regionText(project) }}</el-descriptions-item>
         <el-descriptions-item label="交付模式">{{ project?.deliveryMode || '-' }}</el-descriptions-item>
         <el-descriptions-item label="启动日期">{{ project?.activatedAt || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="有效期至">{{ project?.endDate || '-' }}</el-descriptions-item>
         <el-descriptions-item label="签约扣款(元)">{{ centsToYuan(project?.deductionAmount) }}</el-descriptions-item>
         <el-descriptions-item label="折扣快照">{{ project?.discountRateSnapshot != null ? (project.discountRateSnapshot * 100).toFixed(2) + '%' : '-' }}</el-descriptions-item>
         <el-descriptions-item label="扣款流水号">{{ project?.deductionTxnNo || '-' }}</el-descriptions-item>
@@ -190,7 +190,7 @@
           <el-table-column prop="totalScore" label="总分" width="80" />
           <el-table-column label="操作" width="90" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" :disabled="project?.status !== 'paused'" @click="openQuestionEdit(row)">编辑</el-button>
+              <el-button link type="primary" :disabled="!canPrepareProject" @click="openQuestionEdit(row)">编辑</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -339,7 +339,8 @@ const userStore = useUserStore()
 const dictStore = useDictStore()
 const canActivateProject = computed(() => userStore.hasPermission('project.start'))
 const canUpdateProject = computed(() => userStore.hasPermission('project.update'))
-const canCreateKeywordGroup = computed(() => project.value?.status === 'paused' && userStore.hasPermission('keyword_group.write'))
+const canPrepareProject = computed(() => project.value?.status === 'pending_start' || project.value?.status === 'paused')
+const canCreateKeywordGroup = computed(() => canPrepareProject.value && userStore.hasPermission('keyword_group.write'))
 const projectId = Number(route.params.id)
 const hasValidId = Number.isFinite(projectId) && projectId > 0
 
@@ -379,10 +380,10 @@ const requirementForm = reactive({
 })
 
 const activationConfirmed = ref(false)
-const showActivationGuide = computed(() => route.query.activate === '1' && project.value?.status === 'paused')
+const showActivationGuide = computed(() => route.query.activate === '1' && canPrepareProject.value)
 const canImportKeywordGroup = computed(() => {
   const current = project.value
-  return !!current && current.status === 'paused' && (current.selectedKeywordGroupCount || 0) === 0
+  return !!current && canPrepareProject.value && (current.selectedKeywordGroupCount || 0) === 0
 })
 const keywordSummary = computed(() => {
   const current = project.value
@@ -409,6 +410,11 @@ function centsToYuan(v?: number | null) {
 function regionText(p?: Project | null) {
   if (!p) return '-'
   return regionDisplayFromPayload(p) || '-'
+}
+
+function projectStatusLabel(status?: string | null) {
+  if (!status) return '-'
+  return dictStore.label('project_status', status) || status
 }
 
 function keywordExpectedCounts(current: Project) {
@@ -693,8 +699,8 @@ async function startProject() {
       ElMessage.error('项目信息不存在')
       return
     }
-    if (current.status !== 'paused') {
-      ElMessage.info('当前项目已启动')
+    if (current.status !== 'pending_start' && current.status !== 'paused') {
+      ElMessage.info('当前项目不可启动')
       return
     }
     if (!activationConfirmed.value) {

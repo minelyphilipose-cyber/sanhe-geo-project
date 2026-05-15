@@ -3,6 +3,7 @@ package com.huanjing.geo.module.project.service;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.entity.ArticleBatch;
@@ -141,6 +142,7 @@ public class ProjectService {
     public Page<Project> page(long current, long size, String keyword, String status, String stage, Long partnerId, Long brandId) {
         SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
+        expireOverdueProjects();
         LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<Project>()
                 .isNull(Project::getDeletedAt)
                 .orderByDesc(Project::getCreatedAt);
@@ -181,6 +183,7 @@ public class ProjectService {
         }
 
         Page<Project> page = projectMapper.selectPage(new Page<>(current, size), wrapper);
+        page.getRecords().forEach(this::refreshProjectExpiration);
         attachPlatformSelections(page.getRecords());
         attachCustomerRequirements(page.getRecords());
         attachKeywordGroupSelections(page.getRecords());
@@ -224,7 +227,7 @@ public class ProjectService {
         project.setBrandName(resolveBrandName(req.getBrandId()));
         project.setProjectName(req.getProjectName());
         project.setProjectAliases(normalizeAliases(req.getProjectAliases()));
-        project.setStatus("paused");
+        project.setStatus("pending_start");
         project.setStage("pending_start");
         project.setOwnerType(ownerType);
         project.setSourceType(resolveProjectSourceType(operator));
@@ -382,7 +385,7 @@ public class ProjectService {
             validateKeywordGroupQuota(project);
             channelAllocationService.validateActivation(project);
             channelAllocationService.auditCurrentAllocations(project, operator.getId(), "project.activate", false);
-            markActivatedIfNeeded(project);
+            markActivatedAndApplyPackageValidity(project);
         } else if (isReleasingActiveAllocation(fromStatus, req.getStatus())) {
             channelAllocationService.lockCompany(project.getCompanyId());
             channelAllocationService.auditCurrentAllocations(project, operator.getId(), "project.pause", true);
@@ -435,7 +438,7 @@ public class ProjectService {
             validateKeywordGroupQuota(project);
             channelAllocationService.validateActivation(project);
             channelAllocationService.auditCurrentAllocations(project, operator.getId(), "project.activate", false);
-            markActivatedIfNeeded(project);
+            markActivatedAndApplyPackageValidity(project);
         } else if (isReleasingActiveAllocation(project.getStatus(), req.getStatus())) {
             channelAllocationService.lockCompany(project.getCompanyId());
             channelAllocationService.auditCurrentAllocations(project, operator.getId(), "project.pause", true);
@@ -572,7 +575,40 @@ public class ProjectService {
         if (project == null || project.getDeletedAt() != null) {
             throw new BizException(404, "Project not found");
         }
+        refreshProjectExpiration(project);
         return project;
+    }
+
+    private void refreshProjectExpiration(Project project) {
+        if (project.getExpiredAt() == null || "expired".equals(project.getStatus())) {
+            return;
+        }
+        if (!"active".equals(project.getStatus()) && !"paused".equals(project.getStatus())) {
+            return;
+        }
+        if (project.getExpiredAt().isAfter(LocalDateTime.now())) {
+            return;
+        }
+        String fromStatus = project.getStatus();
+        project.setStatus("expired");
+        projectMapper.update(
+                null,
+                new LambdaUpdateWrapper<Project>()
+                        .eq(Project::getId, project.getId())
+                        .eq(Project::getStatus, fromStatus)
+                        .set(Project::getStatus, "expired")
+        );
+    }
+
+    private void expireOverdueProjects() {
+        projectMapper.update(
+                null,
+                new LambdaUpdateWrapper<Project>()
+                        .in(Project::getStatus, List.of("active", "paused"))
+                        .isNotNull(Project::getExpiredAt)
+                        .le(Project::getExpiredAt, LocalDateTime.now())
+                        .set(Project::getStatus, "expired")
+        );
     }
 
     private Company validateCompany(Long companyId) {
@@ -684,6 +720,11 @@ public class ProjectService {
         }
         if ("paused".equals(targetStatus)) {
             projectStateGuard.ensureCanPause(project, operator);
+            return;
+        }
+        if ("expired".equals(targetStatus)) {
+            currentUserService.ensurePermission("project.update");
+            currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         }
     }
 
@@ -768,7 +809,21 @@ public class ProjectService {
         return vo;
     }
 
-    private void markActivatedIfNeeded(Project project) {
+    private void markActivatedAndApplyPackageValidity(Project project) {
+        CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(project.getCompanyId());
+        LocalDateTime validFrom = binding.getBoundAt() != null ? binding.getBoundAt() : LocalDateTime.now();
+        project.setStartDate(validFrom.toLocalDate());
+        if (binding.getServiceMonths() != null && binding.getServiceMonths() > 0) {
+            LocalDateTime validUntil = validFrom.plusMonths(binding.getServiceMonths());
+            if (!validUntil.isAfter(LocalDateTime.now())) {
+                throw new BizException(400, "Customer package validity has expired, cannot start project");
+            }
+            project.setEndDate(validUntil.toLocalDate());
+            project.setExpiredAt(validUntil);
+        } else {
+            project.setEndDate(null);
+            project.setExpiredAt(null);
+        }
         if (project.getActivatedAt() == null) {
             project.setActivatedAt(LocalDateTime.now());
         }
