@@ -45,6 +45,7 @@ export async function startFillTask(task: ExtensionTaskListItem): Promise<Extens
   cookiesJson = undefined
   const tab = await chrome.tabs.create({ url: command.publishUrl })
   if (!tab.id) throw new Error('编辑器标签页创建失败')
+  await startTaskLifecycle(task.taskId, tab.id, session.token)
   await waitForEditorReady(tab.id, 15_000)
   const result = await chrome.tabs.sendMessage<ExtensionMessage<FillCommandPayload>, FillResult>(
     tab.id,
@@ -52,7 +53,6 @@ export async function startFillTask(task: ExtensionTaskListItem): Promise<Extens
   )
   if (!result?.ok) throw new Error(result?.message || '编辑器填充失败')
   const acked = await extensionApi.ackTask(session.token, task.taskId)
-  await startTaskLifecycle(task.taskId, tab.id, session.token)
   return acked
 }
 

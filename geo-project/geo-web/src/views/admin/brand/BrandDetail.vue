@@ -18,32 +18,32 @@
         </div>
       </template>
 
-      <el-descriptions :column="3" border>
-        <el-descriptions-item label="品牌名称">{{ brand?.brandName || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="品牌标识">{{ brand?.brandSlug || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="状态">{{ dictStore.label('brand_status', brand?.status) }}</el-descriptions-item>
+      <el-descriptions class="brand-basic-descriptions" :column="3" border>
+        <el-descriptions-item label="品牌名称"><EllipsisText :value="brand?.brandName" /></el-descriptions-item>
+        <el-descriptions-item label="品牌标识"><EllipsisText :value="brand?.brandSlug" /></el-descriptions-item>
+        <el-descriptions-item label="状态"><EllipsisText :value="dictStore.label('brand_status', brand?.status)" /></el-descriptions-item>
 
-        <el-descriptions-item label="所属客户">{{ companyName || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="品牌行业">{{ industryLabel(brand?.industry) }}</el-descriptions-item>
-        <el-descriptions-item label="主营业务">{{ brand?.mainBusiness || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="所在地区">{{ regionText }}</el-descriptions-item>
+        <el-descriptions-item label="所属客户"><EllipsisText :value="companyName" /></el-descriptions-item>
+        <el-descriptions-item label="品牌行业"><EllipsisText :value="industryLabel(brand?.industry)" /></el-descriptions-item>
+        <el-descriptions-item label="主营业务"><EllipsisText :value="brand?.mainBusiness" /></el-descriptions-item>
+        <el-descriptions-item label="所在地区"><EllipsisText :value="regionText" /></el-descriptions-item>
 
-        <el-descriptions-item label="官网">{{ brand?.website || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="公众号">{{ brand?.officialAccount || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="视频号">{{ brand?.videoAccount || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="抖音号">{{ brand?.douyinAccount || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="联系电话">{{ brand?.phone || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="对外公开电话">{{ brand?.publicPhone || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="对外公开地址">{{ brand?.publicAddress || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="微信">{{ brand?.wechat || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="资讯站名称">{{ brand?.industrySiteName || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="资讯站唯一标识">{{ brand?.industrySiteCode || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="官网"><EllipsisText :value="brand?.website" /></el-descriptions-item>
+        <el-descriptions-item label="公众号"><EllipsisText :value="brand?.officialAccount" /></el-descriptions-item>
+        <el-descriptions-item label="视频号"><EllipsisText :value="brand?.videoAccount" /></el-descriptions-item>
+        <el-descriptions-item label="抖音号"><EllipsisText :value="brand?.douyinAccount" /></el-descriptions-item>
+        <el-descriptions-item label="联系电话"><EllipsisText :value="brand?.phone" /></el-descriptions-item>
+        <el-descriptions-item label="对外公开电话"><EllipsisText :value="brand?.publicPhone" /></el-descriptions-item>
+        <el-descriptions-item label="对外公开地址"><EllipsisText :value="brand?.publicAddress" /></el-descriptions-item>
+        <el-descriptions-item label="微信"><EllipsisText :value="brand?.wechat" /></el-descriptions-item>
+        <el-descriptions-item label="资讯站名称"><EllipsisText :value="brand?.industrySiteName" /></el-descriptions-item>
+        <el-descriptions-item label="资讯站唯一标识"><EllipsisText :value="brand?.industrySiteCode" /></el-descriptions-item>
 
-        <el-descriptions-item label="品牌标准表述" :span="3">{{ brand?.standardBrandStatement || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="业务标准表述" :span="3">{{ brand?.businessStandardStatement || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="业务介绍" :span="3">{{ brand?.businessIntro || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="品牌描述" :span="3">{{ brand?.description || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="禁用词" :span="3">{{ brand?.forbiddenPhrases || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="品牌标准表述" :span="3"><EllipsisText :value="brand?.standardBrandStatement" /></el-descriptions-item>
+        <el-descriptions-item label="业务标准表述" :span="3"><EllipsisText :value="brand?.businessStandardStatement" /></el-descriptions-item>
+        <el-descriptions-item label="业务介绍" :span="3"><EllipsisText :value="brand?.businessIntro" /></el-descriptions-item>
+        <el-descriptions-item label="品牌描述" :span="3"><EllipsisText :value="brand?.description" /></el-descriptions-item>
+        <el-descriptions-item label="禁用词" :span="3"><EllipsisText :value="brand?.forbiddenPhrases" /></el-descriptions-item>
       </el-descriptions>
     </el-card>
 
@@ -69,9 +69,6 @@
           <template #default="{ row }">{{ selfMediaPlatformLabel(row.platform) }}</template>
         </el-table-column>
         <el-table-column prop="accountName" label="账号名称" min-width="180" />
-        <el-table-column prop="platformAccountId" label="账号标识" min-width="180">
-          <template #default="{ row }">{{ row.platformAccountId || '-' }}</template>
-        </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
             <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">
@@ -113,18 +110,25 @@
           </div>
         </div>
       </template>
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="一句话定位" :span="2">{{ statement?.standardStatement?.positioning || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="核心卖点" :span="2">
-          <div v-if="statement?.standardStatement?.selling_points?.length" class="flex flex-wrap gap-2">
-            <el-tag v-for="(point, idx) in statement?.standardStatement?.selling_points || []" :key="`${idx}-${point}`" type="info">{{ point }}</el-tag>
-          </div>
-          <span v-else>-</span>
+      <el-descriptions class="brand-statement-descriptions" :column="2" border>
+        <el-descriptions-item label="一句话定位" :span="2">
+          <EllipsisText :value="statement?.standardStatement?.positioning" />
         </el-descriptions-item>
-        <el-descriptions-item label="差异化表达" :span="2">{{ statement?.standardStatement?.differentiation || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="推荐品牌介绍段落" :span="2">{{ statement?.standardStatement?.brand_paragraph || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="生成时间">{{ statement?.statementGeneratedAt || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="锁定时间">{{ statement?.statementLockedAt || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="核心卖点" :span="2">
+          <EllipsisText :value="statement?.standardStatement?.selling_points" />
+        </el-descriptions-item>
+        <el-descriptions-item label="差异化表达" :span="2">
+          <EllipsisText :value="statement?.standardStatement?.differentiation" />
+        </el-descriptions-item>
+        <el-descriptions-item label="推荐品牌介绍段落" :span="2">
+          <EllipsisText :value="statement?.standardStatement?.brand_paragraph" />
+        </el-descriptions-item>
+        <el-descriptions-item label="生成时间">
+          <EllipsisText :value="statement?.statementGeneratedAt" />
+        </el-descriptions-item>
+        <el-descriptions-item label="锁定时间">
+          <EllipsisText :value="statement?.statementLockedAt" />
+        </el-descriptions-item>
       </el-descriptions>
     </el-card>
 
@@ -227,9 +231,6 @@
         <el-form-item label="账号名称" prop="accountName" required>
           <el-input v-model="selfMediaAccountForm.accountName" placeholder="运营可识别的账号名称" maxlength="128" />
         </el-form-item>
-        <el-form-item label="账号标识">
-          <el-input v-model="selfMediaAccountForm.platformAccountId" placeholder="可填主页 ID、用户名或内部备注" maxlength="128" />
-        </el-form-item>
         <el-form-item label="状态" prop="status" required>
           <el-select v-model="selfMediaAccountForm.status" style="width: 100%">
             <el-option label="启用" value="active" />
@@ -268,6 +269,7 @@ import {
 import type { Brand, BrandStatementView, SelfMediaAccount } from '@/types'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
+import EllipsisText from '@/components/ui/EllipsisText.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
 
@@ -348,7 +350,6 @@ const statementForm = reactive({
 const selfMediaAccountForm = reactive({
   platform: 'toutiao' as SemiAutoPlatform,
   accountName: '',
-  platformAccountId: '',
   status: 'active' as 'active' | 'disabled',
 })
 
@@ -489,7 +490,6 @@ function openSelfMediaAccountCreate() {
   editingSelfMediaAccount.value = null
   selfMediaAccountForm.platform = 'toutiao'
   selfMediaAccountForm.accountName = ''
-  selfMediaAccountForm.platformAccountId = ''
   selfMediaAccountForm.status = 'active'
   selfMediaAccountVisible.value = true
 }
@@ -498,7 +498,6 @@ function openSelfMediaAccountEdit(account: SemiAutoSelfMediaAccount) {
   editingSelfMediaAccount.value = account
   selfMediaAccountForm.platform = account.platform === 'zhihu' ? 'zhihu' : 'toutiao'
   selfMediaAccountForm.accountName = account.accountName || ''
-  selfMediaAccountForm.platformAccountId = account.platformAccountId || ''
   selfMediaAccountForm.status = account.status === 'disabled' ? 'disabled' : 'active'
   selfMediaAccountVisible.value = true
 }
@@ -511,7 +510,6 @@ async function submitSelfMediaAccount() {
     const payload = {
       platform: selfMediaAccountForm.platform,
       accountName: selfMediaAccountForm.accountName.trim(),
-      platformAccountId: selfMediaAccountForm.platformAccountId.trim() || undefined,
       status: selfMediaAccountForm.status,
     }
     if (editingSelfMediaAccount.value) {
@@ -673,3 +671,21 @@ onMounted(async () => {
   await load()
 })
 </script>
+
+<style scoped>
+.brand-basic-descriptions,
+.brand-statement-descriptions {
+  width: 100%;
+}
+
+.brand-basic-descriptions :deep(.el-descriptions__table),
+.brand-statement-descriptions :deep(.el-descriptions__table) {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.brand-basic-descriptions :deep(.el-descriptions__cell),
+.brand-statement-descriptions :deep(.el-descriptions__cell) {
+  min-width: 0;
+}
+</style>

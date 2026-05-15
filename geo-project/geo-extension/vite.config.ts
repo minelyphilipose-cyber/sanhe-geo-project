@@ -7,7 +7,7 @@ import { resolveExtensionProfile, resolveExtensionProfileName, type ExtensionPro
 
 export default defineConfig(({ mode }) => {
   const profileName = resolveExtensionProfileName(
-    process.env.VITE_GEO_EXTENSION_PROFILE ?? (mode === 'production' ? 'production' : 'test'),
+    process.env.VITE_GEO_EXTENSION_PROFILE ?? (mode === 'production' ? 'production' : mode),
   )
   const profile = resolveExtensionProfile(profileName)
   process.env.VITE_GEO_EXTENSION_PROFILE = profileName

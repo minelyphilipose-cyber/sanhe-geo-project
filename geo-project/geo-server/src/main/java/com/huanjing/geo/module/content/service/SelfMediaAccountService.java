@@ -27,6 +27,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
 @Service
 @Slf4j
@@ -88,12 +89,12 @@ public class SelfMediaAccountService {
     public SelfMediaAccountVO createCookieAccount(Long brandId, SelfMediaAccountManageRequest request) {
         SysUser operator = currentUserService.requireCurrentUser();
         brandAccessService.requireBrandAccess(brandId, operator.getId(), BrandAccessAction.MANAGE);
-        ensureNoDuplicateCookieAccount(null, brandId, request.platform(), request.platformAccountId());
+        String platformAccountId = generatedPlatformAccountId(request.platform(), brandId);
         LocalDateTime now = LocalDateTime.now();
         SelfMediaAccount account = new SelfMediaAccount();
         account.setBrandId(brandId);
         account.setPlatform(request.platform());
-        account.setPlatformAccountId(trimToNull(request.platformAccountId()));
+        account.setPlatformAccountId(platformAccountId);
         account.setAccountName(request.accountName().trim());
         account.setStatus(normalizeStatus(request.status()));
         account.setAuthMode("COOKIE");
@@ -112,9 +113,13 @@ public class SelfMediaAccountService {
             throw new BizException(400, "Only cookie self-media accounts can be managed here");
         }
         brandAccessService.requireBrandAccess(account.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
-        ensureNoDuplicateCookieAccount(account.getId(), account.getBrandId(), request.platform(), request.platformAccountId());
+        if (!StringUtils.hasText(account.getPlatformAccountId())) {
+            account.setPlatformAccountId(generatedPlatformAccountId(request.platform(), account.getBrandId()));
+        } else if (!request.platform().equals(account.getPlatform())
+                && platformAccountIdExists(request.platform(), account.getPlatformAccountId())) {
+            throw new BizException(400, "self media account already exists");
+        }
         account.setPlatform(request.platform());
-        account.setPlatformAccountId(trimToNull(request.platformAccountId()));
         account.setAccountName(request.accountName().trim());
         account.setStatus(normalizeStatus(request.status()));
         account.setUpdatedAt(LocalDateTime.now());
@@ -196,28 +201,29 @@ public class SelfMediaAccountService {
         return vo;
     }
 
-    private void ensureNoDuplicateCookieAccount(Long currentId, Long brandId, String platform, String platformAccountId) {
-        String normalizedPlatformAccountId = trimToNull(platformAccountId);
-        if (!StringUtils.hasText(normalizedPlatformAccountId)) {
-            return;
+    private String generatedPlatformAccountId(String platform, Long brandId) {
+        for (int i = 0; i < 5; i++) {
+            String candidate = "geo-" + platform + "-" + brandId + "-" + UUID.randomUUID()
+                    .toString()
+                    .replace("-", "")
+                    .substring(0, 16);
+            if (!platformAccountIdExists(platform, candidate)) {
+                return candidate;
+            }
         }
+        throw new BizException(500, "self media account identifier generation failed");
+    }
+
+    private boolean platformAccountIdExists(String platform, String platformAccountId) {
         SelfMediaAccount existing = selfMediaAccountMapper.selectOne(new LambdaQueryWrapper<SelfMediaAccount>()
-                .eq(SelfMediaAccount::getBrandId, brandId)
                 .eq(SelfMediaAccount::getPlatform, platform)
-                .eq(SelfMediaAccount::getPlatformAccountId, normalizedPlatformAccountId)
-                .isNull(SelfMediaAccount::getDeletedAt)
+                .eq(SelfMediaAccount::getPlatformAccountId, platformAccountId)
                 .last("LIMIT 1"));
-        if (existing != null && !existing.getId().equals(currentId)) {
-            throw new BizException(400, "self media account already exists");
-        }
+        return existing != null;
     }
 
     private String normalizeStatus(String status) {
         return StringUtils.hasText(status) ? status.trim() : "active";
-    }
-
-    private String trimToNull(String value) {
-        return StringUtils.hasText(value) ? value.trim() : null;
     }
 
 }

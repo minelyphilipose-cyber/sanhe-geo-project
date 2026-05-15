@@ -135,4 +135,10 @@ export const extensionApi = {
       method: 'POST',
     }, token)
   },
+
+  abandonTask(token: string, taskId: number) {
+    return request<ExtensionTaskStateResponse>(`/api/v1/extension/tasks/${taskId}/abandon`, {
+      method: 'POST',
+    }, token)
+  },
 }

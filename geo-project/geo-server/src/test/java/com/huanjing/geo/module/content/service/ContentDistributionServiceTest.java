@@ -442,6 +442,33 @@ class ContentDistributionServiceTest {
         verify(distributionTaskMapper, never()).update(eq(null), any());
     }
 
+    @Test
+    void distributionHistory_selfMediaTaskWithoutSiteIdReturnsAttempt() {
+        givenCommonData();
+        DistributionTask task = new DistributionTask();
+        task.setId(800L);
+        task.setArticleId(1L);
+        task.setProjectId(20L);
+        task.setTargetKind(DistributionTargetKind.MP_ACCOUNT);
+        task.setSelfMediaAccountId(40L);
+        task.setStatus("failed");
+        task.setIntegrationMethod("toutiao");
+        task.setAttemptNo(1);
+        when(distributionTaskMapper.selectList(any())).thenReturn(List.of(task));
+
+        Map<String, Object> result = contentDistributionService.distributionHistory(1L);
+
+        assertEquals(1L, result.get("articleId"));
+        @SuppressWarnings("unchecked")
+        List<com.huanjing.geo.module.content.dto.DistributionAttemptVO> attempts =
+                (List<com.huanjing.geo.module.content.dto.DistributionAttemptVO>) result.get("attempts");
+        assertEquals(1, attempts.size());
+        assertEquals(800L, attempts.get(0).getId());
+        assertEquals(null, attempts.get(0).getSiteId());
+        assertEquals(null, attempts.get(0).getSiteName());
+        verify(publishSiteMapper, never()).selectList(any());
+    }
+
     private void givenCommonData() {
         SysUser operator = new SysUser();
         operator.setId(100L);

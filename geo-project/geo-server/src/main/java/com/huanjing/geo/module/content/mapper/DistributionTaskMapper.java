@@ -59,6 +59,23 @@ public interface DistributionTaskMapper extends BaseMapper<DistributionTask> {
             @Param("publishedBy") Long publishedBy
     );
 
+    @Update("""
+            UPDATE distribution_tasks
+            SET status = 'failed',
+                failure_kind = 'USER_CANCELLED',
+                error_message = #{reason},
+                finished_at = #{abandonedAt},
+                locked_until = NULL
+            WHERE id = #{taskId}
+              AND status IN ('token_issued', 'filling', 'filled')
+              AND dispatch_mode = 'SEMI_AUTO'
+            """)
+    int abandonSemiAutoTask(
+            @Param("taskId") Long taskId,
+            @Param("reason") String reason,
+            @Param("abandonedAt") LocalDateTime abandonedAt
+    );
+
     @Select("""
             SELECT id, article_id, project_id, self_media_account_id, status, dispatch_mode,
                    fill_token_issued_at, filled_at, last_heartbeat_at

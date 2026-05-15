@@ -1,4 +1,4 @@
-export type ExtensionProfileName = 'test' | 'production'
+export type ExtensionProfileName = 'test' | 'lan' | 'production'
 
 export interface ExtensionProfile {
   apiBaseUrl: string
@@ -26,6 +26,17 @@ export const EXTENSION_PROFILES: Record<ExtensionProfileName, ExtensionProfile> 
       ...PLATFORM_HOST_PERMISSIONS,
     ],
   },
+  lan: {
+    apiBaseUrl: 'http://192.168.3.121:8080',
+    adminOrigins: [
+      'http://192.168.3.121:3000',
+      'http://192.168.3.121:5173',
+    ],
+    hostPermissions: [
+      'http://192.168.3.121:8080/*',
+      ...PLATFORM_HOST_PERMISSIONS,
+    ],
+  },
   production: {
     apiBaseUrl: 'http://119.45.154.127',
     adminOrigins: [
@@ -39,7 +50,7 @@ export const EXTENSION_PROFILES: Record<ExtensionProfileName, ExtensionProfile> 
 }
 
 export function resolveExtensionProfileName(value: string | undefined): ExtensionProfileName {
-  if (value === 'production' || value === 'test') return value
+  if (value === 'production' || value === 'test' || value === 'lan') return value
   return 'test'
 }
 

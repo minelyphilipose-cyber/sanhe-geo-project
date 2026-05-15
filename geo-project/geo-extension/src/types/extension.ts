@@ -36,7 +36,7 @@ export interface TokenRefreshResponse {
   sessionId: number
 }
 
-export type ExtensionTaskStatus = 'token_issued' | 'filling' | 'filled' | 'published'
+export type ExtensionTaskStatus = 'token_issued' | 'filling' | 'filled' | 'published' | 'failed'
 
 export interface ExtensionTaskListItem {
   taskId: number

@@ -206,12 +206,12 @@ public class ContentDistributionService {
                         .orderByDesc(DistributionTask::getCreatedAt, DistributionTask::getAttemptNo)
         );
         Set<Long> targetSiteIds = tasks.stream()
-                .map(task -> task.getIndustrySiteId() != null ? task.getIndustrySiteId() : task.getSiteId())
+                .map(this::distributionSiteId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
         Map<Long, PublishSite> siteMap = mapSites(targetSiteIds);
         List<DistributionAttemptVO> attempts = tasks.stream()
-                .map(task -> toAttemptVO(task, siteMap.get(task.getIndustrySiteId() != null ? task.getIndustrySiteId() : task.getSiteId())))
+                .map(task -> toAttemptVO(task, publishSiteForAttempt(task, siteMap)))
                 .collect(Collectors.toList());
 
         Map<String, Object> result = new LinkedHashMap<>();
@@ -1189,7 +1189,7 @@ public class ContentDistributionService {
     private DistributionAttemptVO toAttemptVO(DistributionTask task, PublishSite site) {
         DistributionAttemptVO vo = new DistributionAttemptVO();
         vo.setId(task.getId());
-        vo.setSiteId(task.getIndustrySiteId() != null ? task.getIndustrySiteId() : task.getSiteId());
+        vo.setSiteId(distributionSiteId(task));
         vo.setSiteName(site == null ? null : site.getSiteName());
         vo.setDomain(site == null ? null : site.getDomain());
         vo.setTier(site == null ? null : site.getTier());
@@ -1207,6 +1207,15 @@ public class ContentDistributionService {
         vo.setCreatedAt(task.getCreatedAt());
         vo.setFinishedAt(task.getFinishedAt());
         return vo;
+    }
+
+    private PublishSite publishSiteForAttempt(DistributionTask task, Map<Long, PublishSite> siteMap) {
+        Long siteId = distributionSiteId(task);
+        return siteId == null ? null : siteMap.get(siteId);
+    }
+
+    private Long distributionSiteId(DistributionTask task) {
+        return task.getIndustrySiteId() != null ? task.getIndustrySiteId() : task.getSiteId();
     }
 
     private Map<Long, BigDecimal> querySiteSuccessRate30d(Set<Long> siteIds) {

@@ -1725,16 +1725,28 @@ async function refreshPendingCookieCaptureStatus() {
 
 function handleWindowFocusForCookieCapture() {
   void refreshPendingCookieCaptureStatus()
+  scheduleDistributionStatusRefresh()
 }
 
 function handleVisibilityChangeForCookieCapture() {
   if (document.visibilityState === 'visible') {
     void refreshPendingCookieCaptureStatus()
+    scheduleDistributionStatusRefresh()
   }
+}
+
+function scheduleDistributionStatusRefresh() {
+  if (!rows.value.some(row => row.status === 'distributing')) return
+  window.setTimeout(() => {
+    void load()
+  }, 800)
 }
 
 async function startSemiAutoExtensionTask(articleId: number, accountId: number, platform: string) {
   if (!await ensureExtensionBridgeReady()) {
+    if (mediaDistributeBrandId.value) {
+      await generateExtensionBindCode(mediaDistributeBrandId.value, accountId)
+    }
     return
   }
   const requestId = createRequestId(platform)

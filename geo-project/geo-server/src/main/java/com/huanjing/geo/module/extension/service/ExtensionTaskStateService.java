@@ -43,7 +43,9 @@ public class ExtensionTaskStateService {
     private static final String STATUS_TOKEN_ISSUED = "token_issued";
     private static final String STATUS_FILLING = "filling";
     private static final String STATUS_FILLED = "filled";
+    private static final String STATUS_FAILED = "failed";
     private static final String STATUS_PUBLISHED = "published";
+    private static final String ARTICLE_STATUS_APPROVED = "approved";
     private static final String ARTICLE_STATUS_DISTRIBUTING = "distributing";
     private static final Duration HEARTBEAT_RATE_LIMIT_TTL = Duration.ofSeconds(30);
     private static final Duration STALE_THRESHOLD = Duration.ofMinutes(10);
@@ -115,6 +117,21 @@ public class ExtensionTaskStateService {
     }
 
     @Transactional
+    public ExtensionTaskStateResponse abandon(Long taskId, Long operatorId, Long extensionSessionId) {
+        TaskContext context = requireOperableTask(taskId, operatorId, extensionSessionId, "SEMI_AUTO_TASK_ABANDONED");
+        LocalDateTime now = now();
+        int affected = taskMapper.abandonSemiAutoTask(taskId, "用户关闭平台编辑器，已取消本次半自动分发", now);
+        if (affected != 1) {
+            auditDenied("SEMI_AUTO_TASK_ABANDONED", context, operatorId, extensionSessionId, "STALE_STATE");
+            throw new BizException(TASK_STATE_CONFLICT, "task state conflict");
+        }
+        restoreArticleApproved(context.task());
+        companyChannelQuotaService.refundDistribution(taskId);
+        auditSuccess("SEMI_AUTO_TASK_ABANDONED", context, operatorId, extensionSessionId, detail("abandonedAt", now));
+        return new ExtensionTaskStateResponse(taskId, STATUS_FAILED);
+    }
+
+    @Transactional
     public int reclaimStaleTasks() {
         LocalDateTime now = now();
         LocalDateTime tokenIssuedBefore = now.minus(STALE_THRESHOLD);
@@ -128,6 +145,7 @@ public class ExtensionTaskStateService {
         for (DistributionTask task : staleTasks) {
             int affected = taskMapper.reclaimSemiAutoTask(task.getId(), task.getStatus(), now);
             if (affected == 1) {
+                restoreArticleApproved(task);
                 reclaimed++;
                 auditReclaimed(task, tokenIssuedBefore, heartbeatBefore);
             }
@@ -335,6 +353,18 @@ public class ExtensionTaskStateService {
         if (updated != 1) {
             throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
         }
+    }
+
+    private void restoreArticleApproved(DistributionTask task) {
+        if (task.getArticleId() == null) {
+            throw new BizException(TASK_NOT_FOUND, "task article not found");
+        }
+        ArticleDraft update = new ArticleDraft();
+        update.setStatus(ARTICLE_STATUS_APPROVED);
+        articleDraftMapper.update(update,
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ArticleDraft>()
+                        .eq(ArticleDraft::getId, task.getArticleId())
+                        .eq(ArticleDraft::getStatus, ARTICLE_STATUS_DISTRIBUTING));
     }
 
     private void auditReclaimed(

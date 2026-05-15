@@ -201,6 +201,16 @@ public class ExtensionController {
         return R.ok(taskStateService.published(taskId, session.getOperatorId(), session.getId()));
     }
 
+    @PostMapping("/tasks/{taskId}/abandon")
+    public R<ExtensionTaskStateResponse> abandonTask(
+            @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
+            @PathVariable Long taskId
+    ) {
+        ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        versionService.requireSupported("chrome", session.getExtensionVersion());
+        return R.ok(taskStateService.abandon(taskId, session.getOperatorId(), session.getId()));
+    }
+
     private String clientIp(HttpServletRequest request) {
         String forwarded = request.getHeader("X-Forwarded-For");
         if (StringUtils.hasText(forwarded)) {

@@ -7,6 +7,8 @@ export interface ContentScriptFillProfile {
   tagsSelectors: string[]
   categorySelectors: string[]
   publishButtonSelectors: string[]
+  draftButtonSelectors: string[]
+  completionButtonTextKeywords: string[]
 }
 
 const CONTENT_SCRIPT_PROFILES: ContentScriptFillProfile[] = [
@@ -19,6 +21,8 @@ const CONTENT_SCRIPT_PROFILES: ContentScriptFillProfile[] = [
     tagsSelectors: ['[data-geo-fill="tags"]', 'input[placeholder*="标签"]'],
     categorySelectors: ['[data-geo-fill="category"]', 'input[placeholder*="分类"]'],
     publishButtonSelectors: ['[data-geo-publish]'],
+    draftButtonSelectors: ['[data-geo-save-draft]'],
+    completionButtonTextKeywords: ['发布', '保存草稿', '保存到草稿', '保存草稿箱', '存草稿'],
   },
   {
     platform: 'zhihu',
@@ -29,6 +33,8 @@ const CONTENT_SCRIPT_PROFILES: ContentScriptFillProfile[] = [
     tagsSelectors: ['[data-geo-fill="tags"]', 'input[placeholder*="标签"]'],
     categorySelectors: ['[data-geo-fill="category"]', 'input[placeholder*="分类"]'],
     publishButtonSelectors: ['[data-geo-publish]'],
+    draftButtonSelectors: ['[data-geo-save-draft]'],
+    completionButtonTextKeywords: ['发布', '保存草稿', '保存到草稿', '保存草稿箱', '存草稿'],
   },
 ]
 
