@@ -114,7 +114,7 @@ describe('task lifecycle heartbeat', () => {
     await publishActiveTask(30)
     await handleTaskHeartbeatAlarm()
 
-    expect(extensionApi.publishedTask).toHaveBeenCalledWith('ext.secret', 30)
+    expect(extensionApi.publishedTask).toHaveBeenCalledWith('ext.secret', 30, undefined)
     expect(extensionApi.heartbeatTask).not.toHaveBeenCalled()
     expect(storage[ACTIVE_TASK_KEY]).toBeUndefined()
     expect(storage[PUBLISHING_TASK_KEY]).toBeUndefined()
@@ -122,6 +122,24 @@ describe('task lifecycle heartbeat', () => {
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       payload: expect.objectContaining({ kind: 'published' }),
     }))
+  })
+
+  it('passes publish completion report to backend', async () => {
+    await startTaskLifecycle(30, 9, 'ext.secret')
+
+    await publishActiveTask(30, {
+      action: 'draft_saved_clicked',
+      href: 'https://mp.toutiao.com/editor',
+      platform: 'toutiao',
+      detectedText: '保存草稿',
+    })
+
+    expect(extensionApi.publishedTask).toHaveBeenCalledWith('ext.secret', 30, {
+      action: 'draft_saved_clicked',
+      href: 'https://mp.toutiao.com/editor',
+      platform: 'toutiao',
+      detectedText: '保存草稿',
+    })
   })
 
   it('does not abandon when editor closes while publish report is in flight', async () => {

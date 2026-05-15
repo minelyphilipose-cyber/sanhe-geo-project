@@ -21,6 +21,9 @@ public class ArticleDraft {
     private String periodKey;
     private Integer generationSlotNo;
     private String articleType;
+    private String contentStyle;
+    private String topic;
+    private String topicAsQuestion;
     private String title;
     private String coverImageUrl;
     private String tagsJson;

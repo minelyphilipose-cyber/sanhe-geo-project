@@ -55,6 +55,27 @@
             </el-option>
           </el-select>
         </label>
+        <label v-if="createMode === 'manual'" class="inline-field">
+          <span class="inline-label required">平台风格</span>
+          <el-select v-model="manualForm.contentStyle" class="content-style-select">
+            <el-option
+              v-for="item in contentStyleOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </label>
+        <label v-if="createMode === 'manual'" class="inline-field">
+          <span class="inline-label required">文章主题</span>
+          <el-input
+            v-model="manualForm.topic"
+            class="topic-input"
+            maxlength="1000"
+            placeholder="输入本篇文章主题"
+            clearable
+          />
+        </label>
       </div>
       <div class="sub-toolbar-spacer" />
       <div class="sub-toolbar-actions">
@@ -580,6 +601,8 @@ let nextSectionId = 1
 const manualForm = reactive({
   projectId: undefined as number | undefined,
   articleType: 'industry_article',
+  contentStyle: 'wechat',
+  topic: '',
   title: '',
   sections: [createSection()],
 })
@@ -630,6 +653,8 @@ const projectCascadeOptions = computed(() => buildProjectCascadeOptions(projectO
 const selectedProject = computed(() => projectOptions.value.find((project) => project.id === manualForm.projectId) || null)
 const selectedArticleTypeLabel = computed(() => articleTypeOptions.value.find((item) => item.value === manualForm.articleType)?.label || manualForm.articleType)
 const selectedContentStyleLabel = computed(() => contentStyleOptions.value.find((item) => item.value === aiForm.contentStyle)?.label || 'AI 风格')
+const draftContentStyle = computed(() => createMode.value === 'auto' ? aiForm.contentStyle : manualForm.contentStyle)
+const draftTopic = computed(() => createMode.value === 'auto' ? aiForm.topic.trim() : manualForm.topic.trim())
 const generatedManualMarkdown = computed(() => buildManualMarkdown())
 const manualMarkdown = computed({
   get: () => markdownOverridden.value ? markdownOverride.value : generatedManualMarkdown.value,
@@ -651,7 +676,13 @@ const markdownStats = computed(() => {
 })
 const filledSectionCount = computed(() => manualForm.sections.filter((item) => item.heading.trim() || item.content.trim()).length)
 const allSectionsCollapsed = computed(() => manualForm.sections.length > 0 && manualForm.sections.every((item) => item.collapsed))
-const canSubmit = computed(() => Boolean(manualForm.projectId && manualForm.title.trim() && manualMarkdown.value.trim()) && !generating.value)
+const canSubmit = computed(() => Boolean(
+  manualForm.projectId
+  && draftContentStyle.value
+  && draftTopic.value
+  && manualForm.title.trim()
+  && manualMarkdown.value.trim(),
+) && !generating.value)
 const canGenerate = computed(() => Boolean(manualForm.projectId && manualForm.articleType && aiForm.topic.trim()) && !generating.value)
 const todayText = computed(() => {
   const now = new Date()
@@ -1301,6 +1332,14 @@ async function submitManualCreate() {
     ElMessage.warning('请填写大标题')
     return
   }
+  if (!draftTopic.value) {
+    ElMessage.warning('请填写文章主题')
+    return
+  }
+  if (!draftContentStyle.value) {
+    ElMessage.warning('请选择平台风格')
+    return
+  }
   const contentMarkdown = manualMarkdown.value.trim()
   if (!contentMarkdown) {
     ElMessage.warning('正文不能为空')
@@ -1311,6 +1350,9 @@ async function submitManualCreate() {
     const { data } = await createManualContentArticle({
       projectId: manualForm.projectId,
       articleType: manualForm.articleType,
+      contentStyle: draftContentStyle.value,
+      topic: draftTopic.value,
+      topicAsQuestion: createMode.value === 'auto' ? selectedQuestion.value?.questionText : undefined,
       title: manualForm.title.trim(),
       contentMarkdown,
       source: aiMetadata.value ? 'ai_preview' : 'manual',
@@ -2278,6 +2320,14 @@ onBeforeUnmount(() => {
   width: 220px;
 }
 
+.content-style-select {
+  width: 150px;
+}
+
+.topic-input {
+  width: min(24vw, 320px);
+}
+
 .article-type-option {
   display: flex;
   flex-direction: column;
@@ -2641,7 +2691,7 @@ onBeforeUnmount(() => {
   }
 }
 
-@media (max-width: 1024px) {
+@media (max-width: 1280px) {
   .manual-article-page {
     height: auto;
     overflow: visible;
@@ -2654,6 +2704,13 @@ onBeforeUnmount(() => {
     min-height: 48px;
     flex-wrap: wrap;
     padding: 8px 18px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .manual-article-page {
+    height: auto;
+    overflow: visible;
   }
 
   .page-body {
@@ -2718,7 +2775,9 @@ onBeforeUnmount(() => {
   }
 
   .project-select,
-  .article-type-select {
+  .article-type-select,
+  .content-style-select,
+  .topic-input {
     width: 100%;
   }
 

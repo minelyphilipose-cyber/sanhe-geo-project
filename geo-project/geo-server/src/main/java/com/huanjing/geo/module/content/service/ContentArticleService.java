@@ -77,6 +77,7 @@ public class ContentArticleService {
         }
         Page<ArticleDraft> pageData = articleDraftMapper.selectPage(new Page<>(current, size), wrapper);
         fillProjectNames(pageData.getRecords());
+        fillGenerationMetadata(pageData.getRecords());
         return pageData;
     }
 
@@ -169,11 +170,23 @@ public class ContentArticleService {
         if (!StringUtils.hasText(title)) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Title is required");
         }
+        String contentStyle = StringUtils.hasText(req.getContentStyle()) ? req.getContentStyle().trim() : "";
+        String topic = StringUtils.hasText(req.getTopic()) ? req.getTopic().trim() : "";
+        String topicAsQuestion = StringUtils.hasText(req.getTopicAsQuestion()) ? req.getTopicAsQuestion().trim() : null;
+        if (!StringUtils.hasText(contentStyle)) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Content style is required");
+        }
+        if (!StringUtils.hasText(topic)) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Topic is required");
+        }
         markdownImageReferenceValidator.validate(project, content);
 
         ArticleDraft draft = new ArticleDraft();
         draft.setProjectId(project.getId());
         draft.setArticleType(articleType);
+        draft.setContentStyle(contentStyle);
+        draft.setTopic(topic);
+        draft.setTopicAsQuestion(topicAsQuestion);
         draft.setTitle(title);
         draft.setStatus("pending_review");
         draft.setCurrentVersionNo(1);
@@ -571,6 +584,43 @@ public class ContentArticleService {
                 .collect(Collectors.toMap(Project::getId, Project::getProjectName, (a, b) -> a));
         for (ArticleDraft article : articles) {
             article.setProjectName(projectNameMap.getOrDefault(article.getProjectId(), "-"));
+        }
+    }
+
+    private void fillGenerationMetadata(List<ArticleDraft> articles) {
+        if (articles == null || articles.isEmpty()) {
+            return;
+        }
+        List<Long> articleIds = articles.stream()
+                .map(ArticleDraft::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (articleIds.isEmpty()) {
+            return;
+        }
+        Map<Long, BatchArticleGenerationTask> taskMap = batchArticleGenerationTaskMapper.selectList(
+                        new LambdaQueryWrapper<BatchArticleGenerationTask>()
+                                .in(BatchArticleGenerationTask::getArticleId, articleIds)
+                                .orderByDesc(BatchArticleGenerationTask::getId)
+                ).stream()
+                .filter(Objects::nonNull)
+                .filter(task -> task.getArticleId() != null)
+                .collect(Collectors.toMap(BatchArticleGenerationTask::getArticleId, task -> task, (first, ignored) -> first));
+        for (ArticleDraft article : articles) {
+            BatchArticleGenerationTask task = taskMap.get(article.getId());
+            if (task == null) {
+                continue;
+            }
+            if (!StringUtils.hasText(article.getContentStyle())) {
+                article.setContentStyle(task.getContentStyle());
+            }
+            if (!StringUtils.hasText(article.getTopic())) {
+                article.setTopic(task.getTopic());
+            }
+            if (!StringUtils.hasText(article.getTopicAsQuestion())) {
+                article.setTopicAsQuestion(task.getTopicAsQuestion());
+            }
         }
     }
 

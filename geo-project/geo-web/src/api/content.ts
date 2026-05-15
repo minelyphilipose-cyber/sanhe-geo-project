@@ -41,6 +41,9 @@ export function getSelfMediaCookieStatusBatch(data: {
 export function createManualContentArticle(data: {
   projectId: number
   articleType: string
+  contentStyle: string
+  topic: string
+  topicAsQuestion?: string
   title?: string
   contentMarkdown: string
   source?: 'manual' | 'ai_preview' | string

@@ -9,6 +9,7 @@ export interface ContentScriptFillProfile {
   publishButtonSelectors: string[]
   draftButtonSelectors: string[]
   completionButtonTextKeywords: string[]
+  successFeedbackKeywords: string[]
 }
 
 const CONTENT_SCRIPT_PROFILES: ContentScriptFillProfile[] = [
@@ -23,6 +24,7 @@ const CONTENT_SCRIPT_PROFILES: ContentScriptFillProfile[] = [
     publishButtonSelectors: ['[data-geo-publish]'],
     draftButtonSelectors: ['[data-geo-save-draft]'],
     completionButtonTextKeywords: ['发布', '保存草稿', '保存到草稿', '保存草稿箱', '存草稿'],
+    successFeedbackKeywords: ['发布成功', '保存成功', '草稿已保存', '已保存至草稿箱', '已保存到草稿箱', '提交成功', '审核中'],
   },
   {
     platform: 'zhihu',
@@ -35,6 +37,7 @@ const CONTENT_SCRIPT_PROFILES: ContentScriptFillProfile[] = [
     publishButtonSelectors: ['[data-geo-publish]'],
     draftButtonSelectors: ['[data-geo-save-draft]'],
     completionButtonTextKeywords: ['发布', '保存草稿', '保存到草稿', '保存草稿箱', '存草稿'],
+    successFeedbackKeywords: ['发布成功', '保存成功', '草稿已保存', '已保存至草稿箱', '已保存到草稿箱', '提交成功', '审核中'],
   },
 ]
 

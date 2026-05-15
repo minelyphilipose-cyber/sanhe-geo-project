@@ -32,12 +32,14 @@
       <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无文章数据">
         <el-table :data="rows" border @selection-change="onSelectionChange">
           <el-table-column type="selection" width="48" :selectable="canSelectForBatchPublish" />
-          <el-table-column prop="id" label="文章ID" width="90" />
           <el-table-column label="项目" min-width="180" show-overflow-tooltip>
             <template #default="scope">{{ scope.row.projectName || `#${scope.row.projectId}` }}</template>
           </el-table-column>
           <el-table-column label="文章类型" width="120">
             <template #default="scope">{{ articleTypeLabel(scope.row.articleType) }}</template>
+          </el-table-column>
+          <el-table-column label="平台风格" width="130">
+            <template #default="scope">{{ contentStyleLabel(scope.row.contentStyle) }}</template>
           </el-table-column>
           <el-table-column prop="title" label="标题" min-width="240" show-overflow-tooltip />
           <el-table-column label="状态" width="120">
@@ -78,8 +80,8 @@
           <el-descriptions-item label="项目">{{ detailData.project?.projectName || '-' }}</el-descriptions-item>
           <el-descriptions-item label="文章类型">{{ articleTypeLabel(detailData.article.articleType) }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ statusLabel(detailData.article.status) }}</el-descriptions-item>
-          <el-descriptions-item label="平台风格">{{ contentStyleLabel(detailData.batchGenerationTask?.contentStyle) }}</el-descriptions-item>
-          <el-descriptions-item label="文章主题">{{ detailData.batchGenerationTask?.topic || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="平台风格">{{ contentStyleLabel(detailContentStyle(detailData)) }}</el-descriptions-item>
+          <el-descriptions-item label="文章主题">{{ detailTopic(detailData) || '-' }}</el-descriptions-item>
           <el-descriptions-item label="标题" :span="2">{{ detailData.article.title }}</el-descriptions-item>
         </el-descriptions>
 
@@ -641,7 +643,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -684,6 +686,12 @@ type SelfMediaAccountWithCredential = SelfMediaAccount & {
   cookieCredentialVersion?: number | null
   cookieCredentialCapturedAt?: string | null
 }
+interface BatchPublishBlockedItem {
+  title: string
+  styleLabel: string
+  reason: string
+}
+
 const userStore = useUserStore()
 const route = useRoute()
 const router = useRouter()
@@ -1046,13 +1054,19 @@ async function openBatchPublish() {
     const details = await Promise.all(selected.map((row) => getContentArticleDetail(row.id).then((res) => res.data.data)))
     const blocked = details
       .map((detail) => {
-        const style = detail.batchGenerationTask?.contentStyle || ''
+        const style = detailContentStyle(detail) || ''
         const reason = batchPublishBlockReason(style)
-        return reason ? `#${detail.article.id} ${detail.article.title || ''}：${reason}` : ''
+        return reason
+          ? {
+              title: detail.article.title || '未命名文章',
+              styleLabel: contentStyleLabel(style),
+              reason,
+            }
+          : null
       })
-      .filter(Boolean)
+      .filter((item): item is BatchPublishBlockedItem => item !== null)
     if (blocked.length) {
-      await ElMessageBox.alert(blocked.join('\n'), '当前存在平台不满足自动发布，无法批量发布', {
+      await ElMessageBox.alert(renderBatchPublishBlockMessage(blocked), '当前存在平台不满足自动发布', {
         confirmButtonText: '知道了',
         customClass: 'batch-publish-block-alert',
       })
@@ -1067,6 +1081,26 @@ async function openBatchPublish() {
   }
 }
 
+function renderBatchPublishBlockMessage(items: BatchPublishBlockedItem[]) {
+  return h('div', { class: 'batch-publish-block-dialog' }, [
+    h('p', { class: 'batch-publish-block-summary' }, '以下文章的平台风格暂不支持自动发布，请调整后再发起批量发布。'),
+    h(
+      'div',
+      { class: 'batch-publish-block-list' },
+      items.map((item) =>
+        h('div', { class: 'batch-publish-block-item' }, [
+          h('div', { class: 'batch-publish-block-title' }, item.title),
+          h('div', { class: 'batch-publish-block-meta' }, [
+            h('span', { class: 'batch-publish-block-style' }, item.styleLabel),
+            h('span', { class: 'batch-publish-block-reason' }, item.reason),
+          ]),
+        ]),
+      ),
+    ),
+    h('div', { class: 'batch-publish-block-tip' }, '可继续使用单篇分发，或将文章调整为 Agent 官网/行业资讯站后批量发布。'),
+  ])
+}
+
 function batchPublishBlockReason(contentStyle?: string | null) {
   if (contentStyle === 'agent_site_article' || contentStyle === 'linkedin') return ''
   if (contentStyle === 'industry_site') return ''
@@ -1077,6 +1111,14 @@ function batchPublishBlockReason(contentStyle?: string | null) {
   if (contentStyle === 'douyin_image_text') return '抖音图文不允许自动发布'
   if (contentStyle === 'authority_media') return '权威媒体不允许自动发布'
   return '文章未绑定可自动发布的平台风格'
+}
+
+function detailContentStyle(detail: ArticleDetailResponse) {
+  return detail.batchGenerationTask?.contentStyle || detail.article.contentStyle || ''
+}
+
+function detailTopic(detail: ArticleDetailResponse) {
+  return detail.batchGenerationTask?.topic || detail.article.topic || ''
 }
 
 async function openDetail(articleId: number) {
@@ -2717,6 +2759,119 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   margin-top: 2px;
   font-size: 12px;
   color: var(--el-text-color-secondary);
+}
+
+:global(.batch-publish-block-alert) {
+  width: min(560px, calc(100vw - 40px));
+  padding: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+}
+
+:global(.batch-publish-block-alert .el-message-box__header) {
+  padding: 22px 24px 8px;
+}
+
+:global(.batch-publish-block-alert .el-message-box__title) {
+  color: #111827;
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+:global(.batch-publish-block-alert .el-message-box__headerbtn) {
+  top: 18px;
+  right: 18px;
+  width: 28px;
+  height: 28px;
+}
+
+:global(.batch-publish-block-alert .el-message-box__content) {
+  padding: 0 24px 16px;
+  color: #475569;
+}
+
+:global(.batch-publish-block-dialog) {
+  display: grid;
+  gap: 12px;
+}
+
+:global(.batch-publish-block-summary) {
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+:global(.batch-publish-block-list) {
+  display: grid;
+  gap: 10px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+:global(.batch-publish-block-item) {
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+
+:global(.batch-publish-block-title) {
+  color: #1f2937;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+:global(.batch-publish-block-meta) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+:global(.batch-publish-block-style) {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  color: #3b6df5;
+  background: #eaf0ff;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+:global(.batch-publish-block-reason) {
+  color: #64748b;
+  font-size: 13px;
+}
+
+:global(.batch-publish-block-tip) {
+  padding: 10px 12px;
+  color: #8a5b06;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+:global(.batch-publish-block-alert .el-message-box__btns) {
+  padding: 0 24px 24px;
+}
+
+:global(.batch-publish-block-alert .el-button--primary) {
+  min-width: 92px;
+  height: 40px;
+  padding: 0 22px;
+  background: #3b6df5;
+  border-color: #3b6df5;
+  border-radius: 9px;
+  font-weight: 600;
 }
 
 </style>

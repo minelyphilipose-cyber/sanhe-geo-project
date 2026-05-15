@@ -124,7 +124,12 @@ describe('extensionApi', () => {
     })
     await extensionApi.ackTask('ext.secret', 30)
     await extensionApi.heartbeatTask('ext.secret', 30)
-    await extensionApi.publishedTask('ext.secret', 30)
+    await extensionApi.publishedTask('ext.secret', 30, {
+      action: 'publish_clicked',
+      href: 'https://mp.toutiao.com/editor',
+      platform: 'toutiao',
+      detectedText: '发布',
+    })
     await extensionApi.abandonTask('ext.secret', 30)
 
     expect(fetch).toHaveBeenNthCalledWith(
@@ -152,6 +157,7 @@ describe('extensionApi', () => {
       'http://127.0.0.1:8080/api/v1/extension/tasks/30/published',
       expect.objectContaining({ method: 'POST', headers: expect.any(Headers) }),
     )
+    expect((vi.mocked(fetch).mock.calls[4][1] as RequestInit).body).toContain('"action":"publish_clicked"')
     expect(fetch).toHaveBeenNthCalledWith(
       6,
       'http://127.0.0.1:8080/api/v1/extension/tasks/30/abandon',

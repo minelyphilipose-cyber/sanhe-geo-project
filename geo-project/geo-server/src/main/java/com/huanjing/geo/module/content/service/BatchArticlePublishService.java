@@ -151,7 +151,9 @@ public class BatchArticlePublishService {
         }
         Project project = requireProject(article.getProjectId());
         BatchArticleGenerationTask generationTask = latestGenerationTask(articleId);
-        String contentStyle = generationTask == null ? null : generationTask.getContentStyle();
+        String contentStyle = generationTask == null || !StringUtils.hasText(generationTask.getContentStyle())
+                ? article.getContentStyle()
+                : generationTask.getContentStyle();
         PlatformTarget platform = resolvePlatform(contentStyle);
 
         if ("agent_site".equals(platform.platformKey()) && project.getBrandId() == null) {

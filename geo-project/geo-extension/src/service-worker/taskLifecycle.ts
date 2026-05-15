@@ -1,6 +1,6 @@
 import { ExtensionApiError, extensionApi } from '@/shared/api'
 import { sessionStorage } from '@/shared/storage'
-import type { TaskLifecycleEvent } from '@/types/extension'
+import type { PublishTaskReport, TaskLifecycleEvent } from '@/types/extension'
 
 export const HEARTBEAT_INTERVAL_MS = 30_000
 export const HEARTBEAT_ALARM_NAME = 'geo-task-heartbeat'
@@ -33,12 +33,12 @@ export async function stopTaskLifecycle() {
   await chrome.alarms.clear(HEARTBEAT_ALARM_NAME)
 }
 
-export async function publishActiveTask(taskId: number) {
+export async function publishActiveTask(taskId: number, report?: PublishTaskReport) {
   const task = await getActiveTask()
   if (!task || task.taskId !== taskId) return
   await chrome.storage.session.set({ [PUBLISHING_TASK_KEY]: taskId })
   try {
-    await extensionApi.publishedTask(task.token, taskId)
+    await extensionApi.publishedTask(task.token, taskId, report)
     await stopTaskLifecycle()
     notifyPopup({ taskId, kind: 'published', message: '任务已上报 published。' })
   } finally {

@@ -15,6 +15,7 @@ import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessErrorCodes;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.extension.ExtensionErrorCodes;
+import com.huanjing.geo.module.extension.dto.ExtensionTaskPublishReportRequest;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +25,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -253,6 +255,42 @@ class ExtensionTaskStateServiceTest {
                 eq(null),
                 any()
         );
+    }
+
+    @Test
+    void publishedAuditsPlatformCompletionReport() {
+        stubTask("filled");
+        when(taskMapper.markSemiAutoPublished(eq(30L), any(), eq(99L))).thenReturn(1);
+        when(articleDraftMapper.update(any(), any())).thenReturn(1);
+
+        assertEquals("published", service.published(30L, 99L, 7L, new ExtensionTaskPublishReportRequest(
+                "draft_saved_clicked",
+                "https://mp.toutiao.com/editor",
+                "toutiao",
+                "保存草稿"
+        )).status());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> detailCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditSupport).record(
+                eq("SEMI_AUTO_TASK_PUBLISHED"),
+                eq(AuditResult.SUCCESS),
+                eq(AuditMode.SYNC),
+                eq(false),
+                eq(99L),
+                eq(10L),
+                eq(20L),
+                eq(30L),
+                eq(7L),
+                eq("DISTRIBUTION_TASK"),
+                eq("30"),
+                eq(null),
+                eq(null),
+                detailCaptor.capture()
+        );
+        assertEquals("draft_saved_clicked", detailCaptor.getValue().get("action"));
+        assertEquals("toutiao", detailCaptor.getValue().get("platform"));
+        assertEquals("保存草稿", detailCaptor.getValue().get("detectedText"));
     }
 
     @Test

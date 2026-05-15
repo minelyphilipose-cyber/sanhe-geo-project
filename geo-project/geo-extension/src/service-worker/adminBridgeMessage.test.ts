@@ -60,6 +60,7 @@ beforeEach(() => {
     },
     tabs: {
       onRemoved: { addListener: vi.fn() },
+      onUpdated: { addListener: vi.fn() },
     },
   })
   vi.mocked(sessionStorage.get).mockResolvedValue({

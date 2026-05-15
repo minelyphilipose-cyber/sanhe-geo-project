@@ -15,6 +15,7 @@ import com.huanjing.geo.module.content.service.CompanyChannelQuotaService;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessErrorCodes;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
+import com.huanjing.geo.module.extension.dto.ExtensionTaskPublishReportRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskStateResponse;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
@@ -103,6 +104,16 @@ public class ExtensionTaskStateService {
 
     @Transactional
     public ExtensionTaskStateResponse published(Long taskId, Long operatorId, Long extensionSessionId) {
+        return published(taskId, operatorId, extensionSessionId, null);
+    }
+
+    @Transactional
+    public ExtensionTaskStateResponse published(
+            Long taskId,
+            Long operatorId,
+            Long extensionSessionId,
+            ExtensionTaskPublishReportRequest request
+    ) {
         TaskContext context = requireOperableTask(taskId, operatorId, extensionSessionId, "SEMI_AUTO_TASK_PUBLISHED");
         LocalDateTime now = now();
         int affected = taskMapper.markSemiAutoPublished(taskId, now, operatorId);
@@ -112,7 +123,7 @@ public class ExtensionTaskStateService {
         }
         markArticlePublished(context.task(), now);
         companyChannelQuotaService.confirmDistribution(taskId);
-        auditSuccess("SEMI_AUTO_TASK_PUBLISHED", context, operatorId, extensionSessionId, detail("publishedAt", now));
+        auditSuccess("SEMI_AUTO_TASK_PUBLISHED", context, operatorId, extensionSessionId, publishDetail(now, request));
         return new ExtensionTaskStateResponse(taskId, STATUS_PUBLISHED);
     }
 
@@ -400,6 +411,21 @@ public class ExtensionTaskStateService {
         for (int i = 0; i + 1 < values.length; i += 2) {
             detail.put(String.valueOf(values[i]), values[i + 1]);
         }
+        return detail;
+    }
+
+    private Map<String, Object> publishDetail(
+            LocalDateTime publishedAt,
+            ExtensionTaskPublishReportRequest request
+    ) {
+        Map<String, Object> detail = detail("publishedAt", publishedAt);
+        if (request == null) {
+            return detail;
+        }
+        detail.put("action", request.action());
+        detail.put("platform", request.platform());
+        detail.put("href", request.href());
+        detail.put("detectedText", request.detectedText());
         return detail;
     }
 

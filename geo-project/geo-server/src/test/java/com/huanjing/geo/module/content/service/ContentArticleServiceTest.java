@@ -3,6 +3,7 @@ package com.huanjing.geo.module.content.service;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
@@ -15,6 +16,7 @@ import com.huanjing.geo.module.content.dto.ArticleReviewRequest;
 import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
+import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePublishLogMapper;
@@ -55,6 +57,8 @@ class ContentArticleServiceTest {
 
     private ArticleDraftMapper articleDraftMapper;
     private ArticleDraftVersionMapper articleDraftVersionMapper;
+    private BatchArticleGenerationTaskMapper batchArticleGenerationTaskMapper;
+    private ProjectMapper projectMapper;
     private BrandAccessService brandAccessService;
     private AuditService auditService;
     private ContentArticleService service;
@@ -63,12 +67,15 @@ class ContentArticleServiceTest {
     void setUp() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticleDraft.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticleDraftVersion.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), BatchArticleGenerationTask.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), Project.class);
 
         articleDraftMapper = mock(ArticleDraftMapper.class);
         articleDraftVersionMapper = mock(ArticleDraftVersionMapper.class);
+        batchArticleGenerationTaskMapper = mock(BatchArticleGenerationTaskMapper.class);
         brandAccessService = mock(BrandAccessService.class);
         auditService = mock(AuditService.class);
-        ProjectMapper projectMapper = mock(ProjectMapper.class);
+        projectMapper = mock(ProjectMapper.class);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
 
         when(currentUserService.requireCurrentUser()).thenReturn(operator(7L));
@@ -79,7 +86,7 @@ class ContentArticleServiceTest {
                 articleDraftVersionMapper,
                 mock(ArticleReviewLogMapper.class),
                 mock(ArticlePublishLogMapper.class),
-                mock(BatchArticleGenerationTaskMapper.class),
+                batchArticleGenerationTaskMapper,
                 mock(BrandMapper.class),
                 projectMapper,
                 mock(SysDictItemMapper.class),
@@ -102,6 +109,8 @@ class ContentArticleServiceTest {
         ManualArticleCreateRequest request = new ManualArticleCreateRequest();
         request.setProjectId(10L);
         request.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
+        request.setContentStyle("zhihu");
+        request.setTopic("Manual topic");
         request.setTitle("Manual title");
         String markdown = "## Heading\n\n[official link](https://ok.example)\n\n- bullet";
         request.setContentMarkdown(markdown);
@@ -109,6 +118,10 @@ class ContentArticleServiceTest {
         service.createManual(request);
 
         verify(brandAccessService).requireBrandAccess(20L, 7L, BrandAccessAction.OPERATE);
+        ArgumentCaptor<ArticleDraft> draftCaptor = ArgumentCaptor.forClass(ArticleDraft.class);
+        verify(articleDraftMapper, times(1)).insert(draftCaptor.capture());
+        assertEquals("zhihu", draftCaptor.getValue().getContentStyle());
+        assertEquals("Manual topic", draftCaptor.getValue().getTopic());
         ArgumentCaptor<ArticleDraftVersion> versionCaptor = ArgumentCaptor.forClass(ArticleDraftVersion.class);
         verify(articleDraftVersionMapper).insert(versionCaptor.capture());
         assertEquals(markdown, versionCaptor.getValue().getContentMarkdown());
@@ -127,6 +140,9 @@ class ContentArticleServiceTest {
         ManualArticleCreateRequest request = new ManualArticleCreateRequest();
         request.setProjectId(10L);
         request.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
+        request.setContentStyle("wechat");
+        request.setTopic("AI topic");
+        request.setTopicAsQuestion("AI question");
         request.setTitle("AI edited title");
         request.setContentMarkdown("# AI edited title\n\n## A\n\nbody");
         request.setSource("ai_preview");
@@ -141,6 +157,11 @@ class ContentArticleServiceTest {
 
         service.createManual(request);
 
+        ArgumentCaptor<ArticleDraft> draftCaptor = ArgumentCaptor.forClass(ArticleDraft.class);
+        verify(articleDraftMapper, times(1)).insert(draftCaptor.capture());
+        assertEquals("wechat", draftCaptor.getValue().getContentStyle());
+        assertEquals("AI topic", draftCaptor.getValue().getTopic());
+        assertEquals("AI question", draftCaptor.getValue().getTopicAsQuestion());
         ArgumentCaptor<ArticleDraftVersion> versionCaptor = ArgumentCaptor.forClass(ArticleDraftVersion.class);
         verify(articleDraftVersionMapper).insert(versionCaptor.capture());
         ArticleDraftVersion version = versionCaptor.getValue();
@@ -159,6 +180,8 @@ class ContentArticleServiceTest {
         ManualArticleCreateRequest request = new ManualArticleCreateRequest();
         request.setProjectId(10L);
         request.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
+        request.setContentStyle("wechat");
+        request.setTopic("Manual topic");
         request.setTitle("Manual title");
         request.setContentMarkdown("content");
 
@@ -252,6 +275,29 @@ class ContentArticleServiceTest {
 
         assertEquals(BrandAccessErrorCodes.BRAND_ACCESS_DENIED, ex.getCode());
         verify(articleDraftMapper, never()).update(isNull(), any(Wrapper.class));
+    }
+
+    @Test
+    void pageFillsBatchGenerationMetadataForListDisplay() {
+        ArticleDraft article = article("approved");
+        Page<ArticleDraft> mapperPage = new Page<>(1, 10, 1);
+        mapperPage.setRecords(List.of(article));
+        when(articleDraftMapper.selectPage(any(Page.class), any())).thenReturn(mapperPage);
+        when(projectMapper.selectList(any())).thenReturn(List.of(project()));
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setArticleId(99L);
+        task.setContentStyle("zhihu");
+        task.setTopic("批量文章主题");
+        task.setTopicAsQuestion("批量问题词");
+        when(batchArticleGenerationTaskMapper.selectList(any())).thenReturn(List.of(task));
+
+        Page<ArticleDraft> result = service.page(null, null, null, 1, 10);
+
+        ArticleDraft row = result.getRecords().get(0);
+        assertEquals("Project", row.getProjectName());
+        assertEquals("zhihu", row.getContentStyle());
+        assertEquals("批量文章主题", row.getTopic());
+        assertEquals("批量问题词", row.getTopicAsQuestion());
     }
 
     private void verifyAudit(String eventType, AuditResult result) {

@@ -108,6 +108,22 @@ describe('cookie capture service worker flow', () => {
     expect(chrome.storage.local.remove).toHaveBeenCalled()
   })
 
+  it('treats toutiao session alternatives as valid login cookies', async () => {
+    vi.mocked(chrome.cookies.getAll).mockResolvedValueOnce([
+      { name: 'sessionid_ss', value: 'secret', domain: '.toutiao.com' } as chrome.cookies.Cookie,
+    ])
+
+    const result = await startCookieCaptureForAccount({
+      accountId: 20,
+      brandId: 10,
+      platform: 'toutiao',
+      accountName: 'Toutiao Account',
+    })
+
+    expect(result.status).toBe('captured')
+    expect(extensionApi.captureCookies).toHaveBeenCalledTimes(1)
+  })
+
   it('opens login page and stores pending capture when required cookie is missing', async () => {
     vi.mocked(chrome.cookies.getAll).mockResolvedValueOnce([])
 

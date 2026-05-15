@@ -186,6 +186,19 @@ class BatchArticlePublishServiceTest {
     }
 
     @Test
+    void submit_usesArticleContentStyleWhenNoBatchTaskExists() {
+        givenManualArticle(1L, "linkedin", 20L);
+        givenProject(20L, 30L, "手动官网项目");
+
+        service.submit(scheduledRequest(List.of(1L), null));
+
+        BatchArticlePublishItem item = insertedItems.get(0);
+        assertEquals("agent_site", item.getPlatformKey());
+        assertEquals("linkedin", item.getContentStyle());
+        assertEquals(30L, item.getTargetBrandId());
+    }
+
+    @Test
     void submit_blockedStyleFailsBeforeCreatingItem() {
         givenArticle(1L, "wechat", 20L);
         givenProject(20L, 30L, "公众号项目");
@@ -302,6 +315,13 @@ class BatchArticlePublishServiceTest {
         task.setArticleId(articleId);
         task.setContentStyle(contentStyle);
         when(generationTaskMapper.selectOne(any())).thenReturn(task);
+    }
+
+    private void givenManualArticle(Long articleId, String contentStyle, Long projectId) {
+        ArticleDraft article = article(articleId, projectId, "approved");
+        article.setContentStyle(contentStyle);
+        when(articleDraftMapper.selectById(articleId)).thenReturn(article);
+        when(generationTaskMapper.selectOne(any())).thenReturn(null);
     }
 
     private void givenProject(Long projectId, Long brandId, String name) {

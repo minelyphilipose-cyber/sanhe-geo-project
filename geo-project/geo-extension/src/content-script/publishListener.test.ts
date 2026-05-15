@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { activatePublishListener, handlePublishClick } from './publishListener'
+import { activatePublishListener, handlePublishClick, handlePublishFeedback } from './publishListener'
 
 describe('publish listener', () => {
   it('reports published after operator clicks publish selector', () => {
@@ -23,6 +23,8 @@ describe('publish listener', () => {
         taskId: 30,
         href: 'https://mp.toutiao.com/editor',
         platform: 'toutiao',
+        action: 'publish_clicked',
+        detectedText: '发布',
       },
     })
   })
@@ -46,6 +48,8 @@ describe('publish listener', () => {
         taskId: 31,
         href: 'https://zhuanlan.zhihu.com/p/123/edit',
         platform: 'zhihu',
+        action: 'draft_saved_clicked',
+        detectedText: '保存草稿',
       },
     })
   })
@@ -67,8 +71,31 @@ describe('publish listener', () => {
       payload: expect.objectContaining({
         taskId: 32,
         platform: 'toutiao',
+        action: 'draft_saved_clicked',
       }),
     }))
+  })
+
+  it('reports distributed when a platform success feedback appears', () => {
+    vi.stubGlobal('chrome', {
+      runtime: { sendMessage: vi.fn(async () => undefined) },
+    })
+    document.body.innerHTML = '<div role="status">发布成功，内容进入审核中</div>'
+    activatePublishListener(34)
+
+    const reported = handlePublishFeedback(document.body, 'https://mp.toutiao.com/editor')
+
+    expect(reported).toBe(true)
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: 'GEO_TASK_PUBLISHED',
+      payload: {
+        taskId: 34,
+        href: 'https://mp.toutiao.com/editor',
+        platform: 'toutiao',
+        action: 'success_feedback',
+        detectedText: '发布成功',
+      },
+    })
   })
 
   it('does not report twice after one completion click', () => {

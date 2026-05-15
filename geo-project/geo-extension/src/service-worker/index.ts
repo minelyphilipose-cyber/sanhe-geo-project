@@ -6,7 +6,7 @@ import { captureCookiesForAccount, handleCookieDomainReady, startCookieCaptureFo
 import { startFillTask } from './fillFlow'
 import { getActiveTask, HEARTBEAT_ALARM_NAME, handleTaskHeartbeatAlarm, handleTaskTabRemoved, publishActiveTask } from './taskLifecycle'
 import { BRIDGE_CHANNEL, pongMessage, type AdminBridgeMessage, type AdminStartCookieCapturePayload, type AdminStartFillPayload } from '@/admin-bridge/bridgeMessages'
-import type { ExtensionMessage, ExtensionSelfMediaAccount, ExtensionTaskListItem } from '@/types/extension'
+import type { ExtensionMessage, ExtensionSelfMediaAccount, ExtensionTaskListItem, PublishTaskReport } from '@/types/extension'
 
 const REFRESH_ALARM = 'geo-token-refresh'
 
@@ -66,6 +66,21 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   void handleTaskTabRemoved(tabId)
 })
 
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+  const url = changeInfo.url || tab.url
+  if (!url) return
+  let host = ''
+  try {
+    host = new URL(url).hostname
+  } catch {
+    return
+  }
+  if (!host) return
+  void handleCookieDomainReady(host).catch(error => {
+    logger.warn('cookie capture tab update check failed', error instanceof Error ? error.message : error)
+  })
+})
+
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
   if (isAdminBridgeMessage(message)) {
     void handleAdminBridgeMessage(message as AdminBridgeMessage)
@@ -103,7 +118,9 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
     return true
   }
   if (message.type === 'GEO_TASK_PUBLISHED') {
-    void publishActiveTask((message.payload as { taskId: number }).taskId)
+    const payload = message.payload as PublishTaskReport & { taskId: number }
+    const { taskId, ...report } = payload
+    void publishActiveTask(taskId, report)
       .then(() => sendResponse({ ok: true }))
       .catch(error => sendResponse({
         ok: false,

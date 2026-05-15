@@ -65,6 +65,15 @@ export interface FillTokenConsumeResponse {
 
 export interface ExtensionTaskStateResponse { taskId: number, status: ExtensionTaskStatus }
 
+export type PublishCompletionAction = 'publish_clicked' | 'draft_saved_clicked' | 'success_feedback'
+
+export interface PublishTaskReport {
+  action: PublishCompletionAction
+  href?: string
+  platform?: string
+  detectedText?: string
+}
+
 export interface SemiAutoFillPayload {
   platform: string
   publishUrl: string
