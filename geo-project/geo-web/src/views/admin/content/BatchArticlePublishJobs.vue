@@ -48,7 +48,7 @@
             <template #default="{ row }">{{ row.intervalMinutes }} 分钟</template>
           </el-table-column>
           <el-table-column label="创建时间" width="170">
-            <template #default="{ row }">{{ row.createdAt || '-' }}</template>
+            <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
           </el-table-column>
           <el-table-column label="完成时间" width="170">
             <template #default="{ row }">{{ row.finishedAt || '-' }}</template>
@@ -122,6 +122,7 @@
 import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import DataState from '@/components/ui/DataState.vue'
+import { formatDateTime } from '@/utils/format'
 import {
   getBatchArticlePublish,
   getBatchArticlePublishJobs,

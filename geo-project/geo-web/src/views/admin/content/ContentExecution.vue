@@ -95,7 +95,9 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column prop="createdAt" label="创建时间" width="180" />
+          <el-table-column label="创建时间" width="180">
+            <template #default="scope">{{ formatDateTime(scope.row.createdAt) }}</template>
+          </el-table-column>
           <el-table-column label="操作" width="300" fixed="right">
             <template #default="scope">
               <div class="admin-row-actions">
@@ -150,7 +152,9 @@
             <el-table-column prop="versionNo" label="版本" width="80" />
             <el-table-column prop="title" label="标题" min-width="220" />
             <el-table-column prop="generatedBy" label="来源" width="130" />
-            <el-table-column prop="createdAt" label="时间" width="180" />
+            <el-table-column label="时间" width="180">
+              <template #default="scope">{{ formatDateTime(scope.row.createdAt) }}</template>
+            </el-table-column>
           </el-table>
         </div>
 
@@ -821,6 +825,7 @@ import { getBrandDetail, getBrandImageFolders, getBrandMaterialStream } from '@/
 import { createExtensionBindCode, type ExtensionBindCode } from '@/api/extension'
 import { getProjectDetail } from '@/api/project'
 import { pingExtensionBridge, startExtensionCookieCapture, startExtensionFill } from '@/composables/useExtensionBridge'
+import { formatDateTime } from '@/utils/format'
 
 type MediaPlatform = 'wechat_mp' | 'douyin' | 'toutiao' | 'zhihu'
 type SemiAutoPlatform = 'toutiao' | 'zhihu'
