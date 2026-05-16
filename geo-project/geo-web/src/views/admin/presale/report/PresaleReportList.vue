@@ -48,24 +48,6 @@
             <el-option v-for="opt in roleOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
           </el-select>
         </el-form-item>
-        <el-form-item label="生成状态">
-          <el-tooltip content="v1 暂不支持此筛选,仅用于展示" placement="top">
-            <el-select v-model="filter.generationStatus" placeholder="全部" clearable disabled>
-              <el-option label="已完成" value="DONE" />
-              <el-option label="生成中" value="RUNNING" />
-              <el-option label="失败" value="FAILED" />
-            </el-select>
-          </el-tooltip>
-        </el-form-item>
-        <el-form-item label="冻结">
-          <el-tooltip content="v1 暂不支持此筛选" placement="top">
-            <el-radio-group v-model="filter.frozen" disabled>
-              <el-radio-button :value="undefined">全部</el-radio-button>
-              <el-radio-button :value="true">已冻结</el-radio-button>
-              <el-radio-button :value="false">未冻结</el-radio-button>
-            </el-radio-group>
-          </el-tooltip>
-        </el-form-item>
         <el-form-item label="创建日期">
           <el-date-picker
             v-model="dateRange"
@@ -330,9 +312,7 @@ const roleLabel = (key: string) => roleOptions.find((x) => x.value === key)?.lab
 const filter = reactive<ReportListQueryRequest>({
   keyword: '',
   industry: '',
-  industryRole: '',
-  generationStatus: '',
-  frozen: undefined
+  industryRole: ''
 })
 
 const dateRange = ref<[Date, Date] | null>(null)
@@ -402,8 +382,6 @@ function onReset() {
   filter.keyword = ''
   filter.industry = ''
   filter.industryRole = ''
-  filter.generationStatus = ''
-  filter.frozen = undefined
   dateRange.value = null
   pagination.page = 1
   loadData()
@@ -547,7 +525,7 @@ onMounted(loadData)
 }
 .filter-form {
   display: grid;
-  grid-template-columns: minmax(180px, 240px) minmax(140px, 164px) minmax(140px, 164px) minmax(140px, 164px) auto minmax(280px, 352px) auto;
+  grid-template-columns: minmax(180px, 240px) minmax(140px, 164px) minmax(140px, 164px) minmax(260px, 320px) auto;
   gap: 20px 24px;
   align-items: end;
 }

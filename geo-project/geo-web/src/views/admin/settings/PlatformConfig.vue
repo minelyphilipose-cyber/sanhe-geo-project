@@ -1,9 +1,20 @@
 ﻿<template>
-  <div>
-    <div class="mb-4 flex items-center justify-between gap-3">
-      <div class="flex items-center gap-2">
-        <el-input v-model="query.keyword" placeholder="搜索平台编码/名称/模型" clearable style="width: 260px" @keyup.enter="load" />
-        <el-select v-model="query.priorityLevel" placeholder="平台等级" clearable style="width: 130px" @change="load">
+  <div class="platform-config-page admin-page">
+    <div class="admin-page-header platform-config-header">
+      <div>
+        <div class="admin-page-kicker">系统配置</div>
+        <h1 class="admin-page-title">AI平台配置</h1>
+        <div class="admin-page-subtitle">维护平台模型、密钥引用、并发能力和售前评估开关。</div>
+      </div>
+      <div class="admin-page-actions">
+        <el-button v-if="canManage" type="primary" @click="openCreate">新增平台</el-button>
+      </div>
+    </div>
+
+    <el-card shadow="never" class="admin-surface platform-toolbar-card">
+      <div class="platform-toolbar">
+        <el-input v-model="query.keyword" class="filter-keyword" placeholder="搜索平台编码/名称/模型" clearable @keyup.enter="load" />
+        <el-select v-model="query.priorityLevel" class="filter-level" placeholder="平台等级" clearable @change="load">
           <el-option
             v-for="item in dictStore.options('platform_priority')"
             :key="item.dictKey"
@@ -11,22 +22,71 @@
             :value="item.dictKey"
           />
         </el-select>
-        <el-select v-model="query.enabled" placeholder="状态" clearable style="width: 130px" @change="load">
+        <el-select v-model="query.enabled" class="filter-status" placeholder="状态" clearable @change="load">
           <el-option label="启用" :value="true" />
           <el-option label="停用" :value="false" />
         </el-select>
-        <el-button @click="load">查询</el-button>
+        <el-button type="primary" plain @click="load">查询</el-button>
       </div>
-      <el-button v-if="canManage" type="primary" @click="openCreate">新增平台</el-button>
+    </el-card>
+
+    <div class="admin-metric-grid platform-metric-grid">
+      <div class="admin-metric-card" style="--metric-accent: #2563eb; --metric-tone: #eff6ff">
+        <span class="admin-metric-label">平台总数</span>
+        <strong class="admin-metric-value">{{ page.total }}</strong>
+        <span class="admin-metric-hint">当前筛选结果</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #059669; --metric-tone: #ecfdf5">
+        <span class="admin-metric-label">启用平台</span>
+        <strong class="admin-metric-value">{{ enabledCount }}</strong>
+        <span class="admin-metric-hint">当前页可用配置</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #f59e0b; --metric-tone: #fffbeb">
+        <span class="admin-metric-label">降级处理</span>
+        <strong class="admin-metric-value">{{ degradedCount }}</strong>
+        <span class="admin-metric-hint">需要关注模型链路</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #7c3aed; --metric-tone: #f5f3ff">
+        <span class="admin-metric-label">售前评估</span>
+        <strong class="admin-metric-value">{{ presaleCount }}</strong>
+        <span class="admin-metric-hint">已开启评估能力</span>
+      </div>
     </div>
 
-    <el-card>
+    <el-card shadow="never" class="admin-table-card platform-table-card">
+      <div class="table-header">
+        <div>
+          <div class="table-title">平台配置列表</div>
+          <div class="table-subtitle">按平台等级、启用状态和降级状态核对模型配置。</div>
+        </div>
+        <div class="chips">
+          <span class="chip chip-muted">当前页 {{ rows.length }}</span>
+          <span class="chip chip-success">启用 {{ enabledCount }}</span>
+          <span class="chip chip-warning">降级 {{ degradedCount }}</span>
+        </div>
+      </div>
+
       <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无平台配置">
-        <el-table :data="rows" border>
-          <el-table-column prop="platformCode" label="平台编码" min-width="130" />
-          <el-table-column prop="platformName" label="平台名称" min-width="130" />
+        <el-table :data="rows" border table-layout="fixed">
+          <el-table-column label="平台" min-width="220" show-overflow-tooltip>
+            <template #default="scope">
+              <div class="admin-entity-cell">
+                <div class="admin-entity-avatar platform-avatar" :class="enabledClass(scope.row.enabled)">
+                  {{ platformInitial(scope.row.platformName) }}
+                </div>
+                <div class="min-w-0">
+                  <div class="admin-entity-main">{{ scope.row.platformName }}</div>
+                  <div class="admin-entity-sub">{{ scope.row.platformCode }}</div>
+                </div>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="等级" width="120">
-            <template #default="scope">{{ dictStore.label('platform_priority', scope.row.priorityLevel) }}</template>
+            <template #default="scope">
+              <span class="priority-pill" :class="priorityClass(scope.row.priorityLevel)">
+                {{ dictStore.label('platform_priority', scope.row.priorityLevel) }}
+              </span>
+            </template>
           </el-table-column>
           <el-table-column prop="modelName" label="高性能版本" min-width="140" />
           <el-table-column prop="lowModelId" label="低性能版本" min-width="140">
@@ -37,14 +97,16 @@
           </el-table-column>
           <el-table-column label="售前评估" width="100">
             <template #default="scope">
-              <el-tag :type="scope.row.presaleEvaluateEnabled ? 'success' : 'info'">
+              <span class="admin-status-tag" :class="scope.row.presaleEvaluateEnabled ? 'is-success' : 'is-muted'">
                 {{ scope.row.presaleEvaluateEnabled ? '启用' : '停用' }}
-              </el-tag>
+              </span>
             </template>
           </el-table-column>
           <el-table-column label="降级处理" width="100">
             <template #default="scope">
-              <el-tag :type="scope.row.degraded ? 'warning' : 'info'">{{ scope.row.degraded ? '是' : '否' }}</el-tag>
+              <span class="admin-status-tag" :class="scope.row.degraded ? 'is-warning' : 'is-muted'">
+                {{ scope.row.degraded ? '是' : '否' }}
+              </span>
             </template>
           </el-table-column>
           <el-table-column prop="degradedReason" label="降级原因" min-width="220" show-overflow-tooltip>
@@ -52,7 +114,9 @@
           </el-table-column>
           <el-table-column label="状态" width="100">
             <template #default="scope">
-              <el-tag :type="scope.row.enabled ? 'success' : 'info'">{{ scope.row.enabled ? '启用' : '停用' }}</el-tag>
+              <span class="admin-status-tag" :class="enabledClass(scope.row.enabled)">
+                {{ scope.row.enabled ? '启用' : '停用' }}
+              </span>
             </template>
           </el-table-column>
           <el-table-column label="创建时间" width="180">
@@ -80,20 +144,21 @@
           </el-table-column>
         </el-table>
 
-        <div class="mt-4 flex justify-end">
-          <el-pagination
-            background
-            layout="prev, pager, next, total"
-            :current-page="page.current"
-            :page-size="page.size"
-            :total="page.total"
-            @current-change="onPageChange"
-          />
-        </div>
       </DataState>
+
+      <div class="admin-table-footer">
+        <el-pagination
+          background
+          layout="prev, pager, next, total"
+          :current-page="page.current"
+          :page-size="page.size"
+          :total="page.total"
+          @current-change="onPageChange"
+        />
+      </div>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" :title="mode === 'create' ? '新增平台配置' : '编辑平台配置'" width="900px">
+    <el-dialog v-model="dialogVisible" :title="mode === 'create' ? '新增平台配置' : '编辑平台配置'" width="900px" class="admin-editor-dialog">
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
         <el-row :gutter="12">
           <el-col :xs="24" :md="8">
@@ -269,6 +334,10 @@ const query = reactive<{ keyword: string; priorityLevel: string; enabled: boolea
   enabled: undefined,
 })
 
+const enabledCount = computed(() => rows.value.filter((item) => item.enabled).length)
+const degradedCount = computed(() => rows.value.filter((item) => item.degraded).length)
+const presaleCount = computed(() => rows.value.filter((item) => item.presaleEvaluateEnabled).length)
+
 const dialogVisible = ref(false)
 const formRef = ref<FormInstance>()
 const mode = ref<'create' | 'edit'>('create')
@@ -376,6 +445,21 @@ async function load() {
 function onPageChange(v: number) {
   page.current = v
   load()
+}
+
+function enabledClass(enabled?: boolean) {
+  return enabled ? 'is-success' : 'is-muted'
+}
+
+function priorityClass(priority?: string) {
+  if (priority === 'P0') return 'is-critical'
+  if (priority === 'P1') return 'is-high'
+  return 'is-normal'
+}
+
+function platformInitial(value?: string | null) {
+  const text = String(value || '').trim()
+  return text ? Array.from(text)[0] : '平'
 }
 
 function openCreate() {
@@ -518,3 +602,138 @@ onMounted(async () => {
   await load()
 })
 </script>
+
+<style scoped>
+.platform-config-header {
+  align-items: center;
+}
+
+.platform-toolbar-card :deep(.el-card__body) {
+  padding: 12px;
+}
+
+.platform-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filter-keyword {
+  width: 260px;
+}
+
+.filter-level,
+.filter-status {
+  width: 130px;
+}
+
+.platform-metric-grid {
+  margin-bottom: 0;
+}
+
+.platform-table-card :deep(.el-card__body) {
+  padding: 0;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--admin-panel-border-soft);
+  background: linear-gradient(90deg, #f8fbff 0%, #ffffff 55%, #f0fdf4 100%);
+}
+
+.table-title {
+  color: var(--admin-text-strong);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.table-subtitle {
+  margin-top: 4px;
+  color: var(--admin-text-muted);
+  font-size: 12px;
+}
+
+.chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 14px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chip-muted {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.chip-success {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.chip-warning {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.platform-avatar.is-success {
+  background: linear-gradient(135deg, #059669, #14b8a6);
+}
+
+.platform-avatar.is-muted {
+  background: linear-gradient(135deg, #64748b, #94a3b8);
+}
+
+.priority-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.priority-pill.is-critical {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.priority-pill.is-high {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.priority-pill.is-normal {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+@media (max-width: 768px) {
+  .platform-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .filter-keyword,
+  .filter-level,
+  .filter-status,
+  .platform-toolbar .el-button {
+    width: 100%;
+  }
+}
+</style>

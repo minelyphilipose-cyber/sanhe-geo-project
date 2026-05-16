@@ -1,22 +1,77 @@
 <template>
-  <div>
-    <div class="mb-4 flex items-center justify-between gap-3">
-      <div class="flex items-center gap-2">
-        <el-input v-model="query.keyword" placeholder="搜索套餐类型/名称" clearable style="width: 260px" @keyup.enter="load" />
-        <el-select v-model="query.enabled" placeholder="状态" clearable style="width: 140px" @change="load">
+  <div class="package-config-page admin-page">
+    <div class="admin-page-header package-header">
+      <div>
+        <div class="admin-page-kicker">系统配置</div>
+        <h1 class="admin-page-title">套餐配置</h1>
+        <div class="admin-page-subtitle">维护套餐价格、服务周期、拓词额度和渠道分发额度。</div>
+      </div>
+      <div class="admin-page-actions">
+        <el-button type="primary" @click="openCreate">新增套餐</el-button>
+      </div>
+    </div>
+
+    <el-card shadow="never" class="admin-surface package-toolbar-card">
+      <div class="package-toolbar">
+        <el-input v-model="query.keyword" class="filter-keyword" placeholder="搜索套餐类型/名称" clearable @keyup.enter="load" />
+        <el-select v-model="query.enabled" class="filter-status" placeholder="状态" clearable @change="load">
           <el-option label="启用" :value="true" />
           <el-option label="停用" :value="false" />
         </el-select>
-        <el-button @click="load">查询</el-button>
+        <el-button type="primary" plain @click="load">查询</el-button>
       </div>
-      <el-button type="primary" @click="openCreate">新增套餐</el-button>
+    </el-card>
+
+    <div class="admin-metric-grid package-metric-grid">
+      <div class="admin-metric-card" style="--metric-accent: #2563eb; --metric-tone: #eff6ff">
+        <span class="admin-metric-label">套餐总数</span>
+        <strong class="admin-metric-value">{{ page.total }}</strong>
+        <span class="admin-metric-hint">当前筛选结果</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #059669; --metric-tone: #ecfdf5">
+        <span class="admin-metric-label">启用套餐</span>
+        <strong class="admin-metric-value">{{ enabledCount }}</strong>
+        <span class="admin-metric-hint">当前页启用状态</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #7c3aed; --metric-tone: #f5f3ff">
+        <span class="admin-metric-label">平均价格</span>
+        <strong class="admin-metric-value">{{ avgPriceText }}</strong>
+        <span class="admin-metric-hint">按当前页标准价计算</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #f59e0b; --metric-tone: #fffbeb">
+        <span class="admin-metric-label">平均周期</span>
+        <strong class="admin-metric-value">{{ avgServiceMonths }}</strong>
+        <span class="admin-metric-hint">服务月数均值</span>
+      </div>
     </div>
 
-    <el-card>
+    <el-card shadow="never" class="admin-table-card package-table-card">
+      <div class="table-header">
+        <div>
+          <div class="table-title">套餐列表</div>
+          <div class="table-subtitle">按价格、服务周期、拓词额度和渠道额度核对套餐能力。</div>
+        </div>
+        <div class="chips">
+          <span class="chip chip-muted">当前页 {{ rows.length }}</span>
+          <span class="chip chip-success">启用 {{ enabledCount }}</span>
+        </div>
+      </div>
+
       <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无套餐配置">
-        <el-table :data="rows" border>
-          <el-table-column prop="packageType" label="套餐类型" min-width="150" />
-          <el-table-column prop="packageName" label="套餐名称" min-width="180" />
+        <el-table :data="rows" border table-layout="fixed">
+          <el-table-column label="套餐" min-width="240" show-overflow-tooltip>
+            <template #default="scope">
+              <div class="admin-entity-cell">
+                <div class="admin-entity-avatar package-avatar" :class="scope.row.enabled ? 'is-success' : 'is-muted'">
+                  {{ packageInitial(scope.row.packageName) }}
+                </div>
+                <div class="min-w-0">
+                  <div class="admin-entity-main">{{ scope.row.packageName }}</div>
+                  <div class="admin-entity-sub">{{ scope.row.packageType }}</div>
+                </div>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column label="标准价(元)" width="120">
             <template #default="scope">{{ Number(scope.row.standardPrice || 0).toFixed(2) }}</template>
           </el-table-column>
@@ -32,7 +87,9 @@
           <el-table-column prop="sortOrder" label="排序" width="80" />
           <el-table-column label="状态" width="90">
             <template #default="scope">
-              <el-tag :type="scope.row.enabled ? 'success' : 'info'">{{ scope.row.enabled ? '启用' : '停用' }}</el-tag>
+              <span class="admin-status-tag" :class="scope.row.enabled ? 'is-success' : 'is-muted'">
+                {{ scope.row.enabled ? '启用' : '停用' }}
+              </span>
             </template>
           </el-table-column>
           <el-table-column label="操作" width="150" fixed="right">
@@ -45,20 +102,21 @@
           </el-table-column>
         </el-table>
 
-        <div class="mt-4 flex justify-end">
-          <el-pagination
-            background
-            layout="prev, pager, next, total"
-            :current-page="page.current"
-            :page-size="page.size"
-            :total="page.total"
-            @current-change="onPageChange"
-          />
-        </div>
       </DataState>
+
+      <div class="admin-table-footer">
+        <el-pagination
+          background
+          layout="prev, pager, next, total"
+          :current-page="page.current"
+          :page-size="page.size"
+          :total="page.total"
+          @current-change="onPageChange"
+        />
+      </div>
     </el-card>
 
-    <el-dialog v-model="formVisible" :title="formMode === 'create' ? '新增套餐' : '编辑套餐'" width="900px">
+    <el-dialog v-model="formVisible" :title="formMode === 'create' ? '新增套餐' : '编辑套餐'" width="900px" class="admin-editor-dialog">
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
         <el-row :gutter="12">
           <el-col :xs="24" :md="12">
@@ -217,6 +275,17 @@ const rules: FormRules = {
 }
 
 const tierTotal = computed(() => Number(form.keywordGroupLimitA || 0) + Number(form.keywordGroupLimitB || 0) + Number(form.keywordGroupLimitC || 0))
+const enabledCount = computed(() => rows.value.filter((item) => item.enabled).length)
+const avgPriceText = computed(() => {
+  if (!rows.value.length) return '-'
+  const avg = rows.value.reduce((sum, item) => sum + Number(item.standardPrice || 0), 0) / rows.value.length
+  return avg.toFixed(0)
+})
+const avgServiceMonths = computed(() => {
+  if (!rows.value.length) return '-'
+  const avg = rows.value.reduce((sum, item) => sum + Number(item.serviceMonths || 0), 0) / rows.value.length
+  return `${Math.round(avg)} 月`
+})
 
 function defaultChannelQuotas(): PackageChannelQuotaConfig[] {
   return [
@@ -256,6 +325,11 @@ function quotaSummary(configs?: PackageChannelQuotaConfig[]) {
   const list = configs?.length ? configs : []
   if (!list.length) return '-'
   return list.map((item) => `${channelLabel(item.channelCode)} ${item.quotaLimit}/${periodLabel(item.periodType)}`).join('；')
+}
+
+function packageInitial(value?: string | null) {
+  const text = String(value || '').trim()
+  return text ? Array.from(text)[0] : '套'
 }
 
 function normalizeChannelQuotas(configs?: PackageChannelQuotaConfig[]) {
@@ -407,6 +481,94 @@ onMounted(load)
 </script>
 
 <style scoped>
+.package-header {
+  align-items: center;
+}
+
+.package-toolbar-card :deep(.el-card__body) {
+  padding: 12px;
+}
+
+.package-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filter-keyword {
+  width: 240px;
+}
+
+.filter-status {
+  width: 130px;
+}
+
+.package-metric-grid {
+  margin-bottom: 0;
+}
+
+.package-table-card :deep(.el-card__body) {
+  padding: 0;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--admin-panel-border-soft);
+  background: linear-gradient(90deg, #f8fbff 0%, #ffffff 55%, #f0fdf4 100%);
+}
+
+.table-title {
+  color: var(--admin-text-strong);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.table-subtitle {
+  margin-top: 4px;
+  color: var(--admin-text-muted);
+  font-size: 12px;
+}
+
+.chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 14px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chip-muted {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.chip-success {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.package-avatar.is-success {
+  background: linear-gradient(135deg, #059669, #14b8a6);
+}
+
+.package-avatar.is-muted {
+  background: linear-gradient(135deg, #64748b, #94a3b8);
+}
+
 .tier-total-tip {
   margin: -4px 0 14px;
   font-size: 12px;
@@ -415,5 +577,18 @@ onMounted(load)
 
 .tier-total-tip.invalid {
   color: #e6a23c;
+}
+
+@media (max-width: 768px) {
+  .package-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .filter-keyword,
+  .filter-status,
+  .package-toolbar .el-button {
+    width: 100%;
+  }
 }
 </style>

@@ -1,7 +1,25 @@
 <template>
-  <div class="monitoring-page">
-    <el-card shadow="never" class="topbar-card">
-      <div class="topbar">
+  <div class="monitoring-page admin-page">
+    <div class="admin-page-header monitoring-header">
+      <div>
+        <div class="admin-page-kicker">监控中心</div>
+        <h1 class="admin-page-title">调度监控</h1>
+        <div class="admin-page-subtitle">追踪任务队列、执行通道与异常状态，及时发现阻塞和重试风险。</div>
+      </div>
+      <div class="admin-page-actions monitoring-header-actions">
+        <span class="refresh-state" :class="{ 'is-active': autoRefresh }">
+          <span class="refresh-dot" />
+          {{ autoRefresh ? '自动刷新中' : '手动刷新' }}
+        </span>
+        <el-button :type="autoRefresh ? 'primary' : 'default'" plain @click="toggleAutoRefresh">
+          60秒自动刷新 {{ autoRefresh ? 'ON' : 'OFF' }}
+        </el-button>
+        <el-button type="primary" :loading="loading" @click="reloadActiveTab">刷新</el-button>
+      </div>
+    </div>
+
+    <el-card shadow="never" class="admin-surface monitoring-toolbar-card">
+      <div class="monitoring-toolbar">
         <el-tabs v-model="activeTab" class="tabs compact-tabs" @tab-change="onTabChange">
           <el-tab-pane label="Dashboard 总览" name="dashboard" />
           <el-tab-pane label="任务监控" name="tasks" />
@@ -24,49 +42,156 @@
             end-placeholder="结束日期"
             @change="reloadActiveTab"
           />
-          <el-button :type="autoRefresh ? 'primary' : 'default'" plain @click="toggleAutoRefresh">
-            60秒自动刷新 {{ autoRefresh ? 'ON' : 'OFF' }}
-          </el-button>
-          <el-button :loading="loading" @click="reloadActiveTab">刷新</el-button>
         </div>
       </div>
     </el-card>
 
     <div v-show="activeTab === 'dashboard'">
-      <el-row :gutter="12" class="metrics-row">
-        <el-col :xs="24" :sm="12" :md="6">
-          <el-card shadow="never" class="metric-card metric-card-neutral">
-            <div class="metric-title">进行中项目数</div>
-            <div class="metric-value">{{ dashboard.activeProjectCount }}</div>
-          </el-card>
-        </el-col>
-        <el-col :xs="24" :sm="12" :md="6">
-          <el-card shadow="never" class="metric-card metric-card-success">
-            <div class="metric-title">今日调度 / 已完成</div>
-            <div class="metric-value">{{ dashboard.dueTaskCount }} / {{ dashboard.completedTaskCount }}</div>
-            <el-progress :percentage="dashboardProgress" :stroke-width="8" />
-          </el-card>
-        </el-col>
-        <el-col :xs="24" :sm="12" :md="6">
-          <el-card shadow="never" class="metric-card metric-card-danger">
-            <div class="metric-title">失败 / 死信待处理</div>
-            <div class="metric-value">{{ dashboard.failedTaskCount }} / {{ dashboard.deadLetterPendingCount }}</div>
-            <div class="metric-tip" v-if="dashboard.deadLetterPendingCount > 0">存在待处理 dead_letter 任务</div>
-          </el-card>
-        </el-col>
-        <el-col :xs="24" :sm="12" :md="6">
-          <el-card shadow="never" class="metric-card metric-card-warning">
-            <div class="metric-title">平台异常 / 平均耗时</div>
-            <div class="metric-value">{{ dashboard.platformExceptionCount }} / {{ formatDurationMs(dashboard.avgTaskDurationMs) }}</div>
-          </el-card>
-        </el-col>
-      </el-row>
+      <div class="admin-metric-grid monitoring-metric-grid">
+        <div class="admin-metric-card" style="--metric-accent: #2563eb; --metric-tone: #eff6ff">
+          <span class="admin-metric-label">进行中项目数</span>
+          <strong class="admin-metric-value">{{ dashboard.activeProjectCount }}</strong>
+          <span class="admin-metric-hint">当前仍在服务的项目</span>
+        </div>
+        <div class="admin-metric-card metric-with-progress" style="--metric-accent: #059669; --metric-tone: #ecfdf5">
+          <span class="admin-metric-label">今日调度 / 已完成</span>
+          <strong class="admin-metric-value">{{ dashboard.dueTaskCount }} / {{ dashboard.completedTaskCount }}</strong>
+          <el-progress :percentage="dashboardProgress" :stroke-width="8" />
+        </div>
+        <div class="admin-metric-card" style="--metric-accent: #ef4444; --metric-tone: #fef2f2">
+          <span class="admin-metric-label">失败 / 死信待处理</span>
+          <strong class="admin-metric-value">{{ dashboard.failedTaskCount }} / {{ dashboard.deadLetterPendingCount }}</strong>
+          <span class="admin-metric-hint">{{ dashboard.deadLetterPendingCount > 0 ? '存在待处理 dead_letter 任务' : '暂无死信积压' }}</span>
+        </div>
+        <div class="admin-metric-card" style="--metric-accent: #f59e0b; --metric-tone: #fffbeb">
+          <span class="admin-metric-label">平台异常 / 平均耗时</span>
+          <strong class="admin-metric-value">{{ dashboard.platformExceptionCount }} / {{ formatDurationMs(dashboard.avgTaskDurationMs) }}</strong>
+          <span class="admin-metric-hint">按当前筛选周期统计</span>
+        </div>
+      </div>
+
+      <div class="dashboard-insight-grid">
+        <section class="dashboard-panel completion-panel">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">执行完成度</div>
+              <h3 class="panel-title">{{ dashboard.rangeLabel || rangeLabelText }}</h3>
+            </div>
+            <span class="panel-status" :class="dashboardRiskClass">{{ dashboardRiskText }}</span>
+          </div>
+          <div class="completion-body">
+            <div class="completion-ring" :style="{ '--progress': `${dashboardProgress}%` }">
+              <strong>{{ dashboardProgress }}%</strong>
+              <span>完成率</span>
+            </div>
+            <div class="completion-list">
+              <div class="completion-item">
+                <span>应执行任务</span>
+                <strong>{{ dashboard.dueTaskCount }}</strong>
+              </div>
+              <div class="completion-item">
+                <span>已完成</span>
+                <strong>{{ dashboard.completedTaskCount }}</strong>
+              </div>
+              <div class="completion-item">
+                <span>运行中</span>
+                <strong>{{ dashboard.runningTaskCount }}</strong>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="dashboard-panel risk-panel">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">风险队列</div>
+              <h3 class="panel-title">异常与积压</h3>
+            </div>
+            <strong class="panel-count">{{ unresolvedTaskCount }}</strong>
+          </div>
+          <div class="risk-list">
+            <div class="risk-item is-danger">
+              <span class="risk-dot"></span>
+              <div>
+                <strong>失败任务</strong>
+                <span>已失败且等待处理或重放</span>
+              </div>
+              <b>{{ dashboard.failedTaskCount }}</b>
+            </div>
+            <div class="risk-item is-dead">
+              <span class="risk-dot"></span>
+              <div>
+                <strong>死信任务</strong>
+                <span>超时或重试耗尽，需要优先清理</span>
+              </div>
+              <b>{{ dashboard.deadLetterPendingCount }}</b>
+            </div>
+            <div class="risk-item is-warning">
+              <span class="risk-dot"></span>
+              <div>
+                <strong>平台异常</strong>
+                <span>平台调用异常或链路降级信号</span>
+              </div>
+              <b>{{ dashboard.platformExceptionCount }}</b>
+            </div>
+          </div>
+        </section>
+
+        <section class="dashboard-panel chain-panel">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">链路效率</div>
+              <h3 class="panel-title">任务吞吐与耗时</h3>
+            </div>
+            <span class="health-score">{{ dashboardHealthScore }}</span>
+          </div>
+          <div class="chain-grid">
+            <div class="chain-item">
+              <span>平均耗时</span>
+              <strong>{{ formatDurationMs(dashboard.avgTaskDurationMs) }}</strong>
+            </div>
+            <div class="chain-item">
+              <span>在服项目</span>
+              <strong>{{ dashboard.activeProjectCount }}</strong>
+            </div>
+            <div class="chain-item">
+              <span>待收敛任务</span>
+              <strong>{{ pendingTaskCount }}</strong>
+            </div>
+          </div>
+          <div class="chain-bar">
+            <span :style="{ width: `${dashboardHealthScore}%` }"></span>
+          </div>
+          <div class="chain-note">健康度由完成率、失败、死信和平台异常综合折算，仅用于运营判断。</div>
+        </section>
+
+        <section class="dashboard-panel action-panel">
+          <div class="panel-head">
+            <div>
+              <div class="panel-kicker">处理建议</div>
+              <h3 class="panel-title">下一步动作</h3>
+            </div>
+          </div>
+          <div class="action-list">
+            <div v-for="item in dashboardActions" :key="item.title" class="action-item" :class="item.type">
+              <span class="action-mark">{{ item.mark }}</span>
+              <div>
+                <strong>{{ item.title }}</strong>
+                <span>{{ item.desc }}</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
     </div>
 
     <div v-show="activeTab === 'tasks'">
-      <el-card shadow="never">
+      <el-card shadow="never" class="admin-table-card monitoring-table-card">
         <div class="table-header">
-          <div class="table-title">任务监控</div>
+          <div>
+            <div class="table-title">任务监控</div>
+            <div class="table-subtitle">按项目、通道和执行状态筛选调度任务。</div>
+          </div>
           <div class="chips">
             <span class="chip chip-muted">总计 {{ taskStat.total }}</span>
             <span class="chip chip-run">运行中 {{ taskStat.running }}</span>
@@ -91,13 +216,29 @@
         </div>
 
         <DataState :loading="loading" :empty="!loading && tasks.length === 0" empty-text="暂无任务数据">
-          <el-table :data="tasks" border>
-            <el-table-column prop="projectName" label="项目名称" min-width="160" />
+          <el-table :data="tasks" border table-layout="fixed">
+            <el-table-column label="项目对象" min-width="220" show-overflow-tooltip>
+              <template #default="scope">
+                <div class="admin-entity-cell">
+                  <div class="admin-entity-avatar task-avatar" :class="taskStatusClass(scope.row.status)">
+                    {{ taskAvatarInitial(scope.row.projectName) }}
+                  </div>
+                  <div class="min-w-0">
+                    <div class="admin-entity-main">{{ scope.row.projectName || '-' }}</div>
+                    <div class="admin-entity-sub">{{ scope.row.taskNo || `任务 #${scope.row.id}` }}</div>
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
             <el-table-column label="任务类型" min-width="150">
-              <template #default="scope">{{ taskTypeLabel(scope.row.taskType) }}</template>
+              <template #default="scope">
+                <span class="admin-mini-pill is-blue">{{ taskTypeLabel(scope.row.taskType) }}</span>
+              </template>
             </el-table-column>
             <el-table-column prop="priorityLevel" label="优先级" width="90">
-              <template #default="scope">P{{ scope.row.priorityLevel }}</template>
+              <template #default="scope">
+                <span class="priority-pill" :class="priorityClass(scope.row.priorityLevel)">P{{ scope.row.priorityLevel }}</span>
+              </template>
             </el-table-column>
             <el-table-column prop="platformCode" label="平台编码" width="140" />
             <el-table-column label="执行通道" width="130">
@@ -105,7 +246,9 @@
             </el-table-column>
             <el-table-column prop="status" label="状态" width="120">
               <template #default="scope">
-                <el-tag :type="taskStatusTag(scope.row.status)">{{ taskStatusLabel(scope.row.status) }}</el-tag>
+                <span class="admin-status-tag" :class="taskStatusClass(scope.row.status)">
+                  {{ taskStatusLabel(scope.row.status) }}
+                </span>
               </template>
             </el-table-column>
             <el-table-column prop="retryCount" label="重试次数" width="100" />
@@ -142,7 +285,7 @@
           </el-table>
         </DataState>
 
-        <div class="mt-3 flex justify-end">
+        <div class="admin-table-footer">
           <el-pagination
             background
             layout="prev, pager, next, total"
@@ -155,7 +298,7 @@
       </el-card>
     </div>
 
-    <el-dialog v-model="taskDetailVisible" title="调度详情" width="760px">
+    <el-dialog v-model="taskDetailVisible" title="调度详情" width="760px" class="admin-editor-dialog monitoring-detail-dialog">
       <div v-loading="taskDetailLoading">
         <el-descriptions v-if="taskDetail" :column="2" border>
           <el-descriptions-item label="任务编号">{{ taskDetail.taskNo || '-' }}</el-descriptions-item>
@@ -239,6 +382,92 @@ const taskQuery = reactive({
 const dashboardProgress = computed(() => {
   if (!dashboard.dueTaskCount) return 0
   return Math.min(100, Math.round((dashboard.completedTaskCount / dashboard.dueTaskCount) * 100))
+})
+
+const rangeLabelText = computed(() => {
+  const map: Record<string, string> = {
+    today: '今日调度',
+    last7: '近 7 天调度',
+    last30: '近 30 天调度',
+    custom: '自定义周期调度',
+  }
+  return map[filters.rangeType] || '调度周期'
+})
+
+const unresolvedTaskCount = computed(() => (
+  dashboard.failedTaskCount + dashboard.deadLetterPendingCount + dashboard.platformExceptionCount
+))
+
+const pendingTaskCount = computed(() => Math.max(
+  dashboard.dueTaskCount - dashboard.completedTaskCount,
+  0,
+))
+
+const dashboardRiskClass = computed(() => {
+  if (dashboard.deadLetterPendingCount > 0 || dashboard.failedTaskCount > 0) return 'is-danger'
+  if (dashboard.platformExceptionCount > 0 || dashboard.runningTaskCount > 0) return 'is-warning'
+  return 'is-success'
+})
+
+const dashboardRiskText = computed(() => {
+  if (dashboard.deadLetterPendingCount > 0) return '死信待处理'
+  if (dashboard.failedTaskCount > 0) return '存在失败'
+  if (dashboard.platformExceptionCount > 0) return '平台异常'
+  if (dashboard.runningTaskCount > 0) return '执行中'
+  return '运行平稳'
+})
+
+const dashboardHealthScore = computed(() => {
+  const base = dashboard.dueTaskCount > 0 ? dashboardProgress.value : 100
+  const riskPenalty = dashboard.failedTaskCount * 5
+    + dashboard.deadLetterPendingCount * 12
+    + dashboard.platformExceptionCount * 4
+  return Math.max(0, Math.min(100, base - riskPenalty))
+})
+
+const dashboardActions = computed(() => {
+  const actions: Array<{ type: string; mark: string; title: string; desc: string }> = []
+  if (dashboard.deadLetterPendingCount > 0) {
+    actions.push({
+      type: 'is-danger',
+      mark: '!',
+      title: '优先清理死信任务',
+      desc: '进入任务监控筛选死信状态，查看错误上下文后重放或人工处理。',
+    })
+  }
+  if (dashboard.failedTaskCount > 0) {
+    actions.push({
+      type: 'is-danger',
+      mark: 'F',
+      title: '复核失败任务',
+      desc: '确认是否已切备用链路，必要时按项目或平台批量排查失败原因。',
+    })
+  }
+  if (dashboard.platformExceptionCount > 0) {
+    actions.push({
+      type: 'is-warning',
+      mark: 'P',
+      title: '检查平台健康',
+      desc: '关注平台异常次数和额度阈值，避免异常平台继续影响调度成功率。',
+    })
+  }
+  if (dashboard.runningTaskCount > 0) {
+    actions.push({
+      type: 'is-info',
+      mark: 'R',
+      title: '观察运行中任务',
+      desc: '持续关注运行中任务耗时，若超出预期再进入详情查看超时窗口。',
+    })
+  }
+  if (!actions.length) {
+    actions.push({
+      type: 'is-success',
+      mark: 'OK',
+      title: '当前无需人工介入',
+      desc: '本周期未发现失败、死信或平台异常，可继续保持自动刷新观察。',
+    })
+  }
+  return actions
 })
 
 const taskStat = computed(() => ({
@@ -331,11 +560,22 @@ function channelLabel(channel?: string | null) {
   return map[channel || ''] || channel || '-'
 }
 
-function taskStatusTag(status: string): 'success' | 'warning' | 'danger' | 'info' {
-  if (status === 'completed') return 'success'
-  if (status === 'running') return 'warning'
-  if (status === 'failed' || status === 'dead_letter') return 'danger'
-  return 'info'
+function taskStatusClass(status: string) {
+  if (status === 'completed') return 'is-success'
+  if (status === 'running') return 'is-warning'
+  if (status === 'failed' || status === 'dead_letter') return 'is-danger'
+  return 'is-muted'
+}
+
+function priorityClass(priority?: number | null) {
+  if (priority === 0) return 'is-critical'
+  if (priority === 1) return 'is-high'
+  return 'is-normal'
+}
+
+function taskAvatarInitial(value?: string | null) {
+  const text = String(value || '').trim()
+  return text ? Array.from(text)[0] : '任'
 }
 
 async function loadDashboard() {
@@ -431,20 +671,55 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.monitoring-page {
-  padding: 6px 0;
+.monitoring-header {
+  align-items: center;
 }
 
-.topbar-card {
-  margin-bottom: 12px;
-}
-
-.topbar {
+.monitoring-header-actions,
+.monitoring-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 14px;
   flex-wrap: wrap;
+}
+
+.refresh-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.refresh-state.is-active {
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.refresh-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
+}
+
+.refresh-state.is-active .refresh-dot {
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.16);
+}
+
+.monitoring-toolbar-card :deep(.el-card__body) {
+  padding: 12px;
 }
 
 .tabs {
@@ -459,46 +734,318 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
 }
 
-.metrics-row {
-  margin-bottom: 12px;
+.monitoring-metric-grid {
+  margin-bottom: 0;
 }
 
-.metric-card {
-  min-height: 126px;
-  border: 1px solid var(--el-border-color-lighter);
+.metric-with-progress :deep(.el-progress) {
+  position: relative;
+  z-index: 1;
+  margin-top: 10px;
 }
 
-.metric-title {
-  color: #6b7280;
-  font-size: 13px;
-  margin-bottom: 6px;
+.dashboard-insight-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.18fr) minmax(0, 0.92fr);
+  gap: 14px;
 }
 
-.metric-value {
-  font-size: 24px;
-  font-weight: 600;
-  margin-bottom: 8px;
+.dashboard-panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--admin-panel-border);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, #ffffff 0%, #ffffff 72%, #f8fafc 100%);
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.065);
 }
 
-.metric-card-success {
-  background: linear-gradient(180deg, #f6fbf8 0%, #ffffff 100%);
+.panel-head {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 13px;
+  border-bottom: 1px solid var(--admin-panel-border-soft);
+  background: linear-gradient(90deg, #f8fbff 0%, #ffffff 58%, #f0fdf4 100%);
 }
 
-.metric-card-danger {
-  background: linear-gradient(180deg, #fff7f7 0%, #ffffff 100%);
-}
-
-.metric-card-warning {
-  background: linear-gradient(180deg, #fffbf3 0%, #ffffff 100%);
-}
-
-.metric-card-neutral {
-  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
-}
-
-.metric-tip {
+.panel-kicker {
+  color: #2563eb;
   font-size: 12px;
-  color: #ef4444;
+  font-weight: 800;
+}
+
+.panel-title {
+  margin: 4px 0 0;
+  color: var(--admin-text-strong);
+  font-size: 16px;
+  line-height: 1.35;
+  font-weight: 800;
+}
+
+.panel-status,
+.panel-count,
+.health-score {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 999px;
+  font-weight: 800;
+}
+
+.panel-status {
+  height: 28px;
+  padding: 0 11px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 12px;
+}
+
+.panel-status.is-warning {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.panel-status.is-danger {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.panel-count {
+  min-width: 36px;
+  height: 36px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 18px;
+}
+
+.completion-body {
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: 20px;
+  align-items: center;
+  padding: 24px;
+}
+
+.completion-ring {
+  width: 156px;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  place-content: center;
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at center, #ffffff 0 57%, transparent 58%),
+    conic-gradient(#059669 var(--progress), #e2e8f0 0);
+  box-shadow:
+    inset 0 0 0 1px rgba(226, 232, 240, 0.86),
+    0 16px 34px rgba(15, 23, 42, 0.08);
+}
+
+.completion-ring strong {
+  color: #0f172a;
+  font-size: 30px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.completion-ring span {
+  margin-top: 7px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.completion-list {
+  display: grid;
+  gap: 10px;
+}
+
+.completion-item,
+.chain-item {
+  min-width: 0;
+  border: 1px solid #e7edf5;
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, #ffffff 0%, #fbfdff 64%, #f8fbff 100%);
+  padding: 13px 14px;
+}
+
+.completion-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.completion-item span,
+.chain-item span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.completion-item strong,
+.chain-item strong {
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.risk-list,
+.action-list {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
+.risk-item,
+.action-item {
+  display: grid;
+  align-items: center;
+  min-width: 0;
+  border: 1px solid #e7edf5;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.risk-item {
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  gap: 11px;
+  padding: 13px 14px;
+}
+
+.risk-item strong,
+.action-item strong {
+  display: block;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.risk-item span:not(.risk-dot),
+.action-item span:not(.action-mark) {
+  display: block;
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.risk-item b {
+  color: #0f172a;
+  font-size: 18px;
+}
+
+.risk-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #94a3b8;
+}
+
+.risk-item.is-danger .risk-dot,
+.risk-item.is-dead .risk-dot {
+  background: #ef4444;
+  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.12);
+}
+
+.risk-item.is-warning .risk-dot {
+  background: #f59e0b;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.14);
+}
+
+.chain-panel,
+.action-panel {
+  min-height: 250px;
+}
+
+.health-score {
+  min-width: 42px;
+  height: 42px;
+  background: linear-gradient(135deg, #2563eb, #06b6d4);
+  color: #ffffff;
+  font-size: 18px;
+  box-shadow: 0 12px 22px rgba(37, 99, 235, 0.18);
+}
+
+.chain-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 16px 16px 12px;
+}
+
+.chain-item strong {
+  display: block;
+  margin-top: 8px;
+}
+
+.chain-bar {
+  height: 10px;
+  margin: 2px 16px 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.chain-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #2563eb, #10b981);
+}
+
+.chain-note {
+  padding: 0 16px 16px;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.action-item {
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 12px;
+  padding: 13px 14px;
+}
+
+.action-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.action-item.is-success .action-mark {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.action-item.is-warning .action-mark {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.action-item.is-danger .action-mark {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.monitoring-table-card :deep(.el-card__body) {
+  padding: 0;
+}
+
+.monitoring-table-card {
+  margin-top: 0;
 }
 
 .table-header {
@@ -506,13 +1053,22 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--admin-panel-border-soft);
+  background: linear-gradient(90deg, #f8fbff 0%, #ffffff 55%, #f0fdf4 100%);
 }
 
 .table-title {
-  font-size: 15px;
-  font-weight: 600;
+  color: var(--admin-text-strong);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.table-subtitle {
+  margin-top: 4px;
+  color: var(--admin-text-muted);
+  font-size: 12px;
 }
 
 .chips {
@@ -526,8 +1082,9 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   border-radius: 14px;
-  padding: 2px 8px;
+  padding: 3px 9px;
   font-size: 12px;
+  font-weight: 700;
   border: 1px solid transparent;
 }
 
@@ -556,6 +1113,53 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  padding: 12px 16px;
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--admin-panel-border-soft);
+  background: #ffffff;
+}
+
+.task-avatar.is-success {
+  background: linear-gradient(135deg, #059669, #14b8a6);
+}
+
+.task-avatar.is-warning {
+  background: linear-gradient(135deg, #d97706, #f59e0b);
+}
+
+.task-avatar.is-danger {
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+}
+
+.task-avatar.is-muted {
+  background: linear-gradient(135deg, #64748b, #94a3b8);
+}
+
+.priority-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 23px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.priority-pill.is-critical {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.priority-pill.is-high {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.priority-pill.is-normal {
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 
 :deep(.compact-tabs .el-tabs__header) {
@@ -574,8 +1178,54 @@ onBeforeUnmount(() => {
 
 .detail-pre {
   margin: 0;
+  max-height: 220px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #f8fbff;
+  color: #334155;
   white-space: pre-wrap;
   word-break: break-all;
   font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.monitoring-detail-dialog :deep(.el-descriptions) {
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.monitoring-detail-dialog :deep(.el-descriptions__label) {
+  background: linear-gradient(180deg, #f8fbff, #eef6ff) !important;
+  color: #475569;
+  font-weight: 800;
+}
+
+@media (max-width: 768px) {
+  .monitoring-header,
+  .monitoring-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dashboard-insight-grid,
+  .completion-body,
+  .chain-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .completion-ring {
+    margin-inline: auto;
+  }
+
+  .tabs {
+    min-width: 0;
+  }
+
+  .filters {
+    align-items: stretch;
+  }
 }
 </style>

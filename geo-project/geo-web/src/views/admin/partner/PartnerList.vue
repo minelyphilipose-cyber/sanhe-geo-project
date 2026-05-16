@@ -1,9 +1,26 @@
-﻿<template>
-  <div>
-    <div class="mb-4 flex items-center justify-between gap-3">
-      <div class="flex items-center gap-2">
-        <el-input v-model="query.keyword" placeholder="搜索合伙人名称/编号" clearable style="width: 260px" @keyup.enter="load" />
-        <el-select v-model="query.status" placeholder="状态" clearable style="width: 140px" @change="load">
+<template>
+  <div class="partner-list-page admin-page">
+    <div class="admin-page-header partner-header">
+      <div>
+        <div class="admin-page-kicker">合伙人</div>
+        <h1 class="admin-page-title">合伙人管理</h1>
+        <div class="admin-page-subtitle">维护合伙人档案、账户折扣和合作状态，快速进入资金与充值审核视图。</div>
+      </div>
+      <div class="admin-page-actions">
+        <el-button v-if="canCreatePartner" type="primary" @click="openCreate">新建合伙人</el-button>
+      </div>
+    </div>
+
+    <el-card shadow="never" class="admin-surface partner-toolbar-card">
+      <div class="partner-toolbar">
+        <el-input
+          v-model="query.keyword"
+          class="filter-keyword"
+          placeholder="搜索名称/编号"
+          clearable
+          @keyup.enter="load"
+        />
+        <el-select v-model="query.status" class="filter-status" placeholder="状态" clearable @change="load">
           <el-option
             v-for="item in dictStore.options('partner_status')"
             :key="item.dictKey"
@@ -11,67 +28,125 @@
             :value="item.dictKey"
           />
         </el-select>
-        <el-button @click="load">查询</el-button>
+        <el-button type="primary" plain @click="load">查询</el-button>
       </div>
-      <el-button v-if="canCreatePartner" type="primary" @click="openCreate">新建合伙人</el-button>
-    </div>
-
-    <el-card>
-      <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无合伙人数据">
-        <el-table :data="rows" border>
-        <el-table-column prop="partnerCode" label="编号" width="150" />
-        <el-table-column prop="partnerName" label="名称" min-width="180" />
-        <el-table-column label="等级" width="140">
-          <template #default="scope">{{ dictStore.label('partner_level', scope.row.partnerLevel) }}</template>
-        </el-table-column>
-        <el-table-column label="折扣" width="100">
-          <template #default="scope">{{ (scope.row.discountRate * 100).toFixed(1) }}%</template>
-        </el-table-column>
-        <el-table-column label="状态" width="110">
-          <template #default="scope">{{ dictStore.label('partner_status', scope.row.status) }}</template>
-        </el-table-column>
-        <el-table-column prop="city" label="城市" width="120" />
-        <el-table-column prop="contactName" label="联系人" width="120" />
-        <el-table-column prop="contactPhone" label="电话" width="140" />
-        <el-table-column label="操作" width="260" fixed="right">
-          <template #default="scope">
-            <el-button link type="primary" @click="goDetail(scope.row.id)">详情</el-button>
-            <el-button v-if="canUpdatePartner" link type="primary" @click="openEdit(scope.row)">编辑</el-button>
-            <el-dropdown v-if="canUpdatePartnerStatus" @command="(v: string) => changeStatus(scope.row.id, v)">
-              <el-button link type="primary" style="margin-left: 10px;margin-top: 3px;">
-                改状态
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="active">启用</el-dropdown-item>
-                  <el-dropdown-item command="paused">暂停</el-dropdown-item>
-                  <el-dropdown-item command="closed">关闭</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </template>
-        </el-table-column>
-        </el-table>
-
-        <div class="mt-4 flex justify-end">
-          <el-pagination
-            background
-            layout="prev, pager, next, total"
-            :current-page="page.current"
-            :page-size="page.size"
-            :total="page.total"
-            @current-change="onPageChange"
-          />
-        </div>
-      </DataState>
     </el-card>
 
-    <el-dialog v-model="formVisible" :title="formMode === 'create' ? '新建合伙人' : '编辑合伙人'" width="560px">
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="110px">
+    <div class="admin-metric-grid partner-metric-grid">
+      <div class="admin-metric-card" style="--metric-accent: #2563eb; --metric-tone: #eff6ff">
+        <span class="admin-metric-label">合伙人总数</span>
+        <strong class="admin-metric-value">{{ page.total }}</strong>
+        <span class="admin-metric-hint">当前筛选结果</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #059669; --metric-tone: #ecfdf5">
+        <span class="admin-metric-label">启用中</span>
+        <strong class="admin-metric-value">{{ activeCount }}</strong>
+        <span class="admin-metric-hint">当前页 active 状态</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #f59e0b; --metric-tone: #fffbeb">
+        <span class="admin-metric-label">暂停合作</span>
+        <strong class="admin-metric-value">{{ pausedCount }}</strong>
+        <span class="admin-metric-hint">需跟进合作节奏</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #7c3aed; --metric-tone: #f5f3ff">
+        <span class="admin-metric-label">平均折扣</span>
+        <strong class="admin-metric-value">{{ avgDiscountText }}</strong>
+        <span class="admin-metric-hint">按当前页合伙人计算</span>
+      </div>
+    </div>
+
+    <el-card shadow="never" class="admin-table-card partner-table-card">
+      <div class="table-header">
+        <div>
+          <div class="table-title">合伙人列表</div>
+          <div class="table-subtitle">查看基础信息、合作等级、折扣策略和状态。</div>
+        </div>
+        <div class="chips">
+          <span class="chip chip-muted">当前页 {{ rows.length }}</span>
+          <span class="chip chip-success">启用 {{ activeCount }}</span>
+          <span class="chip chip-warning">暂停 {{ pausedCount }}</span>
+        </div>
+      </div>
+
+      <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无合伙人数据">
+        <el-table :data="rows" border table-layout="fixed">
+          <el-table-column label="合伙人" min-width="240" show-overflow-tooltip>
+            <template #default="scope">
+              <div class="admin-entity-cell">
+                <div class="admin-entity-avatar partner-avatar" :class="statusClass(scope.row.status)">
+                  {{ partnerInitial(scope.row.partnerName) }}
+                </div>
+                <div class="min-w-0">
+                  <div class="admin-entity-main">{{ scope.row.partnerName }}</div>
+                  <div class="admin-entity-sub">{{ scope.row.partnerCode }}</div>
+                </div>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="等级" width="150">
+            <template #default="scope">
+              <span class="level-pill" :class="levelClass(scope.row.partnerLevel)">
+                {{ dictStore.label('partner_level', scope.row.partnerLevel) }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="折扣" width="100">
+            <template #default="scope">{{ formatDiscount(scope.row.discountRate) }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="110">
+            <template #default="scope">
+              <span class="admin-status-tag" :class="statusClass(scope.row.status)">
+                {{ dictStore.label('partner_status', scope.row.status) }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="city" label="城市" width="130" show-overflow-tooltip />
+          <el-table-column prop="contactName" label="联系人" width="120" show-overflow-tooltip />
+          <el-table-column prop="contactPhone" label="电话" width="150" show-overflow-tooltip />
+          <el-table-column label="操作" width="250" fixed="right">
+            <template #default="scope">
+              <el-button link type="primary" @click="goDetail(scope.row.id)">详情</el-button>
+              <el-button v-if="canUpdatePartner" link type="primary" @click="openEdit(scope.row)">编辑</el-button>
+              <el-dropdown v-if="canUpdatePartnerStatus" @command="(v: string) => changeStatus(scope.row.id, v)">
+                <el-button link type="primary" class="status-action">改状态</el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="active">启用</el-dropdown-item>
+                    <el-dropdown-item command="paused">暂停</el-dropdown-item>
+                    <el-dropdown-item command="closed">关闭</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </template>
+          </el-table-column>
+        </el-table>
+      </DataState>
+
+      <div class="admin-table-footer">
+        <el-pagination
+          background
+          layout="prev, pager, next, total"
+          :current-page="page.current"
+          :page-size="page.size"
+          :total="page.total"
+          @current-change="onPageChange"
+        />
+      </div>
+    </el-card>
+
+    <el-dialog
+      v-model="formVisible"
+      :title="formMode === 'create' ? '新建合伙人' : '编辑合伙人'"
+      width="640px"
+      class="admin-editor-dialog partner-editor-dialog"
+    >
+      <el-form ref="formRef" :model="form" :rules="rules" label-width="110px" class="admin-dialog-form">
         <el-form-item label="合伙人编号" required>
           <el-input v-model="form.partnerCode" :disabled="formMode === 'edit'" />
         </el-form-item>
-        <el-form-item label="合伙人名称" required><el-input v-model="form.partnerName" /></el-form-item>
+        <el-form-item label="合伙人名称" required>
+          <el-input v-model="form.partnerName" />
+        </el-form-item>
         <el-form-item label="等级" required>
           <el-select v-model="form.partnerLevel" style="width: 100%" @change="onPartnerLevelChange">
             <el-option
@@ -114,13 +189,19 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="联系人"><el-input v-model="form.contactName" /></el-form-item>
-        <el-form-item label="联系电话"><el-input v-model="form.contactPhone" /></el-form-item>
-        <el-form-item label="城市">
-          <RegionCascader v-model="form.cityCodes" />
-          <div class="mt-1 text-xs text-gray-500">{{ cityDisplayPreview || '未选择' }}</div>
+        <el-form-item label="联系人">
+          <el-input v-model="form.contactName" />
         </el-form-item>
-        <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item label="联系电话">
+          <el-input v-model="form.contactPhone" />
+        </el-form-item>
+        <el-form-item label="城市" class="is-full">
+          <RegionCascader v-model="form.cityCodes" />
+          <div class="city-preview">{{ cityDisplayPreview || '未选择' }}</div>
+        </el-form-item>
+        <el-form-item label="备注" class="is-full">
+          <el-input v-model="form.remark" type="textarea" :rows="3" />
+        </el-form-item>
       </el-form>
 
       <template #footer>
@@ -180,6 +261,14 @@ const form = reactive({
   remark: '',
 })
 
+const activeCount = computed(() => rows.value.filter((item) => item.status === 'active').length)
+const pausedCount = computed(() => rows.value.filter((item) => item.status === 'paused').length)
+const avgDiscountText = computed(() => {
+  if (!rows.value.length) return '-'
+  const avg = rows.value.reduce((sum, item) => sum + Number(item.discountRate || 0), 0) / rows.value.length
+  return formatDiscount(avg)
+})
+
 const partnerLevelProfiles: Record<string, { discountRate: number; initialAmount: number }> = {
   level_29800: { discountRate: 0.3, initialAmount: 29800 },
   level_59800: { discountRate: 0.25, initialAmount: 59800 },
@@ -216,6 +305,29 @@ function onPartnerLevelChange(level: string) {
   if (!profile) return
   form.discountRate = profile.discountRate
   form.initialAmount = profile.initialAmount
+}
+
+function formatDiscount(value?: number | null) {
+  if (value == null) return '-'
+  return `${(Number(value) * 100).toFixed(1)}%`
+}
+
+function partnerInitial(value?: string | null) {
+  const text = String(value || '').trim()
+  return text ? Array.from(text)[0] : '合'
+}
+
+function statusClass(status?: string) {
+  if (status === 'active') return 'is-success'
+  if (status === 'paused') return 'is-warning'
+  if (status === 'closed') return 'is-danger'
+  return 'is-muted'
+}
+
+function levelClass(level?: string) {
+  if (level === 'level_99800') return 'is-premium'
+  if (level === 'level_59800') return 'is-growth'
+  return 'is-basic'
 }
 
 async function load() {
@@ -371,3 +483,155 @@ const cityDisplayPreview = computed(() => {
   return regionPayloadFromCodes(form.cityCodes).displayName || form.city
 })
 </script>
+
+<style scoped>
+.partner-header {
+  align-items: center;
+}
+
+.partner-toolbar-card :deep(.el-card__body) {
+  padding: 12px;
+}
+
+.partner-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.filter-keyword {
+  width: 240px;
+}
+
+.filter-status {
+  width: 140px;
+}
+
+.partner-metric-grid {
+  margin-bottom: 0;
+}
+
+.partner-table-card :deep(.el-card__body) {
+  padding: 0;
+}
+
+.table-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid var(--admin-panel-border-soft);
+  background: linear-gradient(90deg, #f8fbff 0%, #ffffff 55%, #f0fdf4 100%);
+}
+
+.table-title {
+  color: var(--admin-text-strong);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.table-subtitle {
+  margin-top: 4px;
+  color: var(--admin-text-muted);
+  font-size: 12px;
+}
+
+.chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 14px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chip-muted {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.chip-success {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.chip-warning {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.partner-avatar.is-success {
+  background: linear-gradient(135deg, #059669, #14b8a6);
+}
+
+.partner-avatar.is-warning {
+  background: linear-gradient(135deg, #d97706, #f59e0b);
+}
+
+.partner-avatar.is-danger {
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+}
+
+.partner-avatar.is-muted {
+  background: linear-gradient(135deg, #64748b, #94a3b8);
+}
+
+.level-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.level-pill.is-basic {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.level-pill.is-growth {
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+
+.level-pill.is-premium {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.status-action {
+  margin-left: 10px;
+}
+
+.city-preview {
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 768px) {
+  .partner-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .filter-keyword,
+  .filter-status,
+  .partner-toolbar .el-button {
+    width: 100%;
+  }
+}
+</style>
