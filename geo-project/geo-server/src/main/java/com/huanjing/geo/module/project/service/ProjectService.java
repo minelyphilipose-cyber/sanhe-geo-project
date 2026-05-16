@@ -236,7 +236,7 @@ public class ProjectService {
         project.setDiscountRateSnapshot(null);
         project.setDeductionAmount(BigDecimal.ZERO);
         project.setDeductionTxnNo(null);
-        project.setDeliveryMode(StringUtils.hasText(req.getDeliveryMode()) ? req.getDeliveryMode() : "managed");
+        project.setDeliveryMode("managed");
         project.setSignedAt(req.getSignedAt() != null ? req.getSignedAt() : LocalDateTime.now());
         project.setStartDate(req.getStartDate());
         project.setEndDate(req.getEndDate());
@@ -301,7 +301,6 @@ public class ProjectService {
         project.setOwnerType(ownerType);
         project.setPartnerId(partnerId);
         applyRegionFields(project, req.getProvinceCode(), req.getProvinceName(), req.getCityCode(), req.getCityName(), req.getDistrictCode(), req.getDistrictName());
-        project.setDeliveryMode(StringUtils.hasText(req.getDeliveryMode()) ? req.getDeliveryMode() : project.getDeliveryMode());
         project.setSignedAt(req.getSignedAt());
         project.setStartDate(req.getStartDate());
         project.setEndDate(req.getEndDate());

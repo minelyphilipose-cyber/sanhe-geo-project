@@ -84,12 +84,6 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
             "<if test=\"req.platformCode != null and req.platformCode != ''\">",
             "  AND r.platform_code = #{req.platformCode} ",
             "</if>",
-            "<if test=\"req.batchNo != null\">",
-            "  AND r.batch_no = #{req.batchNo} ",
-            "</if>",
-            "<if test=\"req.category != null and req.category != ''\">",
-            "  AND pt.category = #{req.category} ",
-            "</if>",
             "<if test=\"req.keyword != null and req.keyword != ''\">",
             "  AND (r.request_prompt_content LIKE CONCAT('%', #{req.keyword}, '%') ",
             "    OR qc.request_prompt_content LIKE CONCAT('%', #{req.keyword}, '%') ",
@@ -119,7 +113,7 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
     @Select("SELECT DISTINCT " +
             "r.platform_code AS platformCode, " +
             "COALESCE(qc.platform_name_snapshot, p.platform_name, r.platform_code) AS platformName, " +
-            "pt.category AS category " +
+            "NULL AS category " +
             PROMPT_TRACE_FROM +
             "WHERE r.version_id = #{versionId} " +
             "AND r.batch_no IN (1, 2) " +
