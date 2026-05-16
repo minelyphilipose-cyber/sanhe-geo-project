@@ -35,7 +35,7 @@
         <div class="flex items-center justify-between">
           <span>基础信息</span>
           <div class="space-x-2">
-            <el-button size="small" @click="goReports">项目报表</el-button>
+            <el-button size="small" @click="goReports">实时看板</el-button>
             <el-button v-if="project?.status === 'active'" size="small" type="primary" plain @click="goBaselineReport">基线检测报告</el-button>
             <el-tag>{{ projectStatusLabel(project?.status) }}</el-tag>
           </div>
@@ -430,8 +430,6 @@ const projectBasicInfoItems = computed(() => {
     { label: '拓词组', value: keywordSummary.value },
     { label: '问题额度', value: keywordAllocationSummary.value },
     { label: '分发渠道额度', value: channelAllocationSummary.value },
-    { label: '归属类型', value: dictStore.label('owner_type', current?.ownerType) || '-' },
-    { label: '合伙人', value: current?.ownerType === 'direct' ? '-' : '已绑定' },
     { label: '所在地区', value: regionText(current) },
     { label: '启动日期', value: current?.activatedAt || '-' },
     { label: '有效期至', value: current?.endDate || '-' },

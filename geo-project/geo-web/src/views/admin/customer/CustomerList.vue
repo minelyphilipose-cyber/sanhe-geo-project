@@ -4,7 +4,7 @@
       <div>
         <div class="admin-page-kicker">客户资产</div>
         <h1 class="admin-page-title">客户管理</h1>
-        <div class="admin-page-subtitle">管理客户档案、品牌、套餐与项目转化状态。</div>
+        <div class="admin-page-subtitle">让每一个客户从品牌到项目都成为可经营的长期资产。</div>
       </div>
       <div class="admin-page-actions">
         <el-button v-if="canCreateCompany" type="primary" @click="openCreate">新建客户</el-button>

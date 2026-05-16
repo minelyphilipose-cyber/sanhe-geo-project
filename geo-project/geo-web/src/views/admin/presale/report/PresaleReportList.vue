@@ -5,7 +5,7 @@
       <div class="header-left">
         <div class="admin-page-kicker">AI可见度诊断报告</div>
         <h1 class="page-title admin-page-title">报告列表</h1>
-        <div class="admin-page-subtitle">跟踪报告生成状态、版本冻结与 Prompt 调用链路。</div>
+        <div class="admin-page-subtitle">沉淀每一次诊断的版本与证据，让 AI 可见度的演进有迹可循。</div>
       </div>
       <div class="header-right admin-page-actions">
         <el-button v-if="canManagePage03Config" @click="goPage03Config">PAGE03 配置</el-button>

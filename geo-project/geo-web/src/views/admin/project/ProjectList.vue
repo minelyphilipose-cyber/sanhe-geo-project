@@ -4,7 +4,7 @@
       <div>
         <div class="admin-page-kicker">交付运营</div>
         <h1 class="admin-page-title">项目管理</h1>
-        <div class="admin-page-subtitle">管理项目启动、拓词额度、内容分发与交付状态。</div>
+        <div class="admin-page-subtitle">贯通从启动到交付的全链路，让项目进度与产能始终在线。</div>
       </div>
       <div class="admin-page-actions">
         <el-button v-if="canCreateProject" type="primary" @click="openCreate">新建项目</el-button>

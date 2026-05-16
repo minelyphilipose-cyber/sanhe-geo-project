@@ -4,7 +4,7 @@
       <div>
         <div class="admin-page-kicker">内容运营</div>
         <h1 class="admin-page-title">内容与执行</h1>
-        <div class="admin-page-subtitle">集中处理文章生成、审核、修订、发布与分发状态。</div>
+        <div class="admin-page-subtitle">让内容从生成到分发汇于一处，质量与节奏一目了然。</div>
       </div>
     </div>
 

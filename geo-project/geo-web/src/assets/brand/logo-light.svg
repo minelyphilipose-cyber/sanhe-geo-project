@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 180 40" width="180" height="40">
+  <defs>
+    <linearGradient id="energyCoreLight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#E04BA8"/>
+      <stop offset="50%" stop-color="#5B3FD8"/>
+      <stop offset="100%" stop-color="#0099D4"/>
+    </linearGradient>
+    <linearGradient id="energyInnerLight" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#A88FE8"/>
+      <stop offset="100%" stop-color="#4A2DB8"/>
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(0 0)">
+    <path d="M20 2 L23 17 L38 20 L23 23 L20 38 L17 23 L2 20 L17 17 Z" fill="url(#energyCoreLight)"/>
+    <path d="M20 8 L21.5 18.5 L32 20 L21.5 21.5 L20 32 L18.5 21.5 L8 20 L18.5 18.5 Z" fill="url(#energyInnerLight)" opacity="0.85"/>
+    <circle cx="20" cy="20" r="3" fill="#FFFFFF"/>
+  </g>
+
+  <g font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', sans-serif" dominant-baseline="middle">
+    <text x="48" y="22" font-size="20" font-weight="600" fill="#1A1547" letter-spacing="1">幻境AI</text>
+    <text x="118" y="22" font-size="13" font-weight="400" fill="#9B7AB8">·</text>
+    <text x="128" y="22" font-size="13" font-weight="500" fill="#5B3FD8" letter-spacing="2">GEO</text>
+  </g>
+</svg>

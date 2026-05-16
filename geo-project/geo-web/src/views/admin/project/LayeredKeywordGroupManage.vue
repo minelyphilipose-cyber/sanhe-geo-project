@@ -4,7 +4,7 @@
       <div class="keyword-title-block">
         <div class="admin-page-kicker">问题池</div>
         <h1 class="admin-page-title">拓词管理</h1>
-        <div class="admin-page-subtitle">选择项目、确认额度、生成问题词并审核入库。</div>
+        <div class="admin-page-subtitle">把用户真实意图沉淀为可调用的问题资产，为内容生产蓄能。</div>
       </div>
       <div class="step-action-group">
         <button v-for="s in steps" :key="s.no" class="step-btn" :class="{ active: activeStep === s.no, done: completedSteps.includes(s.no) }" @click="goStep(s.no)">

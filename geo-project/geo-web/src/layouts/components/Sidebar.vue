@@ -10,9 +10,6 @@
         :src="collapsed ? logoSymbolUrl : logoHorizontalUrl"
         alt="幻境AI FANTASY GEO"
       >
-      <div v-if="!collapsed" class="sidebar__product">
-        <span>AI Visibility Platform</span>
-      </div>
     </div>
 
     <el-scrollbar class="sidebar__menu-wrap">
@@ -63,8 +60,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
-import logoHorizontalUrl from '@/assets/brand/logo-horizontal.svg'
-import logoSymbolUrl from '@/assets/brand/logo-symbol.svg'
+import logoHorizontalUrl from '@/assets/brand/logo-dark.svg'
+import logoSymbolUrl from '@/assets/brand/logo-icon.svg'
 import { useUserStore } from '@/stores/user'
 import type { RoleType } from '@/types'
 
@@ -173,12 +170,12 @@ const visibleGroups = computed(() =>
 }
 
 .sidebar__logo {
-  min-height: 76px;
+  min-height: 72px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  padding: 12px 16px 14px;
+  padding: 12px 16px;
   border-bottom: 1px solid rgba(148, 163, 184, 0.12);
   flex-shrink: 0;
   position: relative;
@@ -192,8 +189,8 @@ const visibleGroups = computed(() =>
 }
 
 .sidebar__brand {
-  width: 192px;
-  height: 34px;
+  width: 178px;
+  height: 39px;
   object-fit: contain;
   object-position: center;
   flex-shrink: 0;
@@ -204,22 +201,6 @@ const visibleGroups = computed(() =>
   width: 36px;
   height: 36px;
   object-position: center;
-}
-
-.sidebar__product {
-  height: 20px;
-  margin-top: 7px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0 9px;
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  border-radius: 999px;
-  background: rgba(15, 23, 42, 0.38);
-  color: #93c5fd;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0;
 }
 
 .sidebar__menu-wrap {
