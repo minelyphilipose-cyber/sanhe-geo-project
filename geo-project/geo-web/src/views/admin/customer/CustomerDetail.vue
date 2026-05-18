@@ -63,7 +63,7 @@
           <el-descriptions-item label="套餐名称">{{ activePackageBinding.packageName }}</el-descriptions-item>
           <el-descriptions-item label="服务周期">{{ activePackageBinding.serviceMonths }} 个月</el-descriptions-item>
           <el-descriptions-item label="关键词组总额度">{{ activePackageBinding.keywordGroupLimit }}</el-descriptions-item>
-          <el-descriptions-item label="绑定时间">{{ activePackageBinding.boundAt || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="绑定时间">{{ formatDateTimeSeconds(activePackageBinding.boundAt) }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ packageStatusLabel(activePackageBinding.status) }}</el-descriptions-item>
         </el-descriptions>
         <div v-loading="keywordGroupQuotaLoading" class="quota-panel quota-panel--keyword">
@@ -185,8 +185,12 @@
         <el-table-column label="状态" width="110">
           <template #default="scope">{{ packageStatusLabel(scope.row.status) }}</template>
         </el-table-column>
-        <el-table-column prop="boundAt" label="绑定时间" width="180" />
-        <el-table-column prop="unboundAt" label="解绑时间" width="180" />
+        <el-table-column label="绑定时间" width="180">
+          <template #default="scope">{{ formatDateTimeSeconds(scope.row.boundAt) }}</template>
+        </el-table-column>
+        <el-table-column label="解绑时间" width="180">
+          <template #default="scope">{{ formatDateTimeSeconds(scope.row.unboundAt) }}</template>
+        </el-table-column>
       </el-table>
     </el-card>
 
@@ -389,6 +393,7 @@ import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
 import { errorMessage } from '@/utils/error'
+import { formatDateTimeSeconds } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -1000,6 +1005,7 @@ const customerBasicInfoItems = computed(() => [
   { label: '归属', value: dictStore.label('owner_type', company.value?.ownerType) || '-' },
   { label: '合伙人', value: (company.value as any)?.partnerName || '-' },
   { label: '状态', value: dictStore.label('company_status', (company.value as any)?.status) || '-' },
+  { label: '创建时间', value: formatDateTimeSeconds(company.value?.createdAt) },
 ])
 
 onMounted(async () => {
