@@ -2,6 +2,7 @@ package com.huanjing.geo.module.dispatch.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.util.QuotaPeriodResolver;
+import com.huanjing.geo.module.dispatch.config.DispatchProperties;
 import com.huanjing.geo.module.dispatch.enums.DispatchTaskType;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.entity.ProjectChannelAllocation;
@@ -32,6 +33,7 @@ public class DispatchPlannerService {
     private final DispatchTaskService dispatchTaskService;
     private final ProjectDistributionChannelAllocationService channelAllocationService;
     private final DispatchTaskMapper dispatchTaskMapper;
+    private final DispatchProperties dispatchProperties;
 
     @Transactional
     public void scanAndPlan(LocalDate today) {
@@ -107,6 +109,9 @@ public class DispatchPlannerService {
     }
 
     private void planContentGeneration(Project project, LocalDate today) {
+        if (!dispatchProperties.isAutoContentGenerationEnabled()) {
+            return;
+        }
         if (!"active".equals(project.getStatus())) {
             return;
         }

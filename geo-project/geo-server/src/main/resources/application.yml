@@ -231,6 +231,7 @@ geo:
     model-request-timeout-ms: 180000
     resource-busy-retry-min-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_MIN_SECONDS:30}
     resource-busy-retry-jitter-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_JITTER_SECONDS:30}
+    auto-content-generation-enabled: ${DISPATCH_AUTO_CONTENT_GENERATION_ENABLED:false}
     api-key-aes-secret: ${DISPATCH_API_KEY_AES_SECRET:geo-dispatch-key}
   llm:
     pool:
