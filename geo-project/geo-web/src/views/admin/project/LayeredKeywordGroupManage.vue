@@ -233,7 +233,7 @@
           </div>
           <div class="card log-card">
             <div class="card-head"><span>实时日志<span class="note-inline">关键节点级 · 用于审计与排障</span></span></div>
-            <div class="card-body"><div class="log-area"><div v-for="log in currentBatch?.logs || []" :key="`${log.createdAt}-${log.eventCode}`"><span class="log-time">{{ formatTime(log.createdAt) }}</span><span class="log-info">[{{ log.eventCode }}] {{ log.message }}</span></div></div></div>
+            <div class="card-body"><div class="log-area"><div v-for="log in realtimeLogs" :key="log.key"><span class="log-time">{{ formatTime(log.createdAt) }}</span><span class="log-info">[{{ log.eventCode }}] {{ log.message }}</span></div></div></div>
           </div>
           <div class="footer-bar"><div></div><div><button class="btn" @click="goStep(3)">← 返回配置</button><button class="btn btn-primary" :disabled="!currentBatch || ['pending','running'].includes(currentBatch.status)" @click="goReview">下一步：审核 →</button></div></div>
         </section>
@@ -459,6 +459,7 @@ import type { Project } from '@/types'
 defineOptions({ name: 'LayeredKeywordGroupManage' })
 
 type ManualQuestionRow = ManualQuestionInput & { key: number }
+type RealtimeLog = { key: string; eventCode: string; message: string; createdAt?: string }
 const route = useRoute()
 
 const StepHeader = defineComponent({
@@ -592,6 +593,27 @@ const validationMessage = computed(() => {
 })
 const progressObj = computed(() => {
   try { return currentBatch.value?.progressJson ? JSON.parse(currentBatch.value.progressJson) : {} } catch { return {} }
+})
+const realtimeLogs = computed<RealtimeLog[]>(() => {
+  const batch = currentBatch.value
+  if (!batch) return []
+  const logs: RealtimeLog[] = (batch.logs || []).map((log, index) => ({
+    key: `${log.createdAt}-${log.eventCode}-${index}`,
+    eventCode: log.eventCode,
+    message: log.message,
+    createdAt: log.createdAt,
+  }))
+  const progressMessage = String(progressObj.value.message || '').trim()
+  if (progressMessage && !logs.some((log) => log.message === progressMessage)) {
+    const eventCode = batch.status === 'failed' ? 'PROGRESS_ERROR' : 'PROGRESS'
+    logs.push({
+      key: `${batch.id}-${eventCode}-${batch.finishedAt || batch.startedAt || batch.createdAt || 'latest'}`,
+      eventCode,
+      message: progressMessage,
+      createdAt: batch.finishedAt || batch.startedAt || batch.createdAt,
+    })
+  }
+  return logs
 })
 const progressPercent = computed(() => Math.min(100, Math.round(((progressObj.value.generated || 0) / Math.max(progressObj.value.target || batchTotal.value || 1, 1)) * 100)))
 const pagedQuestions = computed(() => questionPage.value.records || [])
