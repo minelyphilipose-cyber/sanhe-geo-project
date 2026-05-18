@@ -412,22 +412,23 @@ body {
 }
 
 .admin-row-actions {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-start;
   gap: 4px 10px;
   width: 100%;
 }
 
 .admin-row-actions .el-button {
-  justify-self: center;
+  flex: 0 0 auto;
   padding-right: 0;
   padding-left: 0;
 }
 
 .admin-row-actions > span {
   display: inline-flex;
-  justify-self: center;
+  flex: 0 0 auto;
 }
 
 .admin-row-actions .el-button + .el-button {
@@ -436,8 +437,8 @@ body {
 
 .admin-row-actions .is-wide,
 .admin-row-actions > span.is-wide {
-  grid-column: 1 / -1;
-  justify-self: center;
+  flex-basis: 100%;
+  justify-content: flex-start;
 }
 
 .admin-entity-cell {

@@ -91,7 +91,6 @@
                 <el-button link type="primary" @click="goDetail(scope.row.id)">详情</el-button>
                 <el-button
                   v-if="canStartProject(scope.row)"
-                  :class="{ 'is-wide': scope.row.status === 'paused' }"
                   link
                   type="primary"
                   @click="goActivate(scope.row.id)"
