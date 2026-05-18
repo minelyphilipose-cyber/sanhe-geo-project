@@ -141,6 +141,15 @@ public class GeoQuestionService {
             existing.setCreatedAt(LocalDateTime.now());
             existing.setUpdatedAt(LocalDateTime.now());
             workorderMapper.insert(existing);
+        } else {
+            syncDraftWorkorderQuota(
+                    existing,
+                    quota.getPackageBindingId(),
+                    quota.getPackageName(),
+                    n(quota.getQuotaLimitA()),
+                    n(quota.getQuotaLimitB()),
+                    n(quota.getQuotaLimitC())
+            );
         }
         return toWorkorderVO(existing, quotaSnapshot(companyId, existing.getId()));
     }
@@ -175,8 +184,50 @@ public class GeoQuestionService {
             existing.setCreatedAt(LocalDateTime.now());
             existing.setUpdatedAt(LocalDateTime.now());
             workorderMapper.insert(existing);
+        } else {
+            syncDraftWorkorderQuota(
+                    existing,
+                    quota.getPackageBindingId(),
+                    quota.getPackageName(),
+                    allocation.a(),
+                    allocation.b(),
+                    allocation.c()
+            );
         }
         return toWorkorderVO(existing, quotaSnapshotByProject(projectId, existing.getId()));
+    }
+
+    private void syncDraftWorkorderQuota(GeoQuestionWorkorder workorder,
+                                        Long packageBindingId,
+                                        String packageName,
+                                        int targetA,
+                                        int targetB,
+                                        int targetC) {
+        boolean changed = false;
+        if (!Objects.equals(workorder.getPackageBindingId(), packageBindingId)) {
+            workorder.setPackageBindingId(packageBindingId);
+            changed = true;
+        }
+        if (!Objects.equals(workorder.getPackageName(), packageName)) {
+            workorder.setPackageName(packageName);
+            changed = true;
+        }
+        if (!Objects.equals(n(workorder.getTargetA()), targetA)) {
+            workorder.setTargetA(targetA);
+            changed = true;
+        }
+        if (!Objects.equals(n(workorder.getTargetB()), targetB)) {
+            workorder.setTargetB(targetB);
+            changed = true;
+        }
+        if (!Objects.equals(n(workorder.getTargetC()), targetC)) {
+            workorder.setTargetC(targetC);
+            changed = true;
+        }
+        if (changed) {
+            workorder.setUpdatedAt(LocalDateTime.now());
+            workorderMapper.updateById(workorder);
+        }
     }
 
     public QuotaSnapshot quotaSnapshot(Long companyId, Long workorderId) {
