@@ -15,7 +15,7 @@
       </div>
     </div>
 
-    <el-form ref="formRef" v-loading="loading" :model="form" :rules="rules" label-position="top">
+    <el-form ref="formRef" v-loading="loading" :model="form" :rules="rules" label-position="top" class="page03-form">
       <section class="section">
         <div class="section-head">
           <div class="section-bar"></div>
@@ -232,8 +232,10 @@ onMounted(load)
 <style scoped>
 .page03-config {
   min-height: 100%;
-  padding: 24px 32px;
-  background: #f5f6f8;
+  padding: 24px 28px 36px;
+  background:
+    linear-gradient(180deg, rgba(230, 240, 255, 0.72) 0, rgba(248, 250, 252, 0) 180px),
+    #f8fafc;
   color: #1d2129;
   font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
   font-size: 13px;
@@ -246,7 +248,12 @@ onMounted(load)
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
+  padding: 22px 24px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.06);
 }
 
 .breadcrumb {
@@ -263,15 +270,15 @@ onMounted(load)
 }
 
 .breadcrumb-current {
-  color: #1d2129;
+  color: #1d4ed8;
 }
 
 .page-title {
   margin: 0;
   color: #1d2129;
   font-size: 22px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
+  font-weight: 700;
+  letter-spacing: 0;
 }
 
 .page-actions {
@@ -310,12 +317,17 @@ onMounted(load)
   background: #1d44d9;
 }
 
+.page03-form {
+  max-width: 1280px;
+}
+
 .section {
-  margin-bottom: 16px;
-  padding: 24px 28px;
-  border: 1px solid #ebedf0;
+  margin-bottom: 18px;
+  padding: 22px 24px 24px;
+  border: 1px solid #e5eaf3;
   border-radius: 10px;
   background: #fff;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.04);
 }
 
 .section-last {
@@ -326,7 +338,7 @@ onMounted(load)
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 4px;
+  margin-bottom: 5px;
 }
 
 .section-bar {
@@ -339,13 +351,13 @@ onMounted(load)
 
 .section-title {
   margin: 0;
-  color: #1d2129;
+  color: #111827;
   font-size: 15px;
-  font-weight: 500;
+  font-weight: 700;
 }
 
 .section-desc {
-  margin: 0 0 20px 13px;
+  margin: 0 0 18px 13px;
   color: #8a8f99;
   font-size: 12px;
 }
@@ -359,8 +371,8 @@ onMounted(load)
 
 .form-grid-2 {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(2, minmax(260px, 420px));
+  gap: 18px;
   margin-bottom: 20px;
 }
 
@@ -399,20 +411,17 @@ onMounted(load)
 .config-input :deep(.el-input__wrapper) {
   height: 36px;
   padding: 0 56px 0 12px;
-  border: 1px solid #dcdfe6;
   border-radius: 6px;
   background: #fff;
-  box-shadow: none;
+  box-shadow: 0 0 0 1px #dbe3ef inset;
 }
 
 .config-input :deep(.el-input__wrapper:hover) {
-  border-color: #b8bcc4;
-  box-shadow: none;
+  box-shadow: 0 0 0 1px #b8c3d4 inset;
 }
 
 .config-input :deep(.el-input__wrapper.is-focus) {
-  border-color: #2454ff;
-  box-shadow: 0 0 0 3px rgba(36, 84, 255, 0.08);
+  box-shadow: 0 0 0 1px #3b82f6 inset, 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .config-input :deep(.el-input__inner) {
@@ -429,14 +438,14 @@ onMounted(load)
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
   gap: 12px;
   margin-bottom: 24px;
 }
 
 .top-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  grid-template-columns: repeat(3, minmax(200px, 1fr));
   gap: 12px;
   margin-bottom: 20px;
 }
@@ -444,15 +453,17 @@ onMounted(load)
 .stat-card {
   position: relative;
   min-width: 0;
-  padding: 14px;
-  border: 1px solid #ebedf0;
+  padding: 14px 14px 15px;
+  border: 1px solid #e5eaf3;
   border-radius: 8px;
-  background: #fafbfc;
-  transition: border-color 0.15s;
+  background: #fbfdff;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .stat-card:hover {
-  border-color: #dcdfe6;
+  border-color: #cbd5e1;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+  transform: translateY(-1px);
 }
 
 .stat-card-label {
@@ -493,9 +504,8 @@ onMounted(load)
 .stat-value :deep(.el-input__wrapper),
 .stat-unit :deep(.el-input__wrapper) {
   height: 32px;
-  border: 1px solid #dcdfe6;
   border-radius: 5px;
-  box-shadow: none;
+  box-shadow: 0 0 0 1px #dbe3ef inset;
 }
 
 .stat-value :deep(.el-input__wrapper) {
@@ -510,7 +520,7 @@ onMounted(load)
 
 .stat-value :deep(.el-input__wrapper.is-focus),
 .stat-unit :deep(.el-input__wrapper.is-focus) {
-  border-color: #2454ff;
+  box-shadow: 0 0 0 1px #3b82f6 inset, 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .stat-unit :deep(.el-input__wrapper.is-focus) {
@@ -571,9 +581,9 @@ onMounted(load)
   flex-shrink: 0;
   height: 36px;
   overflow: hidden;
-  border: 1px solid #dcdfe6;
   border-radius: 6px;
   background: #f5f6f8;
+  box-shadow: 0 0 0 1px #dbe3ef inset;
 }
 
 .stepper button {
@@ -603,22 +613,20 @@ onMounted(load)
 .config-textarea :deep(.el-textarea__inner) {
   height: 88px;
   padding: 10px 12px 24px;
-  border: 1px solid #dcdfe6;
   border-radius: 6px;
   color: #1d2129;
   font-size: 13px;
   line-height: 1.6;
   resize: none;
-  box-shadow: none;
+  box-shadow: 0 0 0 1px #dbe3ef inset;
 }
 
 .config-textarea :deep(.el-textarea__inner:hover) {
-  border-color: #b8bcc4;
+  box-shadow: 0 0 0 1px #b8c3d4 inset;
 }
 
 .config-textarea :deep(.el-textarea__inner:focus) {
-  border-color: #2454ff;
-  box-shadow: 0 0 0 3px rgba(36, 84, 255, 0.08);
+  box-shadow: 0 0 0 1px #3b82f6 inset, 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 .config-textarea :deep(.el-input__count) {
@@ -645,8 +653,31 @@ onMounted(load)
     padding: 18px 16px;
   }
 
+  .page-head {
+    align-items: flex-start;
+    padding: 18px;
+  }
+
+  .page-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
   .section {
     padding: 20px 18px;
+  }
+
+  .form-grid-2,
+  .stat-grid,
+  .top-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (min-width: 769px) and (max-width: 1180px) {
+  .stat-grid,
+  .top-grid {
+    grid-template-columns: repeat(2, minmax(220px, 1fr));
   }
 }
 </style>

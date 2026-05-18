@@ -65,6 +65,38 @@
       </div>
     </div>
 
+    <section class="llm-pool-panel">
+      <div class="llm-pool-head">
+        <div>
+          <div class="panel-kicker">大模型执行池</div>
+          <h3 class="panel-title">全局并发与异常信号</h3>
+        </div>
+        <span class="platform-status" :class="llmPoolStatusClass">
+          <span class="health-dot"></span>
+          {{ llmPoolStatusText }}
+        </span>
+      </div>
+      <div class="llm-pool-grid">
+        <div class="llm-pool-item">
+          <span>全局占用</span>
+          <strong>{{ llmPool?.activeGlobal || 0 }} / {{ llmPool?.globalConcurrency || 0 }}</strong>
+        </div>
+        <div class="llm-pool-item">
+          <span>跟踪租约</span>
+          <strong>{{ llmPool?.trackedLeases || 0 }}</strong>
+        </div>
+        <div class="llm-pool-item">
+          <span>Permit Busy</span>
+          <strong>{{ permitBusyTotal }}</strong>
+        </div>
+        <div class="llm-pool-item">
+          <span>熔断/降级信号</span>
+          <strong>{{ circuitSignalTotal }}</strong>
+        </div>
+      </div>
+      <el-progress :percentage="llmPoolPercent" :status="llmPoolProgressStatus" />
+    </section>
+
     <DataState :loading="loading" :empty="!loading && platforms.length === 0" empty-text="暂无平台健康数据">
       <div class="platform-grid">
         <article v-for="item in platforms" :key="item.id" class="platform-card" :class="platformCardClass(item)">
@@ -91,6 +123,10 @@
               <strong>{{ item.tpmLimit || 0 }}</strong>
             </div>
             <div class="platform-limit-item">
+              <span>并发占用</span>
+              <strong>{{ item.activePermitCount || 0 }} / {{ item.concurrencyLimit || 1 }}</strong>
+            </div>
+            <div class="platform-limit-item">
               <span>异常次数</span>
               <strong>{{ item.exceptionCount || 0 }}</strong>
             </div>
@@ -112,8 +148,8 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
-import { getDispatchPlatforms, type DispatchRangeParams } from '@/api/dispatch'
-import type { DispatchPlatformHealthItem } from '@/types'
+import { getDispatchPlatforms, getLlmPoolSnapshot, type DispatchRangeParams } from '@/api/dispatch'
+import type { DispatchPlatformHealthItem, LlmPoolSnapshot } from '@/types'
 
 const loading = ref(false)
 const autoRefresh = ref(true)
@@ -125,12 +161,40 @@ const filters = reactive({
 })
 
 const platforms = ref<DispatchPlatformHealthItem[]>([])
+const llmPool = ref<LlmPoolSnapshot | null>(null)
 
 const p0Count = computed(() => platforms.value.filter((x) => x.priorityLevel === 'P0').length)
 const p1Count = computed(() => platforms.value.filter((x) => x.priorityLevel === 'P1').length)
 const p2Count = computed(() => platforms.value.filter((x) => x.priorityLevel === 'P2').length)
 const degradedCount = computed(() => platforms.value.filter((x) => x.degraded).length)
 const nearLimitCount = computed(() => platforms.value.filter((x) => !x.degraded && platformPercent(x) >= 80).length)
+const llmPoolPercent = computed(() => {
+  const limit = llmPool.value?.globalConcurrency || 0
+  if (limit <= 0) return 0
+  return Math.min(100, Math.round(((llmPool.value?.activeGlobal || 0) / limit) * 100))
+})
+const permitBusyTotal = computed(() => counterTotal('llm_permit_acquire_busy_total'))
+const circuitSignalTotal = computed(() => {
+  const breakers = llmPool.value?.circuitBreakers || {}
+  return Object.values(breakers).filter((item) => item?.open).length
+})
+const llmPoolStatusText = computed(() => {
+  if (!llmPool.value?.enabled) return '未启用'
+  if (permitBusyTotal.value > 0 || circuitSignalTotal.value > 0) return '存在告警'
+  if (llmPoolPercent.value >= 80) return '接近上限'
+  return '正常'
+})
+const llmPoolStatusClass = computed(() => {
+  if (!llmPool.value?.enabled) return 'dot-gray'
+  if (permitBusyTotal.value > 0 || circuitSignalTotal.value > 0) return 'dot-red'
+  if (llmPoolPercent.value >= 80) return 'dot-yellow'
+  return 'dot-green'
+})
+const llmPoolProgressStatus = computed<'' | 'success' | 'warning' | 'exception'>(() => {
+  if (permitBusyTotal.value > 0 || circuitSignalTotal.value > 0) return 'exception'
+  if (llmPoolPercent.value >= 80) return 'warning'
+  return 'success'
+})
 
 function ensureCustomRange() {
   if (filters.rangeType !== 'custom') return true
@@ -193,11 +257,22 @@ async function loadPlatforms() {
   if (!ensureCustomRange()) return
   loading.value = true
   try {
-    const { data } = await getDispatchPlatforms(buildRangeParams())
+    const [{ data }, poolResp] = await Promise.all([
+      getDispatchPlatforms(buildRangeParams()),
+      getLlmPoolSnapshot(),
+    ])
     platforms.value = data.data || []
+    llmPool.value = poolResp.data.data || null
   } finally {
     loading.value = false
   }
+}
+
+function counterTotal(pattern: string) {
+  const counters = llmPool.value?.counters || {}
+  return Object.entries(counters)
+    .filter(([key]) => key.includes(pattern))
+    .reduce((sum, [, value]) => sum + Number(value || 0), 0)
 }
 
 function startTimer() {
@@ -297,6 +372,65 @@ onBeforeUnmount(() => {
 
 .platform-summary-grid {
   margin-bottom: 0;
+}
+
+.llm-pool-panel {
+  margin: 14px 0;
+  padding: 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
+}
+
+.llm-pool-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.panel-kicker {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.panel-title {
+  margin: 3px 0 0;
+  color: var(--admin-text-strong);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.llm-pool-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.llm-pool-item {
+  padding: 12px;
+  border: 1px solid #e7edf5;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.llm-pool-item span {
+  display: block;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.llm-pool-item strong {
+  display: block;
+  margin-top: 6px;
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 800;
 }
 
 .platform-grid {
@@ -426,11 +560,16 @@ onBeforeUnmount(() => {
   color: #b91c1c;
 }
 
+.platform-status.dot-gray {
+  background: #f8fafc;
+  color: #64748b;
+}
+
 .platform-limit-grid {
   display: grid;
   position: relative;
   z-index: 1;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 14px;
 }
@@ -518,6 +657,10 @@ onBeforeUnmount(() => {
   background: #ef4444;
 }
 
+.platform-status.dot-gray .health-dot {
+  background: #94a3b8;
+}
+
 @media (max-width: 1280px) {
   .platform-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -539,6 +682,10 @@ onBeforeUnmount(() => {
 
   .platform-grid {
     grid-template-columns: 1fr;
+  }
+
+  .llm-pool-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .toolbar-left {

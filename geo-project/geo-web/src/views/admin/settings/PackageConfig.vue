@@ -116,96 +116,105 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="formVisible" :title="formMode === 'create' ? '新增套餐' : '编辑套餐'" width="900px" class="admin-editor-dialog">
-      <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
-        <el-row :gutter="12">
-          <el-col :xs="24" :md="12">
+    <el-dialog v-model="formVisible" :title="formMode === 'create' ? '新增套餐' : '编辑套餐'" width="960px" class="admin-editor-dialog package-editor-dialog">
+      <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="package-config-form">
+        <section class="form-section">
+          <div class="form-section-head">
+            <div>
+              <span>基础信息</span>
+              <strong>套餐标识与名称</strong>
+            </div>
+          </div>
+          <div class="form-grid is-two">
             <el-form-item label="套餐类型" prop="packageType" required>
               <el-input v-model="form.packageType" :disabled="formMode === 'edit'" placeholder="如: trial_basic" />
             </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
             <el-form-item label="套餐名称" prop="packageName" required>
               <el-input v-model="form.packageName" />
             </el-form-item>
-          </el-col>
-        </el-row>
+          </div>
+        </section>
 
-        <el-row :gutter="12">
-          <el-col :xs="24" :sm="12" :lg="6">
+        <section class="form-section">
+          <div class="form-section-head">
+            <div>
+              <span>价格与拓词额度</span>
+              <strong>标准价、服务周期与 A/B/C 档问题数</strong>
+            </div>
+            <em :class="{ invalid: tierTotal !== form.keywordGroupLimit }">
+              A/B/C 合计 {{ tierTotal }} / 总数 {{ form.keywordGroupLimit }}
+            </em>
+          </div>
+          <div class="form-grid is-three">
             <el-form-item label="标准价(元)" prop="standardPrice" required>
-              <el-input-number v-model="form.standardPrice" :min="0.01" :precision="2" style="width: 100%" />
+              <el-input-number v-model="form.standardPrice" :min="0.01" :precision="2" />
             </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :lg="6">
             <el-form-item label="服务月数" prop="serviceMonths" required>
-              <el-input-number v-model="form.serviceMonths" :min="1" style="width: 100%" />
+              <el-input-number v-model="form.serviceMonths" :min="1" />
             </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12" :lg="6">
             <el-form-item label="拓词问题总数" prop="keywordGroupLimit" required>
-              <el-input-number v-model="form.keywordGroupLimit" :min="1" style="width: 100%" />
+              <el-input-number v-model="form.keywordGroupLimit" :min="1" />
             </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="12">
-          <el-col :xs="24" :sm="8">
             <el-form-item label="A档问题数" prop="keywordGroupLimitA" required>
-              <el-input-number v-model="form.keywordGroupLimitA" :min="0" style="width: 100%" />
+              <el-input-number v-model="form.keywordGroupLimitA" :min="0" />
             </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="8">
             <el-form-item label="B档问题数" prop="keywordGroupLimitB" required>
-              <el-input-number v-model="form.keywordGroupLimitB" :min="0" style="width: 100%" />
+              <el-input-number v-model="form.keywordGroupLimitB" :min="0" />
             </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="8">
             <el-form-item label="C档问题数" prop="keywordGroupLimitC" required>
-              <el-input-number v-model="form.keywordGroupLimitC" :min="0" style="width: 100%" />
+              <el-input-number v-model="form.keywordGroupLimitC" :min="0" />
             </el-form-item>
-          </el-col>
-        </el-row>
-        <div class="tier-total-tip" :class="{ invalid: tierTotal !== form.keywordGroupLimit }">
-          A/B/C 合计 {{ tierTotal }}，需等于拓词问题总数 {{ form.keywordGroupLimit }}
-        </div>
+          </div>
+        </section>
 
-        <el-divider content-position="left">分发渠道额度</el-divider>
-        <el-table :data="form.channelQuotaConfigs" border>
-          <el-table-column label="渠道" min-width="180">
-            <template #default="scope">{{ channelLabel(scope.row.channelCode) }}</template>
-          </el-table-column>
-          <el-table-column label="周期" min-width="160">
-            <template #default="scope">
-              <el-select v-model="scope.row.periodType" :disabled="scope.row.channelCode === 'authority_media'" style="width: 100%">
-                <el-option v-for="item in periodOptions(scope.row.channelCode)" :key="item.value" :label="item.label" :value="item.value" />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column label="额度" min-width="160">
-            <template #default="scope">
-              <el-input-number v-model="scope.row.quotaLimit" :min="0" style="width: 100%" />
-            </template>
-          </el-table-column>
-          <el-table-column label="启用" width="100">
-            <template #default="scope"><el-switch v-model="scope.row.enabled" /></template>
-          </el-table-column>
-        </el-table>
+        <section class="form-section">
+          <div class="form-section-head">
+            <div>
+              <span>分发渠道额度</span>
+              <strong>官网、行业站、自媒体和权重媒体额度</strong>
+            </div>
+          </div>
+          <el-table class="quota-editor-table" :data="form.channelQuotaConfigs" border table-layout="fixed">
+            <el-table-column label="渠道" min-width="180">
+              <template #default="scope">{{ channelLabel(scope.row.channelCode) }}</template>
+            </el-table-column>
+            <el-table-column label="周期" min-width="160">
+              <template #default="scope">
+                <el-select v-model="scope.row.periodType" :disabled="scope.row.channelCode === 'authority_media'">
+                  <el-option v-for="item in periodOptions(scope.row.channelCode)" :key="item.value" :label="item.label" :value="item.value" />
+                </el-select>
+              </template>
+            </el-table-column>
+            <el-table-column label="额度" min-width="160">
+              <template #default="scope">
+                <el-input-number v-model="scope.row.quotaLimit" :min="0" />
+              </template>
+            </el-table-column>
+            <el-table-column label="启用" width="100">
+              <template #default="scope"><el-switch v-model="scope.row.enabled" /></template>
+            </el-table-column>
+          </el-table>
+        </section>
 
-        <el-row :gutter="12" class="mt-4">
-          <el-col :xs="24" :sm="12">
+        <section class="form-section">
+          <div class="form-section-head">
+            <div>
+              <span>发布状态</span>
+              <strong>排序、启用状态与备注</strong>
+            </div>
+          </div>
+          <div class="form-grid is-two">
             <el-form-item label="排序" prop="sortOrder" required>
-              <el-input-number v-model="form.sortOrder" :min="0" style="width: 100%" />
+              <el-input-number v-model="form.sortOrder" :min="0" />
             </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12">
             <el-form-item label="状态" prop="enabled" required>
-              <el-switch v-model="form.enabled" />
+              <el-switch v-model="form.enabled" active-text="启用" inactive-text="停用" />
             </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="3" /></el-form-item>
+            <el-form-item label="备注" class="is-full">
+              <el-input v-model="form.remark" type="textarea" :rows="3" />
+            </el-form-item>
+          </div>
+        </section>
       </el-form>
 
       <template #footer>
@@ -569,14 +578,103 @@ onMounted(load)
   background: linear-gradient(135deg, #64748b, #94a3b8);
 }
 
-.tier-total-tip {
-  margin: -4px 0 14px;
-  font-size: 12px;
-  color: #606266;
+.package-editor-dialog :deep(.el-dialog__body) {
+  background: #f8fafc;
 }
 
-.tier-total-tip.invalid {
-  color: #e6a23c;
+.package-config-form {
+  display: grid;
+  gap: 14px;
+}
+
+.form-section {
+  overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.04);
+}
+
+.form-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 16px 11px;
+  border-bottom: 1px solid #e7edf5;
+  background: linear-gradient(90deg, #f8fbff 0%, #ffffff 62%, #f0fdf4 100%);
+}
+
+.form-section-head span {
+  display: block;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.form-section-head strong {
+  display: block;
+  margin-top: 4px;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.form-section-head em {
+  color: #047857;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  text-align: right;
+}
+
+.form-section-head em.invalid {
+  color: #b45309;
+}
+
+.form-grid {
+  display: grid;
+  gap: 13px 14px;
+  padding: 16px;
+}
+
+.form-grid.is-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.form-grid.is-three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.form-grid .is-full {
+  grid-column: 1 / -1;
+}
+
+.package-config-form :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+
+.package-config-form :deep(.el-form-item__label) {
+  padding-bottom: 7px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.package-config-form :deep(.el-input-number),
+.package-config-form :deep(.el-select) {
+  width: 100%;
+}
+
+.quota-editor-table {
+  margin: 16px;
+  width: calc(100% - 32px);
+}
+
+.quota-editor-table :deep(.el-select),
+.quota-editor-table :deep(.el-input-number) {
+  width: 100%;
 }
 
 @media (max-width: 768px) {
@@ -589,6 +687,20 @@ onMounted(load)
   .filter-status,
   .package-toolbar .el-button {
     width: 100%;
+  }
+
+  .form-grid.is-two,
+  .form-grid.is-three {
+    grid-template-columns: 1fr;
+  }
+
+  .form-section-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .form-section-head em {
+    text-align: left;
   }
 }
 </style>

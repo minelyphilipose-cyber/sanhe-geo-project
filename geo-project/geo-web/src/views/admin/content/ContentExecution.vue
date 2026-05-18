@@ -1345,7 +1345,7 @@ function renderBatchPublishBlockMessage(items: BatchPublishBlockedItem[]) {
 function batchPublishBlockReason(contentStyle?: string | null) {
   if (contentStyle === 'agent_site_article' || contentStyle === 'linkedin') return ''
   if (contentStyle === 'industry_site') return ''
-  if (contentStyle === 'forum') return '论坛发布执行器暂未接入'
+  if (contentStyle === 'forum') return ''
   if (contentStyle === 'toutiao') return '今日头条不允许自动发布'
   if (contentStyle === 'wechat') return '公众号不允许自动发布'
   if (contentStyle === 'zhihu') return '知乎不允许自动发布'

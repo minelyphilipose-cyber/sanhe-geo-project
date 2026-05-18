@@ -220,8 +220,8 @@
           </div>
         </section>
 
-        <section v-if="drawerForm.categoryCode === 'industry_site'" class="drawer-section">
-          <div class="form-section-label">行业站点接入配置</div>
+        <section v-if="drawerForm.categoryCode === 'industry_site' || drawerForm.categoryCode === 'forum'" class="drawer-section">
+          <div class="form-section-label">{{ drawerForm.categoryCode === 'forum' ? '论坛接入配置' : '行业站点接入配置' }}</div>
           <div class="form-grid-2">
             <div class="form-row">
               <label>站点域名</label>
@@ -233,8 +233,8 @@
             </div>
           </div>
           <div class="form-row">
-            <label>发布接口 URL</label>
-            <input v-model="drawerForm.apiEndpoint" class="input mono" type="text" placeholder="https://example.com/api/article/publish" />
+            <label>{{ drawerForm.categoryCode === 'forum' ? '发帖页面 URL' : '发布接口 URL' }}</label>
+            <input v-model="drawerForm.apiEndpoint" class="input mono" type="text" :placeholder="drawerForm.categoryCode === 'forum' ? 'https://forum.example.com/post/new' : 'https://example.com/api/article/publish'" />
           </div>
           <div class="form-grid-2">
             <div class="form-row">
@@ -245,6 +245,7 @@
               <label>接入方式</label>
               <select v-model="drawerForm.integrationMethod" class="select">
                 <option value="rest_api">REST API</option>
+                <option value="forum_playwright">论坛浏览器自动化</option>
                 <option value="manual">手动发布</option>
               </select>
             </div>
@@ -283,6 +284,7 @@
             <select v-model="drawerForm.executor" class="select">
               <option value="">无 - 人工发布</option>
               <option value="industry_site">行业资讯站发布器</option>
+              <option value="forum_playwright">论坛发布执行器</option>
               <option value="agent_site_publisher">Agent 官网发布器</option>
             </select>
           </div>
@@ -601,13 +603,18 @@ const agentTargets = computed<TargetConfig[]>(() => {
 })
 
 const industryTargets = computed<TargetConfig[]>(() => publishSites.value
-  .filter((site) => site.integrationMethod !== 'brand_geo_site' && site.siteCode !== 'agent_official_site')
+  .filter((site) => site.integrationMethod !== 'brand_geo_site' && site.integrationMethod !== 'forum_playwright' && site.siteCode !== 'agent_official_site')
   .map((site) => toIndustryTarget(site)))
+
+const forumTargets = computed<TargetConfig[]>(() => publishSites.value
+  .filter((site) => site.integrationMethod === 'forum_playwright')
+  .map((site) => toForumTarget(site)))
 
 const targets = computed<TargetConfig[]>(() => [
   ...staticTargets.filter((item) => item.categoryCode !== 'agent_site'),
   ...agentTargets.value,
   ...industryTargets.value,
+  ...forumTargets.value,
 ])
 
 const targetStats = computed(() => ({
@@ -628,7 +635,7 @@ const activeCategoryMeta = computed(() => {
   const items = targetsByCategory(activeCategoryCode.value)
   const enabledCount = items.filter((item) => item.enabled).length
   const autoCount = items.filter((item) => item.enabled && item.autoPublish).length
-  if (activeCategoryCode.value === 'forum') return '占位 · 暂未接入'
+  if (activeCategoryCode.value === 'forum') return `${items.length} 个论坛 · ${autoCount} 个自动发布`
   if (activeCategoryCode.value === 'authority_media') return '固定大类 · 不展开'
   if (activeCategoryCode.value === 'industry_site') return `${items.length} 个站点 · ${autoCount} 个自动发布`
   return `${items.length} 个目标 · ${enabledCount} 个启用`
@@ -645,7 +652,7 @@ function switchCategory(categoryCode: string) {
 
 function refreshPage() {
   keyword.value = ''
-  if (activeCategoryCode.value === 'industry_site' || activeCategoryCode.value === 'agent_site') {
+  if (activeCategoryCode.value === 'industry_site' || activeCategoryCode.value === 'agent_site' || activeCategoryCode.value === 'forum') {
     loadPublishSites()
   }
 }
@@ -658,10 +665,10 @@ function openDrawer(type: string, selectedTarget?: TargetConfig) {
     drawerForm.name = ''
     drawerForm.code = ''
     drawerForm.categoryCode = activeCategoryCode.value
-    drawerForm.contentStyle = 'industry_site'
+    drawerForm.contentStyle = activeCategoryCode.value === 'forum' ? 'forum' : 'industry_site'
     drawerForm.enabled = true
-    drawerForm.executor = ''
-    drawerForm.autoPublish = false
+    drawerForm.executor = activeCategoryCode.value === 'forum' ? 'forum_playwright' : ''
+    drawerForm.autoPublish = activeCategoryCode.value === 'forum'
     drawerForm.remark = ''
     resetSiteConnectionForm()
   } else if (type === 'news-new') {
@@ -698,12 +705,12 @@ function resetSiteConnectionForm() {
   drawerForm.iconUrl = ''
   drawerForm.apiEndpoint = ''
   drawerForm.industryTags = ''
-  drawerForm.integrationMethod = 'rest_api'
+  drawerForm.integrationMethod = drawerForm.categoryCode === 'forum' ? 'forum_playwright' : 'rest_api'
   drawerForm.headers = '{\n  "X-Admin-Token": ""\n}'
 }
 
 function fillSiteConnectionForm(target?: TargetConfig) {
-  if ((target?.categoryCode !== 'industry_site' && target?.categoryCode !== 'agent_site') || !target.publishSite) {
+  if ((target?.categoryCode !== 'industry_site' && target?.categoryCode !== 'agent_site' && target?.categoryCode !== 'forum') || !target.publishSite) {
     resetSiteConnectionForm()
     return
   }
@@ -749,6 +756,26 @@ function toIndustryTarget(site: PublishSite): TargetConfig {
       { label: '执行器', value: autoPublish ? '行业资讯站发布器' : '-', mono: !autoPublish },
       { label: '域名', value: site.domain || '-', mono: true },
       { label: '接入方式', value: integrationMethodLabel(site.integrationMethod) },
+    ],
+  }
+}
+
+function toForumTarget(site: PublishSite): TargetConfig {
+  const enabled = site.status === 'active'
+  return {
+    categoryCode: 'forum',
+    name: site.siteName,
+    code: site.siteCode || normalizeSiteCode(site),
+    logoText: site.siteName?.trim()?.charAt(0) || '坛',
+    logoClass: 'forum',
+    enabled,
+    autoPublish: enabled && site.integrationMethod === 'forum_playwright',
+    executor: site.integrationMethod || '',
+    drawerType: site.siteCode || normalizeSiteCode(site),
+    publishSite: site,
+    fields: [
+      { label: '接入方式', value: integrationMethodLabel(site.integrationMethod) },
+      { label: '站点域名', value: site.domain || '-' },
     ],
   }
 }
@@ -889,11 +916,11 @@ function validateIndustrySiteForm() {
     ElMessage.warning('请输入站点域名')
     return false
   }
-  if (drawerForm.integrationMethod === 'rest_api' && !drawerForm.apiEndpoint.trim()) {
-    ElMessage.warning('请输入发布接口 URL')
+  if ((drawerForm.integrationMethod === 'rest_api' || drawerForm.integrationMethod === 'forum_playwright') && !drawerForm.apiEndpoint.trim()) {
+    ElMessage.warning(drawerForm.categoryCode === 'forum' ? '请输入发帖页面 URL' : '请输入发布接口 URL')
     return false
   }
-  if (!parseIndustryTagsInput(drawerForm.industryTags).length) {
+  if (drawerForm.categoryCode !== 'forum' && !parseIndustryTagsInput(drawerForm.industryTags).length) {
     ElMessage.warning('请输入至少一个行业分类')
     return false
   }
@@ -968,7 +995,7 @@ async function submitDrawer() {
     }
     return
   }
-  if (drawerForm.categoryCode !== 'industry_site') {
+  if (drawerForm.categoryCode !== 'industry_site' && drawerForm.categoryCode !== 'forum') {
     closeDrawer()
     return
   }

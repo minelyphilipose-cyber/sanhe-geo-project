@@ -835,11 +835,26 @@ export interface DispatchPlatformHealthItem {
   enabled: boolean
   rpmLimit: number
   tpmLimit: number
+  concurrencyLimit?: number | null
+  activePermitCount?: number | null
   degraded: boolean
   degradedReason?: string | null
   currentHealthStatus?: string | null
   lastFailureAt?: string | null
   exceptionCount: number
+}
+
+export interface LlmPoolSnapshot {
+  enabled: boolean
+  globalConcurrency: number
+  activeGlobal: number
+  trackedLeases: number
+  counters: Record<string, number>
+  circuitBreakers?: Record<string, {
+    failureCount?: number
+    open?: boolean
+    openedAtMillis?: number
+  }>
 }
 
 export interface DispatchAlertItem {

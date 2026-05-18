@@ -158,22 +158,24 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" :title="mode === 'create' ? '新增平台配置' : '编辑平台配置'" width="900px" class="admin-editor-dialog">
-      <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
-        <el-row :gutter="12">
-          <el-col :xs="24" :md="8">
+    <el-dialog v-model="dialogVisible" :title="mode === 'create' ? '新增平台配置' : '编辑平台配置'" width="960px" class="admin-editor-dialog platform-editor-dialog">
+      <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="platform-config-form">
+        <section class="form-section">
+          <div class="form-section-head">
+            <div>
+              <span>基础信息</span>
+              <strong>平台识别与优先级</strong>
+            </div>
+          </div>
+          <div class="form-grid is-three">
             <el-form-item label="平台编码" prop="platformCode">
               <el-input v-model="form.platformCode" placeholder="如: doubao / deepseek" />
             </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="8">
             <el-form-item label="平台名称" prop="platformName">
               <el-input v-model="form.platformName" placeholder="如: 豆包" />
             </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="8">
             <el-form-item label="平台等级" prop="priorityLevel">
-              <el-select v-model="form.priorityLevel" style="width: 100%">
+              <el-select v-model="form.priorityLevel">
                 <el-option
                   v-for="item in dictStore.options('platform_priority')"
                   :key="item.dictKey"
@@ -182,94 +184,81 @@
                 />
               </el-select>
             </el-form-item>
-          </el-col>
-        </el-row>
+          </div>
+        </section>
 
-        <el-row :gutter="12">
-          <el-col :xs="24" :md="12">
+        <section class="form-section">
+          <div class="form-section-head">
+            <div>
+              <span>密钥与接入</span>
+              <strong>API 地址、密钥与 Key 引用</strong>
+            </div>
+            <em>API Key 与 primary_key_ref 至少填写一个</em>
+          </div>
+          <div class="form-grid is-two">
             <el-form-item label="API URL" prop="apiUrl">
               <el-input v-model="form.apiUrl" placeholder="https://xxx/v1" />
             </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
             <el-form-item label="API Key" prop="apiKey">
               <el-input v-model="form.apiKey" type="password" show-password placeholder="输入平台 API Key" />
             </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="12">
-          <el-col :xs="24" :md="12">
             <el-form-item label="primary_key_ref" prop="primaryKeyRef">
               <el-input v-model="form.primaryKeyRef" placeholder="如: vault://keys/doubao-primary" />
             </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
             <el-form-item label="backup_key_ref" prop="backupKeyRef">
               <el-input v-model="form.backupKeyRef" placeholder="如: vault://keys/doubao-backup" />
             </el-form-item>
-          </el-col>
-        </el-row>
+          </div>
+        </section>
 
-        <el-row :gutter="12">
-          <el-col :xs="24" :md="8">
-            <el-form-item label="backup_provider_name" prop="backupProviderName">
-              <el-input v-model="form.backupProviderName" placeholder="如: deepseek" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="8">
-            <el-form-item label="backup_api_url" prop="backupApiUrl">
-              <el-input v-model="form.backupApiUrl" placeholder="https://backup.xxx/v1" />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="8">
-            <el-form-item label="backup_model_id" prop="backupModelId">
-              <el-input v-model="form.backupModelId" placeholder="如: deepseek-chat" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="12">
-          <el-col :xs="24" :md="12">
+        <section class="form-section">
+          <div class="form-section-head">
+            <div>
+              <span>模型能力</span>
+              <strong>主模型、低性能模型与备用服务商</strong>
+            </div>
+          </div>
+          <div class="form-grid is-two">
             <el-form-item label="高性能版本(Model ID)" prop="modelId">
               <el-input v-model="form.modelId" placeholder="如: gpt-5.4" />
             </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
             <el-form-item label="Model名称" prop="modelName">
               <el-input v-model="form.modelName" placeholder="如: DeepSeek Chat" />
             </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="12">
-          <el-col :xs="24" :md="12">
             <el-form-item label="低性能版本(Model ID)" prop="lowModelId">
               <el-input v-model="form.lowModelId" placeholder="如: gpt-5.3" />
             </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
             <el-form-item label="并发上限" prop="concurrencyLimit">
-              <el-input-number v-model="form.concurrencyLimit" :min="1" :max="10000" :step="1" style="width: 100%" />
+              <el-input-number v-model="form.concurrencyLimit" :min="1" :max="10000" :step="1" />
             </el-form-item>
-          </el-col>
-        </el-row>
+          </div>
+          <div class="form-grid is-three compact-grid">
+            <el-form-item label="backup_provider_name" prop="backupProviderName">
+              <el-input v-model="form.backupProviderName" placeholder="如: deepseek" />
+            </el-form-item>
+            <el-form-item label="backup_api_url" prop="backupApiUrl">
+              <el-input v-model="form.backupApiUrl" placeholder="https://backup.xxx/v1" />
+            </el-form-item>
+            <el-form-item label="backup_model_id" prop="backupModelId">
+              <el-input v-model="form.backupModelId" placeholder="如: deepseek-chat" />
+            </el-form-item>
+          </div>
+        </section>
 
-        <el-row :gutter="12">
-          <el-col :xs="24" :md="12">
+        <section class="form-section">
+          <div class="form-section-head">
+            <div>
+              <span>运行状态</span>
+              <strong>启用、售前能力与降级处理</strong>
+            </div>
+          </div>
+          <div class="switch-grid">
             <el-form-item label="启用状态" prop="enabled">
               <el-switch v-model="form.enabled" active-text="启用" inactive-text="停用" />
             </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="12">
             <el-form-item label="售前能力">
               <el-switch v-model="form.enabledForPresale" active-text="启用" inactive-text="停用" />
             </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="12">
-          <el-col :xs="24" :md="12">
             <el-form-item label="售前评估模型">
               <el-switch
                 v-model="form.presaleEvaluateEnabled"
@@ -278,24 +267,19 @@
                 :disabled="!canEnablePresaleEvaluate(form.platformCode)"
               />
             </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="12">
-          <el-col :xs="24" :md="12">
             <el-form-item label="降级处理" prop="degraded">
               <el-switch v-model="form.degraded" active-text="是" inactive-text="否" />
             </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-form-item label="降级原因" prop="degradedReason">
-          <el-input v-model="form.degradedReason" type="textarea" :rows="2" placeholder="降级处理开启时建议填写" />
-        </el-form-item>
-
-        <el-form-item label="备注">
-          <el-input v-model="form.remark" type="textarea" :rows="2" />
-        </el-form-item>
+          </div>
+          <div class="form-grid is-two">
+            <el-form-item label="降级原因" prop="degradedReason">
+              <el-input v-model="form.degradedReason" type="textarea" :rows="2" placeholder="降级处理开启时建议填写" />
+            </el-form-item>
+            <el-form-item label="备注">
+              <el-input v-model="form.remark" type="textarea" :rows="2" />
+            </el-form-item>
+          </div>
+        </section>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -723,6 +707,98 @@ onMounted(async () => {
   color: #1d4ed8;
 }
 
+.platform-editor-dialog :deep(.el-dialog__body) {
+  background: #f8fafc;
+}
+
+.platform-config-form {
+  display: grid;
+  gap: 14px;
+}
+
+.form-section {
+  overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.04);
+}
+
+.form-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 16px 11px;
+  border-bottom: 1px solid #e7edf5;
+  background: linear-gradient(90deg, #f8fbff 0%, #ffffff 62%, #f0fdf4 100%);
+}
+
+.form-section-head span {
+  display: block;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.form-section-head strong {
+  display: block;
+  margin-top: 4px;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.form-section-head em {
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+  text-align: right;
+}
+
+.form-grid {
+  display: grid;
+  gap: 13px 14px;
+  padding: 16px;
+}
+
+.form-grid.is-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.form-grid.is-three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.compact-grid {
+  padding-top: 0;
+}
+
+.switch-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px 16px 2px;
+}
+
+.platform-config-form :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+
+.platform-config-form :deep(.el-form-item__label) {
+  padding-bottom: 7px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.platform-config-form :deep(.el-select),
+.platform-config-form :deep(.el-input-number) {
+  width: 100%;
+}
+
 @media (max-width: 768px) {
   .platform-toolbar {
     align-items: stretch;
@@ -734,6 +810,21 @@ onMounted(async () => {
   .filter-status,
   .platform-toolbar .el-button {
     width: 100%;
+  }
+
+  .form-grid.is-two,
+  .form-grid.is-three,
+  .switch-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-section-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .form-section-head em {
+    text-align: left;
   }
 }
 </style>
