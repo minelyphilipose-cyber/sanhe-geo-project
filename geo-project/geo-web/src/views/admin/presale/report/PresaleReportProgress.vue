@@ -75,7 +75,14 @@
         :loading="retrying"
         @click="onRetry"
       >
-        重试生成
+        从失败处继续
+      </el-button>
+      <el-button
+        v-if="isFailed"
+        :loading="regenerating"
+        @click="onRegenerate"
+      >
+        从头重新生成
       </el-button>
     </div>
   </div>
@@ -91,9 +98,10 @@ import {
   CircleCheckFilled,
   CircleCloseFilled
 } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getLatestVersionMeta,
+  regenerateVersion,
   retryVersion,
   type ReportVersionMetaVO
 } from '@/api/presaleReport'
@@ -106,6 +114,7 @@ const reportId = Number(route.params.id)
 const version = ref<ReportVersionMetaVO | null>(null)
 const pollTimer = ref<number | null>(null)
 const retrying = ref(false)
+const regenerating = ref(false)
 
 const POLL_INTERVAL_MS = 3000
 const AUTO_JUMP_DELAY_MS = 2000
@@ -251,19 +260,43 @@ function goDetail() {
 }
 
 async function onRetry() {
-  if (retrying.value || !version.value || !isFailed.value) return
+  if (retrying.value || regenerating.value || !version.value || !isFailed.value) return
   retrying.value = true
   try {
     await retryVersion(reportId, version.value.versionNo)
-    ElMessage.success('已提交重试')
+    ElMessage.success('已从失败处继续生成')
     await fetchOnce()
     if (!isTerminal(version.value?.generationStatus ?? '')) {
       startPolling()
     }
   } catch (err: any) {
-    ElMessage.error(err?.message || '提交重试失败')
+    ElMessage.error(err?.message || '提交从失败处继续失败')
   } finally {
     retrying.value = false
+  }
+}
+
+async function onRegenerate() {
+  if (retrying.value || regenerating.value || !version.value || !isFailed.value) return
+  const confirmed = await ElMessageBox.confirm(
+    '从头重新生成会清理本版本已生成的调用结果,并重新执行完整生成流程。继续吗?',
+    '从头重新生成',
+    { confirmButtonText: '重新生成', cancelButtonText: '取消', type: 'warning' }
+  ).catch(() => false)
+  if (!confirmed || !version.value) return
+
+  regenerating.value = true
+  try {
+    await regenerateVersion(reportId, version.value.versionNo)
+    ElMessage.success('已提交从头重新生成')
+    await fetchOnce()
+    if (!isTerminal(version.value?.generationStatus ?? '')) {
+      startPolling()
+    }
+  } catch (err: any) {
+    ElMessage.error(err?.message || '提交从头重新生成失败')
+  } finally {
+    regenerating.value = false
   }
 }
 

@@ -111,7 +111,17 @@
         @click="handleRetry"
       >
         <el-icon><Refresh /></el-icon>
-        重试生成
+        从失败处继续
+      </el-button>
+      <el-button
+        v-if="isFailed"
+        size="small"
+        class="action-btn"
+        :loading="acting === 'regenerate'"
+        @click="handleRegenerate"
+      >
+        <el-icon><Refresh /></el-icon>
+        从头重新生成
       </el-button>
 
       <!-- delete:manager 专属;有导出记录时 disable -->
@@ -194,7 +204,8 @@ import {
   freezeVersion,
   unfreezeVersion,
   deleteVersion,
-  retryVersion
+  retryVersion,
+  regenerateVersion
 } from '@/api/presaleReport'
 import {
   createPresaleExport,
@@ -235,7 +246,7 @@ const canViewPrompts = computed(() => isDone.value && Boolean(currentVersionNo.v
 const canEdit = computed(() => isDone.value && !isFrozen.value)
 
 // ─── 写动作 ───────────────────────────────────────────────
-type ActionKind = 'derive' | 'freeze' | 'unfreeze' | 'delete' | 'retry' | 'export'
+type ActionKind = 'derive' | 'freeze' | 'unfreeze' | 'delete' | 'retry' | 'regenerate' | 'export'
 const acting = ref<ActionKind | null>(null)
 
 const reportId = computed(() => Number(route.params.id))
@@ -334,7 +345,25 @@ async function handleRetry() {
     retryVersion(reportId.value, currentVersionNo.value!)
   )
   if (res) {
-    ElMessage.success('已提交重试,跳转进度页')
+    ElMessage.success('已从失败处继续生成,跳转进度页')
+    void router.push(`/admin/presale/report/${reportId.value}/progress`)
+  }
+}
+
+async function handleRegenerate() {
+  if (!currentVersionNo.value) return
+  const confirmed = await ElMessageBox.confirm(
+    '从头重新生成会清理本版本已生成的调用结果,并重新执行完整生成流程。继续吗?',
+    '从头重新生成',
+    { confirmButtonText: '重新生成', cancelButtonText: '取消', type: 'warning' }
+  ).catch(() => false)
+  if (!confirmed) return
+
+  const res = await runAction('regenerate', () =>
+    regenerateVersion(reportId.value, currentVersionNo.value!)
+  )
+  if (res) {
+    ElMessage.success('已提交从头重新生成,跳转进度页')
     void router.push(`/admin/presale/report/${reportId.value}/progress`)
   }
 }
