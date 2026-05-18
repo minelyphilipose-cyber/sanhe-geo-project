@@ -84,6 +84,17 @@
               <div class="admin-cell-stack">
                 <span class="admin-cell-main">{{ scope.row.title || '-' }}</span>
                 <span class="admin-cell-sub">{{ contentStyleLabel(scope.row.contentStyle) }}</span>
+                <span v-if="riskWordHits(scope.row).length" class="risk-word-line">
+                  <el-tag
+                    v-for="hit in riskWordHits(scope.row)"
+                    :key="`${hit.severity}-${hit.source}-${hit.word}`"
+                    size="small"
+                    :type="hit.severity === 'block' ? 'danger' : 'warning'"
+                    effect="light"
+                  >
+                    {{ riskSeverityLabel(hit.severity) }}: {{ hit.word }}
+                  </el-tag>
+                </span>
               </div>
             </template>
           </el-table-column>
@@ -143,6 +154,19 @@
             <el-descriptions-item label="文章类型">{{ articleTypeLabel(detailData.article.articleType) }}</el-descriptions-item>
             <el-descriptions-item label="平台风格">{{ contentStyleLabel(detailContentStyle(detailData)) }}</el-descriptions-item>
             <el-descriptions-item label="文章主题" :span="2">{{ detailTopic(detailData) || '-' }}</el-descriptions-item>
+            <el-descriptions-item v-if="riskWordHits(detailData.article).length" label="风险词" :span="2">
+              <div class="risk-word-list">
+                <el-tag
+                  v-for="hit in riskWordHits(detailData.article)"
+                  :key="`${hit.severity}-${hit.source}-${hit.word}`"
+                  size="small"
+                  :type="hit.severity === 'block' ? 'danger' : 'warning'"
+                  effect="light"
+                >
+                  {{ riskSeverityLabel(hit.severity) }} · {{ riskSourceLabel(hit.source) }}: {{ hit.word }}
+                </el-tag>
+              </div>
+            </el-descriptions-item>
           </el-descriptions>
         </div>
 
@@ -183,6 +207,19 @@
         </el-form-item>
         <el-form-item v-if="selectedArticleHasRisk" label="风险覆盖">
           <el-checkbox v-model="reviewForm.riskOverride">强制通过提醒级风险</el-checkbox>
+        </el-form-item>
+        <el-form-item v-if="selectedArticleRiskHits.length" label="命中风险词">
+          <div class="risk-word-list">
+            <el-tag
+              v-for="hit in selectedArticleRiskHits"
+              :key="`${hit.severity}-${hit.source}-${hit.word}`"
+              size="small"
+              :type="hit.severity === 'block' ? 'danger' : 'warning'"
+              effect="light"
+            >
+              {{ riskSeverityLabel(hit.severity) }} · {{ riskSourceLabel(hit.source) }}: {{ hit.word }}
+            </el-tag>
+          </div>
         </el-form-item>
         <el-form-item label="审核意见">
           <el-input v-model="reviewForm.comment" type="textarea" :rows="4" placeholder="驳回或退回修改时必填" />
@@ -841,6 +878,11 @@ interface BatchPublishBlockedItem {
   styleLabel: string
   reason: string
 }
+interface RiskWordHit {
+  word: string
+  severity: string
+  source: string
+}
 
 const userStore = useUserStore()
 const route = useRoute()
@@ -867,6 +909,7 @@ const detailData = ref<ArticleDetailResponse | null>(null)
 const detailViewMode = ref<'preview' | 'markdown'>('preview')
 const currentArticleId = ref<number | null>(null)
 const selectedArticleHasRisk = ref(false)
+const selectedArticleRiskHits = ref<RiskWordHit[]>([])
 
 const reviewVisible = ref(false)
 const reviewForm = reactive({
@@ -1354,6 +1397,40 @@ function batchPublishBlockReason(contentStyle?: string | null) {
   return '文章未绑定可自动发布的平台风格'
 }
 
+function riskWordHits(article?: Pick<ArticleDraft, 'riskWordsJson'> | null): RiskWordHit[] {
+  if (!article?.riskWordsJson) return []
+  try {
+    const parsed = JSON.parse(article.riskWordsJson) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null
+        const row = item as Record<string, unknown>
+        const word = typeof row.word === 'string' ? row.word.trim() : ''
+        if (!word) return null
+        return {
+          word,
+          severity: typeof row.severity === 'string' ? row.severity : 'block',
+          source: typeof row.source === 'string' ? row.source : 'unknown',
+        }
+      })
+      .filter((item): item is RiskWordHit => item !== null)
+  } catch {
+    return []
+  }
+}
+
+function riskSeverityLabel(severity?: string | null) {
+  return severity === 'warn' ? '提醒' : '阻断'
+}
+
+function riskSourceLabel(source?: string | null) {
+  if (source === 'brand') return '品牌'
+  if (source === 'project') return '项目'
+  if (source === 'global') return '全局'
+  return '未知'
+}
+
 function detailContentStyle(detail: ArticleDetailResponse) {
   return detail.batchGenerationTask?.contentStyle || detail.article.contentStyle || ''
 }
@@ -1376,6 +1453,7 @@ async function openDetail(articleId: number) {
 function openReview(row: ArticleDraft) {
   currentArticleId.value = row.id
   selectedArticleHasRisk.value = !!row.hasRisk
+  selectedArticleRiskHits.value = riskWordHits(row)
   reviewForm.action = 'approve'
   reviewForm.comment = ''
   reviewForm.riskOverride = false
@@ -3959,6 +4037,18 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 :global(.batch-publish-block-reason) {
   color: #64748b;
   font-size: 13px;
+}
+
+.risk-word-line,
+.risk-word-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.risk-word-line {
+  margin-top: 2px;
 }
 
 :global(.batch-publish-block-tip) {

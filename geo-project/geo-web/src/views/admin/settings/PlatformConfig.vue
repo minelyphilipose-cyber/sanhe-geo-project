@@ -259,6 +259,9 @@
             <el-form-item label="售前能力">
               <el-switch v-model="form.enabledForPresale" active-text="启用" inactive-text="停用" />
             </el-form-item>
+            <el-form-item label="文章能力">
+              <el-switch v-model="form.enabledForArticle" active-text="启用" inactive-text="停用" />
+            </el-form-item>
             <el-form-item label="售前评估模型">
               <el-switch
                 v-model="form.presaleEvaluateEnabled"
@@ -344,6 +347,7 @@ const form = reactive({
   concurrencyLimit: 1,
   enabled: true,
   enabledForPresale: true,
+  enabledForArticle: false,
   presaleEvaluateEnabled: false,
   degraded: false,
   degradedReason: '',
@@ -400,6 +404,7 @@ function resetForm() {
   form.concurrencyLimit = 1
   form.enabled = true
   form.enabledForPresale = true
+  form.enabledForArticle = false
   form.presaleEvaluateEnabled = false
   form.degraded = false
   form.degradedReason = ''
@@ -472,6 +477,7 @@ function openEdit(row: AIPlatformConfigItem) {
   form.concurrencyLimit = row.concurrencyLimit || 1
   form.enabled = row.enabled
   form.enabledForPresale = row.enabledForPresale ?? true
+  form.enabledForArticle = !!row.enabledForArticle
   form.presaleEvaluateEnabled = !!row.presaleEvaluateEnabled
   form.degraded = row.degraded
   form.degradedReason = row.degradedReason || ''
@@ -505,6 +511,7 @@ async function submit() {
       concurrencyLimit: form.concurrencyLimit,
       enabled: form.enabled,
       enabledForPresale: form.enabledForPresale,
+      enabledForArticle: form.enabledForArticle,
       presaleEvaluateEnabled: form.presaleEvaluateEnabled,
       degraded: form.degraded,
       degradedReason: form.degraded ? form.degradedReason.trim() : undefined,
