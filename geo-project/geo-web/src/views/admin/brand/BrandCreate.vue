@@ -25,7 +25,6 @@
           <el-input :model-value="companyName || '-'" disabled />
         </el-form-item>
         <el-form-item label="品牌名称" prop="brandName" required><el-input v-model="form.brandName" /></el-form-item>
-        <el-form-item label="品牌标识" prop="brandSlug" required><el-input v-model="form.brandSlug" /></el-form-item>
         <el-form-item label="品牌状态" prop="status" required>
           <el-select v-model="form.status" style="width: 100%">
             <el-option
@@ -199,10 +198,6 @@ const form = reactive({
 
 const rules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
-  brandSlug: [
-    { required: true, message: '请输入品牌标识', trigger: 'blur' },
-    { pattern: /^[a-z0-9][a-z0-9_-]{1,127}$/, message: '标识需小写字母数字开头，可含 _ -', trigger: 'blur' },
-  ],
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
 }
@@ -346,7 +341,6 @@ async function submitBrand() {
     const serviceArea = regionPayloadFromCodes(form.serviceAreaCodes).displayName
     const commonPayload = {
       brandName: form.brandName,
-      brandSlug: form.brandSlug,
       status: form.status,
       industry: form.industry,
       mainBusiness: form.mainBusiness || undefined,
@@ -376,9 +370,10 @@ async function submitBrand() {
     if (!createdBrandId.value) {
       const { data } = await createBrand({ companyId: companyId.value, ...commonPayload })
       createdBrandId.value = data.data.id
+      form.brandSlug = data.data.brandSlug
       ElMessage.success('品牌创建成功，可继续上传素材')
     } else {
-      await updateBrand(createdBrandId.value, commonPayload)
+      await updateBrand(createdBrandId.value, { ...commonPayload, brandSlug: form.brandSlug })
       ElMessage.success('品牌信息已更新')
     }
     await Promise.all([loadMaterials(), loadVersions()])

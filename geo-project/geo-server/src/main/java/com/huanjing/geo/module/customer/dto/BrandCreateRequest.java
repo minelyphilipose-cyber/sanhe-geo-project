@@ -12,7 +12,6 @@ public class BrandCreateRequest {
     private String industry;
     @NotBlank
     private String brandName;
-    @NotBlank
     private String brandSlug;
     private String mainBusiness;
     private String serviceArea;

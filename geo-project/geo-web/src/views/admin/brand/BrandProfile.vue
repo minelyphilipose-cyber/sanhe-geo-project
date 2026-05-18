@@ -35,7 +35,6 @@
           <!-- 只读模式 -->
           <el-descriptions v-if="!editingInfo" :column="3" border>
             <el-descriptions-item label="品牌名称">{{ brand?.brandName || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="品牌标识">{{ brand?.brandSlug || '-' }}</el-descriptions-item>
             <el-descriptions-item label="品牌行业">{{ industryLabel(brand?.industry) }}</el-descriptions-item>
             <el-descriptions-item label="主营业务">{{ brand?.mainBusiness || '-' }}</el-descriptions-item>
             <el-descriptions-item label="所在地区">{{ regionText }}</el-descriptions-item>
@@ -61,9 +60,6 @@
             <div class="grid grid-cols-2 gap-x-6">
               <el-form-item label="品牌名称" prop="brandName" required>
                 <el-input v-model="infoForm.brandName" />
-              </el-form-item>
-              <el-form-item label="品牌标识" prop="brandSlug" required>
-                <el-input v-model="infoForm.brandSlug" />
               </el-form-item>
               <el-form-item label="品牌行业" prop="industry" required>
                 <el-select v-model="infoForm.industry" filterable style="width: 100%">
@@ -279,10 +275,6 @@ const infoForm = reactive({
 
 const infoRules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
-  brandSlug: [
-    { required: true, message: '请输入品牌标识', trigger: 'blur' },
-    { pattern: /^[a-z0-9][a-z0-9_-]{1,127}$/, message: '标识需小写字母数字开头，可含 _ -', trigger: 'blur' },
-  ],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
 }
 

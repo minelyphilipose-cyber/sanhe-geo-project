@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.regex.Pattern;
 
@@ -102,21 +103,13 @@ public class BrandService {
         validateBrandStatus(StringUtils.hasText(req.getStatus()) ? req.getStatus() : "active");
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "company");
 
-        Brand existed = brandMapper.selectOne(new LambdaQueryWrapper<Brand>()
-                .isNull(Brand::getDeletedAt)
-                .eq(Brand::getCompanyId, req.getCompanyId())
-                .eq(Brand::getBrandSlug, req.getBrandSlug()));
-        if (existed != null) {
-            throw new BizException(400, "brand_slug already exists in company");
-        }
-
         Brand brand = new Brand();
         brand.setCompanyId(req.getCompanyId());
         String industry = normalizeIndustry(req.getIndustry());
         validateBrandIndustry(industry, company);
         brand.setIndustry(industry);
         brand.setBrandName(req.getBrandName());
-        brand.setBrandSlug(req.getBrandSlug());
+        brand.setBrandSlug(generateBrandSlug(req.getCompanyId()));
         brand.setMainBusiness(req.getMainBusiness());
         applyRegionFields(brand, req.getProvinceCode(), req.getProvinceName(), req.getCityCode(), req.getCityName(), req.getDistrictCode(), req.getDistrictName());
         brand.setServiceArea(StringUtils.hasText(req.getServiceArea())
@@ -274,6 +267,21 @@ public class BrandService {
         if (!BRAND_STATUS.contains(status)) {
             throw new BizException(400, "Invalid brand status");
         }
+    }
+
+    private String generateBrandSlug(Long companyId) {
+        for (int i = 0; i < 8; i++) {
+            String slug = "brand_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+            Brand existed = brandMapper.selectOne(new LambdaQueryWrapper<Brand>()
+                    .isNull(Brand::getDeletedAt)
+                    .eq(Brand::getCompanyId, companyId)
+                    .eq(Brand::getBrandSlug, slug)
+                    .last("LIMIT 1"));
+            if (existed == null) {
+                return slug;
+            }
+        }
+        throw new BizException(500, "Failed to generate brand_slug");
     }
 
     private void applyGeoSiteFields(Brand brand, String rawCode, String rawStatus, Long selfId) {

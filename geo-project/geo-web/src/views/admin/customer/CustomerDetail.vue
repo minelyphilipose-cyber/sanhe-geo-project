@@ -204,7 +204,6 @@
       <DataState :loading="brandLoading" :empty="!brandLoading && brands.length === 0" empty-text="暂无品牌数据">
         <el-table :data="brands" border>
           <el-table-column prop="brandName" label="品牌名称" min-width="180" />
-          <el-table-column prop="brandSlug" label="标识" min-width="150" />
           <el-table-column label="行业" min-width="140">
             <template #default="scope">{{ dictStore.label('industry_tag', scope.row.industry) || scope.row.industry || '-' }}</template>
           </el-table-column>
@@ -301,7 +300,6 @@
     <el-dialog v-model="brandVisible" :title="brandMode === 'create' ? '新增品牌' : '编辑品牌'" width="860px" class="admin-editor-dialog">
       <el-form ref="brandFormRef" class="admin-dialog-form" :model="brandForm" :rules="brandRules" label-width="120px">
         <el-form-item label="品牌名称" required><el-input v-model="brandForm.brandName" /></el-form-item>
-        <el-form-item label="品牌标识" required><el-input v-model="brandForm.brandSlug" /></el-form-item>
         <el-form-item label="品牌行业" prop="industry" required>
           <el-select v-model="brandForm.industry" filterable style="width: 100%">
             <el-option
@@ -472,10 +470,6 @@ const brandForm = reactive({
 })
 const brandRules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
-  brandSlug: [
-    { required: true, message: '请输入品牌标识', trigger: 'blur' },
-    { pattern: /^[a-z0-9][a-z0-9_-]{1,127}$/, message: '品牌标识仅支持字母、数字、下划线、中划线', trigger: 'blur' },
-  ],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
 }
 
@@ -927,10 +921,9 @@ async function submitBrand() {
   brandSaving.value = true
   try {
     const region = regionPayloadFromCodes(brandForm.regionCodes)
-    const payload = {
+    const payload: Record<string, any> = {
       companyId,
       brandName: brandForm.brandName,
-      brandSlug: brandForm.brandSlug,
       industry: brandForm.industry,
       mainBusiness: brandForm.mainBusiness || undefined,
       serviceArea: region.displayName,
@@ -950,6 +943,7 @@ async function submitBrand() {
     if (brandMode.value === 'create') {
       await createBrand(payload as any)
     } else if (brandEditingId.value) {
+      payload.brandSlug = brandForm.brandSlug
       await updateBrand(brandEditingId.value, payload as any)
     }
     ElMessage.success('鍝佺墝淇濆瓨鎴愬姛')

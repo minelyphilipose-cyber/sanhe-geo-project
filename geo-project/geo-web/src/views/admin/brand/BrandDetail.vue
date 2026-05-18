@@ -7,7 +7,7 @@
         <div>
           <h1 class="admin-object-title">{{ brand.brandName }}</h1>
           <div class="admin-object-meta">
-            {{ brand.brandSlug || '-' }} · {{ companyName || '-' }} · {{ industryLabel(brand.industry) }}
+            {{ companyName || '-' }} · {{ industryLabel(brand.industry) }}
           </div>
         </div>
         <span class="admin-status-tag" :class="brand?.status === 'active' ? 'is-success' : 'is-muted'">
@@ -176,7 +176,6 @@
     <el-dialog v-model="editVisible" title="编辑品牌" width="860px" class="admin-editor-dialog">
       <el-form ref="brandFormRef" class="admin-dialog-form" :model="brandForm" :rules="brandRules" label-width="120px">
         <el-form-item label="品牌名称" required><el-input v-model="brandForm.brandName" /></el-form-item>
-        <el-form-item label="品牌标识" required><el-input v-model="brandForm.brandSlug" /></el-form-item>
         <el-form-item label="品牌行业" prop="industry" required>
           <el-select v-model="brandForm.industry" filterable style="width: 100%">
             <el-option
@@ -368,10 +367,6 @@ const selfMediaAccountForm = reactive({
 
 const brandRules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
-  brandSlug: [
-    { required: true, message: '请输入品牌标识', trigger: 'blur' },
-    { pattern: /^[a-z0-9][a-z0-9_-]{1,127}$/, message: '标识需小写字母数字开头，可含 _ -', trigger: 'blur' },
-  ],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
   industrySiteCode: [
@@ -412,7 +407,6 @@ const statementTagType = computed<'success' | 'warning' | 'info'>(() => {
 const availableBrandIndustries = computed(() => companyIndustryTags.value)
 const brandBasicInfoItems = computed(() => [
   { label: '品牌名称', value: brand.value?.brandName || '-' },
-  { label: '品牌标识', value: brand.value?.brandSlug || '-' },
   { label: '状态', value: dictStore.label('brand_status', brand.value?.status) || '-' },
   { label: '所属客户', value: companyName.value || '-' },
   { label: '品牌行业', value: industryLabel(brand.value?.industry) },
