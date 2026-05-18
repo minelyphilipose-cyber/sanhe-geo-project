@@ -554,25 +554,6 @@ const staticTargets = reactive<TargetConfig[]>([
       { label: '用途', value: '人工投放 / 媒体合作' },
     ],
   },
-  {
-    categoryCode: 'forum',
-    name: '论坛（默认占位）',
-    code: 'forum',
-    logoText: '论',
-    logoClass: 'forum',
-    enabled: true,
-    autoPublish: false,
-    executor: '',
-    locked: true,
-    disabledActionText: '请新增具体论坛',
-    source: 'static',
-    fields: [
-      { label: '状态', value: '启用', badge: 'success' },
-      { label: '自动发布', value: '请配置目标', badge: 'warning' },
-      { label: '说明', value: '新增具体论坛后可启用 Discuz HTTP 直发', wrap: true },
-      { label: '执行器', value: '-', mono: true },
-    ],
-  },
 ])
 
 const keyword = ref('')
