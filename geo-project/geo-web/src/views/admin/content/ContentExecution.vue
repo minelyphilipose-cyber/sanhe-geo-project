@@ -113,7 +113,7 @@
             <template #default="scope">
               <div class="admin-row-actions">
                 <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
-                <el-button v-if="canWrite && canReview(scope.row.status)" link type="primary" @click="openReview(scope.row)">审核</el-button>
+                <el-button v-if="canWrite && canReview(scope.row)" link type="primary" @click="openReview(scope.row)">审核</el-button>
                 <el-button v-if="canWrite && canEdit(scope.row.status)" class="content-neutral-action" link @click="openRevision(scope.row)">修订</el-button>
                 <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openDistributionChannel(scope.row)">分发</el-button>
                 <el-button v-if="canWrite && canDeleteArticle(scope.row.status)" link type="danger" @click="deleteArticle(scope.row)">删除</el-button>
@@ -900,7 +900,7 @@ const query = reactive({
   status: '',
   articleType: '',
 })
-const reviewCount = computed(() => rows.value.filter((row) => ['pending_review', 'reviewing'].includes(row.status)).length)
+const reviewCount = computed(() => rows.value.filter((row) => canReview(row)).length)
 const distributableCount = computed(() => rows.value.filter((row) => canDistribute(row.status)).length)
 const blockedCount = computed(() => rows.value.filter((row) => ['rejected', 'failed', 'risk_blocked'].includes(row.status)).length)
 
@@ -1211,8 +1211,8 @@ function contentStatusClass(v: string) {
   return 'is-muted'
 }
 
-function canReview(status: string) {
-  return status === 'pending_review'
+function canReview(row: ArticleDraft) {
+  return row.status === 'pending_review' && !row.systemGenerated
 }
 
 function canEdit(status: string) {

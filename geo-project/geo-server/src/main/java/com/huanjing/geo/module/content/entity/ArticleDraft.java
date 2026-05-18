@@ -41,4 +41,6 @@ public class ArticleDraft {
     private LocalDateTime publishedAt;
     @TableField(exist = false)
     private String projectName;
+    @TableField(exist = false)
+    private Boolean systemGenerated;
 }

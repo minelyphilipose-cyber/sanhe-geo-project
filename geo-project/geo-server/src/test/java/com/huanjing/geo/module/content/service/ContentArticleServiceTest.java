@@ -285,6 +285,18 @@ class ContentArticleServiceTest {
     }
 
     @Test
+    void reviewSystemGeneratedArticleIsRejected() {
+        ArticleDraft article = article("pending_review");
+        when(articleDraftMapper.selectById(99L)).thenReturn(article);
+        when(articleDraftVersionMapper.selectList(any())).thenReturn(List.of(versionGeneratedBy("ai")));
+
+        BizException ex = assertThrows(BizException.class, () -> service.review(99L, review("approve", null)));
+
+        assertEquals(ContentErrorCodes.ARTICLE_BAD_REQUEST, ex.getCode());
+        verify(articleDraftMapper, never()).update(isNull(), any(Wrapper.class));
+    }
+
+    @Test
     void reviewBrandAccessDeniedStopsBeforeUpdate() {
         ArticleDraft article = article("pending_review");
         when(articleDraftMapper.selectById(99L)).thenReturn(article);
@@ -334,6 +346,7 @@ class ContentArticleServiceTest {
         assertEquals("zhihu", row.getContentStyle());
         assertEquals("批量文章主题", row.getTopic());
         assertEquals("批量问题词", row.getTopicAsQuestion());
+        assertEquals(Boolean.TRUE, row.getSystemGenerated());
     }
 
     private void verifyAudit(String eventType, AuditResult result) {

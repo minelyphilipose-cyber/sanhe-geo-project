@@ -894,6 +894,7 @@ export interface ArticleDraft {
   duplicateScore?: number | null
   duplicateArticleId?: number | null
   currentVersionNo: number
+  systemGenerated?: boolean | null
   createdAt: string
   updatedAt: string
   publishedAt?: string | null

@@ -124,6 +124,7 @@ public class ContentArticleService {
         ArticleDraft article = requireArticle(articleId);
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, false);
+        fillGenerationMetadata(List.of(article));
         List<ArticleDraftVersion> versions = articleDraftVersionMapper.selectList(
                 new LambdaQueryWrapper<ArticleDraftVersion>()
                         .eq(ArticleDraftVersion::getArticleId, articleId)
@@ -251,9 +252,7 @@ public class ContentArticleService {
         return versions != null && versions.stream()
                 .filter(Objects::nonNull)
                 .map(ArticleDraftVersion::getGeneratedBy)
-                .filter(StringUtils::hasText)
-                .map(value -> value.trim().toLowerCase(Locale.ROOT))
-                .anyMatch(AUTO_APPROVED_GENERATED_BY::contains);
+                .anyMatch(this::isAutoApprovedGeneratedBy);
     }
 
     private String aiPromptSnapshot(Map<String, Object> aiMetadata) {
@@ -393,6 +392,9 @@ public class ContentArticleService {
         ensureProjectAccess(operator, project, true);
         brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
         ensureReviewerIsNotAuthor(article, operator);
+        if (isSystemGeneratedArticle(articleId)) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Generated article does not require review");
+        }
 
         String action = req.getAction().trim().toLowerCase(Locale.ROOT);
         if (!Set.of("approve", "reject", "return_for_revision").contains(action)) {
@@ -633,20 +635,44 @@ public class ContentArticleService {
                 .filter(task -> task.getArticleId() != null)
                 .collect(Collectors.toMap(BatchArticleGenerationTask::getArticleId, task -> task, (first, ignored) -> first));
         for (ArticleDraft article : articles) {
+            article.setSystemGenerated(false);
             BatchArticleGenerationTask task = taskMap.get(article.getId());
-            if (task == null) {
-                continue;
-            }
-            if (!StringUtils.hasText(article.getContentStyle())) {
-                article.setContentStyle(task.getContentStyle());
-            }
-            if (!StringUtils.hasText(article.getTopic())) {
-                article.setTopic(task.getTopic());
-            }
-            if (!StringUtils.hasText(article.getTopicAsQuestion())) {
-                article.setTopicAsQuestion(task.getTopicAsQuestion());
+            if (task != null) {
+                article.setSystemGenerated(true);
+                fillArticleFromGenerationTask(article, task);
             }
         }
+        Map<Long, Boolean> generatedArticleMap = articleDraftVersionMapper.selectList(
+                        new LambdaQueryWrapper<ArticleDraftVersion>()
+                                .in(ArticleDraftVersion::getArticleId, articleIds)
+                                .select(ArticleDraftVersion::getArticleId, ArticleDraftVersion::getGeneratedBy)
+                ).stream()
+                .filter(Objects::nonNull)
+                .filter(version -> version.getArticleId() != null)
+                .filter(version -> isAutoApprovedGeneratedBy(version.getGeneratedBy()))
+                .collect(Collectors.toMap(ArticleDraftVersion::getArticleId, version -> true, (a, b) -> true));
+        for (ArticleDraft article : articles) {
+            if (Boolean.TRUE.equals(generatedArticleMap.get(article.getId()))) {
+                article.setSystemGenerated(true);
+            }
+        }
+    }
+
+    private void fillArticleFromGenerationTask(ArticleDraft article, BatchArticleGenerationTask task) {
+        if (!StringUtils.hasText(article.getContentStyle())) {
+            article.setContentStyle(task.getContentStyle());
+        }
+        if (!StringUtils.hasText(article.getTopic())) {
+            article.setTopic(task.getTopic());
+        }
+        if (!StringUtils.hasText(article.getTopicAsQuestion())) {
+            article.setTopicAsQuestion(task.getTopicAsQuestion());
+        }
+    }
+
+    private boolean isAutoApprovedGeneratedBy(String generatedBy) {
+        return StringUtils.hasText(generatedBy)
+                && AUTO_APPROVED_GENERATED_BY.contains(generatedBy.trim().toLowerCase(Locale.ROOT));
     }
 
     private List<Long> resolveReadableProjectIds(SysUser operator, String projectName) {
