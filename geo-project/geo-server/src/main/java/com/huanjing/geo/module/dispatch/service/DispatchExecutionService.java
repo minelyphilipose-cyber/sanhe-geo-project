@@ -90,6 +90,7 @@ public class DispatchExecutionService {
     private static final Pattern TOKEN_PATTERN = Pattern.compile("(?i)(api[_-]?key|token)\\s*[:=]\\s*([^\\s,;]+)");
     private static final Pattern PHONE_TEXT_PATTERN = Pattern.compile("(\\+?\\d[\\d\\-\\s()]{5,}\\d)");
     private static final int DB_TRANSIENT_RETRY_DELAY_MS = 200;
+    private static final Set<String> QUESTION_TIERS = Set.of("A", "B", "C");
 
     private final ProjectPlatformBindingMapper projectPlatformBindingMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
@@ -165,20 +166,21 @@ public class DispatchExecutionService {
         if (project == null) {
             throw new BizException(404, "Project not found");
         }
-        List<PollKeywordCandidate> allKeywords = loadProjectPollKeywords(project.getId());
+        String questionTier = resolveQuestionTier(task);
+        List<PollKeywordCandidate> allKeywords = loadProjectPollKeywords(project.getId(), questionTier);
         if (allKeywords.isEmpty()) {
-            log.info("Skip BI_DAILY_POLL task {} because no saved keywords for project {}", task.getId(), task.getProjectId());
+            log.info("Skip BI_DAILY_POLL task {} because no {} tier saved keywords for project {}",
+                    task.getId(), questionTier, task.getProjectId());
             return;
         }
 
-        CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(project.getCompanyId());
-        int planCap = binding.getKeywordGroupLimit() == null ? 0 : binding.getKeywordGroupLimit();
+        int planCap = resolveTierPollLimit(project, questionTier);
         int takeCount = planCap > 0 ? Math.min(planCap, allKeywords.size()) : allKeywords.size();
-        List<PollKeywordCandidate> selected = selectRotatedKeywords(project.getId(), "KW", allKeywords, takeCount);
+        List<PollKeywordCandidate> selected = selectRotatedKeywords(project.getId(), questionTier, allKeywords, takeCount);
 
         LocalDate batchDate = resolveBatchDate(task);
         int batchNo = resolveBatchNo(task);
-        PollBatch batch = ensureBatch(task, project, batchDate, batchNo, selected.size(), platformConfigs.size());
+        PollBatch batch = ensureBatch(task, project, batchDate, batchNo, questionTier, selected.size(), platformConfigs.size());
 
         Set<String> projectNames = resolveProjectNameSet(project);
         Set<String> siteDomains = resolveSiteDomains(project);
@@ -193,7 +195,7 @@ public class DispatchExecutionService {
         for (AiPlatformConfig platform : platformConfigs) {
             PlatformAgg agg = aggByPlatform.get(platform.getId());
             for (PollKeywordCandidate keyword : selected) {
-                InvocationResult invokeResult = invokeWithFallback(platform, task, keyword.keywordText());
+                InvocationResult invokeResult = invokeMonitoringWithRouter(platform, task, keyword.keywordText());
                 PollResult detail = buildPollResult(batch, task, project, platform, keyword, invokeResult, projectNames, siteDomains, normalizedPhones, contactTerms);
                 upsertPollResult(detail);
                 agg.questionCount += 1;
@@ -234,6 +236,7 @@ public class DispatchExecutionService {
             stat.setPlatformName(agg.platform.getPlatformName());
             stat.setBatchDate(batchDate);
             stat.setBatchNo(batchNo);
+            stat.setQuestionTier(questionTier);
             stat.setQuestionCount(agg.questionCount);
             stat.setRequestCount(agg.requestCount);
             stat.setCompletedCount(agg.completedCount);
@@ -310,6 +313,7 @@ public class DispatchExecutionService {
         result.setPlatformCode(platform.getPlatformCode());
         result.setBatchDate(batch.getBatchDate());
         result.setBatchNo(batch.getBatchNo());
+        result.setQuestionTier(batch.getQuestionTier());
         result.setStatus(invokeResult.success ? "completed" : "failed");
         result.setRequestCount(invokeResult.requestCount);
         result.setResponseTimeMs(invokeResult.responseTimeMs);
@@ -536,6 +540,44 @@ public class DispatchExecutionService {
         }
     }
 
+    private InvocationResult invokeMonitoringWithRouter(AiPlatformConfig platform,
+                                                        DispatchTask task,
+                                                        String questionText) {
+        try {
+            LlmRouteResult routed = llmPlatformRouter.invoke(new LlmRouteRequest(
+                    LlmFeature.MONITORING,
+                    "You are a GEO monitoring assistant.",
+                    questionText,
+                    0D,
+                    dispatchProperties.getModelConnectTimeoutMs(),
+                    dispatchProperties.getModelRequestTimeoutMs(),
+                    LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS,
+                    null,
+                    null,
+                    false,
+                    1000,
+                    0,
+                    List.of(platform)
+            ));
+            task.setPlatformCode(routed.platformCode());
+            task.setCurrentChannel(routed.channel());
+            log.info("BI_DAILY_POLL task {} executed by platform={}, model={}, channel={}",
+                    task.getId(), routed.platformCode(), routed.modelId(), routed.channel());
+            return InvocationResult.success(
+                    routed.platformCode(),
+                    routed.channel(),
+                    routed.responseText(),
+                    Math.max(routed.durationMs(), 1L),
+                    routed.requestCount()
+            );
+        } catch (LlmRouteException ex) {
+            if (isCapacityFailure(ex.failureKind())) {
+                throw new DispatchResourceBusyException(ex.getMessage(), ex);
+            }
+            return InvocationResult.failure(ex.failureKind().name(), ex.getMessage(), ex.requestCount(), ex);
+        }
+    }
+
     private boolean isCapacityFailure(LlmRouteFailureKind failureKind) {
         return failureKind == LlmRouteFailureKind.ALL_RATE_LIMITED
                 || failureKind == LlmRouteFailureKind.ALL_PERMIT_BUSY
@@ -734,6 +776,7 @@ public class DispatchExecutionService {
                     .eq(PollResult::getPlatformId, result.getPlatformId())
                     .eq(PollResult::getBatchDate, result.getBatchDate())
                     .eq(PollResult::getBatchNo, result.getBatchNo())
+                    .eq(PollResult::getQuestionTier, result.getQuestionTier())
                     .last("LIMIT 1");
             wrapper.eq(PollResult::getKeywordResultId, result.getKeywordResultId());
             PollResult existing = pollResultMapper.selectOne(wrapper);
@@ -755,6 +798,7 @@ public class DispatchExecutionService {
                             .eq(PollDailyStat::getPlatformId, stat.getPlatformId())
                             .eq(PollDailyStat::getBatchDate, stat.getBatchDate())
                             .eq(PollDailyStat::getBatchNo, stat.getBatchNo())
+                            .eq(PollDailyStat::getQuestionTier, stat.getQuestionTier())
                             .last("LIMIT 1")
             );
             if (existing == null) {
@@ -807,12 +851,19 @@ public class DispatchExecutionService {
         }
     }
 
-    private PollBatch ensureBatch(DispatchTask task, Project project, LocalDate batchDate, int batchNo, int totalQuestions, int totalPlatforms) {
+    private PollBatch ensureBatch(DispatchTask task,
+                                  Project project,
+                                  LocalDate batchDate,
+                                  int batchNo,
+                                  String questionTier,
+                                  int totalQuestions,
+                                  int totalPlatforms) {
         PollBatch existing = pollBatchMapper.selectOne(
                 new LambdaQueryWrapper<PollBatch>()
                         .eq(PollBatch::getProjectId, project.getId())
                         .eq(PollBatch::getBatchDate, batchDate)
                         .eq(PollBatch::getBatchNo, batchNo)
+                        .eq(PollBatch::getQuestionTier, questionTier)
                         .last("LIMIT 1")
         );
         if (existing != null) {
@@ -834,6 +885,7 @@ public class DispatchExecutionService {
         batch.setProjectId(project.getId());
         batch.setBatchDate(batchDate);
         batch.setBatchNo(batchNo);
+        batch.setQuestionTier(questionTier);
         batch.setTriggeredAt(LocalDateTime.now());
         batch.setTotalQuestionCount(totalQuestions);
         batch.setTotalPlatformCount(totalPlatforms);
@@ -872,6 +924,32 @@ public class DispatchExecutionService {
         } catch (NumberFormatException ex) {
             return 1;
         }
+    }
+
+    private String resolveQuestionTier(DispatchTask task) {
+        Map<String, Object> payload = parsePayload(task);
+        Object value = payload.get("questionTier");
+        String tier = value == null ? "A" : String.valueOf(value).trim().toUpperCase(Locale.ROOT);
+        if (!QUESTION_TIERS.contains(tier)) {
+            throw new BizException(400, "Invalid question tier for BI_DAILY_POLL: " + value);
+        }
+        return tier;
+    }
+
+    private int resolveTierPollLimit(Project project, String questionTier) {
+        Integer limit = switch (questionTier) {
+            case "A" -> project.getPlanKeywordGroupLimitA();
+            case "B" -> project.getPlanKeywordGroupLimitB();
+            case "C" -> project.getPlanKeywordGroupLimitC();
+            default -> null;
+        };
+        if (limit != null && limit > 0) {
+            return limit;
+        }
+        if ("A".equals(questionTier) && project.getPlanKeywordGroupLimit() != null && project.getPlanKeywordGroupLimit() > 0) {
+            return project.getPlanKeywordGroupLimit();
+        }
+        return 0;
     }
 
     private boolean hasContentGenerationMetadata(DispatchTask task) {
@@ -928,7 +1006,7 @@ public class DispatchExecutionService {
         }
     }
 
-    private List<PollKeywordCandidate> loadProjectPollKeywords(Long projectId) {
+    private List<PollKeywordCandidate> loadProjectPollKeywords(Long projectId, String questionTier) {
         List<Long> groupIds = projectKeywordGroupRelMapper.selectList(
                 new LambdaQueryWrapper<ProjectKeywordGroupRel>()
                         .eq(ProjectKeywordGroupRel::getProjectId, projectId)
@@ -941,6 +1019,7 @@ public class DispatchExecutionService {
         List<KeywordGroupResult> results = keywordGroupResultMapper.selectList(
                 new LambdaQueryWrapper<KeywordGroupResult>()
                         .in(KeywordGroupResult::getGroupId, groupIds)
+                        .eq(KeywordGroupResult::getQuestionTier, questionTier)
                         .orderByAsc(KeywordGroupResult::getId)
         );
         if (results.isEmpty()) {

@@ -16,6 +16,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -72,20 +73,36 @@ public class DispatchPlannerService {
     }
 
     private void planBiDaily(Project project, LocalDate today) {
-        if (!DispatchScheduleCalculator.isBiDailyDue(project.getActivatedAt().toLocalDate(), today)) {
+        LocalDate activatedDate = project.getActivatedAt().toLocalDate();
+        planQuestionTierPoll(project, today, activatedDate, "A", 1);
+        planQuestionTierPoll(project, today, activatedDate, "B", 7);
+        planQuestionTierPoll(project, today, activatedDate, "C", 14);
+    }
+
+    private void planQuestionTierPoll(Project project,
+                                      LocalDate today,
+                                      LocalDate activatedDate,
+                                      String questionTier,
+                                      int intervalDays) {
+        long daysSinceActivation = ChronoUnit.DAYS.between(activatedDate, today);
+        if (daysSinceActivation < 0 || daysSinceActivation % intervalDays != 0) {
             return;
         }
         Map<String, Object> payload = new HashMap<>();
-        payload.put("mode", "bi-daily");
+        payload.put("mode", "question-poll");
+        payload.put("questionTier", questionTier);
         payload.put("batchDate", today.toString());
         payload.put("batchNo", 1);
         dispatchTaskService.createTaskAndEnqueue(
                 project.getId(),
                 DispatchTaskType.BI_DAILY_POLL,
-                today.minusDays(1),
+                today.minusDays(Math.max(intervalDays - 1, 0)),
                 today,
                 LocalDateTime.now(),
-                payload
+                payload,
+                "question-poll:" + questionTier,
+                null,
+                null
         );
     }
 

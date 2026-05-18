@@ -18,6 +18,7 @@ public class PollResult {
     private Long projectId;
     private Long keywordResultId;
     private String keywordTextSnapshot;
+    private String questionTier;
     private Long platformId;
     private String platformCode;
     private LocalDate batchDate;

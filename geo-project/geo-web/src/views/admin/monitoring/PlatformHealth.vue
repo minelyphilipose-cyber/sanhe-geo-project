@@ -95,6 +95,11 @@
         </div>
       </div>
       <el-progress :percentage="llmPoolPercent" :status="llmPoolProgressStatus" />
+      <div v-if="featureUsageItems.length" class="llm-feature-row">
+        <span v-for="item in featureUsageItems" :key="item.key">
+          {{ featureLabel(item.key) }} {{ item.active }} / {{ item.limit }}
+        </span>
+      </div>
     </section>
 
     <DataState :loading="loading" :empty="!loading && platforms.length === 0" empty-text="暂无平台健康数据">
@@ -195,6 +200,15 @@ const llmPoolProgressStatus = computed<'' | 'success' | 'warning' | 'exception'>
   if (llmPoolPercent.value >= 80) return 'warning'
   return 'success'
 })
+const featureUsageItems = computed(() => {
+  const limits = llmPool.value?.featureConcurrency || {}
+  const active = llmPool.value?.activeFeatures || {}
+  return Object.entries(limits).map(([key, limit]) => ({
+    key,
+    limit: Number(limit || 0),
+    active: Number(active[key] || 0),
+  }))
+})
 
 function ensureCustomRange() {
   if (filters.rangeType !== 'custom') return true
@@ -273,6 +287,17 @@ function counterTotal(pattern: string) {
   return Object.entries(counters)
     .filter(([key]) => key.includes(pattern))
     .reduce((sum, [, value]) => sum + Number(value || 0), 0)
+}
+
+function featureLabel(feature: string) {
+  const labels: Record<string, string> = {
+    monitoring: '问题池',
+    article: '文章',
+    presale: '售前',
+    draft: '草稿',
+    generic: '通用',
+  }
+  return labels[feature] || feature
 }
 
 function startTimer() {
@@ -431,6 +456,27 @@ onBeforeUnmount(() => {
   color: #0f172a;
   font-size: 18px;
   font-weight: 800;
+}
+
+.llm-feature-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.llm-feature-row span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1e40af;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .platform-grid {

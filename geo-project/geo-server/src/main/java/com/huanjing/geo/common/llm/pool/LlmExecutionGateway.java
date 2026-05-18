@@ -9,7 +9,9 @@ import org.springframework.util.StringUtils;
 
 import java.lang.management.ManagementFactory;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -39,7 +41,8 @@ public class LlmExecutionGateway {
         String member = instanceId + ":" + Thread.currentThread().getId() + ":" + requestId;
         long now = System.currentTimeMillis();
         long leaseUntil = now + properties.getLeaseMs();
-        List<LlmPermitToken> tokens = new ArrayList<>(2);
+        List<LlmPermitToken> tokens = new ArrayList<>(3);
+        String normalizedFeature = normalizedFeature(feature);
 
         LlmPermitToken global = new LlmPermitToken(
                 globalKey(),
@@ -54,6 +57,23 @@ public class LlmExecutionGateway {
         }
         tokens.add(global);
 
+        int featureLimit = properties.featureLimit(normalizedFeature);
+        if (featureLimit > 0) {
+            LlmPermitToken featureToken = new LlmPermitToken(
+                    featureKey(normalizedFeature),
+                    member + ":feature:" + normalizedFeature,
+                    LlmPermitScope.FEATURE.name(),
+                    normalizedFeature,
+                    leaseUntil
+            );
+            if (!permitStore.acquire(featureToken.key(), featureToken.member(), featureLimit, now, leaseUntil, properties.getLeaseSafetyMs())) {
+                releaseTokens(tokens);
+                metrics.increment("llm_permit_acquire_busy_total:feature:" + normalizedFeature);
+                throw new LlmPermitUnavailableException(LlmPermitScope.FEATURE, normalizedFeature);
+            }
+            tokens.add(featureToken);
+        }
+
         String platformCode = platformConfig.getPlatformCode().trim();
         int platformLimit = platformConfig.getConcurrencyLimit() == null || platformConfig.getConcurrencyLimit() <= 0
                 ? 1
@@ -66,7 +86,7 @@ public class LlmExecutionGateway {
                 leaseUntil
         );
         if (!permitStore.acquire(platform.key(), platform.member(), platformLimit, now, leaseUntil, properties.getLeaseSafetyMs())) {
-            permitStore.release(global.key(), global.member(), System.currentTimeMillis(), properties.getLeaseSafetyMs());
+            releaseTokens(tokens);
             metrics.increment("llm_permit_acquire_busy_total:platform");
             throw new LlmPermitUnavailableException(LlmPermitScope.PLATFORM, platformCode);
         }
@@ -74,6 +94,9 @@ public class LlmExecutionGateway {
 
         renewalService.register(tokens);
         metrics.increment("llm_permit_acquire_success_total:global");
+        if (featureLimit > 0) {
+            metrics.increment("llm_permit_acquire_success_total:feature:" + normalizedFeature);
+        }
         metrics.increment("llm_permit_acquire_success_total:platform");
         return new LlmExecutionPermit(tokens, requestId, feature, now, this);
     }
@@ -130,6 +153,18 @@ public class LlmExecutionGateway {
         return permitStore.activeCount(platformKey(platformCode));
     }
 
+    public Long activeFeatureCount(String feature) {
+        return permitStore.activeCount(featureKey(normalizedFeature(feature)));
+    }
+
+    public Map<String, Long> activeFeatureCounts() {
+        Map<String, Long> counts = new LinkedHashMap<>();
+        properties.getFeatureConcurrency().keySet().forEach(feature ->
+                counts.put(feature, activeFeatureCount(feature))
+        );
+        return counts;
+    }
+
     @PreDestroy
     public void shutdown() {
         shuttingDown.set(true);
@@ -148,15 +183,37 @@ public class LlmExecutionGateway {
     }
 
     private List<LeaseToken> activeLlmTokens() {
-        return renewalService.snapshotTokensByScope(LlmPermitScope.GLOBAL.name(), LlmPermitScope.PLATFORM.name());
+        return renewalService.snapshotTokensByScope(
+                LlmPermitScope.GLOBAL.name(),
+                LlmPermitScope.FEATURE.name(),
+                LlmPermitScope.PLATFORM.name()
+        );
     }
 
     private String globalKey() {
         return properties.getPermitKeyPrefix() + ":global";
     }
 
+    private String featureKey(String feature) {
+        return properties.getPermitKeyPrefix() + ":feature:" + normalizedFeature(feature);
+    }
+
     private String platformKey(String platformCode) {
         return properties.getPermitKeyPrefix() + ":platform:" + platformCode;
+    }
+
+    private String normalizedFeature(String feature) {
+        if (!StringUtils.hasText(feature)) {
+            return "generic";
+        }
+        return feature.trim().toLowerCase();
+    }
+
+    private void releaseTokens(List<LlmPermitToken> tokens) {
+        for (int i = tokens.size() - 1; i >= 0; i--) {
+            LlmPermitToken token = tokens.get(i);
+            permitStore.release(token.key(), token.member(), System.currentTimeMillis(), properties.getLeaseSafetyMs());
+        }
     }
 
     private static String resolveInstanceId() {

@@ -245,6 +245,12 @@ geo:
       permit-key-prefix: ${GEO_LLM_POOL_PERMIT_KEY_PREFIX:geo:llm:permit}
       circuit-breaker-failure-threshold: ${GEO_LLM_POOL_CIRCUIT_BREAKER_FAILURE_THRESHOLD:5}
       circuit-breaker-open-duration-ms: ${GEO_LLM_POOL_CIRCUIT_BREAKER_OPEN_DURATION_MS:60000}
+      feature-concurrency:
+        monitoring: ${GEO_LLM_POOL_FEATURE_MONITORING:8}
+        article: ${GEO_LLM_POOL_FEATURE_ARTICLE:4}
+        presale: ${GEO_LLM_POOL_FEATURE_PRESALE:8}
+        draft: ${GEO_LLM_POOL_FEATURE_DRAFT:4}
+        generic: ${GEO_LLM_POOL_FEATURE_GENERIC:4}
   extension:
     fill-token:
       hmac-secret: ${FILL_TOKEN_HMAC_SECRET:__REQUIRED_FILL_TOKEN_HMAC_SECRET__}

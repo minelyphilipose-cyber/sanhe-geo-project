@@ -848,6 +848,8 @@ export interface LlmPoolSnapshot {
   enabled: boolean
   globalConcurrency: number
   activeGlobal: number
+  featureConcurrency?: Record<string, number>
+  activeFeatures?: Record<string, number>
   trackedLeases: number
   counters: Record<string, number>
   circuitBreakers?: Record<string, {

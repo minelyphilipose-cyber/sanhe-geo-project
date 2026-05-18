@@ -23,6 +23,7 @@ public class PollDailyStat {
     private String platformName;
     private LocalDate batchDate;
     private Integer batchNo;
+    private String questionTier;
     private Integer questionCount;
     private Integer requestCount;
     private Integer completedCount;

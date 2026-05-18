@@ -17,6 +17,7 @@ import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
+import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -41,6 +42,7 @@ public class DispatchMonitorService {
     private final ProjectMapper projectMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final DispatchAlertService dispatchAlertService;
+    private final LlmExecutionGateway llmExecutionGateway;
 
     public DispatchDashboardVO dashboard(String rangeType, LocalDate startDate, LocalDate endDate, Long projectId) {
         ensureMonitorAccess();
@@ -197,6 +199,8 @@ public class DispatchMonitorService {
             vo.setEnabled(p.getEnabled());
             vo.setRpmLimit(p.getRpmLimit());
             vo.setTpmLimit(p.getTpmLimit());
+            vo.setConcurrencyLimit(p.getConcurrencyLimit());
+            vo.setActivePermitCount(llmExecutionGateway.activePlatformCount(p.getPlatformCode()));
             vo.setDegraded(p.getDegraded());
             vo.setDegradedReason(p.getDegradedReason());
             vo.setCurrentHealthStatus(p.getCurrentHealthStatus());
