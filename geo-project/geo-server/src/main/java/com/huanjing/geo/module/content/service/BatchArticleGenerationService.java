@@ -367,7 +367,7 @@ public class BatchArticleGenerationService {
             draft.setProjectId(project.getId());
             draft.setArticleType(task.getArticleType());
             draft.setTitle(title);
-            draft.setStatus("pending_review");
+            draft.setStatus("approved");
             draft.setCurrentVersionNo(1);
             draft.setHasRisk(false);
             draft.setRiskSeverity("none");

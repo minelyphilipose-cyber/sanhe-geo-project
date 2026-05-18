@@ -21,7 +21,7 @@
         </span>
         <el-button @click="goBack">取消</el-button>
         <el-button type="primary" :icon="Check" :loading="submitting" :disabled="!canSubmit" @click="submitManualCreate">
-          提交审核
+          {{ submitButtonText }}
         </el-button>
       </div>
     </div>
@@ -680,12 +680,12 @@ const manualHtml = computed(() => {
     return `
       <div class="preview-empty preview-empty-workflow">
         <strong>生成草稿后，将在这里预览 AI 内容</strong>
-        <span>配置主题、语气和内容风格后点击生成草稿，确认内容后再提交审核。</span>
+        <span>配置主题、语气和内容风格后点击生成草稿，确认内容后提交保存。</span>
         <ol>
           <li>配置主题</li>
           <li>生成草稿</li>
           <li>编辑结构</li>
-          <li>提交审核</li>
+          <li>提交保存</li>
         </ol>
       </div>
     `
@@ -719,6 +719,7 @@ const submitStateText = computed(() => {
   if (createMode.value === 'auto' && aiMetadata.value && manualMarkdown.value.trim()) return '请确认 AI 草稿'
   return '字段待完善'
 })
+const submitButtonText = computed(() => (aiMetadata.value ? '保存文章' : '提交审核'))
 const previewHeaderText = computed(() => createMode.value === 'auto' ? 'AI 草稿生成后自动进入预览' : '编辑内容时自动同步 Markdown')
 const todayText = computed(() => {
   const now = new Date()
@@ -1320,7 +1321,7 @@ function applyAiPreview(response: ArticleAiDraftPreviewResponse) {
   generationNotice.value = {
     type: 'success',
     title: 'AI 草稿已生成',
-    description: '内容已回填到编辑区，可继续修改后提交审核。',
+    description: '内容已回填到编辑区，可继续修改后提交。',
   }
 }
 
@@ -1405,7 +1406,7 @@ async function submitManualCreate() {
       source: aiMetadata.value ? 'ai_preview' : 'manual',
       aiMetadata: aiMetadata.value || undefined,
     })
-    ElMessage.success('手动文章已生成，进入待审核')
+    ElMessage.success(aiMetadata.value ? 'AI 生成文章已保存，可直接发布' : '手动文章已生成，进入待审核')
     router.push({
       path: '/admin/content/execution',
       query: {

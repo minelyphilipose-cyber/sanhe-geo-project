@@ -335,7 +335,7 @@ public class ProjectDashboardSnapshotService {
         payload.put("distributionFailureCount", failedDistributionArticleIds.size());
         payload.put("items", List.of(
                 progressItem("generated", "已生成", generatedCount, "已进入内容库的文章草稿数量"),
-                progressItem("approved", "已审核通过", approvedCount, "当前处于审核通过后链路的文章数量"),
+                progressItem("approved", "已就绪", approvedCount, "当前处于可发布状态的文章数量"),
                 progressItem("distributed", "已分发", distributedArticleIds.size(), "已实际进入分发执行的去重文章数量"),
                 progressItem("published", "发布成功", publishedArticleIds.size(), "分发任务成功提交或确认的去重文章数量"),
                 progressItem("pending", "待处理", pendingArticleIds.size(), "待审核/待修改文章与待执行分发任务按文章去重"),

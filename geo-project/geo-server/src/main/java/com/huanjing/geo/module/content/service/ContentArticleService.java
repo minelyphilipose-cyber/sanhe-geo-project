@@ -43,6 +43,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ContentArticleService {
 
+    private static final Set<String> AUTO_APPROVED_GENERATED_BY = Set.of("ai", "system", "batch_ai", "ai_preview");
+
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
     private final ArticleReviewLogMapper articleReviewLogMapper;
@@ -181,6 +183,9 @@ public class ContentArticleService {
         }
         markdownImageReferenceValidator.validate(project, content);
 
+        String createSource = normalizeCreateSource(req.getSource());
+        String initialStatus = initialStatusForCreateSource(createSource);
+
         ArticleDraft draft = new ArticleDraft();
         draft.setProjectId(project.getId());
         draft.setArticleType(articleType);
@@ -188,7 +193,7 @@ public class ContentArticleService {
         draft.setTopic(topic);
         draft.setTopicAsQuestion(topicAsQuestion);
         draft.setTitle(title);
-        draft.setStatus("pending_review");
+        draft.setStatus(initialStatus);
         draft.setCurrentVersionNo(1);
         draft.setHasRisk(false);
         draft.setRiskSeverity("none");
@@ -204,7 +209,7 @@ public class ContentArticleService {
         version.setInputSnapshot(aiInputSnapshot(req.getAiMetadata()));
         version.setModelPlatformCode(aiMetadataString(req.getAiMetadata(), "modelPlatformCode"));
         version.setModelId(aiMetadataString(req.getAiMetadata(), "modelId"));
-        version.setGeneratedBy(normalizeCreateSource(req.getSource()));
+        version.setGeneratedBy(createSource);
         version.setCreatedBy(operator.getId());
         articleDraftVersionMapper.insert(version);
 
@@ -218,7 +223,7 @@ public class ContentArticleService {
         draft.setDuplicateArticleId(duplicateResult.articleId);
         articleDraftMapper.updateById(draft);
         draft.setProjectName(project.getProjectName());
-        auditArticleTransition("ARTICLE_CREATED", AuditResult.SUCCESS, operator, project, draft, null, "pending_review", "manual create", null);
+        auditArticleTransition("ARTICLE_CREATED", AuditResult.SUCCESS, operator, project, draft, null, initialStatus, "manual create", null);
         return draft;
     }
 
@@ -231,6 +236,24 @@ public class ContentArticleService {
             return value;
         }
         return "manual";
+    }
+
+    private String initialStatusForCreateSource(String source) {
+        return "ai_preview".equals(source) ? "approved" : "pending_review";
+    }
+
+    private boolean isSystemGeneratedArticle(Long articleId) {
+        List<ArticleDraftVersion> versions = articleDraftVersionMapper.selectList(
+                new LambdaQueryWrapper<ArticleDraftVersion>()
+                        .eq(ArticleDraftVersion::getArticleId, articleId)
+                        .select(ArticleDraftVersion::getGeneratedBy)
+        );
+        return versions != null && versions.stream()
+                .filter(Objects::nonNull)
+                .map(ArticleDraftVersion::getGeneratedBy)
+                .filter(StringUtils::hasText)
+                .map(value -> value.trim().toLowerCase(Locale.ROOT))
+                .anyMatch(AUTO_APPROVED_GENERATED_BY::contains);
     }
 
     private String aiPromptSnapshot(Map<String, Object> aiMetadata) {
@@ -295,6 +318,7 @@ public class ContentArticleService {
 
         RiskResult riskResult = scanRisk(project, content);
         DuplicateResult duplicateResult = checkDuplicate(article, title);
+        String newStatus = isSystemGeneratedArticle(articleId) ? "approved" : "under_revision";
         // Entity is null intentionally; all updated columns are set explicitly in the wrapper,
         // keeping the status predicate and mutation in one atomic UPDATE.
         int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
@@ -302,7 +326,7 @@ public class ContentArticleService {
                 .eq(ArticleDraft::getStatus, oldStatus)
                 .set(ArticleDraft::getTitle, title)
                 .set(ArticleDraft::getCurrentVersionNo, nextVersion)
-                .set(ArticleDraft::getStatus, "under_revision")
+                .set(ArticleDraft::getStatus, newStatus)
                 .set(ArticleDraft::getHasRisk, riskResult.hasRisk)
                 .set(ArticleDraft::getRiskSeverity, riskResult.severity)
                 .set(ArticleDraft::getRiskWordsJson, riskResult.wordsJson)
@@ -310,12 +334,12 @@ public class ContentArticleService {
                 .set(ArticleDraft::getDuplicateScore, duplicateResult.score)
                 .set(ArticleDraft::getDuplicateArticleId, duplicateResult.articleId));
         if (updated != 1) {
-            auditArticleTransition("ARTICLE_REVISION_SAVED", AuditResult.DENIED, operator, project, article, oldStatus, "under_revision", "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
+            auditArticleTransition("ARTICLE_REVISION_SAVED", AuditResult.DENIED, operator, project, article, oldStatus, newStatus, "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
             throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
         }
-        auditArticleTransition("ARTICLE_REVISION_SAVED", AuditResult.SUCCESS, operator, project, article, oldStatus, "under_revision", req.getNote(), null);
+        auditArticleTransition("ARTICLE_REVISION_SAVED", AuditResult.SUCCESS, operator, project, article, oldStatus, newStatus, req.getNote(), null);
 
-        if (StringUtils.hasText(req.getNote())) {
+        if ("under_revision".equals(newStatus) && StringUtils.hasText(req.getNote())) {
             ArticleReviewLog log = new ArticleReviewLog();
             log.setArticleId(articleId);
             log.setAction("return_for_revision");
@@ -338,17 +362,18 @@ public class ContentArticleService {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Only under_revision/rejected article can resubmit");
         }
         String oldStatus = article.getStatus();
+        String newStatus = isSystemGeneratedArticle(articleId) ? "approved" : "pending_review";
         // Entity is null intentionally; all updated columns are set explicitly in the wrapper,
         // keeping the status predicate and mutation in one atomic UPDATE.
         int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
                 .eq(ArticleDraft::getId, articleId)
                 .eq(ArticleDraft::getStatus, oldStatus)
-                .set(ArticleDraft::getStatus, "pending_review"));
+                .set(ArticleDraft::getStatus, newStatus));
         if (updated != 1) {
-            auditArticleTransition("ARTICLE_RESUBMITTED", AuditResult.DENIED, operator, project, article, oldStatus, "pending_review", "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
+            auditArticleTransition("ARTICLE_RESUBMITTED", AuditResult.DENIED, operator, project, article, oldStatus, newStatus, "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
             throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
         }
-        auditArticleTransition("ARTICLE_RESUBMITTED", AuditResult.SUCCESS, operator, project, article, oldStatus, "pending_review", req == null ? null : req.getComment(), null);
+        auditArticleTransition("ARTICLE_RESUBMITTED", AuditResult.SUCCESS, operator, project, article, oldStatus, newStatus, req == null ? null : req.getComment(), null);
 
         ArticleReviewLog log = new ArticleReviewLog();
         log.setArticleId(articleId);
@@ -516,7 +541,7 @@ public class ContentArticleService {
         draft.setGenerationSlotNo(generationSlotNo);
         draft.setArticleType(articleType);
         draft.setTitle(title);
-        draft.setStatus("pending_review");
+        draft.setStatus("approved");
         draft.setCurrentVersionNo(1);
         draft.setHasRisk(false);
         draft.setRiskSeverity("none");

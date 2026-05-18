@@ -259,7 +259,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="resubmitVisible" title="重新提交审核" width="520px">
+    <el-dialog v-model="resubmitVisible" title="重新提交" width="520px">
       <el-form :model="resubmitForm" label-width="90px">
         <el-form-item label="备注">
           <el-input v-model="resubmitForm.comment" type="textarea" :rows="4" />
@@ -1078,7 +1078,7 @@ const selectedDouyinMaterials = computed(() => selectedDouyinImageMaterialIds.va
   .filter((item): item is BrandMaterial => !!item))
 const statusOptions = [
   { label: '待审核', value: 'pending_review' },
-  { label: '已通过', value: 'approved' },
+  { label: '已就绪', value: 'approved' },
   { label: '已驳回', value: 'rejected' },
   { label: '修改中', value: 'under_revision' },
   { label: '已发布', value: 'published' },
@@ -1330,7 +1330,7 @@ function openBatchPublishJobs() {
 async function openBatchPublish() {
   const selected = selectedRows.value.filter((row) => canDistribute(row.status))
   if (!selected.length) {
-    ElMessage.warning('请选择已审核通过或已下架的文章')
+    ElMessage.warning('请选择已就绪或已下架的文章')
     return
   }
   batchPublishChecking.value = true
@@ -2464,7 +2464,7 @@ async function submitResubmit() {
       comment: resubmitForm.comment || undefined,
     })
     resubmitVisible.value = false
-    ElMessage.success('已重新提交审核')
+    ElMessage.success('已重新提交')
     await load()
   } finally {
     submitting.value = false

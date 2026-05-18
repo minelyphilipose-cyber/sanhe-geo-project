@@ -13,6 +13,7 @@ import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.dto.ArticlePublishRequest;
 import com.huanjing.geo.module.content.dto.ArticleResubmitRequest;
 import com.huanjing.geo.module.content.dto.ArticleReviewRequest;
+import com.huanjing.geo.module.content.dto.ArticleRevisionSaveRequest;
 import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
@@ -122,6 +123,7 @@ class ContentArticleServiceTest {
         verify(articleDraftMapper, times(1)).insert(draftCaptor.capture());
         assertEquals("zhihu", draftCaptor.getValue().getContentStyle());
         assertEquals("Manual topic", draftCaptor.getValue().getTopic());
+        assertEquals("pending_review", draftCaptor.getValue().getStatus());
         ArgumentCaptor<ArticleDraftVersion> versionCaptor = ArgumentCaptor.forClass(ArticleDraftVersion.class);
         verify(articleDraftVersionMapper).insert(versionCaptor.capture());
         assertEquals(markdown, versionCaptor.getValue().getContentMarkdown());
@@ -162,6 +164,7 @@ class ContentArticleServiceTest {
         assertEquals("wechat", draftCaptor.getValue().getContentStyle());
         assertEquals("AI topic", draftCaptor.getValue().getTopic());
         assertEquals("AI question", draftCaptor.getValue().getTopicAsQuestion());
+        assertEquals("approved", draftCaptor.getValue().getStatus());
         ArgumentCaptor<ArticleDraftVersion> versionCaptor = ArgumentCaptor.forClass(ArticleDraftVersion.class);
         verify(articleDraftVersionMapper).insert(versionCaptor.capture());
         ArticleDraftVersion version = versionCaptor.getValue();
@@ -205,6 +208,39 @@ class ContentArticleServiceTest {
         verify(brandAccessService).requireBrandAccess(20L, 7L, BrandAccessAction.OPERATE);
         verify(articleDraftMapper).update(isNull(), any(Wrapper.class));
         verifyAudit("ARTICLE_RESUBMITTED", AuditResult.SUCCESS);
+    }
+
+    @Test
+    void resubmitSystemGeneratedArticleApprovesDirectly() {
+        ArticleDraft article = article("under_revision");
+        when(articleDraftMapper.selectById(99L)).thenReturn(article);
+        when(articleDraftVersionMapper.selectList(any())).thenReturn(List.of(versionGeneratedBy("system")));
+        when(articleDraftMapper.update(isNull(), any(Wrapper.class))).thenReturn(1);
+
+        service.resubmit(99L, new ArticleResubmitRequest());
+
+        verify(articleDraftMapper).update(isNull(), any(Wrapper.class));
+        verifyAudit("ARTICLE_RESUBMITTED", AuditResult.SUCCESS, "approved");
+    }
+
+    @Test
+    void saveRevisionSystemGeneratedArticleStaysApproved() {
+        ArticleDraft article = article("approved");
+        when(articleDraftMapper.selectById(99L)).thenReturn(article);
+        when(articleDraftVersionMapper.selectList(any())).thenReturn(List.of(versionGeneratedBy("batch_ai")));
+        when(articleDraftMapper.selectList(any())).thenReturn(List.of());
+        when(articleDraftMapper.update(isNull(), any(Wrapper.class))).thenReturn(1);
+
+        ArticleRevisionSaveRequest request = new ArticleRevisionSaveRequest();
+        request.setTitle("Updated title");
+        request.setContentMarkdown("# Updated title\n\nbody");
+        request.setNote("edit");
+
+        service.saveRevision(99L, request);
+
+        verify(articleDraftVersionMapper).insert(any(ArticleDraftVersion.class));
+        verify(articleDraftMapper).update(isNull(), any(Wrapper.class));
+        verifyAudit("ARTICLE_REVISION_SAVED", AuditResult.SUCCESS, "approved");
     }
 
     @Test
@@ -301,6 +337,10 @@ class ContentArticleServiceTest {
     }
 
     private void verifyAudit(String eventType, AuditResult result) {
+        verifyAudit(eventType, result, null);
+    }
+
+    private void verifyAudit(String eventType, AuditResult result, String newStatus) {
         ArgumentCaptor<AuditEvent> captor = ArgumentCaptor.forClass(AuditEvent.class);
         verify(auditService, times(1)).record(captor.capture());
         AuditEvent event = captor.getValue();
@@ -308,6 +348,9 @@ class ContentArticleServiceTest {
         assertEquals(result, event.getResult());
         assertEquals(7L, event.getActorId());
         assertEquals(20L, event.getBrandId());
+        if (newStatus != null) {
+            assertEquals(newStatus, event.getDetail().get("newStatus"));
+        }
     }
 
     private SysUser operator(Long id) {
@@ -344,6 +387,12 @@ class ContentArticleServiceTest {
         version.setArticleId(99L);
         version.setVersionNo(1);
         version.setCreatedBy(createdBy);
+        return version;
+    }
+
+    private ArticleDraftVersion versionGeneratedBy(String generatedBy) {
+        ArticleDraftVersion version = version(null);
+        version.setGeneratedBy(generatedBy);
         return version;
     }
 

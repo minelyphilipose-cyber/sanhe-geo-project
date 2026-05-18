@@ -40,7 +40,7 @@ import java.util.concurrent.Executor;
 @Service
 public class ArticleAiDraftService {
 
-    private static final String STATUS_PENDING_REVIEW = "pending_review";
+    private static final String STATUS_APPROVED = "approved";
     private static final String GENERATED_BY_AI = "ai";
     private static final String DEFAULT_CONTENT_STYLE = "wechat";
     private static final String DEFAULT_TONE = "professional";
@@ -232,8 +232,8 @@ public class ArticleAiDraftService {
 
             ArticleDraft draft = persistDraft(project, operator, articleType, content, originalPrompt, model, result);
             auditGenerated(AuditResult.SUCCESS, operator, project, draft.getId(), originalPrompt.length(),
-                    model.platformCode(), model.modelId(), elapsedMs(started), STATUS_PENDING_REVIEW, null);
-            return new ArticleAiDraftResponse(draft.getId(), STATUS_PENDING_REVIEW);
+                    model.platformCode(), model.modelId(), elapsedMs(started), STATUS_APPROVED, null);
+            return new ArticleAiDraftResponse(draft.getId(), STATUS_APPROVED);
         } catch (BizException ex) {
             auditGenerated(AuditResult.FAILURE, operator, project, null, originalPrompt.length(),
                     model.platformCode(), model.modelId(), elapsedMs(started), "generation_failed", ex.getCode());
@@ -264,7 +264,7 @@ public class ArticleAiDraftService {
             draft.setProjectId(project.getId());
             draft.setArticleType(articleType);
             draft.setTitle(title);
-            draft.setStatus(STATUS_PENDING_REVIEW);
+            draft.setStatus(STATUS_APPROVED);
             draft.setCurrentVersionNo(1);
             draft.setHasRisk(false);
             draft.setRiskSeverity("none");

@@ -83,27 +83,27 @@ class ArticleAiDraftServiceTest {
     }
 
     @Test
-    void generateCreatesPendingReviewAiDraft() throws Exception {
+    void generateCreatesApprovedAiDraft() throws Exception {
         mockInsertId();
         when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
 
         ArticleAiDraftResponse response = service.generate(request()).get();
 
         assertEquals(99L, response.articleId());
-        assertEquals("pending_review", response.status());
+        assertEquals("approved", response.status());
         verify(brandAccessService).requireBrandAccess(20L, 7L, BrandAccessAction.OPERATE);
         verify(rateLimiter).check(7L);
 
         ArgumentCaptor<ArticleDraft> draft = ArgumentCaptor.forClass(ArticleDraft.class);
         verify(articleMapper).insert(draft.capture());
-        assertEquals("pending_review", draft.getValue().getStatus());
+        assertEquals("approved", draft.getValue().getStatus());
 
         ArgumentCaptor<ArticleDraftVersion> version = ArgumentCaptor.forClass(ArticleDraftVersion.class);
         verify(versionMapper).insert(version.capture());
         assertEquals("ai", version.getValue().getGeneratedBy());
         assertEquals("# AI title\n\nbody", version.getValue().getContentMarkdown());
         assertFalse(version.getValue().getPromptSnapshot().isBlank());
-        verifyAudit(AuditResult.SUCCESS, "pending_review");
+        verifyAudit(AuditResult.SUCCESS, "approved");
     }
 
     @Test

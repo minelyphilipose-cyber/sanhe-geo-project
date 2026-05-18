@@ -30,7 +30,7 @@
       <div class="main-panel">
         <div class="page-alert">
           <span class="info-icon">i</span>
-          <span>由运营手动发起批量生成，生成完成后进入待审核文章池，不自动分发。</span>
+          <span>由运营手动发起批量生成，生成完成后自动进入可发布状态，不自动分发。</span>
         </div>
 
         <section class="section-block">
