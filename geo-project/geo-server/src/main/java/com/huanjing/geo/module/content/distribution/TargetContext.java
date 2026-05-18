@@ -15,7 +15,8 @@ import java.util.Map;
 public sealed interface TargetContext
         permits TargetContext.SiteTarget, TargetContext.BrandOfficialSiteTarget,
         TargetContext.BrandGeoSiteTarget, TargetContext.SelfMediaTarget,
-        TargetContext.IndustrySiteTarget, TargetContext.AuthorityMediaTarget {
+        TargetContext.IndustrySiteTarget, TargetContext.ForumSiteTarget,
+        TargetContext.AuthorityMediaTarget {
 
     record SiteTarget(PublishSite site) implements TargetContext {}
 
@@ -34,6 +35,12 @@ public sealed interface TargetContext
 
     record IndustrySiteTarget(PublishSite site, Project project) implements TargetContext {
         public IndustrySiteTarget(PublishSite site) {
+            this(site, null);
+        }
+    }
+
+    record ForumSiteTarget(PublishSite site, Project project) implements TargetContext {
+        public ForumSiteTarget(PublishSite site) {
             this(site, null);
         }
     }

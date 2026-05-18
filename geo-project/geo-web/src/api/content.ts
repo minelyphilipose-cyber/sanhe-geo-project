@@ -170,6 +170,7 @@ export interface BatchArticlePublishRequest {
   intervalMinutes: number
   platformConcurrency: number
   industrySiteId?: number
+  forumSiteId?: number
 }
 
 export interface BatchArticlePublishItem {

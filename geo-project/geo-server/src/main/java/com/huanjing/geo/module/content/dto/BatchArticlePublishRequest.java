@@ -27,4 +27,6 @@ public class BatchArticlePublishRequest {
     private Integer platformConcurrency = 1;
 
     private Long industrySiteId;
+
+    private Long forumSiteId;
 }

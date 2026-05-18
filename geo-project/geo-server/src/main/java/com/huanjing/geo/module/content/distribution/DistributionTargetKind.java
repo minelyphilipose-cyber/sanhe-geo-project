@@ -11,6 +11,7 @@ public final class DistributionTargetKind {
     public static final String BRAND_OFFICIAL_SITE = "brand_official_site";
     public static final String BRAND_GEO_SITE = "brand_geo_site";
     public static final String INDUSTRY_SITE = "industry_site";
+    public static final String FORUM_SITE = "forum_site";
     public static final String AUTHORITY_MEDIA = "authority_media";
 
     private DistributionTargetKind() {

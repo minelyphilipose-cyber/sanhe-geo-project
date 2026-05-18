@@ -93,7 +93,7 @@
         <section v-for="group in publishGroups" :key="group.platformKey" class="card platform-card">
           <div class="card-header">
             <div class="platform-info">
-              <div class="platform-icon" :class="group.platformKey === 'agent_site' ? 'agent' : 'industry'">
+              <div class="platform-icon" :class="group.platformKey === 'agent_site' ? 'agent' : group.platformKey === 'forum_site' ? 'forum' : 'industry'">
                 {{ group.platformName.slice(0, 1) }}
               </div>
               <div>
@@ -119,6 +119,21 @@
             <el-select v-model="industryTargetSiteId" clearable placeholder="自动匹配或手动选择" class="target-select">
               <el-option
                 v-for="site in activeIndustrySites"
+                :key="site.id"
+                :label="`${site.siteName}（${site.siteCode}）`"
+                :value="site.id"
+              />
+            </el-select>
+          </div>
+
+          <div v-if="group.platformKey === 'forum_site'" class="target-row">
+            <div class="target-info">
+              <div class="target-label">论坛目标</div>
+              <div class="target-desc">可手动指定本次发布论坛；只有一个启用论坛时，系统可自动使用该论坛配置</div>
+            </div>
+            <el-select v-model="forumTargetSiteId" clearable placeholder="自动匹配或手动选择" class="target-select">
+              <el-option
+                v-for="site in activeForumSites"
                 :key="site.id"
                 :label="`${site.siteName}（${site.siteCode}）`"
                 :value="site.id"
@@ -185,7 +200,7 @@ import {
 import { getPublishSites } from '@/api/publishSite'
 import { formatDateTime } from '@/utils/format'
 
-type PublishPlatformKey = 'agent_site' | 'industry_site'
+type PublishPlatformKey = 'agent_site' | 'industry_site' | 'forum_site'
 type PublishResultStatus = 'pending' | 'running' | 'success' | 'failed'
 
 interface BatchPublishItem {
@@ -213,6 +228,7 @@ const intervalValue = ref(30)
 const intervalUnit = ref<'minutes' | 'hours'>('minutes')
 const platformConcurrency = ref(1)
 const industryTargetSiteId = ref<number | null>(null)
+const forumTargetSiteId = ref<number | null>(null)
 
 const validItems = computed(() => articleItems.value.filter((item) => item.platformKey && !item.invalidReason))
 const invalidItems = computed(() => articleItems.value.filter((item) => item.invalidReason))
@@ -221,7 +237,11 @@ const activeIndustrySites = computed(() => publishSites.value.filter((site) => {
   const integrationMethod = site.integrationMethod || ''
   return site.status === 'active'
     && integrationMethod !== 'brand_geo_site'
+    && integrationMethod !== 'forum_playwright'
     && site.siteCode !== 'agent_official_site'
+}))
+const activeForumSites = computed(() => publishSites.value.filter((site) => {
+  return site.status === 'active' && site.integrationMethod === 'forum_playwright'
 }))
 const publishGroups = computed(() => {
   const grouped = new Map<PublishPlatformKey, BatchPublishItem[]>()
@@ -231,8 +251,8 @@ const publishGroups = computed(() => {
   }
   return Array.from(grouped.entries()).map(([platformKey, items]) => ({
     platformKey,
-    platformName: platformKey === 'agent_site' ? 'Agent 官网' : '行业资讯站',
-    executorLabel: platformKey === 'agent_site' ? 'Agent 官网发布器' : '行业资讯站发布器',
+    platformName: platformName(platformKey),
+    executorLabel: executorLabel(platformKey),
     items,
   }))
 })
@@ -259,7 +279,9 @@ async function loadPage() {
     ])
     publishSites.value = siteResponse || []
     const firstIndustrySite = activeIndustrySites.value[0]
+    const firstForumSite = activeForumSites.value[0]
     industryTargetSiteId.value = firstIndustrySite?.id || null
+    forumTargetSiteId.value = firstForumSite?.id || null
     articleItems.value = detailResponses.map(toBatchPublishItem)
   } catch {
     ElMessage.error('加载批量发布数据失败')
@@ -309,19 +331,39 @@ function resolvePlatform(contentStyle: string): {
   if (contentStyle === 'industry_site') {
     return { platformKey: 'industry_site', platformName: '行业资讯站' }
   }
+  if (contentStyle === 'forum') {
+    return { platformKey: 'forum_site', platformName: '论坛' }
+  }
   const blocked: Record<string, string> = {
     toutiao: '今日头条不允许自动发布',
     wechat: '公众号不允许自动发布',
     zhihu: '知乎不允许自动发布',
     douyin_image_text: '抖音图文不允许自动发布',
     authority_media: '权威媒体不允许自动发布',
-    forum: '论坛发布执行器暂未接入',
   }
   return {
     platformKey: null,
     platformName: contentStyleLabel(contentStyle),
     invalidReason: blocked[contentStyle] || '文章未绑定可自动发布的平台风格',
   }
+}
+
+function platformName(platformKey: PublishPlatformKey) {
+  const map: Record<PublishPlatformKey, string> = {
+    agent_site: 'Agent 官网',
+    industry_site: '行业资讯站',
+    forum_site: '论坛',
+  }
+  return map[platformKey]
+}
+
+function executorLabel(platformKey: PublishPlatformKey) {
+  const map: Record<PublishPlatformKey, string> = {
+    agent_site: 'Agent 官网发布器',
+    industry_site: '行业资讯站发布器',
+    forum_site: '论坛发布执行器',
+  }
+  return map[platformKey]
 }
 
 function contentStyleLabel(v?: string | null) {
@@ -377,6 +419,7 @@ async function submitPublish() {
       intervalMinutes: intervalUnit.value === 'hours' ? intervalValue.value * 60 : intervalValue.value,
       platformConcurrency: platformConcurrency.value,
       industrySiteId: industryTargetSiteId.value || undefined,
+      forumSiteId: forumTargetSiteId.value || undefined,
     })
     applyPublishResponse(data.data)
     ElMessage.success(publishMode.value === 'scheduled' ? '定时发布任务已创建' : '批量发布提交完成')
@@ -725,6 +768,10 @@ function goBack() {
 
 .platform-icon.agent {
   background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+}
+
+.platform-icon.forum {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
 }
 
 .platform-title {

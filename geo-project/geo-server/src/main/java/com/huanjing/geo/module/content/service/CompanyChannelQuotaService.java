@@ -257,7 +257,7 @@ public class CompanyChannelQuotaService {
         }
         return switch (targetKind.trim()) {
             case DistributionTargetKind.BRAND_OFFICIAL_SITE, DistributionTargetKind.BRAND_GEO_SITE -> "official_site";
-            case DistributionTargetKind.INDUSTRY_SITE -> "industry_site";
+            case DistributionTargetKind.INDUSTRY_SITE, DistributionTargetKind.FORUM_SITE -> "industry_site";
             case DistributionTargetKind.MP_ACCOUNT -> "self_media";
             case DistributionTargetKind.AUTHORITY_MEDIA -> "authority_media";
             case DistributionTargetKind.SITE -> throw new BizException(400, "Legacy site target is not supported by company package channel quota");

@@ -79,6 +79,7 @@ public class BatchArticlePublishService {
         }
 
         PublishSite manualIndustrySite = request.getIndustrySiteId() == null ? null : requireIndustrySite(request.getIndustrySiteId());
+        PublishSite manualForumSite = request.getForumSiteId() == null ? null : requireForumSite(request.getForumSiteId());
 
         BatchArticlePublishJob job = new BatchArticlePublishJob();
         job.setPublishMode(publishMode);
@@ -94,7 +95,15 @@ public class BatchArticlePublishService {
 
         Map<String, Integer> platformIndex = new HashMap<>();
         for (Long articleId : articleIds) {
-            BatchArticlePublishItem item = buildItem(job.getId(), articleId, baseTime, intervalMinutes, platformIndex, manualIndustrySite);
+            BatchArticlePublishItem item = buildItem(
+                    job.getId(),
+                    articleId,
+                    baseTime,
+                    intervalMinutes,
+                    platformIndex,
+                    manualIndustrySite,
+                    manualForumSite
+            );
             itemMapper.insert(item);
         }
 
@@ -144,7 +153,8 @@ public class BatchArticlePublishService {
                                               LocalDateTime baseTime,
                                               int intervalMinutes,
                                               Map<String, Integer> platformIndex,
-                                              PublishSite industrySite) {
+                                              PublishSite industrySite,
+                                              PublishSite forumSite) {
         ArticleDraft article = requireArticle(articleId);
         if (!ACTIVE_ARTICLE_STATUS.contains(article.getStatus())) {
             throw new BizException(400, "article " + articleId + " is not approved or unpublished");
@@ -163,6 +173,10 @@ public class BatchArticlePublishService {
         if ("industry_site".equals(platform.platformKey()) && resolvedIndustrySite == null) {
             resolvedIndustrySite = resolveBrandIndustrySite(project);
         }
+        PublishSite resolvedForumSite = forumSite;
+        if ("forum_site".equals(platform.platformKey()) && resolvedForumSite == null) {
+            resolvedForumSite = resolveDefaultForumSite();
+        }
 
         int index = platformIndex.merge(platform.platformKey(), 1, Integer::sum) - 1;
         BatchArticlePublishItem item = new BatchArticlePublishItem();
@@ -171,7 +185,11 @@ public class BatchArticlePublishService {
         item.setProjectId(article.getProjectId());
         item.setPlatformKey(platform.platformKey());
         item.setContentStyle(contentStyle);
-        item.setTargetSiteId("industry_site".equals(platform.platformKey()) ? resolvedIndustrySite.getId() : null);
+        item.setTargetSiteId(switch (platform.platformKey()) {
+            case "industry_site" -> resolvedIndustrySite.getId();
+            case "forum_site" -> resolvedForumSite.getId();
+            default -> null;
+        });
         item.setTargetBrandId("agent_site".equals(platform.platformKey()) ? project.getBrandId() : null);
         item.setPlannedAt(baseTime.plusMinutes((long) index * intervalMinutes));
         item.setStatus("pending");
@@ -229,6 +247,14 @@ public class BatchArticlePublishService {
             return contentDistributionService.distributeToAsOperator(
                     item.getArticleId(),
                     new TargetContext.IndustrySiteTarget(site),
+                    operatorId
+            );
+        }
+        if ("forum_site".equals(item.getPlatformKey())) {
+            PublishSite site = requireForumSite(item.getTargetSiteId());
+            return contentDistributionService.distributeToAsOperator(
+                    item.getArticleId(),
+                    new TargetContext.ForumSiteTarget(site),
                     operatorId
             );
         }
@@ -364,13 +390,15 @@ public class BatchArticlePublishService {
         if ("industry_site".equals(contentStyle)) {
             return new PlatformTarget("industry_site");
         }
+        if ("forum".equals(contentStyle)) {
+            return new PlatformTarget("forum_site");
+        }
         Map<String, String> blocked = Map.of(
                 "toutiao", "今日头条不允许自动发布",
                 "wechat", "公众号不允许自动发布",
                 "zhihu", "知乎不允许自动发布",
                 "douyin_image_text", "抖音图文不允许自动发布",
-                "authority_media", "权威媒体不允许自动发布",
-                "forum", "论坛发布执行器暂未接入"
+                "authority_media", "权威媒体不允许自动发布"
         );
         throw new BizException(400, blocked.getOrDefault(contentStyle, "article content style does not support auto publish"));
     }
@@ -413,6 +441,36 @@ public class BatchArticlePublishService {
             throw new BizException(400, "publish site is not an industry site");
         }
         return site;
+    }
+
+    private PublishSite requireForumSite(Long siteId) {
+        PublishSite site = publishSiteMapper.selectById(siteId);
+        if (site == null) {
+            throw new BizException(404, "forum publish site not found");
+        }
+        if (!"active".equalsIgnoreCase(site.getStatus())) {
+            throw new BizException(400, "forum publish site is not active");
+        }
+        if (!"forum_playwright".equalsIgnoreCase(site.getIntegrationMethod())) {
+            throw new BizException(400, "publish site is not a forum playwright target");
+        }
+        return site;
+    }
+
+    private PublishSite resolveDefaultForumSite() {
+        List<PublishSite> sites = publishSiteMapper.selectList(
+                new LambdaQueryWrapper<PublishSite>()
+                        .eq(PublishSite::getIntegrationMethod, "forum_playwright")
+                        .eq(PublishSite::getStatus, "active")
+                        .orderByAsc(PublishSite::getId)
+        );
+        if (sites.isEmpty()) {
+            throw new BizException(400, "forum publish site is not configured");
+        }
+        if (sites.size() > 1) {
+            throw new BizException(400, "multiple forum publish sites configured; forumSiteId is required");
+        }
+        return sites.get(0);
     }
 
     private PublishSite resolveBrandIndustrySite(Project project) {
