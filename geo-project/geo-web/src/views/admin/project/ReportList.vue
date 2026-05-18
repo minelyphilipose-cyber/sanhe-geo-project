@@ -80,30 +80,15 @@
             Live
           </div>
 
-          <div class="orbit-system">
-            <div class="orbit-ring orbit-ring--outer"></div>
-            <div class="orbit-ring orbit-ring--middle"></div>
-            <div class="orbit-ring orbit-ring--inner"></div>
+          <div class="lissa-stage" ref="lissaStageRef">
+            <canvas class="lissa-trail-canvas" ref="lissaCanvasRef" aria-hidden="true"></canvas>
 
-            <div class="orbit-layer orbit-layer--outer">
+            <div class="lissa-logos" ref="lissaLogosRef">
               <div
-                v-for="item in outerOrbitPlatforms"
+                v-for="item in lissajousPlatforms"
                 :key="item.name"
-                class="orbit-chip"
-                :style="{ top: item.top, left: item.left }"
-              >
-                <span :data-tip="`${item.name} · ${item.value}`">
-                  <img :src="item.logo" :alt="item.name" />
-                </span>
-              </div>
-            </div>
-
-            <div class="orbit-layer orbit-layer--middle">
-              <div
-                v-for="item in middleOrbitPlatforms"
-                :key="item.name"
-                class="orbit-chip orbit-chip--small"
-                :style="{ top: item.top, left: item.left }"
+                class="lissa-chip"
+                :class="{ 'lissa-chip--small': !item.big }"
               >
                 <span :data-tip="`${item.name} · ${item.value}`">
                   <img :src="item.logo" :alt="item.name" />
@@ -112,19 +97,23 @@
             </div>
 
             <div class="engine-core">
-              <svg class="engine-core-ring" viewBox="0 0 140 140" aria-hidden="true">
+              <svg class="engine-core-ring engine-core-ring--outer" viewBox="0 0 140 140" aria-hidden="true">
                 <defs>
-                  <linearGradient id="dashboardCoreArcA" x1="0" y1="0" x2="1" y2="1">
+                  <linearGradient id="dashboardCoreArcA" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="140" y2="140">
                     <stop offset="0%" stop-color="#2f6bff" stop-opacity="0" />
-                    <stop offset="100%" stop-color="#2f6bff" stop-opacity="0.86" />
-                  </linearGradient>
-                  <linearGradient id="dashboardCoreArcB" x1="1" y1="1" x2="0" y2="0">
-                    <stop offset="0%" stop-color="#7b61ff" stop-opacity="0" />
-                    <stop offset="100%" stop-color="#7b61ff" stop-opacity="0.82" />
+                    <stop offset="100%" stop-color="#2f6bff" stop-opacity="0.55" />
                   </linearGradient>
                 </defs>
-                <circle cx="70" cy="70" r="68" fill="none" stroke="url(#dashboardCoreArcA)" stroke-width="2" stroke-dasharray="86 340" stroke-linecap="round" />
-                <circle cx="70" cy="70" r="68" fill="none" stroke="url(#dashboardCoreArcB)" stroke-width="2" stroke-dasharray="66 340" stroke-dashoffset="-194" stroke-linecap="round" />
+                <circle cx="70" cy="70" r="50" fill="none" stroke="url(#dashboardCoreArcA)" stroke-width="1.4" stroke-dasharray="80 234" stroke-linecap="round" />
+              </svg>
+              <svg class="engine-core-ring engine-core-ring--inner" viewBox="0 0 140 140" aria-hidden="true">
+                <defs>
+                  <linearGradient id="dashboardCoreArcB" gradientUnits="userSpaceOnUse" x1="140" y1="0" x2="0" y2="140">
+                    <stop offset="0%" stop-color="#7b61ff" stop-opacity="0" />
+                    <stop offset="100%" stop-color="#7b61ff" stop-opacity="0.55" />
+                  </linearGradient>
+                </defs>
+                <circle cx="70" cy="70" r="42" fill="none" stroke="url(#dashboardCoreArcB)" stroke-width="1.4" stroke-dasharray="58 206" stroke-linecap="round" />
               </svg>
               <span>TOTAL</span>
               <strong>60.99万</strong>
@@ -132,7 +121,7 @@
             </div>
           </div>
 
-          <div class="engine-flow">
+          <div class="engine-flow" ref="engineFlowRef">
             <div v-for="item in engineFlowItems" :key="item.label" class="engine-flow-item" :class="`is-${item.tone}`">
               <div>
                 <span></span>
@@ -433,7 +422,7 @@
 
 <script setup lang="ts">
 import type { CSSProperties } from 'vue'
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getActiveCompanyPackageBinding } from '@/api/customer'
@@ -483,15 +472,6 @@ interface IndexingSource {
   color: string
   bg: string
   gradient: string
-}
-
-interface OrbitPlatform {
-  name: string
-  short: string
-  logo: string
-  value: string
-  top: string
-  left: string
 }
 
 interface AiExposurePlatform {
@@ -658,20 +638,17 @@ const indexingSources: IndexingSource[] = [
   { name: 'Kimi', short: 'K', logo: kimiLogo, value: '0.39万', percent: 3.5, color: '#1f2937', bg: '#f3f4f6', gradient: 'linear-gradient(90deg, #6b7280, #111827)' },
 ]
 
-const outerOrbitPlatforms: OrbitPlatform[] = [
-  { name: 'DeepSeek', short: 'D', logo: deepseekLogo, value: '11.27万', top: '0%', left: '50%' },
-  { name: '豆包', short: '豆', logo: doubaoLogo, value: '11.12万', top: '34.55%', left: '97.55%' },
-  { name: '文心一言', short: '文', logo: wenxinLogo, value: '9.68万', top: '90.45%', left: '79.39%' },
-  { name: '元宝', short: '元', logo: hunyuanLogo, value: '8.35万', top: '90.45%', left: '20.61%' },
-  { name: '通义千问', short: '通', logo: qwenLogo, value: '7.24万', top: '34.55%', left: '2.45%' },
-]
-
-const middleOrbitPlatforms: OrbitPlatform[] = [
-  { name: '智谱清言', short: '智', logo: glmLogo, value: '5.16万', top: '9.55%', left: '79.39%' },
-  { name: '360 智脑', short: '360', logo: ai360Logo, value: '4.52万', top: '65.45%', left: '97.55%' },
-  { name: 'MiniMax', short: 'M', logo: minimaxLogo, value: '1.86万', top: '100%', left: '50%' },
-  { name: '小米 Mimo', short: '米', logo: xiaomiMimoLogo, value: '1.40万', top: '65.45%', left: '2.45%' },
-  { name: 'Kimi', short: 'K', logo: kimiLogo, value: '0.39万', top: '9.55%', left: '20.61%' },
+const lissajousPlatforms = [
+  { name: 'DeepSeek', logo: deepseekLogo, value: '11.27万', big: true },
+  { name: '豆包', logo: doubaoLogo, value: '11.12万', big: true },
+  { name: '文心一言', logo: wenxinLogo, value: '9.68万', big: true },
+  { name: '元宝', logo: hunyuanLogo, value: '8.35万', big: true },
+  { name: '通义千问', logo: qwenLogo, value: '7.24万', big: true },
+  { name: '智谱清言', logo: glmLogo, value: '5.16万', big: false },
+  { name: '360 智脑', logo: ai360Logo, value: '4.52万', big: false },
+  { name: 'MiniMax', logo: minimaxLogo, value: '1.86万', big: false },
+  { name: '小米 Mimo', logo: xiaomiMimoLogo, value: '1.40万', big: false },
+  { name: 'Kimi', logo: kimiLogo, value: '0.39万', big: false },
 ]
 
 const aiExposurePlatforms: AiExposurePlatform[] = [
@@ -1138,15 +1115,333 @@ function updateIntentParticles() {
   animationFrame = window.requestAnimationFrame(updateIntentParticles)
 }
 
+// ===== Lissajous 可见度引擎 =====
+const lissaStageRef = ref<HTMLElement | null>(null)
+const lissaCanvasRef = ref<HTMLCanvasElement | null>(null)
+const lissaLogosRef = ref<HTMLElement | null>(null)
+const engineFlowRef = ref<HTMLElement | null>(null)
+
+const LISSA_TRAIL_LIFE_MS = 2000
+const LISSA_TRIGGER_RADIUS = 100
+const LISSA_SAFE_RADIUS = 150
+const LISSA_REJOIN_DURATION_MS = 1400
+const LISSA_EJECT_BASE_SPEED = 3.5
+const LISSA_EJECT_DEPTH_GAIN = 0.05
+const LISSA_TRAIL_RGB = '100,110,125'
+const LISSA_TRAIL_ALPHA_PEAK = 0.42
+const LISSA_CORE_Y_OFFSET = -30
+const LISSA_VISIBLE_WINDOW = 0.4
+const LISSA_HEAD_LINE_WIDTH = 1.8
+
+type LissaPhase = 'lissa' | 'eject' | 'rejoin'
+interface LissaHarmonic {
+  f1: number
+  f2: number
+  ph1: number
+  ph2: number
+  w1: number
+  w2: number
+}
+interface LissaTrailPoint {
+  x: number
+  y: number
+  t: number
+}
+interface LissaState {
+  x: number
+  y: number
+  hx: LissaHarmonic
+  hy: LissaHarmonic
+  // 每个 logo 的独立时间偏移，让它们在 Lissajous 时间轴上一开始就分散
+  tOffset: number
+  phase: LissaPhase
+  vx: number
+  vy: number
+  rejoinStartT: number
+  rejoinFromX: number
+  rejoinFromY: number
+  ejectStartT: number
+  trail: LissaTrailPoint[]
+}
+
+let lissaState: LissaState[] = []
+let lissaChipNodes: HTMLElement[] = []
+let lissaCtx: CanvasRenderingContext2D | null = null
+let lissaStartT = 0
+let lissaAnimationFrame = 0
+let lissaResizeObserver: ResizeObserver | null = null
+
+function lissaRand(min: number, max: number) {
+  return min + Math.random() * (max - min)
+}
+
+function makeLissaHarmonic(baseFreqJitter: number): LissaHarmonic {
+  return {
+    f1: (1 + Math.random() * 2.5) * baseFreqJitter,
+    f2: (1.4 + Math.random() * 2.0) * baseFreqJitter * 1.8,
+    ph1: lissaRand(0, Math.PI * 2),
+    ph2: lissaRand(0, Math.PI * 2),
+    // 总权重 1.2 > 1：配合外层钳位，logo 实际运动会更经常贴近舞台四边
+    w1: 0.75,
+    w2: 0.45,
+  }
+}
+
+function lissaPos(s: LissaState, t: number, halfW: number, halfH: number, cx: number, cy: number) {
+  const ts = t + s.tOffset
+  const dx = s.hx.w1 * Math.sin(s.hx.f1 * ts + s.hx.ph1) + s.hx.w2 * Math.sin(s.hx.f2 * ts + s.hx.ph2)
+  const dy = s.hy.w1 * Math.sin(s.hy.f1 * ts + s.hy.ph1) + s.hy.w2 * Math.sin(s.hy.f2 * ts + s.hy.ph2)
+  // 振幅 1.05：让 sin 叠加峰值能真的把 logo 推到舞台边缘，多余的部分由调用方钳位
+  return { x: cx + dx * halfW * 1.05, y: cy + dy * halfH * 1.05 }
+}
+
+function lissaEaseOutCubic(t: number) {
+  return 1 - Math.pow(1 - t, 3)
+}
+
+function resizeLissaCanvas() {
+  const stage = lissaStageRef.value
+  const canvas = lissaCanvasRef.value
+  if (!stage || !canvas || !lissaCtx) return
+  const rect = stage.getBoundingClientRect()
+  const dpr = window.devicePixelRatio || 1
+  canvas.width = rect.width * dpr
+  canvas.height = rect.height * dpr
+  canvas.style.width = `${rect.width}px`
+  canvas.style.height = `${rect.height}px`
+  lissaCtx.setTransform(dpr, 0, 0, dpr, 0, 0)
+  updatePelletDistance()
+}
+
+function updatePelletDistance() {
+  const flow = engineFlowRef.value
+  if (!flow) return
+  const items = flow.querySelectorAll<HTMLElement>('.engine-flow-item')
+  if (items.length < 2) return
+  const r0 = items[0].getBoundingClientRect()
+  const r1 = items[1].getBoundingClientRect()
+  const dist = r1.left + r1.width / 2 - (r0.left + r0.width / 2)
+  flow.style.setProperty('--pellet-dist', `${dist}px`)
+}
+
+function getLissaBounds() {
+  const stage = lissaStageRef.value
+  if (!stage) return { w: 0, h: 0, minX: 0, maxX: 0, minY: 0, maxY: 0 }
+  const rect = stage.getBoundingClientRect()
+  return {
+    w: rect.width,
+    h: rect.height,
+    minX: 50,
+    maxX: rect.width - 50,
+    minY: 60,
+    maxY: rect.height - 110,
+  }
+}
+
+function lissaTick(now: number) {
+  if (!lissaCtx || !lissaState.length) {
+    lissaAnimationFrame = window.requestAnimationFrame(lissaTick)
+    return
+  }
+  const ctx = lissaCtx
+  const b = getLissaBounds()
+  // 舞台尺寸不正常时（挂载早期、隐藏状态等），跳过这一帧并不要污染 state
+  if (b.w < 100 || b.h < 100) {
+    lissaAnimationFrame = window.requestAnimationFrame(lissaTick)
+    return
+  }
+
+  const cx = b.w / 2
+  const cy = b.h / 2 + LISSA_CORE_Y_OFFSET
+  const halfW = (b.maxX - b.minX) / 2
+  const halfH = (b.maxY - b.minY) / 2
+
+  ctx.clearRect(0, 0, b.w, b.h)
+  const t = now - lissaStartT
+
+  lissaState.forEach((s, i) => {
+    const chip = lissaChipNodes[i]
+    if (!chip) return
+
+    const target = lissaPos(s, t, halfW, halfH, cx, cy)
+    let x: number
+    let y: number
+
+    if (s.phase === 'lissa') {
+      x = target.x
+      y = target.y
+      const ddx = x - cx
+      const ddy = y - cy
+      const dist = Math.sqrt(ddx * ddx + ddy * ddy)
+      if (dist < LISSA_TRIGGER_RADIUS) {
+        const dirX = dist > 0.1 ? ddx / dist : Math.random() - 0.5
+        const dirY = dist > 0.1 ? ddy / dist : Math.random() - 0.5
+        const ejectionStrength = LISSA_EJECT_BASE_SPEED + (LISSA_TRIGGER_RADIUS - dist) * LISSA_EJECT_DEPTH_GAIN
+        s.vx = dirX * ejectionStrength
+        s.vy = dirY * ejectionStrength
+        s.phase = 'eject'
+        s.ejectStartT = now
+        x = cx + dirX * LISSA_TRIGGER_RADIUS
+        y = cy + dirY * LISSA_TRIGGER_RADIUS
+      }
+    } else if (s.phase === 'eject') {
+      s.vx *= 0.96
+      s.vy *= 0.96
+      x = s.x + s.vx
+      y = s.y + s.vy
+      x = Math.max(b.minX, Math.min(b.maxX, x))
+      y = Math.max(b.minY, Math.min(b.maxY, y))
+      const ddx = x - cx
+      const ddy = y - cy
+      const dist = Math.sqrt(ddx * ddx + ddy * ddy)
+      const speedMag = Math.sqrt(s.vx * s.vx + s.vy * s.vy)
+      const ejectAge = now - s.ejectStartT
+      // 正常出口：飞够距离且基本停下
+      if (dist > LISSA_SAFE_RADIUS && speedMag < 0.8) {
+        s.phase = 'rejoin'
+        s.rejoinStartT = now
+        s.rejoinFromX = x
+        s.rejoinFromY = y
+      } else if (ejectAge > 3000) {
+        // 兜底：3 秒还没满足正常出口条件（边界回弹卡住等情况），强制 rejoin
+        s.phase = 'rejoin'
+        s.rejoinStartT = now
+        s.rejoinFromX = x
+        s.rejoinFromY = y
+      }
+    } else {
+      const k = Math.min(1, (now - s.rejoinStartT) / LISSA_REJOIN_DURATION_MS)
+      const e = lissaEaseOutCubic(k)
+      x = s.rejoinFromX + (target.x - s.rejoinFromX) * e
+      y = s.rejoinFromY + (target.y - s.rejoinFromY) * e
+      if (k >= 1) s.phase = 'lissa'
+    }
+
+    x = Math.max(b.minX, Math.min(b.maxX, x))
+    y = Math.max(b.minY, Math.min(b.maxY, y))
+
+    s.x = x
+    s.y = y
+    chip.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`
+
+    s.trail.push({ x, y, t: now })
+    while (s.trail.length && now - s.trail[0].t > LISSA_TRAIL_LIFE_MS) s.trail.shift()
+
+    if (s.trail.length > 1) {
+      const cutoff = 1 - LISSA_VISIBLE_WINDOW
+      for (let j = 1; j < s.trail.length; j++) {
+        const p0 = s.trail[j - 1]
+        const p1 = s.trail[j]
+        const age = now - (p0.t + p1.t) / 2
+        const lifeRatio = 1 - age / LISSA_TRAIL_LIFE_MS
+        if (lifeRatio < cutoff) continue
+        const headRatio = (lifeRatio - cutoff) / LISSA_VISIBLE_WINDOW
+        const alpha = Math.pow(headRatio, 1.4) * LISSA_TRAIL_ALPHA_PEAK
+        const lineWidth = headRatio * LISSA_HEAD_LINE_WIDTH
+        if (alpha < 0.01 || lineWidth < 0.05) continue
+        ctx.strokeStyle = `rgba(${LISSA_TRAIL_RGB},${alpha.toFixed(3)})`
+        ctx.lineWidth = lineWidth
+        ctx.lineCap = 'round'
+        ctx.beginPath()
+        ctx.moveTo(p0.x, p0.y)
+        ctx.lineTo(p1.x, p1.y)
+        ctx.stroke()
+      }
+    }
+  })
+
+  lissaAnimationFrame = window.requestAnimationFrame(lissaTick)
+}
+
+function startLissajous() {
+  const canvas = lissaCanvasRef.value
+  const logosLayer = lissaLogosRef.value
+  if (!canvas || !logosLayer) return
+
+  // 如果舞台还没真正进入 layout（zero size 或太小），下一帧再试，避免在 (0,0) 起跳触发误判
+  const stage = lissaStageRef.value
+  if (stage) {
+    const rect = stage.getBoundingClientRect()
+    if (rect.width < 100 || rect.height < 100) {
+      window.requestAnimationFrame(startLissajous)
+      return
+    }
+  }
+
+  lissaCtx = canvas.getContext('2d')
+  if (!lissaCtx) return
+
+  lissaChipNodes = Array.from(logosLayer.querySelectorAll<HTMLElement>('.lissa-chip'))
+
+  const baseFreq = 0.00010
+  lissaState = lissajousPlatforms.map((_, i) => ({
+    x: 0,
+    y: 0,
+    hx: makeLissaHarmonic(baseFreq + i * 0.000003),
+    hy: makeLissaHarmonic(baseFreq + i * 0.000003),
+    // 给每个 logo 一个均匀分布在 [0, 60s] 内的时间偏移，让 10 个 logo 在 t=0 时就分布在 Lissajous 轨迹的不同位置
+    tOffset: (i / lissajousPlatforms.length) * 60000 + Math.random() * 4000,
+    phase: 'lissa',
+    vx: 0,
+    vy: 0,
+    rejoinStartT: 0,
+    rejoinFromX: 0,
+    rejoinFromY: 0,
+    ejectStartT: 0,
+    trail: [],
+  }))
+
+  // 让每个 logo 的初始位置 = Lissajous 公式在 t=0 时的位置，避免从 (0,0) 跳到第一帧目标的"瞬移"被状态机理解为撞击
+  const b0 = getLissaBounds()
+  const cx = b0.w / 2
+  const cy = b0.h / 2 + LISSA_CORE_Y_OFFSET
+  const halfW = (b0.maxX - b0.minX) / 2
+  const halfH = (b0.maxY - b0.minY) / 2
+  lissaState.forEach((s) => {
+    const p = lissaPos(s, 0, halfW, halfH, cx, cy)
+    s.x = p.x
+    s.y = p.y
+  })
+
+  resizeLissaCanvas()
+  if (lissaStageRef.value) {
+    lissaResizeObserver = new ResizeObserver(resizeLissaCanvas)
+    lissaResizeObserver.observe(lissaStageRef.value)
+  }
+  window.requestAnimationFrame(updatePelletDistance)
+
+  lissaStartT = performance.now()
+  lissaAnimationFrame = window.requestAnimationFrame(lissaTick)
+}
+
+function stopLissajous() {
+  if (lissaAnimationFrame) {
+    window.cancelAnimationFrame(lissaAnimationFrame)
+    lissaAnimationFrame = 0
+  }
+  if (lissaResizeObserver) {
+    lissaResizeObserver.disconnect()
+    lissaResizeObserver = null
+  }
+  lissaCtx = null
+  lissaChipNodes = []
+  lissaState = []
+}
+
 onMounted(() => {
   refreshedAt.value = new Date()
   loadProjectInfo()
   resetIntentParticles()
   animationFrame = window.requestAnimationFrame(updateIntentParticles)
+  // 等 Vue 的 DOM 更新完成且 layout 稳定，再启动 Lissajous，否则 lissaStageRef 可能拿到 0 尺寸
+  nextTick(() => {
+    startLissajous()
+  })
 })
 
 onBeforeUnmount(() => {
   window.cancelAnimationFrame(animationFrame)
+  stopLissajous()
 })
 </script>
 
@@ -1508,10 +1803,8 @@ onBeforeUnmount(() => {
 
 .visibility-engine {
   position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   min-width: 0;
+  min-height: 380px;
   overflow: hidden;
   background: linear-gradient(180deg, rgba(47, 107, 255, 0.025) 0%, rgba(123, 97, 255, 0.035) 100%);
   border: 1px solid rgba(47, 107, 255, 0.08);
@@ -1585,91 +1878,72 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
-.orbit-system {
-  position: relative;
+.lissa-stage {
+  position: absolute;
+  inset: 56px 24px 96px;
   z-index: 1;
-  width: min(430px, 86%);
-  aspect-ratio: 1;
-  margin-bottom: 26px;
 }
 
-.orbit-ring {
-  position: absolute;
-  border-radius: 50%;
-}
-
-.orbit-ring--outer {
-  inset: 0;
-  border: 1px dashed rgba(47, 107, 255, 0.2);
-}
-
-.orbit-ring--middle {
-  inset: 60px;
-  border: 1px solid rgba(47, 107, 255, 0.13);
-}
-
-.orbit-ring--inner {
-  inset: 110px;
-  border: 1px solid rgba(123, 97, 255, 0.16);
-  animation: pulseRing 4s ease-in-out infinite;
-}
-
-.orbit-layer {
+.lissa-trail-canvas {
   position: absolute;
   inset: 0;
-  animation: orbitRotate 40s linear infinite;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
 }
 
-.orbit-layer--middle {
-  inset: 60px;
-  animation-duration: 28s;
-  animation-direction: reverse;
-}
-
-.orbit-chip {
+.lissa-logos {
   position: absolute;
-  transform: translate(-50%, -50%);
+  inset: 0;
+  z-index: 2;
 }
 
-.orbit-chip span {
-  position: relative;
+.lissa-chip {
+  position: absolute;
   display: inline-flex;
-  width: 48px;
-  height: 48px;
+  width: 52px;
+  height: 52px;
   align-items: center;
   justify-content: center;
-  color: var(--primary);
-  background: rgba(255, 255, 255, 0.94);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.96);
   border: 1px solid rgba(47, 107, 255, 0.18);
-  border-radius: 14px;
+  border-radius: 50%;
   box-shadow: 0 8px 18px rgba(47, 107, 255, 0.14);
-  font-size: 15px;
-  font-weight: 800;
-  animation: counterRotate1 40s linear infinite;
+  cursor: pointer;
+  transition: box-shadow 0.2s ease;
+  will-change: transform;
 }
 
-.orbit-chip span img {
+.lissa-chip:hover {
+  box-shadow: 0 14px 30px rgba(47, 107, 255, 0.32);
+  z-index: 10;
+}
+
+.lissa-chip--small {
+  width: 44px;
+  height: 44px;
+  border-color: rgba(123, 97, 255, 0.18);
+}
+
+.lissa-chip span {
+  position: relative;
+  display: inline-flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+}
+
+.lissa-chip img {
   display: block;
-  width: 70%;
-  height: 70%;
+  width: 95%;
+  height: 95%;
   object-fit: contain;
+  pointer-events: none;
 }
 
-.orbit-layer--middle .orbit-chip span {
-  animation-name: counterRotate2;
-  animation-duration: 28s;
-  animation-direction: reverse;
-}
-
-.orbit-chip--small span {
-  width: 40px;
-  height: 40px;
-  border-radius: 12px;
-  color: var(--purple);
-  font-size: 12px;
-}
-
-.orbit-chip span::after {
+.lissa-chip span::after {
   position: absolute;
   bottom: -28px;
   left: 50%;
@@ -1687,21 +1961,21 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.orbit-chip span:hover::after {
+.lissa-chip:hover span::after {
   opacity: 1;
 }
 
 .engine-core {
   position: absolute;
-  top: 50%;
+  top: calc(50% - 30px);
   left: 50%;
   display: flex;
-  width: 124px;
-  height: 124px;
+  width: 140px;
+  height: 140px;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  overflow: visible;
+  overflow: hidden;
   background:
     radial-gradient(circle at 35% 28%, rgba(255, 255, 255, 0.98), rgba(238, 244, 255, 0.9) 54%, rgba(47, 107, 255, 0.12)),
     linear-gradient(135deg, rgba(47, 107, 255, 0.08), rgba(123, 97, 255, 0.08));
@@ -1710,16 +1984,9 @@ onBeforeUnmount(() => {
   box-shadow:
     0 18px 42px rgba(47, 107, 255, 0.18),
     inset 0 2px 14px rgba(255, 255, 255, 0.82);
+  pointer-events: none;
   transform: translate(-50%, -50%);
-}
-
-.engine-core::before {
-  position: absolute;
-  inset: -16px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(47, 107, 255, 0.12), transparent 70%);
-  content: "";
-  filter: blur(4px);
+  z-index: 5;
 }
 
 .engine-core-ring {
@@ -1728,8 +1995,15 @@ onBeforeUnmount(() => {
   z-index: 1;
   width: 100%;
   height: 100%;
-  animation: orbitRotate 18s linear infinite;
   pointer-events: none;
+}
+
+.engine-core-ring--outer {
+  animation: orbitRotate 14s linear infinite;
+}
+
+.engine-core-ring--inner {
+  animation: orbitRotateReverse 18s linear infinite;
 }
 
 .engine-core span {
@@ -2688,30 +2962,14 @@ tbody tr:hover {
   }
 }
 
-@keyframes pulseRing {
-  0%, 100% {
-    opacity: 0.55;
-    transform: scale(1);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1.06);
-  }
-}
-
 @keyframes orbitRotate {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
 
-@keyframes counterRotate1 {
+@keyframes orbitRotateReverse {
   from { transform: rotate(0deg); }
   to { transform: rotate(-360deg); }
-}
-
-@keyframes counterRotate2 {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 @keyframes flowPellet {
@@ -2719,15 +2977,15 @@ tbody tr:hover {
     opacity: 0;
     transform: translateX(0);
   }
-  24% {
+  18% {
     opacity: 1;
   }
-  78% {
+  82% {
     opacity: 1;
   }
   100% {
     opacity: 0;
-    transform: translateX(58px);
+    transform: translateX(var(--pellet-dist, 200px));
   }
 }
 
@@ -2788,28 +3046,16 @@ tbody tr:hover {
   }
 
   .visibility-engine {
-    min-height: 320px;
+    min-height: 380px;
   }
 
-  .orbit-system {
-    width: 290px;
-  }
-
-  .orbit-ring--middle {
-    inset: 48px;
-  }
-
-  .orbit-layer--middle {
-    inset: 48px;
-  }
-
-  .orbit-ring--inner {
-    inset: 92px;
+  .lissa-stage {
+    inset: 56px 16px 96px;
   }
 
   .engine-core {
-    width: 108px;
-    height: 108px;
+    width: 120px;
+    height: 120px;
   }
 
   .trend-summary,

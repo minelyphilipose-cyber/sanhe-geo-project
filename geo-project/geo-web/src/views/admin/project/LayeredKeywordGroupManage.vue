@@ -176,7 +176,7 @@
           </div>
           <div class="footer-bar">
             <div><button class="btn" @click="saveDraft">保存草稿</button><span class="save-tip">自动保存已启用</span></div>
-            <div><button class="btn" @click="activeStep = 1">← 上一步</button><button class="btn btn-primary" @click="goStep3">下一步：配置参数 →</button></div>
+            <div><button class="btn" @click="goStep(1)">← 上一步</button><button class="btn btn-primary" @click="goStep3">下一步：配置参数 →</button></div>
           </div>
         </section>
 
@@ -211,7 +211,7 @@
           </div>
           <div class="footer-bar">
             <div>预估耗时：约 90 秒 · 单批 {{ batchTotal }} 条</div>
-            <div><button class="btn" @click="activeStep = 2">← 上一步</button><button class="btn btn-primary" :disabled="!!validationMessage || hasRunningBatch" @click="startBatch">{{ hasRunningBatch ? '已有运行中批次' : `开始生成（${batchTotal} 条）→` }}</button></div>
+            <div><button class="btn" @click="goStep2">← 上一步</button><button class="btn btn-primary" :disabled="!!validationMessage || hasRunningBatch" @click="startBatch">{{ hasRunningBatch ? '已有运行中批次' : `开始生成（${batchTotal} 条）→` }}</button></div>
           </div>
         </section>
 
@@ -235,7 +235,7 @@
             <div class="card-head"><span>实时日志<span class="note-inline">关键节点级 · 用于审计与排障</span></span></div>
             <div class="card-body"><div class="log-area"><div v-for="log in currentBatch?.logs || []" :key="`${log.createdAt}-${log.eventCode}`"><span class="log-time">{{ formatTime(log.createdAt) }}</span><span class="log-info">[{{ log.eventCode }}] {{ log.message }}</span></div></div></div>
           </div>
-          <div class="footer-bar"><div></div><div><button class="btn" @click="activeStep = 3">← 返回配置</button><button class="btn btn-primary" :disabled="!currentBatch || ['pending','running'].includes(currentBatch.status)" @click="goReview">下一步：审核 →</button></div></div>
+          <div class="footer-bar"><div></div><div><button class="btn" @click="goStep(3)">← 返回配置</button><button class="btn btn-primary" :disabled="!currentBatch || ['pending','running'].includes(currentBatch.status)" @click="goReview">下一步：审核 →</button></div></div>
         </section>
 
         <section v-show="activeStep === 5">
@@ -431,6 +431,7 @@ import {
   deleteGeoQuestion,
   exportGeoWorkorder,
   getGeoBatch,
+  getGeoDraft,
   getGeoProjectProfile,
   getGeoQuestions,
   getGeoProjectQuota,
@@ -552,6 +553,7 @@ const questionTabs = ['all', 'A', 'B', 'C'] as const
 const syncToProfile = ref(false)
 const profileDraftSaved = ref(false)
 const profileLoaded = ref(false)
+const profileSnapshots = new Map<number, { profile: ProfileVO; syncToProfile: boolean; draftSaved: boolean }>()
 
 const profile = reactive<ProfileVO>({
   companyId: 0, companyName: '', brandName: '', brandRelation: '自营', coreBusiness: [], targetRegion: '', industry: '',
@@ -648,8 +650,15 @@ watch(tierTab, () => loadQuestionPage(1))
 async function loadProjects() {
   projectLoading.value = true
   try {
-    const { data } = await getProjectList({ current: 1, size: 500, keyword: keyword.value || undefined, status: 'paused' })
-    projectOptions.value = data.data.records || []
+    const statuses = ['pending_start', 'paused']
+    const responses = await Promise.all(statuses.map((status) => getProjectList({ current: 1, size: 500, keyword: keyword.value || undefined, status })))
+    const projectMap = new Map<number, Project>()
+    responses.forEach(({ data }) => {
+      ;(data.data.records || []).forEach((project) => {
+        projectMap.set(project.id, project)
+      })
+    })
+    projectOptions.value = Array.from(projectMap.values())
   } finally {
     projectLoading.value = false
   }
@@ -690,12 +699,46 @@ async function selectProject(item: Project) {
     await openWorkorderReview(resumableWorkorder)
   }
 }
+function cloneProfileSnapshot(): ProfileVO {
+  return JSON.parse(JSON.stringify(profile)) as ProfileVO
+}
+function applyProfileSnapshot(nextProfile: ProfileVO) {
+  Object.assign(profile, {
+    companyId: nextProfile.companyId || 0,
+    projectId: nextProfile.projectId,
+    projectName: nextProfile.projectName,
+    companyName: nextProfile.companyName || '',
+    brandName: nextProfile.brandName || '',
+    brandRelation: nextProfile.brandRelation || '自营',
+    coreBusiness: Array.isArray(nextProfile.coreBusiness) ? nextProfile.coreBusiness : [],
+    targetRegion: nextProfile.targetRegion || '',
+    industry: nextProfile.industry || '',
+    targetCustomer: nextProfile.targetCustomer || '',
+    coreAdvantage: nextProfile.coreAdvantage || '',
+    benchmarkSpecs: nextProfile.benchmarkSpecs || '',
+    competitors: Array.isArray(nextProfile.competitors) ? nextProfile.competitors : [],
+    coreNeeds: Array.isArray(nextProfile.coreNeeds) ? nextProfile.coreNeeds : [],
+  })
+}
+function ensureProfileCollections() {
+  if (!profile.competitors.length) addCompetitor()
+  if (!profile.coreNeeds.length) { addNeed(); addNeed(); addNeed() }
+}
+function snapshotCurrentProfile() {
+  if (!workorder.value || activeStep.value !== 2) return
+  profileSnapshots.set(workorder.value.id, {
+    profile: cloneProfileSnapshot(),
+    syncToProfile: syncToProfile.value,
+    draftSaved: profileDraftSaved.value,
+  })
+}
 async function loadWorkorderList() {
   if (!selectedProject.value) return
   const { data } = await getGeoProjectWorkorders(selectedProject.value.id)
   workorderList.value = data.data || []
 }
 function resetWorkorderState() {
+  snapshotCurrentProfile()
   profileDraftSaved.value = false
   profileLoaded.value = false
   review.value = undefined
@@ -705,6 +748,7 @@ function resetWorkorderState() {
   duplicateResolveError.value = ''
 }
 async function openWorkorderReview(item: WorkorderListItem) {
+  snapshotCurrentProfile()
   const { data } = await getGeoReview(item.id)
   review.value = data.data
   workorder.value = data.data.workorder
@@ -725,6 +769,7 @@ async function goStep(stepNo: number) {
     await goStep2()
     return
   }
+  snapshotCurrentProfile()
   activeStep.value = stepNo
 }
 async function goStep2() {
@@ -733,10 +778,39 @@ async function goStep2() {
     activeStep.value = 2
     return
   }
+  const snapshot = profileSnapshots.get(workorder.value.id)
+  if (snapshot) {
+    applyProfileSnapshot(snapshot.profile)
+    syncToProfile.value = snapshot.syncToProfile
+    profileDraftSaved.value = snapshot.draftSaved
+    ensureProfileCollections()
+    profileLoaded.value = true
+    activeStep.value = 2
+    return
+  }
+  const draftResponse = await getGeoDraft(workorder.value.id)
+  const draft = draftResponse.data.data
+  if (draft?.profileJson) {
+    try {
+      applyProfileSnapshot(JSON.parse(draft.profileJson) as ProfileVO)
+      syncToProfile.value = !!draft.syncToCustomerProfile
+      profileDraftSaved.value = true
+      ensureProfileCollections()
+      profileSnapshots.set(workorder.value.id, {
+        profile: cloneProfileSnapshot(),
+        syncToProfile: syncToProfile.value,
+        draftSaved: profileDraftSaved.value,
+      })
+      profileLoaded.value = true
+      activeStep.value = 2
+      return
+    } catch {
+      ElMessage.warning('工单草稿解析失败，已回退到项目档案')
+    }
+  }
   const { data } = await getGeoProjectProfile(selectedProject.value.id)
-  Object.assign(profile, data.data)
-  if (!profile.competitors.length) addCompetitor()
-  if (!profile.coreNeeds.length) { addNeed(); addNeed(); addNeed() }
+  applyProfileSnapshot(data.data)
+  ensureProfileCollections()
   profileLoaded.value = true
   activeStep.value = 2
 }
@@ -744,6 +818,11 @@ async function saveDraft() {
   if (!workorder.value) return
   await saveGeoDraft({ workorderId: workorder.value.id, profileJson: JSON.stringify(profile), syncToCustomerProfile: syncToProfile.value, validationStatus: 'valid' })
   profileDraftSaved.value = true
+  profileSnapshots.set(workorder.value.id, {
+    profile: cloneProfileSnapshot(),
+    syncToProfile: syncToProfile.value,
+    draftSaved: true,
+  })
   ElMessage.success('草稿已保存')
 }
 async function goStep3() {

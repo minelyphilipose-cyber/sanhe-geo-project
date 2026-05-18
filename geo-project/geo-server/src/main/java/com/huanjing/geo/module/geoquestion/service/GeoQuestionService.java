@@ -148,8 +148,8 @@ public class GeoQuestionService {
     @Transactional
     public WorkorderVO createOrGetByProject(Long projectId) {
         Project project = requireProject(projectId);
-        if (!"paused".equals(project.getStatus())) {
-            throw new BizException(400, "只有未启动项目可以新增分层拓词组");
+        if (!"pending_start".equals(project.getStatus()) && !"paused".equals(project.getStatus())) {
+            throw new BizException(400, "只有待启动或暂停项目可以新增分层拓词组");
         }
         KeywordAllocation allocation = projectKeywordAllocation(project);
         if (allocation.total() <= 0) {

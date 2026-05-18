@@ -359,7 +359,7 @@ const dictStore = useDictStore()
 const canActivateProject = computed(() => userStore.hasPermission('project.start'))
 const canUpdateProject = computed(() => userStore.hasPermission('project.update'))
 const canPrepareProject = computed(() => project.value?.status === 'pending_start' || project.value?.status === 'paused')
-const canCreateKeywordGroup = computed(() => canPrepareProject.value && userStore.hasPermission('keyword_group.write'))
+const canCreateKeywordGroup = computed(() => !!project.value && userStore.hasPermission('keyword_group.write'))
 const projectId = Number(route.params.id)
 const hasValidId = Number.isFinite(projectId) && projectId > 0
 
