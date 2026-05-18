@@ -10,7 +10,10 @@ public class ForumPublishProfile {
     private String postUrl;
     private String boardId;
     private Integer timeoutMs = 30000;
+    private Integer acquireTimeoutMs = 30000;
     private Boolean headless = true;
+    private Boolean blockHeavyResources = true;
+    private List<String> blockedResourceTypes = List.of("image", "media", "font");
     private String contentMode = "html";
     private String publishedUrlRegex;
     private Selectors selectors = new Selectors();

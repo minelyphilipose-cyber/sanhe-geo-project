@@ -8,7 +8,10 @@ import com.microsoft.playwright.FrameLocator;
 import com.microsoft.playwright.Locator;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.Request;
+import com.microsoft.playwright.TimeoutError;
 import com.microsoft.playwright.options.LoadState;
+import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -19,6 +22,15 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.net.URI;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -28,20 +40,55 @@ import java.util.regex.Pattern;
 public class ForumBrowserPublisher {
 
     private static final String CHROMIUM_LAUNCH_ARGS_ENV = "PLAYWRIGHT_CHROMIUM_LAUNCH_ARGS";
+    private static final int MAX_CONCURRENT_PUBLISHES = 2;
+    private static final Semaphore BROWSER_SLOTS = new Semaphore(MAX_CONCURRENT_PUBLISHES);
 
     private final ObjectMapper objectMapper;
+    private final AtomicInteger workerCursor = new AtomicInteger();
+    private final ThreadLocal<BrowserWorkerState> currentWorkerState = new ThreadLocal<>();
+    private final List<BrowserWorker> workers = List.of(
+            new BrowserWorker("forum-browser-worker-1"),
+            new BrowserWorker("forum-browser-worker-2")
+    );
 
     public SubmitResult publish(ForumPublishProfile profile,
                                 ForumCredential credential,
                                 ForumPublishPayload payload) {
         long started = System.nanoTime();
         String requestPayload = requestPayload(profile, payload);
-        try (Playwright playwright = Playwright.create();
-             Browser browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
-                     .setHeadless(!Boolean.FALSE.equals(profile.getHeadless()))
-                     .setArgs(chromiumLaunchArgs()));
-             BrowserContext context = browser.newContext()) {
+        if (!acquireBrowserSlot(profile, payload, requestPayload)) {
+            return SubmitResult.failure(429, requestPayload, null,
+                    "forum browser concurrency limit reached",
+                    FailureKind.RATE_LIMIT, true);
+        }
+        try {
+            return nextWorker().publish(() -> publishWithBrowser(profile, credential, payload, started, requestPayload));
+        } catch (ForumPublishException ex) {
+            return SubmitResult.failure(ex.statusCode(), requestPayload, null, ex.getMessage(), ex.failureKind(), ex.retryable());
+        } catch (TimeoutError ex) {
+            log.warn("forum publish timeout articleId={} error={}", payload.articleId(), safeMessage(ex));
+            return SubmitResult.failure(504, requestPayload, null, safeMessage(ex), FailureKind.NETWORK_ERROR, true);
+        } catch (Exception ex) {
+            log.warn("forum publish failed articleId={} error={}", payload.articleId(), safeMessage(ex), ex);
+            return SubmitResult.failure(500, requestPayload, null, safeMessage(ex), FailureKind.UNKNOWN, false);
+        } finally {
+            BROWSER_SLOTS.release();
+        }
+    }
 
+    @PreDestroy
+    public void shutdown() {
+        workers.forEach(BrowserWorker::shutdown);
+    }
+
+    private SubmitResult publishWithBrowser(ForumPublishProfile profile,
+                                            ForumCredential credential,
+                                            ForumPublishPayload payload,
+                                            long started,
+                                            String requestPayload) throws Exception {
+        Browser browser = currentWorkerState().browser(profile);
+        try (BrowserContext context = browser.newContext()) {
+            routeHeavyResources(context, profile);
             Page page = context.newPage();
             int timeoutMs = timeoutMs(profile);
             page.setDefaultTimeout(timeoutMs);
@@ -61,12 +108,55 @@ public class ForumBrowserPublisher {
                     "elapsedMs", (System.nanoTime() - started) / 1_000_000
             ));
             return SubmitResult.success(200, requestPayload, responseBody, publishedUrl, platformArticleId(publishedUrl));
-        } catch (ForumPublishException ex) {
-            return SubmitResult.failure(ex.statusCode(), requestPayload, null, ex.getMessage(), ex.failureKind(), ex.retryable());
-        } catch (Exception ex) {
-            log.warn("forum publish failed articleId={} error={}", payload.articleId(), safeMessage(ex), ex);
-            return SubmitResult.failure(500, requestPayload, null, safeMessage(ex), FailureKind.UNKNOWN, false);
         }
+    }
+
+    private BrowserWorker nextWorker() {
+        int index = Math.floorMod(workerCursor.getAndIncrement(), workers.size());
+        return workers.get(index);
+    }
+
+    private BrowserWorkerState currentWorkerState() {
+        BrowserWorkerState state = currentWorkerState.get();
+        if (state == null) {
+            throw new IllegalStateException("forum browser worker state is not bound");
+        }
+        return state;
+    }
+
+    private boolean acquireBrowserSlot(ForumPublishProfile profile,
+                                       ForumPublishPayload payload,
+                                       String requestPayload) {
+        try {
+            boolean acquired = BROWSER_SLOTS.tryAcquire(acquireTimeoutMs(profile), TimeUnit.MILLISECONDS);
+            if (!acquired) {
+                log.warn("forum publish rejected by concurrency limit articleId={} maxConcurrent={} request={}",
+                        payload.articleId(), MAX_CONCURRENT_PUBLISHES, requestPayload);
+            }
+            return acquired;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            log.warn("forum publish interrupted while waiting browser slot articleId={}", payload.articleId());
+            return false;
+        }
+    }
+
+    private void routeHeavyResources(BrowserContext context, ForumPublishProfile profile) {
+        if (Boolean.FALSE.equals(profile.getBlockHeavyResources())) {
+            return;
+        }
+        Set<String> blockedTypes = blockedResourceTypes(profile);
+        if (blockedTypes.isEmpty()) {
+            return;
+        }
+        context.route("**/*", route -> {
+            Request request = route.request();
+            if (blockedTypes.contains(request.resourceType())) {
+                route.abort();
+                return;
+            }
+            route.resume();
+        });
     }
 
     private void login(Page page, ForumPublishProfile profile, ForumCredential credential) {
@@ -189,6 +279,26 @@ public class ForumBrowserPublisher {
         return Math.min(value, 120000);
     }
 
+    private int acquireTimeoutMs(ForumPublishProfile profile) {
+        Integer value = profile.getAcquireTimeoutMs();
+        if (value == null || value < 1000) {
+            return 30000;
+        }
+        return Math.min(value, 120000);
+    }
+
+    private Set<String> blockedResourceTypes(ForumPublishProfile profile) {
+        List<String> configuredTypes = profile.getBlockedResourceTypes();
+        if (configuredTypes == null || configuredTypes.isEmpty()) {
+            configuredTypes = List.of("image", "media", "font");
+        }
+        return configuredTypes.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .map(String::toLowerCase)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
     private void waitNetworkIdle(Page page, int timeoutMs) {
         try {
             page.waitForLoadState(LoadState.NETWORKIDLE, new Page.WaitForLoadStateOptions().setTimeout((double) timeoutMs));
@@ -224,6 +334,125 @@ public class ForumBrowserPublisher {
 
     private String safeMessage(Exception ex) {
         return StringUtils.hasText(ex.getMessage()) ? ex.getMessage() : ex.getClass().getSimpleName();
+    }
+
+    private class BrowserWorker {
+        private final ExecutorService executor;
+        private BrowserWorkerState state;
+
+        BrowserWorker(String threadName) {
+            this.executor = Executors.newSingleThreadExecutor(runnable -> {
+                Thread thread = new Thread(runnable, threadName);
+                thread.setDaemon(true);
+                return thread;
+            });
+        }
+
+        SubmitResult publish(Callable<SubmitResult> task) throws Exception {
+            Future<SubmitResult> future = executor.submit(() -> {
+                BrowserWorkerState boundState = state();
+                currentWorkerState.set(boundState);
+                try {
+                    return task.call();
+                } catch (RuntimeException ex) {
+                    if (!boundState.isBrowserConnected()) {
+                        boundState.closeQuietly();
+                    }
+                    throw ex;
+                } finally {
+                    currentWorkerState.remove();
+                }
+            });
+            try {
+                return future.get();
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new ForumPublishException(500, FailureKind.UNKNOWN, true,
+                        "interrupted while waiting forum browser worker");
+            } catch (ExecutionException ex) {
+                Throwable cause = ex.getCause();
+                if (cause instanceof Exception exception) {
+                    throw exception;
+                }
+                if (cause instanceof Error error) {
+                    throw error;
+                }
+                throw new IllegalStateException(cause);
+            }
+        }
+
+        void shutdown() {
+            Future<?> future = executor.submit(() -> {
+                if (state != null) {
+                    state.closeQuietly();
+                }
+            });
+            try {
+                future.get(10, TimeUnit.SECONDS);
+            } catch (Exception ex) {
+                log.warn("forum browser worker shutdown did not finish cleanly: {}", ex.getMessage());
+            } finally {
+                executor.shutdownNow();
+            }
+        }
+
+        private BrowserWorkerState state() {
+            if (state == null) {
+                state = new BrowserWorkerState();
+            }
+            return state;
+        }
+    }
+
+    private class BrowserWorkerState {
+        private Playwright playwright;
+        private Browser browser;
+        private Boolean headless;
+        private List<String> launchArgs = List.of();
+
+        Browser browser(ForumPublishProfile profile) {
+            Boolean nextHeadless = !Boolean.FALSE.equals(profile.getHeadless());
+            List<String> nextLaunchArgs = chromiumLaunchArgs();
+            if (browser != null && browser.isConnected()
+                    && nextHeadless.equals(headless)
+                    && nextLaunchArgs.equals(launchArgs)) {
+                return browser;
+            }
+
+            closeQuietly();
+            long started = System.nanoTime();
+            playwright = Playwright.create();
+            browser = playwright.chromium().launch(new BrowserType.LaunchOptions()
+                    .setHeadless(nextHeadless)
+                    .setArgs(nextLaunchArgs));
+            headless = nextHeadless;
+            launchArgs = nextLaunchArgs;
+            log.info("forum browser worker started chromium in {}ms", (System.nanoTime() - started) / 1_000_000);
+            return browser;
+        }
+
+        boolean isBrowserConnected() {
+            return browser != null && browser.isConnected();
+        }
+
+        void closeQuietly() {
+            if (browser != null) {
+                try {
+                    browser.close();
+                } catch (Exception ignored) {
+                    // Shutdown best effort.
+                }
+                browser = null;
+            }
+            if (playwright != null) {
+                try {
+                    playwright.close();
+                } catch (Exception ignored) {
+                    // Shutdown best effort.
+                }
+                playwright = null;
+            }
+        }
     }
 
     private static class ForumPublishException extends RuntimeException {
