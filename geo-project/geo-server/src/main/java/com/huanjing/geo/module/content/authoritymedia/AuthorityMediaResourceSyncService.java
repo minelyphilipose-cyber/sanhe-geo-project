@@ -84,7 +84,7 @@ public class AuthorityMediaResourceSyncService {
             return RefreshResult.skipped(resourceId, "external resource id is not numeric");
         }
 
-        JsonNode response = client.listResources(NEWS_MEDIA, 1, 1, remoteId, null);
+        JsonNode response = client.listResources(NEWS_MEDIA, 1, DEFAULT_PAGE_LIMIT, remoteId, null);
         List<JsonNode> items = extractResourceItems(response);
         if (items.isEmpty()) {
             int marked = resourceMapper.markDeletedById(resourceId, LocalDateTime.now());
