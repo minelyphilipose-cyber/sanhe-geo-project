@@ -107,19 +107,19 @@
         <div class="scope-title">诊断范围预览</div>
         <div class="scope-grid">
           <div class="scope-item">
-            <div class="scope-number">{{ scopeNumber(scopePreview?.platformCount) }}</div>
+            <div class="scope-number">{{ scopeNumber(effectiveScopePreview?.platformCount) }}</div>
             <div class="scope-label">AI 平台</div>
           </div>
           <div class="scope-item">
-            <div class="scope-number">{{ scopeNumber(scopePreview?.promptQueryCount) }}</div>
+            <div class="scope-number">{{ scopeNumber(effectiveScopePreview?.promptQueryCount) }}</div>
             <div class="scope-label">Prompt 查询</div>
           </div>
           <div class="scope-item">
-            <div class="scope-number">{{ scopeNumber(scopePreview?.llmCallUpperBound) }}</div>
+            <div class="scope-number">{{ scopeNumber(effectiveScopePreview?.llmCallUpperBound) }}</div>
             <div class="scope-label">最多 LLM 调用</div>
           </div>
           <div class="scope-item">
-            <div class="scope-number">{{ scopeNumber(scopePreview?.dimensionCount) }}</div>
+            <div class="scope-number">{{ scopeNumber(effectiveScopePreview?.dimensionCount) }}</div>
             <div class="scope-label">分析维度</div>
           </div>
         </div>
@@ -446,6 +446,13 @@ const CATEGORY_LABEL_TO_CODE: Record<string, PresalePromptCategoryCode> = {
   场景型: 'SCENARIO'
 }
 const CATEGORY_CODES = CATEGORY_OPTIONS.map((item) => item.code)
+const DEFAULT_LLM_CATEGORY_COUNTS: Record<PresalePromptCategoryCode, number> = {
+  RECOMMENDATION: 10,
+  COMPARISON: 5,
+  PROBLEM: 5,
+  COGNITIVE: 5,
+  SCENARIO: 5
+}
 const ALLOWED_PROMPT_VARIABLES = new Set([
   'competitor'
 ])
@@ -593,6 +600,24 @@ const promptGroups = computed(() => {
 
 const modifiedCount = computed(() => promptItems.value.filter((item) => isModified(item)).length)
 
+const effectiveScopePreview = computed<ReportScopePreviewVO | null>(() => {
+  const base = scopePreview.value
+  if (!base || activePromptTab.value !== 'llm') {
+    return base
+  }
+  const competitorPromptCount = Math.max(0, Number(llmPlan.categoryCounts.COMPARISON || 0))
+  const totalCount = Math.max(0, Number(llmPlan.totalCount || 0))
+  const genericPromptCount = Math.max(0, totalCount - competitorPromptCount)
+  const scope = calculatePromptScope(base.platformCount, genericPromptCount, competitorPromptCount)
+  return {
+    ...base,
+    genericPromptCount,
+    competitorPromptCount,
+    promptQueryCount: totalCount,
+    llmCallUpperBound: scope.totalUpperBound
+  }
+})
+
 const llmQuestionsByCategory = computed<Record<PresalePromptCategoryCode, LlmQuestionDraftItem[]>>(() => {
   const grouped = createCategoryRecord<LlmQuestionDraftItem[]>(() => [])
   for (const item of llmQuestions.value) {
@@ -622,18 +647,19 @@ const canGenerateLlm = computed(() => {
 const scopeNote = computed(() => {
   if (scopeLoading.value) return '正在读取当前启用平台与 Prompt 模板配置...'
   if (scopeLoadFailed.value) return '诊断范围预览读取失败,请刷新页面后重试。'
-  if (!scopePreview.value) return '暂无诊断范围数据。'
-  return `按当前启用配置预计最多发起 ${formatInt(scopePreview.value.llmCallUpperBound)} 次 LLM 调用。生成过程异步进行,提交后会跳到进度页。`
+  if (!effectiveScopePreview.value) return '暂无诊断范围数据。'
+  const sourceText = activePromptTab.value === 'llm' ? '当前 LLM 问题配置' : '当前启用模板配置'
+  return `按${sourceText}预计最多发起 ${formatInt(effectiveScopePreview.value.llmCallUpperBound)} 次 LLM 调用。生成过程异步进行,提交后会跳到进度页。`
 })
 
 const promptSummary = computed(() => {
   if (promptLoading.value) return '正在读取 Prompt 清单...'
   if (promptLoadFailed.value) return 'Prompt 清单读取失败'
-  if (!promptSources.value.length) return '暂无 Prompt 模板'
   if (activePromptTab.value === 'llm') {
     const status = llmSubmitIssues.value.length ? `，还差 ${llmMissingTotal.value} 条或存在待修正项` : '，数量已匹配'
     return `当前为 LLM 问题预览：${llmQuestions.value.length}/${llmPlan.totalCount} 条${status}。提交时只使用当前 Tab 的问题。`
   }
+  if (!promptSources.value.length) return '当前模板问题为空，请切换到 LLM 问题预览生成问题。'
   const counts = CATEGORY_ORDER.map((category) => {
     const count = promptSources.value.filter((x) => x.category === category).length
     return count > 0 ? `${category} ${count}` : ''
@@ -835,8 +861,14 @@ function applyDefaultLlmPlanFromTemplates() {
       counts[code] += 1
     }
   }
-  Object.assign(llmPlan.categoryCounts, counts)
-  llmPlan.totalCount = promptSources.value.length
+  const hasTemplatePlan = promptSources.value.length > 0
+  Object.assign(llmPlan.categoryCounts, hasTemplatePlan ? counts : DEFAULT_LLM_CATEGORY_COUNTS)
+  llmPlan.totalCount = hasTemplatePlan
+    ? promptSources.value.length
+    : Object.values(DEFAULT_LLM_CATEGORY_COUNTS).reduce((sum, count) => sum + count, 0)
+  if (!hasTemplatePlan) {
+    activePromptTab.value = 'llm'
+  }
 }
 
 function currentBaseSnapshot() {
@@ -1059,7 +1091,7 @@ async function onSubmit() {
   if (!formRef.value) return
   const ok = await formRef.value.validate().catch(() => false)
   if (!ok) return
-  if (!promptSources.value.length || promptLoadFailed.value) {
+  if (activePromptTab.value === 'template' && (!promptSources.value.length || promptLoadFailed.value || promptLoading.value)) {
     ElMessage.error('Prompt 清单未加载完成')
     return
   }
