@@ -38,9 +38,9 @@ public class PublishSiteService {
     private static final Set<String> TIER_SET = Set.of("S0", "S1", "S2");
     private static final Set<String> STATUS_SET = Set.of("active", "suspended", "maintenance");
     private static final Set<String> HEALTH_SET = Set.of("normal", "slow", "high_failure", "degraded");
-    private static final Set<String> METHOD_SET = Set.of("rest_api", "ftp", "email", "manual", "brand_geo_site");
+    private static final Set<String> METHOD_SET = Set.of("rest_api", "ftp", "email", "manual", "brand_geo_site", "forum_playwright", "discuz_http");
     private static final Set<String> HTTP_METHOD_SET = Set.of("POST", "PUT");
-    private static final Set<String> AUTH_SET = Set.of("api_key", "bearer_token", "basic_auth", "oauth2");
+    private static final Set<String> AUTH_SET = Set.of("api_key", "bearer_token", "basic_auth", "oauth2", "cookie", "account_cookie");
 
     private final PublishSiteMapper publishSiteMapper;
     private final SysDictItemMapper sysDictItemMapper;
@@ -212,7 +212,9 @@ public class PublishSiteService {
         site.setHttpMethod(StringUtils.hasText(httpMethod) ? httpMethod.trim().toUpperCase(Locale.ROOT) : null);
         site.setAuthType(StringUtils.hasText(authType) ? authType.trim().toLowerCase(Locale.ROOT) : null);
         site.setCredentialRef(StringUtils.hasText(credentialRef) ? credentialRef.trim() : null);
-        site.setApiCredentialEncrypted(platformCredentialService.encryptForStorage(apiCredential));
+        if (StringUtils.hasText(apiCredential)) {
+            site.setApiCredentialEncrypted(platformCredentialService.encryptForStorage(apiCredential));
+        }
         site.setRequestHeaderTemplate(normalizeJsonObject(requestHeaderTemplate));
         site.setRequestBodyTemplate(normalizeJsonObject(requestBodyTemplate));
         site.setResponseUrlPath(StringUtils.hasText(responseUrlPath) ? responseUrlPath.trim() : null);
@@ -249,13 +251,13 @@ public class PublishSiteService {
             throw new BizException(400, "status must be active/suspended/maintenance");
         }
         if (!StringUtils.hasText(integrationMethod) || !METHOD_SET.contains(integrationMethod.trim().toLowerCase(Locale.ROOT))) {
-            throw new BizException(400, "integration_method must be rest_api/ftp/email/manual/brand_geo_site");
+            throw new BizException(400, "integration_method must be rest_api/ftp/email/manual/brand_geo_site/forum_playwright/discuz_http");
         }
         if (StringUtils.hasText(httpMethod) && !HTTP_METHOD_SET.contains(httpMethod.trim().toUpperCase(Locale.ROOT))) {
             throw new BizException(400, "http_method must be POST/PUT");
         }
         if (StringUtils.hasText(authType) && !AUTH_SET.contains(authType.trim().toLowerCase(Locale.ROOT))) {
-            throw new BizException(400, "auth_type must be api_key/bearer_token/basic_auth/oauth2");
+            throw new BizException(400, "auth_type must be api_key/bearer_token/basic_auth/oauth2/cookie/account_cookie");
         }
         if (StringUtils.hasText(currentHealthStatus) && !HEALTH_SET.contains(currentHealthStatus.trim().toLowerCase(Locale.ROOT))) {
             throw new BizException(400, "current_health_status must be normal/slow/high_failure/degraded");

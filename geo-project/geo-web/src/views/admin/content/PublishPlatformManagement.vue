@@ -245,6 +245,7 @@
               <label>接入方式</label>
               <select v-model="drawerForm.integrationMethod" class="select">
                 <option value="rest_api">REST API</option>
+                <option value="discuz_http">Discuz HTTP 直发</option>
                 <option value="forum_playwright">论坛浏览器自动化</option>
                 <option value="manual">手动发布</option>
               </select>
@@ -254,6 +255,15 @@
             <label>请求头信息</label>
             <textarea v-model="drawerForm.headers" class="input textarea mono" placeholder='{"X-Admin-Token":"token"}'></textarea>
             <div class="hint">由原“发布站点配置”迁入，后续保存时会写入行业资讯站点配置。</div>
+          </div>
+          <div v-if="drawerForm.categoryCode === 'forum'" class="form-row">
+            <label>账号 / Cookie 配置</label>
+            <textarea
+              v-model="drawerForm.apiCredential"
+              class="input textarea mono credential-textarea"
+              placeholder='{"accounts":[{"username":"账号","password":"密码","cookie":"完整 Cookie","status":"active"}]}'
+            ></textarea>
+            <div class="hint">支持多个账号，发布时随机选择一个 active 账号；Cookie 为空时才会尝试账号密码登录。编辑时留空表示不修改已保存凭证。</div>
           </div>
         </section>
 
@@ -284,6 +294,7 @@
             <select v-model="drawerForm.executor" class="select">
               <option value="">无 - 人工发布</option>
               <option value="industry_site">行业资讯站发布器</option>
+              <option value="discuz_http">Discuz HTTP 发布器</option>
               <option value="forum_playwright">论坛发布执行器</option>
               <option value="agent_site_publisher">Agent 官网发布器</option>
             </select>
@@ -425,10 +436,13 @@ const categories: CategoryConfig[] = [
   {
     code: 'forum',
     name: '论坛',
-    shortDesc: '占位，暂未接入',
-    desc: '论坛大类已建立但尚未接入实际发布执行器。当前阶段保留占位以便后续配置垂直论坛与对应发布执行器。',
+    shortDesc: 'Discuz / 浏览器自动化',
+    desc: '论坛大类支持 Discuz HTTP 直发，必要时可保留浏览器自动化作为兜底执行器。',
     icon: Connection,
-    notice: '论坛分类<strong>暂不开放真实自动发布</strong>。新增按钮已禁用，待执行器准备好后会同步开放。',
+    canCreate: true,
+    createText: '新增论坛',
+    notice: '优先使用 <strong>Discuz HTTP 直发</strong>，适合大批量发布；浏览器自动化仅作为页面强依赖脚本时的兜底方案。',
+    noticeType: 'info',
   },
 ]
 
@@ -542,7 +556,7 @@ const staticTargets = reactive<TargetConfig[]>([
   },
   {
     categoryCode: 'forum',
-    name: '论坛（大类占位）',
+    name: '论坛（默认占位）',
     code: 'forum',
     logoText: '论',
     logoClass: 'forum',
@@ -550,12 +564,12 @@ const staticTargets = reactive<TargetConfig[]>([
     autoPublish: false,
     executor: '',
     locked: true,
-    disabledActionText: '新增论坛（待开放）',
+    disabledActionText: '请新增具体论坛',
     source: 'static',
     fields: [
       { label: '状态', value: '启用', badge: 'success' },
-      { label: '自动发布', value: '暂未接入', badge: 'warning' },
-      { label: '说明', value: '后续支持配置多个垂直论坛及执行器', wrap: true },
+      { label: '自动发布', value: '请配置目标', badge: 'warning' },
+      { label: '说明', value: '新增具体论坛后可启用 Discuz HTTP 直发', wrap: true },
       { label: '执行器', value: '-', mono: true },
     ],
   },
@@ -589,6 +603,7 @@ const drawerForm = reactive({
   industryTags: '',
   integrationMethod: 'rest_api',
   headers: '{\n  "X-Admin-Token": ""\n}',
+  apiCredential: '',
   remark: '该平台当前仅支持人工发布',
 })
 
@@ -603,11 +618,11 @@ const agentTargets = computed<TargetConfig[]>(() => {
 })
 
 const industryTargets = computed<TargetConfig[]>(() => publishSites.value
-  .filter((site) => site.integrationMethod !== 'brand_geo_site' && site.integrationMethod !== 'forum_playwright' && site.siteCode !== 'agent_official_site')
+  .filter((site) => site.integrationMethod !== 'brand_geo_site' && site.integrationMethod !== 'forum_playwright' && site.integrationMethod !== 'discuz_http' && site.siteCode !== 'agent_official_site')
   .map((site) => toIndustryTarget(site)))
 
 const forumTargets = computed<TargetConfig[]>(() => publishSites.value
-  .filter((site) => site.integrationMethod === 'forum_playwright')
+  .filter((site) => site.integrationMethod === 'forum_playwright' || site.integrationMethod === 'discuz_http')
   .map((site) => toForumTarget(site)))
 
 const targets = computed<TargetConfig[]>(() => [
@@ -667,7 +682,7 @@ function openDrawer(type: string, selectedTarget?: TargetConfig) {
     drawerForm.categoryCode = activeCategoryCode.value
     drawerForm.contentStyle = activeCategoryCode.value === 'forum' ? 'forum' : 'industry_site'
     drawerForm.enabled = true
-    drawerForm.executor = activeCategoryCode.value === 'forum' ? 'forum_playwright' : ''
+    drawerForm.executor = activeCategoryCode.value === 'forum' ? 'discuz_http' : ''
     drawerForm.autoPublish = activeCategoryCode.value === 'forum'
     drawerForm.remark = ''
     resetSiteConnectionForm()
@@ -705,8 +720,9 @@ function resetSiteConnectionForm() {
   drawerForm.iconUrl = ''
   drawerForm.apiEndpoint = ''
   drawerForm.industryTags = ''
-  drawerForm.integrationMethod = drawerForm.categoryCode === 'forum' ? 'forum_playwright' : 'rest_api'
+  drawerForm.integrationMethod = drawerForm.categoryCode === 'forum' ? 'discuz_http' : 'rest_api'
   drawerForm.headers = '{\n  "X-Admin-Token": ""\n}'
+  drawerForm.apiCredential = ''
 }
 
 function fillSiteConnectionForm(target?: TargetConfig) {
@@ -722,6 +738,7 @@ function fillSiteConnectionForm(target?: TargetConfig) {
   drawerForm.industryTags = parseIndustryTags(site.industryTags).join(', ')
   drawerForm.integrationMethod = site.integrationMethod || 'rest_api'
   drawerForm.headers = formatHeaders(site.requestHeaderTemplate)
+  drawerForm.apiCredential = ''
 }
 
 function resolveContentStyle(target?: TargetConfig) {
@@ -769,13 +786,15 @@ function toForumTarget(site: PublishSite): TargetConfig {
     logoText: site.siteName?.trim()?.charAt(0) || '坛',
     logoClass: 'forum',
     enabled,
-    autoPublish: enabled && site.integrationMethod === 'forum_playwright',
+    autoPublish: enabled && (site.integrationMethod === 'forum_playwright' || site.integrationMethod === 'discuz_http'),
     executor: site.integrationMethod || '',
     drawerType: site.siteCode || normalizeSiteCode(site),
     publishSite: site,
     fields: [
       { label: '接入方式', value: integrationMethodLabel(site.integrationMethod) },
       { label: '站点域名', value: site.domain || '-' },
+      { label: '健康状态', value: forumHealthLabel(site.currentHealthStatus), badge: site.currentHealthStatus === 'degraded' ? 'warning' : 'success' },
+      { label: '账号状态', value: site.currentHealthStatus === 'degraded' ? '登录信息可能过期' : '正常', badge: site.currentHealthStatus === 'degraded' ? 'warning' : 'success' },
     ],
   }
 }
@@ -849,12 +868,31 @@ function normalizeHeaders(raw: string) {
   }
 }
 
+function normalizeCredential(raw: string) {
+  const text = raw.trim()
+  if (!text) return undefined
+  try {
+    return JSON.stringify(JSON.parse(text))
+  } catch {
+    return text
+  }
+}
+
 function integrationMethodLabel(v?: string | null) {
   if (v === 'rest_api') return 'REST API'
+  if (v === 'discuz_http') return 'Discuz HTTP 直发'
+  if (v === 'forum_playwright') return '论坛浏览器自动化'
   if (v === 'manual') return '手动发布'
   if (v === 'ftp') return 'FTP'
   if (v === 'email') return '邮件'
   return v || '-'
+}
+
+function forumHealthLabel(status?: string | null) {
+  if (status === 'degraded') return '登录信息异常'
+  if (status === 'slow') return '响应慢'
+  if (status === 'high_failure') return '失败率高'
+  return '正常'
 }
 
 async function loadPublishSites() {
@@ -916,9 +954,17 @@ function validateIndustrySiteForm() {
     ElMessage.warning('请输入站点域名')
     return false
   }
-  if ((drawerForm.integrationMethod === 'rest_api' || drawerForm.integrationMethod === 'forum_playwright') && !drawerForm.apiEndpoint.trim()) {
+  if ((drawerForm.integrationMethod === 'rest_api' || drawerForm.integrationMethod === 'forum_playwright' || drawerForm.integrationMethod === 'discuz_http') && !drawerForm.apiEndpoint.trim()) {
     ElMessage.warning(drawerForm.categoryCode === 'forum' ? '请输入发帖页面 URL' : '请输入发布接口 URL')
     return false
+  }
+  if (drawerForm.categoryCode === 'forum' && drawerForm.apiCredential.trim()) {
+    try {
+      JSON.parse(drawerForm.apiCredential)
+    } catch {
+      ElMessage.warning('账号 / Cookie 配置必须是合法 JSON')
+      return false
+    }
   }
   if (drawerForm.categoryCode !== 'forum' && !parseIndustryTagsInput(drawerForm.industryTags).length) {
     ElMessage.warning('请输入至少一个行业分类')
@@ -958,6 +1004,8 @@ function buildPublishSitePayload() {
     httpMethod: 'POST',
     requestHeaderTemplate: normalizeHeaders(drawerForm.headers),
     requestBodyTemplate: '{"title":"{{title}}","content":"{{content}}","contentMarkdown":"{{contentMarkdown}}","contentHtml":"{{contentHtml}}","author":"{{author}}"}',
+    apiCredential: drawerForm.categoryCode === 'forum' ? normalizeCredential(drawerForm.apiCredential) : undefined,
+    authType: drawerForm.categoryCode === 'forum' ? 'account_cookie' : undefined,
     remark: drawerForm.remark.trim() || undefined,
   }
 }

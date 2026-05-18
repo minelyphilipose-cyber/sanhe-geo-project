@@ -181,6 +181,7 @@ export interface BatchArticlePublishItem {
   platformKey: 'agent_site' | 'industry_site' | string
   contentStyle?: string | null
   targetSiteId?: number | null
+  targetSiteName?: string | null
   targetBrandId?: number | null
   plannedAt: string
   status: 'pending' | 'running' | 'success' | 'failed' | string

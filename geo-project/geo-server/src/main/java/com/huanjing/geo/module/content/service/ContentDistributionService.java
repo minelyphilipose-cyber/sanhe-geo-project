@@ -615,7 +615,7 @@ public class ContentDistributionService {
 
         SubmitResult submitResult;
         try {
-            submitResult = resolveForumSiteAdapter()
+            submitResult = resolveForumSiteAdapter(site.getIntegrationMethod())
                     .submitToTarget(article, content, new TargetContext.ForumSiteTarget(site, project));
         } catch (Exception ex) {
             submitResult = SubmitResult.failure(500, null, null, trimError(ex.getMessage()), FailureKind.UNKNOWN, false);
@@ -1026,6 +1026,9 @@ public class ContentDistributionService {
                     .set(DistributionTask::getFailureKind, result.getFailureKind())
                     .set(DistributionTask::getErrorMessage, trimError(result.getErrorMessage()))
                     .set(DistributionTask::getNextRetryAt, nextRetryAt);
+            if (FailureKind.AUTH.equals(result.getFailureKind()) || FailureKind.AUTH_EXPIRED.equals(result.getFailureKind())) {
+                markForumSiteCredentialExpired(taskId);
+            }
         }
 
         int affected = distributionTaskMapper.update(null, wrapper);
@@ -1065,6 +1068,18 @@ public class ContentDistributionService {
         if (affected == 0) {
             log.warn("finalizeAttemptForForumSite: task {} state changed concurrently, skipped finalize", taskId);
         }
+    }
+
+    private void markForumSiteCredentialExpired(Long taskId) {
+        DistributionTask task = distributionTaskMapper.selectById(taskId);
+        Long siteId = task == null ? null : task.getIndustrySiteId();
+        if (siteId == null) {
+            return;
+        }
+        publishSiteMapper.update(null, new LambdaUpdateWrapper<PublishSite>()
+                .eq(PublishSite::getId, siteId)
+                .set(PublishSite::getCurrentHealthStatus, "degraded")
+                .set(PublishSite::getLastFailureAt, LocalDateTime.now(SH_ZONE)));
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -1157,7 +1172,10 @@ public class ContentDistributionService {
                 .orElseThrow(() -> new BizException(500, "IndustryNewsSiteAdapter not registered"));
     }
 
-    private SiteAdapter resolveForumSiteAdapter() {
+    private SiteAdapter resolveForumSiteAdapter(String integrationMethod) {
+        if (StringUtils.hasText(integrationMethod)) {
+            return resolveAdapter(integrationMethod);
+        }
         return siteAdapters.stream()
                 .filter(adapter -> adapter.supportsPlatform("forum_site"))
                 .findFirst()

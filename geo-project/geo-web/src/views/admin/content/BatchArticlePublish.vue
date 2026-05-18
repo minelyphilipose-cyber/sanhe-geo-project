@@ -129,13 +129,13 @@
           <div v-if="group.platformKey === 'forum_site'" class="target-row">
             <div class="target-info">
               <div class="target-label">论坛目标</div>
-              <div class="target-desc">可手动指定本次发布论坛；只有一个启用论坛时，系统可自动使用该论坛配置</div>
+              <div class="target-desc">不选择时，系统会把论坛文章平均分发到所有启用的小论坛；余数随机落到其中部分论坛</div>
             </div>
-            <el-select v-model="forumTargetSiteId" clearable placeholder="自动匹配或手动选择" class="target-select">
+            <el-select v-model="forumTargetSiteId" clearable placeholder="自动均分到全部启用论坛" class="target-select">
               <el-option
                 v-for="site in activeForumSites"
                 :key="site.id"
-                :label="`${site.siteName}（${site.siteCode}）`"
+                :label="forumSiteOptionLabel(site)"
                 :value="site.id"
               />
             </el-select>
@@ -238,10 +238,11 @@ const activeIndustrySites = computed(() => publishSites.value.filter((site) => {
   return site.status === 'active'
     && integrationMethod !== 'brand_geo_site'
     && integrationMethod !== 'forum_playwright'
+    && integrationMethod !== 'discuz_http'
     && site.siteCode !== 'agent_official_site'
 }))
 const activeForumSites = computed(() => publishSites.value.filter((site) => {
-  return site.status === 'active' && site.integrationMethod === 'forum_playwright'
+  return site.status === 'active' && ['forum_playwright', 'discuz_http'].includes(site.integrationMethod || '')
 }))
 const publishGroups = computed(() => {
   const grouped = new Map<PublishPlatformKey, BatchPublishItem[]>()
@@ -259,6 +260,7 @@ const publishGroups = computed(() => {
 const canSubmit = computed(() => {
   if (submitting.value || loading.value || !validItems.value.length || invalidItems.value.length) return false
   if (publishMode.value === 'scheduled' && !scheduledAt.value) return false
+  if (validItems.value.some((item) => item.platformKey === 'forum_site') && !activeForumSites.value.length) return false
   return true
 })
 
@@ -279,9 +281,8 @@ async function loadPage() {
     ])
     publishSites.value = siteResponse || []
     const firstIndustrySite = activeIndustrySites.value[0]
-    const firstForumSite = activeForumSites.value[0]
     industryTargetSiteId.value = firstIndustrySite?.id || null
-    forumTargetSiteId.value = firstForumSite?.id || null
+    forumTargetSiteId.value = null
     articleItems.value = detailResponses.map(toBatchPublishItem)
   } catch {
     ElMessage.error('加载批量发布数据失败')
@@ -437,7 +438,8 @@ function applyPublishResponse(response: BatchArticlePublishResponse) {
     item.distributionTaskId = backendItem.distributionTaskId || null
     if (backendItem.status === 'success') {
       item.resultStatus = 'success'
-      item.resultMessage = backendItem.distributionTaskId ? `分发任务 #${backendItem.distributionTaskId}` : '已提交'
+      const targetName = backendItem.targetSiteName ? ` · ${backendItem.targetSiteName}` : ''
+      item.resultMessage = backendItem.distributionTaskId ? `分发任务 #${backendItem.distributionTaskId}${targetName}` : `已提交${targetName}`
     } else if (backendItem.status === 'failed') {
       item.resultStatus = 'failed'
       item.resultMessage = backendItem.errorMessage || '提交失败'
@@ -449,6 +451,18 @@ function applyPublishResponse(response: BatchArticlePublishResponse) {
       item.resultMessage = response.publishMode === 'scheduled' ? `任务 #${response.jobId} 待执行` : '待执行'
     }
   })
+}
+
+function forumSiteOptionLabel(site: PublishSite) {
+  const health = site.currentHealthStatus && site.currentHealthStatus !== 'normal' ? ` · ${healthLabel(site.currentHealthStatus)}` : ''
+  return `${site.siteName}（${site.siteCode}）${health}`
+}
+
+function healthLabel(status?: string | null) {
+  if (status === 'degraded') return '登录信息异常'
+  if (status === 'high_failure') return '失败率高'
+  if (status === 'slow') return '响应慢'
+  return status || '正常'
 }
 
 function resultStatusLabel(status: PublishResultStatus) {

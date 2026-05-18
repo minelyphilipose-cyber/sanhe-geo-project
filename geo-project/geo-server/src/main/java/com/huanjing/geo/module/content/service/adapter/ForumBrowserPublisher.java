@@ -40,16 +40,13 @@ import java.util.regex.Pattern;
 public class ForumBrowserPublisher {
 
     private static final String CHROMIUM_LAUNCH_ARGS_ENV = "PLAYWRIGHT_CHROMIUM_LAUNCH_ARGS";
-    private static final int MAX_CONCURRENT_PUBLISHES = 2;
+    private static final int MAX_CONCURRENT_PUBLISHES = 1;
     private static final Semaphore BROWSER_SLOTS = new Semaphore(MAX_CONCURRENT_PUBLISHES);
 
     private final ObjectMapper objectMapper;
     private final AtomicInteger workerCursor = new AtomicInteger();
     private final ThreadLocal<BrowserWorkerState> currentWorkerState = new ThreadLocal<>();
-    private final List<BrowserWorker> workers = List.of(
-            new BrowserWorker("forum-browser-worker-1"),
-            new BrowserWorker("forum-browser-worker-2")
-    );
+    private final List<BrowserWorker> workers = List.of(new BrowserWorker("forum-browser-worker-1"));
 
     public SubmitResult publish(ForumPublishProfile profile,
                                 ForumCredential credential,

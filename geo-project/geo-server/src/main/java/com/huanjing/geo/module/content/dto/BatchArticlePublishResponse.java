@@ -27,6 +27,7 @@ public class BatchArticlePublishResponse {
         private String platformKey;
         private String contentStyle;
         private Long targetSiteId;
+        private String targetSiteName;
         private Long targetBrandId;
         private LocalDateTime plannedAt;
         private String status;

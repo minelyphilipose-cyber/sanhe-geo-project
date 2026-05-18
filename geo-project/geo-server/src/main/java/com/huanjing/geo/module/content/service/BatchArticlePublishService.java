@@ -27,18 +27,24 @@ import com.huanjing.geo.module.system.mapper.PublishSiteMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import jakarta.annotation.Resource;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.Executor;
 import java.util.stream.Collectors;
 
 @Service
@@ -58,6 +64,8 @@ public class BatchArticlePublishService {
     private final PublishSiteMapper publishSiteMapper;
     private final CurrentUserService currentUserService;
     private final ContentDistributionService contentDistributionService;
+    @Resource(name = "taskExecutor")
+    private Executor batchPublishExecutor;
 
     @Transactional
     public BatchArticlePublishResponse submit(BatchArticlePublishRequest request) {
@@ -80,6 +88,7 @@ public class BatchArticlePublishService {
 
         PublishSite manualIndustrySite = request.getIndustrySiteId() == null ? null : requireIndustrySite(request.getIndustrySiteId());
         PublishSite manualForumSite = request.getForumSiteId() == null ? null : requireForumSite(request.getForumSiteId());
+        List<PublishSite> forumSites = manualForumSite == null ? new ArrayList<>() : new ArrayList<>(List.of(manualForumSite));
 
         BatchArticlePublishJob job = new BatchArticlePublishJob();
         job.setPublishMode(publishMode);
@@ -94,6 +103,7 @@ public class BatchArticlePublishService {
         jobMapper.insert(job);
 
         Map<String, Integer> platformIndex = new HashMap<>();
+        Map<String, Integer> forumIndex = new HashMap<>();
         for (Long articleId : articleIds) {
             BatchArticlePublishItem item = buildItem(
                     job.getId(),
@@ -101,14 +111,15 @@ public class BatchArticlePublishService {
                     baseTime,
                     intervalMinutes,
                     platformIndex,
+                    forumIndex,
                     manualIndustrySite,
-                    manualForumSite
+                    forumSites
             );
             itemMapper.insert(item);
         }
 
         if ("now".equals(publishMode)) {
-            executeDueItems(100);
+            triggerAsyncExecutionAfterCommit();
         }
         return response(job.getId());
     }
@@ -123,12 +134,15 @@ public class BatchArticlePublishService {
     }
 
     public void executeDueItems(int limit) {
+        if (hasAnyRunningItem()) {
+            return;
+        }
         List<BatchArticlePublishItem> items = itemMapper.selectList(
                 new LambdaQueryWrapper<BatchArticlePublishItem>()
                         .eq(BatchArticlePublishItem::getStatus, "pending")
                         .le(BatchArticlePublishItem::getPlannedAt, LocalDateTime.now())
                         .orderByAsc(BatchArticlePublishItem::getPlannedAt, BatchArticlePublishItem::getId)
-                        .last("LIMIT " + Math.max(1, Math.min(limit, 100)))
+                        .last("LIMIT " + Math.max(1, Math.min(limit, 1)))
         );
         for (BatchArticlePublishItem item : items) {
             executeOne(item);
@@ -153,8 +167,9 @@ public class BatchArticlePublishService {
                                               LocalDateTime baseTime,
                                               int intervalMinutes,
                                               Map<String, Integer> platformIndex,
+                                              Map<String, Integer> forumIndex,
                                               PublishSite industrySite,
-                                              PublishSite forumSite) {
+                                              List<PublishSite> forumSites) {
         ArticleDraft article = requireArticle(articleId);
         if (!ACTIVE_ARTICLE_STATUS.contains(article.getStatus())) {
             throw new BizException(400, "article " + articleId + " is not approved or unpublished");
@@ -173,9 +188,14 @@ public class BatchArticlePublishService {
         if ("industry_site".equals(platform.platformKey()) && resolvedIndustrySite == null) {
             resolvedIndustrySite = resolveBrandIndustrySite(project);
         }
-        PublishSite resolvedForumSite = forumSite;
+        PublishSite resolvedForumSite = null;
         if ("forum_site".equals(platform.platformKey()) && resolvedForumSite == null) {
-            resolvedForumSite = resolveDefaultForumSite();
+            if (forumSites == null || forumSites.isEmpty()) {
+                forumSites.addAll(resolveActiveForumSites());
+                Collections.shuffle(forumSites);
+            }
+            int index = forumIndex.merge(platform.platformKey(), 1, Integer::sum) - 1;
+            resolvedForumSite = forumSites.get(Math.floorMod(index, forumSites.size()));
         }
 
         int index = platformIndex.merge(platform.platformKey(), 1, Integer::sum) - 1;
@@ -197,7 +217,7 @@ public class BatchArticlePublishService {
     }
 
     private void executeOne(BatchArticlePublishItem item) {
-        if (hasRunningPlatformItem(item)) {
+        if (hasAnyRunningItem()) {
             return;
         }
         int locked = itemMapper.update(null, new LambdaUpdateWrapper<BatchArticlePublishItem>()
@@ -208,7 +228,7 @@ public class BatchArticlePublishService {
         if (locked == 0) {
             return;
         }
-        if (hasOtherRunningPlatformItem(item)) {
+        if (hasOtherRunningItem(item)) {
             itemMapper.update(null, new LambdaUpdateWrapper<BatchArticlePublishItem>()
                     .eq(BatchArticlePublishItem::getId, item.getId())
                     .eq(BatchArticlePublishItem::getStatus, "running")
@@ -231,6 +251,7 @@ public class BatchArticlePublishService {
                     .set(BatchArticlePublishItem::getErrorMessage, trimError(ex.getMessage())));
         } finally {
             refreshJobStatus(item.getJobId());
+            triggerAsyncExecutionSoon();
         }
     }
 
@@ -345,6 +366,10 @@ public class BatchArticlePublishService {
         vo.setPlatformKey(item.getPlatformKey());
         vo.setContentStyle(item.getContentStyle());
         vo.setTargetSiteId(item.getTargetSiteId());
+        if (item.getTargetSiteId() != null) {
+            PublishSite site = publishSiteMapper.selectById(item.getTargetSiteId());
+            vo.setTargetSiteName(site == null ? null : site.getSiteName());
+        }
         vo.setTargetBrandId(item.getTargetBrandId());
         vo.setPlannedAt(item.getPlannedAt());
         vo.setStatus(item.getStatus());
@@ -451,26 +476,33 @@ public class BatchArticlePublishService {
         if (!"active".equalsIgnoreCase(site.getStatus())) {
             throw new BizException(400, "forum publish site is not active");
         }
-        if (!"forum_playwright".equalsIgnoreCase(site.getIntegrationMethod())) {
-            throw new BizException(400, "publish site is not a forum playwright target");
+        String integrationMethod = site.getIntegrationMethod();
+        if (!StringUtils.hasText(integrationMethod)
+                || !Set.of("forum_playwright", "discuz_http").contains(integrationMethod.toLowerCase())) {
+            throw new BizException(400, "publish site is not a supported forum target");
         }
         return site;
     }
 
     private PublishSite resolveDefaultForumSite() {
+        List<PublishSite> sites = resolveActiveForumSites();
+        if (sites.size() > 1) {
+            Collections.shuffle(sites);
+        }
+        return sites.get(0);
+    }
+
+    private List<PublishSite> resolveActiveForumSites() {
         List<PublishSite> sites = publishSiteMapper.selectList(
                 new LambdaQueryWrapper<PublishSite>()
-                        .eq(PublishSite::getIntegrationMethod, "forum_playwright")
+                        .in(PublishSite::getIntegrationMethod, "forum_playwright", "discuz_http")
                         .eq(PublishSite::getStatus, "active")
                         .orderByAsc(PublishSite::getId)
         );
         if (sites.isEmpty()) {
             throw new BizException(400, "forum publish site is not configured");
         }
-        if (sites.size() > 1) {
-            throw new BizException(400, "multiple forum publish sites configured; forumSiteId is required");
-        }
-        return sites.get(0);
+        return sites;
     }
 
     private PublishSite resolveBrandIndustrySite(Project project) {
@@ -502,18 +534,45 @@ public class BatchArticlePublishService {
         return requireIndustrySite(site.getId());
     }
 
-    private boolean hasRunningPlatformItem(BatchArticlePublishItem item) {
-        return hasOtherRunningPlatformItem(item);
-    }
-
-    private boolean hasOtherRunningPlatformItem(BatchArticlePublishItem item) {
+    private boolean hasAnyRunningItem() {
         Long running = itemMapper.selectCount(
                 new LambdaQueryWrapper<BatchArticlePublishItem>()
-                        .eq(BatchArticlePublishItem::getPlatformKey, item.getPlatformKey())
+                        .eq(BatchArticlePublishItem::getStatus, "running")
+        );
+        return running != null && running > 0;
+    }
+
+    private boolean hasOtherRunningItem(BatchArticlePublishItem item) {
+        Long running = itemMapper.selectCount(
+                new LambdaQueryWrapper<BatchArticlePublishItem>()
                         .eq(BatchArticlePublishItem::getStatus, "running")
                         .ne(BatchArticlePublishItem::getId, item.getId())
         );
         return running != null && running > 0;
+    }
+
+    private void triggerAsyncExecutionAfterCommit() {
+        Runnable task = this::triggerAsyncExecutionSoon;
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    task.run();
+                }
+            });
+            return;
+        }
+        task.run();
+    }
+
+    private void triggerAsyncExecutionSoon() {
+        batchPublishExecutor.execute(() -> {
+            try {
+                executeDueItems(1);
+            } catch (Exception ex) {
+                log.warn("batch article publish async trigger failed: {}", ex.getMessage(), ex);
+            }
+        });
     }
 
     private String trimError(String message) {
