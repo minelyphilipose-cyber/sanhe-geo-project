@@ -782,6 +782,38 @@ async function openWorkorderReview(item: WorkorderListItem) {
   await loadQuestionPage(1)
   activeStep.value = 5
 }
+async function ensureEditableWorkorder() {
+  const project = selectedProject.value
+  if (!project) {
+    ElMessage.warning('请先选择项目')
+    return false
+  }
+  if (workorder.value && ['draft', 'paused'].includes(workorder.value.status)) {
+    return true
+  }
+  const currentProfile = profileLoaded.value ? cloneProfileSnapshot() : null
+  const currentSyncToProfile = syncToProfile.value
+  const { data } = await createOrGetProjectWorkorder(project.id)
+  workorder.value = data.data
+  quota.value = data.data.quota
+  review.value = undefined
+  currentBatch.value = undefined
+  questionPage.value = { ...questionPage.value, records: [], total: 0, current: 1, pages: 0 }
+  if (currentProfile) {
+    applyProfileSnapshot(currentProfile)
+    syncToProfile.value = currentSyncToProfile
+    profileSnapshots.set(data.data.id, {
+      profile: cloneProfileSnapshot(),
+      syncToProfile: currentSyncToProfile,
+      draftSaved: true,
+    })
+    await saveGeoDraft({ workorderId: data.data.id, profileJson: JSON.stringify(currentProfile), syncToCustomerProfile: currentSyncToProfile, validationStatus: 'valid' })
+    profileDraftSaved.value = true
+    profileLoaded.value = true
+  }
+  await loadWorkorderList()
+  return true
+}
 async function goStep(stepNo: number) {
   if (stepNo === activeStep.value) return
   if (stepNo > 1 && (!selectedProject.value || !workorder.value)) {
@@ -797,6 +829,7 @@ async function goStep(stepNo: number) {
 }
 async function goStep2() {
   if (!selectedProject.value || !workorder.value) return
+  if (!(await ensureEditableWorkorder())) return
   if (profileLoaded.value) {
     activeStep.value = 2
     return
@@ -849,6 +882,7 @@ async function saveDraft() {
   ElMessage.success('草稿已保存')
 }
 async function goStep3() {
+  if (!(await ensureEditableWorkorder())) return
   await saveDraft()
   await refreshQuota()
   fillToLimit()
@@ -1044,7 +1078,10 @@ function splitByRatio() {
   batchForm.batchA = Math.min(a, r.remainingA); batchForm.batchB = Math.min(b, r.remainingB); batchForm.batchC = Math.min(c, r.remainingC)
 }
 async function startBatch() {
-  if (!workorder.value || validationMessage.value) return
+  if (!workorder.value) return
+  if (!(await ensureEditableWorkorder())) return
+  await refreshQuota()
+  if (validationMessage.value) return
   const provider = selectedProvider.value
   const { data } = await startGeoBatch({ workorderId: workorder.value.id, ...batchForm, modelProvider: provider?.platformCode, modelId: provider?.modelId, modelName: provider?.modelName })
   currentBatch.value = data.data

@@ -444,7 +444,7 @@ public class GeoQuestionService {
         if (total > BATCH_LIMIT) throw new BizException(400, "单批合计不得超过 50");
         validateSceneWeights(req.getSceneWeights(), total);
         GeoQuestionWorkorder workorder = workorderMapper.selectById(req.getWorkorderId());
-        if (workorder == null || !"draft".equals(workorder.getStatus())) {
+        if (workorder == null || !List.of("draft", "paused").contains(workorder.getStatus())) {
             throw new BizException(404, "进行中的问题池工单不存在");
         }
         workorderMapper.lockById(workorder.getId());
