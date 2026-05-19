@@ -126,22 +126,8 @@
           <el-table-column label="创建时间" width="180">
             <template #default="scope">{{ scope.row.createdAt || '-' }}</template>
           </el-table-column>
-          <el-table-column v-if="canManage" label="操作" width="260" fixed="right">
+          <el-table-column v-if="canManage" label="操作" width="150" fixed="right">
             <template #default="scope">
-              <el-tooltip
-                :content="presaleActionTooltip(scope.row)"
-                :disabled="!presaleActionDisabled(scope.row)"
-                placement="top"
-              >
-                <el-button
-                  link
-                  :type="isPresaleEnabled(scope.row) ? 'warning' : 'success'"
-                  :disabled="presaleActionDisabled(scope.row)"
-                  @click="togglePresaleEnabled(scope.row)"
-                >
-                  {{ isPresaleEnabled(scope.row) ? '售前已启用' : '售前已停用' }}
-                </el-button>
-              </el-tooltip>
               <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
               <el-button link type="danger" @click="remove(scope.row)">删除</el-button>
             </template>
@@ -268,74 +254,167 @@
         </section>
 
         <section class="modal-section">
-          <div class="modal-section-head">
-            <span class="section-icon">能</span>
+          <div class="business-section-head">
+            <span class="business-section-icon" aria-hidden="true"><span /><span /><span /></span>
             <strong>业务能力</strong>
-            <small>启用、拓词、售前、文章与降级处理</small>
+            <small>总开关决定该平台是否参与任何业务链路</small>
             <i />
           </div>
-          <div class="capability-switch-grid">
-            <div class="capability-switch-card">
-              <div>
-                <strong>启用状态</strong>
-                <span class="capability-desc">平台是否参与调度</span>
+
+          <div class="master-capability-card">
+            <div class="master-capability-body">
+              <div class="master-capability-info">
+                <span class="master-power-icon" aria-hidden="true" />
+                <div>
+                  <strong title="模型总启用状态">模型总启用状态</strong>
+                  <span title="关闭后，该平台不会参与售前、拓词、文章、跑批等任何任务">
+                    关闭后，该平台不会参与售前、拓词、文章、跑批等任何任务
+                  </span>
+                </div>
               </div>
-              <div class="switch-control">
-                <span class="switch-status">{{ form.enabled ? '启用' : '停用' }}</span>
-                <el-switch v-model="form.enabled" />
-              </div>
-            </div>
-            <div class="capability-switch-card">
-              <div>
-                <strong>售前能力</strong>
-                <span class="capability-desc">售前问答生成</span>
-              </div>
-              <div class="switch-control">
-                <span class="switch-status">{{ form.enabledForPresale ? '启用' : '停用' }}</span>
-                <el-switch v-model="form.enabledForPresale" />
+              <div class="master-switch-control">
+                <span>{{ form.enabled ? '已启用' : '已停用' }}</span>
+                <el-switch v-model="form.enabled" class="master-switch" />
               </div>
             </div>
-            <div class="capability-switch-card">
-              <div>
-                <strong>文章能力</strong>
-                <span class="capability-desc">内容生成任务</span>
+            <span class="master-capability-connector" aria-hidden="true" />
+          </div>
+
+          <div v-if="!form.enabled" class="capability-disabled-alert">
+            <span class="alert-triangle-icon" aria-hidden="true" />
+            <span>模型总开关已关闭，所有子能力暂不生效</span>
+          </div>
+
+          <div class="capability-group">
+            <div class="capability-group-head">
+              <span class="capability-group-strip is-report" />
+              <strong>AI 可见度诊断报告</strong>
+              <small>售前诊断与评估链路</small>
+            </div>
+            <div class="capability-card-grid is-two">
+              <div class="child-capability-card" :class="{ 'is-master-off': !form.enabled }">
+                <div class="child-capability-info">
+                  <strong title="售前问答能力">售前问答能力</strong>
+                  <span title="支持诊断报告中的售前问答生成">支持诊断报告中的售前问答生成</span>
+                </div>
+                <div class="switch-control">
+                  <span class="switch-status" :class="{ 'is-off': !form.enabled || !form.enabledForPresale }">
+                    {{ form.enabled && form.enabledForPresale ? '启用' : '停用' }}
+                  </span>
+                  <el-switch
+                    :model-value="form.enabled && form.enabledForPresale"
+                    :disabled="!form.enabled"
+                    @update:model-value="form.enabledForPresale = $event"
+                  />
+                </div>
               </div>
-              <div class="switch-control">
-                <span class="switch-status">{{ form.enabledForArticle ? '启用' : '停用' }}</span>
-                <el-switch v-model="form.enabledForArticle" />
+              <div class="child-capability-card" :class="{ 'is-master-off': !form.enabled }">
+                <div class="child-capability-info">
+                  <strong title="售前评估模型">售前评估模型</strong>
+                  <span title="支持报告评估与模型判断">支持报告评估与模型判断</span>
+                </div>
+                <div class="switch-control">
+                  <span
+                    class="switch-status"
+                    :class="{
+                      'is-off':
+                        !form.enabled ||
+                        !form.presaleEvaluateEnabled ||
+                        !canEnablePresaleEvaluate(form.platformCode),
+                    }"
+                  >
+                    {{
+                      form.enabled && form.presaleEvaluateEnabled && canEnablePresaleEvaluate(form.platformCode)
+                        ? '启用'
+                        : '停用'
+                    }}
+                  </span>
+                  <el-switch
+                    :model-value="
+                      form.enabled && form.presaleEvaluateEnabled && canEnablePresaleEvaluate(form.platformCode)
+                    "
+                    :disabled="!form.enabled || !canEnablePresaleEvaluate(form.platformCode)"
+                    @update:model-value="form.presaleEvaluateEnabled = $event"
+                  />
+                </div>
               </div>
             </div>
-            <div class="capability-switch-card">
-              <div>
-                <strong>拓词问题池</strong>
-                <span class="capability-desc">仅通义千问 / DeepSeek / Mimo</span>
+          </div>
+
+          <div class="capability-group">
+            <div class="capability-group-head">
+              <span class="capability-group-strip is-content" />
+              <strong>内容生成</strong>
+              <small>拓词管理与文章生产链路</small>
+            </div>
+            <div class="capability-card-grid is-two">
+              <div class="child-capability-card" :class="{ 'is-master-off': !form.enabled }">
+                <div class="child-capability-info">
+                  <strong title="拓词问题生成">拓词问题生成</strong>
+                  <span title="支持 GEO 分层问题池生成">支持 GEO 分层问题池生成</span>
+                </div>
+                <div class="switch-control">
+                  <span
+                    class="switch-status"
+                    :class="{
+                      'is-off':
+                        !form.enabled || !form.enabledForGeoQuestion || !canEnableGeoQuestion(form.platformCode),
+                    }"
+                  >
+                    {{
+                      form.enabled && form.enabledForGeoQuestion && canEnableGeoQuestion(form.platformCode)
+                        ? '启用'
+                        : '停用'
+                    }}
+                  </span>
+                  <el-switch
+                    :model-value="form.enabled && form.enabledForGeoQuestion && canEnableGeoQuestion(form.platformCode)"
+                    :disabled="!form.enabled || !canEnableGeoQuestion(form.platformCode)"
+                    @update:model-value="form.enabledForGeoQuestion = $event"
+                  />
+                </div>
               </div>
-              <div class="switch-control">
-                <span class="switch-status">{{ form.enabledForGeoQuestion ? '启用' : '停用' }}</span>
-                <el-switch v-model="form.enabledForGeoQuestion" :disabled="!canEnableGeoQuestion(form.platformCode)" />
+              <div class="child-capability-card" :class="{ 'is-master-off': !form.enabled }">
+                <div class="child-capability-info">
+                  <strong title="文章生成能力">文章生成能力</strong>
+                  <span title="支持文章内容生成任务">支持文章内容生成任务</span>
+                </div>
+                <div class="switch-control">
+                  <span class="switch-status" :class="{ 'is-off': !form.enabled || !form.enabledForArticle }">
+                    {{ form.enabled && form.enabledForArticle ? '启用' : '停用' }}
+                  </span>
+                  <el-switch
+                    :model-value="form.enabled && form.enabledForArticle"
+                    :disabled="!form.enabled"
+                    @update:model-value="form.enabledForArticle = $event"
+                  />
+                </div>
               </div>
             </div>
-            <div class="capability-switch-card">
-              <div>
-                <strong>问题池定时跑批</strong>
-                <span class="capability-desc">BI 日常问题池轮询</span>
-              </div>
-              <div class="switch-control">
-                <span class="switch-status">{{ form.enabledForQuestionPoll ? '启用' : '停用' }}</span>
-                <el-switch v-model="form.enabledForQuestionPoll" />
-              </div>
+          </div>
+
+          <div class="capability-group">
+            <div class="capability-group-head">
+              <span class="capability-group-strip is-batch" />
+              <strong>跑批任务</strong>
+              <small>周期性后台调度</small>
             </div>
-            <div class="capability-switch-card">
-              <div>
-                <strong>售前评估模型</strong>
-                <span class="capability-desc">评估链路可用</span>
-              </div>
-              <div class="switch-control">
-                <span class="switch-status">{{ form.presaleEvaluateEnabled ? '启用' : '停用' }}</span>
-                <el-switch
-                  v-model="form.presaleEvaluateEnabled"
-                  :disabled="!canEnablePresaleEvaluate(form.platformCode)"
-                />
+            <div class="capability-card-grid is-single">
+              <div class="child-capability-card" :class="{ 'is-master-off': !form.enabled }">
+                <div class="child-capability-info">
+                  <strong title="问题池定时跑批">问题池定时跑批</strong>
+                  <span title="支持 BI 日常问题池轮询与定时批处理">支持 BI 日常问题池轮询与定时批处理</span>
+                </div>
+                <div class="switch-control">
+                  <span class="switch-status" :class="{ 'is-off': !form.enabled || !form.enabledForQuestionPoll }">
+                    {{ form.enabled && form.enabledForQuestionPoll ? '启用' : '停用' }}
+                  </span>
+                  <el-switch
+                    :model-value="form.enabled && form.enabledForQuestionPoll"
+                    :disabled="!form.enabled"
+                    @update:model-value="form.enabledForQuestionPoll = $event"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -396,7 +475,6 @@ import {
   deletePlatformConfig,
   getPlatformConfigPage,
   updatePlatformConfig,
-  updatePresaleEnabled,
 } from '@/api/platformConfig'
 import type { AIPlatformConfigItem } from '@/types'
 
@@ -440,10 +518,10 @@ const form = reactive({
   concurrencyLimit: 1,
   enabled: true,
   enabledForPresale: true,
-  enabledForArticle: false,
-  enabledForGeoQuestion: false,
+  enabledForArticle: true,
+  enabledForGeoQuestion: true,
   enabledForQuestionPoll: false,
-  presaleEvaluateEnabled: false,
+  presaleEvaluateEnabled: true,
   degraded: false,
   degradedReason: '',
   remark: '',
@@ -510,10 +588,10 @@ function resetForm() {
   form.concurrencyLimit = 1
   form.enabled = true
   form.enabledForPresale = true
-  form.enabledForArticle = false
-  form.enabledForGeoQuestion = false
+  form.enabledForArticle = true
+  form.enabledForGeoQuestion = true
   form.enabledForQuestionPoll = false
-  form.presaleEvaluateEnabled = false
+  form.presaleEvaluateEnabled = true
   form.degraded = false
   form.degradedReason = ''
   form.remark = ''
@@ -661,18 +739,6 @@ function isPresaleEnabled(row: AIPlatformConfigItem) {
   return row.enabledForPresale ?? true
 }
 
-function hasLowModel(row: AIPlatformConfigItem) {
-  return !!(row.lowModelId && row.lowModelId.trim())
-}
-
-function presaleActionDisabled(row: AIPlatformConfigItem) {
-  return !isPresaleEnabled(row) && !hasLowModel(row)
-}
-
-function presaleActionTooltip(row: AIPlatformConfigItem) {
-  return presaleActionDisabled(row) ? '请先配置低性能模型(low_model_id)' : ''
-}
-
 const presaleEvaluateCodes = new Set(['deepseek', 'doubao', 'qwen', 'mimo', 'zhipu'])
 const geoQuestionCodes = new Set(['qwen', 'deepseek', 'mimo'])
 
@@ -682,27 +748,6 @@ function canEnablePresaleEvaluate(platformCode: string) {
 
 function canEnableGeoQuestion(platformCode: string) {
   return geoQuestionCodes.has((platformCode || '').trim())
-}
-
-async function togglePresaleEnabled(row: AIPlatformConfigItem) {
-  const target = !isPresaleEnabled(row)
-  const actionText = target ? '启用' : '停用'
-  if (target && !hasLowModel(row)) {
-    ElMessage.warning('请先配置低性能模型(low_model_id)')
-    return
-  }
-  try {
-    await ElMessageBox.confirm(
-      `确认${actionText}平台「${row.platformName}」的售前能力？`,
-      `${actionText}确认`,
-      { type: target ? 'success' : 'warning', confirmButtonText: '确认', cancelButtonText: '取消' },
-    )
-    await updatePresaleEnabled(row.id, target)
-    ElMessage.success(`售前已${actionText}`)
-    await load()
-  } catch (err: any) {
-    if (err === 'cancel' || err === 'close') return
-  }
 }
 
 onMounted(async () => {
@@ -1056,40 +1101,350 @@ onMounted(async () => {
   background: #378add;
 }
 
-.capability-switch-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
+.business-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
 }
 
-.capability-switch-card {
+.business-section-head strong {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.business-section-head small {
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.business-section-head i {
+  flex: 1;
+  height: 1px;
+  background: #e5e7eb;
+  transform: scaleY(0.5);
+  transform-origin: center;
+}
+
+.business-section-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: #378add;
+}
+
+.business-section-icon span {
+  position: absolute;
+  left: 2px;
+  width: 12px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.business-section-icon span:nth-child(1) {
+  top: 3px;
+}
+
+.business-section-icon span:nth-child(2) {
+  top: 7px;
+}
+
+.business-section-icon span:nth-child(3) {
+  top: 11px;
+}
+
+.business-section-icon span::after {
+  position: absolute;
+  top: -2px;
+  width: 4px;
+  height: 4px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: #ffffff;
+  content: '';
+}
+
+.business-section-icon span:nth-child(1)::after {
+  left: 2px;
+}
+
+.business-section-icon span:nth-child(2)::after {
+  right: 2px;
+}
+
+.business-section-icon span:nth-child(3)::after {
+  left: 5px;
+}
+
+.master-capability-card {
+  position: relative;
+  border: 1px solid #b5d4f4;
+  border-radius: 8px;
+  padding: 14px 16px 16px;
+  background: #e6f1fb;
+  transition: background-color 0.16s ease, border-color 0.16s ease;
+}
+
+.master-capability-card:hover {
+  border-color: #9ac5ef;
+  background: #d9ebf8;
+}
+
+.master-capability-body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 82px;
   gap: 16px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  padding: 14px 16px;
-  background: #ffffff;
 }
 
-.capability-switch-card strong,
-.degrade-panel-head strong {
+.master-capability-info {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 12px;
+}
+
+.master-capability-info strong {
   display: block;
+  overflow: hidden;
+  color: #0c447c;
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.master-capability-info span {
+  display: block;
+  overflow: hidden;
+  margin-top: 5px;
+  color: #185fa5;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.master-power-icon {
+  position: relative;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: #378add;
+}
+
+.master-power-icon::before {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #ffffff;
+  border-top-color: transparent;
+  border-radius: 999px;
+  content: '';
+}
+
+.master-power-icon::after {
+  position: absolute;
+  top: 6px;
+  left: 13px;
+  width: 2px;
+  height: 9px;
+  border-radius: 999px;
+  background: #ffffff;
+  content: '';
+}
+
+.master-switch-control {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 9px;
+}
+
+.master-switch-control span {
+  min-width: 40px;
+  color: #378add;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.master-switch :deep(.el-switch__core) {
+  min-width: 32px;
+  height: 18px;
+}
+
+.master-switch :deep(.el-switch__action) {
+  width: 14px;
+  height: 14px;
+}
+
+.master-capability-connector {
+  display: block;
+  width: 1px;
+  height: 10px;
+  margin: 10px 0 -8px 13px;
+  border-left: 1px dashed #85b7eb;
+}
+
+.capability-disabled-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #faeeda;
+  color: #854f0b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.alert-triangle-icon {
+  position: relative;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+}
+
+.alert-triangle-icon::before {
+  position: absolute;
+  left: 1px;
+  top: 2px;
+  width: 10px;
+  height: 10px;
+  border-left: 2px solid currentColor;
+  border-top: 2px solid currentColor;
+  transform: rotate(45deg);
+  content: '';
+}
+
+.alert-triangle-icon::after {
+  position: absolute;
+  left: 6px;
+  top: 5px;
+  width: 2px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 8px 0 currentColor;
+  content: '';
+}
+
+.capability-group {
+  margin-top: 16px;
+}
+
+.capability-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.capability-group-strip {
+  flex: 0 0 3px;
+  width: 3px;
+  height: 12px;
+  border-radius: 999px;
+}
+
+.capability-group-strip.is-report {
+  background: #7f77dd;
+}
+
+.capability-group-strip.is-content {
+  background: #1d9e75;
+}
+
+.capability-group-strip.is-batch {
+  background: #ba7517;
+}
+
+.capability-group-head strong {
   color: #111827;
   font-size: 13px;
-  font-weight: 900;
+  font-weight: 500;
 }
 
-.capability-switch-card .capability-desc,
+.capability-group-head small {
+  overflow: hidden;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.capability-card-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.capability-card-grid.is-two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.capability-card-grid.is-single {
+  grid-template-columns: 1fr;
+}
+
+.child-capability-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 72px;
+  gap: 16px;
+  border: 0.5px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #ffffff;
+  transition: opacity 0.16s ease, border-color 0.16s ease;
+}
+
+.child-capability-card.is-master-off {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.child-capability-card.is-master-off :deep(.el-switch) {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.child-capability-info {
+  min-width: 0;
+}
+
+.child-capability-info strong,
+.degrade-panel-head strong {
+  display: block;
+  overflow: hidden;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.child-capability-info span,
 .degrade-panel-head span {
   display: block;
   margin-top: 5px;
   color: #94a3b8;
   font-size: 12px;
   font-weight: 700;
-  line-height: 1.35;
+  line-height: 1.5;
 }
 
 .switch-control {
@@ -1105,6 +1460,10 @@ onMounted(async () => {
   font-size: 12px;
   font-weight: 800;
   text-align: right;
+}
+
+.switch-status.is-off {
+  color: #94a3b8;
 }
 
 .degrade-panel {
@@ -1177,7 +1536,7 @@ onMounted(async () => {
   .form-grid.is-two,
   .form-grid.is-three,
   .model-main-grid,
-  .capability-switch-grid {
+  .capability-card-grid.is-two {
     grid-template-columns: 1fr;
   }
 
@@ -1196,8 +1555,29 @@ onMounted(async () => {
     flex-wrap: wrap;
   }
 
+  .business-section-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
   .modal-section-head i {
     flex-basis: 100%;
+  }
+
+  .business-section-head i {
+    flex-basis: 100%;
+  }
+
+  .master-capability-body,
+  .child-capability-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .master-switch-control,
+  .child-capability-card .switch-control {
+    justify-content: flex-end;
+    width: 100%;
   }
 
   .platform-modal-footer > div {
