@@ -113,7 +113,7 @@ public interface PresaleAiPromptResultMapper extends BaseMapper<PresaleAiPromptR
     @Select("SELECT DISTINCT " +
             "r.platform_code AS platformCode, " +
             "COALESCE(qc.platform_name_snapshot, p.platform_name, r.platform_code) AS platformName, " +
-            "NULL AS category " +
+            "pt.category AS category " +
             PROMPT_TRACE_FROM +
             "WHERE r.version_id = #{versionId} " +
             "AND r.batch_no IN (1, 2) " +
