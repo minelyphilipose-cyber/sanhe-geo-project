@@ -161,14 +161,30 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" :title="mode === 'create' ? '新增平台配置' : '编辑平台配置'" width="960px" class="admin-editor-dialog platform-editor-dialog">
+    <el-dialog
+      v-model="dialogVisible"
+      width="1040px"
+      class="admin-editor-dialog platform-editor-dialog"
+      :show-close="false"
+    >
+      <template #header>
+        <div class="platform-modal-header">
+          <div class="platform-modal-title">
+            <span class="modal-title-accent" />
+            <span>{{ mode === 'create' ? '新增平台配置' : '编辑平台配置' }}</span>
+            <em v-if="form.platformCode">{{ form.platformCode }}</em>
+          </div>
+          <button class="modal-close-button" type="button" aria-label="关闭" @click="dialogVisible = false">×</button>
+        </div>
+      </template>
+
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top" class="platform-config-form">
-        <section class="form-section">
-          <div class="form-section-head">
-            <div>
-              <span>基础信息</span>
-              <strong>平台识别与优先级</strong>
-            </div>
+        <section class="modal-section">
+          <div class="modal-section-head">
+            <span class="section-icon">基</span>
+            <strong>基础信息</strong>
+            <small>平台识别与优先级</small>
+            <i />
           </div>
           <div class="form-grid is-three">
             <el-form-item label="平台编码" prop="platformCode">
@@ -190,114 +206,169 @@
           </div>
         </section>
 
-        <section class="form-section">
-          <div class="form-section-head">
-            <div>
-              <span>密钥与接入</span>
-              <strong>API 地址、密钥与 Key 引用</strong>
-            </div>
-            <em>API Key 与 primary_key_ref 至少填写一个</em>
+        <section class="modal-section">
+          <div class="modal-section-head">
+            <span class="section-icon">密</span>
+            <strong>密钥与接入</strong>
+            <small>API 地址、密钥与 Key 引用</small>
+            <i />
           </div>
+          <div class="constraint-hint">「密钥」与「主密钥引用」至少填写一个</div>
           <div class="form-grid is-two">
-            <el-form-item label="API URL" prop="apiUrl">
+            <el-form-item label="接口地址" prop="apiUrl">
               <el-input v-model="form.apiUrl" placeholder="https://xxx/v1" />
             </el-form-item>
-            <el-form-item label="API Key" prop="apiKey">
-              <el-input v-model="form.apiKey" type="password" show-password placeholder="输入平台 API Key" />
+            <el-form-item label="密钥" prop="apiKey">
+              <el-input v-model="form.apiKey" type="password" show-password placeholder="输入平台密钥" />
             </el-form-item>
-            <el-form-item label="primary_key_ref" prop="primaryKeyRef">
+            <el-form-item label="主密钥引用" prop="primaryKeyRef">
               <el-input v-model="form.primaryKeyRef" placeholder="如: vault://keys/doubao-primary" />
             </el-form-item>
-            <el-form-item label="backup_key_ref" prop="backupKeyRef">
+            <el-form-item label="备用密钥引用" prop="backupKeyRef">
               <el-input v-model="form.backupKeyRef" placeholder="如: vault://keys/doubao-backup" />
             </el-form-item>
           </div>
         </section>
 
-        <section class="form-section">
-          <div class="form-section-head">
-            <div>
-              <span>模型能力</span>
-              <strong>主模型、低性能模型与备用服务商</strong>
-            </div>
+        <section class="modal-section">
+          <div class="modal-section-head">
+            <span class="section-icon">模</span>
+            <strong>模型能力</strong>
+            <small>主模型、低性能模型与备用服务商</small>
+            <i />
           </div>
-          <div class="form-grid is-two">
-            <el-form-item label="高性能版本(Model ID)" prop="modelId">
+          <div class="subgroup-title"><span />主模型</div>
+          <div class="form-grid model-main-grid">
+            <el-form-item label="高性能模型 ID" prop="modelId">
               <el-input v-model="form.modelId" placeholder="如: gpt-5.4" />
             </el-form-item>
-            <el-form-item label="Model名称" prop="modelName">
+            <el-form-item label="模型名称" prop="modelName">
               <el-input v-model="form.modelName" placeholder="如: DeepSeek Chat" />
-            </el-form-item>
-            <el-form-item label="低性能版本(Model ID)" prop="lowModelId">
-              <el-input v-model="form.lowModelId" placeholder="如: gpt-5.3" />
             </el-form-item>
             <el-form-item label="并发上限" prop="concurrencyLimit">
               <el-input-number v-model="form.concurrencyLimit" :min="1" :max="10000" :step="1" />
             </el-form-item>
+            <el-form-item class="model-low-field" label="低性能模型 ID" prop="lowModelId">
+              <el-input v-model="form.lowModelId" placeholder="如: gpt-5.3" />
+            </el-form-item>
           </div>
+          <div class="subgroup-title"><span />备用服务商（可选）</div>
           <div class="form-grid is-three compact-grid">
-            <el-form-item label="backup_provider_name" prop="backupProviderName">
+            <el-form-item label="备用服务商名称" prop="backupProviderName">
               <el-input v-model="form.backupProviderName" placeholder="如: deepseek" />
             </el-form-item>
-            <el-form-item label="backup_api_url" prop="backupApiUrl">
+            <el-form-item label="备用接口地址" prop="backupApiUrl">
               <el-input v-model="form.backupApiUrl" placeholder="https://backup.xxx/v1" />
             </el-form-item>
-            <el-form-item label="backup_model_id" prop="backupModelId">
+            <el-form-item label="备用模型 ID" prop="backupModelId">
               <el-input v-model="form.backupModelId" placeholder="如: deepseek-chat" />
             </el-form-item>
           </div>
         </section>
 
-        <section class="form-section">
-          <div class="form-section-head">
-            <div>
-              <span>业务能力</span>
-              <strong>启用、拓词、售前、文章与降级处理</strong>
+        <section class="modal-section">
+          <div class="modal-section-head">
+            <span class="section-icon">能</span>
+            <strong>业务能力</strong>
+            <small>启用、拓词、售前、文章与降级处理</small>
+            <i />
+          </div>
+          <div class="capability-switch-grid">
+            <div class="capability-switch-card">
+              <div>
+                <strong>启用状态</strong>
+                <span class="capability-desc">平台是否参与调度</span>
+              </div>
+              <div class="switch-control">
+                <span class="switch-status">{{ form.enabled ? '启用' : '停用' }}</span>
+                <el-switch v-model="form.enabled" />
+              </div>
+            </div>
+            <div class="capability-switch-card">
+              <div>
+                <strong>售前能力</strong>
+                <span class="capability-desc">售前问答生成</span>
+              </div>
+              <div class="switch-control">
+                <span class="switch-status">{{ form.enabledForPresale ? '启用' : '停用' }}</span>
+                <el-switch v-model="form.enabledForPresale" />
+              </div>
+            </div>
+            <div class="capability-switch-card">
+              <div>
+                <strong>文章能力</strong>
+                <span class="capability-desc">内容生成任务</span>
+              </div>
+              <div class="switch-control">
+                <span class="switch-status">{{ form.enabledForArticle ? '启用' : '停用' }}</span>
+                <el-switch v-model="form.enabledForArticle" />
+              </div>
+            </div>
+            <div class="capability-switch-card">
+              <div>
+                <strong>拓词问题池</strong>
+                <span class="capability-desc">仅通义千问 / DeepSeek / Mimo</span>
+              </div>
+              <div class="switch-control">
+                <span class="switch-status">{{ form.enabledForGeoQuestion ? '启用' : '停用' }}</span>
+                <el-switch v-model="form.enabledForGeoQuestion" :disabled="!canEnableGeoQuestion(form.platformCode)" />
+              </div>
+            </div>
+            <div class="capability-switch-card">
+              <div>
+                <strong>售前评估模型</strong>
+                <span class="capability-desc">评估链路可用</span>
+              </div>
+              <div class="switch-control">
+                <span class="switch-status">{{ form.presaleEvaluateEnabled ? '启用' : '停用' }}</span>
+                <el-switch
+                  v-model="form.presaleEvaluateEnabled"
+                  :disabled="!canEnablePresaleEvaluate(form.platformCode)"
+                />
+              </div>
             </div>
           </div>
-          <div class="switch-grid">
-            <el-form-item label="启用状态" prop="enabled">
-              <el-switch v-model="form.enabled" active-text="启用" inactive-text="停用" />
-            </el-form-item>
-            <el-form-item label="售前能力">
-              <el-switch v-model="form.enabledForPresale" active-text="启用" inactive-text="停用" />
-            </el-form-item>
-            <el-form-item label="文章能力">
-              <el-switch v-model="form.enabledForArticle" active-text="启用" inactive-text="停用" />
-            </el-form-item>
-            <el-form-item label="拓词问题池">
-              <el-switch
-                v-model="form.enabledForGeoQuestion"
-                active-text="启用"
-                inactive-text="停用"
-                :disabled="!canEnableGeoQuestion(form.platformCode)"
-              />
-            </el-form-item>
-            <el-form-item label="售前评估模型">
-              <el-switch
-                v-model="form.presaleEvaluateEnabled"
-                active-text="启用"
-                inactive-text="停用"
-                :disabled="!canEnablePresaleEvaluate(form.platformCode)"
-              />
-            </el-form-item>
-            <el-form-item label="降级处理" prop="degraded">
-              <el-switch v-model="form.degraded" active-text="是" inactive-text="否" />
-            </el-form-item>
-          </div>
-          <div class="form-grid is-two">
+
+          <div class="degrade-panel">
+            <div class="degrade-panel-head">
+              <div>
+                <strong>降级处理</strong>
+                <span>开启后该平台将进入降级状态，请记录原因</span>
+              </div>
+              <div class="switch-control">
+                <span class="switch-status">{{ form.degraded ? '是' : '否' }}</span>
+                <el-switch v-model="form.degraded" />
+              </div>
+            </div>
             <el-form-item label="降级原因" prop="degradedReason">
               <el-input v-model="form.degradedReason" type="textarea" :rows="2" placeholder="降级处理开启时建议填写" />
             </el-form-item>
+          </div>
+        </section>
+
+        <section class="modal-section">
+          <div class="modal-section-head">
+            <span class="section-icon">备</span>
+            <strong>平台备注</strong>
+            <small>记录人工说明与维护信息</small>
+            <i />
+          </div>
+          <div class="form-grid is-one">
             <el-form-item label="备注">
-              <el-input v-model="form.remark" type="textarea" :rows="2" />
+              <el-input v-model="form.remark" type="textarea" :rows="3" placeholder="可填写供应商、限制或维护说明" />
             </el-form-item>
           </div>
         </section>
       </el-form>
+
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
+        <div class="platform-modal-footer">
+          <span>带 <b>*</b> 为必填项</span>
+          <div>
+            <el-button @click="dialogVisible = false">取消</el-button>
+            <el-button type="primary" :loading="saving" @click="submit">保存配置</el-button>
+          </div>
+        </div>
       </template>
     </el-dialog>
   </div>
@@ -771,60 +842,162 @@ onMounted(async () => {
   color: #64748b;
 }
 
-.platform-editor-dialog :deep(.el-dialog__body) {
-  background: #f8fafc;
-}
-
-.platform-config-form {
-  display: grid;
-  gap: 14px;
-}
-
-.form-section {
+.platform-editor-dialog :deep(.el-dialog) {
   overflow: hidden;
-  border: 1px solid #dbeafe;
-  border-radius: 14px;
-  background: #ffffff;
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.04);
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.18);
 }
 
-.form-section-head {
+.platform-editor-dialog :deep(.el-dialog__header),
+.platform-editor-dialog :deep(.el-dialog__body),
+.platform-editor-dialog :deep(.el-dialog__footer) {
+  margin: 0;
+  padding: 0;
+}
+
+.platform-editor-dialog :deep(.el-dialog__body) {
+  background: #ffffff;
+}
+
+.platform-modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 13px 16px 11px;
-  border-bottom: 1px solid #e7edf5;
-  background: linear-gradient(90deg, #f8fbff 0%, #ffffff 62%, #f0fdf4 100%);
+  min-height: 56px;
+  padding: 14px 24px;
+  border-bottom: 1px solid #dbeafe;
+  background: linear-gradient(90deg, #f8fbff 0%, #eef6ff 54%, #ecfdf5 100%);
 }
 
-.form-section-head span {
-  display: block;
-  color: #2563eb;
-  font-size: 12px;
+.platform-modal-title {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+  color: #111827;
+  font-size: 18px;
   font-weight: 800;
 }
 
-.form-section-head strong {
-  display: block;
-  margin-top: 4px;
-  color: #0f172a;
-  font-size: 15px;
-  font-weight: 800;
-}
-
-.form-section-head em {
-  color: #64748b;
+.platform-modal-title em {
+  display: inline-flex;
+  align-items: center;
+  max-width: 180px;
+  height: 24px;
+  overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  padding: 0 10px;
+  background: #eff6ff;
+  color: #1d4ed8;
   font-size: 12px;
   font-style: normal;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-title-accent {
+  width: 4px;
+  height: 18px;
+  border-radius: 3px;
+  background: #378add;
+}
+
+.modal-close-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.modal-close-button:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.platform-config-form {
+  display: block;
+  max-height: 72vh;
+  overflow-y: auto;
+  padding: 24px 28px 26px;
+}
+
+.modal-section {
+  margin-bottom: 30px;
+}
+
+.modal-section:last-child {
+  margin-bottom: 0;
+}
+
+.modal-section-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.modal-section-head .section-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 30px;
+  height: 24px;
+  border-radius: 7px;
+  background: #eaf4ff;
+  color: #2563eb;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.modal-section-head strong {
+  flex: 0 0 auto;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.modal-section-head small {
+  flex: 0 0 auto;
+  color: #94a3b8;
+  font-size: 12px;
   font-weight: 700;
-  text-align: right;
+}
+
+.modal-section-head i {
+  flex: 1;
+  height: 1px;
+  background: #e5e7eb;
+}
+
+.constraint-hint {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  margin-bottom: 12px;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 0 11px;
+  background: #fffbeb;
+  color: #92400e;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .form-grid {
   display: grid;
   gap: 13px 14px;
-  padding: 16px;
 }
 
 .form-grid.is-two {
@@ -835,15 +1008,125 @@ onMounted(async () => {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.compact-grid {
-  padding-top: 0;
+.form-grid.is-one {
+  grid-template-columns: 1fr;
 }
 
-.switch-grid {
+.model-main-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 150px;
+}
+
+.model-low-field {
+  grid-column: 1 / -1;
+}
+
+.compact-grid {
+  margin-top: 10px;
+}
+
+.subgroup-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 2px 0 10px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.subgroup-title span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #378add;
+}
+
+.capability-switch-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
-  padding: 16px 16px 2px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.capability-switch-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 82px;
+  gap: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: #ffffff;
+}
+
+.capability-switch-card strong,
+.degrade-panel-head strong {
+  display: block;
+  color: #111827;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.capability-switch-card .capability-desc,
+.degrade-panel-head span {
+  display: block;
+  margin-top: 5px;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.switch-control {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 9px;
+}
+
+.switch-status {
+  min-width: 28px;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+}
+
+.degrade-panel {
+  margin-top: 16px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 18px 20px 20px;
+  background: #f8fafc;
+}
+
+.degrade-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.platform-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 24px;
+  border-top: 1px solid #edf0f4;
+  background: #f8fafc;
+}
+
+.platform-modal-footer span {
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.platform-modal-footer b {
+  color: #ef4444;
+  font-weight: 900;
 }
 
 .platform-config-form :deep(.el-form-item) {
@@ -878,17 +1161,38 @@ onMounted(async () => {
 
   .form-grid.is-two,
   .form-grid.is-three,
-  .switch-grid {
+  .model-main-grid,
+  .capability-switch-grid {
     grid-template-columns: 1fr;
   }
 
-  .form-section-head {
+  .model-low-field {
+    grid-column: auto;
+  }
+
+  .platform-modal-header,
+  .platform-modal-footer {
     align-items: flex-start;
     flex-direction: column;
   }
 
-  .form-section-head em {
-    text-align: left;
+  .modal-section-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .modal-section-head i {
+    flex-basis: 100%;
+  }
+
+  .platform-modal-footer > div {
+    width: 100%;
+  }
+
+  .platform-modal-footer .el-button {
+    width: 100%;
+    margin-left: 0;
+    margin-top: 8px;
   }
 }
 </style>
