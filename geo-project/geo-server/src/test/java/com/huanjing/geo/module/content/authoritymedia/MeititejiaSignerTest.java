@@ -101,28 +101,27 @@ class MeititejiaSignerTest {
     }
 
     @Test
-    void phpUrlencode_matchesDocumentEncodingContract() {
-        assertThat(MeititejiaSigner.phpUrlencode("标题 A*~"))
+    void formEncode_matchesPhpFormEncoding() {
+        assertThat(MeititejiaSigner.formEncode("标题 A*~"))
                 .isEqualTo("%E6%A0%87%E9%A2%98+A*~");
     }
 
     @Test
-    void formBody_doesNotEncodeValuesAgain() {
+    void formBody_encodesValuesForTransport() {
         Map<String, String> params = new LinkedHashMap<>();
-        params.put("title", "%E6%A0%87%E9%A2%98+A*~");
-        params.put("content", "\u7a3f\u4ef6\u94fe\u63a5+%3A+%3Ca%3E");
+        params.put("title", "标题 A*~");
+        params.put("content", "\u7a3f\u4ef6\u94fe\u63a5 : <a>");
 
         assertThat(MeititejiaSigner.formBody(params))
-                .isEqualTo("title=%E6%A0%87%E9%A2%98+A*~&content=\u7a3f\u4ef6\u94fe\u63a5+%3A+%3Ca%3E");
+                .isEqualTo("title=%E6%A0%87%E9%A2%98+A*~&content=%E7%A8%BF%E4%BB%B6%E9%93%BE%E6%8E%A5+%3A+%3Ca%3E");
     }
 
     @Test
-    void phpUrlencode_protectsEqualsAndAmpersandInsideValues() {
+    void formBody_protectsEqualsAndAmpersandInsideValues() {
         Map<String, String> params = new LinkedHashMap<>();
-        params.put("title", MeititejiaSigner.phpUrlencode("A=B&C=D"));
+        params.put("title", "A=B&C=D");
 
-        assertThat(params.get("title")).isEqualTo("A%3DB%26C%3DD");
-        assertThat(MeititejiaSigner.signNormalized(params, "key")).isEqualTo("FDECB4F12292F3004346BC89EBBE042F");
+        assertThat(MeititejiaSigner.signNormalized(params, "key")).isEqualTo("0C5F6042EC0D343CB8F966E335EA03B7");
         assertThat(MeititejiaSigner.formBody(params)).isEqualTo("title=A%3DB%26C%3DD");
     }
 

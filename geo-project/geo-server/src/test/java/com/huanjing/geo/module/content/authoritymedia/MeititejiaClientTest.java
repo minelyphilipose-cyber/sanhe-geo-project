@@ -56,7 +56,7 @@ class MeititejiaClientTest {
     }
 
     @Test
-    void createNewsMediaOrder_encodesTextFieldsBeforeSigningAndDoesNotDoubleEncodeBody() {
+    void createNewsMediaOrder_signsRawTextFieldsAndEncodesFormBody() {
         client.createNewsMediaOrder(new MeititejiaClient.NewsMediaOrderRequest(
                 "标题 A*~",
                 "稿件链接 : <a href=\"https://p.example/a b\">https://p.example/a b</a>",
@@ -72,7 +72,9 @@ class MeititejiaClientTest {
         assertThat(client.lastBody).contains("remark=%E5%A4%87%E6%B3%A8+A");
         assertThat(client.lastBody).contains("published_at=2026-05-08+18%3A00%3A00");
         assertThat(client.lastBody).contains("saling_price=100");
-        assertThat(client.lastCanonical).contains("published_at=2026-05-08+18%3A00%3A00");
+        assertThat(client.lastCanonical).contains("title=标题 A*~");
+        assertThat(client.lastCanonical).contains("content=稿件链接 : <a href=\"https://p.example/a b\">https://p.example/a b</a>");
+        assertThat(client.lastCanonical).contains("published_at=2026-05-08 18:00:00");
         assertThat(client.lastBody).doesNotContain("%25E6%25A0%2587");
     }
 
