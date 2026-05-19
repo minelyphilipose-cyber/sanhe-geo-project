@@ -175,17 +175,17 @@ public class PresaleRawSnapshotAssembler {
     private TestSummary buildTestSummary(Long versionId,
                                          Set<String> degradedPlatforms,
                                          List<String> extractedCompetitorDisplayNames) {
-        int platformCount = countEnabledPlatforms();
+        Set<String> safeDegradedSet = degradedPlatforms == null ? Set.of() : degradedPlatforms;
+        int platformCount = countEffectiveEnabledPlatforms(safeDegradedSet);
         int genericPromptCount = countPromptTemplates(versionId, 0);
         int competitorPromptCount = countPromptTemplates(versionId, 1);
         int competitorCount = extractedCompetitorDisplayNames == null ? 0 : extractedCompetitorDisplayNames.size();
 
         int totalPrompts = genericPromptCount + (competitorCount > 0 ? competitorPromptCount : 0);
-        int totalCalls = countNonSkippedCalls(versionId);
-        int successfulCalls = countCallsByStatus(versionId, STATUS_SUCCESS);
+        int totalCalls = countNonSkippedCalls(versionId, safeDegradedSet);
+        int successfulCalls = countCallsByStatus(versionId, STATUS_SUCCESS, safeDegradedSet);
         int failedCalls = Math.max(0, totalCalls - successfulCalls);
 
-        Set<String> safeDegradedSet = degradedPlatforms == null ? Set.of() : degradedPlatforms;
         return TestSummary.builder()
                 .totalPrompts(totalPrompts)
                 .totalPlatforms(platformCount)
@@ -199,9 +199,11 @@ public class PresaleRawSnapshotAssembler {
                 .build();
     }
 
-    private int countEnabledPlatforms() {
-        Long count = aiPlatformConfigMapper.selectCount(PresalePlatformConfigQueries.presaleEnabledWrapper());
-        return count == null ? 0 : count.intValue();
+    private int countEffectiveEnabledPlatforms(Set<String> degradedPlatforms) {
+        Set<String> safeDegraded = degradedPlatforms == null ? Set.of() : degradedPlatforms;
+        return (int) listEnabledPlatforms().stream()
+                .filter(platform -> !safeDegraded.contains(platform.getPlatformCode()))
+                .count();
     }
 
     private int countPromptTemplates(Long versionId, int hasCompetitorVar) {
@@ -213,26 +215,33 @@ public class PresaleRawSnapshotAssembler {
         return count == null ? 0 : count.intValue();
     }
 
-    private int countNonSkippedCalls(Long versionId) {
-        Long count = aiCallMapper.selectCount(
-                new LambdaQueryWrapper<PresaleAiCall>()
-                        .eq(PresaleAiCall::getVersionId, versionId)
-                        .in(PresaleAiCall::getBatchNo, 1, 2)
-                        .in(PresaleAiCall::getStage, "QUERY", "ANALYZE")
-                        .ne(PresaleAiCall::getCallStatus, STATUS_SKIPPED_DEGRADED)
-        );
+    private int countNonSkippedCalls(Long versionId, Set<String> degradedPlatforms) {
+        LambdaQueryWrapper<PresaleAiCall> wrapper = new LambdaQueryWrapper<PresaleAiCall>()
+                .eq(PresaleAiCall::getVersionId, versionId)
+                .in(PresaleAiCall::getBatchNo, 1, 2)
+                .in(PresaleAiCall::getStage, "QUERY", "ANALYZE")
+                .ne(PresaleAiCall::getCallStatus, STATUS_SKIPPED_DEGRADED);
+        excludeDegradedCallPlatforms(wrapper, degradedPlatforms);
+        Long count = aiCallMapper.selectCount(wrapper);
         return count == null ? 0 : count.intValue();
     }
 
-    private int countCallsByStatus(Long versionId, String status) {
-        Long count = aiCallMapper.selectCount(
-                new LambdaQueryWrapper<PresaleAiCall>()
-                        .eq(PresaleAiCall::getVersionId, versionId)
-                        .in(PresaleAiCall::getBatchNo, 1, 2)
-                        .in(PresaleAiCall::getStage, "QUERY", "ANALYZE")
-                        .eq(PresaleAiCall::getCallStatus, status)
-        );
+    private int countCallsByStatus(Long versionId, String status, Set<String> degradedPlatforms) {
+        LambdaQueryWrapper<PresaleAiCall> wrapper = new LambdaQueryWrapper<PresaleAiCall>()
+                .eq(PresaleAiCall::getVersionId, versionId)
+                .in(PresaleAiCall::getBatchNo, 1, 2)
+                .in(PresaleAiCall::getStage, "QUERY", "ANALYZE")
+                .eq(PresaleAiCall::getCallStatus, status);
+        excludeDegradedCallPlatforms(wrapper, degradedPlatforms);
+        Long count = aiCallMapper.selectCount(wrapper);
         return count == null ? 0 : count.intValue();
+    }
+
+    private void excludeDegradedCallPlatforms(LambdaQueryWrapper<PresaleAiCall> wrapper,
+                                              Set<String> degradedPlatforms) {
+        if (degradedPlatforms != null && !degradedPlatforms.isEmpty()) {
+            wrapper.notIn(PresaleAiCall::getPlatformCode, degradedPlatforms);
+        }
     }
 
     private List<SamplePrompt> buildSamplePrompts(Long versionId) {
@@ -292,15 +301,15 @@ public class PresaleRawSnapshotAssembler {
     }
 
     private List<PlatformBreakdown> buildPlatformBreakdown(Long versionId, Set<String> degradedPlatforms) {
-        List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(PresalePlatformConfigQueries.presaleEnabledWrapper());
-        if (platforms == null) {
-            platforms = List.of();
-        }
+        List<AiPlatformConfig> platforms = listEnabledPlatforms();
         Map<Long, String> categoryByTemplateId = loadVersionTemplateCategoryMap(versionId);
         Set<String> safeDegraded = degradedPlatforms == null ? Set.of() : degradedPlatforms;
         List<PlatformBreakdown> out = new ArrayList<>();
         for (AiPlatformConfig platform : platforms) {
             String platformCode = platform.getPlatformCode();
+            if (safeDegraded.contains(platformCode)) {
+                continue;
+            }
             List<PresaleAiPromptResult> batch1Rows = aiPromptResultMapper.selectList(
                     new LambdaQueryWrapper<PresaleAiPromptResult>()
                             .eq(PresaleAiPromptResult::getVersionId, versionId)
@@ -363,10 +372,15 @@ public class PresaleRawSnapshotAssembler {
                             .neutral(neutral)
                             .negative(negative)
                             .build())
-                    .isDegraded(safeDegraded.contains(platformCode))
+                    .isDegraded(false)
                     .build());
         }
         return out;
+    }
+
+    private List<AiPlatformConfig> listEnabledPlatforms() {
+        List<AiPlatformConfig> platforms = aiPlatformConfigMapper.selectList(PresalePlatformConfigQueries.presaleEnabledWrapper());
+        return platforms == null ? List.of() : platforms;
     }
 
     private Map<Long, String> loadVersionTemplateCategoryMap(Long versionId) {

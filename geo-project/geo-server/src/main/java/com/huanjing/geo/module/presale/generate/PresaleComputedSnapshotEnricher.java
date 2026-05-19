@@ -24,6 +24,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * 统一 computed_snapshot 增强/校验入口。
@@ -79,7 +80,7 @@ public class PresaleComputedSnapshotEnricher {
             computedSnapshot.setIntentBreakdown(scenes.intentBreakdown());
 
             // 2) Scores (D25)
-            RankingStats rankingStats = queryRankingStats(versionId);
+            RankingStats rankingStats = queryRankingStats(versionId, rawSnapshot);
             var scores = scoresCalculator.compute(rawSnapshot, scenes, rankingStats);
             computedSnapshot.setScores(scores);
 
@@ -107,13 +108,20 @@ public class PresaleComputedSnapshotEnricher {
         }
     }
 
-    private RankingStats queryRankingStats(Long versionId) {
-        List<PresaleAiPromptResult> rows = aiPromptResultMapper.selectList(
-                new LambdaQueryWrapper<PresaleAiPromptResult>()
-                        .eq(PresaleAiPromptResult::getVersionId, versionId)
-                        .eq(PresaleAiPromptResult::getBatchNo, 1)
-                        .isNotNull(PresaleAiPromptResult::getRanking)
-        );
+    private RankingStats queryRankingStats(Long versionId, RawSnapshotDTO rawSnapshot) {
+        LambdaQueryWrapper<PresaleAiPromptResult> wrapper = new LambdaQueryWrapper<PresaleAiPromptResult>()
+                .eq(PresaleAiPromptResult::getVersionId, versionId)
+                .eq(PresaleAiPromptResult::getBatchNo, 1)
+                .isNotNull(PresaleAiPromptResult::getRanking);
+        Set<String> degradedPlatforms = rawSnapshot == null
+                || rawSnapshot.getTestSummary() == null
+                || rawSnapshot.getTestSummary().getDegradedPlatforms() == null
+                ? Set.of()
+                : Set.copyOf(rawSnapshot.getTestSummary().getDegradedPlatforms());
+        if (!degradedPlatforms.isEmpty()) {
+            wrapper.notIn(PresaleAiPromptResult::getPlatformCode, degradedPlatforms);
+        }
+        List<PresaleAiPromptResult> rows = aiPromptResultMapper.selectList(wrapper);
         int c1 = 0;
         int c2 = 0;
         int c3 = 0;
