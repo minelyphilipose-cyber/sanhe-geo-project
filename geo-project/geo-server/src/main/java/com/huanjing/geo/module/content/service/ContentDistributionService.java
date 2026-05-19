@@ -184,7 +184,7 @@ public class ContentDistributionService {
 
         task.setStatus("submitted");
         task.setPublishedUrl(publishedUrl.trim());
-        task.setResponsePayload(StringUtils.hasText(responsePayload) ? responsePayload.trim() : null);
+        task.setResponsePayload(jsonColumnPayload(responsePayload));
         task.setErrorMessage(null);
         task.setFinishedAt(LocalDateTime.now());
         distributionTaskMapper.updateById(task);
@@ -347,8 +347,8 @@ public class ContentDistributionService {
                                    Project project,
                                    SubmitResult submitResult) {
         task.setStatus(submitResult.isSuccess() ? "submitted" : "failed");
-        task.setRequestPayload(submitResult.getRequestPayload());
-        task.setResponsePayload(submitResult.getResponseBody());
+        task.setRequestPayload(jsonColumnPayload(submitResult.getRequestPayload()));
+        task.setResponsePayload(jsonColumnPayload(submitResult.getResponseBody()));
         task.setPublishedUrl(submitResult.getPublishedUrl());
         task.setErrorMessage(submitResult.isSuccess() ? null : trimError(submitResult.getErrorMessage()));
         task.setFinishedAt(LocalDateTime.now());
@@ -922,7 +922,7 @@ public class ContentDistributionService {
             wrapper.set(DistributionTask::getStatus, "submitted")
                     .set(DistributionTask::getPublishedUrl, result.getPublishedUrl())
                     .set(DistributionTask::getPlatformArticleId, result.getPlatformArticleId())
-                    .set(DistributionTask::getResponsePayload, result.getResponseBody());
+                    .set(DistributionTask::getResponsePayload, jsonColumnPayload(result.getResponseBody()));
         } else {
             wrapper.set(DistributionTask::getStatus, "failed")
                     .set(DistributionTask::getFailureKind, result.getFailureKind())
@@ -941,8 +941,8 @@ public class ContentDistributionService {
                 .eq(DistributionTask::getStatus, "submitting")
                 .set(DistributionTask::getLockedUntil, null)
                 .set(DistributionTask::getFinishedAt, LocalDateTime.now(SH_ZONE))
-                .set(DistributionTask::getRequestPayload, result.getRequestPayload())
-                .set(DistributionTask::getResponsePayload, result.getResponseBody());
+                .set(DistributionTask::getRequestPayload, jsonColumnPayload(result.getRequestPayload()))
+                .set(DistributionTask::getResponsePayload, jsonColumnPayload(result.getResponseBody()));
 
         if (result.isSuccess()) {
             wrapper.set(DistributionTask::getStatus, "submitted")
@@ -974,8 +974,8 @@ public class ContentDistributionService {
                 .eq(DistributionTask::getStatus, "submitting")
                 .set(DistributionTask::getLockedUntil, null)
                 .set(DistributionTask::getFinishedAt, LocalDateTime.now(SH_ZONE))
-                .set(DistributionTask::getRequestPayload, result.getRequestPayload())
-                .set(DistributionTask::getResponsePayload, result.getResponseBody())
+                .set(DistributionTask::getRequestPayload, jsonColumnPayload(result.getRequestPayload()))
+                .set(DistributionTask::getResponsePayload, jsonColumnPayload(result.getResponseBody()))
                 .set(DistributionTask::getExternalStatus, result.getExternalStatus())
                 .set(DistributionTask::getReviewStatus, result.getReviewStatus())
                 .set(DistributionTask::getReviewFeedback, result.getReviewFeedback());
@@ -1008,8 +1008,8 @@ public class ContentDistributionService {
                 .eq(DistributionTask::getStatus, "submitting")
                 .set(DistributionTask::getLockedUntil, null)
                 .set(DistributionTask::getFinishedAt, LocalDateTime.now(SH_ZONE))
-                .set(DistributionTask::getRequestPayload, result.getRequestPayload())
-                .set(DistributionTask::getResponsePayload, result.getResponseBody());
+                .set(DistributionTask::getRequestPayload, jsonColumnPayload(result.getRequestPayload()))
+                .set(DistributionTask::getResponsePayload, jsonColumnPayload(result.getResponseBody()));
 
         if (result.isSuccess()) {
             wrapper.set(DistributionTask::getStatus, "submitted")
@@ -1043,8 +1043,8 @@ public class ContentDistributionService {
                 .eq(DistributionTask::getStatus, "submitting")
                 .set(DistributionTask::getLockedUntil, null)
                 .set(DistributionTask::getFinishedAt, LocalDateTime.now(SH_ZONE))
-                .set(DistributionTask::getRequestPayload, result.getRequestPayload())
-                .set(DistributionTask::getResponsePayload, result.getResponseBody())
+                .set(DistributionTask::getRequestPayload, jsonColumnPayload(result.getRequestPayload()))
+                .set(DistributionTask::getResponsePayload, jsonColumnPayload(result.getResponseBody()))
                 .set(DistributionTask::getExternalStatus, result.getExternalStatus());
 
         if (result.isSuccess()) {
@@ -1089,8 +1089,8 @@ public class ContentDistributionService {
                 .eq(DistributionTask::getStatus, "submitting")
                 .set(DistributionTask::getLockedUntil, null)
                 .set(DistributionTask::getFinishedAt, LocalDateTime.now(SH_ZONE))
-                .set(DistributionTask::getRequestPayload, result.getRequestPayload())
-                .set(DistributionTask::getResponsePayload, result.getResponseBody())
+                .set(DistributionTask::getRequestPayload, jsonColumnPayload(result.getRequestPayload()))
+                .set(DistributionTask::getResponsePayload, jsonColumnPayload(result.getResponseBody()))
                 .set(DistributionTask::getExternalStatus, result.getExternalStatus());
 
         if (result.isSuccess()) {
@@ -1212,6 +1212,10 @@ public class ContentDistributionService {
         } catch (JsonProcessingException ex) {
             throw new BizException(500, "semi-auto fill payload serialization failed", ex);
         }
+    }
+
+    private String jsonColumnPayload(String payload) {
+        return JsonColumnPayloads.normalize(objectMapper, payload);
     }
 
     private void auditSemiAutoTaskCreated(ArticleDraft article,
