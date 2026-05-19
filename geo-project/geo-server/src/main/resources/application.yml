@@ -215,7 +215,7 @@ geo:
       cron-jitter-ms: ${PRESALE_EXPORT_CLEANUP_CRON_JITTER_MS:60000}
       max-retry-count: ${PRESALE_EXPORT_CLEANUP_MAX_RETRY_COUNT:5}
   dispatch:
-    cron: "0 45 10 * * *"
+    cron: "0 5 0 * * *"
     timezone: "Asia/Shanghai"
     lock-key: "geo:dispatch:scan:lock"
     lock-ttl-seconds: 600

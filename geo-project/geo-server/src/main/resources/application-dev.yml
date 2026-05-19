@@ -15,7 +15,7 @@ spring:
 # JWT
 geo:
   brand-geo-site:
-    endpoint: https://www.sanhexinglian.com/api/v1/content
+    endpoint: https://www.fyhuaweizhijia.com/api/v1/content
 
   wechat:
     client:
