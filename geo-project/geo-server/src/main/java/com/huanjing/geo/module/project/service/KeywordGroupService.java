@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.entity.Company;
+import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
+import com.huanjing.geo.module.customer.mapper.CompanyPackageBindingMapper;
 import com.huanjing.geo.module.project.dto.KeywordGroupColumnsRequest;
 import com.huanjing.geo.module.project.dto.KeywordGroupColumnsVO;
 import com.huanjing.geo.module.project.dto.KeywordGroupImportResultVO;
@@ -89,6 +91,7 @@ public class KeywordGroupService {
     private final KeywordGroupResultMapper keywordGroupResultMapper;
     private final KeywordGroupWordMapper keywordGroupWordMapper;
     private final CompanyMapper companyMapper;
+    private final CompanyPackageBindingMapper companyPackageBindingMapper;
     private final ProjectMapper projectMapper;
     private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
     private final CurrentUserService currentUserService;
@@ -133,6 +136,7 @@ public class KeywordGroupService {
         KeywordGroup group = requireGroup(id);
         String companyName = resolveCompanyName(group.getCompanyId());
         Project project = group.getProjectId() == null ? null : projectMapper.selectById(group.getProjectId());
+        hydrateProjectPackageTypes(project == null ? Collections.emptyList() : List.of(project));
         Long estimatedCount = calcEstimatedCountsByGroupIds(List.of(group.getId())).getOrDefault(group.getId(), 0L);
         Long savedCount = calcSavedCountsByGroupIds(List.of(group.getId())).getOrDefault(group.getId(), 0L);
         KeywordTierCounts tierCounts = calcSavedTierCountsByGroupIds(List.of(group.getId())).get(group.getId());
@@ -637,9 +641,35 @@ public class KeywordGroupService {
         }
         return projectMapper.selectList(
                 new LambdaQueryWrapper<Project>()
-                        .select(Project::getId, Project::getProjectName, Project::getPackageType)
+                        .select(Project::getId, Project::getProjectName, Project::getCompanyId)
                         .in(Project::getId, validIds)
-        ).stream().collect(Collectors.toMap(Project::getId, p -> p, (a, b) -> a));
+        ).stream()
+                .collect(Collectors.collectingAndThen(
+                        Collectors.toList(),
+                        projects -> {
+                            hydrateProjectPackageTypes(projects);
+                            return projects.stream().collect(Collectors.toMap(Project::getId, p -> p, (a, b) -> a));
+                        }
+                ));
+    }
+
+    private void hydrateProjectPackageTypes(List<Project> projects) {
+        List<Long> companyIds = projects.stream()
+                .map(Project::getCompanyId)
+                .filter(id -> id != null && id > 0)
+                .distinct()
+                .toList();
+        if (companyIds.isEmpty()) {
+            return;
+        }
+        Map<Long, String> packageTypeMap = companyPackageBindingMapper.selectList(
+                new LambdaQueryWrapper<CompanyPackageBinding>()
+                        .select(CompanyPackageBinding::getCompanyId, CompanyPackageBinding::getPackageType)
+                        .in(CompanyPackageBinding::getCompanyId, companyIds)
+                        .eq(CompanyPackageBinding::getStatus, CompanyPackageBinding.STATUS_ACTIVE)
+                        .eq(CompanyPackageBinding::getActiveFlag, 1)
+        ).stream().collect(Collectors.toMap(CompanyPackageBinding::getCompanyId, CompanyPackageBinding::getPackageType, (a, b) -> a));
+        projects.forEach(project -> project.setPackageType(packageTypeMap.get(project.getCompanyId())));
     }
 
     private String resolveCompanyName(Long companyId) {
