@@ -220,9 +220,7 @@ public class KeywordGroupService {
         keywordGroupResultMapper.delete(new LambdaQueryWrapper<KeywordGroupResult>().eq(KeywordGroupResult::getGroupId, id));
         keywordGroupWordMapper.delete(new LambdaQueryWrapper<KeywordGroupWord>().eq(KeywordGroupWord::getGroupId, id));
         projectKeywordGroupRelMapper.delete(new LambdaQueryWrapper<ProjectKeywordGroupRel>().eq(ProjectKeywordGroupRel::getKeywordGroupId, id));
-        group.setName(group.getName() + "_deleted_" + id);
-        group.setDeleted(true);
-        keywordGroupMapper.updateById(group);
+        keywordGroupMapper.deleteById(group.getId());
     }
 
     @Transactional

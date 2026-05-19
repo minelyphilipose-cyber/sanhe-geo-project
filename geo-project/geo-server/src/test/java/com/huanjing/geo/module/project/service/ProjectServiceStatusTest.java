@@ -8,7 +8,12 @@ import com.huanjing.geo.module.partner.entity.PartnerAccountTxn;
 import com.huanjing.geo.module.partner.mapper.PartnerAccountMapper;
 import com.huanjing.geo.module.partner.mapper.PartnerAccountTxnMapper;
 import com.huanjing.geo.module.project.dto.ProjectStatusUpdateRequest;
+import com.huanjing.geo.module.project.entity.KeywordGroup;
 import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
+import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
+import com.huanjing.geo.module.project.mapper.ProjectCustomerRequirementMapper;
+import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.ActivityLogService;
@@ -19,6 +24,9 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -35,6 +43,12 @@ class ProjectServiceStatusTest {
     private CompanyPackageBindingService companyPackageBindingService;
     @Mock
     private KeywordGroupService keywordGroupService;
+    @Mock
+    private KeywordGroupMapper keywordGroupMapper;
+    @Mock
+    private ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
+    @Mock
+    private ProjectCustomerRequirementMapper projectCustomerRequirementMapper;
     @Mock
     private PartnerAccountMapper partnerAccountMapper;
     @Mock
@@ -88,5 +102,50 @@ class ProjectServiceStatusTest {
         verify(partnerAccountTxnMapper, never()).insert(any(PartnerAccountTxn.class));
         verify(activityLogService).logAction(any(), any(), any(), any(), any(), any(), any());
         verify(projectMapper, never()).deleteById(20L);
+    }
+
+    @Test
+    void detail_filtersDeletedKeywordGroupsFromSelections() {
+        SysUser operator = new SysUser();
+        operator.setId(10L);
+        operator.setRole("manager");
+
+        Project project = new Project();
+        project.setId(20L);
+        project.setCompanyId(30L);
+        project.setStatus("paused");
+        project.setPartnerId(100L);
+
+        ProjectKeywordGroupRel activeRel = new ProjectKeywordGroupRel();
+        activeRel.setProjectId(20L);
+        activeRel.setKeywordGroupId(101L);
+        ProjectKeywordGroupRel deletedRel = new ProjectKeywordGroupRel();
+        deletedRel.setProjectId(20L);
+        deletedRel.setKeywordGroupId(102L);
+
+        KeywordGroup activeGroup = new KeywordGroup();
+        activeGroup.setId(101L);
+        activeGroup.setCompanyId(30L);
+        activeGroup.setProjectId(20L);
+        activeGroup.setName("active group");
+        activeGroup.setType("imported");
+        activeGroup.setDeleted(false);
+
+        when(currentUserService.requireCurrentUser()).thenReturn(operator);
+        when(projectMapper.selectById(20L)).thenReturn(project);
+        when(projectCustomerRequirementMapper.selectList(any())).thenReturn(List.of());
+        when(projectKeywordGroupRelMapper.selectList(any())).thenReturn(List.of(activeRel, deletedRel));
+        when(keywordGroupMapper.selectList(any())).thenReturn(List.of(activeGroup));
+        when(keywordGroupService.calcSavedCountsByGroupIds(any())).thenReturn(Map.of(101L, 3L));
+        when(keywordGroupService.calcSavedTierCountsByGroupIds(any()))
+                .thenReturn(Map.of(101L, new KeywordGroupService.KeywordTierCounts(1L, 1L, 1L)));
+
+        Project detail = projectService.detail(20L);
+
+        assertEquals(List.of(101L), detail.getSelectedKeywordGroupIds());
+        assertEquals(1, detail.getSelectedKeywordGroupCount());
+        assertEquals(1, detail.getSelectedKeywordGroups().size());
+        assertEquals(101L, detail.getSelectedKeywordGroups().get(0).getId());
+        assertEquals(3L, detail.getSelectedKeywordSavedKeywords());
     }
 }

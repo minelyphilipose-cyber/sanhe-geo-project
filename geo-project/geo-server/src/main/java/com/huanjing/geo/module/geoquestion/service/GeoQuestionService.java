@@ -882,7 +882,7 @@ public class GeoQuestionService {
         KeywordGroup group = new KeywordGroup();
         group.setCompanyId(workorder.getCompanyId());
         group.setProjectId(workorder.getProjectId());
-        group.setName("问题池工单-" + workorderId + "-" + version.getVersionLabel());
+        group.setName(committedKeywordGroupName(workorder));
         group.setType("imported");
         group.setAreaEnabled(false);
         group.setRemark("由拓词管理入库生成");
@@ -924,6 +924,18 @@ public class GeoQuestionService {
         workorder.setUpdatedAt(LocalDateTime.now());
         workorderMapper.updateById(workorder);
         return version;
+    }
+
+    private String committedKeywordGroupName(GeoQuestionWorkorder workorder) {
+        if (workorder.getProjectId() != null) {
+            Project project = projectMapper.selectById(workorder.getProjectId());
+            if (project != null && StringUtils.hasText(project.getProjectName())) {
+                return project.getProjectName().trim() + "_拓词组";
+            }
+        }
+        Company company = companyMapper.selectById(workorder.getCompanyId());
+        String baseName = company == null ? "客户" + workorder.getCompanyId() : defaultText(company.getCompanyName(), "客户" + workorder.getCompanyId());
+        return baseName.trim() + "_拓词组";
     }
 
     private void bindKeywordGroupToProject(Long projectId, Long groupId) {

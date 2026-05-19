@@ -1068,13 +1068,18 @@ public class ProjectService {
             projectGroupIdMap.computeIfAbsent(rel.getProjectId(), k -> new ArrayList<>()).add(rel.getKeywordGroupId());
             allGroupIds.add(rel.getKeywordGroupId());
         }
-        Map<Long, Long> savedCountMap = keywordGroupService.calcSavedCountsByGroupIds(new ArrayList<>(allGroupIds));
-        Map<Long, KeywordGroupService.KeywordTierCounts> tierCountMap = keywordGroupService.calcSavedTierCountsByGroupIds(new ArrayList<>(allGroupIds));
         Map<Long, KeywordGroup> groupMap = allGroupIds.isEmpty() ? Map.of() : keywordGroupMapper.selectList(
-                new LambdaQueryWrapper<KeywordGroup>().in(KeywordGroup::getId, allGroupIds)
+                new LambdaQueryWrapper<KeywordGroup>()
+                        .in(KeywordGroup::getId, allGroupIds)
+                        .eq(KeywordGroup::getDeleted, false)
         ).stream().collect(Collectors.toMap(KeywordGroup::getId, g -> g, (a, b) -> a, LinkedHashMap::new));
+        List<Long> activeGroupIds = new ArrayList<>(groupMap.keySet());
+        Map<Long, Long> savedCountMap = keywordGroupService.calcSavedCountsByGroupIds(activeGroupIds);
+        Map<Long, KeywordGroupService.KeywordTierCounts> tierCountMap = keywordGroupService.calcSavedTierCountsByGroupIds(activeGroupIds);
         for (Project project : projects) {
-            List<Long> groupIds = projectGroupIdMap.getOrDefault(project.getId(), List.of());
+            List<Long> groupIds = projectGroupIdMap.getOrDefault(project.getId(), List.of()).stream()
+                    .filter(groupMap::containsKey)
+                    .toList();
             long totalSaved = 0L;
             long totalA = 0L;
             long totalB = 0L;
