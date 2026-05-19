@@ -102,6 +102,7 @@
                 <span class="capability-tag" :class="isPresaleEnabled(scope.row) ? 'is-success' : 'is-muted'">售前</span>
                 <span class="capability-tag" :class="scope.row.presaleEvaluateEnabled ? 'is-success' : 'is-muted'">评估</span>
                 <span class="capability-tag" :class="scope.row.enabledForArticle ? 'is-success' : 'is-muted'">文章</span>
+                <span class="capability-tag" :class="scope.row.enabledForQuestionPoll ? 'is-success' : 'is-muted'">跑批</span>
               </div>
             </template>
           </el-table-column>
@@ -316,6 +317,16 @@
             </div>
             <div class="capability-switch-card">
               <div>
+                <strong>问题池定时跑批</strong>
+                <span class="capability-desc">BI 日常问题池轮询</span>
+              </div>
+              <div class="switch-control">
+                <span class="switch-status">{{ form.enabledForQuestionPoll ? '启用' : '停用' }}</span>
+                <el-switch v-model="form.enabledForQuestionPoll" />
+              </div>
+            </div>
+            <div class="capability-switch-card">
+              <div>
                 <strong>售前评估模型</strong>
                 <span class="capability-desc">评估链路可用</span>
               </div>
@@ -431,6 +442,7 @@ const form = reactive({
   enabledForPresale: true,
   enabledForArticle: false,
   enabledForGeoQuestion: false,
+  enabledForQuestionPoll: false,
   presaleEvaluateEnabled: false,
   degraded: false,
   degradedReason: '',
@@ -500,6 +512,7 @@ function resetForm() {
   form.enabledForPresale = true
   form.enabledForArticle = false
   form.enabledForGeoQuestion = false
+  form.enabledForQuestionPoll = false
   form.presaleEvaluateEnabled = false
   form.degraded = false
   form.degradedReason = ''
@@ -574,6 +587,7 @@ function openEdit(row: AIPlatformConfigItem) {
   form.enabledForPresale = row.enabledForPresale ?? true
   form.enabledForArticle = !!row.enabledForArticle
   form.enabledForGeoQuestion = !!row.enabledForGeoQuestion
+  form.enabledForQuestionPoll = !!row.enabledForQuestionPoll
   form.presaleEvaluateEnabled = !!row.presaleEvaluateEnabled
   form.degraded = row.degraded
   form.degradedReason = row.degradedReason || ''
@@ -609,6 +623,7 @@ async function submit() {
       enabledForPresale: form.enabledForPresale,
       enabledForArticle: form.enabledForArticle,
       enabledForGeoQuestion: form.enabledForGeoQuestion,
+      enabledForQuestionPoll: form.enabledForQuestionPoll,
       presaleEvaluateEnabled: form.presaleEvaluateEnabled,
       degraded: form.degraded,
       degradedReason: form.degraded ? form.degradedReason.trim() : undefined,

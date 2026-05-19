@@ -16,9 +16,7 @@ import com.huanjing.geo.module.dashboard.mapper.ProjectDashboardSnapshotMapper;
 import com.huanjing.geo.module.dispatch.entity.PollResult;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.project.entity.Project;
-import com.huanjing.geo.module.project.entity.ProjectPlatformBinding;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
-import com.huanjing.geo.module.project.mapper.ProjectPlatformBindingMapper;
 import com.huanjing.geo.module.project.service.KeywordGroupService;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.entity.SysDictItem;
@@ -51,7 +49,6 @@ public class ProjectDashboardService {
     private final ProjectDashboardShareMapper shareMapper;
     private final ProjectDashboardSnapshotMapper snapshotMapper;
     private final ProjectMapper projectMapper;
-    private final ProjectPlatformBindingMapper projectPlatformBindingMapper;
     private final KeywordGroupService keywordGroupService;
     private final PollResultMapper pollResultMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
@@ -427,11 +424,10 @@ public class ProjectDashboardService {
     }
 
     private long countMonitorPlatforms(Long projectId) {
-        return projectPlatformBindingMapper.selectList(
-                new LambdaQueryWrapper<ProjectPlatformBinding>()
-                        .eq(ProjectPlatformBinding::getProjectId, projectId)
-                        .select(ProjectPlatformBinding::getPlatformCode)
-        ).stream().map(ProjectPlatformBinding::getPlatformCode).filter(StringUtils::hasText).distinct().count();
+        Long count = aiPlatformConfigMapper.selectCount(new LambdaQueryWrapper<AiPlatformConfig>()
+                .eq(AiPlatformConfig::getEnabled, true)
+                .eq(AiPlatformConfig::getEnabledForQuestionPoll, true));
+        return count == null ? 0L : count;
     }
 
     private long countMonitorQuestions(Long projectId) {

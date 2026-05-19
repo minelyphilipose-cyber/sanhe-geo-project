@@ -17,6 +17,9 @@ public class SystemAlert {
     private String source;
     private String message;
     private String contextJson;
+    private Long recipientUserId;
+    private String recipientRole;
+    private String dedupeKey;
     private Boolean isResolved;
     private Long resolvedBy;
     private LocalDateTime resolvedAt;

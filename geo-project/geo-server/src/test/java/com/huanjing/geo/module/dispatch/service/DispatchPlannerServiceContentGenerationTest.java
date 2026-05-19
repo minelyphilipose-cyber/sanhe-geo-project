@@ -3,6 +3,7 @@ package com.huanjing.geo.module.dispatch.service;
 import com.huanjing.geo.module.dispatch.enums.DispatchTaskType;
 import com.huanjing.geo.module.dispatch.config.DispatchProperties;
 import com.huanjing.geo.module.dispatch.mapper.DispatchTaskMapper;
+import com.huanjing.geo.module.customer.service.CustomerPackageExpiryService;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.entity.ProjectChannelAllocation;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
@@ -34,6 +35,7 @@ class DispatchPlannerServiceContentGenerationTest {
     private ProjectDistributionChannelAllocationService allocationService;
     private DispatchTaskMapper dispatchTaskMapper;
     private DispatchProperties dispatchProperties;
+    private CustomerPackageExpiryService customerPackageExpiryService;
     private DispatchPlannerService service;
 
     @BeforeEach
@@ -43,7 +45,15 @@ class DispatchPlannerServiceContentGenerationTest {
         allocationService = mock(ProjectDistributionChannelAllocationService.class);
         dispatchTaskMapper = mock(DispatchTaskMapper.class);
         dispatchProperties = new DispatchProperties();
-        service = new DispatchPlannerService(projectMapper, dispatchTaskService, allocationService, dispatchTaskMapper, dispatchProperties);
+        customerPackageExpiryService = mock(CustomerPackageExpiryService.class);
+        service = new DispatchPlannerService(
+                projectMapper,
+                dispatchTaskService,
+                allocationService,
+                dispatchTaskMapper,
+                dispatchProperties,
+                customerPackageExpiryService
+        );
     }
 
     @Test

@@ -33,6 +33,7 @@ public class AiPlatformConfig {
     private Boolean presaleEvaluateEnabled;
     private Boolean enabledForArticle;
     private Boolean enabledForGeoQuestion;
+    private Boolean enabledForQuestionPoll;
     private Integer maxRetry;
     private Integer timeoutMs;
     private Integer rateLimitQps;

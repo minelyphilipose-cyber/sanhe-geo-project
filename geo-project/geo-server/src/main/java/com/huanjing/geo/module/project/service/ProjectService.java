@@ -53,7 +53,6 @@ import com.huanjing.geo.module.project.dto.ProjectStatusUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectUpdateRequest;
 import com.huanjing.geo.module.project.dto.KeywordGroupListItemVO;
 import com.huanjing.geo.module.project.entity.KeywordGroup;
-import com.huanjing.geo.module.project.entity.ProjectPlatformBinding;
 import com.huanjing.geo.module.project.entity.ProjectCustomerRequirement;
 import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
 import com.huanjing.geo.module.project.entity.Project;
@@ -61,7 +60,6 @@ import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
 import com.huanjing.geo.module.project.mapper.ProjectCustomerRequirementMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
-import com.huanjing.geo.module.project.mapper.ProjectPlatformBindingMapper;
 import com.huanjing.geo.module.dispatch.service.BrandStatementDispatchService;
 import com.huanjing.geo.module.report.entity.PostsaleReportSnapshot;
 import com.huanjing.geo.module.report.entity.Report;
@@ -70,8 +68,6 @@ import com.huanjing.geo.module.report.mapper.PostsaleReportSnapshotMapper;
 import com.huanjing.geo.module.report.mapper.ReportAccessLogMapper;
 import com.huanjing.geo.module.report.mapper.ReportMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
-import com.huanjing.geo.module.system.entity.AiPlatformConfig;
-import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
@@ -85,7 +81,6 @@ import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
@@ -127,12 +122,10 @@ public class ProjectService {
     private final ProjectPollRotationMapper projectPollRotationMapper;
     private final KeywordGroupMapper keywordGroupMapper;
     private final ProjectCustomerRequirementMapper projectCustomerRequirementMapper;
-    private final ProjectPlatformBindingMapper projectPlatformBindingMapper;
     private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
     private final PostsaleReportSnapshotMapper postsaleReportSnapshotMapper;
     private final ReportAccessLogMapper reportAccessLogMapper;
     private final ReportMapper reportMapper;
-    private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final CurrentUserService currentUserService;
     private final ProjectStateGuard projectStateGuard;
     private final ActivityLogService activityLogService;
@@ -531,8 +524,6 @@ public class ProjectService {
         projectCustomerRequirementMapper.delete(new LambdaQueryWrapper<ProjectCustomerRequirement>()
                 .eq(ProjectCustomerRequirement::getProjectId, projectId));
         channelAllocationService.deleteProjectAllocations(projectId);
-        projectPlatformBindingMapper.delete(new LambdaQueryWrapper<ProjectPlatformBinding>()
-                .eq(ProjectPlatformBinding::getProjectId, projectId));
         projectPollRotationMapper.delete(new LambdaQueryWrapper<ProjectPollRotation>()
                 .eq(ProjectPollRotation::getProjectId, projectId));
 
@@ -951,102 +942,10 @@ public class ProjectService {
         if (projects == null || projects.isEmpty()) {
             return;
         }
-        List<Long> projectIds = projects.stream().map(Project::getId).collect(Collectors.toList());
-        List<ProjectPlatformBinding> bindings = projectPlatformBindingMapper.selectList(
-                new LambdaQueryWrapper<ProjectPlatformBinding>()
-                        .in(ProjectPlatformBinding::getProjectId, projectIds)
-                        .orderByAsc(ProjectPlatformBinding::getPriorityLevel, ProjectPlatformBinding::getId)
-        );
-        Map<Long, List<String>> p0 = new LinkedHashMap<>();
-        Map<Long, List<String>> p1 = new LinkedHashMap<>();
-        Map<Long, List<String>> p2 = new LinkedHashMap<>();
-        for (ProjectPlatformBinding binding : bindings) {
-            Map<Long, List<String>> bucket;
-            if ("P0".equals(binding.getPriorityLevel())) {
-                bucket = p0;
-            } else if ("P1".equals(binding.getPriorityLevel())) {
-                bucket = p1;
-            } else {
-                bucket = p2;
-            }
-            bucket.computeIfAbsent(binding.getProjectId(), k -> new ArrayList<>()).add(binding.getPlatformCode());
-        }
         for (Project project : projects) {
-            project.setSelectedPlatformCodesP0(p0.getOrDefault(project.getId(), List.of()));
-            project.setSelectedPlatformCodesP1(p1.getOrDefault(project.getId(), List.of()));
-            project.setSelectedPlatformCodesP2(p2.getOrDefault(project.getId(), List.of()));
-        }
-    }
-
-    private void replacePlatformSelections(Long projectId,
-                                           Integer requiredP0,
-                                           Integer requiredP1,
-                                           Integer requiredP2,
-                                           List<String> selectedP0,
-                                           List<String> selectedP1,
-                                           List<String> selectedP2) {
-        List<String> normalizedP0 = normalizePlatformCodes(selectedP0);
-        List<String> normalizedP1 = normalizePlatformCodes(selectedP1);
-        List<String> normalizedP2 = normalizePlatformCodes(selectedP2);
-
-        int expectP0 = requiredP0 == null ? 0 : requiredP0;
-        int expectP1 = requiredP1 == null ? 0 : requiredP1;
-        int expectP2 = requiredP2 == null ? 0 : requiredP2;
-
-        if (normalizedP0.size() != expectP0) {
-            throw new BizException(400, "P0 platform count must be exactly " + expectP0);
-        }
-        if (normalizedP1.size() != expectP1) {
-            throw new BizException(400, "P1 platform count must be exactly " + expectP1);
-        }
-        if (normalizedP2.size() != expectP2) {
-            throw new BizException(400, "P2 platform count must be exactly " + expectP2);
-        }
-
-        Set<String> allCodes = new HashSet<>();
-        allCodes.addAll(normalizedP0);
-        allCodes.addAll(normalizedP1);
-        allCodes.addAll(normalizedP2);
-        int totalSelected = normalizedP0.size() + normalizedP1.size() + normalizedP2.size();
-        if (allCodes.size() != totalSelected) {
-            throw new BizException(400, "Selected platforms cannot duplicate across P0/P1/P2");
-        }
-
-        List<AiPlatformConfig> configs = allCodes.isEmpty() ? List.of() : aiPlatformConfigMapper.selectList(
-                new LambdaQueryWrapper<AiPlatformConfig>()
-                        .in(AiPlatformConfig::getPlatformCode, allCodes)
-                        .eq(AiPlatformConfig::getEnabled, true)
-        );
-        Map<String, AiPlatformConfig> configMap = configs.stream().collect(
-                Collectors.toMap(AiPlatformConfig::getPlatformCode, c -> c, (a, b) -> a, LinkedHashMap::new)
-        );
-        for (String code : normalizedP0) {
-            validatePlatformPriority(configMap.get(code), "P0");
-        }
-        for (String code : normalizedP1) {
-            validatePlatformPriority(configMap.get(code), "P1");
-        }
-        for (String code : normalizedP2) {
-            validatePlatformPriority(configMap.get(code), "P2");
-        }
-
-        projectPlatformBindingMapper.delete(
-                new LambdaQueryWrapper<ProjectPlatformBinding>().eq(ProjectPlatformBinding::getProjectId, projectId)
-        );
-        savePlatformBindings(projectId, normalizedP0, "P0", configMap);
-        savePlatformBindings(projectId, normalizedP1, "P1", configMap);
-        savePlatformBindings(projectId, normalizedP2, "P2", configMap);
-    }
-
-    private void savePlatformBindings(Long projectId, List<String> codes, String priorityLevel, Map<String, AiPlatformConfig> configMap) {
-        for (String code : codes) {
-            AiPlatformConfig cfg = configMap.get(code);
-            ProjectPlatformBinding binding = new ProjectPlatformBinding();
-            binding.setProjectId(projectId);
-            binding.setPlatformCode(code);
-            binding.setPlatformName(cfg.getPlatformName());
-            binding.setPriorityLevel(priorityLevel);
-            projectPlatformBindingMapper.insert(binding);
+            project.setSelectedPlatformCodesP0(List.of());
+            project.setSelectedPlatformCodesP1(List.of());
+            project.setSelectedPlatformCodesP2(List.of());
         }
     }
 
@@ -1079,26 +978,6 @@ public class ProjectService {
             rel.setKeywordGroupId(groupId);
             projectKeywordGroupRelMapper.insert(rel);
         }
-    }
-
-    private void validatePlatformPriority(AiPlatformConfig cfg, String priorityLevel) {
-        if (cfg == null) {
-            throw new BizException(400, "Selected platform is invalid or disabled");
-        }
-        if (!priorityLevel.equals(cfg.getPriorityLevel())) {
-            throw new BizException(400, "Platform " + cfg.getPlatformCode() + " does not belong to " + priorityLevel);
-        }
-    }
-
-    private List<String> normalizePlatformCodes(List<String> selectedCodes) {
-        if (selectedCodes == null) {
-            return List.of();
-        }
-        return selectedCodes.stream()
-                .filter(StringUtils::hasText)
-                .map(String::trim)
-                .distinct()
-                .collect(Collectors.toList());
     }
 
     private List<Long> normalizeKeywordGroupIds(List<Long> selectedIds) {

@@ -2,6 +2,7 @@ package com.huanjing.geo.module.dispatch.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.util.QuotaPeriodResolver;
+import com.huanjing.geo.module.customer.service.CustomerPackageExpiryService;
 import com.huanjing.geo.module.dispatch.config.DispatchProperties;
 import com.huanjing.geo.module.dispatch.enums.DispatchTaskType;
 import com.huanjing.geo.module.project.entity.Project;
@@ -16,7 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -34,9 +34,12 @@ public class DispatchPlannerService {
     private final ProjectDistributionChannelAllocationService channelAllocationService;
     private final DispatchTaskMapper dispatchTaskMapper;
     private final DispatchProperties dispatchProperties;
+    private final CustomerPackageExpiryService customerPackageExpiryService;
 
     @Transactional
     public void scanAndPlan(LocalDate today) {
+        customerPackageExpiryService.scanAndHandle(today);
+
         List<Project> projects = projectMapper.selectList(
                 new LambdaQueryWrapper<Project>()
                         .in(Project::getStatus, List.of("active", "paused"))
@@ -44,34 +47,11 @@ public class DispatchPlannerService {
         );
 
         for (Project project : projects) {
-            if (handleExpireCheck(project, today)) {
-                continue;
-            }
             planBiDaily(project, today);
             planContentGeneration(project, today);
             planMonthly(project, today);
             planQuarterly(project, today);
         }
-    }
-
-    private boolean handleExpireCheck(Project project, LocalDate today) {
-        LocalDate expireDate = resolveExpireDate(project);
-        if (expireDate == null || today.isBefore(expireDate)) {
-            return false;
-        }
-        if (!"expired".equals(project.getStatus())) {
-            if ("active".equals(project.getStatus())) {
-                channelAllocationService.lockCompany(project.getCompanyId());
-                channelAllocationService.auditCurrentAllocations(project, null, "project.expire", true);
-            }
-            Project update = new Project();
-            update.setId(project.getId());
-            update.setStatus("expired");
-            update.setExpiredAt(LocalDateTime.of(today, LocalTime.MIDNIGHT));
-            projectMapper.updateById(update);
-            log.info("Project {} expired at {}", project.getId(), update.getExpiredAt());
-        }
-        return true;
     }
 
     private void planBiDaily(Project project, LocalDate today) {
@@ -202,18 +182,4 @@ public class DispatchPlannerService {
         );
     }
 
-    private LocalDate resolveExpireDate(Project project) {
-        LocalDate byEndDate = project.getEndDate();
-        LocalDate byService = null;
-        if (project.getActivatedAt() != null && project.getServiceMonths() != null) {
-            byService = project.getActivatedAt().toLocalDate().plusMonths(project.getServiceMonths());
-        }
-        if (byEndDate == null) {
-            return byService;
-        }
-        if (byService == null) {
-            return byEndDate;
-        }
-        return byEndDate.isBefore(byService) ? byEndDate : byService;
-    }
 }

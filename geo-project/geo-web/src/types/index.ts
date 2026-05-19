@@ -406,6 +406,7 @@ export interface AIPlatformConfigItem {
   presaleEvaluateEnabled?: boolean
   enabledForArticle?: boolean
   enabledForGeoQuestion?: boolean
+  enabledForQuestionPoll?: boolean
   maxRetry?: number | null
   timeoutMs?: number | null
   rateLimitQps?: number | null

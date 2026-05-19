@@ -73,6 +73,7 @@ public class AiPlatformConfigService {
                 req.getEnabledForPresale(),
                 req.getPresaleEvaluateEnabled(),
                 req.getEnabledForGeoQuestion(),
+                req.getEnabledForQuestionPoll(),
                 req.getDegraded(),
                 req.getDegradedReason()
         );
@@ -114,6 +115,7 @@ public class AiPlatformConfigService {
                 req.getEnabledForPresale(),
                 req.getPresaleEvaluateEnabled(),
                 req.getEnabledForGeoQuestion(),
+                req.getEnabledForQuestionPoll(),
                 req.getDegraded(),
                 req.getDegradedReason()
         );
@@ -206,6 +208,7 @@ public class AiPlatformConfigService {
             Boolean enabledForPresale,
             Boolean presaleEvaluateEnabled,
             Boolean enabledForGeoQuestion,
+            Boolean enabledForQuestionPoll,
             Boolean degraded,
             String degradedReason
     ) {
@@ -266,6 +269,9 @@ public class AiPlatformConfigService {
                 throw new BizException(400, "low_model_id is required when enabling GEO question generation");
             }
         }
+        if (Boolean.TRUE.equals(enabledForQuestionPoll) && !Boolean.TRUE.equals(enabled)) {
+            throw new BizException(400, "platform must be enabled when enabling question poll");
+        }
         if (Boolean.TRUE.equals(degraded) && !StringUtils.hasText(degradedReason)) {
             throw new BizException(400, "degraded_reason is required when degraded=true");
         }
@@ -305,6 +311,7 @@ public class AiPlatformConfigService {
         entity.setPresaleEvaluateEnabled(Boolean.TRUE.equals(req.getPresaleEvaluateEnabled()));
         entity.setEnabledForArticle(req.getEnabledForArticle() != null ? req.getEnabledForArticle() : false);
         entity.setEnabledForGeoQuestion(Boolean.TRUE.equals(req.getEnabledForGeoQuestion()));
+        entity.setEnabledForQuestionPoll(Boolean.TRUE.equals(req.getEnabledForQuestionPoll()));
         entity.setMaxRetry(req.getMaxRetry() != null ? req.getMaxRetry() : 2);
         entity.setTimeoutMs(req.getTimeoutMs() != null ? req.getTimeoutMs() : 60000);
         entity.setRateLimitQps(req.getRateLimitQps() != null ? req.getRateLimitQps() : 3);
@@ -336,6 +343,7 @@ public class AiPlatformConfigService {
         entity.setPresaleEvaluateEnabled(Boolean.TRUE.equals(req.getPresaleEvaluateEnabled()));
         entity.setEnabledForArticle(req.getEnabledForArticle() != null ? req.getEnabledForArticle() : entity.getEnabledForArticle());
         entity.setEnabledForGeoQuestion(req.getEnabledForGeoQuestion() != null ? req.getEnabledForGeoQuestion() : entity.getEnabledForGeoQuestion());
+        entity.setEnabledForQuestionPoll(req.getEnabledForQuestionPoll() != null ? req.getEnabledForQuestionPoll() : entity.getEnabledForQuestionPoll());
         entity.setMaxRetry(req.getMaxRetry() != null ? req.getMaxRetry() : entity.getMaxRetry());
         entity.setTimeoutMs(req.getTimeoutMs() != null ? req.getTimeoutMs() : entity.getTimeoutMs());
         entity.setRateLimitQps(req.getRateLimitQps() != null ? req.getRateLimitQps() : entity.getRateLimitQps());
@@ -364,6 +372,7 @@ public class AiPlatformConfigService {
         snapshot.put("presaleEvaluateEnabled", entity.getPresaleEvaluateEnabled());
         snapshot.put("enabledForArticle", entity.getEnabledForArticle());
         snapshot.put("enabledForGeoQuestion", entity.getEnabledForGeoQuestion());
+        snapshot.put("enabledForQuestionPoll", entity.getEnabledForQuestionPoll());
         snapshot.put("maxRetry", entity.getMaxRetry());
         snapshot.put("timeoutMs", entity.getTimeoutMs());
         snapshot.put("rateLimitQps", entity.getRateLimitQps());

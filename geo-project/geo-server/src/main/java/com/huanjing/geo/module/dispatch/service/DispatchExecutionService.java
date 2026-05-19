@@ -42,11 +42,9 @@ import com.huanjing.geo.module.dispatch.mapper.ProjectPollRotationMapper;
 import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
-import com.huanjing.geo.module.project.entity.ProjectPlatformBinding;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
-import com.huanjing.geo.module.project.mapper.ProjectPlatformBindingMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
@@ -65,7 +63,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -92,7 +90,6 @@ public class DispatchExecutionService {
     private static final int DB_TRANSIENT_RETRY_DELAY_MS = 200;
     private static final Set<String> QUESTION_TIERS = Set.of("A", "B", "C");
 
-    private final ProjectPlatformBindingMapper projectPlatformBindingMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
     private final PlatformRateLimiterService platformRateLimiterService;
@@ -1293,76 +1290,36 @@ public class DispatchExecutionService {
             return resolveArticlePlatformCandidates();
         }
         if (type == DispatchTaskType.BRAND_STATEMENT_GENERATION) {
-            return resolveBrandStatementPlatformCandidates(projectId, type);
+            return resolveRandomEnabledPlatformCandidates();
+        }
+        if (type == DispatchTaskType.BI_DAILY_POLL) {
+            return resolveQuestionPollPlatformCandidates();
         }
 
-        List<ProjectPlatformBinding> bindings = projectPlatformBindingMapper.selectList(
-                new LambdaQueryWrapper<ProjectPlatformBinding>()
-                        .eq(ProjectPlatformBinding::getProjectId, projectId)
-        );
-        if (bindings.isEmpty()) {
-            return List.of();
-        }
-
-        Map<String, String> levelByCode = bindings.stream()
-                .collect(Collectors.toMap(ProjectPlatformBinding::getPlatformCode, ProjectPlatformBinding::getPriorityLevel, (a, b) -> a));
-        List<AiPlatformConfig> configs = aiPlatformConfigMapper.selectList(
-                new LambdaQueryWrapper<AiPlatformConfig>()
-                        .in(AiPlatformConfig::getPlatformCode, levelByCode.keySet())
-                        .eq(AiPlatformConfig::getEnabled, true)
-        );
-
-        List<String> preferredLevels = preferredLevels(type);
-        return configs.stream()
-                .filter(cfg -> preferredLevels.contains(levelByCode.get(cfg.getPlatformCode())))
-                .sorted(Comparator.comparingInt(cfg -> preferredLevels.indexOf(levelByCode.get(cfg.getPlatformCode()))))
-                .collect(Collectors.toList());
-    }
-
-    private List<AiPlatformConfig> resolveBrandStatementPlatformCandidates(Long projectId, DispatchTaskType type) {
-        List<AiPlatformConfig> boundConfigs = resolveBoundPlatformCandidates(projectId, type);
-        if (!boundConfigs.isEmpty()) {
-            return boundConfigs;
-        }
-
-        List<String> preferredLevels = preferredLevels(type);
         return aiPlatformConfigMapper.selectList(
-                        new LambdaQueryWrapper<AiPlatformConfig>()
-                                .eq(AiPlatformConfig::getEnabled, true)
-                                .eq(AiPlatformConfig::getEnabledForPresale, true)
-                ).stream()
-                .filter(cfg -> preferredLevels.contains(cfg.getPriorityLevel()))
-                .sorted(Comparator
-                        .comparingInt((AiPlatformConfig cfg) -> preferredLevels.indexOf(cfg.getPriorityLevel()))
-                        .thenComparing(AiPlatformConfig::getId, Comparator.nullsLast(Long::compareTo)))
-                .collect(Collectors.toList());
+                new LambdaQueryWrapper<AiPlatformConfig>()
+                        .eq(AiPlatformConfig::getEnabled, true)
+                        .orderByAsc(AiPlatformConfig::getPriorityLevel, AiPlatformConfig::getId)
+        );
     }
 
-    private List<AiPlatformConfig> resolveBoundPlatformCandidates(Long projectId, DispatchTaskType type) {
-        if (projectId == null) {
-            return List.of();
-        }
-        List<ProjectPlatformBinding> bindings = projectPlatformBindingMapper.selectList(
-                new LambdaQueryWrapper<ProjectPlatformBinding>()
-                        .eq(ProjectPlatformBinding::getProjectId, projectId)
-        );
-        if (bindings.isEmpty()) {
-            return List.of();
-        }
-
-        Map<String, String> levelByCode = bindings.stream()
-                .collect(Collectors.toMap(ProjectPlatformBinding::getPlatformCode, ProjectPlatformBinding::getPriorityLevel, (a, b) -> a));
-        List<AiPlatformConfig> configs = aiPlatformConfigMapper.selectList(
+    private List<AiPlatformConfig> resolveQuestionPollPlatformCandidates() {
+        return aiPlatformConfigMapper.selectList(
                 new LambdaQueryWrapper<AiPlatformConfig>()
-                        .in(AiPlatformConfig::getPlatformCode, levelByCode.keySet())
                         .eq(AiPlatformConfig::getEnabled, true)
+                        .eq(AiPlatformConfig::getEnabledForQuestionPoll, true)
+                        .orderByAsc(AiPlatformConfig::getPriorityLevel, AiPlatformConfig::getId)
         );
+    }
 
-        List<String> preferredLevels = preferredLevels(type);
-        return configs.stream()
-                .filter(cfg -> preferredLevels.contains(levelByCode.get(cfg.getPlatformCode())))
-                .sorted(Comparator.comparingInt(cfg -> preferredLevels.indexOf(levelByCode.get(cfg.getPlatformCode()))))
-                .collect(Collectors.toList());
+    private List<AiPlatformConfig> resolveRandomEnabledPlatformCandidates() {
+        List<AiPlatformConfig> configs = new ArrayList<>(aiPlatformConfigMapper.selectList(
+                new LambdaQueryWrapper<AiPlatformConfig>()
+                        .eq(AiPlatformConfig::getEnabled, true)
+                        .orderByAsc(AiPlatformConfig::getId)
+        ));
+        Collections.shuffle(configs);
+        return configs;
     }
 
     private List<AiPlatformConfig> resolveArticlePlatformCandidates() {
@@ -1372,17 +1329,6 @@ public class DispatchExecutionService {
                         .eq(AiPlatformConfig::getEnabledForArticle, true)
                         .orderByAsc(AiPlatformConfig::getId)
         );
-    }
-
-    private List<String> preferredLevels(DispatchTaskType type) {
-        if (type == DispatchTaskType.QUARTERLY_REPORT) {
-            return List.of("P0", "P1", "P2");
-        }
-        if (type == DispatchTaskType.MONTHLY_REPORT
-                || type == DispatchTaskType.BRAND_STATEMENT_GENERATION) {
-            return List.of("P1", "P0", "P2");
-        }
-        return List.of("P0", "P1", "P2");
     }
 
     private InvocationResult invokeWithFallback(AiPlatformConfig config, DispatchTask task, String questionText) {
