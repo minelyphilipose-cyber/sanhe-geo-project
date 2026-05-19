@@ -4,7 +4,7 @@
       <div>
         <div class="admin-page-kicker">系统配置</div>
         <h1 class="admin-page-title">AI平台配置</h1>
-        <div class="admin-page-subtitle">维护平台模型、密钥引用、并发能力和售前评估开关。</div>
+        <div class="admin-page-subtitle">维护平台模型、密钥引用、调用控制和业务能力开关。</div>
       </div>
       <div class="admin-page-actions">
         <el-button v-if="canManage" type="primary" @click="openCreate">新增平台</el-button>
@@ -47,9 +47,9 @@
         <span class="admin-metric-hint">需要关注模型链路</span>
       </div>
       <div class="admin-metric-card" style="--metric-accent: #7c3aed; --metric-tone: #f5f3ff">
-        <span class="admin-metric-label">售前评估</span>
-        <strong class="admin-metric-value">{{ presaleCount }}</strong>
-        <span class="admin-metric-hint">已开启评估能力</span>
+        <span class="admin-metric-label">问题池生成</span>
+        <strong class="admin-metric-value">{{ questionCount }}</strong>
+        <span class="admin-metric-hint">已开启拓词能力</span>
       </div>
     </div>
 
@@ -95,11 +95,14 @@
           <el-table-column prop="concurrencyLimit" label="并发上限" width="100">
             <template #default="scope">{{ scope.row.concurrencyLimit ?? 1 }}</template>
           </el-table-column>
-          <el-table-column label="售前评估" width="100">
+          <el-table-column label="能力开关" min-width="210">
             <template #default="scope">
-              <span class="admin-status-tag" :class="scope.row.presaleEvaluateEnabled ? 'is-success' : 'is-muted'">
-                {{ scope.row.presaleEvaluateEnabled ? '启用' : '停用' }}
-              </span>
+              <div class="capability-tags">
+                <span class="capability-tag" :class="scope.row.enabledForGeoQuestion ? 'is-success' : 'is-muted'">问题池</span>
+                <span class="capability-tag" :class="isPresaleEnabled(scope.row) ? 'is-success' : 'is-muted'">售前</span>
+                <span class="capability-tag" :class="scope.row.presaleEvaluateEnabled ? 'is-success' : 'is-muted'">评估</span>
+                <span class="capability-tag" :class="scope.row.enabledForArticle ? 'is-success' : 'is-muted'">文章</span>
+              </div>
             </template>
           </el-table-column>
           <el-table-column label="降级处理" width="100">
@@ -248,8 +251,8 @@
         <section class="form-section">
           <div class="form-section-head">
             <div>
-              <span>运行状态</span>
-              <strong>启用、售前能力与降级处理</strong>
+              <span>业务能力</span>
+              <strong>启用、拓词、售前、文章与降级处理</strong>
             </div>
           </div>
           <div class="switch-grid">
@@ -261,6 +264,14 @@
             </el-form-item>
             <el-form-item label="文章能力">
               <el-switch v-model="form.enabledForArticle" active-text="启用" inactive-text="停用" />
+            </el-form-item>
+            <el-form-item label="拓词问题池">
+              <el-switch
+                v-model="form.enabledForGeoQuestion"
+                active-text="启用"
+                inactive-text="停用"
+                :disabled="!canEnableGeoQuestion(form.platformCode)"
+              />
             </el-form-item>
             <el-form-item label="售前评估模型">
               <el-switch
@@ -323,7 +334,7 @@ const query = reactive<{ keyword: string; priorityLevel: string; enabled: boolea
 
 const enabledCount = computed(() => rows.value.filter((item) => item.enabled).length)
 const degradedCount = computed(() => rows.value.filter((item) => item.degraded).length)
-const presaleCount = computed(() => rows.value.filter((item) => item.presaleEvaluateEnabled).length)
+const questionCount = computed(() => rows.value.filter((item) => item.enabledForGeoQuestion).length)
 
 const dialogVisible = ref(false)
 const formRef = ref<FormInstance>()
@@ -348,6 +359,7 @@ const form = reactive({
   enabled: true,
   enabledForPresale: true,
   enabledForArticle: false,
+  enabledForGeoQuestion: false,
   presaleEvaluateEnabled: false,
   degraded: false,
   degradedReason: '',
@@ -386,6 +398,17 @@ watch(
     }
   },
 )
+watch(
+  () => form.platformCode,
+  (value) => {
+    if (!canEnableGeoQuestion(value)) {
+      form.enabledForGeoQuestion = false
+    }
+    if (!canEnablePresaleEvaluate(value)) {
+      form.presaleEvaluateEnabled = false
+    }
+  },
+)
 
 function resetForm() {
   form.platformCode = ''
@@ -405,6 +428,7 @@ function resetForm() {
   form.enabled = true
   form.enabledForPresale = true
   form.enabledForArticle = false
+  form.enabledForGeoQuestion = false
   form.presaleEvaluateEnabled = false
   form.degraded = false
   form.degradedReason = ''
@@ -478,6 +502,7 @@ function openEdit(row: AIPlatformConfigItem) {
   form.enabled = row.enabled
   form.enabledForPresale = row.enabledForPresale ?? true
   form.enabledForArticle = !!row.enabledForArticle
+  form.enabledForGeoQuestion = !!row.enabledForGeoQuestion
   form.presaleEvaluateEnabled = !!row.presaleEvaluateEnabled
   form.degraded = row.degraded
   form.degradedReason = row.degradedReason || ''
@@ -512,6 +537,7 @@ async function submit() {
       enabled: form.enabled,
       enabledForPresale: form.enabledForPresale,
       enabledForArticle: form.enabledForArticle,
+      enabledForGeoQuestion: form.enabledForGeoQuestion,
       presaleEvaluateEnabled: form.presaleEvaluateEnabled,
       degraded: form.degraded,
       degradedReason: form.degraded ? form.degradedReason.trim() : undefined,
@@ -562,9 +588,14 @@ function presaleActionTooltip(row: AIPlatformConfigItem) {
 }
 
 const presaleEvaluateCodes = new Set(['deepseek', 'doubao', 'qwen', 'mimo', 'zhipu'])
+const geoQuestionCodes = new Set(['qwen', 'deepseek', 'mimo'])
 
 function canEnablePresaleEvaluate(platformCode: string) {
   return presaleEvaluateCodes.has((platformCode || '').trim())
+}
+
+function canEnableGeoQuestion(platformCode: string) {
+  return geoQuestionCodes.has((platformCode || '').trim())
 }
 
 async function togglePresaleEnabled(row: AIPlatformConfigItem) {
@@ -714,6 +745,32 @@ onMounted(async () => {
   color: #1d4ed8;
 }
 
+.capability-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.capability-tag {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  border-radius: 6px;
+  padding: 0 7px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.capability-tag.is-success {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.capability-tag.is-muted {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
 .platform-editor-dialog :deep(.el-dialog__body) {
   background: #f8fafc;
 }
@@ -784,7 +841,7 @@ onMounted(async () => {
 
 .switch-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
   padding: 16px 16px 2px;
 }

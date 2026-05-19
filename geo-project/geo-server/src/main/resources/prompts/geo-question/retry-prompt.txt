@@ -1,0 +1,47 @@
+## 补足生成轮次
+补足轮次的完整 prompt = system-prompt + abc-tier-definition + retry-prompt。
+本轮不拼接首轮 user-input-template。
+
+## 客户品牌识别词
+brand_name: {{brand_name}}
+competitor_brand_terms:
+{{competitor_brand_terms}}
+selfBrandTerms 仅以 brand_name 完整字符串为准，不拆子串。
+
+## 客户上下文
+target_region: {{target_region}}
+industry: {{industry}}
+core_business: {{core_business}}
+core_needs:
+{{core_needs_block}}
+
+## 当前缺口
+retry_a_count: {{retry_a_count}}
+retry_b_count: {{retry_b_count}}
+retry_c_count: {{retry_c_count}}
+retry_total: {{retry_total}}
+
+## 上一轮被剔除原因摘要
+{{retry_reject_reasons}}
+只参考原因类目，不要复用被剔除题目的表达。
+
+## 已通过题目列表
+{{retry_existing_questions}}
+以上每行是一条已通过的 questionText。新题不得重复，也不得同义改写。
+已通过题目列表可能只展示同 tier 代表性题目，未列出的题目也不要重复。
+
+## 可用 need 列表
+{{core_needs_id_list}}
+A 类和 B 类必须绑定其中一个 need_N 或 need_default_N。
+C 类可以绑定 need_N，也可以使用 general。
+
+## 补足要求
+只生成缺口数量：A={{retry_a_count}}，B={{retry_b_count}}，C={{retry_c_count}}，总计 {{retry_total}}。
+继续遵守 A/B/C 形态定义、C 类禁词、sceneCode 枚举和 5 个英文 key。
+如果上一轮出现 a_length/b_length/c_length，本轮避免短句：A 尽量 15-35 字，B 尽量 15-40 字，C 尽量 10-30 字。
+A 类含 brand_name 不得超过 A 类数量 40%，B 类不得超过 15%，C 类必须为 0，整体不得超过 25%。
+C 类禁止出现 competitor_brand_terms 中任一品牌名。
+如果上一轮因品牌名比例超限被剔除，本轮优先生成不含自家品牌的问题。
+补足 B/C 类时，questionText 禁止出现 brand_name；补足 A 类时优先使用地域或竞品锚点。
+如果上一轮因 C 类含品牌或强成交词被剔除，本轮 C 类必须使用中立科普、流程、功能或长尾维度。
+输出严格 JSON 数组，不要 markdown，不要解释。

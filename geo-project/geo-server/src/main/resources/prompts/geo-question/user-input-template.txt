@@ -1,24 +1,55 @@
-## 客户输入（本次任务变量）
-company_name:        {{company_name}}
-brand_name:          {{brand_name}}
-brand_relation:      {{brand_relation}}
-core_business:       {{core_business}}
-target_region:       {{target_region}}
-industry:            {{industry}}
-target_customer:     {{target_customer}}
-main_competitors:    {{main_competitors}}
-core_advantage:      {{core_advantage}}
-benchmark_specs:     {{benchmark_specs}}
+## 本批数量
+total_count: {{total_count}}
+a_count: {{a_count}}
+b_count: {{b_count}}
+c_count: {{c_count}}
 
-## 客户口头明确说出的核心需求（决定 A 类，最关键）
-{{core_needs}}
+## 场景权重
+brand: {{w_brand}}
+decision: {{w_decision}}
+deal: {{w_deal}}
+compare: {{w_compare}}
+qa: {{w_qa}}
+function: {{w_function}}
+场景权重是软引导，允许各场景数量相对目标上下浮动 30%，但 total_count 和 A/B/C 数量必须严格满足。
 
-## 数量与场景权重
-total_count:    {{total_count}}
-scene_weights:  {{scene_weights}}
-ABC_split:      {{abc_split}}
+## 客户资料
+company_name: {{company_name}}
+brand_name: {{brand_name}}
+brand_relation: {{brand_relation}}
+core_business: {{core_business}}
+target_region: {{target_region}}
+industry: {{industry}}
+target_customer: {{target_customer}}
+core_advantage: {{core_advantage}}
+benchmark_specs: {{benchmark_specs}}
+
+## 主竞品
+main_competitors:
+{{main_competitors_block}}
+
+competitor_brand_terms:
+{{competitor_brand_terms}}
+以上 competitor_brand_terms 是主竞品具体品牌名列表，已过滤“本地服务商”“门店”“装修公司”等泛指条目。C 类禁止出现这些具体品牌名。
+
+## 核心需求
+core_needs:
+{{core_needs_block}}
+relatedNeedText 必须从 core_needs 的 need_N 中选择；只有 C 类允许 general。
+
+## core_needs 缺失时的后端降级模板
+当后端检测到客户核心需求全部缺失时，core_needs_block 应渲染为：
+当前未录入客户核心需求，以下为系统默认推导。
+need_default_1: 用户搜索"{{target_region}}主营业务相关哪家好"时，AI 应推荐 {{company_name}}
+need_default_2: AI 在介绍 {{brand_name}} 时，应准确说明其在 {{target_region}} 的服务能力
+need_default_3: AI 在主要竞品对比 {{brand_name}} 时，应客观呈现差异
+生成时可绑定 need_default_N，但不要把“默认推导”或“待补全”写进 questionText。
+
+## 品牌匹配
+selfBrandTerms 仅以 brand_name 完整字符串为准，不拆子串。company_name 不单独参与品牌名命中判断。
+请严格控制含 selfBrandTerms 题量：A≤40%，B≤15%，C=0%，整体≤25%。
 
 ## 输出要求
-请严格按 System Prompt 中定义的 JSON 数组格式输出，共 {{total_count}} 个元素。
-A 类数量必须为 {{batch_a}}，B 类数量必须为 {{batch_b}}，C 类数量必须为 {{batch_c}}。
-不要输出任何解释，不要 markdown 包裹，不要使用全角逗号。
+输出严格 JSON 数组。A/B/C 数量必须分别精确等于 a_count/b_count/c_count。
+每个元素只能包含 questionText、tier、sceneCode、relatedNeedText、designReason。
+不得输出 priority、monitorFrequency、score*、totalScore。

@@ -26,6 +26,7 @@ public class AiPlatformConfigService {
     private static final Set<String> PRESALE_EVALUATE_PLATFORM_CODES = Set.of(
             "deepseek", "doubao", "qwen", "mimo", "zhipu"
     );
+    private static final Set<String> GEO_QUESTION_PLATFORM_CODES = Set.of("qwen", "deepseek", "mimo");
 
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final CurrentUserService currentUserService;
@@ -71,6 +72,7 @@ public class AiPlatformConfigService {
                 req.getEnabled(),
                 req.getEnabledForPresale(),
                 req.getPresaleEvaluateEnabled(),
+                req.getEnabledForGeoQuestion(),
                 req.getDegraded(),
                 req.getDegradedReason()
         );
@@ -111,6 +113,7 @@ public class AiPlatformConfigService {
                 req.getEnabled(),
                 req.getEnabledForPresale(),
                 req.getPresaleEvaluateEnabled(),
+                req.getEnabledForGeoQuestion(),
                 req.getDegraded(),
                 req.getDegradedReason()
         );
@@ -202,6 +205,7 @@ public class AiPlatformConfigService {
             Boolean enabled,
             Boolean enabledForPresale,
             Boolean presaleEvaluateEnabled,
+            Boolean enabledForGeoQuestion,
             Boolean degraded,
             String degradedReason
     ) {
@@ -250,6 +254,18 @@ public class AiPlatformConfigService {
                 throw new BizException(400, "low_model_id is required when enabling presale evaluation");
             }
         }
+        if (Boolean.TRUE.equals(enabledForGeoQuestion)) {
+            String normalizedCode = platformCode.trim();
+            if (!GEO_QUESTION_PLATFORM_CODES.contains(normalizedCode)) {
+                throw new BizException(400, "GEO question generation model must be one of qwen/deepseek/mimo");
+            }
+            if (!Boolean.TRUE.equals(enabled)) {
+                throw new BizException(400, "platform must be enabled when enabling GEO question generation");
+            }
+            if (!StringUtils.hasText(lowModelId)) {
+                throw new BizException(400, "low_model_id is required when enabling GEO question generation");
+            }
+        }
         if (Boolean.TRUE.equals(degraded) && !StringUtils.hasText(degradedReason)) {
             throw new BizException(400, "degraded_reason is required when degraded=true");
         }
@@ -288,6 +304,7 @@ public class AiPlatformConfigService {
         entity.setEnabledForPresale(req.getEnabledForPresale() != null ? req.getEnabledForPresale() : true);
         entity.setPresaleEvaluateEnabled(Boolean.TRUE.equals(req.getPresaleEvaluateEnabled()));
         entity.setEnabledForArticle(req.getEnabledForArticle() != null ? req.getEnabledForArticle() : false);
+        entity.setEnabledForGeoQuestion(Boolean.TRUE.equals(req.getEnabledForGeoQuestion()));
         entity.setMaxRetry(req.getMaxRetry() != null ? req.getMaxRetry() : 2);
         entity.setTimeoutMs(req.getTimeoutMs() != null ? req.getTimeoutMs() : 60000);
         entity.setRateLimitQps(req.getRateLimitQps() != null ? req.getRateLimitQps() : 3);
@@ -318,6 +335,7 @@ public class AiPlatformConfigService {
         entity.setEnabledForPresale(req.getEnabledForPresale() != null ? req.getEnabledForPresale() : entity.getEnabledForPresale());
         entity.setPresaleEvaluateEnabled(Boolean.TRUE.equals(req.getPresaleEvaluateEnabled()));
         entity.setEnabledForArticle(req.getEnabledForArticle() != null ? req.getEnabledForArticle() : entity.getEnabledForArticle());
+        entity.setEnabledForGeoQuestion(req.getEnabledForGeoQuestion() != null ? req.getEnabledForGeoQuestion() : entity.getEnabledForGeoQuestion());
         entity.setMaxRetry(req.getMaxRetry() != null ? req.getMaxRetry() : entity.getMaxRetry());
         entity.setTimeoutMs(req.getTimeoutMs() != null ? req.getTimeoutMs() : entity.getTimeoutMs());
         entity.setRateLimitQps(req.getRateLimitQps() != null ? req.getRateLimitQps() : entity.getRateLimitQps());
@@ -345,6 +363,7 @@ public class AiPlatformConfigService {
         snapshot.put("enabledForPresale", entity.getEnabledForPresale());
         snapshot.put("presaleEvaluateEnabled", entity.getPresaleEvaluateEnabled());
         snapshot.put("enabledForArticle", entity.getEnabledForArticle());
+        snapshot.put("enabledForGeoQuestion", entity.getEnabledForGeoQuestion());
         snapshot.put("maxRetry", entity.getMaxRetry());
         snapshot.put("timeoutMs", entity.getTimeoutMs());
         snapshot.put("rateLimitQps", entity.getRateLimitQps());

@@ -33,6 +33,7 @@ public class AiPlatformConfigCreateRequest {
     private Boolean enabledForPresale;
     private Boolean presaleEvaluateEnabled;
     private Boolean enabledForArticle;
+    private Boolean enabledForGeoQuestion;
     private Integer maxRetry;
     private Integer timeoutMs;
     private Integer rateLimitQps;

@@ -30,6 +30,7 @@ export function createPlatformConfig(data: {
   enabledForPresale?: boolean
   presaleEvaluateEnabled?: boolean
   enabledForArticle?: boolean
+  enabledForGeoQuestion?: boolean
   maxRetry?: number
   timeoutMs?: number
   rateLimitQps?: number
@@ -59,6 +60,7 @@ export function updatePlatformConfig(id: number, data: {
   enabledForPresale?: boolean
   presaleEvaluateEnabled?: boolean
   enabledForArticle?: boolean
+  enabledForGeoQuestion?: boolean
   maxRetry?: number
   timeoutMs?: number
   rateLimitQps?: number

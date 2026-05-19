@@ -59,10 +59,19 @@ import java.util.stream.Collectors;
 public class GeoQuestionService {
     private static final int BATCH_LIMIT = 50;
     private static final int QUESTION_GENERATION_TIMEOUT_MS = 180_000;
+    private static final int MAX_GENERATION_RETRY = 2;
     private static final List<String> SCENES = List.of("brand", "decision", "deal", "compare", "qa", "function");
+    private static final Set<String> STRONG_DEAL_WORDS = Set.of(
+            "哪家好", "怎么选", "报价", "价格", "多少钱", "找谁装", "联系方式", "避坑",
+            "靠谱吗", "比较靠谱", "推荐", "排行", "排名", "选哪个", "值得买吗",
+            "哪家口碑好", "口碑好", "性价比", "性价比高"
+    );
+    private static final Set<String> GENERIC_COMPETITOR_TERMS = Set.of("本地服务商", "服务商", "门店", "装修公司", "本地门店", "本地智能家居门店");
+    private static final Set<String> QUESTION_GENERATION_PLATFORM_CODES = Set.of("qwen", "deepseek", "mimo");
     private static final String SYSTEM_PROMPT = "prompts/geo-question/system-prompt.txt";
     private static final String ABC_TIER_PROMPT = "prompts/geo-question/abc-tier-definition.txt";
     private static final String USER_INPUT_TEMPLATE = "prompts/geo-question/user-input-template.txt";
+    private static final String RETRY_PROMPT = "prompts/geo-question/retry-prompt.txt";
     private static final TypeReference<List<Map<String, Object>>> QUESTION_MAP_LIST = new TypeReference<>() {};
 
     private final CompanyMapper companyMapper;
@@ -409,6 +418,8 @@ public class GeoQuestionService {
     public List<ProviderVO> providers() {
         return aiPlatformConfigMapper.selectList(new LambdaQueryWrapper<AiPlatformConfig>()
                 .eq(AiPlatformConfig::getEnabled, true)
+                .in(AiPlatformConfig::getPlatformCode, QUESTION_GENERATION_PLATFORM_CODES)
+                .eq(AiPlatformConfig::getEnabledForGeoQuestion, true)
                 .isNotNull(AiPlatformConfig::getLowModelId)
                 .apply("TRIM(low_model_id) <> ''")
                 .orderByAsc(AiPlatformConfig::getPlatformCode)).stream().map(cfg -> {
@@ -945,18 +956,18 @@ public class GeoQuestionService {
         if (!StringUtils.hasText(apiKey)) {
             throw new BizException(400, "当前模型未配置 API Key，无法重生成真实问题");
         }
-        String prompt = """
-                请基于以下问题池上下文，重生成 1 条同层级、同用途的新问题。
-                输出必须是 JSON 数组，且只能包含 1 个对象。字段：
-                questionText, tier, sceneCode, priority, monitorFrequency,
-                scoreRelevance, scoreIntent, scoreCompetition, scoreConversion, scoreCoverage, totalScore,
-                relatedNeedText, designReason。
-
-                约束：
-                1. tier 固定为 %s。
-                2. sceneCode 优先保持 %s，若确需调整只能使用 brand、decision、deal、compare、qa、function。
-                3. questionText 必须是新的具体中文问题，不能复用原问题句式，不能输出模板句。
-                4. 该操作是原地替换，不新增题目，不改变工单累计数量。
+        String prompt = readPromptResource(SYSTEM_PROMPT)
+                + "\n\n"
+                + readPromptResource(ABC_TIER_PROMPT)
+                + "\n\n"
+                + """
+                ## 单条重生成
+                只生成 1 条同层级、同用途的新问题。
+                输出 JSON 数组，且只能包含 1 个对象。
+                tier 固定为 %s。
+                sceneCode 优先保持 %s，若确需调整只能使用 brand、decision、deal、compare、qa、function。
+                questionText 必须是新的具体中文问题，不能复用原问题句式，不能输出模板句。
+                该操作是原地替换，不新增题目，不改变工单累计数量。
 
                 原问题：%s
                 原设计理由：%s
@@ -986,13 +997,16 @@ public class GeoQuestionService {
                     Math.max(1, n(config.getRateLimitQps()) == 0 ? 1 : n(config.getRateLimitQps())),
                     null,
                     true,
-                    LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS
+                    LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS,
+                    "geo_question",
+                    config.getConcurrencyLimit()
             ));
-            List<GeneratedQuestionSpec> specs = parseGeneratedQuestions(result.responseText(), batch);
+            GenerationContext context = generationContext(batch);
+            List<GeneratedQuestionSpec> specs = filterGeneratedQuestions(parseGeneratedQuestions(result.responseText(), batch), batch, context, List.of());
             if (specs.isEmpty()) {
                 throw new BizException(500, "模型未返回可用问题");
             }
-            GeneratedQuestionSpec spec = specs.get(0);
+            GeneratedQuestionSpec spec = scoreQuestion(specs.get(0), context);
             return new GeneratedQuestionSpec(
                     spec.questionText(),
                     item.getTier(),
@@ -1020,7 +1034,7 @@ public class GeoQuestionService {
         batch.setStartedAt(LocalDateTime.now());
         batch.setProgressJson(progress("generating", null, null, 0, n(batch.getRequestA()) + n(batch.getRequestB()) + n(batch.getRequestC()), 0, "开始生成"));
         batchMapper.updateById(batch);
-        log(batch.getId(), "llm_request_started", "开始生成问题");
+        log(batch.getId(), "question_generation_started", "开始调用模型生成问题");
     }
 
     private List<GeneratedQuestionSpec> invokeQuestionGeneration(GeoQuestionBatch batch, int total) throws Exception {
@@ -1030,8 +1044,42 @@ public class GeoQuestionService {
         if (!StringUtils.hasText(apiKey)) {
             throw new BizException(400, "当前模型未配置 API Key，无法生成真实问题");
         }
+        GenerationContext context = generationContext(batch);
+        List<GeneratedQuestionSpec> accepted = new ArrayList<>();
         String prompt = buildQuestionGenerationPrompt(batch);
-        LlmInvokeResult result = llmInvoker.invoke(prompt, new LlmModelConfig(
+        log(batch.getId(), "generation_prompt_built", "已组装问题生成提示词");
+        LlmInvokeResult result = invokeQuestionModel(config, modelId, apiKey, batch, prompt);
+        saveLlmResponse(batch.getId(), result.responseText(), result);
+        List<GeneratedQuestionSpec> parsed = parseGeneratedQuestions(result.responseText(), batch);
+        log(batch.getId(), "question_generation_parsed", "已解析模型生成问题 " + parsed.size() + " 条");
+        String rejectReasons = validationRejectSummary(parsed, context, accepted);
+        accepted.addAll(filterGeneratedQuestions(parsed, batch, context, accepted));
+
+        for (int retry = 1; retry <= MAX_GENERATION_RETRY && !hasEnoughQuestions(accepted, batch, total); retry++) {
+            Map<String, Integer> missing = missingGenerationCounts(accepted, batch);
+            log(batch.getId(), "question_generation_retry", "第 " + retry + " 次补足生成，当前缺口 A="
+                    + missing.get("A") + " B=" + missing.get("B") + " C=" + missing.get("C"));
+            String retryPrompt = buildRetryPrompt(batch, context, accepted, missing, rejectReasons);
+            LlmInvokeResult retryResult = invokeQuestionModel(config, modelId, apiKey, batch, retryPrompt);
+            saveLlmResponse(batch.getId(), retryResult.responseText(), retryResult);
+            List<GeneratedQuestionSpec> retryParsed = parseGeneratedQuestions(retryResult.responseText(), batch);
+            log(batch.getId(), "question_generation_retry_parsed", "第 " + retry + " 次补足已解析问题 " + retryParsed.size() + " 条");
+            rejectReasons = validationRejectSummary(retryParsed, context, accepted);
+            accepted.addAll(filterGeneratedQuestions(retryParsed, batch, context, accepted));
+        }
+
+        validateGeneratedCounts(accepted, batch, total);
+        log(batch.getId(), "question_generation_validated", "问题结构校验通过，A=" + countTier(accepted, "A")
+                + " B=" + countTier(accepted, "B") + " C=" + countTier(accepted, "C"));
+        return scoreQuestions(accepted, batch, context, total);
+    }
+
+    private LlmInvokeResult invokeQuestionModel(AiPlatformConfig config,
+                                               String modelId,
+                                               String apiKey,
+                                               GeoQuestionBatch batch,
+                                               String prompt) throws Exception {
+        return llmInvoker.invoke(prompt, new LlmModelConfig(
                 config.getPlatformCode(),
                 config.getPlatformName(),
                 modelId,
@@ -1046,26 +1094,27 @@ public class GeoQuestionService {
                 Math.max(1, n(config.getRateLimitQps()) == 0 ? 1 : n(config.getRateLimitQps())),
                 null,
                 true,
-                LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS
+                LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS,
+                "geo_question",
+                config.getConcurrencyLimit()
         ));
-        saveLlmResponse(batch.getId(), result.responseText());
-        List<GeneratedQuestionSpec> specs = parseGeneratedQuestions(result.responseText(), batch);
-        validateGeneratedCounts(specs, batch, total);
-        log(batch.getId(), "llm_response_received", "模型返回问题 " + specs.size() + " 条");
-        return specs;
     }
 
-    private void saveLlmResponse(Long batchId, String responseText) {
+    private void saveLlmResponse(Long batchId, String responseText, LlmInvokeResult result) {
         batchMapper.update(null, new LambdaUpdateWrapper<GeoQuestionBatch>()
                 .eq(GeoQuestionBatch::getId, batchId)
                 .set(GeoQuestionBatch::getLlmResponseSnapshot, responseText)
                 .set(GeoQuestionBatch::getUpdatedAt, LocalDateTime.now()));
-        log(batchId, "llm_response_saved", "模型原始返回已保存");
+        log(batchId, "question_generation_response_saved", "模型原始返回已保存，耗时 "
+                + n(result.durationMs()) + "ms，promptTokens=" + n(result.promptTokens())
+                + "，completionTokens=" + n(result.completionTokens()));
     }
 
     private AiPlatformConfig resolveBatchModel(GeoQuestionBatch batch) {
         LambdaQueryWrapper<AiPlatformConfig> wrapper = new LambdaQueryWrapper<AiPlatformConfig>()
                 .eq(AiPlatformConfig::getEnabled, true)
+                .in(AiPlatformConfig::getPlatformCode, QUESTION_GENERATION_PLATFORM_CODES)
+                .eq(AiPlatformConfig::getEnabledForGeoQuestion, true)
                 .isNotNull(AiPlatformConfig::getLowModelId)
                 .apply("TRIM(low_model_id) <> ''")
                 .last("LIMIT 1");
@@ -1074,7 +1123,7 @@ public class GeoQuestionService {
         }
         AiPlatformConfig config = aiPlatformConfigMapper.selectOne(wrapper);
         if (config == null || !StringUtils.hasText(config.getApiUrl()) || !StringUtils.hasText(generationModelId(config))) {
-            throw new BizException(400, "当前批次选择的模型配置不可用");
+            throw new BizException(400, "拓词问题池生成只支持通义千问、DeepSeek、Mimo，请重新选择模型");
         }
         return config;
     }
@@ -1082,6 +1131,8 @@ public class GeoQuestionService {
     private AiPlatformConfig resolveRequestedModel(BatchStartRequest req) {
         LambdaQueryWrapper<AiPlatformConfig> wrapper = new LambdaQueryWrapper<AiPlatformConfig>()
                 .eq(AiPlatformConfig::getEnabled, true)
+                .in(AiPlatformConfig::getPlatformCode, QUESTION_GENERATION_PLATFORM_CODES)
+                .eq(AiPlatformConfig::getEnabledForGeoQuestion, true)
                 .isNotNull(AiPlatformConfig::getLowModelId)
                 .apply("TRIM(low_model_id) <> ''")
                 .last("LIMIT 1");
@@ -1092,7 +1143,7 @@ public class GeoQuestionService {
         }
         AiPlatformConfig config = aiPlatformConfigMapper.selectOne(wrapper);
         if (config == null || !StringUtils.hasText(config.getApiUrl()) || !StringUtils.hasText(generationModelId(config))) {
-            throw new BizException(400, "当前批次选择的模型配置不可用");
+            throw new BizException(400, "拓词问题池生成只支持通义千问、DeepSeek、Mimo，请重新选择模型");
         }
         return config;
     }
@@ -1112,30 +1163,7 @@ public class GeoQuestionService {
     }
 
     private String buildQuestionGenerationPrompt(GeoQuestionBatch batch) {
-        return """
-                请基于以下输入生成分层 GEO 问题池。本批必须生成且仅生成 %d 条，其中 A 类 %d 条、B 类 %d 条、C 类 %d 条。
-
-                场景枚举只能使用：brand、decision、deal、compare、qa、function。
-                输出必须是 JSON 数组，不要 Markdown，不要解释。每个对象字段：
-                questionText, tier, sceneCode, priority, monitorFrequency,
-                scoreRelevance, scoreIntent, scoreCompetition, scoreConversion, scoreCoverage, totalScore,
-                relatedNeedText, designReason。
-
-                质量要求：
-                1. questionText 必须是可直接用于搜索或 AI 问答监测的中文问题，不能是模板句。
-                2. A 类围绕承诺考核和核心转化，B 类围绕重点观察和竞品对比，C 类围绕长尾铺底。
-                3. designReason 说明该题为什么属于该层级和场景。
-                4. 分数使用 0-5 的一位小数。
-
-                输入资料：
-                %s
-                """.formatted(
-                n(batch.getRequestA()) + n(batch.getRequestB()) + n(batch.getRequestC()),
-                n(batch.getRequestA()),
-                n(batch.getRequestB()),
-                n(batch.getRequestC()),
-                defaultText(batch.getPromptSnapshot(), "")
-        );
+        return defaultText(batch.getPromptSnapshot(), "");
     }
 
     private List<GeneratedQuestionSpec> parseGeneratedQuestions(String responseText, GeoQuestionBatch batch) {
@@ -1146,20 +1174,23 @@ public class GeoQuestionService {
             for (Map<String, Object> row : rows) {
                 String text = firstText(row, "questionText", "question_text", "问题文本");
                 if (!StringUtils.hasText(text)) continue;
+                if (!row.containsKey("questionText") && (row.containsKey("问题文本") || row.containsKey("分级") || row.containsKey("场景"))) {
+                    log(batch.getId(), "question_generation_legacy_key_warn", "模型返回中文字段 key，已兼容解析");
+                }
                 specs.add(new GeneratedQuestionSpec(
                         text.trim(),
                         normalizeTier(firstText(row, "tier", "分级")),
                         normalizeScene(firstText(row, "sceneCode", "scene_code", "场景")),
-                        defaultText(firstText(row, "priority", "优先级"), "中"),
-                        defaultText(firstText(row, "monitorFrequency", "monitor_frequency", "监测频率"), "每周"),
-                        decimal(firstValue(row, "scoreRelevance", "商业价值"), "4.0"),
-                        decimal(firstValue(row, "scoreIntent", "成交距离"), "4.0"),
-                        decimal(firstValue(row, "scoreCompetition", "品牌绑定"), "4.0"),
-                        decimal(firstValue(row, "scoreConversion", "地域行业"), "4.0"),
-                        decimal(firstValue(row, "scoreCoverage", "一期可达"), "4.0"),
-                        decimal(firstValue(row, "totalScore", "总分"), "4.0"),
-                        defaultText(firstText(row, "relatedNeedText", "related_need_text", "对应需求"), "需求"),
-                        defaultText(firstText(row, "designReason", "design_reason", "设计理由"), "基于客户资料与分层标准生成。")
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        defaultText(firstText(row, "relatedNeedText", "related_need_text", "对应需求"), ""),
+                        trimDesignReason(defaultText(firstText(row, "designReason", "design_reason", "设计理由"), "形态匹配"))
                 ));
             }
             return specs;
@@ -1195,6 +1226,136 @@ public class GeoQuestionService {
         }
     }
 
+    private List<GeneratedQuestionSpec> filterGeneratedQuestions(List<GeneratedQuestionSpec> specs,
+                                                                 GeoQuestionBatch batch,
+                                                                 GenerationContext context,
+                                                                 List<GeneratedQuestionSpec> accepted) {
+        log(batch.getId(), "question_generation_validating", "开始校验模型生成问题");
+        List<GeneratedQuestionSpec> result = new ArrayList<>();
+        Set<String> seen = accepted.stream().map(GeneratedQuestionSpec::questionText).map(this::dedupeQuestionText).collect(Collectors.toSet());
+        Map<String, Integer> rejectCounts = new LinkedHashMap<>();
+        for (GeneratedQuestionSpec spec : specs) {
+            String reason = rejectReason(spec, context);
+            if (reason != null) {
+                rejectCounts.merge(reason, 1, Integer::sum);
+                continue;
+            }
+            String key = dedupeQuestionText(spec.questionText());
+            if (!seen.add(key)) {
+                rejectCounts.merge("duplicate", 1, Integer::sum);
+                continue;
+            }
+            result.add(spec);
+        }
+        if (!rejectCounts.isEmpty()) {
+            log(batch.getId(), "question_generation_validation_rejected", "剔除原因：" + summarizeRejectCounts(rejectCounts));
+        }
+        List<GeneratedQuestionSpec> capped = enforceBrandRatio(result, batch, context, accepted);
+        if (capped.size() < result.size()) {
+            log(batch.getId(), "question_generation_validation_failed", "品牌名比例超限，已剔除 " + (result.size() - capped.size()) + " 条");
+        }
+        return capped;
+    }
+
+    private String validationRejectSummary(List<GeneratedQuestionSpec> specs,
+                                           GenerationContext context,
+                                           List<GeneratedQuestionSpec> accepted) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        Set<String> seen = accepted.stream().map(GeneratedQuestionSpec::questionText).map(this::dedupeQuestionText).collect(Collectors.toSet());
+        for (GeneratedQuestionSpec spec : specs) {
+            String reason = rejectReason(spec, context);
+            if (reason != null) {
+                counts.merge(reason, 1, Integer::sum);
+                continue;
+            }
+            if (!seen.add(dedupeQuestionText(spec.questionText()))) {
+                counts.merge("duplicate", 1, Integer::sum);
+            }
+        }
+        return counts.isEmpty() ? "无" : summarizeRejectCounts(counts);
+    }
+
+    private String summarizeRejectCounts(Map<String, Integer> counts) {
+        return counts.entrySet().stream()
+                .map(entry -> entry.getKey() + "=" + entry.getValue())
+                .collect(Collectors.joining("，"));
+    }
+
+    private String rejectReason(GeneratedQuestionSpec spec, GenerationContext context) {
+        if (spec == null || !StringUtils.hasText(spec.questionText())) return "empty";
+        String text = spec.questionText().trim();
+        if (!SCENES.contains(spec.sceneCode())) return "scene_invalid";
+        if (!Set.of("A", "B", "C").contains(spec.tier())) return "tier_invalid";
+        int length = text.length();
+        if ("A".equals(spec.tier()) && (length < 10 || length > 35)) return "a_length";
+        if ("B".equals(spec.tier()) && (length < 10 || length > 40)) return "b_length";
+        if ("C".equals(spec.tier()) && (length < 6 || length > 30)) return "c_length";
+        if (("A".equals(spec.tier()) || "B".equals(spec.tier())) && !context.needIds().contains(spec.relatedNeedText())) {
+            return "need_invalid";
+        }
+        if ("C".equals(spec.tier()) && StringUtils.hasText(spec.relatedNeedText())
+                && !"general".equals(spec.relatedNeedText()) && !context.needIds().contains(spec.relatedNeedText())) {
+            return "need_invalid";
+        }
+        if ("A".equals(spec.tier()) && (!hasStrongDealWord(text) || !hasStrongAnchor(text, context))) return "a_shape";
+        if ("C".equals(spec.tier()) && (containsSelfBrand(text, context) || containsCompetitorBrand(text, context) || hasStrongDealWord(text))) {
+            return "c_forbidden";
+        }
+        return null;
+    }
+
+    private List<GeneratedQuestionSpec> enforceBrandRatio(List<GeneratedQuestionSpec> current,
+                                                          GeoQuestionBatch batch,
+                                                          GenerationContext context,
+                                                          List<GeneratedQuestionSpec> accepted) {
+        List<GeneratedQuestionSpec> merged = new ArrayList<>(accepted);
+        List<GeneratedQuestionSpec> result = new ArrayList<>();
+        Map<String, Integer> brandByTier = new HashMap<>();
+        for (GeneratedQuestionSpec spec : accepted) {
+            if (containsSelfBrand(spec.questionText(), context)) {
+                brandByTier.merge(spec.tier(), 1, Integer::sum);
+            }
+        }
+        int totalBrand = (int) accepted.stream().filter(spec -> containsSelfBrand(spec.questionText(), context)).count();
+        int maxA = (int) Math.floor(n(batch.getRequestA()) * 0.4D);
+        int maxB = (int) Math.floor(n(batch.getRequestB()) * 0.15D);
+        int maxTotal = (int) Math.floor((n(batch.getRequestA()) + n(batch.getRequestB()) + n(batch.getRequestC())) * 0.25D);
+        for (GeneratedQuestionSpec spec : current) {
+            boolean selfBrand = containsSelfBrand(spec.questionText(), context);
+            if (selfBrand) {
+                int tierCount = brandByTier.getOrDefault(spec.tier(), 0);
+                if ("A".equals(spec.tier()) && tierCount >= maxA) continue;
+                if ("B".equals(spec.tier()) && tierCount >= maxB) continue;
+                if ("C".equals(spec.tier())) continue;
+                if (totalBrand >= maxTotal) continue;
+                brandByTier.merge(spec.tier(), 1, Integer::sum);
+                totalBrand++;
+            }
+            result.add(spec);
+            merged.add(spec);
+        }
+        return result;
+    }
+
+    private boolean hasEnoughQuestions(List<GeneratedQuestionSpec> specs, GeoQuestionBatch batch, int total) {
+        return specs.size() >= total
+                && countTier(specs, "A") >= n(batch.getRequestA())
+                && countTier(specs, "B") >= n(batch.getRequestB())
+                && countTier(specs, "C") >= n(batch.getRequestC());
+    }
+
+    private Map<String, Integer> missingGenerationCounts(List<GeneratedQuestionSpec> specs, GeoQuestionBatch batch) {
+        Map<String, Integer> result = new LinkedHashMap<>();
+        result.put("A", Math.max(0, n(batch.getRequestA()) - countTier(specs, "A")));
+        result.put("B", Math.max(0, n(batch.getRequestB()) - countTier(specs, "B")));
+        result.put("C", Math.max(0, n(batch.getRequestC()) - countTier(specs, "C")));
+        return result;
+    }
+
+    private int countTier(List<GeneratedQuestionSpec> specs, String tier) {
+        return (int) specs.stream().filter(item -> tier.equals(item.tier())).count();
+    }
+
     private void validateGeneratedQuestionDuplicates(List<GeneratedQuestionSpec> specs) {
         Set<String> seen = new HashSet<>();
         for (GeneratedQuestionSpec spec : specs) {
@@ -1228,8 +1389,8 @@ public class GeoQuestionService {
             item.setTier(spec.tier());
             item.setSceneCode(spec.sceneCode());
             item.setQuestionText(spec.questionText());
-            item.setPriority(spec.priority());
-            item.setMonitorFrequency(spec.monitorFrequency());
+            item.setPriority(defaultText(spec.priority(), priorityForTier(spec.tier())));
+            item.setMonitorFrequency(defaultText(spec.monitorFrequency(), frequencyForTier(spec.tier())));
             item.setScoreRelevance(spec.scoreRelevance());
             item.setScoreIntent(spec.scoreIntent());
             item.setScoreCompetition(spec.scoreCompetition());
@@ -1250,11 +1411,11 @@ public class GeoQuestionService {
                     .set(GeoQuestionBatch::getActualB, actual.get("B"))
                     .set(GeoQuestionBatch::getActualC, actual.get("C"))
                     .set(GeoQuestionBatch::getPartialFlag, true)
-                    .set(GeoQuestionBatch::getProgressJson, progress("generating", spec.tier(), spec.sceneCode(), generated, total, 0, "正在保存模型生成问题"))
+                    .set(GeoQuestionBatch::getProgressJson, progress("saving", spec.tier(), spec.sceneCode(), generated, total, generated, "正在保存问题与评分"))
                     .set(GeoQuestionBatch::getUpdatedAt, LocalDateTime.now()));
             if (generated >= total) break;
         }
-        log(batch.getId(), "questions_saved", "模型生成问题已落库 " + generated + "/" + total);
+        log(batch.getId(), "questions_saved", "问题与评分已落库 " + generated + "/" + total);
     }
 
     private void finishBatch(Long batchId, String status, boolean partial, String error) {
@@ -1335,6 +1496,71 @@ public class GeoQuestionService {
             counts.put(item.getSceneCode(), counts.getOrDefault(item.getSceneCode(), 0) + 1);
         }
         return counts;
+    }
+
+    private List<GeneratedQuestionSpec> scoreQuestions(List<GeneratedQuestionSpec> specs,
+                                                       GeoQuestionBatch batch,
+                                                       GenerationContext context,
+                                                       int total) {
+        long started = System.currentTimeMillis();
+        log(batch.getId(), "question_scoring_started", "开始执行规则打分");
+        batchMapper.update(null, new LambdaUpdateWrapper<GeoQuestionBatch>()
+                .eq(GeoQuestionBatch::getId, batch.getId())
+                .set(GeoQuestionBatch::getProgressJson, progress("scoring", null, null, total, total, 0, "正在执行规则打分"))
+                .set(GeoQuestionBatch::getUpdatedAt, LocalDateTime.now()));
+        List<GeneratedQuestionSpec> scored = specs.stream().map(spec -> scoreQuestion(spec, context)).toList();
+        log(batch.getId(), "question_scoring_completed", "规则打分完成 " + scored.size() + " 条，耗时 " + (System.currentTimeMillis() - started) + "ms");
+        return scored;
+    }
+
+    private GeneratedQuestionSpec scoreQuestion(GeneratedQuestionSpec spec, GenerationContext context) {
+        String text = spec.questionText();
+        BigDecimal relevance = scoreValue(2.0D
+                + (hasStrongDealWord(text) ? 1.4D : 0D)
+                + (containsAny(text, "报价", "价格", "多少钱", "联系方式", "找谁装") ? 0.8D : 0D)
+                + (hasRegion(text, context) ? 0.6D : 0D)
+                + ("C".equals(spec.tier()) ? -0.6D : 0D));
+        BigDecimal intent = scoreValue(2.0D
+                + (containsAny(text, "报价", "价格", "多少钱", "联系方式", "找谁装", "哪家好") ? 1.5D : 0D)
+                + (containsAny(text, "方案", "预算", "流程", "怎么规划") ? 0.7D : 0D)
+                + ("C".equals(spec.tier()) ? -0.5D : 0D));
+        BigDecimal competition = scoreValue(2.0D
+                + (containsSelfBrand(text, context) ? 1.5D : 0D)
+                + (containsCompetitorBrand(text, context) ? 1.0D : 0D)
+                + ("A".equals(spec.tier()) ? 0.4D : 0D));
+        BigDecimal conversion = scoreValue(2.0D
+                + (hasRegion(text, context) ? 1.3D : 0D)
+                + (containsAny(text, "全屋智能", "智能家居", "智能灯光", "智能窗帘") ? 0.7D : 0D));
+        BigDecimal coverage = scoreValue(3.0D
+                + (containsSelfBrand(text, context) ? 0.6D : 0D)
+                + (hasRegion(text, context) ? 0.5D : 0D)
+                + (containsCompetitorBrand(text, context) ? -0.4D : 0D));
+        BigDecimal total = relevance.multiply(new BigDecimal("0.30"))
+                .add(intent.multiply(new BigDecimal("0.25")))
+                .add(competition.multiply(new BigDecimal("0.20")))
+                .add(conversion.multiply(new BigDecimal("0.15")))
+                .add(coverage.multiply(new BigDecimal("0.10")))
+                .setScale(1, java.math.RoundingMode.HALF_UP);
+        return new GeneratedQuestionSpec(
+                spec.questionText(),
+                spec.tier(),
+                spec.sceneCode(),
+                priorityForTier(spec.tier()),
+                frequencyForTier(spec.tier()),
+                relevance,
+                intent,
+                competition,
+                conversion,
+                coverage,
+                total,
+                spec.relatedNeedText(),
+                spec.designReason()
+        );
+    }
+
+    private BigDecimal scoreValue(double value) {
+        double bounded = Math.max(1.0D, Math.min(5.0D, value));
+        return BigDecimal.valueOf(bounded).setScale(1, java.math.RoundingMode.HALF_UP);
     }
 
     private void validateManualQuestionDuplicates(Long workorderId, List<ManualQuestionItemRequest> items) {
@@ -1604,14 +1830,61 @@ public class GeoQuestionService {
                 + userInput;
     }
 
+    private GenerationContext generationContext(GeoQuestionBatch batch) {
+        GeoQuestionWorkorder workorder = workorderMapper.selectById(batch.getWorkorderId());
+        Map<String, Object> profile = loadProfileSnapshot(workorder);
+        String brandName = value(profile, "brandName");
+        String targetRegion = value(profile, "targetRegion");
+        String coreBusiness = compactText(renderList(profile.get("coreBusiness")), 160);
+        String industry = value(profile, "industry");
+        List<String> competitorTerms = competitorBrandTerms(profile.get("competitors"));
+        String coreNeedsBlock = renderCoreNeeds(profile);
+        List<String> needIds = extractNeedIds(coreNeedsBlock);
+        return new GenerationContext(brandName, targetRegion, coreBusiness, industry, competitorTerms, coreNeedsBlock, needIds);
+    }
+
+    private String buildRetryPrompt(GeoQuestionBatch batch,
+                                    GenerationContext context,
+                                    List<GeneratedQuestionSpec> accepted,
+                                    Map<String, Integer> missing,
+                                    String rejectReasons) {
+        String template = readPromptResource(RETRY_PROMPT);
+        Map<String, String> values = new LinkedHashMap<>();
+        values.put("brand_name", context.brandName());
+        values.put("target_region", context.targetRegion());
+        values.put("core_business", context.coreBusiness());
+        values.put("industry", context.industry());
+        values.put("competitor_brand_terms", context.competitorTerms().isEmpty() ? "无" : String.join("\n", context.competitorTerms()));
+        values.put("retry_a_count", String.valueOf(missing.getOrDefault("A", 0)));
+        values.put("retry_b_count", String.valueOf(missing.getOrDefault("B", 0)));
+        values.put("retry_c_count", String.valueOf(missing.getOrDefault("C", 0)));
+        values.put("retry_total", String.valueOf(missing.values().stream().mapToInt(Integer::intValue).sum()));
+        values.put("retry_reject_reasons", rejectReasons);
+        values.put("retry_existing_questions", accepted.stream()
+                .map(GeneratedQuestionSpec::questionText)
+                .limit(30)
+                .collect(Collectors.joining("\n")));
+        values.put("core_needs_block", context.coreNeedsBlock());
+        values.put("core_needs_id_list", context.needIds().isEmpty() ? "general" : String.join("\n", context.needIds()));
+        for (Map.Entry<String, String> entry : values.entrySet()) {
+            template = template.replace("{{" + entry.getKey() + "}}", entry.getValue());
+        }
+        return readPromptResource(SYSTEM_PROMPT)
+                + "\n\n"
+                + readPromptResource(ABC_TIER_PROMPT)
+                + "\n\n"
+                + template;
+    }
+
     private String renderUserInputPrompt(GeoQuestionWorkorder workorder, BatchStartRequest req) {
         String template = readPromptResource(USER_INPUT_TEMPLATE);
-        Map<String, Object> profile = loadProfileSnapshot(workorder.getId());
+        Map<String, Object> profile = loadProfileSnapshot(workorder);
         int batchA = n(req.getBatchA());
         int batchB = n(req.getBatchB());
         int batchC = n(req.getBatchC());
         int total = batchA + batchB + batchC;
         Map<String, String> values = new LinkedHashMap<>();
+        Map<String, Integer> weights = req.getSceneWeights() == null ? Collections.emptyMap() : req.getSceneWeights();
         values.put("company_name", value(profile, "companyName"));
         values.put("brand_name", value(profile, "brandName"));
         values.put("brand_relation", value(profile, "brandRelation"));
@@ -1619,16 +1892,21 @@ public class GeoQuestionService {
         values.put("target_region", value(profile, "targetRegion"));
         values.put("industry", value(profile, "industry"));
         values.put("target_customer", value(profile, "targetCustomer"));
-        values.put("main_competitors", renderCompetitors(profile.get("competitors")));
+        values.put("main_competitors_block", renderCompetitors(profile.get("competitors")));
+        values.put("competitor_brand_terms", renderCompetitorBrandTerms(profile.get("competitors")));
         values.put("core_advantage", value(profile, "coreAdvantage"));
         values.put("benchmark_specs", defaultText(value(profile, "benchmarkSpecs"), "无"));
-        values.put("core_needs", renderCoreNeeds(profile.get("coreNeeds")));
+        values.put("core_needs_block", renderCoreNeeds(profile));
         values.put("total_count", String.valueOf(total));
-        values.put("scene_weights", renderSceneWeights(req.getSceneWeights()));
-        values.put("abc_split", batchA + "/" + batchB + "/" + batchC);
-        values.put("batch_a", String.valueOf(batchA));
-        values.put("batch_b", String.valueOf(batchB));
-        values.put("batch_c", String.valueOf(batchC));
+        values.put("a_count", String.valueOf(batchA));
+        values.put("b_count", String.valueOf(batchB));
+        values.put("c_count", String.valueOf(batchC));
+        values.put("w_brand", String.valueOf(n(weights.get("brand"))));
+        values.put("w_decision", String.valueOf(n(weights.get("decision"))));
+        values.put("w_deal", String.valueOf(n(weights.get("deal"))));
+        values.put("w_compare", String.valueOf(n(weights.get("compare"))));
+        values.put("w_qa", String.valueOf(n(weights.get("qa"))));
+        values.put("w_function", String.valueOf(n(weights.get("function"))));
         for (Map.Entry<String, String> entry : values.entrySet()) {
             template = template.replace("{{" + entry.getKey() + "}}", entry.getValue());
         }
@@ -1636,11 +1914,14 @@ public class GeoQuestionService {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> loadProfileSnapshot(Long workorderId) {
+    private Map<String, Object> loadProfileSnapshot(GeoQuestionWorkorder workorder) {
         GeoQuestionProfileDraft draft = draftMapper.selectOne(new LambdaQueryWrapper<GeoQuestionProfileDraft>()
-                .eq(GeoQuestionProfileDraft::getWorkorderId, workorderId)
+                .eq(GeoQuestionProfileDraft::getWorkorderId, workorder.getId())
                 .last("LIMIT 1"));
-        if (draft == null || !StringUtils.hasText(draft.getProfileJson())) return Collections.emptyMap();
+        if (draft == null || !StringUtils.hasText(draft.getProfileJson())) {
+            ProfileVO profile = workorder.getProjectId() == null ? profile(workorder.getCompanyId()) : profileByProject(workorder.getProjectId());
+            return objectMapper.convertValue(profile, Map.class);
+        }
         try {
             return objectMapper.readValue(draft.getProfileJson(), Map.class);
         } catch (JsonProcessingException e) {
@@ -1686,8 +1967,9 @@ public class GeoQuestionService {
         return items.isEmpty() ? "无" : String.join("\n", items);
     }
 
-    private String renderCoreNeeds(Object value) {
-        if (!(value instanceof Collection<?> list) || list.isEmpty()) return "需求 1: 待补全 | 场景: 品牌";
+    private String renderCoreNeeds(Map<String, Object> profile) {
+        Object value = profile.get("coreNeeds");
+        if (!(value instanceof Collection<?> list) || list.isEmpty()) return renderDefaultCoreNeeds(profile);
         List<String> items = new ArrayList<>();
         int index = 1;
         for (Object raw : list) {
@@ -1696,12 +1978,48 @@ public class GeoQuestionService {
                 String scene = mapString(item, "scene", "");
                 String urgent = Boolean.parseBoolean(mapString(item, "urgent", "false")) ? " | 紧急: 是" : "";
                 if (StringUtils.hasText(text)) {
-                    items.add("需求 " + index + ": " + text + " | 场景: " + sceneLabel(scene) + urgent);
+                    items.add("need_" + index + ": " + text + " | 场景: " + sceneLabel(scene) + urgent);
                     index++;
                 }
             }
         }
-        return items.isEmpty() ? "需求 1: 待补全 | 场景: 品牌" : String.join("\n", items);
+        return items.isEmpty() ? renderDefaultCoreNeeds(profile) : String.join("\n", items);
+    }
+
+    private String renderDefaultCoreNeeds(Map<String, Object> profile) {
+        String targetRegion = value(profile, "targetRegion");
+        String companyName = value(profile, "companyName");
+        String brandName = value(profile, "brandName");
+        return """
+                当前未录入客户核心需求，以下为系统默认推导。
+                need_default_1: 用户搜索"%s主营业务相关哪家好"时，AI 应推荐 %s
+                need_default_2: AI 在介绍 %s 时，应准确说明其在 %s 的服务能力
+                need_default_3: AI 在主要竞品对比 %s 时，应客观呈现差异
+                """.formatted(targetRegion, companyName, brandName, targetRegion, brandName).trim();
+    }
+
+    private String renderCompetitorBrandTerms(Object value) {
+        List<String> terms = competitorBrandTerms(value);
+        return terms.isEmpty() ? "无" : String.join("\n", terms);
+    }
+
+    private List<String> competitorBrandTerms(Object value) {
+        if (!(value instanceof Collection<?> list) || list.isEmpty()) return List.of();
+        List<String> terms = new ArrayList<>();
+        for (Object raw : list) {
+            if (raw instanceof Map<?, ?> item) {
+                String name = mapString(item, "competitorName", mapString(item, "competitor_name", ""));
+                if (StringUtils.hasText(name) && !isGenericCompetitorTerm(name)) {
+                    terms.add(name.trim());
+                }
+            }
+        }
+        return terms.stream().distinct().toList();
+    }
+
+    private boolean isGenericCompetitorTerm(String value) {
+        String text = defaultText(value, "").trim();
+        return !StringUtils.hasText(text) || GENERIC_COMPETITOR_TERMS.stream().anyMatch(text::contains);
     }
 
     private String mapString(Map<?, ?> map, String key, String defaultValue) {
@@ -1777,14 +2095,102 @@ public class GeoQuestionService {
         return value == null ? fallback : value;
     }
 
-    private String progress(String phase, String tier, String scene, int generated, int target, int tokenUsed, String message) {
+    private boolean hasStrongDealWord(String text) {
+        return containsAny(text, STRONG_DEAL_WORDS.toArray(String[]::new));
+    }
+
+    private boolean containsAny(String text, String... words) {
+        if (!StringUtils.hasText(text)) return false;
+        for (String word : words) {
+            if (StringUtils.hasText(word) && text.contains(word)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean hasStrongAnchor(String text, GenerationContext context) {
+        return hasRegion(text, context) || containsSelfBrand(text, context) || containsCompetitorBrand(text, context);
+    }
+
+    private boolean hasRegion(String text, GenerationContext context) {
+        if (!StringUtils.hasText(text)) return false;
+        for (String part : regionAliases(context.targetRegion())) {
+            if (text.contains(part)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<String> regionAliases(String region) {
+        Set<String> aliases = new LinkedHashSet<>();
+        for (String part : splitTags(defaultText(region, ""))) {
+            String normalized = part.trim();
+            if (normalized.length() < 2) continue;
+            aliases.add(normalized);
+            String stripped = normalized.replaceFirst("(省|市|区|县|自治州|州|盟)$", "");
+            if (stripped.length() >= 2) {
+                aliases.add(stripped);
+            }
+        }
+        return new ArrayList<>(aliases);
+    }
+
+    private boolean containsSelfBrand(String text, GenerationContext context) {
+        return StringUtils.hasText(context.brandName()) && StringUtils.hasText(text) && text.contains(context.brandName().trim());
+    }
+
+    private boolean containsCompetitorBrand(String text, GenerationContext context) {
+        if (!StringUtils.hasText(text)) return false;
+        return context.competitorTerms().stream().anyMatch(term -> StringUtils.hasText(term) && text.contains(term));
+    }
+
+    private String priorityForTier(String tier) {
+        return switch (defaultText(tier, "C")) {
+            case "A" -> "high";
+            case "B" -> "medium";
+            default -> "low";
+        };
+    }
+
+    private String frequencyForTier(String tier) {
+        return switch (defaultText(tier, "C")) {
+            case "A" -> "weekly";
+            case "B" -> "biweekly";
+            default -> "monthly_sample";
+        };
+    }
+
+    private String trimDesignReason(String value) {
+        String text = defaultText(value, "形态匹配").trim();
+        return text.length() <= 20 ? text : text.substring(0, 20);
+    }
+
+    private String compactText(String value, int maxLength) {
+        if (!StringUtils.hasText(value)) return "";
+        String compact = value.replaceAll("\\s+", " ").trim();
+        return compact.length() <= maxLength ? compact : compact.substring(0, maxLength);
+    }
+
+    private List<String> extractNeedIds(String coreNeedsBlock) {
+        if (!StringUtils.hasText(coreNeedsBlock)) return List.of();
+        List<String> ids = new ArrayList<>();
+        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile("(?m)^(need(?:_default)?_\\d+):").matcher(coreNeedsBlock);
+        while (matcher.find()) {
+            ids.add(matcher.group(1));
+        }
+        return ids;
+    }
+
+    private String progress(String phase, String tier, String scene, int generated, int target, int scored, String message) {
         Map<String, Object> map = new LinkedHashMap<>();
         map.put("phase", phase);
         map.put("currentTier", tier);
         map.put("currentScene", scene);
         map.put("generated", generated);
         map.put("target", target);
-        map.put("tokenUsed", tokenUsed);
+        map.put("scored", scored);
         map.put("message", message);
         return writeJson(map);
     }
@@ -1832,6 +2238,10 @@ public class GeoQuestionService {
         return value == null ? 0 : value;
     }
 
+    private long n(Long value) {
+        return value == null ? 0L : value;
+    }
+
     private String defaultText(String value, String fallback) {
         return StringUtils.hasText(value) ? value : (fallback == null ? "" : fallback);
     }
@@ -1854,6 +2264,15 @@ public class GeoQuestionService {
                                          BigDecimal totalScore,
                                          String relatedNeedText,
                                          String designReason) {
+    }
+
+    private record GenerationContext(String brandName,
+                                     String targetRegion,
+                                     String coreBusiness,
+                                     String industry,
+                                     List<String> competitorTerms,
+                                     String coreNeedsBlock,
+                                     List<String> needIds) {
     }
 
     private record KeywordAllocation(int a, int b, int c) {
