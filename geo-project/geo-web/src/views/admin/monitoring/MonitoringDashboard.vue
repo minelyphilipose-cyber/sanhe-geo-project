@@ -298,35 +298,64 @@
       </el-card>
     </div>
 
-    <el-dialog v-model="taskDetailVisible" title="调度详情" width="760px" class="admin-editor-dialog monitoring-detail-dialog">
-      <div v-loading="taskDetailLoading">
-        <el-descriptions v-if="taskDetail" :column="2" border>
-          <el-descriptions-item label="任务编号">{{ taskDetail.taskNo || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="项目名称">{{ taskDetail.projectName || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="任务类型">{{ taskTypeLabel(taskDetail.taskType) }}</el-descriptions-item>
-          <el-descriptions-item label="任务状态">{{ taskStatusLabel(taskDetail.status) }}</el-descriptions-item>
-          <el-descriptions-item label="优先级">P{{ taskDetail.priorityLevel }}</el-descriptions-item>
-          <el-descriptions-item label="执行通道">{{ channelLabel(taskDetail.currentChannel) }}</el-descriptions-item>
-          <el-descriptions-item label="平台编码">{{ taskDetail.platformCode || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="重试次数">{{ taskDetail.retryCount ?? 0 }} / {{ taskDetail.maxRetry ?? '-' }}</el-descriptions-item>
-          <el-descriptions-item label="窗口开始">{{ taskDetail.windowStart || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="窗口结束">{{ taskDetail.windowEnd || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="应执行时间">{{ formatDateTime(taskDetail.dueTime) }}</el-descriptions-item>
-          <el-descriptions-item label="首次启动时间">{{ formatDateTime(taskDetail.firstStartedAt) }}</el-descriptions-item>
-          <el-descriptions-item label="最近启动时间">{{ formatDateTime(taskDetail.lastStartedAt) }}</el-descriptions-item>
-          <el-descriptions-item label="下次重试时间">{{ formatDateTime(taskDetail.nextRetryAt) }}</el-descriptions-item>
-          <el-descriptions-item label="超时时间">{{ formatDateTime(taskDetail.timeoutAt) }}</el-descriptions-item>
-          <el-descriptions-item label="完成时间">{{ formatDateTime(taskDetail.finishedAt) }}</el-descriptions-item>
-          <el-descriptions-item label="新增时间">{{ formatDateTime(taskDetail.createdAt) }}</el-descriptions-item>
-          <el-descriptions-item label="更新时间">{{ formatDateTime(taskDetail.updatedAt) }}</el-descriptions-item>
-          <el-descriptions-item label="最近错误" :span="2">{{ taskDetail.lastError || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="错误上下文" :span="2">
-            <pre class="detail-pre">{{ taskDetail.errorContext || '-' }}</pre>
-          </el-descriptions-item>
-          <el-descriptions-item label="任务载荷" :span="2">
-            <pre class="detail-pre">{{ taskDetail.payloadJson || '-' }}</pre>
-          </el-descriptions-item>
-        </el-descriptions>
+    <el-dialog v-model="taskDetailVisible" title="调度详情" width="920px" class="admin-editor-dialog monitoring-detail-dialog">
+      <div v-loading="taskDetailLoading" class="detail-loading-wrap">
+        <div v-if="taskDetail" class="dispatch-detail">
+          <section class="detail-hero">
+            <div class="detail-hero-avatar" :class="taskStatusClass(taskDetail.status)">
+              {{ taskAvatarInitial(taskDetail.projectName) }}
+            </div>
+            <div class="detail-hero-main">
+              <div class="detail-task-no">{{ taskDetail.taskNo || `任务 #${taskDetail.id}` }}</div>
+              <h2>{{ taskDetail.projectName || '-' }}</h2>
+              <div class="detail-hero-meta">
+                <span class="admin-mini-pill is-blue">{{ taskTypeLabel(taskDetail.taskType) }}</span>
+                <span class="admin-status-tag" :class="taskStatusClass(taskDetail.status)">
+                  {{ taskStatusLabel(taskDetail.status) }}
+                </span>
+                <span class="priority-pill" :class="priorityClass(taskDetail.priorityLevel)">P{{ taskDetail.priorityLevel }}</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="detail-section">
+            <div class="detail-section-title">基础信息</div>
+            <div class="detail-info-grid">
+              <div v-for="item in taskDetailBaseItems" :key="item.label" class="detail-info-item">
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="detail-section">
+            <div class="detail-section-title">执行时间</div>
+            <div class="detail-info-grid is-time">
+              <div v-for="item in taskDetailTimeItems" :key="item.label" class="detail-info-item">
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section class="detail-section">
+            <div class="detail-section-title">异常信息</div>
+            <div class="detail-error-text">{{ taskDetail.lastError || '-' }}</div>
+          </section>
+
+          <section class="detail-section">
+            <div class="detail-code-grid">
+              <div class="detail-code-panel">
+                <div class="detail-section-title">错误上下文</div>
+                <pre class="detail-pre">{{ formatJsonBlock(taskDetail.errorContext) }}</pre>
+              </div>
+              <div class="detail-code-panel">
+                <div class="detail-section-title">任务载荷</div>
+                <pre class="detail-pre">{{ formatJsonBlock(taskDetail.payloadJson) }}</pre>
+              </div>
+            </div>
+          </section>
+        </div>
       </div>
     </el-dialog>
   </div>
@@ -377,6 +406,39 @@ const taskQuery = reactive({
   keyword: '',
   taskType: '',
   status: '',
+})
+
+interface DetailItem {
+  label: string
+  value: string
+}
+
+const taskDetailBaseItems = computed<DetailItem[]>(() => {
+  const detail = taskDetail.value
+  if (!detail) return []
+  return [
+    { label: '执行通道', value: channelLabel(detail.currentChannel) },
+    { label: '平台编码', value: detail.platformCode || '-' },
+    { label: '重试次数', value: `${detail.retryCount ?? 0} / ${detail.maxRetry ?? '-'}` },
+    { label: '窗口开始', value: detail.windowStart || '-' },
+    { label: '窗口结束', value: detail.windowEnd || '-' },
+    { label: '当前状态', value: taskStatusLabel(detail.status) },
+  ]
+})
+
+const taskDetailTimeItems = computed<DetailItem[]>(() => {
+  const detail = taskDetail.value
+  if (!detail) return []
+  return [
+    { label: '应执行时间', value: formatDateTime(detail.dueTime) },
+    { label: '首次启动时间', value: formatDateTime(detail.firstStartedAt) },
+    { label: '最近启动时间', value: formatDateTime(detail.lastStartedAt) },
+    { label: '下次重试时间', value: formatDateTime(detail.nextRetryAt) },
+    { label: '超时时间', value: formatDateTime(detail.timeoutAt) },
+    { label: '完成时间', value: formatDateTime(detail.finishedAt) },
+    { label: '新增时间', value: formatDateTime(detail.createdAt) },
+    { label: '更新时间', value: formatDateTime(detail.updatedAt) },
+  ]
 })
 
 const dashboardProgress = computed(() => {
@@ -529,6 +591,17 @@ function formatDateTime(value?: string | null) {
   const mi = `${date.getMinutes()}`.padStart(2, '0')
   const ss = `${date.getSeconds()}`.padStart(2, '0')
   return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}`
+}
+
+function formatJsonBlock(value?: string | null) {
+  if (!value) return '-'
+  const text = value.trim()
+  if (!text) return '-'
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2)
+  } catch {
+    return value
+  }
 }
 
 function taskStatusLabel(status: string) {
@@ -1176,31 +1249,171 @@ onBeforeUnmount(() => {
   padding: 0 14px;
 }
 
+.monitoring-detail-dialog :deep(.el-dialog__body) {
+  padding: 0;
+  background: #f8fafc;
+}
+
+.detail-loading-wrap {
+  min-height: 220px;
+}
+
+.dispatch-detail {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.detail-hero,
+.detail-section {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
+}
+
+.detail-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  background:
+    linear-gradient(135deg, #ffffff 0%, #f8fbff 58%, #ecfdf5 100%);
+}
+
+.detail-hero-avatar {
+  width: 54px;
+  height: 54px;
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #64748b, #94a3b8);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 800;
+  box-shadow: 0 12px 22px rgba(15, 23, 42, 0.16);
+}
+
+.detail-hero-avatar.is-success {
+  background: linear-gradient(135deg, #059669, #14b8a6);
+}
+
+.detail-hero-avatar.is-warning {
+  background: linear-gradient(135deg, #d97706, #f59e0b);
+}
+
+.detail-hero-avatar.is-danger {
+  background: linear-gradient(135deg, #dc2626, #ef4444);
+}
+
+.detail-hero-main {
+  min-width: 0;
+}
+
+.detail-task-no {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.detail-hero h2 {
+  margin: 4px 0 9px;
+  color: #0f172a;
+  font-size: 19px;
+  line-height: 1.45;
+  font-weight: 800;
+}
+
+.detail-hero-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.detail-section {
+  padding: 14px;
+}
+
+.detail-section-title {
+  margin-bottom: 10px;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.detail-info-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-info-grid.is-time {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.detail-info-item {
+  min-width: 0;
+  min-height: 66px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid #e7edf5;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #ffffff 0%, #fbfdff 64%, #f8fbff 100%);
+  padding: 10px 12px;
+}
+
+.detail-info-item span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.detail-info-item strong {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.detail-error-text {
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  background: #fef2f2;
+  padding: 12px 14px;
+  color: #991b1b;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.detail-code-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.detail-code-panel {
+  min-width: 0;
+}
+
 .detail-pre {
   margin: 0;
-  max-height: 220px;
+  max-height: 260px;
   overflow: auto;
-  padding: 10px 12px;
+  padding: 12px 14px;
   border: 1px solid #dbeafe;
   border-radius: 10px;
   background: #f8fbff;
   color: #334155;
   white-space: pre-wrap;
-  word-break: break-all;
+  overflow-wrap: anywhere;
   font-family: Consolas, Monaco, monospace;
   font-size: 12px;
-  line-height: 1.6;
-}
-
-.monitoring-detail-dialog :deep(.el-descriptions) {
-  overflow: hidden;
-  border-radius: 12px;
-}
-
-.monitoring-detail-dialog :deep(.el-descriptions__label) {
-  background: linear-gradient(180deg, #f8fbff, #eef6ff) !important;
-  color: #475569;
-  font-weight: 800;
+  line-height: 1.65;
 }
 
 @media (max-width: 768px) {
@@ -1212,7 +1425,10 @@ onBeforeUnmount(() => {
 
   .dashboard-insight-grid,
   .completion-body,
-  .chain-grid {
+  .chain-grid,
+  .detail-info-grid,
+  .detail-info-grid.is-time,
+  .detail-code-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1226,6 +1442,14 @@ onBeforeUnmount(() => {
 
   .filters {
     align-items: stretch;
+  }
+
+  .dispatch-detail {
+    padding: 12px;
+  }
+
+  .detail-hero {
+    align-items: flex-start;
   }
 }
 </style>
