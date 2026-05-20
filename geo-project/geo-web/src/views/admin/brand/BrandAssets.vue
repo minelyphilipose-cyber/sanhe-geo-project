@@ -357,6 +357,7 @@ import {
   getBrandDetail,
   getBrandImageFolders,
   getBrandMaterials,
+  getBrandMaterialPreviewUrl,
   getBrandMaterialStream,
   getBrandStatementDetail,
   uploadBrandMaterial,
@@ -382,6 +383,8 @@ const canDeleteMaterial = computed(() => userStore.hasPermission('brand.material
 // ────────── 状态 ──────────
 type BrandMaterialExt = BrandMaterial & {
   _thumbUrl?: string | null
+  _thumbLoading?: boolean
+  _thumbFailed?: boolean
   _previewing?: boolean
   _downloading?: boolean
 }
@@ -592,14 +595,15 @@ async function loadMaterials() {
   materialsLoading.value = true
   try {
     const { data } = await getBrandMaterials(brandId.value)
+    resetThumbnails()
     materials.value = (data.data || []).sort((a, b) => {
       const bTime = parseDateTime(b.updatedAt || b.createdAt)?.getTime() ?? 0
       const aTime = parseDateTime(a.updatedAt || a.createdAt)?.getTime() ?? 0
       return bTime - aTime
     })
-    // 为图片类素材生成缩略图 URL
-    await loadThumbnails()
+    void loadVisibleThumbnails()
   } catch {
+    resetThumbnails()
     materials.value = []
   } finally {
     materialsLoading.value = false
@@ -639,37 +643,51 @@ async function loadBrandProjects() {
   }
 }
 
-async function loadThumbnails() {
-  const currentRequestId = ++thumbRequestId
-  // 清理旧的 blob URL
-  cleanupThumbs()
-
-  const targets = materials.value.filter((mat) => isImageType(mat.fileType))
+async function loadVisibleThumbnails() {
+  const currentRequestId = thumbRequestId
+  const targets = visibleMaterials.value.filter((mat) => (
+    isImageType(mat.fileType)
+    && !mat._thumbUrl
+    && !mat._thumbLoading
+    && !mat._thumbFailed
+  ))
   if (targets.length === 0) return
 
-  const concurrency = Math.min(6, targets.length)
+  const concurrency = Math.min(2, targets.length)
   let cursor = 0
 
   const worker = async () => {
     while (cursor < targets.length) {
       const mat = targets[cursor++]
+      mat._thumbLoading = true
       try {
-        const { data: blob } = await getBrandMaterialStream(brandId.value, mat.id, false)
-        const url = URL.createObjectURL(blob)
+        const { data } = await getBrandMaterialPreviewUrl(brandId.value, mat.id)
+        const url = data.data?.url || ''
+        if (!url) {
+          mat._thumbUrl = null
+          mat._thumbFailed = true
+          continue
+        }
         if (currentRequestId !== thumbRequestId) {
-          URL.revokeObjectURL(url)
           return
         }
         mat._thumbUrl = url
-        thumbUrls.value.push(url)
       } catch {
         if (currentRequestId !== thumbRequestId) return
         mat._thumbUrl = null
+        mat._thumbFailed = true
+      } finally {
+        mat._thumbLoading = false
       }
     }
   }
 
   await Promise.all(Array.from({ length: concurrency }, () => worker()))
+}
+
+function resetThumbnails() {
+  thumbRequestId++
+  cleanupThumbs()
 }
 
 function cleanupThumbs() {
@@ -831,10 +849,12 @@ async function previewMaterial(row: BrandMaterialExt) {
 
   row._previewing = true
   try {
-    const { data: blob } = await getBrandMaterialStream(brandId.value, row.id, false)
-    const url = URL.createObjectURL(blob)
+    const { data } = await getBrandMaterialPreviewUrl(brandId.value, row.id)
+    const url = data.data?.url
+    if (!url) {
+      throw new Error('Preview URL is empty')
+    }
     win.location.href = url
-    setTimeout(() => URL.revokeObjectURL(url), 60000)
   } catch (e: any) {
     win.close()
     ElMessage.error(e?.response?.data?.message || '预览失败')
@@ -972,15 +992,20 @@ watch(() => route.params.id, (newId, oldId) => {
     folderExpanded.value = false
     searchKeyword.value = ''
     viewMode.value = 'grid'
-    thumbRequestId++
-    cleanupThumbs()
+    resetThumbnails()
     void loadAll()
   }
 })
 
+watch(
+  () => visibleMaterials.value.map((mat) => mat.id).join(','),
+  () => {
+    void loadVisibleThumbnails()
+  },
+)
+
 onBeforeUnmount(() => {
-  thumbRequestId++
-  cleanupThumbs()
+  resetThumbnails()
 })
 </script>
 

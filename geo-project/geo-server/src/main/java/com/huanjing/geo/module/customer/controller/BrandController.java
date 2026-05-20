@@ -26,7 +26,9 @@ import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 import org.springframework.web.bind.annotation.*;
+import java.io.InputStream;
 import java.util.List;
 import java.util.Map;
 import java.nio.charset.StandardCharsets;
@@ -172,23 +174,39 @@ public class BrandController {
     }
 
     @GetMapping("/{brandId}/materials/{materialId}/stream")
-    public ResponseEntity<byte[]> streamMaterial(
+    public ResponseEntity<StreamingResponseBody> streamMaterial(
             @PathVariable Long brandId,
             @PathVariable Long materialId,
             @RequestParam(defaultValue = "false") boolean download
     ) {
         BrandMaterial material = brandProfileService.materialDetail(brandId, materialId);
-        byte[] bytes = brandProfileService.readMaterialBytes(brandId, materialId);
         String fileName = material.getFileName();
         MediaType mediaType = MediaTypeFactory.getMediaType(fileName).orElse(MediaType.APPLICATION_OCTET_STREAM);
         boolean forceDownload = download || !isPreviewable(mediaType);
         ContentDisposition disposition = forceDownload
                 ? ContentDisposition.attachment().filename(fileName, StandardCharsets.UTF_8).build()
                 : ContentDisposition.inline().filename(fileName, StandardCharsets.UTF_8).build();
-        return ResponseEntity.ok()
+        StreamingResponseBody body = outputStream -> {
+            try (InputStream inputStream = brandProfileService.openVerifiedMaterialStream(material)) {
+                inputStream.transferTo(outputStream);
+            }
+        };
+        ResponseEntity.BodyBuilder builder = ResponseEntity.ok()
                 .contentType(mediaType)
-                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString())
-                .body(bytes);
+                .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString());
+        if (material.getFileSize() != null && material.getFileSize() >= 0) {
+            builder.contentLength(material.getFileSize());
+        }
+        return builder.body(body);
+    }
+
+    @GetMapping("/{brandId}/materials/{materialId}/preview-url")
+    public R<Map<String, String>> materialPreviewUrl(
+            @PathVariable Long brandId,
+            @PathVariable Long materialId
+    ) {
+        String url = brandProfileService.buildMaterialPreviewUrl(brandId, materialId);
+        return R.ok(Map.of("url", url));
     }
 
     private boolean isPreviewable(MediaType mediaType) {

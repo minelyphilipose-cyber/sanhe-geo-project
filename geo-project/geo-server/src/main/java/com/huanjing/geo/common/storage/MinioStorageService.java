@@ -12,6 +12,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.InputStream;
+import java.util.Objects;
 
 @Slf4j
 @Service
@@ -24,8 +25,13 @@ public class MinioStorageService {
     private String endpoint;
     @Value("${geo.minio.public-endpoint:${geo.minio.endpoint}}")
     private String publicEndpoint;
+    @Value("${geo.minio.access-key}")
+    private String accessKey;
+    @Value("${geo.minio.secret-key}")
+    private String secretKey;
     @Value("${geo.minio.bucket}")
     private String bucket;
+    private volatile MinioClient publicMinioClient;
 
     public String upload(MultipartFile file, String objectKey, String contentType) {
         try {
@@ -102,6 +108,15 @@ public class MinioStorageService {
         }
     }
 
+    public InputStream openObjectStream(String objectKey) {
+        try {
+            return minioClient.getObject(GetObjectArgs.builder().bucket(bucket).object(objectKey).build());
+        } catch (Exception ex) {
+            log.error("Open minio object stream failed, objectKey={}, err={}", objectKey, ex.getMessage(), ex);
+            throw new BizException(500, "Read file failed");
+        }
+    }
+
     public String buildFileUrl(String objectKey) {
         String source = StringUtils.hasText(publicEndpoint) ? publicEndpoint : endpoint;
         String normalized = source.endsWith("/") ? source.substring(0, source.length() - 1) : source;
@@ -111,7 +126,7 @@ public class MinioStorageService {
     public String buildPresignedDownloadUrl(String objectKey, int expireSeconds) {
         try {
             ensureBucket();
-            return minioClient.getPresignedObjectUrl(
+            return presignClient().getPresignedObjectUrl(
                     GetPresignedObjectUrlArgs.builder()
                             .method(Method.GET)
                             .bucket(bucket)
@@ -135,6 +150,26 @@ public class MinioStorageService {
         boolean exists = minioClient.bucketExists(BucketExistsArgs.builder().bucket(bucket).build());
         if (!exists) {
             minioClient.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
+        }
+    }
+
+    private MinioClient presignClient() {
+        String source = StringUtils.hasText(publicEndpoint) ? publicEndpoint : endpoint;
+        if (Objects.equals(source, endpoint)) {
+            return minioClient;
+        }
+        MinioClient existing = publicMinioClient;
+        if (existing != null) {
+            return existing;
+        }
+        synchronized (this) {
+            if (publicMinioClient == null) {
+                publicMinioClient = MinioClient.builder()
+                        .endpoint(source)
+                        .credentials(accessKey, secretKey)
+                        .build();
+            }
+            return publicMinioClient;
         }
     }
 }

@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.InputStream;
 import java.time.LocalDate;
 import java.util.*;
 
@@ -76,6 +77,26 @@ public class BrandProfileService {
             throw new BizException(400, "Material object key is empty");
         }
         return minioStorageService.getObjectBytes(material.getObjectKey());
+    }
+
+    public InputStream openMaterialStream(Long brandId, Long materialId) {
+        BrandMaterial material = materialDetail(brandId, materialId);
+        return openVerifiedMaterialStream(material);
+    }
+
+    public InputStream openVerifiedMaterialStream(BrandMaterial material) {
+        if (!StringUtils.hasText(material.getObjectKey())) {
+            throw new BizException(400, "Material object key is empty");
+        }
+        return minioStorageService.openObjectStream(material.getObjectKey());
+    }
+
+    public String buildMaterialPreviewUrl(Long brandId, Long materialId) {
+        BrandMaterial material = materialDetail(brandId, materialId);
+        if (!StringUtils.hasText(material.getObjectKey())) {
+            throw new BizException(400, "Material object key is empty");
+        }
+        return minioStorageService.buildPresignedDownloadUrl(material.getObjectKey(), 600);
     }
 
     @Transactional
