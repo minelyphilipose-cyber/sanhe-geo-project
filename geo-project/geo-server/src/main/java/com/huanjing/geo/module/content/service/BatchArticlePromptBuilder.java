@@ -60,6 +60,13 @@ public class BatchArticlePromptBuilder {
             文章结尾的联系方式由系统变量 {{contactBlock}} 提供，已由后端根据品牌配置拼装完成。
             必须原样放置，不得改写、删减、补充，更不得自行编造任何官网、电话或地址。
             如果 {{contactBlock}} 为空，结尾不出现任何联系方式。
+
+            # 标题差异化规则
+
+            模板中的标题示例只作为方向参考，不得逐字套用或只替换变量。
+            生成标题时必须结合 {{topic}}、{{contentAngle}}、{{recentTitles}} 做差异化表达。
+            同一批次内避免连续使用相同句式、相同开头、相同标点结构。
+            历史标题不为空时，新标题不得复用历史标题的核心句式。
             """;
 
     private static final String SYSTEM_PROMPT = """
