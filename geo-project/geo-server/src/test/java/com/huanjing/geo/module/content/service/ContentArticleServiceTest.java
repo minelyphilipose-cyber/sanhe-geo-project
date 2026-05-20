@@ -37,7 +37,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -123,7 +122,7 @@ class ContentArticleServiceTest {
         verify(articleDraftMapper, times(1)).insert(draftCaptor.capture());
         assertEquals("zhihu", draftCaptor.getValue().getContentStyle());
         assertEquals("Manual topic", draftCaptor.getValue().getTopic());
-        assertEquals("pending_review", draftCaptor.getValue().getStatus());
+        assertEquals("approved", draftCaptor.getValue().getStatus());
         ArgumentCaptor<ArticleDraftVersion> versionCaptor = ArgumentCaptor.forClass(ArticleDraftVersion.class);
         verify(articleDraftVersionMapper).insert(versionCaptor.capture());
         assertEquals(markdown, versionCaptor.getValue().getContentMarkdown());
@@ -195,39 +194,24 @@ class ContentArticleServiceTest {
     }
 
     @Test
-    void resubmitUsesConditionalUpdateAndAuditsSuccess() {
+    void resubmitIsDisabled() {
         ArticleDraft article = article("under_revision");
         when(articleDraftMapper.selectById(99L)).thenReturn(article);
-        when(articleDraftMapper.update(isNull(), any(Wrapper.class))).thenReturn(1);
 
         ArticleResubmitRequest request = new ArticleResubmitRequest();
         request.setComment("ready");
 
-        service.resubmit(99L, request);
+        BizException ex = assertThrows(BizException.class, () -> service.resubmit(99L, request));
 
+        assertEquals(ContentErrorCodes.ARTICLE_BAD_REQUEST, ex.getCode());
         verify(brandAccessService).requireBrandAccess(20L, 7L, BrandAccessAction.OPERATE);
-        verify(articleDraftMapper).update(isNull(), any(Wrapper.class));
-        verifyAudit("ARTICLE_RESUBMITTED", AuditResult.SUCCESS);
+        verify(articleDraftMapper, never()).update(isNull(), any(Wrapper.class));
     }
 
     @Test
-    void resubmitSystemGeneratedArticleApprovesDirectly() {
-        ArticleDraft article = article("under_revision");
-        when(articleDraftMapper.selectById(99L)).thenReturn(article);
-        when(articleDraftVersionMapper.selectList(any())).thenReturn(List.of(versionGeneratedBy("system")));
-        when(articleDraftMapper.update(isNull(), any(Wrapper.class))).thenReturn(1);
-
-        service.resubmit(99L, new ArticleResubmitRequest());
-
-        verify(articleDraftMapper).update(isNull(), any(Wrapper.class));
-        verifyAudit("ARTICLE_RESUBMITTED", AuditResult.SUCCESS, "approved");
-    }
-
-    @Test
-    void saveRevisionSystemGeneratedArticleStaysApproved() {
+    void saveRevisionKeepsArticleApproved() {
         ArticleDraft article = article("approved");
         when(articleDraftMapper.selectById(99L)).thenReturn(article);
-        when(articleDraftVersionMapper.selectList(any())).thenReturn(List.of(versionGeneratedBy("batch_ai")));
         when(articleDraftMapper.selectList(any())).thenReturn(List.of());
         when(articleDraftMapper.update(isNull(), any(Wrapper.class))).thenReturn(1);
 
@@ -244,55 +228,15 @@ class ContentArticleServiceTest {
     }
 
     @Test
-    void reviewStateConflictWritesDeniedAudit() {
+    void reviewWorkflowIsDisabled() {
         ArticleDraft article = article("pending_review");
         when(articleDraftMapper.selectById(99L)).thenReturn(article);
-        when(articleDraftVersionMapper.selectList(any())).thenReturn(List.of(version(8L)));
-        when(articleDraftMapper.update(isNull(), any(Wrapper.class))).thenReturn(0);
 
         ArticleReviewRequest request = review("approve", null);
         BizException ex = assertThrows(BizException.class, () -> service.review(99L, request));
-
-        assertEquals(ContentErrorCodes.ARTICLE_STATE_CONFLICT, ex.getCode());
-        verify(brandAccessService).requireBrandAccess(20L, 7L, BrandAccessAction.MANAGE);
-        verifyAudit("ARTICLE_REVIEWED", AuditResult.DENIED);
-    }
-
-    @Test
-    void reviewerCannotReviewOwnArticle() {
-        ArticleDraft article = article("pending_review");
-        when(articleDraftMapper.selectById(99L)).thenReturn(article);
-        when(articleDraftVersionMapper.selectList(any())).thenReturn(List.of(version(8L), version(7L)));
-
-        ArticleReviewRequest request = review("approve", null);
-        BizException ex = assertThrows(BizException.class, () -> service.review(99L, request));
-
-        assertEquals(ContentErrorCodes.ARTICLE_AUTHOR_CANNOT_REVIEW, ex.getCode());
-        verify(articleDraftMapper, never()).update(isNull(), any(Wrapper.class));
-    }
-
-    @Test
-    void reviewIgnoresNullHistoricalVersionAuthors() {
-        ArticleDraft article = article("pending_review");
-        when(articleDraftMapper.selectById(99L)).thenReturn(article);
-        when(articleDraftVersionMapper.selectList(any())).thenReturn(Arrays.asList(null, version(null), version(8L)));
-        when(articleDraftMapper.update(isNull(), any(Wrapper.class))).thenReturn(1);
-
-        service.review(99L, review("approve", null));
-
-        verify(articleDraftMapper).update(isNull(), any(Wrapper.class));
-        verifyAudit("ARTICLE_REVIEWED", AuditResult.SUCCESS);
-    }
-
-    @Test
-    void reviewSystemGeneratedArticleIsRejected() {
-        ArticleDraft article = article("pending_review");
-        when(articleDraftMapper.selectById(99L)).thenReturn(article);
-        when(articleDraftVersionMapper.selectList(any())).thenReturn(List.of(versionGeneratedBy("ai")));
-
-        BizException ex = assertThrows(BizException.class, () -> service.review(99L, review("approve", null)));
 
         assertEquals(ContentErrorCodes.ARTICLE_BAD_REQUEST, ex.getCode());
+        verify(brandAccessService).requireBrandAccess(20L, 7L, BrandAccessAction.MANAGE);
         verify(articleDraftMapper, never()).update(isNull(), any(Wrapper.class));
     }
 
@@ -393,20 +337,6 @@ class ContentArticleServiceTest {
         article.setCurrentVersionNo(1);
         article.setHasRisk(false);
         return article;
-    }
-
-    private ArticleDraftVersion version(Long createdBy) {
-        ArticleDraftVersion version = new ArticleDraftVersion();
-        version.setArticleId(99L);
-        version.setVersionNo(1);
-        version.setCreatedBy(createdBy);
-        return version;
-    }
-
-    private ArticleDraftVersion versionGeneratedBy(String generatedBy) {
-        ArticleDraftVersion version = version(null);
-        version.setGeneratedBy(generatedBy);
-        return version;
     }
 
     private ArticleReviewRequest review(String action, String comment) {

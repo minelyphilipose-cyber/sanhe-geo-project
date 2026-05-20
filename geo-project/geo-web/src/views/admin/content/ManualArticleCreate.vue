@@ -93,7 +93,7 @@
             <div class="section-header-left">
               <span class="section-index">1</span>
               <span class="section-title">AI 生成设置</span>
-              <span class="section-desc">生成后回填为可编辑草稿，不直接进入审核</span>
+              <span class="section-desc">生成后回填为可编辑草稿，保存后直接进入就绪状态</span>
             </div>
             <el-button class="generate-button" type="primary" :loading="generating" :disabled="!canGenerate" @click="generateAiPreview">
               {{ generating ? '生成中' : aiMetadata ? '重新生成' : '生成草稿' }}
@@ -720,7 +720,7 @@ const submitStateText = computed(() => {
   if (createMode.value === 'auto' && aiMetadata.value && manualMarkdown.value.trim()) return '请确认 AI 草稿'
   return '字段待完善'
 })
-const submitButtonText = computed(() => (aiMetadata.value ? '保存文章' : '提交审核'))
+const submitButtonText = computed(() => '保存文章')
 const previewHeaderText = computed(() => createMode.value === 'auto' ? 'AI 草稿生成后自动进入预览' : '编辑内容时自动同步 Markdown')
 const todayText = computed(() => {
   const now = new Date()
@@ -1407,7 +1407,7 @@ async function submitManualCreate() {
       source: aiMetadata.value ? 'ai_preview' : 'manual',
       aiMetadata: aiMetadata.value || undefined,
     })
-    ElMessage.success(aiMetadata.value ? 'AI 生成文章已保存，可直接发布' : '手动文章已生成，进入待审核')
+    ElMessage.success(aiMetadata.value ? 'AI 生成文章已保存，可直接发布' : '手动文章已生成，可直接发布')
     router.push({
       path: '/admin/content/execution',
       query: {

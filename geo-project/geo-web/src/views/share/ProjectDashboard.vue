@@ -374,7 +374,7 @@ const contentProgressItems = computed<ProjectDashboardContentProgressItem[]>(() 
     { key: 'approved', label: '已就绪', value: progress?.approvedCount || 0, description: '当前处于可发布状态的文章数量' },
     { key: 'distributed', label: '已分发', value: progress?.distributedCount || 0, description: '已实际进入分发执行的去重文章数量' },
     { key: 'published', label: '发布成功', value: progress?.publishedCount || 0, description: '分发任务成功提交或确认的去重文章数量' },
-    { key: 'pending', label: '待处理', value: progress?.pendingCount || 0, description: '待审核/待修改文章与待执行分发任务按文章去重' },
+    { key: 'pending', label: '待处理', value: progress?.pendingCount || 0, description: '待执行分发任务按文章去重' },
     { key: 'generation_failed', label: '生成失败', value: progress?.generationFailureCount || 0, description: '内容生成批次中的失败条目数量' },
     { key: 'distribution_failed', label: '分发失败', value: progress?.distributionFailureCount || 0, description: '分发任务失败的去重文章数量' },
   ]

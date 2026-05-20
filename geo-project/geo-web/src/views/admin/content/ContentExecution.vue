@@ -103,8 +103,8 @@
         <span class="admin-metric-hint">当前筛选结果</span>
       </div>
       <div class="admin-metric-card" style="--metric-accent: #f59e0b; --metric-tone: #fffbeb">
-        <span class="admin-metric-label">待审核</span>
-        <strong class="admin-metric-value">{{ reviewCount }}</strong>
+        <span class="admin-metric-label">已发布</span>
+        <strong class="admin-metric-value">{{ publishedCount }}</strong>
         <span class="admin-metric-hint">本页可见</span>
       </div>
       <div class="admin-metric-card" style="--metric-accent: #059669; --metric-tone: #ecfdf5">
@@ -172,11 +172,9 @@
             <template #default="scope">
               <div class="admin-row-actions">
                 <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
-                <el-button v-if="canWrite && canReview(scope.row)" link type="primary" @click="openReview(scope.row)">审核</el-button>
                 <el-button v-if="canWrite && canEdit(scope.row.status)" class="content-neutral-action" link @click="openRevision(scope.row)">修订</el-button>
                 <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openDistributionChannel(scope.row)">分发</el-button>
                 <el-button v-if="canWrite && canDeleteArticle(scope.row.status)" link type="danger" @click="deleteArticle(scope.row)">删除</el-button>
-                <el-button v-if="canWrite && canResubmit(scope.row.status)" class="is-wide" link type="primary" @click="openResubmit(scope.row)">重新提交</el-button>
               </div>
             </template>
           </el-table-column>
@@ -203,9 +201,19 @@
               <span class="detail-kicker">文章信息</span>
               <h3>{{ detailData.article.title || '未命名文章' }}</h3>
             </div>
-            <el-tag :type="statusTagType(detailData.article.status)">
-              {{ statusLabel(detailData.article.status) }}
-            </el-tag>
+            <div class="detail-summary-actions">
+              <el-button
+                v-if="canWrite && canEditFromDetail(detailData.article.status)"
+                size="small"
+                type="primary"
+                @click="openRevisionFromDetail"
+              >
+                编辑文章
+              </el-button>
+              <el-tag :type="statusTagType(detailData.article.status)">
+                {{ statusLabel(detailData.article.status) }}
+              </el-tag>
+            </div>
           </div>
           <el-descriptions :column="2" border>
             <el-descriptions-item label="文章ID">{{ detailData.article.id }}</el-descriptions-item>
@@ -255,45 +263,17 @@
       </div>
     </el-drawer>
 
-    <el-dialog v-model="reviewVisible" title="审核文章" width="560px" class="admin-editor-dialog">
-      <el-form class="admin-dialog-form content-review-form" :model="reviewForm" label-width="110px">
-        <el-form-item label="审核动作" required>
-          <el-select v-model="reviewForm.action" style="width: 100%">
-            <el-option label="通过" value="approve" />
-            <el-option label="驳回" value="reject" />
-            <el-option label="退回修改" value="return_for_revision" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="selectedArticleHasRisk" label="风险覆盖">
-          <el-checkbox v-model="reviewForm.riskOverride">强制通过提醒级风险</el-checkbox>
-        </el-form-item>
-        <el-form-item v-if="selectedArticleRiskHits.length" label="命中风险词">
-          <div class="risk-word-list">
-            <el-tag
-              v-for="hit in selectedArticleRiskHits"
-              :key="`${hit.severity}-${hit.source}-${hit.word}`"
-              size="small"
-              :type="hit.severity === 'block' ? 'danger' : 'warning'"
-              effect="light"
-            >
-              {{ riskSeverityLabel(hit.severity) }} · {{ riskSourceLabel(hit.source) }}: {{ hit.word }}
-            </el-tag>
-          </div>
-        </el-form-item>
-        <el-form-item label="审核意见">
-          <el-input v-model="reviewForm.comment" type="textarea" :rows="4" placeholder="驳回或退回修改时必填" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="reviewVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitReview">提交</el-button>
-      </template>
-    </el-dialog>
-
     <el-dialog v-model="revisionVisible" title="修订文章" width="840px" class="admin-editor-dialog">
       <el-form class="admin-dialog-form content-revision-form" :model="revisionForm" label-width="90px">
-        <el-form-item label="标题">
-          <el-input v-model="revisionForm.title" />
+        <el-form-item class="is-full revision-title-field" label="标题">
+          <el-input
+            v-model="revisionForm.title"
+            type="textarea"
+            :autosize="{ minRows: 2, maxRows: 4 }"
+            maxlength="160"
+            show-word-limit
+            placeholder="请输入文章标题"
+          />
         </el-form-item>
         <el-form-item class="is-full" label="正文" required>
           <div class="editor-wrap">
@@ -315,18 +295,6 @@
       <template #footer>
         <el-button @click="revisionVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitRevision">保存修订</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="resubmitVisible" title="重新提交" width="520px">
-      <el-form :model="resubmitForm" label-width="90px">
-        <el-form-item label="备注">
-          <el-input v-model="resubmitForm.comment" type="textarea" :rows="4" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="resubmitVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitResubmit">提交</el-button>
       </template>
     </el-dialog>
 
@@ -963,8 +931,6 @@ import {
   getWechatMpAuthUrl,
   getWechatMpCapability,
   refreshDistributionTaskReviewStatus,
-  resubmitContentArticle,
-  reviewContentArticle,
   saveContentArticleRevision,
 } from '@/api/content'
 import { getPublishSites } from '@/api/publishSite'
@@ -1014,24 +980,15 @@ const query = reactive({
   generationMode: '' as '' | 'batch' | 'single',
   createdRange: [] as string[],
 })
-const reviewCount = computed(() => rows.value.filter((row) => canReview(row)).length)
+const publishedCount = computed(() => rows.value.filter((row) => row.status === 'published').length)
 const distributableCount = computed(() => rows.value.filter((row) => canDistribute(row.status)).length)
 const showAdvancedFilters = ref(false)
-const blockedCount = computed(() => rows.value.filter((row) => ['rejected', 'failed', 'risk_blocked'].includes(row.status)).length)
+const blockedCount = computed(() => rows.value.filter((row) => ['failed', 'risk_blocked'].includes(row.status)).length)
 
 const detailVisible = ref(false)
 const detailData = ref<ArticleDetailResponse | null>(null)
 const detailViewMode = ref<'preview' | 'markdown'>('preview')
 const currentArticleId = ref<number | null>(null)
-const selectedArticleHasRisk = ref(false)
-const selectedArticleRiskHits = ref<RiskWordHit[]>([])
-
-const reviewVisible = ref(false)
-const reviewForm = reactive({
-  action: 'approve' as 'approve' | 'reject' | 'return_for_revision',
-  comment: '',
-  riskOverride: false,
-})
 
 const revisionVisible = ref(false)
 const revisionViewMode = ref<'preview' | 'markdown'>('markdown')
@@ -1040,9 +997,6 @@ const revisionForm = reactive({
   contentMarkdown: '',
   note: '',
 })
-
-const resubmitVisible = ref(false)
-const resubmitForm = reactive({ comment: '' })
 
 const distributionChannelVisible = ref(false)
 const distributionChannelArticle = ref<ArticleDraft | null>(null)
@@ -1200,10 +1154,7 @@ const selectedDouyinMaterials = computed(() => selectedDouyinImageMaterialIds.va
   .map((id) => douyinImageMaterials.value.find((item) => item.id === id))
   .filter((item): item is BrandMaterial => !!item))
 const statusOptions = [
-  { label: '待审核', value: 'pending_review' },
   { label: '已就绪', value: 'approved' },
-  { label: '已驳回', value: 'rejected' },
-  { label: '修改中', value: 'under_revision' },
   { label: '分发中', value: 'distributing' },
   { label: '已分发', value: 'distributed' },
   { label: '已发布', value: 'published' },
@@ -1413,28 +1364,24 @@ function distributionStatusTag(v?: string | null): 'success' | 'warning' | 'dang
 
 function statusTagType(v: string): 'success' | 'warning' | 'danger' | 'info' {
   if (v === 'approved' || v === 'distributed' || v === 'published') return 'success'
-  if (v === 'rejected') return 'danger'
-  if (v === 'under_revision' || v === 'distributing' || v === 'unpublished') return 'warning'
+  if (v === 'failed' || v === 'risk_blocked') return 'danger'
+  if (v === 'distributing' || v === 'unpublished') return 'warning'
   return 'info'
 }
 
 function contentStatusClass(v: string) {
   if (v === 'approved' || v === 'distributed' || v === 'published') return 'is-success'
-  if (v === 'rejected' || v === 'failed' || v === 'risk_blocked') return 'is-danger'
-  if (v === 'pending_review' || v === 'under_revision' || v === 'distributing' || v === 'unpublished') return 'is-warning'
+  if (v === 'failed' || v === 'risk_blocked') return 'is-danger'
+  if (v === 'distributing' || v === 'unpublished') return 'is-warning'
   return 'is-muted'
 }
 
-function canReview(row: ArticleDraft) {
-  return row.status === 'pending_review' && !row.systemGenerated
-}
-
 function canEdit(status: string) {
-  return status === 'pending_review' || status === 'under_revision' || status === 'rejected'
+  return status === 'approved' || status === 'unpublished'
 }
 
-function canResubmit(status: string) {
-  return status === 'under_revision' || status === 'rejected'
+function canEditFromDetail(status: string) {
+  return canEdit(status)
 }
 
 function canDistribute(status: string) {
@@ -1689,16 +1636,6 @@ async function openDetail(articleId: number) {
   }
 }
 
-function openReview(row: ArticleDraft) {
-  currentArticleId.value = row.id
-  selectedArticleHasRisk.value = !!row.hasRisk
-  selectedArticleRiskHits.value = riskWordHits(row)
-  reviewForm.action = 'approve'
-  reviewForm.comment = ''
-  reviewForm.riskOverride = false
-  reviewVisible.value = true
-}
-
 async function openRevision(row: ArticleDraft) {
   currentArticleId.value = row.id
   revisionForm.title = row.title
@@ -1713,10 +1650,14 @@ async function openRevision(row: ArticleDraft) {
   revisionVisible.value = true
 }
 
-function openResubmit(row: ArticleDraft) {
-  currentArticleId.value = row.id
-  resubmitForm.comment = ''
-  resubmitVisible.value = true
+function openRevisionFromDetail() {
+  if (!detailData.value) return
+  currentArticleId.value = detailData.value.article.id
+  revisionForm.title = detailData.value.article.title
+  revisionForm.contentMarkdown = detailData.value.versions?.[0]?.contentMarkdown || ''
+  revisionForm.note = ''
+  revisionViewMode.value = 'markdown'
+  revisionVisible.value = true
 }
 
 function openDistributionChannel(row: ArticleDraft) {
@@ -2709,27 +2650,6 @@ async function distributeToAgentSite(row: ArticleDraft) {
   }
 }
 
-async function submitReview() {
-  if (!currentArticleId.value) return
-  if ((reviewForm.action === 'reject' || reviewForm.action === 'return_for_revision') && !reviewForm.comment.trim()) {
-    ElMessage.warning('驳回或退回修改时，审核意见不能为空')
-    return
-  }
-  submitting.value = true
-  try {
-    await reviewContentArticle(currentArticleId.value, {
-      action: reviewForm.action,
-      comment: reviewForm.comment || undefined,
-      riskOverride: reviewForm.riskOverride,
-    })
-    reviewVisible.value = false
-    ElMessage.success('审核提交成功')
-    await load()
-  } finally {
-    submitting.value = false
-  }
-}
-
 async function submitRevision() {
   if (!currentArticleId.value) return
   if (!revisionForm.contentMarkdown.trim()) {
@@ -2746,21 +2666,11 @@ async function submitRevision() {
     revisionVisible.value = false
     ElMessage.success('修订保存成功')
     await load()
-  } finally {
-    submitting.value = false
-  }
-}
-
-async function submitResubmit() {
-  if (!currentArticleId.value) return
-  submitting.value = true
-  try {
-    await resubmitContentArticle(currentArticleId.value, {
-      comment: resubmitForm.comment || undefined,
-    })
-    resubmitVisible.value = false
-    ElMessage.success('已重新提交')
-    await load()
+    if (detailVisible.value && detailData.value?.article.id === currentArticleId.value) {
+      const { data } = await getContentArticleDetail(currentArticleId.value)
+      detailData.value = data.data
+      detailViewMode.value = 'preview'
+    }
   } finally {
     submitting.value = false
   }
@@ -3243,6 +3153,13 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   margin-bottom: 14px;
 }
 
+.detail-summary-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 10px;
+}
+
 .detail-summary-head h3 {
   margin: 5px 0 0;
   color: #0f172a;
@@ -3374,6 +3291,11 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   border: 1px solid #dbeafe;
   border-radius: 14px;
   background: #f8fbff;
+}
+
+.revision-title-field :deep(.el-textarea__inner) {
+  font-size: 15px;
+  line-height: 1.6;
 }
 
 .editor-header {

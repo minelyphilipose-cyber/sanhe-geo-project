@@ -896,7 +896,7 @@ export interface ArticleDraft {
   topic?: string | null
   topicAsQuestion?: string | null
   title: string
-  status: 'pending_review' | 'approved' | 'rejected' | 'under_revision' | 'distributing' | 'distributed' | 'published' | 'unpublished' | string
+  status: 'approved' | 'distributing' | 'distributed' | 'published' | 'unpublished' | string
   hasRisk: boolean
   riskSeverity: 'none' | 'warn' | 'block' | string
   riskWordsJson?: string | null

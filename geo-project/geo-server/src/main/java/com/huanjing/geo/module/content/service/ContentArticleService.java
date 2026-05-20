@@ -298,7 +298,7 @@ public class ContentArticleService {
         markdownImageReferenceValidator.validate(project, content);
 
         String createSource = normalizeCreateSource(req.getSource());
-        String initialStatus = initialStatusForCreateSource(createSource);
+        String initialStatus = "approved";
 
         ArticleDraft draft = new ArticleDraft();
         draft.setProjectId(project.getId());
@@ -350,22 +350,6 @@ public class ContentArticleService {
             return value;
         }
         return "manual";
-    }
-
-    private String initialStatusForCreateSource(String source) {
-        return "ai_preview".equals(source) ? "approved" : "pending_review";
-    }
-
-    private boolean isSystemGeneratedArticle(Long articleId) {
-        List<ArticleDraftVersion> versions = articleDraftVersionMapper.selectList(
-                new LambdaQueryWrapper<ArticleDraftVersion>()
-                        .eq(ArticleDraftVersion::getArticleId, articleId)
-                        .select(ArticleDraftVersion::getGeneratedBy)
-        );
-        return versions != null && versions.stream()
-                .filter(Objects::nonNull)
-                .map(ArticleDraftVersion::getGeneratedBy)
-                .anyMatch(this::isAutoApprovedGeneratedBy);
     }
 
     private String aiPromptSnapshot(Map<String, Object> aiMetadata) {
@@ -430,7 +414,7 @@ public class ContentArticleService {
 
         RiskResult riskResult = scanRisk(project, content);
         DuplicateResult duplicateResult = checkDuplicate(article, title);
-        String newStatus = isSystemGeneratedArticle(articleId) ? "approved" : "under_revision";
+        String newStatus = "approved";
         // Entity is null intentionally; all updated columns are set explicitly in the wrapper,
         // keeping the status predicate and mutation in one atomic UPDATE.
         int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
@@ -451,15 +435,6 @@ public class ContentArticleService {
         }
         auditArticleTransition("ARTICLE_REVISION_SAVED", AuditResult.SUCCESS, operator, project, article, oldStatus, newStatus, req.getNote(), null);
 
-        if ("under_revision".equals(newStatus) && StringUtils.hasText(req.getNote())) {
-            ArticleReviewLog log = new ArticleReviewLog();
-            log.setArticleId(articleId);
-            log.setAction("return_for_revision");
-            log.setComment(req.getNote().trim());
-            log.setRiskOverridden(false);
-            log.setOperatorId(operator.getId());
-            articleReviewLogMapper.insert(log);
-        }
     }
 
     @Transactional
@@ -470,30 +445,7 @@ public class ContentArticleService {
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
         brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
-        if (!Set.of("under_revision", "rejected").contains(article.getStatus())) {
-            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Only under_revision/rejected article can resubmit");
-        }
-        String oldStatus = article.getStatus();
-        String newStatus = isSystemGeneratedArticle(articleId) ? "approved" : "pending_review";
-        // Entity is null intentionally; all updated columns are set explicitly in the wrapper,
-        // keeping the status predicate and mutation in one atomic UPDATE.
-        int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
-                .eq(ArticleDraft::getId, articleId)
-                .eq(ArticleDraft::getStatus, oldStatus)
-                .set(ArticleDraft::getStatus, newStatus));
-        if (updated != 1) {
-            auditArticleTransition("ARTICLE_RESUBMITTED", AuditResult.DENIED, operator, project, article, oldStatus, newStatus, "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
-            throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
-        }
-        auditArticleTransition("ARTICLE_RESUBMITTED", AuditResult.SUCCESS, operator, project, article, oldStatus, newStatus, req == null ? null : req.getComment(), null);
-
-        ArticleReviewLog log = new ArticleReviewLog();
-        log.setArticleId(articleId);
-        log.setAction("resubmit");
-        log.setComment(req == null ? null : req.getComment());
-        log.setRiskOverridden(false);
-        log.setOperatorId(operator.getId());
-        articleReviewLogMapper.insert(log);
+        throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Article review workflow is disabled");
     }
 
     @Transactional
@@ -504,61 +456,7 @@ public class ContentArticleService {
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
         brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
-        ensureReviewerIsNotAuthor(article, operator);
-        if (isSystemGeneratedArticle(articleId)) {
-            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Generated article does not require review");
-        }
-
-        String action = req.getAction().trim().toLowerCase(Locale.ROOT);
-        if (!Set.of("approve", "reject", "return_for_revision").contains(action)) {
-            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid review action");
-        }
-        boolean needComment = "reject".equals(action) || "return_for_revision".equals(action);
-        boolean riskOverridden = false;
-        if (needComment && !StringUtils.hasText(req.getComment())) {
-            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Comment is required");
-        }
-        if ("approve".equals(action) && Boolean.TRUE.equals(article.getHasRisk())) {
-            String severity = Optional.ofNullable(article.getRiskSeverity()).orElse("none");
-            if ("block".equalsIgnoreCase(severity)) {
-                throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Please resolve block risk words before approve");
-            }
-            if ("warn".equalsIgnoreCase(severity)) {
-                if (!StringUtils.hasText(req.getComment())) {
-                    throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Warn risk approve requires comment");
-                }
-                riskOverridden = true;
-            }
-        }
-
-        String oldStatus = article.getStatus();
-        String newStatus;
-        if ("approve".equals(action)) {
-            newStatus = "approved";
-        } else if ("reject".equals(action)) {
-            newStatus = "rejected";
-        } else {
-            newStatus = "under_revision";
-        }
-        // Entity is null intentionally; all updated columns are set explicitly in the wrapper,
-        // keeping the status predicate and mutation in one atomic UPDATE.
-        int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
-                .eq(ArticleDraft::getId, articleId)
-                .eq(ArticleDraft::getStatus, "pending_review")
-                .set(ArticleDraft::getStatus, newStatus));
-        if (updated != 1) {
-            auditArticleTransition("ARTICLE_REVIEWED", AuditResult.DENIED, operator, project, article, oldStatus, newStatus, "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
-            throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
-        }
-        auditArticleTransition("ARTICLE_REVIEWED", AuditResult.SUCCESS, operator, project, article, oldStatus, newStatus, req.getComment(), null);
-
-        ArticleReviewLog log = new ArticleReviewLog();
-        log.setArticleId(articleId);
-        log.setAction(action);
-        log.setComment(req.getComment());
-        log.setRiskOverridden(riskOverridden);
-        log.setOperatorId(operator.getId());
-        articleReviewLogMapper.insert(log);
+        throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Article review workflow is disabled");
     }
 
     @Transactional
@@ -810,25 +708,6 @@ public class ContentArticleService {
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         if (write) {
             currentUserService.ensurePermission("project.update");
-        }
-    }
-
-    private void ensureReviewerIsNotAuthor(ArticleDraft article, SysUser operator) {
-        Long reviewerId = operator == null ? null : operator.getId();
-        if (reviewerId == null) {
-            return;
-        }
-        List<ArticleDraftVersion> versions = articleDraftVersionMapper.selectList(
-                new LambdaQueryWrapper<ArticleDraftVersion>()
-                        .eq(ArticleDraftVersion::getArticleId, article.getId())
-                        .select(ArticleDraftVersion::getCreatedBy)
-        );
-        boolean authoredByReviewer = versions != null && versions.stream()
-                .filter(Objects::nonNull)
-                .map(ArticleDraftVersion::getCreatedBy)
-                .anyMatch(reviewerId::equals);
-        if (authoredByReviewer) {
-            throw new BizException(ContentErrorCodes.ARTICLE_AUTHOR_CANNOT_REVIEW, "Article author cannot review their own article");
         }
     }
 

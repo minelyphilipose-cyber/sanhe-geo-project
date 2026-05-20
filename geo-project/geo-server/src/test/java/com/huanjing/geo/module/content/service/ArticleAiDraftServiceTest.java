@@ -27,7 +27,6 @@ import org.junit.jupiter.api.*;
 import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.*;
 
-import java.util.List;
 import java.util.concurrent.ExecutionException;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -215,18 +214,17 @@ class ArticleAiDraftServiceTest {
     }
 
     @Test
-    void aiDraftCannotBeApprovedByItsCreator() throws Exception {
+    void aiDraftReviewWorkflowIsDisabled() throws Exception {
         mockInsertId();
         when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
         Long articleId = service.generate(request()).get().articleId();
-        when(articleMapper.selectById(articleId)).thenReturn(article("pending_review"));
-        when(versionMapper.selectList(any())).thenReturn(List.of(version(7L)));
+        when(articleMapper.selectById(articleId)).thenReturn(article("approved"));
 
         ArticleReviewRequest review = new ArticleReviewRequest();
         review.setAction("approve");
         BizException ex = assertThrows(BizException.class, () -> articleService().review(articleId, review));
 
-        assertEquals(ContentErrorCodes.ARTICLE_AUTHOR_CANNOT_REVIEW, ex.getCode());
+        assertEquals(ContentErrorCodes.ARTICLE_BAD_REQUEST, ex.getCode());
         verify(articleMapper, never()).update(isNull(), any(Wrapper.class));
     }
 
@@ -334,10 +332,4 @@ class ArticleAiDraftServiceTest {
         return article;
     }
 
-    private ArticleDraftVersion version(Long createdBy) {
-        ArticleDraftVersion version = new ArticleDraftVersion();
-        version.setArticleId(99L);
-        version.setCreatedBy(createdBy);
-        return version;
-    }
 }

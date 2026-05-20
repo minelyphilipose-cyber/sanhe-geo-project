@@ -217,6 +217,12 @@ public class KeywordGroupService {
     public void delete(Long id) {
         currentUserService.ensurePermission("keyword_group.write");
         KeywordGroup group = requireGroup(id);
+        if (group.getProjectId() != null) {
+            Project project = requireProject(group.getProjectId());
+            if (!isProjectPrepareStatus(project.getStatus())) {
+                throw new BizException(400, "项目已启动，不能删除拓词组");
+            }
+        }
         keywordGroupResultMapper.delete(new LambdaQueryWrapper<KeywordGroupResult>().eq(KeywordGroupResult::getGroupId, id));
         keywordGroupWordMapper.delete(new LambdaQueryWrapper<KeywordGroupWord>().eq(KeywordGroupWord::getGroupId, id));
         projectKeywordGroupRelMapper.delete(new LambdaQueryWrapper<ProjectKeywordGroupRel>().eq(ProjectKeywordGroupRel::getKeywordGroupId, id));
@@ -227,7 +233,7 @@ public class KeywordGroupService {
     public KeywordGroupImportResultVO importProjectKeywordGroup(Long projectId, MultipartFile file) {
         currentUserService.ensurePermission("keyword_group.write");
         Project project = requireProject(projectId);
-        if (!"paused".equals(project.getStatus())) {
+        if (!isProjectPrepareStatus(project.getStatus())) {
             throw new BizException(400, "只有未启动项目可以导入拓词组");
         }
         if (file == null || file.isEmpty()) {
@@ -292,7 +298,7 @@ public class KeywordGroupService {
         KeywordGroup group = requireGroup(groupId);
         if (group.getProjectId() != null) {
             Project project = requireProject(group.getProjectId());
-            if (!"paused".equals(project.getStatus())) {
+            if (!isProjectPrepareStatus(project.getStatus())) {
                 throw new BizException(400, "项目已启动，不能编辑拓词组问题");
             }
         }
@@ -1024,6 +1030,10 @@ public class KeywordGroupService {
             throw new BizException(404, "Project not found");
         }
         return project;
+    }
+
+    private boolean isProjectPrepareStatus(String status) {
+        return "pending_start".equals(status) || "paused".equals(status);
     }
 
     private void ensureProjectHasNoKeywordGroup(Project project) {

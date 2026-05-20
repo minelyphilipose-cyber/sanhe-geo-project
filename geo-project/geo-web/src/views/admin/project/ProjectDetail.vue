@@ -147,9 +147,10 @@
         <el-table-column label="A/B/C" width="160">
           <template #default="{ row }">A {{ row.savedKeywordCountA || 0 }} / B {{ row.savedKeywordCountB || 0 }} / C {{ row.savedKeywordCountC || 0 }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="110">
+        <el-table-column label="操作" width="160">
           <template #default="{ row }">
             <el-button link type="primary" @click="openKeywordQuestions(row)">查看编辑</el-button>
+            <el-button v-if="canDeleteKeywordGroup" link type="danger" @click="removeKeywordGroup(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -341,6 +342,7 @@ import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
 import {
   deleteProject,
+  deleteKeywordGroup,
   getProjectChannelAllocationQuota,
   getProjectDetail,
   getKeywordGroupQuestions,
@@ -360,6 +362,7 @@ const canActivateProject = computed(() => userStore.hasPermission('project.start
 const canUpdateProject = computed(() => userStore.hasPermission('project.update'))
 const canPrepareProject = computed(() => project.value?.status === 'pending_start' || project.value?.status === 'paused')
 const canCreateKeywordGroup = computed(() => !!project.value && userStore.hasPermission('keyword_group.write'))
+const canDeleteKeywordGroup = computed(() => !!project.value && canPrepareProject.value && userStore.hasPermission('keyword_group.write'))
 const projectId = Number(route.params.id)
 const hasValidId = Number.isFinite(projectId) && projectId > 0
 
@@ -766,6 +769,29 @@ async function handleKeywordImport(file: UploadFile) {
     await load()
   } finally {
     importing.value = false
+  }
+}
+
+async function removeKeywordGroup(row: KeywordGroup) {
+  if (!project.value || !canDeleteKeywordGroup.value) {
+    ElMessage.warning('当前项目状态不可删除拓词组')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认删除拓词组「${row.name}」？删除后可重新创建或导入拓词组。`,
+      '删除拓词组确认',
+      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' },
+    )
+    await deleteKeywordGroup(row.id)
+    ElMessage.success('拓词组已删除')
+    if (currentKeywordGroup.value?.id === row.id) {
+      questionDrawerVisible.value = false
+      currentKeywordGroup.value = null
+    }
+    await load()
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return
   }
 }
 
