@@ -171,7 +171,7 @@
           <div class="form-section-head">
             <div>
               <span>分发渠道额度</span>
-              <strong>官网、行业站、自媒体和权重媒体额度</strong>
+              <strong>官网、行业站、论坛、自媒体和权重媒体额度</strong>
             </div>
           </div>
           <el-table class="quota-editor-table" :data="form.channelQuotaConfigs" border table-layout="fixed">
@@ -300,6 +300,7 @@ function defaultChannelQuotas(): PackageChannelQuotaConfig[] {
   return [
     { channelCode: 'official_site', periodType: 'week', quotaLimit: 1, enabled: true },
     { channelCode: 'industry_site', periodType: 'week', quotaLimit: 1, enabled: true },
+    { channelCode: 'forum', periodType: 'week', quotaLimit: 1, enabled: true },
     { channelCode: 'self_media', periodType: 'week', quotaLimit: 1, enabled: true },
     { channelCode: 'authority_media', periodType: 'total', quotaLimit: 0, enabled: true },
   ]
@@ -309,6 +310,7 @@ function channelLabel(code: string) {
   const map: Record<string, string> = {
     official_site: '官网',
     industry_site: '行业资讯站',
+    forum: '论坛',
     self_media: '自媒体平台',
     authority_media: '权重媒体平台',
   }

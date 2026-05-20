@@ -31,11 +31,12 @@ public class PackagePlanService {
 
     private static final Pattern PACKAGE_TYPE_PATTERN = Pattern.compile("^[a-z][a-z0-9_]{2,31}$");
     private static final Set<String> INTENSITY_LEVELS = Set.of("L1", "L2", "L3");
-    private static final Set<String> CHANNEL_CODES = Set.of("official_site", "industry_site", "self_media", "authority_media");
+    private static final Set<String> CHANNEL_CODES = Set.of("official_site", "industry_site", "forum", "self_media", "authority_media");
     private static final Set<String> PERIOD_TYPES = Set.of("day", "week", "month", "total");
     private static final Map<String, String> DEFAULT_PERIOD_BY_CHANNEL = Map.of(
             "official_site", "week",
             "industry_site", "week",
+            "forum", "week",
             "self_media", "week",
             "authority_media", "total"
     );

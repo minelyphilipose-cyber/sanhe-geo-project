@@ -39,12 +39,14 @@ public class ProjectDistributionChannelAllocationService {
 
     public static final String OFFICIAL_SITE = "official_site";
     public static final String INDUSTRY_SITE = "industry_site";
+    public static final String FORUM = "forum";
     public static final String SELF_MEDIA = "self_media";
     public static final String AUTHORITY_MEDIA = "authority_media";
 
     private static final List<ChannelDefinition> CHANNELS = List.of(
             new ChannelDefinition(OFFICIAL_SITE, "官网"),
             new ChannelDefinition(INDUSTRY_SITE, "行业资讯站"),
+            new ChannelDefinition(FORUM, "论坛"),
             new ChannelDefinition(SELF_MEDIA, "自媒体号"),
             new ChannelDefinition(AUTHORITY_MEDIA, "权威媒体")
     );

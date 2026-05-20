@@ -173,7 +173,7 @@ public class CompanyPackageBindingService {
                         LinkedHashMap::new
                 ));
         List<Map<String, Object>> exceeded = new java.util.ArrayList<>();
-        for (String channel : List.of("official_site", "industry_site", "self_media", "authority_media")) {
+        for (String channel : List.of("official_site", "industry_site", "forum", "self_media", "authority_media")) {
             int quotaLimit = quotaByChannel.getOrDefault(channel, 0);
             List<ProjectChannelAllocationProjectRow> activeProjects =
                     projectChannelAllocationMapper.activeProjectRowsForUpdate(companyId, channel, null);
