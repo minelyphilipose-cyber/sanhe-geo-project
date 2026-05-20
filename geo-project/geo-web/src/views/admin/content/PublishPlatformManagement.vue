@@ -593,8 +593,8 @@ const activeCategory = computed(() => categories.find((item) => item.code === ac
 const agentFallbackTarget = computed(() => staticTargets.find((item) => item.categoryCode === 'agent_site'))
 
 const agentTargets = computed<TargetConfig[]>(() => {
-  const site = publishSites.value.find((item) => item.integrationMethod === 'brand_geo_site' || item.siteCode === 'agent_official_site')
-  if (site) return [toAgentTarget(site)]
+  const sites = publishSites.value.filter((item) => item.integrationMethod === 'brand_geo_site' || item.siteCode === 'agent_official_site')
+  if (sites.length) return sites.map((site) => toAgentTarget(site))
   return agentFallbackTarget.value ? [agentFallbackTarget.value] : []
 })
 
