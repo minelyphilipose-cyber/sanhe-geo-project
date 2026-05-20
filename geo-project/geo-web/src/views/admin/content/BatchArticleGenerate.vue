@@ -144,6 +144,18 @@
                         </div>
                         <div class="platform-desc">{{ platform.desc }}</div>
                         <div v-if="platform.meta" class="platform-meta">{{ platform.meta }}</div>
+                        <div v-if="!platform.disabled" class="platform-template-meta">
+                          <el-tooltip
+                            effect="dark"
+                            :content="platform.templates?.map((template) => template.templateName).join('、') || '暂无启用模板'"
+                            placement="top"
+                          >
+                            <button class="template-count-link" type="button" @click="openPlatformTemplates(platform)">
+                              可用模板 {{ platform.templateCount || 0 }} 个
+                            </button>
+                          </el-tooltip>
+                          <el-tag v-if="topic.platformAllocationModes[platform.value] === 'custom'" size="small" type="warning">自定义</el-tag>
+                        </div>
                         <div v-if="platform.disabledReason" class="platform-disabled-reason">{{ platform.disabledReason }}</div>
                         <el-input-number
                           v-model="topic.platformCounts[platform.value]"
@@ -152,6 +164,16 @@
                           :disabled="platform.disabled"
                           controls-position="right"
                         />
+                        <div class="platform-cell-actions">
+                          <el-button
+                            link
+                            type="primary"
+                            :disabled="platform.disabled || Number(topic.platformCounts[platform.value] || 0) <= 0"
+                            @click="openAllocationDialog(topic, platform)"
+                          >
+                            展开配置
+                          </el-button>
+                        </div>
                       </div>
                     </div>
                   </section>
@@ -192,6 +214,43 @@
         </ul>
       </aside>
     </main>
+
+    <el-dialog v-model="allocationDialogVisible" title="模板分配配置" width="760px">
+      <div v-if="allocationTopic && allocationPlatform" class="allocation-dialog">
+        <div class="allocation-summary">
+          <div>
+            <strong>{{ allocationTopic.topic }}</strong>
+            <span>{{ allocationPlatform.label }}，共 {{ allocationTopic.platformCounts[allocationPlatform.value] || 0 }} 篇</span>
+          </div>
+          <el-segmented v-model="allocationMode" :options="allocationModeOptions" @change="handleAllocationModeChange" />
+        </div>
+        <DataState :loading="allocationPreviewLoading" :empty="!allocationPreviewLoading && allocationRows.length === 0" empty-text="当前平台暂无可用模板">
+          <el-table :data="allocationRows" border>
+            <el-table-column prop="templateName" label="模板" min-width="220" show-overflow-tooltip />
+            <el-table-column prop="articleTypeName" label="文章类型" width="120" />
+            <el-table-column label="官网归属" width="110">
+              <template #default="{ row }">{{ agentSiteModuleText(row.agentSiteModule) }}</template>
+            </el-table-column>
+            <el-table-column label="数量" width="180">
+              <template #default="{ row }">
+                <el-input-number
+                  v-model="row.count"
+                  :min="0"
+                  :max="MAX_BATCH_ARTICLE_COUNT"
+                  size="small"
+                  controls-position="right"
+                  :disabled="allocationMode === 'auto'"
+                />
+              </template>
+            </el-table-column>
+          </el-table>
+        </DataState>
+      </div>
+      <template #footer>
+        <el-button @click="allocationDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="confirmAllocationDialog">确认</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="batchQuestionPickerVisible" title="选择主题问题词" width="960px">
       <div class="question-picker-toolbar">
@@ -255,11 +314,19 @@
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Back, Check, Delete } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import type { TableInstance } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import type { Brand, KeywordGroup, KeywordGroupQuestion, Project, PublishSite } from '@/types'
-import { createBatchContentArticles } from '@/api/content'
+import {
+  createBatchContentArticles,
+  getArticleGenerationOptions,
+  previewArticleTemplateAllocation,
+  type ArticleGenerationOptions,
+  type ArticleGenerationTemplateOption,
+  type BatchArticleGenerateNotice,
+  type BatchArticleGenerateTemplateCount,
+} from '@/api/content'
 import { getBrandDetail } from '@/api/customer'
 import { getPublishSites } from '@/api/publishSite'
 import { getKeywordGroupQuestions, getProjectDetail, getProjectList } from '@/api/project'
@@ -269,6 +336,11 @@ interface ContentStyleOption {
   label: string
   desc: string
   icon: string
+  contentStyle: string
+  channelGroupCode: string
+  channelSubCode?: string | null
+  templateCount?: number
+  templates?: ArticleGenerationTemplateOption[]
   iconUrl?: string | null
   meta?: string
   disabled?: boolean
@@ -303,6 +375,9 @@ interface SelectedTopic {
   keywordGroupId?: number
   keywordGroupName?: string
   platformCounts: Record<string, number>
+  platformAllocationModes: Record<string, 'auto' | 'custom'>
+  platformTemplateCounts: Record<string, BatchArticleGenerateTemplateCount[]>
+  platformPreviewCounts: Record<string, BatchArticleGenerateTemplateCount[]>
 }
 
 const STATIC_PLATFORM_GROUPS: PlatformGroup[] = [
@@ -311,10 +386,10 @@ const STATIC_PLATFORM_GROUPS: PlatformGroup[] = [
     label: '自媒体平台',
     desc: '面向账号内容分发，按平台阅读习惯生成不同表达。',
     platforms: [
-      { value: 'toutiao', label: '今日头条', desc: '泛资讯阅读，结论前置', icon: '头' },
-      { value: 'wechat', label: '公众号', desc: '完整长文，结构稳', icon: '公' },
-      { value: 'zhihu', label: '知乎', desc: '问题回答，判断清晰', icon: '知' },
-      { value: 'douyin_image_text', label: '抖音图文', desc: '图文卡片式阅读', icon: '抖' },
+      { value: 'self_media:toutiao', label: '今日头条', desc: '泛资讯阅读，结论前置', icon: '头', contentStyle: 'toutiao', channelGroupCode: 'self_media', channelSubCode: 'toutiao' },
+      { value: 'self_media:wechat', label: '公众号', desc: '完整长文，结构稳', icon: '公', contentStyle: 'wechat', channelGroupCode: 'self_media', channelSubCode: 'wechat' },
+      { value: 'self_media:zhihu', label: '知乎', desc: '问题回答，判断清晰', icon: '知', contentStyle: 'zhihu', channelGroupCode: 'self_media', channelSubCode: 'zhihu' },
+      { value: 'self_media:douyin_image_text', label: '抖音图文', desc: '图文卡片式阅读', icon: '抖', contentStyle: 'douyin_image_text', channelGroupCode: 'self_media', channelSubCode: 'douyin_image_text' },
     ],
   },
   {
@@ -328,8 +403,8 @@ const STATIC_PLATFORM_GROUPS: PlatformGroup[] = [
     label: '外部媒体与社区',
     desc: '面向媒体投放、社区讨论或专业商务场景。',
     platforms: [
-      { value: 'authority_media', label: '权威媒体', desc: '正式审慎，事实边界', icon: '权' },
-      { value: 'forum', label: '论坛', desc: '垂直社区讨论感', icon: '坛' },
+      { value: 'authority_media:industry_media', label: '权威媒体', desc: '正式审慎，事实边界', icon: '权', contentStyle: 'authority_media', channelGroupCode: 'authority_media', channelSubCode: 'industry_media' },
+      { value: 'forum:', label: '论坛', desc: '垂直社区讨论感', icon: '坛', contentStyle: 'forum', channelGroupCode: 'forum', channelSubCode: null },
     ],
   },
 ]
@@ -342,13 +417,26 @@ const batchSubmitting = ref(false)
 const projectOptions = ref<Project[]>([])
 const publishSites = ref<PublishSite[]>([])
 const selectedBrand = ref<Brand | null>(null)
+const generationOptions = ref<ArticleGenerationOptions | null>(null)
 const batchQuestionPickerVisible = ref(false)
 const batchQuestionPickerLoading = ref(false)
+const allocationDialogVisible = ref(false)
+const allocationPreviewLoading = ref(false)
 const batchQuestionRows = ref<ArticleQuestionOption[]>([])
 const selectedQuestionRows = ref<ArticleQuestionOption[]>([])
 const questionTableRef = ref<TableInstance>()
 const selectedTopics = ref<SelectedTopic[]>([])
 const manualTopicInput = ref('')
+const allocationMode = ref<'auto' | 'custom'>('auto')
+const allocationRows = ref<Array<BatchArticleGenerateTemplateCount & {
+  templateName?: string
+  articleTypeName?: string | null
+  agentSiteModule?: string | null
+}>>([])
+const allocationTarget = reactive({
+  topicId: '',
+  platformValue: '',
+})
 
 const batchForm = reactive({
   projectId: undefined as number | undefined,
@@ -358,6 +446,10 @@ const batchQuestionFilters = reactive({
   keyword: '',
   scene: 'all',
 })
+const allocationModeOptions = [
+  { label: '自动分配', value: 'auto' },
+  { label: '自定义数量', value: 'custom' },
+]
 
 const platformGroups = computed(() => buildPlatformGroups())
 const platformOptions = computed(() => platformGroups.value.flatMap((group) => group.platforms))
@@ -370,6 +462,8 @@ const projectCascadeProps = {
 }
 const projectCascadeOptions = computed(() => buildProjectCascadeOptions(projectOptions.value))
 const selectedBatchProject = computed(() => projectOptions.value.find((project) => project.id === batchForm.projectId) || null)
+const allocationTopic = computed(() => selectedTopics.value.find((topic) => topic.id === allocationTarget.topicId) || null)
+const allocationPlatform = computed(() => platformOptions.value.find((platform) => platform.value === allocationTarget.platformValue) || null)
 const filteredBatchQuestionRows = computed(() => {
   const keyword = batchQuestionFilters.keyword.trim()
   return batchQuestionRows.value.filter((row) => {
@@ -402,12 +496,32 @@ function createPlatformCounts() {
   return Object.fromEntries(platformOptions.value.map((platform) => [platform.value, 0])) as Record<string, number>
 }
 
+function createPlatformAllocationModes() {
+  return Object.fromEntries(platformOptions.value.map((platform) => [platform.value, 'auto'])) as Record<string, 'auto' | 'custom'>
+}
+
+function createPlatformTemplateCounts() {
+  return Object.fromEntries(platformOptions.value.map((platform) => [platform.value, []])) as Record<string, BatchArticleGenerateTemplateCount[]>
+}
+
+function syncTopicPlatformKeys() {
+  for (const topic of selectedTopics.value) {
+    for (const platform of platformOptions.value) {
+      if (topic.platformCounts[platform.value] == null) topic.platformCounts[platform.value] = 0
+      if (!topic.platformAllocationModes[platform.value]) topic.platformAllocationModes[platform.value] = 'auto'
+      if (!topic.platformTemplateCounts[platform.value]) topic.platformTemplateCounts[platform.value] = []
+      if (!topic.platformPreviewCounts[platform.value]) topic.platformPreviewCounts[platform.value] = []
+    }
+  }
+}
+
 async function handleBatchProjectChange() {
   selectedTopics.value = []
   selectedQuestionRows.value = []
   batchQuestionRows.value = []
   manualTopicInput.value = ''
   await loadSelectedBrand()
+  syncTopicPlatformKeys()
 }
 
 function addManualTopic() {
@@ -424,6 +538,9 @@ function addManualTopic() {
       source: 'manual',
       topic,
       platformCounts: createPlatformCounts(),
+      platformAllocationModes: createPlatformAllocationModes(),
+      platformTemplateCounts: createPlatformTemplateCounts(),
+      platformPreviewCounts: createPlatformTemplateCounts(),
     })) {
       added += 1
     }
@@ -449,25 +566,140 @@ function removeTopic(topicId: string) {
 function setTopicPreset(topic: SelectedTopic, count: number) {
   for (const platform of activePlatformOptions.value) {
     topic.platformCounts[platform.value] = count
+    topic.platformAllocationModes[platform.value] = 'auto'
   }
 }
 
 function clearTopicCounts(topic: SelectedTopic) {
   for (const platform of platformOptions.value) {
     topic.platformCounts[platform.value] = 0
+    topic.platformTemplateCounts[platform.value] = []
+    topic.platformPreviewCounts[platform.value] = []
+    topic.platformAllocationModes[platform.value] = 'auto'
   }
 }
 
 function setPlatformGroupPreset(topic: SelectedTopic, group: PlatformGroup, count: number) {
   for (const platform of group.platforms.filter((item) => !item.disabled)) {
     topic.platformCounts[platform.value] = count
+    topic.platformAllocationModes[platform.value] = 'auto'
   }
 }
 
 function clearPlatformGroupCounts(topic: SelectedTopic, group: PlatformGroup) {
   for (const platform of group.platforms) {
     topic.platformCounts[platform.value] = 0
+    topic.platformTemplateCounts[platform.value] = []
+    topic.platformPreviewCounts[platform.value] = []
+    topic.platformAllocationModes[platform.value] = 'auto'
   }
+}
+
+async function openAllocationDialog(topic: SelectedTopic, platform: ContentStyleOption) {
+  const count = Number(topic.platformCounts[platform.value] || 0)
+  if (count <= 0) {
+    ElMessage.warning('请先填写该平台的生成数量')
+    return
+  }
+  allocationTarget.topicId = topic.id
+  allocationTarget.platformValue = platform.value
+  allocationMode.value = topic.platformAllocationModes[platform.value] || 'auto'
+  allocationDialogVisible.value = true
+  if (allocationMode.value === 'custom' && topic.platformTemplateCounts[platform.value]?.length) {
+    allocationRows.value = hydrateTemplateRows(platform, topic.platformTemplateCounts[platform.value])
+    return
+  }
+  await loadAllocationPreview(topic, platform)
+}
+
+async function handleAllocationModeChange() {
+  const topic = allocationTopic.value
+  const platform = allocationPlatform.value
+  if (!topic || !platform) return
+  if (allocationMode.value === 'auto') {
+    await loadAllocationPreview(topic, platform)
+    return
+  }
+  if (!allocationRows.value.length) {
+    allocationRows.value = hydrateTemplateRows(platform, platform.templates?.map((template) => ({
+      templateId: template.templateId,
+      templateVersionId: template.templateVersionId,
+      count: 0,
+    })) || [])
+  }
+}
+
+async function loadAllocationPreview(topic: SelectedTopic, platform: ContentStyleOption) {
+  allocationPreviewLoading.value = true
+  try {
+    const count = Number(topic.platformCounts[platform.value] || 0)
+    const { data } = await previewArticleTemplateAllocation({
+      channelGroupCode: platform.channelGroupCode,
+      channelSubCode: platform.channelSubCode || null,
+      count,
+    })
+    allocationRows.value = data.data.items.map((item) => ({
+      templateId: item.templateId,
+      templateVersionId: item.templateVersionId,
+      templateName: item.templateName,
+      articleTypeName: item.articleTypeName,
+      agentSiteModule: item.agentSiteModule,
+      count: item.count,
+    }))
+    topic.platformPreviewCounts[platform.value] = allocationRows.value.map(toTemplateCount)
+  } catch (err) {
+    console.error(err)
+    allocationRows.value = []
+    ElMessage.error('预览模板分配失败')
+  } finally {
+    allocationPreviewLoading.value = false
+  }
+}
+
+function hydrateTemplateRows(platform: ContentStyleOption, counts: BatchArticleGenerateTemplateCount[]) {
+  const templateMap = new Map((platform.templates || []).map((template) => [template.templateId, template]))
+  return counts.map((item) => {
+    const template = templateMap.get(item.templateId)
+    return {
+      ...item,
+      templateVersionId: item.templateVersionId || template?.templateVersionId,
+      templateName: template?.templateName || `模板 #${item.templateId}`,
+      articleTypeName: template?.articleTypeName,
+      agentSiteModule: template?.agentSiteModule,
+    }
+  })
+}
+
+function confirmAllocationDialog() {
+  const topic = allocationTopic.value
+  const platform = allocationPlatform.value
+  if (!topic || !platform) return
+  const rows = allocationRows.value.map(toTemplateCount).filter((item) => item.count > 0)
+  if (allocationMode.value === 'custom') {
+    const total = rows.reduce((sum, item) => sum + item.count, 0)
+    topic.platformCounts[platform.value] = total
+    topic.platformTemplateCounts[platform.value] = rows
+    topic.platformAllocationModes[platform.value] = 'custom'
+  } else {
+    topic.platformPreviewCounts[platform.value] = rows
+    topic.platformTemplateCounts[platform.value] = []
+    topic.platformAllocationModes[platform.value] = 'auto'
+  }
+  allocationDialogVisible.value = false
+}
+
+function toTemplateCount(row: BatchArticleGenerateTemplateCount): BatchArticleGenerateTemplateCount {
+  return {
+    templateId: row.templateId,
+    templateVersionId: row.templateVersionId,
+    count: Number(row.count || 0),
+    extraPrompt: row.extraPrompt,
+  }
+}
+
+function agentSiteModuleText(value?: string | null) {
+  if (!value) return '-'
+  return ({ faq: 'FAQ', knowledge: '知识库', product: '产品服务' } as Record<string, string>)[value] || value
 }
 
 async function loadProjectOptions() {
@@ -487,11 +719,17 @@ async function loadProjectOptions() {
 async function loadPublishPlatformOptions() {
   platformLoading.value = true
   try {
-    const { data } = await getPublishSites({ status: 'active' })
+    const [{ data }, optionResponse] = await Promise.all([
+      getPublishSites({ status: 'active' }),
+      getArticleGenerationOptions(),
+    ])
     publishSites.value = data.data || []
+    generationOptions.value = optionResponse.data.data
+    syncTopicPlatformKeys()
   } catch (err) {
     console.error(err)
     publishSites.value = []
+    generationOptions.value = null
     ElMessage.error('加载发布平台失败')
   } finally {
     platformLoading.value = false
@@ -512,6 +750,14 @@ async function loadSelectedBrand() {
 }
 
 function buildPlatformGroups(): PlatformGroup[] {
+  if (generationOptions.value?.groups?.length) {
+    return generationOptions.value.groups.map((group) => ({
+      key: group.groupCode,
+      label: group.label,
+      desc: group.description,
+      platforms: group.channels.map((channel) => buildChannelOption(channel)),
+    }))
+  }
   const groups = STATIC_PLATFORM_GROUPS.map((group) => ({
     ...group,
     platforms: [...group.platforms],
@@ -526,38 +772,93 @@ function buildPlatformGroups(): PlatformGroup[] {
   return groups
 }
 
-function buildAgentSiteOption(): ContentStyleOption {
+function buildChannelOption(channel: ArticleGenerationOptions['groups'][number]['channels'][number]): ContentStyleOption {
+  const value = `${channel.channelGroupCode}:${channel.channelSubCode || ''}`
+  const option: ContentStyleOption = {
+    value,
+    label: channel.label,
+    desc: channel.description,
+    icon: channelIcon(channel.channelGroupCode, channel.channelSubCode),
+    contentStyle: channel.contentStyle,
+    channelGroupCode: channel.channelGroupCode,
+    channelSubCode: channel.channelSubCode || null,
+    templateCount: channel.templateCount,
+    templates: channel.templates || [],
+    disabled: !channel.enabled,
+    disabledReason: channel.disabledReason || undefined,
+  }
+  if (channel.channelGroupCode === 'agent_site') {
+    return { ...option, ...buildAgentSiteOption(option) }
+  }
+  if (channel.channelGroupCode === 'industry_site') {
+    return { ...option, ...buildIndustrySiteOption(option) }
+  }
+  return option
+}
+
+function buildAgentSiteOption(base?: ContentStyleOption): ContentStyleOption {
   const agentSite = findAgentPublishSite()
   const geoSiteCode = selectedBrand.value?.geoSiteCode?.trim()
   const isActive = selectedBrand.value?.geoSiteStatus === 'active'
   const disabled = !geoSiteCode || !isActive
   return {
-    value: 'agent_site_article',
-    label: 'Agent 官网',
-    desc: '官网文章风格，适合品牌自有 GEO 站点发布',
-    icon: 'A',
+    value: base?.value || 'agent_site:',
+    label: base?.label || 'Agent 官网',
+    desc: base?.desc || '官网文章风格，适合品牌自有 GEO 站点发布',
+    icon: base?.icon || 'A',
+    contentStyle: base?.contentStyle || 'agent_site_article',
+    channelGroupCode: 'agent_site',
+    channelSubCode: null,
+    templateCount: base?.templateCount,
+    templates: base?.templates,
     iconUrl: agentSite?.iconUrl || null,
     meta: geoSiteCode ? `绑定站点：${geoSiteCode}` : undefined,
-    disabled,
-    disabledReason: disabled ? '当前品牌未绑定可用 Agent 官网' : undefined,
+    disabled: disabled || base?.disabled,
+    disabledReason: disabled ? '当前品牌未绑定可用 Agent 官网' : base?.disabledReason,
   }
 }
 
-function buildIndustrySiteOption(): ContentStyleOption {
+function buildIndustrySiteOption(base?: ContentStyleOption): ContentStyleOption {
   const brand = selectedBrand.value
   const site = findIndustryPublishSite(brand?.industrySiteCode, brand?.industrySiteName)
-  const label = brand?.industrySiteName || site?.siteName || '行业资讯站'
+  const label = brand?.industrySiteName || site?.siteName || base?.label || '行业资讯站'
   const disabled = !brand?.industrySiteCode && !brand?.industrySiteName
   return {
-    value: 'industry_site',
+    value: base?.value || 'industry_site:',
     label,
-    desc: '行业资讯站稿件，客观中立、可检索、可引用',
-    icon: '讯',
+    desc: base?.desc || '行业资讯站稿件，客观中立、可检索、可引用',
+    icon: base?.icon || '讯',
+    contentStyle: base?.contentStyle || 'industry_site',
+    channelGroupCode: 'industry_site',
+    channelSubCode: null,
+    templateCount: base?.templateCount,
+    templates: base?.templates,
     iconUrl: site?.iconUrl || null,
     meta: buildSiteMeta(site, brand?.industrySiteCode),
-    disabled,
-    disabledReason: disabled ? '当前品牌未绑定行业资讯站' : undefined,
+    disabled: disabled || base?.disabled,
+    disabledReason: disabled ? '当前品牌未绑定行业资讯站' : base?.disabledReason,
   }
+}
+
+function channelIcon(group: string, sub?: string | null) {
+  const icons: Record<string, string> = {
+    agent_site: 'A',
+    industry_site: '讯',
+    forum: '坛',
+    toutiao: '头',
+    wechat: '公',
+    zhihu: '知',
+    douyin_image_text: '抖',
+    xiaohongshu: '红',
+    baijiahao: '百',
+    industry_media: '行',
+    local_media: '地',
+    finance_media: '财',
+    tech_media: '科',
+    news_source: '新',
+    portal_media: '门',
+  }
+  return icons[sub || group] || '文'
 }
 
 function findAgentPublishSite() {
@@ -581,6 +882,17 @@ function buildSiteMeta(site?: PublishSite | null, fallbackCode?: string | null) 
   if (site?.siteName) return `站点：${site.siteName}`
   if (fallbackCode) return `绑定站点：${fallbackCode}`
   return undefined
+}
+
+function openPlatformTemplates(platform: ContentStyleOption) {
+  const query: Record<string, string> = {
+    channelGroupCode: platform.channelGroupCode,
+    status: 'active',
+  }
+  if (platform.channelSubCode) {
+    query.channelSubCode = platform.channelSubCode
+  }
+  router.push({ name: 'ArticlePromptTemplates', query })
 }
 
 function mergeProjects(primary: Project[], secondary: Project[]) {
@@ -729,6 +1041,9 @@ function confirmSelectedBatchQuestions() {
       keywordGroupId: question.groupId,
       keywordGroupName: question.groupName,
       platformCounts: createPlatformCounts(),
+      platformAllocationModes: createPlatformAllocationModes(),
+      platformTemplateCounts: createPlatformTemplateCounts(),
+      platformPreviewCounts: createPlatformTemplateCounts(),
     })) {
       added += 1
     }
@@ -780,10 +1095,18 @@ async function submitBatchGeneration() {
     topicAsQuestion: topic.topicAsQuestion,
     keywordGroupId: topic.keywordGroupId,
     keywordGroupName: topic.keywordGroupName,
-    platforms: activePlatformOptions.value.map((platform) => ({
-      contentStyle: platform.value,
-      count: Number(topic.platformCounts[platform.value] || 0),
-    })),
+    platforms: activePlatformOptions.value.map((platform) => {
+      const mode = topic.platformAllocationModes[platform.value] || 'auto'
+      return {
+        contentStyle: platform.contentStyle,
+        channelGroupCode: platform.channelGroupCode,
+        channelSubCode: platform.channelSubCode || undefined,
+        allocationMode: mode,
+        count: Number(topic.platformCounts[platform.value] || 0),
+        templateCounts: mode === 'custom' ? topic.platformTemplateCounts[platform.value] || [] : undefined,
+        previewTemplateCounts: mode === 'auto' ? topic.platformPreviewCounts[platform.value] || [] : undefined,
+      }
+    }),
   }))
   batchSubmitting.value = true
   try {
@@ -792,7 +1115,12 @@ async function submitBatchGeneration() {
       topicSource: selectedTopics.value.some((topic) => topic.source === 'keyword_group') ? 'keyword_group' : 'manual',
       topics: payloadTopics,
     })
-    ElMessage.success(`已提交批量生成任务，预计生成 ${data.data.totalCount} 篇文章`)
+    const notices = data.data.notices || []
+    if (notices.length) {
+      await showGenerationNotices(data.data.totalCount, notices)
+    } else {
+      ElMessage.success(`已提交批量生成任务，预计生成 ${data.data.totalCount} 篇文章`)
+    }
     router.push('/admin/content/execution')
   } catch (err) {
     console.error(err)
@@ -800,6 +1128,27 @@ async function submitBatchGeneration() {
   } finally {
     batchSubmitting.value = false
   }
+}
+
+async function showGenerationNotices(totalCount: number, notices: BatchArticleGenerateNotice[]) {
+  const detailHtml = notices.flatMap((notice) => notice.items?.map((item) => {
+    const channel = [item.channelGroupCode, item.channelSubCode].filter(Boolean).join(' / ')
+    const after = item.after?.map((count) => `${count.templateName || `模板 #${count.templateId}`}：${count.count} 篇`).join('，')
+    const reason = item.reason ? `，原因：${item.reason}` : ''
+    return `<li>${item.topic || '-'}｜${channel || '-'}${item.templateId ? `｜模板 #${item.templateId}` : ''}${reason}${after ? `<br/>实际分配：${after}` : ''}</li>`
+  }) || []).join('')
+  await ElMessageBox.alert(
+    `<div class="generation-notice-box">
+      <p>生成任务已创建，共 ${totalCount} 篇。注意：因模板池有变化，实际分配与预览可能不一致。</p>
+      <ul>${detailHtml || '<li>后端已按最新可用模板完成分配。</li>'}</ul>
+    </div>`,
+    '生成任务已创建',
+    {
+      dangerouslyUseHTMLString: true,
+      confirmButtonText: '知道了',
+      type: 'warning',
+    },
+  )
 }
 
 function goBack() {
@@ -1179,11 +1528,36 @@ onMounted(() => {
 }
 
 .platform-meta,
+.platform-template-meta,
 .platform-disabled-reason {
   margin: -4px 0 10px;
   font-size: 12px;
   line-height: 1.45;
   color: var(--text-tertiary);
+}
+
+.platform-template-meta {
+  margin-top: -2px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #2563eb;
+}
+
+.template-count-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #2563eb;
+  font: inherit;
+  cursor: pointer;
+}
+
+.template-count-link:hover {
+  color: #1d4ed8;
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .platform-disabled-reason {
@@ -1192,6 +1566,40 @@ onMounted(() => {
 
 .platform-cell :deep(.el-input-number) {
   width: 100%;
+}
+
+.platform-cell-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.allocation-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.allocation-summary {
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  background: #f8fafc;
+}
+
+.allocation-summary strong,
+.allocation-summary span {
+  display: block;
+}
+
+.allocation-summary span {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .side-panel {

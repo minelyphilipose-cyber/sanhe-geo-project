@@ -22,6 +22,13 @@ public class ArticleDraft {
     private Integer generationSlotNo;
     private String articleType;
     private String contentStyle;
+    private String channelGroupCode;
+    private String channelSubCode;
+    private String agentSiteModule;
+    private String articleTypeCode;
+    private Long promptTemplateId;
+    private Long promptTemplateVersionId;
+    private String allocationMode;
     private String topic;
     private String topicAsQuestion;
     private String title;

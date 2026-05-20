@@ -558,6 +558,7 @@ const CONTENT_STYLE_OPTIONS: ContentStyleOption[] = [
   { value: 'douyin_image_text', label: '抖音图文', desc: '钩子开头，适合卡片拆分', icon: '抖' },
   { value: 'zhihu', label: '知乎风格', desc: '问题导向，论据充分', icon: '知' },
   { value: 'xiaohongshu', label: '小红书风格', desc: '自然种草，清单友好', icon: '红' },
+  { value: 'baijiahao', label: '百家号风格', desc: '搜索收录友好，信息密度高', icon: '百' },
   { value: 'linkedin', label: '领英风格', desc: '商务专业，重视洞察', icon: '领' },
 ]
 

@@ -380,6 +380,7 @@ function contentStyleLabel(v?: string | null) {
     authority_media: '权威媒体',
     forum: '论坛',
     xiaohongshu: '小红书',
+    baijiahao: '百家号',
   }
   return map[v] || v
 }

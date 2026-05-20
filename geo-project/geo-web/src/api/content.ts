@@ -83,7 +83,22 @@ export function previewAiContentArticleDraft(data: ArticleAiDraftPreviewRequest)
 }
 
 export interface BatchArticleGeneratePlatform {
-  contentStyle: string
+  contentStyle?: string
+  channelGroupCode?: string
+  channelSubCode?: string | null
+  allocationMode?: 'auto' | 'custom'
+  agentSiteModule?: string | null
+  articleTypeCode?: string | null
+  count: number
+  extraPrompt?: string
+  templateCounts?: BatchArticleGenerateTemplateCount[]
+  previewTemplateCounts?: BatchArticleGenerateTemplateCount[]
+}
+
+export interface BatchArticleGenerateTemplateCount {
+  templateId: number
+  templateVersionId?: number
+  templateName?: string
   count: number
   extraPrompt?: string
 }
@@ -106,10 +121,195 @@ export interface BatchArticleGenerateResponse {
   batchId: number
   totalCount: number
   status: string
+  allocationChanged?: boolean
+  customSkipped?: boolean
+  notices?: BatchArticleGenerateNotice[]
+}
+
+export interface BatchArticleGenerateNotice {
+  type: string
+  level: 'warning' | 'info' | string
+  message: string
+  items?: BatchArticleGenerateNoticeItem[]
+}
+
+export interface BatchArticleGenerateNoticeItem {
+  topic?: string
+  channelGroupCode?: string
+  channelSubCode?: string
+  templateId?: number
+  templateName?: string
+  requestedCount?: number
+  reason?: string
+  before?: BatchArticleGenerateTemplateCount[]
+  after?: BatchArticleGenerateTemplateCount[]
 }
 
 export function createBatchContentArticles(data: BatchArticleGenerateRequest) {
   return request.post<R<BatchArticleGenerateResponse>>('/content/articles/batch-generate', data)
+}
+
+export interface ArticlePromptTemplate {
+  id: number
+  name: string
+  description?: string | null
+  channelGroupCode: string
+  channelGroupName?: string | null
+  channelSubCode?: string | null
+  channelSubName?: string | null
+  agentSiteModule?: string | null
+  articleTypeCode: string
+  articleTypeName?: string | null
+  status: 'draft' | 'active' | 'disabled' | string
+  weight: number
+  sortOrder: number
+  sampleOutputUrl?: string | null
+  contactDisclosureMode?: 'full' | 'soft_hint' | 'brand_only' | 'none' | string | null
+  currentVersionId?: number | null
+  currentVersionNo?: number | null
+  updatedAt?: string | null
+  createdAt?: string | null
+}
+
+export interface ArticlePromptTemplateVersion {
+  id: number
+  templateId: number
+  versionNo: number
+  status: 'draft' | 'published' | 'archived' | string
+  systemPrompt: string
+  userPromptTemplate: string
+  changeNote?: string | null
+  createdAt?: string | null
+  publishedAt?: string | null
+}
+
+export interface ArticlePromptTemplateDetail extends ArticlePromptTemplate {
+  versions: ArticlePromptTemplateVersion[]
+}
+
+export interface ArticlePromptTemplateSaveRequest {
+  name: string
+  description?: string
+  channelGroupCode: string
+  channelSubCode?: string | null
+  agentSiteModule?: string | null
+  articleTypeCode: string
+  status: 'draft' | 'active' | 'disabled' | string
+  weight: number
+  sortOrder: number
+  sampleOutputUrl?: string | null
+  contactDisclosureMode?: 'full' | 'soft_hint' | 'brand_only' | 'none' | string | null
+  systemPrompt: string
+  userPromptTemplate: string
+  changeNote?: string
+}
+
+export interface ArticleGenerationTemplateOption {
+  templateId: number
+  templateVersionId: number
+  templateName: string
+  channelGroupCode: string
+  channelSubCode?: string | null
+  agentSiteModule?: string | null
+  articleTypeCode: string
+  articleTypeName?: string | null
+  weight: number
+  sortOrder: number
+}
+
+export interface ArticleGenerationChannelOption {
+  channelGroupCode: string
+  channelGroupName: string
+  channelSubCode?: string | null
+  channelSubName?: string | null
+  label: string
+  description: string
+  contentStyle: string
+  enabled: boolean
+  disabledReason?: string | null
+  templateCount: number
+  templates: ArticleGenerationTemplateOption[]
+}
+
+export interface ArticleGenerationChannelGroup {
+  groupCode: string
+  label: string
+  description: string
+  channels: ArticleGenerationChannelOption[]
+}
+
+export interface ArticleGenerationOptions {
+  groups: ArticleGenerationChannelGroup[]
+}
+
+export interface ArticleAllocationItem {
+  templateId: number
+  templateVersionId: number
+  templateName: string
+  articleTypeCode: string
+  articleTypeName?: string | null
+  agentSiteModule?: string | null
+  weight: number
+  count: number
+}
+
+export interface ArticleAllocationPreviewResponse {
+  channelGroupCode: string
+  channelSubCode?: string | null
+  totalCount: number
+  items: ArticleAllocationItem[]
+}
+
+export function getArticlePromptTemplates(params?: {
+  channelGroupCode?: string
+  channelSubCode?: string
+  agentSiteModule?: string
+  status?: string
+  keyword?: string
+  current?: number
+  size?: number
+}) {
+  return request.get<R<PageResult<ArticlePromptTemplate>>>('/content/article-prompt-templates', { params })
+}
+
+export function getArticlePromptTemplate(id: number) {
+  return request.get<R<ArticlePromptTemplateDetail>>(`/content/article-prompt-templates/${id}`)
+}
+
+export function createArticlePromptTemplate(data: ArticlePromptTemplateSaveRequest) {
+  return request.post<R<ArticlePromptTemplateDetail>>('/content/article-prompt-templates', data)
+}
+
+export function updateArticlePromptTemplate(id: number, data: ArticlePromptTemplateSaveRequest) {
+  return request.put<R<ArticlePromptTemplateDetail>>(`/content/article-prompt-templates/${id}`, data)
+}
+
+export function updateArticlePromptTemplateWeight(id: number, data: { weight: number }) {
+  return request.patch<R<ArticlePromptTemplate>>(`/content/article-prompt-templates/${id}/weight`, data)
+}
+
+export function createArticlePromptTemplateVersion(id: number, data: {
+  systemPrompt: string
+  userPromptTemplate: string
+  changeNote?: string
+}) {
+  return request.post<R<ArticlePromptTemplateDetail>>(`/content/article-prompt-templates/${id}/versions`, data)
+}
+
+export function publishArticlePromptTemplateVersion(id: number, versionId: number) {
+  return request.post<R<ArticlePromptTemplateDetail>>(`/content/article-prompt-templates/${id}/versions/${versionId}/publish`)
+}
+
+export function getArticleGenerationOptions() {
+  return request.get<R<ArticleGenerationOptions>>('/content/article-prompt-templates/generation-options')
+}
+
+export function previewArticleTemplateAllocation(data: {
+  channelGroupCode: string
+  channelSubCode?: string | null
+  count: number
+}) {
+  return request.post<R<ArticleAllocationPreviewResponse>>('/content/article-prompt-templates/preview-allocation', data)
 }
 
 export function deleteContentArticle(articleId: number) {

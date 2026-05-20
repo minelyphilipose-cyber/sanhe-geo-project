@@ -120,6 +120,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '批量生成文章', hidden: true, permissions: ['project.read'] },
     },
     {
+      path: 'content/article-prompt-templates',
+      name: 'ArticlePromptTemplates',
+      component: () => import('@/views/admin/content/ArticlePromptTemplates.vue'),
+      meta: { title: '文章提示词模板', hidden: true, permissions: ['project.read'] },
+    },
+    {
       path: 'content/articles/batch-publish',
       name: 'BatchArticlePublish',
       component: () => import('@/views/admin/content/BatchArticlePublish.vue'),

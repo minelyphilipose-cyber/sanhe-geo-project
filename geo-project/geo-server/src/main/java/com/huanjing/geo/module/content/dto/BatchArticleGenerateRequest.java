@@ -42,17 +42,58 @@ public class BatchArticleGenerateRequest {
         private String topicAsQuestion;
 
         @NotEmpty
-        @Size(max = 9)
+        @Size(max = 16)
         @Valid
         private List<PlatformCount> platforms;
     }
 
     @Data
     public static class PlatformCount {
-        @NotBlank
+        @Size(max = 64)
+        private String channelGroupCode;
+
+        @Size(max = 64)
+        private String channelSubCode;
+
+        @Size(max = 16)
+        @Pattern(regexp = "auto|custom")
+        private String allocationMode;
+
+        @Size(max = 64)
+        private String articleTypeCode;
+
         @Size(max = 32)
-        @Pattern(regexp = "wechat|toutiao|douyin_image_text|zhihu|linkedin|agent_site_article|industry_site|authority_media|forum|xiaohongshu")
+        private String agentSiteModule;
+
+        private Long templateId;
+
+        private Long templateVersionId;
+
+        @Size(max = 64)
+        @Pattern(regexp = "^[a-z][a-z0-9_]{1,63}$")
         private String contentStyle;
+
+        @Min(0)
+        @Max(30)
+        private Integer count;
+
+        @Size(max = 3000)
+        private String extraPrompt;
+
+        @Valid
+        private List<TemplateCount> templateCounts;
+
+        @Valid
+        private List<TemplateCount> previewTemplateCounts;
+    }
+
+    @Data
+    public static class TemplateCount {
+        @NotNull
+        private Long templateId;
+
+        @NotNull
+        private Long templateVersionId;
 
         @Min(0)
         @Max(30)

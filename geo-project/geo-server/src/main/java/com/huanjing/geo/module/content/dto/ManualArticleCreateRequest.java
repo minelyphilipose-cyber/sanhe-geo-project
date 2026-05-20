@@ -15,8 +15,8 @@ public class ManualArticleCreateRequest {
     @NotBlank
     private String articleType;
     @NotBlank
-    @Size(max = 32)
-    @Pattern(regexp = "wechat|toutiao|douyin_image_text|zhihu|xiaohongshu|linkedin|agent_site_article|industry_site")
+    @Size(max = 64)
+    @Pattern(regexp = "^[a-z][a-z0-9_]{1,63}$")
     private String contentStyle;
     @NotBlank
     @Size(max = 1000)

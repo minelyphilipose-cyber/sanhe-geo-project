@@ -30,11 +30,13 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executor;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -92,6 +94,8 @@ class BatchArticlePublishServiceTest {
                 currentUserService,
                 contentDistributionService
         );
+        ReflectionTestUtils.setField(service, "batchPublishExecutor", (Executor) command -> {
+        });
 
         SysUser operator = new SysUser();
         operator.setId(100L);
@@ -266,7 +270,7 @@ class BatchArticlePublishServiceTest {
     void executeDueItems_revertsLockWhenAnotherPlatformItemStartsAfterLock() {
         BatchArticlePublishItem item = publishItem(1000L, "industry_site", "pending");
         when(itemMapper.selectList(any())).thenReturn(List.of(item));
-        when(itemMapper.selectCount(any())).thenReturn(0L, 1L);
+        when(itemMapper.selectCount(any())).thenReturn(0L, 0L, 1L);
         when(itemMapper.update(eq(null), any())).thenReturn(1);
 
         service.executeDueItems(20);

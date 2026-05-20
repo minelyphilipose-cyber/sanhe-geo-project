@@ -10,6 +10,7 @@ import com.huanjing.geo.common.llm.LlmInvokeResult;
 import com.huanjing.geo.common.llm.LlmInvoker;
 import com.huanjing.geo.common.llm.LlmModelConfig;
 import com.huanjing.geo.module.content.ContentErrorCodes;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
@@ -17,11 +18,15 @@ import com.huanjing.geo.module.content.dto.BatchArticleGenerationDetailResponse;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
 import com.huanjing.geo.module.content.entity.ArticleGenerationLog;
+import com.huanjing.geo.module.content.entity.ArticlePromptTemplate;
+import com.huanjing.geo.module.content.entity.ArticlePromptTemplateVersion;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationBatch;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
 import com.huanjing.geo.module.content.mapper.ArticleGenerationLogMapper;
+import com.huanjing.geo.module.content.mapper.ArticlePromptTemplateMapper;
+import com.huanjing.geo.module.content.mapper.ArticlePromptTemplateVersionMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationBatchMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
@@ -56,7 +61,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.concurrent.Executor;
 
 @Slf4j
@@ -73,15 +77,6 @@ public class BatchArticleGenerationService {
     private static final String DEFAULT_ARTICLE_TYPE = ArticleTypes.INDUSTRY_ARTICLE;
     private static final String DEFAULT_LENGTH = "medium";
     private static final int ARTICLE_REQUEST_TIMEOUT_MS = 120_000;
-    private static final Set<String> SUPPORTED_CONTENT_STYLES = Set.of(
-            "wechat", "toutiao", "douyin_image_text", "zhihu", "linkedin",
-            "agent_site_article", "industry_site", "authority_media", "forum", "xiaohongshu"
-    );
-    private static final Set<String> CREATABLE_CONTENT_STYLES = Set.of(
-            "wechat", "toutiao", "douyin_image_text", "zhihu", "linkedin",
-            "agent_site_article", "industry_site", "authority_media", "forum"
-    );
-
     private final ProjectMapper projectMapper;
     private final BrandMapper brandMapper;
     private final KeywordGroupMapper keywordGroupMapper;
@@ -91,6 +86,8 @@ public class BatchArticleGenerationService {
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
     private final ArticleGenerationLogMapper articleGenerationLogMapper;
+    private final ArticlePromptTemplateMapper promptTemplateMapper;
+    private final ArticlePromptTemplateVersionMapper promptTemplateVersionMapper;
     private final BatchArticleGenerationBatchMapper batchMapper;
     private final BatchArticleGenerationTaskMapper taskMapper;
     private final CurrentUserService currentUserService;
@@ -102,6 +99,7 @@ public class BatchArticleGenerationService {
     private final ArticleAiDraftPromptFilter promptFilter;
     private final BatchArticlePromptBuilder promptBuilder;
     private final BatchArticleQualityChecker qualityChecker;
+    private final ArticleTemplateAllocationService allocationService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
     private final Executor articleAiDraftExecutor;
@@ -115,6 +113,8 @@ public class BatchArticleGenerationService {
                                          ArticleDraftMapper articleDraftMapper,
                                          ArticleDraftVersionMapper articleDraftVersionMapper,
                                          ArticleGenerationLogMapper articleGenerationLogMapper,
+                                         ArticlePromptTemplateMapper promptTemplateMapper,
+                                         ArticlePromptTemplateVersionMapper promptTemplateVersionMapper,
                                          BatchArticleGenerationBatchMapper batchMapper,
                                          BatchArticleGenerationTaskMapper taskMapper,
                                          CurrentUserService currentUserService,
@@ -126,6 +126,7 @@ public class BatchArticleGenerationService {
                                          ArticleAiDraftPromptFilter promptFilter,
                                          BatchArticlePromptBuilder promptBuilder,
                                          BatchArticleQualityChecker qualityChecker,
+                                         ArticleTemplateAllocationService allocationService,
                                          ObjectMapper objectMapper,
                                          PlatformTransactionManager transactionManager,
                                          @Qualifier("articleAiDraftExecutor") Executor articleAiDraftExecutor) {
@@ -138,6 +139,8 @@ public class BatchArticleGenerationService {
         this.articleDraftMapper = articleDraftMapper;
         this.articleDraftVersionMapper = articleDraftVersionMapper;
         this.articleGenerationLogMapper = articleGenerationLogMapper;
+        this.promptTemplateMapper = promptTemplateMapper;
+        this.promptTemplateVersionMapper = promptTemplateVersionMapper;
         this.batchMapper = batchMapper;
         this.taskMapper = taskMapper;
         this.currentUserService = currentUserService;
@@ -149,6 +152,7 @@ public class BatchArticleGenerationService {
         this.promptFilter = promptFilter;
         this.promptBuilder = promptBuilder;
         this.qualityChecker = qualityChecker;
+        this.allocationService = allocationService;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.articleAiDraftExecutor = articleAiDraftExecutor;
@@ -165,7 +169,8 @@ public class BatchArticleGenerationService {
         }
 
         String topicSource = StringUtils.hasText(req.getTopicSource()) ? req.getTopicSource().trim() : "manual";
-        List<ValidatedTopic> topics = validateTopics(project.getId(), topicSource, req.getTopics());
+        List<BatchArticleGenerateResponse.Notice> notices = new ArrayList<>();
+        List<ValidatedTopic> topics = validateTopics(project.getId(), topicSource, req.getTopics(), notices);
         int totalCount = topics.stream()
                 .flatMap(topic -> topic.platforms().stream())
                 .mapToInt(platform -> platform.count() == null ? 0 : platform.count())
@@ -212,6 +217,13 @@ public class BatchArticleGenerationService {
                         task.setArticleType(DEFAULT_ARTICLE_TYPE);
                         task.setTone("");
                         task.setContentStyle(platform.contentStyle());
+                        task.setChannelGroupCode(platform.channelGroupCode());
+                        task.setChannelSubCode(platform.channelSubCode());
+                        task.setAgentSiteModule(platform.agentSiteModule());
+                        task.setArticleTypeCode(platform.articleTypeCode());
+                        task.setPromptTemplateId(platform.templateId());
+                        task.setPromptTemplateVersionId(platform.templateVersionId());
+                        task.setAllocationMode(platform.allocationMode());
                         task.setLength(DEFAULT_LENGTH);
                         task.setTopic(topic.topic());
                         task.setTopicAsQuestion(topic.topicAsQuestion());
@@ -230,7 +242,9 @@ public class BatchArticleGenerationService {
         }));
 
         articleAiDraftExecutor.execute(() -> runBatch(batchId));
-        return new BatchArticleGenerateResponse(batchId, totalCount, STATUS_PENDING);
+        boolean allocationChanged = notices.stream().anyMatch(notice -> "auto_allocation_changed".equals(notice.type()));
+        boolean customSkipped = notices.stream().anyMatch(notice -> "custom_template_skipped".equals(notice.type()));
+        return new BatchArticleGenerateResponse(batchId, totalCount, STATUS_PENDING, allocationChanged, customSkipped, notices);
     }
 
     public BatchArticleGenerationDetailResponse detail(Long batchId) {
@@ -310,24 +324,24 @@ public class BatchArticleGenerationService {
             task.setTopicAsQuestion(topicAsQuestion);
             List<String> relatedKeywords = relatedKeywords(batch.getProjectId(), task);
             String brandStatement = resolveBrandStatement(project, brand);
-            BatchArticlePromptBuilder.PromptBuildResult prompt = promptBuilder.build(
-                    new BatchArticlePromptBuilder.PromptBuildInput(
-                            project,
-                            brand,
-                            brandStatement,
-                            batch.getTopicSource(),
-                            topic,
-                            topicAsQuestion,
-                            task.getKeywordGroupId(),
-                            task.getKeywordGroupName(),
-                            relatedKeywords,
-                            task.getArticleType(),
-                            task.getContentStyle(),
-                            task.getLength(),
-                            task.getExtraPrompt(),
-                            task.getArticleIndexInBatch()
-                    )
+            BatchArticlePromptBuilder.PromptBuildInput promptInput = new BatchArticlePromptBuilder.PromptBuildInput(
+                    project,
+                    brand,
+                    brandStatement,
+                    batch.getTopicSource(),
+                    topic,
+                    topicAsQuestion,
+                    task.getKeywordGroupId(),
+                    task.getKeywordGroupName(),
+                    relatedKeywords,
+                    task.getArticleType(),
+                    task.getContentStyle(),
+                    task.getLength(),
+                    task.getExtraPrompt(),
+                    task.getArticleIndexInBatch(),
+                    forbiddenPhrases(project, brand)
             );
+            BatchArticlePromptBuilder.PromptBuildResult prompt = buildPrompt(task, promptInput);
             task.setContentAngle(prompt.contentAngle());
             task.setAudiencePerspective(prompt.audiencePerspective());
 
@@ -366,6 +380,16 @@ public class BatchArticleGenerationService {
             draft.setBatchId(null);
             draft.setProjectId(project.getId());
             draft.setArticleType(task.getArticleType());
+            draft.setContentStyle(task.getContentStyle());
+            draft.setChannelGroupCode(task.getChannelGroupCode());
+            draft.setChannelSubCode(task.getChannelSubCode());
+            draft.setAgentSiteModule(task.getAgentSiteModule());
+            draft.setArticleTypeCode(task.getArticleTypeCode());
+            draft.setPromptTemplateId(task.getPromptTemplateId());
+            draft.setPromptTemplateVersionId(task.getPromptTemplateVersionId());
+            draft.setAllocationMode(task.getAllocationMode());
+            draft.setTopic(task.getTopic());
+            draft.setTopicAsQuestion(task.getTopicAsQuestion());
             draft.setTitle(title);
             draft.setStatus("approved");
             draft.setCurrentVersionNo(1);
@@ -396,6 +420,21 @@ public class BatchArticleGenerationService {
             articleGenerationLogMapper.insert(logRow);
             return draft.getId();
         }));
+    }
+
+    private BatchArticlePromptBuilder.PromptBuildResult buildPrompt(BatchArticleGenerationTask task,
+                                                                    BatchArticlePromptBuilder.PromptBuildInput input) {
+        if (task.getPromptTemplateId() == null || task.getPromptTemplateVersionId() == null) {
+            return promptBuilder.build(input);
+        }
+        ArticlePromptTemplate template = promptTemplateMapper.selectById(task.getPromptTemplateId());
+        ArticlePromptTemplateVersion version = promptTemplateVersionMapper.selectById(task.getPromptTemplateVersionId());
+        if (template == null || version == null || !template.getId().equals(version.getTemplateId())) {
+            log.warn("Prompt template snapshot missing taskId={} templateId={} versionId={}",
+                    task.getId(), task.getPromptTemplateId(), task.getPromptTemplateVersionId());
+            return promptBuilder.build(input);
+        }
+        return promptBuilder.buildFromTemplate(input, template, version);
     }
 
     private ModelSelection resolveModel(String systemPrompt) {
@@ -540,7 +579,8 @@ public class BatchArticleGenerationService {
 
     private List<ValidatedTopic> validateTopics(Long projectId,
                                                 String topicSource,
-                                                List<BatchArticleGenerateRequest.TopicConfig> topics) {
+                                                List<BatchArticleGenerateRequest.TopicConfig> topics,
+                                                List<BatchArticleGenerateResponse.Notice> notices) {
         if (topics == null || topics.isEmpty()) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Topics are required");
         }
@@ -551,7 +591,7 @@ public class BatchArticleGenerationService {
                 throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Topic is required");
             }
             KeywordGroup keywordGroup = validateKeywordGroup(projectId, topicSource, topicConfig.getKeywordGroupId());
-            List<ValidatedPlatform> platforms = validatePlatforms(topicConfig.getPlatforms());
+            List<ValidatedPlatform> platforms = validatePlatforms(topic, topicConfig.getPlatforms(), notices);
             if (platforms.stream().mapToInt(platform -> platform.count() == null ? 0 : platform.count()).sum() <= 0) {
                 continue;
             }
@@ -569,26 +609,199 @@ public class BatchArticleGenerationService {
         return result;
     }
 
-    private List<ValidatedPlatform> validatePlatforms(List<BatchArticleGenerateRequest.PlatformCount> platforms) {
+    private List<ValidatedPlatform> validatePlatforms(String topic,
+                                                      List<BatchArticleGenerateRequest.PlatformCount> platforms,
+                                                      List<BatchArticleGenerateResponse.Notice> notices) {
         if (platforms == null || platforms.isEmpty()) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Platform counts are required");
         }
         List<ValidatedPlatform> result = new ArrayList<>();
         for (BatchArticleGenerateRequest.PlatformCount platform : platforms) {
-            String contentStyle = trim(platform.getContentStyle());
-            if (!SUPPORTED_CONTENT_STYLES.contains(contentStyle) || !CREATABLE_CONTENT_STYLES.contains(contentStyle)) {
-                throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid content style");
-            }
-            int count = platform.getCount() == null ? 0 : platform.getCount();
-            if (count < 0) {
-                throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid article count");
-            }
-            if (count == 0) {
+            String allocationMode = StringUtils.hasText(platform.getAllocationMode()) ? platform.getAllocationMode().trim() : "auto";
+            if ("custom".equals(allocationMode)) {
+                result.addAll(validateCustomPlatform(topic, platform, notices));
                 continue;
             }
-            result.add(new ValidatedPlatform(contentStyle, count, trimToNull(platform.getExtraPrompt())));
+            result.addAll(validateAutoPlatform(topic, platform, notices));
         }
         return result;
+    }
+
+    private List<ValidatedPlatform> validateAutoPlatform(String topic,
+                                                         BatchArticleGenerateRequest.PlatformCount platform,
+                                                         List<BatchArticleGenerateResponse.Notice> notices) {
+        int count = platform.getCount() == null ? 0 : platform.getCount();
+        if (count < 0) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid article count");
+        }
+        if (count == 0) {
+            return List.of();
+        }
+        ChannelRef channel = resolveChannel(platform);
+        List<ArticleTemplateAllocationService.AllocatedTemplate> allocated = allocationService.allocate(
+                channel.groupCode(), channel.subCode(), count
+        );
+        if (allocated.isEmpty()) {
+            addSkippedNotice(notices, topic, channel, null, null, count, "未配置启用模板");
+            return List.of();
+        }
+        maybeAddAllocationChangedNotice(topic, channel, platform.getPreviewTemplateCounts(), allocated, notices);
+        return allocated.stream()
+                .map(item -> toValidatedPlatform(channel, item.template(), item.version(), item.count(), platform.getExtraPrompt(), "auto"))
+                .toList();
+    }
+
+    private List<ValidatedPlatform> validateCustomPlatform(String topic,
+                                                           BatchArticleGenerateRequest.PlatformCount platform,
+                                                           List<BatchArticleGenerateResponse.Notice> notices) {
+        if (platform.getTemplateCounts() == null || platform.getTemplateCounts().isEmpty()) {
+            return List.of();
+        }
+        List<ValidatedPlatform> result = new ArrayList<>();
+        for (BatchArticleGenerateRequest.TemplateCount templateCount : platform.getTemplateCounts()) {
+            int count = templateCount.getCount() == null ? 0 : templateCount.getCount();
+            if (count <= 0) {
+                continue;
+            }
+            ArticleTemplateAllocationService.TemplateWithVersion resolved = allocationService.resolveTemplate(
+                    templateCount.getTemplateId(), templateCount.getTemplateVersionId()
+            );
+            if (resolved == null) {
+                ChannelRef channel = resolveChannel(platform);
+                addSkippedNotice(notices, topic, channel, templateCount.getTemplateId(), null, count, "模板已失效");
+                continue;
+            }
+            ChannelRef channel = new ChannelRef(
+                    resolved.template().getChannelGroupCode(),
+                    resolved.template().getChannelSubCode(),
+                    ArticlePromptChannels.contentStyle(resolved.template().getChannelGroupCode(), resolved.template().getChannelSubCode())
+            );
+            result.add(toValidatedPlatform(channel, resolved.template(), resolved.version(), count, templateCount.getExtraPrompt(), "custom"));
+        }
+        return result;
+    }
+
+    private ValidatedPlatform toValidatedPlatform(ChannelRef channel,
+                                                  ArticlePromptTemplate template,
+                                                  ArticlePromptTemplateVersion version,
+                                                  int count,
+                                                  String extraPrompt,
+                                                  String allocationMode) {
+        return new ValidatedPlatform(
+                channel.contentStyle(),
+                channel.groupCode(),
+                channel.subCode(),
+                template.getAgentSiteModule(),
+                template.getArticleTypeCode(),
+                template.getId(),
+                version.getId(),
+                allocationMode,
+                count,
+                trimToNull(extraPrompt)
+        );
+    }
+
+    private ChannelRef resolveChannel(BatchArticleGenerateRequest.PlatformCount platform) {
+        String group = trimToNull(platform.getChannelGroupCode());
+        String sub = trimToNull(platform.getChannelSubCode());
+        if (group == null) {
+            group = groupFromContentStyle(platform.getContentStyle());
+            sub = subFromContentStyle(platform.getContentStyle());
+        }
+        if (!ArticlePromptChannels.isValidCode(group)) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid channel group");
+        }
+        if (sub != null && !ArticlePromptChannels.isValidCode(sub)) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid channel sub code");
+        }
+        return new ChannelRef(group, sub, ArticlePromptChannels.contentStyle(group, sub));
+    }
+
+    private String groupFromContentStyle(String contentStyle) {
+        String style = trim(contentStyle);
+        if (List.of("wechat", "toutiao", "douyin_image_text", "zhihu", "xiaohongshu", "baijiahao").contains(style)) {
+            return ArticlePromptChannels.SELF_MEDIA;
+        }
+        if ("agent_site_article".equals(style) || "linkedin".equals(style)) {
+            return ArticlePromptChannels.AGENT_SITE;
+        }
+        if ("industry_site".equals(style)) {
+            return ArticlePromptChannels.INDUSTRY_SITE;
+        }
+        if ("authority_media".equals(style)) {
+            return ArticlePromptChannels.AUTHORITY_MEDIA;
+        }
+        if ("forum".equals(style)) {
+            return ArticlePromptChannels.FORUM;
+        }
+        if (ArticlePromptChannels.isValidCode(style)) {
+            return style;
+        }
+        throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid content style");
+    }
+
+    private String subFromContentStyle(String contentStyle) {
+        String style = trim(contentStyle);
+        if (List.of("wechat", "toutiao", "douyin_image_text", "zhihu", "xiaohongshu", "baijiahao").contains(style)) {
+            return style;
+        }
+        if ("authority_media".equals(style)) {
+            return "industry_media";
+        }
+        return null;
+    }
+
+    private void maybeAddAllocationChangedNotice(String topic,
+                                                 ChannelRef channel,
+                                                 List<BatchArticleGenerateRequest.TemplateCount> preview,
+                                                 List<ArticleTemplateAllocationService.AllocatedTemplate> actual,
+                                                 List<BatchArticleGenerateResponse.Notice> notices) {
+        if (preview == null || preview.isEmpty()) {
+            return;
+        }
+        Map<Long, Integer> beforeMap = new LinkedHashMap<>();
+        for (BatchArticleGenerateRequest.TemplateCount item : preview) {
+            if (item.getCount() != null && item.getCount() > 0) {
+                beforeMap.put(item.getTemplateId(), item.getCount());
+            }
+        }
+        Map<Long, Integer> afterMap = new LinkedHashMap<>();
+        for (ArticleTemplateAllocationService.AllocatedTemplate item : actual) {
+            afterMap.put(item.template().getId(), item.count());
+        }
+        if (beforeMap.equals(afterMap)) {
+            return;
+        }
+        List<BatchArticleGenerateResponse.TemplateCount> before = preview.stream()
+                .filter(item -> item.getCount() != null && item.getCount() > 0)
+                .map(item -> new BatchArticleGenerateResponse.TemplateCount(item.getTemplateId(), null, item.getCount()))
+                .toList();
+        List<BatchArticleGenerateResponse.TemplateCount> after = actual.stream()
+                .map(item -> new BatchArticleGenerateResponse.TemplateCount(item.template().getId(), item.template().getName(), item.count()))
+                .toList();
+        notices.add(new BatchArticleGenerateResponse.Notice(
+                "auto_allocation_changed",
+                "warning",
+                "因模板池有变化，实际分配与预览不一致",
+                List.of(new BatchArticleGenerateResponse.Item(topic, channel.groupCode(), channel.subCode(),
+                        null, null, null, null, before, after))
+        ));
+    }
+
+    private void addSkippedNotice(List<BatchArticleGenerateResponse.Notice> notices,
+                                  String topic,
+                                  ChannelRef channel,
+                                  Long templateId,
+                                  String templateName,
+                                  Integer requestedCount,
+                                  String reason) {
+        notices.add(new BatchArticleGenerateResponse.Notice(
+                "custom_template_skipped",
+                "warning",
+                "部分模板不可用并已跳过",
+                List.of(new BatchArticleGenerateResponse.Item(topic, channel.groupCode(), channel.subCode(),
+                        templateId, templateName, requestedCount, reason, null, null))
+        ));
     }
 
     private List<String> relatedKeywords(Long projectId, BatchArticleGenerationTask task) {
@@ -751,6 +964,18 @@ public class BatchArticleGenerationService {
                                   List<ValidatedPlatform> platforms) {
     }
 
-    private record ValidatedPlatform(String contentStyle, Integer count, String extraPrompt) {
+    private record ChannelRef(String groupCode, String subCode, String contentStyle) {
+    }
+
+    private record ValidatedPlatform(String contentStyle,
+                                     String channelGroupCode,
+                                     String channelSubCode,
+                                     String agentSiteModule,
+                                     String articleTypeCode,
+                                     Long templateId,
+                                     Long templateVersionId,
+                                     String allocationMode,
+                                     Integer count,
+                                     String extraPrompt) {
     }
 }

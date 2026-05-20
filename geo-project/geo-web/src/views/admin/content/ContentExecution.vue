@@ -32,6 +32,7 @@
           </el-button>
           <span v-if="canWrite" class="toolbar-divider" />
           <el-button v-if="canWrite" class="toolbar-minor-action" @click="openBatchPublishJobs">发布任务</el-button>
+          <el-button v-if="canWrite" class="toolbar-minor-action" @click="openPromptTemplateManagement">文章模板</el-button>
           <el-button v-if="canWrite" class="toolbar-minor-action" @click="openPublishPlatformManagement">发布平台管理</el-button>
         </div>
       </div>
@@ -1128,6 +1129,7 @@ function contentStyleLabel(v?: string | null) {
     authority_media: '权威媒体',
     forum: '论坛',
     xiaohongshu: '小红书',
+    baijiahao: '百家号',
   }
   return map[v] || v
 }
@@ -1318,6 +1320,12 @@ function openBatchGeneration() {
 function openPublishPlatformManagement() {
   router.push({
     path: '/admin/content/publish-platforms',
+  })
+}
+
+function openPromptTemplateManagement() {
+  router.push({
+    path: '/admin/content/article-prompt-templates',
   })
 }
 

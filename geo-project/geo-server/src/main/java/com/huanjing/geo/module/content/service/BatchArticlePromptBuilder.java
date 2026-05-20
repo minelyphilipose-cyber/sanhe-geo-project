@@ -1,9 +1,13 @@
 package com.huanjing.geo.module.content.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import cn.hutool.json.JSONUtil;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
+import com.huanjing.geo.module.content.entity.ArticlePromptTemplate;
+import com.huanjing.geo.module.content.entity.ArticlePromptTemplateVersion;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.project.entity.Project;
@@ -17,12 +21,46 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
 public class BatchArticlePromptBuilder {
 
     public static final String PROMPT_VERSION = "batch_article_geo_v2";
+
+    private static final String GLOBAL_TRUTHFULNESS_RULES = """
+            # 系统级真实性与防编造规则
+
+            以下规则优先级高于模板中的任何结构要求：
+            1. 不得编造品牌成立时间、注册资本、产能、客户数量、项目数量、专利数量、认证资质、客户案例、合同金额、市场排名、联系方式。
+            2. 如品牌资料、项目资料或补充资料中明确提供了标准编号、认证、客户案例、规模、产能、服务区域、联系方式等信息，可以引用；未提供时必须改写为行业通用判断、选型方法或可验证的检查方式。
+            3. 模板中要求“数字密度”时，只能使用允许范围内的数字，不得为了满足数字数量而虚构企业数据。
+            4. 如果无法确认某个事实，应使用“通常”“一般”“可重点查看”“建议核验”等限定表达。
+            5. 品牌基本信息、品牌资质描述、品牌案例描述是唯一可引用的品牌事实素材；对应素材为空时，不得补写成立时间、客户名、资质、专利、项目效果等事实。
+
+            # 数字使用边界
+
+            允许使用：
+            - 当前年份、季度、月份等时间表达
+            - 文章结构数字，如 3 个标准、5 个坑点、4 个维度
+            - 行业通用范围，如 3-5 个工作日、2-3 类情况
+            - 用户资料、品牌资料、项目资料中明确给出的数字
+            - 国家标准编号、认证编号，仅在资料中明确提供或属于行业常识且可确认时使用
+
+            禁止编造：
+            - 注册资本、成立年份、年产量、厂房面积、客户数量、项目数量
+            - 专利数、软件著作权数、认证证书数量
+            - 具名客户、合作案例、合同金额、增长率、市场份额
+            - 品牌排名、获奖信息、联系方式
+
+            # 联系方式呈现规则
+
+            文章结尾的联系方式由系统变量 {{contactBlock}} 提供，已由后端根据品牌配置拼装完成。
+            必须原样放置，不得改写、删减、补充，更不得自行编造任何官网、电话或地址。
+            如果 {{contactBlock}} 为空，结尾不出现任何联系方式。
+            """;
 
     private static final String SYSTEM_PROMPT = """
             你是一名中文 GEO 内容写作助手，负责生成可被搜索引擎、AI Overview、Perplexity、豆包搜索等系统理解和引用的中文行业文章草稿。
@@ -42,31 +80,37 @@ public class BatchArticlePromptBuilder {
             "faq", "问答文章",
             "scenario_content", "场景内容文",
             "industry_article", "行业分析文",
-            "stage_advice", "阶段建议文"
+            "stage_advice", "阶段建议文",
+            "buying_guide", "选择指南",
+            "pitfall_guide", "避坑指南",
+            "social_note", "经验笔记",
+            "forum_discussion", "讨论帖"
     );
-    private static final Map<String, String> STYLE_LABELS = Map.of(
-            "wechat", "公众号",
-            "toutiao", "今日头条",
-            "douyin_image_text", "抖音图文",
-            "zhihu", "知乎",
-            "xiaohongshu", "小红书",
-            "linkedin", "领英",
-            "agent_site_article", "Agent 官网文章",
-            "industry_site", "行业资讯站",
-            "authority_media", "权威媒体",
-            "forum", "论坛"
+    private static final Map<String, String> STYLE_LABELS = Map.ofEntries(
+            Map.entry("wechat", "公众号"),
+            Map.entry("toutiao", "今日头条"),
+            Map.entry("douyin_image_text", "抖音图文"),
+            Map.entry("zhihu", "知乎"),
+            Map.entry("xiaohongshu", "小红书"),
+            Map.entry("baijiahao", "百家号"),
+            Map.entry("linkedin", "领英"),
+            Map.entry("agent_site_article", "Agent 官网文章"),
+            Map.entry("industry_site", "行业资讯站"),
+            Map.entry("authority_media", "权威媒体"),
+            Map.entry("forum", "论坛")
     );
-    private static final Map<String, String> STYLE_GUIDES = Map.of(
-            "wechat", "适合完整解释一个行业问题。结构可以更稳，有清晰的小标题和递进关系，但每个小标题下必须有具体信息，不做空泛铺陈。语气自然、克制，像一篇给潜在用户认真看的长文。不要写成品牌宣传稿，不要在结尾强行导向某个品牌。",
-            "toutiao", "面向泛资讯阅读用户。开头直接给出结论、判断或一个具体的现象，不铺垫背景。标题可以有明确判断，但不能标题党。正文要保持信息密度，段落较短但不能碎片化。适合解释一个现实问题、拆解一个选择标准或指出一个常见误区。避免营销腔、情绪化煽动和过度口语化。",
-            "douyin_image_text", "适合图文卡片式阅读，但输出仍是 Markdown 文章正文。开头要短、直接、有判断。句子可以更短，段落更轻，但每段都要有明确的信息点。适合用清晰的小节切分复杂问题，每个小节聚焦一个明确的判断或提醒，小节内仍保持完整的段落化表达，不要碎片化成短句列表。不使用任何 emoji，不写口播稿，不使用短视频营销话术。",
-            "zhihu", "像一个了解行业的人在回答具体问题。可以先给判断，再解释理由；也可以先讲一个反常识点，再回到主题。观点要有边界，允许让步和转折。不要用“作为从业者”“根据多年经验”这类自证式开头。不要写成百科词条式的定义罗列，也不要写成销售推荐。避免刻意金句、对仗式短句堆砌、爹味说教语气。",
-            "xiaohongshu", "这是 GEO 场景下的小红书风格，不是平台投放文案。使用经验分享语气，但保持信息密度。不使用任何 emoji。不使用密集换行，段落保持完整。不使用“姐妹们”“家人们”这类称呼。重点是让内容像真实用户的经验帖，而不是营销号种草文。",
-            "linkedin", "偏商业观察和行业分析。强调趋势、结构性问题、经营逻辑、决策框架和方法论。语言专业克制，不夸张，不煽动。可以使用书面化表达，强调判断与论证，避免咨询报告式的商业黑话堆砌。适合面向管理者、从业者、投资人或 B 端读者。",
-            "agent_site_article", "企业 Agent 官网文章口吻。内容应像品牌自有站点上的专业说明或行业知识文章，但不能写成硬广。可以结合品牌服务范围、地域和业务背景提供清晰解释，重点回答用户问题、展示专业判断和服务边界。语气稳健、可信、可检索，避免夸张承诺、促销话术和强行导流。",
-            "industry_site", "第三方行业资讯或行业科普口吻。内容应客观、中立、可引用，重点解释行业现象、选择标准、流程变化或市场误区。表达上要有“信息来源感”，可以使用“行业内普遍的做法是”“公开资料显示”“常见的合同条款里”这类表达方式，但不虚构具体机构名、报告名或数据来源。不要有明显品牌立场，不要写成软文。标题和正文都要像资讯站可发布的行业稿，而不是企业官网文章。",
-            "authority_media", "正式、审慎、信息来源感更强。强调事实边界、行业背景、规范表达和公共信息价值。表达稳重、审慎，对事实和观点做明确区分：事实用陈述句呈现，观点用限定语呈现。可以引用行业惯例和公开信息，但不虚构采访、报告来源或官方数据。语气客观，避免主观推荐和夸张判断。",
-            "forum", "像在垂直行业社区或专业论坛里发的讨论帖，不是社交平台或贴吧氛围。可以从一个具体困惑、踩坑场景或对比经历切入，允许第一人称表达和经验感叙述。语气比知乎更松弛一些，但每段都要有具体信息或具体判断。避免吵架式、带节奏、营销号式语气，避免情绪化吐槽或灌水式短句堆砌。"
+    private static final Map<String, String> STYLE_GUIDES = Map.ofEntries(
+            Map.entry("wechat", "适合完整解释一个行业问题。结构可以更稳，有清晰的小标题和递进关系，但每个小标题下必须有具体信息，不做空泛铺陈。语气自然、克制，像一篇给潜在用户认真看的长文。不要写成品牌宣传稿，不要在结尾强行导向某个品牌。"),
+            Map.entry("toutiao", "面向泛资讯阅读用户。开头直接给出结论、判断或一个具体的现象，不铺垫背景。标题可以有明确判断，但不能标题党。正文要保持信息密度，段落较短但不能碎片化。适合解释一个现实问题、拆解一个选择标准或指出一个常见误区。避免营销腔、情绪化煽动和过度口语化。"),
+            Map.entry("douyin_image_text", "适合图文卡片式阅读，但输出仍是 Markdown 文章正文。开头要短、直接、有判断。句子可以更短，段落更轻，但每段都要有明确的信息点。适合用清晰的小节切分复杂问题，每个小节聚焦一个明确的判断或提醒，小节内仍保持完整的段落化表达，不要碎片化成短句列表。不使用任何 emoji，不写口播稿，不使用短视频营销话术。"),
+            Map.entry("zhihu", "像一个了解行业的人在回答具体问题。可以先给判断，再解释理由；也可以先讲一个反常识点，再回到主题。观点要有边界，允许让步和转折。不要用“作为从业者”“根据多年经验”这类自证式开头。不要写成百科词条式的定义罗列，也不要写成销售推荐。避免刻意金句、对仗式短句堆砌、爹味说教语气。"),
+            Map.entry("xiaohongshu", "这是 GEO 场景下的小红书风格，不是平台投放文案。使用经验分享语气，但保持信息密度。不使用任何 emoji。不使用密集换行，段落保持完整。不使用“姐妹们”“家人们”这类称呼。重点是让内容像真实用户的经验帖，而不是营销号种草文。"),
+            Map.entry("baijiahao", "面向百度搜索收录的行业资讯长文。标题和前 200 字需要自然出现核心关键词，表达专业、信息密度高、事实边界清晰。不要虚构报告、客户、认证、专利或企业数据。"),
+            Map.entry("linkedin", "偏商业观察和行业分析。强调趋势、结构性问题、经营逻辑、决策框架和方法论。语言专业克制，不夸张，不煽动。可以使用书面化表达，强调判断与论证，避免咨询报告式的商业黑话堆砌。适合面向管理者、从业者、投资人或 B 端读者。"),
+            Map.entry("agent_site_article", "企业 Agent 官网文章口吻。内容应像品牌自有站点上的专业说明或行业知识文章，但不能写成硬广。可以结合品牌服务范围、地域和业务背景提供清晰解释，重点回答用户问题、展示专业判断和服务边界。语气稳健、可信、可检索，避免夸张承诺、促销话术和强行导流。"),
+            Map.entry("industry_site", "第三方行业资讯或行业科普口吻。内容应客观、中立、可引用，重点解释行业现象、选择标准、流程变化或市场误区。表达上要有“信息来源感”，可以使用“行业内普遍的做法是”“公开资料显示”“常见的合同条款里”这类表达方式，但不虚构具体机构名、报告名或数据来源。不要有明显品牌立场，不要写成软文。标题和正文都要像资讯站可发布的行业稿，而不是企业官网文章。"),
+            Map.entry("authority_media", "正式、审慎、信息来源感更强。强调事实边界、行业背景、规范表达和公共信息价值。表达稳重、审慎，对事实和观点做明确区分：事实用陈述句呈现，观点用限定语呈现。可以引用行业惯例和公开信息，但不虚构采访、报告来源或官方数据。语气客观，避免主观推荐和夸张判断。"),
+            Map.entry("forum", "像在垂直行业社区或专业论坛里发的讨论帖，不是社交平台或贴吧氛围。可以从一个具体困惑、踩坑场景或对比经历切入，允许第一人称表达和经验感叙述。语气比知乎更松弛一些，但每段都要有具体信息或具体判断。避免吵架式、带节奏、营销号式语气，避免情绪化吐槽或灌水式短句堆砌。")
     );
     private static final Map<String, String> LENGTH_LABELS = Map.of(
             "short", "短文，约 600 字",
@@ -126,14 +170,72 @@ public class BatchArticlePromptBuilder {
         inputSnapshot.put("extraPrompt", input.extraPrompt());
         inputSnapshot.put("businessFocus", businessFocus);
 
+        String systemPrompt = withGlobalRules(SYSTEM_PROMPT, input.forbiddenPhrases());
         return new PromptBuildResult(
-                SYSTEM_PROMPT,
-                userPrompt,
+                systemPrompt,
+                systemPrompt + "\n\n" + userPrompt,
                 contentAngle,
                 audiencePerspective,
                 json(promptSnapshot),
                 json(inputSnapshot)
         );
+    }
+
+    public PromptBuildResult buildFromTemplate(PromptBuildInput input,
+                                               ArticlePromptTemplate template,
+                                               ArticlePromptTemplateVersion version) {
+        String contentAngle = resolveContentAngle(input.articleIndexInBatch());
+        String audiencePerspective = resolveAudiencePerspective(input.articleIndexInBatch());
+        String businessFocus = resolveBusinessFocus(input.brandStatement(), input.brand());
+        List<String> recentTitles = resolveHistoryTitles(input.project().getId(), 10);
+        String contactBlock = buildContactBlock(template, input.brand());
+        Map<String, String> brandFacts = buildBrandFacts(input);
+        String templateSystemPrompt = StringUtils.hasText(version.getSystemPrompt()) ? version.getSystemPrompt() : SYSTEM_PROMPT;
+        String systemPrompt = withGlobalRules(templateSystemPrompt, input.forbiddenPhrases()).replace("{{contactBlock}}", contactBlock);
+        String userPrompt = renderTemplate(version.getUserPromptTemplate(), input, template, contentAngle,
+                audiencePerspective, businessFocus, recentTitles, contactBlock, brandFacts);
+
+        Map<String, Object> promptSnapshot = new LinkedHashMap<>();
+        promptSnapshot.put("promptVersion", "template_v" + version.getVersionNo());
+        promptSnapshot.put("templateId", template.getId());
+        promptSnapshot.put("templateVersionId", version.getId());
+        promptSnapshot.put("templateName", template.getName());
+        promptSnapshot.put("systemPrompt", systemPrompt);
+        promptSnapshot.put("userPrompt", userPrompt);
+        promptSnapshot.put("contentAngle", contentAngle);
+        promptSnapshot.put("audiencePerspective", audiencePerspective);
+        promptSnapshot.put("recentTitles", recentTitles);
+        promptSnapshot.put("contactDisclosureMode", template.getContactDisclosureMode());
+        promptSnapshot.put("contactBlock", contactBlock);
+        promptSnapshot.put("brandFacts", brandFacts);
+
+        Map<String, Object> inputSnapshot = new LinkedHashMap<>();
+        inputSnapshot.put("promptVersion", "template_v" + version.getVersionNo());
+        inputSnapshot.put("templateId", template.getId());
+        inputSnapshot.put("templateVersionId", version.getId());
+        inputSnapshot.put("projectId", input.project().getId());
+        inputSnapshot.put("brandId", input.project().getBrandId());
+        inputSnapshot.put("topic", input.topic());
+        inputSnapshot.put("topicAsQuestion", input.topicAsQuestion());
+        inputSnapshot.put("topicSource", input.topicSource());
+        inputSnapshot.put("keywordGroupId", input.keywordGroupId());
+        inputSnapshot.put("keywordGroupName", input.keywordGroupName());
+        inputSnapshot.put("relatedKeywords", input.relatedKeywords());
+        inputSnapshot.put("articleType", input.articleType());
+        inputSnapshot.put("contentStyle", input.contentStyle());
+        inputSnapshot.put("channelGroupCode", template.getChannelGroupCode());
+        inputSnapshot.put("channelSubCode", template.getChannelSubCode());
+        inputSnapshot.put("agentSiteModule", template.getAgentSiteModule());
+        inputSnapshot.put("articleTypeCode", template.getArticleTypeCode());
+        inputSnapshot.put("length", input.length());
+        inputSnapshot.put("extraPrompt", input.extraPrompt());
+        inputSnapshot.put("businessFocus", businessFocus);
+        inputSnapshot.put("contactDisclosureMode", template.getContactDisclosureMode());
+        inputSnapshot.put("contactBlock", contactBlock);
+        inputSnapshot.put("brandFacts", brandFacts);
+
+        return new PromptBuildResult(systemPrompt, systemPrompt + "\n\n" + userPrompt, contentAngle, audiencePerspective,
+                json(promptSnapshot), json(inputSnapshot));
     }
 
     public String topicAsQuestion(String topic, String articleType, int articleIndexInBatch) {
@@ -262,6 +364,113 @@ public class BatchArticlePromptBuilder {
         appendLine(sb, "与本主题相关的、可在合适场景被提及的品牌之一", line.toString());
     }
 
+    private String renderTemplate(String raw,
+                                  PromptBuildInput input,
+                                  ArticlePromptTemplate template,
+                                  String contentAngle,
+                                  String audiencePerspective,
+                                  String businessFocus,
+                                  List<String> recentTitles,
+                                  String contactBlock,
+                                  Map<String, String> brandFacts) {
+        String rendered = StringUtils.hasText(raw) ? raw : "";
+        Map<String, String> values = new LinkedHashMap<>();
+        values.put("topic", trimToDash(input.topic()));
+        values.put("topicAsQuestion", trimToDash(input.topicAsQuestion()));
+        values.put("brandName", input.brand() == null ? "-" : trimToDash(input.brand().getBrandName()));
+        values.put("industry", resolveIndustry(input.project(), input.brand()));
+        values.put("projectName", trimToDash(input.project().getProjectName()));
+        values.put("channelName", ArticlePromptChannels.channelName(template.getChannelGroupCode(), template.getChannelSubCode()));
+        values.put("articleTypeName", ArticlePromptChannels.ARTICLE_TYPE_LABELS.getOrDefault(template.getArticleTypeCode(), template.getArticleTypeCode()));
+        values.put("relatedKeywords", input.relatedKeywords() == null || input.relatedKeywords().isEmpty() ? "-" : String.join("、", input.relatedKeywords()));
+        values.put("forbiddenPhrases", forbiddenPhrasesText(input.forbiddenPhrases()));
+        values.put("channelGuide", ArticlePromptChannels.channelGuide(template.getChannelGroupCode(), template.getChannelSubCode()));
+        values.put("region", resolveRegion(input.project(), input.brand()));
+        values.put("contentAngle", contentAngle);
+        values.put("audiencePerspective", audiencePerspective);
+        values.put("businessFocus", businessFocus == null ? "-" : businessFocus);
+        values.put("recentTitles", recentTitles.isEmpty() ? "-" : String.join("；", recentTitles));
+        values.put("contactBlock", contactBlock == null ? "" : contactBlock);
+        values.putAll(brandFacts);
+        for (Map.Entry<String, String> entry : values.entrySet()) {
+            rendered = rendered.replace("{{" + entry.getKey() + "}}", entry.getValue() == null ? "-" : entry.getValue());
+        }
+        return rendered;
+    }
+
+    private Map<String, String> buildBrandFacts(PromptBuildInput input) {
+        Brand brand = input.brand();
+        Project project = input.project();
+        Map<String, String> facts = new LinkedHashMap<>();
+        String brandName = brand == null ? null : brand.getBrandName();
+        facts.put("companyFullName", trimToDash(firstText(project == null ? null : project.getCompanyName(), brandName)));
+        facts.put("brandShortName", trimToDash(firstText(brand == null ? null : brand.getBrandShortName(), brandName)));
+        facts.put("mainBusiness", trimToDash(brand == null ? null : brand.getMainBusiness()));
+        facts.put("coreProducts", normalizeCommaList(brand == null ? null : brand.getCoreProducts()));
+        facts.put("brandPositioning", trimToDash(brand == null ? null : brand.getBrandPositioning()));
+        facts.put("serviceArea", trimToDash(brand == null ? null : brand.getServiceArea()));
+        facts.put("brandIntro", trimToDash(brand == null ? null : brand.getBusinessIntro()));
+        facts.put("brandQualificationDescription", trimToDash(brand == null ? null : brand.getBrandQualificationDescription()));
+        facts.put("brandCaseDescription", trimToDash(brand == null ? null : brand.getBrandCaseDescription()));
+        return facts;
+    }
+
+    private String withGlobalRules(String systemPrompt, List<String> forbiddenPhrases) {
+        return GLOBAL_TRUTHFULNESS_RULES
+                + "\n\n# 禁用表达\n\n"
+                + forbiddenPhrasesInstruction(forbiddenPhrases)
+                + "\n\n# 模板级系统提示词\n\n"
+                + (StringUtils.hasText(systemPrompt) ? systemPrompt.trim() : SYSTEM_PROMPT);
+    }
+
+    private String buildContactBlock(ArticlePromptTemplate template, Brand brand) {
+        String mode = trimToNull(template == null ? null : template.getContactDisclosureMode());
+        if ("soft_hint".equals(mode)) {
+            return "感兴趣的可以自己搜一下相关信息了解。";
+        }
+        if (!"full".equals(mode) || brand == null) {
+            return "";
+        }
+        List<String> parts = new ArrayList<>();
+        String websiteUrl = trimToNull(brand.getWebsite());
+        String contactPhone = trimToNull(brand.getPublicPhone());
+        String contactAddress = trimToNull(brand.getPublicAddress());
+        if (websiteUrl != null) {
+            parts.add("访问官网 " + websiteUrl);
+        }
+        if (contactPhone != null) {
+            parts.add("致电 " + contactPhone + " 咨询");
+        }
+        if (contactAddress != null) {
+            parts.add("地址:" + contactAddress);
+        }
+        return parts.isEmpty() ? "" : "如需了解更多信息,可" + String.join(",", parts) + "。";
+    }
+
+    private String forbiddenPhrasesInstruction(List<String> forbiddenPhrases) {
+        List<String> values = normalizeList(forbiddenPhrases);
+        if (values.isEmpty()) {
+            return "未配置额外禁用表达，但仍需遵守绝对化词汇和防编造规则。";
+        }
+        return "以下表达在本文中不能出现：" + String.join("、", values);
+    }
+
+    private String forbiddenPhrasesText(List<String> forbiddenPhrases) {
+        List<String> values = normalizeList(forbiddenPhrases);
+        return values.isEmpty() ? "未配置额外禁用表达" : String.join("、", values);
+    }
+
+    private List<String> normalizeList(List<String> raw) {
+        if (raw == null || raw.isEmpty()) {
+            return List.of();
+        }
+        return raw.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .toList();
+    }
+
     private String resolveBusinessFocus(String brandStatement, Brand brand) {
         String raw = trimToNull(brandStatement);
         if (raw == null || raw.length() < 12) {
@@ -295,6 +504,52 @@ public class BatchArticlePromptBuilder {
             return brand.getIndustry();
         }
         return project.getProjectName();
+    }
+
+    private String resolveRegion(Project project, Brand brand) {
+        List<String> targetRegions = parseJsonArray(project.getTargetRegions());
+        if (!targetRegions.isEmpty()) {
+            return String.join("、", targetRegions);
+        }
+        String projectRegion = joinRegion(project.getProvinceName(), project.getCityName(), project.getDistrictName());
+        if (StringUtils.hasText(projectRegion)) {
+            return projectRegion;
+        }
+        if (brand != null) {
+            String brandRegion = joinRegion(brand.getProvinceName(), brand.getCityName(), brand.getDistrictName());
+            if (StringUtils.hasText(brandRegion)) {
+                return brandRegion;
+            }
+            if (StringUtils.hasText(brand.getServiceArea())) {
+                return brand.getServiceArea().trim();
+            }
+        }
+        return "-";
+    }
+
+    private String joinRegion(String provinceName, String cityName, String districtName) {
+        return Stream.of(provinceName, cityName, districtName)
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .collect(Collectors.joining(""));
+    }
+
+    private List<String> parseJsonArray(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return List.of();
+        }
+        try {
+            List<String> result = new ArrayList<>();
+            JSONUtil.parseArray(raw).forEach(item -> {
+                if (item != null && StringUtils.hasText(String.valueOf(item))) {
+                    result.add(String.valueOf(item).trim());
+                }
+            });
+            return result;
+        } catch (Exception ex) {
+            return List.of(raw.trim());
+        }
     }
 
     private List<String> resolveHistoryTitles(Long projectId, int limit) {
@@ -343,6 +598,22 @@ public class BatchArticlePromptBuilder {
         return StringUtils.hasText(value) ? value.trim() : "-";
     }
 
+    private String firstText(String first, String fallback) {
+        return StringUtils.hasText(first) ? first.trim() : fallback;
+    }
+
+    private String normalizeCommaList(String value) {
+        String raw = trimToNull(value);
+        if (raw == null) {
+            return "-";
+        }
+        return Stream.of(raw.split("[,，、;；\\n]+"))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .collect(Collectors.joining("、"));
+    }
+
     private String promptSafeInline(String value) {
         return StringUtils.hasText(value) ? value.trim().replaceAll("[\"\\\\]", "") : "";
     }
@@ -368,7 +639,8 @@ public class BatchArticlePromptBuilder {
                                    String contentStyle,
                                    String length,
                                    String extraPrompt,
-                                   int articleIndexInBatch) {
+                                   int articleIndexInBatch,
+                                   List<String> forbiddenPhrases) {
     }
 
     public record PromptBuildResult(String systemPrompt,
