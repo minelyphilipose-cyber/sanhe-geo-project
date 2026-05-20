@@ -189,16 +189,43 @@
         <el-form-item label="主营业务"><el-input v-model="brandForm.mainBusiness" /></el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="brandForm.regionCodes" /></el-form-item>
         <el-form-item label="官网"><el-input v-model="brandForm.website" /></el-form-item>
-        <el-form-item label="公众号"><el-input v-model="brandForm.officialAccount" /></el-form-item>
-        <el-form-item label="视频号"><el-input v-model="brandForm.videoAccount" /></el-form-item>
-        <el-form-item label="抖音号"><el-input v-model="brandForm.douyinAccount" /></el-form-item>
         <el-form-item label="联系电话"><el-input v-model="brandForm.phone" /></el-form-item>
         <el-form-item label="对外公开电话"><el-input v-model="brandForm.publicPhone" /></el-form-item>
         <el-form-item label="对外公开地址"><el-input v-model="brandForm.publicAddress" /></el-form-item>
         <el-form-item label="微信"><el-input v-model="brandForm.wechat" /></el-form-item>
-        <el-form-item label="资讯站名称"><el-input v-model="brandForm.industrySiteName" placeholder="用于展示和辅助匹配，可选" /></el-form-item>
-        <el-form-item label="资讯站唯一标识" prop="industrySiteCode">
-          <el-input v-model="brandForm.industrySiteCode" placeholder="与发布平台管理中的平台标识一致" />
+        <el-form-item label="Agent 官网">
+          <el-select
+            v-model="brandForm.geoSiteCode"
+            clearable
+            filterable
+            placeholder="选择 Agent 官网，自动带出站点标识"
+            style="width: 100%"
+            @change="handleAgentSiteChange"
+          >
+            <el-option
+              v-for="site in agentSiteOptions"
+              :key="site.siteCode || site.id"
+              :label="site.siteName"
+              :value="site.siteCode"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="行业资讯站">
+          <el-select
+            v-model="brandForm.industrySiteCode"
+            clearable
+            filterable
+            placeholder="选择资讯站，自动带出站点标识"
+            style="width: 100%"
+            @change="handleIndustrySiteChange"
+          >
+            <el-option
+              v-for="site in industrySiteOptions"
+              :key="site.siteCode || site.id"
+              :label="site.siteName"
+              :value="site.siteCode"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="状态" required>
           <el-select v-model="brandForm.status" style="width: 100%">
@@ -210,10 +237,13 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item class="is-full" label="品牌描述"><el-input v-model="brandForm.description" type="textarea" :rows="3" /></el-form-item>
         <el-form-item class="is-full" label="业务介绍"><el-input v-model="brandForm.businessIntro" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item class="is-full" label="标准口径"><el-input v-model="brandForm.standardBrandStatement" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item class="is-full" label="业务标准表述"><el-input v-model="brandForm.businessStandardStatement" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="品牌资质描述">
+          <el-input v-model="brandForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit />
+        </el-form-item>
+        <el-form-item class="is-full" label="品牌案例描述">
+          <el-input v-model="brandForm.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit />
+        </el-form-item>
         <el-form-item class="is-full" label="禁用词"><el-input v-model="brandForm.forbiddenPhrases" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer>
@@ -278,7 +308,8 @@ import {
   unlockBrandStatement,
   regenerateBrandStatement,
 } from '@/api/customer'
-import type { Brand, BrandStatementView, SelfMediaAccount } from '@/types'
+import { getPublishSites } from '@/api/publishSite'
+import type { Brand, BrandStatementView, PublishSite, SelfMediaAccount } from '@/types'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
 import EllipsisText from '@/components/ui/EllipsisText.vue'
@@ -322,6 +353,7 @@ const selfMediaAccountVisible = ref(false)
 const brand = ref<Brand | null>(null)
 const statement = ref<BrandStatementView | null>(null)
 const selfMediaAccounts = ref<SemiAutoSelfMediaAccount[]>([])
+const publishSites = ref<PublishSite[]>([])
 const editingSelfMediaAccount = ref<SemiAutoSelfMediaAccount | null>(null)
 const companyName = ref('')
 const companyIndustryTags = ref<string[]>([])
@@ -335,19 +367,17 @@ const brandForm = reactive({
   mainBusiness: '',
   regionCodes: [] as string[],
   website: '',
-  officialAccount: '',
-  videoAccount: '',
-  douyinAccount: '',
   phone: '',
   publicPhone: '',
   publicAddress: '',
   wechat: '',
   status: 'active',
-  description: '',
   businessIntro: '',
-  standardBrandStatement: '',
-  businessStandardStatement: '',
+  brandQualificationDescription: '',
+  brandCaseDescription: '',
   forbiddenPhrases: '',
+  geoSiteCode: '',
+  geoSiteStatus: '',
   industrySiteName: '',
   industrySiteCode: '',
 })
@@ -369,9 +399,6 @@ const brandRules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
-  industrySiteCode: [
-    { pattern: /^[a-z0-9][a-z0-9_-]{1,127}$/, message: '标识需小写字母数字开头，可含 _ -', trigger: 'blur' },
-  ],
 }
 
 const selfMediaAccountRules: FormRules = {
@@ -405,6 +432,15 @@ const statementTagType = computed<'success' | 'warning' | 'info'>(() => {
 })
 
 const availableBrandIndustries = computed(() => companyIndustryTags.value)
+const agentSiteOptions = computed(() => publishSites.value.filter((site) =>
+  site.integrationMethod === 'brand_geo_site' || site.siteCode === 'agent_official_site',
+))
+const industrySiteOptions = computed(() => publishSites.value.filter((site) =>
+  site.integrationMethod !== 'brand_geo_site'
+  && site.integrationMethod !== 'forum_playwright'
+  && site.integrationMethod !== 'discuz_http'
+  && site.siteCode !== 'agent_official_site',
+))
 const brandBasicInfoItems = computed(() => [
   { label: '品牌名称', value: brand.value?.brandName || '-' },
   { label: '状态', value: dictStore.label('brand_status', brand.value?.status) || '-' },
@@ -413,19 +449,15 @@ const brandBasicInfoItems = computed(() => [
   { label: '主营业务', value: brand.value?.mainBusiness || '-' },
   { label: '所在地区', value: regionText.value },
   { label: '官网', value: brand.value?.website || '-' },
-  { label: '公众号', value: brand.value?.officialAccount || '-' },
-  { label: '视频号', value: brand.value?.videoAccount || '-' },
-  { label: '抖音号', value: brand.value?.douyinAccount || '-' },
   { label: '联系电话', value: brand.value?.phone || '-' },
   { label: '对外公开电话', value: brand.value?.publicPhone || '-' },
   { label: '对外公开地址', value: brand.value?.publicAddress || '-' },
   { label: '微信', value: brand.value?.wechat || '-' },
+  { label: 'Agent 官网', value: agentSiteLabel(brand.value?.geoSiteCode) },
   { label: '资讯站名称', value: brand.value?.industrySiteName || '-' },
-  { label: '资讯站唯一标识', value: brand.value?.industrySiteCode || '-' },
-  { label: '品牌标准表述', value: brand.value?.standardBrandStatement || '-', wide: true },
-  { label: '业务标准表述', value: brand.value?.businessStandardStatement || '-', wide: true },
   { label: '业务介绍', value: brand.value?.businessIntro || '-', wide: true },
-  { label: '品牌描述', value: brand.value?.description || '-', wide: true },
+  { label: '品牌资质描述', value: brand.value?.brandQualificationDescription || '-', wide: true },
+  { label: '品牌案例描述', value: brand.value?.brandCaseDescription || '-', wide: true },
   { label: '禁用词', value: brand.value?.forbiddenPhrases || '-', wide: true },
 ])
 
@@ -438,6 +470,21 @@ function selfMediaPlatformLabel(value?: string | null) {
   if (value === 'toutiao') return '头条'
   if (value === 'zhihu') return '知乎'
   return value || '-'
+}
+
+function agentSiteLabel(code?: string | null) {
+  if (!code) return '-'
+  return agentSiteOptions.value.find((item) => item.siteCode === code)?.siteName || code
+}
+
+function handleAgentSiteChange(value: string) {
+  const site = agentSiteOptions.value.find((item) => item.siteCode === value)
+  brandForm.geoSiteStatus = site ? 'active' : ''
+}
+
+function handleIndustrySiteChange(value: string) {
+  const site = industrySiteOptions.value.find((item) => item.siteCode === value)
+  brandForm.industrySiteName = site?.siteName || ''
 }
 
 function parseIndustryTags(value?: string | string[] | null) {
@@ -458,28 +505,36 @@ function fillForm(data: Brand) {
   brandForm.mainBusiness = data.mainBusiness || ''
   brandForm.regionCodes = regionCodesFromPayload(data)
   brandForm.website = data.website || ''
-  brandForm.officialAccount = data.officialAccount || ''
-  brandForm.videoAccount = data.videoAccount || ''
-  brandForm.douyinAccount = data.douyinAccount || ''
   brandForm.phone = data.phone || ''
   brandForm.publicPhone = data.publicPhone || ''
   brandForm.publicAddress = data.publicAddress || ''
   brandForm.wechat = data.wechat || ''
   brandForm.status = data.status || 'active'
-  brandForm.description = data.description || ''
   brandForm.businessIntro = data.businessIntro || ''
-  brandForm.standardBrandStatement = data.standardBrandStatement || ''
-  brandForm.businessStandardStatement = data.businessStandardStatement || ''
+  brandForm.brandQualificationDescription = data.brandQualificationDescription || ''
+  brandForm.brandCaseDescription = data.brandCaseDescription || ''
   brandForm.forbiddenPhrases = Array.isArray(data.forbiddenPhrases)
     ? data.forbiddenPhrases.join('，')
     : (data.forbiddenPhrases || '')
+  brandForm.geoSiteCode = data.geoSiteCode || ''
+  brandForm.geoSiteStatus = data.geoSiteStatus || ''
   brandForm.industrySiteName = data.industrySiteName || ''
   brandForm.industrySiteCode = data.industrySiteCode || ''
+}
+
+async function loadPublishSiteOptions() {
+  try {
+    const { data } = await getPublishSites({ status: 'active' })
+    publishSites.value = data.data || []
+  } catch {
+    publishSites.value = []
+  }
 }
 
 async function load() {
   loading.value = true
   try {
+    await loadPublishSiteOptions()
     const { data } = await getBrandDetail(brandId)
     brand.value = data.data
     fillForm(data.data)
@@ -636,19 +691,21 @@ async function submitBrand() {
       districtCode: region.districtCode,
       districtName: region.districtName,
       website: brandForm.website || undefined,
-      officialAccount: brandForm.officialAccount || undefined,
-      videoAccount: brandForm.videoAccount || undefined,
-      douyinAccount: brandForm.douyinAccount || undefined,
+      officialAccount: brand.value?.officialAccount || undefined,
+      videoAccount: brand.value?.videoAccount || undefined,
+      douyinAccount: brand.value?.douyinAccount || undefined,
       phone: brandForm.phone || undefined,
       publicPhone: brandForm.publicPhone || undefined,
       publicAddress: brandForm.publicAddress || undefined,
       wechat: brandForm.wechat || undefined,
       status: brandForm.status,
-      description: brandForm.description || undefined,
+      description: brandForm.businessIntro || undefined,
       businessIntro: brandForm.businessIntro || undefined,
-      standardBrandStatement: brandForm.standardBrandStatement || undefined,
-      businessStandardStatement: brandForm.businessStandardStatement || undefined,
+      brandQualificationDescription: brandForm.brandQualificationDescription || undefined,
+      brandCaseDescription: brandForm.brandCaseDescription || undefined,
       forbiddenPhrases: brandForm.forbiddenPhrases || undefined,
+      geoSiteCode: brandForm.geoSiteCode || undefined,
+      geoSiteStatus: brandForm.geoSiteCode ? brandForm.geoSiteStatus || 'active' : undefined,
       industrySiteName: brandForm.industrySiteName || undefined,
       industrySiteCode: brandForm.industrySiteCode || undefined,
     })

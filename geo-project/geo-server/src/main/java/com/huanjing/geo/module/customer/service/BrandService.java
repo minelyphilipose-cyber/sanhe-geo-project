@@ -125,8 +125,8 @@ public class BrandService {
         brand.setWechat(req.getWechat());
         brand.setDescription(req.getDescription());
         brand.setBusinessIntro(req.getBusinessIntro());
-        brand.setStandardBrandStatement(req.getStandardBrandStatement());
-        brand.setBusinessStandardStatement(req.getBusinessStandardStatement());
+        brand.setBrandQualificationDescription(req.getBrandQualificationDescription());
+        brand.setBrandCaseDescription(req.getBrandCaseDescription());
         brand.setForbiddenPhrases(normalizeForbiddenPhrases(req.getForbiddenPhrases()));
         applyGeoSiteFields(brand, req.getGeoSiteCode(), req.getGeoSiteStatus(), null);
         applyIndustrySiteFields(brand, req.getIndustrySiteName(), req.getIndustrySiteCode());
@@ -187,8 +187,8 @@ public class BrandService {
         brand.setWechat(req.getWechat());
         brand.setDescription(req.getDescription());
         brand.setBusinessIntro(req.getBusinessIntro());
-        brand.setStandardBrandStatement(req.getStandardBrandStatement());
-        brand.setBusinessStandardStatement(req.getBusinessStandardStatement());
+        brand.setBrandQualificationDescription(req.getBrandQualificationDescription());
+        brand.setBrandCaseDescription(req.getBrandCaseDescription());
         brand.setForbiddenPhrases(normalizeForbiddenPhrases(req.getForbiddenPhrases()));
         applyGeoSiteFields(brand, req.getGeoSiteCode(), req.getGeoSiteStatus(), id);
         applyIndustrySiteFields(brand, req.getIndustrySiteName(), req.getIndustrySiteCode());
@@ -353,7 +353,8 @@ public class BrandService {
         snapshot.put("districtName", brand.getDistrictName());
         snapshot.put("status", brand.getStatus());
         snapshot.put("businessIntro", brand.getBusinessIntro());
-        snapshot.put("businessStandardStatement", brand.getBusinessStandardStatement());
+        snapshot.put("brandQualificationDescription", brand.getBrandQualificationDescription());
+        snapshot.put("brandCaseDescription", brand.getBrandCaseDescription());
         snapshot.put("geoSiteCode", brand.getGeoSiteCode());
         snapshot.put("geoSiteStatus", brand.getGeoSiteStatus());
         snapshot.put("industrySiteName", brand.getIndustrySiteName());

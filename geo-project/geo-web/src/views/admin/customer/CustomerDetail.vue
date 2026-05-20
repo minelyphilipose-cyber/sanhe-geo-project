@@ -325,8 +325,13 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item class="is-full" label="品牌描述"><el-input v-model="brandForm.description" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item class="is-full" label="品牌标准表述"><el-input v-model="brandForm.standardBrandStatement" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="业务介绍"><el-input v-model="brandForm.businessIntro" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="品牌资质描述">
+          <el-input v-model="brandForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit />
+        </el-form-item>
+        <el-form-item class="is-full" label="品牌案例描述">
+          <el-input v-model="brandForm.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="brandVisible = false">取消</el-button>
@@ -465,8 +470,9 @@ const brandForm = reactive({
   phone: '',
   wechat: '',
   status: 'active',
-  description: '',
-  standardBrandStatement: '',
+  businessIntro: '',
+  brandQualificationDescription: '',
+  brandCaseDescription: '',
 })
 const brandRules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
@@ -689,8 +695,9 @@ function resetBrandForm() {
   brandForm.phone = ''
   brandForm.wechat = ''
   brandForm.status = 'active'
-  brandForm.description = ''
-  brandForm.standardBrandStatement = ''
+  brandForm.businessIntro = ''
+  brandForm.brandQualificationDescription = ''
+  brandForm.brandCaseDescription = ''
 }
 
 async function loadCompany() {
@@ -910,8 +917,9 @@ function openBrandEdit(row: Brand) {
   brandForm.phone = row.phone || ''
   brandForm.wechat = row.wechat || ''
   brandForm.status = (row as any).status || 'active'
-  brandForm.description = row.description || ''
-  brandForm.standardBrandStatement = row.standardBrandStatement || ''
+  brandForm.businessIntro = row.businessIntro || row.description || ''
+  brandForm.brandQualificationDescription = row.brandQualificationDescription || ''
+  brandForm.brandCaseDescription = row.brandCaseDescription || ''
   brandVisible.value = true
 }
 
@@ -921,6 +929,9 @@ async function submitBrand() {
   brandSaving.value = true
   try {
     const region = regionPayloadFromCodes(brandForm.regionCodes)
+    const existingBrand = brandEditingId.value
+      ? brands.value.find((item) => item.id === brandEditingId.value)
+      : null
     const payload: Record<string, any> = {
       companyId,
       brandName: brandForm.brandName,
@@ -936,9 +947,23 @@ async function submitBrand() {
       website: brandForm.website || undefined,
       phone: brandForm.phone || undefined,
       wechat: brandForm.wechat || undefined,
+      officialAccount: existingBrand?.officialAccount || undefined,
+      videoAccount: existingBrand?.videoAccount || undefined,
+      douyinAccount: existingBrand?.douyinAccount || undefined,
+      publicPhone: existingBrand?.publicPhone || undefined,
+      publicAddress: existingBrand?.publicAddress || undefined,
       status: brandForm.status,
-      description: brandForm.description || undefined,
-      standardBrandStatement: brandForm.standardBrandStatement || undefined,
+      description: brandForm.businessIntro || undefined,
+      businessIntro: brandForm.businessIntro || undefined,
+      brandQualificationDescription: brandForm.brandQualificationDescription || undefined,
+      brandCaseDescription: brandForm.brandCaseDescription || undefined,
+      forbiddenPhrases: Array.isArray(existingBrand?.forbiddenPhrases)
+        ? existingBrand?.forbiddenPhrases.join('，')
+        : existingBrand?.forbiddenPhrases || undefined,
+      geoSiteCode: existingBrand?.geoSiteCode || undefined,
+      geoSiteStatus: existingBrand?.geoSiteCode ? existingBrand?.geoSiteStatus || 'active' : undefined,
+      industrySiteName: existingBrand?.industrySiteName || undefined,
+      industrySiteCode: existingBrand?.industrySiteCode || undefined,
     }
     if (brandMode.value === 'create') {
       await createBrand(payload as any)

@@ -4,7 +4,7 @@
       <div>
         <div class="admin-page-kicker">品牌资产</div>
         <h1 class="admin-page-title">新建品牌</h1>
-        <div class="admin-page-subtitle">维护品牌基础资料、阵地账号、标准表述与素材资产。</div>
+        <div class="admin-page-subtitle">维护品牌基础资料、发布阵地、资质案例与素材资产。</div>
       </div>
       <div class="admin-page-actions">
         <el-button @click="$router.back()">返回</el-button>
@@ -49,6 +49,12 @@
         <el-divider class="is-full" content-position="left">业务介绍录入</el-divider>
         <el-form-item label="主营业务方向"><el-input v-model="form.mainBusiness" /></el-form-item>
         <el-form-item class="is-full" label="业务介绍"><el-input v-model="form.businessIntro" type="textarea" :rows="4" /></el-form-item>
+        <el-form-item class="is-full" label="品牌资质描述">
+          <el-input v-model="form.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit />
+        </el-form-item>
+        <el-form-item class="is-full" label="品牌案例描述">
+          <el-input v-model="form.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit />
+        </el-form-item>
         <el-form-item class="is-full" label="服务区域"><RegionCascader v-model="form.serviceAreaCodes" /></el-form-item>
         <el-form-item class="is-full" label="所在地区"><RegionCascader v-model="form.regionCodes" /></el-form-item>
 
@@ -58,14 +64,44 @@
         <el-form-item label="对外公开地址"><el-input v-model="form.publicAddress" /></el-form-item>
         <el-form-item label="微信"><el-input v-model="form.wechat" /></el-form-item>
         <el-form-item label="官网"><el-input v-model="form.website" /></el-form-item>
-        <el-form-item label="公众号"><el-input v-model="form.officialAccount" /></el-form-item>
-        <el-form-item label="视频号"><el-input v-model="form.videoAccount" /></el-form-item>
-        <el-form-item label="抖音号"><el-input v-model="form.douyinAccount" /></el-form-item>
 
-        <el-divider class="is-full" content-position="left">标准表述维护</el-divider>
-        <el-form-item class="is-full" label="品牌标准表述"><el-input v-model="form.standardBrandStatement" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item class="is-full" label="业务标准表述"><el-input v-model="form.businessStandardStatement" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item class="is-full" label="品牌描述"><el-input v-model="form.description" type="textarea" :rows="3" /></el-form-item>
+        <el-divider class="is-full" content-position="left">发布阵地</el-divider>
+        <el-form-item label="Agent 官网">
+          <el-select
+            v-model="form.geoSiteCode"
+            clearable
+            filterable
+            placeholder="选择 Agent 官网，自动带出站点标识"
+            style="width: 100%"
+            @change="handleAgentSiteChange"
+          >
+            <el-option
+              v-for="site in agentSiteOptions"
+              :key="site.siteCode || site.id"
+              :label="site.siteName"
+              :value="site.siteCode"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="行业资讯站">
+          <el-select
+            v-model="form.industrySiteCode"
+            clearable
+            filterable
+            placeholder="选择资讯站，自动带出站点标识"
+            style="width: 100%"
+            @change="handleIndustrySiteChange"
+          >
+            <el-option
+              v-for="site in industrySiteOptions"
+              :key="site.siteCode || site.id"
+              :label="site.siteName"
+              :value="site.siteCode"
+            />
+          </el-select>
+        </el-form-item>
+
+        <el-divider class="is-full" content-position="left">内容约束</el-divider>
         <el-form-item class="is-full" label="禁用词"><el-input v-model="form.forbiddenPhrases" type="textarea" :rows="3" /></el-form-item>
         <el-form-item label="版本变更原因"><el-input v-model="form.versionChangeReason" placeholder="用于版本记录，建议填写" /></el-form-item>
       </el-form>
@@ -154,7 +190,8 @@ import {
   updateBrand,
   uploadBrandMaterial,
 } from '@/api/customer'
-import type { BrandMaterial, BrandProfileVersion } from '@/types'
+import { getPublishSites } from '@/api/publishSite'
+import type { BrandMaterial, BrandProfileVersion, PublishSite } from '@/types'
 import { regionPayloadFromCodes } from '@/constants/region'
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
 import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.mjs?url'
@@ -189,9 +226,12 @@ const form = reactive({
   officialAccount: '',
   videoAccount: '',
   douyinAccount: '',
-  standardBrandStatement: '',
-  businessStandardStatement: '',
-  description: '',
+  geoSiteCode: '',
+  geoSiteStatus: 'active',
+  industrySiteName: '',
+  industrySiteCode: '',
+  brandQualificationDescription: '',
+  brandCaseDescription: '',
   forbiddenPhrases: '',
   versionChangeReason: '',
 })
@@ -206,8 +246,29 @@ const availableBrandIndustries = computed(() => companyIndustryTags.value)
 
 const materials = ref<BrandMaterial[]>([])
 const versions = ref<BrandProfileVersion[]>([])
+const publishSites = ref<PublishSite[]>([])
 const uploadCategory = ref('brand_image')
 const MAX_UPLOAD_SIZE = 10 * 1024 * 1024
+
+const agentSiteOptions = computed(() => publishSites.value.filter((site) =>
+  site.integrationMethod === 'brand_geo_site' || site.siteCode === 'agent_official_site',
+))
+const industrySiteOptions = computed(() => publishSites.value.filter((site) =>
+  site.integrationMethod !== 'brand_geo_site'
+  && site.integrationMethod !== 'forum_playwright'
+  && site.integrationMethod !== 'discuz_http'
+  && site.siteCode !== 'agent_official_site',
+))
+
+function handleAgentSiteChange(value: string) {
+  const site = agentSiteOptions.value.find((item) => item.siteCode === value)
+  form.geoSiteStatus = site ? 'active' : ''
+}
+
+function handleIndustrySiteChange(value: string) {
+  const site = industrySiteOptions.value.find((item) => item.siteCode === value)
+  form.industrySiteName = site?.siteName || ''
+}
 
 const previewableExtSet = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg', 'tif', 'tiff'])
 const imageExtSet = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg', 'tif', 'tiff'])
@@ -357,12 +418,13 @@ async function submitBrand() {
       publicAddress: form.publicAddress || undefined,
       wechat: form.wechat || undefined,
       website: form.website || undefined,
-      officialAccount: form.officialAccount || undefined,
-      videoAccount: form.videoAccount || undefined,
-      douyinAccount: form.douyinAccount || undefined,
-      standardBrandStatement: form.standardBrandStatement || undefined,
-      businessStandardStatement: form.businessStandardStatement || undefined,
-      description: form.description || undefined,
+      geoSiteCode: form.geoSiteCode || undefined,
+      geoSiteStatus: form.geoSiteCode ? form.geoSiteStatus || 'active' : undefined,
+      industrySiteName: form.industrySiteName || undefined,
+      industrySiteCode: form.industrySiteCode || undefined,
+      brandQualificationDescription: form.brandQualificationDescription || undefined,
+      brandCaseDescription: form.brandCaseDescription || undefined,
+      description: form.businessIntro || undefined,
       forbiddenPhrases: form.forbiddenPhrases || undefined,
       versionChangeReason: form.versionChangeReason || undefined,
     }
@@ -416,6 +478,15 @@ async function loadVersions() {
   versions.value = data.data.records || []
 }
 
+async function loadPublishSiteOptions() {
+  try {
+    const { data } = await getPublishSites({ status: 'active' })
+    publishSites.value = data.data || []
+  } catch {
+    publishSites.value = []
+  }
+}
+
 async function removeMaterial(materialId: number) {
   if (!createdBrandId.value) return
   await ElMessageBox.confirm('确认删除该素材？', '删除确认', {
@@ -435,7 +506,7 @@ function goBrandDetail() {
 
 onMounted(async () => {
   await dictStore.ensureLoaded()
-  await loadCompany()
+  await Promise.all([loadCompany(), loadPublishSiteOptions()])
   if (!dictStore.options('brand_material_category').length) {
     uploadCategory.value = 'other'
   }

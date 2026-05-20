@@ -34,8 +34,8 @@ public class Brand {
     private String wechat;
     private String description;
     private String businessIntro;
-    private String standardBrandStatement;
-    private String businessStandardStatement;
+    private String brandQualificationDescription;
+    private String brandCaseDescription;
     private String standardStatement;
     private String statementStatus;
     private LocalDateTime statementGeneratedAt;

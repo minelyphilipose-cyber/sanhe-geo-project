@@ -147,8 +147,8 @@ export interface Brand {
   wechat: string | null
   description: string | null
   businessIntro?: string | null
-  standardBrandStatement: string | null
-  businessStandardStatement?: string | null
+  brandQualificationDescription?: string | null
+  brandCaseDescription?: string | null
   standardStatement?: {
     positioning?: string | null
     selling_points?: string[] | null

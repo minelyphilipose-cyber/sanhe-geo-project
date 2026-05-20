@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.customer.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 @Data
@@ -29,8 +30,10 @@ public class BrandUpdateRequest {
     private String wechat;
     private String description;
     private String businessIntro;
-    private String standardBrandStatement;
-    private String businessStandardStatement;
+    @Size(max = 300)
+    private String brandQualificationDescription;
+    @Size(max = 300)
+    private String brandCaseDescription;
     private String forbiddenPhrases;
     private String geoSiteCode;
     private String geoSiteStatus;

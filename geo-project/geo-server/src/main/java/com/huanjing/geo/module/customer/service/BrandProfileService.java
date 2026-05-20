@@ -309,8 +309,8 @@ public class BrandProfileService {
         snapshot.put("wechat", brand.getWechat());
         snapshot.put("description", brand.getDescription());
         snapshot.put("businessIntro", brand.getBusinessIntro());
-        snapshot.put("standardBrandStatement", brand.getStandardBrandStatement());
-        snapshot.put("businessStandardStatement", brand.getBusinessStandardStatement());
+        snapshot.put("brandQualificationDescription", brand.getBrandQualificationDescription());
+        snapshot.put("brandCaseDescription", brand.getBrandCaseDescription());
         snapshot.put("forbiddenPhrases", brand.getForbiddenPhrases());
         snapshot.put("status", brand.getStatus());
         return snapshot;

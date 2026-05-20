@@ -473,7 +473,7 @@ function extractBrandBaseStatement(brand: Brand | null) {
       return statement.trim()
     }
   }
-  return brand.standardBrandStatement || brand.businessStandardStatement || ''
+  return ''
 }
 
 function resetForm() {

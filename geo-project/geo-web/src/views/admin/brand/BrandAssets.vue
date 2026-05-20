@@ -38,9 +38,9 @@
         <div class="space-y-2">
           <CheckItem label="品牌官网" :ok="!!brand?.website" />
           <CheckItem label="联系方式（公开电话/公开地址/电话/微信）" :ok="hasContactInfo" />
-          <CheckItem label="品牌简介" :ok="!!brand?.description" />
           <CheckItem label="业务介绍" :ok="!!brand?.businessIntro" />
-          <CheckItem label="标准表述" :ok="!!brand?.standardBrandStatement" />
+          <CheckItem label="品牌资质描述" :ok="!!brand?.brandQualificationDescription" />
+          <CheckItem label="品牌案例描述" :ok="!!brand?.brandCaseDescription" />
           <CheckItem label="品牌形象素材" :ok="hasCategoryMaterial('brand_image')" />
           <CheckItem label="资质文件" :ok="hasCategoryMaterial('qualification')" />
         </div>
@@ -467,9 +467,9 @@ const hasContactInfo = computed(() => !!(brand.value?.publicPhone || brand.value
 const completenessItems = computed(() => [
   !!brand.value?.website,
   hasContactInfo.value,
-  !!brand.value?.description,
   !!brand.value?.businessIntro,
-  !!brand.value?.standardBrandStatement,
+  !!brand.value?.brandQualificationDescription,
+  !!brand.value?.brandCaseDescription,
   hasCategoryMaterial('brand_image'),
   hasCategoryMaterial('qualification'),
 ])

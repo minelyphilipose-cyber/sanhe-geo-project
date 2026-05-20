@@ -45,13 +45,13 @@
             </el-descriptions-item>
             <el-descriptions-item label="联系电话">{{ brand?.phone || '-' }}</el-descriptions-item>
             <el-descriptions-item label="微信">{{ brand?.wechat || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="公众号">{{ brand?.officialAccount || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="视频号">{{ brand?.videoAccount || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="抖音号">{{ brand?.douyinAccount || '-' }}</el-descriptions-item>
             <el-descriptions-item label="对外公开电话">{{ brand?.publicPhone || '-' }}</el-descriptions-item>
             <el-descriptions-item label="对外公开地址">{{ brand?.publicAddress || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="品牌简介" :span="3">{{ brand?.description || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="Agent 官网">{{ agentSiteLabel(brand?.geoSiteCode) }}</el-descriptions-item>
+            <el-descriptions-item label="行业资讯站">{{ brand?.industrySiteName || '-' }}</el-descriptions-item>
             <el-descriptions-item label="业务介绍" :span="3">{{ brand?.businessIntro || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="品牌资质描述" :span="3">{{ brand?.brandQualificationDescription || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="品牌案例描述" :span="3">{{ brand?.brandCaseDescription || '-' }}</el-descriptions-item>
             <el-descriptions-item label="禁用词" :span="3">{{ brand?.forbiddenPhrases || '-' }}</el-descriptions-item>
           </el-descriptions>
 
@@ -92,14 +92,39 @@
               <el-form-item label="对外公开地址">
                 <el-input v-model="infoForm.publicAddress" />
               </el-form-item>
-              <el-form-item label="公众号">
-                <el-input v-model="infoForm.officialAccount" />
+              <el-form-item label="Agent 官网">
+                <el-select
+                  v-model="infoForm.geoSiteCode"
+                  clearable
+                  filterable
+                  placeholder="选择 Agent 官网，自动带出站点标识"
+                  style="width: 100%"
+                  @change="handleAgentSiteChange"
+                >
+                  <el-option
+                    v-for="site in agentSiteOptions"
+                    :key="site.siteCode || site.id"
+                    :label="site.siteName"
+                    :value="site.siteCode"
+                  />
+                </el-select>
               </el-form-item>
-              <el-form-item label="视频号">
-                <el-input v-model="infoForm.videoAccount" />
-              </el-form-item>
-              <el-form-item label="抖音号">
-                <el-input v-model="infoForm.douyinAccount" />
+              <el-form-item label="行业资讯站">
+                <el-select
+                  v-model="infoForm.industrySiteCode"
+                  clearable
+                  filterable
+                  placeholder="选择资讯站，自动带出站点标识"
+                  style="width: 100%"
+                  @change="handleIndustrySiteChange"
+                >
+                  <el-option
+                    v-for="site in industrySiteOptions"
+                    :key="site.siteCode || site.id"
+                    :label="site.siteName"
+                    :value="site.siteCode"
+                  />
+                </el-select>
               </el-form-item>
               <el-form-item label="状态" required>
                 <el-select v-model="infoForm.status" style="width: 100%">
@@ -112,11 +137,14 @@
                 </el-select>
               </el-form-item>
             </div>
-            <el-form-item label="品牌简介">
-              <el-input v-model="infoForm.description" type="textarea" :rows="3" />
-            </el-form-item>
             <el-form-item label="业务介绍">
               <el-input v-model="infoForm.businessIntro" type="textarea" :rows="3" />
+            </el-form-item>
+            <el-form-item label="品牌资质描述">
+              <el-input v-model="infoForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit />
+            </el-form-item>
+            <el-form-item label="品牌案例描述">
+              <el-input v-model="infoForm.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit />
             </el-form-item>
             <el-form-item label="禁用词">
               <el-input v-model="infoForm.forbiddenPhrases" type="textarea" :rows="2" placeholder="多个禁用词用逗号分隔" />
@@ -150,8 +178,6 @@
           </el-descriptions>
 
           <el-descriptions class="mt-4" :column="2" border>
-            <el-descriptions-item label="品牌标准表述">{{ brand?.standardBrandStatement || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="业务标准表述">{{ brand?.businessStandardStatement || '-' }}</el-descriptions-item>
             <el-descriptions-item label="生成时间">{{ statement?.statementGeneratedAt || '-' }}</el-descriptions-item>
             <el-descriptions-item label="锁定时间">{{ statement?.statementLockedAt || '-' }}</el-descriptions-item>
           </el-descriptions>
@@ -227,7 +253,8 @@ import {
   getBrandMaterialStream,
   getBrandVersions,
 } from '@/api/customer'
-import type { Brand, BrandStatementView, BrandMaterial, BrandProfileVersion } from '@/types'
+import { getPublishSites } from '@/api/publishSite'
+import type { Brand, BrandStatementView, BrandMaterial, BrandProfileVersion, PublishSite } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
@@ -248,6 +275,7 @@ const activeTab = ref('info')
 const brand = ref<Brand | null>(null)
 const statement = ref<BrandStatementView | null>(null)
 const companyIndustryTags = ref<string[]>([])
+const publishSites = ref<PublishSite[]>([])
 
 // ────────── Tab 1: 基础资料 ──────────
 const editingInfo = ref(false)
@@ -264,12 +292,14 @@ const infoForm = reactive({
   wechat: '',
   publicPhone: '',
   publicAddress: '',
-  officialAccount: '',
-  videoAccount: '',
-  douyinAccount: '',
+  geoSiteCode: '',
+  geoSiteStatus: '',
+  industrySiteName: '',
+  industrySiteCode: '',
   status: 'active',
-  description: '',
   businessIntro: '',
+  brandQualificationDescription: '',
+  brandCaseDescription: '',
   forbiddenPhrases: '',
 })
 
@@ -279,6 +309,15 @@ const infoRules: FormRules = {
 }
 
 const availableIndustries = computed(() => companyIndustryTags.value)
+const agentSiteOptions = computed(() => publishSites.value.filter((site) =>
+  site.integrationMethod === 'brand_geo_site' || site.siteCode === 'agent_official_site',
+))
+const industrySiteOptions = computed(() => publishSites.value.filter((site) =>
+  site.integrationMethod !== 'brand_geo_site'
+  && site.integrationMethod !== 'forum_playwright'
+  && site.integrationMethod !== 'discuz_http'
+  && site.siteCode !== 'agent_official_site',
+))
 
 const regionText = computed(() => {
   if (!brand.value) return '-'
@@ -292,6 +331,21 @@ function industryLabel(value?: string | null) {
 
 function normalizeUrl(url: string) {
   return url.startsWith('http') ? url : `https://${url}`
+}
+
+function agentSiteLabel(code?: string | null) {
+  if (!code) return '-'
+  return agentSiteOptions.value.find((item) => item.siteCode === code)?.siteName || code
+}
+
+function handleAgentSiteChange(value: string) {
+  const site = agentSiteOptions.value.find((item) => item.siteCode === value)
+  infoForm.geoSiteStatus = site ? 'active' : ''
+}
+
+function handleIndustrySiteChange(value: string) {
+  const site = industrySiteOptions.value.find((item) => item.siteCode === value)
+  infoForm.industrySiteName = site?.siteName || ''
 }
 
 function parseIndustryTags(value?: string | string[] | null) {
@@ -316,12 +370,14 @@ function fillInfoForm(data: Brand) {
   infoForm.wechat = data.wechat || ''
   infoForm.publicPhone = data.publicPhone || ''
   infoForm.publicAddress = data.publicAddress || ''
-  infoForm.officialAccount = data.officialAccount || ''
-  infoForm.videoAccount = data.videoAccount || ''
-  infoForm.douyinAccount = data.douyinAccount || ''
+  infoForm.geoSiteCode = data.geoSiteCode || ''
+  infoForm.geoSiteStatus = data.geoSiteStatus || ''
+  infoForm.industrySiteName = data.industrySiteName || ''
+  infoForm.industrySiteCode = data.industrySiteCode || ''
   infoForm.status = data.status || 'active'
-  infoForm.description = data.description || ''
   infoForm.businessIntro = data.businessIntro || ''
+  infoForm.brandQualificationDescription = data.brandQualificationDescription || ''
+  infoForm.brandCaseDescription = data.brandCaseDescription || ''
   infoForm.forbiddenPhrases = Array.isArray(data.forbiddenPhrases)
     ? data.forbiddenPhrases.join('，')
     : (data.forbiddenPhrases || '')
@@ -360,12 +416,18 @@ async function saveInfo() {
       wechat: infoForm.wechat || undefined,
       publicPhone: infoForm.publicPhone || undefined,
       publicAddress: infoForm.publicAddress || undefined,
-      officialAccount: infoForm.officialAccount || undefined,
-      videoAccount: infoForm.videoAccount || undefined,
-      douyinAccount: infoForm.douyinAccount || undefined,
+      officialAccount: brand.value?.officialAccount || undefined,
+      videoAccount: brand.value?.videoAccount || undefined,
+      douyinAccount: brand.value?.douyinAccount || undefined,
+      geoSiteCode: infoForm.geoSiteCode || undefined,
+      geoSiteStatus: infoForm.geoSiteCode ? infoForm.geoSiteStatus || 'active' : undefined,
+      industrySiteName: infoForm.industrySiteName || undefined,
+      industrySiteCode: infoForm.industrySiteCode || undefined,
       status: infoForm.status,
-      description: infoForm.description || undefined,
+      description: infoForm.businessIntro || undefined,
       businessIntro: infoForm.businessIntro || undefined,
+      brandQualificationDescription: infoForm.brandQualificationDescription || undefined,
+      brandCaseDescription: infoForm.brandCaseDescription || undefined,
       forbiddenPhrases: infoForm.forbiddenPhrases || undefined,
     })
     ElMessage.success('品牌信息已更新')
@@ -400,6 +462,15 @@ async function loadStatement() {
     statement.value = data.data
   } catch {
     statement.value = null
+  }
+}
+
+async function loadPublishSiteOptions() {
+  try {
+    const { data } = await getPublishSites({ status: 'active' })
+    publishSites.value = data.data || []
+  } catch {
+    publishSites.value = []
   }
 }
 
@@ -548,6 +619,7 @@ async function loadAll() {
   loading.value = true
   editingInfo.value = false
   await dictStore.ensureLoaded()
+  await loadPublishSiteOptions()
   await loadBrand()
   await Promise.all([loadStatement(), loadMaterials(), loadVersions()])
   loading.value = false
