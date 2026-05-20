@@ -210,6 +210,7 @@ const form = reactive<KeywordGroupFormState>({
 })
 
 const legacyTypeLabels: Record<string, string> = {
+  imported: '导入问题池',
   search: '搜索词(历史)',
   location: '地域词(历史)',
   industry: '行业词(历史)',

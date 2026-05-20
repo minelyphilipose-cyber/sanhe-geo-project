@@ -21,6 +21,12 @@ export function getContentArticles(params: {
   projectName?: string
   status?: string
   articleType?: string
+  articleTypeCode?: string
+  channelGroupCode?: string
+  channelSubCode?: string
+  generationMode?: 'batch' | 'single'
+  createdStartDate?: string
+  createdEndDate?: string
   current?: number
   size?: number
 }) {

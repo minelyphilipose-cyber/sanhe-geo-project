@@ -50,4 +50,6 @@ public class ArticleDraft {
     private String projectName;
     @TableField(exist = false)
     private Boolean systemGenerated;
+    @TableField(exist = false)
+    private String generationMode;
 }

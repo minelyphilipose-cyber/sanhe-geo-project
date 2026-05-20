@@ -210,7 +210,7 @@ public class BatchArticleGenerationService {
                         task.setRowNo(topicIndex + 1);
                         task.setArticleIndexInRow(articleIndexInTopic);
                         task.setArticleIndexInBatch(articleIndexInBatch);
-                        task.setArticleType(DEFAULT_ARTICLE_TYPE);
+                        task.setArticleType(resolveTaskArticleType(platform.articleTypeCode()));
                         task.setTone("");
                         task.setContentStyle(platform.contentStyle());
                         task.setChannelGroupCode(platform.channelGroupCode());
@@ -695,6 +695,14 @@ public class BatchArticleGenerationService {
                 count,
                 trimToNull(extraPrompt)
         );
+    }
+
+    private String resolveTaskArticleType(String articleTypeCode) {
+        String articleType = trimToNull(articleTypeCode);
+        if (articleType != null && ArticleTypes.isSupported(articleType)) {
+            return articleType;
+        }
+        return DEFAULT_ARTICLE_TYPE;
     }
 
     private ChannelRef resolveChannel(BatchArticleGenerateRequest.PlatformCount platform) {

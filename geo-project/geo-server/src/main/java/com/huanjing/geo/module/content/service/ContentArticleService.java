@@ -10,6 +10,7 @@ import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.service.AuditService;
 import com.huanjing.geo.module.content.ContentErrorCodes;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.dto.ArticlePublishRequest;
 import com.huanjing.geo.module.content.dto.ArticleResubmitRequest;
@@ -35,6 +36,7 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -59,6 +61,20 @@ public class ContentArticleService {
     private final AuditService auditService;
 
     public Page<ArticleDraft> page(String projectName, String status, String articleType, long current, long size) {
+        return page(projectName, status, articleType, null, null, null, null, null, null, current, size);
+    }
+
+    public Page<ArticleDraft> page(String projectName,
+                                   String status,
+                                   String articleType,
+                                   String articleTypeCode,
+                                   String channelGroupCode,
+                                   String channelSubCode,
+                                   String generationMode,
+                                   String createdStartDate,
+                                   String createdEndDate,
+                                   long current,
+                                   long size) {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
         LambdaQueryWrapper<ArticleDraft> wrapper = new LambdaQueryWrapper<ArticleDraft>()
@@ -77,10 +93,107 @@ public class ContentArticleService {
         if (StringUtils.hasText(articleType)) {
             wrapper.eq(ArticleDraft::getArticleType, articleType.trim());
         }
+        applyArticleTypeCodeFilter(wrapper, articleTypeCode);
+        applyChannelFilter(wrapper, channelGroupCode, channelSubCode);
+        applyGenerationModeFilter(wrapper, generationMode);
+        applyCreatedDateFilter(wrapper, createdStartDate, createdEndDate);
         Page<ArticleDraft> pageData = articleDraftMapper.selectPage(new Page<>(current, size), wrapper);
         fillProjectNames(pageData.getRecords());
         fillGenerationMetadata(pageData.getRecords());
         return pageData;
+    }
+
+    private void applyArticleTypeCodeFilter(LambdaQueryWrapper<ArticleDraft> wrapper, String articleTypeCode) {
+        String code = trimToNull(articleTypeCode);
+        if (code == null) {
+            return;
+        }
+        if (!ArticleTypes.isSupported(code)) {
+            wrapper.eq(ArticleDraft::getArticleTypeCode, code);
+            return;
+        }
+        wrapper.and(item -> item
+                .eq(ArticleDraft::getArticleTypeCode, code)
+                .or()
+                .nested(legacy -> legacy
+                        .eq(ArticleDraft::getArticleType, code)
+                        .isNull(ArticleDraft::getArticleTypeCode)));
+    }
+
+    private void applyChannelFilter(LambdaQueryWrapper<ArticleDraft> wrapper, String channelGroupCode, String channelSubCode) {
+        String group = trimToNull(channelGroupCode);
+        String sub = trimToNull(channelSubCode);
+        if (group == null) {
+            return;
+        }
+        String legacyContentStyle = ArticlePromptChannels.contentStyle(group, sub);
+        if (sub != null) {
+            wrapper.and(item -> item
+                    .nested(channel -> channel
+                            .eq(ArticleDraft::getChannelGroupCode, group)
+                            .eq(ArticleDraft::getChannelSubCode, sub))
+                    .or()
+                    .eq(ArticleDraft::getContentStyle, legacyContentStyle));
+            return;
+        }
+        if (ArticlePromptChannels.SELF_MEDIA.equals(group)) {
+            wrapper.and(item -> item
+                    .eq(ArticleDraft::getChannelGroupCode, group)
+                    .or()
+                    .in(ArticleDraft::getContentStyle, ArticlePromptChannels.subCodes(group)));
+            return;
+        }
+        wrapper.and(item -> item
+                .eq(ArticleDraft::getChannelGroupCode, group)
+                .or()
+                .eq(ArticleDraft::getContentStyle, legacyContentStyle));
+    }
+
+    private void applyGenerationModeFilter(LambdaQueryWrapper<ArticleDraft> wrapper, String generationMode) {
+        String mode = trimToNull(generationMode);
+        if (mode == null) {
+            return;
+        }
+        String batchGeneratedSql = """
+                SELECT article_id
+                FROM batch_article_generation_task
+                WHERE article_id IS NOT NULL
+                UNION
+                SELECT article_id
+                FROM article_draft_version
+                WHERE generated_by = 'batch_ai'
+                """;
+        if ("batch".equals(mode)) {
+            wrapper.inSql(ArticleDraft::getId, batchGeneratedSql);
+        } else if ("single".equals(mode)) {
+            wrapper.notInSql(ArticleDraft::getId, batchGeneratedSql);
+        }
+    }
+
+    private void applyCreatedDateFilter(LambdaQueryWrapper<ArticleDraft> wrapper, String createdStartDate, String createdEndDate) {
+        LocalDate startDate = parseDate(createdStartDate);
+        LocalDate endDate = parseDate(createdEndDate);
+        if (startDate != null) {
+            wrapper.ge(ArticleDraft::getCreatedAt, startDate.atStartOfDay());
+        }
+        if (endDate != null) {
+            wrapper.lt(ArticleDraft::getCreatedAt, endDate.plusDays(1).atStartOfDay());
+        }
+    }
+
+    private LocalDate parseDate(String value) {
+        String text = trimToNull(value);
+        if (text == null) {
+            return null;
+        }
+        return LocalDate.parse(text);
+    }
+
+    private String trimToNull(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
     }
 
     public String publicPreviewHtml(Long articleId) {
@@ -636,9 +749,11 @@ public class ContentArticleService {
                 .collect(Collectors.toMap(BatchArticleGenerationTask::getArticleId, task -> task, (first, ignored) -> first));
         for (ArticleDraft article : articles) {
             article.setSystemGenerated(false);
+            article.setGenerationMode("single");
             BatchArticleGenerationTask task = taskMap.get(article.getId());
             if (task != null) {
                 article.setSystemGenerated(true);
+                article.setGenerationMode("batch");
                 fillArticleFromGenerationTask(article, task);
             }
         }

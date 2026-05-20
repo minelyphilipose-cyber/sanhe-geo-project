@@ -10,30 +10,88 @@
 
     <el-card shadow="never" class="mb-3 admin-surface content-toolbar-card">
       <div class="toolbar">
-        <div class="toolbar-left">
-          <el-input v-model="query.projectName" clearable placeholder="项目名称" style="width: 220px" @keyup.enter="search" />
-          <el-select v-model="query.articleType" clearable placeholder="文章类型" style="width: 160px">
-            <el-option label="FAQ" value="faq" />
-            <el-option label="场景内容" value="scenario_content" />
-            <el-option label="行业文章" value="industry_article" />
-            <el-option label="阶段建议" value="stage_advice" />
-          </el-select>
-          <el-select v-model="query.status" clearable placeholder="状态" style="width: 150px">
-            <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
-          </el-select>
-          <el-button type="primary" @click="search">查询</el-button>
-          <el-button @click="resetQuery">重置</el-button>
+        <div class="toolbar-filter-row">
+          <div class="toolbar-filter-line is-primary">
+            <el-input
+              v-model="query.projectName"
+              class="toolbar-project-input"
+              clearable
+              placeholder="搜索项目名称"
+              :prefix-icon="Search"
+              @keyup.enter="search"
+            />
+            <el-select v-model="query.articleType" class="toolbar-filter-control" clearable placeholder="全部">
+              <template #prefix><span class="toolbar-select-prefix">类型</span></template>
+              <el-option label="FAQ" value="faq" />
+              <el-option label="场景内容" value="scenario_content" />
+              <el-option label="行业文章" value="industry_article" />
+              <el-option label="阶段建议" value="stage_advice" />
+            </el-select>
+            <el-select v-model="query.status" class="toolbar-filter-control" clearable placeholder="全部">
+              <template #prefix><span class="toolbar-select-prefix">状态</span></template>
+              <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+            <span class="toolbar-filter-divider" />
+            <div class="toolbar-filter-actions">
+              <el-button class="toolbar-search-action" type="primary" :icon="Search" @click="search">查询</el-button>
+              <el-button class="toolbar-reset-action" :icon="Refresh" @click="resetQuery">重置</el-button>
+              <el-button class="toolbar-toggle-action" text @click="showAdvancedFilters = !showAdvancedFilters">
+                {{ showAdvancedFilters ? '收起' : '更多筛选' }}
+                <el-icon class="toolbar-toggle-icon">
+                  <ArrowUp v-if="showAdvancedFilters" />
+                  <ArrowDown v-else />
+                </el-icon>
+              </el-button>
+            </div>
+          </div>
+          <div v-show="showAdvancedFilters" class="toolbar-filter-line is-secondary">
+            <el-select v-model="query.channelKey" class="toolbar-filter-control is-wide" clearable filterable placeholder="全部">
+              <template #prefix><span class="toolbar-select-prefix">渠道</span></template>
+              <el-option v-for="item in channelFilterOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+            <el-select v-model="query.articleTypeCode" class="toolbar-filter-control is-wide" clearable filterable placeholder="全部">
+              <template #prefix><span class="toolbar-select-prefix">形态</span></template>
+              <el-option v-for="item in contentShapeOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+            <el-select v-model="query.generationMode" class="toolbar-filter-control" clearable placeholder="全部">
+              <template #prefix><span class="toolbar-select-prefix">方式</span></template>
+              <el-option label="批量生成" value="batch" />
+              <el-option label="单篇生成" value="single" />
+            </el-select>
+            <el-date-picker
+              v-model="query.createdRange"
+              class="toolbar-date-range"
+              type="daterange"
+              start-placeholder="开始时间"
+              end-placeholder="结束时间"
+              value-format="YYYY-MM-DD"
+              :prefix-icon="Calendar"
+              unlink-panels
+              clearable
+            />
+          </div>
         </div>
-        <div class="toolbar-right">
-          <el-button v-if="canWrite" type="primary" @click="openBatchGeneration">批量生成文章</el-button>
-          <el-button v-if="canWrite" @click="goManualCreate">手动生成文章</el-button>
-          <el-button v-if="canWrite" :disabled="!selectedRows.length || batchPublishChecking" :loading="batchPublishChecking" @click="openBatchPublish">
-            批量发布
-          </el-button>
-          <span v-if="canWrite" class="toolbar-divider" />
-          <el-button v-if="canWrite" class="toolbar-minor-action" @click="openBatchPublishJobs">发布任务</el-button>
-          <el-button v-if="canWrite" class="toolbar-minor-action" @click="openPromptTemplateManagement">文章模板</el-button>
-          <el-button v-if="canWrite" class="toolbar-minor-action" @click="openPublishPlatformManagement">发布平台管理</el-button>
+        <div v-if="canWrite" class="toolbar-action-row">
+          <div class="toolbar-primary-actions">
+            <el-button type="primary" @click="openBatchGeneration">批量生成文章</el-button>
+            <el-button @click="goManualCreate">单篇生成文章</el-button>
+          </div>
+          <div class="toolbar-secondary-actions">
+            <span v-if="selectedRows.length" class="toolbar-selection-hint">已选 {{ selectedRows.length }} 篇</span>
+            <el-button :disabled="!selectedRows.length || batchPublishChecking" :loading="batchPublishChecking" @click="openBatchPublish">
+              批量发布{{ selectedRows.length ? `（${selectedRows.length}）` : '' }}
+            </el-button>
+            <el-dropdown trigger="click" @command="handleToolbarMoreCommand">
+              <el-button class="toolbar-more-action">更多</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="jobs">发布任务</el-dropdown-item>
+                  <el-dropdown-item command="templates">文章模板</el-dropdown-item>
+                  <el-dropdown-item command="platforms">发布平台管理</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
         </div>
       </div>
     </el-card>
@@ -74,7 +132,7 @@
                 <div class="min-w-0">
                   <div class="admin-entity-main">{{ scope.row.projectName || `#${scope.row.projectId}` }}</div>
                   <div class="admin-entity-sub">
-                    {{ articleTypeLabel(scope.row.articleType) }} · {{ contentStyleLabel(scope.row.contentStyle) }}
+                    {{ articleTypeLabel(scope.row.articleType) }} · {{ articleChannelLabel(scope.row) }} · {{ generationModeLabel(scope.row) }}
                   </div>
                 </div>
               </div>
@@ -834,6 +892,7 @@ import { computed, h, onBeforeUnmount, onMounted, reactive, ref, watch } from 'v
 import { useRoute, useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowDown, ArrowUp, Calendar, Refresh, Search } from '@element-plus/icons-vue'
 import DataState from '@/components/ui/DataState.vue'
 import { useUserStore } from '@/stores/user'
 import type { ArticleDetailResponse, ArticleDraft, AuthorityMediaResource, BrandImageFolder, BrandMaterial, DistributionTask, DouyinCapability, PublishSite, SelfMediaAccount, WechatMpCapability } from '@/types'
@@ -900,9 +959,14 @@ const query = reactive({
   projectName: '',
   status: '',
   articleType: '',
+  articleTypeCode: '',
+  channelKey: '',
+  generationMode: '' as '' | 'batch' | 'single',
+  createdRange: [] as string[],
 })
 const reviewCount = computed(() => rows.value.filter((row) => canReview(row)).length)
 const distributableCount = computed(() => rows.value.filter((row) => canDistribute(row.status)).length)
+const showAdvancedFilters = ref(false)
 const blockedCount = computed(() => rows.value.filter((row) => ['rejected', 'failed', 'risk_blocked'].includes(row.status)).length)
 
 const detailVisible = ref(false)
@@ -1082,9 +1146,51 @@ const statusOptions = [
   { label: '已就绪', value: 'approved' },
   { label: '已驳回', value: 'rejected' },
   { label: '修改中', value: 'under_revision' },
+  { label: '分发中', value: 'distributing' },
+  { label: '已分发', value: 'distributed' },
   { label: '已发布', value: 'published' },
   { label: '已下架', value: 'unpublished' },
 ]
+
+const channelFilterOptions = [
+  { label: '官网', value: 'agent_site:' },
+  { label: '行业资讯站', value: 'industry_site:' },
+  { label: '论坛', value: 'forum:' },
+  { label: '自媒体平台 / 今日头条', value: 'self_media:toutiao' },
+  { label: '自媒体平台 / 公众号', value: 'self_media:wechat' },
+  { label: '自媒体平台 / 知乎', value: 'self_media:zhihu' },
+  { label: '自媒体平台 / 抖音图文', value: 'self_media:douyin_image_text' },
+  { label: '自媒体平台 / 小红书', value: 'self_media:xiaohongshu' },
+  { label: '自媒体平台 / 百家号', value: 'self_media:baijiahao' },
+  { label: '权威媒体 / 行业媒体', value: 'authority_media:industry_media' },
+  { label: '权威媒体 / 地方媒体', value: 'authority_media:local_media' },
+  { label: '权威媒体 / 财经媒体', value: 'authority_media:finance_media' },
+  { label: '权威媒体 / 科技媒体', value: 'authority_media:tech_media' },
+  { label: '权威媒体 / 新闻源媒体', value: 'authority_media:news_source' },
+  { label: '权威媒体 / 门户媒体', value: 'authority_media:portal_media' },
+]
+
+const contentShapeOptions = [
+  { label: '问答文章', value: 'faq' },
+  { label: '场景内容文', value: 'scenario_content' },
+  { label: '行业分析文', value: 'industry_article' },
+  { label: '阶段建议文', value: 'stage_advice' },
+  { label: '选择指南', value: 'buying_guide' },
+  { label: '对比评测', value: 'comparison' },
+  { label: '费用解析', value: 'cost_analysis' },
+  { label: '避坑指南', value: 'pitfall_guide' },
+  { label: '经验笔记', value: 'social_note' },
+  { label: '资讯简讯', value: 'news_brief' },
+  { label: '讨论帖', value: 'forum_discussion' },
+]
+
+function parseChannelKey(value: string) {
+  const [channelGroupCode, channelSubCode = ''] = value.split(':')
+  return {
+    channelGroupCode: channelGroupCode || undefined,
+    channelSubCode: channelSubCode || undefined,
+  }
+}
 
 function articleTypeLabel(v: string) {
   const map: Record<string, string> = {
@@ -1132,6 +1238,50 @@ function contentStyleLabel(v?: string | null) {
     baijiahao: '百家号',
   }
   return map[v] || v
+}
+
+function channelGroupLabel(v?: string | null) {
+  const map: Record<string, string> = {
+    agent_site: '官网',
+    industry_site: '行业资讯站',
+    self_media: '自媒体平台',
+    authority_media: '权威媒体',
+    forum: '论坛',
+  }
+  return v ? map[v] || v : ''
+}
+
+function channelSubLabel(v?: string | null) {
+  const map: Record<string, string> = {
+    toutiao: '今日头条',
+    wechat: '公众号',
+    zhihu: '知乎',
+    douyin_image_text: '抖音图文',
+    xiaohongshu: '小红书',
+    baijiahao: '百家号',
+    industry_media: '行业媒体',
+    local_media: '地方媒体',
+    finance_media: '财经媒体',
+    tech_media: '科技媒体',
+    news_source: '新闻源媒体',
+    portal_media: '门户媒体',
+  }
+  return v ? map[v] || v : ''
+}
+
+function articleChannelLabel(row: ArticleDraft) {
+  if (row.channelGroupCode) {
+    const group = channelGroupLabel(row.channelGroupCode)
+    const sub = channelSubLabel(row.channelSubCode)
+    return sub ? `${group}/${sub}` : group
+  }
+  return contentStyleLabel(row.contentStyle)
+}
+
+function generationModeLabel(row: ArticleDraft) {
+  if (row.generationMode === 'batch') return '批量生成'
+  if (row.generationMode === 'single') return '单篇生成'
+  return row.systemGenerated ? '批量生成' : '单篇生成'
 }
 
 function statusLabel(v: string) {
@@ -1200,16 +1350,16 @@ function distributionStatusTag(v?: string | null): 'success' | 'warning' | 'dang
 }
 
 function statusTagType(v: string): 'success' | 'warning' | 'danger' | 'info' {
-  if (v === 'approved' || v === 'published') return 'success'
+  if (v === 'approved' || v === 'distributed' || v === 'published') return 'success'
   if (v === 'rejected') return 'danger'
-  if (v === 'under_revision' || v === 'unpublished') return 'warning'
+  if (v === 'under_revision' || v === 'distributing' || v === 'unpublished') return 'warning'
   return 'info'
 }
 
 function contentStatusClass(v: string) {
-  if (v === 'approved' || v === 'published') return 'is-success'
+  if (v === 'approved' || v === 'distributed' || v === 'published') return 'is-success'
   if (v === 'rejected' || v === 'failed' || v === 'risk_blocked') return 'is-danger'
-  if (v === 'pending_review' || v === 'under_revision' || v === 'unpublished') return 'is-warning'
+  if (v === 'pending_review' || v === 'under_revision' || v === 'distributing' || v === 'unpublished') return 'is-warning'
   return 'is-muted'
 }
 
@@ -1265,6 +1415,11 @@ async function load() {
       projectName: query.projectName.trim() || undefined,
       status: query.status || undefined,
       articleType: query.articleType || undefined,
+      articleTypeCode: query.articleTypeCode || undefined,
+      ...parseChannelKey(query.channelKey),
+      generationMode: query.generationMode || undefined,
+      createdStartDate: query.createdRange[0] || undefined,
+      createdEndDate: query.createdRange[1] || undefined,
     })
     rows.value = data.data.records || []
     page.total = data.data.total || 0
@@ -1286,6 +1441,10 @@ function resetQuery() {
   query.projectName = ''
   query.status = ''
   query.articleType = ''
+  query.articleTypeCode = ''
+  query.channelKey = ''
+  query.generationMode = ''
+  query.createdRange = []
   search()
 }
 
@@ -1333,6 +1492,16 @@ function openBatchPublishJobs() {
   router.push({
     path: '/admin/content/articles/batch-publish-jobs',
   })
+}
+
+function handleToolbarMoreCommand(command: string) {
+  if (command === 'jobs') {
+    openBatchPublishJobs()
+  } else if (command === 'templates') {
+    openPromptTemplateManagement()
+  } else if (command === 'platforms') {
+    openPublishPlatformManagement()
+  }
 }
 
 async function openBatchPublish() {
@@ -2585,39 +2754,251 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 
 .toolbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 14px;
 }
 
-.toolbar-left {
+.content-toolbar-card {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.content-toolbar-card :deep(.el-card__body) {
+  padding: 20px 22px;
+}
+
+.toolbar-filter-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.toolbar-right {
-  display: flex;
+.toolbar-filter-line {
+  display: grid;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 10px;
 }
 
-.toolbar-divider {
+.toolbar-filter-line.is-primary {
+  grid-template-columns:
+    minmax(240px, 300px)
+    minmax(170px, 200px)
+    minmax(150px, 180px)
+    1px
+    auto;
+  justify-content: start;
+}
+
+.toolbar-filter-line.is-secondary {
+  padding-top: 16px;
+  border-top: 1px dashed #e2e8f0;
+  grid-template-columns:
+    minmax(180px, 220px)
+    minmax(180px, 220px)
+    minmax(180px, 220px)
+    minmax(300px, 360px);
+  justify-content: start;
+}
+
+.toolbar-project-input,
+.toolbar-filter-control,
+.toolbar-date-range {
+  width: 100%;
+}
+
+.toolbar-filter-control.is-narrow {
+  min-width: 128px;
+}
+
+.toolbar-filter-control.is-wide {
+  min-width: 170px;
+}
+
+.toolbar-filter-divider {
   width: 1px;
-  height: 24px;
-  background: #e2e8f0;
+  height: 32px;
+  background: #e5ebf3;
 }
 
-.toolbar-minor-action {
+.toolbar-select-prefix {
+  color: #8ea0ba;
+  font-weight: 400;
+  margin-right: 18px;
+}
+
+.toolbar-project-input :deep(.el-input__wrapper),
+.toolbar-date-range :deep(.el-input__wrapper),
+.toolbar-date-range :deep(.el-range-input),
+.toolbar-filter-control :deep(.el-select__wrapper) {
+  min-height: 50px;
+  border-radius: 11px;
+  background: #f8fafd;
+  box-shadow: 0 0 0 1px #e2e8f0 inset;
+}
+
+.toolbar-project-input :deep(.el-input__wrapper:hover),
+.toolbar-date-range :deep(.el-input__wrapper:hover),
+.toolbar-filter-control :deep(.el-select__wrapper:hover) {
+  box-shadow: 0 0 0 1px #cbd8e8 inset;
+}
+
+.toolbar-project-input :deep(.el-input__inner),
+.toolbar-filter-control :deep(.el-select__placeholder),
+.toolbar-filter-control :deep(.el-select__selected-item),
+.toolbar-date-range :deep(.el-range-input) {
+  color: #334155;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.toolbar-project-input :deep(.el-input__inner::placeholder),
+.toolbar-date-range :deep(.el-range-input::placeholder) {
+  color: #8ea0ba;
+  font-weight: 400;
+}
+
+.toolbar-date-range :deep(.el-range-separator) {
+  color: #c2ccda;
+  font-weight: 400;
+}
+
+.toolbar-filter-actions,
+.toolbar-action-row,
+.toolbar-primary-actions,
+.toolbar-secondary-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.toolbar-filter-actions {
+  justify-content: flex-end;
+  white-space: nowrap;
+  flex-wrap: nowrap;
+}
+
+.toolbar-search-action,
+.toolbar-reset-action {
+  height: 50px;
+  min-width: 112px;
+  border-radius: 11px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.toolbar-search-action {
+  background: #2563eb;
+  border-color: #2563eb;
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.28);
+}
+
+.toolbar-reset-action {
+  color: #334155;
+  background: #fff;
+  border-color: #e2e8f0;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+.toolbar-toggle-action {
+  color: #2563eb;
+  font-size: 15px;
+  font-weight: 800;
+  padding: 0 4px 0 10px;
+}
+
+.toolbar-toggle-action:hover {
+  color: #1d4ed8;
+  background: transparent;
+}
+
+.toolbar-toggle-icon {
+  margin-left: 4px;
+  font-size: 14px;
+}
+
+.toolbar-action-row {
+  justify-content: space-between;
+  min-height: 44px;
+  padding-top: 12px;
+  border-top: 1px solid #edf2f7;
+  flex-wrap: wrap;
+}
+
+.toolbar-primary-actions,
+.toolbar-secondary-actions {
+  flex-wrap: wrap;
+}
+
+.toolbar-secondary-actions {
+  justify-content: flex-end;
+}
+
+.toolbar-selection-hint {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.toolbar-more-action {
   color: #64748b;
 }
 
-.toolbar-minor-action:hover {
+.toolbar-more-action:hover {
   color: #334155;
+}
+
+@media (max-width: 1180px) {
+  .toolbar-filter-line.is-primary,
+  .toolbar-filter-line.is-secondary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .toolbar-filter-divider {
+    display: none;
+  }
+
+  .toolbar-filter-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 760px) {
+  .toolbar-filter-line.is-primary,
+  .toolbar-filter-line.is-secondary {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar-action-row,
+  .toolbar-primary-actions,
+  .toolbar-secondary-actions {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .toolbar-action-row {
+    flex-direction: column;
+  }
+
+  .toolbar-primary-actions .el-button,
+  .toolbar-secondary-actions .el-button,
+  .toolbar-filter-actions .el-button,
+  .toolbar-secondary-actions :deep(.el-dropdown) {
+    flex: 1 1 0;
+  }
+
+  .toolbar-filter-actions {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .toolbar-toggle-action {
+    justify-content: center;
+  }
+
+  .toolbar-selection-hint {
+    width: 100%;
+  }
 }
 
 .mb-3 {

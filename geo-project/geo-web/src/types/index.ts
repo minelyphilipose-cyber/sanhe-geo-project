@@ -886,8 +886,13 @@ export interface ArticleDraft {
   batchId?: number | null
   projectId: number
   projectName?: string
+  targetChannel?: string | null
   articleType: 'faq' | 'scenario_content' | 'industry_article' | 'stage_advice' | string
+  articleTypeCode?: string | null
   contentStyle?: string | null
+  channelGroupCode?: string | null
+  channelSubCode?: string | null
+  allocationMode?: string | null
   topic?: string | null
   topicAsQuestion?: string | null
   title: string
@@ -900,6 +905,7 @@ export interface ArticleDraft {
   duplicateArticleId?: number | null
   currentVersionNo: number
   systemGenerated?: boolean | null
+  generationMode?: 'batch' | 'single' | string | null
   createdAt: string
   updatedAt: string
   publishedAt?: string | null

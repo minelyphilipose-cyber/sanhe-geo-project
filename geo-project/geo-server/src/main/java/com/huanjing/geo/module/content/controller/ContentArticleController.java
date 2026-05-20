@@ -45,9 +45,16 @@ public class ContentArticleController {
     public R<Page<ArticleDraft>> page(@RequestParam(required = false) String projectName,
                                       @RequestParam(required = false) String status,
                                       @RequestParam(required = false) String articleType,
+                                      @RequestParam(required = false) String articleTypeCode,
+                                      @RequestParam(required = false) String channelGroupCode,
+                                      @RequestParam(required = false) String channelSubCode,
+                                      @RequestParam(required = false) String generationMode,
+                                      @RequestParam(required = false) String createdStartDate,
+                                      @RequestParam(required = false) String createdEndDate,
                                       @RequestParam(defaultValue = "1") Long current,
                                       @RequestParam(defaultValue = "10") Long size) {
-        return R.ok(contentArticleService.page(projectName, status, articleType, current, size));
+        return R.ok(contentArticleService.page(projectName, status, articleType, articleTypeCode,
+                channelGroupCode, channelSubCode, generationMode, createdStartDate, createdEndDate, current, size));
     }
 
     @PostMapping("/manual")

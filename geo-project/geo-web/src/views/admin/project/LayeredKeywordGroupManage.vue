@@ -107,10 +107,10 @@
               <div v-if="!workorderList.length" class="empty-row">该项目暂无已生成拓词组。提交生成任务后会在这里展示。</div>
               <div v-for="item in workorderList" :key="item.id" class="workorder-row">
                 <div><b>{{ item.workorderNo }}</b><br><span class="meta">{{ formatTime(item.createdAt) }}</span></div>
-                <div>{{ item.packageName || '-' }}<br><span class="tag" :class="statusTagClass(item.status)">{{ item.status }}</span></div>
+                <div>{{ item.packageName || '-' }}<br><span class="tag" :class="statusTagClass(item.status)">{{ geoStatusLabel(item.status) }}</span></div>
                 <div>A {{ item.countA }} / B {{ item.countB }} / C {{ item.countC }}<br><b>合计 {{ item.countTotal }}</b></div>
                 <div>{{ item.batchCount }}</div>
-                <div>{{ item.latestBatchStatus || '-' }}<br><span class="meta">{{ formatTime(item.latestBatchAt) }}</span></div>
+                <div>{{ geoStatusLabel(item.latestBatchStatus) }}<br><span class="meta">{{ formatTime(item.latestBatchAt) }}</span></div>
                 <div><button class="btn btn-sm btn-primary" :disabled="!item.countTotal" @click="openWorkorderReview(item)">查看问题</button></div>
               </div>
             </div>
@@ -218,13 +218,13 @@
         <section v-show="activeStep === 4">
           <div class="design-note"><strong>Step 4 说明：</strong>异步任务。前端轮询批次详情拿结构化进度对象。中断走协作式：标记 cancel_requested，已生成部分保留落库（partial）。</div>
           <div class="card progress-card">
-            <div class="card-head"><span>当前批次 {{ currentBatch?.batchNo || '-' }}</span><span class="tag tag-warning">{{ currentBatch?.status || '未开始' }}</span></div>
+            <div class="card-head"><span>当前批次 {{ currentBatch?.batchNo || '-' }}</span><span class="tag tag-warning">{{ geoStatusLabel(currentBatch?.status, '未开始') }}</span></div>
             <div class="card-body">
               <div class="overview-grid">
                 <div><label>所属工单</label><b>{{ workorder ? `WO-${workorder.id}` : '-' }}</b></div>
                 <div><label>使用模型</label><b>{{ currentBatch?.modelName || selectedProvider?.modelName || '-' }}</b></div>
                 <div><label>本批数量</label><b>A {{ currentBatch?.requestA || 0 }} · B {{ currentBatch?.requestB || 0 }} · C {{ currentBatch?.requestC || 0 }}</b></div>
-                <div><label>状态</label><b>{{ currentBatch?.partialFlag ? 'partial' : currentBatch?.status || '-' }}</b></div>
+                <div><label>状态</label><b>{{ currentBatchStatusLabel(currentBatch) }}</b></div>
               </div>
               <div class="progress-bar"><div :style="{ width: progressPercent + '%' }"></div></div>
               <div class="progress-text">{{ progressObj.message || '等待生成' }} · {{ progressObj.generated || 0 }}/{{ progressObj.target || batchTotal }}</div>
@@ -246,7 +246,7 @@
             <div class="card-head"><span>本工单生成批次（{{ review?.batches.length || 0 }} 个）</span></div>
             <div class="card-body batch-list">
               <div class="batch-row head"><div>批次号</div><div>生成时间 / 模型</div><div>本批数量</div><div>状态</div><div>替换次数</div><div>操作</div></div>
-              <div v-for="b in review?.batches || []" :key="b.id" class="batch-row"><div>{{ b.batchNo }}</div><div>{{ formatTime(b.createdAt) }}<br>{{ b.modelName }}</div><div>A {{ b.actualA }} · B {{ b.actualB }} · C {{ b.actualC }}</div><div><span class="tag tag-success">{{ b.status }}</span></div><div>{{ batchReplaceCount(b.id) }}</div><div><button class="btn btn-sm" @click="currentBatch = b; activeStep = 4">查看</button><button class="btn btn-sm btn-danger" @click="removeBatch(b.id)">删除批次（软删除并释放额度）</button></div></div>
+              <div v-for="b in review?.batches || []" :key="b.id" class="batch-row"><div>{{ b.batchNo }}</div><div>{{ formatTime(b.createdAt) }}<br>{{ b.modelName }}</div><div>A {{ b.actualA }} · B {{ b.actualB }} · C {{ b.actualC }}</div><div><span class="tag" :class="statusTagClass(b.status)">{{ currentBatchStatusLabel(b) }}</span></div><div>{{ batchReplaceCount(b.id) }}</div><div><button class="btn btn-sm" @click="currentBatch = b; activeStep = 4">查看</button><button class="btn btn-sm btn-danger" @click="removeBatch(b.id)">删除批次（软删除并释放额度）</button></div></div>
             </div>
           </div>
           <div class="card question-review-card">
@@ -1277,10 +1277,40 @@ function isManualBatch(batch?: BatchVO | null) {
   if (!batch) return false
   return batch.batchType === 'manual' || batch.modelName === '手动录入' || batch.batchNo?.startsWith('MAN-')
 }
+function geoStatusLabel(status?: string | null, empty = '-') {
+  if (!status) return empty
+  const map: Record<string, string> = {
+    draft: '草稿',
+    paused: '已暂停',
+    committed: '已入库',
+    discarded: '已废弃',
+    imported: '已导入',
+    pending: '待生成',
+    running: '生成中',
+    completed: '已完成',
+    success: '成功',
+    failed: '失败',
+    deleted: '已删除',
+    cancelled: '已取消',
+    cancel_requested: '取消中',
+    partial: '部分完成',
+    partial_success: '部分成功',
+    pending_review: '待审核',
+    approved: '已通过',
+    rejected: '已驳回',
+    active: '启用',
+  }
+  return map[status] || status
+}
+function currentBatchStatusLabel(batch?: BatchVO | null) {
+  if (!batch) return '-'
+  if (batch.partialFlag && batch.status === 'completed') return '部分完成'
+  return geoStatusLabel(batch.status)
+}
 function statusTagClass(status?: string) {
-  if (status === 'committed') return 'tag-success'
+  if (status === 'committed' || status === 'completed' || status === 'success' || status === 'imported' || status === 'active') return 'tag-success'
   if (status === 'draft') return 'tag-primary'
-  if (status === 'discarded') return 'tag-danger'
+  if (status === 'discarded' || status === 'deleted' || status === 'failed' || status === 'cancelled') return 'tag-danger'
   return 'tag-warning'
 }
 </script>
