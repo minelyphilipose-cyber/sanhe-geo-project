@@ -342,7 +342,7 @@ public class BatchArticleGenerationService {
             task.setAudiencePerspective(prompt.audiencePerspective());
 
             ModelSelection model = resolveModel(prompt.systemPrompt());
-            String outboundPrompt = promptFilter.filterOutboundPrompt(prompt.userPrompt(), project, brand);
+            String outboundPrompt = promptFilter.filterOutboundPrompt(prompt.userPrompt(), project, brand, true);
             LlmInvokeResult result = llmInvoker.invoke(outboundPrompt, model.config());
             String content = normalizeContent(promptFilter.filterGeneratedContent(result.responseText(), project, brand, true));
 
