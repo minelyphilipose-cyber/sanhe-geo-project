@@ -409,6 +409,55 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="forumSiteVisible" title="论坛分发" width="900px" class="industry-site-dialog">
+      <div class="industry-site-intro">
+        选择一个已启用的论坛，系统会将当前文章作为论坛内容发布到对应站点。
+      </div>
+      <DataState :loading="forumSiteLoading" :empty="!forumSiteLoading && forumSites.length === 0" empty-text="暂无可用论坛">
+        <div class="industry-site-list">
+          <button
+            v-for="site in forumSites"
+            :key="site.id"
+            type="button"
+            class="industry-site-card"
+            :class="{ selected: selectedForumSiteId === site.id }"
+            @click="selectForumSite(site)"
+          >
+            <span class="industry-site-radio" :class="{ selected: selectedForumSiteId === site.id }" />
+            <span class="industry-site-content">
+              <span class="industry-site-head">
+                <span class="site-cell">
+                  <el-avatar v-if="site.iconUrl" :src="site.iconUrl" shape="square" :size="34" />
+                  <span v-else class="industry-site-avatar">{{ industrySiteInitial(site) }}</span>
+                  <span>
+                    <span class="site-name">{{ site.siteName }}</span>
+                    <span class="site-domain">{{ site.domain || '-' }}</span>
+                  </span>
+                </span>
+                <span v-if="selectedForumSiteId === site.id" class="industry-site-selected">已选择</span>
+              </span>
+              <span class="industry-site-meta">
+                <span>
+                  <span class="industry-site-meta-label">论坛分类</span>
+                  {{ industrySiteTagText(site) }}
+                </span>
+                <span>
+                  <span class="industry-site-meta-label">接入方式</span>
+                  {{ distributionPlatformLabel(site.integrationMethod) }}
+                </span>
+              </span>
+            </span>
+          </button>
+        </div>
+      </DataState>
+      <template #footer>
+        <el-button @click="forumSiteVisible = false">取消</el-button>
+        <el-button type="primary" :loading="forumSiteSubmitting" :disabled="!selectedForumSiteId" @click="submitForumSite">
+          确认分发
+        </el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="authorityMediaVisible" title="权威媒体分发" width="1080px" class="authority-media-modal">
       <div class="authority-media-dialog">
         <div class="authority-media-notice">
@@ -901,6 +950,7 @@ import {
   deleteContentArticle,
   distributeContentArticleToAgentSite,
   distributeContentArticleToAuthorityMedia,
+  distributeContentArticleToForumSite,
   distributeContentArticleToIndustrySite,
   distributeContentArticleToSelfMediaAccount,
   getArticleDistribution,
@@ -927,7 +977,7 @@ import { formatDateTime } from '@/utils/format'
 type MediaPlatform = 'wechat_mp' | 'douyin' | 'toutiao' | 'zhihu'
 type SemiAutoPlatform = 'toutiao' | 'zhihu'
 type ExtensionBridgeStatus = 'unknown' | 'checking' | 'bound' | 'unbound' | 'missing' | 'error'
-type DistributionChannel = 'official_site' | 'industry_site' | 'self_media' | 'authority_media'
+type DistributionChannel = 'official_site' | 'industry_site' | 'forum' | 'self_media' | 'authority_media'
 type SelfMediaAccountWithCredential = SelfMediaAccount & {
   cookieCredentialStatus?: string | null
   cookieCredentialVersion?: number | null
@@ -1004,6 +1054,7 @@ const distributionChannels: Array<{
 }> = [
   { value: 'official_site', label: 'Agent 官网', description: '发布到项目品牌的 Agent 官网站点。' },
   { value: 'industry_site', label: '行业资讯站', description: '选择已启用的行业资讯站并发布。' },
+  { value: 'forum', label: '论坛', description: '选择已启用的论坛站点并发布讨论帖。' },
   { value: 'self_media', label: '自媒体平台', description: '分发到微信公众号、抖音、头条、知乎等账号。' },
   { value: 'authority_media', label: '权威媒体', description: '选择特价网新闻媒体资源并创建出稿订单。' },
 ]
@@ -1014,6 +1065,13 @@ const industrySiteSubmitting = ref(false)
 const industrySiteArticle = ref<ArticleDraft | null>(null)
 const industrySites = ref<PublishSite[]>([])
 const selectedIndustrySiteId = ref<number | null>(null)
+
+const forumSiteVisible = ref(false)
+const forumSiteLoading = ref(false)
+const forumSiteSubmitting = ref(false)
+const forumSiteArticle = ref<ArticleDraft | null>(null)
+const forumSites = ref<PublishSite[]>([])
+const selectedForumSiteId = ref<number | null>(null)
 
 const authorityMediaVisible = ref(false)
 const authorityLoading = ref(false)
@@ -1300,6 +1358,8 @@ function distributionPlatformLabel(v?: string | null) {
     manual: '手动分发',
     brand_geo_site: '品牌官网',
     agent_official_site: 'Agent 官网',
+    discuz_http: 'Discuz HTTP 直发',
+    forum_playwright: '论坛浏览器自动化',
   }
   return v ? map[v] || v : '-'
 }
@@ -1313,6 +1373,7 @@ function distributionChannelInitial(v: DistributionChannel) {
   const map: Record<DistributionChannel, string> = {
     official_site: '站',
     industry_site: '讯',
+    forum: '坛',
     self_media: '媒',
     authority_media: '权',
   }
@@ -1323,6 +1384,7 @@ function distributionChannelClass(v: DistributionChannel) {
   const map: Record<DistributionChannel, string> = {
     official_site: 'is-official',
     industry_site: 'is-industry',
+    forum: 'is-forum',
     self_media: 'is-media',
     authority_media: 'is-authority',
   }
@@ -1670,6 +1732,11 @@ async function selectDistributionChannel(channel: DistributionChannel) {
     await openIndustrySiteDistribute(row)
     return
   }
+  if (channel === 'forum') {
+    distributionChannelVisible.value = false
+    await openForumSiteDistribute(row)
+    return
+  }
   distributionChannelVisible.value = false
   if (channel === 'official_site') {
     await distributeToAgentSite(row)
@@ -1690,7 +1757,7 @@ async function openIndustrySiteDistribute(row: ArticleDraft) {
   industrySiteLoading.value = true
   try {
     const { data } = await getPublishSites({ status: 'active' })
-    industrySites.value = data.data || []
+    industrySites.value = (data.data || []).filter(isIndustryPublishSite)
   } catch {
     ElMessage.error('加载行业资讯站失败')
   } finally {
@@ -1698,8 +1765,28 @@ async function openIndustrySiteDistribute(row: ArticleDraft) {
   }
 }
 
+async function openForumSiteDistribute(row: ArticleDraft) {
+  forumSiteArticle.value = row
+  selectedForumSiteId.value = null
+  forumSites.value = []
+  forumSiteVisible.value = true
+  forumSiteLoading.value = true
+  try {
+    const { data } = await getPublishSites({ status: 'active' })
+    forumSites.value = (data.data || []).filter(isForumPublishSite)
+  } catch {
+    ElMessage.error('加载论坛失败')
+  } finally {
+    forumSiteLoading.value = false
+  }
+}
+
 function selectIndustrySite(row?: PublishSite) {
   selectedIndustrySiteId.value = row?.id || null
+}
+
+function selectForumSite(row?: PublishSite) {
+  selectedForumSiteId.value = row?.id || null
 }
 
 async function submitIndustrySite() {
@@ -1718,6 +1805,25 @@ async function submitIndustrySite() {
     }
   } finally {
     industrySiteSubmitting.value = false
+  }
+}
+
+async function submitForumSite() {
+  const row = forumSiteArticle.value
+  if (!row || !selectedForumSiteId.value) return
+  forumSiteSubmitting.value = true
+  try {
+    const result = await distributeContentArticleToForumSite(row.id, selectedForumSiteId.value)
+    const task = result.data.data
+    if (task.status === 'submitted') {
+      ElMessage.success('论坛分发成功')
+      forumSiteVisible.value = false
+      await load()
+    } else {
+      ElMessage.error(task.errorMessage || '论坛分发失败')
+    }
+  } finally {
+    forumSiteSubmitting.value = false
   }
 }
 
@@ -2508,6 +2614,18 @@ function parseIndustryTags(raw?: string | string[] | null) {
   } catch {
     return []
   }
+}
+
+function isAgentPublishSite(site: PublishSite) {
+  return site.integrationMethod === 'brand_geo_site' || site.siteCode === 'agent_official_site'
+}
+
+function isForumPublishSite(site: PublishSite) {
+  return site.integrationMethod === 'forum_playwright' || site.integrationMethod === 'discuz_http'
+}
+
+function isIndustryPublishSite(site: PublishSite) {
+  return !isAgentPublishSite(site) && !isForumPublishSite(site)
 }
 
 function industrySiteInitial(site: PublishSite) {
@@ -3348,6 +3466,10 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 
 .distribution-channel-mark.is-industry {
   background: linear-gradient(135deg, #0d9488, #14b8a6);
+}
+
+.distribution-channel-mark.is-forum {
+  background: linear-gradient(135deg, #16a34a, #0f766e);
 }
 
 .distribution-channel-mark.is-media {

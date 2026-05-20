@@ -465,6 +465,11 @@ public class BatchArticlePublishService {
                 || "agent_official_site".equalsIgnoreCase(site.getSiteCode())) {
             throw new BizException(400, "publish site is not an industry site");
         }
+        String integrationMethod = site.getIntegrationMethod();
+        if (StringUtils.hasText(integrationMethod)
+                && Set.of("forum_playwright", "discuz_http").contains(integrationMethod.toLowerCase())) {
+            throw new BizException(400, "publish site is a forum target; use forum publish target");
+        }
         return site;
     }
 

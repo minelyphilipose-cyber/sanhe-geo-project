@@ -105,7 +105,15 @@ public class ContentDistributionService {
     @Transactional
     public DistributionTask distributeToIndustrySite(Long articleId, Long siteId) {
         PublishSite site = requireSite(siteId);
+        requireIndustryPublishSite(site);
         return distributeTo(articleId, new TargetContext.IndustrySiteTarget(site));
+    }
+
+    @Transactional
+    public DistributionTask distributeToForumSite(Long articleId, Long siteId) {
+        PublishSite site = requireSite(siteId);
+        requireForumPublishSite(site);
+        return distributeTo(articleId, new TargetContext.ForumSiteTarget(site));
     }
 
     @Transactional
@@ -560,6 +568,7 @@ public class ContentDistributionService {
         if (site.getIsFramework() != null && site.getIsFramework() == 1) {
             throw new BizException(400, "framework site is not a valid publish target");
         }
+        requireIndustryPublishSite(site);
 
         String content = requireLatestContent(article.getId());
         DistributionTask task = createAttemptForIndustrySite(article, site, operator.getId());
@@ -602,6 +611,7 @@ public class ContentDistributionService {
         if (site.getIsFramework() != null && site.getIsFramework() == 1) {
             throw new BizException(400, "framework site is not a valid publish target");
         }
+        requireForumPublishSite(site);
 
         String content = requireLatestContent(article.getId());
         DistributionTask task = createAttemptForForumSite(article, site, operator.getId());
@@ -1518,6 +1528,34 @@ public class ContentDistributionService {
             throw new BizException(400, "framework site is not a valid publish target");
         }
         return site;
+    }
+
+    private void requireIndustryPublishSite(PublishSite site) {
+        if (site == null) {
+            throw new BizException(404, "Publish site not found");
+        }
+        String integrationMethod = normalize(site.getIntegrationMethod());
+        String siteCode = normalize(site.getSiteCode());
+        if ("brand_geo_site".equals(integrationMethod) || "agent_official_site".equals(siteCode)) {
+            throw new BizException(400, "publish site is not an industry site");
+        }
+        if ("forum_playwright".equals(integrationMethod) || "discuz_http".equals(integrationMethod)) {
+            throw new BizException(400, "publish site is a forum target; use forum distribution");
+        }
+    }
+
+    private void requireForumPublishSite(PublishSite site) {
+        if (site == null) {
+            throw new BizException(404, "Forum publish site not found");
+        }
+        String integrationMethod = normalize(site.getIntegrationMethod());
+        if (!Set.of("forum_playwright", "discuz_http").contains(integrationMethod)) {
+            throw new BizException(400, "publish site is not a supported forum target");
+        }
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
 
     private String trimError(String msg) {
