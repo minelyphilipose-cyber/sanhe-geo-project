@@ -1,5 +1,5 @@
 ﻿/* ====================================================
-   API 鍝嶅簲鍖呰
+   API 响应包装
    ==================================================== */
 export interface R<T = any> {
   code: number
@@ -88,7 +88,7 @@ export type TrainingStatus = 'not_trained' | 'in_training' | 'passed' | 'product
 export type AlertSeverity = 'info' | 'warn' | 'error' | 'critical'
 
 /* ====================================================
-   涓氬姟瀹炰綋
+   业务实体
    ==================================================== */
 export interface Company {
   id: number

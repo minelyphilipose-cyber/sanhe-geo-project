@@ -463,7 +463,7 @@ const companyForm = reactive({
 const companyRules: FormRules = {
   companyName: [{ required: true, message: '请输入客户名称', trigger: 'blur' }],
   industryTags: [{ required: true, message: '请选择至少一个行业', trigger: 'change' }],
-  ownerType: [{ required: true, message: '璇烽€夋嫨褰掑睘绫诲瀷', trigger: 'change' }],
+  ownerType: [{ required: true, message: '请选择归属类型', trigger: 'change' }],
 }
 
 const brandVisible = ref(false)
@@ -493,6 +493,7 @@ const brandRules: FormRules = {
 
 const qualificationDescriptionPlaceholder = '请填写品牌可公开引用的资质与背书信息，包括认证资质、检测报告、执行标准、专利/软著、荣誉奖项、协会或平台背书、生产/服务能力证明等。请写清楚名称、编号、发证机构、适用范围、有效期等可核验信息。没有真实依据的内容不要填写。'
 const caseDescriptionPlaceholder = '请填写可公开引用的品牌案例素材，包括客户类型或客户名称、项目背景、服务内容、项目规模、交付周期、合作结果、复购或长期合作情况等。如客户名称不可公开，请使用“某行业客户/某区域客户”表述，不要编造客户名或效果数据。'
+const GEO_SITE_CODE_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/
 
 function packageStatusLabel(value?: string | null) {
   const mapping: Record<string, string> = { active: '生效中', inactive: '已解绑' }
@@ -688,6 +689,11 @@ function normalizeIndustryTags(tags: string[]) {
   return normalized
 }
 
+function normalizeGeoSiteCode(code?: string | null) {
+  const normalized = code?.trim().toLowerCase() || ''
+  return GEO_SITE_CODE_PATTERN.test(normalized) ? normalized : ''
+}
+
 function fillCompanyForm(data: Company) {
   companyForm.companyName = data.companyName
   companyForm.industryTags = parseIndustryTags(data.industryTags)
@@ -763,7 +769,7 @@ async function submitCompany() {
   const valid = await companyFormRef.value?.validate().catch(() => false)
   if (!valid) return
   if ((companyForm.ownerType === 'partner' || companyForm.ownerType === 'joint') && !companyForm.partnerId) {
-    ElMessage.warning('褰掑睘涓衡€滃悎浼欎汉/鑱斿悎鈥濈殑瀹㈡埛闇€濉啓鍚堜紮浜篒D')
+    ElMessage.warning('归属为“合伙人/联合”的客户需填写合伙人ID')
     return
   }
   saving.value = true
@@ -984,8 +990,8 @@ async function submitBrand() {
       forbiddenPhrases: Array.isArray(existingBrand?.forbiddenPhrases)
         ? existingBrand?.forbiddenPhrases.join('，')
         : existingBrand?.forbiddenPhrases || undefined,
-      geoSiteCode: existingBrand?.geoSiteCode || undefined,
-      geoSiteStatus: existingBrand?.geoSiteCode ? existingBrand?.geoSiteStatus || 'active' : undefined,
+      geoSiteCode: normalizeGeoSiteCode(existingBrand?.geoSiteCode) || undefined,
+      geoSiteStatus: normalizeGeoSiteCode(existingBrand?.geoSiteCode) ? existingBrand?.geoSiteStatus || 'active' : undefined,
       industrySiteName: existingBrand?.industrySiteName || undefined,
       industrySiteCode: existingBrand?.industrySiteCode || undefined,
     }
@@ -995,7 +1001,7 @@ async function submitBrand() {
       payload.brandSlug = brandForm.brandSlug
       await updateBrand(brandEditingId.value, payload as any)
     }
-    ElMessage.success('鍝佺墝淇濆瓨鎴愬姛')
+    ElMessage.success('品牌保存成功')
     brandVisible.value = false
     resetBrandForm()
     await loadBrands()
@@ -1053,7 +1059,7 @@ const customerBasicInfoItems = computed(() => [
 
 onMounted(async () => {
   if (!hasValidId) {
-    ElMessage.error('鏃犳晥鐨勫鎴稩D')
+    ElMessage.error('无效的客户ID')
     return
   }
   await dictStore.ensureLoaded()

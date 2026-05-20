@@ -69,6 +69,21 @@ class BrandServiceTest {
     }
 
     @Test
+    void create_geoSiteCodeWithUnderscore_success() {
+        when(brandMapper.selectOne(any())).thenReturn(null);
+        when(brandMapper.insert(any())).thenAnswer(invocation -> {
+            Brand brand = invocation.getArgument(0);
+            brand.setId(1L);
+            return 1;
+        });
+
+        Brand result = brandService.create(createReq("agent_official_site", null));
+
+        assertEquals("agent_official_site", result.getGeoSiteCode());
+        assertEquals("active", result.getGeoSiteStatus());
+    }
+
+    @Test
     void create_duplicateGeoSiteCode_fails() {
         Brand duplicate = new Brand();
         duplicate.setId(2L);

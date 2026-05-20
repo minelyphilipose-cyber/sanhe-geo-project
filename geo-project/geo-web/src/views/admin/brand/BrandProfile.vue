@@ -9,7 +9,7 @@
       </template>
     </el-page-header>
 
-    <el-card v-loading="loading">
+    <el-card v-loading="loading" class="admin-rich-card brand-profile-card">
       <template #header>
         <div class="flex items-center gap-2">
           <span class="text-base font-medium">{{ brand?.brandName || '—' }}</span>
@@ -59,8 +59,9 @@
           </el-descriptions>
 
           <!-- 编辑模式 -->
-          <el-form v-if="editingInfo" ref="infoFormRef" :model="infoForm" :rules="infoRules" label-width="120px">
-            <div class="grid grid-cols-2 gap-x-6">
+          <el-form v-if="editingInfo" ref="infoFormRef" class="brand-form" :model="infoForm" :rules="infoRules" label-position="top">
+            <div class="brand-section-bar"><span />基础信息<i /></div>
+            <div class="brand-form-grid">
               <el-form-item label="品牌名称" prop="brandName" required>
                 <el-input v-model="infoForm.brandName" />
               </el-form-item>
@@ -89,6 +90,20 @@
               <el-form-item label="地区">
                 <RegionCascader v-model="infoForm.regionCodes" />
               </el-form-item>
+              <el-form-item label="状态" required>
+                <el-select v-model="infoForm.status" style="width: 100%">
+                  <el-option
+                    v-for="item in dictStore.options('brand_status')"
+                    :key="item.dictKey"
+                    :label="item.dictValue"
+                    :value="item.dictKey"
+                  />
+                </el-select>
+              </el-form-item>
+            </div>
+
+            <div class="brand-section-bar"><span />联系方式与阵地<i /></div>
+            <div class="brand-form-grid">
               <el-form-item label="官网">
                 <el-input v-model="infoForm.website" />
               </el-form-item>
@@ -138,29 +153,25 @@
                   />
                 </el-select>
               </el-form-item>
-              <el-form-item label="状态" required>
-                <el-select v-model="infoForm.status" style="width: 100%">
-                  <el-option
-                    v-for="item in dictStore.options('brand_status')"
-                    :key="item.dictKey"
-                    :label="item.dictValue"
-                    :value="item.dictKey"
-                  />
-                </el-select>
+            </div>
+
+            <div class="brand-section-bar"><span />业务介绍与内容约束<i /></div>
+            <div class="brand-form-grid">
+              <el-form-item class="is-wide" label="业务介绍">
+                <el-input v-model="infoForm.businessIntro" type="textarea" :rows="3" />
+              </el-form-item>
+              <el-form-item class="is-wide" label="品牌资质描述">
+                <el-input v-model="infoForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="qualificationDescriptionPlaceholder" />
+                <div class="brand-field-help">仅填写可公开引用、可核验的资质与背书信息。</div>
+              </el-form-item>
+              <el-form-item class="is-wide" label="品牌案例描述">
+                <el-input v-model="infoForm.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="caseDescriptionPlaceholder" />
+                <div class="brand-field-help">客户名称不可公开时，可使用行业或区域客户描述。</div>
+              </el-form-item>
+              <el-form-item class="is-wide" label="禁用词">
+                <el-input v-model="infoForm.forbiddenPhrases" type="textarea" :rows="2" placeholder="多个禁用词用逗号分隔" />
               </el-form-item>
             </div>
-            <el-form-item label="业务介绍">
-              <el-input v-model="infoForm.businessIntro" type="textarea" :rows="3" />
-            </el-form-item>
-            <el-form-item label="品牌资质描述">
-              <el-input v-model="infoForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="qualificationDescriptionPlaceholder" />
-            </el-form-item>
-            <el-form-item label="品牌案例描述">
-              <el-input v-model="infoForm.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="caseDescriptionPlaceholder" />
-            </el-form-item>
-            <el-form-item label="禁用词">
-              <el-input v-model="infoForm.forbiddenPhrases" type="textarea" :rows="2" placeholder="多个禁用词用逗号分隔" />
-            </el-form-item>
           </el-form>
         </el-tab-pane>
 
@@ -288,6 +299,7 @@ const brand = ref<Brand | null>(null)
 const statement = ref<BrandStatementView | null>(null)
 const companyIndustryTags = ref<string[]>([])
 const publishSites = ref<PublishSite[]>([])
+const GEO_SITE_CODE_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/
 
 // ────────── Tab 1: 基础资料 ──────────
 const editingInfo = ref(false)
@@ -328,7 +340,8 @@ const caseDescriptionPlaceholder = '请填写可公开引用的品牌案例素�
 
 const availableIndustries = computed(() => companyIndustryTags.value)
 const agentSiteOptions = computed(() => publishSites.value.filter((site) =>
-  site.integrationMethod === 'brand_geo_site' || site.siteCode === 'agent_official_site',
+  isValidGeoSiteCode(site.siteCode)
+  && (site.integrationMethod === 'brand_geo_site' || site.siteCode === 'agent_official_site'),
 ))
 const industrySiteOptions = computed(() => publishSites.value.filter((site) =>
   site.integrationMethod !== 'brand_geo_site'
@@ -356,8 +369,18 @@ function agentSiteLabel(code?: string | null) {
   return agentSiteOptions.value.find((item) => item.siteCode === code)?.siteName || code
 }
 
+function normalizeGeoSiteCode(code?: string | null) {
+  const normalized = code?.trim().toLowerCase() || ''
+  return GEO_SITE_CODE_PATTERN.test(normalized) ? normalized : ''
+}
+
+function isValidGeoSiteCode(code?: string | null) {
+  return !!normalizeGeoSiteCode(code)
+}
+
 function handleAgentSiteChange(value: string) {
-  const site = agentSiteOptions.value.find((item) => item.siteCode === value)
+  infoForm.geoSiteCode = normalizeGeoSiteCode(value)
+  const site = agentSiteOptions.value.find((item) => item.siteCode === infoForm.geoSiteCode)
   infoForm.geoSiteStatus = site ? 'active' : ''
 }
 
@@ -443,8 +466,8 @@ async function saveInfo() {
       officialAccount: brand.value?.officialAccount || undefined,
       videoAccount: brand.value?.videoAccount || undefined,
       douyinAccount: brand.value?.douyinAccount || undefined,
-      geoSiteCode: infoForm.geoSiteCode || undefined,
-      geoSiteStatus: infoForm.geoSiteCode ? infoForm.geoSiteStatus || 'active' : undefined,
+      geoSiteCode: normalizeGeoSiteCode(infoForm.geoSiteCode) || undefined,
+      geoSiteStatus: normalizeGeoSiteCode(infoForm.geoSiteCode) ? infoForm.geoSiteStatus || 'active' : undefined,
       industrySiteName: infoForm.industrySiteName || undefined,
       industrySiteCode: infoForm.industrySiteCode || undefined,
       status: infoForm.status,
@@ -667,3 +690,90 @@ watch(activeTab, (tab) => {
   }
 })
 </script>
+
+<style scoped>
+.brand-profile-card :deep(.el-card__body) {
+  padding: 18px 20px 22px;
+}
+
+.brand-form {
+  margin-top: 4px;
+}
+
+.brand-section-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 4px 0 16px;
+  color: #1e40af;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.brand-section-bar:not(:first-child) {
+  margin-top: 28px;
+}
+
+.brand-section-bar span {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #2563eb;
+  box-shadow: 0 0 0 4px #dbeafe;
+}
+
+.brand-section-bar i {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, #bfdbfe, transparent);
+}
+
+.brand-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 22px;
+  row-gap: 18px;
+}
+
+.brand-form-grid :deep(.el-form-item) {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.brand-form-grid .is-wide {
+  grid-column: 1 / -1;
+}
+
+.brand-form :deep(.el-form-item__label) {
+  color: #334155;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.brand-form :deep(.el-input__wrapper),
+.brand-form :deep(.el-select__wrapper),
+.brand-form :deep(.el-textarea__inner) {
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 0 0 1px #dbe3ee inset;
+}
+
+.brand-form :deep(.el-input__wrapper:hover),
+.brand-form :deep(.el-select__wrapper:hover),
+.brand-form :deep(.el-textarea__inner:hover) {
+  box-shadow: 0 0 0 1px #93c5fd inset;
+}
+
+.brand-field-help {
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+@media (max-width: 900px) {
+  .brand-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

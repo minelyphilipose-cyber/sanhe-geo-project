@@ -60,7 +60,6 @@ import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
 import com.huanjing.geo.module.project.mapper.ProjectCustomerRequirementMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
-import com.huanjing.geo.module.dispatch.service.BrandStatementDispatchService;
 import com.huanjing.geo.module.report.entity.PostsaleReportSnapshot;
 import com.huanjing.geo.module.report.entity.Report;
 import com.huanjing.geo.module.report.entity.ReportAccessLog;
@@ -129,7 +128,6 @@ public class ProjectService {
     private final CurrentUserService currentUserService;
     private final ProjectStateGuard projectStateGuard;
     private final ActivityLogService activityLogService;
-    private final BrandStatementDispatchService brandStatementDispatchService;
     private final ProjectDistributionChannelAllocationService channelAllocationService;
 
     public Page<Project> page(long current, long size, String keyword, String status, String stage, Long partnerId, Long brandId) {
@@ -384,15 +382,6 @@ public class ProjectService {
         }
         project.setStatus(req.getStatus());
         projectMapper.updateById(project);
-        if (isActivating(fromStatus, req.getStatus())) {
-            try {
-                brandStatementDispatchService.maybeEnqueueOnProjectActivated(project);
-            } catch (Exception ex) {
-                // Brand statement dispatch is best-effort; project activation should not fail because Redis is unavailable.
-                log.warn("Brand statement enqueue skipped after activation, projectId={}, brandId={}, reason={}",
-                        project.getId(), project.getBrandId(), ex.getMessage());
-            }
-        }
         activityLogService.logAction(
                 operator.getId(),
                 "project.status.update",
@@ -438,15 +427,6 @@ public class ProjectService {
         project.setStatus(req.getStatus());
         project.setStage(req.getStage());
         projectMapper.updateById(project);
-        if (isActivating(String.valueOf(before.get("status")), req.getStatus())) {
-            try {
-                brandStatementDispatchService.maybeEnqueueOnProjectActivated(project);
-            } catch (Exception ex) {
-                // Brand statement dispatch is best-effort; project activation should not fail because Redis is unavailable.
-                log.warn("Brand statement enqueue skipped after flow activation, projectId={}, brandId={}, reason={}",
-                        project.getId(), project.getBrandId(), ex.getMessage());
-            }
-        }
         activityLogService.logAction(
                 operator.getId(),
                 "project.flow.update",

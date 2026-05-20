@@ -256,13 +256,10 @@
         <el-form-item label="目标受众">
           <el-input v-model="form.targetAudience" placeholder="例如：装修业主、二手房翻新用户" />
         </el-form-item>
-        <el-form-item class="is-full" label="品牌基准表述">
-          <el-input :model-value="brandBaseStatement" type="textarea" :rows="4" readonly placeholder="当前品牌未配置基准表述" />
-        </el-form-item>
         <el-form-item class="is-full" label="项目定制表述">
           <div class="w-full">
-            <el-input v-model="form.customStatement" type="textarea" :rows="4" placeholder="留空时生成内容将使用上方品牌基准表述" />
-            <div class="form-tip">留空时生成内容将使用上方品牌基准表述</div>
+            <el-input v-model="form.customStatement" type="textarea" :rows="4" placeholder="留空时生成内容将使用品牌定位、核心产品、业务介绍、资质案例等品牌基础信息" />
+            <div class="form-tip">留空时生成内容将使用品牌基础信息；填写后优先使用项目定制表述</div>
           </div>
         </el-form-item>
         <el-form-item label="内容调性">
@@ -355,7 +352,6 @@ const fromCustomerBrandPath = computed(() => {
 })
 const lockCompanyBrandSelection = computed(() => formMode.value === 'create' && fromCustomerBrandPath.value)
 const selectedBrand = computed(() => brandOptions.value.find((item) => item.id === form.brandId) || null)
-const brandBaseStatement = computed(() => extractBrandBaseStatement(selectedBrand.value))
 const brandForbiddenPhraseList = computed(() => parseStringArray(selectedBrand.value?.forbiddenPhrases))
 
 const statusOptions = computed(() => ['pending_start', 'active', 'paused', 'expired'])
@@ -449,31 +445,6 @@ function parseStringArray(value?: string | string[] | null) {
       .filter((item, index, arr) => item.length > 0 && arr.indexOf(item) === index)
   }
   return []
-}
-
-function extractBrandBaseStatement(brand: Brand | null) {
-  if (!brand) {
-    return ''
-  }
-  const statement = brand.standardStatement
-  if (statement && typeof statement === 'object') {
-    const brandParagraph = statement.brand_paragraph?.trim()
-    if (brandParagraph) {
-      return brandParagraph
-    }
-  }
-  if (typeof statement === 'string' && statement.trim()) {
-    try {
-      const parsed = JSON.parse(statement)
-      const brandParagraph = typeof parsed?.brand_paragraph === 'string' ? parsed.brand_paragraph.trim() : ''
-      if (brandParagraph) {
-        return brandParagraph
-      }
-    } catch {
-      return statement.trim()
-    }
-  }
-  return ''
 }
 
 function resetForm() {

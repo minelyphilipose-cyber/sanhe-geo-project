@@ -33,7 +33,6 @@ import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
-import com.huanjing.geo.module.customer.service.BrandStatementService;
 import com.huanjing.geo.module.project.entity.KeywordGroup;
 import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.entity.Project;
@@ -93,7 +92,6 @@ public class BatchArticleGenerationService {
     private final CurrentUserService currentUserService;
     private final BrandAccessService brandAccessService;
     private final PlatformCredentialService platformCredentialService;
-    private final BrandStatementService brandStatementService;
     private final LlmInvoker llmInvoker;
     private final MarkdownImageReferenceValidator markdownImageReferenceValidator;
     private final ArticleAiDraftPromptFilter promptFilter;
@@ -120,7 +118,6 @@ public class BatchArticleGenerationService {
                                          CurrentUserService currentUserService,
                                          BrandAccessService brandAccessService,
                                          PlatformCredentialService platformCredentialService,
-                                         BrandStatementService brandStatementService,
                                          LlmInvoker llmInvoker,
                                          MarkdownImageReferenceValidator markdownImageReferenceValidator,
                                          ArticleAiDraftPromptFilter promptFilter,
@@ -146,7 +143,6 @@ public class BatchArticleGenerationService {
         this.currentUserService = currentUserService;
         this.brandAccessService = brandAccessService;
         this.platformCredentialService = platformCredentialService;
-        this.brandStatementService = brandStatementService;
         this.llmInvoker = llmInvoker;
         this.markdownImageReferenceValidator = markdownImageReferenceValidator;
         this.promptFilter = promptFilter;
@@ -838,7 +834,24 @@ public class BatchArticleGenerationService {
         if (brand == null) {
             return null;
         }
-        return brandStatementService.resolvePromptStatement(brand);
+        return buildBrandProfileStatement(brand);
+    }
+
+    private String buildBrandProfileStatement(Brand brand) {
+        List<String> parts = new ArrayList<>();
+        addPart(parts, "品牌定位", brand.getBrandPositioning());
+        addPart(parts, "主营业务", brand.getMainBusiness());
+        addPart(parts, "核心产品", brand.getCoreProducts());
+        addPart(parts, "业务介绍", brand.getBusinessIntro());
+        addPart(parts, "资质背书", brand.getBrandQualificationDescription());
+        addPart(parts, "案例素材", brand.getBrandCaseDescription());
+        return parts.isEmpty() ? null : String.join("；", parts);
+    }
+
+    private void addPart(List<String> parts, String label, String value) {
+        if (StringUtils.hasText(value)) {
+            parts.add(label + "：" + value.trim());
+        }
     }
 
     private List<String> forbiddenPhrases(Project project, Brand brand) {

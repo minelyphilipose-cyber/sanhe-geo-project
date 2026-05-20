@@ -1,122 +1,141 @@
 ﻿<template>
-  <div class="admin-page">
-    <div class="admin-page-header">
+  <div class="admin-page brand-create-page">
+    <div class="brand-hero">
       <div>
-        <div class="admin-page-kicker">品牌资产</div>
-        <h1 class="admin-page-title">新建品牌</h1>
-        <div class="admin-page-subtitle">维护品牌基础资料、发布阵地、资质案例与素材资产。</div>
+        <div class="brand-hero-kicker">品牌资产</div>
+        <h1 class="brand-hero-title">新建品牌</h1>
+        <div class="brand-hero-subtitle">维护品牌基础资料、业务介绍、发布阵地、资质案例与素材资产。</div>
       </div>
-      <div class="admin-page-actions">
+      <div class="brand-hero-actions">
         <el-button @click="$router.back()">返回</el-button>
         <el-button v-if="createdBrandId" @click="goBrandDetail">查看品牌详情</el-button>
         <el-button type="primary" :loading="saving" @click="submitBrand">保存品牌</el-button>
       </div>
     </div>
 
-    <el-card class="admin-rich-card">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <span>品牌资料表单</span>
+    <section class="brand-panel">
+      <div class="brand-panel-header">
+        <div>
+          <h2 class="brand-panel-title">品牌资料表单</h2>
+          <p class="brand-panel-hint">按基础信息、介绍素材和发布阵地分区录入，减少后续维护成本。</p>
         </div>
-      </template>
+      </div>
 
-      <el-form ref="formRef" class="admin-dialog-form" :model="form" :rules="rules" label-width="120px">
-        <el-form-item label="所属客户" required>
-          <el-input :model-value="companyName || '-'" disabled />
-        </el-form-item>
-        <el-form-item label="品牌名称" prop="brandName" required><el-input v-model="form.brandName" /></el-form-item>
-        <el-form-item label="品牌状态" prop="status" required>
-          <el-select v-model="form.status" style="width: 100%">
-            <el-option
-              v-for="item in dictStore.options('brand_status')"
-              :key="item.dictKey"
-              :label="item.dictValue"
-              :value="item.dictKey"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="品牌行业" prop="industry" required>
-          <el-select v-model="form.industry" filterable style="width: 100%">
-            <el-option
-              v-for="tag in availableBrandIndustries"
-              :key="tag"
-              :label="dictStore.label('industry_tag', tag) || tag"
-              :value="tag"
-            />
-          </el-select>
-        </el-form-item>
+      <el-form ref="formRef" class="brand-form" :model="form" :rules="rules" label-position="top">
+        <div class="brand-section-bar"><span />基础信息<i /></div>
+        <div class="brand-form-grid">
+          <el-form-item label="所属客户" required>
+            <el-input :model-value="companyName || '-'" disabled />
+          </el-form-item>
+          <el-form-item label="品牌名称" prop="brandName" required><el-input v-model="form.brandName" /></el-form-item>
+          <el-form-item label="品牌简称"><el-input v-model="form.brandShortName" maxlength="128" show-word-limit /></el-form-item>
+          <el-form-item label="品牌状态" prop="status" required>
+            <el-select v-model="form.status" style="width: 100%">
+              <el-option
+                v-for="item in dictStore.options('brand_status')"
+                :key="item.dictKey"
+                :label="item.dictValue"
+                :value="item.dictKey"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="品牌行业" prop="industry" required>
+            <el-select v-model="form.industry" filterable style="width: 100%">
+              <el-option
+                v-for="tag in availableBrandIndustries"
+                :key="tag"
+                :label="dictStore.label('industry_tag', tag) || tag"
+                :value="tag"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="主营业务方向"><el-input v-model="form.mainBusiness" /></el-form-item>
+          <el-form-item label="核心产品">
+            <el-input v-model="form.coreProducts" maxlength="500" show-word-limit placeholder="多个产品以逗号隔开" />
+          </el-form-item>
+          <el-form-item label="品牌定位">
+            <el-input v-model="form.brandPositioning" maxlength="255" show-word-limit placeholder="如“某某方案服务商/代理商”“本地某某平台”" />
+          </el-form-item>
+          <el-form-item class="is-wide" label="服务区域"><RegionCascader v-model="form.serviceAreaCodes" /></el-form-item>
+          <el-form-item class="is-wide" label="所在地区"><RegionCascader v-model="form.regionCodes" /></el-form-item>
+        </div>
 
-        <el-divider class="is-full" content-position="left">业务介绍录入</el-divider>
-        <el-form-item label="品牌简称"><el-input v-model="form.brandShortName" maxlength="128" show-word-limit /></el-form-item>
-        <el-form-item label="主营业务方向"><el-input v-model="form.mainBusiness" /></el-form-item>
-        <el-form-item label="核心产品">
-          <el-input v-model="form.coreProducts" maxlength="500" show-word-limit placeholder="多个产品以逗号隔开" />
-        </el-form-item>
-        <el-form-item label="品牌定位">
-          <el-input v-model="form.brandPositioning" maxlength="255" show-word-limit placeholder="如“某某方案服务商/代理商”“本地某某平台”" />
-        </el-form-item>
-        <el-form-item class="is-full" label="业务介绍"><el-input v-model="form.businessIntro" type="textarea" :rows="4" /></el-form-item>
-        <el-form-item class="is-full" label="品牌资质描述">
-          <el-input v-model="form.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="qualificationDescriptionPlaceholder" />
-        </el-form-item>
-        <el-form-item class="is-full" label="品牌案例描述">
-          <el-input v-model="form.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="caseDescriptionPlaceholder" />
-        </el-form-item>
-        <el-form-item class="is-full" label="服务区域"><RegionCascader v-model="form.serviceAreaCodes" /></el-form-item>
-        <el-form-item class="is-full" label="所在地区"><RegionCascader v-model="form.regionCodes" /></el-form-item>
+        <div class="brand-section-bar"><span />业务介绍录入<i /></div>
+        <div class="brand-form-grid">
+          <el-form-item class="is-wide" label="业务介绍"><el-input v-model="form.businessIntro" type="textarea" :rows="4" /></el-form-item>
+          <el-form-item class="is-wide" label="品牌资质描述">
+            <el-input v-model="form.brandQualificationDescription" type="textarea" :rows="4" maxlength="300" show-word-limit :placeholder="qualificationDescriptionPlaceholder" />
+            <div class="brand-field-help">仅填写可公开引用、可核验的资质与背书信息。</div>
+          </el-form-item>
+          <el-form-item class="is-wide" label="品牌案例描述">
+            <el-input v-model="form.brandCaseDescription" type="textarea" :rows="4" maxlength="300" show-word-limit :placeholder="caseDescriptionPlaceholder" />
+            <div class="brand-field-help">客户名称不可公开时，可使用行业或区域客户描述。</div>
+          </el-form-item>
+        </div>
 
-        <el-divider class="is-full" content-position="left">联系方式与阵地</el-divider>
-        <el-form-item label="联系电话"><el-input v-model="form.phone" /></el-form-item>
-        <el-form-item label="对外公开电话"><el-input v-model="form.publicPhone" /></el-form-item>
-        <el-form-item label="对外公开地址"><el-input v-model="form.publicAddress" /></el-form-item>
-        <el-form-item label="微信"><el-input v-model="form.wechat" /></el-form-item>
-        <el-form-item label="官网"><el-input v-model="form.website" /></el-form-item>
+        <div class="brand-section-bar"><span />联系方式与阵地<i /></div>
+        <div class="brand-form-grid">
+          <el-form-item label="联系电话"><el-input v-model="form.phone" /></el-form-item>
+          <el-form-item label="对外公开电话"><el-input v-model="form.publicPhone" /></el-form-item>
+          <el-form-item label="对外公开地址"><el-input v-model="form.publicAddress" /></el-form-item>
+          <el-form-item label="微信"><el-input v-model="form.wechat" /></el-form-item>
+          <el-form-item class="is-wide" label="官网"><el-input v-model="form.website" /></el-form-item>
+        </div>
 
-        <el-divider class="is-full" content-position="left">发布阵地</el-divider>
-        <el-form-item label="Agent 官网">
-          <el-select
-            v-model="form.geoSiteCode"
-            clearable
-            filterable
-            placeholder="选择 Agent 官网，自动带出站点标识"
-            style="width: 100%"
-            @change="handleAgentSiteChange"
-          >
-            <el-option
-              v-for="site in agentSiteOptions"
-              :key="site.siteCode || site.id"
-              :label="site.siteName"
-              :value="site.siteCode"
-            />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="行业资讯站">
-          <el-select
-            v-model="form.industrySiteCode"
-            clearable
-            filterable
-            placeholder="选择资讯站，自动带出站点标识"
-            style="width: 100%"
-            @change="handleIndustrySiteChange"
-          >
-            <el-option
-              v-for="site in industrySiteOptions"
-              :key="site.siteCode || site.id"
-              :label="site.siteName"
-              :value="site.siteCode"
-            />
-          </el-select>
-        </el-form-item>
+        <div class="brand-section-bar"><span />发布阵地<i /></div>
+        <div class="brand-form-grid">
+          <el-form-item label="Agent 官网">
+            <el-select
+              v-model="form.geoSiteCode"
+              clearable
+              filterable
+              placeholder="选择 Agent 官网，自动带出站点标识"
+              style="width: 100%"
+              @change="handleAgentSiteChange"
+            >
+              <el-option
+                v-for="site in agentSiteOptions"
+                :key="site.siteCode || site.id"
+                :label="site.siteName"
+                :value="site.siteCode"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="行业资讯站">
+            <el-select
+              v-model="form.industrySiteCode"
+              clearable
+              filterable
+              placeholder="选择资讯站，自动带出站点标识"
+              style="width: 100%"
+              @change="handleIndustrySiteChange"
+            >
+              <el-option
+                v-for="site in industrySiteOptions"
+                :key="site.siteCode || site.id"
+                :label="site.siteName"
+                :value="site.siteCode"
+              />
+            </el-select>
+          </el-form-item>
+        </div>
 
-        <el-divider class="is-full" content-position="left">内容约束</el-divider>
-        <el-form-item class="is-full" label="禁用词"><el-input v-model="form.forbiddenPhrases" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item label="版本变更原因"><el-input v-model="form.versionChangeReason" placeholder="用于版本记录，建议填写" /></el-form-item>
+        <div class="brand-section-bar"><span />内容约束<i /></div>
+        <div class="brand-form-grid">
+          <el-form-item class="is-wide" label="禁用词"><el-input v-model="form.forbiddenPhrases" type="textarea" :rows="3" /></el-form-item>
+          <el-form-item class="is-wide" label="版本变更原因"><el-input v-model="form.versionChangeReason" placeholder="用于版本记录，建议填写" /></el-form-item>
+        </div>
       </el-form>
-    </el-card>
+    </section>
 
-    <el-card class="admin-table-card">
-      <template #header><span>素材上传（图片/案例/资质）</span></template>
-      <div class="mb-3 flex items-center gap-2">
+    <section class="brand-panel">
+      <div class="brand-panel-header">
+        <div>
+          <h2 class="brand-panel-title">素材上传</h2>
+          <p class="brand-panel-hint">保存品牌后可上传图片、案例和资质材料。</p>
+        </div>
+      </div>
+      <div class="brand-upload-row">
         <el-select v-model="uploadCategory" style="width: 220px" :disabled="!createdBrandId">
           <el-option
             v-for="item in dictStore.options('brand_material_category')"
@@ -154,16 +173,21 @@
           </template>
         </el-table-column>
       </el-table>
-    </el-card>
+    </section>
 
-    <el-card class="admin-table-card">
-      <template #header><span>历史版本</span></template>
+    <section class="brand-panel">
+      <div class="brand-panel-header">
+        <div>
+          <h2 class="brand-panel-title">历史版本</h2>
+          <p class="brand-panel-hint">记录品牌资料快照和变更原因。</p>
+        </div>
+      </div>
       <el-table :data="versions" border>
         <el-table-column prop="versionNo" label="版本号" width="100" />
         <el-table-column prop="changeReason" label="变更原因" min-width="260" />
         <el-table-column prop="createdAt" label="创建时间" width="180" />
       </el-table>
-    </el-card>
+    </section>
 
     <el-dialog v-model="previewVisible" title="文件预览" width="80%" class="admin-editor-dialog" @closed="onPreviewClosed">
       <div v-loading="previewLoading" style="min-height: 200px">
@@ -260,11 +284,13 @@ const availableBrandIndustries = computed(() => companyIndustryTags.value)
 const materials = ref<BrandMaterial[]>([])
 const versions = ref<BrandProfileVersion[]>([])
 const publishSites = ref<PublishSite[]>([])
+const GEO_SITE_CODE_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/
 const uploadCategory = ref('brand_image')
 const MAX_UPLOAD_SIZE = 10 * 1024 * 1024
 
 const agentSiteOptions = computed(() => publishSites.value.filter((site) =>
-  site.integrationMethod === 'brand_geo_site' || site.siteCode === 'agent_official_site',
+  isValidGeoSiteCode(site.siteCode)
+  && (site.integrationMethod === 'brand_geo_site' || site.siteCode === 'agent_official_site'),
 ))
 const industrySiteOptions = computed(() => publishSites.value.filter((site) =>
   site.integrationMethod !== 'brand_geo_site'
@@ -274,8 +300,18 @@ const industrySiteOptions = computed(() => publishSites.value.filter((site) =>
 ))
 
 function handleAgentSiteChange(value: string) {
-  const site = agentSiteOptions.value.find((item) => item.siteCode === value)
+  form.geoSiteCode = normalizeGeoSiteCode(value)
+  const site = agentSiteOptions.value.find((item) => item.siteCode === form.geoSiteCode)
   form.geoSiteStatus = site ? 'active' : ''
+}
+
+function normalizeGeoSiteCode(code?: string | null) {
+  const normalized = code?.trim().toLowerCase() || ''
+  return GEO_SITE_CODE_PATTERN.test(normalized) ? normalized : ''
+}
+
+function isValidGeoSiteCode(code?: string | null) {
+  return !!normalizeGeoSiteCode(code)
 }
 
 function handleIndustrySiteChange(value: string) {
@@ -434,8 +470,8 @@ async function submitBrand() {
       publicAddress: form.publicAddress || undefined,
       wechat: form.wechat || undefined,
       website: form.website || undefined,
-      geoSiteCode: form.geoSiteCode || undefined,
-      geoSiteStatus: form.geoSiteCode ? form.geoSiteStatus || 'active' : undefined,
+      geoSiteCode: normalizeGeoSiteCode(form.geoSiteCode) || undefined,
+      geoSiteStatus: normalizeGeoSiteCode(form.geoSiteCode) ? form.geoSiteStatus || 'active' : undefined,
       industrySiteName: form.industrySiteName || undefined,
       industrySiteCode: form.industrySiteCode || undefined,
       brandQualificationDescription: form.brandQualificationDescription || undefined,
@@ -528,3 +564,218 @@ onMounted(async () => {
   }
 })
 </script>
+
+<style scoped>
+.brand-create-page {
+  gap: 18px;
+}
+
+.brand-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  position: relative;
+  overflow: hidden;
+  min-height: 118px;
+  padding: 24px 26px;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 84% 18%, rgba(16, 185, 129, 0.14), transparent 32%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(239, 246, 255, 0.94) 58%, rgba(240, 253, 250, 0.9) 100%);
+  box-shadow: 0 18px 42px rgba(37, 99, 235, 0.08);
+}
+
+.brand-hero::before {
+  content: "";
+  position: absolute;
+  inset: 18px auto 18px 0;
+  width: 5px;
+  border-radius: 0 999px 999px 0;
+  background: linear-gradient(180deg, #2563eb, #06b6d4 48%, #10b981);
+}
+
+.brand-hero > * {
+  position: relative;
+  z-index: 1;
+}
+
+.brand-hero-kicker {
+  margin-bottom: 8px;
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.brand-hero-title {
+  margin: 0;
+  color: var(--admin-text-strong);
+  font-size: 24px;
+  font-weight: 850;
+  line-height: 1.28;
+}
+
+.brand-hero-subtitle {
+  margin-top: 7px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.brand-hero-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.brand-panel {
+  overflow: hidden;
+  border: 1px solid var(--admin-panel-border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fff 0%, #fff 78%, #f8fafc 100%);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.075);
+}
+
+.brand-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 58px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--admin-panel-border-soft);
+  background: linear-gradient(90deg, #f8fbff 0%, #ffffff 52%, #f0fdf4 100%);
+}
+
+.brand-panel-title {
+  margin: 0;
+  color: var(--admin-text-strong);
+  font-size: 16px;
+  font-weight: 850;
+}
+
+.brand-panel-hint {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.brand-form {
+  padding: 20px;
+}
+
+.brand-section-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 4px 0 18px;
+  color: #1e40af;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.brand-section-bar:not(:first-child) {
+  margin-top: 28px;
+}
+
+.brand-section-bar span {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #2563eb;
+  box-shadow: 0 0 0 4px #dbeafe;
+}
+
+.brand-section-bar i {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, #bfdbfe, transparent);
+}
+
+.brand-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 22px;
+  row-gap: 18px;
+}
+
+.brand-form-grid :deep(.el-form-item) {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.brand-form-grid .is-wide {
+  grid-column: 1 / -1;
+}
+
+.brand-form :deep(.el-form-item__label) {
+  color: #334155;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.brand-form :deep(.el-input__wrapper),
+.brand-form :deep(.el-select__wrapper),
+.brand-form :deep(.el-textarea__inner) {
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 0 0 1px #dbe3ee inset;
+}
+
+.brand-form :deep(.el-input__wrapper:hover),
+.brand-form :deep(.el-select__wrapper:hover),
+.brand-form :deep(.el-textarea__inner:hover) {
+  box-shadow: 0 0 0 1px #93c5fd inset;
+}
+
+.brand-field-help {
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.brand-upload-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 18px 20px;
+  padding: 14px;
+  border: 1px dashed #bfdbfe;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f8fbff, #ffffff);
+}
+
+.brand-panel :deep(.el-table) {
+  margin: 0 20px 20px;
+  width: calc(100% - 40px);
+}
+
+@media (max-width: 900px) {
+  .brand-hero {
+    flex-direction: column;
+    padding: 22px;
+  }
+
+  .brand-hero-actions {
+    justify-content: flex-start;
+  }
+
+  .brand-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-form {
+    padding: 16px;
+  }
+
+  .brand-panel :deep(.el-table) {
+    margin: 0 16px 16px;
+    width: calc(100% - 32px);
+  }
+}
+</style>

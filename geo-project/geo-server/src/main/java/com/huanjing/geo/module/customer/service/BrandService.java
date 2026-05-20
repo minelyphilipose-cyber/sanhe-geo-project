@@ -42,7 +42,7 @@ public class BrandService {
     private static final Set<String> BRAND_STATUS = Set.of("draft", "active", "archived");
     private static final Set<String> GEO_SITE_STATUS = Set.of("active", "disabled");
     private static final Pattern GEO_SITE_CODE_PATTERN =
-            Pattern.compile("^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$");
+            Pattern.compile("^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$");
 
     private final BrandMapper brandMapper;
     private final BrandMaterialMapper brandMaterialMapper;
