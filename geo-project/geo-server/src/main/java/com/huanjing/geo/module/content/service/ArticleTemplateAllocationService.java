@@ -77,6 +77,16 @@ public class ArticleTemplateAllocationService {
         List<TemplateWithVersion> candidates = activeTemplates(groupCode, subCode).stream()
                 .filter(item -> item.template().getWeight() != null && item.template().getWeight() > 0)
                 .toList();
+        return allocateCandidates(candidates, count);
+    }
+
+    public List<AllocatedTemplate> allocateCandidates(List<TemplateWithVersion> candidates, int count) {
+        if (count <= 0 || candidates == null || candidates.isEmpty()) {
+            return List.of();
+        }
+        candidates = candidates.stream()
+                .filter(item -> item.template().getWeight() != null && item.template().getWeight() > 0)
+                .toList();
         if (candidates.isEmpty()) {
             return List.of();
         }
