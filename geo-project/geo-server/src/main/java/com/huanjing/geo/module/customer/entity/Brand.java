@@ -15,8 +15,11 @@ public class Brand {
     private Long companyId;
     private String industry;
     private String brandName;
+    private String brandShortName;
     private String brandSlug;
     private String mainBusiness;
+    private String coreProducts;
+    private String brandPositioning;
     private String serviceArea;
     private String provinceCode;
     private String provinceName;

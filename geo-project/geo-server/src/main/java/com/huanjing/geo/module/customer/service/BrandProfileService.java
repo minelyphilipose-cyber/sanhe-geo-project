@@ -290,8 +290,11 @@ public class BrandProfileService {
         snapshot.put("id", brand.getId());
         snapshot.put("companyId", brand.getCompanyId());
         snapshot.put("brandName", brand.getBrandName());
+        snapshot.put("brandShortName", brand.getBrandShortName());
         snapshot.put("brandSlug", brand.getBrandSlug());
         snapshot.put("mainBusiness", brand.getMainBusiness());
+        snapshot.put("coreProducts", brand.getCoreProducts());
+        snapshot.put("brandPositioning", brand.getBrandPositioning());
         snapshot.put("serviceArea", brand.getServiceArea());
         snapshot.put("provinceCode", brand.getProvinceCode());
         snapshot.put("provinceName", brand.getProvinceName());

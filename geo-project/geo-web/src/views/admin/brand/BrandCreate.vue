@@ -47,13 +47,20 @@
         </el-form-item>
 
         <el-divider class="is-full" content-position="left">业务介绍录入</el-divider>
+        <el-form-item label="品牌简称"><el-input v-model="form.brandShortName" maxlength="128" show-word-limit /></el-form-item>
         <el-form-item label="主营业务方向"><el-input v-model="form.mainBusiness" /></el-form-item>
+        <el-form-item label="核心产品">
+          <el-input v-model="form.coreProducts" maxlength="500" show-word-limit placeholder="多个产品以逗号隔开" />
+        </el-form-item>
+        <el-form-item label="品牌定位">
+          <el-input v-model="form.brandPositioning" maxlength="255" show-word-limit placeholder="如“某某方案服务商/代理商”“本地某某平台”" />
+        </el-form-item>
         <el-form-item class="is-full" label="业务介绍"><el-input v-model="form.businessIntro" type="textarea" :rows="4" /></el-form-item>
         <el-form-item class="is-full" label="品牌资质描述">
-          <el-input v-model="form.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit />
+          <el-input v-model="form.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="qualificationDescriptionPlaceholder" />
         </el-form-item>
         <el-form-item class="is-full" label="品牌案例描述">
-          <el-input v-model="form.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit />
+          <el-input v-model="form.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="caseDescriptionPlaceholder" />
         </el-form-item>
         <el-form-item class="is-full" label="服务区域"><RegionCascader v-model="form.serviceAreaCodes" /></el-form-item>
         <el-form-item class="is-full" label="所在地区"><RegionCascader v-model="form.regionCodes" /></el-form-item>
@@ -211,10 +218,13 @@ const saving = ref(false)
 const formRef = ref<FormInstance>()
 const form = reactive({
   brandName: '',
+  brandShortName: '',
   brandSlug: '',
   status: 'active',
   industry: '',
   mainBusiness: '',
+  coreProducts: '',
+  brandPositioning: '',
   businessIntro: '',
   serviceAreaCodes: [] as string[],
   regionCodes: [] as string[],
@@ -241,6 +251,9 @@ const rules: FormRules = {
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
 }
+
+const qualificationDescriptionPlaceholder = '请填写品牌可公开引用的资质与背书信息，包括认证资质、检测报告、执行标准、专利/软著、荣誉奖项、协会或平台背书、生产/服务能力证明等。请写清楚名称、编号、发证机构、适用范围、有效期等可核验信息。没有真实依据的内容不要填写。'
+const caseDescriptionPlaceholder = '请填写可公开引用的品牌案例素材，包括客户类型或客户名称、项目背景、服务内容、项目规模、交付周期、合作结果、复购或长期合作情况等。如客户名称不可公开，请使用“某行业客户/某区域客户”表述，不要编造客户名或效果数据。'
 
 const availableBrandIndustries = computed(() => companyIndustryTags.value)
 
@@ -402,9 +415,12 @@ async function submitBrand() {
     const serviceArea = regionPayloadFromCodes(form.serviceAreaCodes).displayName
     const commonPayload = {
       brandName: form.brandName,
+      brandShortName: form.brandShortName || undefined,
       status: form.status,
       industry: form.industry,
       mainBusiness: form.mainBusiness || undefined,
+      coreProducts: form.coreProducts || undefined,
+      brandPositioning: form.brandPositioning || undefined,
       businessIntro: form.businessIntro || undefined,
       serviceArea: serviceArea || undefined,
       provinceCode: region.provinceCode,

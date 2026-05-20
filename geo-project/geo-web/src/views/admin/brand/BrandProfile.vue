@@ -35,8 +35,11 @@
           <!-- 只读模式 -->
           <el-descriptions v-if="!editingInfo" :column="3" border>
             <el-descriptions-item label="品牌名称">{{ brand?.brandName || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="品牌简称">{{ brand?.brandShortName || '-' }}</el-descriptions-item>
             <el-descriptions-item label="品牌行业">{{ industryLabel(brand?.industry) }}</el-descriptions-item>
             <el-descriptions-item label="主营业务">{{ brand?.mainBusiness || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="核心产品">{{ brand?.coreProducts || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="品牌定位">{{ brand?.brandPositioning || '-' }}</el-descriptions-item>
             <el-descriptions-item label="所在地区">{{ regionText }}</el-descriptions-item>
             <el-descriptions-item label="服务区域">{{ brand?.serviceArea || '-' }}</el-descriptions-item>
             <el-descriptions-item label="官网">
@@ -61,6 +64,9 @@
               <el-form-item label="品牌名称" prop="brandName" required>
                 <el-input v-model="infoForm.brandName" />
               </el-form-item>
+              <el-form-item label="品牌简称">
+                <el-input v-model="infoForm.brandShortName" maxlength="128" show-word-limit />
+              </el-form-item>
               <el-form-item label="品牌行业" prop="industry" required>
                 <el-select v-model="infoForm.industry" filterable style="width: 100%">
                   <el-option
@@ -73,6 +79,12 @@
               </el-form-item>
               <el-form-item label="主营业务">
                 <el-input v-model="infoForm.mainBusiness" />
+              </el-form-item>
+              <el-form-item label="核心产品">
+                <el-input v-model="infoForm.coreProducts" maxlength="500" show-word-limit placeholder="多个产品以逗号隔开" />
+              </el-form-item>
+              <el-form-item label="品牌定位">
+                <el-input v-model="infoForm.brandPositioning" maxlength="255" show-word-limit placeholder="如“某某方案服务商/代理商”“本地某某平台”" />
               </el-form-item>
               <el-form-item label="地区">
                 <RegionCascader v-model="infoForm.regionCodes" />
@@ -141,10 +153,10 @@
               <el-input v-model="infoForm.businessIntro" type="textarea" :rows="3" />
             </el-form-item>
             <el-form-item label="品牌资质描述">
-              <el-input v-model="infoForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit />
+              <el-input v-model="infoForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="qualificationDescriptionPlaceholder" />
             </el-form-item>
             <el-form-item label="品牌案例描述">
-              <el-input v-model="infoForm.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit />
+              <el-input v-model="infoForm.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="caseDescriptionPlaceholder" />
             </el-form-item>
             <el-form-item label="禁用词">
               <el-input v-model="infoForm.forbiddenPhrases" type="textarea" :rows="2" placeholder="多个禁用词用逗号分隔" />
@@ -283,9 +295,12 @@ const savingInfo = ref(false)
 const infoFormRef = ref<FormInstance>()
 const infoForm = reactive({
   brandName: '',
+  brandShortName: '',
   brandSlug: '',
   industry: '',
   mainBusiness: '',
+  coreProducts: '',
+  brandPositioning: '',
   regionCodes: [] as string[],
   website: '',
   phone: '',
@@ -307,6 +322,9 @@ const infoRules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
 }
+
+const qualificationDescriptionPlaceholder = '请填写品牌可公开引用的资质与背书信息，包括认证资质、检测报告、执行标准、专利/软著、荣誉奖项、协会或平台背书、生产/服务能力证明等。请写清楚名称、编号、发证机构、适用范围、有效期等可核验信息。没有真实依据的内容不要填写。'
+const caseDescriptionPlaceholder = '请填写可公开引用的品牌案例素材，包括客户类型或客户名称、项目背景、服务内容、项目规模、交付周期、合作结果、复购或长期合作情况等。如客户名称不可公开，请使用“某行业客户/某区域客户”表述，不要编造客户名或效果数据。'
 
 const availableIndustries = computed(() => companyIndustryTags.value)
 const agentSiteOptions = computed(() => publishSites.value.filter((site) =>
@@ -361,9 +379,12 @@ function parseIndustryTags(value?: string | string[] | null) {
 
 function fillInfoForm(data: Brand) {
   infoForm.brandName = data.brandName
+  infoForm.brandShortName = data.brandShortName || ''
   infoForm.brandSlug = data.brandSlug
   infoForm.industry = data.industry || availableIndustries.value[0] || ''
   infoForm.mainBusiness = data.mainBusiness || ''
+  infoForm.coreProducts = data.coreProducts || ''
+  infoForm.brandPositioning = data.brandPositioning || ''
   infoForm.regionCodes = regionCodesFromPayload(data)
   infoForm.website = data.website || ''
   infoForm.phone = data.phone || ''
@@ -401,9 +422,12 @@ async function saveInfo() {
     await updateBrand(brandId.value, {
       companyId: brand.value?.companyId,
       brandName: infoForm.brandName,
+      brandShortName: infoForm.brandShortName || undefined,
       brandSlug: infoForm.brandSlug,
       industry: infoForm.industry,
       mainBusiness: infoForm.mainBusiness || undefined,
+      coreProducts: infoForm.coreProducts || undefined,
+      brandPositioning: infoForm.brandPositioning || undefined,
       serviceArea: region.displayName,
       provinceCode: region.provinceCode,
       provinceName: region.provinceName,

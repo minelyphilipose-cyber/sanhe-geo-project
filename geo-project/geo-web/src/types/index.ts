@@ -128,8 +128,11 @@ export interface Brand {
   companyId: number
   industry: string
   brandName: string
+  brandShortName?: string | null
   brandSlug: string
   mainBusiness: string | null
+  coreProducts?: string | null
+  brandPositioning?: string | null
   serviceArea: string | null
   provinceCode?: string | null
   provinceName?: string | null

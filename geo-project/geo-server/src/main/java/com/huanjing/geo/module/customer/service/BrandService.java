@@ -109,8 +109,11 @@ public class BrandService {
         validateBrandIndustry(industry, company);
         brand.setIndustry(industry);
         brand.setBrandName(req.getBrandName());
+        brand.setBrandShortName(req.getBrandShortName());
         brand.setBrandSlug(generateBrandSlug(req.getCompanyId()));
         brand.setMainBusiness(req.getMainBusiness());
+        brand.setCoreProducts(req.getCoreProducts());
+        brand.setBrandPositioning(req.getBrandPositioning());
         applyRegionFields(brand, req.getProvinceCode(), req.getProvinceName(), req.getCityCode(), req.getCityName(), req.getDistrictCode(), req.getDistrictName());
         brand.setServiceArea(StringUtils.hasText(req.getServiceArea())
                 ? req.getServiceArea()
@@ -168,11 +171,14 @@ public class BrandService {
         }
 
         brand.setBrandName(req.getBrandName());
+        brand.setBrandShortName(req.getBrandShortName());
         brand.setBrandSlug(req.getBrandSlug());
         String industry = normalizeIndustry(req.getIndustry());
         validateBrandIndustry(industry, company);
         brand.setIndustry(industry);
         brand.setMainBusiness(req.getMainBusiness());
+        brand.setCoreProducts(req.getCoreProducts());
+        brand.setBrandPositioning(req.getBrandPositioning());
         applyRegionFields(brand, req.getProvinceCode(), req.getProvinceName(), req.getCityCode(), req.getCityName(), req.getDistrictCode(), req.getDistrictName());
         brand.setServiceArea(StringUtils.hasText(req.getServiceArea())
                 ? req.getServiceArea()
@@ -344,7 +350,11 @@ public class BrandService {
         snapshot.put("companyId", brand.getCompanyId());
         snapshot.put("industry", brand.getIndustry());
         snapshot.put("brandName", brand.getBrandName());
+        snapshot.put("brandShortName", brand.getBrandShortName());
         snapshot.put("brandSlug", brand.getBrandSlug());
+        snapshot.put("mainBusiness", brand.getMainBusiness());
+        snapshot.put("coreProducts", brand.getCoreProducts());
+        snapshot.put("brandPositioning", brand.getBrandPositioning());
         snapshot.put("provinceCode", brand.getProvinceCode());
         snapshot.put("provinceName", brand.getProvinceName());
         snapshot.put("cityCode", brand.getCityCode());

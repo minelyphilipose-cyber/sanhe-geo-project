@@ -204,10 +204,12 @@
       <DataState :loading="brandLoading" :empty="!brandLoading && brands.length === 0" empty-text="暂无品牌数据">
         <el-table :data="brands" border>
           <el-table-column prop="brandName" label="品牌名称" min-width="180" />
+          <el-table-column prop="brandShortName" label="品牌简称" min-width="140" />
           <el-table-column label="行业" min-width="140">
             <template #default="scope">{{ dictStore.label('industry_tag', scope.row.industry) || scope.row.industry || '-' }}</template>
           </el-table-column>
           <el-table-column prop="mainBusiness" label="主营业务" min-width="180" />
+          <el-table-column prop="brandPositioning" label="品牌定位" min-width="180" />
           <el-table-column prop="serviceArea" label="地区" min-width="220">
             <template #default="scope">{{ brandRegion(scope.row) }}</template>
           </el-table-column>
@@ -300,6 +302,7 @@
     <el-dialog v-model="brandVisible" :title="brandMode === 'create' ? '新增品牌' : '编辑品牌'" width="860px" class="admin-editor-dialog">
       <el-form ref="brandFormRef" class="admin-dialog-form" :model="brandForm" :rules="brandRules" label-width="120px">
         <el-form-item label="品牌名称" required><el-input v-model="brandForm.brandName" /></el-form-item>
+        <el-form-item label="品牌简称"><el-input v-model="brandForm.brandShortName" maxlength="128" show-word-limit /></el-form-item>
         <el-form-item label="品牌行业" prop="industry" required>
           <el-select v-model="brandForm.industry" filterable style="width: 100%">
             <el-option
@@ -311,6 +314,12 @@
           </el-select>
         </el-form-item>
         <el-form-item label="主营业务"><el-input v-model="brandForm.mainBusiness" /></el-form-item>
+        <el-form-item label="核心产品">
+          <el-input v-model="brandForm.coreProducts" maxlength="500" show-word-limit placeholder="多个产品以逗号隔开" />
+        </el-form-item>
+        <el-form-item label="品牌定位">
+          <el-input v-model="brandForm.brandPositioning" maxlength="255" show-word-limit placeholder="如“某某方案服务商/代理商”“本地某某平台”" />
+        </el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="brandForm.regionCodes" /></el-form-item>
         <el-form-item label="官网"><el-input v-model="brandForm.website" /></el-form-item>
         <el-form-item label="联系电话"><el-input v-model="brandForm.phone" /></el-form-item>
@@ -327,10 +336,10 @@
         </el-form-item>
         <el-form-item class="is-full" label="业务介绍"><el-input v-model="brandForm.businessIntro" type="textarea" :rows="3" /></el-form-item>
         <el-form-item class="is-full" label="品牌资质描述">
-          <el-input v-model="brandForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit />
+          <el-input v-model="brandForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="qualificationDescriptionPlaceholder" />
         </el-form-item>
         <el-form-item class="is-full" label="品牌案例描述">
-          <el-input v-model="brandForm.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit />
+          <el-input v-model="brandForm.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="caseDescriptionPlaceholder" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -462,9 +471,12 @@ const brandMode = ref<'create' | 'edit'>('create')
 const brandEditingId = ref<number | null>(null)
 const brandForm = reactive({
   brandName: '',
+  brandShortName: '',
   brandSlug: '',
   industry: '',
   mainBusiness: '',
+  coreProducts: '',
+  brandPositioning: '',
   regionCodes: [] as string[],
   website: '',
   phone: '',
@@ -478,6 +490,9 @@ const brandRules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
 }
+
+const qualificationDescriptionPlaceholder = '请填写品牌可公开引用的资质与背书信息，包括认证资质、检测报告、执行标准、专利/软著、荣誉奖项、协会或平台背书、生产/服务能力证明等。请写清楚名称、编号、发证机构、适用范围、有效期等可核验信息。没有真实依据的内容不要填写。'
+const caseDescriptionPlaceholder = '请填写可公开引用的品牌案例素材，包括客户类型或客户名称、项目背景、服务内容、项目规模、交付周期、合作结果、复购或长期合作情况等。如客户名称不可公开，请使用“某行业客户/某区域客户”表述，不要编造客户名或效果数据。'
 
 function packageStatusLabel(value?: string | null) {
   const mapping: Record<string, string> = { active: '生效中', inactive: '已解绑' }
@@ -687,9 +702,12 @@ function fillCompanyForm(data: Company) {
 
 function resetBrandForm() {
   brandForm.brandName = ''
+  brandForm.brandShortName = ''
   brandForm.brandSlug = ''
   brandForm.industry = availableBrandIndustries.value[0] || ''
   brandForm.mainBusiness = ''
+  brandForm.coreProducts = ''
+  brandForm.brandPositioning = ''
   brandForm.regionCodes = []
   brandForm.website = ''
   brandForm.phone = ''
@@ -909,9 +927,12 @@ function openBrandEdit(row: Brand) {
   brandMode.value = 'edit'
   brandEditingId.value = row.id
   brandForm.brandName = row.brandName
+  brandForm.brandShortName = row.brandShortName || ''
   brandForm.brandSlug = row.brandSlug
   brandForm.industry = row.industry || availableBrandIndustries.value[0] || ''
   brandForm.mainBusiness = row.mainBusiness || ''
+  brandForm.coreProducts = row.coreProducts || ''
+  brandForm.brandPositioning = row.brandPositioning || ''
   brandForm.regionCodes = regionCodesFromPayload(row)
   brandForm.website = row.website || ''
   brandForm.phone = row.phone || ''
@@ -935,8 +956,11 @@ async function submitBrand() {
     const payload: Record<string, any> = {
       companyId,
       brandName: brandForm.brandName,
+      brandShortName: brandForm.brandShortName || undefined,
       industry: brandForm.industry,
       mainBusiness: brandForm.mainBusiness || undefined,
+      coreProducts: brandForm.coreProducts || undefined,
+      brandPositioning: brandForm.brandPositioning || undefined,
       serviceArea: region.displayName,
       provinceCode: region.provinceCode,
       provinceName: region.provinceName,

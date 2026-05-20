@@ -176,6 +176,7 @@
     <el-dialog v-model="editVisible" title="编辑品牌" width="860px" class="admin-editor-dialog">
       <el-form ref="brandFormRef" class="admin-dialog-form" :model="brandForm" :rules="brandRules" label-width="120px">
         <el-form-item label="品牌名称" required><el-input v-model="brandForm.brandName" /></el-form-item>
+        <el-form-item label="品牌简称"><el-input v-model="brandForm.brandShortName" maxlength="128" show-word-limit /></el-form-item>
         <el-form-item label="品牌行业" prop="industry" required>
           <el-select v-model="brandForm.industry" filterable style="width: 100%">
             <el-option
@@ -187,6 +188,12 @@
           </el-select>
         </el-form-item>
         <el-form-item label="主营业务"><el-input v-model="brandForm.mainBusiness" /></el-form-item>
+        <el-form-item label="核心产品">
+          <el-input v-model="brandForm.coreProducts" maxlength="500" show-word-limit placeholder="多个产品以逗号隔开" />
+        </el-form-item>
+        <el-form-item label="品牌定位">
+          <el-input v-model="brandForm.brandPositioning" maxlength="255" show-word-limit placeholder="如“某某方案服务商/代理商”“本地某某平台”" />
+        </el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="brandForm.regionCodes" /></el-form-item>
         <el-form-item label="官网"><el-input v-model="brandForm.website" /></el-form-item>
         <el-form-item label="联系电话"><el-input v-model="brandForm.phone" /></el-form-item>
@@ -239,10 +246,10 @@
         </el-form-item>
         <el-form-item class="is-full" label="业务介绍"><el-input v-model="brandForm.businessIntro" type="textarea" :rows="3" /></el-form-item>
         <el-form-item class="is-full" label="品牌资质描述">
-          <el-input v-model="brandForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit />
+          <el-input v-model="brandForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="qualificationDescriptionPlaceholder" />
         </el-form-item>
         <el-form-item class="is-full" label="品牌案例描述">
-          <el-input v-model="brandForm.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit />
+          <el-input v-model="brandForm.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="caseDescriptionPlaceholder" />
         </el-form-item>
         <el-form-item class="is-full" label="禁用词"><el-input v-model="brandForm.forbiddenPhrases" type="textarea" :rows="3" /></el-form-item>
       </el-form>
@@ -362,9 +369,12 @@ const selfMediaAccountFormRef = ref<FormInstance>()
 
 const brandForm = reactive({
   brandName: '',
+  brandShortName: '',
   brandSlug: '',
   industry: '',
   mainBusiness: '',
+  coreProducts: '',
+  brandPositioning: '',
   regionCodes: [] as string[],
   website: '',
   phone: '',
@@ -400,6 +410,9 @@ const brandRules: FormRules = {
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
 }
+
+const qualificationDescriptionPlaceholder = '请填写品牌可公开引用的资质与背书信息，包括认证资质、检测报告、执行标准、专利/软著、荣誉奖项、协会或平台背书、生产/服务能力证明等。请写清楚名称、编号、发证机构、适用范围、有效期等可核验信息。没有真实依据的内容不要填写。'
+const caseDescriptionPlaceholder = '请填写可公开引用的品牌案例素材，包括客户类型或客户名称、项目背景、服务内容、项目规模、交付周期、合作结果、复购或长期合作情况等。如客户名称不可公开，请使用“某行业客户/某区域客户”表述，不要编造客户名或效果数据。'
 
 const selfMediaAccountRules: FormRules = {
   platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
@@ -443,10 +456,13 @@ const industrySiteOptions = computed(() => publishSites.value.filter((site) =>
 ))
 const brandBasicInfoItems = computed(() => [
   { label: '品牌名称', value: brand.value?.brandName || '-' },
+  { label: '品牌简称', value: brand.value?.brandShortName || '-' },
   { label: '状态', value: dictStore.label('brand_status', brand.value?.status) || '-' },
   { label: '所属客户', value: companyName.value || '-' },
   { label: '品牌行业', value: industryLabel(brand.value?.industry) },
   { label: '主营业务', value: brand.value?.mainBusiness || '-' },
+  { label: '核心产品', value: brand.value?.coreProducts || '-' },
+  { label: '品牌定位', value: brand.value?.brandPositioning || '-' },
   { label: '所在地区', value: regionText.value },
   { label: '官网', value: brand.value?.website || '-' },
   { label: '联系电话', value: brand.value?.phone || '-' },
@@ -500,9 +516,12 @@ function parseIndustryTags(value?: string | string[] | null) {
 
 function fillForm(data: Brand) {
   brandForm.brandName = data.brandName
+  brandForm.brandShortName = data.brandShortName || ''
   brandForm.brandSlug = data.brandSlug
   brandForm.industry = data.industry || availableBrandIndustries.value[0] || ''
   brandForm.mainBusiness = data.mainBusiness || ''
+  brandForm.coreProducts = data.coreProducts || ''
+  brandForm.brandPositioning = data.brandPositioning || ''
   brandForm.regionCodes = regionCodesFromPayload(data)
   brandForm.website = data.website || ''
   brandForm.phone = data.phone || ''
@@ -680,9 +699,12 @@ async function submitBrand() {
     await updateBrand(brandId, {
       companyId: brand.value?.companyId,
       brandName: brandForm.brandName,
+      brandShortName: brandForm.brandShortName || undefined,
       brandSlug: brandForm.brandSlug,
       industry: brandForm.industry,
       mainBusiness: brandForm.mainBusiness || undefined,
+      coreProducts: brandForm.coreProducts || undefined,
+      brandPositioning: brandForm.brandPositioning || undefined,
       serviceArea: region.displayName,
       provinceCode: region.provinceCode,
       provinceName: region.provinceName,

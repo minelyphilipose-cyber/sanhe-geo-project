@@ -10,9 +10,15 @@ public class BrandUpdateRequest {
     private String industry;
     @NotBlank
     private String brandName;
+    @Size(max = 128)
+    private String brandShortName;
     @NotBlank
     private String brandSlug;
     private String mainBusiness;
+    @Size(max = 500)
+    private String coreProducts;
+    @Size(max = 255)
+    private String brandPositioning;
     private String serviceArea;
     private String provinceCode;
     private String provinceName;
