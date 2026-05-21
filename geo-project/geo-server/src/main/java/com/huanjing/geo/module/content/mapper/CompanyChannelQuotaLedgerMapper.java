@@ -40,6 +40,10 @@ public interface CompanyChannelQuotaLedgerMapper extends BaseMapper<CompanyChann
     List<CompanyChannelQuotaLedger> selectTimedOutReserved(@Param("before") LocalDateTime before,
                                                            @Param("limit") int limit);
 
+    @Select("SELECT * FROM company_channel_quota_ledger " +
+            "WHERE company_id = #{companyId} AND status = 'reserved'")
+    List<CompanyChannelQuotaLedger> selectReservedByCompany(@Param("companyId") Long companyId);
+
     @Select("SELECT COUNT(1) FROM company_channel_quota_ledger " +
             "WHERE company_id = #{companyId} AND status = 'reserved'")
     long countReservedByCompany(@Param("companyId") Long companyId);

@@ -5,9 +5,12 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.util.QuotaPeriodResolver;
 import com.huanjing.geo.module.content.dto.ChannelQuotaSnapshotItem;
+import com.huanjing.geo.module.content.entity.CompanyChannelQuotaLedger;
 import com.huanjing.geo.module.content.entity.CompanyChannelQuotaUsage;
+import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.mapper.CompanyChannelQuotaLedgerMapper;
 import com.huanjing.geo.module.content.mapper.CompanyChannelQuotaUsageMapper;
+import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
@@ -28,11 +31,17 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 public class CompanyPackageBindingService {
+
+    private static final java.time.ZoneId BUSINESS_ZONE = QuotaPeriodResolver.BUSINESS_ZONE;
+    private static final String BIZ_TYPE_DISTRIBUTION = "distribution";
+    private static final Set<String> SUCCESS_TASK_STATUS = Set.of("submitted", "confirmed", "published");
+    private static final Set<String> FAILED_TASK_STATUS = Set.of("failed", "cancelled", "canceled");
 
     private final CompanyPackageBindingMapper bindingMapper;
     private final CompanyMapper companyMapper;
@@ -41,6 +50,7 @@ public class CompanyPackageBindingService {
     private final ProjectMapper projectMapper;
     private final CompanyChannelQuotaUsageMapper quotaUsageMapper;
     private final CompanyChannelQuotaLedgerMapper quotaLedgerMapper;
+    private final DistributionTaskMapper distributionTaskMapper;
     private final ProjectChannelAllocationMapper projectChannelAllocationMapper;
     private final CurrentUserService currentUserService;
 
@@ -129,6 +139,7 @@ public class CompanyPackageBindingService {
         currentUserService.ensurePermission("user.manage");
         lockCompany(companyId);
         CompanyPackageBinding binding = requireActiveBinding(companyId);
+        reconcileReservedDistributionQuota(companyId);
         long reserved = quotaLedgerMapper.countReservedByCompany(companyId);
         if (reserved > 0) {
             throw new BizException(400, "Customer has reserved distribution quota, cannot unbind package");
@@ -138,6 +149,67 @@ public class CompanyPackageBindingService {
         if (updated != 1) {
             throw new BizException(409, "Package binding status changed, please retry");
         }
+    }
+
+    private void reconcileReservedDistributionQuota(Long companyId) {
+        List<CompanyChannelQuotaLedger> ledgers = quotaLedgerMapper.selectReservedByCompany(companyId);
+        if (ledgers == null || ledgers.isEmpty()) {
+            return;
+        }
+        for (CompanyChannelQuotaLedger ledger : ledgers) {
+            if (ledger == null || ledger.getId() == null || !"reserved".equals(ledger.getStatus())) {
+                continue;
+            }
+            DistributionTask task = resolveDistributionTask(ledger);
+            LocalDateTime now = LocalDateTime.now(BUSINESS_ZONE);
+            if (task != null && SUCCESS_TASK_STATUS.contains(task.getStatus())) {
+                quotaLedgerMapper.updateStatusFromReserved(ledger.getId(), "confirmed", now);
+                continue;
+            }
+            if (task != null && FAILED_TASK_STATUS.contains(task.getStatus())) {
+                expireReservedLedgerAndReleaseUsage(ledger);
+                continue;
+            }
+            if (task != null && !SUCCESS_TASK_STATUS.contains(task.getStatus())) {
+                markDistributionTaskFailed(task, now);
+                expireReservedLedgerAndReleaseUsage(ledger);
+                continue;
+            }
+            expireReservedLedgerAndReleaseUsage(ledger);
+        }
+    }
+
+    private DistributionTask resolveDistributionTask(CompanyChannelQuotaLedger ledger) {
+        if (!BIZ_TYPE_DISTRIBUTION.equals(ledger.getBizType()) || ledger.getBizId() == null || ledger.getBizId().isBlank()) {
+            return null;
+        }
+        try {
+            return distributionTaskMapper.selectById(Long.valueOf(ledger.getBizId()));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private void markDistributionTaskFailed(DistributionTask task, LocalDateTime now) {
+        task.setStatus("failed");
+        task.setFailureKind("UNKNOWN");
+        task.setErrorMessage("Distribution task expired while submitting before package unbind");
+        task.setFinishedAt(now);
+        task.setLockedUntil(null);
+        distributionTaskMapper.updateById(task);
+    }
+
+    private void expireReservedLedgerAndReleaseUsage(CompanyChannelQuotaLedger ledger) {
+        int updated = quotaLedgerMapper.updateStatusFromReserved(ledger.getId(), "expired", LocalDateTime.now(BUSINESS_ZONE));
+        if (updated != 1) {
+            return;
+        }
+        quotaUsageMapper.releaseReserved(
+                ledger.getCompanyId(),
+                ledger.getChannelCode(),
+                ledger.getPeriodType(),
+                ledger.getPeriodKey()
+        );
     }
 
     private CompanyPackageBinding buildBinding(Long companyId, PackagePlan plan, List<PackageChannelQuotaConfig> channelQuotas) {

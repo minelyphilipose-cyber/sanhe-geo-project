@@ -1,8 +1,11 @@
 package com.huanjing.geo.module.customer.service;
 
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.entity.CompanyChannelQuotaLedger;
+import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.mapper.CompanyChannelQuotaLedgerMapper;
 import com.huanjing.geo.module.content.mapper.CompanyChannelQuotaUsageMapper;
+import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
@@ -42,6 +45,7 @@ class CompanyPackageBindingServiceTest {
     private ProjectMapper projectMapper;
     private CompanyChannelQuotaUsageMapper quotaUsageMapper;
     private CompanyChannelQuotaLedgerMapper quotaLedgerMapper;
+    private DistributionTaskMapper distributionTaskMapper;
     private ProjectChannelAllocationMapper projectChannelAllocationMapper;
     private CurrentUserService currentUserService;
     private CompanyPackageBindingService service;
@@ -55,6 +59,7 @@ class CompanyPackageBindingServiceTest {
         projectMapper = mock(ProjectMapper.class);
         quotaUsageMapper = mock(CompanyChannelQuotaUsageMapper.class);
         quotaLedgerMapper = mock(CompanyChannelQuotaLedgerMapper.class);
+        distributionTaskMapper = mock(DistributionTaskMapper.class);
         projectChannelAllocationMapper = mock(ProjectChannelAllocationMapper.class);
         currentUserService = mock(CurrentUserService.class);
         when(companyMapper.lockCompanyForUpdate(any())).thenReturn(7L);
@@ -68,6 +73,7 @@ class CompanyPackageBindingServiceTest {
                 projectMapper,
                 quotaUsageMapper,
                 quotaLedgerMapper,
+                distributionTaskMapper,
                 projectChannelAllocationMapper,
                 currentUserService
         );
@@ -82,6 +88,85 @@ class CompanyPackageBindingServiceTest {
 
         service.unbind(7L);
 
+        verify(bindingMapper).markInactive(eq(100L), any(LocalDateTime.class));
+    }
+
+    @Test
+    void unbindConfirmsSubmittedReservedLedgerBeforeCheckingBlockers() {
+        CompanyPackageBinding binding = activeBinding();
+        CompanyChannelQuotaLedger ledger = reservedLedger();
+        DistributionTask task = distributionTask("submitted");
+        when(bindingMapper.selectOne(any())).thenReturn(binding);
+        when(quotaLedgerMapper.selectReservedByCompany(7L)).thenReturn(List.of(ledger));
+        when(distributionTaskMapper.selectById(200L)).thenReturn(task);
+        when(quotaLedgerMapper.updateStatusFromReserved(eq(10L), eq("confirmed"), any(LocalDateTime.class))).thenReturn(1);
+        when(quotaLedgerMapper.countReservedByCompany(7L)).thenReturn(0L);
+        when(bindingMapper.markInactive(eq(100L), any(LocalDateTime.class))).thenReturn(1);
+
+        service.unbind(7L);
+
+        verify(quotaLedgerMapper).updateStatusFromReserved(eq(10L), eq("confirmed"), any(LocalDateTime.class));
+        verify(bindingMapper).markInactive(eq(100L), any(LocalDateTime.class));
+    }
+
+    @Test
+    void unbindExpiresFailedReservedLedgerAndReleasesUsageBeforeCheckingBlockers() {
+        CompanyPackageBinding binding = activeBinding();
+        CompanyChannelQuotaLedger ledger = reservedLedger();
+        DistributionTask task = distributionTask("failed");
+        when(bindingMapper.selectOne(any())).thenReturn(binding);
+        when(quotaLedgerMapper.selectReservedByCompany(7L)).thenReturn(List.of(ledger));
+        when(distributionTaskMapper.selectById(200L)).thenReturn(task);
+        when(quotaLedgerMapper.updateStatusFromReserved(eq(10L), eq("expired"), any(LocalDateTime.class))).thenReturn(1);
+        when(quotaUsageMapper.releaseReserved(7L, "official_site", "month", "2026-05")).thenReturn(1);
+        when(quotaLedgerMapper.countReservedByCompany(7L)).thenReturn(0L);
+        when(bindingMapper.markInactive(eq(100L), any(LocalDateTime.class))).thenReturn(1);
+
+        service.unbind(7L);
+
+        verify(quotaUsageMapper).releaseReserved(7L, "official_site", "month", "2026-05");
+        verify(bindingMapper).markInactive(eq(100L), any(LocalDateTime.class));
+    }
+
+    @Test
+    void unbindContinuesWhenReservedUsageWasAlreadyReleased() {
+        CompanyPackageBinding binding = activeBinding();
+        CompanyChannelQuotaLedger ledger = reservedLedger();
+        DistributionTask task = distributionTask("failed");
+        when(bindingMapper.selectOne(any())).thenReturn(binding);
+        when(quotaLedgerMapper.selectReservedByCompany(7L)).thenReturn(List.of(ledger));
+        when(distributionTaskMapper.selectById(200L)).thenReturn(task);
+        when(quotaLedgerMapper.updateStatusFromReserved(eq(10L), eq("expired"), any(LocalDateTime.class))).thenReturn(1);
+        when(quotaUsageMapper.releaseReserved(7L, "official_site", "month", "2026-05")).thenReturn(0);
+        when(quotaLedgerMapper.countReservedByCompany(7L)).thenReturn(0L);
+        when(bindingMapper.markInactive(eq(100L), any(LocalDateTime.class))).thenReturn(1);
+
+        service.unbind(7L);
+
+        verify(quotaUsageMapper).releaseReserved(7L, "official_site", "month", "2026-05");
+        verify(bindingMapper).markInactive(eq(100L), any(LocalDateTime.class));
+    }
+
+    @Test
+    void unbindExpiresActiveReservedLedgerAndMarksTaskFailedBeforeCheckingBlockers() {
+        CompanyPackageBinding binding = activeBinding();
+        CompanyChannelQuotaLedger ledger = reservedLedger();
+        DistributionTask task = distributionTask("token_issued");
+        when(bindingMapper.selectOne(any())).thenReturn(binding);
+        when(quotaLedgerMapper.selectReservedByCompany(7L)).thenReturn(List.of(ledger));
+        when(distributionTaskMapper.selectById(200L)).thenReturn(task);
+        when(distributionTaskMapper.updateById(any(DistributionTask.class))).thenReturn(1);
+        when(quotaLedgerMapper.updateStatusFromReserved(eq(10L), eq("expired"), any(LocalDateTime.class))).thenReturn(1);
+        when(quotaUsageMapper.releaseReserved(7L, "official_site", "month", "2026-05")).thenReturn(1);
+        when(quotaLedgerMapper.countReservedByCompany(7L)).thenReturn(0L);
+        when(bindingMapper.markInactive(eq(100L), any(LocalDateTime.class))).thenReturn(1);
+
+        service.unbind(7L);
+
+        org.mockito.ArgumentCaptor<DistributionTask> captor = forClass(DistributionTask.class);
+        verify(distributionTaskMapper).updateById(captor.capture());
+        assertEquals("failed", captor.getValue().getStatus());
+        verify(quotaUsageMapper).releaseReserved(7L, "official_site", "month", "2026-05");
         verify(bindingMapper).markInactive(eq(100L), any(LocalDateTime.class));
     }
 
@@ -206,6 +291,28 @@ class CompanyPackageBindingServiceTest {
         binding.setCompanyId(7L);
         binding.markActive();
         return binding;
+    }
+
+    private CompanyChannelQuotaLedger reservedLedger() {
+        CompanyChannelQuotaLedger ledger = new CompanyChannelQuotaLedger();
+        ledger.setId(10L);
+        ledger.setCompanyId(7L);
+        ledger.setProjectId(8L);
+        ledger.setChannelCode("official_site");
+        ledger.setPeriodType("month");
+        ledger.setPeriodKey("2026-05");
+        ledger.setStatus("reserved");
+        ledger.setBizType("distribution");
+        ledger.setBizId("200");
+        ledger.setReservedAt(LocalDateTime.now().minusMinutes(5));
+        return ledger;
+    }
+
+    private DistributionTask distributionTask(String status) {
+        DistributionTask task = new DistributionTask();
+        task.setId(200L);
+        task.setStatus(status);
+        return task;
     }
 
     private PackagePlan enabledPlan() {
