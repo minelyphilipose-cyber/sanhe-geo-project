@@ -254,11 +254,14 @@
           </div>
           <el-segmented v-model="allocationMode" :options="allocationModeOptions" @change="handleAllocationModeChange" />
         </div>
+        <div class="allocation-tip">
+          {{ allocationTipText }}
+        </div>
         <DataState :loading="allocationPreviewLoading" :empty="!allocationPreviewLoading && allocationRows.length === 0" empty-text="当前平台暂无可用模板">
           <el-table :data="allocationRows" border>
             <el-table-column prop="templateName" label="模板" min-width="220" show-overflow-tooltip />
             <el-table-column prop="articleTypeName" label="文章类型" width="120" />
-            <el-table-column label="官网归属" width="110">
+            <el-table-column v-if="showAgentSiteModuleColumn" label="官网归属" width="110">
               <template #default="{ row }">{{ agentSiteModuleText(row.agentSiteModule) }}</template>
             </el-table-column>
             <el-table-column label="数量" width="180">
@@ -498,6 +501,12 @@ const projectCascadeOptions = computed(() => buildProjectCascadeOptions(projectO
 const selectedBatchProject = computed(() => projectOptions.value.find((project) => project.id === batchForm.projectId) || null)
 const allocationTopic = computed(() => selectedTopics.value.find((topic) => topic.id === allocationTarget.topicId) || null)
 const allocationPlatform = computed(() => platformOptions.value.find((platform) => platform.value === allocationTarget.platformValue) || null)
+const showAgentSiteModuleColumn = computed(() => allocationPlatform.value?.channelGroupCode === 'agent_site')
+const allocationTipText = computed(() => (
+  allocationTopic.value?.questionSceneCode
+    ? '已展示当前平台全部启用模板，默认数量会分配到匹配当前问题类型的模板；其余模板为 0，可切换“自定义数量”调整。'
+    : '已展示当前平台全部启用模板，未绑定问题类型时会按全部可用模板权重分配；可切换“自定义数量”调整。'
+))
 const filteredBatchQuestionRows = computed(() => {
   const keyword = batchQuestionFilters.keyword.trim()
   return batchQuestionRows.value.filter((row) => {
@@ -715,7 +724,7 @@ async function openAllocationDialog(topic: SelectedTopic, platform: ContentStyle
   allocationMode.value = topic.platformAllocationModes[platform.value] || 'auto'
   allocationDialogVisible.value = true
   if (allocationMode.value === 'custom' && topic.platformTemplateCounts[platform.value]?.length) {
-    allocationRows.value = hydrateTemplateRows(platform, topic.platformTemplateCounts[platform.value])
+    allocationRows.value = hydrateTemplateRows(platform, topic.platformTemplateCounts[platform.value], true)
     return
   }
   await loadAllocationPreview(topic, platform)
@@ -730,11 +739,7 @@ async function handleAllocationModeChange() {
     return
   }
   if (!allocationRows.value.length) {
-    allocationRows.value = hydrateTemplateRows(platform, platform.templates?.map((template) => ({
-      templateId: template.templateId,
-      templateVersionId: template.templateVersionId,
-      count: 0,
-    })) || [])
+    allocationRows.value = hydrateTemplateRows(platform, [], true)
   }
 }
 
@@ -748,15 +753,8 @@ async function loadAllocationPreview(topic: SelectedTopic, platform: ContentStyl
       questionSceneCode: topic.questionSceneCode || null,
       count,
     })
-    allocationRows.value = data.data.items.map((item) => ({
-      templateId: item.templateId,
-      templateVersionId: item.templateVersionId,
-      templateName: item.templateName,
-      articleTypeName: item.articleTypeName,
-      agentSiteModule: item.agentSiteModule,
-      count: item.count,
-    }))
-    topic.platformPreviewCounts[platform.value] = allocationRows.value.map(toTemplateCount)
+    allocationRows.value = hydrateTemplateRows(platform, data.data.items, true)
+    topic.platformPreviewCounts[platform.value] = allocationRows.value.map(toTemplateCount).filter((item) => item.count > 0)
   } catch (err) {
     console.error(err)
     allocationRows.value = []
@@ -766,9 +764,18 @@ async function loadAllocationPreview(topic: SelectedTopic, platform: ContentStyl
   }
 }
 
-function hydrateTemplateRows(platform: ContentStyleOption, counts: BatchArticleGenerateTemplateCount[]) {
+function hydrateTemplateRows(platform: ContentStyleOption, counts: BatchArticleGenerateTemplateCount[], includeAllTemplates = false) {
   const templateMap = new Map((platform.templates || []).map((template) => [template.templateId, template]))
-  return counts.map((item) => {
+  const countMap = new Map(counts.map((item) => [item.templateId, item]))
+  const baseCounts = includeAllTemplates
+    ? (platform.templates || []).map((template) => ({
+        templateId: template.templateId,
+        templateVersionId: template.templateVersionId,
+        count: Number(countMap.get(template.templateId)?.count || 0),
+        extraPrompt: countMap.get(template.templateId)?.extraPrompt,
+      }))
+    : counts
+  return baseCounts.map((item) => {
     const template = templateMap.get(item.templateId)
     return {
       ...item,
@@ -1783,6 +1790,16 @@ onMounted(() => {
   margin-top: 4px;
   color: var(--text-secondary);
   font-size: 12px;
+}
+
+.allocation-tip {
+  padding: 10px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  color: #1d4ed8;
+  background: #eff6ff;
+  font-size: 13px;
+  line-height: 1.5;
 }
 
 .side-panel {
