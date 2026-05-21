@@ -6,6 +6,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.project.dto.PackageChannelQuotaConfigRequest;
 import com.huanjing.geo.module.project.dto.PackagePlanCreateRequest;
 import com.huanjing.geo.module.project.dto.PackagePlanUpdateRequest;
+import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.project.entity.PackageChannelQuotaConfig;
 import com.huanjing.geo.module.project.entity.PackagePlan;
 import com.huanjing.geo.module.project.mapper.PackageChannelQuotaConfigMapper;
@@ -13,6 +14,7 @@ import com.huanjing.geo.module.project.mapper.PackagePlanMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
@@ -43,6 +45,7 @@ public class PackagePlanService {
 
     private final PackagePlanMapper packagePlanMapper;
     private final PackageChannelQuotaConfigMapper packageChannelQuotaConfigMapper;
+    private final CompanyPackageBindingService companyPackageBindingService;
     private final CurrentUserService currentUserService;
 
     public Page<PackagePlan> page(long current, long size, String keyword, Boolean enabled) {
@@ -76,6 +79,7 @@ public class PackagePlanService {
         return plans;
     }
 
+    @Transactional
     public PackagePlan create(PackagePlanCreateRequest req) {
         currentUserService.ensurePermission("user.manage");
         validateType(req.getPackageType());
@@ -128,6 +132,7 @@ public class PackagePlanService {
         return plan;
     }
 
+    @Transactional
     public PackagePlan update(Long id, PackagePlanUpdateRequest req) {
         currentUserService.ensurePermission("user.manage");
         validateBase(req.getStandardPrice(), req.getServiceMonths(), req.getSortOrder());
@@ -167,6 +172,7 @@ public class PackagePlanService {
         plan.setRemark(req.getRemark());
         packagePlanMapper.updateById(plan);
         saveChannelQuotaConfigs(plan.getId(), req.getChannelQuotaConfigs());
+        companyPackageBindingService.syncActiveBindingsForPackagePlan(plan.getId());
         attachChannelQuotaConfigs(List.of(plan));
         return plan;
     }
@@ -197,10 +203,12 @@ public class PackagePlanService {
         return findChannelQuotaConfigs(plan.getId());
     }
 
+    @Transactional
     public List<PackageChannelQuotaConfig> saveChannelQuotaConfigsByPlanId(Long packagePlanId, List<PackageChannelQuotaConfigRequest> configs) {
         currentUserService.ensurePermission("user.manage");
         PackagePlan plan = requireById(packagePlanId);
         saveChannelQuotaConfigs(plan.getId(), configs);
+        companyPackageBindingService.syncActiveBindingsForPackagePlan(plan.getId());
         return findChannelQuotaConfigs(plan.getId());
     }
 

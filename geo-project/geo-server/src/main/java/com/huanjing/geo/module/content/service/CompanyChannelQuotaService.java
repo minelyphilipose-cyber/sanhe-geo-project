@@ -68,6 +68,7 @@ public class CompanyChannelQuotaService {
         }
 
         usageMapper.insertIgnore(companyId, channel, quota.periodType(), periodKey, quota.quotaLimit());
+        usageMapper.updateQuotaLimit(companyId, channel, quota.periodType(), periodKey, quota.quotaLimit());
         int reserved = usageMapper.tryReserve(companyId, channel, quota.periodType(), periodKey);
         if (reserved != 1) {
             throw new BizException(400, "Distribution quota exhausted for channel " + channel);
@@ -122,6 +123,7 @@ public class CompanyChannelQuotaService {
         SnapshotQuota quota = resolveSnapshotQuota(binding, channel);
         String periodKey = periodKey(quota.periodType());
         usageMapper.insertIgnore(companyId, channel, quota.periodType(), periodKey, quota.quotaLimit());
+        usageMapper.updateQuotaLimit(companyId, channel, quota.periodType(), periodKey, quota.quotaLimit());
         CompanyChannelQuotaUsage usage = usageMapper.selectOne(
                 new LambdaQueryWrapper<CompanyChannelQuotaUsage>()
                         .eq(CompanyChannelQuotaUsage::getCompanyId, companyId)
