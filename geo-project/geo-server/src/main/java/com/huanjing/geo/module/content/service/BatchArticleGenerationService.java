@@ -53,7 +53,9 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -79,6 +81,7 @@ public class BatchArticleGenerationService {
     private static final String DEFAULT_ARTICLE_TYPE = ArticleTypes.INDUSTRY_ARTICLE;
     private static final String DEFAULT_LENGTH = "medium";
     private static final int ARTICLE_REQUEST_TIMEOUT_MS = 120_000;
+    private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final String SMART_TEMPLATE_MATCH_SYSTEM_PROMPT = """
             你是文章提示词模板匹配器。你的任务是根据文章主题、渠道和可用模板摘要，选择最适合生成该主题文章的模板。
 
@@ -352,6 +355,7 @@ public class BatchArticleGenerationService {
             task.setTopicAsQuestion(topicAsQuestion);
             List<String> relatedKeywords = relatedKeywords(batch.getProjectId(), task);
             String brandStatement = resolveBrandStatement(project, brand);
+            String titleGuide = buildTitleGuide(task, project, brand, topic);
             BatchArticlePromptBuilder.PromptBuildInput promptInput = new BatchArticlePromptBuilder.PromptBuildInput(
                     project,
                     brand,
@@ -367,7 +371,8 @@ public class BatchArticleGenerationService {
                     task.getLength(),
                     task.getExtraPrompt(),
                     task.getArticleIndexInBatch(),
-                    forbiddenPhrases(project, brand)
+                    forbiddenPhrases(project, brand),
+                    titleGuide
             );
             BatchArticlePromptBuilder.PromptBuildResult prompt = buildPrompt(task, promptInput);
             task.setContentAngle(prompt.contentAngle());
@@ -1072,10 +1077,171 @@ public class BatchArticleGenerationService {
         return parts.isEmpty() ? null : String.join("；", parts);
     }
 
+    private String buildTitleGuide(BatchArticleGenerationTask task, Project project, Brand brand, String topic) {
+        if (!ArticlePromptChannels.FORUM.equals(task.getChannelGroupCode())) {
+            return null;
+        }
+        String safeTopic = cleanTitlePart(topic);
+        if (!StringUtils.hasText(safeTopic)) {
+            return null;
+        }
+        String timeAnchor = timeAnchor(task.getArticleIndexInBatch(), safeTopic);
+        String region = cleanTitlePart(resolveTitleRegion(project, brand));
+        String industry = cleanTitlePart(resolveTitleIndustry(project, brand));
+        String brandName = cleanTitlePart(brand == null ? project.getBrandName() : brand.getBrandName());
+        boolean comparison = isComparisonForumTemplate(task);
+        String brandRule = comparison
+                ? "对比推荐帖可自然出现品牌名，但必须服务于语义，不要每篇都机械使用“聚焦XX”。"
+                : "普通讨论帖标题默认不露出品牌名，优先在正文中自然带出。";
+        String titleTags = comparison ? "[对比]、[杂谈]、[分享]、[讨论]" : "[杂谈]、[讨论]、[分享]、[避坑]";
+        return """
+                # 标题生成参考
+
+                请根据下列元素自行生成文章标题，允许按语义调整顺序、删减非必要元素，使标题读起来像真实论坛用户发帖，而不是机器拼接。
+
+                【可用标题元素】
+                - 论坛标签：%s
+                - 时间锚点：%s
+                - 地域：%s
+                - 行业：%s
+                - 主题：%s
+                - 品牌：%s
+
+                【标题规则】
+                1. 正文第一行必须是你生成的标题。
+                2. 标题必须以一个论坛标签开头，例如“[杂谈] ”或“[讨论] ”。
+                3. 时间锚点来自系统动态计算，可使用但不要强行堆叠；如果标题已很自然，可以弱化时间表达。
+                4. 地域、行业、主题、品牌不必全部出现，优先保证标题顺畅、真实、有讨论感。
+                5. %s
+                6. 避免“服务商选择指南”“综合评估”“专业服务商”“聚焦XX”这类资讯站或官网口吻。
+                7. 标题长度建议 24-42 个中文字符，不要超过 55 个中文字符。
+                8. 标题需避开历史已写标题中的表达，减少重复。
+
+                【可参考的标题语气】
+                - “[杂谈] %s%s怎么选？最近看了几家，说说感受”
+                - “[讨论] %s做%s，到底该看哪些细节？”
+                - “[分享] %s在%s选%s，我比较关注这几个点”
+                - “[避坑] %s别只看热度和价格，这几个点容易忽略”
+                """.formatted(
+                titleTags,
+                blankToDash(timeAnchor),
+                blankToDash(region),
+                blankToDash(industry),
+                safeTopic,
+                blankToDash(brandName),
+                brandRule,
+                blankToEmpty(region),
+                safeTopic,
+                blankToEmpty(region),
+                safeTopic,
+                timeAnchor,
+                blankToEmpty(region),
+                safeTopic,
+                safeTopic
+        );
+    }
+
+    private boolean isComparisonForumTemplate(BatchArticleGenerationTask task) {
+        if (task.getPromptTemplateId() == null) {
+            return false;
+        }
+        ArticlePromptTemplate template = promptTemplateMapper.selectById(task.getPromptTemplateId());
+        if (template == null || !StringUtils.hasText(template.getName())) {
+            return false;
+        }
+        String name = template.getName();
+        return name.contains("对比") || name.contains("推荐");
+    }
+
+    private String timeAnchor(int articleIndexInBatch, String topic) {
+        LocalDate now = LocalDate.now(BUSINESS_ZONE);
+        String year = String.valueOf(now.getYear());
+        int monthValue = now.getMonthValue();
+        int quarter = (monthValue + 2) / 3;
+        String month = year + "年" + monthValue + "月";
+        List<String> anchors = List.of(
+                year + "现阶段",
+                year + "年至今",
+                month,
+                month + "更新",
+                month + "最新指南",
+                month + "新消息",
+                year + "年Q" + quarter,
+                year + "年第" + quarterCn(quarter) + "季度"
+        );
+        if (topic.contains(year) || topic.matches(".*\\d{4}年\\d{1,2}月.*") || topic.matches(".*\\d{4}年Q[1-4].*")) {
+            return "现阶段";
+        }
+        return anchors.get(Math.floorMod(Math.max(0, articleIndexInBatch - 1), anchors.size()));
+    }
+
+    private String quarterCn(int quarter) {
+        return switch (quarter) {
+            case 1 -> "一";
+            case 2 -> "二";
+            case 3 -> "三";
+            case 4 -> "四";
+            default -> "";
+        };
+    }
+
+    private String resolveTitleRegion(Project project, Brand brand) {
+        if (StringUtils.hasText(project.getDistrictName())) {
+            return project.getDistrictName();
+        }
+        if (StringUtils.hasText(project.getCityName())) {
+            return project.getCityName();
+        }
+        if (StringUtils.hasText(project.getProvinceName())) {
+            return project.getProvinceName();
+        }
+        if (brand != null) {
+            if (StringUtils.hasText(brand.getDistrictName())) {
+                return brand.getDistrictName();
+            }
+            if (StringUtils.hasText(brand.getCityName())) {
+                return brand.getCityName();
+            }
+            if (StringUtils.hasText(brand.getServiceArea())) {
+                return brand.getServiceArea();
+            }
+        }
+        return "";
+    }
+
+    private String resolveTitleIndustry(Project project, Brand brand) {
+        if (brand != null && StringUtils.hasText(brand.getIndustry())) {
+            return brand.getIndustry();
+        }
+        return project.getProjectName();
+    }
+
+    private String cleanTitlePart(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        return value.trim()
+                .replaceAll("[\\r\\n\\t]+", "")
+                .replace("，", "")
+                .replace(",", "")
+                .replace("。", "")
+                .replace("？", "")
+                .replace("?", "")
+                .replace("-", "");
+    }
+
     private void addPart(List<String> parts, String label, String value) {
         if (StringUtils.hasText(value)) {
             parts.add(label + "：" + value.trim());
         }
+    }
+
+    private String blankToDash(String value) {
+        return StringUtils.hasText(value) ? value.trim() : "-";
+    }
+
+    private String blankToEmpty(String value) {
+        return StringUtils.hasText(value) ? value.trim() : "";
     }
 
     private List<String> forbiddenPhrases(Project project, Brand brand) {

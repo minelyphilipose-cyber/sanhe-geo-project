@@ -152,6 +152,7 @@ public class BatchArticlePromptBuilder {
         String businessFocus = resolveBusinessFocus(input.brandStatement(), input.brand());
         List<String> recentTitles = resolveHistoryTitles(input.project().getId(), 10);
         String userPrompt = buildUserPrompt(input, contentAngle, audiencePerspective, businessFocus, recentTitles);
+        userPrompt = withTitleGuideInstruction(userPrompt, input.titleGuide());
 
         Map<String, Object> promptSnapshot = new LinkedHashMap<>();
         promptSnapshot.put("promptVersion", PROMPT_VERSION);
@@ -160,6 +161,7 @@ public class BatchArticlePromptBuilder {
         promptSnapshot.put("contentAngle", contentAngle);
         promptSnapshot.put("audiencePerspective", audiencePerspective);
         promptSnapshot.put("recentTitles", recentTitles);
+        promptSnapshot.put("titleGuide", input.titleGuide());
 
         Map<String, Object> inputSnapshot = new LinkedHashMap<>();
         inputSnapshot.put("promptVersion", PROMPT_VERSION);
@@ -176,6 +178,7 @@ public class BatchArticlePromptBuilder {
         inputSnapshot.put("length", input.length());
         inputSnapshot.put("extraPrompt", input.extraPrompt());
         inputSnapshot.put("businessFocus", businessFocus);
+        inputSnapshot.put("titleGuide", input.titleGuide());
 
         String systemPrompt = withGlobalRules(SYSTEM_PROMPT, input.forbiddenPhrases());
         return new PromptBuildResult(
@@ -201,6 +204,7 @@ public class BatchArticlePromptBuilder {
         String systemPrompt = withGlobalRules(templateSystemPrompt, input.forbiddenPhrases()).replace("{{contactBlock}}", contactBlock);
         String userPrompt = renderTemplate(version.getUserPromptTemplate(), input, template, contentAngle,
                 audiencePerspective, businessFocus, recentTitles, contactBlock, brandFacts);
+        userPrompt = withTitleGuideInstruction(userPrompt, input.titleGuide());
 
         Map<String, Object> promptSnapshot = new LinkedHashMap<>();
         promptSnapshot.put("promptVersion", "template_v" + version.getVersionNo());
@@ -215,6 +219,7 @@ public class BatchArticlePromptBuilder {
         promptSnapshot.put("contactDisclosureMode", template.getContactDisclosureMode());
         promptSnapshot.put("contactBlock", contactBlock);
         promptSnapshot.put("brandFacts", brandFacts);
+        promptSnapshot.put("titleGuide", input.titleGuide());
 
         Map<String, Object> inputSnapshot = new LinkedHashMap<>();
         inputSnapshot.put("promptVersion", "template_v" + version.getVersionNo());
@@ -240,6 +245,7 @@ public class BatchArticlePromptBuilder {
         inputSnapshot.put("contactDisclosureMode", template.getContactDisclosureMode());
         inputSnapshot.put("contactBlock", contactBlock);
         inputSnapshot.put("brandFacts", brandFacts);
+        inputSnapshot.put("titleGuide", input.titleGuide());
 
         return new PromptBuildResult(systemPrompt, systemPrompt + "\n\n" + userPrompt, contentAngle, audiencePerspective,
                 json(promptSnapshot), json(inputSnapshot));
@@ -398,6 +404,8 @@ public class BatchArticlePromptBuilder {
         values.put("businessFocus", businessFocus == null ? "-" : businessFocus);
         values.put("recentTitles", recentTitles.isEmpty() ? "-" : String.join("；", recentTitles));
         values.put("contactBlock", contactBlock == null ? "" : contactBlock);
+        values.put("titleGuide", input.titleGuide() == null ? "" : input.titleGuide());
+        values.put("titleElements", input.titleGuide() == null ? "" : input.titleGuide());
         values.putAll(brandFacts);
         for (Map.Entry<String, String> entry : values.entrySet()) {
             rendered = rendered.replace("{{" + entry.getKey() + "}}", entry.getValue() == null ? "-" : entry.getValue());
@@ -621,6 +629,15 @@ public class BatchArticlePromptBuilder {
                 .collect(Collectors.joining("、"));
     }
 
+    private String withTitleGuideInstruction(String userPrompt, String titleGuide) {
+        if (!StringUtils.hasText(titleGuide) || userPrompt.contains("# 标题生成参考")) {
+            return userPrompt;
+        }
+        return titleGuide.trim()
+                + "\n\n"
+                + userPrompt;
+    }
+
     private String promptSafeInline(String value) {
         return StringUtils.hasText(value) ? value.trim().replaceAll("[\"\\\\]", "") : "";
     }
@@ -647,7 +664,8 @@ public class BatchArticlePromptBuilder {
                                    String length,
                                    String extraPrompt,
                                    int articleIndexInBatch,
-                                   List<String> forbiddenPhrases) {
+                                   List<String> forbiddenPhrases,
+                                   String titleGuide) {
     }
 
     public record PromptBuildResult(String systemPrompt,
