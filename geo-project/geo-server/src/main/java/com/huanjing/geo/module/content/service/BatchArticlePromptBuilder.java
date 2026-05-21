@@ -387,6 +387,7 @@ public class BatchArticlePromptBuilder {
         values.put("topicAsQuestion", trimToDash(input.topicAsQuestion()));
         values.put("brandName", input.brand() == null ? "-" : trimToDash(input.brand().getBrandName()));
         values.put("industry", resolveIndustry(input.project(), input.brand()));
+        values.put("category", resolveIndustry(input.project(), input.brand()));
         values.put("projectName", trimToDash(input.project().getProjectName()));
         values.put("channelName", ArticlePromptChannels.channelName(template.getChannelGroupCode(), template.getChannelSubCode()));
         values.put("articleTypeName", ArticlePromptChannels.ARTICLE_TYPE_LABELS.getOrDefault(template.getArticleTypeCode(), template.getArticleTypeCode()));
@@ -394,6 +395,7 @@ public class BatchArticlePromptBuilder {
         values.put("forbiddenPhrases", forbiddenPhrasesText(input.forbiddenPhrases()));
         values.put("channelGuide", ArticlePromptChannels.channelGuide(template.getChannelGroupCode(), template.getChannelSubCode()));
         values.put("region", resolveRegion(input.project(), input.brand()));
+        values.put("targetAudience", trimToDash(input.project().getTargetAudience()));
         values.put("contentAngle", contentAngle);
         values.put("audiencePerspective", audiencePerspective);
         values.put("businessFocus", businessFocus == null ? "-" : businessFocus);

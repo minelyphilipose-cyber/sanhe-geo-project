@@ -55,6 +55,8 @@ class BatchArticlePromptBuilderTest {
 
         assertThat(result.userPrompt())
                 .contains("行业：美容美业")
+                .contains("品类：美容美业")
+                .contains("适配客群：本地养生用户")
                 .doesNotContain("beauty_cosmetic");
     }
 
@@ -64,6 +66,7 @@ class BatchArticlePromptBuilderTest {
         project.setBrandId(8L);
         project.setProjectName("得闲spa");
         project.setCompanyName("得闲spa");
+        project.setTargetAudience("本地养生用户");
 
         Brand brand = new Brand();
         brand.setBrandName("阜阳市颍州区得闲养生馆");
@@ -107,7 +110,7 @@ class BatchArticlePromptBuilderTest {
         version.setTemplateId(23L);
         version.setVersionNo(1);
         version.setSystemPrompt("系统提示");
-        version.setUserPromptTemplate("【可用品牌事实】\n- 行业：{{industry}}\n- 品牌：{{brandName}}\n");
+        version.setUserPromptTemplate("【可用品牌事实】\n- 行业：{{industry}}\n- 品类：{{category}}\n- 品牌：{{brandName}}\n- 适配客群：{{targetAudience}}\n");
         return version;
     }
 }
