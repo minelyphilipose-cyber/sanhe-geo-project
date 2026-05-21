@@ -32,6 +32,8 @@ public class MinioStorageService {
     private String secretKey;
     @Value("${geo.minio.bucket}")
     private String bucket;
+    @Value("${geo.minio.region:us-east-1}")
+    private String region;
     private volatile MinioClient publicMinioClient;
 
     public String upload(MultipartFile file, String objectKey, String contentType) {
@@ -131,6 +133,7 @@ public class MinioStorageService {
                     GetPresignedObjectUrlArgs.builder()
                             .method(Method.GET)
                             .bucket(bucket)
+                            .region(region)
                             .object(objectKey)
                             .expiry(expireSeconds)
                             .build()
@@ -158,9 +161,9 @@ public class MinioStorageService {
     }
 
     private MinioClient presignClient() {
-        String source = StringUtils.hasText(publicEndpoint) ? publicEndpoint : endpoint;
+        String source = endpointSource();
         String sourceOrigin = endpointOrigin(source);
-        if (Objects.equals(sourceOrigin, endpointOrigin(endpoint))) {
+        if (Objects.equals(sourceOrigin, endpointOrigin(cleanEndpoint(endpoint)))) {
             return minioClient;
         }
         MinioClient existing = publicMinioClient;
@@ -171,6 +174,7 @@ public class MinioStorageService {
             if (publicMinioClient == null) {
                 publicMinioClient = MinioClient.builder()
                         .endpoint(sourceOrigin)
+                        .region(region)
                         .credentials(accessKey, secretKey)
                         .build();
             }
@@ -179,16 +183,15 @@ public class MinioStorageService {
     }
 
     private String endpointOrigin(String source) {
-        URI uri = URI.create(source);
+        URI uri = URI.create(cleanEndpoint(source));
         if (!StringUtils.hasText(uri.getScheme()) || !StringUtils.hasText(uri.getRawAuthority())) {
-            return source;
+            return cleanEndpoint(source);
         }
         return uri.getScheme() + "://" + uri.getRawAuthority();
     }
 
     private String applyPublicEndpointPathPrefix(String presignedUrl) {
-        String source = StringUtils.hasText(publicEndpoint) ? publicEndpoint : endpoint;
-        String prefix = endpointPathPrefix(source);
+        String prefix = endpointPathPrefix(endpointSource());
         if (!StringUtils.hasText(prefix)) {
             return presignedUrl;
         }
@@ -202,7 +205,7 @@ public class MinioStorageService {
     }
 
     private String endpointPathPrefix(String source) {
-        URI uri = URI.create(source);
+        URI uri = URI.create(cleanEndpoint(source));
         String path = uri.getRawPath();
         if (!StringUtils.hasText(path) || "/".equals(path)) {
             return "";
@@ -211,5 +214,13 @@ public class MinioStorageService {
             path = path.substring(0, path.length() - 1);
         }
         return path;
+    }
+
+    private String endpointSource() {
+        return StringUtils.hasText(publicEndpoint) ? cleanEndpoint(publicEndpoint) : cleanEndpoint(endpoint);
+    }
+
+    private String cleanEndpoint(String source) {
+        return source == null ? "" : source.trim();
     }
 }
