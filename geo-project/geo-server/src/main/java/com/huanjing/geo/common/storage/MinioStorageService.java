@@ -12,6 +12,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.InputStream;
+import java.net.URI;
 import java.util.Objects;
 
 @Slf4j
@@ -126,7 +127,7 @@ public class MinioStorageService {
     public String buildPresignedDownloadUrl(String objectKey, int expireSeconds) {
         try {
             ensureBucket();
-            return presignClient().getPresignedObjectUrl(
+            String presignedUrl = presignClient().getPresignedObjectUrl(
                     GetPresignedObjectUrlArgs.builder()
                             .method(Method.GET)
                             .bucket(bucket)
@@ -134,7 +135,10 @@ public class MinioStorageService {
                             .expiry(expireSeconds)
                             .build()
             );
+            return applyPublicEndpointPathPrefix(presignedUrl);
         } catch (Exception ex) {
+            log.error("Generate minio presigned url failed, objectKey={}, endpoint={}, publicEndpoint={}, err={}",
+                    objectKey, endpoint, publicEndpoint, ex.getMessage(), ex);
             throw new BizException(500, "Generate presigned url failed");
         }
     }
@@ -155,7 +159,8 @@ public class MinioStorageService {
 
     private MinioClient presignClient() {
         String source = StringUtils.hasText(publicEndpoint) ? publicEndpoint : endpoint;
-        if (Objects.equals(source, endpoint)) {
+        String sourceOrigin = endpointOrigin(source);
+        if (Objects.equals(sourceOrigin, endpointOrigin(endpoint))) {
             return minioClient;
         }
         MinioClient existing = publicMinioClient;
@@ -165,11 +170,46 @@ public class MinioStorageService {
         synchronized (this) {
             if (publicMinioClient == null) {
                 publicMinioClient = MinioClient.builder()
-                        .endpoint(source)
+                        .endpoint(sourceOrigin)
                         .credentials(accessKey, secretKey)
                         .build();
             }
             return publicMinioClient;
         }
+    }
+
+    private String endpointOrigin(String source) {
+        URI uri = URI.create(source);
+        if (!StringUtils.hasText(uri.getScheme()) || !StringUtils.hasText(uri.getRawAuthority())) {
+            return source;
+        }
+        return uri.getScheme() + "://" + uri.getRawAuthority();
+    }
+
+    private String applyPublicEndpointPathPrefix(String presignedUrl) {
+        String source = StringUtils.hasText(publicEndpoint) ? publicEndpoint : endpoint;
+        String prefix = endpointPathPrefix(source);
+        if (!StringUtils.hasText(prefix)) {
+            return presignedUrl;
+        }
+
+        URI uri = URI.create(presignedUrl);
+        String path = uri.getRawPath();
+        String normalizedPath = path.startsWith("/") ? path : "/" + path;
+        String query = StringUtils.hasText(uri.getRawQuery()) ? "?" + uri.getRawQuery() : "";
+        String fragment = StringUtils.hasText(uri.getRawFragment()) ? "#" + uri.getRawFragment() : "";
+        return uri.getScheme() + "://" + uri.getRawAuthority() + prefix + normalizedPath + query + fragment;
+    }
+
+    private String endpointPathPrefix(String source) {
+        URI uri = URI.create(source);
+        String path = uri.getRawPath();
+        if (!StringUtils.hasText(path) || "/".equals(path)) {
+            return "";
+        }
+        while (path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
+        return path;
     }
 }
