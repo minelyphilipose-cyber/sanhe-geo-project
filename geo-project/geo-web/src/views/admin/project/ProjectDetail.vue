@@ -358,6 +358,12 @@ const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 const dictStore = useDictStore()
+const PROJECT_STATUS_LABELS: Record<string, string> = {
+  pending_start: '待启动',
+  active: '已启动',
+  paused: '已暂停',
+  expired: '已过期',
+}
 const canActivateProject = computed(() => userStore.hasPermission('project.start'))
 const canUpdateProject = computed(() => userStore.hasPermission('project.update'))
 const canPrepareProject = computed(() => project.value?.status === 'pending_start' || project.value?.status === 'paused')
@@ -447,7 +453,7 @@ function regionText(p?: Project | null) {
 
 function projectStatusLabel(status?: string | null) {
   if (!status) return '-'
-  return dictStore.label('project_status', status) || status
+  return PROJECT_STATUS_LABELS[status] || dictStore.label('project_status', status) || status
 }
 
 function projectStatusClass(status?: string | null) {

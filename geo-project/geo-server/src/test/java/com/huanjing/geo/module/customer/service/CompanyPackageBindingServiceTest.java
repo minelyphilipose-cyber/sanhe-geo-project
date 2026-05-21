@@ -196,6 +196,22 @@ class CompanyPackageBindingServiceTest {
     }
 
     @Test
+    void bindMarksCompanySignedWhenPackageIsBound() {
+        Company company = new Company();
+        company.setId(7L);
+        company.setStatus("potential");
+        when(companyMapper.selectById(7L)).thenReturn(company);
+        when(packagePlanMapper.selectById(3L)).thenReturn(enabledPlan());
+        when(channelQuotaConfigMapper.selectList(any())).thenReturn(List.of());
+
+        service.bind(7L, 3L);
+
+        org.mockito.ArgumentCaptor<Company> captor = forClass(Company.class);
+        verify(companyMapper).updateById(captor.capture());
+        assertEquals("signed", captor.getValue().getStatus());
+    }
+
+    @Test
     void bindAllowsPackageWhenActiveProjectAllocationsFitAllChannels() {
         Company company = new Company();
         company.setId(7L);

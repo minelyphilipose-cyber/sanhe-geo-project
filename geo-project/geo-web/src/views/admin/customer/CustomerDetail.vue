@@ -504,6 +504,7 @@ function channelLabel(value?: string | null) {
   const mapping: Record<string, string> = {
     official_site: '官网',
     industry_site: '行业资讯站',
+    forum: '平台网站',
     self_media: '自媒体平台',
     authority_media: '权重媒体平台',
   }
@@ -518,7 +519,7 @@ function periodLabel(value?: string | null) {
 const distributionQuotaItems = computed(() => distributionQuota.value?.items || [])
 const distributionQuotaSummary = computed(() => {
   const opened = distributionQuotaItems.value.filter((item) => item.enabled).length
-  return `${opened}/4 个渠道已开通`
+  return `${opened}/${distributionQuotaItems.value.length} 个渠道已开通`
 })
 const hasActiveKeywordGroupQuota = computed(() => !!keywordGroupQuota.value?.activeBinding)
 const isKeywordGroupOverQuota = computed(() => {

@@ -131,6 +131,7 @@ public class CompanyPackageBindingService {
         CompanyPackageBinding binding = buildBinding(companyId, plan, channelQuotas);
         bindingMapper.insert(binding);
         initTotalUsage(binding, channelQuotas);
+        markCompanySigned(company);
         return binding;
     }
 
@@ -261,6 +262,14 @@ public class CompanyPackageBindingService {
         if (locked == null) {
             throw new BizException(404, "Company not found");
         }
+    }
+
+    private void markCompanySigned(Company company) {
+        if (company == null || "signed".equals(company.getStatus())) {
+            return;
+        }
+        company.setStatus("signed");
+        companyMapper.updateById(company);
     }
 
     private void validateActiveProjectAllocationsAgainstPackage(Long companyId, List<PackageChannelQuotaConfig> channelQuotas) {

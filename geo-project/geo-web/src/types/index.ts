@@ -1215,7 +1215,7 @@ export interface PackagePlan {
 export interface PackageChannelQuotaConfig {
   id?: number
   packagePlanId?: number
-  channelCode: 'official_site' | 'industry_site' | 'self_media' | 'authority_media' | string
+  channelCode: 'official_site' | 'industry_site' | 'forum' | 'self_media' | 'authority_media' | string
   periodType: 'day' | 'week' | 'month' | 'total' | string
   quotaLimit: number
   enabled: boolean
@@ -1250,7 +1250,7 @@ export interface CompanyDistributionQuota {
 }
 
 export interface CompanyDistributionQuotaItem {
-  channelCode: 'official_site' | 'industry_site' | 'self_media' | 'authority_media' | string
+  channelCode: 'official_site' | 'industry_site' | 'forum' | 'self_media' | 'authority_media' | string
   channelName: string
   enabled: boolean
   periodType?: 'day' | 'week' | 'month' | 'total' | string | null
