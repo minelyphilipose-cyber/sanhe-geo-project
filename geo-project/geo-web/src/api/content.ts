@@ -193,6 +193,12 @@ export interface ArticlePromptTemplateDetail extends ArticlePromptTemplate {
   versions: ArticlePromptTemplateVersion[]
 }
 
+export interface ArticlePromptTemplateDetailResponse {
+  template: ArticlePromptTemplate
+  currentVersion?: ArticlePromptTemplateVersion | null
+  versions: ArticlePromptTemplateVersion[]
+}
+
 export interface ArticlePromptTemplateSaveRequest {
   name: string
   description?: string
@@ -279,15 +285,15 @@ export function getArticlePromptTemplates(params?: {
 }
 
 export function getArticlePromptTemplate(id: number) {
-  return request.get<R<ArticlePromptTemplateDetail>>(`/content/article-prompt-templates/${id}`)
+  return request.get<R<ArticlePromptTemplateDetailResponse>>(`/content/article-prompt-templates/${id}`)
 }
 
 export function createArticlePromptTemplate(data: ArticlePromptTemplateSaveRequest) {
-  return request.post<R<ArticlePromptTemplateDetail>>('/content/article-prompt-templates', data)
+  return request.post<R<ArticlePromptTemplateDetailResponse>>('/content/article-prompt-templates', data)
 }
 
 export function updateArticlePromptTemplate(id: number, data: ArticlePromptTemplateSaveRequest) {
-  return request.put<R<ArticlePromptTemplateDetail>>(`/content/article-prompt-templates/${id}`, data)
+  return request.put<R<ArticlePromptTemplateDetailResponse>>(`/content/article-prompt-templates/${id}`, data)
 }
 
 export function updateArticlePromptTemplateWeight(id: number, data: { weight: number }) {
@@ -299,11 +305,11 @@ export function createArticlePromptTemplateVersion(id: number, data: {
   userPromptTemplate: string
   changeNote?: string
 }) {
-  return request.post<R<ArticlePromptTemplateDetail>>(`/content/article-prompt-templates/${id}/versions`, data)
+  return request.post<R<ArticlePromptTemplateDetailResponse>>(`/content/article-prompt-templates/${id}/versions`, data)
 }
 
 export function publishArticlePromptTemplateVersion(id: number, versionId: number) {
-  return request.post<R<ArticlePromptTemplateDetail>>(`/content/article-prompt-templates/${id}/versions/${versionId}/publish`)
+  return request.post<R<ArticlePromptTemplateDetailResponse>>(`/content/article-prompt-templates/${id}/versions/${versionId}/publish`)
 }
 
 export function getArticleGenerationOptions() {

@@ -96,7 +96,15 @@
           </div>
 
           <div class="template-grid">
-            <article v-for="item in section.items" :key="item.id" class="template-card">
+            <article
+              v-for="item in section.items"
+              :key="item.id"
+              class="template-card"
+              role="button"
+              tabindex="0"
+              @click="openDetail(item)"
+              @keydown.enter.prevent="openDetail(item)"
+            >
               <div class="card-top">
                 <div class="template-title-wrap">
                   <div class="template-scope">{{ templateScopeLabel(item) }}</div>
@@ -111,7 +119,7 @@
                 <span>版本 {{ item.currentVersionNo || '-' }}</span>
                 <span>{{ formatDateTime(item.updatedAt) }}</span>
               </div>
-              <div class="weight-row">
+              <div class="weight-row" @click.stop>
                 <div>
                   <span>权重</span>
                   <small>范围 0-100。数字越大，自动生成时分配到的文章数越多；0 表示不参与自动分配</small>
@@ -128,9 +136,9 @@
                 />
               </div>
               <div class="card-actions">
-                <el-button v-if="item.sampleOutputUrl" text type="success" @click="openSample(item.sampleOutputUrl)">样文</el-button>
-                <el-button text type="primary" @click="openEdit(item)">编辑</el-button>
-                <el-button text @click="openVersion(item)">版本</el-button>
+                <el-button v-if="item.sampleOutputUrl" text type="success" @click.stop="openSample(item.sampleOutputUrl)">样文</el-button>
+                <el-button text type="primary" @click.stop="openEdit(item)">编辑</el-button>
+                <el-button text @click.stop="openVersion(item)">版本</el-button>
               </div>
             </article>
           </div>
@@ -243,6 +251,54 @@
     </el-dialog>
 
     <el-dialog
+      v-model="detailVisible"
+      title="模板详情"
+      width="960px"
+      class="template-detail-dialog"
+      destroy-on-close
+    >
+      <DataState :loading="detailLoading" :empty="!detailLoading && !templateDetail">
+        <div v-if="templateDetail" class="template-detail-panel">
+          <div class="detail-summary">
+            <div>
+              <div class="detail-kicker">{{ templateScopeLabel(templateDetail) }}</div>
+              <h3>{{ templateDetail.name }}</h3>
+              <p>{{ templateDetail.description || '未填写模板说明' }}</p>
+            </div>
+            <el-tag :type="statusTagType(templateDetail.status)">{{ statusLabel(templateDetail.status) }}</el-tag>
+          </div>
+          <div class="detail-info-grid">
+            <div><label>渠道大类</label><strong>{{ templateDetail.channelGroupName || channelGroupLabel(templateDetail.channelGroupCode) }}</strong></div>
+            <div><label>渠道小类</label><strong>{{ templateDetail.channelSubName || templateDetail.channelSubCode || '-' }}</strong></div>
+            <div><label>官网归属</label><strong>{{ templateDetail.agentSiteModule ? agentSiteModuleLabel(templateDetail.agentSiteModule) : '-' }}</strong></div>
+            <div><label>文章类型</label><strong>{{ templateDetail.articleTypeName || articleTypeLabel(templateDetail.articleTypeCode) }}</strong></div>
+            <div><label>联系方式露出</label><strong>{{ contactModeLabel(templateDetail.contactDisclosureMode) }}</strong></div>
+            <div><label>权重</label><strong>{{ templateDetail.weight }}</strong></div>
+            <div><label>当前版本</label><strong>{{ currentTemplateVersion(templateDetail)?.versionNo || '-' }}</strong></div>
+            <div><label>更新时间</label><strong>{{ formatDateTime(templateDetail.updatedAt) }}</strong></div>
+            <div class="detail-info-wide"><label>样文链接</label><strong>{{ templateDetail.sampleOutputUrl || '-' }}</strong></div>
+          </div>
+          <div class="detail-prompt-grid">
+            <section>
+              <h4>系统提示词</h4>
+              <pre>{{ currentTemplateVersion(templateDetail)?.systemPrompt || '暂无系统提示词' }}</pre>
+            </section>
+            <section>
+              <h4>用户提示词模板</h4>
+              <pre>{{ currentTemplateVersion(templateDetail)?.userPromptTemplate || '暂无用户提示词模板' }}</pre>
+            </section>
+          </div>
+        </div>
+      </DataState>
+      <template #footer>
+        <el-button @click="detailVisible = false">关闭</el-button>
+        <el-button v-if="templateDetail?.sampleOutputUrl" type="success" plain @click="openSample(templateDetail.sampleOutputUrl)">查看样文</el-button>
+        <el-button v-if="templateDetail" @click="openVersionFromDetail">查看版本</el-button>
+        <el-button v-if="templateDetail" type="primary" @click="openEditFromDetail">编辑</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
       v-model="versionVisible"
       title="模板版本"
       width="860px"
@@ -305,6 +361,7 @@ import {
   updateArticlePromptTemplateWeight,
   type ArticlePromptTemplate,
   type ArticlePromptTemplateDetail,
+  type ArticlePromptTemplateDetailResponse,
   type ArticlePromptTemplateSaveRequest,
 } from '@/api/content'
 
@@ -368,9 +425,11 @@ const saving = ref(false)
 const publishing = ref(false)
 const detailLoading = ref(false)
 const editorVisible = ref(false)
+const detailVisible = ref(false)
 const versionVisible = ref(false)
 const templates = ref<ArticlePromptTemplate[]>([])
 const templateDetail = ref<ArticlePromptTemplateDetail | null>(null)
+const editingDetail = ref<ArticlePromptTemplateDetail | null>(null)
 const editingId = ref<number | null>(null)
 const route = useRoute()
 const pagination = reactive({ current: 1, size: 12, total: 0 })
@@ -402,6 +461,12 @@ const formGroupOptions = computed(() => {
   if (form.channelGroupCode && !map.has(form.channelGroupCode)) {
     map.set(form.channelGroupCode, { label: form.channelGroupCode, value: form.channelGroupCode })
   }
+  if (editingDetail.value?.channelGroupCode && !map.has(editingDetail.value.channelGroupCode)) {
+    map.set(editingDetail.value.channelGroupCode, {
+      label: editingDetail.value.channelGroupName || editingDetail.value.channelGroupCode,
+      value: editingDetail.value.channelGroupCode,
+    })
+  }
   return Array.from(map.values())
 })
 const channelTabGroups = computed(() => {
@@ -417,7 +482,14 @@ const channelTabGroups = computed(() => {
   return Array.from(map.values())
 })
 const currentSubOptions = computed(() => mergedSubOptions(filters.channelGroupCode))
-const formSubOptions = computed(() => mergedSubOptions(form.channelGroupCode))
+const formSubOptions = computed(() => {
+  const options = mergedSubOptions(form.channelGroupCode)
+  const detail = editingDetail.value
+  if (detail?.channelGroupCode === form.channelGroupCode && detail.channelSubCode && !options.some((item) => item.value === detail.channelSubCode)) {
+    options.unshift({ label: detail.channelSubName || detail.channelSubCode, value: detail.channelSubCode })
+  }
+  return options
+})
 const groupedTemplateSections = computed(() => {
   const groups = new Map<string, ArticlePromptTemplate[]>()
   templates.value.forEach((item) => {
@@ -551,6 +623,24 @@ function openSample(url: string) {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+function currentTemplateVersion(detail: ArticlePromptTemplateDetail) {
+  return detail.versions.find((version) => version.id === detail.currentVersionId) || detail.versions[0]
+}
+
+function normalizeTemplateDetail(response: ArticlePromptTemplateDetailResponse): ArticlePromptTemplateDetail {
+  const versions = response.versions || []
+  const currentVersion = response.currentVersion
+  const allVersions = currentVersion && !versions.some((version) => version.id === currentVersion.id)
+    ? [currentVersion, ...versions]
+    : versions
+  return {
+    ...response.template,
+    currentVersionId: response.template.currentVersionId || currentVersion?.id || null,
+    currentVersionNo: response.template.currentVersionNo || currentVersion?.versionNo || null,
+    versions: allVersions,
+  }
+}
+
 function handleFormGroupChange() {
   form.channelSubCode = null
   form.agentSiteModule = form.channelGroupCode === 'agent_site' ? 'knowledge' : null
@@ -595,40 +685,68 @@ function resetForm() {
 
 function openCreate() {
   editingId.value = null
+  editingDetail.value = null
   resetForm()
   editorVisible.value = true
 }
 
-async function openEdit(item: ArticlePromptTemplate) {
-  editingId.value = item.id
+function fillFormFromDetail(detail: ArticlePromptTemplateDetail) {
+  const currentVersion = currentTemplateVersion(detail)
+  Object.assign(form, {
+    name: detail.name,
+    description: detail.description || '',
+    channelGroupCode: detail.channelGroupCode,
+    channelSubCode: detail.channelSubCode || null,
+    agentSiteModule: detail.channelGroupCode === 'agent_site' ? (detail.agentSiteModule || 'knowledge') : null,
+    articleTypeCode: detail.articleTypeCode,
+    status: detail.status,
+    weight: detail.weight,
+    sortOrder: detail.sortOrder,
+    sampleOutputUrl: detail.sampleOutputUrl || '',
+    contactDisclosureMode: detail.contactDisclosureMode || 'none',
+    systemPrompt: currentVersion?.systemPrompt || '',
+    userPromptTemplate: currentVersion?.userPromptTemplate || '',
+    changeNote: '',
+  })
+}
+
+async function loadTemplateDetail(templateId: number, failMessage: string) {
   detailLoading.value = true
   try {
-    const { data } = await getArticlePromptTemplate(item.id)
-    const detail = data.data
-    const currentVersion = detail.versions.find((version) => version.id === detail.currentVersionId) || detail.versions[0]
-    Object.assign(form, {
-      name: detail.name,
-      description: detail.description || '',
-      channelGroupCode: detail.channelGroupCode,
-      channelSubCode: detail.channelSubCode || null,
-      agentSiteModule: detail.agentSiteModule || null,
-      articleTypeCode: detail.articleTypeCode,
-      status: detail.status,
-      weight: detail.weight,
-      sortOrder: detail.sortOrder,
-      sampleOutputUrl: detail.sampleOutputUrl || '',
-      contactDisclosureMode: detail.contactDisclosureMode || 'none',
-      systemPrompt: currentVersion?.systemPrompt || '',
-      userPromptTemplate: currentVersion?.userPromptTemplate || '',
-      changeNote: '',
-    })
-    editorVisible.value = true
+    const { data } = await getArticlePromptTemplate(templateId)
+    return normalizeTemplateDetail(data.data)
   } catch (err) {
     console.error(err)
-    ElMessage.error('加载模板详情失败')
+    ElMessage.error(failMessage)
+    return null
   } finally {
     detailLoading.value = false
   }
+}
+
+async function openDetail(item: ArticlePromptTemplate) {
+  detailVisible.value = true
+  templateDetail.value = null
+  const detail = await loadTemplateDetail(item.id, '加载模板详情失败')
+  if (detail) templateDetail.value = detail
+}
+
+async function openEdit(item: ArticlePromptTemplate) {
+  editingId.value = item.id
+  const detail = await loadTemplateDetail(item.id, '加载模板详情失败')
+  if (!detail) return
+  editingDetail.value = detail
+  fillFormFromDetail(detail)
+  editorVisible.value = true
+}
+
+function openEditFromDetail() {
+  if (!templateDetail.value) return
+  editingId.value = templateDetail.value.id
+  editingDetail.value = templateDetail.value
+  fillFormFromDetail(templateDetail.value)
+  detailVisible.value = false
+  editorVisible.value = true
 }
 
 async function saveTemplate() {
@@ -696,18 +814,18 @@ async function openVersion(item: ArticlePromptTemplate) {
   await openVersionById(item.id)
 }
 
+async function openVersionFromDetail() {
+  if (!templateDetail.value) return
+  const templateId = templateDetail.value.id
+  detailVisible.value = false
+  await openVersionById(templateId)
+}
+
 async function openVersionById(templateId: number) {
   versionVisible.value = true
-  detailLoading.value = true
-  try {
-    const { data } = await getArticlePromptTemplate(templateId)
-    templateDetail.value = data.data
-  } catch (err) {
-    console.error(err)
-    ElMessage.error('加载版本失败')
-  } finally {
-    detailLoading.value = false
-  }
+  templateDetail.value = null
+  const detail = await loadTemplateDetail(templateId, '加载版本失败')
+  if (detail) templateDetail.value = detail
 }
 
 async function publishVersion(versionId: number) {
@@ -715,7 +833,7 @@ async function publishVersion(versionId: number) {
   publishing.value = true
   try {
     const { data } = await publishArticlePromptTemplateVersion(templateDetail.value.id, versionId)
-    templateDetail.value = data.data
+    templateDetail.value = normalizeTemplateDetail(data.data)
     ElMessage.success('版本已发布')
     loadTemplates()
   } catch (err) {
@@ -1031,13 +1149,16 @@ onMounted(async () => {
   border-color: #e2e8f0;
   background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.045);
+  cursor: pointer;
   transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
 }
 
+.template-card:focus-visible,
 .template-card:hover {
   border-color: #c7d2fe;
   box-shadow: 0 16px 34px rgba(37, 99, 235, 0.1);
   transform: translateY(-1px);
+  outline: none;
 }
 
 .card-top,
@@ -1187,6 +1308,115 @@ onMounted(async () => {
   min-height: 420px !important;
 }
 
+.template-detail-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.detail-summary {
+  padding: 18px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  background: linear-gradient(135deg, #f8fbff 0%, #ffffff 100%);
+}
+
+.detail-summary h3 {
+  margin: 4px 0 6px;
+  font-size: 20px;
+  line-height: 1.35;
+  color: #0f172a;
+}
+
+.detail-summary p {
+  margin: 0;
+  color: #64748b;
+  line-height: 1.6;
+}
+
+.detail-kicker {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.detail-info-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-info-grid > div {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #edf2f7;
+  border-radius: 10px;
+  background: #fbfdff;
+}
+
+.detail-info-grid label,
+.detail-info-grid strong {
+  display: block;
+}
+
+.detail-info-grid label {
+  margin-bottom: 5px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.detail-info-grid strong {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-info-wide {
+  grid-column: span 2;
+}
+
+.detail-prompt-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  gap: 12px;
+}
+
+.detail-prompt-grid section {
+  min-width: 0;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.detail-prompt-grid h4 {
+  margin: 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid #edf2f7;
+  color: #334155;
+  font-size: 14px;
+}
+
+.detail-prompt-grid pre {
+  min-height: 260px;
+  max-height: 360px;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  color: #334155;
+  font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #fbfdff;
+}
+
 .version-title {
   margin-bottom: 16px;
   padding: 16px;
@@ -1246,21 +1476,25 @@ onMounted(async () => {
 }
 
 :deep(.template-editor-dialog .el-dialog__body),
+:deep(.template-detail-dialog .el-dialog__body),
 :deep(.version-dialog .el-dialog__body) {
   padding-top: 12px;
 }
 
 :deep(.template-editor-dialog .el-dialog),
+:deep(.template-detail-dialog .el-dialog),
 :deep(.version-dialog .el-dialog) {
   border-radius: 14px;
 }
 
 :deep(.template-editor-dialog .el-dialog__header),
+:deep(.template-detail-dialog .el-dialog__header),
 :deep(.version-dialog .el-dialog__header) {
   padding: 20px 24px 8px;
 }
 
 :deep(.template-editor-dialog .el-dialog__footer),
+:deep(.template-detail-dialog .el-dialog__footer),
 :deep(.version-dialog .el-dialog__footer) {
   padding: 10px 24px 20px;
 }
@@ -1276,6 +1510,14 @@ onMounted(async () => {
 
   .form-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .detail-info-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .detail-prompt-grid {
+    grid-template-columns: 1fr;
   }
 
   .prompt-editor-grid {
@@ -1303,7 +1545,8 @@ onMounted(async () => {
 
   .template-grid,
   .channel-tabs,
-  .form-grid {
+  .form-grid,
+  .detail-info-grid {
     grid-template-columns: 1fr;
   }
 
