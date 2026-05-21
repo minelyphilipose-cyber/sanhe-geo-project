@@ -186,15 +186,16 @@ public class BrandController {
         ContentDisposition disposition = forceDownload
                 ? ContentDisposition.attachment().filename(fileName, StandardCharsets.UTF_8).build()
                 : ContentDisposition.inline().filename(fileName, StandardCharsets.UTF_8).build();
+        InputStream inputStream = brandProfileService.openVerifiedMaterialStream(material);
         StreamingResponseBody body = outputStream -> {
-            try (InputStream inputStream = brandProfileService.openVerifiedMaterialStream(material)) {
+            try (inputStream) {
                 inputStream.transferTo(outputStream);
             }
         };
         ResponseEntity.BodyBuilder builder = ResponseEntity.ok()
                 .contentType(mediaType)
                 .header(HttpHeaders.CONTENT_DISPOSITION, disposition.toString());
-        if (material.getFileSize() != null && material.getFileSize() >= 0) {
+        if (material.getFileSize() != null && material.getFileSize() > 0) {
             builder.contentLength(material.getFileSize());
         }
         return builder.body(body);

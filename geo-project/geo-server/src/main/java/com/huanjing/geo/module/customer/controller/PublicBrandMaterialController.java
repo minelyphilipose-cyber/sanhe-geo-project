@@ -32,16 +32,20 @@ public class PublicBrandMaterialController {
     public ResponseEntity<StreamingResponseBody> stream(@PathVariable Long materialId,
                                                         @RequestParam("sig") String signature) {
         BrandMaterial material = publicUrlService.verifyPublicAccess(materialId, signature);
+        InputStream inputStream = brandProfileService.openVerifiedMaterialStream(material);
         StreamingResponseBody body = outputStream -> {
-            try (InputStream inputStream = brandProfileService.openVerifiedMaterialStream(material)) {
+            try (inputStream) {
                 inputStream.transferTo(outputStream);
             }
         };
-        return ResponseEntity.ok()
+        ResponseEntity.BodyBuilder builder = ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(resolveContentType(material.getFileType())))
                 .cacheControl(CacheControl.maxAge(30, TimeUnit.DAYS).cachePublic())
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline")
-                .body(body);
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline");
+        if (material.getFileSize() != null && material.getFileSize() > 0) {
+            builder.contentLength(material.getFileSize());
+        }
+        return builder.body(body);
     }
 
     private String resolveContentType(String fileType) {
