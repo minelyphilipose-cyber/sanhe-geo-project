@@ -84,7 +84,14 @@ public class AuthorityMediaResourceSyncService {
             return RefreshResult.skipped(resourceId, "external resource id is not numeric");
         }
 
-        JsonNode response = client.listResources(NEWS_MEDIA, 1, DEFAULT_PAGE_LIMIT, remoteId, null);
+        JsonNode response;
+        try {
+            response = client.listResources(NEWS_MEDIA, 1, DEFAULT_PAGE_LIMIT, remoteId, null);
+        } catch (MeititejiaApiException ex) {
+            log.warn("Meititejia NEWS_MEDIA resource refresh failed; continue with local cache, resourceId={}, externalResourceId={}, httpStatus={}, bizCode={}, bizMsg={}",
+                    resourceId, existing.getExternalResourceId(), ex.getHttpStatus(), ex.getBizCode(), ex.getBizMsg());
+            return RefreshResult.skipped(resourceId, "remote refresh failed");
+        }
         List<JsonNode> items = extractResourceItems(response);
         if (items.isEmpty()) {
             int marked = resourceMapper.markDeletedById(resourceId, LocalDateTime.now());

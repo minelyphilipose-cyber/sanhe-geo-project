@@ -57,7 +57,7 @@ public class MeititejiaClient {
         params.put("title", request.title());
         params.put("content", request.content());
         params.put("mid", request.mediaId());
-        params.put("no", request.externalNo());
+        params.put("no", vendorOrderNo(request.externalNo()));
         params.put("remark", request.remark());
         params.put("published_at", request.publishedAt());
         params.put("saling_price", request.salingPrice());
@@ -67,12 +67,17 @@ public class MeititejiaClient {
     public JsonNode queryOrders(MeititejiaResourceType type, List<String> externalNos) {
         String nostr = externalNos == null ? "" : externalNos.stream()
                 .filter(StringUtils::hasText)
-                .map(String::trim)
+                .map(MeititejiaClient::vendorOrderNo)
+                .filter(StringUtils::hasText)
                 .collect(Collectors.joining(","));
         if (!StringUtils.hasText(nostr)) {
             throw new IllegalArgumentException("externalNos is required");
         }
         return postSigned(type.queryOrderPath(), Map.of("nostr", nostr));
+    }
+
+    public static String vendorOrderNo(String externalNo) {
+        return externalNo == null ? null : externalNo.trim().replace("-", "");
     }
 
     protected JsonNode postSigned(String path, Map<String, ?> params) {

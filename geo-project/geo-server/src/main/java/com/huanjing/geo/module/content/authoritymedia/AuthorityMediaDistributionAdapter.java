@@ -112,13 +112,14 @@ public class AuthorityMediaDistributionAdapter {
 
         AuthorityMediaOrder order = ensureOrder(article, project, task, resource, operatorId);
         String externalNo = ensureExternalNo(order);
+        String vendorExternalNo = MeititejiaClient.vendorOrderNo(externalNo);
         String previewUrl = previewTokenService.issuePreviewUrl(order, article, target.previewUrl());
         String content = buildContent(contentMarkdown, previewUrl);
         MeititejiaClient.NewsMediaOrderRequest request = new MeititejiaClient.NewsMediaOrderRequest(
                 article.getTitle(),
                 content,
                 mediaId(resource),
-                externalNo,
+                vendorExternalNo,
                 target.remark(),
                 target.publishedAt(),
                 salingPrice

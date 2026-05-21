@@ -85,6 +85,10 @@ class AuthorityMediaDistributionAdapterTest {
         assertThat(result.isSuccess()).isTrue();
         assertThat(result.getPlatformArticleId()).isNull();
         verify(orderMapper).assignExternalNoIfAbsent(501L, "AM-501");
+        ArgumentCaptor<MeititejiaClient.NewsMediaOrderRequest> requestCaptor =
+                ArgumentCaptor.forClass(MeititejiaClient.NewsMediaOrderRequest.class);
+        verify(client).createNewsMediaOrder(requestCaptor.capture());
+        assertThat(requestCaptor.getValue().externalNo()).isEqualTo("AM501");
         ArgumentCaptor<String> payloadCaptor = ArgumentCaptor.forClass(String.class);
         verify(orderMapper).updateSubmissionResult(eq(501L), eq("submitted"), any(), eq(0), eq("未处理"),
                 payloadCaptor.capture(), any());

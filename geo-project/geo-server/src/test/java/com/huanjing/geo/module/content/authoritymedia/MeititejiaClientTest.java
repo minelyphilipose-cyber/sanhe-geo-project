@@ -70,8 +70,10 @@ class MeititejiaClientTest {
         assertThat(client.lastUrl).isEqualTo("https://vendor.example/root/create_media_order");
         assertThat(client.lastBody).contains("title=%E6%A0%87%E9%A2%98+A*~");
         assertThat(client.lastBody).contains("remark=%E5%A4%87%E6%B3%A8+A");
+        assertThat(client.lastBody).contains("no=AM1");
         assertThat(client.lastBody).contains("published_at=2026-05-08+18%3A00%3A00");
         assertThat(client.lastBody).contains("saling_price=100");
+        assertThat(client.lastCanonical).contains("no=AM1");
         assertThat(client.lastCanonical).contains("title=标题 A*~");
         assertThat(client.lastCanonical).contains("content=稿件链接 : <a href=\"https://p.example/a b\">https://p.example/a b</a>");
         assertThat(client.lastCanonical).contains("published_at=2026-05-08 18:00:00");
@@ -83,7 +85,7 @@ class MeititejiaClientTest {
         client.queryOrders(MeititejiaResourceType.NEWS_MEDIA, java.util.List.of("AM-1", " AM-2 "));
 
         assertThat(client.lastUrl).isEqualTo("https://vendor.example/root/query_media_order");
-        assertThat(client.lastBody).contains("nostr=AM-1%2CAM-2");
+        assertThat(client.lastBody).contains("nostr=AM1%2CAM2");
     }
 
     @Test

@@ -199,6 +199,24 @@ class AuthorityMediaResourceSyncServiceTest {
         assertThat(result.reason()).isEqualTo("remote missing");
     }
 
+    @Test
+    void refreshNewsMediaResourceIfStale_continuesWithLocalCacheWhenRemoteRefreshFails() {
+        AuthorityMediaResource resource = resource(10L, "1001", LocalDateTime.now().minusHours(2));
+        when(resourceMapper.selectById(10L)).thenReturn(resource);
+        when(client.listResources(NEWS_MEDIA, 1, 200, 1001L, null))
+                .thenThrow(new MeititejiaApiException(
+                        500, null, null, "media_lst", "server error", true, null
+                ));
+
+        AuthorityMediaResourceSyncService.RefreshResult result = service.refreshNewsMediaResourceIfStale(10L);
+
+        assertThat(result.refreshed()).isFalse();
+        assertThat(result.deleted()).isFalse();
+        assertThat(result.reason()).isEqualTo("remote refresh failed");
+        verify(resourceMapper, never()).markDeletedById(any(), any());
+        verify(resourceMapper, never()).upsert(any());
+    }
+
     private AuthorityMediaResource resource(Long id, String externalId, LocalDateTime updatedAt) {
         AuthorityMediaResource resource = new AuthorityMediaResource();
         resource.setId(id);
