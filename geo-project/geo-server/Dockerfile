@@ -41,7 +41,7 @@ RUN mvn -s /tmp/settings.xml dependency:go-offline -B
 
 # 再拷源码并打包
 COPY src/ ./src/
-RUN mvn -s /tmp/settings.xml package -DskipTests -B
+RUN mvn -s /tmp/settings.xml package -Dmaven.test.skip=true -B
 
 # 拷出 Playwright 依赖,并在构建阶段预装 Chromium
 RUN set -eux; \

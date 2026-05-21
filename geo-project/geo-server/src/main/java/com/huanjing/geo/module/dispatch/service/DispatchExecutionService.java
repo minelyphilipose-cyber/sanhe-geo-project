@@ -74,6 +74,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -189,28 +196,39 @@ public class DispatchExecutionService {
             aggByPlatform.put(platform.getId(), new PlatformAgg(platform));
         }
 
-        for (AiPlatformConfig platform : platformConfigs) {
-            PlatformAgg agg = aggByPlatform.get(platform.getId());
-            for (PollKeywordCandidate keyword : selected) {
-                InvocationResult invokeResult = invokeMonitoringWithRouter(platform, task, keyword.keywordText());
-                PollResult detail = buildPollResult(batch, task, project, platform, keyword, invokeResult, projectNames, siteDomains, normalizedPhones, contactTerms);
-                upsertPollResult(detail);
-                agg.questionCount += 1;
-                agg.requestCount += Math.max(detail.getRequestCount() == null ? 0 : detail.getRequestCount(), 0);
-                if ("completed".equals(detail.getStatus())) {
-                    agg.completedCount += 1;
-                    if (Boolean.TRUE.equals(detail.getIsHit())) {
-                        agg.hitCount += 1;
-                    }
-                    if (Boolean.TRUE.equals(detail.getSiteMentioned())) {
-                        agg.siteMentionCount += 1;
-                    }
-                    if (Boolean.TRUE.equals(detail.getContactMentioned())) {
-                        agg.contactMentionCount += 1;
-                    }
-                } else {
-                    agg.failedCount += 1;
+        List<PollResult> details = executePollInvocationsInParallel(
+                batch,
+                task,
+                project,
+                platformConfigs,
+                selected,
+                projectNames,
+                siteDomains,
+                normalizedPhones,
+                contactTerms
+        );
+
+        for (PollResult detail : details) {
+            upsertPollResult(detail);
+            PlatformAgg agg = aggByPlatform.get(detail.getPlatformId());
+            if (agg == null) {
+                continue;
+            }
+            agg.questionCount += 1;
+            agg.requestCount += Math.max(detail.getRequestCount() == null ? 0 : detail.getRequestCount(), 0);
+            if ("completed".equals(detail.getStatus())) {
+                agg.completedCount += 1;
+                if (Boolean.TRUE.equals(detail.getIsHit())) {
+                    agg.hitCount += 1;
                 }
+                if (Boolean.TRUE.equals(detail.getSiteMentioned())) {
+                    agg.siteMentionCount += 1;
+                }
+                if (Boolean.TRUE.equals(detail.getContactMentioned())) {
+                    agg.contactMentionCount += 1;
+                }
+            } else {
+                agg.failedCount += 1;
             }
         }
 
@@ -254,6 +272,71 @@ public class DispatchExecutionService {
         batch.setOverallHitRate(overallHitRate);
         batch.setFinishedAt(LocalDateTime.now());
         pollBatchMapper.updateById(batch);
+    }
+
+    private List<PollResult> executePollInvocationsInParallel(PollBatch batch,
+                                                              DispatchTask task,
+                                                              Project project,
+                                                              List<AiPlatformConfig> platformConfigs,
+                                                              List<PollKeywordCandidate> selected,
+                                                              Set<String> projectNames,
+                                                              Set<String> siteDomains,
+                                                              Set<String> normalizedPhones,
+                                                              Set<String> contactTerms) {
+        int totalCalls = platformConfigs.size() * selected.size();
+        if (totalCalls <= 0) {
+            return List.of();
+        }
+        int poolSize = Math.max(1, Math.min(dispatchProperties.getQuestionPollConcurrency(), totalCalls));
+        ExecutorService executor = Executors.newFixedThreadPool(
+                poolSize,
+                new QuestionPollThreadFactory(task.getId(), batch.getQuestionTier())
+        );
+        try {
+            List<CompletableFuture<PollResult>> futures = new ArrayList<>(totalCalls);
+            for (AiPlatformConfig platform : platformConfigs) {
+                for (PollKeywordCandidate keyword : selected) {
+                    futures.add(CompletableFuture.supplyAsync(() -> {
+                        DispatchTask invocationTask = copyTaskForPollInvocation(task);
+                        InvocationResult invokeResult = invokeMonitoringWithRouter(platform, invocationTask, keyword.keywordText());
+                        return buildPollResult(batch, task, project, platform, keyword, invokeResult,
+                                projectNames, siteDomains, normalizedPhones, contactTerms);
+                    }, executor));
+                }
+            }
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            return futures.stream()
+                    .map(CompletableFuture::join)
+                    .toList();
+        } catch (CompletionException ex) {
+            Throwable cause = ex.getCause() == null ? ex : ex.getCause();
+            if (cause instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new IllegalStateException(cause);
+        } finally {
+            executor.shutdownNow();
+            try {
+                if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    log.warn("question poll executor did not stop quickly, taskId={}, questionTier={}",
+                            task.getId(), batch.getQuestionTier());
+                }
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private DispatchTask copyTaskForPollInvocation(DispatchTask task) {
+        DispatchTask copy = new DispatchTask();
+        copy.setId(task.getId());
+        copy.setProjectId(task.getProjectId());
+        copy.setTaskType(task.getTaskType());
+        copy.setPayloadJson(task.getPayloadJson());
+        copy.setWindowStart(task.getWindowStart());
+        copy.setWindowEnd(task.getWindowEnd());
+        copy.setDueTime(task.getDueTime());
+        return copy;
     }
 
     private PollResult buildPollResult(PollBatch batch,
@@ -1768,5 +1851,21 @@ public class DispatchExecutionService {
     }
 
     private record PollKeywordCandidate(Long keywordResultId, String keywordText) {
+    }
+
+    private static final class QuestionPollThreadFactory implements ThreadFactory {
+        private final AtomicInteger sequence = new AtomicInteger(1);
+        private final String prefix;
+
+        private QuestionPollThreadFactory(Long taskId, String questionTier) {
+            this.prefix = "question-poll-" + taskId + "-" + questionTier + "-";
+        }
+
+        @Override
+        public Thread newThread(Runnable runnable) {
+            Thread thread = new Thread(runnable, prefix + sequence.getAndIncrement());
+            thread.setDaemon(true);
+            return thread;
+        }
     }
 }

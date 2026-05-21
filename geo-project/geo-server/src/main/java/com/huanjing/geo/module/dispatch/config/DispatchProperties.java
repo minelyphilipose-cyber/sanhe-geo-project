@@ -21,9 +21,14 @@ public class DispatchProperties {
     private int taskRetentionDays = 90;
     private int modelConnectTimeoutMs = 10000;
     private int modelRequestTimeoutMs = 45000;
+    private int questionPollConcurrency = 4;
     private int resourceBusyRetryMinSeconds = 30;
     private int resourceBusyRetryJitterSeconds = 30;
     private boolean autoContentGenerationEnabled = false;
+
+    public void setQuestionPollConcurrency(int questionPollConcurrency) {
+        this.questionPollConcurrency = Math.max(1, questionPollConcurrency);
+    }
 
     public void setResourceBusyRetryMinSeconds(int resourceBusyRetryMinSeconds) {
         this.resourceBusyRetryMinSeconds = Math.max(1, resourceBusyRetryMinSeconds);

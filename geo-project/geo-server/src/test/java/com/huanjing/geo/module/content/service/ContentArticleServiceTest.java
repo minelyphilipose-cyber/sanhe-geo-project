@@ -21,6 +21,7 @@ import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePublishLogMapper;
+import com.huanjing.geo.module.content.mapper.ArticlePromptTemplateMapper;
 import com.huanjing.geo.module.content.mapper.ArticleReviewLogMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
@@ -94,6 +95,7 @@ class ContentArticleServiceTest {
                 mock(ArticleReviewLogMapper.class),
                 mock(ArticlePublishLogMapper.class),
                 batchArticleGenerationTaskMapper,
+                mock(ArticlePromptTemplateMapper.class),
                 mock(BrandMapper.class),
                 projectMapper,
                 mock(SysDictItemMapper.class),
