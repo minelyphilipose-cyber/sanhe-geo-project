@@ -53,6 +53,7 @@ public class ContentArticleService {
     private final ArticleReviewLogMapper articleReviewLogMapper;
     private final ArticlePublishLogMapper articlePublishLogMapper;
     private final BatchArticleGenerationTaskMapper batchArticleGenerationTaskMapper;
+    private final ArticlePromptTemplateMapper articlePromptTemplateMapper;
     private final BrandMapper brandMapper;
     private final ProjectMapper projectMapper;
     private final SysDictItemMapper sysDictItemMapper;
@@ -111,16 +112,7 @@ public class ContentArticleService {
         if (code == null) {
             return;
         }
-        if (!ArticleTypes.isSupported(code)) {
-            wrapper.eq(ArticleDraft::getArticleTypeCode, code);
-            return;
-        }
-        wrapper.and(item -> item
-                .eq(ArticleDraft::getArticleTypeCode, code)
-                .or()
-                .nested(legacy -> legacy
-                        .eq(ArticleDraft::getArticleType, code)
-                        .isNull(ArticleDraft::getArticleTypeCode)));
+        wrapper.eq(ArticleDraft::getArticleTypeCode, code);
     }
 
     private void applyChannelFilter(LambdaQueryWrapper<ArticleDraft> wrapper, String channelGroupCode, String channelSubCode) {
@@ -129,27 +121,12 @@ public class ContentArticleService {
         if (group == null) {
             return;
         }
-        String legacyContentStyle = ArticlePromptChannels.contentStyle(group, sub);
         if (sub != null) {
-            wrapper.and(item -> item
-                    .nested(channel -> channel
-                            .eq(ArticleDraft::getChannelGroupCode, group)
-                            .eq(ArticleDraft::getChannelSubCode, sub))
-                    .or()
-                    .eq(ArticleDraft::getContentStyle, legacyContentStyle));
+            wrapper.eq(ArticleDraft::getChannelGroupCode, group)
+                    .eq(ArticleDraft::getChannelSubCode, sub);
             return;
         }
-        if (ArticlePromptChannels.SELF_MEDIA.equals(group)) {
-            wrapper.and(item -> item
-                    .eq(ArticleDraft::getChannelGroupCode, group)
-                    .or()
-                    .in(ArticleDraft::getContentStyle, ArticlePromptChannels.subCodes(group)));
-            return;
-        }
-        wrapper.and(item -> item
-                .eq(ArticleDraft::getChannelGroupCode, group)
-                .or()
-                .eq(ArticleDraft::getContentStyle, legacyContentStyle));
+        wrapper.eq(ArticleDraft::getChannelGroupCode, group);
     }
 
     private void applyGenerationModeFilter(LambdaQueryWrapper<ArticleDraft> wrapper, String generationMode) {
@@ -197,6 +174,43 @@ public class ContentArticleService {
             return null;
         }
         return value.trim();
+    }
+
+    private String groupFromContentStyle(String contentStyle) {
+        String style = trimToNull(contentStyle);
+        if (style == null) {
+            return null;
+        }
+        if (ArticlePromptChannels.SELF_MEDIA_SUBS.contains(style)) {
+            return ArticlePromptChannels.SELF_MEDIA;
+        }
+        if ("agent_site_article".equals(style) || "linkedin".equals(style)) {
+            return ArticlePromptChannels.AGENT_SITE;
+        }
+        if (ArticlePromptChannels.INDUSTRY_SITE.equals(style)) {
+            return ArticlePromptChannels.INDUSTRY_SITE;
+        }
+        if (ArticlePromptChannels.AUTHORITY_MEDIA.equals(style)) {
+            return ArticlePromptChannels.AUTHORITY_MEDIA;
+        }
+        if (ArticlePromptChannels.FORUM.equals(style)) {
+            return ArticlePromptChannels.FORUM;
+        }
+        return ArticlePromptChannels.isValidCode(style) ? style : null;
+    }
+
+    private String subFromContentStyle(String contentStyle) {
+        String style = trimToNull(contentStyle);
+        if (style == null) {
+            return null;
+        }
+        if (ArticlePromptChannels.SELF_MEDIA_SUBS.contains(style)) {
+            return style;
+        }
+        if (ArticlePromptChannels.AUTHORITY_MEDIA.equals(style)) {
+            return "industry_media";
+        }
+        return null;
     }
 
     public String publicPreviewHtml(Long articleId) {
@@ -266,6 +280,8 @@ public class ContentArticleService {
                         .orderByDesc(BatchArticleGenerationTask::getId)
                         .last("limit 1")
         );
+        fillPromptTemplateName(article);
+        fillPromptTemplateName(batchGenerationTask);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("article", article);
         result.put("project", project);
@@ -310,7 +326,10 @@ public class ContentArticleService {
         ArticleDraft draft = new ArticleDraft();
         draft.setProjectId(project.getId());
         draft.setArticleType(articleType);
+        draft.setArticleTypeCode(articleType);
         draft.setContentStyle(contentStyle);
+        draft.setChannelGroupCode(groupFromContentStyle(contentStyle));
+        draft.setChannelSubCode(subFromContentStyle(contentStyle));
         draft.setTopic(topic);
         draft.setTopicAsQuestion(topicAsQuestion);
         draft.setTitle(title);
@@ -560,6 +579,7 @@ public class ContentArticleService {
         draft.setPeriodKey(periodKey);
         draft.setGenerationSlotNo(generationSlotNo);
         draft.setArticleType(articleType);
+        draft.setArticleTypeCode(articleType);
         draft.setTitle(title);
         draft.setStatus("approved");
         draft.setCurrentVersionNo(1);
@@ -676,17 +696,58 @@ public class ContentArticleService {
                 article.setSystemGenerated(true);
             }
         }
+        fillPromptTemplateNames(articles);
     }
 
     private void fillArticleFromGenerationTask(ArticleDraft article, BatchArticleGenerationTask task) {
-        if (!StringUtils.hasText(article.getContentStyle())) {
-            article.setContentStyle(task.getContentStyle());
-        }
         if (!StringUtils.hasText(article.getTopic())) {
             article.setTopic(task.getTopic());
         }
         if (!StringUtils.hasText(article.getTopicAsQuestion())) {
             article.setTopicAsQuestion(task.getTopicAsQuestion());
+        }
+    }
+
+    private void fillPromptTemplateNames(List<ArticleDraft> articles) {
+        if (articles == null || articles.isEmpty()) {
+            return;
+        }
+        List<Long> templateIds = articles.stream()
+                .map(ArticleDraft::getPromptTemplateId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (templateIds.isEmpty()) {
+            return;
+        }
+        Map<Long, String> nameMap = articlePromptTemplateMapper.selectList(
+                        new LambdaQueryWrapper<ArticlePromptTemplate>()
+                                .in(ArticlePromptTemplate::getId, templateIds)
+                                .select(ArticlePromptTemplate::getId, ArticlePromptTemplate::getName)
+                ).stream()
+                .collect(Collectors.toMap(ArticlePromptTemplate::getId, ArticlePromptTemplate::getName, (a, b) -> a));
+        for (ArticleDraft article : articles) {
+            article.setPromptTemplateName(nameMap.get(article.getPromptTemplateId()));
+        }
+    }
+
+    private void fillPromptTemplateName(ArticleDraft article) {
+        if (article == null || article.getPromptTemplateId() == null || StringUtils.hasText(article.getPromptTemplateName())) {
+            return;
+        }
+        ArticlePromptTemplate template = articlePromptTemplateMapper.selectById(article.getPromptTemplateId());
+        if (template != null) {
+            article.setPromptTemplateName(template.getName());
+        }
+    }
+
+    private void fillPromptTemplateName(BatchArticleGenerationTask task) {
+        if (task == null || task.getPromptTemplateId() == null) {
+            return;
+        }
+        ArticlePromptTemplate template = articlePromptTemplateMapper.selectById(task.getPromptTemplateId());
+        if (template != null) {
+            task.setPromptTemplateName(template.getName());
         }
     }
 

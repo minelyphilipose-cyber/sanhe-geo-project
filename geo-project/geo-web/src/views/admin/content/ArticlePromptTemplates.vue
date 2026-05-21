@@ -69,8 +69,10 @@
 
     <section class="filter-bar">
       <div class="filter-main">
+        <el-select v-model="filters.questionSceneCode" clearable placeholder="问题场景">
+          <el-option v-for="item in questionScenes" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
         <el-select v-model="filters.status" clearable placeholder="状态">
-          <el-option label="草稿" value="draft" />
           <el-option label="启用" value="active" />
           <el-option label="停用" value="disabled" />
         </el-select>
@@ -114,9 +116,9 @@
               </div>
               <p class="template-desc">{{ item.description || '未填写模板说明' }}</p>
               <div class="template-facts">
+                <span>{{ questionSceneLabel(item.questionSceneCode) }}</span>
                 <span>{{ item.articleTypeName || articleTypeLabel(item.articleTypeCode) }}</span>
                 <span>{{ contactModeLabel(item.contactDisclosureMode) }}</span>
-                <span>版本 {{ item.currentVersionNo || '-' }}</span>
                 <span>{{ formatDateTime(item.updatedAt) }}</span>
               </div>
               <div class="weight-row" @click.stop>
@@ -138,7 +140,6 @@
               <div class="card-actions">
                 <el-button v-if="item.sampleOutputUrl" text type="success" @click.stop="openSample(item.sampleOutputUrl)">样文</el-button>
                 <el-button text type="primary" @click.stop="openEdit(item)">编辑</el-button>
-                <el-button text @click.stop="openVersion(item)">版本</el-button>
               </div>
             </article>
           </div>
@@ -177,7 +178,6 @@
             </el-form-item>
             <el-form-item label="状态">
               <el-select v-model="form.status">
-                <el-option label="草稿" value="draft" />
                 <el-option label="启用" value="active" />
                 <el-option label="停用" value="disabled" />
               </el-select>
@@ -209,6 +209,11 @@
             <el-form-item label="文章类型">
               <el-select v-model="form.articleTypeCode">
                 <el-option v-for="item in articleTypes" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="关联问题场景">
+              <el-select v-model="form.questionSceneCode" clearable placeholder="通用 / 未绑定">
+                <el-option v-for="item in questionScenes" :key="item.value" :label="item.label" :value="item.value" />
               </el-select>
             </el-form-item>
             <el-form-item label="样文链接">
@@ -248,7 +253,7 @@
         <section class="editor-section prompt-section">
           <div class="section-title">
             <h3>提示词内容</h3>
-            <span>当前版本 {{ editingDetail?.currentVersionNo || '新建' }}</span>
+            <span>保存后立即生效</span>
           </div>
           <div class="prompt-editor-grid">
             <div class="prompt-card">
@@ -307,9 +312,9 @@
             <div><label>渠道小类</label><strong>{{ templateDetail.channelSubName || templateDetail.channelSubCode || '-' }}</strong></div>
             <div v-if="isAgentSiteTemplate(templateDetail)"><label>官网归属</label><strong>{{ agentSiteModuleLabel(templateDetail.agentSiteModule || 'knowledge') }}</strong></div>
             <div><label>文章类型</label><strong>{{ templateDetail.articleTypeName || articleTypeLabel(templateDetail.articleTypeCode) }}</strong></div>
+            <div><label>关联问题场景</label><strong>{{ questionSceneLabel(templateDetail.questionSceneCode) }}</strong></div>
             <div><label>联系方式露出</label><strong>{{ contactModeLabel(templateDetail.contactDisclosureMode) }}</strong></div>
             <div><label>权重</label><strong>{{ templateDetail.weight }}</strong></div>
-            <div><label>当前版本</label><strong>{{ currentTemplateVersion(templateDetail)?.versionNo || '-' }}</strong></div>
             <div><label>更新时间</label><strong>{{ formatDateTime(templateDetail.updatedAt) }}</strong></div>
             <div class="detail-info-wide"><label>样文链接</label><strong>{{ templateDetail.sampleOutputUrl || '-' }}</strong></div>
           </div>
@@ -328,55 +333,8 @@
       <template #footer>
         <el-button @click="detailVisible = false">关闭</el-button>
         <el-button v-if="templateDetail?.sampleOutputUrl" type="success" plain @click="openSample(templateDetail.sampleOutputUrl)">查看样文</el-button>
-        <el-button v-if="templateDetail" @click="openVersionFromDetail">查看版本</el-button>
         <el-button v-if="templateDetail" type="primary" @click="openEditFromDetail">编辑</el-button>
       </template>
-    </el-dialog>
-
-    <el-dialog
-      v-model="versionVisible"
-      title="模板版本"
-      width="860px"
-      class="version-dialog"
-      destroy-on-close
-    >
-      <DataState :loading="detailLoading" :empty="!detailLoading && !templateDetail">
-        <div v-if="templateDetail" class="version-panel">
-          <div class="version-title">
-            <div>
-              <strong>{{ templateDetail.name }}</strong>
-              <span>{{ templateDetail.channelGroupName || channelGroupLabel(templateDetail.channelGroupCode) }}</span>
-            </div>
-            <el-tag :type="statusTagType(templateDetail.status)">{{ statusLabel(templateDetail.status) }}</el-tag>
-          </div>
-          <div class="version-list">
-            <article
-              v-for="version in templateDetail.versions"
-              :key="version.id"
-              class="version-card"
-            >
-              <div class="version-card-head">
-                <div>
-                  <strong>版本 {{ version.versionNo }}</strong>
-                  <span>{{ version.publishedAt || version.createdAt || '-' }}</span>
-                </div>
-                <el-tag size="small" :type="versionStatusTagType(version.status)">{{ versionStatusLabel(version.status) }}</el-tag>
-              </div>
-              <p>{{ version.changeNote || '未填写变更说明' }}</p>
-              <el-button
-                v-if="version.status === 'draft'"
-                size="small"
-                type="primary"
-                plain
-                :loading="publishing"
-                @click="publishVersion(version.id)"
-              >
-                发布此版本
-              </el-button>
-            </article>
-          </div>
-        </div>
-      </DataState>
     </el-dialog>
   </div>
 </template>
@@ -391,7 +349,6 @@ import {
   createArticlePromptTemplate,
   getArticlePromptTemplate,
   getArticlePromptTemplates,
-  publishArticlePromptTemplateVersion,
   updateArticlePromptTemplate,
   updateArticlePromptTemplateWeight,
   type ArticlePromptTemplate,
@@ -405,14 +362,14 @@ const channelGroups = [
   { label: '行业资讯站', value: 'industry_site' },
   { label: '自媒体平台', value: 'self_media' },
   { label: '权威媒体', value: 'authority_media' },
-  { label: '论坛', value: 'forum' },
+  { label: '平台网站', value: 'forum' },
 ]
 const channelGroupDescriptions: Record<string, string> = {
   agent_site: 'Agent 官网统一模板',
   industry_site: '垂直行业站通用模板',
   self_media: '公众号、知乎等平台风格',
   authority_media: '媒体稿件按类型区分',
-  forum: '论坛讨论场景模板',
+  forum: '平台网站讨论场景模板',
 }
 const subOptions: Record<string, Array<{ label: string; value: string }>> = {
   self_media: [
@@ -422,6 +379,7 @@ const subOptions: Record<string, Array<{ label: string; value: string }>> = {
     { label: '抖音图文', value: 'douyin_image_text' },
     { label: '小红书', value: 'xiaohongshu' },
     { label: '百家号', value: 'baijiahao' },
+    { label: '网易', value: 'netease' },
   ],
   authority_media: [
     { label: '行业媒体', value: 'industry_media' },
@@ -445,6 +403,14 @@ const articleTypes = [
   { label: '资讯简讯', value: 'news_brief' },
   { label: '讨论帖', value: 'forum_discussion' },
 ]
+const questionScenes = [
+  { label: '品牌', value: 'brand' },
+  { label: '决策', value: 'decision' },
+  { label: '成交', value: 'deal' },
+  { label: '对比', value: 'compare' },
+  { label: '问答', value: 'qa' },
+  { label: '功能', value: 'function' },
+]
 const contactModes = [
   { label: '完整露出（官网 / 电话 / 地址）', value: 'full' },
   { label: '软引导', value: 'soft_hint' },
@@ -457,18 +423,16 @@ const CHANNEL_CODE_PATTERN = /^[a-z][a-z0-9_]{1,63}$/
 
 const loading = ref(false)
 const saving = ref(false)
-const publishing = ref(false)
 const detailLoading = ref(false)
 const editorVisible = ref(false)
 const detailVisible = ref(false)
-const versionVisible = ref(false)
 const templates = ref<ArticlePromptTemplate[]>([])
 const templateDetail = ref<ArticlePromptTemplateDetail | null>(null)
 const editingDetail = ref<ArticlePromptTemplateDetail | null>(null)
 const editingId = ref<number | null>(null)
 const route = useRoute()
 const pagination = reactive({ current: 1, size: 12, total: 0 })
-const filters = reactive({ channelGroupCode: '', channelSubCode: '', status: '', keyword: '' })
+const filters = reactive({ channelGroupCode: '', channelSubCode: '', questionSceneCode: '', status: '', keyword: '' })
 const form = reactive<ArticlePromptTemplateSaveRequest>({
   name: '',
   description: '',
@@ -476,7 +440,8 @@ const form = reactive<ArticlePromptTemplateSaveRequest>({
   channelSubCode: null,
   agentSiteModule: 'knowledge',
   articleTypeCode: 'industry_article',
-  status: 'draft',
+  questionSceneCode: null,
+  status: 'active',
   weight: 1,
   sortOrder: 0,
   sampleOutputUrl: '',
@@ -571,6 +536,11 @@ function articleTypeLabel(value: string) {
   return articleTypes.find((item) => item.value === value)?.label || value
 }
 
+function questionSceneLabel(value?: string | null) {
+  if (!value) return '通用 / 未绑定'
+  return questionScenes.find((item) => item.value === value)?.label || value
+}
+
 function contactModeLabel(value?: string | null) {
   return contactModes.find((item) => item.value === value)?.label || '不露出'
 }
@@ -582,16 +552,6 @@ function statusLabel(value: string) {
 function statusTagType(value: string) {
   if (value === 'active') return 'success'
   if (value === 'disabled') return 'info'
-  return 'warning'
-}
-
-function versionStatusLabel(value: string) {
-  return ({ draft: '草稿', published: '已发布', archived: '已归档' } as Record<string, string>)[value] || value
-}
-
-function versionStatusTagType(value: string) {
-  if (value === 'published') return 'success'
-  if (value === 'archived') return 'info'
   return 'warning'
 }
 
@@ -620,10 +580,12 @@ function applyRouteFilters() {
   const channelGroupCode = queryStringValue(route.query.channelGroupCode)
   const channelSubCode = queryStringValue(route.query.channelSubCode)
   const status = queryStringValue(route.query.status)
+  const questionSceneCode = queryStringValue(route.query.questionSceneCode)
   const keyword = queryStringValue(route.query.keyword)
   if (channelGroupCode) filters.channelGroupCode = channelGroupCode
   if (channelSubCode) filters.channelSubCode = channelSubCode
   if (status) filters.status = status
+  if (questionSceneCode) filters.questionSceneCode = questionSceneCode
   if (keyword) filters.keyword = keyword
   pagination.current = 1
 }
@@ -676,6 +638,8 @@ const templateFallbackKeys = [
   'agentSiteModule',
   'articleTypeCode',
   'articleTypeName',
+  'questionSceneCode',
+  'questionSceneName',
   'status',
   'weight',
   'sortOrder',
@@ -748,7 +712,8 @@ function resetForm() {
     channelSubCode: null,
     agentSiteModule: 'knowledge',
     articleTypeCode: 'industry_article',
-    status: 'draft',
+    questionSceneCode: null,
+    status: 'active',
     weight: 1,
     sortOrder: 0,
     sampleOutputUrl: '',
@@ -775,6 +740,7 @@ function fillFormFromDetail(detail: ArticlePromptTemplateDetail) {
     channelSubCode: detail.channelSubCode || null,
     agentSiteModule: detail.channelGroupCode === 'agent_site' ? (detail.agentSiteModule || 'knowledge') : null,
     articleTypeCode: detail.articleTypeCode,
+    questionSceneCode: detail.questionSceneCode || null,
     status: detail.status,
     weight: detail.weight,
     sortOrder: detail.sortOrder,
@@ -848,13 +814,18 @@ async function saveTemplate() {
   }
   saving.value = true
   try {
-    const payload = { ...form, channelSubCode: form.channelSubCode || null, agentSiteModule: form.channelGroupCode === 'agent_site' ? form.agentSiteModule : null }
+    const payload = {
+      ...form,
+      channelSubCode: form.channelSubCode || null,
+      agentSiteModule: form.channelGroupCode === 'agent_site' ? form.agentSiteModule : null,
+      questionSceneCode: form.questionSceneCode || null,
+    }
     if (editingId.value) {
       await updateArticlePromptTemplate(editingId.value, payload)
     } else {
       await createArticlePromptTemplate(payload)
     }
-    ElMessage.success('模板已保存')
+    ElMessage.success('模板已保存并生效')
     editorVisible.value = false
     loadTemplates()
   } catch (err) {
@@ -883,41 +854,6 @@ async function confirmWeight(item: ArticlePromptTemplate, weight: number) {
     loadTemplates()
   } catch {
     loadTemplates()
-  }
-}
-
-async function openVersion(item: ArticlePromptTemplate) {
-  await openVersionById(item.id)
-}
-
-async function openVersionFromDetail() {
-  if (!templateDetail.value) return
-  const templateId = templateDetail.value.id
-  detailVisible.value = false
-  await openVersionById(templateId)
-}
-
-async function openVersionById(templateId: number) {
-  versionVisible.value = true
-  const fallback = templateDetail.value || templates.value.find((item) => item.id === templateId)
-  templateDetail.value = null
-  const detail = await loadTemplateDetail(templateId, '加载版本失败', fallback)
-  if (detail) templateDetail.value = detail
-}
-
-async function publishVersion(versionId: number) {
-  if (!templateDetail.value) return
-  publishing.value = true
-  try {
-    const { data } = await publishArticlePromptTemplateVersion(templateDetail.value.id, versionId)
-    templateDetail.value = normalizeTemplateDetail(data.data, templateDetail.value)
-    ElMessage.success('版本已发布')
-    loadTemplates()
-  } catch (err) {
-    console.error(err)
-    ElMessage.error('发布版本失败')
-  } finally {
-    publishing.value = false
   }
 }
 

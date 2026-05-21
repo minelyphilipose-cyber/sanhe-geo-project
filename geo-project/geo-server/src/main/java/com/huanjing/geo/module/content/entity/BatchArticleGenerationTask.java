@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.content.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -28,6 +29,7 @@ public class BatchArticleGenerationTask {
     private Long promptTemplateId;
     private Long promptTemplateVersionId;
     private String allocationMode;
+    private String templateSource;
     private String length;
     private String topic;
     private String topicAsQuestion;
@@ -50,4 +52,6 @@ public class BatchArticleGenerationTask {
     private LocalDateTime updatedAt;
     private LocalDateTime startedAt;
     private LocalDateTime finishedAt;
+    @TableField(exist = false)
+    private String promptTemplateName;
 }

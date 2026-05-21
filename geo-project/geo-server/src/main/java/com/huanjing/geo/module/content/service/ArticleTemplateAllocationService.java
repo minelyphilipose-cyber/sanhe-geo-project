@@ -53,15 +53,19 @@ public class ArticleTemplateAllocationService {
                         .map(sub -> channelOption(ArticlePromptChannels.AUTHORITY_MEDIA, sub,
                                 ArticlePromptChannels.SUB_LABELS.getOrDefault(sub, sub), "正式审慎，事实边界清晰"))
                         .toList()));
-        groups.add(new ChannelGroupVO(ArticlePromptChannels.FORUM, "论坛",
-                "统一按社区讨论、经验分享、避坑帖风格生成。",
-                List.of(channelOption(ArticlePromptChannels.FORUM, null, "论坛", "垂直社区讨论感"))));
+        groups.add(new ChannelGroupVO(ArticlePromptChannels.FORUM, "平台网站",
+                "统一按平台网站的社区讨论、经验分享、避坑帖风格生成。",
+                List.of(channelOption(ArticlePromptChannels.FORUM, null, "平台网站", "平台网站讨论感"))));
         groups.addAll(customGroups());
         return new GenerationOptionsVO(groups);
     }
 
     public AllocationPreviewResponse preview(String groupCode, String subCode, int count) {
-        List<AllocatedTemplate> allocated = allocate(groupCode, subCode, count);
+        return preview(groupCode, subCode, null, count);
+    }
+
+    public AllocationPreviewResponse preview(String groupCode, String subCode, String questionSceneCode, int count) {
+        List<AllocatedTemplate> allocated = allocate(groupCode, subCode, questionSceneCode, count);
         return new AllocationPreviewResponse(
                 groupCode,
                 trimToNull(subCode),
@@ -71,10 +75,14 @@ public class ArticleTemplateAllocationService {
     }
 
     public List<AllocatedTemplate> allocate(String groupCode, String subCode, int count) {
+        return allocate(groupCode, subCode, null, count);
+    }
+
+    public List<AllocatedTemplate> allocate(String groupCode, String subCode, String questionSceneCode, int count) {
         if (count <= 0) {
             return List.of();
         }
-        List<TemplateWithVersion> candidates = activeTemplates(groupCode, subCode).stream()
+        List<TemplateWithVersion> candidates = activeTemplates(groupCode, subCode, questionSceneCode).stream()
                 .filter(item -> item.template().getWeight() != null && item.template().getWeight() > 0)
                 .toList();
         return allocateCandidates(candidates, count);
@@ -120,6 +128,10 @@ public class ArticleTemplateAllocationService {
     }
 
     public List<TemplateWithVersion> activeTemplates(String groupCode, String subCode) {
+        return activeTemplates(groupCode, subCode, null);
+    }
+
+    public List<TemplateWithVersion> activeTemplates(String groupCode, String subCode, String questionSceneCode) {
         List<ArticlePromptTemplate> templates = templateMapper.selectList(
                 new LambdaQueryWrapper<ArticlePromptTemplate>()
                         .eq(ArticlePromptTemplate::getChannelGroupCode, groupCode)
@@ -136,7 +148,7 @@ public class ArticleTemplateAllocationService {
                 result.add(new TemplateWithVersion(template, version));
             }
         }
-        return result;
+        return filterByQuestionScene(result, questionSceneCode);
     }
 
     public TemplateWithVersion resolveTemplate(Long templateId, Long versionId) {
@@ -257,9 +269,27 @@ public class ArticleTemplateAllocationService {
                 template.getAgentSiteModule(),
                 template.getArticleTypeCode(),
                 ArticlePromptChannels.ARTICLE_TYPE_LABELS.getOrDefault(template.getArticleTypeCode(), template.getArticleTypeCode()),
+                template.getQuestionSceneCode(),
+                questionSceneLabel(template.getQuestionSceneCode()),
                 template.getWeight(),
                 template.getSortOrder()
         );
+    }
+
+    private List<TemplateWithVersion> filterByQuestionScene(List<TemplateWithVersion> templates, String questionSceneCode) {
+        String scene = trimToNull(questionSceneCode);
+        if (!StringUtils.hasText(scene)) {
+            return templates;
+        }
+        List<TemplateWithVersion> matched = templates.stream()
+                .filter(item -> scene.equals(trimToNull(item.template().getQuestionSceneCode())))
+                .toList();
+        if (!matched.isEmpty()) {
+            return matched;
+        }
+        return templates.stream()
+                .filter(item -> !StringUtils.hasText(item.template().getQuestionSceneCode()))
+                .toList();
     }
 
     private AllocationItemVO toAllocationItem(AllocatedTemplate item) {
@@ -270,6 +300,8 @@ public class ArticleTemplateAllocationService {
                 template.getName(),
                 template.getArticleTypeCode(),
                 ArticlePromptChannels.ARTICLE_TYPE_LABELS.getOrDefault(template.getArticleTypeCode(), template.getArticleTypeCode()),
+                template.getQuestionSceneCode(),
+                questionSceneLabel(template.getQuestionSceneCode()),
                 template.getAgentSiteModule(),
                 template.getWeight(),
                 item.count()
@@ -282,8 +314,17 @@ public class ArticleTemplateAllocationService {
             case "wechat" -> "完整长文，结构稳";
             case "zhihu" -> "问题回答，判断清晰";
             case "douyin_image_text" -> "图文卡片式阅读";
+            case "baijiahao" -> "搜索收录友好，信息密度高";
+            case "netease" -> "门户资讯阅读，媒体感强";
             default -> "自媒体内容风格";
         };
+    }
+
+    private String questionSceneLabel(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return ArticlePromptTemplateService.QUESTION_SCENE_LABELS.getOrDefault(value, value);
     }
 
     private int normalize(Integer value) {

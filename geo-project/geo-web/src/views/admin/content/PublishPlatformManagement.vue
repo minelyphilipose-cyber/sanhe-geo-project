@@ -211,17 +211,18 @@
               <option value="wechat">公众号</option>
               <option value="zhihu">知乎</option>
               <option value="douyin_image_text">抖音图文</option>
+              <option value="netease">网易</option>
               <option value="agent_site_article">Agent 官网文章</option>
               <option value="industry_site">行业资讯站</option>
               <option value="authority_media">权威媒体</option>
-              <option value="forum">论坛</option>
+              <option value="forum">平台网站</option>
             </select>
             <div class="hint">影响“批量生成文章”页面的可选风格。停用后该风格不再用于新生成，历史文章保留。</div>
           </div>
         </section>
 
         <section v-if="drawerForm.categoryCode === 'industry_site' || drawerForm.categoryCode === 'forum'" class="drawer-section">
-          <div class="form-section-label">{{ drawerForm.categoryCode === 'forum' ? '论坛接入配置' : '行业站点接入配置' }}</div>
+          <div class="form-section-label">{{ drawerForm.categoryCode === 'forum' ? '平台网站接入配置' : '行业站点接入配置' }}</div>
           <div class="form-grid-2">
             <div class="form-row">
               <label>站点域名</label>
@@ -246,7 +247,7 @@
               <select v-model="drawerForm.integrationMethod" class="select">
                 <option value="rest_api">REST API</option>
                 <option value="discuz_http">Discuz HTTP 直发</option>
-                <option value="forum_playwright">论坛浏览器自动化</option>
+                <option value="forum_playwright">平台网站浏览器自动化</option>
                 <option value="manual">手动发布</option>
               </select>
             </div>
@@ -295,7 +296,7 @@
               <option value="">无 - 人工发布</option>
               <option value="industry_site">行业资讯站发布器</option>
               <option value="discuz_http">Discuz HTTP 发布器</option>
-              <option value="forum_playwright">论坛发布执行器</option>
+              <option value="forum_playwright">平台网站发布执行器</option>
               <option value="agent_site_publisher">Agent 官网发布器</option>
             </select>
           </div>
@@ -435,12 +436,12 @@ const categories: CategoryConfig[] = [
   },
   {
     code: 'forum',
-    name: '论坛',
+    name: '平台网站',
     shortDesc: 'Discuz / 浏览器自动化',
-    desc: '论坛大类支持 Discuz HTTP 直发，必要时可保留浏览器自动化作为兜底执行器。',
+    desc: '平台网站大类支持 Discuz HTTP 直发，必要时可保留浏览器自动化作为兜底执行器。',
     icon: Connection,
     canCreate: true,
-    createText: '新增论坛',
+    createText: '新增平台网站',
     notice: '优先使用 <strong>Discuz HTTP 直发</strong>，适合大批量发布；浏览器自动化仅作为页面强依赖脚本时的兜底方案。',
     noticeType: 'info',
   },
@@ -510,6 +511,23 @@ const staticTargets = reactive<TargetConfig[]>([
     source: 'static',
     fields: [
       { label: '内容风格', value: '抖音图文' },
+      { label: '状态', value: '启用', badge: 'success' },
+      { label: '自动发布', value: '不支持', badge: 'neutral' },
+      { label: '执行器', value: '-', mono: true },
+    ],
+  },
+  {
+    categoryCode: 'self_media',
+    name: '网易',
+    code: 'netease',
+    logoText: '网',
+    logoClass: 'media',
+    enabled: true,
+    autoPublish: false,
+    executor: '',
+    source: 'static',
+    fields: [
+      { label: '内容风格', value: '网易' },
       { label: '状态', value: '启用', badge: 'success' },
       { label: '自动发布', value: '不支持', badge: 'neutral' },
       { label: '执行器', value: '-', mono: true },
@@ -631,7 +649,7 @@ const activeCategoryMeta = computed(() => {
   const items = targetsByCategory(activeCategoryCode.value)
   const enabledCount = items.filter((item) => item.enabled).length
   const autoCount = items.filter((item) => item.enabled && item.autoPublish).length
-  if (activeCategoryCode.value === 'forum') return `${items.length} 个论坛 · ${autoCount} 个自动发布`
+  if (activeCategoryCode.value === 'forum') return `${items.length} 个平台网站 · ${autoCount} 个自动发布`
   if (activeCategoryCode.value === 'authority_media') return '固定大类 · 不展开'
   if (activeCategoryCode.value === 'industry_site') return `${items.length} 个站点 · ${autoCount} 个自动发布`
   return `${items.length} 个目标 · ${enabledCount} 个启用`
@@ -862,7 +880,7 @@ function normalizeCredential(raw: string) {
 function integrationMethodLabel(v?: string | null) {
   if (v === 'rest_api') return 'REST API'
   if (v === 'discuz_http') return 'Discuz HTTP 直发'
-  if (v === 'forum_playwright') return '论坛浏览器自动化'
+  if (v === 'forum_playwright') return '平台网站浏览器自动化'
   if (v === 'manual') return '手动发布'
   if (v === 'ftp') return 'FTP'
   if (v === 'email') return '邮件'

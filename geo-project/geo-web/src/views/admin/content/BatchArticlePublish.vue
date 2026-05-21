@@ -128,10 +128,10 @@
 
           <div v-if="group.platformKey === 'forum_site'" class="target-row">
             <div class="target-info">
-              <div class="target-label">论坛目标</div>
-              <div class="target-desc">不选择时，系统会把论坛文章平均分发到所有启用的小论坛；余数随机落到其中部分论坛</div>
+              <div class="target-label">平台网站目标</div>
+              <div class="target-desc">不选择时，系统会把平台网站文章平均分发到所有启用的平台网站；余数随机落到其中部分平台网站</div>
             </div>
-            <el-select v-model="forumTargetSiteId" clearable placeholder="自动均分到全部启用论坛" class="target-select">
+            <el-select v-model="forumTargetSiteId" clearable placeholder="自动均分到全部启用平台网站" class="target-select">
               <el-option
                 v-for="site in activeForumSites"
                 :key="site.id"
@@ -333,13 +333,14 @@ function resolvePlatform(contentStyle: string): {
     return { platformKey: 'industry_site', platformName: '行业资讯站' }
   }
   if (contentStyle === 'forum') {
-    return { platformKey: 'forum_site', platformName: '论坛' }
+    return { platformKey: 'forum_site', platformName: '平台网站' }
   }
   const blocked: Record<string, string> = {
     toutiao: '今日头条不允许自动发布',
     wechat: '公众号不允许自动发布',
     zhihu: '知乎不允许自动发布',
     douyin_image_text: '抖音图文不允许自动发布',
+    netease: '网易不允许自动发布',
     authority_media: '权威媒体不允许自动发布',
   }
   return {
@@ -353,7 +354,7 @@ function platformName(platformKey: PublishPlatformKey) {
   const map: Record<PublishPlatformKey, string> = {
     agent_site: 'Agent 官网',
     industry_site: '行业资讯站',
-    forum_site: '论坛',
+    forum_site: '平台网站',
   }
   return map[platformKey]
 }
@@ -362,7 +363,7 @@ function executorLabel(platformKey: PublishPlatformKey) {
   const map: Record<PublishPlatformKey, string> = {
     agent_site: 'Agent 官网发布器',
     industry_site: '行业资讯站发布器',
-    forum_site: '论坛发布执行器',
+    forum_site: '平台网站发布执行器',
   }
   return map[platformKey]
 }
@@ -378,9 +379,10 @@ function contentStyleLabel(v?: string | null) {
     agent_site_article: 'Agent 官网文章',
     industry_site: '行业资讯站',
     authority_media: '权威媒体',
-    forum: '论坛',
+    forum: '平台网站',
     xiaohongshu: '小红书',
     baijiahao: '百家号',
+    netease: '网易',
   }
   return map[v] || v
 }
@@ -425,6 +427,10 @@ async function submitPublish() {
     })
     applyPublishResponse(data.data)
     ElMessage.success(publishMode.value === 'scheduled' ? '定时发布任务已创建' : '批量发布提交完成')
+    await router.push({
+      name: 'BatchArticlePublishJobs',
+      query: { jobId: data.data.jobId },
+    })
   } finally {
     submitting.value = false
   }

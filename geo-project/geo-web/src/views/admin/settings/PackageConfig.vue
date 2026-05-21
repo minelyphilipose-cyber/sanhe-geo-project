@@ -171,7 +171,7 @@
           <div class="form-section-head">
             <div>
               <span>分发渠道额度</span>
-              <strong>官网、行业站、论坛、自媒体和权重媒体额度</strong>
+              <strong>官网、行业站、平台网站、自媒体和权重媒体额度</strong>
             </div>
           </div>
           <el-table class="quota-editor-table" :data="form.channelQuotaConfigs" border table-layout="fixed">
@@ -310,7 +310,7 @@ function channelLabel(code: string) {
   const map: Record<string, string> = {
     official_site: '官网',
     industry_site: '行业资讯站',
-    forum: '论坛',
+    forum: '平台网站',
     self_media: '自媒体平台',
     authority_media: '权重媒体平台',
   }

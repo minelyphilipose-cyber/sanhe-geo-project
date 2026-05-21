@@ -893,6 +893,10 @@ export interface ArticleDraft {
   channelGroupCode?: string | null
   channelSubCode?: string | null
   allocationMode?: string | null
+  templateSource?: 'smart' | 'weighted' | 'custom' | 'fallback_default_prompt' | string | null
+  promptTemplateId?: number | null
+  promptTemplateVersionId?: number | null
+  promptTemplateName?: string | null
   topic?: string | null
   topicAsQuestion?: string | null
   title: string
@@ -958,6 +962,15 @@ export interface BatchArticleGenerationTaskDetail {
   articleType?: string | null
   tone?: string | null
   contentStyle?: string | null
+  channelGroupCode?: string | null
+  channelSubCode?: string | null
+  agentSiteModule?: string | null
+  articleTypeCode?: string | null
+  promptTemplateId?: number | null
+  promptTemplateVersionId?: number | null
+  promptTemplateName?: string | null
+  allocationMode?: string | null
+  templateSource?: 'smart' | 'weighted' | 'custom' | 'fallback_default_prompt' | string | null
   length?: string | null
   topic?: string | null
   topicAsQuestion?: string | null

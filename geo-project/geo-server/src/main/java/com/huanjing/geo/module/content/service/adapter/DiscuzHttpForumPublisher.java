@@ -134,7 +134,7 @@ public class DiscuzHttpForumPublisher {
                 page.waitForTimeout(2000);
             }
             if (page.locator("input[name='formhash']").count() == 0 || page.locator("input[name='subject']").count() == 0) {
-                throw new BizException(401, "论坛登录 Cookie 已失效或发帖页被 WAF 拦截，请重新登录后更新该论坛账号 Cookie");
+                throw new BizException(401, "平台网站登录 Cookie 已失效或发帖页被 WAF 拦截，请重新登录后更新该平台网站账号 Cookie");
             }
 
             @SuppressWarnings("unchecked")
@@ -411,7 +411,7 @@ public class DiscuzHttpForumPublisher {
                 return;
             }
             if (StringUtils.hasText(account.cookie())) {
-                throw new BizException(401, "论坛登录 Cookie 已失效或被 WAF 拦截，请重新登录后更新该论坛账号 Cookie");
+                throw new BizException(401, "平台网站登录 Cookie 已失效或被 WAF 拦截，请重新登录后更新该平台网站账号 Cookie");
             }
             DiscuzLoginForm loginForm = loadLoginForm(profile);
             Map<String, String> values = new LinkedHashMap<>();
@@ -426,7 +426,7 @@ public class DiscuzHttpForumPublisher {
             post(profile.loginSubmitUri(), urlEncode(values));
             HttpResponse<String> verified = get(profile.postPageUri());
             if (!isAuthenticated(verified.body())) {
-                throw new BizException(401, "论坛账号登录失败或登录信息已过期，请检查账号密码或更新 Cookie");
+                throw new BizException(401, "平台网站账号登录失败或登录信息已过期，请检查账号密码或更新 Cookie");
             }
         }
 

@@ -126,13 +126,13 @@
           <el-table-column label="内容对象" min-width="280" show-overflow-tooltip>
             <template #default="scope">
               <div class="admin-entity-cell">
-                <div class="admin-entity-avatar content-avatar" :class="articleTypeClass(scope.row.articleType)">
-                  {{ articleTypeInitial(scope.row.articleType) }}
+                <div class="admin-entity-avatar content-avatar" :class="articleTypeClass(scope.row.articleTypeCode)">
+                  {{ articleTypeInitial(scope.row.articleTypeCode) }}
                 </div>
                 <div class="min-w-0">
                   <div class="admin-entity-main">{{ scope.row.projectName || `#${scope.row.projectId}` }}</div>
                   <div class="admin-entity-sub">
-                    {{ articleTypeLabel(scope.row.articleType) }} · {{ articleChannelLabel(scope.row) }} · {{ generationModeLabel(scope.row) }}
+                    {{ articleTypeLabel(scope.row.articleTypeCode) }} · {{ articleChannelLabel(scope.row) }} · {{ generationModeLabel(scope.row) }}
                   </div>
                 </div>
               </div>
@@ -142,7 +142,7 @@
             <template #default="scope">
               <div class="admin-cell-stack">
                 <span class="admin-cell-main">{{ scope.row.title || '-' }}</span>
-                <span class="admin-cell-sub">{{ contentStyleLabel(scope.row.contentStyle) }}</span>
+                <span class="admin-cell-sub">{{ templateUsageLabel(scope.row) }}</span>
                 <span v-if="riskWordHits(scope.row).length" class="risk-word-line">
                   <el-tag
                     v-for="hit in riskWordHits(scope.row)"
@@ -218,8 +218,9 @@
           <el-descriptions :column="2" border>
             <el-descriptions-item label="文章ID">{{ detailData.article.id }}</el-descriptions-item>
             <el-descriptions-item label="项目">{{ detailData.project?.projectName || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="文章类型">{{ articleTypeLabel(detailData.article.articleType) }}</el-descriptions-item>
-            <el-descriptions-item label="平台风格">{{ contentStyleLabel(detailContentStyle(detailData)) }}</el-descriptions-item>
+            <el-descriptions-item label="文章类型">{{ articleTypeLabel(detailData.article.articleTypeCode) }}</el-descriptions-item>
+            <el-descriptions-item label="发布渠道">{{ detailChannelLabel(detailData) }}</el-descriptions-item>
+            <el-descriptions-item label="文章模板">{{ detailTemplateUsageLabel(detailData) }}</el-descriptions-item>
             <el-descriptions-item label="文章主题" :span="2">{{ detailTopic(detailData) || '-' }}</el-descriptions-item>
             <el-descriptions-item v-if="riskWordHits(detailData.article).length" label="风险词" :span="2">
               <div class="risk-word-list">
@@ -377,11 +378,11 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="forumSiteVisible" title="论坛分发" width="900px" class="industry-site-dialog">
+    <el-dialog v-model="forumSiteVisible" title="平台网站分发" width="900px" class="industry-site-dialog">
       <div class="industry-site-intro">
-        选择一个已启用的论坛，系统会将当前文章作为论坛内容发布到对应站点。
+        选择一个已启用的平台网站，系统会将当前文章作为平台网站内容发布到对应站点。
       </div>
-      <DataState :loading="forumSiteLoading" :empty="!forumSiteLoading && forumSites.length === 0" empty-text="暂无可用论坛">
+      <DataState :loading="forumSiteLoading" :empty="!forumSiteLoading && forumSites.length === 0" empty-text="暂无可用平台网站">
         <div class="industry-site-list">
           <button
             v-for="site in forumSites"
@@ -406,7 +407,7 @@
               </span>
               <span class="industry-site-meta">
                 <span>
-                  <span class="industry-site-meta-label">论坛分类</span>
+                  <span class="industry-site-meta-label">平台网站分类</span>
                   {{ industrySiteTagText(site) }}
                 </span>
                 <span>
@@ -1009,7 +1010,7 @@ const distributionChannels: Array<{
 }> = [
   { value: 'official_site', label: 'Agent 官网', description: '发布到项目品牌的 Agent 官网站点。' },
   { value: 'industry_site', label: '行业资讯站', description: '选择已启用的行业资讯站并发布。' },
-  { value: 'forum', label: '论坛', description: '选择已启用的论坛站点并发布讨论帖。' },
+  { value: 'forum', label: '平台网站', description: '选择已启用的平台网站并发布讨论帖。' },
   { value: 'self_media', label: '自媒体平台', description: '分发到微信公众号、抖音、头条、知乎等账号。' },
   { value: 'authority_media', label: '权威媒体', description: '选择特价网新闻媒体资源并创建出稿订单。' },
 ]
@@ -1164,13 +1165,14 @@ const statusOptions = [
 const channelFilterOptions = [
   { label: '官网', value: 'agent_site:' },
   { label: '行业资讯站', value: 'industry_site:' },
-  { label: '论坛', value: 'forum:' },
+  { label: '平台网站', value: 'forum:' },
   { label: '自媒体平台 / 今日头条', value: 'self_media:toutiao' },
   { label: '自媒体平台 / 公众号', value: 'self_media:wechat' },
   { label: '自媒体平台 / 知乎', value: 'self_media:zhihu' },
   { label: '自媒体平台 / 抖音图文', value: 'self_media:douyin_image_text' },
   { label: '自媒体平台 / 小红书', value: 'self_media:xiaohongshu' },
   { label: '自媒体平台 / 百家号', value: 'self_media:baijiahao' },
+  { label: '自媒体平台 / 网易', value: 'self_media:netease' },
   { label: '权威媒体 / 行业媒体', value: 'authority_media:industry_media' },
   { label: '权威媒体 / 地方媒体', value: 'authority_media:local_media' },
   { label: '权威媒体 / 财经媒体', value: 'authority_media:finance_media' },
@@ -1201,34 +1203,55 @@ function parseChannelKey(value: string) {
   }
 }
 
-function articleTypeLabel(v: string) {
+function articleTypeLabel(v?: string | null) {
   const map: Record<string, string> = {
     faq: 'FAQ',
     scenario_content: '场景内容',
     industry_article: '行业文章',
     stage_advice: '阶段建议',
+    buying_guide: '选择指南',
+    comparison: '对比评测',
+    cost_analysis: '费用解析',
+    pitfall_guide: '避坑指南',
+    social_note: '经验笔记',
+    news_brief: '资讯简讯',
+    forum_discussion: '讨论帖',
   }
-  return map[v] || v
+  return v ? map[v] || v : '-'
 }
 
-function articleTypeInitial(v: string) {
+function articleTypeInitial(v?: string | null) {
   const map: Record<string, string> = {
     faq: '问',
     scenario_content: '景',
     industry_article: '文',
     stage_advice: '议',
+    buying_guide: '选',
+    comparison: '比',
+    cost_analysis: '费',
+    pitfall_guide: '坑',
+    social_note: '记',
+    news_brief: '讯',
+    forum_discussion: '帖',
   }
-  return map[v] || '文'
+  return v ? map[v] || '文' : '-'
 }
 
-function articleTypeClass(v: string) {
+function articleTypeClass(v?: string | null) {
   const map: Record<string, string> = {
     faq: 'is-faq',
     scenario_content: 'is-scene',
     industry_article: 'is-article',
     stage_advice: 'is-advice',
+    buying_guide: 'is-article',
+    comparison: 'is-article',
+    cost_analysis: 'is-article',
+    pitfall_guide: 'is-advice',
+    social_note: 'is-scene',
+    news_brief: 'is-article',
+    forum_discussion: 'is-scene',
   }
-  return map[v] || 'is-article'
+  return v ? map[v] || 'is-article' : 'is-article'
 }
 
 function contentStyleLabel(v?: string | null) {
@@ -1242,9 +1265,10 @@ function contentStyleLabel(v?: string | null) {
     agent_site_article: 'Agent 官网文章',
     industry_site: '行业资讯站',
     authority_media: '权威媒体',
-    forum: '论坛',
+    forum: '平台网站',
     xiaohongshu: '小红书',
     baijiahao: '百家号',
+    netease: '网易',
   }
   return map[v] || v
 }
@@ -1255,7 +1279,7 @@ function channelGroupLabel(v?: string | null) {
     industry_site: '行业资讯站',
     self_media: '自媒体平台',
     authority_media: '权威媒体',
-    forum: '论坛',
+    forum: '平台网站',
   }
   return v ? map[v] || v : ''
 }
@@ -1268,6 +1292,7 @@ function channelSubLabel(v?: string | null) {
     douyin_image_text: '抖音图文',
     xiaohongshu: '小红书',
     baijiahao: '百家号',
+    netease: '网易',
     industry_media: '行业媒体',
     local_media: '地方媒体',
     finance_media: '财经媒体',
@@ -1284,7 +1309,46 @@ function articleChannelLabel(row: ArticleDraft) {
     const sub = channelSubLabel(row.channelSubCode)
     return sub ? `${group}/${sub}` : group
   }
-  return contentStyleLabel(row.contentStyle)
+  return '-'
+}
+
+function templateSourceLabel(v?: string | null) {
+  const label = templateSourceValueLabel(v)
+  return label === '-' ? '模板来源：-' : `模板来源：${label}`
+}
+
+function templateUsageLabel(row: ArticleDraft) {
+  if (row.promptTemplateName) {
+    return `模板：${row.promptTemplateName}（${templateSourceValueLabel(row.templateSource)}）`
+  }
+  if (row.promptTemplateId) {
+    return `模板：#${row.promptTemplateId}（${templateSourceValueLabel(row.templateSource)}）`
+  }
+  return templateSourceLabel(row.templateSource)
+}
+
+function detailTemplateUsageLabel(detail: ArticleDetailResponse) {
+  const task = detail.batchGenerationTask
+  const templateName = detail.article.promptTemplateName || task?.promptTemplateName
+  const templateId = detail.article.promptTemplateId || task?.promptTemplateId
+  const source = detail.article.templateSource || task?.templateSource
+  if (templateName) {
+    return `${templateName}（${templateSourceValueLabel(source)}）`
+  }
+  if (templateId) {
+    return `模板 #${templateId}（${templateSourceValueLabel(source)}）`
+  }
+  return templateSourceValueLabel(source)
+}
+
+function templateSourceValueLabel(v?: string | null) {
+  const map: Record<string, string> = {
+    smart: '智能匹配',
+    weighted: '权重分配',
+    custom: '手动指定',
+    fallback_default_prompt: '默认兜底',
+  }
+  return v ? map[v] || v : '-'
 }
 
 function generationModeLabel(row: ArticleDraft) {
@@ -1310,7 +1374,7 @@ function distributionPlatformLabel(v?: string | null) {
     brand_geo_site: '品牌官网',
     agent_official_site: 'Agent 官网',
     discuz_http: 'Discuz HTTP 直发',
-    forum_playwright: '论坛浏览器自动化',
+    forum_playwright: '平台网站浏览器自动化',
   }
   return v ? map[v] || v : '-'
 }
@@ -1621,6 +1685,14 @@ function detailContentStyle(detail: ArticleDetailResponse) {
   return detail.batchGenerationTask?.contentStyle || detail.article.contentStyle || ''
 }
 
+function detailChannelLabel(detail: ArticleDetailResponse) {
+  const group = detail.article.channelGroupCode
+  if (!group) return '-'
+  const groupLabel = channelGroupLabel(group)
+  const subLabel = channelSubLabel(detail.article.channelSubCode)
+  return subLabel ? `${groupLabel}/${subLabel}` : groupLabel
+}
+
 function detailTopic(detail: ArticleDetailResponse) {
   return detail.batchGenerationTask?.topic || detail.article.topic || ''
 }
@@ -1721,7 +1793,7 @@ async function openForumSiteDistribute(row: ArticleDraft) {
     const { data } = await getPublishSites({ status: 'active' })
     forumSites.value = (data.data || []).filter(isForumPublishSite)
   } catch {
-    ElMessage.error('加载论坛失败')
+    ElMessage.error('加载平台网站失败')
   } finally {
     forumSiteLoading.value = false
   }
@@ -1762,11 +1834,11 @@ async function submitForumSite() {
     const result = await distributeContentArticleToForumSite(row.id, selectedForumSiteId.value)
     const task = result.data.data
     if (task.status === 'submitted') {
-      ElMessage.success('论坛分发成功')
+      ElMessage.success('平台网站分发成功')
       forumSiteVisible.value = false
       await load()
     } else {
-      ElMessage.error(task.errorMessage || '论坛分发失败')
+      ElMessage.error(task.errorMessage || '平台网站分发失败')
     }
   } finally {
     forumSiteSubmitting.value = false

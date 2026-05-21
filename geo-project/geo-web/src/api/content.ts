@@ -112,6 +112,7 @@ export interface BatchArticleGenerateTemplateCount {
 export interface BatchArticleGenerateTopic {
   topic: string
   topicAsQuestion?: string
+  questionSceneCode?: string | null
   keywordGroupId?: number
   keywordGroupName?: string
   platforms: BatchArticleGeneratePlatform[]
@@ -166,6 +167,8 @@ export interface ArticlePromptTemplate {
   agentSiteModule?: string | null
   articleTypeCode: string
   articleTypeName?: string | null
+  questionSceneCode?: string | null
+  questionSceneName?: string | null
   status: 'draft' | 'active' | 'disabled' | string
   weight: number
   sortOrder: number
@@ -206,6 +209,7 @@ export interface ArticlePromptTemplateSaveRequest {
   channelSubCode?: string | null
   agentSiteModule?: string | null
   articleTypeCode: string
+  questionSceneCode?: string | null
   status: 'draft' | 'active' | 'disabled' | string
   weight: number
   sortOrder: number
@@ -225,6 +229,8 @@ export interface ArticleGenerationTemplateOption {
   agentSiteModule?: string | null
   articleTypeCode: string
   articleTypeName?: string | null
+  questionSceneCode?: string | null
+  questionSceneName?: string | null
   weight: number
   sortOrder: number
 }
@@ -260,6 +266,8 @@ export interface ArticleAllocationItem {
   templateName: string
   articleTypeCode: string
   articleTypeName?: string | null
+  questionSceneCode?: string | null
+  questionSceneName?: string | null
   agentSiteModule?: string | null
   weight: number
   count: number
@@ -276,6 +284,7 @@ export function getArticlePromptTemplates(params?: {
   channelGroupCode?: string
   channelSubCode?: string
   agentSiteModule?: string
+  questionSceneCode?: string
   status?: string
   keyword?: string
   current?: number
@@ -319,6 +328,7 @@ export function getArticleGenerationOptions() {
 export function previewArticleTemplateAllocation(data: {
   channelGroupCode: string
   channelSubCode?: string | null
+  questionSceneCode?: string | null
   count: number
 }) {
   return request.post<R<ArticleAllocationPreviewResponse>>('/content/article-prompt-templates/preview-allocation', data)

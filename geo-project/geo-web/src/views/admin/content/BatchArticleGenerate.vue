@@ -110,11 +110,26 @@
           <div v-loading="platformLoading" class="section-body matrix-body">
             <div v-if="selectedTopics.length" class="topic-matrix-list">
               <article v-for="topic in selectedTopics" :key="topic.id" class="topic-card">
-                <div class="topic-card-head">
+                <div class="topic-card-head" :class="{ 'is-collapsed': isTopicCollapsed(topic) }">
                   <div class="topic-title-wrap">
-                    <div class="topic-title">{{ topic.topic }}</div>
+                    <div class="topic-title-row">
+                      <el-button
+                        class="collapse-trigger"
+                        link
+                        :icon="isTopicCollapsed(topic) ? ArrowRight : ArrowDown"
+                        :aria-label="isTopicCollapsed(topic) ? '展开主题' : '折叠主题'"
+                        @click="toggleTopicCollapse(topic)"
+                      />
+                      <div class="topic-title">{{ topic.topic }}</div>
+                    </div>
                     <div class="topic-meta">
                       {{ topic.source === 'keyword_group' ? `拓词组：${topic.keywordGroupName || '-'}` : '手动输入' }}
+                    </div>
+                    <div class="topic-summary-line">
+                      <span>{{ topicGeneratedCount(topic) }} 篇</span>
+                      <span>覆盖 {{ topicActivePlatformCount(topic) }} 个平台</span>
+                      <span>{{ topicSceneSummary(topic) }}</span>
+                      <span v-if="topicCustomPlatformCount(topic)">自定义 {{ topicCustomPlatformCount(topic) }} 项</span>
                     </div>
                   </div>
                   <div class="topic-card-actions">
@@ -123,19 +138,34 @@
                     <el-button link type="danger" :icon="Delete" @click="removeTopic(topic.id)">移除</el-button>
                   </div>
                 </div>
-                <div class="platform-group-list">
+                <div v-show="!isTopicCollapsed(topic)" class="platform-group-list">
                   <section v-for="group in platformGroups" :key="group.key" class="platform-group">
-                    <div class="platform-group-head">
+                    <div class="platform-group-head" :class="{ 'is-collapsed': isPlatformGroupCollapsed(topic, group) }">
                       <div>
-                        <div class="platform-group-title">{{ group.label }}</div>
+                        <div class="platform-group-title-row">
+                          <el-button
+                            class="collapse-trigger"
+                            link
+                            :icon="isPlatformGroupCollapsed(topic, group) ? ArrowRight : ArrowDown"
+                            :aria-label="isPlatformGroupCollapsed(topic, group) ? '展开平台大类' : '折叠平台大类'"
+                            @click="togglePlatformGroupCollapse(topic, group)"
+                          />
+                          <div class="platform-group-title">{{ group.label }}</div>
+                        </div>
                         <div class="platform-group-desc">{{ group.desc }}</div>
+                        <div class="platform-group-summary-line">
+                          <span>{{ platformGroupGeneratedCount(topic, group) }} 篇</span>
+                          <span>覆盖 {{ platformGroupActivePlatformCount(topic, group) }} 个平台</span>
+                          <span>可用 {{ platformGroupTemplateCount(group) }} 个模板</span>
+                          <span v-if="platformGroupCustomCount(topic, group)">自定义 {{ platformGroupCustomCount(topic, group) }} 项</span>
+                        </div>
                       </div>
                       <div class="platform-group-actions">
                         <el-button link type="primary" @click="setPlatformGroupPreset(topic, group, 1)">本组每项 1 篇</el-button>
                         <el-button link @click="clearPlatformGroupCounts(topic, group)">清空本组</el-button>
                       </div>
                     </div>
-                    <div class="platform-grid">
+                    <div v-show="!isPlatformGroupCollapsed(topic, group)" class="platform-grid">
                       <div v-for="platform in group.platforms" :key="platform.value" class="platform-cell" :class="{ 'is-disabled': platform.disabled }">
                         <div class="platform-label">
                           <img v-if="platform.iconUrl" class="platform-icon image-icon" :src="platform.iconUrl" :alt="platform.label" />
@@ -313,7 +343,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Back, Check, Delete } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowRight, Back, Check, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { TableInstance } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
@@ -372,6 +402,7 @@ interface SelectedTopic {
   source: 'manual' | 'keyword_group'
   topic: string
   topicAsQuestion?: string
+  questionSceneCode?: string | null
   keywordGroupId?: number
   keywordGroupName?: string
   platformCounts: Record<string, number>
@@ -390,6 +421,7 @@ const STATIC_PLATFORM_GROUPS: PlatformGroup[] = [
       { value: 'self_media:wechat', label: '公众号', desc: '完整长文，结构稳', icon: '公', contentStyle: 'wechat', channelGroupCode: 'self_media', channelSubCode: 'wechat' },
       { value: 'self_media:zhihu', label: '知乎', desc: '问题回答，判断清晰', icon: '知', contentStyle: 'zhihu', channelGroupCode: 'self_media', channelSubCode: 'zhihu' },
       { value: 'self_media:douyin_image_text', label: '抖音图文', desc: '图文卡片式阅读', icon: '抖', contentStyle: 'douyin_image_text', channelGroupCode: 'self_media', channelSubCode: 'douyin_image_text' },
+      { value: 'self_media:netease', label: '网易', desc: '门户资讯阅读，媒体感强', icon: '网', contentStyle: 'netease', channelGroupCode: 'self_media', channelSubCode: 'netease' },
     ],
   },
   {
@@ -404,7 +436,7 @@ const STATIC_PLATFORM_GROUPS: PlatformGroup[] = [
     desc: '面向媒体投放、社区讨论或专业商务场景。',
     platforms: [
       { value: 'authority_media:industry_media', label: '权威媒体', desc: '正式审慎，事实边界', icon: '权', contentStyle: 'authority_media', channelGroupCode: 'authority_media', channelSubCode: 'industry_media' },
-      { value: 'forum:', label: '论坛', desc: '垂直社区讨论感', icon: '坛', contentStyle: 'forum', channelGroupCode: 'forum', channelSubCode: null },
+      { value: 'forum:', label: '平台网站', desc: '平台网站讨论感', icon: '坛', contentStyle: 'forum', channelGroupCode: 'forum', channelSubCode: null },
     ],
   },
 ]
@@ -426,6 +458,8 @@ const batchQuestionRows = ref<ArticleQuestionOption[]>([])
 const selectedQuestionRows = ref<ArticleQuestionOption[]>([])
 const questionTableRef = ref<TableInstance>()
 const selectedTopics = ref<SelectedTopic[]>([])
+const collapsedTopicMap = ref<Record<string, boolean>>({})
+const collapsedPlatformGroupMap = ref<Record<string, boolean>>({})
 const manualTopicInput = ref('')
 const allocationMode = ref<'auto' | 'custom'>('auto')
 const allocationRows = ref<Array<BatchArticleGenerateTemplateCount & {
@@ -492,6 +526,74 @@ const batchStatusText = computed(() => {
   return canSubmitBatchGeneration.value ? `预计生成 ${batchGeneratedTotal.value} 篇` : '配置待完善'
 })
 
+function topicGeneratedCount(topic: SelectedTopic) {
+  return activePlatformOptions.value.reduce((sum, platform) => sum + Number(topic.platformCounts[platform.value] || 0), 0)
+}
+
+function topicActivePlatformCount(topic: SelectedTopic) {
+  return activePlatformOptions.value.filter((platform) => Number(topic.platformCounts[platform.value] || 0) > 0).length
+}
+
+function topicCustomPlatformCount(topic: SelectedTopic) {
+  return activePlatformOptions.value.filter((platform) => (
+    Number(topic.platformCounts[platform.value] || 0) > 0
+    && topic.platformAllocationModes[platform.value] === 'custom'
+  )).length
+}
+
+function topicSceneSummary(topic: SelectedTopic) {
+  return topic.questionSceneCode ? `场景：${sceneLabel(topic.questionSceneCode)}` : '未绑定问题场景'
+}
+
+function platformGroupGeneratedCount(topic: SelectedTopic, group: PlatformGroup) {
+  return group.platforms
+    .filter((platform) => !platform.disabled)
+    .reduce((sum, platform) => sum + Number(topic.platformCounts[platform.value] || 0), 0)
+}
+
+function platformGroupActivePlatformCount(topic: SelectedTopic, group: PlatformGroup) {
+  return group.platforms.filter((platform) => !platform.disabled && Number(topic.platformCounts[platform.value] || 0) > 0).length
+}
+
+function platformGroupCustomCount(topic: SelectedTopic, group: PlatformGroup) {
+  return group.platforms.filter((platform) => (
+    !platform.disabled
+    && Number(topic.platformCounts[platform.value] || 0) > 0
+    && topic.platformAllocationModes[platform.value] === 'custom'
+  )).length
+}
+
+function platformGroupTemplateCount(group: PlatformGroup) {
+  return group.platforms.reduce((sum, platform) => sum + Number(platform.templateCount || 0), 0)
+}
+
+function platformGroupCollapseKey(topic: SelectedTopic, group: PlatformGroup) {
+  return `${topic.id}::${group.key}`
+}
+
+function isTopicCollapsed(topic: SelectedTopic) {
+  return Boolean(collapsedTopicMap.value[topic.id])
+}
+
+function toggleTopicCollapse(topic: SelectedTopic) {
+  collapsedTopicMap.value = {
+    ...collapsedTopicMap.value,
+    [topic.id]: !collapsedTopicMap.value[topic.id],
+  }
+}
+
+function isPlatformGroupCollapsed(topic: SelectedTopic, group: PlatformGroup) {
+  return Boolean(collapsedPlatformGroupMap.value[platformGroupCollapseKey(topic, group)])
+}
+
+function togglePlatformGroupCollapse(topic: SelectedTopic, group: PlatformGroup) {
+  const key = platformGroupCollapseKey(topic, group)
+  collapsedPlatformGroupMap.value = {
+    ...collapsedPlatformGroupMap.value,
+    [key]: !collapsedPlatformGroupMap.value[key],
+  }
+}
+
 function createPlatformCounts() {
   return Object.fromEntries(platformOptions.value.map((platform) => [platform.value, 0])) as Record<string, number>
 }
@@ -537,6 +639,7 @@ function addManualTopic() {
       id: `manual:${topic}`,
       source: 'manual',
       topic,
+      questionSceneCode: null,
       platformCounts: createPlatformCounts(),
       platformAllocationModes: createPlatformAllocationModes(),
       platformTemplateCounts: createPlatformTemplateCounts(),
@@ -561,6 +664,12 @@ function appendTopic(topic: SelectedTopic) {
 
 function removeTopic(topicId: string) {
   selectedTopics.value = selectedTopics.value.filter((topic) => topic.id !== topicId)
+  const remainingTopics = { ...collapsedTopicMap.value }
+  delete remainingTopics[topicId]
+  collapsedTopicMap.value = remainingTopics
+  collapsedPlatformGroupMap.value = Object.fromEntries(
+    Object.entries(collapsedPlatformGroupMap.value).filter(([key]) => !key.startsWith(`${topicId}::`)),
+  )
 }
 
 function setTopicPreset(topic: SelectedTopic, count: number) {
@@ -636,6 +745,7 @@ async function loadAllocationPreview(topic: SelectedTopic, platform: ContentStyl
     const { data } = await previewArticleTemplateAllocation({
       channelGroupCode: platform.channelGroupCode,
       channelSubCode: platform.channelSubCode || null,
+      questionSceneCode: topic.questionSceneCode || null,
       count,
     })
     allocationRows.value = data.data.items.map((item) => ({
@@ -751,8 +861,8 @@ async function loadSelectedBrand() {
 
 function buildPlatformGroups(): PlatformGroup[] {
   if (generationOptions.value?.groups?.length) {
-    return generationOptions.value.groups.map((group) => ({
-      key: group.groupCode,
+    return generationOptions.value.groups.map((group, index) => ({
+      key: buildPlatformGroupUiKey(group, index),
       label: group.label,
       desc: group.description,
       platforms: group.channels.map((channel) => buildChannelOption(channel)),
@@ -770,6 +880,11 @@ function buildPlatformGroups(): PlatformGroup[] {
     ]
   }
   return groups
+}
+
+function buildPlatformGroupUiKey(group: ArticleGenerationOptions['groups'][number], index: number) {
+  const groupCode = group.groupCode?.trim()
+  return `${groupCode || 'platform_group'}::${index}`
 }
 
 function buildChannelOption(channel: ArticleGenerationOptions['groups'][number]['channels'][number]): ContentStyleOption {
@@ -851,6 +966,7 @@ function channelIcon(group: string, sub?: string | null) {
     douyin_image_text: '抖',
     xiaohongshu: '红',
     baijiahao: '百',
+    netease: '网',
     industry_media: '行',
     local_media: '地',
     finance_media: '财',
@@ -1038,6 +1154,7 @@ function confirmSelectedBatchQuestions() {
       source: 'keyword_group',
       topic: question.questionText,
       topicAsQuestion: question.questionText,
+      questionSceneCode: question.sceneCode || null,
       keywordGroupId: question.groupId,
       keywordGroupName: question.groupName,
       platformCounts: createPlatformCounts(),
@@ -1093,6 +1210,7 @@ async function submitBatchGeneration() {
   const payloadTopics = selectedTopics.value.map((topic) => ({
     topic: topic.topic,
     topicAsQuestion: topic.topicAsQuestion,
+    questionSceneCode: topic.questionSceneCode || undefined,
     keywordGroupId: topic.keywordGroupId,
     keywordGroupName: topic.keywordGroupName,
     platforms: activePlatformOptions.value.map((platform) => {
@@ -1413,17 +1531,75 @@ onMounted(() => {
   background: #f9fafb;
 }
 
+.topic-card-head.is-collapsed {
+  border-bottom: 0;
+}
+
+.topic-title-wrap {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.topic-title-row,
+.platform-group-title-row {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.collapse-trigger {
+  width: 24px;
+  height: 24px;
+  min-height: 24px;
+  flex: 0 0 24px;
+  border-radius: 6px;
+  color: #64748b;
+}
+
+.collapse-trigger:hover {
+  background: #eef2ff;
+  color: #2563eb;
+}
+
 .topic-title {
+  min-width: 0;
   font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .topic-meta {
-  margin-top: 4px;
+  margin-top: 6px;
+  padding-left: 32px;
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.topic-summary-line,
+.platform-group-summary-line {
+  margin-top: 8px;
+  padding-left: 32px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.topic-summary-line span,
+.platform-group-summary-line span {
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid #dbe4f0;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  background: #ffffff;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .platform-group-list {
@@ -1450,15 +1626,22 @@ onMounted(() => {
   background: #f8fafc;
 }
 
+.platform-group-head.is-collapsed {
+  border-bottom: 0;
+}
+
 .platform-group-title {
+  min-width: 0;
   font-size: 14px;
   line-height: 1.4;
   font-weight: 600;
   color: var(--text-primary);
+  overflow-wrap: anywhere;
 }
 
 .platform-group-desc {
-  margin-top: 3px;
+  margin-top: 5px;
+  padding-left: 32px;
   font-size: 12px;
   line-height: 1.45;
   color: var(--text-secondary);
@@ -1728,6 +1911,22 @@ onMounted(() => {
 
   .topic-card-head {
     flex-direction: column;
+  }
+
+  .topic-card-actions,
+  .platform-group-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .topic-summary-line,
+  .platform-group-summary-line {
+    padding-left: 0;
+  }
+
+  .topic-meta,
+  .platform-group-desc {
+    padding-left: 0;
   }
 
   .platform-group-head {

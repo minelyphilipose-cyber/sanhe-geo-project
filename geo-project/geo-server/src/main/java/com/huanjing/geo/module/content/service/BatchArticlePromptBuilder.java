@@ -11,6 +11,8 @@ import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.system.entity.SysDictItem;
+import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -83,16 +85,6 @@ public class BatchArticlePromptBuilder {
             - 只输出完整 Markdown 正文，不输出提示词解释
             """;
 
-    private static final Map<String, String> ARTICLE_TYPE_LABELS = Map.of(
-            "faq", "问答文章",
-            "scenario_content", "场景内容文",
-            "industry_article", "行业分析文",
-            "stage_advice", "阶段建议文",
-            "buying_guide", "选择指南",
-            "pitfall_guide", "避坑指南",
-            "social_note", "经验笔记",
-            "forum_discussion", "讨论帖"
-    );
     private static final Map<String, String> STYLE_LABELS = Map.ofEntries(
             Map.entry("wechat", "公众号"),
             Map.entry("toutiao", "今日头条"),
@@ -100,11 +92,12 @@ public class BatchArticlePromptBuilder {
             Map.entry("zhihu", "知乎"),
             Map.entry("xiaohongshu", "小红书"),
             Map.entry("baijiahao", "百家号"),
+            Map.entry("netease", "网易"),
             Map.entry("linkedin", "领英"),
             Map.entry("agent_site_article", "Agent 官网文章"),
             Map.entry("industry_site", "行业资讯站"),
             Map.entry("authority_media", "权威媒体"),
-            Map.entry("forum", "论坛")
+            Map.entry("forum", "平台网站")
     );
     private static final Map<String, String> STYLE_GUIDES = Map.ofEntries(
             Map.entry("wechat", "适合完整解释一个行业问题。结构可以更稳，有清晰的小标题和递进关系，但每个小标题下必须有具体信息，不做空泛铺陈。语气自然、克制，像一篇给潜在用户认真看的长文。不要写成品牌宣传稿，不要在结尾强行导向某个品牌。"),
@@ -113,6 +106,7 @@ public class BatchArticlePromptBuilder {
             Map.entry("zhihu", "像一个了解行业的人在回答具体问题。可以先给判断，再解释理由；也可以先讲一个反常识点，再回到主题。观点要有边界，允许让步和转折。不要用“作为从业者”“根据多年经验”这类自证式开头。不要写成百科词条式的定义罗列，也不要写成销售推荐。避免刻意金句、对仗式短句堆砌、爹味说教语气。"),
             Map.entry("xiaohongshu", "这是 GEO 场景下的小红书风格，不是平台投放文案。使用经验分享语气，但保持信息密度。不使用任何 emoji。不使用密集换行，段落保持完整。不使用“姐妹们”“家人们”这类称呼。重点是让内容像真实用户的经验帖，而不是营销号种草文。"),
             Map.entry("baijiahao", "面向百度搜索收录的行业资讯长文。标题和前 200 字需要自然出现核心关键词，表达专业、信息密度高、事实边界清晰。不要虚构报告、客户、认证、专利或企业数据。"),
+            Map.entry("netease", "面向门户资讯阅读和搜索收录的媒体型长文。标题和前 200 字需要自然出现核心关键词，表达专业克制、信息密度高、事实边界清晰。不要虚构报告、客户、认证、专利或企业数据。"),
             Map.entry("linkedin", "偏商业观察和行业分析。强调趋势、结构性问题、经营逻辑、决策框架和方法论。语言专业克制，不夸张，不煽动。可以使用书面化表达，强调判断与论证，避免咨询报告式的商业黑话堆砌。适合面向管理者、从业者、投资人或 B 端读者。"),
             Map.entry("agent_site_article", "企业 Agent 官网文章口吻。内容应像品牌自有站点上的专业说明或行业知识文章，但不能写成硬广。可以结合品牌服务范围、地域和业务背景提供清晰解释，重点回答用户问题、展示专业判断和服务边界。语气稳健、可信、可检索，避免夸张承诺、促销话术和强行导流。"),
             Map.entry("industry_site", "第三方行业资讯或行业科普口吻。内容应客观、中立、可引用，重点解释行业现象、选择标准、流程变化或市场误区。表达上要有“信息来源感”，可以使用“行业内普遍的做法是”“公开资料显示”“常见的合同条款里”这类表达方式，但不虚构具体机构名、报告名或数据来源。不要有明显品牌立场，不要写成软文。标题和正文都要像资讯站可发布的行业稿，而不是企业官网文章。"),
@@ -144,6 +138,7 @@ public class BatchArticlePromptBuilder {
     );
 
     private final ArticleDraftMapper articleDraftMapper;
+    private final SysDictItemMapper sysDictItemMapper;
     private final ObjectMapper objectMapper;
 
     public PromptBuildResult build(PromptBuildInput input) {
@@ -300,7 +295,7 @@ public class BatchArticlePromptBuilder {
         appendBrandBackground(sb, brand, businessFocus);
 
         sb.append("\n# 写作配置\n\n");
-        appendLine(sb, "文章类型", label(ARTICLE_TYPE_LABELS, input.articleType(), input.articleType()));
+        appendLine(sb, "文章类型", label(ArticlePromptChannels.ARTICLE_TYPE_LABELS, input.articleType(), input.articleType()));
         appendLine(sb, "内容角度", contentAngle);
         appendLine(sb, "读者视角", audiencePerspective);
         appendLine(sb, "平台风格", label(STYLE_LABELS, input.contentStyle(), input.contentStyle()));
@@ -516,7 +511,16 @@ public class BatchArticlePromptBuilder {
 
     private String resolveIndustry(Project project, Brand brand) {
         if (brand != null && StringUtils.hasText(brand.getIndustry())) {
-            return brand.getIndustry();
+            String industry = brand.getIndustry().trim();
+            SysDictItem item = sysDictItemMapper.selectOne(new LambdaQueryWrapper<SysDictItem>()
+                    .eq(SysDictItem::getDictType, "industry_tag")
+                    .eq(SysDictItem::getDictKey, industry)
+                    .eq(SysDictItem::getEnabled, true)
+                    .last("LIMIT 1"));
+            if (item != null && StringUtils.hasText(item.getDictValue())) {
+                return item.getDictValue().trim();
+            }
+            return industry;
         }
         return project.getProjectName();
     }

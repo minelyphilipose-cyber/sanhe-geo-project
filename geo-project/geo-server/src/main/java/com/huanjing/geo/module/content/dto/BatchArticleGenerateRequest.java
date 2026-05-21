@@ -41,6 +41,10 @@ public class BatchArticleGenerateRequest {
         @Size(max = 1000)
         private String topicAsQuestion;
 
+        @Size(max = 32)
+        @Pattern(regexp = "^[a-z][a-z0-9_]{1,63}$")
+        private String questionSceneCode;
+
         @NotEmpty
         @Size(max = 16)
         @Valid

@@ -42,7 +42,10 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
@@ -127,6 +130,9 @@ class ContentArticleServiceTest {
         ArgumentCaptor<ArticleDraft> draftCaptor = ArgumentCaptor.forClass(ArticleDraft.class);
         verify(articleDraftMapper, times(1)).insert(draftCaptor.capture());
         assertEquals("zhihu", draftCaptor.getValue().getContentStyle());
+        assertEquals(ArticleTypes.INDUSTRY_ARTICLE, draftCaptor.getValue().getArticleTypeCode());
+        assertEquals("self_media", draftCaptor.getValue().getChannelGroupCode());
+        assertEquals("zhihu", draftCaptor.getValue().getChannelSubCode());
         assertEquals("Manual topic", draftCaptor.getValue().getTopic());
         assertEquals("approved", draftCaptor.getValue().getStatus());
         ArgumentCaptor<ArticleDraftVersion> versionCaptor = ArgumentCaptor.forClass(ArticleDraftVersion.class);
@@ -276,7 +282,7 @@ class ContentArticleServiceTest {
     }
 
     @Test
-    void pageFillsBatchGenerationMetadataForListDisplay() {
+    void pageDoesNotBackfillLegacyContentStyleForListDisplay() {
         ArticleDraft article = article("approved");
         Page<ArticleDraft> mapperPage = new Page<>(1, 10, 1);
         mapperPage.setRecords(List.of(article));
@@ -293,10 +299,40 @@ class ContentArticleServiceTest {
 
         ArticleDraft row = result.getRecords().get(0);
         assertEquals("Project", row.getProjectName());
-        assertEquals("zhihu", row.getContentStyle());
+        assertNull(row.getContentStyle());
         assertEquals("批量文章主题", row.getTopic());
         assertEquals("批量问题词", row.getTopicAsQuestion());
         assertEquals(Boolean.TRUE, row.getSystemGenerated());
+    }
+
+    @Test
+    void pageArticleTypeCodeFilterDoesNotFallbackToLegacyArticleType() {
+        when(articleDraftMapper.selectPage(any(Page.class), any())).thenReturn(new Page<>(1, 10, 0));
+
+        service.page(null, null, null, ArticleTypes.BUYING_GUIDE,
+                null, null, null, null, null, 1, 10);
+
+        ArgumentCaptor<Wrapper<ArticleDraft>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(articleDraftMapper).selectPage(any(Page.class), captor.capture());
+        String sql = captor.getValue().getSqlSegment();
+        assertTrue(sql.contains("article_type_code"));
+        assertFalse(sql.matches("(?s).*\\barticle_type\\s*=.*"));
+        assertFalse(sql.contains("IS NULL"));
+    }
+
+    @Test
+    void pageChannelFilterDoesNotFallbackToLegacyContentStyle() {
+        when(articleDraftMapper.selectPage(any(Page.class), any())).thenReturn(new Page<>(1, 10, 0));
+
+        service.page(null, null, null, null,
+                "self_media", "zhihu", null, null, null, 1, 10);
+
+        ArgumentCaptor<Wrapper<ArticleDraft>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(articleDraftMapper).selectPage(any(Page.class), captor.capture());
+        String sql = captor.getValue().getSqlSegment();
+        assertTrue(sql.contains("channel_group_code"));
+        assertTrue(sql.contains("channel_sub_code"));
+        assertFalse(sql.contains("content_style"));
     }
 
     private void verifyAudit(String eventType, AuditResult result) {

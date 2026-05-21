@@ -120,7 +120,7 @@
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import DataState from '@/components/ui/DataState.vue'
 import { formatDateTime } from '@/utils/format'
 import {
@@ -131,6 +131,7 @@ import {
 } from '@/api/content'
 
 const router = useRouter()
+const route = useRoute()
 const loading = ref(false)
 const detailLoading = ref(false)
 const autoRefresh = ref(true)
@@ -141,8 +142,12 @@ const page = reactive({ current: 1, size: 10, total: 0 })
 const query = reactive({ status: '' })
 let refreshTimer: number | null = null
 
-onMounted(() => {
-  load()
+onMounted(async () => {
+  await load()
+  const initialJobId = Number(route.query.jobId)
+  if (Number.isFinite(initialJobId) && initialJobId > 0) {
+    await openDetail(initialJobId)
+  }
   startTimer()
 })
 onBeforeUnmount(stopTimer)
@@ -256,6 +261,7 @@ function itemTagType(v: string): 'success' | 'warning' | 'danger' | 'info' {
 function platformLabel(v: string) {
   if (v === 'agent_site') return 'Agent 官网'
   if (v === 'industry_site') return '行业资讯站'
+  if (v === 'forum_site') return '平台网站'
   return v || '-'
 }
 

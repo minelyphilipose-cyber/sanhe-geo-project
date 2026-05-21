@@ -28,11 +28,12 @@ public class ArticlePromptTemplateController {
     public R<Page<TemplateVO>> page(@RequestParam(required = false) String channelGroupCode,
                                     @RequestParam(required = false) String channelSubCode,
                                     @RequestParam(required = false) String agentSiteModule,
+                                    @RequestParam(required = false) String questionSceneCode,
                                     @RequestParam(required = false) String status,
                                     @RequestParam(required = false) String keyword,
                                     @RequestParam(defaultValue = "1") long current,
                                     @RequestParam(defaultValue = "10") long size) {
-        return R.ok(templateService.page(channelGroupCode, channelSubCode, agentSiteModule, status, keyword, current, size));
+        return R.ok(templateService.page(channelGroupCode, channelSubCode, agentSiteModule, questionSceneCode, status, keyword, current, size));
     }
 
     @GetMapping("/{id}")
@@ -72,6 +73,6 @@ public class ArticlePromptTemplateController {
 
     @PostMapping("/preview-allocation")
     public R<AllocationPreviewResponse> previewAllocation(@Valid @RequestBody AllocationPreviewRequest req) {
-        return R.ok(allocationService.preview(req.channelGroupCode(), req.channelSubCode(), req.count()));
+        return R.ok(allocationService.preview(req.channelGroupCode(), req.channelSubCode(), req.questionSceneCode(), req.count()));
     }
 }

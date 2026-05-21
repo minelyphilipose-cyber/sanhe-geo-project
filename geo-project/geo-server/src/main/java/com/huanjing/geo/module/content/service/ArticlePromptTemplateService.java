@@ -44,6 +44,14 @@ public class ArticlePromptTemplateService {
     public static final String CONTACT_SOFT_HINT = "soft_hint";
     public static final String CONTACT_BRAND_ONLY = "brand_only";
     public static final String CONTACT_NONE = "none";
+    public static final Map<String, String> QUESTION_SCENE_LABELS = Map.of(
+            "brand", "品牌",
+            "decision", "决策",
+            "deal", "成交",
+            "compare", "对比",
+            "qa", "问答",
+            "function", "功能"
+    );
     public static final int MIN_TEMPLATE_WEIGHT = 0;
     public static final int MAX_TEMPLATE_WEIGHT = 100;
 
@@ -55,6 +63,7 @@ public class ArticlePromptTemplateService {
     public Page<TemplateVO> page(String channelGroupCode,
                                  String channelSubCode,
                                  String agentSiteModule,
+                                 String questionSceneCode,
                                  String status,
                                  String keyword,
                                  long current,
@@ -64,6 +73,7 @@ public class ArticlePromptTemplateService {
                 .eq(StringUtils.hasText(channelGroupCode), ArticlePromptTemplate::getChannelGroupCode, trim(channelGroupCode))
                 .eq(StringUtils.hasText(channelSubCode), ArticlePromptTemplate::getChannelSubCode, trim(channelSubCode))
                 .eq(StringUtils.hasText(agentSiteModule), ArticlePromptTemplate::getAgentSiteModule, trim(agentSiteModule))
+                .eq(StringUtils.hasText(questionSceneCode), ArticlePromptTemplate::getQuestionSceneCode, trim(questionSceneCode))
                 .eq(StringUtils.hasText(status), ArticlePromptTemplate::getStatus, trim(status))
                 .and(StringUtils.hasText(keyword), q -> q
                         .like(ArticlePromptTemplate::getName, trim(keyword))
@@ -99,7 +109,7 @@ public class ArticlePromptTemplateService {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("user.manage");
         validateTemplate(req.channelGroupCode(), req.channelSubCode(), req.agentSiteModule(), req.status(), req.weight(),
-                req.contactDisclosureMode());
+                req.contactDisclosureMode(), req.questionSceneCode());
 
         ArticlePromptTemplate template = new ArticlePromptTemplate();
         fillTemplate(template, req);
@@ -108,14 +118,12 @@ public class ArticlePromptTemplateService {
         templateMapper.insert(template);
 
         ArticlePromptTemplateVersion version = createVersionRow(template.getId(), 1, req.systemPrompt(),
-                req.userPromptTemplate(), req.variablesJson(), req.qualityRulesJson(), Boolean.TRUE.equals(req.publish()), operator.getId());
-        if (VERSION_PUBLISHED.equals(version.getStatus())) {
-            template.setCurrentVersionId(version.getId());
-            if (STATUS_DRAFT.equals(template.getStatus())) {
-                template.setStatus(STATUS_ACTIVE);
-            }
-            templateMapper.updateById(template);
+                req.userPromptTemplate(), req.variablesJson(), req.qualityRulesJson(), true, operator.getId());
+        template.setCurrentVersionId(version.getId());
+        if (STATUS_DRAFT.equals(template.getStatus())) {
+            template.setStatus(STATUS_ACTIVE);
         }
+        templateMapper.updateById(template);
         audit(operator, "article_prompt_template.create", template.getId(), Map.of("name", template.getName()));
         return detail(template.getId());
     }
@@ -126,19 +134,15 @@ public class ArticlePromptTemplateService {
         currentUserService.ensurePermission("user.manage");
         ArticlePromptTemplate template = requireTemplate(id);
         validateTemplate(req.channelGroupCode(), req.channelSubCode(), req.agentSiteModule(), req.status(), req.weight(),
-                req.contactDisclosureMode());
+                req.contactDisclosureMode(), req.questionSceneCode());
         Map<String, Object> before = snapshot(template);
         fillTemplate(template, req);
         templateMapper.updateById(template);
 
         boolean hasVersionPayload = StringUtils.hasText(req.systemPrompt()) && StringUtils.hasText(req.userPromptTemplate());
         if (hasVersionPayload) {
-            int nextVersion = versionMapper.maxVersionNo(id) + 1;
-            ArticlePromptTemplateVersion version = createVersionRow(id, nextVersion, req.systemPrompt(),
-                    req.userPromptTemplate(), req.variablesJson(), req.qualityRulesJson(), Boolean.TRUE.equals(req.publish()), operator.getId());
-            if (VERSION_PUBLISHED.equals(version.getStatus())) {
-                publishVersionInternal(template, version);
-            }
+            upsertCurrentVersion(template, req.systemPrompt(), req.userPromptTemplate(),
+                    req.variablesJson(), req.qualityRulesJson(), operator.getId());
         }
         audit(operator, "article_prompt_template.update", id, Map.of("before", before, "after", snapshot(template)));
         return detail(id);
@@ -149,14 +153,10 @@ public class ArticlePromptTemplateService {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("user.manage");
         ArticlePromptTemplate template = requireTemplate(templateId);
-        int nextVersion = versionMapper.maxVersionNo(templateId) + 1;
-        ArticlePromptTemplateVersion version = createVersionRow(templateId, nextVersion, req.systemPrompt(),
-                req.userPromptTemplate(), req.variablesJson(), req.qualityRulesJson(), Boolean.TRUE.equals(req.publish()), operator.getId());
-        if (VERSION_PUBLISHED.equals(version.getStatus())) {
-            publishVersionInternal(template, version);
-        }
+        ArticlePromptTemplateVersion version = upsertCurrentVersion(template, req.systemPrompt(),
+                req.userPromptTemplate(), req.variablesJson(), req.qualityRulesJson(), operator.getId());
         audit(operator, "article_prompt_template.version.create", templateId,
-                Map.of("versionNo", version.getVersionNo(), "published", VERSION_PUBLISHED.equals(version.getStatus())));
+                Map.of("versionNo", version.getVersionNo(), "published", true));
         return detail(templateId);
     }
 
@@ -166,8 +166,14 @@ public class ArticlePromptTemplateService {
         currentUserService.ensurePermission("user.manage");
         ArticlePromptTemplate template = requireTemplate(templateId);
         ArticlePromptTemplateVersion version = requireVersion(templateId, versionId);
-        publishVersionInternal(template, version);
-        audit(operator, "article_prompt_template.version.publish", templateId, Map.of("versionId", versionId));
+        if (!version.getId().equals(template.getCurrentVersionId())) {
+            throw new BizException(400, "Template version publishing is disabled; edit and save the template to take effect");
+        }
+        version.setStatus(VERSION_PUBLISHED);
+        version.setPublishedAt(version.getPublishedAt() == null ? LocalDateTime.now() : version.getPublishedAt());
+        versionMapper.updateById(version);
+        audit(operator, "article_prompt_template.version.publish", templateId,
+                Map.of("versionId", versionId, "directSaveMode", true));
         return detail(templateId);
     }
 
@@ -208,6 +214,7 @@ public class ArticlePromptTemplateService {
         template.setChannelSubCode(trimToNull(req.channelSubCode()));
         template.setAgentSiteModule(trimToNull(req.agentSiteModule()));
         template.setArticleTypeCode(trim(req.articleTypeCode()));
+        template.setQuestionSceneCode(normalizeQuestionScene(req.questionSceneCode()));
         template.setWeight(req.weight());
         template.setSortOrder(req.sortOrder() == null ? 0 : req.sortOrder());
         template.setStatus(trim(req.status()));
@@ -216,7 +223,7 @@ public class ArticlePromptTemplateService {
     }
 
     private void validateTemplate(String groupCode, String subCode, String module, String status, Integer weight,
-                                  String contactDisclosureMode) {
+                                  String contactDisclosureMode, String questionSceneCode) {
         String group = trim(groupCode);
         String sub = trimToNull(subCode);
         if (!ArticlePromptChannels.isValidCode(group)) {
@@ -232,6 +239,10 @@ public class ArticlePromptTemplateService {
         if (!List.of(CONTACT_FULL, CONTACT_SOFT_HINT, CONTACT_BRAND_ONLY, CONTACT_NONE)
                 .contains(normalizeContactMode(contactDisclosureMode))) {
             throw new BizException(400, "Invalid contact disclosure mode");
+        }
+        String scene = normalizeQuestionScene(questionSceneCode);
+        if (scene != null && !QUESTION_SCENE_LABELS.containsKey(scene)) {
+            throw new BizException(400, "Invalid question scene");
         }
         if (ArticlePromptChannels.AGENT_SITE.equals(group)) {
             if (!ArticlePromptChannels.AGENT_SITE_MODULES.contains(trim(module))) {
@@ -287,22 +298,35 @@ public class ArticlePromptTemplateService {
         return version;
     }
 
-    private void publishVersionInternal(ArticlePromptTemplate template, ArticlePromptTemplateVersion version) {
-        if (template.getCurrentVersionId() != null && !template.getCurrentVersionId().equals(version.getId())) {
-            ArticlePromptTemplateVersion current = versionMapper.selectById(template.getCurrentVersionId());
-            if (current != null && VERSION_PUBLISHED.equals(current.getStatus())) {
-                current.setStatus(VERSION_ARCHIVED);
-                versionMapper.updateById(current);
-            }
+    private ArticlePromptTemplateVersion upsertCurrentVersion(ArticlePromptTemplate template,
+                                                              String systemPrompt,
+                                                              String userPromptTemplate,
+                                                              String variablesJson,
+                                                              String qualityRulesJson,
+                                                              Long operatorId) {
+        ArticlePromptTemplateVersion current = template.getCurrentVersionId() == null
+                ? null
+                : versionMapper.selectById(template.getCurrentVersionId());
+        if (current != null) {
+            current.setSystemPrompt(systemPrompt);
+            current.setUserPromptTemplate(userPromptTemplate);
+            current.setVariablesJson(trimToNull(variablesJson));
+            current.setQualityRulesJson(trimToNull(qualityRulesJson));
+            current.setStatus(VERSION_PUBLISHED);
+            current.setPublishedAt(LocalDateTime.now());
+            versionMapper.updateById(current);
+            return current;
         }
-        version.setStatus(VERSION_PUBLISHED);
-        version.setPublishedAt(version.getPublishedAt() == null ? LocalDateTime.now() : version.getPublishedAt());
-        versionMapper.updateById(version);
+
+        int nextVersion = versionMapper.maxVersionNo(template.getId()) + 1;
+        ArticlePromptTemplateVersion version = createVersionRow(template.getId(), nextVersion, systemPrompt,
+                userPromptTemplate, variablesJson, qualityRulesJson, true, operatorId);
         template.setCurrentVersionId(version.getId());
         if (STATUS_DRAFT.equals(template.getStatus())) {
             template.setStatus(STATUS_ACTIVE);
         }
         templateMapper.updateById(template);
+        return version;
     }
 
     private TemplateVO toVO(ArticlePromptTemplate template) {
@@ -320,6 +344,8 @@ public class ArticlePromptTemplateService {
                 template.getAgentSiteModule(),
                 template.getArticleTypeCode(),
                 ArticlePromptChannels.ARTICLE_TYPE_LABELS.getOrDefault(template.getArticleTypeCode(), template.getArticleTypeCode()),
+                template.getQuestionSceneCode(),
+                questionSceneLabel(template.getQuestionSceneCode()),
                 template.getWeight(),
                 template.getSortOrder(),
                 template.getStatus(),
@@ -354,6 +380,7 @@ public class ArticlePromptTemplateService {
         map.put("channelSubCode", template.getChannelSubCode());
         map.put("agentSiteModule", template.getAgentSiteModule());
         map.put("articleTypeCode", template.getArticleTypeCode());
+        map.put("questionSceneCode", template.getQuestionSceneCode());
         map.put("weight", template.getWeight());
         map.put("status", template.getStatus());
         map.put("sampleOutputUrl", template.getSampleOutputUrl());
@@ -384,5 +411,16 @@ public class ArticlePromptTemplateService {
     private String normalizeContactMode(String value) {
         String mode = trimToNull(value);
         return mode == null ? CONTACT_NONE : mode;
+    }
+
+    private String normalizeQuestionScene(String value) {
+        return trimToNull(value);
+    }
+
+    private String questionSceneLabel(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return QUESTION_SCENE_LABELS.getOrDefault(value, value);
     }
 }

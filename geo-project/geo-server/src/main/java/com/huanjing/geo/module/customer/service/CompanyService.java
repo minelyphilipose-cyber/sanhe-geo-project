@@ -75,7 +75,7 @@ public class CompanyService {
     private static final List<ChannelDefinition> DISTRIBUTION_CHANNELS = List.of(
             new ChannelDefinition("official_site", "官网"),
             new ChannelDefinition("industry_site", "行业资讯站"),
-            new ChannelDefinition("forum", "论坛"),
+            new ChannelDefinition("forum", "平台网站"),
             new ChannelDefinition("self_media", "自媒体平台"),
             new ChannelDefinition("authority_media", "权重媒体平台")
     );

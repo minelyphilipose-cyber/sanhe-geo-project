@@ -18,6 +18,7 @@ public class ArticlePromptTemplate {
     private String channelSubCode;
     private String agentSiteModule;
     private String articleTypeCode;
+    private String questionSceneCode;
     private Integer weight;
     private Integer sortOrder;
     private String status;
