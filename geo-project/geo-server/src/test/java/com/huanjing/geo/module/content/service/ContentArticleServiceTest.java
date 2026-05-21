@@ -32,6 +32,7 @@ import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
+import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -61,6 +62,7 @@ class ContentArticleServiceTest {
     private ProjectMapper projectMapper;
     private BrandAccessService brandAccessService;
     private AuditService auditService;
+    private ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
     private ContentArticleService service;
 
     @BeforeEach
@@ -75,11 +77,13 @@ class ContentArticleServiceTest {
         batchArticleGenerationTaskMapper = mock(BatchArticleGenerationTaskMapper.class);
         brandAccessService = mock(BrandAccessService.class);
         auditService = mock(AuditService.class);
+        articleImagePublicUrlRewriter = mock(ArticleImagePublicUrlRewriter.class);
         projectMapper = mock(ProjectMapper.class);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
 
         when(currentUserService.requireCurrentUser()).thenReturn(operator(7L));
         when(projectMapper.selectById(10L)).thenReturn(project());
+        when(articleImagePublicUrlRewriter.rewrite(any(), any())).thenAnswer(invocation -> invocation.getArgument(1));
 
         service = new ContentArticleService(
                 articleDraftMapper,
@@ -92,6 +96,8 @@ class ContentArticleServiceTest {
                 mock(SysDictItemMapper.class),
                 currentUserService,
                 mock(MarkdownImageReferenceValidator.class),
+                new MarkdownToHtmlRenderer(),
+                articleImagePublicUrlRewriter,
                 brandAccessService,
                 auditService
         );

@@ -82,6 +82,7 @@ class ContentDistributionServiceTest {
     private BrandAccessService brandAccessService;
     private FillTokenService fillTokenService;
     private AuditService auditService;
+    private ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
     private ContentDistributionService contentDistributionService;
 
     @BeforeEach
@@ -105,6 +106,8 @@ class ContentDistributionServiceTest {
         brandAccessService = mock(BrandAccessService.class);
         fillTokenService = mock(FillTokenService.class);
         auditService = mock(AuditService.class);
+        articleImagePublicUrlRewriter = mock(ArticleImagePublicUrlRewriter.class);
+        when(articleImagePublicUrlRewriter.rewrite(any(), any())).thenAnswer(invocation -> invocation.getArgument(1));
         contentDistributionService = new ContentDistributionService(
                 articleDraftMapper,
                 articleDraftVersionMapper,
@@ -125,7 +128,8 @@ class ContentDistributionServiceTest {
                 fillTokenService,
                 auditService,
                 new ObjectMapper(),
-                mock(AuthorityMediaDistributionAdapter.class)
+                mock(AuthorityMediaDistributionAdapter.class),
+                articleImagePublicUrlRewriter
         );
     }
 

@@ -96,6 +96,7 @@ public class ContentDistributionService {
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
     private final AuthorityMediaDistributionAdapter authorityMediaDistributionAdapter;
+    private final ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
 
     @Transactional
     public DistributionTask distribute(Long articleId, Long siteId) {
@@ -527,7 +528,7 @@ public class ContentDistributionService {
             return createSemiAutoSelfMediaTask(article, project, operator, account, mpTarget);
         }
 
-        String content = requireLatestContent(article.getId());
+        String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
         AutoSelfMediaAdapter adapter = resolveSelfMediaAdapter(account.getPlatform());
         DistributionTask task = createAttemptForSelfMedia(article, account, operator.getId(), mpTarget.requestId().trim());
         companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.MP_ACCOUNT, task.getId());
@@ -570,7 +571,7 @@ public class ContentDistributionService {
         }
         requireIndustryPublishSite(site);
 
-        String content = requireLatestContent(article.getId());
+        String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
         DistributionTask task = createAttemptForIndustrySite(article, site, operator.getId());
         companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.INDUSTRY_SITE, task.getId());
         try {
@@ -613,7 +614,7 @@ public class ContentDistributionService {
         }
         requireForumPublishSite(site);
 
-        String content = requireLatestContent(article.getId());
+        String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
         DistributionTask task = createAttemptForForumSite(article, site, operator.getId());
         companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.FORUM_SITE, task.getId());
         try {
@@ -663,7 +664,7 @@ public class ContentDistributionService {
                                                           SysUser operator,
                                                           TargetContext.AuthorityMediaTarget target) {
         authorityMediaDistributionAdapter.validateBeforeCreatingTask(article, target);
-        String content = requireLatestContent(article.getId());
+        String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
         DistributionTask task = createAttemptForAuthorityMedia(article, target.resourceId(), operator.getId());
         companyChannelQuotaService.reserveDistribution(project.getCompanyId(), project.getId(), DistributionTargetKind.AUTHORITY_MEDIA, task.getId());
         try {
@@ -695,7 +696,7 @@ public class ContentDistributionService {
                                                         SelfMediaAccount account,
                                                         TargetContext.SelfMediaTarget mpTarget) {
         brandAccessService.requireBrandAccess(account.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
-        String content = requireLatestContent(article.getId());
+        String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
         SemiAutoSelfMediaAdapter adapter = resolveSemiAutoSelfMediaAdapter(account.getPlatform());
         SemiAutoFillTask fillTask = adapter.prepareFillTask(article, content, adapter.fillProfile());
         String fillPayload = toFillPayload(fillTask);

@@ -19,6 +19,7 @@ import com.huanjing.geo.module.content.dto.ArticleRevisionSaveRequest;
 import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
 import com.huanjing.geo.module.content.entity.*;
 import com.huanjing.geo.module.content.mapper.*;
+import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -57,6 +58,8 @@ public class ContentArticleService {
     private final SysDictItemMapper sysDictItemMapper;
     private final CurrentUserService currentUserService;
     private final MarkdownImageReferenceValidator markdownImageReferenceValidator;
+    private final MarkdownToHtmlRenderer markdownToHtmlRenderer;
+    private final ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
     private final BrandAccessService brandAccessService;
     private final AuditService auditService;
 
@@ -212,6 +215,8 @@ public class ContentArticleService {
         }
         String title = StringUtils.hasText(version.getTitle()) ? version.getTitle() : article.getTitle();
         String content = Optional.ofNullable(version.getContentMarkdown()).orElse("");
+        Project project = requireProject(article.getProjectId());
+        String html = markdownToHtmlRenderer.render(articleImagePublicUrlRewriter.rewrite(project, content));
         return """
                 <!doctype html>
                 <html lang="zh-CN">
@@ -223,12 +228,14 @@ public class ContentArticleService {
                     body{margin:0;background:#f8fafc;color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.75}
                     main{max-width:820px;margin:0 auto;padding:40px 20px 64px;background:#fff;min-height:100vh}
                     h1{font-size:28px;line-height:1.35;margin:0 0 24px}
-                    pre{white-space:pre-wrap;word-break:break-word;font:inherit;margin:0}
+                    img{max-width:100%%;height:auto;border-radius:6px}
+                    table{border-collapse:collapse;width:100%%}
+                    th,td{border:1px solid #e2e8f0;padding:8px;text-align:left}
                   </style>
                 </head>
-                <body><main><h1>%s</h1><pre>%s</pre></main></body>
+                <body><main><h1>%s</h1>%s</main></body>
                 </html>
-                """.formatted(escapeHtml(title), escapeHtml(title), escapeHtml(content));
+                """.formatted(escapeHtml(title), escapeHtml(title), html);
     }
 
     public Map<String, Object> detail(Long articleId) {

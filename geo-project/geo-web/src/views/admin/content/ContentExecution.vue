@@ -989,6 +989,7 @@ const detailVisible = ref(false)
 const detailData = ref<ArticleDetailResponse | null>(null)
 const detailViewMode = ref<'preview' | 'markdown'>('preview')
 const currentArticleId = ref<number | null>(null)
+const articleImagePreviewUrls = ref<Record<string, string>>({})
 
 const revisionVisible = ref(false)
 const revisionViewMode = ref<'preview' | 'markdown'>('markdown')
@@ -1098,8 +1099,8 @@ const markdown = new MarkdownIt({
 })
 
 const detailMarkdown = computed(() => detailData.value?.versions?.[0]?.contentMarkdown || '')
-const detailHtml = computed(() => markdown.render(detailMarkdown.value || ''))
-const revisionHtml = computed(() => markdown.render(revisionForm.contentMarkdown || ''))
+const detailHtml = computed(() => renderArticlePreviewMarkdown(detailMarkdown.value || ''))
+const revisionHtml = computed(() => renderArticlePreviewMarkdown(revisionForm.contentMarkdown || ''))
 const wechatActive = computed(() => wechatAccounts.value.some((account) => account.status === 'active'))
 const wechatStatusLabel = computed(() => {
   if (!wechatCapability.value?.draftDistributionEnabled) return '审核中'
@@ -1626,9 +1627,11 @@ function detailTopic(detail: ArticleDetailResponse) {
 
 async function openDetail(articleId: number) {
   try {
+    articleImagePreviewUrls.value = {}
     const { data } = await getContentArticleDetail(articleId)
     detailData.value = data.data
     detailViewMode.value = 'preview'
+    await loadArticleImagePreviewUrls(detailMarkdown.value, data.data.project?.brandId || null, data.data.project?.id)
     detailVisible.value = true
   } catch {
     ElMessage.error('加载详情失败')
@@ -1640,9 +1643,11 @@ async function openRevision(row: ArticleDraft) {
   revisionForm.title = row.title
   revisionForm.note = ''
   revisionViewMode.value = 'markdown'
+  articleImagePreviewUrls.value = {}
   try {
     const { data } = await getContentArticleDetail(row.id)
     revisionForm.contentMarkdown = data.data.versions?.[0]?.contentMarkdown || ''
+    await loadArticleImagePreviewUrls(revisionForm.contentMarkdown, data.data.project?.brandId || null, data.data.project?.id)
   } catch {
     revisionForm.contentMarkdown = ''
   }
@@ -1656,6 +1661,7 @@ function openRevisionFromDetail() {
   revisionForm.contentMarkdown = detailData.value.versions?.[0]?.contentMarkdown || ''
   revisionForm.note = ''
   revisionViewMode.value = 'markdown'
+  void loadArticleImagePreviewUrls(revisionForm.contentMarkdown, detailData.value.project?.brandId || null, detailData.value.project?.id)
   revisionVisible.value = true
 }
 
@@ -2050,6 +2056,68 @@ function selectImageFolder(folderId: number) {
   selectedImageFolderId.value = folderId
   selectedCoverMaterialId.value = selectedMediaPlatform.value === 'wechat_mp' ? imageMaterials.value[0]?.id || null : null
   selectedDouyinImageMaterialIds.value = selectedDouyinImageMaterialIds.value.filter((id) => douyinImageMaterials.value.some((item) => item.id === id))
+}
+
+function renderArticlePreviewMarkdown(content: string) {
+  const html = markdown.render(content)
+  const previewUrls = articleImagePreviewUrls.value
+  if (!Object.keys(previewUrls).length) {
+    return html
+  }
+  const template = document.createElement('template')
+  template.innerHTML = html
+  template.content.querySelectorAll('img').forEach((image) => {
+    const originalSrc = image.getAttribute('src') || ''
+    const previewUrl = previewUrls[originalSrc]
+    if (previewUrl) {
+      image.setAttribute('data-source-src', originalSrc)
+      image.setAttribute('src', previewUrl)
+    }
+  })
+  return template.innerHTML
+}
+
+async function loadArticleImagePreviewUrls(markdownContent: string, brandId?: number | null, projectId?: number | null) {
+  if (!brandId || !markdownContent.trim()) {
+    articleImagePreviewUrls.value = {}
+    return
+  }
+  const imageUrls = extractMarkdownImageUrls(markdownContent)
+  if (!imageUrls.length) {
+    articleImagePreviewUrls.value = {}
+    return
+  }
+  try {
+    const { data } = await getBrandImageFolders(brandId, {
+      projectId: projectId || undefined,
+      activeOnly: true,
+      includeMaterials: true,
+    })
+    const materials = (data.data || []).flatMap((folder) => folder.materials || [])
+    const materialByUrl = new Map(materials.map((material) => [material.fileUrl, material]))
+    const next: Record<string, string> = {}
+    await Promise.all(imageUrls.map(async (url) => {
+      const material = materialByUrl.get(url)
+      if (!material) return
+      const previewRes = await getBrandMaterialPreviewUrl(brandId, material.id)
+      next[url] = previewRes.data.data.url
+    }))
+    articleImagePreviewUrls.value = next
+  } catch {
+    articleImagePreviewUrls.value = {}
+  }
+}
+
+function extractMarkdownImageUrls(content: string) {
+  const urls = new Set<string>()
+  const pattern = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(content)) !== null) {
+    if (match[1]) {
+      urls.add(match[1])
+    }
+  }
+  return Array.from(urls)
 }
 
 function ensureSelectedImageFolder() {
@@ -2666,6 +2734,7 @@ async function submitRevision() {
       const { data } = await getContentArticleDetail(currentArticleId.value)
       detailData.value = data.data
       detailViewMode.value = 'preview'
+      await loadArticleImagePreviewUrls(detailMarkdown.value, data.data.project?.brandId || null, data.data.project?.id)
     }
   } finally {
     submitting.value = false

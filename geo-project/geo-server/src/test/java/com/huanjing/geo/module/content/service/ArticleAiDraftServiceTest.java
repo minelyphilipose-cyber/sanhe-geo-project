@@ -233,7 +233,8 @@ class ArticleAiDraftServiceTest {
                 mock(ArticleReviewLogMapper.class), mock(ArticlePublishLogMapper.class),
                 mock(BatchArticleGenerationTaskMapper.class), mock(BrandMapper.class),
                 projectMapper, mock(SysDictItemMapper.class), currentUserService,
-                mock(MarkdownImageReferenceValidator.class), brandAccessService, mock(AuditService.class));
+                mock(MarkdownImageReferenceValidator.class), mock(com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer.class),
+                mock(ArticleImagePublicUrlRewriter.class), brandAccessService, mock(AuditService.class));
     }
 
     private void verifyAudit(AuditResult result, String status) {
