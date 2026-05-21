@@ -166,87 +166,122 @@
       destroy-on-close
     >
       <el-form label-position="top" class="template-form">
-        <div class="form-grid">
-          <el-form-item label="模板名称">
-            <el-input v-model="form.name" maxlength="80" show-word-limit />
+        <section class="editor-section basic-section">
+          <div class="section-title">
+            <h3>基础信息</h3>
+            <span>{{ form.channelGroupCode === 'agent_site' ? '官网模板' : '渠道模板' }}</span>
+          </div>
+          <div class="form-grid">
+            <el-form-item label="模板名称">
+              <el-input v-model="form.name" maxlength="80" show-word-limit />
+            </el-form-item>
+            <el-form-item label="状态">
+              <el-select v-model="form.status">
+                <el-option label="草稿" value="draft" />
+                <el-option label="启用" value="active" />
+                <el-option label="停用" value="disabled" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="渠道大类">
+              <el-select v-model="form.channelGroupCode" filterable allow-create default-first-option @change="handleFormGroupChange">
+                <el-option v-for="group in formGroupOptions" :key="group.value" :label="group.label" :value="group.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="渠道小类">
+              <el-select
+                v-model="form.channelSubCode"
+                clearable
+                filterable
+                allow-create
+                default-first-option
+                :disabled="form.channelGroupCode === 'agent_site' || form.channelGroupCode === 'industry_site' || form.channelGroupCode === 'forum'"
+              >
+                <el-option v-for="item in formSubOptions" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item v-if="form.channelGroupCode === 'agent_site'" label="官网文章归属">
+              <el-select v-model="form.agentSiteModule">
+                <el-option label="FAQ" value="faq" />
+                <el-option label="知识库" value="knowledge" />
+                <el-option label="产品服务" value="product" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="文章类型">
+              <el-select v-model="form.articleTypeCode">
+                <el-option v-for="item in articleTypes" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="样文链接">
+              <el-input v-model="form.sampleOutputUrl" clearable placeholder="可选，填写标杆样文 URL" />
+            </el-form-item>
+            <el-form-item label="联系方式露出">
+              <el-select v-model="form.contactDisclosureMode">
+                <el-option v-for="item in contactModes" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item>
+              <template #label>
+                <span class="field-label">权重</span>
+                <span class="field-help">取值 {{ MIN_TEMPLATE_WEIGHT }}-{{ MAX_TEMPLATE_WEIGHT }}，用于自动分配。数字越大分配越多，0 不参与。</span>
+              </template>
+              <el-input-number
+                v-model="form.weight"
+                :min="MIN_TEMPLATE_WEIGHT"
+                :max="MAX_TEMPLATE_WEIGHT"
+                :step="1"
+                step-strictly
+                controls-position="right"
+              />
+            </el-form-item>
+          </div>
+        </section>
+
+        <section class="editor-section note-section">
+          <div class="section-title">
+            <h3>模板说明</h3>
+          </div>
+          <el-form-item label="说明内容" class="compact-form-item">
+            <el-input v-model="form.description" type="textarea" :rows="2" maxlength="300" show-word-limit />
           </el-form-item>
-          <el-form-item label="状态">
-            <el-select v-model="form.status">
-              <el-option label="草稿" value="draft" />
-              <el-option label="启用" value="active" />
-              <el-option label="停用" value="disabled" />
-            </el-select>
+        </section>
+
+        <section class="editor-section prompt-section">
+          <div class="section-title">
+            <h3>提示词内容</h3>
+            <span>当前版本 {{ editingDetail?.currentVersionNo || '新建' }}</span>
+          </div>
+          <div class="prompt-editor-grid">
+            <div class="prompt-card">
+              <div class="prompt-card-head">
+                <strong>系统提示词</strong>
+                <span>{{ form.systemPrompt.length }} 字</span>
+              </div>
+              <el-input v-model="form.systemPrompt" class="prompt-textarea system-prompt" type="textarea" :rows="14" />
+            </div>
+            <div class="prompt-card">
+              <div class="prompt-card-head">
+                <strong>用户提示词模板</strong>
+                <span>{{ form.userPromptTemplate.length }} 字</span>
+              </div>
+              <el-input v-model="form.userPromptTemplate" class="prompt-textarea user-prompt" type="textarea" :rows="18" />
+            </div>
+          </div>
+        </section>
+
+        <section class="editor-section">
+          <div class="section-title">
+            <h3>变更说明</h3>
+          </div>
+          <el-form-item label="说明内容" class="compact-form-item">
+            <el-input v-model="form.changeNote" type="textarea" :rows="2" />
           </el-form-item>
-          <el-form-item label="渠道大类">
-            <el-select v-model="form.channelGroupCode" filterable allow-create default-first-option @change="handleFormGroupChange">
-              <el-option v-for="group in formGroupOptions" :key="group.value" :label="group.label" :value="group.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="渠道小类">
-            <el-select
-              v-model="form.channelSubCode"
-              clearable
-              filterable
-              allow-create
-              default-first-option
-              :disabled="form.channelGroupCode === 'agent_site' || form.channelGroupCode === 'industry_site' || form.channelGroupCode === 'forum'"
-            >
-              <el-option v-for="item in formSubOptions" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item v-if="form.channelGroupCode === 'agent_site'" label="官网文章归属">
-            <el-select v-model="form.agentSiteModule">
-              <el-option label="FAQ" value="faq" />
-              <el-option label="知识库" value="knowledge" />
-              <el-option label="产品服务" value="product" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="文章类型">
-            <el-select v-model="form.articleTypeCode">
-              <el-option v-for="item in articleTypes" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="样文链接">
-            <el-input v-model="form.sampleOutputUrl" clearable placeholder="可选，填写标杆样文 URL" />
-          </el-form-item>
-          <el-form-item label="联系方式露出">
-            <el-select v-model="form.contactDisclosureMode">
-              <el-option v-for="item in contactModes" :key="item.value" :label="item.label" :value="item.value" />
-            </el-select>
-          </el-form-item>
-          <el-form-item>
-            <template #label>
-              <span class="field-label">权重</span>
-              <span class="field-help">取值 {{ MIN_TEMPLATE_WEIGHT }}-{{ MAX_TEMPLATE_WEIGHT }}，用于自动分配。数字越大分配越多，0 不参与。</span>
-            </template>
-            <el-input-number
-              v-model="form.weight"
-              :min="MIN_TEMPLATE_WEIGHT"
-              :max="MAX_TEMPLATE_WEIGHT"
-              :step="1"
-              step-strictly
-              controls-position="right"
-            />
-          </el-form-item>
-        </div>
-        <el-form-item label="模板说明">
-          <el-input v-model="form.description" type="textarea" :rows="2" maxlength="300" show-word-limit />
-        </el-form-item>
-        <div class="prompt-editor-grid">
-          <el-form-item label="系统提示词">
-            <el-input v-model="form.systemPrompt" class="prompt-textarea system-prompt" type="textarea" :rows="14" />
-          </el-form-item>
-          <el-form-item label="用户提示词模板">
-            <el-input v-model="form.userPromptTemplate" class="prompt-textarea user-prompt" type="textarea" :rows="18" />
-          </el-form-item>
-        </div>
-        <el-form-item label="变更说明">
-          <el-input v-model="form.changeNote" type="textarea" :rows="2" />
-        </el-form-item>
+        </section>
       </el-form>
       <template #footer>
-        <el-button @click="editorVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="saveTemplate">保存</el-button>
+        <div class="editor-footer">
+          <el-button @click="editorVisible = false">取消</el-button>
+          <el-button type="primary" :loading="saving" @click="saveTemplate">保存</el-button>
+        </div>
       </template>
     </el-dialog>
 
@@ -1300,18 +1335,127 @@ onMounted(async () => {
 
 .template-form {
   max-height: 70vh;
-  padding: 2px 6px 0 0;
+  padding: 2px 8px 4px 0;
   overflow-y: auto;
+}
+
+.editor-section {
+  padding: 18px 20px;
+  border: 1px solid #e8eef6;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.basic-section {
+  position: relative;
+  border-color: #dfe8f5;
+  background:
+    linear-gradient(180deg, rgba(248, 251, 255, 0.92) 0%, #ffffff 100%);
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.035);
+}
+
+.basic-section::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 18px;
+  width: 3px;
+  height: 22px;
+  border-radius: 0 6px 6px 0;
+  background: #2563eb;
+}
+
+.note-section {
+  padding-top: 16px;
+  padding-bottom: 16px;
+  background: #fcfdff;
+}
+
+.editor-section + .editor-section {
+  margin-top: 14px;
+}
+
+.section-title {
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-title h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.section-title span {
+  flex: none;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .form-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0 14px;
+  gap: 6px 16px;
 }
 
 .form-grid .el-form-item:first-child {
   grid-column: span 2;
+}
+
+.template-form :deep(.el-form-item) {
+  margin-bottom: 14px;
+}
+
+.template-form :deep(.el-form-item__label) {
+  margin-bottom: 7px;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.template-form :deep(.el-input__wrapper),
+.template-form :deep(.el-select__wrapper) {
+  min-height: 40px;
+  border-radius: 9px;
+  box-shadow: 0 0 0 1px #dbe4f0 inset;
+  background: #ffffff;
+}
+
+.template-form :deep(.el-input__wrapper:hover),
+.template-form :deep(.el-select__wrapper:hover) {
+  box-shadow: 0 0 0 1px #c8d5e5 inset;
+}
+
+.template-form :deep(.el-input__wrapper.is-focus),
+.template-form :deep(.el-select__wrapper.is-focused) {
+  box-shadow: 0 0 0 1px #2563eb inset;
+}
+
+.template-form :deep(.el-textarea__inner) {
+  border-radius: 9px;
+  box-shadow: 0 0 0 1px #dbe4f0 inset;
+}
+
+.template-form :deep(.el-textarea__inner:focus) {
+  box-shadow: 0 0 0 1px #2563eb inset;
+}
+
+.template-form :deep(.el-input-number) {
+  width: 100%;
+}
+
+.template-form :deep(.el-input-number .el-input__wrapper) {
+  padding-left: 11px;
 }
 
 .field-label,
@@ -1326,20 +1470,68 @@ onMounted(async () => {
   line-height: 1.45;
 }
 
+.compact-form-item {
+  margin-bottom: 0;
+}
+
+.prompt-section {
+  padding: 2px 0 0;
+  border: 0;
+  background: transparent;
+}
+
 .prompt-editor-grid {
   display: grid;
   grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
   gap: 14px;
 }
 
+.prompt-card {
+  min-width: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
+.prompt-card-head {
+  min-height: 44px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #edf2f7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #fbfdff;
+}
+
+.prompt-card-head strong {
+  color: #172033;
+  font-size: 14px;
+}
+
+.prompt-card-head span {
+  color: #94a3b8;
+  font-size: 12px;
+}
+
 .prompt-textarea :deep(.el-textarea__inner) {
   min-height: 360px !important;
-  padding: 14px 15px;
-  border-radius: 8px;
+  padding: 15px 16px;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
   font-size: 13px;
   line-height: 1.7;
-  background: #fbfdff;
+  color: #1e293b;
+  background: #fcfdff;
+  resize: vertical;
+}
+
+.prompt-textarea :deep(.el-textarea__inner:focus) {
+  box-shadow: inset 0 0 0 1px #93c5fd;
 }
 
 .system-prompt :deep(.el-textarea__inner) {
@@ -1348,6 +1540,13 @@ onMounted(async () => {
 
 .user-prompt :deep(.el-textarea__inner) {
   min-height: 420px !important;
+}
+
+.editor-footer {
+  width: 100%;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .template-detail-panel {
