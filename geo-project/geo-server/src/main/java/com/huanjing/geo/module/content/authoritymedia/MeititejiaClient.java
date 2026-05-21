@@ -57,7 +57,7 @@ public class MeititejiaClient {
         params.put("title", request.title());
         params.put("content", request.content());
         params.put("mid", request.mediaId());
-        params.put("no", request.externalNo());
+        params.put("no", vendorOrderNo(request.externalNo()));
         params.put("remark", request.remark());
         params.put("published_at", request.publishedAt());
         params.put("saling_price", request.salingPrice());
@@ -67,12 +67,17 @@ public class MeititejiaClient {
     public JsonNode queryOrders(MeititejiaResourceType type, List<String> externalNos) {
         String nostr = externalNos == null ? "" : externalNos.stream()
                 .filter(StringUtils::hasText)
-                .map(String::trim)
+                .map(MeititejiaClient::vendorOrderNo)
+                .filter(StringUtils::hasText)
                 .collect(Collectors.joining(","));
         if (!StringUtils.hasText(nostr)) {
             throw new IllegalArgumentException("externalNos is required");
         }
         return postSigned(type.queryOrderPath(), Map.of("nostr", nostr));
+    }
+
+    public static String vendorOrderNo(String externalNo) {
+        return externalNo == null ? null : externalNo.trim().replace("-", "");
     }
 
     protected JsonNode postSigned(String path, Map<String, ?> params) {
@@ -84,7 +89,7 @@ public class MeititejiaClient {
 
     protected Map<String, String> signedParametersForRequest(Map<String, ?> params) {
         return MeititejiaSigner.signedParameters(
-                encodeStringValues(params),
+                params,
                 requireSecretId(),
                 requireSecretKey(),
                 Instant.now().getEpochSecond()
@@ -98,7 +103,7 @@ public class MeititejiaClient {
      */
     public Map<String, String> buildAuditPayload(Map<String, ?> params) {
         Map<String, String> payload = new LinkedHashMap<>();
-        encodeStringValues(params).forEach((key, value) -> {
+        encodeFormValues(params).forEach((key, value) -> {
             String normalizedKey = key == null ? "" : key.trim().toLowerCase(Locale.ROOT);
             String normalizedValue = MeititejiaSigner.normalizeValue(value);
             if (StringUtils.hasText(key)
@@ -189,14 +194,14 @@ public class MeititejiaClient {
         rateLimiter.acquire(Math.max(properties.getRateLimitQps(), 1));
     }
 
-    private Map<String, ?> encodeStringValues(Map<String, ?> params) {
+    private Map<String, ?> encodeFormValues(Map<String, ?> params) {
         Map<String, Object> encoded = new LinkedHashMap<>();
         if (params == null) {
             return encoded;
         }
         params.forEach((key, value) -> {
             if (value instanceof String text) {
-                encoded.put(key, MeititejiaSigner.phpUrlencode(text));
+                encoded.put(key, MeititejiaSigner.formEncode(text));
             } else {
                 encoded.put(key, value);
             }

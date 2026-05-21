@@ -3,6 +3,7 @@ package com.huanjing.geo.module.content.service;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
@@ -12,13 +13,16 @@ import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.dto.ArticlePublishRequest;
 import com.huanjing.geo.module.content.dto.ArticleResubmitRequest;
 import com.huanjing.geo.module.content.dto.ArticleReviewRequest;
+import com.huanjing.geo.module.content.dto.ArticleRevisionSaveRequest;
 import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
+import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePublishLogMapper;
 import com.huanjing.geo.module.content.mapper.ArticleReviewLogMapper;
+import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessErrorCodes;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
@@ -28,12 +32,12 @@ import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
+import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -54,35 +58,46 @@ class ContentArticleServiceTest {
 
     private ArticleDraftMapper articleDraftMapper;
     private ArticleDraftVersionMapper articleDraftVersionMapper;
+    private BatchArticleGenerationTaskMapper batchArticleGenerationTaskMapper;
+    private ProjectMapper projectMapper;
     private BrandAccessService brandAccessService;
     private AuditService auditService;
+    private ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
     private ContentArticleService service;
 
     @BeforeEach
     void setUp() {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticleDraft.class);
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), ArticleDraftVersion.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), BatchArticleGenerationTask.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), Project.class);
 
         articleDraftMapper = mock(ArticleDraftMapper.class);
         articleDraftVersionMapper = mock(ArticleDraftVersionMapper.class);
+        batchArticleGenerationTaskMapper = mock(BatchArticleGenerationTaskMapper.class);
         brandAccessService = mock(BrandAccessService.class);
         auditService = mock(AuditService.class);
-        ProjectMapper projectMapper = mock(ProjectMapper.class);
+        articleImagePublicUrlRewriter = mock(ArticleImagePublicUrlRewriter.class);
+        projectMapper = mock(ProjectMapper.class);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
 
         when(currentUserService.requireCurrentUser()).thenReturn(operator(7L));
         when(projectMapper.selectById(10L)).thenReturn(project());
+        when(articleImagePublicUrlRewriter.rewrite(any(), any())).thenAnswer(invocation -> invocation.getArgument(1));
 
         service = new ContentArticleService(
                 articleDraftMapper,
                 articleDraftVersionMapper,
                 mock(ArticleReviewLogMapper.class),
                 mock(ArticlePublishLogMapper.class),
+                batchArticleGenerationTaskMapper,
                 mock(BrandMapper.class),
                 projectMapper,
                 mock(SysDictItemMapper.class),
                 currentUserService,
                 mock(MarkdownImageReferenceValidator.class),
+                new MarkdownToHtmlRenderer(),
+                articleImagePublicUrlRewriter,
                 brandAccessService,
                 auditService
         );
@@ -100,6 +115,8 @@ class ContentArticleServiceTest {
         ManualArticleCreateRequest request = new ManualArticleCreateRequest();
         request.setProjectId(10L);
         request.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
+        request.setContentStyle("zhihu");
+        request.setTopic("Manual topic");
         request.setTitle("Manual title");
         String markdown = "## Heading\n\n[official link](https://ok.example)\n\n- bullet";
         request.setContentMarkdown(markdown);
@@ -107,6 +124,11 @@ class ContentArticleServiceTest {
         service.createManual(request);
 
         verify(brandAccessService).requireBrandAccess(20L, 7L, BrandAccessAction.OPERATE);
+        ArgumentCaptor<ArticleDraft> draftCaptor = ArgumentCaptor.forClass(ArticleDraft.class);
+        verify(articleDraftMapper, times(1)).insert(draftCaptor.capture());
+        assertEquals("zhihu", draftCaptor.getValue().getContentStyle());
+        assertEquals("Manual topic", draftCaptor.getValue().getTopic());
+        assertEquals("approved", draftCaptor.getValue().getStatus());
         ArgumentCaptor<ArticleDraftVersion> versionCaptor = ArgumentCaptor.forClass(ArticleDraftVersion.class);
         verify(articleDraftVersionMapper).insert(versionCaptor.capture());
         assertEquals(markdown, versionCaptor.getValue().getContentMarkdown());
@@ -125,6 +147,9 @@ class ContentArticleServiceTest {
         ManualArticleCreateRequest request = new ManualArticleCreateRequest();
         request.setProjectId(10L);
         request.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
+        request.setContentStyle("wechat");
+        request.setTopic("AI topic");
+        request.setTopicAsQuestion("AI question");
         request.setTitle("AI edited title");
         request.setContentMarkdown("# AI edited title\n\n## A\n\nbody");
         request.setSource("ai_preview");
@@ -139,6 +164,12 @@ class ContentArticleServiceTest {
 
         service.createManual(request);
 
+        ArgumentCaptor<ArticleDraft> draftCaptor = ArgumentCaptor.forClass(ArticleDraft.class);
+        verify(articleDraftMapper, times(1)).insert(draftCaptor.capture());
+        assertEquals("wechat", draftCaptor.getValue().getContentStyle());
+        assertEquals("AI topic", draftCaptor.getValue().getTopic());
+        assertEquals("AI question", draftCaptor.getValue().getTopicAsQuestion());
+        assertEquals("approved", draftCaptor.getValue().getStatus());
         ArgumentCaptor<ArticleDraftVersion> versionCaptor = ArgumentCaptor.forClass(ArticleDraftVersion.class);
         verify(articleDraftVersionMapper).insert(versionCaptor.capture());
         ArticleDraftVersion version = versionCaptor.getValue();
@@ -157,6 +188,8 @@ class ContentArticleServiceTest {
         ManualArticleCreateRequest request = new ManualArticleCreateRequest();
         request.setProjectId(10L);
         request.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
+        request.setContentStyle("wechat");
+        request.setTopic("Manual topic");
         request.setTitle("Manual title");
         request.setContentMarkdown("content");
 
@@ -167,60 +200,50 @@ class ContentArticleServiceTest {
     }
 
     @Test
-    void resubmitUsesConditionalUpdateAndAuditsSuccess() {
+    void resubmitIsDisabled() {
         ArticleDraft article = article("under_revision");
         when(articleDraftMapper.selectById(99L)).thenReturn(article);
-        when(articleDraftMapper.update(isNull(), any(Wrapper.class))).thenReturn(1);
 
         ArticleResubmitRequest request = new ArticleResubmitRequest();
         request.setComment("ready");
 
-        service.resubmit(99L, request);
+        BizException ex = assertThrows(BizException.class, () -> service.resubmit(99L, request));
 
+        assertEquals(ContentErrorCodes.ARTICLE_BAD_REQUEST, ex.getCode());
         verify(brandAccessService).requireBrandAccess(20L, 7L, BrandAccessAction.OPERATE);
-        verify(articleDraftMapper).update(isNull(), any(Wrapper.class));
-        verifyAudit("ARTICLE_RESUBMITTED", AuditResult.SUCCESS);
-    }
-
-    @Test
-    void reviewStateConflictWritesDeniedAudit() {
-        ArticleDraft article = article("pending_review");
-        when(articleDraftMapper.selectById(99L)).thenReturn(article);
-        when(articleDraftVersionMapper.selectList(any())).thenReturn(List.of(version(8L)));
-        when(articleDraftMapper.update(isNull(), any(Wrapper.class))).thenReturn(0);
-
-        ArticleReviewRequest request = review("approve", null);
-        BizException ex = assertThrows(BizException.class, () -> service.review(99L, request));
-
-        assertEquals(ContentErrorCodes.ARTICLE_STATE_CONFLICT, ex.getCode());
-        verify(brandAccessService).requireBrandAccess(20L, 7L, BrandAccessAction.MANAGE);
-        verifyAudit("ARTICLE_REVIEWED", AuditResult.DENIED);
-    }
-
-    @Test
-    void reviewerCannotReviewOwnArticle() {
-        ArticleDraft article = article("pending_review");
-        when(articleDraftMapper.selectById(99L)).thenReturn(article);
-        when(articleDraftVersionMapper.selectList(any())).thenReturn(List.of(version(8L), version(7L)));
-
-        ArticleReviewRequest request = review("approve", null);
-        BizException ex = assertThrows(BizException.class, () -> service.review(99L, request));
-
-        assertEquals(ContentErrorCodes.ARTICLE_AUTHOR_CANNOT_REVIEW, ex.getCode());
         verify(articleDraftMapper, never()).update(isNull(), any(Wrapper.class));
     }
 
     @Test
-    void reviewIgnoresNullHistoricalVersionAuthors() {
-        ArticleDraft article = article("pending_review");
+    void saveRevisionKeepsArticleApproved() {
+        ArticleDraft article = article("approved");
         when(articleDraftMapper.selectById(99L)).thenReturn(article);
-        when(articleDraftVersionMapper.selectList(any())).thenReturn(Arrays.asList(null, version(null), version(8L)));
+        when(articleDraftMapper.selectList(any())).thenReturn(List.of());
         when(articleDraftMapper.update(isNull(), any(Wrapper.class))).thenReturn(1);
 
-        service.review(99L, review("approve", null));
+        ArticleRevisionSaveRequest request = new ArticleRevisionSaveRequest();
+        request.setTitle("Updated title");
+        request.setContentMarkdown("# Updated title\n\nbody");
+        request.setNote("edit");
 
+        service.saveRevision(99L, request);
+
+        verify(articleDraftVersionMapper).insert(any(ArticleDraftVersion.class));
         verify(articleDraftMapper).update(isNull(), any(Wrapper.class));
-        verifyAudit("ARTICLE_REVIEWED", AuditResult.SUCCESS);
+        verifyAudit("ARTICLE_REVISION_SAVED", AuditResult.SUCCESS, "approved");
+    }
+
+    @Test
+    void reviewWorkflowIsDisabled() {
+        ArticleDraft article = article("pending_review");
+        when(articleDraftMapper.selectById(99L)).thenReturn(article);
+
+        ArticleReviewRequest request = review("approve", null);
+        BizException ex = assertThrows(BizException.class, () -> service.review(99L, request));
+
+        assertEquals(ContentErrorCodes.ARTICLE_BAD_REQUEST, ex.getCode());
+        verify(brandAccessService).requireBrandAccess(20L, 7L, BrandAccessAction.MANAGE);
+        verify(articleDraftMapper, never()).update(isNull(), any(Wrapper.class));
     }
 
     @Test
@@ -252,7 +275,35 @@ class ContentArticleServiceTest {
         verify(articleDraftMapper, never()).update(isNull(), any(Wrapper.class));
     }
 
+    @Test
+    void pageFillsBatchGenerationMetadataForListDisplay() {
+        ArticleDraft article = article("approved");
+        Page<ArticleDraft> mapperPage = new Page<>(1, 10, 1);
+        mapperPage.setRecords(List.of(article));
+        when(articleDraftMapper.selectPage(any(Page.class), any())).thenReturn(mapperPage);
+        when(projectMapper.selectList(any())).thenReturn(List.of(project()));
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setArticleId(99L);
+        task.setContentStyle("zhihu");
+        task.setTopic("批量文章主题");
+        task.setTopicAsQuestion("批量问题词");
+        when(batchArticleGenerationTaskMapper.selectList(any())).thenReturn(List.of(task));
+
+        Page<ArticleDraft> result = service.page(null, null, null, 1, 10);
+
+        ArticleDraft row = result.getRecords().get(0);
+        assertEquals("Project", row.getProjectName());
+        assertEquals("zhihu", row.getContentStyle());
+        assertEquals("批量文章主题", row.getTopic());
+        assertEquals("批量问题词", row.getTopicAsQuestion());
+        assertEquals(Boolean.TRUE, row.getSystemGenerated());
+    }
+
     private void verifyAudit(String eventType, AuditResult result) {
+        verifyAudit(eventType, result, null);
+    }
+
+    private void verifyAudit(String eventType, AuditResult result, String newStatus) {
         ArgumentCaptor<AuditEvent> captor = ArgumentCaptor.forClass(AuditEvent.class);
         verify(auditService, times(1)).record(captor.capture());
         AuditEvent event = captor.getValue();
@@ -260,6 +311,9 @@ class ContentArticleServiceTest {
         assertEquals(result, event.getResult());
         assertEquals(7L, event.getActorId());
         assertEquals(20L, event.getBrandId());
+        if (newStatus != null) {
+            assertEquals(newStatus, event.getDetail().get("newStatus"));
+        }
     }
 
     private SysUser operator(Long id) {
@@ -289,14 +343,6 @@ class ContentArticleServiceTest {
         article.setCurrentVersionNo(1);
         article.setHasRisk(false);
         return article;
-    }
-
-    private ArticleDraftVersion version(Long createdBy) {
-        ArticleDraftVersion version = new ArticleDraftVersion();
-        version.setArticleId(99L);
-        version.setVersionNo(1);
-        version.setCreatedBy(createdBy);
-        return version;
     }
 
     private ArticleReviewRequest review(String action, String comment) {

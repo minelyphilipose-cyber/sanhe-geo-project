@@ -1,6 +1,5 @@
 package com.huanjing.geo.module.content.service;
 
-import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
@@ -8,7 +7,6 @@ import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ArticleGenerationLogMapper;
 import com.huanjing.geo.module.customer.entity.Brand;
-import com.huanjing.geo.module.customer.service.BrandStatementService;
 import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
@@ -39,7 +37,6 @@ public class GeoPromptBuilder {
             "测试品牌", "品牌名称", "xxx", "xxxx", "测试", "待定", "brand", "brandname"
     );
 
-    private final BrandStatementService brandStatementService;
     private final KeywordGroupResultMapper keywordGroupResultMapper;
     private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
     private final ArticleGenerationLogMapper articleGenerationLogMapper;
@@ -125,10 +122,15 @@ public class GeoPromptBuilder {
             appendLine(sb, "品牌名称", brandName);
             appendLine(sb, "所属行业", brand.getIndustry());
             appendLine(sb, "主营业务", brand.getMainBusiness());
-            appendLine(sb, "品牌简介", brand.getDescription());
+            appendLine(sb, "品牌简称", brand.getBrandShortName());
+            appendLine(sb, "品牌定位", brand.getBrandPositioning());
+            appendLine(sb, "核心产品", brand.getCoreProducts());
+            appendLine(sb, "品牌简介", brand.getBusinessIntro());
+            appendLine(sb, "品牌资质", brand.getBrandQualificationDescription());
+            appendLine(sb, "品牌案例", brand.getBrandCaseDescription());
             appendLine(sb, "对外公开电话", brand.getPublicPhone());
             appendLine(sb, "对外公开地址", brand.getPublicAddress());
-            appendLine(sb, "品牌表述", resolveBrandStatement(project, brand));
+            appendLine(sb, "项目定制表述", resolveProjectCustomStatement(project));
         } else {
             appendLine(sb, "项目名称", project.getProjectName());
         }
@@ -236,22 +238,8 @@ public class GeoPromptBuilder {
                 .toList();
     }
 
-    private String resolveBrandStatement(Project project, Brand brand) {
-        String raw = StringUtils.hasText(project.getCustomStatement())
-                ? project.getCustomStatement().trim()
-                : brandStatementService.resolvePromptStatement(brand);
-        if (!StringUtils.hasText(raw)) {
-            return null;
-        }
-        try {
-            JSONObject json = JSONUtil.parseObj(raw);
-            String paragraph = json.getStr("brand_paragraph");
-            if (StringUtils.hasText(paragraph)) {
-                return paragraph.trim();
-            }
-        } catch (Exception ignored) {
-        }
-        return raw.trim();
+    private String resolveProjectCustomStatement(Project project) {
+        return StringUtils.hasText(project.getCustomStatement()) ? project.getCustomStatement().trim() : null;
     }
 
     private String resolveUsableBrandName(Brand brand) {

@@ -47,7 +47,12 @@ public class AuthorityMediaOrderStatusService {
         }
         Map<String, AuthorityMediaOrder> byNo = orders.stream()
                 .filter(order -> StringUtils.hasText(order.getExternalNo()))
-                .collect(Collectors.toMap(AuthorityMediaOrder::getExternalNo, Function.identity(), (a, b) -> a, LinkedHashMap::new));
+                .collect(Collectors.toMap(
+                        order -> MeititejiaClient.vendorOrderNo(order.getExternalNo()),
+                        Function.identity(),
+                        (a, b) -> a,
+                        LinkedHashMap::new
+                ));
         if (byNo.isEmpty()) {
             return new StatusCheckResult(orders.size(), 0, 0, 0);
         }
@@ -57,7 +62,7 @@ public class AuthorityMediaOrderStatusService {
         int terminal = 0;
         int missing = 0;
         for (JsonNode item : items) {
-            String externalNo = externalNo(item);
+            String externalNo = MeititejiaClient.vendorOrderNo(externalNo(item));
             AuthorityMediaOrder order = byNo.remove(externalNo);
             if (order == null) {
                 continue;

@@ -1,56 +1,186 @@
 <template>
-  <div class="content-execution-page">
-    <el-card shadow="never" class="mb-3">
+  <div class="content-execution-page admin-page">
+    <div class="admin-page-header">
+      <div>
+        <div class="admin-page-kicker">内容运营</div>
+        <h1 class="admin-page-title">内容与执行</h1>
+        <div class="admin-page-subtitle">让内容从生成到分发汇于一处，质量与节奏一目了然。</div>
+      </div>
+    </div>
+
+    <el-card shadow="never" class="mb-3 admin-surface content-toolbar-card">
       <div class="toolbar">
-        <div class="toolbar-left">
-          <el-input v-model="query.projectName" clearable placeholder="项目名称" style="width: 220px" @keyup.enter="search" />
-          <el-select v-model="query.articleType" clearable placeholder="文章类型" style="width: 160px">
-            <el-option label="FAQ" value="faq" />
-            <el-option label="场景内容" value="scenario_content" />
-            <el-option label="行业文章" value="industry_article" />
-            <el-option label="阶段建议" value="stage_advice" />
-          </el-select>
-          <el-select v-model="query.status" clearable placeholder="状态" style="width: 150px">
-            <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
-          </el-select>
-          <el-button type="primary" @click="search">查询</el-button>
-          <el-button @click="resetQuery">重置</el-button>
+        <div class="toolbar-filter-row">
+          <div class="toolbar-filter-line is-primary">
+            <el-input
+              v-model="query.projectName"
+              class="toolbar-project-input"
+              clearable
+              placeholder="搜索项目名称"
+              :prefix-icon="Search"
+              @keyup.enter="search"
+            />
+            <el-select v-model="query.articleType" class="toolbar-filter-control" clearable placeholder="全部">
+              <template #prefix><span class="toolbar-select-prefix">类型</span></template>
+              <el-option label="FAQ" value="faq" />
+              <el-option label="场景内容" value="scenario_content" />
+              <el-option label="行业文章" value="industry_article" />
+              <el-option label="阶段建议" value="stage_advice" />
+            </el-select>
+            <el-select v-model="query.status" class="toolbar-filter-control" clearable placeholder="全部">
+              <template #prefix><span class="toolbar-select-prefix">状态</span></template>
+              <el-option v-for="item in statusOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+            <span class="toolbar-filter-divider" />
+            <div class="toolbar-filter-actions">
+              <el-button class="toolbar-search-action" type="primary" :icon="Search" @click="search">查询</el-button>
+              <el-button class="toolbar-reset-action" :icon="Refresh" @click="resetQuery">重置</el-button>
+              <el-button class="toolbar-toggle-action" text @click="showAdvancedFilters = !showAdvancedFilters">
+                {{ showAdvancedFilters ? '收起' : '更多筛选' }}
+                <el-icon class="toolbar-toggle-icon">
+                  <ArrowUp v-if="showAdvancedFilters" />
+                  <ArrowDown v-else />
+                </el-icon>
+              </el-button>
+            </div>
+          </div>
+          <div v-show="showAdvancedFilters" class="toolbar-filter-line is-secondary">
+            <el-select v-model="query.channelKey" class="toolbar-filter-control is-wide" clearable filterable placeholder="全部">
+              <template #prefix><span class="toolbar-select-prefix">渠道</span></template>
+              <el-option v-for="item in channelFilterOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+            <el-select v-model="query.articleTypeCode" class="toolbar-filter-control is-wide" clearable filterable placeholder="全部">
+              <template #prefix><span class="toolbar-select-prefix">形态</span></template>
+              <el-option v-for="item in contentShapeOptions" :key="item.value" :label="item.label" :value="item.value" />
+            </el-select>
+            <el-select v-model="query.generationMode" class="toolbar-filter-control" clearable placeholder="全部">
+              <template #prefix><span class="toolbar-select-prefix">方式</span></template>
+              <el-option label="批量生成" value="batch" />
+              <el-option label="单篇生成" value="single" />
+            </el-select>
+            <el-date-picker
+              v-model="query.createdRange"
+              class="toolbar-date-range"
+              type="daterange"
+              start-placeholder="开始时间"
+              end-placeholder="结束时间"
+              value-format="YYYY-MM-DD"
+              :prefix-icon="Calendar"
+              unlink-panels
+              clearable
+            />
+          </div>
         </div>
-        <div class="toolbar-right">
-          <el-button v-if="canWrite" type="primary" @click="goManualCreate">手动生成文章</el-button>
+        <div v-if="canWrite" class="toolbar-action-row">
+          <div class="toolbar-primary-actions">
+            <el-button type="primary" @click="openBatchGeneration">批量生成文章</el-button>
+            <el-button @click="goManualCreate">单篇生成文章</el-button>
+          </div>
+          <div class="toolbar-secondary-actions">
+            <span v-if="selectedRows.length" class="toolbar-selection-hint">已选 {{ selectedRows.length }} 篇</span>
+            <el-button :disabled="!selectedRows.length || batchPublishChecking" :loading="batchPublishChecking" @click="openBatchPublish">
+              批量发布{{ selectedRows.length ? `（${selectedRows.length}）` : '' }}
+            </el-button>
+            <el-dropdown trigger="click" @command="handleToolbarMoreCommand">
+              <el-button class="toolbar-more-action">更多</el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="jobs">发布任务</el-dropdown-item>
+                  <el-dropdown-item command="templates">文章模板</el-dropdown-item>
+                  <el-dropdown-item command="platforms">发布平台管理</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </div>
         </div>
       </div>
     </el-card>
 
-    <el-card shadow="never">
+    <div class="admin-metric-grid">
+      <div class="admin-metric-card" style="--metric-accent: #2563eb; --metric-tone: #eff6ff">
+        <span class="admin-metric-label">文章总数</span>
+        <strong class="admin-metric-value">{{ page.total }}</strong>
+        <span class="admin-metric-hint">当前筛选结果</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #f59e0b; --metric-tone: #fffbeb">
+        <span class="admin-metric-label">已发布</span>
+        <strong class="admin-metric-value">{{ publishedCount }}</strong>
+        <span class="admin-metric-hint">本页可见</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #059669; --metric-tone: #ecfdf5">
+        <span class="admin-metric-label">可分发</span>
+        <strong class="admin-metric-value">{{ distributableCount }}</strong>
+        <span class="admin-metric-hint">本页可见</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #ef4444; --metric-tone: #fef2f2">
+        <span class="admin-metric-label">需处理</span>
+        <strong class="admin-metric-value">{{ blockedCount }}</strong>
+        <span class="admin-metric-hint">驳回/失败/风险</span>
+      </div>
+    </div>
+
+    <el-card shadow="never" class="admin-table-card">
       <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无文章数据">
-        <el-table :data="rows" border>
-          <el-table-column prop="id" label="文章ID" width="90" />
-          <el-table-column label="项目" min-width="180" show-overflow-tooltip>
-            <template #default="scope">{{ scope.row.projectName || `#${scope.row.projectId}` }}</template>
-          </el-table-column>
-          <el-table-column label="文章类型" width="120">
-            <template #default="scope">{{ articleTypeLabel(scope.row.articleType) }}</template>
-          </el-table-column>
-          <el-table-column prop="title" label="标题" min-width="240" show-overflow-tooltip />
-          <el-table-column label="状态" width="120">
+        <el-table class="content-list-table" :data="rows" border table-layout="fixed" @selection-change="onSelectionChange">
+          <el-table-column type="selection" width="48" :selectable="canSelectForBatchPublish" />
+          <el-table-column label="内容对象" min-width="280" show-overflow-tooltip>
             <template #default="scope">
-              <el-tag :type="statusTagType(scope.row.status)">{{ statusLabel(scope.row.status) }}</el-tag>
+              <div class="admin-entity-cell">
+                <div class="admin-entity-avatar content-avatar" :class="articleTypeClass(scope.row.articleType)">
+                  {{ articleTypeInitial(scope.row.articleType) }}
+                </div>
+                <div class="min-w-0">
+                  <div class="admin-entity-main">{{ scope.row.projectName || `#${scope.row.projectId}` }}</div>
+                  <div class="admin-entity-sub">
+                    {{ articleTypeLabel(scope.row.articleType) }} · {{ articleChannelLabel(scope.row) }} · {{ generationModeLabel(scope.row) }}
+                  </div>
+                </div>
+              </div>
             </template>
           </el-table-column>
-          <el-table-column prop="createdAt" label="创建时间" width="180" />
+          <el-table-column label="标题" min-width="360" show-overflow-tooltip>
+            <template #default="scope">
+              <div class="admin-cell-stack">
+                <span class="admin-cell-main">{{ scope.row.title || '-' }}</span>
+                <span class="admin-cell-sub">{{ contentStyleLabel(scope.row.contentStyle) }}</span>
+                <span v-if="riskWordHits(scope.row).length" class="risk-word-line">
+                  <el-tag
+                    v-for="hit in riskWordHits(scope.row)"
+                    :key="`${hit.severity}-${hit.source}-${hit.word}`"
+                    size="small"
+                    :type="hit.severity === 'block' ? 'danger' : 'warning'"
+                    effect="light"
+                  >
+                    {{ riskSeverityLabel(hit.severity) }}: {{ hit.word }}
+                  </el-tag>
+                </span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="120">
+            <template #default="scope">
+              <span class="content-status-text" :class="contentStatusClass(scope.row.status)">
+                <span class="content-status-dot" />
+                {{ statusLabel(scope.row.status) }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="创建时间" width="180">
+            <template #default="scope">{{ formatDateTime(scope.row.createdAt) }}</template>
+          </el-table-column>
           <el-table-column label="操作" width="300" fixed="right">
             <template #default="scope">
-              <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
-              <el-button v-if="canWrite && canReview(scope.row.status)" link type="primary" @click="openReview(scope.row)">审核</el-button>
-              <el-button v-if="canWrite && canEdit(scope.row.status)" link type="primary" @click="openRevision(scope.row)">修订</el-button>
-              <el-button v-if="canWrite && canResubmit(scope.row.status)" link type="primary" @click="openResubmit(scope.row)">重新提交</el-button>
-              <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openDistributionChannel(scope.row)">分发</el-button>
+              <div class="admin-row-actions">
+                <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
+                <el-button v-if="canWrite && canEdit(scope.row.status)" class="content-neutral-action" link @click="openRevision(scope.row)">修订</el-button>
+                <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openDistributionChannel(scope.row)">分发</el-button>
+                <el-button v-if="canWrite && canDeleteArticle(scope.row.status)" link type="danger" @click="deleteArticle(scope.row)">删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
 
-        <div class="pager">
+        <div class="admin-table-footer">
           <el-pagination
             background
             layout="prev, pager, next, total"
@@ -63,64 +193,89 @@
       </DataState>
     </el-card>
 
-    <el-drawer v-model="detailVisible" title="文章详情" size="70%">
+    <el-drawer v-model="detailVisible" title="文章详情" size="70%" class="content-detail-drawer">
       <div v-if="detailData" class="detail-wrap">
-        <el-descriptions :column="2" border>
-          <el-descriptions-item label="文章ID">{{ detailData.article.id }}</el-descriptions-item>
-          <el-descriptions-item label="项目">{{ detailData.project?.projectName || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="文章类型">{{ articleTypeLabel(detailData.article.articleType) }}</el-descriptions-item>
-          <el-descriptions-item label="状态">{{ statusLabel(detailData.article.status) }}</el-descriptions-item>
-          <el-descriptions-item label="标题" :span="2">{{ detailData.article.title }}</el-descriptions-item>
-        </el-descriptions>
-
-        <h4 class="detail-title">版本记录</h4>
-        <el-table :data="detailData.versions" border>
-          <el-table-column prop="versionNo" label="版本" width="80" />
-          <el-table-column prop="title" label="标题" min-width="220" />
-          <el-table-column prop="generatedBy" label="来源" width="130" />
-          <el-table-column prop="createdAt" label="时间" width="180" />
-        </el-table>
-
-        <div class="detail-header">
-          <h4 class="detail-title">内容预览</h4>
-          <el-radio-group v-model="detailViewMode" size="small">
-            <el-radio-button label="preview">预览</el-radio-button>
-            <el-radio-button label="markdown">Markdown</el-radio-button>
-          </el-radio-group>
+        <div class="detail-summary-panel">
+          <div class="detail-summary-head">
+            <div>
+              <span class="detail-kicker">文章信息</span>
+              <h3>{{ detailData.article.title || '未命名文章' }}</h3>
+            </div>
+            <div class="detail-summary-actions">
+              <el-button
+                v-if="canWrite && canEditFromDetail(detailData.article.status)"
+                size="small"
+                type="primary"
+                @click="openRevisionFromDetail"
+              >
+                编辑文章
+              </el-button>
+              <el-tag :type="statusTagType(detailData.article.status)">
+                {{ statusLabel(detailData.article.status) }}
+              </el-tag>
+            </div>
+          </div>
+          <el-descriptions :column="2" border>
+            <el-descriptions-item label="文章ID">{{ detailData.article.id }}</el-descriptions-item>
+            <el-descriptions-item label="项目">{{ detailData.project?.projectName || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="文章类型">{{ articleTypeLabel(detailData.article.articleType) }}</el-descriptions-item>
+            <el-descriptions-item label="平台风格">{{ contentStyleLabel(detailContentStyle(detailData)) }}</el-descriptions-item>
+            <el-descriptions-item label="文章主题" :span="2">{{ detailTopic(detailData) || '-' }}</el-descriptions-item>
+            <el-descriptions-item v-if="riskWordHits(detailData.article).length" label="风险词" :span="2">
+              <div class="risk-word-list">
+                <el-tag
+                  v-for="hit in riskWordHits(detailData.article)"
+                  :key="`${hit.severity}-${hit.source}-${hit.word}`"
+                  size="small"
+                  :type="hit.severity === 'block' ? 'danger' : 'warning'"
+                  effect="light"
+                >
+                  {{ riskSeverityLabel(hit.severity) }} · {{ riskSourceLabel(hit.source) }}: {{ hit.word }}
+                </el-tag>
+              </div>
+            </el-descriptions-item>
+          </el-descriptions>
         </div>
-        <el-input v-if="detailViewMode === 'markdown'" type="textarea" :rows="14" :model-value="detailMarkdown" readonly />
-        <div v-else class="markdown-preview" v-html="detailHtml"></div>
+
+        <div class="detail-section-panel">
+          <h4 class="detail-title">版本记录</h4>
+          <el-table :data="detailData.versions" border>
+            <el-table-column prop="versionNo" label="版本" width="80" />
+            <el-table-column prop="title" label="标题" min-width="220" />
+            <el-table-column prop="generatedBy" label="来源" width="130" />
+            <el-table-column label="时间" width="180">
+              <template #default="scope">{{ formatDateTime(scope.row.createdAt) }}</template>
+            </el-table-column>
+          </el-table>
+        </div>
+
+        <div class="detail-section-panel detail-preview-panel">
+          <div class="detail-header">
+            <h4 class="detail-title">内容预览</h4>
+            <el-radio-group v-model="detailViewMode" size="small">
+              <el-radio-button label="preview">预览</el-radio-button>
+              <el-radio-button label="markdown">Markdown</el-radio-button>
+            </el-radio-group>
+          </div>
+          <el-input v-if="detailViewMode === 'markdown'" type="textarea" :rows="14" :model-value="detailMarkdown" readonly />
+          <div v-else class="markdown-preview" v-html="detailHtml"></div>
+        </div>
       </div>
     </el-drawer>
 
-    <el-dialog v-model="reviewVisible" title="审核文章" width="540px">
-      <el-form :model="reviewForm" label-width="110px">
-        <el-form-item label="审核动作" required>
-          <el-select v-model="reviewForm.action" style="width: 100%">
-            <el-option label="通过" value="approve" />
-            <el-option label="驳回" value="reject" />
-            <el-option label="退回修改" value="return_for_revision" />
-          </el-select>
+    <el-dialog v-model="revisionVisible" title="修订文章" width="840px" class="admin-editor-dialog">
+      <el-form class="admin-dialog-form content-revision-form" :model="revisionForm" label-width="90px">
+        <el-form-item class="is-full revision-title-field" label="标题">
+          <el-input
+            v-model="revisionForm.title"
+            type="textarea"
+            :autosize="{ minRows: 2, maxRows: 4 }"
+            maxlength="160"
+            show-word-limit
+            placeholder="请输入文章标题"
+          />
         </el-form-item>
-        <el-form-item v-if="selectedArticleHasRisk" label="风险覆盖">
-          <el-checkbox v-model="reviewForm.riskOverride">强制通过提醒级风险</el-checkbox>
-        </el-form-item>
-        <el-form-item label="审核意见">
-          <el-input v-model="reviewForm.comment" type="textarea" :rows="4" placeholder="驳回或退回修改时必填" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="reviewVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitReview">提交</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="revisionVisible" title="修订文章" width="760px">
-      <el-form :model="revisionForm" label-width="90px">
-        <el-form-item label="标题">
-          <el-input v-model="revisionForm.title" />
-        </el-form-item>
-        <el-form-item label="正文" required>
+        <el-form-item class="is-full" label="正文" required>
           <div class="editor-wrap">
             <div class="detail-header editor-header">
               <span class="editor-title">内容编辑</span>
@@ -133,7 +288,7 @@
             <div v-else class="markdown-preview editor-preview" v-html="revisionHtml"></div>
           </div>
         </el-form-item>
-        <el-form-item label="备注">
+        <el-form-item class="is-full" label="备注">
           <el-input v-model="revisionForm.note" />
         </el-form-item>
       </el-form>
@@ -143,19 +298,10 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="resubmitVisible" title="重新提交审核" width="520px">
-      <el-form :model="resubmitForm" label-width="90px">
-        <el-form-item label="备注">
-          <el-input v-model="resubmitForm.comment" type="textarea" :rows="4" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="resubmitVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitResubmit">提交</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="distributionChannelVisible" title="选择分发渠道" width="720px">
+    <el-dialog v-model="distributionChannelVisible" title="选择分发渠道" width="760px" class="distribution-channel-dialog">
+      <div class="distribution-channel-intro">
+        选择本篇文章的发布去向，后续会进入对应平台配置。
+      </div>
       <div class="distribution-channel-grid">
         <button
           v-for="channel in distributionChannels"
@@ -165,11 +311,16 @@
           :class="{ disabled: channel.disabled }"
           @click="selectDistributionChannel(channel.value)"
         >
+          <span class="distribution-channel-mark" :class="distributionChannelClass(channel.value)">
+            {{ distributionChannelInitial(channel.value) }}
+          </span>
+          <span class="distribution-channel-status" :class="{ disabled: channel.disabled }">
+            <span class="distribution-channel-status-dot" />
+            {{ channel.disabled ? '待接入' : '可分发' }}
+          </span>
           <span class="distribution-channel-title">{{ channel.label }}</span>
           <span class="distribution-channel-desc">{{ channel.description }}</span>
-          <el-tag size="small" :type="channel.disabled ? 'info' : 'success'">
-            {{ channel.disabled ? '待接入' : '可分发' }}
-          </el-tag>
+          <span class="distribution-channel-action">选择</span>
         </button>
       </div>
       <template #footer>
@@ -177,77 +328,199 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="authorityMediaVisible" title="权威媒体分发" width="1080px">
+    <el-dialog v-model="industrySiteVisible" title="行业资讯站分发" width="900px" class="industry-site-dialog">
+      <div class="industry-site-intro">
+        选择一个已启用的行业资讯站，系统会将当前文章发布到对应站点。
+      </div>
+      <DataState :loading="industrySiteLoading" :empty="!industrySiteLoading && industrySites.length === 0" empty-text="暂无可用行业资讯站">
+        <div class="industry-site-list">
+          <button
+            v-for="site in industrySites"
+            :key="site.id"
+            type="button"
+            class="industry-site-card"
+            :class="{ selected: selectedIndustrySiteId === site.id }"
+            @click="selectIndustrySite(site)"
+          >
+            <span class="industry-site-radio" :class="{ selected: selectedIndustrySiteId === site.id }" />
+            <span class="industry-site-content">
+              <span class="industry-site-head">
+                <span class="site-cell">
+                  <el-avatar v-if="site.iconUrl" :src="site.iconUrl" shape="square" :size="34" />
+                  <span v-else class="industry-site-avatar">{{ industrySiteInitial(site) }}</span>
+                  <span>
+                    <span class="site-name">{{ site.siteName }}</span>
+                    <span class="site-domain">{{ site.domain || '-' }}</span>
+                  </span>
+                </span>
+                <span v-if="selectedIndustrySiteId === site.id" class="industry-site-selected">已选择</span>
+              </span>
+              <span class="industry-site-meta">
+                <span>
+                  <span class="industry-site-meta-label">行业分类</span>
+                  {{ industrySiteTagText(site) }}
+                </span>
+                <span>
+                  <span class="industry-site-meta-label">接入方式</span>
+                  {{ distributionPlatformLabel(site.integrationMethod) }}
+                </span>
+              </span>
+            </span>
+          </button>
+        </div>
+      </DataState>
+      <template #footer>
+        <el-button @click="industrySiteVisible = false">取消</el-button>
+        <el-button type="primary" :loading="industrySiteSubmitting" :disabled="!selectedIndustrySiteId" @click="submitIndustrySite">
+          确认分发
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="forumSiteVisible" title="论坛分发" width="900px" class="industry-site-dialog">
+      <div class="industry-site-intro">
+        选择一个已启用的论坛，系统会将当前文章作为论坛内容发布到对应站点。
+      </div>
+      <DataState :loading="forumSiteLoading" :empty="!forumSiteLoading && forumSites.length === 0" empty-text="暂无可用论坛">
+        <div class="industry-site-list">
+          <button
+            v-for="site in forumSites"
+            :key="site.id"
+            type="button"
+            class="industry-site-card"
+            :class="{ selected: selectedForumSiteId === site.id }"
+            @click="selectForumSite(site)"
+          >
+            <span class="industry-site-radio" :class="{ selected: selectedForumSiteId === site.id }" />
+            <span class="industry-site-content">
+              <span class="industry-site-head">
+                <span class="site-cell">
+                  <el-avatar v-if="site.iconUrl" :src="site.iconUrl" shape="square" :size="34" />
+                  <span v-else class="industry-site-avatar">{{ industrySiteInitial(site) }}</span>
+                  <span>
+                    <span class="site-name">{{ site.siteName }}</span>
+                    <span class="site-domain">{{ site.domain || '-' }}</span>
+                  </span>
+                </span>
+                <span v-if="selectedForumSiteId === site.id" class="industry-site-selected">已选择</span>
+              </span>
+              <span class="industry-site-meta">
+                <span>
+                  <span class="industry-site-meta-label">论坛分类</span>
+                  {{ industrySiteTagText(site) }}
+                </span>
+                <span>
+                  <span class="industry-site-meta-label">接入方式</span>
+                  {{ distributionPlatformLabel(site.integrationMethod) }}
+                </span>
+              </span>
+            </span>
+          </button>
+        </div>
+      </DataState>
+      <template #footer>
+        <el-button @click="forumSiteVisible = false">取消</el-button>
+        <el-button type="primary" :loading="forumSiteSubmitting" :disabled="!selectedForumSiteId" @click="submitForumSite">
+          确认分发
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="authorityMediaVisible" title="权威媒体分发" width="1080px" class="authority-media-modal">
       <div class="authority-media-dialog">
-        <el-alert
-          type="info"
-          :closable="false"
-          show-icon
-          title="当前接入特价网新闻媒体资源。提交后将创建权威媒体订单，出稿状态由系统定时同步。"
-        />
+        <div class="authority-media-notice">
+          <span class="authority-media-notice-icon">i</span>
+          <span>选择权威媒体资源并提交订单，出稿状态将由系统自动同步。</span>
+        </div>
         <div class="authority-filter">
-          <el-input v-model="authorityQuery.keyword" clearable placeholder="媒体名称" style="width: 180px" @keyup.enter="searchAuthorityMedia" />
-          <el-input v-model="authorityQuery.industry" clearable placeholder="频道/行业" style="width: 160px" @keyup.enter="searchAuthorityMedia" />
-          <el-input v-model="authorityQuery.province" clearable placeholder="地区" style="width: 140px" @keyup.enter="searchAuthorityMedia" />
-          <el-select v-model="authorityQuery.entranceLevel" clearable placeholder="入口级别" style="width: 130px">
+          <el-input v-model="authorityQuery.keyword" clearable placeholder="媒体名称" @keyup.enter="searchAuthorityMedia" />
+          <el-input v-model="authorityQuery.industry" clearable placeholder="频道/行业" @keyup.enter="searchAuthorityMedia" />
+          <el-input v-model="authorityQuery.province" clearable placeholder="地区" @keyup.enter="searchAuthorityMedia" />
+          <el-select v-model="authorityQuery.entranceLevel" clearable placeholder="入口级别">
             <el-option label="无入口" :value="0" />
             <el-option label="首页入口" :value="1" />
             <el-option label="频道入口" :value="2" />
             <el-option label="上级入口" :value="3" />
           </el-select>
-          <el-select v-model="authorityQuery.newsResource" clearable placeholder="新闻源" style="width: 150px">
+          <el-select v-model="authorityQuery.newsResource" clearable placeholder="新闻源">
             <el-option label="非新闻源" :value="0" />
             <el-option label="百度新闻源" :value="1" />
             <el-option label="头条新闻源" :value="2" />
             <el-option label="百度&头条" :value="3" />
           </el-select>
-          <el-select v-model="authorityQuery.includeCondition" clearable placeholder="收录" style="width: 130px">
+          <el-select v-model="authorityQuery.includeCondition" clearable placeholder="收录">
             <el-option label="不包收录" :value="0" />
             <el-option label="百度包收录" :value="1" />
             <el-option label="头条包收录" :value="2" />
           </el-select>
-          <el-button type="primary" @click="searchAuthorityMedia">查询</el-button>
-          <el-button @click="resetAuthorityMediaQuery">重置</el-button>
+          <div class="authority-filter-actions">
+            <el-button type="primary" @click="searchAuthorityMedia">查询</el-button>
+            <el-button @click="resetAuthorityMediaQuery">重置</el-button>
+          </div>
         </div>
-        <el-table
-          :data="authorityResources"
-          border
-          max-height="360"
-          v-loading="authorityLoading"
-          highlight-current-row
-          @current-change="selectAuthorityResource"
-        >
-          <el-table-column width="52">
-            <template #default="scope">
-              <el-radio :model-value="authorityForm.resourceId" :label="scope.row.id" @change="selectAuthorityResource(scope.row)" />
-            </template>
-          </el-table-column>
-          <el-table-column prop="name" label="媒体名称" min-width="170" show-overflow-tooltip />
-          <el-table-column prop="industry" label="频道/行业" width="120" show-overflow-tooltip />
-          <el-table-column prop="province" label="地区" width="100" show-overflow-tooltip />
-          <el-table-column label="价格" width="95">
-            <template #default="scope">￥{{ money(scope.row.price) }}</template>
-          </el-table-column>
-          <el-table-column label="入口" width="90">
-            <template #default="scope">{{ entranceLevelLabel(scope.row.entranceLevel) }}</template>
-          </el-table-column>
-          <el-table-column label="新闻源" width="120">
-            <template #default="scope">{{ newsResourceLabel(scope.row.newsResource) }}</template>
-          </el-table-column>
-          <el-table-column label="收录" width="110">
-            <template #default="scope">{{ includeConditionLabel(scope.row.includeCondition) }}</template>
-          </el-table-column>
-          <el-table-column label="权重" width="90">
-            <template #default="scope">PC {{ scope.row.pcWeight ?? '-' }} / M {{ scope.row.mWeight ?? '-' }}</template>
-          </el-table-column>
-          <el-table-column label="链接" width="120">
-            <template #default="scope">
-              <el-button v-if="scope.row.caseLink" link type="primary" @click.stop="openExternalLink(scope.row.caseLink)">案例</el-button>
-              <el-button v-if="scope.row.entranceLink" link type="primary" @click.stop="openExternalLink(scope.row.entranceLink)">入口</el-button>
-            </template>
-          </el-table-column>
-          <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
-        </el-table>
+        <div class="authority-table-wrap">
+          <el-table
+            :data="authorityResources"
+            border
+            max-height="360"
+            v-loading="authorityLoading"
+            highlight-current-row
+            :row-class-name="authorityRowClass"
+            @current-change="selectAuthorityResource"
+          >
+            <el-table-column width="52">
+              <template #default="scope">
+                <el-radio :model-value="authorityForm.resourceId" :label="scope.row.id" @change="selectAuthorityResource(scope.row)" />
+              </template>
+            </el-table-column>
+            <el-table-column label="媒体资源" min-width="230" show-overflow-tooltip>
+              <template #default="scope">
+                <div class="authority-media-cell">
+                  <span class="authority-media-avatar">{{ authorityMediaInitial(scope.row) }}</span>
+                  <span class="authority-media-main">
+                    <span class="authority-media-name">{{ scope.row.name }}</span>
+                    <span class="authority-media-sub">{{ scope.row.industry || '未分类' }} · {{ scope.row.province || '全国' }}</span>
+                  </span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="价格" width="110">
+              <template #default="scope">
+                <span class="authority-price">￥{{ money(scope.row.price) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="入口" width="110">
+              <template #default="scope">
+                <span class="authority-soft-chip">{{ entranceLevelLabel(scope.row.entranceLevel) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="新闻源" width="125">
+              <template #default="scope">
+                <span class="authority-soft-chip">{{ newsResourceLabel(scope.row.newsResource) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="收录" width="125">
+              <template #default="scope">
+                <span class="authority-soft-chip">{{ includeConditionLabel(scope.row.includeCondition) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="权重" width="115">
+              <template #default="scope">
+                <span class="authority-weight">{{ authorityWeightText(scope.row) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="链接" width="120">
+              <template #default="scope">
+                <div class="authority-link-actions">
+                  <el-button v-if="scope.row.caseLink" link type="primary" @click.stop="openExternalLink(scope.row.caseLink)">案例</el-button>
+                  <el-button v-if="scope.row.entranceLink" link type="primary" @click.stop="openExternalLink(scope.row.entranceLink)">入口</el-button>
+                  <span v-if="!scope.row.caseLink && !scope.row.entranceLink" class="authority-empty-link">-</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
+          </el-table>
+        </div>
         <div class="pager compact">
           <el-pagination
             background
@@ -259,11 +532,13 @@
           />
         </div>
         <div v-if="selectedAuthorityResource" class="authority-confirm">
-          <div class="authority-selected">
-            <strong>{{ selectedAuthorityResource.name }}</strong>
-            <span>底价 ￥{{ money(selectedAuthorityResource.price) }}</span>
-            <span>{{ entranceLevelLabel(selectedAuthorityResource.entranceLevel) }}</span>
-            <span>{{ newsResourceLabel(selectedAuthorityResource.newsResource) }}</span>
+          <div class="authority-confirm-head">
+            <div class="authority-selected">
+              <strong>{{ selectedAuthorityResource.name }}</strong>
+              <span>底价 ￥{{ money(selectedAuthorityResource.price) }}</span>
+              <span>{{ entranceLevelLabel(selectedAuthorityResource.entranceLevel) }}</span>
+              <span>{{ newsResourceLabel(selectedAuthorityResource.newsResource) }}</span>
+            </div>
           </div>
           <el-form :model="authorityForm" label-width="100px" class="authority-form">
             <el-form-item label="订单售价" required>
@@ -285,17 +560,31 @@
         </div>
       </div>
       <template #footer>
-        <el-button @click="authorityMediaVisible = false">取消</el-button>
-        <el-button type="primary" :loading="authoritySubmitting" :disabled="!authorityForm.resourceId" @click="submitAuthorityMedia">
-          提交权威媒体订单
-        </el-button>
+        <div class="authority-footer">
+          <div class="authority-footer-summary">
+            <template v-if="selectedAuthorityResource">
+              <span class="authority-footer-label">已选择</span>
+              <strong>{{ selectedAuthorityResource.name }}</strong>
+              <span>￥{{ money(authorityForm.salingPrice) }}</span>
+              <span>{{ entranceLevelLabel(selectedAuthorityResource.entranceLevel) }}</span>
+            </template>
+            <span v-else>请选择一个媒体资源后提交订单。</span>
+          </div>
+          <div class="authority-footer-actions">
+            <el-button @click="authorityMediaVisible = false">取消</el-button>
+            <el-button type="primary" :loading="authoritySubmitting" :disabled="!authorityForm.resourceId" @click="submitAuthorityMedia">
+              提交权威媒体订单
+            </el-button>
+          </div>
+        </div>
       </template>
     </el-dialog>
 
-    <el-dialog v-model="mediaDistributeVisible" title="自媒体分发" width="860px">
+    <el-dialog v-model="mediaDistributeVisible" title="自媒体分发" width="980px" class="media-distribute-dialog">
       <div class="media-distribute">
         <el-alert
           v-if="wechatCapability && !wechatCapability.draftDistributionEnabled"
+          class="media-capability-alert"
           type="warning"
           :closable="false"
           show-icon
@@ -303,6 +592,7 @@
         />
         <el-alert
           v-if="douyinCapability && !douyinCapability.enabled"
+          class="media-capability-alert"
           type="warning"
           :closable="false"
           show-icon
@@ -534,9 +824,25 @@
             <span>分发记录</span>
             <el-tag size="small" type="info">{{ distributionAttempts.length }} 条</el-tag>
           </div>
-          <el-table :data="distributionAttempts" border max-height="220">
-            <el-table-column prop="integrationMethod" label="平台" width="110" />
-            <el-table-column prop="status" label="任务状态" width="100" />
+          <el-table class="distribution-history-table" :data="distributionAttempts" max-height="260">
+            <el-table-column label="平台" min-width="180">
+              <template #default="scope">
+                <div class="distribution-target-cell">
+                  <span class="distribution-target-avatar">{{ distributionPlatformInitial(scope.row.integrationMethod) }}</span>
+                  <span class="distribution-target-main">
+                    <span class="distribution-target-title">{{ distributionPlatformLabel(scope.row.integrationMethod) }}</span>
+                    <span class="distribution-target-sub">{{ scope.row.siteName || scope.row.domain || `任务 #${scope.row.id}` }}</span>
+                  </span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="任务状态" width="130">
+              <template #default="scope">
+                <el-tag size="small" :type="distributionStatusTag(scope.row.status)">
+                  {{ distributionStatusLabel(scope.row.status) }}
+                </el-tag>
+              </template>
+            </el-table-column>
             <el-table-column label="审核状态" width="120">
               <template #default="scope">
                 <el-tag v-if="scope.row.reviewStatus" size="small" :type="reviewStatusTag(scope.row.reviewStatus)">
@@ -545,19 +851,28 @@
                 <span v-else>-</span>
               </template>
             </el-table-column>
-            <el-table-column prop="externalStatus" label="平台状态" min-width="110" show-overflow-tooltip />
-            <el-table-column prop="errorMessage" label="错误" min-width="160" show-overflow-tooltip />
-            <el-table-column label="操作" width="100">
+            <el-table-column label="平台反馈" min-width="230" show-overflow-tooltip>
               <template #default="scope">
-                <el-button
-                  v-if="scope.row.reviewStatus === 'under_review'"
-                  link
-                  type="primary"
-                  :loading="refreshingReviewTaskId === scope.row.id"
-                  @click="refreshReviewStatus(scope.row)"
-                >
-                  刷新
-                </el-button>
+                <div class="distribution-feedback">
+                  <span class="distribution-feedback-main">{{ scope.row.externalStatus || '暂无平台状态' }}</span>
+                  <span v-if="scope.row.errorMessage" class="distribution-feedback-error">{{ scope.row.errorMessage }}</span>
+                  <span v-else class="distribution-feedback-muted">未返回错误</span>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="120" align="center">
+              <template #default="scope">
+                <div class="admin-row-actions distribution-actions">
+                  <el-button
+                    v-if="scope.row.reviewStatus === 'under_review'"
+                    link
+                    type="primary"
+                    :loading="refreshingReviewTaskId === scope.row.id"
+                    @click="refreshReviewStatus(scope.row)"
+                  >
+                    刷新
+                  </el-button>
+                </div>
               </template>
             </el-table-column>
           </el-table>
@@ -590,17 +905,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import MarkdownIt from 'markdown-it'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowDown, ArrowUp, Calendar, Refresh, Search } from '@element-plus/icons-vue'
 import DataState from '@/components/ui/DataState.vue'
 import { useUserStore } from '@/stores/user'
-import type { ArticleDetailResponse, ArticleDraft, AuthorityMediaResource, BrandImageFolder, BrandMaterial, DistributionTask, DouyinCapability, SelfMediaAccount, WechatMpCapability } from '@/types'
+import type { ArticleDetailResponse, ArticleDraft, AuthorityMediaResource, BrandImageFolder, BrandMaterial, DistributionTask, DouyinCapability, PublishSite, SelfMediaAccount, WechatMpCapability } from '@/types'
 import {
   checkSelfMediaAccountAuth,
+  deleteContentArticle,
   distributeContentArticleToAgentSite,
   distributeContentArticleToAuthorityMedia,
+  distributeContentArticleToForumSite,
+  distributeContentArticleToIndustrySite,
   distributeContentArticleToSelfMediaAccount,
   getArticleDistribution,
   getAuthorityMediaResources,
@@ -612,23 +931,33 @@ import {
   getWechatMpAuthUrl,
   getWechatMpCapability,
   refreshDistributionTaskReviewStatus,
-  resubmitContentArticle,
-  reviewContentArticle,
   saveContentArticleRevision,
 } from '@/api/content'
-import { getBrandDetail, getBrandImageFolders, getBrandMaterialStream } from '@/api/customer'
+import { getPublishSites } from '@/api/publishSite'
+import { getBrandDetail, getBrandImageFolders, getBrandMaterialPreviewUrl } from '@/api/customer'
 import { createExtensionBindCode, type ExtensionBindCode } from '@/api/extension'
 import { getProjectDetail } from '@/api/project'
 import { pingExtensionBridge, startExtensionCookieCapture, startExtensionFill } from '@/composables/useExtensionBridge'
+import { formatDateTime } from '@/utils/format'
 
 type MediaPlatform = 'wechat_mp' | 'douyin' | 'toutiao' | 'zhihu'
 type SemiAutoPlatform = 'toutiao' | 'zhihu'
 type ExtensionBridgeStatus = 'unknown' | 'checking' | 'bound' | 'unbound' | 'missing' | 'error'
-type DistributionChannel = 'official_site' | 'industry_site' | 'self_media' | 'authority_media'
+type DistributionChannel = 'official_site' | 'industry_site' | 'forum' | 'self_media' | 'authority_media'
 type SelfMediaAccountWithCredential = SelfMediaAccount & {
   cookieCredentialStatus?: string | null
   cookieCredentialVersion?: number | null
   cookieCredentialCapturedAt?: string | null
+}
+interface BatchPublishBlockedItem {
+  title: string
+  styleLabel: string
+  reason: string
+}
+interface RiskWordHit {
+  word: string
+  severity: string
+  source: string
 }
 
 const userStore = useUserStore()
@@ -639,25 +968,28 @@ const canWrite = computed(() => userStore.hasPermission('project.write'))
 const loading = ref(false)
 const submitting = ref(false)
 const rows = ref<ArticleDraft[]>([])
+const selectedRows = ref<ArticleDraft[]>([])
+const batchPublishChecking = ref(false)
 const page = reactive({ current: 1, size: 10, total: 0 })
 const query = reactive({
   projectName: '',
   status: '',
   articleType: '',
+  articleTypeCode: '',
+  channelKey: '',
+  generationMode: '' as '' | 'batch' | 'single',
+  createdRange: [] as string[],
 })
+const publishedCount = computed(() => rows.value.filter((row) => row.status === 'published').length)
+const distributableCount = computed(() => rows.value.filter((row) => canDistribute(row.status)).length)
+const showAdvancedFilters = ref(false)
+const blockedCount = computed(() => rows.value.filter((row) => ['failed', 'risk_blocked'].includes(row.status)).length)
 
 const detailVisible = ref(false)
 const detailData = ref<ArticleDetailResponse | null>(null)
 const detailViewMode = ref<'preview' | 'markdown'>('preview')
 const currentArticleId = ref<number | null>(null)
-const selectedArticleHasRisk = ref(false)
-
-const reviewVisible = ref(false)
-const reviewForm = reactive({
-  action: 'approve' as 'approve' | 'reject' | 'return_for_revision',
-  comment: '',
-  riskOverride: false,
-})
+const articleImagePreviewUrls = ref<Record<string, string>>({})
 
 const revisionVisible = ref(false)
 const revisionViewMode = ref<'preview' | 'markdown'>('markdown')
@@ -666,9 +998,6 @@ const revisionForm = reactive({
   contentMarkdown: '',
   note: '',
 })
-
-const resubmitVisible = ref(false)
-const resubmitForm = reactive({ comment: '' })
 
 const distributionChannelVisible = ref(false)
 const distributionChannelArticle = ref<ArticleDraft | null>(null)
@@ -679,10 +1008,25 @@ const distributionChannels: Array<{
   disabled?: boolean
 }> = [
   { value: 'official_site', label: 'Agent 官网', description: '发布到项目品牌的 Agent 官网站点。' },
-  { value: 'industry_site', label: '行业资讯站', description: '行业资讯站分发通道待接入。', disabled: true },
+  { value: 'industry_site', label: '行业资讯站', description: '选择已启用的行业资讯站并发布。' },
+  { value: 'forum', label: '论坛', description: '选择已启用的论坛站点并发布讨论帖。' },
   { value: 'self_media', label: '自媒体平台', description: '分发到微信公众号、抖音、头条、知乎等账号。' },
   { value: 'authority_media', label: '权威媒体', description: '选择特价网新闻媒体资源并创建出稿订单。' },
 ]
+
+const industrySiteVisible = ref(false)
+const industrySiteLoading = ref(false)
+const industrySiteSubmitting = ref(false)
+const industrySiteArticle = ref<ArticleDraft | null>(null)
+const industrySites = ref<PublishSite[]>([])
+const selectedIndustrySiteId = ref<number | null>(null)
+
+const forumSiteVisible = ref(false)
+const forumSiteLoading = ref(false)
+const forumSiteSubmitting = ref(false)
+const forumSiteArticle = ref<ArticleDraft | null>(null)
+const forumSites = ref<PublishSite[]>([])
+const selectedForumSiteId = ref<number | null>(null)
 
 const authorityMediaVisible = ref(false)
 const authorityLoading = ref(false)
@@ -725,7 +1069,6 @@ const zhihuAccounts = ref<SelfMediaAccount[]>([])
 const checkingSelfMediaAccountId = ref<number | null>(null)
 const brandImageFolders = ref<BrandImageFolder[]>([])
 const materialThumbUrls = ref<Record<number, string | null>>({})
-const materialThumbObjectUrls = ref<string[]>([])
 const imageFolderScope = ref<'project' | 'all'>('project')
 const selectedImageFolderId = ref<number | null>(null)
 const selectedMediaPlatform = ref<MediaPlatform>('wechat_mp')
@@ -756,8 +1099,8 @@ const markdown = new MarkdownIt({
 })
 
 const detailMarkdown = computed(() => detailData.value?.versions?.[0]?.contentMarkdown || '')
-const detailHtml = computed(() => markdown.render(detailMarkdown.value || ''))
-const revisionHtml = computed(() => markdown.render(revisionForm.contentMarkdown || ''))
+const detailHtml = computed(() => renderArticlePreviewMarkdown(detailMarkdown.value || ''))
+const revisionHtml = computed(() => renderArticlePreviewMarkdown(revisionForm.contentMarkdown || ''))
 const wechatActive = computed(() => wechatAccounts.value.some((account) => account.status === 'active'))
 const wechatStatusLabel = computed(() => {
   if (!wechatCapability.value?.draftDistributionEnabled) return '审核中'
@@ -811,13 +1154,52 @@ const selectedDouyinMaterials = computed(() => selectedDouyinImageMaterialIds.va
   .map((id) => douyinImageMaterials.value.find((item) => item.id === id))
   .filter((item): item is BrandMaterial => !!item))
 const statusOptions = [
-  { label: '待审核', value: 'pending_review' },
-  { label: '已通过', value: 'approved' },
-  { label: '已驳回', value: 'rejected' },
-  { label: '修改中', value: 'under_revision' },
+  { label: '已就绪', value: 'approved' },
+  { label: '分发中', value: 'distributing' },
+  { label: '已分发', value: 'distributed' },
   { label: '已发布', value: 'published' },
   { label: '已下架', value: 'unpublished' },
 ]
+
+const channelFilterOptions = [
+  { label: '官网', value: 'agent_site:' },
+  { label: '行业资讯站', value: 'industry_site:' },
+  { label: '论坛', value: 'forum:' },
+  { label: '自媒体平台 / 今日头条', value: 'self_media:toutiao' },
+  { label: '自媒体平台 / 公众号', value: 'self_media:wechat' },
+  { label: '自媒体平台 / 知乎', value: 'self_media:zhihu' },
+  { label: '自媒体平台 / 抖音图文', value: 'self_media:douyin_image_text' },
+  { label: '自媒体平台 / 小红书', value: 'self_media:xiaohongshu' },
+  { label: '自媒体平台 / 百家号', value: 'self_media:baijiahao' },
+  { label: '权威媒体 / 行业媒体', value: 'authority_media:industry_media' },
+  { label: '权威媒体 / 地方媒体', value: 'authority_media:local_media' },
+  { label: '权威媒体 / 财经媒体', value: 'authority_media:finance_media' },
+  { label: '权威媒体 / 科技媒体', value: 'authority_media:tech_media' },
+  { label: '权威媒体 / 新闻源媒体', value: 'authority_media:news_source' },
+  { label: '权威媒体 / 门户媒体', value: 'authority_media:portal_media' },
+]
+
+const contentShapeOptions = [
+  { label: '问答文章', value: 'faq' },
+  { label: '场景内容文', value: 'scenario_content' },
+  { label: '行业分析文', value: 'industry_article' },
+  { label: '阶段建议文', value: 'stage_advice' },
+  { label: '选择指南', value: 'buying_guide' },
+  { label: '对比评测', value: 'comparison' },
+  { label: '费用解析', value: 'cost_analysis' },
+  { label: '避坑指南', value: 'pitfall_guide' },
+  { label: '经验笔记', value: 'social_note' },
+  { label: '资讯简讯', value: 'news_brief' },
+  { label: '讨论帖', value: 'forum_discussion' },
+]
+
+function parseChannelKey(value: string) {
+  const [channelGroupCode, channelSubCode = ''] = value.split(':')
+  return {
+    channelGroupCode: channelGroupCode || undefined,
+    channelSubCode: channelSubCode || undefined,
+  }
+}
 
 function articleTypeLabel(v: string) {
   const map: Record<string, string> = {
@@ -829,31 +1211,208 @@ function articleTypeLabel(v: string) {
   return map[v] || v
 }
 
+function articleTypeInitial(v: string) {
+  const map: Record<string, string> = {
+    faq: '问',
+    scenario_content: '景',
+    industry_article: '文',
+    stage_advice: '议',
+  }
+  return map[v] || '文'
+}
+
+function articleTypeClass(v: string) {
+  const map: Record<string, string> = {
+    faq: 'is-faq',
+    scenario_content: 'is-scene',
+    industry_article: 'is-article',
+    stage_advice: 'is-advice',
+  }
+  return map[v] || 'is-article'
+}
+
+function contentStyleLabel(v?: string | null) {
+  if (!v) return '-'
+  const map: Record<string, string> = {
+    toutiao: '今日头条',
+    wechat: '公众号',
+    zhihu: '知乎',
+    douyin_image_text: '抖音图文',
+    linkedin: '领英风格',
+    agent_site_article: 'Agent 官网文章',
+    industry_site: '行业资讯站',
+    authority_media: '权威媒体',
+    forum: '论坛',
+    xiaohongshu: '小红书',
+    baijiahao: '百家号',
+  }
+  return map[v] || v
+}
+
+function channelGroupLabel(v?: string | null) {
+  const map: Record<string, string> = {
+    agent_site: '官网',
+    industry_site: '行业资讯站',
+    self_media: '自媒体平台',
+    authority_media: '权威媒体',
+    forum: '论坛',
+  }
+  return v ? map[v] || v : ''
+}
+
+function channelSubLabel(v?: string | null) {
+  const map: Record<string, string> = {
+    toutiao: '今日头条',
+    wechat: '公众号',
+    zhihu: '知乎',
+    douyin_image_text: '抖音图文',
+    xiaohongshu: '小红书',
+    baijiahao: '百家号',
+    industry_media: '行业媒体',
+    local_media: '地方媒体',
+    finance_media: '财经媒体',
+    tech_media: '科技媒体',
+    news_source: '新闻源媒体',
+    portal_media: '门户媒体',
+  }
+  return v ? map[v] || v : ''
+}
+
+function articleChannelLabel(row: ArticleDraft) {
+  if (row.channelGroupCode) {
+    const group = channelGroupLabel(row.channelGroupCode)
+    const sub = channelSubLabel(row.channelSubCode)
+    return sub ? `${group}/${sub}` : group
+  }
+  return contentStyleLabel(row.contentStyle)
+}
+
+function generationModeLabel(row: ArticleDraft) {
+  if (row.generationMode === 'batch') return '批量生成'
+  if (row.generationMode === 'single') return '单篇生成'
+  return row.systemGenerated ? '批量生成' : '单篇生成'
+}
+
 function statusLabel(v: string) {
   return statusOptions.find((s) => s.value === v)?.label || v
 }
 
-function statusTagType(v: string): 'success' | 'warning' | 'danger' | 'info' {
-  if (v === 'approved' || v === 'published') return 'success'
-  if (v === 'rejected') return 'danger'
-  if (v === 'under_revision' || v === 'unpublished') return 'warning'
+function distributionPlatformLabel(v?: string | null) {
+  const map: Record<string, string> = {
+    wechat_mp: '微信公众号',
+    douyin: '抖音图文',
+    toutiao: '今日头条',
+    zhihu: '知乎',
+    rest_api: 'REST API',
+    ftp: 'FTP',
+    email: '邮件',
+    manual: '手动分发',
+    brand_geo_site: '品牌官网',
+    agent_official_site: 'Agent 官网',
+    discuz_http: 'Discuz HTTP 直发',
+    forum_playwright: '论坛浏览器自动化',
+  }
+  return v ? map[v] || v : '-'
+}
+
+function distributionPlatformInitial(v?: string | null) {
+  const label = distributionPlatformLabel(v)
+  return label === '-' ? '发' : label.slice(0, 1)
+}
+
+function distributionChannelInitial(v: DistributionChannel) {
+  const map: Record<DistributionChannel, string> = {
+    official_site: '站',
+    industry_site: '讯',
+    forum: '坛',
+    self_media: '媒',
+    authority_media: '权',
+  }
+  return map[v]
+}
+
+function distributionChannelClass(v: DistributionChannel) {
+  const map: Record<DistributionChannel, string> = {
+    official_site: 'is-official',
+    industry_site: 'is-industry',
+    forum: 'is-forum',
+    self_media: 'is-media',
+    authority_media: 'is-authority',
+  }
+  return map[v]
+}
+
+function distributionStatusLabel(v?: string | null) {
+  const map: Record<string, string> = {
+    pending: '待提交',
+    submitting: '提交中',
+    submitted: '已提交',
+    filled: '已填充',
+    failed: '失败',
+    confirmed: '已确认',
+    published: '已发布',
+  }
+  return v ? map[v] || v : '-'
+}
+
+function distributionStatusTag(v?: string | null): 'success' | 'warning' | 'danger' | 'info' {
+  if (v === 'submitted' || v === 'confirmed' || v === 'published' || v === 'filled') return 'success'
+  if (v === 'submitting' || v === 'pending') return 'warning'
+  if (v === 'failed') return 'danger'
   return 'info'
 }
 
-function canReview(status: string) {
-  return status === 'pending_review'
+function statusTagType(v: string): 'success' | 'warning' | 'danger' | 'info' {
+  if (v === 'approved' || v === 'distributed' || v === 'published') return 'success'
+  if (v === 'failed' || v === 'risk_blocked') return 'danger'
+  if (v === 'distributing' || v === 'unpublished') return 'warning'
+  return 'info'
+}
+
+function contentStatusClass(v: string) {
+  if (v === 'approved' || v === 'distributed' || v === 'published') return 'is-success'
+  if (v === 'failed' || v === 'risk_blocked') return 'is-danger'
+  if (v === 'distributing' || v === 'unpublished') return 'is-warning'
+  return 'is-muted'
 }
 
 function canEdit(status: string) {
-  return status === 'pending_review' || status === 'under_revision' || status === 'rejected'
+  return status === 'approved' || status === 'unpublished'
 }
 
-function canResubmit(status: string) {
-  return status === 'under_revision' || status === 'rejected'
+function canEditFromDetail(status: string) {
+  return canEdit(status)
 }
 
 function canDistribute(status: string) {
   return status === 'approved' || status === 'unpublished'
+}
+
+function canDeleteArticle(status: string) {
+  return !['published', 'distributed', 'distributing'].includes(status)
+}
+
+async function deleteArticle(row: ArticleDraft) {
+  try {
+    await ElMessageBox.confirm(`确认删除文章「${row.title || row.id}」？删除后将不再显示在内容列表中。`, '删除文章', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      confirmButtonClass: 'el-button--danger',
+    })
+  } catch {
+    return
+  }
+  try {
+    await deleteContentArticle(row.id)
+    ElMessage.success('文章已删除')
+    if (rows.value.length === 1 && page.current > 1) {
+      page.current -= 1
+    }
+    await load()
+  } catch {
+    ElMessage.error('删除文章失败')
+  }
 }
 
 async function load() {
@@ -865,6 +1424,11 @@ async function load() {
       projectName: query.projectName.trim() || undefined,
       status: query.status || undefined,
       articleType: query.articleType || undefined,
+      articleTypeCode: query.articleTypeCode || undefined,
+      ...parseChannelKey(query.channelKey),
+      generationMode: query.generationMode || undefined,
+      createdStartDate: query.createdRange[0] || undefined,
+      createdEndDate: query.createdRange[1] || undefined,
     })
     rows.value = data.data.records || []
     page.total = data.data.total || 0
@@ -886,12 +1450,24 @@ function resetQuery() {
   query.projectName = ''
   query.status = ''
   query.articleType = ''
+  query.articleTypeCode = ''
+  query.channelKey = ''
+  query.generationMode = ''
+  query.createdRange = []
   search()
 }
 
 function onPageChange(v: number) {
   page.current = v
   load()
+}
+
+function onSelectionChange(selection: ArticleDraft[]) {
+  selectedRows.value = selection
+}
+
+function canSelectForBatchPublish(row: ArticleDraft) {
+  return canDistribute(row.status)
 }
 
 function goManualCreate() {
@@ -903,24 +1479,163 @@ function goManualCreate() {
   })
 }
 
+function openBatchGeneration() {
+  router.push({
+    path: '/admin/content/articles/batch-generate',
+  })
+}
+
+function openPublishPlatformManagement() {
+  router.push({
+    path: '/admin/content/publish-platforms',
+  })
+}
+
+function openPromptTemplateManagement() {
+  router.push({
+    path: '/admin/content/article-prompt-templates',
+  })
+}
+
+function openBatchPublishJobs() {
+  router.push({
+    path: '/admin/content/articles/batch-publish-jobs',
+  })
+}
+
+function handleToolbarMoreCommand(command: string) {
+  if (command === 'jobs') {
+    openBatchPublishJobs()
+  } else if (command === 'templates') {
+    openPromptTemplateManagement()
+  } else if (command === 'platforms') {
+    openPublishPlatformManagement()
+  }
+}
+
+async function openBatchPublish() {
+  const selected = selectedRows.value.filter((row) => canDistribute(row.status))
+  if (!selected.length) {
+    ElMessage.warning('请选择已就绪或已下架的文章')
+    return
+  }
+  batchPublishChecking.value = true
+  try {
+    const details = await Promise.all(selected.map((row) => getContentArticleDetail(row.id).then((res) => res.data.data)))
+    const blocked = details
+      .map((detail) => {
+        const style = detailContentStyle(detail) || ''
+        const reason = batchPublishBlockReason(style)
+        return reason
+          ? {
+              title: detail.article.title || '未命名文章',
+              styleLabel: contentStyleLabel(style),
+              reason,
+            }
+          : null
+      })
+      .filter((item): item is BatchPublishBlockedItem => item !== null)
+    if (blocked.length) {
+      await ElMessageBox.alert(renderBatchPublishBlockMessage(blocked), '当前存在平台不满足自动发布', {
+        confirmButtonText: '知道了',
+        customClass: 'batch-publish-block-alert',
+      })
+      return
+    }
+    router.push({
+      path: '/admin/content/articles/batch-publish',
+      query: { ids: selected.map((row) => row.id).join(',') },
+    })
+  } finally {
+    batchPublishChecking.value = false
+  }
+}
+
+function renderBatchPublishBlockMessage(items: BatchPublishBlockedItem[]) {
+  return h('div', { class: 'batch-publish-block-dialog' }, [
+    h('p', { class: 'batch-publish-block-summary' }, '以下文章的平台风格暂不支持自动发布，请调整后再发起批量发布。'),
+    h(
+      'div',
+      { class: 'batch-publish-block-list' },
+      items.map((item) =>
+        h('div', { class: 'batch-publish-block-item' }, [
+          h('div', { class: 'batch-publish-block-title' }, item.title),
+          h('div', { class: 'batch-publish-block-meta' }, [
+            h('span', { class: 'batch-publish-block-style' }, item.styleLabel),
+            h('span', { class: 'batch-publish-block-reason' }, item.reason),
+          ]),
+        ]),
+      ),
+    ),
+    h('div', { class: 'batch-publish-block-tip' }, '可继续使用单篇分发，或将文章调整为 Agent 官网/行业资讯站后批量发布。'),
+  ])
+}
+
+function batchPublishBlockReason(contentStyle?: string | null) {
+  if (contentStyle === 'agent_site_article' || contentStyle === 'linkedin') return ''
+  if (contentStyle === 'industry_site') return ''
+  if (contentStyle === 'forum') return ''
+  if (contentStyle === 'toutiao') return '今日头条不允许自动发布'
+  if (contentStyle === 'wechat') return '公众号不允许自动发布'
+  if (contentStyle === 'zhihu') return '知乎不允许自动发布'
+  if (contentStyle === 'douyin_image_text') return '抖音图文不允许自动发布'
+  if (contentStyle === 'authority_media') return '权威媒体不允许自动发布'
+  return '文章未绑定可自动发布的平台风格'
+}
+
+function riskWordHits(article?: Pick<ArticleDraft, 'riskWordsJson'> | null): RiskWordHit[] {
+  if (!article?.riskWordsJson) return []
+  try {
+    const parsed = JSON.parse(article.riskWordsJson) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed
+      .map((item) => {
+        if (!item || typeof item !== 'object') return null
+        const row = item as Record<string, unknown>
+        const word = typeof row.word === 'string' ? row.word.trim() : ''
+        if (!word) return null
+        return {
+          word,
+          severity: typeof row.severity === 'string' ? row.severity : 'block',
+          source: typeof row.source === 'string' ? row.source : 'unknown',
+        }
+      })
+      .filter((item): item is RiskWordHit => item !== null)
+  } catch {
+    return []
+  }
+}
+
+function riskSeverityLabel(severity?: string | null) {
+  return severity === 'warn' ? '提醒' : '阻断'
+}
+
+function riskSourceLabel(source?: string | null) {
+  if (source === 'brand') return '品牌'
+  if (source === 'project') return '项目'
+  if (source === 'global') return '全局'
+  return '未知'
+}
+
+function detailContentStyle(detail: ArticleDetailResponse) {
+  return detail.batchGenerationTask?.contentStyle || detail.article.contentStyle || ''
+}
+
+function detailTopic(detail: ArticleDetailResponse) {
+  return detail.batchGenerationTask?.topic || detail.article.topic || ''
+}
+
 async function openDetail(articleId: number) {
   try {
+    articleImagePreviewUrls.value = {}
     const { data } = await getContentArticleDetail(articleId)
     detailData.value = data.data
     detailViewMode.value = 'preview'
+    await loadArticleImagePreviewUrls(detailMarkdown.value, data.data.project?.brandId || null, data.data.project?.id)
     detailVisible.value = true
   } catch {
     ElMessage.error('加载详情失败')
   }
-}
-
-function openReview(row: ArticleDraft) {
-  currentArticleId.value = row.id
-  selectedArticleHasRisk.value = !!row.hasRisk
-  reviewForm.action = 'approve'
-  reviewForm.comment = ''
-  reviewForm.riskOverride = false
-  reviewVisible.value = true
 }
 
 async function openRevision(row: ArticleDraft) {
@@ -928,19 +1643,26 @@ async function openRevision(row: ArticleDraft) {
   revisionForm.title = row.title
   revisionForm.note = ''
   revisionViewMode.value = 'markdown'
+  articleImagePreviewUrls.value = {}
   try {
     const { data } = await getContentArticleDetail(row.id)
     revisionForm.contentMarkdown = data.data.versions?.[0]?.contentMarkdown || ''
+    await loadArticleImagePreviewUrls(revisionForm.contentMarkdown, data.data.project?.brandId || null, data.data.project?.id)
   } catch {
     revisionForm.contentMarkdown = ''
   }
   revisionVisible.value = true
 }
 
-function openResubmit(row: ArticleDraft) {
-  currentArticleId.value = row.id
-  resubmitForm.comment = ''
-  resubmitVisible.value = true
+function openRevisionFromDetail() {
+  if (!detailData.value) return
+  currentArticleId.value = detailData.value.article.id
+  revisionForm.title = detailData.value.article.title
+  revisionForm.contentMarkdown = detailData.value.versions?.[0]?.contentMarkdown || ''
+  revisionForm.note = ''
+  revisionViewMode.value = 'markdown'
+  void loadArticleImagePreviewUrls(revisionForm.contentMarkdown, detailData.value.project?.brandId || null, detailData.value.project?.id)
+  revisionVisible.value = true
 }
 
 function openDistributionChannel(row: ArticleDraft) {
@@ -952,7 +1674,13 @@ async function selectDistributionChannel(channel: DistributionChannel) {
   const row = distributionChannelArticle.value
   if (!row) return
   if (channel === 'industry_site') {
-    ElMessage.info('行业资讯站分发通道待接入')
+    distributionChannelVisible.value = false
+    await openIndustrySiteDistribute(row)
+    return
+  }
+  if (channel === 'forum') {
+    distributionChannelVisible.value = false
+    await openForumSiteDistribute(row)
     return
   }
   distributionChannelVisible.value = false
@@ -965,6 +1693,84 @@ async function selectDistributionChannel(channel: DistributionChannel) {
     return
   }
   await openAuthorityMedia(row)
+}
+
+async function openIndustrySiteDistribute(row: ArticleDraft) {
+  industrySiteArticle.value = row
+  selectedIndustrySiteId.value = null
+  industrySites.value = []
+  industrySiteVisible.value = true
+  industrySiteLoading.value = true
+  try {
+    const { data } = await getPublishSites({ status: 'active' })
+    industrySites.value = (data.data || []).filter(isIndustryPublishSite)
+  } catch {
+    ElMessage.error('加载行业资讯站失败')
+  } finally {
+    industrySiteLoading.value = false
+  }
+}
+
+async function openForumSiteDistribute(row: ArticleDraft) {
+  forumSiteArticle.value = row
+  selectedForumSiteId.value = null
+  forumSites.value = []
+  forumSiteVisible.value = true
+  forumSiteLoading.value = true
+  try {
+    const { data } = await getPublishSites({ status: 'active' })
+    forumSites.value = (data.data || []).filter(isForumPublishSite)
+  } catch {
+    ElMessage.error('加载论坛失败')
+  } finally {
+    forumSiteLoading.value = false
+  }
+}
+
+function selectIndustrySite(row?: PublishSite) {
+  selectedIndustrySiteId.value = row?.id || null
+}
+
+function selectForumSite(row?: PublishSite) {
+  selectedForumSiteId.value = row?.id || null
+}
+
+async function submitIndustrySite() {
+  const row = industrySiteArticle.value
+  if (!row || !selectedIndustrySiteId.value) return
+  industrySiteSubmitting.value = true
+  try {
+    const result = await distributeContentArticleToIndustrySite(row.id, selectedIndustrySiteId.value)
+    const task = result.data.data
+    if (task.status === 'submitted') {
+      ElMessage.success('行业资讯站分发成功')
+      industrySiteVisible.value = false
+      await load()
+    } else {
+      ElMessage.error(task.errorMessage || '行业资讯站分发失败')
+    }
+  } finally {
+    industrySiteSubmitting.value = false
+  }
+}
+
+async function submitForumSite() {
+  const row = forumSiteArticle.value
+  if (!row || !selectedForumSiteId.value) return
+  forumSiteSubmitting.value = true
+  try {
+    const result = await distributeContentArticleToForumSite(row.id, selectedForumSiteId.value)
+    const task = result.data.data
+    if (task.status === 'submitted') {
+      ElMessage.success('论坛分发成功')
+      forumSiteVisible.value = false
+      await load()
+    } else {
+      ElMessage.error(task.errorMessage || '论坛分发失败')
+    }
+  } finally {
+    forumSiteSubmitting.value = false
+  }
 }
 
 async function openAuthorityMedia(row: ArticleDraft) {
@@ -1252,6 +2058,68 @@ function selectImageFolder(folderId: number) {
   selectedDouyinImageMaterialIds.value = selectedDouyinImageMaterialIds.value.filter((id) => douyinImageMaterials.value.some((item) => item.id === id))
 }
 
+function renderArticlePreviewMarkdown(content: string) {
+  const html = markdown.render(content)
+  const previewUrls = articleImagePreviewUrls.value
+  if (!Object.keys(previewUrls).length) {
+    return html
+  }
+  const template = document.createElement('template')
+  template.innerHTML = html
+  template.content.querySelectorAll('img').forEach((image) => {
+    const originalSrc = image.getAttribute('src') || ''
+    const previewUrl = previewUrls[originalSrc]
+    if (previewUrl) {
+      image.setAttribute('data-source-src', originalSrc)
+      image.setAttribute('src', previewUrl)
+    }
+  })
+  return template.innerHTML
+}
+
+async function loadArticleImagePreviewUrls(markdownContent: string, brandId?: number | null, projectId?: number | null) {
+  if (!brandId || !markdownContent.trim()) {
+    articleImagePreviewUrls.value = {}
+    return
+  }
+  const imageUrls = extractMarkdownImageUrls(markdownContent)
+  if (!imageUrls.length) {
+    articleImagePreviewUrls.value = {}
+    return
+  }
+  try {
+    const { data } = await getBrandImageFolders(brandId, {
+      projectId: projectId || undefined,
+      activeOnly: true,
+      includeMaterials: true,
+    })
+    const materials = (data.data || []).flatMap((folder) => folder.materials || [])
+    const materialByUrl = new Map(materials.map((material) => [material.fileUrl, material]))
+    const next: Record<string, string> = {}
+    await Promise.all(imageUrls.map(async (url) => {
+      const material = materialByUrl.get(url)
+      if (!material) return
+      const previewRes = await getBrandMaterialPreviewUrl(brandId, material.id)
+      next[url] = previewRes.data.data.url
+    }))
+    articleImagePreviewUrls.value = next
+  } catch {
+    articleImagePreviewUrls.value = {}
+  }
+}
+
+function extractMarkdownImageUrls(content: string) {
+  const urls = new Set<string>()
+  const pattern = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(content)) !== null) {
+    if (match[1]) {
+      urls.add(match[1])
+    }
+  }
+  return Array.from(urls)
+}
+
 function ensureSelectedImageFolder() {
   const folders = displayImageFolders.value
   if (!folders.length) {
@@ -1289,9 +2157,8 @@ async function loadMaterialThumbs() {
     while (cursor < targets.length) {
       const material = targets[cursor++]
       try {
-        const { data: blob } = await getBrandMaterialStream(brandId, material.id, false)
-        const url = URL.createObjectURL(blob)
-        materialThumbObjectUrls.value.push(url)
+        const { data } = await getBrandMaterialPreviewUrl(brandId, material.id)
+        const url = data.data.url
         materialThumbUrls.value = { ...materialThumbUrls.value, [material.id]: url }
       } catch {
         materialThumbUrls.value = { ...materialThumbUrls.value, [material.id]: null }
@@ -1303,8 +2170,6 @@ async function loadMaterialThumbs() {
 }
 
 function cleanupMaterialThumbs() {
-  materialThumbObjectUrls.value.forEach((url) => URL.revokeObjectURL(url))
-  materialThumbObjectUrls.value = []
   materialThumbUrls.value = {}
 }
 
@@ -1509,16 +2374,28 @@ async function refreshPendingCookieCaptureStatus() {
 
 function handleWindowFocusForCookieCapture() {
   void refreshPendingCookieCaptureStatus()
+  scheduleDistributionStatusRefresh()
 }
 
 function handleVisibilityChangeForCookieCapture() {
   if (document.visibilityState === 'visible') {
     void refreshPendingCookieCaptureStatus()
+    scheduleDistributionStatusRefresh()
   }
+}
+
+function scheduleDistributionStatusRefresh() {
+  if (!rows.value.some(row => row.status === 'distributing')) return
+  window.setTimeout(() => {
+    void load()
+  }, 800)
 }
 
 async function startSemiAutoExtensionTask(articleId: number, accountId: number, platform: string) {
   if (!await ensureExtensionBridgeReady()) {
+    if (mediaDistributeBrandId.value) {
+      await generateExtensionBindCode(mediaDistributeBrandId.value, accountId)
+    }
     return
   }
   const requestId = createRequestId(platform)
@@ -1733,6 +2610,39 @@ function money(value: number | string | null | undefined) {
   return Number.isFinite(n) ? n.toFixed(2) : '0.00'
 }
 
+function parseIndustryTags(raw?: string | string[] | null) {
+  if (Array.isArray(raw)) return raw
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+function isAgentPublishSite(site: PublishSite) {
+  return site.integrationMethod === 'brand_geo_site' || site.siteCode === 'agent_official_site'
+}
+
+function isForumPublishSite(site: PublishSite) {
+  return site.integrationMethod === 'forum_playwright' || site.integrationMethod === 'discuz_http'
+}
+
+function isIndustryPublishSite(site: PublishSite) {
+  return !isAgentPublishSite(site) && !isForumPublishSite(site)
+}
+
+function industrySiteInitial(site: PublishSite) {
+  const text = (site.siteName || site.domain || '站').trim()
+  return Array.from(text)[0] || '站'
+}
+
+function industrySiteTagText(site: PublishSite) {
+  const tags = parseIndustryTags(site.industryTags)
+  return tags.length ? tags.join(' / ') : '未分类'
+}
+
 function entranceLevelLabel(value?: number | null) {
   const map: Record<number, string> = {
     0: '无入口',
@@ -1762,6 +2672,19 @@ function includeConditionLabel(value?: number | null) {
   return value == null ? '-' : (map[value] || String(value))
 }
 
+function authorityMediaInitial(resource: AuthorityMediaResource) {
+  const text = (resource.name || resource.industry || '媒').trim()
+  return Array.from(text)[0] || '媒'
+}
+
+function authorityWeightText(resource: AuthorityMediaResource) {
+  return `PC ${resource.pcWeight ?? '-'} / M ${resource.mWeight ?? '-'}`
+}
+
+function authorityRowClass({ row }: { row: AuthorityMediaResource }) {
+  return row.id === authorityForm.resourceId ? 'is-selected-authority' : ''
+}
+
 function openExternalLink(url?: string | null) {
   if (!url) return
   window.open(url, '_blank', 'noopener,noreferrer')
@@ -1778,42 +2701,13 @@ async function distributeToAgentSite(row: ArticleDraft) {
     }
     const brandRes = await getBrandDetail(brandId)
     const brand = brandRes.data.data
-    if (!brand.geoSiteCode) {
-      ElMessage.warning('该品牌未配置 Agent 官网，请先在品牌配置页填写')
-      return
-    }
-    if (brand.geoSiteStatus !== 'active') {
-      ElMessage.warning('该品牌 Agent 官网已停用')
-      return
-    }
     const result = await distributeContentArticleToAgentSite(row.id, brandId)
     const task = result.data.data
     if (task.status === 'submitted') {
-      ElMessage.success(`已分发到 https://www.${brand.geoSiteCode}.com`)
+      ElMessage.success(`已分发到 ${brand.brandName || '品牌'} Agent 官网`)
     } else {
       ElMessage.error(task.errorMessage || 'Agent 官网分发失败')
     }
-    await load()
-  } finally {
-    submitting.value = false
-  }
-}
-
-async function submitReview() {
-  if (!currentArticleId.value) return
-  if ((reviewForm.action === 'reject' || reviewForm.action === 'return_for_revision') && !reviewForm.comment.trim()) {
-    ElMessage.warning('驳回或退回修改时，审核意见不能为空')
-    return
-  }
-  submitting.value = true
-  try {
-    await reviewContentArticle(currentArticleId.value, {
-      action: reviewForm.action,
-      comment: reviewForm.comment || undefined,
-      riskOverride: reviewForm.riskOverride,
-    })
-    reviewVisible.value = false
-    ElMessage.success('审核提交成功')
     await load()
   } finally {
     submitting.value = false
@@ -1836,21 +2730,12 @@ async function submitRevision() {
     revisionVisible.value = false
     ElMessage.success('修订保存成功')
     await load()
-  } finally {
-    submitting.value = false
-  }
-}
-
-async function submitResubmit() {
-  if (!currentArticleId.value) return
-  submitting.value = true
-  try {
-    await resubmitContentArticle(currentArticleId.value, {
-      comment: resubmitForm.comment || undefined,
-    })
-    resubmitVisible.value = false
-    ElMessage.success('已重新提交审核')
-    await load()
+    if (detailVisible.value && detailData.value?.article.id === currentArticleId.value) {
+      const { data } = await getContentArticleDetail(currentArticleId.value)
+      detailData.value = data.data
+      detailViewMode.value = 'preview'
+      await loadArticleImagePreviewUrls(detailMarkdown.value, data.data.project?.brandId || null, data.data.project?.id)
+    }
   } finally {
     submitting.value = false
   }
@@ -1962,45 +2847,396 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 
 .toolbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+  flex-direction: column;
+  gap: 14px;
 }
 
-.toolbar-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+.content-toolbar-card {
+  border-radius: 12px;
+  overflow: hidden;
 }
 
-.toolbar-right {
+.content-toolbar-card :deep(.el-card__body) {
+  padding: 20px 22px;
+}
+
+.toolbar-filter-row {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.toolbar-filter-line {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+}
+
+.toolbar-filter-line.is-primary {
+  grid-template-columns:
+    minmax(240px, 300px)
+    minmax(170px, 200px)
+    minmax(150px, 180px)
+    1px
+    auto;
+  justify-content: start;
+}
+
+.toolbar-filter-line.is-secondary {
+  padding-top: 16px;
+  border-top: 1px dashed #e2e8f0;
+  grid-template-columns:
+    minmax(180px, 220px)
+    minmax(180px, 220px)
+    minmax(180px, 220px)
+    minmax(300px, 360px);
+  justify-content: start;
+}
+
+.toolbar-project-input,
+.toolbar-filter-control,
+.toolbar-date-range {
+  width: 100%;
+}
+
+.toolbar-filter-control.is-narrow {
+  min-width: 128px;
+}
+
+.toolbar-filter-control.is-wide {
+  min-width: 170px;
+}
+
+.toolbar-filter-divider {
+  width: 1px;
+  height: 32px;
+  background: #e5ebf3;
+}
+
+.toolbar-select-prefix {
+  color: #8ea0ba;
+  font-weight: 400;
+  margin-right: 18px;
+}
+
+.toolbar-project-input :deep(.el-input__wrapper),
+.toolbar-date-range :deep(.el-input__wrapper),
+.toolbar-date-range :deep(.el-range-input),
+.toolbar-filter-control :deep(.el-select__wrapper) {
+  min-height: 50px;
+  border-radius: 11px;
+  background: #f8fafd;
+  box-shadow: 0 0 0 1px #e2e8f0 inset;
+}
+
+.toolbar-project-input :deep(.el-input__wrapper:hover),
+.toolbar-date-range :deep(.el-input__wrapper:hover),
+.toolbar-filter-control :deep(.el-select__wrapper:hover) {
+  box-shadow: 0 0 0 1px #cbd8e8 inset;
+}
+
+.toolbar-project-input :deep(.el-input__inner),
+.toolbar-filter-control :deep(.el-select__placeholder),
+.toolbar-filter-control :deep(.el-select__selected-item),
+.toolbar-date-range :deep(.el-range-input) {
+  color: #334155;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.toolbar-project-input :deep(.el-input__inner::placeholder),
+.toolbar-date-range :deep(.el-range-input::placeholder) {
+  color: #8ea0ba;
+  font-weight: 400;
+}
+
+.toolbar-date-range :deep(.el-range-separator) {
+  color: #c2ccda;
+  font-weight: 400;
+}
+
+.toolbar-filter-actions,
+.toolbar-action-row,
+.toolbar-primary-actions,
+.toolbar-secondary-actions {
   display: flex;
   align-items: center;
+  gap: 10px;
+}
+
+.toolbar-filter-actions {
   justify-content: flex-end;
-  gap: 8px;
+  white-space: nowrap;
+  flex-wrap: nowrap;
+}
+
+.toolbar-search-action,
+.toolbar-reset-action {
+  height: 50px;
+  min-width: 112px;
+  border-radius: 11px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.toolbar-search-action {
+  background: #2563eb;
+  border-color: #2563eb;
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.28);
+}
+
+.toolbar-reset-action {
+  color: #334155;
+  background: #fff;
+  border-color: #e2e8f0;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+.toolbar-toggle-action {
+  color: #2563eb;
+  font-size: 15px;
+  font-weight: 800;
+  padding: 0 4px 0 10px;
+}
+
+.toolbar-toggle-action:hover {
+  color: #1d4ed8;
+  background: transparent;
+}
+
+.toolbar-toggle-icon {
+  margin-left: 4px;
+  font-size: 14px;
+}
+
+.toolbar-action-row {
+  justify-content: space-between;
+  min-height: 44px;
+  padding-top: 12px;
+  border-top: 1px solid #edf2f7;
   flex-wrap: wrap;
+}
+
+.toolbar-primary-actions,
+.toolbar-secondary-actions {
+  flex-wrap: wrap;
+}
+
+.toolbar-secondary-actions {
+  justify-content: flex-end;
+}
+
+.toolbar-selection-hint {
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.toolbar-more-action {
+  color: #64748b;
+}
+
+.toolbar-more-action:hover {
+  color: #334155;
+}
+
+@media (max-width: 1180px) {
+  .toolbar-filter-line.is-primary,
+  .toolbar-filter-line.is-secondary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .toolbar-filter-divider {
+    display: none;
+  }
+
+  .toolbar-filter-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 760px) {
+  .toolbar-filter-line.is-primary,
+  .toolbar-filter-line.is-secondary {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar-action-row,
+  .toolbar-primary-actions,
+  .toolbar-secondary-actions {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .toolbar-action-row {
+    flex-direction: column;
+  }
+
+  .toolbar-primary-actions .el-button,
+  .toolbar-secondary-actions .el-button,
+  .toolbar-filter-actions .el-button,
+  .toolbar-secondary-actions :deep(.el-dropdown) {
+    flex: 1 1 0;
+  }
+
+  .toolbar-filter-actions {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .toolbar-toggle-action {
+    justify-content: center;
+  }
+
+  .toolbar-selection-hint {
+    width: 100%;
+  }
 }
 
 .mb-3 {
   margin-bottom: 12px;
 }
 
-.pager {
-  margin-top: 12px;
-  display: flex;
-  justify-content: flex-end;
-}
-
 .pager.compact {
   margin-top: 8px;
+}
+
+.content-avatar.is-faq {
+  background: linear-gradient(135deg, #2563eb, #0891b2);
+}
+
+.content-avatar.is-scene {
+  background: linear-gradient(135deg, #0d9488, #14b8a6);
+}
+
+.content-avatar.is-article {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+}
+
+.content-avatar.is-advice {
+  background: linear-gradient(135deg, #475569, #64748b);
+}
+
+.content-status-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #92400e;
+  font-weight: 700;
+}
+
+.content-status-text.is-success {
+  color: #047857;
+}
+
+.content-status-text.is-danger {
+  color: #b91c1c;
+}
+
+.content-status-text.is-muted {
+  color: #64748b;
+}
+
+.content-status-dot {
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.14);
+}
+
+.content-status-text.is-success .content-status-dot {
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.14);
+}
+
+.content-status-text.is-danger .content-status-dot {
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.14);
+}
+
+.content-status-text.is-muted .content-status-dot {
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
+}
+
+.content-neutral-action {
+  color: #64748b;
+}
+
+.content-neutral-action:hover {
+  color: #334155;
 }
 
 .detail-wrap {
   display: flex;
   flex-direction: column;
+  gap: 16px;
+}
+
+.content-detail-drawer :deep(.el-drawer__header) {
+  margin-bottom: 0;
+  padding: 18px 22px;
+  border-bottom: 1px solid #e2e8f0;
+  background: linear-gradient(135deg, #f8fbff, #eff6ff 58%, #ecfdf5);
+}
+
+.content-detail-drawer :deep(.el-drawer__title) {
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.content-detail-drawer :deep(.el-drawer__body) {
+  padding: 18px 22px 24px;
+  background: #f7fbff;
+}
+
+.detail-summary-panel,
+.detail-section-panel {
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+
+.detail-summary-panel {
+  padding: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.08), transparent 30%),
+    linear-gradient(135deg, #ffffff, #f8fbff);
+}
+
+.detail-summary-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 14px;
+  margin-bottom: 14px;
+}
+
+.detail-summary-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 10px;
+}
+
+.detail-summary-head h3 {
+  margin: 5px 0 0;
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.detail-kicker {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .detail-header {
@@ -2011,17 +3247,34 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 }
 
 .detail-title {
-  margin: 2px 0;
-  font-size: 14px;
-  font-weight: 600;
+  margin: 0;
+  padding: 14px 16px;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.detail-section-panel > .el-table {
+  border-top: 1px solid #e2e8f0;
+}
+
+.detail-preview-panel {
+  padding-bottom: 16px;
+}
+
+.detail-preview-panel .detail-header {
+  padding-right: 16px;
+  border-bottom: 1px solid #e2e8f0;
 }
 
 .markdown-preview {
   min-height: 360px;
-  padding: 16px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  background: #fff;
+  margin: 16px;
+  padding: 22px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, #ffffff 0%, #ffffff 74%, #f8fafc 100%);
   overflow: auto;
   line-height: 1.75;
   color: var(--el-text-color-primary);
@@ -2099,6 +3352,15 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 
 .editor-wrap {
   width: 100%;
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #f8fbff;
+}
+
+.revision-title-field :deep(.el-textarea__inner) {
+  font-size: 15px;
+  line-height: 1.6;
 }
 
 .editor-header {
@@ -2112,6 +3374,7 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 
 .editor-preview {
   min-height: 360px;
+  margin: 0;
 }
 
 .distribution-channel-grid {
@@ -2120,73 +3383,642 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   gap: 12px;
 }
 
+.distribution-channel-dialog :deep(.el-dialog__body) {
+  padding-top: 4px;
+}
+
+.distribution-channel-dialog :deep(.el-dialog__footer) {
+  padding: 14px 20px;
+  border-top: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #fff, #f8fafc);
+}
+
+.distribution-channel-intro {
+  margin: 0 0 14px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .distribution-channel-card {
-  min-height: 112px;
-  padding: 14px;
-  border: 1px solid #dcdfe6;
-  border-radius: 8px;
-  background: #fff;
-  color: var(--el-text-color-primary);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 8px;
+  position: relative;
+  min-height: 124px;
+  padding: 16px 18px 14px 64px;
+  border: 1px solid #dbe3ef;
+  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(248, 251, 255, 0.96), #fff 54%);
+  color: #0f172a;
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 
 .distribution-channel-card:hover {
-  border-color: var(--el-color-success);
-  box-shadow: 0 4px 14px rgb(0 0 0 / 8%);
+  border-color: #93c5fd;
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.1);
+  transform: translateY(-1px);
 }
 
 .distribution-channel-card.disabled {
-  background: #fafafa;
+  background: #f8fafc;
+  cursor: not-allowed;
+  opacity: 0.72;
 }
 
-.distribution-channel-title {
+.distribution-channel-card.disabled:hover {
+  border-color: #dbe3ef;
+  box-shadow: none;
+  transform: none;
+}
+
+.distribution-channel-mark {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  color: #fff;
   font-size: 15px;
+  font-weight: 800;
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.14);
+}
+
+.distribution-channel-mark.is-official {
+  background: linear-gradient(135deg, #2563eb, #0891b2);
+}
+
+.distribution-channel-mark.is-industry {
+  background: linear-gradient(135deg, #0d9488, #14b8a6);
+}
+
+.distribution-channel-mark.is-forum {
+  background: linear-gradient(135deg, #16a34a, #0f766e);
+}
+
+.distribution-channel-mark.is-media {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+}
+
+.distribution-channel-mark.is-authority {
+  background: linear-gradient(135deg, #475569, #64748b);
+}
+
+.distribution-channel-status {
+  position: absolute;
+  top: 16px;
+  right: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #047857;
+  font-size: 12px;
   font-weight: 700;
 }
 
+.distribution-channel-status.disabled {
+  color: #64748b;
+}
+
+.distribution-channel-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.14);
+}
+
+.distribution-channel-status.disabled .distribution-channel-status-dot {
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
+}
+
+.distribution-channel-title {
+  display: block;
+  margin: 4px 76px 8px 0;
+  font-size: 15px;
+  font-weight: 800;
+}
+
 .distribution-channel-desc {
-  min-height: 34px;
-  color: var(--el-text-color-secondary);
+  display: block;
+  min-height: 38px;
+  color: #64748b;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.distribution-channel-action {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 10px;
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.distribution-channel-action::after {
+  content: ">";
+  margin-left: 6px;
+}
+
+.industry-site-dialog :deep(.el-dialog__body) {
+  padding-top: 4px;
+}
+
+.industry-site-dialog :deep(.el-dialog__footer) {
+  padding: 14px 20px;
+  border-top: 1px solid #e2e8f0;
+  background: linear-gradient(180deg, #fff, #f8fafc);
+}
+
+.industry-site-intro {
+  margin: 0 0 14px;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.industry-site-list {
+  display: grid;
+  gap: 12px;
+}
+
+.industry-site-card {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 12px;
+  width: 100%;
+  padding: 16px;
+  border: 1px solid #dbe3ef;
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(248, 251, 255, 0.96), #ffffff 58%);
+  color: #0f172a;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.industry-site-card:hover {
+  border-color: #93c5fd;
+  box-shadow: 0 12px 28px rgba(37, 99, 235, 0.1);
+  transform: translateY(-1px);
+}
+
+.industry-site-card.selected {
+  border-color: #60a5fa;
+  background:
+    linear-gradient(135deg, #eff6ff, #ffffff 62%, #f0fdfa);
+  box-shadow:
+    0 14px 30px rgba(37, 99, 235, 0.12),
+    inset 0 0 0 1px rgba(96, 165, 250, 0.35);
+}
+
+.industry-site-radio {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  margin-top: 9px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #ffffff;
+  flex-shrink: 0;
+}
+
+.industry-site-radio.selected {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.industry-site-radio.selected::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  border-radius: inherit;
+  background: #2563eb;
+}
+
+.industry-site-content,
+.industry-site-head,
+.industry-site-meta {
+  display: flex;
+  min-width: 0;
+}
+
+.industry-site-content {
+  flex-direction: column;
+  gap: 12px;
+}
+
+.industry-site-head {
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.industry-site-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #0d9488, #14b8a6);
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 800;
+  flex-shrink: 0;
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.12);
+}
+
+.industry-site-selected {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.industry-site-meta {
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.industry-site-meta-label {
+  margin-right: 6px;
+  color: #94a3b8;
+  font-weight: 700;
 }
 
 .authority-media-dialog {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
+}
+
+.authority-media-modal :deep(.el-dialog) {
+  overflow: hidden;
+  border-radius: 18px;
+  box-shadow: 0 28px 72px rgba(15, 23, 42, 0.18);
+}
+
+.authority-media-modal :deep(.el-dialog__header) {
+  margin: 0;
+  padding: 20px 24px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  background: linear-gradient(135deg, #ffffff, #eff6ff 62%, #ecfdf5);
+}
+
+.authority-media-modal :deep(.el-dialog__title) {
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.authority-media-modal :deep(.el-dialog__body) {
+  padding: 16px 20px 12px;
+  background: #f8fbff;
+}
+
+.authority-media-modal :deep(.el-dialog__footer) {
+  padding: 0;
+  border-top: 1px solid #e2e8f0;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.authority-media-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #eff6ff, #f8fbff);
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.authority-media-notice-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+  flex-shrink: 0;
 }
 
 .authority-filter {
+  display: grid;
+  grid-template-columns:
+    minmax(160px, 1.12fr)
+    minmax(140px, 1fr)
+    minmax(120px, 0.86fr)
+    minmax(120px, 0.86fr)
+    minmax(130px, 0.92fr)
+    minmax(120px, 0.86fr)
+    auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.045);
+}
+
+.authority-filter :deep(.el-input),
+.authority-filter :deep(.el-select) {
+  width: 100%;
+}
+
+.authority-filter :deep(.el-input__wrapper),
+.authority-filter :deep(.el-select__wrapper) {
+  min-height: 40px;
+  border-radius: 10px;
+}
+
+.authority-filter-actions {
   display: flex;
-  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.authority-filter-actions .el-button {
+  margin-left: 0;
+}
+
+.authority-table-wrap {
+  overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
+}
+
+.authority-table-wrap :deep(.el-table__header th) {
+  border-right-color: transparent;
+  background: #eff6ff;
+  color: #334155;
+  font-weight: 800;
+}
+
+.authority-table-wrap :deep(.el-table__body td) {
+  border-right-color: transparent;
+  border-bottom-color: #edf2f7;
+}
+
+.authority-table-wrap :deep(.el-table__row) {
+  cursor: pointer;
+}
+
+.authority-table-wrap :deep(.el-table__row:hover > td) {
+  background: #f8fbff !important;
+}
+
+.authority-table-wrap :deep(.el-table__row.is-selected-authority > td) {
+  background: #eff6ff !important;
+}
+
+.authority-table-wrap :deep(.el-table__row.is-selected-authority td:first-child) {
+  box-shadow: inset 3px 0 0 #2563eb;
+}
+
+.authority-media-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.authority-media-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #475569, #2563eb);
+  color: #ffffff;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.authority-media-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.authority-media-name {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authority-media-sub {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authority-price {
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.authority-soft-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid #e2e8f0;
+  border-radius: 999px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.authority-weight {
+  color: #475569;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.authority-link-actions {
+  display: flex;
+  align-items: center;
   gap: 8px;
 }
 
+.authority-link-actions .el-button {
+  margin-left: 0;
+}
+
+.authority-empty-link {
+  color: #94a3b8;
+}
+
 .authority-confirm {
-  padding: 12px;
-  border: 1px solid var(--el-border-color);
-  border-radius: 8px;
-  background: #fafafa;
+  padding: 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, #eff6ff, #ffffff 64%);
+}
+
+.authority-confirm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
 .authority-selected {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 12px;
-  color: var(--el-text-color-regular);
+  gap: 8px;
+  color: #475569;
+}
+
+.authority-selected strong {
+  color: #0f172a;
+}
+
+.authority-selected span {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .authority-form {
-  max-width: 760px;
+  display: grid;
+  align-items: start;
+  gap: 0 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.authority-form .el-form-item:last-child {
+  grid-column: 1 / -1;
+}
+
+.authority-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 14px 20px;
+}
+
+.authority-footer-summary {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.authority-footer-summary strong {
+  max-width: 260px;
+  overflow: hidden;
+  color: #0f172a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authority-footer-summary span:not(.authority-footer-label) {
+  white-space: nowrap;
+}
+
+.authority-footer-label {
+  color: #2563eb;
+  font-weight: 800;
+}
+
+.authority-footer-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 10px;
+  max-width: 100%;
+}
+
+.authority-footer-actions .el-button {
+  margin-left: 0;
+  white-space: nowrap;
+}
+
+.media-distribute-dialog :deep(.el-dialog) {
+  overflow: hidden;
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.99), rgba(248, 251, 255, 0.98));
+  box-shadow: 0 28px 72px rgba(15, 23, 42, 0.18);
+}
+
+.media-distribute-dialog :deep(.el-dialog__header) {
+  margin: 0;
+  padding: 20px 24px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  background:
+    linear-gradient(135deg, #ffffff, #eff6ff 62%, #ecfdf5);
+}
+
+.media-distribute-dialog :deep(.el-dialog__title) {
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.media-distribute-dialog :deep(.el-dialog__body) {
+  padding: 18px 20px 20px;
+}
+
+.media-distribute-dialog :deep(.el-dialog__footer) {
+  padding: 14px 20px 18px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
 }
 
 .media-distribute {
@@ -2195,123 +4027,151 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   gap: 16px;
 }
 
+.media-capability-alert {
+  border: 1px solid #fed7aa;
+  border-radius: 12px;
+  background: #fff7ed;
+}
+
 .media-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .media-platform {
-  min-height: 118px;
-  border: 1px solid #dcdfe6;
-  border-radius: 8px;
-  background: #fff;
-  color: var(--el-text-color-primary);
+  position: relative;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  min-height: 128px;
+  padding: 16px 12px;
+  overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, #ffffff 0%, #ffffff 68%, #f8fbff 100%);
+  color: #0f172a;
   cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  flex-direction: column;
+  gap: 9px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.media-platform::after {
+  content: "";
+  position: absolute;
+  right: -34px;
+  bottom: -42px;
+  width: 110px;
+  height: 110px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.06);
+  pointer-events: none;
 }
 
 .media-platform:hover {
-  border-color: var(--el-color-success);
-  box-shadow: 0 4px 14px rgb(0 0 0 / 8%);
+  transform: translateY(-2px);
+  border-color: #93c5fd;
+  box-shadow: 0 18px 40px rgba(37, 99, 235, 0.1);
 }
 
 .media-platform.active {
-  border-color: var(--el-color-success);
+  border-color: #22c55e;
+  background:
+    linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%);
+  box-shadow:
+    0 18px 42px rgba(34, 197, 94, 0.13),
+    inset 0 0 0 1px rgba(34, 197, 94, 0.28);
 }
 
 .media-platform.disabled {
   cursor: not-allowed;
-  background: #fafafa;
+  background:
+    linear-gradient(135deg, #ffffff, #f8fafc);
+  color: #94a3b8;
+  opacity: 0.78;
+}
+
+.wechat-mark,
+.douyin-mark,
+.toutiao-mark,
+.zhihu-mark {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  color: #fff;
+  font-size: 23px;
+  font-weight: 800;
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
 }
 
 .wechat-mark {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  background: #1aad19;
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  font-weight: 700;
+  background: linear-gradient(135deg, #16a34a, #22c55e);
 }
 
 .douyin-mark {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  background: #111827;
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  font-weight: 700;
-}
-
-.toutiao-mark,
-.zhihu-mark {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  font-weight: 700;
+  background: linear-gradient(135deg, #020617, #1e293b);
 }
 
 .toutiao-mark {
-  background: #d92323;
+  background: linear-gradient(135deg, #dc2626, #ef4444);
 }
 
 .zhihu-mark {
-  background: #1677ff;
+  background: linear-gradient(135deg, #2563eb, #3b82f6);
 }
 
 .media-name {
-  font-size: 14px;
-  font-weight: 600;
+  position: relative;
+  z-index: 1;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
 }
 
 .self-media-account-list {
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
   overflow: hidden;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
 }
 
 .self-media-account-row {
-  min-height: 58px;
-  padding: 10px 12px;
   display: grid;
-  grid-template-columns: 1fr auto auto auto;
   align-items: center;
+  min-height: 64px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #e2e8f0;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   gap: 12px;
-  border-bottom: 1px solid #ebeef5;
 }
 
 .self-media-account-row:last-child {
   border-bottom: 0;
 }
 
+.self-media-account-row:hover {
+  background: #f8fbff;
+}
+
 .self-media-account-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
 }
 
 .self-media-account-meta {
-  margin-top: 2px;
+  margin-top: 3px;
+  color: #64748b;
   font-size: 12px;
-  color: var(--el-text-color-secondary);
 }
 
 .extension-bind-guide {
@@ -2332,10 +4192,12 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 }
 
 .cover-picker {
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
-  padding: 12px;
-  background: #fafafa;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  padding: 14px;
+  background:
+    linear-gradient(180deg, #ffffff, #f8fbff);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
 }
 
 .cover-picker-header {
@@ -2467,6 +4329,248 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 .douyin-text-editor,
 .distribution-history {
   margin-top: 12px;
+}
+
+.distribution-history {
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, #ffffff, #f8fbff);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
+}
+
+.distribution-history-table {
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+}
+
+.distribution-history-table :deep(.el-table__header th) {
+  border-right-color: transparent;
+  background: #eff6ff;
+  color: #334155;
+  font-weight: 800;
+}
+
+.distribution-history-table :deep(.el-table__body td) {
+  border-right-color: transparent;
+  border-bottom-color: #edf2f7;
+}
+
+.distribution-history-table :deep(.el-table__row:hover > td) {
+  background: #f8fbff !important;
+}
+
+.distribution-target-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.distribution-target-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #2563eb, #06b6d4);
+  color: #ffffff;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.distribution-target-main,
+.distribution-feedback {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.distribution-target-title,
+.distribution-feedback-main {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.distribution-target-sub,
+.distribution-feedback-muted {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.distribution-feedback-error {
+  overflow: hidden;
+  color: #ef4444;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.distribution-actions {
+  grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
+}
+
+.site-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.site-name {
+  display: block;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 800;
+  color: #0f172a;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.site-domain {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  font-size: 12px;
+  color: #64748b;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(.batch-publish-block-alert) {
+  width: min(560px, calc(100vw - 40px));
+  padding: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+}
+
+:global(.batch-publish-block-alert .el-message-box__header) {
+  padding: 22px 24px 8px;
+}
+
+:global(.batch-publish-block-alert .el-message-box__title) {
+  color: #111827;
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+:global(.batch-publish-block-alert .el-message-box__headerbtn) {
+  top: 18px;
+  right: 18px;
+  width: 28px;
+  height: 28px;
+}
+
+:global(.batch-publish-block-alert .el-message-box__content) {
+  padding: 0 24px 16px;
+  color: #475569;
+}
+
+:global(.batch-publish-block-dialog) {
+  display: grid;
+  gap: 12px;
+}
+
+:global(.batch-publish-block-summary) {
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+:global(.batch-publish-block-list) {
+  display: grid;
+  gap: 10px;
+  max-height: 260px;
+  overflow: auto;
+}
+
+:global(.batch-publish-block-item) {
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+
+:global(.batch-publish-block-title) {
+  color: #1f2937;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+:global(.batch-publish-block-meta) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+:global(.batch-publish-block-style) {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 9px;
+  color: #3b6df5;
+  background: #eaf0ff;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+:global(.batch-publish-block-reason) {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.risk-word-line,
+.risk-word-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+
+.risk-word-line {
+  margin-top: 2px;
+}
+
+:global(.batch-publish-block-tip) {
+  padding: 10px 12px;
+  color: #8a5b06;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+:global(.batch-publish-block-alert .el-message-box__btns) {
+  padding: 0 24px 24px;
+}
+
+:global(.batch-publish-block-alert .el-button--primary) {
+  min-width: 92px;
+  height: 40px;
+  padding: 0 22px;
+  background: #3b6df5;
+  border-color: #3b6df5;
+  border-radius: 9px;
+  font-weight: 600;
 }
 
 </style>

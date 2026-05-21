@@ -15,8 +15,11 @@ public class Brand {
     private Long companyId;
     private String industry;
     private String brandName;
+    private String brandShortName;
     private String brandSlug;
     private String mainBusiness;
+    private String coreProducts;
+    private String brandPositioning;
     private String serviceArea;
     private String provinceCode;
     private String provinceName;
@@ -34,8 +37,8 @@ public class Brand {
     private String wechat;
     private String description;
     private String businessIntro;
-    private String standardBrandStatement;
-    private String businessStandardStatement;
+    private String brandQualificationDescription;
+    private String brandCaseDescription;
     private String standardStatement;
     private String statementStatus;
     private LocalDateTime statementGeneratedAt;
@@ -46,6 +49,8 @@ public class Brand {
     private String forbiddenPhrases;
     private String geoSiteCode;
     private String geoSiteStatus;
+    private String industrySiteName;
+    private String industrySiteCode;
     private String status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

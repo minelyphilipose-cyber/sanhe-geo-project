@@ -29,6 +29,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
@@ -39,12 +40,19 @@ import java.util.concurrent.Executor;
 @Service
 public class ArticleAiDraftService {
 
-    private static final String STATUS_PENDING_REVIEW = "pending_review";
+    private static final String STATUS_APPROVED = "approved";
     private static final String GENERATED_BY_AI = "ai";
     private static final String DEFAULT_CONTENT_STYLE = "wechat";
     private static final String DEFAULT_TONE = "professional";
     private static final String DEFAULT_LENGTH = "medium";
     private static final int ARTICLE_PREVIEW_REQUEST_TIMEOUT_MS = 120_000;
+    private static final String ARTICLE_PREVIEW_SYSTEM_PROMPT = """
+            你是一名中文 GEO 内容写作助手，负责为品牌项目生成可被大模型引用的高质量 Markdown 文章草稿。
+            内容立场是行业观察者，而非品牌方市场人员。只输出完整 Markdown 正文，不输出提示词解释。
+            """;
+    private static final List<String> CONTACT_INTENT_KEYWORDS = List.of(
+            "联系", "咨询", "电话", "地址", "怎么找", "在哪里", "到店", "预约", "客服", "门店", "网点"
+    );
 
     private static final Map<String, String> CONTENT_STYLE_LABELS = Map.of(
             "wechat", "公众号",
@@ -52,15 +60,17 @@ public class ArticleAiDraftService {
             "douyin_image_text", "抖音图文",
             "zhihu", "知乎",
             "xiaohongshu", "小红书",
+            "baijiahao", "百家号",
             "linkedin", "领英"
     );
     private static final Map<String, String> CONTENT_STYLE_GUIDES = Map.of(
-            "wechat", "深度长文，结构完整，适合公众号阅读，重视标题吸引力和段落层次。",
-            "toutiao", "资讯密度高，开头直接给结论，段落短，信息点清晰。",
-            "douyin_image_text", "钩子开头，语言轻快，适合图文卡片拆分，避免长段落。",
-            "zhihu", "问题导向，论据充分，强调分析过程和可信结论。",
-            "xiaohongshu", "种草口吻，表达自然，适合加入清单和话题标签。",
-            "linkedin", "商务专业，强调洞察、案例和可执行建议。"
+            "wechat", "深度长文，结构完整，重视段落层次，以分析和洞察为主，不写软文化的“种草”。",
+            "toutiao", "资讯密度高，开头直接给结论，段落短，信息点清晰，以新闻或行业资讯口吻写作。",
+            "douyin_image_text", "钩子开头，语言轻快，适合图文卡片拆分，但内容必须是有价值的信息分享，不是带货话术。",
+            "zhihu", "问题导向，论据充分，强调分析过程和可信结论，呈现行业观察者立场。",
+            "xiaohongshu", "口语化、平等交流，可以加入清单和话题标签，但以“分享经验”为主，避免“安利”式表达。",
+            "baijiahao", "面向百度搜索收录，标题和前 200 字突出核心关键词，表达专业克制，信息密度高，不虚构具体数据来源。",
+            "linkedin", "商务专业，强调洞察、案例和可执行建议，行业视角，不做品牌宣传。"
     );
     private static final Map<String, String> TONE_LABELS = Map.of(
             "professional", "专业严谨",
@@ -143,12 +153,13 @@ public class ArticleAiDraftService {
         String articleType = normalizeArticleType(req.getArticleType());
         Brand brand = resolveBrand(project.getBrandId());
         String prompt = buildPreviewPrompt(req, articleType, project, brand);
-        String outboundPrompt = promptFilter.filterOutboundPrompt(prompt, project, brand);
+        boolean allowContactInfo = shouldIncludeContactInfo(articleType, req.getTopic());
+        String outboundPrompt = promptFilter.filterOutboundPrompt(prompt, project, brand, allowContactInfo);
         ModelSelection model = resolveModel(req.getModelPlatformCode(), req.getModelId(), true);
         String inputSnapshot = previewInputSnapshot(req, articleType, project, brand);
 
         return CompletableFuture.supplyAsync(
-                () -> previewInWorker(project, operator, prompt, outboundPrompt, inputSnapshot, model),
+                () -> previewInWorker(project, operator, prompt, outboundPrompt, inputSnapshot, model, allowContactInfo),
                 articleAiDraftExecutor
         );
     }
@@ -158,11 +169,14 @@ public class ArticleAiDraftService {
                                                           String originalPrompt,
                                                           String outboundPrompt,
                                                           String inputSnapshot,
-                                                          ModelSelection model) {
+                                                          ModelSelection model,
+                                                          boolean allowContactInfo) {
         long started = System.nanoTime();
         try {
             LlmInvokeResult result = llmInvoker.invoke(outboundPrompt, model.config());
-            String content = promptFilter.filterGeneratedContent(result.responseText(), project, resolveBrand(project.getBrandId())).trim();
+            String content = promptFilter.filterGeneratedContent(
+                    result.responseText(), project, resolveBrand(project.getBrandId()), allowContactInfo
+            ).trim();
             if (!StringUtils.hasText(content)) {
                 throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI generated empty article");
             }
@@ -220,8 +234,8 @@ public class ArticleAiDraftService {
 
             ArticleDraft draft = persistDraft(project, operator, articleType, content, originalPrompt, model, result);
             auditGenerated(AuditResult.SUCCESS, operator, project, draft.getId(), originalPrompt.length(),
-                    model.platformCode(), model.modelId(), elapsedMs(started), STATUS_PENDING_REVIEW, null);
-            return new ArticleAiDraftResponse(draft.getId(), STATUS_PENDING_REVIEW);
+                    model.platformCode(), model.modelId(), elapsedMs(started), STATUS_APPROVED, null);
+            return new ArticleAiDraftResponse(draft.getId(), STATUS_APPROVED);
         } catch (BizException ex) {
             auditGenerated(AuditResult.FAILURE, operator, project, null, originalPrompt.length(),
                     model.platformCode(), model.modelId(), elapsedMs(started), "generation_failed", ex.getCode());
@@ -252,7 +266,7 @@ public class ArticleAiDraftService {
             draft.setProjectId(project.getId());
             draft.setArticleType(articleType);
             draft.setTitle(title);
-            draft.setStatus(STATUS_PENDING_REVIEW);
+            draft.setStatus(STATUS_APPROVED);
             draft.setCurrentVersionNo(1);
             draft.setHasRisk(false);
             draft.setRiskSeverity("none");
@@ -333,7 +347,7 @@ public class ArticleAiDraftService {
         }
         LlmModelConfig modelConfig = new LlmModelConfig(config.getPlatformCode(), config.getPlatformName(),
                 resolvedModelId, resolveModelDisplayName(config, resolvedModelId), config.getApiUrl(), apiKey,
-                "你是一个中文 GEO 内容文章写作助手。只输出完整 Markdown 正文，不输出提示词解释。", 0.4D,
+                ARTICLE_PREVIEW_SYSTEM_PROMPT, 0.4D,
                 LlmModelConfig.DEFAULT_CONNECT_TIMEOUT_MS,
                 longForm ? resolveArticleRequestTimeout(config.getTimeoutMs()) : resolveStandardRequestTimeout(config.getTimeoutMs()),
                 normalize(config.getMaxRetry(), 2), Math.max(1, normalize(config.getRateLimitQps(), 1)), null, false,
@@ -456,18 +470,19 @@ public class ArticleAiDraftService {
         String styleGuide = CONTENT_STYLE_GUIDES.getOrDefault(contentStyle, CONTENT_STYLE_GUIDES.get(DEFAULT_CONTENT_STYLE));
         String toneLabel = TONE_LABELS.getOrDefault(tone, TONE_LABELS.get(DEFAULT_TONE));
         String lengthLabel = LENGTH_LABELS.getOrDefault(length, LENGTH_LABELS.get(DEFAULT_LENGTH));
+        String contactInfo = buildContactInfo(articleType, req.getTopic(), brand);
 
         return """
                 # 角色
-                你是一名中文 GEO 内容文章写作助手，负责为品牌项目生成可审核的 Markdown 文章草稿。
+                你是一名中文 GEO 内容写作助手，以行业观察者视角为项目生成可审核的 Markdown 文章草稿。
 
                 # 项目信息
-                - 项目 ID：%s
                 - 项目名称：%s
-                - 品牌：%s
-                - 对外公开电话：%s
-                - 对外公开地址：%s
+                - 所属行业：%s
+                - 主营业务：%s
                 - 文章类型：%s
+                - 如有必要可提及的品牌名：%s
+                %s
 
                 # 写作要求
                 - 内容风格：%s
@@ -482,19 +497,25 @@ public class ArticleAiDraftService {
                 # 参考资料
                 %s
 
+                # 品牌处理规则
+                - 全文品牌名最多出现 1-2 次，且必须出现在自然语境下，例如作为场景参考、可选方案之一或信息来源之一。
+                - 不得在开头段或结尾段强调品牌。
+                - 不得使用“推荐”“首选”“值得信赖”“欢迎咨询”等推销性表达。
+                - 文章主体围绕选题本身展开，品牌只是参考点之一。
+                - 不得编造联系方式、价格、资质、客户案例或不可验证数据。
+
                 # 输出要求
-                - 只输出 Markdown 正文，不要解释提示词。
+                - 只输出 Markdown 正文，不要解释提示词
                 - 第一行必须是一级标题，格式为 "# 标题"。
                 - 正文至少包含 3 个二级标题，格式为 "## 小标题"。
-                - 不要编造联系方式、价格、资质、客户案例或不可验证数据。
                 - 避免空泛套话，给出具体分析和可执行建议。
                 """.formatted(
-                project.getId(),
                 nullToDash(project.getProjectName()),
-                brand == null ? "-" : nullToDash(brand.getBrandName()),
-                brand == null ? "-" : nullToDash(brand.getPublicPhone()),
-                brand == null ? "-" : nullToDash(brand.getPublicAddress()),
+                brand == null ? "-" : nullToDash(brand.getIndustry()),
+                brand == null ? "-" : nullToDash(brand.getMainBusiness()),
                 articleType,
+                brand == null ? "-" : nullToDash(brand.getBrandName()),
+                contactInfo,
                 styleLabel,
                 styleGuide,
                 toneLabel,
@@ -503,6 +524,34 @@ public class ArticleAiDraftService {
                 StringUtils.hasText(req.getExtraPrompt()) ? req.getExtraPrompt().trim() : "无",
                 StringUtils.hasText(req.getReferenceMaterials()) ? req.getReferenceMaterials().trim() : "无"
         );
+    }
+
+    private String buildContactInfo(String articleType, String topic, Brand brand) {
+        if (!shouldIncludeContactInfo(articleType, topic) || brand == null) {
+            return "";
+        }
+        String phone = nullToDash(brand.getPublicPhone());
+        String address = nullToDash(brand.getPublicAddress());
+        if ("-".equals(phone) && "-".equals(address)) {
+            return "";
+        }
+        return """
+                - 可在文中提及的联系方式（仅在回答“如何联系/咨询途径”类问题中使用一次）：
+                  · 电话：%s
+                  · 地址：%s
+                """.formatted(phone, address).stripTrailing();
+    }
+
+    private boolean shouldIncludeContactInfo(String articleType, String topic) {
+        return ArticleTypes.FAQ.equals(articleType) && isContactIntentTopic(topic);
+    }
+
+    private boolean isContactIntentTopic(String topic) {
+        if (!StringUtils.hasText(topic)) {
+            return false;
+        }
+        String normalized = topic.trim();
+        return CONTACT_INTENT_KEYWORDS.stream().anyMatch(normalized::contains);
     }
 
     private String normalizeOption(String value) {

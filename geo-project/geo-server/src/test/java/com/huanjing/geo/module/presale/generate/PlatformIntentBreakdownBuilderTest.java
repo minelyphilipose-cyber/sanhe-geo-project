@@ -28,7 +28,7 @@ class PlatformIntentBreakdownBuilderTest {
                 row("P1", "推荐型", "SUCCESS", 0, 1),
                 row("P2", "对比型", "SUCCESS", 0, 1)
         ));
-        Mockito.when(mapper.selectTemplateIntentStats(Mockito.nullable(String.class))).thenReturn(templateStats());
+        Mockito.when(mapper.selectVersionPromptIntentStats(1L)).thenReturn(templateStats());
         PlatformIntentBreakdownBuilder builder = new PlatformIntentBreakdownBuilder(mapper);
 
         List<PlatformIntentCell> cells = builder.build(1L, raw("P1", "P2", 1, 1), computed(), false).cells();
@@ -61,7 +61,7 @@ class PlatformIntentBreakdownBuilderTest {
                 judge("P1", "COGNITIVE", new BigDecimal("71.43"), null, 7),
                 judge("P1", "COMPARISON", new BigDecimal("47.06"), "target", 17)
         ));
-        Mockito.when(mapper.selectTemplateIntentStats(Mockito.nullable(String.class))).thenReturn(templateStats());
+        Mockito.when(mapper.selectVersionPromptIntentStats(1L)).thenReturn(templateStats());
         PlatformIntentBreakdownBuilder builder = new PlatformIntentBreakdownBuilder(mapper);
 
         List<PlatformIntentCell> cells = builder.build(1L, raw("P1", 2), computed(), false).cells();
@@ -87,7 +87,7 @@ class PlatformIntentBreakdownBuilderTest {
                 row("P1", "推荐型", "SUCCESS", 1, 1)
                 // 对比型无记录 -> platform_prompt_count = null
         ));
-        Mockito.when(mapper.selectTemplateIntentStats(Mockito.nullable(String.class))).thenReturn(templateStats());
+        Mockito.when(mapper.selectVersionPromptIntentStats(1L)).thenReturn(templateStats());
         PlatformIntentBreakdownBuilder builder = new PlatformIntentBreakdownBuilder(mapper);
 
         List<PlatformIntentCell> cells = builder.build(1L, raw("P1", 0), computed(), false).cells();
@@ -114,7 +114,7 @@ class PlatformIntentBreakdownBuilderTest {
             rows.add(row("P1", "推荐型", "SUCCESS", 0, 0));
         }
         Mockito.when(mapper.selectIntentSamplesByVersionId(1L)).thenReturn(rows);
-        Mockito.when(mapper.selectTemplateIntentStats(Mockito.nullable(String.class))).thenReturn(templateStats());
+        Mockito.when(mapper.selectVersionPromptIntentStats(1L)).thenReturn(templateStats());
         PlatformIntentBreakdownBuilder builder = new PlatformIntentBreakdownBuilder(mapper);
 
         List<PlatformIntentCell> cells = builder.build(1L, raw("P1", 1), computed(), false).cells();
@@ -136,7 +136,7 @@ class PlatformIntentBreakdownBuilderTest {
         // "template_count × competitor_count" logic.
         PresaleAiPromptResultMapper mapper = Mockito.mock(PresaleAiPromptResultMapper.class);
         Mockito.when(mapper.selectIntentSamplesByVersionId(1L)).thenReturn(List.of());
-        Mockito.when(mapper.selectTemplateIntentStats(Mockito.nullable(String.class))).thenReturn(templateStatsWithCompetitorVarRecommendation());
+        Mockito.when(mapper.selectVersionPromptIntentStats(1L)).thenReturn(templateStatsWithCompetitorVarRecommendation());
         PlatformIntentBreakdownBuilder builder = new PlatformIntentBreakdownBuilder(mapper);
 
         RawSnapshotDTO raw = raw("P1", 0);
@@ -157,7 +157,7 @@ class PlatformIntentBreakdownBuilderTest {
     void build_allowsComparisonIntentFromCompetitorVarTemplateOnly() {
         PresaleAiPromptResultMapper mapper = Mockito.mock(PresaleAiPromptResultMapper.class);
         Mockito.when(mapper.selectIntentSamplesByVersionId(1L)).thenReturn(List.of());
-        Mockito.when(mapper.selectTemplateIntentStats(Mockito.nullable(String.class)))
+        Mockito.when(mapper.selectVersionPromptIntentStats(1L))
                 .thenReturn(templateStatsComparisonOnlyCompetitorVar());
         PlatformIntentBreakdownBuilder builder = new PlatformIntentBreakdownBuilder(mapper);
 

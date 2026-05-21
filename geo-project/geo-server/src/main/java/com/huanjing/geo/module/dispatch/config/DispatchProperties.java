@@ -23,6 +23,7 @@ public class DispatchProperties {
     private int modelRequestTimeoutMs = 45000;
     private int resourceBusyRetryMinSeconds = 30;
     private int resourceBusyRetryJitterSeconds = 30;
+    private boolean autoContentGenerationEnabled = false;
 
     public void setResourceBusyRetryMinSeconds(int resourceBusyRetryMinSeconds) {
         this.resourceBusyRetryMinSeconds = Math.max(1, resourceBusyRetryMinSeconds);

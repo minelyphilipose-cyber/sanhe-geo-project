@@ -15,9 +15,9 @@ import java.util.stream.Collectors;
 /**
  * Signature and form-body helpers for Meititejia requests.
  *
- * <p>Invariant: field set in the HTTP body equals the field set in the
- * canonical signature string union {@code signature}. Empty values and legacy
- * signature keys are excluded from both places.</p>
+ * <p>Invariant: signature canonicalization uses normalized raw values, while
+ * form-body construction performs the transport-level URL encoding. Empty
+ * values and legacy signature keys are excluded from both places.</p>
  */
 public final class MeititejiaSigner {
 
@@ -79,16 +79,15 @@ public final class MeititejiaSigner {
         }
         return params.entrySet().stream()
                 .filter(entry -> includeInBody(entry.getKey(), entry.getValue()))
-                .map(entry -> entry.getKey() + "=" + entry.getValue())
+                .map(entry -> formEncode(entry.getKey()) + "=" + formEncode(entry.getValue()))
                 .collect(Collectors.joining("&"));
     }
 
     /**
-     * Matches the vendor document's PHP-style urlencode expectation for fields
-     * that must be encoded before signing and before form-body construction:
-     * spaces become '+', and '*' / '~' remain readable.
+     * Matches PHP-style urlencode semantics for form submission: spaces become
+     * '+', and '*' / '~' remain readable.
      */
-    public static String phpUrlencode(String value) {
+    public static String formEncode(String value) {
         if (value == null) {
             return null;
         }

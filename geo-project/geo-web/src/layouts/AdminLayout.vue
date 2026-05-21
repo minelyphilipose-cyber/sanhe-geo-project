@@ -64,10 +64,10 @@ const sidebarGroups: MenuGroup[] = [
     key: 'business',
     title: '业务操作',
     menus: [
-      { path: '/admin/presale/report', name: 'PresaleReportList', title: '售前报告', icon: 'Document', permissions: ['presale.report.list'] },
+      { path: '/admin/presale/report', name: 'PresaleReportList', title: 'AI可见度诊断报告', icon: 'Document', permissions: ['presale.report.list'] },
       { path: '/admin/customers', name: 'CustomerList', title: '客户管理', icon: 'User', roles: ['sales', 'operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['company.read'] },
-      { path: '/admin/layered-keyword-groups', name: 'LayeredKeywordGroupManage', title: '分层拓词管理', icon: 'Collection', roles: ['sales', 'operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['keyword_group.read'] },
       { path: '/admin/projects', name: 'ProjectList', title: '项目管理', icon: 'Folder', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['project.read'] },
+      { path: '/admin/layered-keyword-groups', name: 'LayeredKeywordGroupManage', title: '拓词管理', icon: 'Collection', roles: ['sales', 'operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['keyword_group.read'] },
       { path: '/admin/content/execution', name: 'ContentExecution', title: '内容与执行', icon: 'Memo', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['project.read'] },
     ],
   },
@@ -93,10 +93,8 @@ const sidebarGroups: MenuGroup[] = [
     title: '系统配置',
     menus: [
       { path: '/admin/settings/platforms', name: 'PlatformConfig', title: 'AI平台配置', icon: 'Setting', permissions: ['user.manage'] },
-      { path: '/admin/settings/publish-sites', name: 'PublishSiteConfig', title: '发布站点配置', icon: 'Promotion', permissions: ['user.manage'] },
       { path: '/admin/settings/packages', name: 'PackageConfig', title: '套餐配置', icon: 'CollectionTag', permissions: ['user.manage'] },
       { path: '/admin/settings/dicts', name: 'DictCenter', title: '字典中心', icon: 'Tickets', permissions: ['user.manage'] },
-      { path: '/admin/settings/affix-words', name: 'KeywordAffixWordManage', title: '拓词信息维护', icon: 'EditPen', permissions: ['keyword_affix.manage'] },
       { path: '/admin/settings/users', name: 'UserManage', title: '用户与权限', icon: 'Setting', permissions: ['user.manage'] },
     ],
   },

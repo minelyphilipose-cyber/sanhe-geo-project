@@ -1,14 +1,18 @@
 <template>
-  <div class="presale-report-create">
-    <div class="page-header">
-      <el-breadcrumb separator="/">
-        <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">售前报告</el-breadcrumb-item>
-        <el-breadcrumb-item>新建报告</el-breadcrumb-item>
-      </el-breadcrumb>
-      <h2 class="page-title">新建报告</h2>
+  <div class="presale-report-create admin-page">
+    <div class="page-header admin-page-header">
+      <div>
+        <el-breadcrumb separator="/">
+          <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">AI可见度诊断报告</el-breadcrumb-item>
+          <el-breadcrumb-item>新建报告</el-breadcrumb-item>
+        </el-breadcrumb>
+        <div class="admin-page-kicker">报告生成</div>
+        <h2 class="page-title admin-page-title">新建报告</h2>
+        <div class="admin-page-subtitle">录入品牌基础信息，确认诊断范围与问题模板后提交生成。</div>
+      </div>
     </div>
 
-    <el-card shadow="never" class="form-card">
+    <el-card shadow="never" class="form-card admin-rich-card">
       <el-form
         ref="formRef"
         :model="form"
@@ -99,23 +103,23 @@
       </el-form>
 
       <el-divider />
-      <div class="scope-preview">
+      <div class="scope-preview admin-scope-preview">
         <div class="scope-title">诊断范围预览</div>
         <div class="scope-grid">
           <div class="scope-item">
-            <div class="scope-number">{{ scopeNumber(scopePreview?.platformCount) }}</div>
+            <div class="scope-number">{{ scopeNumber(effectiveScopePreview?.platformCount) }}</div>
             <div class="scope-label">AI 平台</div>
           </div>
           <div class="scope-item">
-            <div class="scope-number">{{ scopeNumber(scopePreview?.promptQueryCount) }}</div>
+            <div class="scope-number">{{ scopeNumber(effectiveScopePreview?.promptQueryCount) }}</div>
             <div class="scope-label">Prompt 查询</div>
           </div>
           <div class="scope-item">
-            <div class="scope-number">{{ scopeNumber(scopePreview?.llmCallUpperBound) }}</div>
+            <div class="scope-number">{{ scopeNumber(effectiveScopePreview?.llmCallUpperBound) }}</div>
             <div class="scope-label">最多 LLM 调用</div>
           </div>
           <div class="scope-item">
-            <div class="scope-number">{{ scopeNumber(scopePreview?.dimensionCount) }}</div>
+            <div class="scope-number">{{ scopeNumber(effectiveScopePreview?.dimensionCount) }}</div>
             <div class="scope-label">分析维度</div>
           </div>
         </div>
@@ -272,7 +276,7 @@
                       <span>{{ cat.label }}</span>
                       <el-input-number
                         v-model="llmPlan.categoryCounts[cat.code]"
-                        :min="cat.code === 'COMPARISON' ? 1 : 0"
+                        :min="cat.code === 'COMPARISON' ? 1 : cat.code === 'COGNITIVE' ? 3 : 0"
                         :max="30"
                         size="small"
                         controls-position="right"
@@ -293,7 +297,7 @@
                   <el-button
                     type="primary"
                     :loading="llmGenerating"
-                    :disabled="!canGenerateLlm || (llmQuestions.length > 0 && llmMissingTotal === 0)"
+                    :disabled="!canGenerateLlm || (llmQuestions.length > 0 && llmMissingTotal === 0) || llmGenerationIssues.length > 0"
                     @click="generateLlmQuestions(false)"
                   >
                     {{ llmQuestions.length ? `补 ${llmMissingTotal} 条` : '生成 LLM 问题' }}
@@ -308,6 +312,14 @@
                 <el-alert
                   v-if="llmLastWarning"
                   :title="llmLastWarning"
+                  type="warning"
+                  :closable="false"
+                  class="prompt-alert"
+                />
+
+                <el-alert
+                  v-if="llmGenerationIssues.length"
+                  :title="llmGenerationIssues[0]"
                   type="warning"
                   :closable="false"
                   class="prompt-alert"
@@ -434,11 +446,20 @@ const CATEGORY_LABEL_TO_CODE: Record<string, PresalePromptCategoryCode> = {
   场景型: 'SCENARIO'
 }
 const CATEGORY_CODES = CATEGORY_OPTIONS.map((item) => item.code)
+const DEFAULT_LLM_CATEGORY_COUNTS: Record<PresalePromptCategoryCode, number> = {
+  RECOMMENDATION: 10,
+  COMPARISON: 5,
+  PROBLEM: 5,
+  COGNITIVE: 5,
+  SCENARIO: 5
+}
 const ALLOWED_PROMPT_VARIABLES = new Set([
   'competitor'
 ])
 const MAX_LLM_TOTAL_COUNT = 60
 const MAX_LLM_CATEGORY_COUNT = 30
+const MIN_LLM_COGNITIVE_COUNT = 3
+const MAX_LLM_EXISTING_QUESTIONS = 80
 
 const router = useRouter()
 const route = useRoute()
@@ -579,6 +600,24 @@ const promptGroups = computed(() => {
 
 const modifiedCount = computed(() => promptItems.value.filter((item) => isModified(item)).length)
 
+const effectiveScopePreview = computed<ReportScopePreviewVO | null>(() => {
+  const base = scopePreview.value
+  if (!base || activePromptTab.value !== 'llm') {
+    return base
+  }
+  const competitorPromptCount = Math.max(0, Number(llmPlan.categoryCounts.COMPARISON || 0))
+  const totalCount = Math.max(0, Number(llmPlan.totalCount || 0))
+  const genericPromptCount = Math.max(0, totalCount - competitorPromptCount)
+  const scope = calculatePromptScope(base.platformCount, genericPromptCount, competitorPromptCount)
+  return {
+    ...base,
+    genericPromptCount,
+    competitorPromptCount,
+    promptQueryCount: totalCount,
+    llmCallUpperBound: scope.totalUpperBound
+  }
+})
+
 const llmQuestionsByCategory = computed<Record<PresalePromptCategoryCode, LlmQuestionDraftItem[]>>(() => {
   const grouped = createCategoryRecord<LlmQuestionDraftItem[]>(() => [])
   for (const item of llmQuestions.value) {
@@ -599,6 +638,8 @@ const llmMissingTotal = computed(() => Math.max(0, Number(llmPlan.totalCount || 
 
 const llmSubmitIssues = computed(() => validateLlmSubmit(false))
 
+const llmGenerationIssues = computed(() => validateLlmGeneration(false, false))
+
 const canGenerateLlm = computed(() => {
   return canPreviewPrompts.value && !llmGenerating.value && validateLlmPlanConfig(false).length === 0
 })
@@ -606,18 +647,19 @@ const canGenerateLlm = computed(() => {
 const scopeNote = computed(() => {
   if (scopeLoading.value) return '正在读取当前启用平台与 Prompt 模板配置...'
   if (scopeLoadFailed.value) return '诊断范围预览读取失败,请刷新页面后重试。'
-  if (!scopePreview.value) return '暂无诊断范围数据。'
-  return `按当前启用配置预计最多发起 ${formatInt(scopePreview.value.llmCallUpperBound)} 次 LLM 调用。生成过程异步进行,提交后会跳到进度页。`
+  if (!effectiveScopePreview.value) return '暂无诊断范围数据。'
+  const sourceText = activePromptTab.value === 'llm' ? '当前 LLM 问题配置' : '当前启用模板配置'
+  return `按${sourceText}预计最多发起 ${formatInt(effectiveScopePreview.value.llmCallUpperBound)} 次 LLM 调用。生成过程异步进行,提交后会跳到进度页。`
 })
 
 const promptSummary = computed(() => {
   if (promptLoading.value) return '正在读取 Prompt 清单...'
   if (promptLoadFailed.value) return 'Prompt 清单读取失败'
-  if (!promptSources.value.length) return '暂无 Prompt 模板'
   if (activePromptTab.value === 'llm') {
     const status = llmSubmitIssues.value.length ? `，还差 ${llmMissingTotal.value} 条或存在待修正项` : '，数量已匹配'
     return `当前为 LLM 问题预览：${llmQuestions.value.length}/${llmPlan.totalCount} 条${status}。提交时只使用当前 Tab 的问题。`
   }
+  if (!promptSources.value.length) return '当前模板问题为空，请切换到 LLM 问题预览生成问题。'
   const counts = CATEGORY_ORDER.map((category) => {
     const count = promptSources.value.filter((x) => x.category === category).length
     return count > 0 ? `${category} ${count}` : ''
@@ -819,8 +861,14 @@ function applyDefaultLlmPlanFromTemplates() {
       counts[code] += 1
     }
   }
-  Object.assign(llmPlan.categoryCounts, counts)
-  llmPlan.totalCount = promptSources.value.length
+  const hasTemplatePlan = promptSources.value.length > 0
+  Object.assign(llmPlan.categoryCounts, hasTemplatePlan ? counts : DEFAULT_LLM_CATEGORY_COUNTS)
+  llmPlan.totalCount = hasTemplatePlan
+    ? promptSources.value.length
+    : Object.values(DEFAULT_LLM_CATEGORY_COUNTS).reduce((sum, count) => sum + count, 0)
+  if (!hasTemplatePlan) {
+    activePromptTab.value = 'llm'
+  }
 }
 
 function currentBaseSnapshot() {
@@ -853,8 +901,36 @@ function validateLlmPlanConfig(showMessage: boolean) {
   if (Number(llmPlan.categoryCounts.COMPARISON || 0) < 1) {
     issues.push('对比型分类必须存在，数量至少为 1')
   }
+  if (Number(llmPlan.categoryCounts.COGNITIVE || 0) < MIN_LLM_COGNITIVE_COUNT) {
+    issues.push(`认知型分类数量至少为 ${MIN_LLM_COGNITIVE_COUNT}`)
+  }
   if (sum !== totalCount) {
     issues.push(`各分类数量之和需等于总问题数，当前为 ${sum}`)
+  }
+
+  if (showMessage && issues.length) {
+    ElMessage.warning(issues[0])
+  }
+  return issues
+}
+
+function validateLlmGeneration(reset: boolean, showMessage: boolean) {
+  const issues = validateLlmPlanConfig(false)
+  if (!reset) {
+    const totalCount = Number(llmPlan.totalCount || 0)
+    if (llmQuestions.value.length > MAX_LLM_EXISTING_QUESTIONS) {
+      issues.push(`已有 LLM 问题最多保留 ${MAX_LLM_EXISTING_QUESTIONS} 条，请删除多余问题后再补生成`)
+    }
+    if (llmQuestions.value.length > totalCount) {
+      issues.push(`已有 LLM 问题 ${llmQuestions.value.length} 条，超过总问题数 ${totalCount} 条，请调大总数、删除多余问题或重新生成`)
+    }
+    for (const cat of CATEGORY_OPTIONS) {
+      const actual = llmActualCategoryCounts.value[cat.code]
+      const target = Number(llmPlan.categoryCounts[cat.code] || 0)
+      if (actual > target) {
+        issues.push(`${cat.label}已有 ${actual} 条，超过目标 ${target} 条，请调大该分类数量、删除多余问题或重新生成`)
+      }
+    }
   }
 
   if (showMessage && issues.length) {
@@ -933,7 +1009,7 @@ function buildLlmPromptQuestions(): LlmPromptQuestionDraft[] {
 async function generateLlmQuestions(reset: boolean) {
   if (!formRef.value) return
   const ok = await formRef.value.validate().catch(() => false)
-  if (!ok || validateLlmPlanConfig(true).length) {
+  if (!ok || validateLlmGeneration(reset, true).length) {
     return
   }
 
@@ -1015,7 +1091,7 @@ async function onSubmit() {
   if (!formRef.value) return
   const ok = await formRef.value.validate().catch(() => false)
   if (!ok) return
-  if (!promptSources.value.length || promptLoadFailed.value) {
+  if (activePromptTab.value === 'template' && (!promptSources.value.length || promptLoadFailed.value || promptLoading.value)) {
     ElMessage.error('Prompt 清单未加载完成')
     return
   }
@@ -1153,19 +1229,16 @@ function formatInt(value: number) {
 
 <style scoped>
 .presale-report-create {
-  padding: 16px 24px;
-  max-width: 1120px;
+  max-width: 1180px;
 }
 .page-header {
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 .page-title {
   margin: 8px 0 0 0;
-  font-size: 22px;
-  font-weight: 600;
 }
 .form-card {
-  padding: 12px 0;
+  padding: 0;
 }
 .form-tip {
   margin-left: 12px;
@@ -1173,11 +1246,13 @@ function formatInt(value: number) {
   font-size: 12px;
 }
 .scope-preview {
-  padding: 12px 0;
+  padding: 16px;
+  margin: 4px 0 14px;
 }
 .scope-title {
-  font-size: 14px;
-  color: #606266;
+  font-size: 15px;
+  color: #0f172a;
+  font-weight: 800;
   margin-bottom: 12px;
 }
 .scope-grid {
@@ -1190,13 +1265,14 @@ function formatInt(value: number) {
 .scope-item {
   text-align: center;
   padding: 16px;
-  background: #f5f7fa;
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
 }
 .scope-number {
   font-size: 28px;
-  font-weight: 600;
-  color: #409eff;
+  font-weight: 800;
+  color: #2563eb;
   font-family: 'JetBrains Mono', Consolas, monospace;
 }
 .scope-label {
@@ -1220,15 +1296,15 @@ function formatInt(value: number) {
   gap: 16px;
   align-items: center;
   padding: 14px 16px;
-  border: 1px solid #dcdfe6;
-  border-radius: 4px;
-  background: #fff;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #ffffff, #f8fbff);
   color: #303133;
   cursor: pointer;
   text-align: left;
 }
 .prompt-summary:hover {
-  border-color: #c6e2ff;
+  border-color: #93c5fd;
 }
 .prompt-summary:focus-visible {
   outline: 2px solid #409eff;

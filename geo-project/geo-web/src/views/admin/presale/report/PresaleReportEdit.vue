@@ -3,10 +3,10 @@
     <div class="edit-header">
       <div>
         <el-breadcrumb separator="/">
-          <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">售前报告</el-breadcrumb-item>
+          <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">AI可见度诊断报告</el-breadcrumb-item>
           <el-breadcrumb-item>编辑内容</el-breadcrumb-item>
         </el-breadcrumb>
-        <h2>{{ detail?.brandName || '售前报告' }} · v{{ detail?.version.versionNo || '-' }}</h2>
+        <h2>{{ detail?.brandName || 'AI可见度诊断报告' }} · v{{ detail?.version.versionNo || '-' }}</h2>
       </div>
       <div class="header-actions">
         <el-tag v-if="isDirty" type="warning" effect="plain">有未保存修改</el-tag>
@@ -51,6 +51,7 @@
 
     <div v-else-if="draft && raw && computedSnap" class="edit-layout">
       <aside class="edit-nav">
+        <div class="edit-nav-title">编辑目录</div>
         <a href="#basic">基本文案</a>
         <a href="#market">AI 搜索新战场</a>
         <a href="#summary">执行摘要</a>
@@ -563,15 +564,24 @@
       </main>
 
       <aside class="edit-preview">
-        <el-card shadow="never">
+        <el-card shadow="never" class="preview-card">
           <template #header>实时预览</template>
           <div v-if="mergedPreview">
             <div class="preview-title">{{ mergedPreview.report_title || '（空标题）' }}</div>
             <div class="preview-subtitle">{{ mergedPreview.report_subtitle || '（空副标题）' }}</div>
             <el-divider />
-            <div>关键结论：{{ mergedPreview.key_takeaways.length }} 条</div>
-            <div>优化建议：{{ mergedPreview.merged_findings.length }} 条</div>
-            <div>竞品场景：{{ mergedPreview.merged_competitors.length }} 个竞品</div>
+            <div class="preview-stat">
+              <span>关键结论</span>
+              <strong>{{ mergedPreview.key_takeaways.length }} 条</strong>
+            </div>
+            <div class="preview-stat">
+              <span>优化建议</span>
+              <strong>{{ mergedPreview.merged_findings.length }} 条</strong>
+            </div>
+            <div class="preview-stat">
+              <span>竞品场景</span>
+              <strong>{{ mergedPreview.merged_competitors.length }} 个</strong>
+            </div>
           </div>
         </el-card>
       </aside>
@@ -1080,23 +1090,40 @@ onBeforeUnmount(() => {
 <style scoped>
 .presale-report-edit {
   min-height: calc(100vh - 60px);
-  padding: 16px 24px 32px;
-  background: #f6f7fb;
+  padding: 24px 28px 36px;
+  background:
+    linear-gradient(180deg, rgba(230, 240, 255, 0.72) 0, rgba(248, 250, 252, 0) 180px),
+    #f8fafc;
+  color: #1f2937;
 }
 .edit-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  margin-bottom: 16px;
+  gap: 18px;
+  margin-bottom: 20px;
+  padding: 22px 24px;
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.06);
 }
 .edit-header h2 {
-  margin: 8px 0 0;
+  margin: 10px 0 0;
+  color: #111827;
   font-size: 22px;
+  font-weight: 700;
+  line-height: 1.25;
 }
 .header-actions {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
+}
+.header-actions :deep(.el-button) {
+  height: 36px;
+  border-radius: 6px;
 }
 .state-panel {
   padding: 80px;
@@ -1110,29 +1137,45 @@ onBeforeUnmount(() => {
 }
 .edit-layout {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr) 260px;
-  gap: 16px;
+  grid-template-columns: 184px minmax(0, 1fr) 280px;
+  gap: 18px;
+  align-items: start;
 }
 .edit-nav,
 .edit-preview {
   position: sticky;
-  top: 76px;
+  top: 84px;
   align-self: start;
 }
 .edit-nav {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
+  padding: 14px;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+.edit-nav-title {
+  margin: 0 4px 8px;
+  color: #94a3b8;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
 }
 .edit-nav a {
-  color: #606266;
+  color: #64748b;
   text-decoration: none;
-  padding: 8px 10px;
+  padding: 9px 10px;
   border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 .edit-nav a:hover {
-  background: #fff;
-  color: #303133;
+  background: #eef4ff;
+  color: #1d4ed8;
 }
 .edit-main {
   display: flex;
@@ -1140,7 +1183,22 @@ onBeforeUnmount(() => {
   gap: 16px;
 }
 .edit-section {
-  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.04);
+}
+.edit-section :deep(.el-card__header) {
+  padding: 16px 20px;
+  border-bottom: 1px solid #eef2f7;
+  background: #fbfdff;
+  color: #111827;
+  font-size: 15px;
+  font-weight: 700;
+}
+.edit-section :deep(.el-card__body) {
+  padding: 18px 20px 20px;
 }
 .section-header,
 .row-title,
@@ -1150,36 +1208,55 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   gap: 12px;
 }
+.section-header > div,
+.row-title > div {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
 .field-block {
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 .field-label {
-  margin-bottom: 6px;
-  color: #303133;
-  font-weight: 500;
+  margin-bottom: 7px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 600;
 }
 .default-hint,
 .readonly-line,
 .field-warning {
-  color: #909399;
+  color: #94a3b8;
   font-size: 12px;
   line-height: 1.6;
   margin-bottom: 8px;
 }
 .field-warning {
   margin-top: 6px;
-  color: #b88230;
+  color: #b45309;
 }
 .market-collapse {
-  --el-collapse-header-bg-color: #fff;
+  overflow: hidden;
+  border: 1px solid #e5eaf3;
+  border-radius: 8px;
+  --el-collapse-header-bg-color: #fbfdff;
   --el-collapse-content-bg-color: #fff;
 }
+.market-collapse :deep(.el-collapse-item__header) {
+  padding: 0 14px;
+  color: #1f2937;
+  font-weight: 600;
+}
+.market-collapse :deep(.el-collapse-item__content) {
+  padding: 16px 14px 18px;
+}
 .list-editor-item {
-  border: 1px solid #e4e7ed;
-  border-radius: 6px;
-  padding: 14px;
+  border: 1px solid #e5eaf3;
+  border-radius: 8px;
+  padding: 15px;
   margin-bottom: 12px;
-  background: #fff;
+  background: #fbfdff;
 }
 .list-editor-item.muted {
   opacity: 0.64;
@@ -1191,17 +1268,66 @@ onBeforeUnmount(() => {
 .inline-row {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
   margin-top: 8px;
 }
-.preview-title {
+.edit-section :deep(.el-input__wrapper),
+.edit-section :deep(.el-textarea__inner) {
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px #dbe3ef inset;
+}
+.edit-section :deep(.el-input__wrapper:hover),
+.edit-section :deep(.el-textarea__inner:hover) {
+  box-shadow: 0 0 0 1px #b8c3d4 inset;
+}
+.edit-section :deep(.el-input__wrapper.is-focus),
+.edit-section :deep(.el-textarea__inner:focus) {
+  box-shadow: 0 0 0 1px #3b82f6 inset, 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+.preview-card {
+  overflow: hidden;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 10px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+}
+.preview-card :deep(.el-card__header) {
+  padding: 15px 16px;
+  border-bottom: 1px solid #eef2f7;
+  background: #fbfdff;
+  color: #111827;
   font-weight: 700;
+}
+.preview-card :deep(.el-card__body) {
+  padding: 16px;
+}
+.preview-title {
+  color: #111827;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.45;
   margin-bottom: 8px;
 }
 .preview-subtitle {
-  color: #606266;
+  color: #64748b;
   font-size: 13px;
+  line-height: 1.5;
+}
+.preview-stat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  color: #64748b;
+  font-size: 13px;
+}
+.preview-stat + .preview-stat {
+  border-top: 1px solid #eef2f7;
+}
+.preview-stat strong {
+  color: #1d4ed8;
+  font-size: 14px;
 }
 @media (max-width: 1180px) {
   .edit-layout {
@@ -1210,6 +1336,30 @@ onBeforeUnmount(() => {
   .edit-nav,
   .edit-preview {
     position: static;
+  }
+  .edit-nav {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+  }
+  .edit-nav-title {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 768px) {
+  .presale-report-edit {
+    padding: 18px 16px 28px;
+  }
+  .edit-header {
+    align-items: flex-start;
+    padding: 18px;
+  }
+  .header-actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  .inline-row {
+    grid-template-columns: 1fr;
   }
 }
 </style>

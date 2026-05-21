@@ -2,6 +2,8 @@ package com.huanjing.geo.module.dispatch.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.util.QuotaPeriodResolver;
+import com.huanjing.geo.module.customer.service.CustomerPackageExpiryService;
+import com.huanjing.geo.module.dispatch.config.DispatchProperties;
 import com.huanjing.geo.module.dispatch.enums.DispatchTaskType;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.entity.ProjectChannelAllocation;
@@ -15,7 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -31,9 +33,13 @@ public class DispatchPlannerService {
     private final DispatchTaskService dispatchTaskService;
     private final ProjectDistributionChannelAllocationService channelAllocationService;
     private final DispatchTaskMapper dispatchTaskMapper;
+    private final DispatchProperties dispatchProperties;
+    private final CustomerPackageExpiryService customerPackageExpiryService;
 
     @Transactional
     public void scanAndPlan(LocalDate today) {
+        customerPackageExpiryService.scanAndHandle(today);
+
         List<Project> projects = projectMapper.selectList(
                 new LambdaQueryWrapper<Project>()
                         .in(Project::getStatus, List.of("active", "paused"))
@@ -41,53 +47,51 @@ public class DispatchPlannerService {
         );
 
         for (Project project : projects) {
-            if (handleExpireCheck(project, today)) {
-                continue;
-            }
             planBiDaily(project, today);
             planContentGeneration(project, today);
+            planMonthly(project, today);
+            planQuarterly(project, today);
         }
-    }
-
-    private boolean handleExpireCheck(Project project, LocalDate today) {
-        LocalDate expireDate = resolveExpireDate(project);
-        if (expireDate == null || today.isBefore(expireDate)) {
-            return false;
-        }
-        if (!"expired".equals(project.getStatus())) {
-            if ("active".equals(project.getStatus())) {
-                channelAllocationService.lockCompany(project.getCompanyId());
-                channelAllocationService.auditCurrentAllocations(project, null, "project.expire", true);
-            }
-            Project update = new Project();
-            update.setId(project.getId());
-            update.setStatus("expired");
-            update.setExpiredAt(LocalDateTime.of(today, LocalTime.MIDNIGHT));
-            projectMapper.updateById(update);
-            log.info("Project {} expired at {}", project.getId(), update.getExpiredAt());
-        }
-        return true;
     }
 
     private void planBiDaily(Project project, LocalDate today) {
-        if (!DispatchScheduleCalculator.isBiDailyDue(project.getActivatedAt().toLocalDate(), today)) {
+        LocalDate activatedDate = project.getActivatedAt().toLocalDate();
+        planQuestionTierPoll(project, today, activatedDate, "A", 1);
+        planQuestionTierPoll(project, today, activatedDate, "B", 7);
+        planQuestionTierPoll(project, today, activatedDate, "C", 14);
+    }
+
+    private void planQuestionTierPoll(Project project,
+                                      LocalDate today,
+                                      LocalDate activatedDate,
+                                      String questionTier,
+                                      int intervalDays) {
+        long daysSinceActivation = ChronoUnit.DAYS.between(activatedDate, today);
+        if (daysSinceActivation < 0 || daysSinceActivation % intervalDays != 0) {
             return;
         }
         Map<String, Object> payload = new HashMap<>();
-        payload.put("mode", "bi-daily");
+        payload.put("mode", "question-poll");
+        payload.put("questionTier", questionTier);
         payload.put("batchDate", today.toString());
         payload.put("batchNo", 1);
         dispatchTaskService.createTaskAndEnqueue(
                 project.getId(),
                 DispatchTaskType.BI_DAILY_POLL,
-                today.minusDays(1),
+                today.minusDays(Math.max(intervalDays - 1, 0)),
                 today,
                 LocalDateTime.now(),
-                payload
+                payload,
+                "question-poll:" + questionTier,
+                null,
+                null
         );
     }
 
     private void planContentGeneration(Project project, LocalDate today) {
+        if (!dispatchProperties.isAutoContentGenerationEnabled()) {
+            return;
+        }
         if (!"active".equals(project.getStatus())) {
             return;
         }
@@ -178,18 +182,4 @@ public class DispatchPlannerService {
         );
     }
 
-    private LocalDate resolveExpireDate(Project project) {
-        LocalDate byEndDate = project.getEndDate();
-        LocalDate byService = null;
-        if (project.getActivatedAt() != null && project.getServiceMonths() != null) {
-            byService = project.getActivatedAt().toLocalDate().plusMonths(project.getServiceMonths());
-        }
-        if (byEndDate == null) {
-            return byService;
-        }
-        if (byService == null) {
-            return byEndDate;
-        }
-        return byEndDate.isBefore(byService) ? byEndDate : byService;
-    }
 }

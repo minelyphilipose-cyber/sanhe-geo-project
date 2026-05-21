@@ -22,10 +22,12 @@ import type {
   Competitor,
   RawSnapshotDTO,
   TestSummary,
+  PlatformBreakdown,
 } from '../../types/presale/raw';
 import type {
   ComputedSnapshotDTO,
   OptimizationFinding,
+  PlatformIntentCell,
   RoiPhase,
 } from '../../types/presale/computed';
 import type {
@@ -104,6 +106,12 @@ export function mergeSnapshot(
     editable?.competitor_scene_descriptions
   );
   const keyTakeaways = asArray<KeyTakeaway>(editable?.key_takeaways);
+  const platformBreakdown = filterEffectivePlatforms(raw);
+  const effectivePlatformCodes = new Set(platformBreakdown.map((p) => p.platform_code));
+  const effectiveTestSummary = normalizeTestSummary(raw.test_summary, platformBreakdown);
+  const platformIntentBreakdown = asArray<PlatformIntentCell>(computed?.platform_intent_breakdown).filter((cell) =>
+    effectivePlatformCodes.has(cell.platform_code)
+  );
 
   return {
     meta,
@@ -116,8 +124,8 @@ export function mergeSnapshot(
     user_demand: raw.client_info.user_demand ?? null,
 
     // L1 事实直出
-    test_summary: raw.test_summary,
-    platform_breakdown: raw.platform_breakdown,
+    test_summary: effectiveTestSummary,
+    platform_breakdown: platformBreakdown,
     sentiment_detail: raw.sentiment_detail,
     benchmarks_frozen: raw.benchmarks_frozen,
 
@@ -130,13 +138,13 @@ export function mergeSnapshot(
     // `?? []` 兼容历史报告(spec v3 §7.2):新生成 DONE 报告此字段 required,
     // 历史快照可能缺失,此处归一为空数组,Page05 会显示降级提示。
     // 6 个月后评估是否移除此兜底(见 spec §7.4)。
-    platform_intent_breakdown: computed.platform_intent_breakdown ?? [],
+    platform_intent_breakdown: platformIntentBreakdown,
 
     // L3 文案 + 默认模板回退
     report_title: resolveReportTitle(editable.report_title, raw.client_info),
     report_subtitle: resolveReportSubtitle(
       editable.report_subtitle,
-      raw.test_summary
+      effectiveTestSummary
     ),
     executive_summary: resolveExecutiveSummary(editable.executive_summary),
     market_battleground: resolveMarketBattleground(editable.market_battleground),
@@ -195,6 +203,28 @@ function buildMeta(
 
 function asArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
+}
+
+function filterEffectivePlatforms(raw: RawSnapshotDTO): PlatformBreakdown[] {
+  const degradedCodes = new Set<string>(raw?.test_summary?.degraded_platforms ?? []);
+  for (const platform of asArray<PlatformBreakdown>(raw?.platform_breakdown)) {
+    if (platform.is_degraded === true && platform.platform_code) {
+      degradedCodes.add(platform.platform_code);
+    }
+  }
+  return asArray<PlatformBreakdown>(raw?.platform_breakdown).filter(
+    (platform) => !degradedCodes.has(platform.platform_code)
+  );
+}
+
+function normalizeTestSummary(
+  summary: TestSummary,
+  platformBreakdown: PlatformBreakdown[]
+): TestSummary {
+  return {
+    ...summary,
+    total_platforms: platformBreakdown.length,
+  };
 }
 
 // ─────────────────────── 文案默认模板 + 变量插值 ───────────────────────

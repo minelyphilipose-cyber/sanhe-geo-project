@@ -52,6 +52,21 @@ public class AsyncExecutorConfig {
     @Value("${audit.threadpool.queue-capacity:1000}")
     private int auditQueueCapacity;
 
+    @Bean("taskExecutor")
+    public Executor taskExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(2);
+        executor.setMaxPoolSize(4);
+        executor.setQueueCapacity(100);
+        executor.setKeepAliveSeconds(60);
+        executor.setThreadNamePrefix("async-");
+        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+        executor.setWaitForTasksToCompleteOnShutdown(true);
+        executor.setAwaitTerminationSeconds(30);
+        executor.initialize();
+        return executor;
+    }
+
     @Bean("presaleGenerateExecutor")
     public Executor presaleGenerateExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();

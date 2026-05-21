@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.presale.generate;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.llm.pool.LlmPermitScope;
+import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
 import com.huanjing.geo.module.presale.generate.l3.PresaleL3InitService;
 import com.huanjing.geo.module.presale.generate.l3.PresalePage03DoubaoService;
 import com.huanjing.geo.module.presale.generate.llm.CallStatus;
@@ -56,6 +58,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -108,6 +111,12 @@ class PresaleGenerateOrchestratorTest {
     @Mock
     private PresaleCompetitorAggregator competitorAggregator;
     @Mock
+    private PresaleCompetitorNormalizationService competitorNormalizationService;
+    @Mock
+    private PresaleEvaluationModelRouter evaluationModelRouter;
+    @Mock
+    private PresaleGenerateCancellationRegistry cancellationRegistry;
+    @Mock
     private PresaleJudgeService presaleJudgeService;
     @Mock
     private Executor platformExecutor;
@@ -131,6 +140,9 @@ class PresaleGenerateOrchestratorTest {
         lenient().when(competitorAggregator.extractTopCompetitorsFromBatch1(any(), anyString())).thenReturn(List.of());
         lenient().when(sysDictItemMapper.selectList(any())).thenReturn(List.of());
         lenient().when(competitorAggregator.normalizeName(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        lenient().when(cancellationRegistry.isCanceled(any())).thenReturn(false);
+        lenient().when(evaluationModelRouter.routeContexts(any()))
+                .thenAnswer(inv -> List.of(inv.getArgument(0, PlatformCallContext.class)));
         lenient().when(promptTemplateRenderer.variables(any(), any())).thenCallRealMethod();
         lenient().when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
@@ -563,6 +575,39 @@ class PresaleGenerateOrchestratorTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void batch1_analyzeFailuresDoNotDegradeAnswerPlatform() throws Exception {
+        ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
+        ReflectionTestUtils.setField(orchestrator, "platformExecutor", (Executor) Runnable::run);
+
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
+                promptTemplate(2001L, "P1", "Q1"),
+                promptTemplate(2002L, "P2", "Q2"),
+                promptTemplate(2003L, "P3", "Q3"),
+                promptTemplate(2004L, "P4", "Q4")
+        ));
+        when(promptTemplateRenderer.render(anyString(), any(PromptTemplateRenderer.RenderVariables.class)))
+                .thenAnswer(inv -> inv.getArgument(0, String.class));
+        when(llmInvoker.query(any(), anyString())).thenReturn(successResult("query-ok"));
+        when(llmInvoker.analyze(any(), anyString(), anyString()))
+                .thenThrow(new LlmInvokeException("judge parse failed"));
+
+        Object result = invokeExecuteBatch1(9105L, 8105L);
+        Set<String> degradedPlatforms = (Set<String>) invokeNoArg(result, "degradedPlatforms");
+        List<PlatformBatchResult> platformResults = (List<PlatformBatchResult>) invokeNoArg(result, "platformResults");
+
+        assertTrue(degradedPlatforms.isEmpty());
+        assertEquals(PlatformStatus.DONE, platformResults.get(0).status());
+        ArgumentCaptor<PresaleAiCall> callCaptor = ArgumentCaptor.forClass(PresaleAiCall.class);
+        verify(aiCallMapper, atLeastOnce()).insert(callCaptor.capture());
+        long skippedCount = callCaptor.getAllValues().stream()
+                .filter(c -> CallStatus.SKIPPED_DEGRADED.name().equals(c.getCallStatus()))
+                .count();
+        assertEquals(0L, skippedCount);
+    }
+
+    @Test
     void shouldDegrade_processed6Failed4_returnsTrue() throws Exception {
         Class<?> stateClass = Class.forName(
                 "com.huanjing.geo.module.presale.generate.PresaleGenerateOrchestrator$PlatformBatchState");
@@ -613,7 +658,7 @@ class PresaleGenerateOrchestratorTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void executeBatch1_platformParallel_degradeThresholdStopsNewTasks() throws Exception {
+    void executeBatch1_platformParallel_degradeThresholdStopsPipelineAfterSubmittedTasks() throws Exception {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         ReflectionTestUtils.setField(orchestrator, "platformExecutor", (Executor) Runnable::run);
 
@@ -630,18 +675,23 @@ class PresaleGenerateOrchestratorTest {
             }
             return successResult("query-ok");
         });
+        when(llmInvoker.analyze(any(), anyString(), anyString()))
+                .thenReturn(successResult("{\"is_mentioned\":true,\"ranking\":1,\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[],\"scene_advantages\":[]}"));
 
         Object result = invokeExecuteBatch1(3001L, 7001L);
         List<PlatformBatchResult> platformResults = (List<PlatformBatchResult>) invokeNoArg(result, "platformResults");
         Set<String> degradedPlatforms = (Set<String>) invokeNoArg(result, "degradedPlatforms");
         boolean stopPipeline = (boolean) invokeNoArg(result, "stopPipeline");
 
-        assertEquals(4, submittedPlatforms.get());
-        assertEquals(4, platformResults.size());
+        assertEquals(5, submittedPlatforms.get());
+        assertEquals(5, platformResults.size());
         assertEquals(Set.of("p1", "p2", "p3", "p4"), degradedPlatforms);
         assertTrue(stopPipeline);
-        assertTrue(platformResults.stream().allMatch(r -> r.status() == PlatformStatus.DEGRADED));
-        assertTrue(platformResults.stream().noneMatch(r -> "p5".equals(r.platformCode())));
+        assertTrue(platformResults.stream()
+                .filter(r -> Set.of("p1", "p2", "p3", "p4").contains(r.platformCode()))
+                .allMatch(r -> r.status() == PlatformStatus.DEGRADED));
+        assertTrue(platformResults.stream()
+                .anyMatch(r -> "p5".equals(r.platformCode()) && r.status() == PlatformStatus.DONE));
     }
 
     @Test
@@ -759,7 +809,7 @@ class PresaleGenerateOrchestratorTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void executeBatch2_platformParallel_degradeThresholdStopsNewTasks() throws Exception {
+    void executeBatch2_platformParallel_degradeThresholdStopsPipelineAfterSubmittedTasks() throws Exception {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
         ReflectionTestUtils.setField(orchestrator, "platformExecutor", (Executor) Runnable::run);
 
@@ -778,6 +828,8 @@ class PresaleGenerateOrchestratorTest {
             }
             return successResult("query-ok");
         });
+        when(llmInvoker.analyze(any(), anyString(), anyString()))
+                .thenReturn(successResult("{\"target_mentioned\":true,\"competitor_mentioned\":true,\"preferred_brand\":\"target\",\"evidence\":\"ok\",\"sentiment\":\"POSITIVE\",\"mentioned_competitors\":[\"c1\"]}"));
 
         Object result = invokeExecuteBatch2(4001L, 8001L, List.of("c1"), 1, Set.of("p1", "p2"));
         List<PlatformBatchResult> platformResults = (List<PlatformBatchResult>) invokeNoArg(result, "platformResults");
@@ -785,11 +837,13 @@ class PresaleGenerateOrchestratorTest {
         Set<String> displayDegradedPlatforms = (Set<String>) invokeNoArg(result, "displayDegradedPlatforms");
         boolean stopPipeline = (boolean) invokeNoArg(result, "stopPipeline");
 
-        assertEquals(2, submittedPlatforms.get());
-        assertEquals(2, platformResults.size());
+        assertEquals(3, submittedPlatforms.get());
+        assertEquals(3, platformResults.size());
         assertEquals(Set.of("p3", "p4"), batch2DegradedPlatforms);
         assertEquals(Set.of("p1", "p2", "p3", "p4"), displayDegradedPlatforms);
         assertTrue(stopPipeline);
+        assertTrue(platformResults.stream()
+                .anyMatch(r -> "p5".equals(r.platformCode()) && r.status() == PlatformStatus.DONE));
     }
 
     @Test
@@ -1429,6 +1483,30 @@ class PresaleGenerateOrchestratorTest {
                 .findFirst()
                 .orElseThrow();
         assertEquals("行业=餐饮,身份=连锁品牌,品牌=Acme", row.getRequestPromptContent());
+    }
+
+    @Test
+    void analyzeWithEvaluationModel_retriesThreeRoundsAndCompensationWhenAllJudgesBusy() throws Exception {
+        PlatformCallContext sourceCtx = new PlatformCallContext(
+                9301L, 1, "chatgpt", 11L, "", "Acme", 1L, false);
+        PlatformCallContext deepseekCtx = new PlatformCallContext(
+                9301L, 1, "deepseek", 11L, "", "Acme", 1L, false);
+        PlatformCallContext doubaoCtx = new PlatformCallContext(
+                9301L, 1, "doubao", 11L, "", "Acme", 1L, false);
+        when(evaluationModelRouter.routeContexts(sourceCtx)).thenReturn(List.of(deepseekCtx, doubaoCtx));
+        when(llmInvoker.analyze(any(), anyString(), anyString()))
+                .thenThrow(new LlmPermitUnavailableException(LlmPermitScope.PLATFORM, "busy"));
+
+        RuntimeException thrown = assertThrows(RuntimeException.class, () -> ReflectionTestUtils.invokeMethod(
+                orchestrator,
+                "analyzeWithEvaluationModel",
+                sourceCtx,
+                "prompt",
+                "answer"
+        ));
+        assertInstanceOf(LlmInvokeException.class, thrown.getCause());
+        verify(evaluationModelRouter, times(1)).routeContexts(sourceCtx);
+        verify(llmInvoker, times(10)).analyze(any(), anyString(), anyString());
     }
 
     private Object invokeExecuteBatch1(Long versionId, Long reportId) throws Exception {

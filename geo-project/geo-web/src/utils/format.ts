@@ -23,6 +23,10 @@ export function formatDateTime(date: string | null | undefined): string {
   return formatDate(date, 'YYYY-MM-DD HH:mm')
 }
 
+export function formatDateTimeSeconds(date: string | null | undefined): string {
+  return formatDate(date, 'YYYY-MM-DD HH:mm:ss')
+}
+
 /**
  * 百分比
  * // 非 presale 使用:presale 报表统一走 @/utils/presale/numberFormat

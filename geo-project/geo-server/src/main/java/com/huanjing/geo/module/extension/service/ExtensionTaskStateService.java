@@ -15,6 +15,7 @@ import com.huanjing.geo.module.content.service.CompanyChannelQuotaService;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessErrorCodes;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
+import com.huanjing.geo.module.extension.dto.ExtensionTaskPublishReportRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskStateResponse;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
@@ -43,7 +44,9 @@ public class ExtensionTaskStateService {
     private static final String STATUS_TOKEN_ISSUED = "token_issued";
     private static final String STATUS_FILLING = "filling";
     private static final String STATUS_FILLED = "filled";
+    private static final String STATUS_FAILED = "failed";
     private static final String STATUS_PUBLISHED = "published";
+    private static final String ARTICLE_STATUS_APPROVED = "approved";
     private static final String ARTICLE_STATUS_DISTRIBUTING = "distributing";
     private static final Duration HEARTBEAT_RATE_LIMIT_TTL = Duration.ofSeconds(30);
     private static final Duration STALE_THRESHOLD = Duration.ofMinutes(10);
@@ -101,6 +104,16 @@ public class ExtensionTaskStateService {
 
     @Transactional
     public ExtensionTaskStateResponse published(Long taskId, Long operatorId, Long extensionSessionId) {
+        return published(taskId, operatorId, extensionSessionId, null);
+    }
+
+    @Transactional
+    public ExtensionTaskStateResponse published(
+            Long taskId,
+            Long operatorId,
+            Long extensionSessionId,
+            ExtensionTaskPublishReportRequest request
+    ) {
         TaskContext context = requireOperableTask(taskId, operatorId, extensionSessionId, "SEMI_AUTO_TASK_PUBLISHED");
         LocalDateTime now = now();
         int affected = taskMapper.markSemiAutoPublished(taskId, now, operatorId);
@@ -110,8 +123,23 @@ public class ExtensionTaskStateService {
         }
         markArticlePublished(context.task(), now);
         companyChannelQuotaService.confirmDistribution(taskId);
-        auditSuccess("SEMI_AUTO_TASK_PUBLISHED", context, operatorId, extensionSessionId, detail("publishedAt", now));
+        auditSuccess("SEMI_AUTO_TASK_PUBLISHED", context, operatorId, extensionSessionId, publishDetail(now, request));
         return new ExtensionTaskStateResponse(taskId, STATUS_PUBLISHED);
+    }
+
+    @Transactional
+    public ExtensionTaskStateResponse abandon(Long taskId, Long operatorId, Long extensionSessionId) {
+        TaskContext context = requireOperableTask(taskId, operatorId, extensionSessionId, "SEMI_AUTO_TASK_ABANDONED");
+        LocalDateTime now = now();
+        int affected = taskMapper.abandonSemiAutoTask(taskId, "用户关闭平台编辑器，已取消本次半自动分发", now);
+        if (affected != 1) {
+            auditDenied("SEMI_AUTO_TASK_ABANDONED", context, operatorId, extensionSessionId, "STALE_STATE");
+            throw new BizException(TASK_STATE_CONFLICT, "task state conflict");
+        }
+        restoreArticleApproved(context.task());
+        companyChannelQuotaService.refundDistribution(taskId);
+        auditSuccess("SEMI_AUTO_TASK_ABANDONED", context, operatorId, extensionSessionId, detail("abandonedAt", now));
+        return new ExtensionTaskStateResponse(taskId, STATUS_FAILED);
     }
 
     @Transactional
@@ -128,6 +156,7 @@ public class ExtensionTaskStateService {
         for (DistributionTask task : staleTasks) {
             int affected = taskMapper.reclaimSemiAutoTask(task.getId(), task.getStatus(), now);
             if (affected == 1) {
+                restoreArticleApproved(task);
                 reclaimed++;
                 auditReclaimed(task, tokenIssuedBefore, heartbeatBefore);
             }
@@ -337,6 +366,18 @@ public class ExtensionTaskStateService {
         }
     }
 
+    private void restoreArticleApproved(DistributionTask task) {
+        if (task.getArticleId() == null) {
+            throw new BizException(TASK_NOT_FOUND, "task article not found");
+        }
+        ArticleDraft update = new ArticleDraft();
+        update.setStatus(ARTICLE_STATUS_APPROVED);
+        articleDraftMapper.update(update,
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ArticleDraft>()
+                        .eq(ArticleDraft::getId, task.getArticleId())
+                        .eq(ArticleDraft::getStatus, ARTICLE_STATUS_DISTRIBUTING));
+    }
+
     private void auditReclaimed(
             DistributionTask task,
             LocalDateTime tokenIssuedBefore,
@@ -370,6 +411,21 @@ public class ExtensionTaskStateService {
         for (int i = 0; i + 1 < values.length; i += 2) {
             detail.put(String.valueOf(values[i]), values[i + 1]);
         }
+        return detail;
+    }
+
+    private Map<String, Object> publishDetail(
+            LocalDateTime publishedAt,
+            ExtensionTaskPublishReportRequest request
+    ) {
+        Map<String, Object> detail = detail("publishedAt", publishedAt);
+        if (request == null) {
+            return detail;
+        }
+        detail.put("action", request.action());
+        detail.put("platform", request.platform());
+        detail.put("href", request.href());
+        detail.put("detectedText", request.detectedText());
         return detail;
     }
 

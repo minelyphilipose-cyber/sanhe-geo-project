@@ -82,6 +82,7 @@ class ContentDistributionServiceTest {
     private BrandAccessService brandAccessService;
     private FillTokenService fillTokenService;
     private AuditService auditService;
+    private ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
     private ContentDistributionService contentDistributionService;
 
     @BeforeEach
@@ -105,6 +106,8 @@ class ContentDistributionServiceTest {
         brandAccessService = mock(BrandAccessService.class);
         fillTokenService = mock(FillTokenService.class);
         auditService = mock(AuditService.class);
+        articleImagePublicUrlRewriter = mock(ArticleImagePublicUrlRewriter.class);
+        when(articleImagePublicUrlRewriter.rewrite(any(), any())).thenAnswer(invocation -> invocation.getArgument(1));
         contentDistributionService = new ContentDistributionService(
                 articleDraftMapper,
                 articleDraftVersionMapper,
@@ -125,7 +128,8 @@ class ContentDistributionServiceTest {
                 fillTokenService,
                 auditService,
                 new ObjectMapper(),
-                mock(AuthorityMediaDistributionAdapter.class)
+                mock(AuthorityMediaDistributionAdapter.class),
+                articleImagePublicUrlRewriter
         );
     }
 
@@ -292,7 +296,7 @@ class ContentDistributionServiceTest {
                 () -> contentDistributionService.distributeTo(1L, new TargetContext.BrandGeoSiteTarget(30L, null)));
 
         assertEquals(400, ex.getCode());
-        assertEquals("Brand has no GEO site configured", ex.getMessage());
+        assertEquals("Agent official site publish target is not configured", ex.getMessage());
         verify(companyChannelQuotaService, never()).reserveDistribution(any(), any(), any(), any());
         verify(distributionTaskMapper, never()).insert(any());
     }
@@ -306,7 +310,7 @@ class ContentDistributionServiceTest {
                 () -> contentDistributionService.distributeTo(1L, new TargetContext.BrandGeoSiteTarget(30L, "ok")));
 
         assertEquals(400, ex.getCode());
-        assertEquals("Brand GEO site is not active", ex.getMessage());
+        assertEquals("Agent official site publish target is not configured", ex.getMessage());
         verify(companyChannelQuotaService, never()).reserveDistribution(any(), any(), any(), any());
         verify(distributionTaskMapper, never()).insert(any());
     }
@@ -440,6 +444,33 @@ class ContentDistributionServiceTest {
         contentDistributionService.refreshDistributionTaskReviewStatus(701L);
 
         verify(distributionTaskMapper, never()).update(eq(null), any());
+    }
+
+    @Test
+    void distributionHistory_selfMediaTaskWithoutSiteIdReturnsAttempt() {
+        givenCommonData();
+        DistributionTask task = new DistributionTask();
+        task.setId(800L);
+        task.setArticleId(1L);
+        task.setProjectId(20L);
+        task.setTargetKind(DistributionTargetKind.MP_ACCOUNT);
+        task.setSelfMediaAccountId(40L);
+        task.setStatus("failed");
+        task.setIntegrationMethod("toutiao");
+        task.setAttemptNo(1);
+        when(distributionTaskMapper.selectList(any())).thenReturn(List.of(task));
+
+        Map<String, Object> result = contentDistributionService.distributionHistory(1L);
+
+        assertEquals(1L, result.get("articleId"));
+        @SuppressWarnings("unchecked")
+        List<com.huanjing.geo.module.content.dto.DistributionAttemptVO> attempts =
+                (List<com.huanjing.geo.module.content.dto.DistributionAttemptVO>) result.get("attempts");
+        assertEquals(1, attempts.size());
+        assertEquals(800L, attempts.get(0).getId());
+        assertEquals(null, attempts.get(0).getSiteId());
+        assertEquals(null, attempts.get(0).getSiteName());
+        verify(publishSiteMapper, never()).selectList(any());
     }
 
     private void givenCommonData() {

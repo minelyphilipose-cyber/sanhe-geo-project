@@ -111,6 +111,7 @@ export interface BatchVO {
   actualA: number
   actualB: number
   actualC: number
+  batchType?: 'manual' | 'ai'
   modelName?: string
   status: string
   progressJson?: string
@@ -142,6 +143,22 @@ export interface QuestionVO {
   designReason?: string
   status: string
   replaceCount: number
+}
+
+export interface ManualQuestionInput {
+  questionText: string
+  sceneCode: string
+  tier: 'A' | 'B' | 'C'
+  priority?: string
+  monitorFrequency?: string
+  scoreRelevance?: number
+  scoreIntent?: number
+  scoreCompetition?: number
+  scoreConversion?: number
+  scoreCoverage?: number
+  totalScore?: number
+  relatedNeedText?: string
+  designReason?: string
 }
 
 export interface ReviewVO {
@@ -228,6 +245,10 @@ export function getGeoReview(workorderId: number) {
 
 export function getGeoQuestions(workorderId: number, params: { tier?: string; current?: number; size?: number }) {
   return request.get<R<QuestionPageVO>>(`/geo/workorder/${workorderId}/questions`, { params })
+}
+
+export function createManualGeoQuestions(workorderId: number, data: { items: ManualQuestionInput[]; manualReason?: string }) {
+  return request.post<R<ReviewVO>>(`/geo/workorder/${workorderId}/questions/manual`, data)
 }
 
 export function regenerateGeoQuestion(id: number) {

@@ -48,12 +48,13 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
         for (int attempt = 0; attempt <= modelConfig.maxRetry(); attempt++) {
             long started = System.currentTimeMillis();
             try {
-                throttle(modelConfig.platformCode(), modelConfig.rateLimitQps());
                 InvocationResponse response;
                 if (executionGateway == null || !modelConfig.useExecutionGateway()) {
+                    throttle(modelConfig.platformCode(), modelConfig.rateLimitQps());
                     response = invokeOnce(prompt == null ? "" : prompt, modelConfig);
                 } else {
-                    try (LlmExecutionPermit ignored = executionGateway.acquire(modelConfig.feature(), toPlatformConfig(modelConfig))) {
+                    try (LlmExecutionPermit ignored = executionGateway.acquireBlocking(modelConfig.feature(), toPlatformConfig(modelConfig))) {
+                        throttle(modelConfig.platformCode(), modelConfig.rateLimitQps());
                         response = invokeOnce(prompt == null ? "" : prompt, modelConfig);
                     }
                 }

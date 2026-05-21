@@ -3,6 +3,7 @@ package com.huanjing.geo.test;
 import com.huanjing.geo.module.audit.service.AuditService;
 import com.huanjing.geo.module.content.credential.crypto.MasterKeyProvider;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabase;
@@ -11,6 +12,7 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -38,24 +40,49 @@ public abstract class AbstractAuditDbIntegrationTest {
     protected MasterKeyProvider masterKeyProvider;
 
     @BeforeEach
+    void cleanAuditDbFixturesBefore() {
+        Assumptions.assumeTrue(isIsolatedTestDatabase(),
+                () -> "Audit DB integration tests require an isolated test database, current database="
+                        + currentDatabaseName());
+        cleanAuditDbFixtures();
+    }
+
     @AfterEach
-    void cleanAuditDbFixtures() {
+    void cleanAuditDbFixturesAfter() {
+        if (!isIsolatedTestDatabase()) {
+            return;
+        }
+        cleanAuditDbFixtures();
+    }
+
+    private void cleanAuditDbFixtures() {
         jdbcTemplate.execute("SET FOREIGN_KEY_CHECKS=0");
-        jdbcTemplate.update("""
-                DELETE FROM audit_log
-                WHERE actor_id BETWEEN ? AND ?
-                   OR brand_id BETWEEN ? AND ?
-                   OR account_id BETWEEN ? AND ?
-                   OR task_id BETWEEN ? AND ?
-                """, TEST_ID_BASE, TEST_ID_BASE + 999, TEST_ID_BASE, TEST_ID_BASE + 999,
-                TEST_ID_BASE, TEST_ID_BASE + 999, TEST_ID_BASE, TEST_ID_BASE + 999);
-        jdbcTemplate.update("DELETE FROM distribution_tasks WHERE id BETWEEN ? AND ?", TEST_ID_BASE, TEST_ID_BASE + 999);
-        jdbcTemplate.update("DELETE FROM article_draft WHERE id BETWEEN ? AND ?", TEST_ID_BASE, TEST_ID_BASE + 999);
-        jdbcTemplate.update("DELETE FROM project WHERE id BETWEEN ? AND ?", TEST_ID_BASE, TEST_ID_BASE + 999);
-        jdbcTemplate.update("DELETE FROM self_media_account WHERE id BETWEEN ? AND ?", TEST_ID_BASE, TEST_ID_BASE + 999);
-        jdbcTemplate.update("DELETE FROM brand WHERE id BETWEEN ? AND ?", TEST_ID_BASE, TEST_ID_BASE + 999);
-        jdbcTemplate.update("DELETE FROM sys_user WHERE id BETWEEN ? AND ?", TEST_ID_BASE, TEST_ID_BASE + 999);
-        jdbcTemplate.execute("SET FOREIGN_KEY_CHECKS=1");
+        try {
+            jdbcTemplate.update("""
+                    DELETE FROM audit_log
+                    WHERE actor_id = ?
+                       OR brand_id = ?
+                       OR account_id = ?
+                       OR task_id = ?
+                    """, TEST_OPERATOR_ID, TEST_BRAND_ID, TEST_ACCOUNT_ID, TEST_TASK_ID);
+            jdbcTemplate.update("DELETE FROM distribution_tasks WHERE id = ?", TEST_TASK_ID);
+            jdbcTemplate.update("DELETE FROM article_draft WHERE id = ?", TEST_ARTICLE_ID);
+            jdbcTemplate.update("DELETE FROM project WHERE id = ?", TEST_PROJECT_ID);
+            jdbcTemplate.update("DELETE FROM self_media_account WHERE id = ?", TEST_ACCOUNT_ID);
+            jdbcTemplate.update("DELETE FROM brand WHERE id = ?", TEST_BRAND_ID);
+            jdbcTemplate.update("DELETE FROM sys_user WHERE id = ?", TEST_OPERATOR_ID);
+        } finally {
+            jdbcTemplate.execute("SET FOREIGN_KEY_CHECKS=1");
+        }
+    }
+
+    private boolean isIsolatedTestDatabase() {
+        String databaseName = currentDatabaseName();
+        return databaseName != null && databaseName.toLowerCase(Locale.ROOT).contains("test");
+    }
+
+    private String currentDatabaseName() {
+        return jdbcTemplate.queryForObject("SELECT DATABASE()", String.class);
     }
 
     protected List<Map<String, Object>> queryAuditLog(String eventType) {

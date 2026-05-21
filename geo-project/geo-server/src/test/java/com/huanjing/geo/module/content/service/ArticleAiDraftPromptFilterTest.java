@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.content.service;
 
+import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import org.junit.jupiter.api.Test;
@@ -47,5 +48,45 @@ class ArticleAiDraftPromptFilterTest {
         );
 
         assertEquals("请围绕 真实项目名 输出文章，不要保留 真实项目名 占位符", filtered);
+    }
+
+    @Test
+    void contactInfoIsRedactedUnlessExplicitlyAllowed() {
+        SysDictItemMapper mapper = mock(SysDictItemMapper.class);
+        when(mapper.selectList(any())).thenReturn(List.of());
+        ArticleAiDraftPromptFilter filter = new ArticleAiDraftPromptFilter(mapper);
+        Brand brand = new Brand();
+        brand.setPublicPhone("13812345678");
+        brand.setPublicAddress("北京市朝阳区测试路88号");
+
+        String source = "电话 13812345678，地址 北京市朝阳区测试路88号";
+
+        String redacted = filter.filterOutboundPrompt(source, null, brand, false);
+        String allowed = filter.filterOutboundPrompt(source, null, brand, true);
+
+        assertTrue(redacted.contains("[PHONE_REDACTED]"));
+        assertTrue(redacted.contains("[ADDRESS_REDACTED]"));
+        assertTrue(allowed.contains("13812345678"));
+        assertTrue(allowed.contains("北京市朝阳区测试路88号"));
+    }
+
+    @Test
+    void allowedContactInfoOnlyPreservesBrandPublicContact() {
+        SysDictItemMapper mapper = mock(SysDictItemMapper.class);
+        when(mapper.selectList(any())).thenReturn(List.of());
+        ArticleAiDraftPromptFilter filter = new ArticleAiDraftPromptFilter(mapper);
+        Brand brand = new Brand();
+        brand.setPublicPhone("13812345678");
+
+        String filtered = filter.filterOutboundPrompt(
+                "公开电话 13812345678，其他电话 13912345678",
+                null,
+                brand,
+                true
+        );
+
+        assertTrue(filtered.contains("13812345678"));
+        assertFalse(filtered.contains("13912345678"));
+        assertTrue(filtered.contains("[PHONE_REDACTED]"));
     }
 }

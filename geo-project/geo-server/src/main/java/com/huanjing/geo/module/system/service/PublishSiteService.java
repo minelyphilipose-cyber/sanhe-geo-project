@@ -4,7 +4,7 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
-import com.huanjing.geo.common.util.HttpClientUtil;
+import com.huanjing.geo.module.content.config.BrandGeoSiteProperties;
 import com.huanjing.geo.module.system.dto.PublishSiteCreateRequest;
 import com.huanjing.geo.module.system.dto.PublishSiteStatusUpdateRequest;
 import com.huanjing.geo.module.system.dto.PublishSiteUpdateRequest;
@@ -17,6 +17,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -35,14 +38,15 @@ public class PublishSiteService {
     private static final Set<String> TIER_SET = Set.of("S0", "S1", "S2");
     private static final Set<String> STATUS_SET = Set.of("active", "suspended", "maintenance");
     private static final Set<String> HEALTH_SET = Set.of("normal", "slow", "high_failure", "degraded");
-    private static final Set<String> METHOD_SET = Set.of("rest_api", "ftp", "email", "manual");
+    private static final Set<String> METHOD_SET = Set.of("rest_api", "ftp", "email", "manual", "brand_geo_site", "forum_playwright", "discuz_http");
     private static final Set<String> HTTP_METHOD_SET = Set.of("POST", "PUT");
-    private static final Set<String> AUTH_SET = Set.of("api_key", "bearer_token", "basic_auth", "oauth2");
+    private static final Set<String> AUTH_SET = Set.of("api_key", "bearer_token", "basic_auth", "oauth2", "cookie", "account_cookie");
 
     private final PublishSiteMapper publishSiteMapper;
     private final SysDictItemMapper sysDictItemMapper;
     private final CurrentUserService currentUserService;
     private final PlatformCredentialService platformCredentialService;
+    private final BrandGeoSiteProperties brandGeoSiteProperties;
 
     public List<PublishSite> list(String tier, String status, String industry) {
         ensureReadRole();
@@ -70,10 +74,10 @@ public class PublishSiteService {
 
     public PublishSite create(PublishSiteCreateRequest req) {
         ensureWriteRole();
-        validate(req.getSiteName(), req.getDomain(), req.getIndustryTags(), req.getTier(), req.getStatus(), req.getIntegrationMethod(),
+        validate(req.getSiteName(), req.getSiteCode(), req.getDomain(), req.getIndustryTags(), req.getTier(), req.getStatus(), req.getIntegrationMethod(),
                 req.getHttpMethod(), req.getAuthType(), req.getCurrentHealthStatus());
         PublishSite site = new PublishSite();
-        fill(site, req.getSiteName(), req.getDomain(), req.getIndustryTags(), req.getTier(), req.getStatus(),
+        fill(site, req.getSiteName(), req.getSiteCode(), req.getDomain(), req.getIconUrl(), req.getIndustryTags(), req.getTier(), req.getStatus(),
                 req.getIntegrationMethod(), req.getApiEndpoint(), req.getHttpMethod(), req.getAuthType(),
                 req.getCredentialRef(), req.getApiCredential(), req.getRequestHeaderTemplate(), req.getRequestBodyTemplate(),
                 req.getResponseUrlPath(), req.getContentConstraints(), req.getCurrentHealthStatus(), req.getRemark());
@@ -83,10 +87,10 @@ public class PublishSiteService {
 
     public PublishSite update(Long id, PublishSiteUpdateRequest req) {
         ensureWriteRole();
-        validate(req.getSiteName(), req.getDomain(), req.getIndustryTags(), req.getTier(), req.getStatus(), req.getIntegrationMethod(),
+        validate(req.getSiteName(), req.getSiteCode(), req.getDomain(), req.getIndustryTags(), req.getTier(), req.getStatus(), req.getIntegrationMethod(),
                 req.getHttpMethod(), req.getAuthType(), req.getCurrentHealthStatus());
         PublishSite site = requireById(id);
-        fill(site, req.getSiteName(), req.getDomain(), req.getIndustryTags(), req.getTier(), req.getStatus(),
+        fill(site, req.getSiteName(), req.getSiteCode(), req.getDomain(), req.getIconUrl(), req.getIndustryTags(), req.getTier(), req.getStatus(),
                 req.getIntegrationMethod(), req.getApiEndpoint(), req.getHttpMethod(), req.getAuthType(),
                 req.getCredentialRef(), req.getApiCredential(), req.getRequestHeaderTemplate(), req.getRequestBodyTemplate(),
                 req.getResponseUrlPath(), req.getContentConstraints(), req.getCurrentHealthStatus(), req.getRemark());
@@ -111,50 +115,61 @@ public class PublishSiteService {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("siteId", site.getId());
         result.put("siteName", site.getSiteName());
-        result.put("integrationMethod", site.getIntegrationMethod());
-        if (!"rest_api".equalsIgnoreCase(site.getIntegrationMethod())) {
+        result.put("domain", site.getDomain());
+        if ("brand_geo_site".equalsIgnoreCase(site.getIntegrationMethod())) {
+            return testBrandGeoSiteEndpoint(result);
+        }
+        String host = resolvePingHost(site);
+        result.put("host", host);
+        result.put("testType", "ping");
+        return pingHost(result, host);
+    }
+
+    private Map<String, Object> testBrandGeoSiteEndpoint(Map<String, Object> result) {
+        String endpoint = brandGeoSiteProperties.getEndpoint();
+        result.put("testType", "endpoint_ping");
+        result.put("endpoint", endpoint);
+        if (!StringUtils.hasText(endpoint)) {
             result.put("success", false);
-            result.put("message", "only rest_api connectivity test is supported in phase1");
+            result.put("reachable", false);
+            result.put("message", "BRAND_GEO_SITE_ENDPOINT is not configured");
             return result;
         }
-        if (!StringUtils.hasText(site.getApiEndpoint())) {
-            throw new BizException(400, "api_endpoint is required");
-        }
-        String method = StringUtils.hasText(site.getHttpMethod()) ? site.getHttpMethod().trim().toUpperCase(Locale.ROOT) : "POST";
-        String bodyTemplate = StringUtils.hasText(site.getRequestBodyTemplate())
-                ? site.getRequestBodyTemplate()
-                : "{\"title\":\"{{title}}\",\"content\":\"{{content}}\"}";
-        String payload = replacePlaceholders(bodyTemplate, Map.of(
-                "title", "connectivity_test_title",
-                "content", "connectivity_test_content",
-                "keywords", "connectivity,test",
-                "author", "geo-system"
-        ));
+        String host = resolveHost(endpoint.trim());
+        result.put("host", host);
+        return pingHost(result, host);
+    }
 
-        Map<String, String> headers = parseHeaders(site.getRequestHeaderTemplate());
-        String credential = platformCredentialService.resolveCredential(site.getCredentialRef(), site.getApiCredentialEncrypted());
-        applyAuthHeader(headers, site.getAuthType(), credential);
-        headers.putIfAbsent("Content-Type", "application/json");
+    private Map<String, Object> pingHost(Map<String, Object> result, String host) {
         try {
-            HttpClientUtil.HttpResult resp = HttpClientUtil.request(
-                    method,
-                    site.getApiEndpoint().trim(),
-                    headers,
-                    payload,
-                    5000,
-                    10000
-            );
-            boolean ok = resp.statusCode() >= 200 && resp.statusCode() < 300;
-            result.put("success", ok);
-            result.put("statusCode", resp.statusCode());
-            result.put("responseBody", resp.body());
-            result.put("publishedUrl", extractJsonPath(resp.body(), site.getResponseUrlPath()));
+            long startedAt = System.currentTimeMillis();
+            PingResult ping = runPing(host);
+            boolean reachable = ping.reachable();
+            result.put("success", reachable);
+            result.put("reachable", reachable);
+            result.put("elapsedMs", System.currentTimeMillis() - startedAt);
+            if (!reachable) {
+                result.put("message", StringUtils.hasText(ping.output()) ? ping.output().trim() : "ping unreachable");
+            }
             return result;
         } catch (Exception ex) {
             result.put("success", false);
+            result.put("reachable", false);
             result.put("message", ex.getMessage());
             return result;
         }
+    }
+
+    protected PingResult runPing(String host) throws Exception {
+        Process process = new ProcessBuilder(pingCommand(host))
+                .redirectErrorStream(true)
+                .start();
+        boolean finished = process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        if (!finished) {
+            process.destroyForcibly();
+        }
+        return new PingResult(finished && process.exitValue() == 0, output);
     }
 
     private PublishSite requireById(Long id) {
@@ -167,7 +182,9 @@ public class PublishSiteService {
 
     private void fill(PublishSite site,
                       String siteName,
+                      String siteCode,
                       String domain,
+                      String iconUrl,
                       List<String> industryTags,
                       String tier,
                       String status,
@@ -184,7 +201,9 @@ public class PublishSiteService {
                       String currentHealthStatus,
                       String remark) {
         site.setSiteName(siteName.trim());
+        site.setSiteCode(normalizeSiteCode(siteCode));
         site.setDomain(domain.trim().toLowerCase(Locale.ROOT));
+        site.setIconUrl(StringUtils.hasText(iconUrl) ? iconUrl.trim() : null);
         site.setIndustryTags(normalizeJsonArray(industryTags));
         site.setTier(tier.trim().toUpperCase(Locale.ROOT));
         site.setStatus(status.trim().toLowerCase(Locale.ROOT));
@@ -193,7 +212,9 @@ public class PublishSiteService {
         site.setHttpMethod(StringUtils.hasText(httpMethod) ? httpMethod.trim().toUpperCase(Locale.ROOT) : null);
         site.setAuthType(StringUtils.hasText(authType) ? authType.trim().toLowerCase(Locale.ROOT) : null);
         site.setCredentialRef(StringUtils.hasText(credentialRef) ? credentialRef.trim() : null);
-        site.setApiCredentialEncrypted(platformCredentialService.encryptForStorage(apiCredential));
+        if (StringUtils.hasText(apiCredential)) {
+            site.setApiCredentialEncrypted(platformCredentialService.encryptForStorage(apiCredential));
+        }
         site.setRequestHeaderTemplate(normalizeJsonObject(requestHeaderTemplate));
         site.setRequestBodyTemplate(normalizeJsonObject(requestBodyTemplate));
         site.setResponseUrlPath(StringUtils.hasText(responseUrlPath) ? responseUrlPath.trim() : null);
@@ -203,6 +224,7 @@ public class PublishSiteService {
     }
 
     private void validate(String siteName,
+                          String siteCode,
                           String domain,
                           List<String> industryTags,
                           String tier,
@@ -214,6 +236,10 @@ public class PublishSiteService {
         if (!StringUtils.hasText(siteName)) {
             throw new BizException(400, "site_name is required");
         }
+        if (!StringUtils.hasText(siteCode)) {
+            throw new BizException(400, "site_code is required");
+        }
+        normalizeSiteCode(siteCode);
         if (!StringUtils.hasText(domain)) {
             throw new BizException(400, "domain is required");
         }
@@ -225,13 +251,13 @@ public class PublishSiteService {
             throw new BizException(400, "status must be active/suspended/maintenance");
         }
         if (!StringUtils.hasText(integrationMethod) || !METHOD_SET.contains(integrationMethod.trim().toLowerCase(Locale.ROOT))) {
-            throw new BizException(400, "integration_method must be rest_api/ftp/email/manual");
+            throw new BizException(400, "integration_method must be rest_api/ftp/email/manual/brand_geo_site/forum_playwright/discuz_http");
         }
         if (StringUtils.hasText(httpMethod) && !HTTP_METHOD_SET.contains(httpMethod.trim().toUpperCase(Locale.ROOT))) {
             throw new BizException(400, "http_method must be POST/PUT");
         }
         if (StringUtils.hasText(authType) && !AUTH_SET.contains(authType.trim().toLowerCase(Locale.ROOT))) {
-            throw new BizException(400, "auth_type must be api_key/bearer_token/basic_auth/oauth2");
+            throw new BizException(400, "auth_type must be api_key/bearer_token/basic_auth/oauth2/cookie/account_cookie");
         }
         if (StringUtils.hasText(currentHealthStatus) && !HEALTH_SET.contains(currentHealthStatus.trim().toLowerCase(Locale.ROOT))) {
             throw new BizException(400, "current_health_status must be normal/slow/high_failure/degraded");
@@ -268,19 +294,12 @@ public class PublishSiteService {
             throw new BizException(400, "industry_tags is required");
         }
         try {
-            Set<String> validIndustryTags = queryValidIndustryTags();
-            if (validIndustryTags.isEmpty()) {
-                throw new BizException(500, "industry_tag dictionary is empty");
-            }
             List<String> normalized = new ArrayList<>();
             for (String tag : raw) {
                 if (!StringUtils.hasText(tag)) {
                     continue;
                 }
                 String key = tag.trim().toLowerCase(Locale.ROOT);
-                if (!validIndustryTags.contains(key)) {
-                    throw new BizException(400, "Invalid industry tag: " + tag);
-                }
                 if (!normalized.contains(key)) {
                     normalized.add(key);
                 }
@@ -295,6 +314,56 @@ public class PublishSiteService {
             }
             throw new BizException(400, "Invalid industry_tags");
         }
+    }
+
+    private String normalizeSiteCode(String value) {
+        String siteCode = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+        if (!siteCode.matches("^[a-z0-9][a-z0-9_-]{1,127}$")) {
+            throw new BizException(400, "site_code must be 2-128 chars and only contain lowercase letters, numbers, underscores or hyphens");
+        }
+        return siteCode;
+    }
+
+    private String resolvePingHost(PublishSite site) {
+        String raw = StringUtils.hasText(site.getDomain()) ? site.getDomain().trim() : site.getApiEndpoint();
+        if (!StringUtils.hasText(raw)) {
+            throw new BizException(400, "domain is required");
+        }
+        return resolveHost(raw);
+    }
+
+    private String resolveHost(String raw) {
+        String value = raw.trim();
+        try {
+            URI uri = value.contains("://") ? URI.create(value) : URI.create("http://" + value);
+            if (StringUtils.hasText(uri.getHost())) {
+                return uri.getHost();
+            }
+        } catch (Exception ignored) {
+            // Fall through to plain host normalization.
+        }
+        int slash = value.indexOf('/');
+        if (slash >= 0) {
+            value = value.substring(0, slash);
+        }
+        int colon = value.indexOf(':');
+        if (colon >= 0) {
+            value = value.substring(0, colon);
+        }
+        if (!StringUtils.hasText(value)) {
+            throw new BizException(400, "domain is invalid");
+        }
+        return value;
+    }
+
+    protected record PingResult(boolean reachable, String output) {}
+
+    private List<String> pingCommand(String host) {
+        String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        if (os.contains("win")) {
+            return Arrays.asList("ping", "-n", "1", "-w", "3000", host);
+        }
+        return Arrays.asList("ping", "-c", "1", "-W", "3", host);
     }
 
     private Set<String> queryValidIndustryTags() {

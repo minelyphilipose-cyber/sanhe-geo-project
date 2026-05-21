@@ -15,7 +15,7 @@ spring:
 # JWT
 geo:
   brand-geo-site:
-    endpoint: https://www.sanhexinglian.com/api/v1/content
+    endpoint: https://www.fyhuaweizhijia.com/api/v1/content
 
   wechat:
     client:
@@ -77,6 +77,7 @@ geo:
     access-key: admin
     secret-key: admin123
     bucket: geo-files
+    region: ${MINIO_REGION:us-east-1}
 
 presale:
   security:

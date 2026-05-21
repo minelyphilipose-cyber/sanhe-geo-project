@@ -114,6 +114,36 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '生成文章', hidden: true, permissions: ['project.read'] },
     },
     {
+      path: 'content/articles/batch-generate',
+      name: 'BatchArticleGenerate',
+      component: () => import('@/views/admin/content/BatchArticleGenerate.vue'),
+      meta: { title: '批量生成文章', hidden: true, permissions: ['project.read'] },
+    },
+    {
+      path: 'content/article-prompt-templates',
+      name: 'ArticlePromptTemplates',
+      component: () => import('@/views/admin/content/ArticlePromptTemplates.vue'),
+      meta: { title: '文章提示词模板', hidden: true, permissions: ['project.read'] },
+    },
+    {
+      path: 'content/articles/batch-publish',
+      name: 'BatchArticlePublish',
+      component: () => import('@/views/admin/content/BatchArticlePublish.vue'),
+      meta: { title: '批量发布文章', hidden: true, permissions: ['project.read'] },
+    },
+    {
+      path: 'content/articles/batch-publish-jobs',
+      name: 'BatchArticlePublishJobs',
+      component: () => import('@/views/admin/content/BatchArticlePublishJobs.vue'),
+      meta: { title: '批量发布任务', hidden: true, permissions: ['project.read'] },
+    },
+    {
+      path: 'content/publish-platforms',
+      name: 'PublishPlatformManagement',
+      component: () => import('@/views/admin/content/PublishPlatformManagement.vue'),
+      meta: { title: '发布平台管理', hidden: true, permissions: ['project.read'] },
+    },
+    {
       path: 'keyword-groups',
       name: 'KeywordGroupManage',
       redirect: '/admin/layered-keyword-groups',
@@ -123,7 +153,7 @@ const adminRoutes: RouteRecordRaw = {
       path: 'layered-keyword-groups',
       name: 'LayeredKeywordGroupManage',
       component: () => import('@/views/admin/project/LayeredKeywordGroupManage.vue'),
-      meta: { title: '分层拓词管理', icon: 'Collection', permissions: ['keyword_group.read'] },
+      meta: { title: '拓词管理', icon: 'Collection', permissions: ['keyword_group.read'] },
     },
     {
       path: 'monitoring/platforms',
@@ -142,7 +172,7 @@ const adminRoutes: RouteRecordRaw = {
       name: 'PresaleReportList',
       component: () => import('@/views/admin/presale/report/PresaleReportList.vue'),
       meta: {
-        title: '售前报告',
+        title: 'AI可见度诊断报告',
         icon: 'Document',
         permissions: ['presale.report.list'],
       },
@@ -155,6 +185,16 @@ const adminRoutes: RouteRecordRaw = {
         title: '新建报告',
         hidden: true,
         permissions: ['presale.report.create'],
+      },
+    },
+    {
+      path: 'presale/report/page03-config',
+      name: 'PresalePage03Config',
+      component: () => import('@/views/admin/presale/report/PresalePage03Config.vue'),
+      meta: {
+        title: 'PAGE03 配置',
+        hidden: true,
+        roles: ['delivery_manager', 'manager', 'super_admin'],
       },
     },
     {
@@ -182,7 +222,7 @@ const adminRoutes: RouteRecordRaw = {
       name: 'PresaleReportEdit',
       component: () => import('@/views/admin/presale/report/PresaleReportEdit.vue'),
       meta: {
-        title: '编辑售前报告',
+        title: '编辑AI可见度诊断报告',
         hidden: true,
         permissions: ['presale.report.view'],
       },
@@ -244,8 +284,8 @@ const adminRoutes: RouteRecordRaw = {
     {
       path: 'settings/publish-sites',
       name: 'PublishSiteConfig',
-      component: () => import('@/views/admin/settings/PublishSiteConfig.vue'),
-      meta: { title: '发布站点配置', permissions: ['user.manage'] },
+      redirect: '/admin/content/publish-platforms',
+      meta: { title: '发布站点配置', hidden: true, permissions: ['user.manage'] },
     },
     {
       path: 'settings/packages',

@@ -9,6 +9,8 @@ import com.huanjing.geo.module.presale.dto.snapshot.editable.EditableContentDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.MarketBattleground;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.SamplePrompt;
+import com.huanjing.geo.module.presale.persist.entity.PresalePage03MarketConfig;
+import com.huanjing.geo.module.presale.service.PresalePage03MarketConfigService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -24,14 +26,32 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class PresaleL3Defaults {
 
+    private static final int MARKET_NARRATIVE_QUESTION_MAX_LENGTH = 34;
+
     private final ObjectMapper objectMapper;
+    private final PresalePage03MarketConfigService page03MarketConfigService;
 
     public EditableContentDTO normalize(EditableContentDTO input, RawSnapshotDTO raw, ComputedSnapshotDTO computed) {
+        return normalize(input, raw, computed, false);
+    }
+
+    public EditableContentDTO normalizeGenerated(EditableContentDTO input, RawSnapshotDTO raw, ComputedSnapshotDTO computed) {
+        return normalize(input, raw, computed, true);
+    }
+
+    private EditableContentDTO normalize(EditableContentDTO input,
+                                         RawSnapshotDTO raw,
+                                         ComputedSnapshotDTO computed,
+                                         boolean blankAsMissing) {
         EditableContentDTO out = input == null ? new EditableContentDTO() : input;
         if (out.getMarketBattleground() == null) {
             out.setMarketBattleground(defaultMarketBattleground(raw));
         } else {
-            out.setMarketBattleground(normalizeMarket(out.getMarketBattleground(), defaultMarketBattleground(raw)));
+            out.setMarketBattleground(normalizeMarket(
+                    out.getMarketBattleground(),
+                    defaultMarketBattleground(raw),
+                    blankAsMissing
+            ));
         }
         return out;
     }
@@ -107,7 +127,8 @@ public class PresaleL3Defaults {
         String industry = raw == null || raw.getClientInfo() == null
                 ? null : raw.getClientInfo().getIndustry();
         IndustryProfile profile = resolveIndustryProfile(industry);
-        MarketScale scale = estimateMarketScale(region, profile);
+        PresalePage03MarketConfig config = page03MarketConfigService.getConfig();
+        MarketScale scale = estimateMarketScale(region, profile, config);
 
         return MarketBattleground.builder()
                 .topbarTitle(MarketBattlegroundValidator.TOPBAR_TITLE)
@@ -115,21 +136,21 @@ public class PresaleL3Defaults {
                 .pageTitle("每天，有数千万次消费决策正在 AI 上发生")
                 .pageKicker(MarketBattlegroundValidator.PAGE_KICKER)
                 .marketCard(MarketBattleground.MarketCard.builder()
-                        .label("CHINA AI MARKET · 2026 Q1")
-                        .source("来源：行业公开数据综合估算")
+                        .label(config.getMarketLabel())
+                        .source(config.getMarketSource())
                         .stats(List.of(
-                                stat("10.2", "亿", "AI 原生 APP 月活"),
-                                stat("8.5", "亿+", "日均活跃用户（DAU）"),
-                                stat("25.1", "亿次", "日均提问总量"),
-                                stat("63.8", "次", "豆包人均月使用")
+                                stat(config.getAppMonthlyActiveValue(), config.getAppMonthlyActiveUnit(), "AI 原生 APP 月活"),
+                                stat(config.getDailyActiveUsersValue(), config.getDailyActiveUsersUnit(), "日均活跃用户"),
+                                stat(config.getDailyQuestionTotalValue(), config.getDailyQuestionTotalUnit(), "日均提问总量"),
+                                stat(config.getDoubaoMonthlyUsageValue(), config.getDoubaoMonthlyUsageUnit(), "豆包人均月使用")
                         ))
                         .platformLabel(MarketBattlegroundValidator.PLATFORM_LABEL)
                         .platforms(List.of(
-                                platform("豆包", "4.45 亿"),
-                                platform("千问", "2.66 亿"),
-                                platform("DeepSeek", "1.97 亿")
+                                platform(config.getPlatform1Name(), config.getPlatform1Value()),
+                                platform(config.getPlatform2Name(), config.getPlatform2Value()),
+                                platform(config.getPlatform3Name(), config.getPlatform3Value())
                         ))
-                        .platformSuffix(MarketBattlegroundValidator.PLATFORM_SUFFIX)
+                        .platformSuffix(config.getPlatformSuffix())
                         .build())
                 .nationalCard(MarketBattleground.CalculationCard.builder()
                         .label("NATIONAL · 全国" + profile.industryLabel() + "每天")
@@ -139,7 +160,7 @@ public class PresaleL3Defaults {
                         .subtitle("条 / 天 · " + profile.industryLabel() + "相关 AI 提问")
                         .calculationLabel("CALCULATION · 推导口径")
                         .rows(List.of(
-                                calcRow("日均提问总量", "约 25 亿次 / 天", false),
+                                calcRow("日均提问总量", "约 " + config.getDailyQuestionTotalValue() + config.getDailyQuestionTotalUnit() + " / 天", false),
                                 calcRow(profile.parentCategory() + "类占比", profile.parentShareRange(), false),
                                 calcRow(profile.industryLabel() + "占比", profile.industryShareRange(), false),
                                 calcRow("中枢值", scale.nationalTotalText(), true)
@@ -156,19 +177,19 @@ public class PresaleL3Defaults {
                         .rows(List.of(
                                 calcRow("全国" + profile.industryLabel() + "日提问", scale.nationalTotalText(), false),
                                 calcRow(region + "占比", scale.regionShareText(), false),
-                                calcRow("数据来源", "行业公开数据综合估算", false),
+                                calcRow("数据来源", config.getPage03DataSource(), false),
                                 calcRow("区域日提问", scale.regionalTotalText(), true)
                         ))
                         .build())
                 .narrative(MarketBattleground.Narrative.builder()
                         .intro("这意味着，消费者正在通过 AI 持续询问：")
-                        .questions(buildDecisionQuestions(raw, region, profile))
+                        .questions(buildDecisionQuestions(raw, region, profile, brand))
                         .conclusion("而 AI 给出的答案，正在影响他们下一步选择。")
                         .brandLinePrefix(MarketBattlegroundValidator.BRAND_LINE_PREFIX)
                         .brandName(brand)
                         .brandLineSuffix("在这些场景中的真实可见度如何？详见下章诊断结果。")
                         .build())
-                .footnote("本报告引用的市场规模数据基于行业公开口径综合估算，受平台分布、用户行为差异及统计窗口影响，合理浮动区间约 ±20%。具体数值仅作量级参考，不构成精确的市场断言。")
+                .footnote(config.getFootnote())
                 .footerBrand("GEO · CONFIDENTIAL")
                 .build();
     }
@@ -204,8 +225,8 @@ public class PresaleL3Defaults {
         };
     }
 
-    private MarketScale estimateMarketScale(String region, IndustryProfile profile) {
-        double dailyQuestions = 2_500_000_000D;
+    private MarketScale estimateMarketScale(String region, IndustryProfile profile, PresalePage03MarketConfig config) {
+        double dailyQuestions = configDailyQuestionCount(config);
         double national = dailyQuestions * midpoint(profile.parentShareRange()) * midpoint(profile.industryShareRange());
         double regionShare = estimateRegionShare(region);
         double regional = national * regionShare;
@@ -220,7 +241,15 @@ public class PresaleL3Defaults {
         );
     }
 
-    private List<String> buildDecisionQuestions(RawSnapshotDTO raw, String region, IndustryProfile profile) {
+    private double configDailyQuestionCount(PresalePage03MarketConfig config) {
+        Double parsed = parseCount(config.getDailyQuestionTotalValue() + config.getDailyQuestionTotalUnit());
+        return parsed == null ? 1_200_000_000D : parsed;
+    }
+
+    private List<String> buildDecisionQuestions(RawSnapshotDTO raw,
+                                                String region,
+                                                IndustryProfile profile,
+                                                String brandName) {
         List<String> samplePrompts = raw == null || raw.getSamplePrompts() == null
                 ? List.of()
                 : raw.getSamplePrompts().stream()
@@ -232,10 +261,12 @@ public class PresaleL3Defaults {
         if (samplePrompts.size() == 3) {
             return samplePrompts.stream()
                     .map(this::quoteQuestion)
+                    .map(question -> compactQuestion(question, brandName))
                     .toList();
         }
         return profile.questionSuffixes().stream()
                 .map(question -> "\"" + region + question + "\"")
+                .map(question -> compactQuestion(question, brandName))
                 .toList();
     }
 
@@ -312,18 +343,20 @@ public class PresaleL3Defaults {
         return String.format(java.util.Locale.ROOT, "%.1f", value);
     }
 
-    private MarketBattleground normalizeMarket(MarketBattleground value, MarketBattleground defaults) {
+    private MarketBattleground normalizeMarket(MarketBattleground value,
+                                               MarketBattleground defaults,
+                                               boolean blankAsMissing) {
         value.setTopbarTitle(defaults.getTopbarTitle());
         value.setTopbarRight(defaults.getTopbarRight());
-        value.setPageTitle(coalesce(value.getPageTitle(), defaults.getPageTitle()));
+        value.setPageTitle(coalesce(value.getPageTitle(), defaults.getPageTitle(), blankAsMissing));
         value.setPageKicker(defaults.getPageKicker());
-        value.setMarketCard(normalizeMarketCard(value.getMarketCard(), defaults.getMarketCard()));
-        value.setNationalCard(normalizeCard(value.getNationalCard(), defaults.getNationalCard()));
+        value.setMarketCard(normalizeMarketCard(value.getMarketCard(), defaults.getMarketCard(), blankAsMissing));
+        value.setNationalCard(normalizeCard(value.getNationalCard(), defaults.getNationalCard(), blankAsMissing));
         value.setBridgeText(defaults.getBridgeText());
-        value.setRegionalCard(normalizeCard(value.getRegionalCard(), defaults.getRegionalCard()));
-        value.setNarrative(normalizeNarrative(value.getNarrative(), defaults.getNarrative()));
-        value.setFootnote(coalesce(value.getFootnote(), defaults.getFootnote()));
-        value.setFooterBrand(coalesce(value.getFooterBrand(), defaults.getFooterBrand()));
+        value.setRegionalCard(normalizeCard(value.getRegionalCard(), defaults.getRegionalCard(), blankAsMissing));
+        value.setNarrative(normalizeNarrative(value.getNarrative(), defaults.getNarrative(), blankAsMissing));
+        value.setFootnote(coalesce(value.getFootnote(), defaults.getFootnote(), blankAsMissing));
+        value.setFooterBrand(coalesce(value.getFooterBrand(), defaults.getFooterBrand(), blankAsMissing));
         recalculateMarketTraffic(value);
         return value;
     }
@@ -416,64 +449,75 @@ public class PresaleL3Defaults {
     }
 
     private MarketBattleground.MarketCard normalizeMarketCard(MarketBattleground.MarketCard value,
-                                                              MarketBattleground.MarketCard defaults) {
+                                                              MarketBattleground.MarketCard defaults,
+                                                              boolean blankAsMissing) {
         if (value == null) return defaults;
-        value.setLabel(coalesce(value.getLabel(), defaults.getLabel()));
-        value.setSource(coalesce(value.getSource(), defaults.getSource()));
-        value.setStats(normalizeList(value.getStats(), defaults.getStats(), this::normalizeStat));
+        value.setLabel(coalesce(value.getLabel(), defaults.getLabel(), blankAsMissing));
+        value.setSource(coalesce(value.getSource(), defaults.getSource(), blankAsMissing));
+        value.setStats(normalizeList(value.getStats(), defaults.getStats(),
+                (item, itemDefaults) -> normalizeStat(item, itemDefaults, blankAsMissing)));
         value.setPlatformLabel(defaults.getPlatformLabel());
-        value.setPlatforms(normalizeList(value.getPlatforms(), defaults.getPlatforms(), this::normalizePlatform));
+        value.setPlatforms(normalizeList(value.getPlatforms(), defaults.getPlatforms(),
+                (item, itemDefaults) -> normalizePlatform(item, itemDefaults, blankAsMissing)));
         value.setPlatformSuffix(defaults.getPlatformSuffix());
         return value;
     }
 
-    private MarketBattleground.Stat normalizeStat(MarketBattleground.Stat value, MarketBattleground.Stat defaults) {
+    private MarketBattleground.Stat normalizeStat(MarketBattleground.Stat value,
+                                                  MarketBattleground.Stat defaults,
+                                                  boolean blankAsMissing) {
         if (value == null) return defaults;
-        value.setValue(coalesce(value.getValue(), defaults.getValue()));
-        value.setUnit(coalesce(value.getUnit(), defaults.getUnit()));
-        value.setLabel(coalesce(value.getLabel(), defaults.getLabel()));
+        value.setValue(coalesce(value.getValue(), defaults.getValue(), blankAsMissing));
+        value.setUnit(coalesce(value.getUnit(), defaults.getUnit(), blankAsMissing));
+        value.setLabel(coalesce(value.getLabel(), defaults.getLabel(), blankAsMissing));
         return value;
     }
 
     private MarketBattleground.Platform normalizePlatform(MarketBattleground.Platform value,
-                                                          MarketBattleground.Platform defaults) {
+                                                          MarketBattleground.Platform defaults,
+                                                          boolean blankAsMissing) {
         if (value == null) return defaults;
-        value.setName(coalesce(value.getName(), defaults.getName()));
-        value.setValue(coalesce(value.getValue(), defaults.getValue()));
+        value.setName(coalesce(value.getName(), defaults.getName(), blankAsMissing));
+        value.setValue(coalesce(value.getValue(), defaults.getValue(), blankAsMissing));
         return value;
     }
 
     private MarketBattleground.CalculationCard normalizeCard(MarketBattleground.CalculationCard value,
-                                                             MarketBattleground.CalculationCard defaults) {
+                                                             MarketBattleground.CalculationCard defaults,
+                                                             boolean blankAsMissing) {
         if (value == null) return defaults;
-        value.setLabel(coalesce(value.getLabel(), defaults.getLabel()));
-        value.setValuePrefix(coalesce(value.getValuePrefix(), defaults.getValuePrefix()));
-        value.setValue(coalesce(value.getValue(), defaults.getValue()));
-        value.setUnit(coalesce(value.getUnit(), defaults.getUnit()));
-        value.setSubtitle(coalesce(value.getSubtitle(), defaults.getSubtitle()));
-        value.setCalculationLabel(coalesce(value.getCalculationLabel(), defaults.getCalculationLabel()));
-        value.setRows(normalizeList(value.getRows(), defaults.getRows(), this::normalizeCalcRow));
+        value.setLabel(coalesce(value.getLabel(), defaults.getLabel(), blankAsMissing));
+        value.setValuePrefix(coalesce(value.getValuePrefix(), defaults.getValuePrefix(), blankAsMissing));
+        value.setValue(coalesce(value.getValue(), defaults.getValue(), blankAsMissing));
+        value.setUnit(coalesce(value.getUnit(), defaults.getUnit(), blankAsMissing));
+        value.setSubtitle(coalesce(value.getSubtitle(), defaults.getSubtitle(), blankAsMissing));
+        value.setCalculationLabel(coalesce(value.getCalculationLabel(), defaults.getCalculationLabel(), blankAsMissing));
+        value.setRows(normalizeList(value.getRows(), defaults.getRows(),
+                (row, rowDefaults) -> normalizeCalcRow(row, rowDefaults, blankAsMissing)));
         return value;
     }
 
     private MarketBattleground.CalculationRow normalizeCalcRow(MarketBattleground.CalculationRow value,
-                                                               MarketBattleground.CalculationRow defaults) {
+                                                               MarketBattleground.CalculationRow defaults,
+                                                               boolean blankAsMissing) {
         if (value == null) return defaults;
-        value.setLabel(coalesce(value.getLabel(), defaults.getLabel()));
-        value.setValue(coalesce(value.getValue(), defaults.getValue()));
+        value.setLabel(coalesce(value.getLabel(), defaults.getLabel(), blankAsMissing));
+        value.setValue(coalesce(value.getValue(), defaults.getValue(), blankAsMissing));
         value.setIsTotal(value.getIsTotal() == null ? defaults.getIsTotal() : value.getIsTotal());
         return value;
     }
 
     private MarketBattleground.Narrative normalizeNarrative(MarketBattleground.Narrative value,
-                                                            MarketBattleground.Narrative defaults) {
+                                                            MarketBattleground.Narrative defaults,
+                                                            boolean blankAsMissing) {
         if (value == null) return defaults;
-        value.setIntro(coalesce(value.getIntro(), defaults.getIntro()));
-        value.setQuestions(normalizeStringList(value.getQuestions(), defaults.getQuestions()));
-        value.setConclusion(coalesce(value.getConclusion(), defaults.getConclusion()));
+        value.setIntro(coalesce(value.getIntro(), defaults.getIntro(), blankAsMissing));
+        String brandName = coalesce(value.getBrandName(), defaults.getBrandName(), blankAsMissing);
+        value.setQuestions(normalizeQuestionList(value.getQuestions(), defaults.getQuestions(), brandName, blankAsMissing));
+        value.setConclusion(coalesce(value.getConclusion(), defaults.getConclusion(), blankAsMissing));
         value.setBrandLinePrefix(defaults.getBrandLinePrefix());
-        value.setBrandName(coalesce(value.getBrandName(), defaults.getBrandName()));
-        value.setBrandLineSuffix(coalesce(value.getBrandLineSuffix(), defaults.getBrandLineSuffix()));
+        value.setBrandName(brandName);
+        value.setBrandLineSuffix(coalesce(value.getBrandLineSuffix(), defaults.getBrandLineSuffix(), blankAsMissing));
         return value;
     }
 
@@ -486,16 +530,62 @@ public class PresaleL3Defaults {
         return out;
     }
 
-    private List<String> normalizeStringList(List<String> value, List<String> defaults) {
+    private List<String> normalizeStringList(List<String> value, List<String> defaults, boolean blankAsMissing) {
         List<String> out = new ArrayList<>();
         for (int i = 0; i < defaults.size(); i++) {
             String existing = value == null || i >= value.size() ? null : value.get(i);
-            out.add(coalesce(existing, defaults.get(i)));
+            out.add(coalesce(existing, defaults.get(i), blankAsMissing));
         }
         return out;
     }
 
+    private List<String> normalizeQuestionList(List<String> value,
+                                               List<String> defaults,
+                                               String brandName,
+                                               boolean blankAsMissing) {
+        List<String> out = new ArrayList<>();
+        for (int i = 0; i < defaults.size(); i++) {
+            String existing = value == null || i >= value.size() ? null : value.get(i);
+            String fallback = compactQuestion(defaults.get(i), brandName);
+            String question = coalesce(existing, fallback, blankAsMissing);
+            if (!isValidQuestion(question, brandName)) {
+                question = fallback;
+            }
+            out.add(compactQuestion(question, brandName));
+        }
+        return out;
+    }
+
+    private boolean isValidQuestion(String value, String brandName) {
+        return !isBlank(value)
+                && value.length() <= MARKET_NARRATIVE_QUESTION_MAX_LENGTH
+                && (isBlank(brandName) || !value.contains(brandName));
+    }
+
+    private String compactQuestion(String value, String brandName) {
+        String text = isBlank(value) ? "本地服务机构哪家更合适？" : value.trim();
+        if (!isBlank(brandName)) {
+            text = text.replace(brandName, "这类品牌");
+        }
+        if (text.length() <= MARKET_NARRATIVE_QUESTION_MAX_LENGTH) {
+            return text;
+        }
+        String suffix = text.endsWith("？") || text.endsWith("?") ? "？" : "";
+        int maxBodyLength = suffix.isEmpty()
+                ? MARKET_NARRATIVE_QUESTION_MAX_LENGTH
+                : MARKET_NARRATIVE_QUESTION_MAX_LENGTH - suffix.length();
+        String body = suffix.isEmpty() ? text : text.substring(0, text.length() - 1);
+        return body.substring(0, Math.min(maxBodyLength, body.length())) + suffix;
+    }
+
     private String coalesce(String value, String defaultValue) {
+        return coalesce(value, defaultValue, false);
+    }
+
+    private String coalesce(String value, String defaultValue, boolean blankAsMissing) {
+        if (blankAsMissing && (value == null || value.isBlank())) {
+            return defaultValue;
+        }
         return value == null ? defaultValue : value;
     }
 

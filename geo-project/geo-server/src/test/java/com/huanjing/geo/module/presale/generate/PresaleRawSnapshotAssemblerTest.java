@@ -55,10 +55,10 @@ class PresaleRawSnapshotAssemblerTest {
         PresaleRawSnapshotAssembler assembler = createAssembler();
         PresaleReport report = report();
         PresaleReportVersion version = version();
-        Set<String> degraded = new LinkedHashSet<>(List.of("bing_copilot"));
+        Set<String> degraded = Set.of();
         List<String> extracted = List.of("Claude");
 
-        mockCommonCounts(2L, 2L, 1L, 10L, 7L);
+        mockCommonCounts(2L, 1L, 10L, 7L);
         mockEnabledPlatforms(
                 platform("bing_copilot", "Bing Copilot"),
                 platform("kimi", "Kimi")
@@ -108,8 +108,6 @@ class PresaleRawSnapshotAssemblerTest {
         assertFalse(raw.getTestSummary().getIsDegraded());
 
         assertEquals(2, raw.getPlatformBreakdown().size());
-        assertTrue(raw.getPlatformBreakdown().stream()
-                .anyMatch(p -> "bing_copilot".equals(p.getPlatformCode()) && Boolean.TRUE.equals(p.getIsDegraded())));
 
         assertEquals(1, raw.getCompetitors().size());
         assertEquals("Claude", raw.getCompetitors().get(0).getName());
@@ -124,7 +122,7 @@ class PresaleRawSnapshotAssemblerTest {
         PresaleReport report = report();
         PresaleReportVersion version = version();
 
-        mockCommonCounts(1L, 2L, 1L, 4L, 3L);
+        mockCommonCounts(2L, 1L, 4L, 3L);
         mockEnabledPlatforms(platform("kimi", "Kimi"));
         when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
         when(aiPromptResultMapper.selectList(any())).thenReturn(
@@ -140,12 +138,12 @@ class PresaleRawSnapshotAssemblerTest {
     }
 
     @Test
-    void singlePlatformDegraded_marksPlatformTrueButSummaryFalse() throws Exception {
+    void singlePlatformDegraded_excludesPlatformAndSummaryStillFalse() throws Exception {
         PresaleRawSnapshotAssembler assembler = createAssembler();
         PresaleReport report = report();
         PresaleReportVersion version = version();
 
-        mockCommonCounts(2L, 2L, 1L, 6L, 6L);
+        mockCommonCounts(2L, 1L, 6L, 6L);
         mockEnabledPlatforms(platform("bing_copilot", "Bing Copilot"), platform("kimi", "Kimi"));
         when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
         when(aiPromptResultMapper.selectList(any())).thenReturn(
@@ -160,8 +158,10 @@ class PresaleRawSnapshotAssemblerTest {
         RawSnapshotDTO raw = new ObjectMapper().readValue(json, RawSnapshotDTO.class);
 
         assertFalse(raw.getTestSummary().getIsDegraded());
-        assertTrue(raw.getPlatformBreakdown().stream()
-                .anyMatch(p -> "bing_copilot".equals(p.getPlatformCode()) && Boolean.TRUE.equals(p.getIsDegraded())));
+        assertEquals(1, raw.getTestSummary().getTotalPlatforms());
+        assertEquals(1, raw.getPlatformBreakdown().size());
+        assertFalse(raw.getPlatformBreakdown().stream()
+                .anyMatch(p -> "bing_copilot".equals(p.getPlatformCode())));
     }
 
     @Test
@@ -170,7 +170,7 @@ class PresaleRawSnapshotAssemblerTest {
         PresaleReport report = report();
         PresaleReportVersion version = version();
 
-        mockCommonCounts(4L, 1L, 1L, 8L, 8L);
+        mockCommonCounts(1L, 1L, 8L, 8L);
         mockEnabledPlatforms(
                 platform("p1", "P1"),
                 platform("p2", "P2"),
@@ -200,7 +200,7 @@ class PresaleRawSnapshotAssemblerTest {
         PresaleReport report = report();
         PresaleReportVersion version = version();
 
-        mockCommonCounts(1L, 1L, 0L, 2L, 2L);
+        mockCommonCounts(1L, 0L, 2L, 2L);
         mockEnabledPlatforms(platform("kimi", "Kimi"));
         when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(promptResult(1L, 1, 1, "POSITIVE", null, null)),
@@ -219,7 +219,7 @@ class PresaleRawSnapshotAssemblerTest {
         PresaleReport report = report();
         PresaleReportVersion version = version();
 
-        mockCommonCounts(1L, 1L, 0L, 4L, 4L);
+        mockCommonCounts(1L, 0L, 4L, 4L);
         mockEnabledPlatforms(platform("kimi", "Kimi"));
         when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
 
@@ -275,7 +275,7 @@ class PresaleRawSnapshotAssemblerTest {
         PresaleReport report = report();
         PresaleReportVersion version = version();
 
-        mockCommonCounts(1L, 1L, 0L, 2L, 2L);
+        mockCommonCounts(1L, 0L, 2L, 2L);
         mockEnabledPlatforms(platform("kimi", "Kimi"));
         when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
 
@@ -307,12 +307,10 @@ class PresaleRawSnapshotAssemblerTest {
         );
     }
 
-    private void mockCommonCounts(Long platformCount,
-                                  Long batch1TemplateCount,
+    private void mockCommonCounts(Long batch1TemplateCount,
                                   Long batch2TemplateCount,
                                   Long totalCalls,
                                   Long successfulCalls) {
-        when(aiPlatformConfigMapper.selectCount(any())).thenReturn(platformCount);
         when(versionPromptTemplateMapper.selectCount(any())).thenReturn(batch1TemplateCount, batch2TemplateCount);
         when(aiCallMapper.selectCount(any())).thenReturn(totalCalls, successfulCalls);
     }

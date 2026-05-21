@@ -22,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.InputStream;
 import java.time.LocalDate;
 import java.util.*;
 
@@ -76,6 +77,26 @@ public class BrandProfileService {
             throw new BizException(400, "Material object key is empty");
         }
         return minioStorageService.getObjectBytes(material.getObjectKey());
+    }
+
+    public InputStream openMaterialStream(Long brandId, Long materialId) {
+        BrandMaterial material = materialDetail(brandId, materialId);
+        return openVerifiedMaterialStream(material);
+    }
+
+    public InputStream openVerifiedMaterialStream(BrandMaterial material) {
+        if (!StringUtils.hasText(material.getObjectKey())) {
+            throw new BizException(400, "Material object key is empty");
+        }
+        return minioStorageService.openObjectStream(material.getObjectKey());
+    }
+
+    public String buildMaterialPreviewUrl(Long brandId, Long materialId) {
+        BrandMaterial material = materialDetail(brandId, materialId);
+        if (!StringUtils.hasText(material.getObjectKey())) {
+            throw new BizException(400, "Material object key is empty");
+        }
+        return minioStorageService.buildPresignedDownloadUrl(material.getObjectKey(), 600);
     }
 
     @Transactional
@@ -290,8 +311,11 @@ public class BrandProfileService {
         snapshot.put("id", brand.getId());
         snapshot.put("companyId", brand.getCompanyId());
         snapshot.put("brandName", brand.getBrandName());
+        snapshot.put("brandShortName", brand.getBrandShortName());
         snapshot.put("brandSlug", brand.getBrandSlug());
         snapshot.put("mainBusiness", brand.getMainBusiness());
+        snapshot.put("coreProducts", brand.getCoreProducts());
+        snapshot.put("brandPositioning", brand.getBrandPositioning());
         snapshot.put("serviceArea", brand.getServiceArea());
         snapshot.put("provinceCode", brand.getProvinceCode());
         snapshot.put("provinceName", brand.getProvinceName());
@@ -309,8 +333,8 @@ public class BrandProfileService {
         snapshot.put("wechat", brand.getWechat());
         snapshot.put("description", brand.getDescription());
         snapshot.put("businessIntro", brand.getBusinessIntro());
-        snapshot.put("standardBrandStatement", brand.getStandardBrandStatement());
-        snapshot.put("businessStandardStatement", brand.getBusinessStandardStatement());
+        snapshot.put("brandQualificationDescription", brand.getBrandQualificationDescription());
+        snapshot.put("brandCaseDescription", brand.getBrandCaseDescription());
         snapshot.put("forbiddenPhrases", brand.getForbiddenPhrases());
         snapshot.put("status", brand.getStatus());
         return snapshot;

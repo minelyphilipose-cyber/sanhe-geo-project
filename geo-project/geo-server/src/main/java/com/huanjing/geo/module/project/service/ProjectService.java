@@ -3,6 +3,7 @@ package com.huanjing.geo.module.project.service;
 import cn.hutool.core.util.RandomUtil;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.entity.ArticleBatch;
@@ -52,14 +53,13 @@ import com.huanjing.geo.module.project.dto.ProjectStatusUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectUpdateRequest;
 import com.huanjing.geo.module.project.dto.KeywordGroupListItemVO;
 import com.huanjing.geo.module.project.entity.KeywordGroup;
-import com.huanjing.geo.module.project.entity.ProjectPlatformBinding;
+import com.huanjing.geo.module.project.entity.ProjectCustomerRequirement;
 import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
+import com.huanjing.geo.module.project.mapper.ProjectCustomerRequirementMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
-import com.huanjing.geo.module.project.mapper.ProjectPlatformBindingMapper;
-import com.huanjing.geo.module.dispatch.service.BrandStatementDispatchService;
 import com.huanjing.geo.module.report.entity.PostsaleReportSnapshot;
 import com.huanjing.geo.module.report.entity.Report;
 import com.huanjing.geo.module.report.entity.ReportAccessLog;
@@ -67,8 +67,6 @@ import com.huanjing.geo.module.report.mapper.PostsaleReportSnapshotMapper;
 import com.huanjing.geo.module.report.mapper.ReportAccessLogMapper;
 import com.huanjing.geo.module.report.mapper.ReportMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
-import com.huanjing.geo.module.system.entity.AiPlatformConfig;
-import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
@@ -82,7 +80,6 @@ import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
@@ -97,6 +94,9 @@ import java.util.stream.Collectors;
 public class ProjectService {
 
     private static final Set<String> OWNER_TYPES = Set.of("direct", "partner", "joint");
+    private static final int CUSTOMER_REQUIREMENT_MAX_COUNT = 20;
+    private static final int CUSTOMER_REQUIREMENT_MIN_LENGTH = 10;
+    private static final int CUSTOMER_REQUIREMENT_MAX_LENGTH = 100;
 
     private final ProjectMapper projectMapper;
     private final BrandMapper brandMapper;
@@ -120,21 +120,20 @@ public class ProjectService {
     private final PollResultMapper pollResultMapper;
     private final ProjectPollRotationMapper projectPollRotationMapper;
     private final KeywordGroupMapper keywordGroupMapper;
-    private final ProjectPlatformBindingMapper projectPlatformBindingMapper;
+    private final ProjectCustomerRequirementMapper projectCustomerRequirementMapper;
     private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
     private final PostsaleReportSnapshotMapper postsaleReportSnapshotMapper;
     private final ReportAccessLogMapper reportAccessLogMapper;
     private final ReportMapper reportMapper;
-    private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final CurrentUserService currentUserService;
     private final ProjectStateGuard projectStateGuard;
     private final ActivityLogService activityLogService;
-    private final BrandStatementDispatchService brandStatementDispatchService;
     private final ProjectDistributionChannelAllocationService channelAllocationService;
 
     public Page<Project> page(long current, long size, String keyword, String status, String stage, Long partnerId, Long brandId) {
         SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
+        expireOverdueProjects();
         LambdaQueryWrapper<Project> wrapper = new LambdaQueryWrapper<Project>()
                 .isNull(Project::getDeletedAt)
                 .orderByDesc(Project::getCreatedAt);
@@ -175,7 +174,9 @@ public class ProjectService {
         }
 
         Page<Project> page = projectMapper.selectPage(new Page<>(current, size), wrapper);
+        page.getRecords().forEach(this::refreshProjectExpiration);
         attachPlatformSelections(page.getRecords());
+        attachCustomerRequirements(page.getRecords());
         attachKeywordGroupSelections(page.getRecords());
         channelAllocationService.attachAllocations(page.getRecords());
         return page;
@@ -188,6 +189,7 @@ public class ProjectService {
         currentUserService.ensurePartnerResourceAccess(user, project.getPartnerId(), "project");
         ensureSalesProjectAccess(user, project);
         attachPlatformSelections(Collections.singletonList(project));
+        attachCustomerRequirements(Collections.singletonList(project));
         attachKeywordGroupSelections(Collections.singletonList(project));
         channelAllocationService.attachAllocations(Collections.singletonList(project));
         return project;
@@ -204,6 +206,9 @@ public class ProjectService {
         companyPackageBindingService.requireActiveBinding(company.getId());
         validateProjectCompanyPartnerConsistency(ownerType, partnerId, company.getPartnerId());
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "project");
+        if (req.getKeywordGroupIds() != null && !req.getKeywordGroupIds().isEmpty()) {
+            throw new BizException(400, "项目新建时不允许绑定拓词组，请先创建项目后再创建或导入拓词组");
+        }
 
         Project project = new Project();
         project.setCompanyId(req.getCompanyId());
@@ -213,7 +218,7 @@ public class ProjectService {
         project.setBrandName(resolveBrandName(req.getBrandId()));
         project.setProjectName(req.getProjectName());
         project.setProjectAliases(normalizeAliases(req.getProjectAliases()));
-        project.setStatus("paused");
+        project.setStatus("pending_start");
         project.setStage("pending_start");
         project.setOwnerType(ownerType);
         project.setSourceType(resolveProjectSourceType(operator));
@@ -222,7 +227,7 @@ public class ProjectService {
         project.setDiscountRateSnapshot(null);
         project.setDeductionAmount(BigDecimal.ZERO);
         project.setDeductionTxnNo(null);
-        project.setDeliveryMode(StringUtils.hasText(req.getDeliveryMode()) ? req.getDeliveryMode() : "managed");
+        project.setDeliveryMode("managed");
         project.setSignedAt(req.getSignedAt() != null ? req.getSignedAt() : LocalDateTime.now());
         project.setStartDate(req.getStartDate());
         project.setEndDate(req.getEndDate());
@@ -242,10 +247,11 @@ public class ProjectService {
         applyKeywordGroupAllocation(project, resolveKeywordGroupAllocation(company.getId(), null,
                 req.getKeywordGroupLimitA(), req.getKeywordGroupLimitB(), req.getKeywordGroupLimitC()));
         projectMapper.insert(project);
-        replaceKeywordGroupSelections(project.getId(), project.getCompanyId(), req.getKeywordGroupIds());
+        replaceCustomerRequirements(project.getId(), req.getCustomerRequirements());
         channelAllocationService.replaceAllocations(project, req.getChannelAllocations(), req.getAllocationVersion(),
                 operator.getId(), "project.create");
         attachPlatformSelections(Collections.singletonList(project));
+        attachCustomerRequirements(Collections.singletonList(project));
         attachKeywordGroupSelections(Collections.singletonList(project));
         channelAllocationService.attachAllocations(Collections.singletonList(project));
 
@@ -272,6 +278,7 @@ public class ProjectService {
         Long partnerId = resolvePartnerIdByCompany(company);
         validateOwnerBinding(ownerType, partnerId);
         currentUserService.ensurePartnerResourceAccess(operator, partnerId, "project");
+        attachCustomerRequirements(Collections.singletonList(project));
         Map<String, Object> before = snapshotProject(project);
         validateProjectCompanyPartnerConsistency(ownerType, partnerId, company.getPartnerId());
         companyPackageBindingService.requireActiveBinding(company.getId());
@@ -285,7 +292,6 @@ public class ProjectService {
         project.setOwnerType(ownerType);
         project.setPartnerId(partnerId);
         applyRegionFields(project, req.getProvinceCode(), req.getProvinceName(), req.getCityCode(), req.getCityName(), req.getDistrictCode(), req.getDistrictName());
-        project.setDeliveryMode(StringUtils.hasText(req.getDeliveryMode()) ? req.getDeliveryMode() : project.getDeliveryMode());
         project.setSignedAt(req.getSignedAt());
         project.setStartDate(req.getStartDate());
         project.setEndDate(req.getEndDate());
@@ -304,6 +310,9 @@ public class ProjectService {
         applyKeywordGroupAllocation(project, resolveKeywordGroupAllocation(company.getId(), project.getId(),
                 req.getKeywordGroupLimitA(), req.getKeywordGroupLimitB(), req.getKeywordGroupLimitC()));
         projectMapper.updateById(project);
+        if (req.getCustomerRequirements() != null) {
+            replaceCustomerRequirements(project.getId(), req.getCustomerRequirements());
+        }
         replaceKeywordGroupSelections(project.getId(), project.getCompanyId(), req.getKeywordGroupIds());
         channelAllocationService.replaceAllocations(project, req.getChannelAllocations(), req.getAllocationVersion(),
                 operator.getId(), "project.update");
@@ -312,6 +321,7 @@ public class ProjectService {
             channelAllocationService.validateActivation(project);
         }
         attachPlatformSelections(Collections.singletonList(project));
+        attachCustomerRequirements(Collections.singletonList(project));
         attachKeywordGroupSelections(Collections.singletonList(project));
         channelAllocationService.attachAllocations(Collections.singletonList(project));
         activityLogService.logAction(
@@ -365,22 +375,13 @@ public class ProjectService {
             validateKeywordGroupQuota(project);
             channelAllocationService.validateActivation(project);
             channelAllocationService.auditCurrentAllocations(project, operator.getId(), "project.activate", false);
-            markActivatedIfNeeded(project);
+            markActivatedAndApplyPackageValidity(project);
         } else if (isReleasingActiveAllocation(fromStatus, req.getStatus())) {
             channelAllocationService.lockCompany(project.getCompanyId());
             channelAllocationService.auditCurrentAllocations(project, operator.getId(), "project.pause", true);
         }
         project.setStatus(req.getStatus());
         projectMapper.updateById(project);
-        if (isActivating(fromStatus, req.getStatus())) {
-            try {
-                brandStatementDispatchService.maybeEnqueueOnProjectActivated(project);
-            } catch (Exception ex) {
-                // Brand statement dispatch is best-effort; project activation should not fail because Redis is unavailable.
-                log.warn("Brand statement enqueue skipped after activation, projectId={}, brandId={}, reason={}",
-                        project.getId(), project.getBrandId(), ex.getMessage());
-            }
-        }
         activityLogService.logAction(
                 operator.getId(),
                 "project.status.update",
@@ -418,7 +419,7 @@ public class ProjectService {
             validateKeywordGroupQuota(project);
             channelAllocationService.validateActivation(project);
             channelAllocationService.auditCurrentAllocations(project, operator.getId(), "project.activate", false);
-            markActivatedIfNeeded(project);
+            markActivatedAndApplyPackageValidity(project);
         } else if (isReleasingActiveAllocation(project.getStatus(), req.getStatus())) {
             channelAllocationService.lockCompany(project.getCompanyId());
             channelAllocationService.auditCurrentAllocations(project, operator.getId(), "project.pause", true);
@@ -426,15 +427,6 @@ public class ProjectService {
         project.setStatus(req.getStatus());
         project.setStage(req.getStage());
         projectMapper.updateById(project);
-        if (isActivating(String.valueOf(before.get("status")), req.getStatus())) {
-            try {
-                brandStatementDispatchService.maybeEnqueueOnProjectActivated(project);
-            } catch (Exception ex) {
-                // Brand statement dispatch is best-effort; project activation should not fail because Redis is unavailable.
-                log.warn("Brand statement enqueue skipped after flow activation, projectId={}, brandId={}, reason={}",
-                        project.getId(), project.getBrandId(), ex.getMessage());
-            }
-        }
         activityLogService.logAction(
                 operator.getId(),
                 "project.flow.update",
@@ -509,9 +501,9 @@ public class ProjectService {
                 .eq(ProjectDashboardShare::getProjectId, projectId));
         projectKeywordGroupRelMapper.delete(new LambdaQueryWrapper<ProjectKeywordGroupRel>()
                 .eq(ProjectKeywordGroupRel::getProjectId, projectId));
+        projectCustomerRequirementMapper.delete(new LambdaQueryWrapper<ProjectCustomerRequirement>()
+                .eq(ProjectCustomerRequirement::getProjectId, projectId));
         channelAllocationService.deleteProjectAllocations(projectId);
-        projectPlatformBindingMapper.delete(new LambdaQueryWrapper<ProjectPlatformBinding>()
-                .eq(ProjectPlatformBinding::getProjectId, projectId));
         projectPollRotationMapper.delete(new LambdaQueryWrapper<ProjectPollRotation>()
                 .eq(ProjectPollRotation::getProjectId, projectId));
 
@@ -553,7 +545,40 @@ public class ProjectService {
         if (project == null || project.getDeletedAt() != null) {
             throw new BizException(404, "Project not found");
         }
+        refreshProjectExpiration(project);
         return project;
+    }
+
+    private void refreshProjectExpiration(Project project) {
+        if (project.getExpiredAt() == null || "expired".equals(project.getStatus())) {
+            return;
+        }
+        if (!"active".equals(project.getStatus()) && !"paused".equals(project.getStatus())) {
+            return;
+        }
+        if (project.getExpiredAt().isAfter(LocalDateTime.now())) {
+            return;
+        }
+        String fromStatus = project.getStatus();
+        project.setStatus("expired");
+        projectMapper.update(
+                null,
+                new LambdaUpdateWrapper<Project>()
+                        .eq(Project::getId, project.getId())
+                        .eq(Project::getStatus, fromStatus)
+                        .set(Project::getStatus, "expired")
+        );
+    }
+
+    private void expireOverdueProjects() {
+        projectMapper.update(
+                null,
+                new LambdaUpdateWrapper<Project>()
+                        .in(Project::getStatus, List.of("active", "paused"))
+                        .isNotNull(Project::getExpiredAt)
+                        .le(Project::getExpiredAt, LocalDateTime.now())
+                        .set(Project::getStatus, "expired")
+        );
     }
 
     private Company validateCompany(Long companyId) {
@@ -665,6 +690,11 @@ public class ProjectService {
         }
         if ("paused".equals(targetStatus)) {
             projectStateGuard.ensureCanPause(project, operator);
+            return;
+        }
+        if ("expired".equals(targetStatus)) {
+            currentUserService.ensurePermission("project.update");
+            currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         }
     }
 
@@ -749,7 +779,21 @@ public class ProjectService {
         return vo;
     }
 
-    private void markActivatedIfNeeded(Project project) {
+    private void markActivatedAndApplyPackageValidity(Project project) {
+        CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(project.getCompanyId());
+        LocalDateTime validFrom = binding.getBoundAt() != null ? binding.getBoundAt() : LocalDateTime.now();
+        project.setStartDate(validFrom.toLocalDate());
+        if (binding.getServiceMonths() != null && binding.getServiceMonths() > 0) {
+            LocalDateTime validUntil = validFrom.plusMonths(binding.getServiceMonths());
+            if (!validUntil.isAfter(LocalDateTime.now())) {
+                throw new BizException(400, "Customer package validity has expired, cannot start project");
+            }
+            project.setEndDate(validUntil.toLocalDate());
+            project.setExpiredAt(validUntil);
+        } else {
+            project.setEndDate(null);
+            project.setExpiredAt(null);
+        }
         if (project.getActivatedAt() == null) {
             project.setActivatedAt(LocalDateTime.now());
         }
@@ -878,102 +922,10 @@ public class ProjectService {
         if (projects == null || projects.isEmpty()) {
             return;
         }
-        List<Long> projectIds = projects.stream().map(Project::getId).collect(Collectors.toList());
-        List<ProjectPlatformBinding> bindings = projectPlatformBindingMapper.selectList(
-                new LambdaQueryWrapper<ProjectPlatformBinding>()
-                        .in(ProjectPlatformBinding::getProjectId, projectIds)
-                        .orderByAsc(ProjectPlatformBinding::getPriorityLevel, ProjectPlatformBinding::getId)
-        );
-        Map<Long, List<String>> p0 = new LinkedHashMap<>();
-        Map<Long, List<String>> p1 = new LinkedHashMap<>();
-        Map<Long, List<String>> p2 = new LinkedHashMap<>();
-        for (ProjectPlatformBinding binding : bindings) {
-            Map<Long, List<String>> bucket;
-            if ("P0".equals(binding.getPriorityLevel())) {
-                bucket = p0;
-            } else if ("P1".equals(binding.getPriorityLevel())) {
-                bucket = p1;
-            } else {
-                bucket = p2;
-            }
-            bucket.computeIfAbsent(binding.getProjectId(), k -> new ArrayList<>()).add(binding.getPlatformCode());
-        }
         for (Project project : projects) {
-            project.setSelectedPlatformCodesP0(p0.getOrDefault(project.getId(), List.of()));
-            project.setSelectedPlatformCodesP1(p1.getOrDefault(project.getId(), List.of()));
-            project.setSelectedPlatformCodesP2(p2.getOrDefault(project.getId(), List.of()));
-        }
-    }
-
-    private void replacePlatformSelections(Long projectId,
-                                           Integer requiredP0,
-                                           Integer requiredP1,
-                                           Integer requiredP2,
-                                           List<String> selectedP0,
-                                           List<String> selectedP1,
-                                           List<String> selectedP2) {
-        List<String> normalizedP0 = normalizePlatformCodes(selectedP0);
-        List<String> normalizedP1 = normalizePlatformCodes(selectedP1);
-        List<String> normalizedP2 = normalizePlatformCodes(selectedP2);
-
-        int expectP0 = requiredP0 == null ? 0 : requiredP0;
-        int expectP1 = requiredP1 == null ? 0 : requiredP1;
-        int expectP2 = requiredP2 == null ? 0 : requiredP2;
-
-        if (normalizedP0.size() != expectP0) {
-            throw new BizException(400, "P0 platform count must be exactly " + expectP0);
-        }
-        if (normalizedP1.size() != expectP1) {
-            throw new BizException(400, "P1 platform count must be exactly " + expectP1);
-        }
-        if (normalizedP2.size() != expectP2) {
-            throw new BizException(400, "P2 platform count must be exactly " + expectP2);
-        }
-
-        Set<String> allCodes = new HashSet<>();
-        allCodes.addAll(normalizedP0);
-        allCodes.addAll(normalizedP1);
-        allCodes.addAll(normalizedP2);
-        int totalSelected = normalizedP0.size() + normalizedP1.size() + normalizedP2.size();
-        if (allCodes.size() != totalSelected) {
-            throw new BizException(400, "Selected platforms cannot duplicate across P0/P1/P2");
-        }
-
-        List<AiPlatformConfig> configs = allCodes.isEmpty() ? List.of() : aiPlatformConfigMapper.selectList(
-                new LambdaQueryWrapper<AiPlatformConfig>()
-                        .in(AiPlatformConfig::getPlatformCode, allCodes)
-                        .eq(AiPlatformConfig::getEnabled, true)
-        );
-        Map<String, AiPlatformConfig> configMap = configs.stream().collect(
-                Collectors.toMap(AiPlatformConfig::getPlatformCode, c -> c, (a, b) -> a, LinkedHashMap::new)
-        );
-        for (String code : normalizedP0) {
-            validatePlatformPriority(configMap.get(code), "P0");
-        }
-        for (String code : normalizedP1) {
-            validatePlatformPriority(configMap.get(code), "P1");
-        }
-        for (String code : normalizedP2) {
-            validatePlatformPriority(configMap.get(code), "P2");
-        }
-
-        projectPlatformBindingMapper.delete(
-                new LambdaQueryWrapper<ProjectPlatformBinding>().eq(ProjectPlatformBinding::getProjectId, projectId)
-        );
-        savePlatformBindings(projectId, normalizedP0, "P0", configMap);
-        savePlatformBindings(projectId, normalizedP1, "P1", configMap);
-        savePlatformBindings(projectId, normalizedP2, "P2", configMap);
-    }
-
-    private void savePlatformBindings(Long projectId, List<String> codes, String priorityLevel, Map<String, AiPlatformConfig> configMap) {
-        for (String code : codes) {
-            AiPlatformConfig cfg = configMap.get(code);
-            ProjectPlatformBinding binding = new ProjectPlatformBinding();
-            binding.setProjectId(projectId);
-            binding.setPlatformCode(code);
-            binding.setPlatformName(cfg.getPlatformName());
-            binding.setPriorityLevel(priorityLevel);
-            projectPlatformBindingMapper.insert(binding);
+            project.setSelectedPlatformCodesP0(List.of());
+            project.setSelectedPlatformCodesP1(List.of());
+            project.setSelectedPlatformCodesP2(List.of());
         }
     }
 
@@ -1008,26 +960,6 @@ public class ProjectService {
         }
     }
 
-    private void validatePlatformPriority(AiPlatformConfig cfg, String priorityLevel) {
-        if (cfg == null) {
-            throw new BizException(400, "Selected platform is invalid or disabled");
-        }
-        if (!priorityLevel.equals(cfg.getPriorityLevel())) {
-            throw new BizException(400, "Platform " + cfg.getPlatformCode() + " does not belong to " + priorityLevel);
-        }
-    }
-
-    private List<String> normalizePlatformCodes(List<String> selectedCodes) {
-        if (selectedCodes == null) {
-            return List.of();
-        }
-        return selectedCodes.stream()
-                .filter(StringUtils::hasText)
-                .map(String::trim)
-                .distinct()
-                .collect(Collectors.toList());
-    }
-
     private List<Long> normalizeKeywordGroupIds(List<Long> selectedIds) {
         if (selectedIds == null) {
             return List.of();
@@ -1036,6 +968,68 @@ public class ProjectService {
                 .filter(id -> id != null && id > 0)
                 .distinct()
                 .collect(Collectors.toCollection(LinkedList::new));
+    }
+
+    private void attachCustomerRequirements(List<Project> projects) {
+        if (projects == null || projects.isEmpty()) {
+            return;
+        }
+        List<Long> projectIds = projects.stream().map(Project::getId).collect(Collectors.toList());
+        List<ProjectCustomerRequirement> requirements = projectCustomerRequirementMapper.selectList(
+                new LambdaQueryWrapper<ProjectCustomerRequirement>()
+                        .in(ProjectCustomerRequirement::getProjectId, projectIds)
+                        .orderByDesc(ProjectCustomerRequirement::getCreatedAt)
+                        .orderByDesc(ProjectCustomerRequirement::getId)
+        );
+        Map<Long, List<String>> requirementMap = new LinkedHashMap<>();
+        for (ProjectCustomerRequirement requirement : requirements) {
+            requirementMap
+                    .computeIfAbsent(requirement.getProjectId(), k -> new ArrayList<>())
+                    .add(requirement.getRequirementText());
+        }
+        for (Project project : projects) {
+            project.setCustomerRequirements(requirementMap.getOrDefault(project.getId(), List.of()));
+        }
+    }
+
+    private void replaceCustomerRequirements(Long projectId, List<String> rawRequirements) {
+        List<String> requirements = normalizeCustomerRequirements(rawRequirements);
+        projectCustomerRequirementMapper.delete(new LambdaQueryWrapper<ProjectCustomerRequirement>()
+                .eq(ProjectCustomerRequirement::getProjectId, projectId));
+        if (requirements.isEmpty()) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        for (String text : requirements) {
+            ProjectCustomerRequirement requirement = new ProjectCustomerRequirement();
+            requirement.setProjectId(projectId);
+            requirement.setRequirementText(text);
+            requirement.setCreatedAt(now);
+            requirement.setUpdatedAt(now);
+            projectCustomerRequirementMapper.insert(requirement);
+        }
+    }
+
+    private List<String> normalizeCustomerRequirements(List<String> rawRequirements) {
+        if (rawRequirements == null || rawRequirements.isEmpty()) {
+            return List.of();
+        }
+        if (rawRequirements.size() > CUSTOMER_REQUIREMENT_MAX_COUNT) {
+            throw new BizException(400, "客户需求最多录入 " + CUSTOMER_REQUIREMENT_MAX_COUNT + " 条");
+        }
+        List<String> requirements = new ArrayList<>();
+        for (String raw : rawRequirements) {
+            if (!StringUtils.hasText(raw)) {
+                throw new BizException(400, "客户需求不能为空");
+            }
+            String text = raw.trim();
+            int length = text.codePointCount(0, text.length());
+            if (length < CUSTOMER_REQUIREMENT_MIN_LENGTH || length > CUSTOMER_REQUIREMENT_MAX_LENGTH) {
+                throw new BizException(400, "每条客户需求字数需在 10-100 之间");
+            }
+            requirements.add(text);
+        }
+        return requirements;
     }
 
     private void attachKeywordGroupSelections(List<Project> projects) {
@@ -1054,13 +1048,18 @@ public class ProjectService {
             projectGroupIdMap.computeIfAbsent(rel.getProjectId(), k -> new ArrayList<>()).add(rel.getKeywordGroupId());
             allGroupIds.add(rel.getKeywordGroupId());
         }
-        Map<Long, Long> savedCountMap = keywordGroupService.calcSavedCountsByGroupIds(new ArrayList<>(allGroupIds));
-        Map<Long, KeywordGroupService.KeywordTierCounts> tierCountMap = keywordGroupService.calcSavedTierCountsByGroupIds(new ArrayList<>(allGroupIds));
         Map<Long, KeywordGroup> groupMap = allGroupIds.isEmpty() ? Map.of() : keywordGroupMapper.selectList(
-                new LambdaQueryWrapper<KeywordGroup>().in(KeywordGroup::getId, allGroupIds)
+                new LambdaQueryWrapper<KeywordGroup>()
+                        .in(KeywordGroup::getId, allGroupIds)
+                        .eq(KeywordGroup::getDeleted, false)
         ).stream().collect(Collectors.toMap(KeywordGroup::getId, g -> g, (a, b) -> a, LinkedHashMap::new));
+        List<Long> activeGroupIds = new ArrayList<>(groupMap.keySet());
+        Map<Long, Long> savedCountMap = keywordGroupService.calcSavedCountsByGroupIds(activeGroupIds);
+        Map<Long, KeywordGroupService.KeywordTierCounts> tierCountMap = keywordGroupService.calcSavedTierCountsByGroupIds(activeGroupIds);
         for (Project project : projects) {
-            List<Long> groupIds = projectGroupIdMap.getOrDefault(project.getId(), List.of());
+            List<Long> groupIds = projectGroupIdMap.getOrDefault(project.getId(), List.of()).stream()
+                    .filter(groupMap::containsKey)
+                    .toList();
             long totalSaved = 0L;
             long totalA = 0L;
             long totalB = 0L;
@@ -1125,6 +1124,7 @@ public class ProjectService {
         snapshot.put("preferredAngles", project.getPreferredAngles());
         snapshot.put("extraForbiddenPhrases", project.getExtraForbiddenPhrases());
         snapshot.put("contentNote", project.getContentNote());
+        snapshot.put("customerRequirements", project.getCustomerRequirements());
         snapshot.put("status", project.getStatus());
         snapshot.put("stage", project.getStage());
         snapshot.put("activatedAt", project.getActivatedAt());

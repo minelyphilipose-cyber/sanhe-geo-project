@@ -8,7 +8,7 @@ public final class ProjectFlowPolicy {
     private ProjectFlowPolicy() {
     }
 
-    public static final Set<String> STATUS_SET = Set.of("active", "paused");
+    public static final Set<String> STATUS_SET = Set.of("pending_start", "active", "paused", "expired");
     public static final Set<String> STAGE_SET = Set.of(
             "pending_start",
             "collecting_materials",
@@ -20,7 +20,9 @@ public final class ProjectFlowPolicy {
             "completed"
     );
     public static final Map<String, Set<String>> STATUS_TRANSITION = Map.of(
-            "active", Set.of("paused"),
-            "paused", Set.of("active")
+            "pending_start", Set.of("active"),
+            "active", Set.of("paused", "expired"),
+            "paused", Set.of("active", "expired"),
+            "expired", Set.<String>of()
     );
 }

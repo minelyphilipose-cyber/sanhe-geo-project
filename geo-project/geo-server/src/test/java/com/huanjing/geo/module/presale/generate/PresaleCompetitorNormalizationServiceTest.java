@@ -5,9 +5,8 @@ import com.huanjing.geo.module.presale.generate.PresaleCompetitorAggregator.Extr
 import com.huanjing.geo.module.presale.generate.PresaleCompetitorAggregator.RawCompetitorMention;
 import com.huanjing.geo.module.presale.generate.llm.CallStatus;
 import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
+import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
-import com.huanjing.geo.module.system.entity.AiPlatformConfig;
-import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -28,12 +27,12 @@ class PresaleCompetitorNormalizationServiceTest {
     @Mock
     private PresaleLlmInvoker llmInvoker;
     @Mock
-    private AiPlatformConfigMapper aiPlatformConfigMapper;
+    private PresaleEvaluationModelRouter evaluationModelRouter;
 
     @Test
     void normalize_mergesAliasesAndRecomputesTop3Counts() throws Exception {
         PresaleCompetitorNormalizationService service = createService();
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("deepseek")));
+        mockEvaluationPlatform();
         when(llmInvoker.normalizeCompetitors(any(), anyString())).thenReturn(new LlmCallResult(
                 """
                         {
@@ -72,7 +71,7 @@ class PresaleCompetitorNormalizationServiceTest {
     @Test
     void normalize_rejectsInventedAliasesAndKeepsMissingNamesAsSingletons() throws Exception {
         PresaleCompetitorNormalizationService service = createService();
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(platform("deepseek")));
+        mockEvaluationPlatform();
         when(llmInvoker.normalizeCompetitors(any(), anyString())).thenReturn(new LlmCallResult(
                 """
                         {
@@ -105,7 +104,7 @@ class PresaleCompetitorNormalizationServiceTest {
     @Test
     void normalize_fallbacksToRawTopWhenNoPlatform() {
         PresaleCompetitorNormalizationService service = createService();
-        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of());
+        when(evaluationModelRouter.routeContexts(any())).thenReturn(List.of());
 
         PresaleCompetitorNormalizationService.NormalizationOutcome outcome = service.normalize(
                 214L,
@@ -121,17 +120,16 @@ class PresaleCompetitorNormalizationServiceTest {
     }
 
     private PresaleCompetitorNormalizationService createService() {
-        return new PresaleCompetitorNormalizationService(llmInvoker, aiPlatformConfigMapper, new ObjectMapper());
+        return new PresaleCompetitorNormalizationService(llmInvoker, evaluationModelRouter, new ObjectMapper());
+    }
+
+    private void mockEvaluationPlatform() {
+        when(evaluationModelRouter.routeContexts(any()))
+                .thenReturn(List.of(new PlatformCallContext(214L, 1, "deepseek", null, "", "品牌", 1L, true)));
     }
 
     private RawCompetitorMention raw(String name, int count) {
         return new RawCompetitorMention(name, count, name);
-    }
-
-    private AiPlatformConfig platform(String platformCode) {
-        AiPlatformConfig row = new AiPlatformConfig();
-        row.setPlatformCode(platformCode);
-        return row;
     }
 
     private void assertCompetitor(ExtractedCompetitor actual, String name, int count, List<String> aliases) {

@@ -6,6 +6,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.project.dto.PackageChannelQuotaConfigRequest;
 import com.huanjing.geo.module.project.dto.PackagePlanCreateRequest;
 import com.huanjing.geo.module.project.dto.PackagePlanUpdateRequest;
+import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.project.entity.PackageChannelQuotaConfig;
 import com.huanjing.geo.module.project.entity.PackagePlan;
 import com.huanjing.geo.module.project.mapper.PackageChannelQuotaConfigMapper;
@@ -13,6 +14,7 @@ import com.huanjing.geo.module.project.mapper.PackagePlanMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
@@ -31,17 +33,19 @@ public class PackagePlanService {
 
     private static final Pattern PACKAGE_TYPE_PATTERN = Pattern.compile("^[a-z][a-z0-9_]{2,31}$");
     private static final Set<String> INTENSITY_LEVELS = Set.of("L1", "L2", "L3");
-    private static final Set<String> CHANNEL_CODES = Set.of("official_site", "industry_site", "self_media", "authority_media");
+    private static final Set<String> CHANNEL_CODES = Set.of("official_site", "industry_site", "forum", "self_media", "authority_media");
     private static final Set<String> PERIOD_TYPES = Set.of("day", "week", "month", "total");
     private static final Map<String, String> DEFAULT_PERIOD_BY_CHANNEL = Map.of(
             "official_site", "week",
             "industry_site", "week",
+            "forum", "week",
             "self_media", "week",
             "authority_media", "total"
     );
 
     private final PackagePlanMapper packagePlanMapper;
     private final PackageChannelQuotaConfigMapper packageChannelQuotaConfigMapper;
+    private final CompanyPackageBindingService companyPackageBindingService;
     private final CurrentUserService currentUserService;
 
     public Page<PackagePlan> page(long current, long size, String keyword, Boolean enabled) {
@@ -75,6 +79,7 @@ public class PackagePlanService {
         return plans;
     }
 
+    @Transactional
     public PackagePlan create(PackagePlanCreateRequest req) {
         currentUserService.ensurePermission("user.manage");
         validateType(req.getPackageType());
@@ -127,6 +132,7 @@ public class PackagePlanService {
         return plan;
     }
 
+    @Transactional
     public PackagePlan update(Long id, PackagePlanUpdateRequest req) {
         currentUserService.ensurePermission("user.manage");
         validateBase(req.getStandardPrice(), req.getServiceMonths(), req.getSortOrder());
@@ -166,6 +172,7 @@ public class PackagePlanService {
         plan.setRemark(req.getRemark());
         packagePlanMapper.updateById(plan);
         saveChannelQuotaConfigs(plan.getId(), req.getChannelQuotaConfigs());
+        companyPackageBindingService.syncActiveBindingsForPackagePlan(plan.getId());
         attachChannelQuotaConfigs(List.of(plan));
         return plan;
     }
@@ -196,10 +203,12 @@ public class PackagePlanService {
         return findChannelQuotaConfigs(plan.getId());
     }
 
+    @Transactional
     public List<PackageChannelQuotaConfig> saveChannelQuotaConfigsByPlanId(Long packagePlanId, List<PackageChannelQuotaConfigRequest> configs) {
         currentUserService.ensurePermission("user.manage");
         PackagePlan plan = requireById(packagePlanId);
         saveChannelQuotaConfigs(plan.getId(), configs);
+        companyPackageBindingService.syncActiveBindingsForPackagePlan(plan.getId());
         return findChannelQuotaConfigs(plan.getId());
     }
 

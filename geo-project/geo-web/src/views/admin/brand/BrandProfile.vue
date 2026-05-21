@@ -9,7 +9,7 @@
       </template>
     </el-page-header>
 
-    <el-card v-loading="loading">
+    <el-card v-loading="loading" class="admin-rich-card brand-profile-card">
       <template #header>
         <div class="flex items-center gap-2">
           <span class="text-base font-medium">{{ brand?.brandName || '—' }}</span>
@@ -35,9 +35,11 @@
           <!-- 只读模式 -->
           <el-descriptions v-if="!editingInfo" :column="3" border>
             <el-descriptions-item label="品牌名称">{{ brand?.brandName || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="品牌标识">{{ brand?.brandSlug || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="品牌简称">{{ brand?.brandShortName || '-' }}</el-descriptions-item>
             <el-descriptions-item label="品牌行业">{{ industryLabel(brand?.industry) }}</el-descriptions-item>
             <el-descriptions-item label="主营业务">{{ brand?.mainBusiness || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="核心产品">{{ brand?.coreProducts || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="品牌定位">{{ brand?.brandPositioning || '-' }}</el-descriptions-item>
             <el-descriptions-item label="所在地区">{{ regionText }}</el-descriptions-item>
             <el-descriptions-item label="服务区域">{{ brand?.serviceArea || '-' }}</el-descriptions-item>
             <el-descriptions-item label="官网">
@@ -46,24 +48,25 @@
             </el-descriptions-item>
             <el-descriptions-item label="联系电话">{{ brand?.phone || '-' }}</el-descriptions-item>
             <el-descriptions-item label="微信">{{ brand?.wechat || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="公众号">{{ brand?.officialAccount || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="视频号">{{ brand?.videoAccount || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="抖音号">{{ brand?.douyinAccount || '-' }}</el-descriptions-item>
             <el-descriptions-item label="对外公开电话">{{ brand?.publicPhone || '-' }}</el-descriptions-item>
             <el-descriptions-item label="对外公开地址">{{ brand?.publicAddress || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="品牌简介" :span="3">{{ brand?.description || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="Agent 官网">{{ agentSiteLabel(brand?.geoSiteCode) }}</el-descriptions-item>
+            <el-descriptions-item label="行业资讯站">{{ brand?.industrySiteName || '-' }}</el-descriptions-item>
             <el-descriptions-item label="业务介绍" :span="3">{{ brand?.businessIntro || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="品牌资质描述" :span="3">{{ brand?.brandQualificationDescription || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="品牌案例描述" :span="3">{{ brand?.brandCaseDescription || '-' }}</el-descriptions-item>
             <el-descriptions-item label="禁用词" :span="3">{{ brand?.forbiddenPhrases || '-' }}</el-descriptions-item>
           </el-descriptions>
 
           <!-- 编辑模式 -->
-          <el-form v-if="editingInfo" ref="infoFormRef" :model="infoForm" :rules="infoRules" label-width="120px">
-            <div class="grid grid-cols-2 gap-x-6">
+          <el-form v-if="editingInfo" ref="infoFormRef" class="brand-form" :model="infoForm" :rules="infoRules" label-position="top">
+            <div class="brand-section-bar"><span />基础信息<i /></div>
+            <div class="brand-form-grid">
               <el-form-item label="品牌名称" prop="brandName" required>
                 <el-input v-model="infoForm.brandName" />
               </el-form-item>
-              <el-form-item label="品牌标识" prop="brandSlug" required>
-                <el-input v-model="infoForm.brandSlug" />
+              <el-form-item label="品牌简称">
+                <el-input v-model="infoForm.brandShortName" maxlength="128" show-word-limit />
               </el-form-item>
               <el-form-item label="品牌行业" prop="industry" required>
                 <el-select v-model="infoForm.industry" filterable style="width: 100%">
@@ -78,9 +81,29 @@
               <el-form-item label="主营业务">
                 <el-input v-model="infoForm.mainBusiness" />
               </el-form-item>
+              <el-form-item label="核心产品">
+                <el-input v-model="infoForm.coreProducts" maxlength="500" show-word-limit placeholder="多个产品以逗号隔开" />
+              </el-form-item>
+              <el-form-item label="品牌定位">
+                <el-input v-model="infoForm.brandPositioning" maxlength="255" show-word-limit placeholder="如“某某方案服务商/代理商”“本地某某平台”" />
+              </el-form-item>
               <el-form-item label="地区">
                 <RegionCascader v-model="infoForm.regionCodes" />
               </el-form-item>
+              <el-form-item label="状态" required>
+                <el-select v-model="infoForm.status" style="width: 100%">
+                  <el-option
+                    v-for="item in dictStore.options('brand_status')"
+                    :key="item.dictKey"
+                    :label="item.dictValue"
+                    :value="item.dictKey"
+                  />
+                </el-select>
+              </el-form-item>
+            </div>
+
+            <div class="brand-section-bar"><span />联系方式与阵地<i /></div>
+            <div class="brand-form-grid">
               <el-form-item label="官网">
                 <el-input v-model="infoForm.website" />
               </el-form-item>
@@ -96,35 +119,59 @@
               <el-form-item label="对外公开地址">
                 <el-input v-model="infoForm.publicAddress" />
               </el-form-item>
-              <el-form-item label="公众号">
-                <el-input v-model="infoForm.officialAccount" />
-              </el-form-item>
-              <el-form-item label="视频号">
-                <el-input v-model="infoForm.videoAccount" />
-              </el-form-item>
-              <el-form-item label="抖音号">
-                <el-input v-model="infoForm.douyinAccount" />
-              </el-form-item>
-              <el-form-item label="状态" required>
-                <el-select v-model="infoForm.status" style="width: 100%">
+              <el-form-item label="Agent 官网">
+                <el-select
+                  v-model="infoForm.geoSiteCode"
+                  clearable
+                  filterable
+                  placeholder="选择 Agent 官网，自动带出站点标识"
+                  style="width: 100%"
+                  @change="handleAgentSiteChange"
+                >
                   <el-option
-                    v-for="item in dictStore.options('brand_status')"
-                    :key="item.dictKey"
-                    :label="item.dictValue"
-                    :value="item.dictKey"
+                    v-for="site in agentSiteOptions"
+                    :key="site.siteCode || site.id"
+                    :label="site.siteName"
+                    :value="site.siteCode"
+                  />
+                </el-select>
+              </el-form-item>
+              <el-form-item label="行业资讯站">
+                <el-select
+                  v-model="infoForm.industrySiteCode"
+                  clearable
+                  filterable
+                  placeholder="选择资讯站，自动带出站点标识"
+                  style="width: 100%"
+                  @change="handleIndustrySiteChange"
+                >
+                  <el-option
+                    v-for="site in industrySiteOptions"
+                    :key="site.siteCode || site.id"
+                    :label="site.siteName"
+                    :value="site.siteCode"
                   />
                 </el-select>
               </el-form-item>
             </div>
-            <el-form-item label="品牌简介">
-              <el-input v-model="infoForm.description" type="textarea" :rows="3" />
-            </el-form-item>
-            <el-form-item label="业务介绍">
-              <el-input v-model="infoForm.businessIntro" type="textarea" :rows="3" />
-            </el-form-item>
-            <el-form-item label="禁用词">
-              <el-input v-model="infoForm.forbiddenPhrases" type="textarea" :rows="2" placeholder="多个禁用词用逗号分隔" />
-            </el-form-item>
+
+            <div class="brand-section-bar"><span />业务介绍与内容约束<i /></div>
+            <div class="brand-form-grid">
+              <el-form-item class="is-wide" label="业务介绍">
+                <el-input v-model="infoForm.businessIntro" type="textarea" :rows="3" />
+              </el-form-item>
+              <el-form-item class="is-wide" label="品牌资质描述">
+                <el-input v-model="infoForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="qualificationDescriptionPlaceholder" />
+                <div class="brand-field-help">仅填写可公开引用、可核验的资质与背书信息。</div>
+              </el-form-item>
+              <el-form-item class="is-wide" label="品牌案例描述">
+                <el-input v-model="infoForm.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="caseDescriptionPlaceholder" />
+                <div class="brand-field-help">客户名称不可公开时，可使用行业或区域客户描述。</div>
+              </el-form-item>
+              <el-form-item class="is-wide" label="禁用词">
+                <el-input v-model="infoForm.forbiddenPhrases" type="textarea" :rows="2" placeholder="多个禁用词用逗号分隔" />
+              </el-form-item>
+            </div>
           </el-form>
         </el-tab-pane>
 
@@ -154,8 +201,6 @@
           </el-descriptions>
 
           <el-descriptions class="mt-4" :column="2" border>
-            <el-descriptions-item label="品牌标准表述">{{ brand?.standardBrandStatement || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="业务标准表述">{{ brand?.businessStandardStatement || '-' }}</el-descriptions-item>
             <el-descriptions-item label="生成时间">{{ statement?.statementGeneratedAt || '-' }}</el-descriptions-item>
             <el-descriptions-item label="锁定时间">{{ statement?.statementLockedAt || '-' }}</el-descriptions-item>
           </el-descriptions>
@@ -231,7 +276,8 @@ import {
   getBrandMaterialStream,
   getBrandVersions,
 } from '@/api/customer'
-import type { Brand, BrandStatementView, BrandMaterial, BrandProfileVersion } from '@/types'
+import { getPublishSites } from '@/api/publishSite'
+import type { Brand, BrandStatementView, BrandMaterial, BrandProfileVersion, PublishSite } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
@@ -252,6 +298,8 @@ const activeTab = ref('info')
 const brand = ref<Brand | null>(null)
 const statement = ref<BrandStatementView | null>(null)
 const companyIndustryTags = ref<string[]>([])
+const publishSites = ref<PublishSite[]>([])
+const GEO_SITE_CODE_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/
 
 // ────────── Tab 1: 基础资料 ──────────
 const editingInfo = ref(false)
@@ -259,34 +307,48 @@ const savingInfo = ref(false)
 const infoFormRef = ref<FormInstance>()
 const infoForm = reactive({
   brandName: '',
+  brandShortName: '',
   brandSlug: '',
   industry: '',
   mainBusiness: '',
+  coreProducts: '',
+  brandPositioning: '',
   regionCodes: [] as string[],
   website: '',
   phone: '',
   wechat: '',
   publicPhone: '',
   publicAddress: '',
-  officialAccount: '',
-  videoAccount: '',
-  douyinAccount: '',
+  geoSiteCode: '',
+  geoSiteStatus: '',
+  industrySiteName: '',
+  industrySiteCode: '',
   status: 'active',
-  description: '',
   businessIntro: '',
+  brandQualificationDescription: '',
+  brandCaseDescription: '',
   forbiddenPhrases: '',
 })
 
 const infoRules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
-  brandSlug: [
-    { required: true, message: '请输入品牌标识', trigger: 'blur' },
-    { pattern: /^[a-z0-9][a-z0-9_-]{1,127}$/, message: '标识需小写字母数字开头，可含 _ -', trigger: 'blur' },
-  ],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
 }
 
+const qualificationDescriptionPlaceholder = '请填写品牌可公开引用的资质与背书信息，包括认证资质、检测报告、执行标准、专利/软著、荣誉奖项、协会或平台背书、生产/服务能力证明等。请写清楚名称、编号、发证机构、适用范围、有效期等可核验信息。没有真实依据的内容不要填写。'
+const caseDescriptionPlaceholder = '请填写可公开引用的品牌案例素材，包括客户类型或客户名称、项目背景、服务内容、项目规模、交付周期、合作结果、复购或长期合作情况等。如客户名称不可公开，请使用“某行业客户/某区域客户”表述，不要编造客户名或效果数据。'
+
 const availableIndustries = computed(() => companyIndustryTags.value)
+const agentSiteOptions = computed(() => publishSites.value.filter((site) =>
+  isValidGeoSiteCode(site.siteCode)
+  && (site.integrationMethod === 'brand_geo_site' || site.siteCode === 'agent_official_site'),
+))
+const industrySiteOptions = computed(() => publishSites.value.filter((site) =>
+  site.integrationMethod !== 'brand_geo_site'
+  && site.integrationMethod !== 'forum_playwright'
+  && site.integrationMethod !== 'discuz_http'
+  && site.siteCode !== 'agent_official_site',
+))
 
 const regionText = computed(() => {
   if (!brand.value) return '-'
@@ -302,6 +364,31 @@ function normalizeUrl(url: string) {
   return url.startsWith('http') ? url : `https://${url}`
 }
 
+function agentSiteLabel(code?: string | null) {
+  if (!code) return '-'
+  return agentSiteOptions.value.find((item) => item.siteCode === code)?.siteName || code
+}
+
+function normalizeGeoSiteCode(code?: string | null) {
+  const normalized = code?.trim().toLowerCase() || ''
+  return GEO_SITE_CODE_PATTERN.test(normalized) ? normalized : ''
+}
+
+function isValidGeoSiteCode(code?: string | null) {
+  return !!normalizeGeoSiteCode(code)
+}
+
+function handleAgentSiteChange(value: string) {
+  infoForm.geoSiteCode = normalizeGeoSiteCode(value)
+  const site = agentSiteOptions.value.find((item) => item.siteCode === infoForm.geoSiteCode)
+  infoForm.geoSiteStatus = site ? 'active' : ''
+}
+
+function handleIndustrySiteChange(value: string) {
+  const site = industrySiteOptions.value.find((item) => item.siteCode === value)
+  infoForm.industrySiteName = site?.siteName || ''
+}
+
 function parseIndustryTags(value?: string | string[] | null) {
   if (Array.isArray(value)) return value
   if (!value) return []
@@ -315,21 +402,26 @@ function parseIndustryTags(value?: string | string[] | null) {
 
 function fillInfoForm(data: Brand) {
   infoForm.brandName = data.brandName
+  infoForm.brandShortName = data.brandShortName || ''
   infoForm.brandSlug = data.brandSlug
   infoForm.industry = data.industry || availableIndustries.value[0] || ''
   infoForm.mainBusiness = data.mainBusiness || ''
+  infoForm.coreProducts = data.coreProducts || ''
+  infoForm.brandPositioning = data.brandPositioning || ''
   infoForm.regionCodes = regionCodesFromPayload(data)
   infoForm.website = data.website || ''
   infoForm.phone = data.phone || ''
   infoForm.wechat = data.wechat || ''
   infoForm.publicPhone = data.publicPhone || ''
   infoForm.publicAddress = data.publicAddress || ''
-  infoForm.officialAccount = data.officialAccount || ''
-  infoForm.videoAccount = data.videoAccount || ''
-  infoForm.douyinAccount = data.douyinAccount || ''
+  infoForm.geoSiteCode = data.geoSiteCode || ''
+  infoForm.geoSiteStatus = data.geoSiteStatus || ''
+  infoForm.industrySiteName = data.industrySiteName || ''
+  infoForm.industrySiteCode = data.industrySiteCode || ''
   infoForm.status = data.status || 'active'
-  infoForm.description = data.description || ''
   infoForm.businessIntro = data.businessIntro || ''
+  infoForm.brandQualificationDescription = data.brandQualificationDescription || ''
+  infoForm.brandCaseDescription = data.brandCaseDescription || ''
   infoForm.forbiddenPhrases = Array.isArray(data.forbiddenPhrases)
     ? data.forbiddenPhrases.join('，')
     : (data.forbiddenPhrases || '')
@@ -353,9 +445,12 @@ async function saveInfo() {
     await updateBrand(brandId.value, {
       companyId: brand.value?.companyId,
       brandName: infoForm.brandName,
+      brandShortName: infoForm.brandShortName || undefined,
       brandSlug: infoForm.brandSlug,
       industry: infoForm.industry,
       mainBusiness: infoForm.mainBusiness || undefined,
+      coreProducts: infoForm.coreProducts || undefined,
+      brandPositioning: infoForm.brandPositioning || undefined,
       serviceArea: region.displayName,
       provinceCode: region.provinceCode,
       provinceName: region.provinceName,
@@ -368,12 +463,18 @@ async function saveInfo() {
       wechat: infoForm.wechat || undefined,
       publicPhone: infoForm.publicPhone || undefined,
       publicAddress: infoForm.publicAddress || undefined,
-      officialAccount: infoForm.officialAccount || undefined,
-      videoAccount: infoForm.videoAccount || undefined,
-      douyinAccount: infoForm.douyinAccount || undefined,
+      officialAccount: brand.value?.officialAccount || undefined,
+      videoAccount: brand.value?.videoAccount || undefined,
+      douyinAccount: brand.value?.douyinAccount || undefined,
+      geoSiteCode: normalizeGeoSiteCode(infoForm.geoSiteCode) || undefined,
+      geoSiteStatus: normalizeGeoSiteCode(infoForm.geoSiteCode) ? infoForm.geoSiteStatus || 'active' : undefined,
+      industrySiteName: infoForm.industrySiteName || undefined,
+      industrySiteCode: infoForm.industrySiteCode || undefined,
       status: infoForm.status,
-      description: infoForm.description || undefined,
+      description: infoForm.businessIntro || undefined,
       businessIntro: infoForm.businessIntro || undefined,
+      brandQualificationDescription: infoForm.brandQualificationDescription || undefined,
+      brandCaseDescription: infoForm.brandCaseDescription || undefined,
       forbiddenPhrases: infoForm.forbiddenPhrases || undefined,
     })
     ElMessage.success('品牌信息已更新')
@@ -408,6 +509,15 @@ async function loadStatement() {
     statement.value = data.data
   } catch {
     statement.value = null
+  }
+}
+
+async function loadPublishSiteOptions() {
+  try {
+    const { data } = await getPublishSites({ status: 'active' })
+    publishSites.value = data.data || []
+  } catch {
+    publishSites.value = []
   }
 }
 
@@ -556,6 +666,7 @@ async function loadAll() {
   loading.value = true
   editingInfo.value = false
   await dictStore.ensureLoaded()
+  await loadPublishSiteOptions()
   await loadBrand()
   await Promise.all([loadStatement(), loadMaterials(), loadVersions()])
   loading.value = false
@@ -579,3 +690,90 @@ watch(activeTab, (tab) => {
   }
 })
 </script>
+
+<style scoped>
+.brand-profile-card :deep(.el-card__body) {
+  padding: 18px 20px 22px;
+}
+
+.brand-form {
+  margin-top: 4px;
+}
+
+.brand-section-bar {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 4px 0 16px;
+  color: #1e40af;
+  font-size: 14px;
+  font-weight: 850;
+}
+
+.brand-section-bar:not(:first-child) {
+  margin-top: 28px;
+}
+
+.brand-section-bar span {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #2563eb;
+  box-shadow: 0 0 0 4px #dbeafe;
+}
+
+.brand-section-bar i {
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, #bfdbfe, transparent);
+}
+
+.brand-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 22px;
+  row-gap: 18px;
+}
+
+.brand-form-grid :deep(.el-form-item) {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.brand-form-grid .is-wide {
+  grid-column: 1 / -1;
+}
+
+.brand-form :deep(.el-form-item__label) {
+  color: #334155;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.brand-form :deep(.el-input__wrapper),
+.brand-form :deep(.el-select__wrapper),
+.brand-form :deep(.el-textarea__inner) {
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 0 0 1px #dbe3ee inset;
+}
+
+.brand-form :deep(.el-input__wrapper:hover),
+.brand-form :deep(.el-select__wrapper:hover),
+.brand-form :deep(.el-textarea__inner:hover) {
+  box-shadow: 0 0 0 1px #93c5fd inset;
+}
+
+.brand-field-help {
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+@media (max-width: 900px) {
+  .brand-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

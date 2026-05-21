@@ -20,7 +20,6 @@ import com.huanjing.geo.common.llm.router.LlmPlatformRouter;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
-import com.huanjing.geo.module.project.mapper.ProjectPlatformBindingMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
@@ -29,6 +28,8 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -38,16 +39,14 @@ import static org.mockito.Mockito.when;
 class DispatchExecutionServicePlatformCandidateTest {
 
     @Test
-    void brandStatementFallsBackToGlobalPresalePlatformsWhenProjectHasNoBindings() throws Exception {
-        ProjectPlatformBindingMapper bindingMapper = mock(ProjectPlatformBindingMapper.class);
+    void brandStatementUsesRandomEnabledPlatformCandidates() throws Exception {
         AiPlatformConfigMapper platformMapper = mock(AiPlatformConfigMapper.class);
-        when(bindingMapper.selectList(any())).thenReturn(List.of());
 
         AiPlatformConfig p0 = platform(1L, "p0", "P0");
         AiPlatformConfig p1 = platform(2L, "p1", "P1");
         when(platformMapper.selectList(any())).thenReturn(List.of(p0, p1));
 
-        DispatchExecutionService service = service(bindingMapper, platformMapper);
+        DispatchExecutionService service = service(platformMapper);
 
         List<AiPlatformConfig> candidates = resolvePlatformCandidates(
                 service,
@@ -55,7 +54,25 @@ class DispatchExecutionServicePlatformCandidateTest {
                 DispatchTaskType.BRAND_STATEMENT_GENERATION
         );
 
-        assertEquals(List.of(p1, p0), candidates);
+        assertEquals(Set.of("p0", "p1"), candidates.stream().map(AiPlatformConfig::getPlatformCode).collect(Collectors.toSet()));
+    }
+
+    @Test
+    void biDailyPollUsesQuestionPollPlatformPool() throws Exception {
+        AiPlatformConfigMapper platformMapper = mock(AiPlatformConfigMapper.class);
+        AiPlatformConfig qwen = platform(3L, "qwen", "P1");
+        qwen.setEnabledForQuestionPoll(true);
+        when(platformMapper.selectList(any())).thenReturn(List.of(qwen));
+
+        DispatchExecutionService service = service(platformMapper);
+
+        List<AiPlatformConfig> candidates = resolvePlatformCandidates(
+                service,
+                100L,
+                DispatchTaskType.BI_DAILY_POLL
+        );
+
+        assertEquals(List.of(qwen), candidates);
     }
 
     @SuppressWarnings("unchecked")
@@ -81,10 +98,8 @@ class DispatchExecutionServicePlatformCandidateTest {
         return config;
     }
 
-    private static DispatchExecutionService service(ProjectPlatformBindingMapper bindingMapper,
-                                                    AiPlatformConfigMapper platformMapper) {
+    private static DispatchExecutionService service(AiPlatformConfigMapper platformMapper) {
         return new DispatchExecutionService(
-                bindingMapper,
                 platformMapper,
                 mock(PlatformCredentialService.class),
                 mock(PlatformRateLimiterService.class),

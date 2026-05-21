@@ -18,10 +18,7 @@
           <el-table-column prop="companyName" label="客户" min-width="180" />
           <el-table-column prop="brandName" label="品牌" min-width="160" />
           <el-table-column label="项目状态" width="120">
-            <template #default="scope">{{ dictStore.label('project_status', scope.row.status) || scope.row.status }}</template>
-          </el-table-column>
-          <el-table-column label="阶段" width="180">
-            <template #default="scope">{{ dictStore.label('project_stage', scope.row.stage) || scope.row.stage }}</template>
+            <template #default="scope">{{ projectStatusLabel(scope.row.status) }}</template>
           </el-table-column>
           <el-table-column v-if="canUpdateProject" label="操作" width="100" fixed="right">
             <template #default="scope">
@@ -125,12 +122,6 @@
           </div>
         </el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="form.regionCodes" /></el-form-item>
-        <el-form-item v-if="formMode === 'edit'" label="激活状态">
-          <el-select v-model="form.status" style="width: 100%">
-            <el-option :label="dictStore.label('project_status', 'active')" value="active" />
-            <el-option :label="dictStore.label('project_status', 'paused')" value="paused" />
-          </el-select>
-        </el-form-item>
         <el-form-item label="交付模式"><el-input v-model="form.deliveryMode" /></el-form-item>
         <el-form-item label="主目标"><el-input v-model="form.primaryGoal" type="textarea" :rows="3" /></el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="3" /></el-form-item>
@@ -155,7 +146,6 @@ import {
   getKeywordGroupPage,
   getProjectList,
   updateProject,
-  updateProjectStatus,
 } from '@/api/project'
 import type { Brand, Company, KeywordGroup, Project, ProjectChannelAllocationItem, ProjectKeywordGroupQuota } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
@@ -187,7 +177,6 @@ const formVisible = ref(false)
 const formRef = ref<FormInstance>()
 const formMode = ref<'create' | 'edit'>('create')
 const editingId = ref<number | null>(null)
-const originalStatus = ref<'active' | 'paused'>('paused')
 
 const form = reactive({
   projectName: '',
@@ -199,7 +188,6 @@ const form = reactive({
   keywordGroupLimitB: 0,
   keywordGroupLimitC: 0,
   channelAllocations: {} as Record<string, number>,
-  status: 'paused' as 'active' | 'paused',
   regionCodes: [] as string[],
   deliveryMode: 'managed',
   primaryGoal: '',
@@ -226,6 +214,11 @@ const keywordGroupSummary = computed(() => {
   return `已选 ${form.keywordGroupIds.length} 个拓词组，已入库 ${saved} 条关键词`
 })
 
+function projectStatusLabel(status?: string | null) {
+  if (!status) return '-'
+  return dictStore.label('project_status', status) || status
+}
+
 function resetForm() {
   form.projectName = ''
   form.projectAliases = ''
@@ -239,7 +232,6 @@ function resetForm() {
   form.channelAllocations = {}
   channelQuotaItems.value = []
   allocationVersion.value = null
-  form.status = 'paused'
   form.regionCodes = []
   form.deliveryMode = 'managed'
   form.primaryGoal = ''
@@ -342,8 +334,6 @@ async function openEdit(row: Project) {
   form.keywordGroupLimitA = row.planKeywordGroupLimitA ?? row.planKeywordGroupLimit ?? 0
   form.keywordGroupLimitB = row.planKeywordGroupLimitB ?? 0
   form.keywordGroupLimitC = row.planKeywordGroupLimitC ?? 0
-  form.status = row.status === 'active' ? 'active' : 'paused'
-  originalStatus.value = form.status
   form.regionCodes = regionCodesFromPayload(row)
   form.deliveryMode = row.deliveryMode || 'managed'
   form.primaryGoal = row.primaryGoal || ''
@@ -397,9 +387,6 @@ async function submit() {
       await createProject(payload)
     } else if (editingId.value) {
       await updateProject(editingId.value, payload)
-      if (form.status !== originalStatus.value) {
-        await updateProjectStatus(editingId.value, form.status)
-      }
     }
 
     formVisible.value = false

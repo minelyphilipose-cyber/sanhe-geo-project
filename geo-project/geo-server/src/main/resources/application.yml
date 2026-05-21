@@ -5,7 +5,7 @@ server:
 
 spring:
   profiles:
-    active: prod
+    active: dev
   application:
     name: geo-server
   servlet:
@@ -215,7 +215,7 @@ geo:
       cron-jitter-ms: ${PRESALE_EXPORT_CLEANUP_CRON_JITTER_MS:60000}
       max-retry-count: ${PRESALE_EXPORT_CLEANUP_MAX_RETRY_COUNT:5}
   dispatch:
-    cron: "0 45 10 * * *"
+    cron: "0 5 0 * * *"
     timezone: "Asia/Shanghai"
     lock-key: "geo:dispatch:scan:lock"
     lock-ttl-seconds: 600
@@ -231,18 +231,27 @@ geo:
     model-request-timeout-ms: 180000
     resource-busy-retry-min-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_MIN_SECONDS:30}
     resource-busy-retry-jitter-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_JITTER_SECONDS:30}
+    auto-content-generation-enabled: ${DISPATCH_AUTO_CONTENT_GENERATION_ENABLED:false}
     api-key-aes-secret: ${DISPATCH_API_KEY_AES_SECRET:geo-dispatch-key}
   llm:
     pool:
-      enabled: ${GEO_LLM_POOL_ENABLED:false}
-      global-concurrency: ${GEO_LLM_POOL_GLOBAL_CONCURRENCY:8}
+      enabled: ${GEO_LLM_POOL_ENABLED:true}
+      global-concurrency: ${GEO_LLM_POOL_GLOBAL_CONCURRENCY:24}
       lease-ms: ${GEO_LLM_POOL_LEASE_MS:600000}
       lease-renew-interval-ms: ${GEO_LLM_POOL_LEASE_RENEW_INTERVAL_MS:30000}
       lease-safety-ms: ${GEO_LLM_POOL_LEASE_SAFETY_MS:60000}
       shutdown-grace-ms: ${GEO_LLM_POOL_SHUTDOWN_GRACE_MS:30000}
+      permit-wait-timeout-ms: ${GEO_LLM_POOL_PERMIT_WAIT_TIMEOUT_MS:120000}
+      permit-retry-interval-ms: ${GEO_LLM_POOL_PERMIT_RETRY_INTERVAL_MS:200}
       permit-key-prefix: ${GEO_LLM_POOL_PERMIT_KEY_PREFIX:geo:llm:permit}
       circuit-breaker-failure-threshold: ${GEO_LLM_POOL_CIRCUIT_BREAKER_FAILURE_THRESHOLD:5}
       circuit-breaker-open-duration-ms: ${GEO_LLM_POOL_CIRCUIT_BREAKER_OPEN_DURATION_MS:60000}
+      feature-concurrency:
+        monitoring: ${GEO_LLM_POOL_FEATURE_MONITORING:8}
+        article: ${GEO_LLM_POOL_FEATURE_ARTICLE:4}
+        presale: ${GEO_LLM_POOL_FEATURE_PRESALE:8}
+        draft: ${GEO_LLM_POOL_FEATURE_DRAFT:4}
+        generic: ${GEO_LLM_POOL_FEATURE_GENERIC:4}
   extension:
     fill-token:
       hmac-secret: ${FILL_TOKEN_HMAC_SECRET:__REQUIRED_FILL_TOKEN_HMAC_SECRET__}
@@ -281,6 +290,8 @@ presale:
         core-pool-size: ${PRESALE_PLATFORM_CORE_POOL_SIZE:10}
         max-pool-size: ${PRESALE_PLATFORM_MAX_POOL_SIZE:16}
         queue-capacity: ${PRESALE_PLATFORM_QUEUE_CAPACITY:50}
+    prompt-max-concurrency-per-report: ${PRESALE_PROMPT_MAX_CONCURRENCY_PER_REPORT:24}
+    db-write-max-concurrency: ${PRESALE_DB_WRITE_MAX_CONCURRENCY:12}
     allow-synthetic-fallback:
       mock: true
       real: false

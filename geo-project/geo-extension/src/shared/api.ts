@@ -9,6 +9,7 @@ import type {
   ExtensionTaskListItem,
   FillTokenConsumeResponse,
   FillTokenIssueResponse,
+  PublishTaskReport,
   TokenRefreshResponse,
   VersionCheckResponse,
 } from '@/types/extension'
@@ -130,8 +131,15 @@ export const extensionApi = {
     }, token)
   },
 
-  publishedTask(token: string, taskId: number) {
+  publishedTask(token: string, taskId: number, payload?: PublishTaskReport) {
     return request<ExtensionTaskStateResponse>(`/api/v1/extension/tasks/${taskId}/published`, {
+      method: 'POST',
+      body: JSON.stringify(payload ?? {}),
+    }, token)
+  },
+
+  abandonTask(token: string, taskId: number) {
+    return request<ExtensionTaskStateResponse>(`/api/v1/extension/tasks/${taskId}/abandon`, {
       method: 'POST',
     }, token)
   },

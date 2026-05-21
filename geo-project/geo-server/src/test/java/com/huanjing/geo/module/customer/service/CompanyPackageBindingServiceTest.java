@@ -22,10 +22,13 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -164,6 +167,39 @@ class CompanyPackageBindingServiceTest {
         org.junit.jupiter.api.Assertions.assertEquals(2, channels.size());
     }
 
+    @Test
+    void syncActiveBindingsForPackagePlanRefreshesBindingSnapshotAndUsageLimits() {
+        PackagePlan plan = enabledPlan();
+        plan.setPackageName("Updated");
+        plan.setKeywordGroupLimit(30);
+        plan.setKeywordGroupLimitA(10);
+        plan.setKeywordGroupLimitB(12);
+        plan.setKeywordGroupLimitC(8);
+        CompanyPackageBinding binding = activeBinding();
+        binding.setPackagePlanId(3L);
+        when(packagePlanMapper.selectById(3L)).thenReturn(plan);
+        when(channelQuotaConfigMapper.selectList(any())).thenReturn(List.of(
+                quota("official_site", 5),
+                totalQuota("authority_media", 9)
+        ));
+        when(bindingMapper.selectList(any())).thenReturn(List.of(binding));
+
+        service.syncActiveBindingsForPackagePlan(3L);
+
+        org.mockito.ArgumentCaptor<CompanyPackageBinding> captor = forClass(CompanyPackageBinding.class);
+        verify(bindingMapper).updateById(captor.capture());
+        CompanyPackageBinding updated = captor.getValue();
+        assertEquals("Updated", updated.getPackageName());
+        assertEquals(30, updated.getKeywordGroupLimit());
+        assertEquals(10, updated.getKeywordGroupLimitA());
+        assertEquals(12, updated.getKeywordGroupLimitB());
+        assertEquals(8, updated.getKeywordGroupLimitC());
+        org.junit.jupiter.api.Assertions.assertTrue(updated.getChannelQuotaSnapshot().contains("\"quotaLimit\":5"));
+        org.junit.jupiter.api.Assertions.assertTrue(updated.getChannelQuotaSnapshot().contains("\"quotaLimit\":9"));
+        verify(quotaUsageMapper).updateQuotaLimit(eq(7L), eq("official_site"), eq("month"), anyString(), eq(5));
+        verify(quotaUsageMapper).updateQuotaLimit(eq(7L), eq("authority_media"), eq("total"), eq("TOTAL"), eq(9));
+    }
+
     private CompanyPackageBinding activeBinding() {
         CompanyPackageBinding binding = new CompanyPackageBinding();
         binding.setId(100L);
@@ -191,6 +227,12 @@ class CompanyPackageBindingServiceTest {
         config.setPeriodType("month");
         config.setQuotaLimit(quotaLimit);
         config.setEnabled(true);
+        return config;
+    }
+
+    private PackageChannelQuotaConfig totalQuota(String channelCode, int quotaLimit) {
+        PackageChannelQuotaConfig config = quota(channelCode, quotaLimit);
+        config.setPeriodType("total");
         return config;
     }
 

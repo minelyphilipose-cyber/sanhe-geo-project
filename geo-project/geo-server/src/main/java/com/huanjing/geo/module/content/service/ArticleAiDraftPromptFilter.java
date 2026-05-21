@@ -9,7 +9,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -22,22 +24,94 @@ public class ArticleAiDraftPromptFilter {
     private static final Pattern MOBILE = Pattern.compile("(?<!\\d)1[3-9]\\d{9}(?!\\d)");
     private static final Pattern ID_CARD = Pattern.compile("(?<![0-9A-Za-z])\\d{17}[0-9Xx](?![0-9A-Za-z])");
     private static final Pattern BANK_CARD = Pattern.compile("(?<!\\d)(\\d{13,19})(?!\\d)");
+    private static final Pattern ADDRESS_LIKE = Pattern.compile(
+            "[^\\r\\n，,。；;]{0,30}(?:省|市|区|县)[^\\r\\n，,。；;]{0,30}(?:路|街|巷|号|栋|楼|室|门店|网点)[^\\r\\n，,。；;]{0,30}"
+    );
 
     private final SysDictItemMapper sysDictItemMapper;
 
     public String filterOutboundPrompt(String prompt, Project project, Brand brand) {
-        return restoreSensitiveDictionaryValues(redactPii(prompt == null ? "" : prompt));
+        return filterOutboundPrompt(prompt, project, brand, false);
+    }
+
+    public String filterOutboundPrompt(String prompt, Project project, Brand brand, boolean allowContactInfo) {
+        return restoreSensitiveDictionaryValues(redactPii(prompt == null ? "" : prompt, brand, allowContactInfo));
     }
 
     public String filterGeneratedContent(String content, Project project, Brand brand) {
-        return filterOutboundPrompt(content, project, brand);
+        return filterGeneratedContent(content, project, brand, false);
     }
 
-    private String redactPii(String value) {
-        return redactBankCards(ID_CARD.matcher(MOBILE.matcher(EMAIL.matcher(value)
-                .replaceAll("[EMAIL_REDACTED]"))
-                .replaceAll("[PHONE_REDACTED]"))
-                .replaceAll("[ID_REDACTED]"));
+    public String filterGeneratedContent(String content, Project project, Brand brand, boolean allowContactInfo) {
+        return filterOutboundPrompt(content, project, brand, allowContactInfo);
+    }
+
+    private String redactPii(String value, Brand brand, boolean allowContactInfo) {
+        String redacted = EMAIL.matcher(value).replaceAll("[EMAIL_REDACTED]");
+        redacted = redactMobiles(redacted, allowedPhones(brand, allowContactInfo));
+        redacted = redactAddresses(redacted, brand, allowContactInfo);
+        return redactBankCards(ID_CARD.matcher(redacted).replaceAll("[ID_REDACTED]"));
+    }
+
+    private String redactMobiles(String value, Set<String> allowedPhones) {
+        Matcher matcher = MOBILE.matcher(value);
+        StringBuffer result = new StringBuffer();
+        while (matcher.find()) {
+            String phone = matcher.group();
+            String replacement = allowedPhones.contains(normalizeDigits(phone)) ? phone : "[PHONE_REDACTED]";
+            matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(result);
+        return result.toString();
+    }
+
+    private String redactAddresses(String value, Brand brand, boolean allowContactInfo) {
+        String allowedAddress = allowContactInfo && brand != null && StringUtils.hasText(brand.getPublicAddress())
+                ? brand.getPublicAddress().trim()
+                : null;
+        Matcher matcher = ADDRESS_LIKE.matcher(value);
+        StringBuffer result = new StringBuffer();
+        while (matcher.find()) {
+            String address = matcher.group();
+            String replacement = isAllowedAddress(address, allowedAddress) ? address : "[ADDRESS_REDACTED]";
+            matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(result);
+        return result.toString();
+    }
+
+    private Set<String> allowedPhones(Brand brand, boolean allowContactInfo) {
+        if (!allowContactInfo || brand == null || !StringUtils.hasText(brand.getPublicPhone())) {
+            return Set.of();
+        }
+        Set<String> phones = new HashSet<>();
+        String publicPhone = brand.getPublicPhone();
+        Matcher matcher = MOBILE.matcher(publicPhone);
+        while (matcher.find()) {
+            phones.add(normalizeDigits(matcher.group()));
+        }
+        String normalized = normalizeDigits(publicPhone);
+        if (phones.isEmpty() && StringUtils.hasText(normalized)) {
+            phones.add(normalized);
+        }
+        return phones;
+    }
+
+    private boolean isAllowedAddress(String address, String allowedAddress) {
+        if (!StringUtils.hasText(address) || !StringUtils.hasText(allowedAddress)) {
+            return false;
+        }
+        String normalizedAddress = normalizeAddress(address);
+        String normalizedAllowed = normalizeAddress(allowedAddress);
+        return normalizedAddress.contains(normalizedAllowed) || normalizedAllowed.contains(normalizedAddress);
+    }
+
+    private String normalizeDigits(String value) {
+        return StringUtils.hasText(value) ? value.replaceAll("\\D", "") : "";
+    }
+
+    private String normalizeAddress(String value) {
+        return StringUtils.hasText(value) ? value.replaceAll("\\s", "") : "";
     }
 
     private String redactBankCards(String value) {

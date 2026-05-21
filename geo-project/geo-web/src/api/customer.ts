@@ -201,6 +201,10 @@ export function getBrandMaterialStream(brandId: number, materialId: number, down
   })
 }
 
+export function getBrandMaterialPreviewUrl(brandId: number, materialId: number) {
+  return request.get<R<{ url: string }>>(`/brands/${brandId}/materials/${materialId}/preview-url`)
+}
+
 export function getBrandStatementDetail(brandId: number) {
   return request.get<R<BrandStatementView>>(`/brands/${brandId}/statement`)
 }

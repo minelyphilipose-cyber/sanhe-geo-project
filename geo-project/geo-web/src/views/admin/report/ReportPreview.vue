@@ -52,7 +52,7 @@
       <template #header><span>发布进度与内容执行</span></template>
       <el-row :gutter="12">
         <el-col :span="8"><el-statistic title="生成文章数" :value="num(contentSummary.articles_generated)" /></el-col>
-        <el-col :span="8"><el-statistic title="审核通过数" :value="num(contentSummary.articles_approved)" /></el-col>
+        <el-col :span="8"><el-statistic title="可发布文章数" :value="num(contentSummary.articles_approved)" /></el-col>
         <el-col :span="8"><el-statistic title="分发完成数" :value="num(contentSummary.articles_distributed)" /></el-col>
       </el-row>
     </el-card>

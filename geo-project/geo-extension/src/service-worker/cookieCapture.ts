@@ -9,7 +9,7 @@ const PLATFORM_DOMAINS: Record<string, string[]> = {
 }
 
 const REQUIRED_COOKIE_NAMES: Record<string, string[]> = {
-  toutiao: ['sessionid'],
+  toutiao: ['sessionid', 'sessionid_ss', 'sid_tt', 'sid_guard'],
   zhihu: ['z_c0'],
 }
 
@@ -127,6 +127,9 @@ async function hasRequiredCookies(platform: string): Promise<boolean> {
   if (requiredNames.length === 0) return false
   const cookies = await readPlatformCookies(platform)
   const names = new Set(cookies.map(cookie => cookie.name))
+  if (platform === 'toutiao') {
+    return requiredNames.some(name => names.has(name))
+  }
   return requiredNames.every(name => names.has(name))
 }
 

@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -13,6 +14,15 @@ public class ManualArticleCreateRequest {
     private Long projectId;
     @NotBlank
     private String articleType;
+    @NotBlank
+    @Size(max = 64)
+    @Pattern(regexp = "^[a-z][a-z0-9_]{1,63}$")
+    private String contentStyle;
+    @NotBlank
+    @Size(max = 1000)
+    private String topic;
+    @Size(max = 1000)
+    private String topicAsQuestion;
     @NotBlank
     @Size(max = 120)
     private String title;

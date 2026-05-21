@@ -1,7 +1,9 @@
 package com.huanjing.geo.module.dispatch.service;
 
 import com.huanjing.geo.module.dispatch.enums.DispatchTaskType;
+import com.huanjing.geo.module.dispatch.config.DispatchProperties;
 import com.huanjing.geo.module.dispatch.mapper.DispatchTaskMapper;
+import com.huanjing.geo.module.customer.service.CustomerPackageExpiryService;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.entity.ProjectChannelAllocation;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
@@ -32,6 +34,8 @@ class DispatchPlannerServiceContentGenerationTest {
     private DispatchTaskService dispatchTaskService;
     private ProjectDistributionChannelAllocationService allocationService;
     private DispatchTaskMapper dispatchTaskMapper;
+    private DispatchProperties dispatchProperties;
+    private CustomerPackageExpiryService customerPackageExpiryService;
     private DispatchPlannerService service;
 
     @BeforeEach
@@ -40,11 +44,42 @@ class DispatchPlannerServiceContentGenerationTest {
         dispatchTaskService = mock(DispatchTaskService.class);
         allocationService = mock(ProjectDistributionChannelAllocationService.class);
         dispatchTaskMapper = mock(DispatchTaskMapper.class);
-        service = new DispatchPlannerService(projectMapper, dispatchTaskService, allocationService, dispatchTaskMapper);
+        dispatchProperties = new DispatchProperties();
+        customerPackageExpiryService = mock(CustomerPackageExpiryService.class);
+        service = new DispatchPlannerService(
+                projectMapper,
+                dispatchTaskService,
+                allocationService,
+                dispatchTaskMapper,
+                dispatchProperties,
+                customerPackageExpiryService
+        );
+    }
+
+    @Test
+    void scanSkipsContentGenerationWhenAutoPlanningDisabled() {
+        Project project = activeProject(LocalDate.of(2026, 5, 1));
+        when(projectMapper.selectList(any())).thenReturn(List.of(project));
+
+        service.scanAndPlan(LocalDate.of(2026, 5, 3));
+
+        verify(allocationService, never()).contentGenerationAllocations(anyLong());
+        verify(dispatchTaskService, never()).createTaskAndEnqueue(
+                eq(project.getId()),
+                eq(DispatchTaskType.CONTENT_GENERATION),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any(),
+                any()
+        );
     }
 
     @Test
     void planContentGenerationFillsMissingSlotsOnly() {
+        dispatchProperties.setAutoContentGenerationEnabled(true);
         Project project = activeProject(LocalDate.of(2026, 5, 1));
         ProjectChannelAllocation allocation = allocation("official_site", "week", 3);
         LocalDate today = LocalDate.of(2026, 5, 3);
@@ -81,6 +116,7 @@ class DispatchPlannerServiceContentGenerationTest {
 
     @Test
     void dayPeriodBypassesBiDailyGate() {
+        dispatchProperties.setAutoContentGenerationEnabled(true);
         Project project = activeProject(LocalDate.of(2026, 5, 1));
         ProjectChannelAllocation allocation = allocation("industry_site", "day", 1);
         LocalDate today = LocalDate.of(2026, 5, 2);
@@ -112,6 +148,7 @@ class DispatchPlannerServiceContentGenerationTest {
 
     @Test
     void contentGenerationSkipsInactiveProject() {
+        dispatchProperties.setAutoContentGenerationEnabled(true);
         Project project = activeProject(LocalDate.of(2026, 5, 1));
         project.setStatus("paused");
         when(projectMapper.selectList(any())).thenReturn(List.of(project));
@@ -124,6 +161,9 @@ class DispatchPlannerServiceContentGenerationTest {
                 eq(DispatchTaskType.BI_DAILY_POLL),
                 any(),
                 any(),
+                any(),
+                any(),
+                eq("question-poll:A"),
                 any(),
                 any()
         );

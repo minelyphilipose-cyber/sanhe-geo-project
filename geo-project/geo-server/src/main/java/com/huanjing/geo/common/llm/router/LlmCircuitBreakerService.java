@@ -6,6 +6,9 @@ import org.springframework.stereotype.Service;
 
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -43,6 +46,25 @@ public class LlmCircuitBreakerService {
         if (state.failures.incrementAndGet() >= properties.getCircuitBreakerFailureThreshold()) {
             state.openedAtMillis = System.currentTimeMillis();
         }
+    }
+
+    public Map<String, Map<String, Object>> snapshot() {
+        long now = System.currentTimeMillis();
+        return states.entrySet().stream()
+                .collect(Collectors.toMap(
+                        Map.Entry::getKey,
+                        entry -> {
+                            BreakerState state = entry.getValue();
+                            Map<String, Object> item = new LinkedHashMap<>();
+                            item.put("failureCount", state.failures.get());
+                            item.put("open", state.openedAtMillis > 0
+                                    && now - state.openedAtMillis <= properties.getCircuitBreakerOpenDurationMs());
+                            item.put("openedAtMillis", state.openedAtMillis);
+                            return item;
+                        },
+                        (a, b) -> a,
+                        LinkedHashMap::new
+                ));
     }
 
     // TODO: move breaker state to Redis before relying on circuit state across multi-instance deployments.

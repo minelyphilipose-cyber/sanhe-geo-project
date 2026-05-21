@@ -23,6 +23,10 @@ public class AiPlatformConfigService {
 
     private static final Pattern CODE_PATTERN = Pattern.compile("^[a-z][a-z0-9_\\-]{1,63}$");
     private static final Set<String> PRIORITY_SET = Set.of("P0", "P1", "P2");
+    private static final Set<String> PRESALE_EVALUATE_PLATFORM_CODES = Set.of(
+            "deepseek", "doubao", "qwen", "mimo", "zhipu"
+    );
+    private static final Set<String> GEO_QUESTION_PLATFORM_CODES = Set.of("qwen", "deepseek", "mimo");
 
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final CurrentUserService currentUserService;
@@ -62,8 +66,14 @@ public class AiPlatformConfigService {
                 req.getPrimaryKeyRef(),
                 req.getApiUrl(),
                 req.getModelId(),
+                req.getLowModelId(),
                 req.getModelName(),
                 req.getConcurrencyLimit(),
+                req.getEnabled(),
+                req.getEnabledForPresale(),
+                req.getPresaleEvaluateEnabled(),
+                req.getEnabledForGeoQuestion(),
+                req.getEnabledForQuestionPoll(),
                 req.getDegraded(),
                 req.getDegradedReason()
         );
@@ -98,8 +108,14 @@ public class AiPlatformConfigService {
                 req.getPrimaryKeyRef(),
                 req.getApiUrl(),
                 req.getModelId(),
+                req.getLowModelId(),
                 req.getModelName(),
                 req.getConcurrencyLimit(),
+                req.getEnabled(),
+                req.getEnabledForPresale(),
+                req.getPresaleEvaluateEnabled(),
+                req.getEnabledForGeoQuestion(),
+                req.getEnabledForQuestionPoll(),
                 req.getDegraded(),
                 req.getDegradedReason()
         );
@@ -134,6 +150,9 @@ public class AiPlatformConfigService {
 
         Map<String, Object> before = snapshot(entity);
         entity.setEnabledForPresale(Boolean.TRUE.equals(enabledForPresale));
+        if (!Boolean.TRUE.equals(enabledForPresale)) {
+            entity.setPresaleEvaluateEnabled(false);
+        }
         aiPlatformConfigMapper.updateById(entity);
 
         activityLogService.logAction(
@@ -182,8 +201,14 @@ public class AiPlatformConfigService {
             String primaryKeyRef,
             String apiUrl,
             String modelId,
+            String lowModelId,
             String modelName,
             Integer concurrencyLimit,
+            Boolean enabled,
+            Boolean enabledForPresale,
+            Boolean presaleEvaluateEnabled,
+            Boolean enabledForGeoQuestion,
+            Boolean enabledForQuestionPoll,
             Boolean degraded,
             String degradedReason
     ) {
@@ -216,6 +241,36 @@ public class AiPlatformConfigService {
         }
         if (concurrencyLimit != null && concurrencyLimit <= 0) {
             throw new BizException(400, "concurrency_limit must be > 0");
+        }
+        if (Boolean.TRUE.equals(presaleEvaluateEnabled)) {
+            String normalizedCode = platformCode.trim();
+            if (!PRESALE_EVALUATE_PLATFORM_CODES.contains(normalizedCode)) {
+                throw new BizException(400, "presale evaluation model must be one of deepseek/doubao/qwen/mimo/zhipu");
+            }
+            if (!Boolean.TRUE.equals(enabled)) {
+                throw new BizException(400, "platform must be enabled when enabling presale evaluation");
+            }
+            if (!Boolean.TRUE.equals(enabledForPresale)) {
+                throw new BizException(400, "presale must be enabled when enabling presale evaluation");
+            }
+            if (!StringUtils.hasText(lowModelId)) {
+                throw new BizException(400, "low_model_id is required when enabling presale evaluation");
+            }
+        }
+        if (Boolean.TRUE.equals(enabledForGeoQuestion)) {
+            String normalizedCode = platformCode.trim();
+            if (!GEO_QUESTION_PLATFORM_CODES.contains(normalizedCode)) {
+                throw new BizException(400, "GEO question generation model must be one of qwen/deepseek/mimo");
+            }
+            if (!Boolean.TRUE.equals(enabled)) {
+                throw new BizException(400, "platform must be enabled when enabling GEO question generation");
+            }
+            if (!StringUtils.hasText(lowModelId)) {
+                throw new BizException(400, "low_model_id is required when enabling GEO question generation");
+            }
+        }
+        if (Boolean.TRUE.equals(enabledForQuestionPoll) && !Boolean.TRUE.equals(enabled)) {
+            throw new BizException(400, "platform must be enabled when enabling question poll");
         }
         if (Boolean.TRUE.equals(degraded) && !StringUtils.hasText(degradedReason)) {
             throw new BizException(400, "degraded_reason is required when degraded=true");
@@ -253,7 +308,10 @@ public class AiPlatformConfigService {
         entity.setConcurrencyLimit(req.getConcurrencyLimit() != null ? req.getConcurrencyLimit() : 1);
         entity.setEnabled(req.getEnabled());
         entity.setEnabledForPresale(req.getEnabledForPresale() != null ? req.getEnabledForPresale() : true);
+        entity.setPresaleEvaluateEnabled(Boolean.TRUE.equals(req.getPresaleEvaluateEnabled()));
         entity.setEnabledForArticle(req.getEnabledForArticle() != null ? req.getEnabledForArticle() : false);
+        entity.setEnabledForGeoQuestion(Boolean.TRUE.equals(req.getEnabledForGeoQuestion()));
+        entity.setEnabledForQuestionPoll(Boolean.TRUE.equals(req.getEnabledForQuestionPoll()));
         entity.setMaxRetry(req.getMaxRetry() != null ? req.getMaxRetry() : 2);
         entity.setTimeoutMs(req.getTimeoutMs() != null ? req.getTimeoutMs() : 60000);
         entity.setRateLimitQps(req.getRateLimitQps() != null ? req.getRateLimitQps() : 3);
@@ -282,7 +340,10 @@ public class AiPlatformConfigService {
         entity.setConcurrencyLimit(req.getConcurrencyLimit() != null ? req.getConcurrencyLimit() : entity.getConcurrencyLimit());
         entity.setEnabled(req.getEnabled());
         entity.setEnabledForPresale(req.getEnabledForPresale() != null ? req.getEnabledForPresale() : entity.getEnabledForPresale());
+        entity.setPresaleEvaluateEnabled(Boolean.TRUE.equals(req.getPresaleEvaluateEnabled()));
         entity.setEnabledForArticle(req.getEnabledForArticle() != null ? req.getEnabledForArticle() : entity.getEnabledForArticle());
+        entity.setEnabledForGeoQuestion(req.getEnabledForGeoQuestion() != null ? req.getEnabledForGeoQuestion() : entity.getEnabledForGeoQuestion());
+        entity.setEnabledForQuestionPoll(req.getEnabledForQuestionPoll() != null ? req.getEnabledForQuestionPoll() : entity.getEnabledForQuestionPoll());
         entity.setMaxRetry(req.getMaxRetry() != null ? req.getMaxRetry() : entity.getMaxRetry());
         entity.setTimeoutMs(req.getTimeoutMs() != null ? req.getTimeoutMs() : entity.getTimeoutMs());
         entity.setRateLimitQps(req.getRateLimitQps() != null ? req.getRateLimitQps() : entity.getRateLimitQps());
@@ -308,7 +369,10 @@ public class AiPlatformConfigService {
         snapshot.put("concurrencyLimit", entity.getConcurrencyLimit());
         snapshot.put("enabled", entity.getEnabled());
         snapshot.put("enabledForPresale", entity.getEnabledForPresale());
+        snapshot.put("presaleEvaluateEnabled", entity.getPresaleEvaluateEnabled());
         snapshot.put("enabledForArticle", entity.getEnabledForArticle());
+        snapshot.put("enabledForGeoQuestion", entity.getEnabledForGeoQuestion());
+        snapshot.put("enabledForQuestionPoll", entity.getEnabledForQuestionPoll());
         snapshot.put("maxRetry", entity.getMaxRetry());
         snapshot.put("timeoutMs", entity.getTimeoutMs());
         snapshot.put("rateLimitQps", entity.getRateLimitQps());

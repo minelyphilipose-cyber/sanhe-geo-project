@@ -11,6 +11,7 @@ import com.huanjing.geo.module.extension.dto.ExtensionSelfMediaAccountResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskListItemResponse;
+import com.huanjing.geo.module.extension.dto.ExtensionTaskPublishReportRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskStateResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionVersionCheckRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionVersionCheckResponse;
@@ -194,11 +195,22 @@ public class ExtensionController {
     @PostMapping("/tasks/{taskId}/published")
     public R<ExtensionTaskStateResponse> publishTask(
             @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
+            @PathVariable Long taskId,
+            @Valid @RequestBody(required = false) ExtensionTaskPublishReportRequest request
+    ) {
+        ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        versionService.requireSupported("chrome", session.getExtensionVersion());
+        return R.ok(taskStateService.published(taskId, session.getOperatorId(), session.getId(), request));
+    }
+
+    @PostMapping("/tasks/{taskId}/abandon")
+    public R<ExtensionTaskStateResponse> abandonTask(
+            @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
             @PathVariable Long taskId
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
         versionService.requireSupported("chrome", session.getExtensionVersion());
-        return R.ok(taskStateService.published(taskId, session.getOperatorId(), session.getId()));
+        return R.ok(taskStateService.abandon(taskId, session.getOperatorId(), session.getId()));
     }
 
     private String clientIp(HttpServletRequest request) {

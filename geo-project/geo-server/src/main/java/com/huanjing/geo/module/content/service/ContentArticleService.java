@@ -10,6 +10,7 @@ import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.service.AuditService;
 import com.huanjing.geo.module.content.ContentErrorCodes;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.dto.ArticlePublishRequest;
 import com.huanjing.geo.module.content.dto.ArticleResubmitRequest;
@@ -18,6 +19,7 @@ import com.huanjing.geo.module.content.dto.ArticleRevisionSaveRequest;
 import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
 import com.huanjing.geo.module.content.entity.*;
 import com.huanjing.geo.module.content.mapper.*;
+import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -35,6 +37,7 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -43,22 +46,42 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ContentArticleService {
 
+    private static final Set<String> AUTO_APPROVED_GENERATED_BY = Set.of("ai", "system", "batch_ai", "ai_preview");
+
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
     private final ArticleReviewLogMapper articleReviewLogMapper;
     private final ArticlePublishLogMapper articlePublishLogMapper;
+    private final BatchArticleGenerationTaskMapper batchArticleGenerationTaskMapper;
     private final BrandMapper brandMapper;
     private final ProjectMapper projectMapper;
     private final SysDictItemMapper sysDictItemMapper;
     private final CurrentUserService currentUserService;
     private final MarkdownImageReferenceValidator markdownImageReferenceValidator;
+    private final MarkdownToHtmlRenderer markdownToHtmlRenderer;
+    private final ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
     private final BrandAccessService brandAccessService;
     private final AuditService auditService;
 
     public Page<ArticleDraft> page(String projectName, String status, String articleType, long current, long size) {
+        return page(projectName, status, articleType, null, null, null, null, null, null, current, size);
+    }
+
+    public Page<ArticleDraft> page(String projectName,
+                                   String status,
+                                   String articleType,
+                                   String articleTypeCode,
+                                   String channelGroupCode,
+                                   String channelSubCode,
+                                   String generationMode,
+                                   String createdStartDate,
+                                   String createdEndDate,
+                                   long current,
+                                   long size) {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
         LambdaQueryWrapper<ArticleDraft> wrapper = new LambdaQueryWrapper<ArticleDraft>()
+                .ne(ArticleDraft::getStatus, "deleted")
                 .orderByDesc(ArticleDraft::getCreatedAt);
         if (StringUtils.hasText(projectName) || currentUserService.isPartnerUser(operator)) {
             List<Long> projectIds = resolveReadableProjectIds(operator, projectName);
@@ -73,9 +96,107 @@ public class ContentArticleService {
         if (StringUtils.hasText(articleType)) {
             wrapper.eq(ArticleDraft::getArticleType, articleType.trim());
         }
+        applyArticleTypeCodeFilter(wrapper, articleTypeCode);
+        applyChannelFilter(wrapper, channelGroupCode, channelSubCode);
+        applyGenerationModeFilter(wrapper, generationMode);
+        applyCreatedDateFilter(wrapper, createdStartDate, createdEndDate);
         Page<ArticleDraft> pageData = articleDraftMapper.selectPage(new Page<>(current, size), wrapper);
         fillProjectNames(pageData.getRecords());
+        fillGenerationMetadata(pageData.getRecords());
         return pageData;
+    }
+
+    private void applyArticleTypeCodeFilter(LambdaQueryWrapper<ArticleDraft> wrapper, String articleTypeCode) {
+        String code = trimToNull(articleTypeCode);
+        if (code == null) {
+            return;
+        }
+        if (!ArticleTypes.isSupported(code)) {
+            wrapper.eq(ArticleDraft::getArticleTypeCode, code);
+            return;
+        }
+        wrapper.and(item -> item
+                .eq(ArticleDraft::getArticleTypeCode, code)
+                .or()
+                .nested(legacy -> legacy
+                        .eq(ArticleDraft::getArticleType, code)
+                        .isNull(ArticleDraft::getArticleTypeCode)));
+    }
+
+    private void applyChannelFilter(LambdaQueryWrapper<ArticleDraft> wrapper, String channelGroupCode, String channelSubCode) {
+        String group = trimToNull(channelGroupCode);
+        String sub = trimToNull(channelSubCode);
+        if (group == null) {
+            return;
+        }
+        String legacyContentStyle = ArticlePromptChannels.contentStyle(group, sub);
+        if (sub != null) {
+            wrapper.and(item -> item
+                    .nested(channel -> channel
+                            .eq(ArticleDraft::getChannelGroupCode, group)
+                            .eq(ArticleDraft::getChannelSubCode, sub))
+                    .or()
+                    .eq(ArticleDraft::getContentStyle, legacyContentStyle));
+            return;
+        }
+        if (ArticlePromptChannels.SELF_MEDIA.equals(group)) {
+            wrapper.and(item -> item
+                    .eq(ArticleDraft::getChannelGroupCode, group)
+                    .or()
+                    .in(ArticleDraft::getContentStyle, ArticlePromptChannels.subCodes(group)));
+            return;
+        }
+        wrapper.and(item -> item
+                .eq(ArticleDraft::getChannelGroupCode, group)
+                .or()
+                .eq(ArticleDraft::getContentStyle, legacyContentStyle));
+    }
+
+    private void applyGenerationModeFilter(LambdaQueryWrapper<ArticleDraft> wrapper, String generationMode) {
+        String mode = trimToNull(generationMode);
+        if (mode == null) {
+            return;
+        }
+        String batchGeneratedSql = """
+                SELECT article_id
+                FROM batch_article_generation_task
+                WHERE article_id IS NOT NULL
+                UNION
+                SELECT article_id
+                FROM article_draft_version
+                WHERE generated_by = 'batch_ai'
+                """;
+        if ("batch".equals(mode)) {
+            wrapper.inSql(ArticleDraft::getId, batchGeneratedSql);
+        } else if ("single".equals(mode)) {
+            wrapper.notInSql(ArticleDraft::getId, batchGeneratedSql);
+        }
+    }
+
+    private void applyCreatedDateFilter(LambdaQueryWrapper<ArticleDraft> wrapper, String createdStartDate, String createdEndDate) {
+        LocalDate startDate = parseDate(createdStartDate);
+        LocalDate endDate = parseDate(createdEndDate);
+        if (startDate != null) {
+            wrapper.ge(ArticleDraft::getCreatedAt, startDate.atStartOfDay());
+        }
+        if (endDate != null) {
+            wrapper.lt(ArticleDraft::getCreatedAt, endDate.plusDays(1).atStartOfDay());
+        }
+    }
+
+    private LocalDate parseDate(String value) {
+        String text = trimToNull(value);
+        if (text == null) {
+            return null;
+        }
+        return LocalDate.parse(text);
+    }
+
+    private String trimToNull(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
     }
 
     public String publicPreviewHtml(Long articleId) {
@@ -94,6 +215,8 @@ public class ContentArticleService {
         }
         String title = StringUtils.hasText(version.getTitle()) ? version.getTitle() : article.getTitle();
         String content = Optional.ofNullable(version.getContentMarkdown()).orElse("");
+        Project project = requireProject(article.getProjectId());
+        String html = markdownToHtmlRenderer.render(articleImagePublicUrlRewriter.rewrite(project, content));
         return """
                 <!doctype html>
                 <html lang="zh-CN">
@@ -105,12 +228,14 @@ public class ContentArticleService {
                     body{margin:0;background:#f8fafc;color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.75}
                     main{max-width:820px;margin:0 auto;padding:40px 20px 64px;background:#fff;min-height:100vh}
                     h1{font-size:28px;line-height:1.35;margin:0 0 24px}
-                    pre{white-space:pre-wrap;word-break:break-word;font:inherit;margin:0}
+                    img{max-width:100%%;height:auto;border-radius:6px}
+                    table{border-collapse:collapse;width:100%%}
+                    th,td{border:1px solid #e2e8f0;padding:8px;text-align:left}
                   </style>
                 </head>
-                <body><main><h1>%s</h1><pre>%s</pre></main></body>
+                <body><main><h1>%s</h1>%s</main></body>
                 </html>
-                """.formatted(escapeHtml(title), escapeHtml(title), escapeHtml(content));
+                """.formatted(escapeHtml(title), escapeHtml(title), html);
     }
 
     public Map<String, Object> detail(Long articleId) {
@@ -119,6 +244,7 @@ public class ContentArticleService {
         ArticleDraft article = requireArticle(articleId);
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, false);
+        fillGenerationMetadata(List.of(article));
         List<ArticleDraftVersion> versions = articleDraftVersionMapper.selectList(
                 new LambdaQueryWrapper<ArticleDraftVersion>()
                         .eq(ArticleDraftVersion::getArticleId, articleId)
@@ -134,9 +260,16 @@ public class ContentArticleService {
                         .eq(ArticlePublishLog::getArticleId, articleId)
                         .orderByDesc(ArticlePublishLog::getCreatedAt)
         );
+        BatchArticleGenerationTask batchGenerationTask = batchArticleGenerationTaskMapper.selectOne(
+                new LambdaQueryWrapper<BatchArticleGenerationTask>()
+                        .eq(BatchArticleGenerationTask::getArticleId, articleId)
+                        .orderByDesc(BatchArticleGenerationTask::getId)
+                        .last("limit 1")
+        );
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("article", article);
         result.put("project", project);
+        result.put("batchGenerationTask", batchGenerationTask);
         result.put("versions", versions);
         result.put("reviewLogs", reviewLogs);
         result.put("publishLogs", publishLogs);
@@ -160,13 +293,28 @@ public class ContentArticleService {
         if (!StringUtils.hasText(title)) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Title is required");
         }
+        String contentStyle = StringUtils.hasText(req.getContentStyle()) ? req.getContentStyle().trim() : "";
+        String topic = StringUtils.hasText(req.getTopic()) ? req.getTopic().trim() : "";
+        String topicAsQuestion = StringUtils.hasText(req.getTopicAsQuestion()) ? req.getTopicAsQuestion().trim() : null;
+        if (!StringUtils.hasText(contentStyle)) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Content style is required");
+        }
+        if (!StringUtils.hasText(topic)) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Topic is required");
+        }
         markdownImageReferenceValidator.validate(project, content);
+
+        String createSource = normalizeCreateSource(req.getSource());
+        String initialStatus = "approved";
 
         ArticleDraft draft = new ArticleDraft();
         draft.setProjectId(project.getId());
         draft.setArticleType(articleType);
+        draft.setContentStyle(contentStyle);
+        draft.setTopic(topic);
+        draft.setTopicAsQuestion(topicAsQuestion);
         draft.setTitle(title);
-        draft.setStatus("pending_review");
+        draft.setStatus(initialStatus);
         draft.setCurrentVersionNo(1);
         draft.setHasRisk(false);
         draft.setRiskSeverity("none");
@@ -182,7 +330,7 @@ public class ContentArticleService {
         version.setInputSnapshot(aiInputSnapshot(req.getAiMetadata()));
         version.setModelPlatformCode(aiMetadataString(req.getAiMetadata(), "modelPlatformCode"));
         version.setModelId(aiMetadataString(req.getAiMetadata(), "modelId"));
-        version.setGeneratedBy(normalizeCreateSource(req.getSource()));
+        version.setGeneratedBy(createSource);
         version.setCreatedBy(operator.getId());
         articleDraftVersionMapper.insert(version);
 
@@ -196,7 +344,7 @@ public class ContentArticleService {
         draft.setDuplicateArticleId(duplicateResult.articleId);
         articleDraftMapper.updateById(draft);
         draft.setProjectName(project.getProjectName());
-        auditArticleTransition("ARTICLE_CREATED", AuditResult.SUCCESS, operator, project, draft, null, "pending_review", "manual create", null);
+        auditArticleTransition("ARTICLE_CREATED", AuditResult.SUCCESS, operator, project, draft, null, initialStatus, "manual create", null);
         return draft;
     }
 
@@ -273,6 +421,7 @@ public class ContentArticleService {
 
         RiskResult riskResult = scanRisk(project, content);
         DuplicateResult duplicateResult = checkDuplicate(article, title);
+        String newStatus = "approved";
         // Entity is null intentionally; all updated columns are set explicitly in the wrapper,
         // keeping the status predicate and mutation in one atomic UPDATE.
         int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
@@ -280,7 +429,7 @@ public class ContentArticleService {
                 .eq(ArticleDraft::getStatus, oldStatus)
                 .set(ArticleDraft::getTitle, title)
                 .set(ArticleDraft::getCurrentVersionNo, nextVersion)
-                .set(ArticleDraft::getStatus, "under_revision")
+                .set(ArticleDraft::getStatus, newStatus)
                 .set(ArticleDraft::getHasRisk, riskResult.hasRisk)
                 .set(ArticleDraft::getRiskSeverity, riskResult.severity)
                 .set(ArticleDraft::getRiskWordsJson, riskResult.wordsJson)
@@ -288,20 +437,11 @@ public class ContentArticleService {
                 .set(ArticleDraft::getDuplicateScore, duplicateResult.score)
                 .set(ArticleDraft::getDuplicateArticleId, duplicateResult.articleId));
         if (updated != 1) {
-            auditArticleTransition("ARTICLE_REVISION_SAVED", AuditResult.DENIED, operator, project, article, oldStatus, "under_revision", "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
+            auditArticleTransition("ARTICLE_REVISION_SAVED", AuditResult.DENIED, operator, project, article, oldStatus, newStatus, "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
             throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
         }
-        auditArticleTransition("ARTICLE_REVISION_SAVED", AuditResult.SUCCESS, operator, project, article, oldStatus, "under_revision", req.getNote(), null);
+        auditArticleTransition("ARTICLE_REVISION_SAVED", AuditResult.SUCCESS, operator, project, article, oldStatus, newStatus, req.getNote(), null);
 
-        if (StringUtils.hasText(req.getNote())) {
-            ArticleReviewLog log = new ArticleReviewLog();
-            log.setArticleId(articleId);
-            log.setAction("return_for_revision");
-            log.setComment(req.getNote().trim());
-            log.setRiskOverridden(false);
-            log.setOperatorId(operator.getId());
-            articleReviewLogMapper.insert(log);
-        }
     }
 
     @Transactional
@@ -312,29 +452,7 @@ public class ContentArticleService {
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
         brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
-        if (!Set.of("under_revision", "rejected").contains(article.getStatus())) {
-            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Only under_revision/rejected article can resubmit");
-        }
-        String oldStatus = article.getStatus();
-        // Entity is null intentionally; all updated columns are set explicitly in the wrapper,
-        // keeping the status predicate and mutation in one atomic UPDATE.
-        int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
-                .eq(ArticleDraft::getId, articleId)
-                .eq(ArticleDraft::getStatus, oldStatus)
-                .set(ArticleDraft::getStatus, "pending_review"));
-        if (updated != 1) {
-            auditArticleTransition("ARTICLE_RESUBMITTED", AuditResult.DENIED, operator, project, article, oldStatus, "pending_review", "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
-            throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
-        }
-        auditArticleTransition("ARTICLE_RESUBMITTED", AuditResult.SUCCESS, operator, project, article, oldStatus, "pending_review", req == null ? null : req.getComment(), null);
-
-        ArticleReviewLog log = new ArticleReviewLog();
-        log.setArticleId(articleId);
-        log.setAction("resubmit");
-        log.setComment(req == null ? null : req.getComment());
-        log.setRiskOverridden(false);
-        log.setOperatorId(operator.getId());
-        articleReviewLogMapper.insert(log);
+        throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Article review workflow is disabled");
     }
 
     @Transactional
@@ -345,58 +463,7 @@ public class ContentArticleService {
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
         brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
-        ensureReviewerIsNotAuthor(article, operator);
-
-        String action = req.getAction().trim().toLowerCase(Locale.ROOT);
-        if (!Set.of("approve", "reject", "return_for_revision").contains(action)) {
-            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid review action");
-        }
-        boolean needComment = "reject".equals(action) || "return_for_revision".equals(action);
-        boolean riskOverridden = false;
-        if (needComment && !StringUtils.hasText(req.getComment())) {
-            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Comment is required");
-        }
-        if ("approve".equals(action) && Boolean.TRUE.equals(article.getHasRisk())) {
-            String severity = Optional.ofNullable(article.getRiskSeverity()).orElse("none");
-            if ("block".equalsIgnoreCase(severity)) {
-                throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Please resolve block risk words before approve");
-            }
-            if ("warn".equalsIgnoreCase(severity)) {
-                if (!StringUtils.hasText(req.getComment())) {
-                    throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Warn risk approve requires comment");
-                }
-                riskOverridden = true;
-            }
-        }
-
-        String oldStatus = article.getStatus();
-        String newStatus;
-        if ("approve".equals(action)) {
-            newStatus = "approved";
-        } else if ("reject".equals(action)) {
-            newStatus = "rejected";
-        } else {
-            newStatus = "under_revision";
-        }
-        // Entity is null intentionally; all updated columns are set explicitly in the wrapper,
-        // keeping the status predicate and mutation in one atomic UPDATE.
-        int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
-                .eq(ArticleDraft::getId, articleId)
-                .eq(ArticleDraft::getStatus, "pending_review")
-                .set(ArticleDraft::getStatus, newStatus));
-        if (updated != 1) {
-            auditArticleTransition("ARTICLE_REVIEWED", AuditResult.DENIED, operator, project, article, oldStatus, newStatus, "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
-            throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
-        }
-        auditArticleTransition("ARTICLE_REVIEWED", AuditResult.SUCCESS, operator, project, article, oldStatus, newStatus, req.getComment(), null);
-
-        ArticleReviewLog log = new ArticleReviewLog();
-        log.setArticleId(articleId);
-        log.setAction(action);
-        log.setComment(req.getComment());
-        log.setRiskOverridden(riskOverridden);
-        log.setOperatorId(operator.getId());
-        articleReviewLogMapper.insert(log);
+        throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Article review workflow is disabled");
     }
 
     @Transactional
@@ -446,6 +513,31 @@ public class ContentArticleService {
     }
 
     @Transactional
+    public void deleteUnpublished(Long articleId) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission("project.update");
+        ArticleDraft article = requireArticle(articleId);
+        Project project = requireProject(article.getProjectId());
+        ensureProjectAccess(operator, project, true);
+        brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
+
+        String oldStatus = article.getStatus();
+        if (Set.of("published", "distributed", "distributing").contains(oldStatus)) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Published or distributing article cannot be deleted");
+        }
+
+        int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
+                .eq(ArticleDraft::getId, articleId)
+                .eq(ArticleDraft::getStatus, oldStatus)
+                .set(ArticleDraft::getStatus, "deleted"));
+        if (updated != 1) {
+            auditArticleTransition("ARTICLE_DELETED", AuditResult.DENIED, operator, project, article, oldStatus, "deleted", "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
+            throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
+        }
+        auditArticleTransition("ARTICLE_DELETED", AuditResult.SUCCESS, operator, project, article, oldStatus, "deleted", "delete unpublished article", null);
+    }
+
+    @Transactional
     public ArticleDraft createGeneratedDraft(Long batchId,
                                              Project project,
                                              String articleType,
@@ -469,7 +561,7 @@ public class ContentArticleService {
         draft.setGenerationSlotNo(generationSlotNo);
         draft.setArticleType(articleType);
         draft.setTitle(title);
-        draft.setStatus("pending_review");
+        draft.setStatus("approved");
         draft.setCurrentVersionNo(1);
         draft.setHasRisk(false);
         draft.setRiskSeverity("none");
@@ -502,7 +594,7 @@ public class ContentArticleService {
 
     private ArticleDraft requireArticle(Long articleId) {
         ArticleDraft article = articleDraftMapper.selectById(articleId);
-        if (article == null) {
+        if (article == null || "deleted".equals(article.getStatus())) {
             throw new BizException(ContentErrorCodes.ARTICLE_NOT_FOUND, "Article not found");
         }
         return article;
@@ -540,6 +632,69 @@ public class ContentArticleService {
         }
     }
 
+    private void fillGenerationMetadata(List<ArticleDraft> articles) {
+        if (articles == null || articles.isEmpty()) {
+            return;
+        }
+        List<Long> articleIds = articles.stream()
+                .map(ArticleDraft::getId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+        if (articleIds.isEmpty()) {
+            return;
+        }
+        Map<Long, BatchArticleGenerationTask> taskMap = batchArticleGenerationTaskMapper.selectList(
+                        new LambdaQueryWrapper<BatchArticleGenerationTask>()
+                                .in(BatchArticleGenerationTask::getArticleId, articleIds)
+                                .orderByDesc(BatchArticleGenerationTask::getId)
+                ).stream()
+                .filter(Objects::nonNull)
+                .filter(task -> task.getArticleId() != null)
+                .collect(Collectors.toMap(BatchArticleGenerationTask::getArticleId, task -> task, (first, ignored) -> first));
+        for (ArticleDraft article : articles) {
+            article.setSystemGenerated(false);
+            article.setGenerationMode("single");
+            BatchArticleGenerationTask task = taskMap.get(article.getId());
+            if (task != null) {
+                article.setSystemGenerated(true);
+                article.setGenerationMode("batch");
+                fillArticleFromGenerationTask(article, task);
+            }
+        }
+        Map<Long, Boolean> generatedArticleMap = articleDraftVersionMapper.selectList(
+                        new LambdaQueryWrapper<ArticleDraftVersion>()
+                                .in(ArticleDraftVersion::getArticleId, articleIds)
+                                .select(ArticleDraftVersion::getArticleId, ArticleDraftVersion::getGeneratedBy)
+                ).stream()
+                .filter(Objects::nonNull)
+                .filter(version -> version.getArticleId() != null)
+                .filter(version -> isAutoApprovedGeneratedBy(version.getGeneratedBy()))
+                .collect(Collectors.toMap(ArticleDraftVersion::getArticleId, version -> true, (a, b) -> true));
+        for (ArticleDraft article : articles) {
+            if (Boolean.TRUE.equals(generatedArticleMap.get(article.getId()))) {
+                article.setSystemGenerated(true);
+            }
+        }
+    }
+
+    private void fillArticleFromGenerationTask(ArticleDraft article, BatchArticleGenerationTask task) {
+        if (!StringUtils.hasText(article.getContentStyle())) {
+            article.setContentStyle(task.getContentStyle());
+        }
+        if (!StringUtils.hasText(article.getTopic())) {
+            article.setTopic(task.getTopic());
+        }
+        if (!StringUtils.hasText(article.getTopicAsQuestion())) {
+            article.setTopicAsQuestion(task.getTopicAsQuestion());
+        }
+    }
+
+    private boolean isAutoApprovedGeneratedBy(String generatedBy) {
+        return StringUtils.hasText(generatedBy)
+                && AUTO_APPROVED_GENERATED_BY.contains(generatedBy.trim().toLowerCase(Locale.ROOT));
+    }
+
     private List<Long> resolveReadableProjectIds(SysUser operator, String projectName) {
         LambdaQueryWrapper<Project> projectWrapper = new LambdaQueryWrapper<Project>()
                 .isNull(Project::getDeletedAt)
@@ -560,25 +715,6 @@ public class ContentArticleService {
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         if (write) {
             currentUserService.ensurePermission("project.update");
-        }
-    }
-
-    private void ensureReviewerIsNotAuthor(ArticleDraft article, SysUser operator) {
-        Long reviewerId = operator == null ? null : operator.getId();
-        if (reviewerId == null) {
-            return;
-        }
-        List<ArticleDraftVersion> versions = articleDraftVersionMapper.selectList(
-                new LambdaQueryWrapper<ArticleDraftVersion>()
-                        .eq(ArticleDraftVersion::getArticleId, article.getId())
-                        .select(ArticleDraftVersion::getCreatedBy)
-        );
-        boolean authoredByReviewer = versions != null && versions.stream()
-                .filter(Objects::nonNull)
-                .map(ArticleDraftVersion::getCreatedBy)
-                .anyMatch(reviewerId::equals);
-        if (authoredByReviewer) {
-            throw new BizException(ContentErrorCodes.ARTICLE_AUTHOR_CANNOT_REVIEW, "Article author cannot review their own article");
         }
     }
 

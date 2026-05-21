@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.regex.Pattern;
 
@@ -41,7 +42,7 @@ public class BrandService {
     private static final Set<String> BRAND_STATUS = Set.of("draft", "active", "archived");
     private static final Set<String> GEO_SITE_STATUS = Set.of("active", "disabled");
     private static final Pattern GEO_SITE_CODE_PATTERN =
-            Pattern.compile("^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$");
+            Pattern.compile("^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$");
 
     private final BrandMapper brandMapper;
     private final BrandMaterialMapper brandMaterialMapper;
@@ -102,22 +103,17 @@ public class BrandService {
         validateBrandStatus(StringUtils.hasText(req.getStatus()) ? req.getStatus() : "active");
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "company");
 
-        Brand existed = brandMapper.selectOne(new LambdaQueryWrapper<Brand>()
-                .isNull(Brand::getDeletedAt)
-                .eq(Brand::getCompanyId, req.getCompanyId())
-                .eq(Brand::getBrandSlug, req.getBrandSlug()));
-        if (existed != null) {
-            throw new BizException(400, "brand_slug already exists in company");
-        }
-
         Brand brand = new Brand();
         brand.setCompanyId(req.getCompanyId());
         String industry = normalizeIndustry(req.getIndustry());
         validateBrandIndustry(industry, company);
         brand.setIndustry(industry);
         brand.setBrandName(req.getBrandName());
-        brand.setBrandSlug(req.getBrandSlug());
+        brand.setBrandShortName(req.getBrandShortName());
+        brand.setBrandSlug(generateBrandSlug(req.getCompanyId()));
         brand.setMainBusiness(req.getMainBusiness());
+        brand.setCoreProducts(req.getCoreProducts());
+        brand.setBrandPositioning(req.getBrandPositioning());
         applyRegionFields(brand, req.getProvinceCode(), req.getProvinceName(), req.getCityCode(), req.getCityName(), req.getDistrictCode(), req.getDistrictName());
         brand.setServiceArea(StringUtils.hasText(req.getServiceArea())
                 ? req.getServiceArea()
@@ -132,10 +128,11 @@ public class BrandService {
         brand.setWechat(req.getWechat());
         brand.setDescription(req.getDescription());
         brand.setBusinessIntro(req.getBusinessIntro());
-        brand.setStandardBrandStatement(req.getStandardBrandStatement());
-        brand.setBusinessStandardStatement(req.getBusinessStandardStatement());
+        brand.setBrandQualificationDescription(req.getBrandQualificationDescription());
+        brand.setBrandCaseDescription(req.getBrandCaseDescription());
         brand.setForbiddenPhrases(normalizeForbiddenPhrases(req.getForbiddenPhrases()));
         applyGeoSiteFields(brand, req.getGeoSiteCode(), req.getGeoSiteStatus(), null);
+        applyIndustrySiteFields(brand, req.getIndustrySiteName(), req.getIndustrySiteCode());
         brand.setStatus(StringUtils.hasText(req.getStatus()) ? req.getStatus() : "active");
         brandMapper.insert(brand);
         brandProfileService.createProfileVersionSnapshot(
@@ -174,11 +171,14 @@ public class BrandService {
         }
 
         brand.setBrandName(req.getBrandName());
+        brand.setBrandShortName(req.getBrandShortName());
         brand.setBrandSlug(req.getBrandSlug());
         String industry = normalizeIndustry(req.getIndustry());
         validateBrandIndustry(industry, company);
         brand.setIndustry(industry);
         brand.setMainBusiness(req.getMainBusiness());
+        brand.setCoreProducts(req.getCoreProducts());
+        brand.setBrandPositioning(req.getBrandPositioning());
         applyRegionFields(brand, req.getProvinceCode(), req.getProvinceName(), req.getCityCode(), req.getCityName(), req.getDistrictCode(), req.getDistrictName());
         brand.setServiceArea(StringUtils.hasText(req.getServiceArea())
                 ? req.getServiceArea()
@@ -193,10 +193,11 @@ public class BrandService {
         brand.setWechat(req.getWechat());
         brand.setDescription(req.getDescription());
         brand.setBusinessIntro(req.getBusinessIntro());
-        brand.setStandardBrandStatement(req.getStandardBrandStatement());
-        brand.setBusinessStandardStatement(req.getBusinessStandardStatement());
+        brand.setBrandQualificationDescription(req.getBrandQualificationDescription());
+        brand.setBrandCaseDescription(req.getBrandCaseDescription());
         brand.setForbiddenPhrases(normalizeForbiddenPhrases(req.getForbiddenPhrases()));
         applyGeoSiteFields(brand, req.getGeoSiteCode(), req.getGeoSiteStatus(), id);
+        applyIndustrySiteFields(brand, req.getIndustrySiteName(), req.getIndustrySiteCode());
         brand.setStatus(req.getStatus());
         brandMapper.updateById(brand);
         brandProfileService.createProfileVersionSnapshot(
@@ -274,6 +275,21 @@ public class BrandService {
         }
     }
 
+    private String generateBrandSlug(Long companyId) {
+        for (int i = 0; i < 8; i++) {
+            String slug = "brand_" + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+            Brand existed = brandMapper.selectOne(new LambdaQueryWrapper<Brand>()
+                    .isNull(Brand::getDeletedAt)
+                    .eq(Brand::getCompanyId, companyId)
+                    .eq(Brand::getBrandSlug, slug)
+                    .last("LIMIT 1"));
+            if (existed == null) {
+                return slug;
+            }
+        }
+        throw new BizException(500, "Failed to generate brand_slug");
+    }
+
     private void applyGeoSiteFields(Brand brand, String rawCode, String rawStatus, Long selfId) {
         String code = trimToNull(rawCode);
         String status = trimToNull(rawStatus);
@@ -310,13 +326,35 @@ public class BrandService {
         brand.setGeoSiteStatus(status);
     }
 
+    private void applyIndustrySiteFields(Brand brand, String rawName, String rawCode) {
+        String name = trimToNull(rawName);
+        String code = trimToNull(rawCode);
+        if (name == null && code == null) {
+            brand.setIndustrySiteName(null);
+            brand.setIndustrySiteCode(null);
+            return;
+        }
+        if (code == null) {
+            throw new BizException(400, "industry_site_code is required when industry site is configured");
+        }
+        if (!Pattern.compile("^[a-z0-9][a-z0-9_-]{1,127}$").matcher(code).matches()) {
+            throw new BizException(400, "Invalid industry_site_code");
+        }
+        brand.setIndustrySiteName(name);
+        brand.setIndustrySiteCode(code);
+    }
+
     private Map<String, Object> snapshotBrand(Brand brand) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("id", brand.getId());
         snapshot.put("companyId", brand.getCompanyId());
         snapshot.put("industry", brand.getIndustry());
         snapshot.put("brandName", brand.getBrandName());
+        snapshot.put("brandShortName", brand.getBrandShortName());
         snapshot.put("brandSlug", brand.getBrandSlug());
+        snapshot.put("mainBusiness", brand.getMainBusiness());
+        snapshot.put("coreProducts", brand.getCoreProducts());
+        snapshot.put("brandPositioning", brand.getBrandPositioning());
         snapshot.put("provinceCode", brand.getProvinceCode());
         snapshot.put("provinceName", brand.getProvinceName());
         snapshot.put("cityCode", brand.getCityCode());
@@ -325,9 +363,12 @@ public class BrandService {
         snapshot.put("districtName", brand.getDistrictName());
         snapshot.put("status", brand.getStatus());
         snapshot.put("businessIntro", brand.getBusinessIntro());
-        snapshot.put("businessStandardStatement", brand.getBusinessStandardStatement());
+        snapshot.put("brandQualificationDescription", brand.getBrandQualificationDescription());
+        snapshot.put("brandCaseDescription", brand.getBrandCaseDescription());
         snapshot.put("geoSiteCode", brand.getGeoSiteCode());
         snapshot.put("geoSiteStatus", brand.getGeoSiteStatus());
+        snapshot.put("industrySiteName", brand.getIndustrySiteName());
+        snapshot.put("industrySiteCode", brand.getIndustrySiteCode());
         snapshot.put("officialAccount", brand.getOfficialAccount());
         snapshot.put("videoAccount", brand.getVideoAccount());
         snapshot.put("douyinAccount", brand.getDouyinAccount());

@@ -83,6 +83,7 @@ geo:
     access-key: ${MINIO_APP_ACCESS_KEY}
     secret-key: ${MINIO_APP_SECRET_KEY}
     bucket: ${MINIO_BUCKET:geo-files}
+    region: ${MINIO_REGION:us-east-1}
   jwt:
     secret: ${JWT_SECRET}
     access-token-expire: ${JWT_ACCESS_TOKEN_EXPIRE:7200}

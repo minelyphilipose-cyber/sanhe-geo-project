@@ -4,6 +4,7 @@ import { sessionStorage } from '@/shared/storage'
 import {
   ACTIVE_TASK_KEY,
   HEARTBEAT_ALARM_NAME,
+  PUBLISHING_TASK_KEY,
   handleTaskHeartbeatAlarm,
   handleTaskTabRemoved,
   publishActiveTask,
@@ -23,6 +24,7 @@ vi.mock('@/shared/api', async () => {
       ...actual.extensionApi,
       heartbeatTask: vi.fn(),
       publishedTask: vi.fn(),
+      abandonTask: vi.fn(),
     },
   }
 })
@@ -37,6 +39,7 @@ beforeEach(() => {
   vi.spyOn(Date, 'now').mockImplementation(() => now)
   vi.mocked(extensionApi.heartbeatTask).mockResolvedValue({ taskId: 30, status: 'filling' })
   vi.mocked(extensionApi.publishedTask).mockResolvedValue({ taskId: 30, status: 'published' })
+  vi.mocked(extensionApi.abandonTask).mockResolvedValue({ taskId: 30, status: 'failed' })
   vi.stubGlobal('chrome', {
     alarms: {
       create: vi.fn(),
@@ -100,6 +103,7 @@ describe('task lifecycle heartbeat', () => {
 
     await handleTaskTabRemoved(9)
 
+    expect(extensionApi.abandonTask).toHaveBeenCalledWith('ext.secret', 30)
     expect(storage[ACTIVE_TASK_KEY]).toBeUndefined()
     expect(chrome.alarms.clear).toHaveBeenCalledWith(HEARTBEAT_ALARM_NAME)
   })
@@ -110,13 +114,50 @@ describe('task lifecycle heartbeat', () => {
     await publishActiveTask(30)
     await handleTaskHeartbeatAlarm()
 
-    expect(extensionApi.publishedTask).toHaveBeenCalledWith('ext.secret', 30)
+    expect(extensionApi.publishedTask).toHaveBeenCalledWith('ext.secret', 30, undefined)
     expect(extensionApi.heartbeatTask).not.toHaveBeenCalled()
     expect(storage[ACTIVE_TASK_KEY]).toBeUndefined()
+    expect(storage[PUBLISHING_TASK_KEY]).toBeUndefined()
     expect(chrome.alarms.clear).toHaveBeenCalledWith(HEARTBEAT_ALARM_NAME)
     expect(chrome.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({
       payload: expect.objectContaining({ kind: 'published' }),
     }))
+  })
+
+  it('passes publish completion report to backend', async () => {
+    await startTaskLifecycle(30, 9, 'ext.secret')
+
+    await publishActiveTask(30, {
+      action: 'draft_saved_clicked',
+      href: 'https://mp.toutiao.com/editor',
+      platform: 'toutiao',
+      detectedText: '保存草稿',
+    })
+
+    expect(extensionApi.publishedTask).toHaveBeenCalledWith('ext.secret', 30, {
+      action: 'draft_saved_clicked',
+      href: 'https://mp.toutiao.com/editor',
+      platform: 'toutiao',
+      detectedText: '保存草稿',
+    })
+  })
+
+  it('does not abandon when editor closes while publish report is in flight', async () => {
+    let resolvePublish!: () => void
+    vi.mocked(extensionApi.publishedTask).mockReturnValueOnce(new Promise(resolve => {
+      resolvePublish = () => resolve({ taskId: 30, status: 'published' })
+    }))
+    await startTaskLifecycle(30, 9, 'ext.secret')
+
+    const publishPromise = publishActiveTask(30)
+    await vi.waitFor(() => expect(storage[PUBLISHING_TASK_KEY]).toBe(30))
+    await handleTaskTabRemoved(9)
+    resolvePublish()
+    await publishPromise
+
+    expect(extensionApi.abandonTask).not.toHaveBeenCalled()
+    expect(storage[ACTIVE_TASK_KEY]).toBeUndefined()
+    expect(storage[PUBLISHING_TASK_KEY]).toBeUndefined()
   })
 
   it('stops stale task when alarm fires after two hours', async () => {
@@ -139,13 +180,14 @@ describe('task lifecycle heartbeat', () => {
     expect(extensionApi.heartbeatTask).not.toHaveBeenCalled()
   })
 
-  it('stops lifecycle when tab lookup fails', async () => {
+  it('abandons lifecycle when tab lookup fails', async () => {
     await startTaskLifecycle(30, 9, 'ext.secret')
     vi.mocked(chrome.tabs.get).mockRejectedValueOnce(new Error('missing tab'))
 
     await handleTaskHeartbeatAlarm()
 
     expect(storage[ACTIVE_TASK_KEY]).toBeUndefined()
+    expect(extensionApi.abandonTask).toHaveBeenCalledWith('ext.secret', 30)
     expect(extensionApi.heartbeatTask).not.toHaveBeenCalled()
   })
 

@@ -1,10 +1,11 @@
 import { ExtensionApiError, extensionApi } from '@/shared/api'
 import { sessionStorage } from '@/shared/storage'
-import type { TaskLifecycleEvent } from '@/types/extension'
+import type { PublishTaskReport, TaskLifecycleEvent } from '@/types/extension'
 
 export const HEARTBEAT_INTERVAL_MS = 30_000
 export const HEARTBEAT_ALARM_NAME = 'geo-task-heartbeat'
 export const ACTIVE_TASK_KEY = 'geo:active-task'
+export const PUBLISHING_TASK_KEY = 'geo:publishing-task'
 const HEARTBEAT_PERIOD_MINUTES = HEARTBEAT_INTERVAL_MS / 60_000
 const MAX_ACTIVE_TASK_AGE_MS = 2 * 60 * 60 * 1000
 
@@ -32,12 +33,17 @@ export async function stopTaskLifecycle() {
   await chrome.alarms.clear(HEARTBEAT_ALARM_NAME)
 }
 
-export async function publishActiveTask(taskId: number) {
+export async function publishActiveTask(taskId: number, report?: PublishTaskReport) {
   const task = await getActiveTask()
   if (!task || task.taskId !== taskId) return
-  await extensionApi.publishedTask(task.token, taskId)
-  await stopTaskLifecycle()
-  notifyPopup({ taskId, kind: 'published', message: '任务已上报 published。' })
+  await chrome.storage.session.set({ [PUBLISHING_TASK_KEY]: taskId })
+  try {
+    await extensionApi.publishedTask(task.token, taskId, report)
+    await stopTaskLifecycle()
+    notifyPopup({ taskId, kind: 'published', message: '任务已上报 published。' })
+  } finally {
+    await chrome.storage.session.remove(PUBLISHING_TASK_KEY)
+  }
 }
 
 export async function handleTaskHeartbeatAlarm() {
@@ -54,7 +60,7 @@ export async function handleTaskHeartbeatAlarm() {
   try {
     await chrome.tabs.get(active.tabId)
   } catch {
-    await stopTaskLifecycle()
+    await abandonActiveTask(active, '平台编辑器已关闭，本次分发已取消。')
     return
   }
   await heartbeat(active)
@@ -62,12 +68,30 @@ export async function handleTaskHeartbeatAlarm() {
 
 export async function handleTaskTabRemoved(closedTabId: number) {
   const active = await getActiveTask()
-  if (active?.tabId === closedTabId) await stopTaskLifecycle()
+  if (active?.tabId !== closedTabId) return
+  await abandonActiveTask(active, '平台编辑器已关闭，本次分发已取消。')
+}
+
+async function abandonActiveTask(active: PersistedActiveTask, successMessage: string) {
+  await stopTaskLifecycle()
+  if (await isPublishingTask(active.taskId)) return
+  try {
+    await extensionApi.abandonTask(active.token, active.taskId)
+    notifyPopup({ taskId: active.taskId, kind: 'stopped', message: successMessage })
+  } catch (error) {
+    if (error instanceof ExtensionApiError && error.code === 70013) return
+    notifyPopup({ taskId: active.taskId, kind: 'stopped', message: '平台编辑器已关闭，本地任务已停止。' })
+  }
 }
 
 export async function getActiveTask(): Promise<PersistedActiveTask | null> {
   const stored = await chrome.storage.session.get(ACTIVE_TASK_KEY)
   return (stored[ACTIVE_TASK_KEY] as PersistedActiveTask | undefined) ?? null
+}
+
+async function isPublishingTask(taskId: number): Promise<boolean> {
+  const stored = await chrome.storage.session.get(PUBLISHING_TASK_KEY)
+  return stored[PUBLISHING_TASK_KEY] === taskId
 }
 
 async function heartbeat(task: PersistedActiveTask) {

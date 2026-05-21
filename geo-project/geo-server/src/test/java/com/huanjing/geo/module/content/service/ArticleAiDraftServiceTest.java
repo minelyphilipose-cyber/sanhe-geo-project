@@ -27,7 +27,6 @@ import org.junit.jupiter.api.*;
 import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.*;
 
-import java.util.List;
 import java.util.concurrent.ExecutionException;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -72,7 +71,9 @@ class ArticleAiDraftServiceTest {
         when(configMapper.selectOne(any())).thenReturn(aiConfig());
         when(credentialService.resolveApiKey(eq("openai"), any(), any())).thenReturn("sk-test");
         when(promptFilter.filterOutboundPrompt(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
+        when(promptFilter.filterOutboundPrompt(any(), any(), any(), anyBoolean())).thenAnswer(i -> i.getArgument(0));
         when(promptFilter.filterGeneratedContent(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
+        when(promptFilter.filterGeneratedContent(any(), any(), any(), anyBoolean())).thenAnswer(i -> i.getArgument(0));
 
         service = new ArticleAiDraftService(projectMapper, brandMapper, articleMapper, versionMapper, configMapper,
                 currentUserService, brandAccessService, credentialService, llmInvoker,
@@ -81,27 +82,27 @@ class ArticleAiDraftServiceTest {
     }
 
     @Test
-    void generateCreatesPendingReviewAiDraft() throws Exception {
+    void generateCreatesApprovedAiDraft() throws Exception {
         mockInsertId();
         when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
 
         ArticleAiDraftResponse response = service.generate(request()).get();
 
         assertEquals(99L, response.articleId());
-        assertEquals("pending_review", response.status());
+        assertEquals("approved", response.status());
         verify(brandAccessService).requireBrandAccess(20L, 7L, BrandAccessAction.OPERATE);
         verify(rateLimiter).check(7L);
 
         ArgumentCaptor<ArticleDraft> draft = ArgumentCaptor.forClass(ArticleDraft.class);
         verify(articleMapper).insert(draft.capture());
-        assertEquals("pending_review", draft.getValue().getStatus());
+        assertEquals("approved", draft.getValue().getStatus());
 
         ArgumentCaptor<ArticleDraftVersion> version = ArgumentCaptor.forClass(ArticleDraftVersion.class);
         verify(versionMapper).insert(version.capture());
         assertEquals("ai", version.getValue().getGeneratedBy());
         assertEquals("# AI title\n\nbody", version.getValue().getContentMarkdown());
         assertFalse(version.getValue().getPromptSnapshot().isBlank());
-        verifyAudit(AuditResult.SUCCESS, "pending_review");
+        verifyAudit(AuditResult.SUCCESS, "approved");
     }
 
     @Test
@@ -130,6 +131,22 @@ class ArticleAiDraftServiceTest {
 
         verify(llmInvoker).invoke(any(), configCaptor.capture());
         assertTrue(configCaptor.getValue().requestTimeoutMs() >= 120_000);
+    }
+
+    @Test
+    void previewUsesIndustryObserverPromptAndContactGate() throws Exception {
+        when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<LlmModelConfig> configCaptor = ArgumentCaptor.forClass(LlmModelConfig.class);
+
+        service.preview(previewRequest()).get();
+
+        verify(llmInvoker).invoke(promptCaptor.capture(), configCaptor.capture());
+        assertTrue(configCaptor.getValue().systemPrompt().contains("行业观察者"));
+        assertTrue(promptCaptor.getValue().contains("如有必要可提及的品牌名"));
+        assertTrue(promptCaptor.getValue().contains("# 品牌处理规则"));
+        assertFalse(promptCaptor.getValue().contains("对外公开电话"));
+        assertFalse(promptCaptor.getValue().contains("对外公开地址"));
     }
 
     @Test
@@ -197,26 +214,27 @@ class ArticleAiDraftServiceTest {
     }
 
     @Test
-    void aiDraftCannotBeApprovedByItsCreator() throws Exception {
+    void aiDraftReviewWorkflowIsDisabled() throws Exception {
         mockInsertId();
         when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
         Long articleId = service.generate(request()).get().articleId();
-        when(articleMapper.selectById(articleId)).thenReturn(article("pending_review"));
-        when(versionMapper.selectList(any())).thenReturn(List.of(version(7L)));
+        when(articleMapper.selectById(articleId)).thenReturn(article("approved"));
 
         ArticleReviewRequest review = new ArticleReviewRequest();
         review.setAction("approve");
         BizException ex = assertThrows(BizException.class, () -> articleService().review(articleId, review));
 
-        assertEquals(ContentErrorCodes.ARTICLE_AUTHOR_CANNOT_REVIEW, ex.getCode());
+        assertEquals(ContentErrorCodes.ARTICLE_BAD_REQUEST, ex.getCode());
         verify(articleMapper, never()).update(isNull(), any(Wrapper.class));
     }
 
     private ContentArticleService articleService() {
         return new ContentArticleService(articleMapper, versionMapper,
-                mock(ArticleReviewLogMapper.class), mock(ArticlePublishLogMapper.class), mock(BrandMapper.class),
+                mock(ArticleReviewLogMapper.class), mock(ArticlePublishLogMapper.class),
+                mock(BatchArticleGenerationTaskMapper.class), mock(BrandMapper.class),
                 projectMapper, mock(SysDictItemMapper.class), currentUserService,
-                mock(MarkdownImageReferenceValidator.class), brandAccessService, mock(AuditService.class));
+                mock(MarkdownImageReferenceValidator.class), mock(com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer.class),
+                mock(ArticleImagePublicUrlRewriter.class), brandAccessService, mock(AuditService.class));
     }
 
     private void verifyAudit(AuditResult result, String status) {
@@ -315,10 +333,4 @@ class ArticleAiDraftServiceTest {
         return article;
     }
 
-    private ArticleDraftVersion version(Long createdBy) {
-        ArticleDraftVersion version = new ArticleDraftVersion();
-        version.setArticleId(99L);
-        version.setCreatedBy(createdBy);
-        return version;
-    }
 }

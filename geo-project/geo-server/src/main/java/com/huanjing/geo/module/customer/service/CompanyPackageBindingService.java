@@ -3,6 +3,7 @@ package com.huanjing.geo.module.customer.service;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.util.QuotaPeriodResolver;
 import com.huanjing.geo.module.content.dto.ChannelQuotaSnapshotItem;
 import com.huanjing.geo.module.content.entity.CompanyChannelQuotaUsage;
 import com.huanjing.geo.module.content.mapper.CompanyChannelQuotaLedgerMapper;
@@ -76,6 +77,29 @@ public class CompanyPackageBindingService {
     }
 
     @Transactional
+    public void syncActiveBindingsForPackagePlan(Long packagePlanId) {
+        if (packagePlanId == null) {
+            return;
+        }
+        PackagePlan plan = packagePlanMapper.selectById(packagePlanId);
+        if (plan == null) {
+            return;
+        }
+        List<PackageChannelQuotaConfig> channelQuotas = activeChannelQuotas(packagePlanId);
+        List<CompanyPackageBinding> bindings = bindingMapper.selectList(
+                new LambdaQueryWrapper<CompanyPackageBinding>()
+                        .eq(CompanyPackageBinding::getPackagePlanId, packagePlanId)
+                        .eq(CompanyPackageBinding::getStatus, CompanyPackageBinding.STATUS_ACTIVE)
+                        .eq(CompanyPackageBinding::getActiveFlag, 1)
+        );
+        for (CompanyPackageBinding binding : bindings) {
+            applyPlanSnapshot(binding, plan, channelQuotas);
+            bindingMapper.updateById(binding);
+            syncCurrentUsageQuotaLimits(binding, channelQuotas);
+        }
+    }
+
+    @Transactional
     public CompanyPackageBinding bind(Long companyId, Long packagePlanId) {
         currentUserService.ensurePermission("user.manage");
         lockCompany(companyId);
@@ -119,6 +143,13 @@ public class CompanyPackageBindingService {
     private CompanyPackageBinding buildBinding(Long companyId, PackagePlan plan, List<PackageChannelQuotaConfig> channelQuotas) {
         CompanyPackageBinding binding = new CompanyPackageBinding();
         binding.setCompanyId(companyId);
+        applyPlanSnapshot(binding, plan, channelQuotas);
+        binding.markActive();
+        binding.setBoundAt(LocalDateTime.now());
+        return binding;
+    }
+
+    private void applyPlanSnapshot(CompanyPackageBinding binding, PackagePlan plan, List<PackageChannelQuotaConfig> channelQuotas) {
         binding.setPackagePlanId(plan.getId());
         binding.setPackageType(plan.getPackageType());
         binding.setPackageName(plan.getPackageName());
@@ -129,9 +160,6 @@ public class CompanyPackageBindingService {
         binding.setKeywordGroupLimitB(defaultInt(plan.getKeywordGroupLimitB(), 0));
         binding.setKeywordGroupLimitC(defaultInt(plan.getKeywordGroupLimitC(), 0));
         binding.setChannelQuotaSnapshot(JSONUtil.toJsonStr(toSnapshot(channelQuotas)));
-        binding.markActive();
-        binding.setBoundAt(LocalDateTime.now());
-        return binding;
     }
 
     private void hydrateKeywordLimitsFromCurrentPlan(CompanyPackageBinding binding) {
@@ -173,7 +201,7 @@ public class CompanyPackageBindingService {
                         LinkedHashMap::new
                 ));
         List<Map<String, Object>> exceeded = new java.util.ArrayList<>();
-        for (String channel : List.of("official_site", "industry_site", "self_media", "authority_media")) {
+        for (String channel : List.of("official_site", "industry_site", "forum", "self_media", "authority_media")) {
             int quotaLimit = quotaByChannel.getOrDefault(channel, 0);
             List<ProjectChannelAllocationProjectRow> activeProjects =
                     projectChannelAllocationMapper.activeProjectRowsForUpdate(companyId, channel, null);
@@ -277,6 +305,29 @@ public class CompanyPackageBindingService {
                 update.setQuotaLimit(cfg.getQuotaLimit());
                 quotaUsageMapper.updateById(update);
             }
+        }
+    }
+
+    private void syncCurrentUsageQuotaLimits(CompanyPackageBinding binding, List<PackageChannelQuotaConfig> channelQuotas) {
+        for (PackageChannelQuotaConfig cfg : channelQuotas) {
+            String periodKey = QuotaPeriodResolver.periodKeyOrNull(cfg.getPeriodType());
+            if (periodKey == null) {
+                continue;
+            }
+            quotaUsageMapper.insertIgnore(
+                    binding.getCompanyId(),
+                    cfg.getChannelCode(),
+                    cfg.getPeriodType(),
+                    periodKey,
+                    cfg.getQuotaLimit()
+            );
+            quotaUsageMapper.updateQuotaLimit(
+                    binding.getCompanyId(),
+                    cfg.getChannelCode(),
+                    cfg.getPeriodType(),
+                    periodKey,
+                    cfg.getQuotaLimit()
+            );
         }
     }
 }

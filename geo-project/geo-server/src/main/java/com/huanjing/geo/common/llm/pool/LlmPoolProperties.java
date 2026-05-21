@@ -4,6 +4,9 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
+import java.util.Map;
+
 @Data
 @Component
 @ConfigurationProperties(prefix = "geo.llm.pool")
@@ -14,9 +17,18 @@ public class LlmPoolProperties {
     private long leaseRenewIntervalMs = 30_000L;
     private long leaseSafetyMs = 60_000L;
     private long shutdownGraceMs = 30_000L;
+    private long permitWaitTimeoutMs = 120_000L;
+    private long permitRetryIntervalMs = 200L;
     private String permitKeyPrefix = "geo:llm:permit";
     private int circuitBreakerFailureThreshold = 5;
     private long circuitBreakerOpenDurationMs = 60_000L;
+    private Map<String, Integer> featureConcurrency = new LinkedHashMap<>(Map.of(
+            "monitoring", 8,
+            "article", 4,
+            "presale", 8,
+            "draft", 4,
+            "generic", 4
+    ));
 
     public void setGlobalConcurrency(int globalConcurrency) {
         this.globalConcurrency = Math.max(1, globalConcurrency);
@@ -38,11 +50,38 @@ public class LlmPoolProperties {
         this.shutdownGraceMs = Math.max(0L, shutdownGraceMs);
     }
 
+    public void setPermitWaitTimeoutMs(long permitWaitTimeoutMs) {
+        this.permitWaitTimeoutMs = Math.max(0L, permitWaitTimeoutMs);
+    }
+
+    public void setPermitRetryIntervalMs(long permitRetryIntervalMs) {
+        this.permitRetryIntervalMs = Math.max(10L, permitRetryIntervalMs);
+    }
+
     public void setCircuitBreakerFailureThreshold(int circuitBreakerFailureThreshold) {
         this.circuitBreakerFailureThreshold = Math.max(1, circuitBreakerFailureThreshold);
     }
 
     public void setCircuitBreakerOpenDurationMs(long circuitBreakerOpenDurationMs) {
         this.circuitBreakerOpenDurationMs = Math.max(1_000L, circuitBreakerOpenDurationMs);
+    }
+
+    public void setFeatureConcurrency(Map<String, Integer> featureConcurrency) {
+        Map<String, Integer> normalized = new LinkedHashMap<>();
+        if (featureConcurrency != null) {
+            featureConcurrency.forEach((key, value) -> {
+                if (key != null && !key.isBlank() && value != null && value > 0) {
+                    normalized.put(key.trim().toLowerCase(), value);
+                }
+            });
+        }
+        this.featureConcurrency = normalized;
+    }
+
+    public int featureLimit(String feature) {
+        if (feature == null || feature.isBlank()) {
+            return featureConcurrency.getOrDefault("generic", 0);
+        }
+        return featureConcurrency.getOrDefault(feature.trim().toLowerCase(), 0);
     }
 }

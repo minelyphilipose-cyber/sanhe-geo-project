@@ -10,11 +10,15 @@ import com.huanjing.geo.module.presale.generate.llm.CallStatus;
 import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
 import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
 import com.huanjing.geo.module.presale.generate.llm.PresaleLlmInvoker;
+import com.huanjing.geo.module.presale.generate.PresaleEvaluationModelRouter;
+import com.huanjing.geo.module.presale.persist.entity.PresalePage03MarketConfig;
+import com.huanjing.geo.module.presale.service.PresalePage03MarketConfigService;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -26,10 +30,13 @@ class PresalePage03DoubaoServiceTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final PresaleLlmInvoker llmInvoker = mock(PresaleLlmInvoker.class);
-    private final PresaleL3Defaults l3Defaults = new PresaleL3Defaults(objectMapper);
+    private final PresalePage03MarketConfigService configService = mockConfigService();
+    private final PresaleL3Defaults l3Defaults = new PresaleL3Defaults(objectMapper, configService);
     private final MarketBattlegroundValidator validator = new MarketBattlegroundValidator();
+    private final PresaleEvaluationModelRouter evaluationModelRouter = mock(PresaleEvaluationModelRouter.class);
     private final PresalePage03DoubaoService service =
-            new PresalePage03DoubaoService(objectMapper, llmInvoker, l3Defaults, validator);
+            new PresalePage03DoubaoService(objectMapper, llmInvoker, l3Defaults, validator, evaluationModelRouter,
+                    configService);
 
     @Test
     void generateAndApply_usesDoubaoAndRecalculatesTraffic() throws Exception {
@@ -52,6 +59,8 @@ class PresalePage03DoubaoServiceTest {
         when(llmInvoker.marketBattleground(any(PlatformCallContext.class), anyString()))
                 .thenReturn(new LlmCallResult(doubaoResponse(), 100, 200, 30L, 0,
                         CallStatus.SUCCESS, "doubao", "豆包", "doubao-pro", "豆包 Pro"));
+        when(evaluationModelRouter.routeContexts(any(PlatformCallContext.class)))
+                .thenReturn(List.of(new PlatformCallContext(290L, 3, "doubao", null, "", "无二火锅", 1L, false)));
 
         String resultJson = service.generateAndApply(290L, rawJson, editableJson, 1L, false);
 
@@ -60,87 +69,152 @@ class PresalePage03DoubaoServiceTest {
         org.mockito.Mockito.verify(llmInvoker).marketBattleground(ctxCaptor.capture(), promptCaptor.capture());
         assertEquals("doubao", ctxCaptor.getValue().platformCode());
         assertTrue(promptCaptor.getValue().contains("\"brand_name\":\"无二火锅\""));
-        assertTrue(promptCaptor.getValue().contains("固定句式为「每天，{决策主题}决策正在 AI 上发生」"));
+        assertTrue(promptCaptor.getValue().contains("\"question_max_length\":34"));
+        assertTrue(promptCaptor.getValue().contains("\"parent_category_name\""));
+        assertTrue(promptCaptor.getValue().contains("在全部 AI 搜索/问答流量中"));
+        assertTrue(promptCaptor.getValue().contains("长度计算包含所有中文、英文、数字、标点和空格"));
 
         MarketBattleground market = objectMapper.readValue(resultJson, EditableContentDTO.class).getMarketBattleground();
-        assertEquals("每天，火锅决策正在 AI 上发生", market.getPageTitle());
-        assertEquals("281.3", market.getNationalCard().getValue());
+        assertEquals("每天，有数千万次消费决策正在 AI 上发生", market.getPageTitle());
+        assertEquals("餐饮消费类占比", market.getNationalCard().getRows().get(1).getLabel());
+        assertEquals("225.0", market.getNationalCard().getValue());
         assertEquals("万次", market.getNationalCard().getUnit());
-        assertEquals("281.3万次", market.getNationalCard().getRows().get(3).getValue());
-        assertEquals("2250", market.getRegionalCard().getValue());
+        assertEquals("225.0万次", market.getNationalCard().getRows().get(3).getValue());
+        assertEquals("1800", market.getRegionalCard().getValue());
         assertEquals("次", market.getRegionalCard().getUnit());
-        assertEquals("281.3万次", market.getRegionalCard().getRows().get(0).getValue());
-        assertEquals("2250次", market.getRegionalCard().getRows().get(3).getValue());
+        assertEquals("225.0万次", market.getRegionalCard().getRows().get(0).getValue());
+        assertEquals("1800次", market.getRegionalCard().getRows().get(3).getValue());
+    }
+
+    @Test
+    void generateAndApply_keepsConfiguredMarketCardLabel() throws Exception {
+        RawSnapshotDTO raw = RawSnapshotDTO.builder()
+                .clientInfo(ClientInfo.builder()
+                        .brandName("无二火锅")
+                        .industry("restaurant")
+                        .industryRole("连锁品牌")
+                        .region("阜阳")
+                        .build())
+                .build();
+        String rawJson = objectMapper.writeValueAsString(raw);
+        String editableJson = objectMapper.writeValueAsString(l3Defaults.normalize(new EditableContentDTO(), raw, null));
+        when(llmInvoker.marketBattleground(any(PlatformCallContext.class), anyString()))
+                .thenReturn(new LlmCallResult(doubaoResponse(), 100, 200, 30L, 0,
+                        CallStatus.SUCCESS, "doubao", "豆包", "doubao-pro", "豆包 Pro"));
+        when(evaluationModelRouter.routeContexts(any(PlatformCallContext.class)))
+                .thenReturn(List.of(new PlatformCallContext(290L, 3, "doubao", null, "", "无二火锅", 1L, false)));
+
+        String resultJson = service.generateAndApply(290L, rawJson, editableJson, 1L, false);
+
+        MarketBattleground market = objectMapper.readValue(resultJson, EditableContentDTO.class).getMarketBattleground();
+        assertEquals("AI 搜索流量总览", market.getMarketCard().getLabel());
+    }
+
+    @Test
+    void generateAndApply_replacesOverlongNarrativeQuestion() throws Exception {
+        RawSnapshotDTO raw = RawSnapshotDTO.builder()
+                .clientInfo(ClientInfo.builder()
+                        .brandName("诗帝尼")
+                        .industry("门窗")
+                        .industryRole("manufacturer")
+                        .region("国内")
+                        .userDemand("了解诗帝尼在AI推荐中的真实表现")
+                        .build())
+                .samplePrompts(List.of(
+                        SamplePrompt.builder().category("问题型").promptContent("国内系统门窗加盟应该优先看哪些品牌的综合实力？").build(),
+                        SamplePrompt.builder().category("推荐型").promptContent("国内高端系统门窗加盟推荐哪类品牌？").build(),
+                        SamplePrompt.builder().category("场景型").promptContent("国内代理商选择门窗品牌时哪家更适合长期合作？").build()
+                ))
+                .build();
+        String rawJson = objectMapper.writeValueAsString(raw);
+        String editableJson = objectMapper.writeValueAsString(l3Defaults.normalize(new EditableContentDTO(), raw, null));
+        String responseWithLongQuestion = doubaoResponse()
+                .replace("\"阜阳哪家火锅店适合聚会？\"",
+                        "\"国内系统门窗加盟应该优先看哪些品牌的综合实力和长期扶持能力？\"");
+        when(llmInvoker.marketBattleground(any(PlatformCallContext.class), anyString()))
+                .thenReturn(new LlmCallResult(responseWithLongQuestion, 100, 200, 30L, 0,
+                        CallStatus.SUCCESS, "doubao", "豆包", "doubao-pro", "豆包 Pro"));
+        when(evaluationModelRouter.routeContexts(any(PlatformCallContext.class)))
+                .thenReturn(List.of(new PlatformCallContext(330L, 3, "doubao", null, "", "诗帝尼", 1L, false)));
+
+        String resultJson = service.generateAndApply(330L, rawJson, editableJson, 1L, false);
+
+        MarketBattleground market = objectMapper.readValue(resultJson, EditableContentDTO.class).getMarketBattleground();
+        assertTrue(market.getNarrative().getQuestions().stream()
+                .allMatch(question -> question.length() <= 34 && !question.contains("诗帝尼")));
+    }
+
+    @Test
+    void generateAndApply_rejectsNonPurePercentText() throws Exception {
+        RawSnapshotDTO raw = RawSnapshotDTO.builder()
+                .clientInfo(ClientInfo.builder()
+                        .brandName("无二火锅")
+                        .industry("restaurant")
+                        .industryRole("连锁品牌")
+                        .region("阜阳")
+                        .build())
+                .build();
+        String rawJson = objectMapper.writeValueAsString(raw);
+        String editableJson = objectMapper.writeValueAsString(l3Defaults.normalize(new EditableContentDTO(), raw, null));
+        String responseWithApproxPercent = doubaoResponse().replace("\"12.5%\"", "\"约 12.5%\"");
+        when(llmInvoker.marketBattleground(any(PlatformCallContext.class), anyString()))
+                .thenReturn(new LlmCallResult(responseWithApproxPercent, 100, 200, 30L, 0,
+                        CallStatus.SUCCESS, "doubao", "豆包", "doubao-pro", "豆包 Pro"));
+        when(evaluationModelRouter.routeContexts(any(PlatformCallContext.class)))
+                .thenReturn(List.of(new PlatformCallContext(290L, 3, "doubao", null, "", "无二火锅", 1L, false)));
+
+        com.huanjing.geo.common.exception.BizException ex = assertThrows(
+                com.huanjing.geo.common.exception.BizException.class,
+                () -> service.generateAndApply(290L, rawJson, editableJson, 1L, false)
+        );
+        assertTrue(ex.getMessage().contains("parent_category_share"));
+        assertTrue(ex.getMessage().contains("^\\d+(\\.\\d{1,2})?%$"));
     }
 
     private String doubaoResponse() {
         return """
                 {
-                  "topbar_title": "MARKET BATTLEGROUND · AI 搜索新战场",
-                  "topbar_right": "GEO · CONFIDENTIAL",
-                  "page_title": "每天，火锅决策正在 AI 上发生",
-                  "page_kicker": "THE NEW BATTLEGROUND FOR YOUR BRAND",
-                  "market_card": {
-                    "label": "AI 搜索大盘流量",
-                    "source": "来源：行业公开数据综合估算",
-                    "stats": [
-                      {"value": "9.8", "unit": "亿", "label": "AI 原生 APP 月活"},
-                      {"value": "3.5", "unit": "亿", "label": "日均活跃用户"},
-                      {"value": "15.0", "unit": "亿次", "label": "日均提问总量"},
-                      {"value": "19.6", "unit": "次", "label": "豆包人均月使用"}
-                    ],
-                    "platform_label": "TOP 平台",
-                    "platforms": [
-                      {"name": "豆包", "value": "5.8亿月活"},
-                      {"name": "千问", "value": "3.2亿月活"},
-                      {"name": "DeepSeek", "value": "1.9亿月活"}
-                    ],
-                    "platform_suffix": "元宝 / Kimi 等"
-                  },
-                  "national_card": {
-                    "label": "全国火锅AI决策流量",
-                    "value_prefix": "全国日均",
-                    "value": "9999",
-                    "unit": "万次",
-                    "subtitle": "火锅消费决策向AI迁移",
-                    "calculation_label": "流量推导逻辑",
-                    "rows": [
-                      {"label": "AI日均提问总量", "value": "15.0亿次", "is_total": false},
-                      {"label": "生活餐饮占比", "value": "12.5%", "is_total": false},
-                      {"label": "火锅品类占比", "value": "1.5%", "is_total": false},
-                      {"label": "全国火锅AI提问", "value": "9999万次", "is_total": true}
-                    ]
-                  },
-                  "bridge_text": "↓ 聚焦到您的核心市场",
-                  "regional_card": {
-                    "label": "阜阳火锅AI决策流量",
-                    "value_prefix": "阜阳日均",
-                    "value": "9999",
-                    "unit": "次",
-                    "subtitle": "本地火锅AI搜索需求活跃",
-                    "calculation_label": "区域推导逻辑",
-                    "rows": [
-                      {"label": "全国火锅AI提问", "value": "9999万次", "is_total": false},
-                      {"label": "阜阳区域占比", "value": "0.08%", "is_total": false},
-                      {"label": "数据来源", "value": "公开口径综合测算", "is_total": false},
-                      {"label": "阜阳火锅AI提问", "value": "9999次", "is_total": true}
-                    ]
-                  },
-                  "narrative": {
-                    "intro": "这意味着，消费者正在通过 AI 持续询问：",
-                    "questions": [
-                      "阜阳哪家火锅店适合聚会？",
-                      "阜阳火锅哪家性价比高？",
-                      "阜阳约会火锅店推荐哪家？"
-                    ],
-                    "conclusion": "而 AI 给出的答案，正在影响他们下一步选择。",
-                    "brand_line_prefix": "→",
-                    "brand_name": "无二火锅",
-                    "brand_line_suffix": "在这些场景中的真实可见度如何？详见下章诊断结果。"
-                  },
-                  "footnote": "本数据为行业公开信息综合估算，存在合理浮动区间，仅作市场量级参考，不构成精确市场断言。",
-                  "footer_brand": "无二火锅"
+                  "parent_category_name": "餐饮消费",
+                  "parent_category_share": "12.5%",
+                  "industry_share": "1.5%",
+                  "region_share": "0.08%",
+                  "questions": [
+                    "阜阳哪家火锅店适合聚会？",
+                    "阜阳火锅哪家性价比高？",
+                    "阜阳约会火锅店推荐哪家？"
+                  ]
                 }
                 """;
+    }
+
+    private PresalePage03MarketConfigService mockConfigService() {
+        PresalePage03MarketConfigService service = mock(PresalePage03MarketConfigService.class);
+        when(service.getConfig()).thenReturn(defaultConfig());
+        return service;
+    }
+
+    private PresalePage03MarketConfig defaultConfig() {
+        PresalePage03MarketConfig out = new PresalePage03MarketConfig();
+        out.setMarketLabel("AI 搜索流量总览");
+        out.setMarketSource("来源：行业公开数据综合估算");
+        out.setAppMonthlyActiveValue("8.3");
+        out.setAppMonthlyActiveUnit("亿");
+        out.setDailyActiveUsersValue("7.2");
+        out.setDailyActiveUsersUnit("亿");
+        out.setDailyQuestionTotalValue("12");
+        out.setDailyQuestionTotalUnit("亿次");
+        out.setDoubaoMonthlyUsageValue("28");
+        out.setDoubaoMonthlyUsageUnit("次");
+        out.setPlatform1Name("豆包");
+        out.setPlatform1Value("5.8亿/月活");
+        out.setPlatform2Name("千问");
+        out.setPlatform2Value("4.2亿/月活");
+        out.setPlatform3Name("DeepSeek");
+        out.setPlatform3Value("3.1亿/月活");
+        out.setPlatformSuffix("元宝 / Kimi 等");
+        out.setPage03DataSource("公开口径综合测算");
+        out.setFootnote("注：以上数据基于行业公开数据与主流AI平台问答量综合估算，存在±20%合理浮动区间，仅作量级参考，不构成精确市场断言。");
+        out.setQuestionCount(3);
+        return out;
     }
 }

@@ -69,6 +69,21 @@ class BrandServiceTest {
     }
 
     @Test
+    void create_geoSiteCodeWithUnderscore_success() {
+        when(brandMapper.selectOne(any())).thenReturn(null);
+        when(brandMapper.insert(any())).thenAnswer(invocation -> {
+            Brand brand = invocation.getArgument(0);
+            brand.setId(1L);
+            return 1;
+        });
+
+        Brand result = brandService.create(createReq("agent_official_site", null));
+
+        assertEquals("agent_official_site", result.getGeoSiteCode());
+        assertEquals("active", result.getGeoSiteStatus());
+    }
+
+    @Test
     void create_duplicateGeoSiteCode_fails() {
         Brand duplicate = new Brand();
         duplicate.setId(2L);
@@ -101,6 +116,49 @@ class BrandServiceTest {
     }
 
     @Test
+    void create_withIndustrySiteConfig_successTrimsValues() {
+        when(brandMapper.selectOne(any())).thenReturn(null);
+        when(brandMapper.insert(any())).thenAnswer(invocation -> {
+            Brand brand = invocation.getArgument(0);
+            brand.setId(1L);
+            return 1;
+        });
+        BrandCreateRequest req = createReq(null, null);
+        req.setIndustrySiteName(" 火锅资讯站 ");
+        req.setIndustrySiteCode(" hotpot_news ");
+
+        Brand result = brandService.create(req);
+
+        assertEquals("火锅资讯站", result.getIndustrySiteName());
+        assertEquals("hotpot_news", result.getIndustrySiteCode());
+    }
+
+    @Test
+    void create_industrySiteNameWithoutCode_fails() {
+        when(brandMapper.selectOne(any())).thenReturn(null);
+        BrandCreateRequest req = createReq(null, null);
+        req.setIndustrySiteName("火锅资讯站");
+
+        BizException ex = assertThrows(BizException.class, () -> brandService.create(req));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("industry_site_code is required when industry site is configured", ex.getMessage());
+    }
+
+    @Test
+    void create_invalidIndustrySiteCode_fails() {
+        when(brandMapper.selectOne(any())).thenReturn(null);
+        BrandCreateRequest req = createReq(null, null);
+        req.setIndustrySiteName("火锅资讯站");
+        req.setIndustrySiteCode("-bad");
+
+        BizException ex = assertThrows(BizException.class, () -> brandService.create(req));
+
+        assertEquals(400, ex.getCode());
+        assertEquals("Invalid industry_site_code", ex.getMessage());
+    }
+
+    @Test
     void update_changeGeoSiteCode_uniqueCheck() {
         Brand existing = existingBrand();
         when(brandMapper.selectById(1L)).thenReturn(existing);
@@ -128,6 +186,25 @@ class BrandServiceTest {
         verify(brandMapper).updateById(captor.capture());
         assertNull(captor.getValue().getGeoSiteCode());
         assertNull(captor.getValue().getGeoSiteStatus());
+    }
+
+    @Test
+    void update_blankIndustrySiteFields_clearsConfig() {
+        Brand existing = existingBrand();
+        existing.setIndustrySiteName("旧资讯站");
+        existing.setIndustrySiteCode("old_site");
+        when(brandMapper.selectById(1L)).thenReturn(existing);
+        when(brandMapper.selectOne(any())).thenReturn(null);
+        BrandUpdateRequest req = updateReq(null, null);
+        req.setIndustrySiteName("");
+        req.setIndustrySiteCode("");
+
+        brandService.update(1L, req);
+
+        ArgumentCaptor<Brand> captor = ArgumentCaptor.forClass(Brand.class);
+        verify(brandMapper).updateById(captor.capture());
+        assertNull(captor.getValue().getIndustrySiteName());
+        assertNull(captor.getValue().getIndustrySiteCode());
     }
 
     private BrandCreateRequest createReq(String geoSiteCode, String geoSiteStatus) {

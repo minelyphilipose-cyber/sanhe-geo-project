@@ -105,6 +105,9 @@ services:
     build:
       context: ./geo-server
       dockerfile: Dockerfile
+      args:
+        MAVEN_MIRROR: ${MAVEN_MIRROR:-https://maven.aliyun.com/repository/public}
+        PLAYWRIGHT_DOWNLOAD_HOST: ${PLAYWRIGHT_DOWNLOAD_HOST:-https://npmmirror.com/mirrors/playwright}
     container_name: geo-server
     restart: unless-stopped
     env_file:

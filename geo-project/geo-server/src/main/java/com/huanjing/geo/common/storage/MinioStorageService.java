@@ -12,6 +12,8 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.InputStream;
+import java.net.URI;
+import java.util.Objects;
 
 @Slf4j
 @Service
@@ -24,8 +26,15 @@ public class MinioStorageService {
     private String endpoint;
     @Value("${geo.minio.public-endpoint:${geo.minio.endpoint}}")
     private String publicEndpoint;
+    @Value("${geo.minio.access-key}")
+    private String accessKey;
+    @Value("${geo.minio.secret-key}")
+    private String secretKey;
     @Value("${geo.minio.bucket}")
     private String bucket;
+    @Value("${geo.minio.region:us-east-1}")
+    private String region;
+    private volatile MinioClient publicMinioClient;
 
     public String upload(MultipartFile file, String objectKey, String contentType) {
         try {
@@ -102,6 +111,15 @@ public class MinioStorageService {
         }
     }
 
+    public InputStream openObjectStream(String objectKey) {
+        try {
+            return minioClient.getObject(GetObjectArgs.builder().bucket(bucket).object(objectKey).build());
+        } catch (Exception ex) {
+            log.error("Open minio object stream failed, objectKey={}, err={}", objectKey, ex.getMessage(), ex);
+            throw new BizException(500, "Read file failed");
+        }
+    }
+
     public String buildFileUrl(String objectKey) {
         String source = StringUtils.hasText(publicEndpoint) ? publicEndpoint : endpoint;
         String normalized = source.endsWith("/") ? source.substring(0, source.length() - 1) : source;
@@ -111,15 +129,19 @@ public class MinioStorageService {
     public String buildPresignedDownloadUrl(String objectKey, int expireSeconds) {
         try {
             ensureBucket();
-            return minioClient.getPresignedObjectUrl(
+            String presignedUrl = presignClient().getPresignedObjectUrl(
                     GetPresignedObjectUrlArgs.builder()
                             .method(Method.GET)
                             .bucket(bucket)
+                            .region(region)
                             .object(objectKey)
                             .expiry(expireSeconds)
                             .build()
             );
+            return applyPublicEndpointPathPrefix(presignedUrl);
         } catch (Exception ex) {
+            log.error("Generate minio presigned url failed, objectKey={}, endpoint={}, publicEndpoint={}, err={}",
+                    objectKey, endpoint, publicEndpoint, ex.getMessage(), ex);
             throw new BizException(500, "Generate presigned url failed");
         }
     }
@@ -136,5 +158,69 @@ public class MinioStorageService {
         if (!exists) {
             minioClient.makeBucket(MakeBucketArgs.builder().bucket(bucket).build());
         }
+    }
+
+    private MinioClient presignClient() {
+        String source = endpointSource();
+        String sourceOrigin = endpointOrigin(source);
+        if (Objects.equals(sourceOrigin, endpointOrigin(cleanEndpoint(endpoint)))) {
+            return minioClient;
+        }
+        MinioClient existing = publicMinioClient;
+        if (existing != null) {
+            return existing;
+        }
+        synchronized (this) {
+            if (publicMinioClient == null) {
+                publicMinioClient = MinioClient.builder()
+                        .endpoint(sourceOrigin)
+                        .region(region)
+                        .credentials(accessKey, secretKey)
+                        .build();
+            }
+            return publicMinioClient;
+        }
+    }
+
+    private String endpointOrigin(String source) {
+        URI uri = URI.create(cleanEndpoint(source));
+        if (!StringUtils.hasText(uri.getScheme()) || !StringUtils.hasText(uri.getRawAuthority())) {
+            return cleanEndpoint(source);
+        }
+        return uri.getScheme() + "://" + uri.getRawAuthority();
+    }
+
+    private String applyPublicEndpointPathPrefix(String presignedUrl) {
+        String prefix = endpointPathPrefix(endpointSource());
+        if (!StringUtils.hasText(prefix)) {
+            return presignedUrl;
+        }
+
+        URI uri = URI.create(presignedUrl);
+        String path = uri.getRawPath();
+        String normalizedPath = path.startsWith("/") ? path : "/" + path;
+        String query = StringUtils.hasText(uri.getRawQuery()) ? "?" + uri.getRawQuery() : "";
+        String fragment = StringUtils.hasText(uri.getRawFragment()) ? "#" + uri.getRawFragment() : "";
+        return uri.getScheme() + "://" + uri.getRawAuthority() + prefix + normalizedPath + query + fragment;
+    }
+
+    private String endpointPathPrefix(String source) {
+        URI uri = URI.create(cleanEndpoint(source));
+        String path = uri.getRawPath();
+        if (!StringUtils.hasText(path) || "/".equals(path)) {
+            return "";
+        }
+        while (path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
+        return path;
+    }
+
+    private String endpointSource() {
+        return StringUtils.hasText(publicEndpoint) ? cleanEndpoint(publicEndpoint) : cleanEndpoint(endpoint);
+    }
+
+    private String cleanEndpoint(String source) {
+        return source == null ? "" : source.trim();
     }
 }

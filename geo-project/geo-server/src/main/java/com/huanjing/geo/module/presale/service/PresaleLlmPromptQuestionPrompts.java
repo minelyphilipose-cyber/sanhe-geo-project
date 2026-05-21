@@ -30,8 +30,9 @@ public final class PresaleLlmPromptQuestionPrompts {
             4. 非 COMPARISON 问题禁止包含 {competitor}。
             5. 除 COMPARISON 的 {competitor} 外,禁止输出任何占位符,包括但不限于 {brand}、{product}、{industry}、{industry_role}、{region}、{user_type};需要品牌、行业、地区等信息时直接使用基础信息中的真实文本。
             6. 所有问题用于模拟真实用户向大模型提问的场景,需保持真实用户口吻:口语化但保留必要行业术语。
-            7. 每条 6-80 字,中文自然问句,避免重复、空泛和模板腔。
-            8. 避免与以下已有问题重复或语义重复:
+            7. PROBLEM 问题型禁止直接提及基础信息中的品牌名称,必须以行业、地区、具体场景或用户痛点发问,用于观察 AI 是否会自然返回当前品牌。
+            8. 每条 6-80 字,中文自然问句,避免重复、空泛和模板腔。
+            9. 避免与以下已有问题重复或语义重复:
             %s
             """;
 }

@@ -190,7 +190,7 @@
           <div class="panel-header detail-header">
             <div>
               <h2>命中明细</h2>
-              <span>默认仅展示已命中记录，最多在线查看 {{ formatNum(details.maxViewable) }} 条</span>
+              <span>默认展示当前 {{ selectedDays }} 天窗口内的已命中记录，最多在线查看 {{ formatNum(details.maxViewable) }} 条</span>
             </div>
             <button class="filter-toggle" @click="filterExpanded = !filterExpanded">
               {{ filterExpanded ? '收起筛选' : '展开筛选' }}
@@ -204,8 +204,8 @@
                 {{ item.platformName || item.platformCode }}
               </option>
             </select>
-            <input v-model="detailQuery.startDate" type="date" />
-            <input v-model="detailQuery.endDate" type="date" />
+            <input v-model="detailQuery.startDate" type="date" :min="windowStartDate" :max="windowEndDate" />
+            <input v-model="detailQuery.endDate" type="date" :min="windowStartDate" :max="windowEndDate" />
             <input v-model="detailQuery.keyword" type="text" placeholder="搜索问题或关键词" @keyup.enter="searchDetails" />
             <button @click="searchDetails">查询</button>
           </div>
@@ -371,10 +371,10 @@ const contentProgressItems = computed<ProjectDashboardContentProgressItem[]>(() 
   const progress = summary.contentProgress
   return [
     { key: 'generated', label: '已生成', value: progress?.generatedCount || 0, description: '已进入内容库的文章草稿数量' },
-    { key: 'approved', label: '已审核通过', value: progress?.approvedCount || 0, description: '当前处于审核通过后链路的文章数量' },
+    { key: 'approved', label: '已就绪', value: progress?.approvedCount || 0, description: '当前处于可发布状态的文章数量' },
     { key: 'distributed', label: '已分发', value: progress?.distributedCount || 0, description: '已实际进入分发执行的去重文章数量' },
     { key: 'published', label: '发布成功', value: progress?.publishedCount || 0, description: '分发任务成功提交或确认的去重文章数量' },
-    { key: 'pending', label: '待处理', value: progress?.pendingCount || 0, description: '待审核/待修改文章与待执行分发任务按文章去重' },
+    { key: 'pending', label: '待处理', value: progress?.pendingCount || 0, description: '待执行分发任务按文章去重' },
     { key: 'generation_failed', label: '生成失败', value: progress?.generationFailureCount || 0, description: '内容生成批次中的失败条目数量' },
     { key: 'distribution_failed', label: '分发失败', value: progress?.distributionFailureCount || 0, description: '分发任务失败的去重文章数量' },
   ]
@@ -382,6 +382,12 @@ const contentProgressItems = computed<ProjectDashboardContentProgressItem[]>(() 
 const projectStageLabel = computed(() => {
   const key = String(summary.projectStage || '')
   return PROJECT_STAGE_MAP[key as keyof typeof PROJECT_STAGE_MAP]?.label || key || '-'
+})
+const windowEndDate = computed(() => formatDate(new Date()))
+const windowStartDate = computed(() => {
+  const date = new Date()
+  date.setDate(date.getDate() - selectedDays.value + 1)
+  return formatDate(date)
 })
 const servicePeriod = computed(() => {
   if (!summary.startDate && !summary.endDate) return '-'
@@ -405,6 +411,7 @@ async function loadTrend() {
 }
 
 async function loadDetails() {
+  ensureDetailDateWindow()
   const { data } = await getPublicProjectDashboardDetails(shareCode, {
     page: detailPage.page,
     size: detailPage.size,
@@ -418,7 +425,9 @@ async function loadDetails() {
 
 async function changeDays(days: number) {
   selectedDays.value = days
-  await Promise.all([loadSummary(), loadTrend()])
+  detailPage.page = 1
+  syncDetailDateWindow()
+  await Promise.all([loadSummary(), loadTrend(), loadDetails()])
 }
 
 function searchDetails() {
@@ -429,6 +438,31 @@ function searchDetails() {
 function onDetailPageChange(page: number) {
   detailPage.page = page
   void loadDetails()
+}
+
+function syncDetailDateWindow() {
+  detailQuery.startDate = windowStartDate.value
+  detailQuery.endDate = windowEndDate.value
+}
+
+function ensureDetailDateWindow() {
+  if (!detailQuery.startDate || detailQuery.startDate < windowStartDate.value) {
+    detailQuery.startDate = windowStartDate.value
+  }
+  if (!detailQuery.endDate || detailQuery.endDate > windowEndDate.value) {
+    detailQuery.endDate = windowEndDate.value
+  }
+  if (detailQuery.startDate > detailQuery.endDate) {
+    detailQuery.startDate = windowStartDate.value
+    detailQuery.endDate = windowEndDate.value
+  }
+}
+
+function formatDate(date: Date) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
 }
 
 function formatNum(value?: number | null) {

@@ -9,7 +9,7 @@ public enum DispatchTaskType {
     BIWEEKLY_REPORT(2, true),
     BI_DAILY_POLL(3, true),
     CONTENT_GENERATION(3, true),
-    PROJECT_EXPIRE_CHECK(4, false);
+    CUSTOMER_EXPIRE_CHECK(4, false);
 
     private final int priorityLevel;
     private final boolean queueTask;

@@ -13,10 +13,11 @@ public class DispatchPlatformHealthVO {
     private Boolean enabled;
     private Integer rpmLimit;
     private Integer tpmLimit;
+    private Integer concurrencyLimit;
+    private Long activePermitCount;
     private Boolean degraded;
     private String degradedReason;
     private String currentHealthStatus;
     private LocalDateTime lastFailureAt;
     private Long exceptionCount;
 }
-

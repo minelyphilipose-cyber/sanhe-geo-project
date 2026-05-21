@@ -42,4 +42,16 @@ public interface CompanyChannelQuotaUsageMapper extends BaseMapper<CompanyChanne
                         @Param("channelCode") String channelCode,
                         @Param("periodType") String periodType,
                         @Param("periodKey") String periodKey);
+
+    @Update("UPDATE company_channel_quota_usage " +
+            "SET quota_limit = #{quotaLimit} " +
+            "WHERE company_id = #{companyId} " +
+            "  AND channel_code = #{channelCode} " +
+            "  AND period_type = #{periodType} " +
+            "  AND period_key = #{periodKey}")
+    int updateQuotaLimit(@Param("companyId") Long companyId,
+                         @Param("channelCode") String channelCode,
+                         @Param("periodType") String periodType,
+                         @Param("periodKey") String periodKey,
+                         @Param("quotaLimit") Integer quotaLimit);
 }

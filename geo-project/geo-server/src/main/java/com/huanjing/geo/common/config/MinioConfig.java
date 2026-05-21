@@ -12,10 +12,12 @@ public class MinioConfig {
     public MinioClient minioClient(
             @Value("${geo.minio.endpoint}") String endpoint,
             @Value("${geo.minio.access-key}") String accessKey,
-            @Value("${geo.minio.secret-key}") String secretKey
+            @Value("${geo.minio.secret-key}") String secretKey,
+            @Value("${geo.minio.region:us-east-1}") String region
     ) {
         return MinioClient.builder()
                 .endpoint(endpoint)
+                .region(region)
                 .credentials(accessKey, secretKey)
                 .build();
     }

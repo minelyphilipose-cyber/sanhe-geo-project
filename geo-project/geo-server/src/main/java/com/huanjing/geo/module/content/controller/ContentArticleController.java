@@ -10,12 +10,16 @@ import com.huanjing.geo.module.content.dto.ArticlePublishRequest;
 import com.huanjing.geo.module.content.dto.ArticleResubmitRequest;
 import com.huanjing.geo.module.content.dto.ArticleReviewRequest;
 import com.huanjing.geo.module.content.dto.ArticleRevisionSaveRequest;
+import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
+import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
+import com.huanjing.geo.module.content.dto.BatchArticleGenerationDetailResponse;
 import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaCookieStatusBatchRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaCookieStatusBatchResponse;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.service.ArticleAiDraftService;
 import com.huanjing.geo.module.content.service.ArticleSelfMediaCookieStatusService;
+import com.huanjing.geo.module.content.service.BatchArticleGenerationService;
 import com.huanjing.geo.module.content.service.ContentArticleService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -35,14 +39,22 @@ public class ContentArticleController {
     private final ContentArticleService contentArticleService;
     private final ArticleAiDraftService articleAiDraftService;
     private final ArticleSelfMediaCookieStatusService selfMediaCookieStatusService;
+    private final BatchArticleGenerationService batchArticleGenerationService;
 
     @GetMapping
     public R<Page<ArticleDraft>> page(@RequestParam(required = false) String projectName,
                                       @RequestParam(required = false) String status,
                                       @RequestParam(required = false) String articleType,
+                                      @RequestParam(required = false) String articleTypeCode,
+                                      @RequestParam(required = false) String channelGroupCode,
+                                      @RequestParam(required = false) String channelSubCode,
+                                      @RequestParam(required = false) String generationMode,
+                                      @RequestParam(required = false) String createdStartDate,
+                                      @RequestParam(required = false) String createdEndDate,
                                       @RequestParam(defaultValue = "1") Long current,
                                       @RequestParam(defaultValue = "10") Long size) {
-        return R.ok(contentArticleService.page(projectName, status, articleType, current, size));
+        return R.ok(contentArticleService.page(projectName, status, articleType, articleTypeCode,
+                channelGroupCode, channelSubCode, generationMode, createdStartDate, createdEndDate, current, size));
     }
 
     @PostMapping("/manual")
@@ -60,6 +72,16 @@ public class ContentArticleController {
             @Valid @RequestBody ArticleAiDraftPreviewRequest req
     ) throws Exception {
         return R.ok(await(articleAiDraftService.preview(req)));
+    }
+
+    @PostMapping("/batch-generate")
+    public R<BatchArticleGenerateResponse> batchGenerate(@Valid @RequestBody BatchArticleGenerateRequest req) {
+        return R.ok(batchArticleGenerationService.create(req));
+    }
+
+    @GetMapping("/batch-generate/{batchId}")
+    public R<BatchArticleGenerationDetailResponse> batchGenerateDetail(@PathVariable Long batchId) {
+        return R.ok(batchArticleGenerationService.detail(batchId));
     }
 
     @PostMapping("/self-media-cookie-status/batch")
@@ -89,6 +111,12 @@ public class ContentArticleController {
     @PostMapping("/{articleId}/review")
     public R<Void> review(@PathVariable Long articleId, @Valid @RequestBody ArticleReviewRequest req) {
         contentArticleService.review(articleId, req);
+        return R.ok();
+    }
+
+    @DeleteMapping("/{articleId}")
+    public R<Void> delete(@PathVariable Long articleId) {
+        contentArticleService.deleteUnpublished(articleId);
         return R.ok();
     }
 

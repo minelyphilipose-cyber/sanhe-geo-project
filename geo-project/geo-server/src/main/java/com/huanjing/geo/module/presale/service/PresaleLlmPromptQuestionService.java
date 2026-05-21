@@ -133,6 +133,10 @@ public class PresaleLlmPromptQuestionService {
         if (counts.getOrDefault(PresalePromptCategoryCode.COMPARISON, 0) <= 0) {
             errors.add(new LlmPromptQuestionDraftValidator.ValidationError(null, "COMPARISON", "对比型问题数量必须大于 0"));
         }
+        if (counts.getOrDefault(PresalePromptCategoryCode.COGNITIVE, 0) < LlmPromptQuestionDraftValidator.MIN_COGNITIVE_COUNT) {
+            errors.add(new LlmPromptQuestionDraftValidator.ValidationError(null, "COGNITIVE",
+                    "认知型问题数量必须至少 " + LlmPromptQuestionDraftValidator.MIN_COGNITIVE_COUNT + " 条"));
+        }
         return errors;
     }
 
@@ -165,6 +169,9 @@ public class PresaleLlmPromptQuestionService {
                 continue;
             }
             item.setPromptContent(validator.normalizeQuestionText(item.getPromptContent()));
+            if (isProblemQuestionWithTargetBrand(item, req.getBrandName())) {
+                continue;
+            }
             if (!validator.validateQuestionOnly(item).isEmpty()) {
                 continue;
             }
@@ -176,6 +183,13 @@ public class PresaleLlmPromptQuestionService {
             acceptedCounts.merge(item.getCategoryCode(), 1, Integer::sum);
         }
         return accepted;
+    }
+
+    private boolean isProblemQuestionWithTargetBrand(LlmPromptQuestionDraftRequest item, String brandName) {
+        return item.getCategoryCode() == PresalePromptCategoryCode.PROBLEM
+                && StringUtils.hasText(brandName)
+                && StringUtils.hasText(item.getPromptContent())
+                && item.getPromptContent().contains(brandName.trim());
     }
 
     private String invokeOnce(String userPrompt) throws Exception {

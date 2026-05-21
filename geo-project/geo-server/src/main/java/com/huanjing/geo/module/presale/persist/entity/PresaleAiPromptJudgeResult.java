@@ -22,6 +22,7 @@ public class PresaleAiPromptJudgeResult {
     private String competitorName;
     private String judgeStatus;
     private Integer judgeAttemptCount;
+    private String judgePlatformCode;
     private String judgeModelId;
     private BigDecimal judgeTemperature;
     private String judgeError;
@@ -42,4 +43,3 @@ public class PresaleAiPromptJudgeResult {
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
-

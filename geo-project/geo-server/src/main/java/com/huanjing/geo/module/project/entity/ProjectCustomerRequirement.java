@@ -8,15 +8,12 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("project_platform_binding")
-public class ProjectPlatformBinding {
+@TableName("project_customer_requirement")
+public class ProjectCustomerRequirement {
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long projectId;
-    private String platformCode;
-    private String platformName;
-    private String priorityLevel;
+    private String requirementText;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }
-

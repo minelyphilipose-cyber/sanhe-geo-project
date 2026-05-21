@@ -15,6 +15,7 @@ import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessErrorCodes;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.extension.ExtensionErrorCodes;
+import com.huanjing.geo.module.extension.dto.ExtensionTaskPublishReportRequest;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -24,6 +25,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -256,6 +258,42 @@ class ExtensionTaskStateServiceTest {
     }
 
     @Test
+    void publishedAuditsPlatformCompletionReport() {
+        stubTask("filled");
+        when(taskMapper.markSemiAutoPublished(eq(30L), any(), eq(99L))).thenReturn(1);
+        when(articleDraftMapper.update(any(), any())).thenReturn(1);
+
+        assertEquals("published", service.published(30L, 99L, 7L, new ExtensionTaskPublishReportRequest(
+                "draft_saved_clicked",
+                "https://mp.toutiao.com/editor",
+                "toutiao",
+                "保存草稿"
+        )).status());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> detailCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(auditSupport).record(
+                eq("SEMI_AUTO_TASK_PUBLISHED"),
+                eq(AuditResult.SUCCESS),
+                eq(AuditMode.SYNC),
+                eq(false),
+                eq(99L),
+                eq(10L),
+                eq(20L),
+                eq(30L),
+                eq(7L),
+                eq("DISTRIBUTION_TASK"),
+                eq("30"),
+                eq(null),
+                eq(null),
+                detailCaptor.capture()
+        );
+        assertEquals("draft_saved_clicked", detailCaptor.getValue().get("action"));
+        assertEquals("toutiao", detailCaptor.getValue().get("platform"));
+        assertEquals("保存草稿", detailCaptor.getValue().get("detectedText"));
+    }
+
+    @Test
     void publishedNonFilledTaskIsRejected() {
         stubTask("filling");
         when(taskMapper.markSemiAutoPublished(eq(30L), any(), eq(99L))).thenReturn(0);
@@ -281,15 +319,60 @@ class ExtensionTaskStateServiceTest {
     }
 
     @Test
+    void abandonMarksTaskFailedRestoresArticleAndRefundsQuota() {
+        stubTask("filled");
+        when(taskMapper.abandonSemiAutoTask(eq(30L), any(), any())).thenReturn(1);
+        when(articleDraftMapper.update(any(), any())).thenReturn(1);
+
+        assertEquals("failed", service.abandon(30L, 99L, 7L).status());
+
+        verify(taskMapper).abandonSemiAutoTask(eq(30L), any(), any());
+        ArgumentCaptor<ArticleDraft> articleUpdate = forClass(ArticleDraft.class);
+        verify(articleDraftMapper).update(articleUpdate.capture(), any());
+        assertEquals("approved", articleUpdate.getValue().getStatus());
+        verify(companyChannelQuotaService).refundDistribution(30L);
+        verify(auditSupport).record(
+                eq("SEMI_AUTO_TASK_ABANDONED"),
+                eq(AuditResult.SUCCESS),
+                eq(AuditMode.SYNC),
+                eq(false),
+                eq(99L),
+                eq(10L),
+                eq(20L),
+                eq(30L),
+                eq(7L),
+                eq("DISTRIBUTION_TASK"),
+                eq("30"),
+                eq(null),
+                eq(null),
+                any()
+        );
+    }
+
+    @Test
+    void abandonStateConflictDoesNotRestoreArticleOrRefundQuota() {
+        stubTask("published");
+        when(taskMapper.abandonSemiAutoTask(eq(30L), any(), any())).thenReturn(0);
+
+        BizException ex = assertThrows(BizException.class, () -> service.abandon(30L, 99L, 7L));
+
+        assertEquals(ExtensionErrorCodes.TASK_STATE_CONFLICT, ex.getCode());
+        verifyNoInteractions(articleDraftMapper);
+        verifyNoInteractions(companyChannelQuotaService);
+    }
+
+    @Test
     void reclaimTokenIssuedStaleTaskReturnsItToTokenIssuedWithFreshIssuedAt() {
         DistributionTask task = task("token_issued");
         task.setFillTokenIssuedAt(LocalDateTime.now().minusMinutes(20));
         when(taskMapper.selectStaleSemiAutoTasks(any(), any(), eq(100))).thenReturn(List.of(task));
         when(taskMapper.reclaimSemiAutoTask(eq(30L), eq("token_issued"), any())).thenReturn(1);
+        when(articleDraftMapper.update(any(), any())).thenReturn(1);
 
         assertEquals(1, service.reclaimStaleTasks());
 
         verify(taskMapper).reclaimSemiAutoTask(eq(30L), eq("token_issued"), any());
+        verify(articleDraftMapper).update(any(), any());
         verify(auditService).record(any(AuditEvent.class));
     }
 
@@ -299,6 +382,7 @@ class ExtensionTaskStateServiceTest {
         task.setLastHeartbeatAt(LocalDateTime.now().minusMinutes(20));
         when(taskMapper.selectStaleSemiAutoTasks(any(), any(), eq(100))).thenReturn(List.of(task));
         when(taskMapper.reclaimSemiAutoTask(eq(30L), eq("filling"), any())).thenReturn(1);
+        when(articleDraftMapper.update(any(), any())).thenReturn(1);
 
         assertEquals(1, service.reclaimStaleTasks());
 
@@ -311,6 +395,7 @@ class ExtensionTaskStateServiceTest {
         task.setFilledAt(LocalDateTime.now().minusMinutes(20));
         when(taskMapper.selectStaleSemiAutoTasks(any(), any(), eq(100))).thenReturn(List.of(task));
         when(taskMapper.reclaimSemiAutoTask(eq(30L), eq("filled"), any())).thenReturn(1);
+        when(articleDraftMapper.update(any(), any())).thenReturn(1);
 
         assertEquals(1, service.reclaimStaleTasks());
 

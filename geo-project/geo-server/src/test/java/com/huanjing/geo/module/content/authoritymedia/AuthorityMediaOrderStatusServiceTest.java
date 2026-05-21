@@ -47,9 +47,9 @@ class AuthorityMediaOrderStatusServiceTest {
     void checkDueNewsMediaOrders_marksPublishedWhenRemoteStatusCompleted() throws Exception {
         AuthorityMediaOrder order = order(1L, 41L, "AM-1", 3);
         when(orderMapper.selectDueForStatusCheck(any(), eq(50))).thenReturn(List.of(order));
-        when(client.queryOrders(MeititejiaResourceType.NEWS_MEDIA, List.of("AM-1")))
+        when(client.queryOrders(MeititejiaResourceType.NEWS_MEDIA, List.of("AM1")))
                 .thenReturn(objectMapper.readTree("""
-                        {"code":200,"data":[{"no3":"AM-1","status":2,"url":"https://news.example/a"}]}
+                        {"code":200,"data":[{"no3":"AM1","status":2,"url":"https://news.example/a"}]}
                         """));
         when(orderMapper.updateRemoteStatus(eq(1L), eq(3), eq(2), eq("已完成"), eq("https://news.example/a"),
                 isNull(), any(), any(), isNull(), any(), isNull())).thenReturn(1);
@@ -67,9 +67,9 @@ class AuthorityMediaOrderStatusServiceTest {
     void checkDueNewsMediaOrders_marksRejectedAndRefundsConfirmedQuota() throws Exception {
         AuthorityMediaOrder order = order(2L, 42L, "AM-2", 4);
         when(orderMapper.selectDueForStatusCheck(any(), eq(50))).thenReturn(List.of(order));
-        when(client.queryOrders(MeititejiaResourceType.NEWS_MEDIA, List.of("AM-2")))
+        when(client.queryOrders(MeititejiaResourceType.NEWS_MEDIA, List.of("AM2")))
                 .thenReturn(objectMapper.readTree("""
-                        {"code":200,"data":[{"no3":"AM-2","status":-1,"reason":"内容违规"}]}
+                        {"code":200,"data":[{"no3":"AM2","status":-1,"reason":"内容违规"}]}
                         """));
         when(orderMapper.updateRemoteStatus(eq(2L), eq(4), eq(-1), eq("已拒稿"), isNull(),
                 eq("内容违规"), isNull(), any(), isNull(), any(), isNull())).thenReturn(1);
@@ -85,9 +85,9 @@ class AuthorityMediaOrderStatusServiceTest {
     void checkDueNewsMediaOrders_marksDeletedAsPlatformFailureAndRefundsConfirmedQuota() throws Exception {
         AuthorityMediaOrder order = order(5L, 45L, "AM-5", 7);
         when(orderMapper.selectDueForStatusCheck(any(), eq(50))).thenReturn(List.of(order));
-        when(client.queryOrders(MeititejiaResourceType.NEWS_MEDIA, List.of("AM-5")))
+        when(client.queryOrders(MeititejiaResourceType.NEWS_MEDIA, List.of("AM5")))
                 .thenReturn(objectMapper.readTree("""
-                        {"code":200,"data":[{"no3":"AM-5","status":-2,"reason":"已删除"}]}
+                        {"code":200,"data":[{"no3":"AM5","status":-2,"reason":"已删除"}]}
                         """));
         when(orderMapper.updateRemoteStatus(eq(5L), eq(7), eq(-2), eq("已删除"), isNull(),
                 eq("已删除"), isNull(), any(), isNull(), any(), isNull())).thenReturn(1);
@@ -104,9 +104,9 @@ class AuthorityMediaOrderStatusServiceTest {
     void checkDueNewsMediaOrders_schedulesNextCheckForPublishingStatus() throws Exception {
         AuthorityMediaOrder order = order(3L, 43L, "AM-3", 5);
         when(orderMapper.selectDueForStatusCheck(any(), eq(50))).thenReturn(List.of(order));
-        when(client.queryOrders(MeititejiaResourceType.NEWS_MEDIA, List.of("AM-3")))
+        when(client.queryOrders(MeititejiaResourceType.NEWS_MEDIA, List.of("AM3")))
                 .thenReturn(objectMapper.readTree("""
-                        {"code":200,"data":[{"no3":"AM-3","status":1}]}
+                        {"code":200,"data":[{"no3":"AM3","status":1}]}
                         """));
         when(orderMapper.updateRemoteStatus(eq(3L), eq(5), eq(1), eq("发布中"), isNull(),
                 isNull(), isNull(), any(), any(), any(), isNull())).thenReturn(1);
@@ -123,7 +123,7 @@ class AuthorityMediaOrderStatusServiceTest {
     void checkDueNewsMediaOrders_updatesNextCheckWhenRemoteDoesNotReturnOrder() throws Exception {
         AuthorityMediaOrder order = order(4L, 44L, "AM-4", 6);
         when(orderMapper.selectDueForStatusCheck(any(), eq(50))).thenReturn(List.of(order));
-        when(client.queryOrders(MeititejiaResourceType.NEWS_MEDIA, List.of("AM-4")))
+        when(client.queryOrders(MeititejiaResourceType.NEWS_MEDIA, List.of("AM4")))
                 .thenReturn(objectMapper.readTree("{\"code\":200,\"data\":[]}"));
         when(orderMapper.updateRemoteStatus(eq(4L), eq(6), isNull(), isNull(), isNull(),
                 isNull(), isNull(), any(), any(), eq("remote order not returned"), isNull())).thenReturn(1);
@@ -137,9 +137,9 @@ class AuthorityMediaOrderStatusServiceTest {
     void checkDueNewsMediaOrders_skipsTaskAndQuotaWhenOrderVersionChanged() throws Exception {
         AuthorityMediaOrder order = order(6L, 46L, "AM-6", 8);
         when(orderMapper.selectDueForStatusCheck(any(), eq(50))).thenReturn(List.of(order));
-        when(client.queryOrders(MeititejiaResourceType.NEWS_MEDIA, List.of("AM-6")))
+        when(client.queryOrders(MeititejiaResourceType.NEWS_MEDIA, List.of("AM6")))
                 .thenReturn(objectMapper.readTree("""
-                        {"code":200,"data":[{"no3":"AM-6","status":-1,"reason":"内容违规"}]}
+                        {"code":200,"data":[{"no3":"AM6","status":-1,"reason":"内容违规"}]}
                         """));
         when(orderMapper.updateRemoteStatus(eq(6L), eq(8), eq(-1), eq("已拒稿"), isNull(),
                 eq("内容违规"), isNull(), any(), isNull(), any(), isNull())).thenReturn(0);
@@ -156,7 +156,7 @@ class AuthorityMediaOrderStatusServiceTest {
     void checkDueNewsMediaOrders_failsWhenOrderListShapeIsUnexpected() throws Exception {
         AuthorityMediaOrder order = order(7L, 47L, "AM-7", 9);
         when(orderMapper.selectDueForStatusCheck(any(), eq(50))).thenReturn(List.of(order));
-        when(client.queryOrders(MeititejiaResourceType.NEWS_MEDIA, List.of("AM-7")))
+        when(client.queryOrders(MeititejiaResourceType.NEWS_MEDIA, List.of("AM7")))
                 .thenReturn(objectMapper.readTree("""
                         {"code":200,"data":{"error":"unexpected"}}
                         """));

@@ -2,6 +2,7 @@ import request from './request'
 import type {
   DispatchAlertItem,
   DispatchDashboardMetrics,
+  LlmPoolSnapshot,
   DispatchPlatformHealthItem,
   DispatchTaskItem,
   PageResult,
@@ -41,6 +42,10 @@ export function getDispatchTasks(params?: DispatchTaskQuery) {
 
 export function getDispatchPlatforms(params?: DispatchRangeParams) {
   return request.get<R<DispatchPlatformHealthItem[]>>('/dispatch/monitor/platforms', { params })
+}
+
+export function getLlmPoolSnapshot() {
+  return request.get<R<LlmPoolSnapshot>>('/monitoring/llm-pool')
 }
 
 export function getDispatchAlerts(params?: DispatchAlertQuery) {

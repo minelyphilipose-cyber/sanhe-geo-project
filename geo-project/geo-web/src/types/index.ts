@@ -1,5 +1,5 @@
 ﻿/* ====================================================
-   API 鍝嶅簲鍖呰
+   API 响应包装
    ==================================================== */
 export interface R<T = any> {
   code: number
@@ -55,7 +55,7 @@ export type RoleType =
 
 export type PackageType = 'trial_6980' | 'standard_12800' | 'growth_26800'
 
-export type ProjectStatus = 'draft' | 'active' | 'paused' | 'dispute' | 'completed' | 'archived'
+export type ProjectStatus = 'pending_start' | 'active' | 'paused' | 'expired'
 
 export type ProjectStage =
   | 'pending_start'
@@ -88,7 +88,7 @@ export type TrainingStatus = 'not_trained' | 'in_training' | 'passed' | 'product
 export type AlertSeverity = 'info' | 'warn' | 'error' | 'critical'
 
 /* ====================================================
-   涓氬姟瀹炰綋
+   业务实体
    ==================================================== */
 export interface Company {
   id: number
@@ -128,8 +128,11 @@ export interface Brand {
   companyId: number
   industry: string
   brandName: string
+  brandShortName?: string | null
   brandSlug: string
   mainBusiness: string | null
+  coreProducts?: string | null
+  brandPositioning?: string | null
   serviceArea: string | null
   provinceCode?: string | null
   provinceName?: string | null
@@ -147,8 +150,8 @@ export interface Brand {
   wechat: string | null
   description: string | null
   businessIntro?: string | null
-  standardBrandStatement: string | null
-  businessStandardStatement?: string | null
+  brandQualificationDescription?: string | null
+  brandCaseDescription?: string | null
   standardStatement?: {
     positioning?: string | null
     selling_points?: string[] | null
@@ -164,6 +167,8 @@ export interface Brand {
   forbiddenPhrases: string | string[] | null
   geoSiteCode?: string | null
   geoSiteStatus?: 'active' | 'disabled' | string | null
+  industrySiteName?: string | null
+  industrySiteCode?: string | null
   status?: string
   createdAt: string
   updatedAt: string
@@ -235,7 +240,9 @@ export interface Project {
   startDate: string | null
   activatedAt?: string | null
   endDate: string | null
+  expiredAt?: string | null
   primaryGoal: string | null
+  customerRequirements?: string[]
   ownerType: OwnerType
   sourceType?: 'internal' | 'partner'
   partnerId: number | null
@@ -399,7 +406,10 @@ export interface AIPlatformConfigItem {
   concurrencyLimit?: number | null
   enabled: boolean
   enabledForPresale?: boolean
+  presaleEvaluateEnabled?: boolean
   enabledForArticle?: boolean
+  enabledForGeoQuestion?: boolean
+  enabledForQuestionPoll?: boolean
   maxRetry?: number | null
   timeoutMs?: number | null
   rateLimitQps?: number | null
@@ -830,11 +840,28 @@ export interface DispatchPlatformHealthItem {
   enabled: boolean
   rpmLimit: number
   tpmLimit: number
+  concurrencyLimit?: number | null
+  activePermitCount?: number | null
   degraded: boolean
   degradedReason?: string | null
   currentHealthStatus?: string | null
   lastFailureAt?: string | null
   exceptionCount: number
+}
+
+export interface LlmPoolSnapshot {
+  enabled: boolean
+  globalConcurrency: number
+  activeGlobal: number
+  featureConcurrency?: Record<string, number>
+  activeFeatures?: Record<string, number>
+  trackedLeases: number
+  counters: Record<string, number>
+  circuitBreakers?: Record<string, {
+    failureCount?: number
+    open?: boolean
+    openedAtMillis?: number
+  }>
 }
 
 export interface DispatchAlertItem {
@@ -859,9 +886,17 @@ export interface ArticleDraft {
   batchId?: number | null
   projectId: number
   projectName?: string
+  targetChannel?: string | null
   articleType: 'faq' | 'scenario_content' | 'industry_article' | 'stage_advice' | string
+  articleTypeCode?: string | null
+  contentStyle?: string | null
+  channelGroupCode?: string | null
+  channelSubCode?: string | null
+  allocationMode?: string | null
+  topic?: string | null
+  topicAsQuestion?: string | null
   title: string
-  status: 'pending_review' | 'approved' | 'rejected' | 'under_revision' | 'distributing' | 'distributed' | 'published' | 'unpublished' | string
+  status: 'approved' | 'distributing' | 'distributed' | 'published' | 'unpublished' | string
   hasRisk: boolean
   riskSeverity: 'none' | 'warn' | 'block' | string
   riskWordsJson?: string | null
@@ -869,6 +904,8 @@ export interface ArticleDraft {
   duplicateScore?: number | null
   duplicateArticleId?: number | null
   currentVersionNo: number
+  systemGenerated?: boolean | null
+  generationMode?: 'batch' | 'single' | string | null
   createdAt: string
   updatedAt: string
   publishedAt?: string | null
@@ -910,9 +947,33 @@ export interface ArticlePublishLog {
   createdAt: string
 }
 
+export interface BatchArticleGenerationTaskDetail {
+  id: number
+  batchId: number
+  projectId: number
+  articleId?: number | null
+  rowNo?: number | null
+  articleIndexInRow?: number | null
+  articleIndexInBatch?: number | null
+  articleType?: string | null
+  tone?: string | null
+  contentStyle?: string | null
+  length?: string | null
+  topic?: string | null
+  topicAsQuestion?: string | null
+  keywordGroupId?: number | null
+  keywordGroupName?: string | null
+  contentAngle?: string | null
+  audiencePerspective?: string | null
+  extraPrompt?: string | null
+  status?: string | null
+  qualityStatus?: string | null
+}
+
 export interface ArticleDetailResponse {
   article: ArticleDraft
   project: Project
+  batchGenerationTask?: BatchArticleGenerationTaskDetail | null
   versions: ArticleDraftVersion[]
   reviewLogs: ArticleReviewLog[]
   publishLogs: ArticlePublishLog[]
@@ -1055,6 +1116,7 @@ export interface RecommendedSite {
   siteId: number
   siteName: string
   domain: string
+  iconUrl?: string | null
   tier: 'S0' | 'S1' | 'S2' | string
   status: string
   integrationMethod: 'rest_api' | 'ftp' | 'email' | 'manual' | string
@@ -1074,7 +1136,9 @@ export interface RecommendedSitesResponse {
 export interface PublishSite {
   id: number
   siteName: string
+  siteCode: string
   domain: string
+  iconUrl?: string | null
   industryTags?: string | string[] | null
   tier: 'S0' | 'S1' | 'S2' | string
   status: 'active' | 'suspended' | 'maintenance' | string

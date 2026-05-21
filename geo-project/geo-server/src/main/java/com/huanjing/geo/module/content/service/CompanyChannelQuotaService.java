@@ -68,6 +68,7 @@ public class CompanyChannelQuotaService {
         }
 
         usageMapper.insertIgnore(companyId, channel, quota.periodType(), periodKey, quota.quotaLimit());
+        usageMapper.updateQuotaLimit(companyId, channel, quota.periodType(), periodKey, quota.quotaLimit());
         int reserved = usageMapper.tryReserve(companyId, channel, quota.periodType(), periodKey);
         if (reserved != 1) {
             throw new BizException(400, "Distribution quota exhausted for channel " + channel);
@@ -122,6 +123,7 @@ public class CompanyChannelQuotaService {
         SnapshotQuota quota = resolveSnapshotQuota(binding, channel);
         String periodKey = periodKey(quota.periodType());
         usageMapper.insertIgnore(companyId, channel, quota.periodType(), periodKey, quota.quotaLimit());
+        usageMapper.updateQuotaLimit(companyId, channel, quota.periodType(), periodKey, quota.quotaLimit());
         CompanyChannelQuotaUsage usage = usageMapper.selectOne(
                 new LambdaQueryWrapper<CompanyChannelQuotaUsage>()
                         .eq(CompanyChannelQuotaUsage::getCompanyId, companyId)
@@ -258,6 +260,7 @@ public class CompanyChannelQuotaService {
         return switch (targetKind.trim()) {
             case DistributionTargetKind.BRAND_OFFICIAL_SITE, DistributionTargetKind.BRAND_GEO_SITE -> "official_site";
             case DistributionTargetKind.INDUSTRY_SITE -> "industry_site";
+            case DistributionTargetKind.FORUM_SITE -> "forum";
             case DistributionTargetKind.MP_ACCOUNT -> "self_media";
             case DistributionTargetKind.AUTHORITY_MEDIA -> "authority_media";
             case DistributionTargetKind.SITE -> throw new BizException(400, "Legacy site target is not supported by company package channel quota");

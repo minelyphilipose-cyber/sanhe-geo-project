@@ -40,7 +40,15 @@
           :loading="retrying"
           @click="handleRetry"
         >
-          重试生成
+          从失败处继续
+        </el-button>
+        <el-button
+          v-if="isFailed"
+          size="small"
+          :loading="regenerating"
+          @click="handleRegenerate"
+        >
+          从头重新生成
         </el-button>
         <el-button size="small" type="primary" @click="goProgress">查看生成进度</el-button>
         <el-button size="small" @click="goList">返回列表</el-button>
@@ -58,12 +66,13 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 
 import {
   getLatestDetail,
   getVersionDetail,
+  regenerateVersion,
   retryVersion,
   type ReportDetailVO
 } from '@/api/presaleReport'
@@ -98,6 +107,7 @@ const detail = ref<ReportDetailVO | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 const retrying = ref(false)
+const regenerating = ref(false)
 const isFailed = computed(() => detail.value?.version.generationStatus === 'FAILED')
 
 /**
@@ -250,16 +260,38 @@ function goProgress() {
 
 async function handleRetry() {
   const versionNo = detail.value?.version.versionNo
-  if (retrying.value || !versionNo || !isFailed.value) return
+  if (retrying.value || regenerating.value || !versionNo || !isFailed.value) return
   retrying.value = true
   try {
     await retryVersion(reportId.value, versionNo)
-    ElMessage.success('已提交重试')
+    ElMessage.success('已从失败处继续生成')
     void router.push(`/admin/presale/report/${reportId.value}/progress`)
   } catch (e: unknown) {
-    ElMessage.error((e as Error).message || '提交重试失败')
+    ElMessage.error((e as Error).message || '提交从失败处继续失败')
   } finally {
     retrying.value = false
+  }
+}
+
+async function handleRegenerate() {
+  const versionNo = detail.value?.version.versionNo
+  if (retrying.value || regenerating.value || !versionNo || !isFailed.value) return
+  const confirmed = await ElMessageBox.confirm(
+    '从头重新生成会清理本版本已生成的调用结果,并重新执行完整生成流程。继续吗?',
+    '从头重新生成',
+    { confirmButtonText: '重新生成', cancelButtonText: '取消', type: 'warning' }
+  ).catch(() => false)
+  if (!confirmed) return
+
+  regenerating.value = true
+  try {
+    await regenerateVersion(reportId.value, versionNo)
+    ElMessage.success('已提交从头重新生成')
+    void router.push(`/admin/presale/report/${reportId.value}/progress`)
+  } catch (e: unknown) {
+    ElMessage.error((e as Error).message || '提交从头重新生成失败')
+  } finally {
+    regenerating.value = false
   }
 }
 

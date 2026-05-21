@@ -1,8 +1,36 @@
 ﻿<template>
-  <div class="space-y-4">
+  <div class="admin-page">
     <el-page-header content="客户详情" @back="$router.back()" />
 
-    <el-card v-loading="loading">
+    <section v-if="company" class="admin-object-hero customer-detail-hero" :class="customerHeroClass((company as any).status)">
+      <div class="admin-object-hero-main">
+        <div>
+          <h1 class="admin-object-title">{{ company.companyName }}</h1>
+          <div class="admin-object-meta">
+            {{ companyIndustryText }} · {{ companyRegion(company) }} · {{ dictStore.label('owner_type', company.ownerType) || '-' }}
+          </div>
+        </div>
+        <span class="admin-status-tag" :class="companyStatusClass((company as any).status)">
+          {{ dictStore.label('company_status', (company as any).status) || '-' }}
+        </span>
+      </div>
+      <div class="admin-object-kpis">
+        <div class="admin-object-kpi customer-hero-kpi customer-hero-kpi--brand">
+          <span>品牌数量</span>
+          <strong>{{ brands.length }}</strong>
+        </div>
+        <div class="admin-object-kpi customer-hero-kpi customer-hero-kpi--package">
+          <span>套餐状态</span>
+          <strong>{{ activePackageBinding ? '已绑定' : '未绑定' }}</strong>
+        </div>
+        <div class="admin-object-kpi customer-hero-kpi customer-hero-kpi--quota">
+          <span>关键词组额度</span>
+          <strong>{{ keywordGroupQuotaText }}</strong>
+        </div>
+      </div>
+    </section>
+
+    <el-card v-loading="loading" class="admin-rich-card">
       <template #header>
         <div class="flex items-center justify-between">
           <span>客户信息</span>
@@ -12,17 +40,15 @@
           </div>
         </div>
       </template>
-      <el-descriptions :column="3" border>
-        <el-descriptions-item label="客户名称">{{ company?.companyName }}</el-descriptions-item>
-        <el-descriptions-item label="行业">{{ companyIndustryText }}</el-descriptions-item>
-        <el-descriptions-item label="地区">{{ companyRegion(company) }}</el-descriptions-item>
-        <el-descriptions-item label="归属">{{ dictStore.label('owner_type', company?.ownerType) }}</el-descriptions-item>
-        <el-descriptions-item label="合伙人">{{ (company as any)?.partnerName || '-' }}</el-descriptions-item>
-        <el-descriptions-item label="状态">{{ dictStore.label('company_status', (company as any)?.status) }}</el-descriptions-item>
-      </el-descriptions>
+      <div class="admin-info-grid">
+        <div v-for="item in customerBasicInfoItems" :key="item.label" class="admin-info-item">
+          <span class="admin-info-label">{{ item.label }}</span>
+          <strong class="admin-info-value">{{ item.value }}</strong>
+        </div>
+      </div>
     </el-card>
 
-    <el-card v-loading="packageLoading">
+    <el-card v-loading="packageLoading" class="admin-rich-card">
       <template #header>
         <div class="flex items-center justify-between">
           <span>客户套餐</span>
@@ -35,39 +61,52 @@
       <template v-if="activePackageBinding">
         <el-descriptions :column="4" border>
           <el-descriptions-item label="套餐名称">{{ activePackageBinding.packageName }}</el-descriptions-item>
-          <el-descriptions-item label="套餐类型">{{ activePackageBinding.packageType }}</el-descriptions-item>
-          <el-descriptions-item label="标准价格(元)">{{ moneyText(activePackageBinding.standardPrice) }}</el-descriptions-item>
           <el-descriptions-item label="服务周期">{{ activePackageBinding.serviceMonths }} 个月</el-descriptions-item>
           <el-descriptions-item label="关键词组总额度">{{ activePackageBinding.keywordGroupLimit }}</el-descriptions-item>
-          <el-descriptions-item label="绑定时间">{{ activePackageBinding.boundAt || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="绑定时间">{{ formatDateTimeSeconds(activePackageBinding.boundAt) }}</el-descriptions-item>
           <el-descriptions-item label="状态">{{ packageStatusLabel(activePackageBinding.status) }}</el-descriptions-item>
         </el-descriptions>
-        <div v-loading="keywordGroupQuotaLoading" class="quota-panel">
+        <div v-loading="keywordGroupQuotaLoading" class="quota-panel quota-panel--keyword">
           <div class="quota-panel__header">
-            <span>关键词组额度</span>
-            <span>{{ keywordGroupQuotaText }}</span>
+            <div>
+              <span>关键词组额度</span>
+              <small>统计客户下所有已激活项目分配的问题额度</small>
+            </div>
+            <strong>{{ keywordGroupQuotaText }}</strong>
           </div>
           <el-progress
+            class="keyword-total-progress"
             :percentage="keywordGroupQuotaPercentage"
             :status="keywordGroupQuotaStatus"
-            :stroke-width="10"
+            :color="keywordGroupQuotaColor"
+            :stroke-width="9"
+            :show-text="false"
           />
           <div class="quota-panel__meta">
             <span v-if="isKeywordGroupOverQuota">超出额度 {{ keywordGroupOverflow }}</span>
             <span v-else>剩余额度 {{ keywordGroupQuota?.remainingCount ?? 0 }}</span>
-            <span>统计客户下所有已激活项目分配的问题额度</span>
           </div>
           <div class="keyword-tier-list">
-            <div v-for="item in keywordGroupTierItems" :key="item.tier" class="keyword-tier-row">
+            <div
+              v-for="item in keywordGroupTierItems"
+              :key="item.tier"
+              class="keyword-tier-row"
+              :class="`keyword-tier-row--${item.tier.toLowerCase()}`"
+            >
               <div class="keyword-tier-row__main">
-                <span>{{ item.label }}</span>
-                <strong>{{ item.used }} / {{ item.limit }}</strong>
+                <div>
+                  <span>{{ item.label }}</span>
+                  <strong>{{ item.used }} / {{ item.limit }}</strong>
+                </div>
+                <em>{{ item.percentage }}%</em>
               </div>
               <el-progress
+                class="keyword-tier-progress"
                 :percentage="item.percentage"
                 :status="item.status"
+                :color="item.color"
                 :show-text="false"
-                :stroke-width="8"
+                :stroke-width="7"
               />
               <div class="keyword-tier-row__meta">
                 <span v-if="item.overflow > 0">超出 {{ item.overflow }}</span>
@@ -143,66 +182,19 @@
       <el-empty v-else description="当前客户未绑定套餐" />
       <el-table v-if="packageBindingHistory.length" class="mt-4" :data="packageBindingHistory" border>
         <el-table-column prop="packageName" label="历史套餐" min-width="180" />
-        <el-table-column prop="packageType" label="类型" min-width="150" />
         <el-table-column label="状态" width="110">
           <template #default="scope">{{ packageStatusLabel(scope.row.status) }}</template>
         </el-table-column>
-        <el-table-column prop="boundAt" label="绑定时间" width="180" />
-        <el-table-column prop="unboundAt" label="解绑时间" width="180" />
+        <el-table-column label="绑定时间" width="180">
+          <template #default="scope">{{ formatDateTimeSeconds(scope.row.boundAt) }}</template>
+        </el-table-column>
+        <el-table-column label="解绑时间" width="180">
+          <template #default="scope">{{ formatDateTimeSeconds(scope.row.unboundAt) }}</template>
+        </el-table-column>
       </el-table>
     </el-card>
 
-    <el-card v-loading="accountLoading">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <span>客户余额</span>
-          <div class="space-x-2">
-            <el-button v-if="canAdjustCompanyAccount" type="primary" @click="rechargeVisible = true">充值</el-button>
-            <el-button v-if="canAdjustCompanyAccount" @click="deductVisible = true">扣款</el-button>
-          </div>
-        </div>
-      </template>
-      <el-descriptions :column="4" border>
-        <el-descriptions-item label="当前余额(元)">{{ centsToYuan(account?.currentBalance) }}</el-descriptions-item>
-        <el-descriptions-item label="累计充值(元)">{{ centsToYuan(account?.totalRecharge) }}</el-descriptions-item>
-        <el-descriptions-item label="累计扣款(元)">{{ centsToYuan(account?.totalDeduction) }}</el-descriptions-item>
-        <el-descriptions-item label="状态">{{ account?.status || '-' }}</el-descriptions-item>
-      </el-descriptions>
-      <DataState :loading="accountLoading" :empty="!accountLoading && txns.length === 0" empty-text="暂无交易记录">
-        <el-table class="mt-4" :data="txns" border>
-          <el-table-column prop="txnNo" label="流水号" min-width="220" />
-          <el-table-column label="类型" width="100">
-            <template #default="scope">{{ txnTypeLabel(scope.row.txnType) }}</template>
-          </el-table-column>
-          <el-table-column label="业务" width="120">
-            <template #default="scope">{{ bizTypeLabel(scope.row.bizType) }}</template>
-          </el-table-column>
-          <el-table-column label="金额(元)" width="120">
-            <template #default="scope">{{ centsToYuan(scope.row.amount) }}</template>
-          </el-table-column>
-          <el-table-column label="前余额(元)" width="120">
-            <template #default="scope">{{ centsToYuan(scope.row.balanceBefore) }}</template>
-          </el-table-column>
-          <el-table-column label="后余额(元)" width="120">
-            <template #default="scope">{{ centsToYuan(scope.row.balanceAfter) }}</template>
-          </el-table-column>
-          <el-table-column prop="reason" label="原因" min-width="180" />
-          <el-table-column prop="createdAt" label="时间" width="180" />
-        </el-table>
-        <div class="mt-4 flex justify-end">
-          <el-pagination
-            background
-            layout="prev, pager, next, total"
-            :current-page="txnPage.current"
-            :page-size="txnPage.size"
-            :total="txnPage.total"
-            @current-change="onTxnPageChange"
-          />
-        </div>
-      </DataState>
-    </el-card>
-
-    <el-card v-loading="brandLoading">
+    <el-card v-loading="brandLoading" class="admin-rich-card">
       <template #header>
         <div class="flex items-center justify-between">
           <span>品牌列表</span>
@@ -212,11 +204,12 @@
       <DataState :loading="brandLoading" :empty="!brandLoading && brands.length === 0" empty-text="暂无品牌数据">
         <el-table :data="brands" border>
           <el-table-column prop="brandName" label="品牌名称" min-width="180" />
-          <el-table-column prop="brandSlug" label="标识" min-width="150" />
+          <el-table-column prop="brandShortName" label="品牌简称" min-width="140" />
           <el-table-column label="行业" min-width="140">
             <template #default="scope">{{ dictStore.label('industry_tag', scope.row.industry) || scope.row.industry || '-' }}</template>
           </el-table-column>
           <el-table-column prop="mainBusiness" label="主营业务" min-width="180" />
+          <el-table-column prop="brandPositioning" label="品牌定位" min-width="180" />
           <el-table-column prop="serviceArea" label="地区" min-width="220">
             <template #default="scope">{{ brandRegion(scope.row) }}</template>
           </el-table-column>
@@ -241,10 +234,10 @@
       </DataState>
     </el-card>
 
-    <el-dialog v-model="editVisible" title="编辑客户" width="620px">
-      <el-form ref="companyFormRef" :model="companyForm" :rules="companyRules" label-width="100px">
+    <el-dialog v-model="editVisible" title="编辑客户" width="820px" class="admin-editor-dialog">
+      <el-form ref="companyFormRef" class="admin-dialog-form" :model="companyForm" :rules="companyRules" label-width="100px">
         <el-form-item label="客户名称" required><el-input v-model="companyForm.companyName" /></el-form-item>
-        <el-form-item label="行业" prop="industryTags">
+        <el-form-item class="is-full" label="行业" prop="industryTags">
           <el-select
             v-model="companyForm.industryTags"
             multiple
@@ -260,10 +253,6 @@
               :value="item.dictKey"
             />
           </el-select>
-        </el-form-item>
-        <el-form-item label="服务区域">
-          <RegionCascader v-model="companyForm.serviceAreaCodes" />
-          <div class="mt-1 text-xs text-gray-500">{{ companyServiceAreaPreview || '未选择' }}</div>
         </el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="companyForm.regionCodes" /></el-form-item>
         <el-form-item label="归属" required>
@@ -302,7 +291,7 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="备注"><el-input v-model="companyForm.remark" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="备注"><el-input v-model="companyForm.remark" type="textarea" :rows="3" /></el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>
@@ -310,10 +299,10 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="brandVisible" :title="brandMode === 'create' ? '新增品牌' : '编辑品牌'" width="680px">
-      <el-form ref="brandFormRef" :model="brandForm" :rules="brandRules" label-width="120px">
+    <el-dialog v-model="brandVisible" :title="brandMode === 'create' ? '新增品牌' : '编辑品牌'" width="860px" class="admin-editor-dialog">
+      <el-form ref="brandFormRef" class="admin-dialog-form" :model="brandForm" :rules="brandRules" label-width="120px">
         <el-form-item label="品牌名称" required><el-input v-model="brandForm.brandName" /></el-form-item>
-        <el-form-item label="品牌标识" required><el-input v-model="brandForm.brandSlug" /></el-form-item>
+        <el-form-item label="品牌简称"><el-input v-model="brandForm.brandShortName" maxlength="128" show-word-limit /></el-form-item>
         <el-form-item label="品牌行业" prop="industry" required>
           <el-select v-model="brandForm.industry" filterable style="width: 100%">
             <el-option
@@ -325,6 +314,12 @@
           </el-select>
         </el-form-item>
         <el-form-item label="主营业务"><el-input v-model="brandForm.mainBusiness" /></el-form-item>
+        <el-form-item label="核心产品">
+          <el-input v-model="brandForm.coreProducts" maxlength="500" show-word-limit placeholder="多个产品以逗号隔开" />
+        </el-form-item>
+        <el-form-item label="品牌定位">
+          <el-input v-model="brandForm.brandPositioning" maxlength="255" show-word-limit placeholder="如“某某方案服务商/代理商”“本地某某平台”" />
+        </el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="brandForm.regionCodes" /></el-form-item>
         <el-form-item label="官网"><el-input v-model="brandForm.website" /></el-form-item>
         <el-form-item label="联系电话"><el-input v-model="brandForm.phone" /></el-form-item>
@@ -339,8 +334,13 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="品牌描述"><el-input v-model="brandForm.description" type="textarea" :rows="3" /></el-form-item>
-        <el-form-item label="品牌标准表述"><el-input v-model="brandForm.standardBrandStatement" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="业务介绍"><el-input v-model="brandForm.businessIntro" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="品牌资质描述">
+          <el-input v-model="brandForm.brandQualificationDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="qualificationDescriptionPlaceholder" />
+        </el-form-item>
+        <el-form-item class="is-full" label="品牌案例描述">
+          <el-input v-model="brandForm.brandCaseDescription" type="textarea" :rows="3" maxlength="300" show-word-limit :placeholder="caseDescriptionPlaceholder" />
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="brandVisible = false">取消</el-button>
@@ -348,9 +348,9 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="packageBindVisible" title="绑定客户套餐" width="520px">
-      <el-form label-width="100px">
-        <el-form-item label="套餐" required>
+    <el-dialog v-model="packageBindVisible" title="绑定客户套餐" width="560px" class="admin-editor-dialog">
+      <el-form class="admin-dialog-form" label-width="100px">
+        <el-form-item class="is-full" label="套餐" required>
           <el-select
             v-model="packageBindForm.packagePlanId"
             filterable
@@ -360,7 +360,7 @@
             <el-option
               v-for="item in packagePlanOptions"
               :key="item.id"
-              :label="`${item.packageName} / ${moneyText(item.standardPrice)} 元 / ${item.keywordGroupLimit} 关键词`"
+              :label="`${item.packageName} / ${item.keywordGroupLimit} 关键词`"
               :value="item.id"
             />
           </el-select>
@@ -372,34 +372,6 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="rechargeVisible" title="客户充值" width="520px">
-      <el-form :model="rechargeForm" label-width="100px">
-        <el-form-item label="金额(元)" required>
-          <el-input-number v-model="rechargeForm.amountYuan" :min="0.01" :precision="2" :step="100" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="充值原因" required><el-input v-model="rechargeForm.reason" /></el-form-item>
-        <el-form-item label="线下凭证"><el-input v-model="rechargeForm.offlineReference" /></el-form-item>
-        <el-form-item label="备注"><el-input v-model="rechargeForm.remark" type="textarea" :rows="3" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="rechargeVisible = false">取消</el-button>
-        <el-button type="primary" :loading="accountSubmitting" @click="submitRecharge">确认</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="deductVisible" title="客户扣款" width="520px">
-      <el-form :model="deductForm" label-width="100px">
-        <el-form-item label="金额(元)" required>
-          <el-input-number v-model="deductForm.amountYuan" :min="0.01" :precision="2" :step="100" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="扣款原因" required><el-input v-model="deductForm.reason" /></el-form-item>
-        <el-form-item label="备注"><el-input v-model="deductForm.remark" type="textarea" :rows="3" /></el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="deductVisible = false">取消</el-button>
-        <el-button type="primary" :loading="accountSubmitting" @click="submitDeduct">确认</el-button>
-      </template>
-    </el-dialog>
   </div>
 </template>
 <script setup lang="ts">
@@ -412,19 +384,15 @@ import { useDictStore } from '@/stores/dict'
 import {
   createBrand,
   bindCompanyPackage,
-  deductCompanyAccount,
   deleteBrand,
   deleteCompany,
   getActiveCompanyPackageBinding,
   getBrandList,
-  getCompanyAccount,
-  getCompanyAccountTxns,
   getCompanyDetail,
   getCompanyDistributionQuotas,
   getCompanyPackageBindings,
   getCompanyKeywordGroupQuota,
   getSalesOwnerOptions,
-  rechargeCompanyAccount,
   unbindCompanyPackage,
   updateBrand,
   updateCompany,
@@ -432,11 +400,12 @@ import {
 } from '@/api/customer'
 import { getEnabledPackagePlans } from '@/api/packagePlan'
 import { getPartnerList, type PartnerItem } from '@/api/partner'
-import type { Brand, Company, CompanyAccount, CompanyAccountTxn, CompanyDistributionQuota, CompanyDistributionQuotaItem, CompanyPackageBinding, CompanyKeywordGroupQuota, PackagePlan } from '@/types'
+import type { Brand, Company, CompanyDistributionQuota, CompanyDistributionQuotaItem, CompanyPackageBinding, CompanyKeywordGroupQuota, PackagePlan } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
 import { errorMessage } from '@/utils/error'
+import { formatDateTimeSeconds } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -444,7 +413,6 @@ const userStore = useUserStore()
 const dictStore = useDictStore()
 const canUpdateCompany = computed(() => userStore.hasPermission('company.update'))
 const canDeleteCompany = computed(() => userStore.hasPermission('company.delete'))
-const canAdjustCompanyAccount = computed(() => userStore.hasPermission('company.account.adjust'))
 const canCreateBrand = computed(() => userStore.hasPermission('brand.create'))
 const canUpdateBrand = computed(() => userStore.hasPermission('brand.update'))
 const canDeleteBrand = computed(() => userStore.hasPermission('brand.delete'))
@@ -456,27 +424,22 @@ const hasValidId = Number.isFinite(companyId) && companyId > 0
 
 const loading = ref(false)
 const brandLoading = ref(false)
-const accountLoading = ref(false)
 const packageLoading = ref(false)
 const keywordGroupQuotaLoading = ref(false)
 const distributionQuotaLoading = ref(false)
 const saving = ref(false)
 const brandSaving = ref(false)
-const accountSubmitting = ref(false)
 const packageSubmitting = ref(false)
 
 const company = ref<Company | null>(null)
 const brands = ref<Brand[]>([])
 const partnerOptions = ref<PartnerItem[]>([])
 const salesOwnerOptions = ref<SalesOwnerOption[]>([])
-const account = ref<CompanyAccount | null>(null)
-const txns = ref<CompanyAccountTxn[]>([])
 const activePackageBinding = ref<CompanyPackageBinding | null>(null)
 const keywordGroupQuota = ref<CompanyKeywordGroupQuota | null>(null)
 const distributionQuota = ref<CompanyDistributionQuota | null>(null)
 const packageBindingHistory = ref<CompanyPackageBinding[]>([])
 const packagePlanOptions = ref<PackagePlan[]>([])
-const txnPage = reactive({ current: 1, size: 10, total: 0 })
 
 const companyFormRef = ref<FormInstance>()
 const brandFormRef = ref<FormInstance>()
@@ -489,8 +452,6 @@ const packageBindForm = reactive({
 const companyForm = reactive({
   companyName: '',
   industryTags: [] as string[],
-  serviceArea: '',
-  serviceAreaCodes: [] as string[],
   regionCodes: [] as string[],
   ownerType: 'direct',
   partnerId: null as number | null,
@@ -502,7 +463,7 @@ const companyForm = reactive({
 const companyRules: FormRules = {
   companyName: [{ required: true, message: '请输入客户名称', trigger: 'blur' }],
   industryTags: [{ required: true, message: '请选择至少一个行业', trigger: 'change' }],
-  ownerType: [{ required: true, message: '璇烽€夋嫨褰掑睘绫诲瀷', trigger: 'change' }],
+  ownerType: [{ required: true, message: '请选择归属类型', trigger: 'change' }],
 }
 
 const brandVisible = ref(false)
@@ -510,54 +471,29 @@ const brandMode = ref<'create' | 'edit'>('create')
 const brandEditingId = ref<number | null>(null)
 const brandForm = reactive({
   brandName: '',
+  brandShortName: '',
   brandSlug: '',
   industry: '',
   mainBusiness: '',
+  coreProducts: '',
+  brandPositioning: '',
   regionCodes: [] as string[],
   website: '',
   phone: '',
   wechat: '',
   status: 'active',
-  description: '',
-  standardBrandStatement: '',
+  businessIntro: '',
+  brandQualificationDescription: '',
+  brandCaseDescription: '',
 })
 const brandRules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
-  brandSlug: [
-    { required: true, message: '请输入品牌标识', trigger: 'blur' },
-    { pattern: /^[a-z0-9][a-z0-9_-]{1,127}$/, message: '品牌标识仅支持字母、数字、下划线、中划线', trigger: 'blur' },
-  ],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
 }
 
-const rechargeVisible = ref(false)
-const deductVisible = ref(false)
-const rechargeForm = reactive({ amountYuan: 100, reason: '', offlineReference: '', remark: '' })
-const deductForm = reactive({ amountYuan: 100, reason: '', remark: '' })
-
-function centsToYuan(v?: number | null) {
-  if (v == null) return '-'
-  return Number(v).toFixed(2)
-}
-
-function yuanToCents(v: number) {
-  return Number(v.toFixed(2))
-}
-
-function txnTypeLabel(value: string) {
-  const mapping: Record<string, string> = { recharge: '充值', deduction: '扣款', manual_adjust: '调整' }
-  return mapping[value] || value
-}
-
-function bizTypeLabel(value: string) {
-  const mapping: Record<string, string> = { company_prepaid: '客户预存', project_signing: '项目签约', finance_adjust: '人工调整' }
-  return mapping[value] || value
-}
-
-function moneyText(value?: number | null) {
-  if (value == null) return '-'
-  return Number(value).toFixed(2)
-}
+const qualificationDescriptionPlaceholder = '请填写品牌可公开引用的资质与背书信息，包括认证资质、检测报告、执行标准、专利/软著、荣誉奖项、协会或平台背书、生产/服务能力证明等。请写清楚名称、编号、发证机构、适用范围、有效期等可核验信息。没有真实依据的内容不要填写。'
+const caseDescriptionPlaceholder = '请填写可公开引用的品牌案例素材，包括客户类型或客户名称、项目背景、服务内容、项目规模、交付周期、合作结果、复购或长期合作情况等。如客户名称不可公开，请使用“某行业客户/某区域客户”表述，不要编造客户名或效果数据。'
+const GEO_SITE_CODE_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/
 
 function packageStatusLabel(value?: string | null) {
   const mapping: Record<string, string> = { active: '生效中', inactive: '已解绑' }
@@ -623,6 +559,11 @@ const keywordGroupQuotaStatus = computed(() => {
   }
   return undefined
 })
+const keywordGroupQuotaColor = computed(() => {
+  if (isKeywordGroupOverQuota.value) return '#ef4444'
+  if (keywordGroupQuotaPercentage.value >= 90) return '#f59e0b'
+  return '#2563eb'
+})
 const keywordGroupTierItems = computed(() => {
   const quota = keywordGroupQuota.value
   const tiers = [
@@ -632,6 +573,7 @@ const keywordGroupTierItems = computed(() => {
       limit: quota?.quotaLimitA ?? 0,
       used: quota?.usedCountA ?? 0,
       remaining: quota?.remainingCountA ?? 0,
+      color: '#2563eb',
     },
     {
       tier: 'B',
@@ -639,6 +581,7 @@ const keywordGroupTierItems = computed(() => {
       limit: quota?.quotaLimitB ?? 0,
       used: quota?.usedCountB ?? 0,
       remaining: quota?.remainingCountB ?? 0,
+      color: '#10b981',
     },
     {
       tier: 'C',
@@ -646,6 +589,7 @@ const keywordGroupTierItems = computed(() => {
       limit: quota?.quotaLimitC ?? 0,
       used: quota?.usedCountC ?? 0,
       remaining: quota?.remainingCountC ?? 0,
+      color: '#8b5cf6',
     },
   ]
   return tiers.map((item) => {
@@ -704,6 +648,21 @@ function companyRegion(value?: Company | null) {
   return regionDisplayFromPayload(value) || value.city || '-'
 }
 
+function companyStatusClass(status?: string | null) {
+  const value = String(status || '')
+  if (['active', 'signed', 'deal', 'converted'].includes(value)) return 'is-success'
+  if (['disabled', 'lost', 'deleted'].includes(value)) return 'is-muted'
+  if (['risk', 'blocked'].includes(value)) return 'is-danger'
+  return 'is-warning'
+}
+
+function customerHeroClass(status?: string | null) {
+  const value = String(status || '')
+  if (['active', 'signed', 'deal', 'converted'].includes(value)) return 'is-signed'
+  if (['disabled', 'lost', 'deleted'].includes(value)) return 'is-disabled'
+  return 'is-potential'
+}
+
 function brandRegion(value: Brand) {
   return regionDisplayFromPayload(value) || value.serviceArea || '-'
 }
@@ -730,11 +689,14 @@ function normalizeIndustryTags(tags: string[]) {
   return normalized
 }
 
+function normalizeGeoSiteCode(code?: string | null) {
+  const normalized = code?.trim().toLowerCase() || ''
+  return GEO_SITE_CODE_PATTERN.test(normalized) ? normalized : ''
+}
+
 function fillCompanyForm(data: Company) {
   companyForm.companyName = data.companyName
   companyForm.industryTags = parseIndustryTags(data.industryTags)
-  companyForm.serviceArea = (data as any).serviceArea || ''
-  companyForm.serviceAreaCodes = []
   companyForm.regionCodes = regionCodesFromPayload(data)
   companyForm.ownerType = data.ownerType
   companyForm.partnerId = data.partnerId
@@ -746,16 +708,20 @@ function fillCompanyForm(data: Company) {
 
 function resetBrandForm() {
   brandForm.brandName = ''
+  brandForm.brandShortName = ''
   brandForm.brandSlug = ''
   brandForm.industry = availableBrandIndustries.value[0] || ''
   brandForm.mainBusiness = ''
+  brandForm.coreProducts = ''
+  brandForm.brandPositioning = ''
   brandForm.regionCodes = []
   brandForm.website = ''
   brandForm.phone = ''
   brandForm.wechat = ''
   brandForm.status = 'active'
-  brandForm.description = ''
-  brandForm.standardBrandStatement = ''
+  brandForm.businessIntro = ''
+  brandForm.brandQualificationDescription = ''
+  brandForm.brandCaseDescription = ''
 }
 
 async function loadCompany() {
@@ -769,30 +735,6 @@ async function loadCompany() {
   } finally {
     loading.value = false
   }
-}
-
-async function loadAccount() {
-  accountLoading.value = true
-  try {
-    const [accountRes, txnRes] = await Promise.all([
-      getCompanyAccount(companyId),
-      getCompanyAccountTxns(companyId, { current: txnPage.current, size: txnPage.size }),
-    ])
-    account.value = accountRes.data.data
-    txns.value = txnRes.data.data.records || []
-    txnPage.total = txnRes.data.data.total || 0
-  } catch {
-    account.value = null
-    txns.value = []
-    txnPage.total = 0
-  } finally {
-    accountLoading.value = false
-  }
-}
-
-function onTxnPageChange(v: number) {
-  txnPage.current = v
-  loadAccount()
 }
 
 async function removeCurrentCompany() {
@@ -827,17 +769,15 @@ async function submitCompany() {
   const valid = await companyFormRef.value?.validate().catch(() => false)
   if (!valid) return
   if ((companyForm.ownerType === 'partner' || companyForm.ownerType === 'joint') && !companyForm.partnerId) {
-    ElMessage.warning('褰掑睘涓衡€滃悎浼欎汉/鑱斿悎鈥濈殑瀹㈡埛闇€濉啓鍚堜紮浜篒D')
+    ElMessage.warning('归属为“合伙人/联合”的客户需填写合伙人ID')
     return
   }
   saving.value = true
   try {
     const region = regionPayloadFromCodes(companyForm.regionCodes)
-    const serviceArea = regionPayloadFromCodes(companyForm.serviceAreaCodes).displayName || companyForm.serviceArea
     await updateCompany(companyId, {
       companyName: companyForm.companyName,
       industryTags: normalizeIndustryTags(companyForm.industryTags),
-      serviceArea: serviceArea || undefined,
       city: region.displayName,
       provinceCode: region.provinceCode,
       provinceName: region.provinceName,
@@ -993,16 +933,20 @@ function openBrandEdit(row: Brand) {
   brandMode.value = 'edit'
   brandEditingId.value = row.id
   brandForm.brandName = row.brandName
+  brandForm.brandShortName = row.brandShortName || ''
   brandForm.brandSlug = row.brandSlug
   brandForm.industry = row.industry || availableBrandIndustries.value[0] || ''
   brandForm.mainBusiness = row.mainBusiness || ''
+  brandForm.coreProducts = row.coreProducts || ''
+  brandForm.brandPositioning = row.brandPositioning || ''
   brandForm.regionCodes = regionCodesFromPayload(row)
   brandForm.website = row.website || ''
   brandForm.phone = row.phone || ''
   brandForm.wechat = row.wechat || ''
   brandForm.status = (row as any).status || 'active'
-  brandForm.description = row.description || ''
-  brandForm.standardBrandStatement = row.standardBrandStatement || ''
+  brandForm.businessIntro = row.businessIntro || row.description || ''
+  brandForm.brandQualificationDescription = row.brandQualificationDescription || ''
+  brandForm.brandCaseDescription = row.brandCaseDescription || ''
   brandVisible.value = true
 }
 
@@ -1012,12 +956,17 @@ async function submitBrand() {
   brandSaving.value = true
   try {
     const region = regionPayloadFromCodes(brandForm.regionCodes)
-    const payload = {
+    const existingBrand = brandEditingId.value
+      ? brands.value.find((item) => item.id === brandEditingId.value)
+      : null
+    const payload: Record<string, any> = {
       companyId,
       brandName: brandForm.brandName,
-      brandSlug: brandForm.brandSlug,
+      brandShortName: brandForm.brandShortName || undefined,
       industry: brandForm.industry,
       mainBusiness: brandForm.mainBusiness || undefined,
+      coreProducts: brandForm.coreProducts || undefined,
+      brandPositioning: brandForm.brandPositioning || undefined,
       serviceArea: region.displayName,
       provinceCode: region.provinceCode,
       provinceName: region.provinceName,
@@ -1028,16 +977,31 @@ async function submitBrand() {
       website: brandForm.website || undefined,
       phone: brandForm.phone || undefined,
       wechat: brandForm.wechat || undefined,
+      officialAccount: existingBrand?.officialAccount || undefined,
+      videoAccount: existingBrand?.videoAccount || undefined,
+      douyinAccount: existingBrand?.douyinAccount || undefined,
+      publicPhone: existingBrand?.publicPhone || undefined,
+      publicAddress: existingBrand?.publicAddress || undefined,
       status: brandForm.status,
-      description: brandForm.description || undefined,
-      standardBrandStatement: brandForm.standardBrandStatement || undefined,
+      description: brandForm.businessIntro || undefined,
+      businessIntro: brandForm.businessIntro || undefined,
+      brandQualificationDescription: brandForm.brandQualificationDescription || undefined,
+      brandCaseDescription: brandForm.brandCaseDescription || undefined,
+      forbiddenPhrases: Array.isArray(existingBrand?.forbiddenPhrases)
+        ? existingBrand?.forbiddenPhrases.join('，')
+        : existingBrand?.forbiddenPhrases || undefined,
+      geoSiteCode: normalizeGeoSiteCode(existingBrand?.geoSiteCode) || undefined,
+      geoSiteStatus: normalizeGeoSiteCode(existingBrand?.geoSiteCode) ? existingBrand?.geoSiteStatus || 'active' : undefined,
+      industrySiteName: existingBrand?.industrySiteName || undefined,
+      industrySiteCode: existingBrand?.industrySiteCode || undefined,
     }
     if (brandMode.value === 'create') {
       await createBrand(payload as any)
     } else if (brandEditingId.value) {
+      payload.brandSlug = brandForm.brandSlug
       await updateBrand(brandEditingId.value, payload as any)
     }
-    ElMessage.success('鍝佺墝淇濆瓨鎴愬姛')
+    ElMessage.success('品牌保存成功')
     brandVisible.value = false
     resetBrandForm()
     await loadBrands()
@@ -1061,62 +1025,6 @@ async function removeBrand(row: Brand) {
   }
 }
 
-async function submitRecharge() {
-  if (!rechargeForm.amountYuan || rechargeForm.amountYuan <= 0) {
-    ElMessage.warning('充值金额需大于 0')
-    return
-  }
-  if (!rechargeForm.reason.trim()) {
-    ElMessage.warning('请填写原因')
-    return
-  }
-  accountSubmitting.value = true
-  try {
-    await rechargeCompanyAccount(companyId, {
-      amount: yuanToCents(rechargeForm.amountYuan),
-      reason: rechargeForm.reason.trim(),
-      offlineReference: rechargeForm.offlineReference || undefined,
-      remark: rechargeForm.remark || undefined,
-    })
-    ElMessage.success('充值成功')
-    rechargeVisible.value = false
-    rechargeForm.amountYuan = 100
-    rechargeForm.reason = ''
-    rechargeForm.offlineReference = ''
-    rechargeForm.remark = ''
-    await loadAccount()
-  } finally {
-    accountSubmitting.value = false
-  }
-}
-
-async function submitDeduct() {
-  if (!deductForm.amountYuan || deductForm.amountYuan <= 0) {
-    ElMessage.warning('扣款金额需大于 0')
-    return
-  }
-  if (!deductForm.reason.trim()) {
-    ElMessage.warning('请填写原因')
-    return
-  }
-  accountSubmitting.value = true
-  try {
-    await deductCompanyAccount(companyId, {
-      amount: yuanToCents(deductForm.amountYuan),
-      reason: deductForm.reason.trim(),
-      remark: deductForm.remark || undefined,
-    })
-    ElMessage.success('扣款成功')
-    deductVisible.value = false
-    deductForm.amountYuan = 100
-    deductForm.reason = ''
-    deductForm.remark = ''
-    await loadAccount()
-  } finally {
-    accountSubmitting.value = false
-  }
-}
-
 function goCreateProject(brandId: number) {
   router.push({
     path: '/admin/projects',
@@ -1132,12 +1040,6 @@ function goBrandDetail(brandId: number) {
   router.push(`/admin/brands/${brandId}`)
 }
 
-const companyServiceAreaPreview = computed(() => {
-  const selected = regionPayloadFromCodes(companyForm.serviceAreaCodes).displayName
-  if (selected) return selected
-  return companyForm.serviceArea
-})
-
 const availableBrandIndustries = computed(() => companyForm.industryTags || [])
 
 const companyIndustryText = computed(() => {
@@ -1145,25 +1047,109 @@ const companyIndustryText = computed(() => {
   if (!tags.length) return '-'
   return tags.map((tag) => dictStore.label('industry_tag', tag) || tag).join(' / ')
 })
+const customerBasicInfoItems = computed(() => [
+  { label: '客户名称', value: company.value?.companyName || '-' },
+  { label: '行业', value: companyIndustryText.value },
+  { label: '地区', value: companyRegion(company.value) },
+  { label: '归属', value: dictStore.label('owner_type', company.value?.ownerType) || '-' },
+  { label: '合伙人', value: (company.value as any)?.partnerName || '-' },
+  { label: '状态', value: dictStore.label('company_status', (company.value as any)?.status) || '-' },
+  { label: '创建时间', value: formatDateTimeSeconds(company.value?.createdAt) },
+])
 
 onMounted(async () => {
   if (!hasValidId) {
-    ElMessage.error('鏃犳晥鐨勫鎴稩D')
+    ElMessage.error('无效的客户ID')
     return
   }
   await dictStore.ensureLoaded()
   await Promise.all([loadPartners(), loadSalesOwners()])
   await loadCompany()
-  await Promise.all([loadBrands(), loadAccount(), loadPackageBinding(), loadKeywordGroupQuota(), loadDistributionQuotas()])
+  await Promise.all([loadBrands(), loadPackageBinding(), loadKeywordGroupQuota(), loadDistributionQuotas()])
 })
 </script>
 
 <style scoped>
+.customer-detail-hero {
+  border-color: rgba(147, 197, 253, 0.72);
+  background:
+    radial-gradient(circle at 88% 0%, rgba(34, 197, 94, 0.08), transparent 28%),
+    linear-gradient(135deg, #ffffff 0%, #f8fbff 45%, #effdf7 100%);
+}
+
+.customer-detail-hero::after {
+  width: 220px;
+  opacity: 0.42;
+}
+
+.customer-detail-hero.is-signed {
+  border-left: 4px solid #10b981;
+}
+
+.customer-detail-hero.is-potential {
+  border-left: 4px solid #f59e0b;
+}
+
+.customer-detail-hero.is-disabled {
+  border-left: 4px solid #94a3b8;
+}
+
+.customer-hero-kpi {
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(191, 219, 254, 0.7);
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.customer-hero-kpi::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 3px;
+  border-radius: 999px;
+}
+
+.customer-hero-kpi--brand::before {
+  background: linear-gradient(90deg, #60a5fa, rgba(96, 165, 250, 0.08));
+}
+
+.customer-hero-kpi--brand strong {
+  color: #1d4ed8;
+}
+
+.customer-hero-kpi--package::before {
+  background: linear-gradient(90deg, #34d399, rgba(52, 211, 153, 0.08));
+}
+
+.customer-hero-kpi--package strong {
+  color: #047857;
+}
+
+.customer-hero-kpi--quota::before {
+  background: linear-gradient(90deg, #fbbf24, rgba(251, 191, 36, 0.08));
+}
+
+.customer-hero-kpi--quota strong {
+  color: #b45309;
+}
+
 .quota-panel {
   margin-top: 16px;
   padding: 14px 16px;
   border: 1px solid #e4e7ed;
   border-radius: 6px;
+}
+
+.quota-panel--keyword {
+  padding: 18px;
+  border-color: #dbeafe;
+  border-radius: 12px;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.08), transparent 28%),
+    linear-gradient(135deg, #ffffff 0%, #f8fbff 58%, #f7f7ff 100%);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
 }
 
 .quota-panel__header,
@@ -1179,23 +1165,56 @@ onMounted(async () => {
   font-weight: 600;
 }
 
+.quota-panel__header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.quota-panel__header small {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.quota-panel__header strong {
+  padding: 5px 12px;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.08);
+  color: #1d4ed8;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
 .quota-panel__meta {
+  justify-content: flex-start;
   margin-top: 8px;
   color: #606266;
   font-size: 12px;
 }
 
+.keyword-total-progress {
+  width: min(560px, 100%);
+}
+
 .keyword-tier-list {
   display: grid;
-  gap: 10px;
-  margin-top: 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
 }
 
 .keyword-tier-row {
-  display: grid;
-  grid-template-columns: minmax(120px, 160px) minmax(180px, 1fr) 90px;
-  align-items: center;
-  gap: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .keyword-tier-row__main {
@@ -1206,14 +1225,51 @@ onMounted(async () => {
   font-size: 13px;
 }
 
+.keyword-tier-row__main > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.keyword-tier-row__main span {
+  color: #475569;
+}
+
 .keyword-tier-row__main strong {
+  color: #0f172a;
+  font-size: 18px;
+  line-height: 1.1;
   font-weight: 600;
+}
+
+.keyword-tier-row__main em {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 12px;
+  font-style: normal;
+}
+
+.keyword-tier-progress {
+  width: 100%;
 }
 
 .keyword-tier-row__meta {
   font-size: 12px;
   color: #606266;
-  text-align: right;
+  text-align: left;
+}
+
+.keyword-tier-row--a {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.08), rgba(255, 255, 255, 0.92));
+}
+
+.keyword-tier-row--b {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.09), rgba(255, 255, 255, 0.92));
+}
+
+.keyword-tier-row--c {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.09), rgba(255, 255, 255, 0.92));
 }
 
 .quota-channel-cell,
@@ -1235,6 +1291,12 @@ onMounted(async () => {
 
 :deep(.quota-row-exceeded > td.el-table__cell) {
   background: #fef0f0;
+}
+
+@media (max-width: 1100px) {
+  .keyword-tier-list {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
 

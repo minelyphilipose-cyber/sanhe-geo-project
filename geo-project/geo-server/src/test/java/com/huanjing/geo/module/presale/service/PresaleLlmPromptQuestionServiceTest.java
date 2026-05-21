@@ -28,7 +28,9 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
@@ -80,7 +82,7 @@ class PresaleLlmPromptQuestionServiceTest {
 
         LlmPromptQuestionGenerateVO result = service.generate(request());
 
-        assertEquals(2, result.getGeneratedTotal());
+        assertEquals(5, result.getGeneratedTotal());
         assertEquals(0, result.getMissingTotal());
         ArgumentCaptor<LlmModelConfig> configCaptor = ArgumentCaptor.forClass(LlmModelConfig.class);
         verify(llmInvoker, org.mockito.Mockito.times(2)).invoke(anyString(), configCaptor.capture());
@@ -105,6 +107,37 @@ class PresaleLlmPromptQuestionServiceTest {
         assertEquals("LLM 问题生成失败：AI 平台余额或额度不足，请检查平台账户", ex.getMessage());
     }
 
+    @Test
+    void generate_filtersProblemQuestionsThatMentionTargetBrand() throws Exception {
+        AiPlatformConfig platform = platform("aaa", "http://first.example/v1");
+        when(aiPlatformConfigMapper.selectList(any(Wrapper.class))).thenReturn(List.of(platform));
+        when(platformCredentialService.resolveApiKey("aaa", null, "key-aaa")).thenReturn("key-aaa");
+        when(llmInvoker.invoke(anyString(), any(LlmModelConfig.class)))
+                .thenReturn(result("""
+                        [
+                          {"categoryCode":"PROBLEM","promptContent":"广州诗帝尼门窗有限公司售后靠不靠谱?"},
+                          {"categoryCode":"PROBLEM","promptContent":"广州装修选门窗时售后和安装怎么避坑?"},
+                          {"categoryCode":"COMPARISON","promptContent":"诗帝尼和 {competitor} 哪个更适合装修?"},
+                          {"categoryCode":"COGNITIVE","promptContent":"诗帝尼门窗这个品牌怎么样?"},
+                          {"categoryCode":"COGNITIVE","promptContent":"诗帝尼门窗质量口碑如何?"},
+                          {"categoryCode":"COGNITIVE","promptContent":"诗帝尼在门窗行业知名度如何?"}
+                        ]
+                        """, "aaa"));
+
+        LlmPromptQuestionGenerateVO result = service.generate(problemRequest());
+
+        assertEquals(5, result.getGeneratedTotal());
+        assertFalse(result.getQuestions().stream()
+                .anyMatch(q -> q.getCategoryCode() == PresalePromptCategoryCode.PROBLEM
+                        && q.getPromptContent().contains("广州诗帝尼门窗有限公司")));
+        assertTrue(result.getQuestions().stream()
+                .anyMatch(q -> q.getCategoryCode() == PresalePromptCategoryCode.PROBLEM
+                        && q.getPromptContent().equals("广州装修选门窗时售后和安装怎么避坑?")));
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(llmInvoker).invoke(promptCaptor.capture(), any(LlmModelConfig.class));
+        assertTrue(promptCaptor.getValue().contains("PROBLEM 问题型禁止直接提及基础信息中的品牌名称"));
+    }
+
     private static LlmPromptQuestionGenerateRequest request() {
         Map<PresalePromptCategoryCode, Integer> counts = new EnumMap<>(PresalePromptCategoryCode.class);
         for (PresalePromptCategoryCode code : PresalePromptCategoryCode.values()) {
@@ -112,6 +145,7 @@ class PresaleLlmPromptQuestionServiceTest {
         }
         counts.put(PresalePromptCategoryCode.RECOMMENDATION, 1);
         counts.put(PresalePromptCategoryCode.COMPARISON, 1);
+        counts.put(PresalePromptCategoryCode.COGNITIVE, 3);
         LlmPromptQuestionGenerateRequest request = new LlmPromptQuestionGenerateRequest();
         request.setBrandName("广州诗帝尼门窗有限公司");
         request.setIndustry("建筑装饰");
@@ -119,9 +153,23 @@ class PresaleLlmPromptQuestionServiceTest {
         request.setRegion("全国");
         request.setUserType("装修客户");
         request.setUserDemand("了解品牌在 AI 搜索中的真实表现。");
-        request.setTotalCount(2);
+        request.setTotalCount(5);
         request.setCategoryCounts(counts);
         request.setExistingQuestions(List.of());
+        return request;
+    }
+
+    private static LlmPromptQuestionGenerateRequest problemRequest() {
+        LlmPromptQuestionGenerateRequest request = request();
+        Map<PresalePromptCategoryCode, Integer> counts = new EnumMap<>(PresalePromptCategoryCode.class);
+        for (PresalePromptCategoryCode code : PresalePromptCategoryCode.values()) {
+            counts.put(code, 0);
+        }
+        counts.put(PresalePromptCategoryCode.PROBLEM, 1);
+        counts.put(PresalePromptCategoryCode.COMPARISON, 1);
+        counts.put(PresalePromptCategoryCode.COGNITIVE, 3);
+        request.setCategoryCounts(counts);
+        request.setTotalCount(5);
         return request;
     }
 
@@ -136,9 +184,19 @@ class PresaleLlmPromptQuestionServiceTest {
     }
 
     private static LlmInvokeResult successResult(String platformCode) {
-        return new LlmInvokeResult(
+        return result(
                 "[{\"categoryCode\":\"RECOMMENDATION\",\"promptContent\":\"广州门窗品牌哪家值得推荐?\"},"
-                        + "{\"categoryCode\":\"COMPARISON\",\"promptContent\":\"诗帝尼和 {competitor} 哪个更适合装修?\"}]",
+                        + "{\"categoryCode\":\"COMPARISON\",\"promptContent\":\"诗帝尼和 {competitor} 哪个更适合装修?\"},"
+                        + "{\"categoryCode\":\"COGNITIVE\",\"promptContent\":\"诗帝尼门窗这个品牌怎么样?\"},"
+                        + "{\"categoryCode\":\"COGNITIVE\",\"promptContent\":\"诗帝尼门窗质量口碑如何?\"},"
+                        + "{\"categoryCode\":\"COGNITIVE\",\"promptContent\":\"诗帝尼在门窗行业知名度如何?\"}]",
+                platformCode
+        );
+    }
+
+    private static LlmInvokeResult result(String responseText, String platformCode) {
+        return new LlmInvokeResult(
+                responseText,
                 10,
                 20,
                 120L,

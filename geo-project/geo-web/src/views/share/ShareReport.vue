@@ -105,7 +105,7 @@
         <h3 class="font-bold mt-4 mb-2">内容执行情况</h3>
         <el-row :gutter="12">
           <el-col :xs="24" :sm="8"><el-statistic title="生成文章数" :value="num(contentSummary.articles_generated)" /></el-col>
-          <el-col :xs="24" :sm="8"><el-statistic title="审核通过数" :value="num(contentSummary.articles_approved)" /></el-col>
+          <el-col :xs="24" :sm="8"><el-statistic title="可发布文章数" :value="num(contentSummary.articles_approved)" /></el-col>
           <el-col :xs="24" :sm="8"><el-statistic title="分发完成数" :value="num(contentSummary.articles_distributed)" /></el-col>
         </el-row>
 

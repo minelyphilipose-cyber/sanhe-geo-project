@@ -36,7 +36,7 @@ export interface TokenRefreshResponse {
   sessionId: number
 }
 
-export type ExtensionTaskStatus = 'token_issued' | 'filling' | 'filled' | 'published'
+export type ExtensionTaskStatus = 'token_issued' | 'filling' | 'filled' | 'published' | 'failed'
 
 export interface ExtensionTaskListItem {
   taskId: number
@@ -64,6 +64,15 @@ export interface FillTokenConsumeResponse {
 }
 
 export interface ExtensionTaskStateResponse { taskId: number, status: ExtensionTaskStatus }
+
+export type PublishCompletionAction = 'publish_clicked' | 'draft_saved_clicked' | 'success_feedback'
+
+export interface PublishTaskReport {
+  action: PublishCompletionAction
+  href?: string
+  platform?: string
+  detectedText?: string
+}
 
 export interface SemiAutoFillPayload {
   platform: string

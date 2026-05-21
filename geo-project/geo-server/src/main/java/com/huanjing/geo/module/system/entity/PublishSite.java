@@ -14,7 +14,9 @@ public class PublishSite {
     @TableId(type = IdType.AUTO)
     private Long id;
     private String siteName;
+    private String siteCode;
     private String domain;
+    private String iconUrl;
     private String industryTags;
     private String tier;
     private String status;

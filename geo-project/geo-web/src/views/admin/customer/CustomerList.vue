@@ -1,7 +1,18 @@
 ﻿<template>
-  <div>
-    <div class="mb-4 flex items-center justify-between gap-3">
-      <div class="flex items-center gap-2">
+  <div class="admin-page">
+    <div class="admin-page-header">
+      <div>
+        <div class="admin-page-kicker">客户资产</div>
+        <h1 class="admin-page-title">客户管理</h1>
+        <div class="admin-page-subtitle">让每一个客户从品牌到项目都成为可经营的长期资产。</div>
+      </div>
+      <div class="admin-page-actions">
+        <el-button v-if="canCreateCompany" type="primary" @click="openCreate">新建客户</el-button>
+      </div>
+    </div>
+
+    <div class="admin-filter-panel">
+      <div class="admin-filter-controls">
         <el-input v-model="query.keyword" placeholder="搜索公司名称" clearable style="width: 260px" @keyup.enter="load" />
         <el-select v-model="query.ownerType" placeholder="归属类型" clearable style="width: 140px" @change="load">
           <el-option
@@ -13,43 +24,90 @@
         </el-select>
         <el-button @click="load">查询</el-button>
       </div>
-      <el-button v-if="canCreateCompany" type="primary" @click="openCreate">新建客户</el-button>
     </div>
 
-    <el-card>
+    <div class="admin-metric-grid">
+      <div class="admin-metric-card" style="--metric-accent: #2563eb; --metric-tone: #eff6ff">
+        <span class="admin-metric-label">客户总数</span>
+        <strong class="admin-metric-value">{{ page.total }}</strong>
+        <span class="admin-metric-hint">当前筛选结果</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #059669; --metric-tone: #ecfdf5">
+        <span class="admin-metric-label">直营客户</span>
+        <strong class="admin-metric-value">{{ directCount }}</strong>
+        <span class="admin-metric-hint">本页可见</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #7c3aed; --metric-tone: #f5f3ff">
+        <span class="admin-metric-label">已签约</span>
+        <strong class="admin-metric-value">{{ signedCount }}</strong>
+        <span class="admin-metric-hint">本页可见</span>
+      </div>
+      <div class="admin-metric-card" style="--metric-accent: #f59e0b; --metric-tone: #fffbeb">
+        <span class="admin-metric-label">待跟进</span>
+        <strong class="admin-metric-value">{{ potentialCount }}</strong>
+        <span class="admin-metric-hint">潜在/跟进中客户</span>
+      </div>
+    </div>
+
+    <el-card class="admin-table-card">
       <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无客户数据">
-        <el-table :data="rows" border>
-        <el-table-column prop="companyName" label="公司名称" min-width="220" />
-        <el-table-column label="联系人" min-width="160">
-          <template #default="scope">{{ scope.row.contactName || '-' }}{{ scope.row.contactPhone ? ` / ${scope.row.contactPhone}` : '' }}</template>
+        <el-table class="customer-list-table" :data="rows" border table-layout="fixed">
+        <el-table-column label="客户对象" min-width="300" show-overflow-tooltip>
+          <template #default="scope">
+            <div class="admin-entity-cell">
+              <div class="admin-entity-avatar customer-avatar" :class="customerAvatarClass(scope.row.status)">
+                {{ entityInitial(scope.row.companyName) }}
+              </div>
+              <div class="min-w-0">
+                <div class="admin-entity-main">{{ scope.row.companyName }}</div>
+                <div class="admin-entity-sub">
+                  {{ customerIdentityLabel(scope.row) }}
+                </div>
+              </div>
+            </div>
+          </template>
         </el-table-column>
-        <el-table-column label="行业" min-width="180">
+        <el-table-column label="联系人" min-width="160" show-overflow-tooltip>
+          <template #default="scope">
+            <span v-if="contactText(scope.row) !== '-'">{{ contactText(scope.row) }}</span>
+            <el-button
+              v-else-if="canUpdateCompany"
+              class="customer-contact-link"
+              link
+              type="primary"
+              @click="openEdit(scope.row)"
+            >
+              + 添加联系人
+            </el-button>
+            <span v-else class="customer-empty-text">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="行业" min-width="200" show-overflow-tooltip>
           <template #default="scope">{{ industryLabels(scope.row) }}</template>
         </el-table-column>
-        <el-table-column prop="businessDirection" label="主营方向" min-width="160" />
-        <el-table-column prop="city" label="地区" min-width="220">
+        <el-table-column prop="city" label="地区" min-width="150" show-overflow-tooltip>
           <template #default="scope">{{ companyRegion(scope.row) }}</template>
         </el-table-column>
-        <el-table-column label="归属" width="100">
-          <template #default="scope">{{ dictStore.label('owner_type', scope.row.ownerType) }}</template>
-        </el-table-column>
-        <el-table-column label="来源" width="120">
-          <template #default="scope">{{ dictStore.label('company_source_type', scope.row.sourceType) || '-' }}</template>
-        </el-table-column>
-        <el-table-column prop="partnerName" label="合伙人" width="160" />
-        <el-table-column label="状态" width="120">
-          <template #default="scope">{{ dictStore.label('company_status', scope.row.status) }}</template>
-        </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="状态" width="120" show-overflow-tooltip>
           <template #default="scope">
-            <el-button link type="primary" @click="goDetail(scope.row.id)">详情</el-button>
-            <el-button v-if="canUpdateCompany" link type="primary" @click="openEdit(scope.row)">编辑</el-button>
-            <el-button v-if="canDeleteCompany" link type="danger" @click="removeCompany(scope.row)">删除</el-button>
+            <span class="customer-status-text" :class="companyStatusClass(scope.row.status)">
+              <span class="customer-status-dot" />
+              {{ dictStore.label('company_status', scope.row.status) }}
+            </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="220" fixed="right">
+          <template #default="scope">
+            <div class="admin-row-actions">
+              <el-button link type="primary" @click="goDetail(scope.row.id)">详情</el-button>
+              <el-button v-if="canUpdateCompany" class="customer-edit-action" link @click="openEdit(scope.row)">编辑</el-button>
+              <el-button v-if="canDeleteCompany" link type="danger" @click="removeCompany(scope.row)">删除</el-button>
+            </div>
           </template>
         </el-table-column>
         </el-table>
 
-        <div class="mt-4 flex justify-end">
+        <div class="admin-table-footer">
           <el-pagination
             background
             layout="prev, pager, next, total"
@@ -62,12 +120,17 @@
       </DataState>
     </el-card>
 
-    <el-dialog v-model="formVisible" :title="formMode === 'create' ? '新建客户' : '编辑客户'" width="620px">
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="100px">
+    <el-dialog
+      v-model="formVisible"
+      :title="formMode === 'create' ? '新建客户' : '编辑客户'"
+      width="860px"
+      class="admin-editor-dialog"
+    >
+      <el-form ref="formRef" class="admin-dialog-form" :model="form" :rules="rules" label-width="100px">
         <el-form-item label="公司名称" required><el-input v-model="form.companyName" /></el-form-item>
         <el-form-item label="客户联系人"><el-input v-model="form.contactName" /></el-form-item>
         <el-form-item label="联系电话"><el-input v-model="form.contactPhone" /></el-form-item>
-        <el-form-item label="行业" prop="industryTags">
+        <el-form-item class="is-full" label="行业" prop="industryTags">
           <el-select
             v-model="form.industryTags"
             multiple
@@ -84,16 +147,6 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="主营方向"><el-input v-model="form.businessDirection" /></el-form-item>
-        <el-form-item label="服务区域">
-          <RegionCascader v-model="form.serviceAreaCodes" />
-          <div class="mt-1 text-xs text-gray-500">{{ serviceAreaTextPreview || '未选择' }}</div>
-        </el-form-item>
-        <el-form-item label="竞品"><el-input v-model="form.competitors" placeholder="多个可用逗号分隔" /></el-form-item>
-        <el-form-item label="官网"><el-input v-model="form.officialWebsite" /></el-form-item>
-        <el-form-item label="公众号"><el-input v-model="form.officialAccount" /></el-form-item>
-        <el-form-item label="视频号"><el-input v-model="form.videoAccount" /></el-form-item>
-        <el-form-item label="抖音号"><el-input v-model="form.douyinAccount" /></el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="form.regionCodes" /></el-form-item>
         <el-form-item label="归属类型" required>
           <el-select v-model="form.ownerType" style="width: 100%">
@@ -144,7 +197,7 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="3" /></el-form-item>
+        <el-form-item class="is-full" label="备注"><el-input v-model="form.remark" type="textarea" :rows="3" /></el-form-item>
       </el-form>
 
       <template #footer>
@@ -194,14 +247,6 @@ const form = reactive({
   contactName: '',
   contactPhone: '',
   industryTags: [] as string[],
-  businessDirection: '',
-  serviceArea: '',
-  serviceAreaCodes: [] as string[],
-  competitors: '',
-  officialWebsite: '',
-  officialAccount: '',
-  videoAccount: '',
-  douyinAccount: '',
   regionCodes: [] as string[],
   ownerType: 'direct',
   sourceType: 'internal' as 'internal' | 'partner',
@@ -220,20 +265,17 @@ const rules: FormRules = {
 const isPartnerOperator = computed(() => ['partner', 'partner_staff', 'partner_viewer'].includes(userStore.role || ''))
 const createSourceType = computed<'internal' | 'partner'>(() => (isPartnerOperator.value ? 'partner' : 'internal'))
 const createSourceTypeLabel = computed(() => dictStore.label('company_source_type', createSourceType.value) || (createSourceType.value === 'partner' ? '合伙人' : '本部'))
+const directCount = computed(() => rows.value.filter((row) => row.ownerType === 'direct').length)
+const signedCount = computed(() =>
+  rows.value.filter((row) => ['signed', 'deal', 'converted'].includes(String((row as any).status || ''))).length
+)
+const potentialCount = computed(() => rows.value.filter((row) => ['potential', 'following', 'follow_up'].includes(String((row as any).status || ''))).length)
 
 function resetForm() {
   form.companyName = ''
   form.contactName = ''
   form.contactPhone = ''
   form.industryTags = []
-  form.businessDirection = ''
-  form.serviceArea = ''
-  form.serviceAreaCodes = []
-  form.competitors = ''
-  form.officialWebsite = ''
-  form.officialAccount = ''
-  form.videoAccount = ''
-  form.douyinAccount = ''
   form.regionCodes = []
   form.ownerType = 'direct'
   form.sourceType = 'internal'
@@ -245,7 +287,15 @@ function resetForm() {
 }
 
 function companyRegion(company: Company) {
-  return regionDisplayFromPayload(company) || company.city || '-'
+  const parts = regionParts(company).map((item) => item.label)
+  return parts.length ? parts.join(' · ') : regionDisplayFromPayload(company) || company.city || '-'
+}
+
+function contactText(company: Company) {
+  const name = company.contactName || ''
+  const phone = company.contactPhone || ''
+  if (name && phone) return `${name} / ${phone}`
+  return name || phone || '-'
 }
 
 function parseIndustryTags(value?: string | string[] | null) {
@@ -271,9 +321,48 @@ function normalizeIndustryTags(tags: string[]) {
 }
 
 function industryLabels(company: Company) {
-  const tags = parseIndustryTags(company.industryTags)
-  if (!tags.length) return '-'
-  return tags.map((tag) => dictStore.label('industry_tag', tag) || tag).join(' / ')
+  const labels = industryLabelList(company)
+  return labels.length ? labels.join(' / ') : '-'
+}
+
+function industryLabelList(company: Company) {
+  return parseIndustryTags(company.industryTags).map((tag) => dictStore.label('industry_tag', tag) || tag)
+}
+
+function regionParts(company: Company) {
+  const parts: Array<{ level: 'province' | 'city' | 'district'; label: string }> = []
+  const source = company as any
+  if (source.provinceName) parts.push({ level: 'province', label: source.provinceName })
+  if (source.cityName && source.cityName !== source.provinceName) parts.push({ level: 'city', label: source.cityName })
+  if (source.districtName) parts.push({ level: 'district', label: source.districtName })
+  if (!parts.length && company.city) parts.push({ level: 'city', label: company.city })
+  return parts
+}
+
+function customerIdentityLabel(company: Company) {
+  if (company.ownerType === 'direct') return '直营客户'
+  if (company.ownerType === 'partner' || company.sourceType === 'partner') return '合伙人客户'
+  if (company.ownerType === 'joint') return '合作客户'
+  return dictStore.label('owner_type', company.ownerType) || '客户'
+}
+
+function entityInitial(value?: string | null) {
+  const text = String(value || '').trim()
+  return text ? Array.from(text)[0] : '客'
+}
+
+function companyStatusClass(status?: string | null) {
+  const value = String(status || '')
+  if (['active', 'signed', 'deal', 'converted'].includes(value)) return 'is-success'
+  if (['disabled', 'lost', 'deleted'].includes(value)) return 'is-muted'
+  return 'is-warning'
+}
+
+function customerAvatarClass(status?: string | null) {
+  const value = String(status || '')
+  if (['active', 'signed', 'deal', 'converted'].includes(value)) return 'is-signed'
+  if (['disabled', 'lost', 'deleted'].includes(value)) return 'is-disabled'
+  return 'is-potential'
 }
 
 async function load() {
@@ -337,14 +426,6 @@ function openEdit(row: Company) {
   form.contactName = row.contactName || ''
   form.contactPhone = row.contactPhone || ''
   form.industryTags = parseIndustryTags(row.industryTags)
-  form.businessDirection = row.businessDirection || ''
-  form.serviceArea = row.serviceArea || ''
-  form.serviceAreaCodes = []
-  form.competitors = row.competitors || ''
-  form.officialWebsite = row.officialWebsite || ''
-  form.officialAccount = row.officialAccount || ''
-  form.videoAccount = row.videoAccount || ''
-  form.douyinAccount = row.douyinAccount || ''
   form.regionCodes = regionCodesFromPayload(row)
   form.ownerType = row.ownerType
   form.sourceType = row.sourceType || (row.partnerId ? 'partner' : 'internal')
@@ -368,19 +449,11 @@ async function submit() {
   saving.value = true
   try {
     const region = regionPayloadFromCodes(form.regionCodes)
-    const serviceArea = regionPayloadFromCodes(form.serviceAreaCodes).displayName || form.serviceArea
     const payload = {
       companyName: form.companyName,
       contactName: form.contactName || undefined,
       contactPhone: form.contactPhone || undefined,
       industryTags: normalizeIndustryTags(form.industryTags),
-      businessDirection: form.businessDirection || undefined,
-      serviceArea: serviceArea || undefined,
-      competitors: form.competitors || undefined,
-      officialWebsite: form.officialWebsite || undefined,
-      officialAccount: form.officialAccount || undefined,
-      videoAccount: form.videoAccount || undefined,
-      douyinAccount: form.douyinAccount || undefined,
       city: region.displayName,
       provinceCode: region.provinceCode,
       provinceName: region.provinceName,
@@ -439,11 +512,75 @@ onMounted(async () => {
   await Promise.all([loadPartners(), loadSalesOwners()])
   await load()
 })
-
-const serviceAreaTextPreview = computed(() => {
-  const selected = regionPayloadFromCodes(form.serviceAreaCodes).displayName
-  if (selected) return selected
-  return form.serviceArea
-})
 </script>
+
+<style scoped>
+.customer-empty-text {
+  color: #94a3b8;
+}
+
+.customer-avatar.is-signed {
+  background: linear-gradient(135deg, #059669, #10b981);
+}
+
+.customer-avatar.is-potential {
+  background: linear-gradient(135deg, #2563eb, #0891b2);
+}
+
+.customer-avatar.is-disabled {
+  background: linear-gradient(135deg, #64748b, #94a3b8);
+}
+
+.customer-contact-link {
+  color: #64748b;
+  font-weight: 500;
+}
+
+.customer-contact-link:hover {
+  color: #2563eb;
+}
+
+.customer-status-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: #92400e;
+  font-weight: 700;
+}
+
+.customer-status-text.is-success {
+  color: #047857;
+}
+
+.customer-status-text.is-muted {
+  color: #64748b;
+}
+
+.customer-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.14);
+  flex-shrink: 0;
+}
+
+.customer-status-text.is-success .customer-status-dot {
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.14);
+}
+
+.customer-status-text.is-muted .customer-status-dot {
+  background: #94a3b8;
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.16);
+}
+
+.customer-edit-action {
+  color: #64748b;
+}
+
+.customer-edit-action:hover {
+  color: #334155;
+}
+</style>
 

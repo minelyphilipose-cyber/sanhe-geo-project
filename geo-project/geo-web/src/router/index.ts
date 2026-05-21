@@ -1,6 +1,7 @@
 ﻿import { createRouter, createWebHistory } from 'vue-router'
 import NProgress from 'nprogress'
 import 'nprogress/nprogress.css'
+import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import adminRoutes from './admin'
 import partnerRoutes from './partner'
@@ -8,6 +9,9 @@ import type { RoleType } from '@/types'
 import { resolvePostLoginPath } from '@/utils/navigation'
 
 NProgress.configure({ showSpinner: false })
+
+const AUTH_STORAGE_KEY = 'geo_auth_v1'
+const SESSION_EXPIRED_MESSAGE = '登录信息已超时，请重新登录'
 
 const enablePresalePrintPoc = import.meta.env.DEV && import.meta.env.VITE_ENABLE_PRESALE_POC !== 'false'
 const presalePrintPocRoutes = enablePresalePrintPoc
@@ -123,9 +127,10 @@ router.beforeEach(async (to, _from, next) => {
     try {
       await userStore.syncProfile()
     } catch {
-      await userStore.logout()
-      localStorage.removeItem('geo_auth_v1')
-      return next(`/session-expired?redirect=${encodeURIComponent(to.fullPath)}`)
+      userStore.clearAuth()
+      localStorage.removeItem(AUTH_STORAGE_KEY)
+      ElMessage.info(SESSION_EXPIRED_MESSAGE)
+      return next(`/login?redirect=${encodeURIComponent(to.fullPath)}`)
     }
   }
 

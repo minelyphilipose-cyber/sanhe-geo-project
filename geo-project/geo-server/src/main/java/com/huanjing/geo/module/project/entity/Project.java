@@ -87,6 +87,8 @@ public class Project {
     @TableField(exist = false)
     private List<Long> selectedKeywordGroupIds;
     @TableField(exist = false)
+    private List<String> customerRequirements;
+    @TableField(exist = false)
     private Integer selectedKeywordGroupCount;
     @TableField(exist = false)
     private Long selectedKeywordSavedKeywords;

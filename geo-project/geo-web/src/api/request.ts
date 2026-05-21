@@ -22,6 +22,11 @@ function isAuthRequest(url?: string): boolean {
   return url.includes('/auth/login') || url.includes('/auth/refresh')
 }
 
+function isRefreshRequest(url?: string): boolean {
+  if (!url) return false
+  return url.includes('/auth/refresh')
+}
+
 request.interceptors.request.use(
   (config) => {
     const userStore = useUserStore()
@@ -34,8 +39,12 @@ request.interceptors.request.use(
 )
 
 let isRefreshing = false
-let pendingQueue: Array<(token: string) => void> = []
+let pendingQueue: Array<{
+  resolve: (token: string) => void
+  reject: (error: ApiError) => void
+}> = []
 const AUTH_STORAGE_KEY = 'geo_auth_v1'
+const SESSION_EXPIRED_MESSAGE = '登录信息已超时，请重新登录'
 
 export interface ApiError<T = unknown> extends Error {
   code?: number
@@ -51,19 +60,30 @@ function buildApiError(message: string, code?: number, data?: unknown, status?: 
   return err
 }
 
-function buildSessionExpiredUrl() {
+function buildLoginUrl() {
   const current = router.currentRoute.value
   const currentPath = current?.fullPath || ''
   const isAuthPage = currentPath.startsWith('/login') || currentPath.startsWith('/session-expired')
   const redirect = currentPath && !isAuthPage ? currentPath : '/admin/overview'
-  return `/session-expired?redirect=${encodeURIComponent(redirect)}`
+  return `/login?redirect=${encodeURIComponent(redirect)}`
 }
 
-async function redirectToSessionExpired() {
+async function redirectToLoginForExpiredSession() {
   const userStore = useUserStore()
-  await userStore.logout()
+  userStore.clearAuth()
   localStorage.removeItem(AUTH_STORAGE_KEY)
-  router.replace(buildSessionExpiredUrl())
+  ElMessage.info(SESSION_EXPIRED_MESSAGE)
+  await router.replace(buildLoginUrl())
+}
+
+function rejectPendingQueue(error: ApiError) {
+  pendingQueue.forEach((item) => item.reject(error))
+  pendingQueue = []
+}
+
+function resolvePendingQueue(token: string) {
+  pendingQueue.forEach((item) => item.resolve(token))
+  pendingQueue = []
 }
 
 request.interceptors.response.use(
@@ -78,18 +98,21 @@ request.interceptors.response.use(
     const reqUrl = response.config.url || ''
     const isAuthApi = isAuthRequest(reqUrl)
 
-      if (res.code !== 0) {
-        if (res.code === 401 && !isAuthApi) {
-          await redirectToSessionExpired()
-          return Promise.reject(buildApiError(res.message || '登录状态已失效', res.code, res.data))
-        }
-        if (res.code === 403) {
-          router.push('/403')
-          return Promise.reject(buildApiError(res.message || '无权限访问', res.code, res.data))
-        }
-        ElMessage.error(res.message || '请求失败')
-        return Promise.reject(buildApiError(res.message || '请求失败', res.code, res.data))
+    if (res.code !== 0) {
+      if (isRefreshRequest(reqUrl)) {
+        return Promise.reject(buildApiError(SESSION_EXPIRED_MESSAGE, 401, res.data, response.status))
       }
+      if (res.code === 401 && !isAuthApi) {
+        await redirectToLoginForExpiredSession()
+        return Promise.reject(buildApiError(res.message || '登录状态已失效', res.code, res.data))
+      }
+      if (res.code === 403) {
+        router.push('/403')
+        return Promise.reject(buildApiError(res.message || '无权限访问', res.code, res.data))
+      }
+      ElMessage.error(res.message || '请求失败')
+      return Promise.reject(buildApiError(res.message || '请求失败', res.code, res.data))
+    }
 
     return response
   },
@@ -107,32 +130,36 @@ request.interceptors.response.use(
           const userStore = useUserStore()
           const newToken = await userStore.refreshAccessToken()
 
-          pendingQueue.forEach((cb) => cb(newToken))
-          pendingQueue = []
+          resolvePendingQueue(newToken)
 
           originalRequest.headers = originalRequest.headers || {}
           originalRequest.headers.Authorization = `Bearer ${newToken}`
           return request(originalRequest)
         } catch {
-          await redirectToSessionExpired()
-          return Promise.reject(buildApiError('登录状态已失效，请重新登录后重试', 401, error.response?.data, 401))
+          const sessionError = buildApiError(SESSION_EXPIRED_MESSAGE, 401, error.response?.data, 401)
+          rejectPendingQueue(sessionError)
+          await redirectToLoginForExpiredSession()
+          return Promise.reject(sessionError)
         } finally {
           isRefreshing = false
         }
       }
 
-      return new Promise((resolve) => {
-        pendingQueue.push((token: string) => {
-          originalRequest.headers = originalRequest.headers || {}
-          originalRequest.headers.Authorization = `Bearer ${token}`
-          resolve(request(originalRequest))
+      return new Promise((resolve, reject) => {
+        pendingQueue.push({
+          resolve: (token: string) => {
+            originalRequest.headers = originalRequest.headers || {}
+            originalRequest.headers.Authorization = `Bearer ${token}`
+            resolve(request(originalRequest))
+          },
+          reject,
         })
       })
     }
 
     if (error.response?.status === 403) {
       if (isAuthApi) {
-        await redirectToSessionExpired()
+        await redirectToLoginForExpiredSession()
         return Promise.reject(error)
       }
 
@@ -145,25 +172,29 @@ request.interceptors.response.use(
             const userStore = useUserStore()
             const newToken = await userStore.refreshAccessToken()
 
-            pendingQueue.forEach((cb) => cb(newToken))
-            pendingQueue = []
+            resolvePendingQueue(newToken)
 
             originalRequest.headers = originalRequest.headers || {}
             originalRequest.headers.Authorization = `Bearer ${newToken}`
             return request(originalRequest)
           } catch {
-            await redirectToSessionExpired()
-            return Promise.reject(buildApiError('登录状态已失效，请重新登录后重试', 401, error.response?.data, 401))
+            const sessionError = buildApiError(SESSION_EXPIRED_MESSAGE, 401, error.response?.data, 401)
+            rejectPendingQueue(sessionError)
+            await redirectToLoginForExpiredSession()
+            return Promise.reject(sessionError)
           } finally {
             isRefreshing = false
           }
         }
 
-        return new Promise((resolve) => {
-          pendingQueue.push((token: string) => {
-            originalRequest.headers = originalRequest.headers || {}
-            originalRequest.headers.Authorization = `Bearer ${token}`
-            resolve(request(originalRequest))
+        return new Promise((resolve, reject) => {
+          pendingQueue.push({
+            resolve: (token: string) => {
+              originalRequest.headers = originalRequest.headers || {}
+              originalRequest.headers.Authorization = `Bearer ${token}`
+              resolve(request(originalRequest))
+            },
+            reject,
           })
         })
       }

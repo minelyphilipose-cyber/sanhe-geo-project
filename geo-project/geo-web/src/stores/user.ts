@@ -56,6 +56,14 @@ export const useUserStore = defineStore('user', () => {
     localStorage.removeItem(AUTH_STORAGE_KEY)
   }
 
+  function clearAuth() {
+    accessToken.value = ''
+    refreshToken.value = ''
+    userInfo.value = null
+    profileSynced.value = false
+    clearPersistedAuth()
+  }
+
   async function login(form: LoginRequest) {
     const { data } = await loginApi(form)
     const res = data.data
@@ -115,11 +123,7 @@ export const useUserStore = defineStore('user', () => {
     } catch {
       // ignore backend logout error and clear local state
     } finally {
-      accessToken.value = ''
-      refreshToken.value = ''
-      userInfo.value = null
-      profileSynced.value = false
-      clearPersistedAuth()
+      clearAuth()
     }
   }
 
@@ -153,6 +157,7 @@ export const useUserStore = defineStore('user', () => {
     updateAccessToken,
     syncProfile,
     logout,
+    clearAuth,
     hasRole,
     hasPermission,
   }

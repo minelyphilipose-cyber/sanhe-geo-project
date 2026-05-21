@@ -31,7 +31,10 @@ public class AiPlatformConfigUpdateRequest {
     @NotNull
     private Boolean enabled;
     private Boolean enabledForPresale;
+    private Boolean presaleEvaluateEnabled;
     private Boolean enabledForArticle;
+    private Boolean enabledForGeoQuestion;
+    private Boolean enabledForQuestionPoll;
     private Integer maxRetry;
     private Integer timeoutMs;
     private Integer rateLimitQps;

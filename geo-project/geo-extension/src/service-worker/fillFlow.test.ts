@@ -84,6 +84,8 @@ describe('fill service worker flow', () => {
     })
     expect(extensionApi.ackTask).toHaveBeenCalledWith('ext.secret', 30)
     expect(startTaskLifecycle).toHaveBeenCalledWith(30, 9, 'ext.secret')
+    expect(vi.mocked(startTaskLifecycle).mock.invocationCallOrder[0])
+      .toBeLessThan(vi.mocked(extensionApi.ackTask).mock.invocationCallOrder[0])
   })
 
   it('passes content html to content script without invoking DOMPurify in the service worker', async () => {

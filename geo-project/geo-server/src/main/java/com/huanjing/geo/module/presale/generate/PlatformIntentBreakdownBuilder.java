@@ -8,7 +8,6 @@ import com.huanjing.geo.module.presale.dto.snapshot.raw.PlatformBreakdown;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
 import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -29,8 +28,6 @@ public class PlatformIntentBreakdownBuilder {
     private static final String ALGORITHM_VERSION = "v2";
     private static final String CATEGORY_COGNITIVE = "COGNITIVE";
     private static final String CATEGORY_COMPARISON = "COMPARISON";
-    @Value("${presale.prompt.active-version:v2}")
-    private String activePromptTemplateVersion;
 
     public BuildResult build(Long versionId,
                              RawSnapshotDTO rawSnapshot,
@@ -50,7 +47,7 @@ public class PlatformIntentBreakdownBuilder {
             }
         }
 
-        Map<String, Integer> intentTotalPrompts = resolveIntentTotalPromptsFromTemplate();
+        Map<String, Integer> intentTotalPrompts = resolveIntentTotalPromptsFromVersion(versionId);
         List<PlatformIntentSampleRow> rows = aiPromptResultMapper.selectIntentSamplesByVersionId(versionId);
         List<PlatformIntentJudgeAggregateRow> judgeRows = aiPromptResultMapper.selectJudgeAggregatesByVersionId(versionId);
         if ((rows == null || rows.isEmpty()) && allowSyntheticFallback) {
@@ -176,9 +173,9 @@ public class PlatformIntentBreakdownBuilder {
                 .build();
     }
 
-    private Map<String, Integer> resolveIntentTotalPromptsFromTemplate() {
+    private Map<String, Integer> resolveIntentTotalPromptsFromVersion(Long versionId) {
         Map<String, Integer> map = new HashMap<>();
-        List<PromptTemplateIntentStatRow> rows = aiPromptResultMapper.selectTemplateIntentStats(activePromptTemplateVersion);
+        List<PromptTemplateIntentStatRow> rows = aiPromptResultMapper.selectVersionPromptIntentStats(versionId);
         if (rows != null) {
             for (PromptTemplateIntentStatRow row : rows) {
                 if (row == null || row.getIntentLabel() == null) {
@@ -198,9 +195,7 @@ public class PlatformIntentBreakdownBuilder {
         }
 
         for (PresaleIntentCode intentCode : PresaleIntentCode.allInOrder()) {
-            if (!map.containsKey(intentCode.getCode())) {
-                throw new BizException(500, "platform_intent_breakdown integrity violated: template stats missing category=" + intentCode.getLabel());
-            }
+            map.putIfAbsent(intentCode.getCode(), 0);
         }
         return map;
     }

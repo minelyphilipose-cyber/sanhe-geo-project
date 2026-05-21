@@ -73,6 +73,7 @@ class ContentDistributionSemiAutoServiceTest {
     private FillTokenService fillTokenService;
     private CompanyChannelQuotaService companyChannelQuotaService;
     private AuditService auditService;
+    private ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
     private ContentDistributionService service;
 
     @BeforeEach
@@ -89,6 +90,8 @@ class ContentDistributionSemiAutoServiceTest {
         fillTokenService = mock(FillTokenService.class);
         companyChannelQuotaService = mock(CompanyChannelQuotaService.class);
         auditService = mock(AuditService.class);
+        articleImagePublicUrlRewriter = mock(ArticleImagePublicUrlRewriter.class);
+        when(articleImagePublicUrlRewriter.rewrite(any(), any())).thenAnswer(invocation -> invocation.getArgument(1));
         when(articleDraftMapper.update(eq(null), any())).thenReturn(1);
 
         service = newService(List.of(new TestSemiAutoAdapter()));
@@ -115,7 +118,8 @@ class ContentDistributionSemiAutoServiceTest {
                 fillTokenService,
                 auditService,
                 new ObjectMapper(),
-                mock(AuthorityMediaDistributionAdapter.class)
+                mock(AuthorityMediaDistributionAdapter.class),
+                articleImagePublicUrlRewriter
         );
     }
 

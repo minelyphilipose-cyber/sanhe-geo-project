@@ -11,14 +11,14 @@ public interface PresaleAiPromptJudgeResultMapper extends BaseMapper<PresaleAiPr
 
     @Insert("INSERT INTO presale_ai_prompt_judge_result (" +
             "prompt_result_id, version_id, batch_no, platform_code, prompt_template_id, category, competitor_name, " +
-            "judge_status, judge_attempt_count, judge_model_id, judge_temperature, judge_error, " +
+            "judge_status, judge_attempt_count, judge_platform_code, judge_model_id, judge_temperature, judge_error, " +
             "sentiment, sentiment_score, attribute_hit_rate, tone, " +
             "preferred_brand, target_sentiment, reasoning_quality, " +
             "attributes_hit, factual_errors, target_advantages, target_disadvantages, competitor_advantages, " +
             "judge_payload_json, raw_judge_response" +
             ") VALUES (" +
             "#{row.promptResultId}, #{row.versionId}, #{row.batchNo}, #{row.platformCode}, #{row.promptTemplateId}, #{row.category}, #{row.competitorName}, " +
-            "#{row.judgeStatus}, #{row.judgeAttemptCount}, #{row.judgeModelId}, #{row.judgeTemperature}, #{row.judgeError}, " +
+            "#{row.judgeStatus}, #{row.judgeAttemptCount}, #{row.judgePlatformCode}, #{row.judgeModelId}, #{row.judgeTemperature}, #{row.judgeError}, " +
             "#{row.sentiment}, #{row.sentimentScore}, #{row.attributeHitRate}, #{row.tone}, " +
             "#{row.preferredBrand}, #{row.targetSentiment}, #{row.reasoningQuality}, " +
             "#{row.attributesHit}, #{row.factualErrors}, #{row.targetAdvantages}, #{row.targetDisadvantages}, #{row.competitorAdvantages}, " +
@@ -32,6 +32,7 @@ public interface PresaleAiPromptJudgeResultMapper extends BaseMapper<PresaleAiPr
             "competitor_name = VALUES(competitor_name), " +
             "judge_status = VALUES(judge_status), " +
             "judge_attempt_count = VALUES(judge_attempt_count), " +
+            "judge_platform_code = VALUES(judge_platform_code), " +
             "judge_model_id = VALUES(judge_model_id), " +
             "judge_temperature = VALUES(judge_temperature), " +
             "judge_error = VALUES(judge_error), " +

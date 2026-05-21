@@ -79,6 +79,11 @@ public class GeoQuestionController {
         return R.ok(geoQuestionService.questionPage(id, tier, current == null ? 1L : current, size == null ? 20L : size));
     }
 
+    @PostMapping("/api/geo/workorder/{id:\\d+}/questions/manual")
+    public R<ReviewVO> createManualQuestions(@PathVariable Long id, @RequestBody ManualQuestionCreateRequest req) {
+        return R.ok(geoQuestionService.createManualQuestions(id, req));
+    }
+
     @PostMapping("/api/geo/workorder/{id:\\d+}/commit")
     public R<GeoQuestionVersion> commit(@PathVariable Long id, @RequestBody CommitRequest req) {
         return R.ok(geoQuestionService.commit(id, req));

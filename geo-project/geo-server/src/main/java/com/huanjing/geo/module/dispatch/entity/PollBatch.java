@@ -18,6 +18,7 @@ public class PollBatch {
     private Long projectId;
     private LocalDate batchDate;
     private Integer batchNo;
+    private String questionTier;
     private LocalDateTime triggeredAt;
     private LocalDateTime finishedAt;
     private Integer totalQuestionCount;
