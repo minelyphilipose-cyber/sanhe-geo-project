@@ -934,7 +934,7 @@ import {
   saveContentArticleRevision,
 } from '@/api/content'
 import { getPublishSites } from '@/api/publishSite'
-import { getBrandDetail, getBrandImageFolders, getBrandMaterialStream } from '@/api/customer'
+import { getBrandDetail, getBrandImageFolders, getBrandMaterialPreviewUrl } from '@/api/customer'
 import { createExtensionBindCode, type ExtensionBindCode } from '@/api/extension'
 import { getProjectDetail } from '@/api/project'
 import { pingExtensionBridge, startExtensionCookieCapture, startExtensionFill } from '@/composables/useExtensionBridge'
@@ -1068,7 +1068,6 @@ const zhihuAccounts = ref<SelfMediaAccount[]>([])
 const checkingSelfMediaAccountId = ref<number | null>(null)
 const brandImageFolders = ref<BrandImageFolder[]>([])
 const materialThumbUrls = ref<Record<number, string | null>>({})
-const materialThumbObjectUrls = ref<string[]>([])
 const imageFolderScope = ref<'project' | 'all'>('project')
 const selectedImageFolderId = ref<number | null>(null)
 const selectedMediaPlatform = ref<MediaPlatform>('wechat_mp')
@@ -2090,9 +2089,8 @@ async function loadMaterialThumbs() {
     while (cursor < targets.length) {
       const material = targets[cursor++]
       try {
-        const { data: blob } = await getBrandMaterialStream(brandId, material.id, false)
-        const url = URL.createObjectURL(blob)
-        materialThumbObjectUrls.value.push(url)
+        const { data } = await getBrandMaterialPreviewUrl(brandId, material.id)
+        const url = data.data.url
         materialThumbUrls.value = { ...materialThumbUrls.value, [material.id]: url }
       } catch {
         materialThumbUrls.value = { ...materialThumbUrls.value, [material.id]: null }
@@ -2104,8 +2102,6 @@ async function loadMaterialThumbs() {
 }
 
 function cleanupMaterialThumbs() {
-  materialThumbObjectUrls.value.forEach((url) => URL.revokeObjectURL(url))
-  materialThumbObjectUrls.value = []
   materialThumbUrls.value = {}
 }
 

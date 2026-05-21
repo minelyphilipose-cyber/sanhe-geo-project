@@ -492,7 +492,7 @@ import {
   previewAiContentArticleDraft,
   type ArticleAiDraftPreviewResponse,
 } from '@/api/content'
-import { getBrandImageFolders, getBrandMaterialStream } from '@/api/customer'
+import { getBrandImageFolders, getBrandMaterialPreviewUrl } from '@/api/customer'
 import { getKeywordGroupQuestions, getProjectDetail, getProjectList } from '@/api/project'
 import { useDictStore } from '@/stores/dict'
 import DataState from '@/components/ui/DataState.vue'
@@ -595,7 +595,6 @@ const questionPickerLoading = ref(false)
 const imageFoldersLoading = ref(false)
 const imageFolders = ref<BrandImageFolder[]>([])
 const imageThumbUrls = ref<Record<number, string | null>>({})
-const imageThumbObjectUrls = ref<string[]>([])
 const imagePreviewUrls = ref<Record<string, string>>({})
 const selectedImageFolderId = ref<number | null>(null)
 const selectedImageMaterialId = ref<number | null>(null)
@@ -1121,9 +1120,8 @@ async function loadImageThumbs(brandId: number) {
     while (cursor < targets.length) {
       const material = targets[cursor++]
       try {
-        const { data: blob } = await getBrandMaterialStream(brandId, material.id, false)
-        const url = URL.createObjectURL(blob)
-        imageThumbObjectUrls.value.push(url)
+        const { data } = await getBrandMaterialPreviewUrl(brandId, material.id)
+        const url = data.data.url
         imageThumbUrls.value = { ...imageThumbUrls.value, [material.id]: url }
         if (material.fileUrl) {
           imagePreviewUrls.value = { ...imagePreviewUrls.value, [material.fileUrl]: url }
@@ -1138,8 +1136,6 @@ async function loadImageThumbs(brandId: number) {
 }
 
 function cleanupImageThumbs() {
-  imageThumbObjectUrls.value.forEach((url) => URL.revokeObjectURL(url))
-  imageThumbObjectUrls.value = []
   imageThumbUrls.value = {}
   imagePreviewUrls.value = {}
 }
