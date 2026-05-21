@@ -150,7 +150,7 @@
                             :aria-label="isPlatformGroupCollapsed(topic, group) ? '展开平台大类' : '折叠平台大类'"
                             @click="togglePlatformGroupCollapse(topic, group)"
                           />
-                          <div class="platform-group-title">{{ group.label }}</div>
+                          <div class="platform-group-title">{{ platformGroupTitle(group) }}</div>
                         </div>
                         <div class="platform-group-desc">{{ group.desc }}</div>
                         <div class="platform-group-summary-line">
@@ -595,6 +595,20 @@ function isPlatformGroupCollapsed(topic: SelectedTopic, group: PlatformGroup) {
   return Boolean(collapsedPlatformGroupMap.value[platformGroupCollapseKey(topic, group)])
 }
 
+function hasPlatformGroupCollapseState(topic: SelectedTopic, group: PlatformGroup) {
+  return Object.prototype.hasOwnProperty.call(collapsedPlatformGroupMap.value, platformGroupCollapseKey(topic, group))
+}
+
+function collapseMissingPlatformGroups(topic: SelectedTopic) {
+  const next = { ...collapsedPlatformGroupMap.value }
+  for (const group of platformGroups.value) {
+    if (!hasPlatformGroupCollapseState(topic, group)) {
+      next[platformGroupCollapseKey(topic, group)] = true
+    }
+  }
+  collapsedPlatformGroupMap.value = next
+}
+
 function togglePlatformGroupCollapse(topic: SelectedTopic, group: PlatformGroup) {
   const key = platformGroupCollapseKey(topic, group)
   collapsedPlatformGroupMap.value = {
@@ -623,6 +637,7 @@ function syncTopicPlatformKeys() {
       if (!topic.platformTemplateCounts[platform.value]) topic.platformTemplateCounts[platform.value] = []
       if (!topic.platformPreviewCounts[platform.value]) topic.platformPreviewCounts[platform.value] = []
     }
+    collapseMissingPlatformGroups(topic)
   }
 }
 
@@ -668,6 +683,7 @@ function appendTopic(topic: SelectedTopic) {
     return false
   }
   selectedTopics.value.push(topic)
+  collapseMissingPlatformGroups(topic)
   return true
 }
 
@@ -870,7 +886,7 @@ function buildPlatformGroups(): PlatformGroup[] {
   if (generationOptions.value?.groups?.length) {
     return generationOptions.value.groups.map((group, index) => ({
       key: buildPlatformGroupUiKey(group, index),
-      label: group.label,
+      label: normalizePlatformGroupLabel(group.groupCode, group.label),
       desc: group.description,
       platforms: group.channels.map((channel) => buildChannelOption(channel)),
     }))
@@ -892,6 +908,23 @@ function buildPlatformGroups(): PlatformGroup[] {
 function buildPlatformGroupUiKey(group: ArticleGenerationOptions['groups'][number], index: number) {
   const groupCode = group.groupCode?.trim()
   return `${groupCode || 'platform_group'}::${index}`
+}
+
+function normalizePlatformGroupLabel(groupCode?: string | null, label?: string | null) {
+  const text = label?.trim()
+  if (text) return text
+  const labels: Record<string, string> = {
+    agent_site: 'Agent 官网',
+    industry_site: '行业资讯站',
+    self_media: '自媒体平台',
+    authority_media: '权威媒体',
+    forum: '平台网站',
+  }
+  return labels[groupCode?.trim() || ''] || '分发平台'
+}
+
+function platformGroupTitle(group: PlatformGroup) {
+  return group.label?.trim() || '分发平台'
 }
 
 function buildChannelOption(channel: ArticleGenerationOptions['groups'][number]['channels'][number]): ContentStyleOption {
