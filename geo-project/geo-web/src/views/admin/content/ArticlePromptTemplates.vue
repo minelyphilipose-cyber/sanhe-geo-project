@@ -270,7 +270,7 @@
           <div class="detail-info-grid">
             <div><label>渠道大类</label><strong>{{ templateDetail.channelGroupName || channelGroupLabel(templateDetail.channelGroupCode) }}</strong></div>
             <div><label>渠道小类</label><strong>{{ templateDetail.channelSubName || templateDetail.channelSubCode || '-' }}</strong></div>
-            <div><label>官网归属</label><strong>{{ templateDetail.agentSiteModule ? agentSiteModuleLabel(templateDetail.agentSiteModule) : '-' }}</strong></div>
+            <div v-if="isAgentSiteTemplate(templateDetail)"><label>官网归属</label><strong>{{ agentSiteModuleLabel(templateDetail.agentSiteModule || 'knowledge') }}</strong></div>
             <div><label>文章类型</label><strong>{{ templateDetail.articleTypeName || articleTypeLabel(templateDetail.articleTypeCode) }}</strong></div>
             <div><label>联系方式露出</label><strong>{{ contactModeLabel(templateDetail.contactDisclosureMode) }}</strong></div>
             <div><label>权重</label><strong>{{ templateDetail.weight }}</strong></div>
@@ -606,6 +606,10 @@ function templateScopeLabel(item: ArticlePromptTemplate) {
   return '通用模板'
 }
 
+function isAgentSiteTemplate(item: ArticlePromptTemplate) {
+  return item.channelGroupCode === 'agent_site'
+}
+
 function selectChannelGroup(value: string) {
   filters.channelGroupCode = value
   filters.channelSubCode = ''
@@ -627,16 +631,53 @@ function currentTemplateVersion(detail: ArticlePromptTemplateDetail) {
   return detail.versions.find((version) => version.id === detail.currentVersionId) || detail.versions[0]
 }
 
-function normalizeTemplateDetail(response: ArticlePromptTemplateDetailResponse): ArticlePromptTemplateDetail {
-  const versions = response.versions || []
+const templateFallbackKeys = [
+  'name',
+  'description',
+  'channelGroupCode',
+  'channelGroupName',
+  'channelSubCode',
+  'channelSubName',
+  'agentSiteModule',
+  'articleTypeCode',
+  'articleTypeName',
+  'status',
+  'weight',
+  'sortOrder',
+  'sampleOutputUrl',
+  'contactDisclosureMode',
+  'currentVersionId',
+  'currentVersionNo',
+  'createdAt',
+  'updatedAt',
+] as const
+
+function mergeTemplateFallback(template: ArticlePromptTemplate, fallback?: ArticlePromptTemplate) {
+  if (!fallback) return template
+  const merged = { ...fallback, ...template }
+  templateFallbackKeys.forEach((key) => {
+    if (merged[key] === undefined || merged[key] === null || merged[key] === '') {
+      merged[key] = fallback[key] as never
+    }
+  })
+  return merged
+}
+
+function normalizeTemplateDetail(
+  response: ArticlePromptTemplateDetailResponse,
+  fallback?: ArticlePromptTemplate,
+): ArticlePromptTemplateDetail {
+  const flatResponse = response as unknown as ArticlePromptTemplateDetail
+  const template = mergeTemplateFallback(response.template || flatResponse, fallback)
+  const versions = response.versions || flatResponse.versions || []
   const currentVersion = response.currentVersion
   const allVersions = currentVersion && !versions.some((version) => version.id === currentVersion.id)
     ? [currentVersion, ...versions]
     : versions
   return {
-    ...response.template,
-    currentVersionId: response.template.currentVersionId || currentVersion?.id || null,
-    currentVersionNo: response.template.currentVersionNo || currentVersion?.versionNo || null,
+    ...template,
+    currentVersionId: template.currentVersionId || currentVersion?.id || null,
+    currentVersionNo: template.currentVersionNo || currentVersion?.versionNo || null,
     versions: allVersions,
   }
 }
@@ -710,11 +751,11 @@ function fillFormFromDetail(detail: ArticlePromptTemplateDetail) {
   })
 }
 
-async function loadTemplateDetail(templateId: number, failMessage: string) {
+async function loadTemplateDetail(templateId: number, failMessage: string, fallback?: ArticlePromptTemplate) {
   detailLoading.value = true
   try {
     const { data } = await getArticlePromptTemplate(templateId)
-    return normalizeTemplateDetail(data.data)
+    return normalizeTemplateDetail(data.data, fallback)
   } catch (err) {
     console.error(err)
     ElMessage.error(failMessage)
@@ -727,13 +768,13 @@ async function loadTemplateDetail(templateId: number, failMessage: string) {
 async function openDetail(item: ArticlePromptTemplate) {
   detailVisible.value = true
   templateDetail.value = null
-  const detail = await loadTemplateDetail(item.id, '加载模板详情失败')
+  const detail = await loadTemplateDetail(item.id, '加载模板详情失败', item)
   if (detail) templateDetail.value = detail
 }
 
 async function openEdit(item: ArticlePromptTemplate) {
   editingId.value = item.id
-  const detail = await loadTemplateDetail(item.id, '加载模板详情失败')
+  const detail = await loadTemplateDetail(item.id, '加载模板详情失败', item)
   if (!detail) return
   editingDetail.value = detail
   fillFormFromDetail(detail)
@@ -823,8 +864,9 @@ async function openVersionFromDetail() {
 
 async function openVersionById(templateId: number) {
   versionVisible.value = true
+  const fallback = templateDetail.value || templates.value.find((item) => item.id === templateId)
   templateDetail.value = null
-  const detail = await loadTemplateDetail(templateId, '加载版本失败')
+  const detail = await loadTemplateDetail(templateId, '加载版本失败', fallback)
   if (detail) templateDetail.value = detail
 }
 
@@ -833,7 +875,7 @@ async function publishVersion(versionId: number) {
   publishing.value = true
   try {
     const { data } = await publishArticlePromptTemplateVersion(templateDetail.value.id, versionId)
-    templateDetail.value = normalizeTemplateDetail(data.data)
+    templateDetail.value = normalizeTemplateDetail(data.data, templateDetail.value)
     ElMessage.success('版本已发布')
     loadTemplates()
   } catch (err) {
