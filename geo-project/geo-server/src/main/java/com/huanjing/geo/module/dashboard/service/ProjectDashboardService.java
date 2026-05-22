@@ -406,9 +406,20 @@ public class ProjectDashboardService {
                 row.put("platformName", stringValue(value.get("platformName")));
             }
         }
-        Map<String, String> logoMap = loadAllPlatformLogoMap();
-        for (Map<String, Object> row : merged.values()) {
-            row.put("platformLogoUrl", logoMap.get(String.valueOf(row.get("platformCode"))));
+        for (AiPlatformConfig platform : loadQuestionPollPlatforms()) {
+            String code = platform.getPlatformCode();
+            Map<String, Object> row = merged.computeIfAbsent(code, ignored -> {
+                Map<String, Object> initial = new LinkedHashMap<>();
+                initial.put("platformCode", code);
+                initial.put("hitCount", 0L);
+                initial.put("contactCount", 0L);
+                initial.put("siteCount", 0L);
+                return initial;
+            });
+            row.put("platformName", StringUtils.hasText(stringValue(row.get("platformName")))
+                    ? stringValue(row.get("platformName"))
+                    : platform.getPlatformName());
+            row.put("platformLogoUrl", platform.getPlatformLogoUrl());
         }
         return merged.values().stream()
                 .sorted((a, b) -> Long.compare(longValue(b.get("hitCount")), longValue(a.get("hitCount"))))
@@ -715,13 +726,20 @@ public class ProjectDashboardService {
         ).stream().collect(Collectors.toMap(AiPlatformConfig::getPlatformCode, AiPlatformConfig::getPlatformLogoUrl, (a, b) -> a));
     }
 
-    private Map<String, String> loadAllPlatformLogoMap() {
+    private List<AiPlatformConfig> loadQuestionPollPlatforms() {
         return aiPlatformConfigMapper.selectList(
                 new LambdaQueryWrapper<AiPlatformConfig>()
-                        .isNotNull(AiPlatformConfig::getPlatformLogoUrl)
-                        .ne(AiPlatformConfig::getPlatformLogoUrl, "")
-                        .select(AiPlatformConfig::getPlatformCode, AiPlatformConfig::getPlatformLogoUrl)
-        ).stream().collect(Collectors.toMap(AiPlatformConfig::getPlatformCode, AiPlatformConfig::getPlatformLogoUrl, (a, b) -> a));
+                        .eq(AiPlatformConfig::getEnabled, true)
+                        .eq(AiPlatformConfig::getEnabledForQuestionPoll, true)
+                        .orderByAsc(AiPlatformConfig::getPriorityLevel)
+                        .orderByAsc(AiPlatformConfig::getPlatformName)
+                        .orderByAsc(AiPlatformConfig::getId)
+                        .select(
+                                AiPlatformConfig::getPlatformCode,
+                                AiPlatformConfig::getPlatformName,
+                                AiPlatformConfig::getPlatformLogoUrl
+                        )
+        );
     }
 
     private long longValue(Object value) {
