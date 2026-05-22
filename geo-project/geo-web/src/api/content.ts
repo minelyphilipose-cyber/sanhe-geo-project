@@ -115,6 +115,8 @@ export interface BatchArticleGenerateTopic {
   questionSceneCode?: string | null
   keywordGroupId?: number
   keywordGroupName?: string
+  readinessWarningConfirmed?: boolean
+  readinessWarningCodes?: string[]
   platforms: BatchArticleGeneratePlatform[]
 }
 
@@ -187,6 +189,8 @@ export interface ArticlePromptTemplateVersion {
   status: 'draft' | 'published' | 'archived' | string
   systemPrompt: string
   userPromptTemplate: string
+  variablesJson?: string | null
+  qualityRulesJson?: string | null
   changeNote?: string | null
   createdAt?: string | null
   publishedAt?: string | null
@@ -217,7 +221,19 @@ export interface ArticlePromptTemplateSaveRequest {
   contactDisclosureMode?: 'full' | 'soft_hint' | 'brand_only' | 'none' | string | null
   systemPrompt: string
   userPromptTemplate: string
+  variablesJson?: string | null
+  qualityRulesJson?: string | null
   changeNote?: string
+}
+
+export interface ArticlePromptVariable {
+  code: string
+  name: string
+  description: string
+  source: string
+  emptyStrategy: 'KEEP_EMPTY' | 'DASH' | 'SAFE_TEXT' | string
+  emptyText?: string | null
+  sampleValue?: string | null
 }
 
 export interface ArticleGenerationTemplateOption {
@@ -258,6 +274,13 @@ export interface ArticleGenerationChannelGroup {
 
 export interface ArticleGenerationOptions {
   groups: ArticleGenerationChannelGroup[]
+  questionScenePlatformSuggestions?: ArticleQuestionScenePlatformSuggestion[]
+}
+
+export interface ArticleQuestionScenePlatformSuggestion {
+  questionSceneCode: string
+  questionSceneName?: string | null
+  platformCodes: string[]
 }
 
 export interface ArticleAllocationItem {
@@ -295,6 +318,10 @@ export function getArticlePromptTemplates(params?: {
 
 export function getArticlePromptTemplate(id: number) {
   return request.get<R<ArticlePromptTemplateDetailResponse>>(`/content/article-prompt-templates/${id}`)
+}
+
+export function getArticlePromptTemplateVariables() {
+  return request.get<R<ArticlePromptVariable[]>>('/content/article-prompt-templates/variables')
 }
 
 export function createArticlePromptTemplate(data: ArticlePromptTemplateSaveRequest) {
@@ -526,7 +553,7 @@ export function getSelfMediaAccountsByBrand(brandId: number) {
 }
 
 export function createSelfMediaAccount(brandId: number, data: {
-  platform: 'toutiao' | 'zhihu'
+  platform: 'toutiao' | 'zhihu' | 'xiaohongshu'
   accountName: string
   platformAccountId?: string
   status?: 'active' | 'disabled'
@@ -535,7 +562,7 @@ export function createSelfMediaAccount(brandId: number, data: {
 }
 
 export function updateSelfMediaAccount(id: number, data: {
-  platform: 'toutiao' | 'zhihu'
+  platform: 'toutiao' | 'zhihu' | 'xiaohongshu'
   accountName: string
   platformAccountId?: string
   status?: 'active' | 'disabled'
@@ -553,7 +580,7 @@ export function distributeContentArticleToSelfMediaAccount(articleId: number, da
   imageMaterialIds?: number[]
   privateStatus?: number | string
   downloadType?: number | string
-  platformOptions?: DouyinPlatformOptions
+  platformOptions?: DouyinPlatformOptions | Record<string, unknown>
   requestId: string
 }) {
   return request.post<R<DistributionTask>>(`/content/articles/${articleId}/distribute-to-self-media`, data)

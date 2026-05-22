@@ -7,6 +7,7 @@ import com.huanjing.geo.module.content.dto.ArticleGenerationOptionDtos.Allocatio
 import com.huanjing.geo.module.content.dto.ArticleGenerationOptionDtos.ChannelGroupVO;
 import com.huanjing.geo.module.content.dto.ArticleGenerationOptionDtos.ChannelOptionVO;
 import com.huanjing.geo.module.content.dto.ArticleGenerationOptionDtos.GenerationOptionsVO;
+import com.huanjing.geo.module.content.dto.ArticleGenerationOptionDtos.QuestionScenePlatformSuggestionVO;
 import com.huanjing.geo.module.content.dto.ArticleGenerationOptionDtos.TemplateOptionVO;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplate;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplateVersion;
@@ -32,6 +33,7 @@ public class ArticleTemplateAllocationService {
 
     private final ArticlePromptTemplateMapper templateMapper;
     private final ArticlePromptTemplateVersionMapper versionMapper;
+    private final QuestionScenePlatformSuggestionService suggestionService;
 
     public GenerationOptionsVO options() {
         List<ChannelGroupVO> groups = new ArrayList<>();
@@ -57,7 +59,14 @@ public class ArticleTemplateAllocationService {
                 "统一按平台网站的社区讨论、经验分享、避坑帖风格生成。",
                 List.of(channelOption(ArticlePromptChannels.FORUM, null, "平台网站", "平台网站讨论感"))));
         groups.addAll(customGroups());
-        return new GenerationOptionsVO(groups);
+        List<QuestionScenePlatformSuggestionVO> suggestions = suggestionService.suggestions().stream()
+                .map(item -> new QuestionScenePlatformSuggestionVO(
+                        item.questionSceneCode(),
+                        questionSceneLabel(item.questionSceneCode()),
+                        item.platformCodes()
+                ))
+                .toList();
+        return new GenerationOptionsVO(groups, suggestions);
     }
 
     public AllocationPreviewResponse preview(String groupCode, String subCode, int count) {
@@ -65,6 +74,7 @@ public class ArticleTemplateAllocationService {
     }
 
     public AllocationPreviewResponse preview(String groupCode, String subCode, String questionSceneCode, int count) {
+        subCode = ArticlePromptChannels.canonicalSubCode(groupCode, subCode);
         List<AllocatedTemplate> allocated = allocate(groupCode, subCode, questionSceneCode, count);
         return new AllocationPreviewResponse(
                 groupCode,
@@ -132,6 +142,7 @@ public class ArticleTemplateAllocationService {
     }
 
     public List<TemplateWithVersion> activeTemplates(String groupCode, String subCode, String questionSceneCode) {
+        subCode = ArticlePromptChannels.canonicalSubCode(groupCode, subCode);
         List<ArticlePromptTemplate> templates = templateMapper.selectList(
                 new LambdaQueryWrapper<ArticlePromptTemplate>()
                         .eq(ArticlePromptTemplate::getChannelGroupCode, groupCode)
@@ -313,7 +324,8 @@ public class ArticleTemplateAllocationService {
             case "toutiao" -> "泛资讯阅读，结论前置";
             case "wechat" -> "完整长文，结构稳";
             case "zhihu" -> "问题回答，判断清晰";
-            case "douyin_image_text" -> "图文卡片式阅读";
+            case "douyin" -> "图文卡片式阅读；Open API 图文发布，需授权账号和图片素材";
+            case "xiaohongshu" -> "经验笔记；半自动填表，需浏览器扩展和 Cookie 凭证";
             case "baijiahao" -> "搜索收录友好，信息密度高";
             case "netease" -> "门户资讯阅读，媒体感强";
             default -> "自媒体内容风格";

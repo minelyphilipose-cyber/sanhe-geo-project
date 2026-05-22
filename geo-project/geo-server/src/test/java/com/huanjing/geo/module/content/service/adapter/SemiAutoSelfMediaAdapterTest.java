@@ -65,6 +65,32 @@ class SemiAutoSelfMediaAdapterTest {
     }
 
     @Test
+    void xiaohongshuProfileComesFromConfiguration() {
+        SemiAutoPlatformProperties properties = new SemiAutoPlatformProperties();
+        SemiAutoPlatformProperties.Platform profile = new SemiAutoPlatformProperties.Platform();
+        profile.setPublishUrl("https://creator.xiaohongshu.com/publish/publish");
+        profile.setCookieDomains(List.of(".xiaohongshu.com", ".xhscdn.com"));
+        profile.setRequiredCookieNames(List.of("web_session", "a1"));
+        profile.setEditorSelectors(Map.of("title", "input[placeholder*='标题']"));
+        profile.setAllowedHtmlTags(List.of("p", "strong", "ul", "li"));
+        properties.setProfiles(Map.of(XiaohongshuSemiAutoAdapter.PLATFORM, profile));
+        XiaohongshuSemiAutoAdapter adapter = new XiaohongshuSemiAutoAdapter(properties, new MarkdownToHtmlRenderer());
+
+        PlatformFillProfile fillProfile = adapter.fillProfile();
+        ArticleDraft article = new ArticleDraft();
+        article.setTitle("小红书标题");
+        SemiAutoFillTask task = adapter.prepareFillTask(article, "**内容**", fillProfile);
+
+        assertEquals("xiaohongshu", adapter.platform());
+        assertEquals("https://creator.xiaohongshu.com/publish/publish", fillProfile.publishUrl());
+        assertEquals(List.of(".xiaohongshu.com", ".xhscdn.com"), fillProfile.cookieDomains());
+        assertEquals(List.of("web_session", "a1"), fillProfile.requiredCookieNames());
+        assertEquals("xiaohongshu", task.platform());
+        assertEquals("小红书标题", task.title());
+        assertTrue(task.renderedHtml().contains("<strong>内容</strong>"));
+    }
+
+    @Test
     void missingProfileFailsFast() {
         SemiAutoPlatformProperties properties = new SemiAutoPlatformProperties();
         ToutiaoSemiAutoAdapter adapter = new ToutiaoSemiAutoAdapter(properties, new MarkdownToHtmlRenderer());

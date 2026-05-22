@@ -27,6 +27,7 @@ geo:
       token: ${WECHAT_TOKEN:GeoWxToken2026A8x9kP3qR7nM}
       encoding-aes-key: ${WECHAT_ENCODING_AES_KEY:Q8wE2rT5yU7iO9pA3sD6fG4hJ1kL8zX5cV2bN7mQ4wE}
       draft-distribution-enabled: false
+      auto-publish-enabled: false
       func-scope-strict-mode: false
       required-draft-func-scopes: [1, 13]
       auth-type: 1

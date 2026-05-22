@@ -210,7 +210,7 @@
               <option value="toutiao">今日头条</option>
               <option value="wechat">公众号</option>
               <option value="zhihu">知乎</option>
-              <option value="douyin_image_text">抖音图文</option>
+              <option value="douyin">抖音图文</option>
               <option value="netease">网易</option>
               <option value="agent_site_article">Agent 官网文章</option>
               <option value="industry_site">行业资讯站</option>
@@ -502,7 +502,7 @@ const staticTargets = reactive<TargetConfig[]>([
   {
     categoryCode: 'self_media',
     name: '抖音图文',
-    code: 'douyin_image_text',
+    code: 'douyin',
     logoText: '抖',
     logoClass: 'douyin',
     enabled: true,

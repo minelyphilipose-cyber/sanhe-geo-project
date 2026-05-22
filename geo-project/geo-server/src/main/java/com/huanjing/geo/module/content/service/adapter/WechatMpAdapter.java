@@ -3,6 +3,7 @@ package com.huanjing.geo.module.content.service.adapter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.DistributionTask;
@@ -35,6 +36,7 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
     private final WechatMediaService mediaService;
     private final WechatTokenAwareExecutor tokenAwareExecutor;
     private final WechatMpClient wechatMpClient;
+    private final WechatOpenPlatformProperties openPlatformProperties;
     private final BrandService brandService;
     private final ObjectMapper objectMapper;
 
@@ -99,10 +101,24 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
             requestPayload = buildRequestPayload(account, mpTarget.coverMaterialId(), draftArticle);
             WechatMpClient.DraftResult result =
                     tokenAwareExecutor.execute(account, accessToken -> wechatMpClient.addDraft(accessToken, draftArticle));
+            if (shouldSubmitPublish(mpTarget)) {
+                WechatMpClient.PublishResult publishResult =
+                        tokenAwareExecutor.execute(account, accessToken -> wechatMpClient.submitPublish(accessToken, result.mediaId()));
+                ObjectNode response = objectMapper.createObjectNode();
+                response.put("media_id", result.mediaId());
+                response.put("publish_id", publishResult.publishId());
+                response.put("message", "submitted_to_wechat_freepublish");
+                SubmitResult submitResult = SubmitResult.success(200, requestPayload, objectMapper.writeValueAsString(response), null, publishResult.publishId());
+                submitResult.setExternalStatus("submitted_to_publish");
+                submitResult.setReviewStatus(ReviewStatusResult.ReviewStatus.UNDER_REVIEW);
+                return submitResult;
+            }
             ObjectNode response = objectMapper.createObjectNode();
             response.put("media_id", result.mediaId());
             response.put("message", "saved_to_wechat_draft");
-            return SubmitResult.success(200, requestPayload, objectMapper.writeValueAsString(response), null, result.mediaId());
+            SubmitResult submitResult = SubmitResult.success(200, requestPayload, objectMapper.writeValueAsString(response), null, result.mediaId());
+            submitResult.setExternalStatus("saved_to_draft");
+            return submitResult;
         } catch (BizException ex) {
             return SubmitResult.failure(ex.getCode(), requestPayload, null, ex.getMessage(), failureKind(ex.getCode()), retryable(ex.getCode()));
         } catch (Exception ex) {
@@ -145,7 +161,7 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
     private String buildRequestPayload(SelfMediaAccount account, Long coverMaterialId, WechatMpClient.DraftArticle article) throws Exception {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("platform", PLATFORM);
-            root.put("selfMediaAccountId", account.getId());
+        root.put("selfMediaAccountId", account.getId());
         root.put("authorizerAppid", account.getPlatformAccountId());
         root.put("coverMaterialId", coverMaterialId);
         ObjectNode draft = root.putObject("draftArticle");
@@ -157,6 +173,21 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
         draft.put("needOpenComment", article.needOpenComment());
         draft.put("onlyFansCanComment", article.onlyFansCanComment());
         return objectMapper.writeValueAsString(root);
+    }
+
+    private boolean shouldSubmitPublish(TargetContext.SelfMediaTarget target) {
+        if (target == null || target.platformOptions() == null) {
+            return false;
+        }
+        Object action = target.platformOptions().get("publishAction");
+        boolean requested = action != null && "publish".equalsIgnoreCase(String.valueOf(action).trim());
+        if (!requested) {
+            return false;
+        }
+        if (!openPlatformProperties.isAutoPublishEnabled()) {
+            throw new BizException(403, "微信公众号自动发布未开启，当前仅允许保存草稿");
+        }
+        return true;
     }
 
     private String failureKind(int code) {

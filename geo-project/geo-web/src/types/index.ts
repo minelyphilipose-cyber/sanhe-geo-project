@@ -1079,8 +1079,10 @@ export interface AuthorityMediaResource {
 
 export interface WechatMpCapability {
   draftDistributionEnabled: boolean
+  autoPublishEnabled?: boolean
   clientMode: string
   reason?: string | null
+  description?: string | null
 }
 
 export interface WechatMpAuthUrl {
@@ -1092,6 +1094,7 @@ export interface DouyinCapability {
   enabled: boolean
   mode: 'mock' | 'real' | string
   disabledReason?: string | null
+  description?: string | null
 }
 
 export interface DouyinAuthUrl {

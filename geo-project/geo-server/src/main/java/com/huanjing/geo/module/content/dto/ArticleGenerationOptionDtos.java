@@ -10,7 +10,8 @@ public final class ArticleGenerationOptionDtos {
     private ArticleGenerationOptionDtos() {
     }
 
-    public record GenerationOptionsVO(List<ChannelGroupVO> groups) {
+    public record GenerationOptionsVO(List<ChannelGroupVO> groups,
+                                      List<QuestionScenePlatformSuggestionVO> questionScenePlatformSuggestions) {
     }
 
     public record ChannelGroupVO(
@@ -49,6 +50,13 @@ public final class ArticleGenerationOptionDtos {
             String questionSceneName,
             Integer weight,
             Integer sortOrder
+    ) {
+    }
+
+    public record QuestionScenePlatformSuggestionVO(
+            String questionSceneCode,
+            String questionSceneName,
+            List<String> platformCodes
     ) {
     }
 

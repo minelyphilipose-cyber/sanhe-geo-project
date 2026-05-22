@@ -8,6 +8,7 @@ import com.huanjing.geo.module.content.dto.ArticleGenerationOptionDtos.Generatio
 import com.huanjing.geo.module.content.dto.ArticlePromptTemplateDtos.TemplateDetailVO;
 import com.huanjing.geo.module.content.dto.ArticlePromptTemplateDtos.TemplateSaveRequest;
 import com.huanjing.geo.module.content.dto.ArticlePromptTemplateDtos.TemplateVO;
+import com.huanjing.geo.module.content.dto.ArticlePromptTemplateDtos.VariableVO;
 import com.huanjing.geo.module.content.dto.ArticlePromptTemplateDtos.VersionCreateRequest;
 import com.huanjing.geo.module.content.dto.ArticlePromptTemplateDtos.WeightUpdateRequest;
 import com.huanjing.geo.module.content.service.ArticlePromptTemplateService;
@@ -34,6 +35,21 @@ public class ArticlePromptTemplateController {
                                     @RequestParam(defaultValue = "1") long current,
                                     @RequestParam(defaultValue = "10") long size) {
         return R.ok(templateService.page(channelGroupCode, channelSubCode, agentSiteModule, questionSceneCode, status, keyword, current, size));
+    }
+
+    @GetMapping("/variables")
+    public R<java.util.List<VariableVO>> variables() {
+        return R.ok(templateService.variables().stream()
+                .map(def -> new VariableVO(
+                        def.code(),
+                        def.name(),
+                        def.description(),
+                        def.source(),
+                        def.emptyStrategy(),
+                        def.emptyText(),
+                        def.sampleValue()
+                ))
+                .toList());
     }
 
     @GetMapping("/{id}")

@@ -84,6 +84,8 @@ public class BatchArticleGenerationService {
     private static final String TEMPLATE_SOURCE_WEIGHTED = "weighted";
     private static final String TEMPLATE_SOURCE_CUSTOM = "custom";
     private static final String TEMPLATE_SOURCE_FALLBACK_DEFAULT_PROMPT = "fallback_default_prompt";
+    private static final String WARNING_DEAL_CONTACT_MISSING = "deal_contact_missing";
+    private static final String WARNING_DEAL_CONTACT_HIDDEN = "deal_contact_hidden";
     private static final int ARTICLE_REQUEST_TIMEOUT_MS = 120_000;
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final String SMART_TEMPLATE_MATCH_SYSTEM_PROMPT = """
@@ -133,6 +135,7 @@ public class BatchArticleGenerationService {
     private final BatchArticlePromptBuilder promptBuilder;
     private final BatchArticleQualityChecker qualityChecker;
     private final ArticleTemplateAllocationService allocationService;
+    private final QuestionScenePlatformSuggestionService suggestionService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
     private final Executor articleAiDraftExecutor;
@@ -159,6 +162,7 @@ public class BatchArticleGenerationService {
                                          BatchArticlePromptBuilder promptBuilder,
                                          BatchArticleQualityChecker qualityChecker,
                                          ArticleTemplateAllocationService allocationService,
+                                         QuestionScenePlatformSuggestionService suggestionService,
                                          ObjectMapper objectMapper,
                                          PlatformTransactionManager transactionManager,
                                          @Qualifier("articleAiDraftExecutor") Executor articleAiDraftExecutor) {
@@ -184,6 +188,7 @@ public class BatchArticleGenerationService {
         this.promptBuilder = promptBuilder;
         this.qualityChecker = qualityChecker;
         this.allocationService = allocationService;
+        this.suggestionService = suggestionService;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.articleAiDraftExecutor = articleAiDraftExecutor;
@@ -195,6 +200,7 @@ public class BatchArticleGenerationService {
 
         Project project = requireActiveProject(req.getProjectId());
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
+        Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
         if (project.getBrandId() != null) {
             brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
         }
@@ -261,6 +267,14 @@ public class BatchArticleGenerationService {
                         task.setPromptTemplateVersionId(platform.templateVersionId());
                         task.setAllocationMode(platform.allocationMode());
                         task.setTemplateSource(platform.templateSource());
+                        task.setSuggestedPlatformCodes(writeJson(topic.suggestedPlatformCodes()));
+                        task.setSelectedPlatformCodes(writeJson(topic.selectedPlatformCodes()));
+                        List<String> warningCodes = readinessWarningCodes(topic.questionSceneCode(), platform.contactDisclosureMode(), brand);
+                        List<String> confirmedCodes = warningCodes.stream()
+                                .filter(topic.confirmedReadinessWarningCodes()::contains)
+                                .toList();
+                        task.setReadinessWarningCodes(warningCodes.isEmpty() ? null : writeJson(warningCodes));
+                        task.setReadinessWarningConfirmed(!confirmedCodes.isEmpty());
                         task.setLength(DEFAULT_LENGTH);
                         task.setTopic(topic.topic());
                         task.setTopicAsQuestion(topic.topicAsQuestion());
@@ -313,6 +327,10 @@ public class BatchArticleGenerationService {
                         task.getPromptTemplateVersionId(),
                         task.getAllocationMode(),
                         task.getTemplateSource(),
+                        task.getSuggestedPlatformCodes(),
+                        task.getSelectedPlatformCodes(),
+                        task.getReadinessWarningConfirmed(),
+                        task.getReadinessWarningCodes(),
                         task.getStatus(),
                         task.getQualityStatus(),
                         task.getErrorMessage(),
@@ -644,6 +662,11 @@ public class BatchArticleGenerationService {
             }
             KeywordGroup keywordGroup = validateKeywordGroup(projectId, topicSource, topicConfig.getKeywordGroupId());
             String questionSceneCode = normalizeQuestionScene(topicConfig.getQuestionSceneCode());
+            List<String> suggestedPlatformCodes = suggestionService.suggestedPlatformCodes(questionSceneCode);
+            List<String> selectedPlatformCodes = selectedPlatformCodes(topicConfig.getPlatforms());
+            List<String> confirmedReadinessWarningCodes = Boolean.TRUE.equals(topicConfig.getReadinessWarningConfirmed())
+                    ? normalizeWarningCodes(topicConfig.getReadinessWarningCodes())
+                    : List.of();
             List<ValidatedPlatform> platforms = validatePlatforms(topicIndex, topic, questionSceneCode,
                     topicConfig.getPlatforms(), notices, smartSelections);
             if (platforms.stream().mapToInt(platform -> platform.count() == null ? 0 : platform.count()).sum() <= 0) {
@@ -655,6 +678,9 @@ public class BatchArticleGenerationService {
                     questionSceneCode,
                     keywordGroup == null ? null : keywordGroup.getId(),
                     keywordGroup == null ? trimToNull(topicConfig.getKeywordGroupName()) : keywordGroup.getName(),
+                    suggestedPlatformCodes,
+                    selectedPlatformCodes,
+                    confirmedReadinessWarningCodes,
                     platforms
             ));
         }
@@ -662,6 +688,41 @@ public class BatchArticleGenerationService {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "At least one topic must generate articles");
         }
         return result;
+    }
+
+    private List<String> selectedPlatformCodes(List<BatchArticleGenerateRequest.PlatformCount> platforms) {
+        if (platforms == null || platforms.isEmpty()) {
+            return List.of();
+        }
+        return platforms.stream()
+                .filter(Objects::nonNull)
+                .filter(this::hasRequestedCount)
+                .map(this::resolveChannel)
+                .map(channel -> QuestionScenePlatformSuggestionService.key(channel.groupCode(), channel.subCode()))
+                .distinct()
+                .toList();
+    }
+
+    private boolean hasRequestedCount(BatchArticleGenerateRequest.PlatformCount platform) {
+        String allocationMode = StringUtils.hasText(platform.getAllocationMode()) ? platform.getAllocationMode().trim() : "auto";
+        if ("custom".equals(allocationMode)) {
+            return platform.getTemplateCounts() != null && platform.getTemplateCounts().stream()
+                    .filter(Objects::nonNull)
+                    .anyMatch(item -> item.getCount() != null && item.getCount() > 0);
+        }
+        return platform.getCount() != null && platform.getCount() > 0;
+    }
+
+    private List<String> normalizeWarningCodes(List<String> codes) {
+        if (codes == null || codes.isEmpty()) {
+            return List.of();
+        }
+        return codes.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .filter(code -> WARNING_DEAL_CONTACT_MISSING.equals(code) || WARNING_DEAL_CONTACT_HIDDEN.equals(code))
+                .distinct()
+                .toList();
     }
 
     private List<ValidatedPlatform> validatePlatforms(int topicIndex,
@@ -954,11 +1015,26 @@ public class BatchArticleGenerationService {
                 template.getArticleTypeCode(),
                 template.getId(),
                 version.getId(),
+                template.getContactDisclosureMode(),
                 allocationMode,
                 templateSource,
                 count,
                 trimToNull(extraPrompt)
         );
+    }
+
+    private List<String> readinessWarningCodes(String questionSceneCode, String contactDisclosureMode, Brand brand) {
+        if (!"deal".equals(questionSceneCode)) {
+            return List.of();
+        }
+        String fullContactBlock = promptBuilder.buildContactBlock(brand, "full");
+        if (!StringUtils.hasText(fullContactBlock)) {
+            return List.of(WARNING_DEAL_CONTACT_MISSING);
+        }
+        if ("none".equals(trimToNull(contactDisclosureMode))) {
+            return List.of(WARNING_DEAL_CONTACT_HIDDEN);
+        }
+        return List.of();
     }
 
     private String resolveTaskArticleType(String articleTypeCode) {
@@ -982,12 +1058,13 @@ public class BatchArticleGenerationService {
         if (sub != null && !ArticlePromptChannels.isValidCode(sub)) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid channel sub code");
         }
+        sub = ArticlePromptChannels.canonicalSubCode(group, sub);
         return new ChannelRef(group, sub, ArticlePromptChannels.contentStyle(group, sub));
     }
 
     private String groupFromContentStyle(String contentStyle) {
         String style = trim(contentStyle);
-        if (List.of("wechat", "toutiao", "douyin_image_text", "zhihu", "xiaohongshu", "baijiahao", "netease").contains(style)) {
+        if (List.of("wechat", "toutiao", "douyin", "douyin_image_text", "zhihu", "xiaohongshu", "baijiahao", "netease").contains(style)) {
             return ArticlePromptChannels.SELF_MEDIA;
         }
         if ("agent_site_article".equals(style) || "linkedin".equals(style)) {
@@ -1010,7 +1087,7 @@ public class BatchArticleGenerationService {
 
     private String subFromContentStyle(String contentStyle) {
         String style = trim(contentStyle);
-        if (List.of("wechat", "toutiao", "douyin_image_text", "zhihu", "xiaohongshu", "baijiahao", "netease").contains(style)) {
+        if (List.of("wechat", "toutiao", "douyin", "douyin_image_text", "zhihu", "xiaohongshu", "baijiahao", "netease").contains(style)) {
             return style;
         }
         if ("authority_media".equals(style)) {
@@ -1450,6 +1527,9 @@ public class BatchArticleGenerationService {
                                   String questionSceneCode,
                                   Long keywordGroupId,
                                   String keywordGroupName,
+                                  List<String> suggestedPlatformCodes,
+                                  List<String> selectedPlatformCodes,
+                                  List<String> confirmedReadinessWarningCodes,
                                   List<ValidatedPlatform> platforms) {
     }
 
@@ -1463,6 +1543,7 @@ public class BatchArticleGenerationService {
                                      String articleTypeCode,
                                      Long templateId,
                                      Long templateVersionId,
+                                     String contactDisclosureMode,
                                      String allocationMode,
                                      String templateSource,
                                      Integer count,

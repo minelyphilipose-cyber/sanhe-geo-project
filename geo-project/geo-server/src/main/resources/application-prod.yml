@@ -103,6 +103,7 @@ geo:
       token: ${WECHAT_TOKEN}
       encoding-aes-key: ${WECHAT_ENCODING_AES_KEY}
       draft-distribution-enabled: ${WECHAT_DRAFT_DISTRIBUTION_ENABLED:false}
+      auto-publish-enabled: ${WECHAT_AUTO_PUBLISH_ENABLED:false}
       func-scope-strict-mode: ${WECHAT_FUNC_SCOPE_STRICT_MODE:true}
       required-draft-func-scopes: [1, 13]
       auth-type: ${WECHAT_AUTH_TYPE:1}

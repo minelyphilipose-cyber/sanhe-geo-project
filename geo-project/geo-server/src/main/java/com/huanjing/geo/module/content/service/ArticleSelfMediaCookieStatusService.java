@@ -39,7 +39,7 @@ import java.util.stream.Collectors;
 public class ArticleSelfMediaCookieStatusService {
 
     private static final int MAX_ARTICLE_IDS = 50;
-    private static final Set<String> DEFAULT_PLATFORMS = Set.of("toutiao", "zhihu");
+    private static final Set<String> DEFAULT_PLATFORMS = Set.of("toutiao", "zhihu", "xiaohongshu");
     private static final String AUTH_MODE_COOKIE = "COOKIE";
 
     private final ArticleDraftMapper articleDraftMapper;

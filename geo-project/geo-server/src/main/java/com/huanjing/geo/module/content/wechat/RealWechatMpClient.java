@@ -98,6 +98,14 @@ public class RealWechatMpClient implements WechatMpClient {
     }
 
     @Override
+    public PublishResult submitPublish(String authorizerAccessToken, String mediaId) {
+        ObjectNode body = objectMapper.createObjectNode();
+        body.put("media_id", mediaId);
+        JsonNode root = post("/cgi-bin/freepublish/submit", authorizerAccessToken, body);
+        return new PublishResult(root.path("publish_id").asText());
+    }
+
+    @Override
     public MaterialCountResult getMaterialCount(String authorizerAccessToken) {
         JsonNode root = get("/cgi-bin/material/get_materialcount", authorizerAccessToken);
         return new MaterialCountResult(

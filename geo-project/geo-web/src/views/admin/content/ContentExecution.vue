@@ -584,12 +584,12 @@
     <el-dialog v-model="mediaDistributeVisible" title="自媒体分发" width="980px" class="media-distribute-dialog">
       <div class="media-distribute">
         <el-alert
-          v-if="wechatCapability && !wechatCapability.draftDistributionEnabled"
+          v-if="wechatCapability && !wechatDistributionAvailable"
           class="media-capability-alert"
           type="warning"
           :closable="false"
           show-icon
-          title="微信公众号能力审核中"
+          :title="wechatCapability.description || '微信公众号能力审核中'"
         />
         <el-alert
           v-if="douyinCapability && !douyinCapability.enabled"
@@ -603,7 +603,7 @@
         <div class="media-grid">
           <button
             class="media-platform"
-            :class="{ active: selectedMediaPlatform === 'wechat_mp', disabled: !wechatCapability?.draftDistributionEnabled }"
+            :class="{ active: selectedMediaPlatform === 'wechat_mp', disabled: !wechatDistributionAvailable }"
             type="button"
             @click="handleWechatPlatformClick"
           >
@@ -640,6 +640,16 @@
             <span class="zhihu-mark">知</span>
             <span class="media-name">知乎</span>
             <el-tag size="small" :type="semiAutoStatusTagType(zhihuAccounts)">{{ semiAutoStatusLabel(zhihuAccounts) }}</el-tag>
+          </button>
+          <button
+            class="media-platform"
+            :class="{ active: selectedMediaPlatform === 'xiaohongshu', disabled: !xiaohongshuAccounts.length }"
+            type="button"
+            @click="handleSemiAutoPlatformClick('xiaohongshu')"
+          >
+            <span class="xiaohongshu-mark">红</span>
+            <span class="media-name">小红书</span>
+            <el-tag size="small" :type="semiAutoStatusTagType(xiaohongshuAccounts)">{{ semiAutoStatusLabel(xiaohongshuAccounts) }}</el-tag>
           </button>
         </div>
 
@@ -696,7 +706,7 @@
         </div>
         <el-empty
           v-else-if="isSemiAutoPlatform(selectedMediaPlatform)"
-          description="当前品牌暂无可用的头条/知乎账号"
+          :description="`当前品牌暂无可用的${semiAutoPlatformLabel(selectedMediaPlatform)}账号`"
         />
 
         <el-alert
@@ -941,8 +951,8 @@ import { getProjectDetail } from '@/api/project'
 import { pingExtensionBridge, startExtensionCookieCapture, startExtensionFill } from '@/composables/useExtensionBridge'
 import { formatDateTime } from '@/utils/format'
 
-type MediaPlatform = 'wechat_mp' | 'douyin' | 'toutiao' | 'zhihu'
-type SemiAutoPlatform = 'toutiao' | 'zhihu'
+type MediaPlatform = 'wechat_mp' | 'douyin' | 'toutiao' | 'zhihu' | 'xiaohongshu'
+type SemiAutoPlatform = 'toutiao' | 'zhihu' | 'xiaohongshu'
 type ExtensionBridgeStatus = 'unknown' | 'checking' | 'bound' | 'unbound' | 'missing' | 'error'
 type DistributionChannel = 'official_site' | 'industry_site' | 'forum' | 'self_media' | 'authority_media'
 type SelfMediaAccountWithCredential = SelfMediaAccount & {
@@ -1067,6 +1077,7 @@ const wechatAccounts = ref<SelfMediaAccount[]>([])
 const douyinAccounts = ref<SelfMediaAccount[]>([])
 const toutiaoAccounts = ref<SelfMediaAccount[]>([])
 const zhihuAccounts = ref<SelfMediaAccount[]>([])
+const xiaohongshuAccounts = ref<SelfMediaAccount[]>([])
 const checkingSelfMediaAccountId = ref<number | null>(null)
 const brandImageFolders = ref<BrandImageFolder[]>([])
 const materialThumbUrls = ref<Record<number, string | null>>({})
@@ -1103,13 +1114,16 @@ const detailMarkdown = computed(() => detailData.value?.versions?.[0]?.contentMa
 const detailHtml = computed(() => renderArticlePreviewMarkdown(detailMarkdown.value || ''))
 const revisionHtml = computed(() => renderArticlePreviewMarkdown(revisionForm.contentMarkdown || ''))
 const wechatActive = computed(() => wechatAccounts.value.some((account) => account.status === 'active'))
+const wechatDistributionAvailable = computed(() =>
+  !!wechatCapability.value?.draftDistributionEnabled || !!wechatCapability.value?.autoPublishEnabled,
+)
 const wechatStatusLabel = computed(() => {
-  if (!wechatCapability.value?.draftDistributionEnabled) return '审核中'
+  if (!wechatDistributionAvailable.value) return '审核中'
   if (wechatActive.value) return '已登录'
   return '未登录'
 })
 const wechatStatusTagType = computed<'success' | 'warning' | 'info'>(() => {
-  if (!wechatCapability.value?.draftDistributionEnabled) return 'warning'
+  if (!wechatDistributionAvailable.value) return 'warning'
   return wechatActive.value ? 'success' : 'info'
 })
 const douyinActive = computed(() => douyinAccounts.value.some((account) => account.status === 'active'))
@@ -1130,6 +1144,8 @@ const currentPlatformAccounts = computed(() => {
       return toutiaoAccounts.value
     case 'zhihu':
       return zhihuAccounts.value
+    case 'xiaohongshu':
+      return xiaohongshuAccounts.value
     default:
       return wechatAccounts.value
   }
@@ -1169,7 +1185,7 @@ const channelFilterOptions = [
   { label: '自媒体平台 / 今日头条', value: 'self_media:toutiao' },
   { label: '自媒体平台 / 公众号', value: 'self_media:wechat' },
   { label: '自媒体平台 / 知乎', value: 'self_media:zhihu' },
-  { label: '自媒体平台 / 抖音图文', value: 'self_media:douyin_image_text' },
+  { label: '自媒体平台 / 抖音图文', value: 'self_media:douyin' },
   { label: '自媒体平台 / 小红书', value: 'self_media:xiaohongshu' },
   { label: '自媒体平台 / 百家号', value: 'self_media:baijiahao' },
   { label: '自媒体平台 / 网易', value: 'self_media:netease' },
@@ -1260,7 +1276,7 @@ function contentStyleLabel(v?: string | null) {
     toutiao: '今日头条',
     wechat: '公众号',
     zhihu: '知乎',
-    douyin_image_text: '抖音图文',
+    douyin: '抖音图文',
     linkedin: '领英风格',
     agent_site_article: 'Agent 官网文章',
     industry_site: '行业资讯站',
@@ -1289,7 +1305,7 @@ function channelSubLabel(v?: string | null) {
     toutiao: '今日头条',
     wechat: '公众号',
     zhihu: '知乎',
-    douyin_image_text: '抖音图文',
+    douyin: '抖音图文',
     xiaohongshu: '小红书',
     baijiahao: '百家号',
     netease: '网易',
@@ -1642,7 +1658,7 @@ function batchPublishBlockReason(contentStyle?: string | null) {
   if (contentStyle === 'toutiao') return '今日头条不允许自动发布'
   if (contentStyle === 'wechat') return '公众号不允许自动发布'
   if (contentStyle === 'zhihu') return '知乎不允许自动发布'
-  if (contentStyle === 'douyin_image_text') return '抖音图文不允许自动发布'
+  if (contentStyle === 'douyin') return '抖音图文暂不纳入批量发布'
   if (contentStyle === 'authority_media') return '权威媒体不允许自动发布'
   return '文章未绑定可自动发布的平台风格'
 }
@@ -1939,6 +1955,7 @@ async function openMediaDistribute(row: ArticleDraft) {
   douyinAccounts.value = []
   toutiaoAccounts.value = []
   zhihuAccounts.value = []
+  xiaohongshuAccounts.value = []
   brandImageFolders.value = []
   imageFolderScope.value = 'project'
   selectedImageFolderId.value = null
@@ -1988,6 +2005,7 @@ function applySelfMediaAccounts(accounts: SelfMediaAccount[]) {
   douyinAccounts.value = accounts.filter((account) => account.platform === 'douyin')
   toutiaoAccounts.value = accounts.filter((account) => account.platform === 'toutiao')
   zhihuAccounts.value = accounts.filter((account) => account.platform === 'zhihu')
+  xiaohongshuAccounts.value = accounts.filter((account) => account.platform === 'xiaohongshu')
 }
 
 async function refreshSelfMediaAccounts() {
@@ -1997,8 +2015,8 @@ async function refreshSelfMediaAccounts() {
 }
 
 async function handleWechatPlatformClick() {
-  if (!wechatCapability.value?.draftDistributionEnabled) {
-    ElMessage.info('微信公众号能力审核中，暂未开放授权')
+  if (!wechatDistributionAvailable.value) {
+    ElMessage.info(wechatCapability.value?.description || '微信公众号能力审核中，暂未开放授权')
     return
   }
   if (!wechatActive.value) {
@@ -2059,7 +2077,13 @@ function startDouyinImageText(account: SelfMediaAccount) {
 }
 
 function isSemiAutoPlatform(platform: MediaPlatform): platform is SemiAutoPlatform {
-  return platform === 'toutiao' || platform === 'zhihu'
+  return platform === 'toutiao' || platform === 'zhihu' || platform === 'xiaohongshu'
+}
+
+function semiAutoPlatformLabel(platform: string) {
+  if (platform === 'toutiao') return '头条'
+  if (platform === 'zhihu') return '知乎'
+  return '小红书'
 }
 
 function semiAutoStatusLabel(accounts: SelfMediaAccount[]) {
@@ -2102,9 +2126,9 @@ function handleSemiAutoPlatformClick(platform: SemiAutoPlatform) {
   selectedSelfMediaAccountId.value = null
   selectedCoverMaterialId.value = null
   selectedDouyinImageMaterialIds.value = []
-  const accounts = platform === 'toutiao' ? toutiaoAccounts.value : zhihuAccounts.value
+  const accounts = semiAutoAccountsByPlatform(platform)
   if (!accounts.length) {
-    ElMessage.info(`当前品牌暂无${platform === 'toutiao' ? '头条' : '知乎'}账号`)
+    ElMessage.info(`当前品牌暂无${semiAutoPlatformLabel(platform)}账号`)
     return
   }
   const readyAccount = accounts.find((account) => account.status === 'active' && hasActiveCookieCredential(account))
@@ -2116,6 +2140,12 @@ function handleSemiAutoPlatformClick(platform: SemiAutoPlatform) {
   if (loginAccount) {
     void startSemiAutoCookieCapture(loginAccount)
   }
+}
+
+function semiAutoAccountsByPlatform(platform: SemiAutoPlatform) {
+  if (platform === 'toutiao') return toutiaoAccounts.value
+  if (platform === 'zhihu') return zhihuAccounts.value
+  return xiaohongshuAccounts.value
 }
 
 function handleFolderScopeChange() {
@@ -2423,7 +2453,7 @@ function stopCookieCaptureStatusPolling() {
 
 async function refreshSelfMediaAccountsAfterCookieCapture(accountId: number, notify: boolean) {
   await refreshSelfMediaAccounts()
-  const account = [...toutiaoAccounts.value, ...zhihuAccounts.value].find(item => item.id === accountId)
+  const account = [...toutiaoAccounts.value, ...zhihuAccounts.value, ...xiaohongshuAccounts.value].find(item => item.id === accountId)
   if (!account || !hasActiveCookieCredential(account)) return false
   selectedSelfMediaAccountId.value = account.id
   pendingCookieCaptureAccountId.value = null
@@ -4169,7 +4199,8 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 .wechat-mark,
 .douyin-mark,
 .toutiao-mark,
-.zhihu-mark {
+.zhihu-mark,
+.xiaohongshu-mark {
   position: relative;
   z-index: 1;
   display: inline-flex;
@@ -4198,6 +4229,10 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 
 .zhihu-mark {
   background: linear-gradient(135deg, #2563eb, #3b82f6);
+}
+
+.xiaohongshu-mark {
+  background: linear-gradient(135deg, #be123c, #f43f5e);
 }
 
 .media-name {

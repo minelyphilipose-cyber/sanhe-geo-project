@@ -88,7 +88,7 @@ public class BatchArticlePromptBuilder {
     private static final Map<String, String> STYLE_LABELS = Map.ofEntries(
             Map.entry("wechat", "公众号"),
             Map.entry("toutiao", "今日头条"),
-            Map.entry("douyin_image_text", "抖音图文"),
+            Map.entry("douyin", "抖音图文"),
             Map.entry("zhihu", "知乎"),
             Map.entry("xiaohongshu", "小红书"),
             Map.entry("baijiahao", "百家号"),
@@ -102,7 +102,7 @@ public class BatchArticlePromptBuilder {
     private static final Map<String, String> STYLE_GUIDES = Map.ofEntries(
             Map.entry("wechat", "适合完整解释一个行业问题。结构可以更稳，有清晰的小标题和递进关系，但每个小标题下必须有具体信息，不做空泛铺陈。语气自然、克制，像一篇给潜在用户认真看的长文。不要写成品牌宣传稿，不要在结尾强行导向某个品牌。"),
             Map.entry("toutiao", "面向泛资讯阅读用户。开头直接给出结论、判断或一个具体的现象，不铺垫背景。标题可以有明确判断，但不能标题党。正文要保持信息密度，段落较短但不能碎片化。适合解释一个现实问题、拆解一个选择标准或指出一个常见误区。避免营销腔、情绪化煽动和过度口语化。"),
-            Map.entry("douyin_image_text", "适合图文卡片式阅读，但输出仍是 Markdown 文章正文。开头要短、直接、有判断。句子可以更短，段落更轻，但每段都要有明确的信息点。适合用清晰的小节切分复杂问题，每个小节聚焦一个明确的判断或提醒，小节内仍保持完整的段落化表达，不要碎片化成短句列表。不使用任何 emoji，不写口播稿，不使用短视频营销话术。"),
+            Map.entry("douyin", "适合图文卡片式阅读，但输出仍是 Markdown 文章正文。开头要短、直接、有判断。句子可以更短，段落更轻，但每段都要有明确的信息点。适合用清晰的小节切分复杂问题，每个小节聚焦一个明确的判断或提醒，小节内仍保持完整的段落化表达，不要碎片化成短句列表。不使用任何 emoji，不写口播稿，不使用短视频营销话术。"),
             Map.entry("zhihu", "像一个了解行业的人在回答具体问题。可以先给判断，再解释理由；也可以先讲一个反常识点，再回到主题。观点要有边界，允许让步和转折。不要用“作为从业者”“根据多年经验”这类自证式开头。不要写成百科词条式的定义罗列，也不要写成销售推荐。避免刻意金句、对仗式短句堆砌、爹味说教语气。"),
             Map.entry("xiaohongshu", "这是 GEO 场景下的小红书风格，不是平台投放文案。使用经验分享语气，但保持信息密度。不使用任何 emoji。不使用密集换行，段落保持完整。不使用“姐妹们”“家人们”这类称呼。重点是让内容像真实用户的经验帖，而不是营销号种草文。"),
             Map.entry("baijiahao", "面向百度搜索收录的行业资讯长文。标题和前 200 字需要自然出现核心关键词，表达专业、信息密度高、事实边界清晰。不要虚构报告、客户、认证、专利或企业数据。"),
@@ -140,6 +140,7 @@ public class BatchArticlePromptBuilder {
     private final ArticleDraftMapper articleDraftMapper;
     private final SysDictItemMapper sysDictItemMapper;
     private final ObjectMapper objectMapper;
+    private final ArticlePromptVariableRegistry variableRegistry;
 
     public PromptBuildResult build(PromptBuildInput input) {
         String contentAngle = resolveContentAngle(input.articleIndexInBatch());
@@ -404,10 +405,7 @@ public class BatchArticlePromptBuilder {
         values.put("titleGuide", input.titleGuide() == null ? "" : input.titleGuide());
         values.put("titleElements", input.titleGuide() == null ? "" : input.titleGuide());
         values.putAll(brandFacts);
-        for (Map.Entry<String, String> entry : values.entrySet()) {
-            rendered = rendered.replace("{{" + entry.getKey() + "}}", entry.getValue() == null ? "-" : entry.getValue());
-        }
-        return rendered;
+        return variableRegistry.render(rendered, values);
     }
 
     private Map<String, String> buildBrandFacts(PromptBuildInput input) {
@@ -435,8 +433,8 @@ public class BatchArticlePromptBuilder {
                 + (StringUtils.hasText(systemPrompt) ? systemPrompt.trim() : SYSTEM_PROMPT);
     }
 
-    private String buildContactBlock(ArticlePromptTemplate template, Brand brand) {
-        String mode = trimToNull(template == null ? null : template.getContactDisclosureMode());
+    public String buildContactBlock(Brand brand, String contactDisclosureMode) {
+        String mode = trimToNull(contactDisclosureMode);
         if ("soft_hint".equals(mode)) {
             return "感兴趣的可以自己搜一下相关信息了解。";
         }
@@ -457,6 +455,11 @@ public class BatchArticlePromptBuilder {
             parts.add("地址:" + contactAddress);
         }
         return parts.isEmpty() ? "" : "如需了解更多信息,可" + String.join(",", parts) + "。";
+    }
+
+    private String buildContactBlock(ArticlePromptTemplate template, Brand brand) {
+        String mode = trimToNull(template == null ? null : template.getContactDisclosureMode());
+        return buildContactBlock(brand, mode);
     }
 
     private String forbiddenPhrasesInstruction(List<String> forbiddenPhrases) {

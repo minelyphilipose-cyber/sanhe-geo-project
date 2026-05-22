@@ -129,6 +129,33 @@ semi-auto:
           - blockquote
           - a
           - img
+      xiaohongshu:
+        publish-url: ${SEMI_AUTO_XIAOHONGSHU_PUBLISH_URL:https://creator.xiaohongshu.com/publish/publish}
+        cookie-domains:
+          - ".xiaohongshu.com"
+          - ".xhscdn.com"
+        required-cookie-names:
+          - web_session
+          - a1
+        editor-selectors:
+          title: "input[placeholder*='标题'], textarea[placeholder*='标题']"
+          content: "[contenteditable='true'], textarea[placeholder*='正文'], textarea[placeholder*='内容']"
+          cover: "input[type='file']"
+        allowed-html-tags:
+          - p
+          - br
+          - strong
+          - em
+          - u
+          - h1
+          - h2
+          - h3
+          - ul
+          - ol
+          - li
+          - blockquote
+          - a
+          - img
 
 geo:
   security:

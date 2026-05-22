@@ -70,7 +70,8 @@ public class DouyinAuthorizationService {
         return new DouyinCapabilityVO(
                 enabled,
                 clientProperties.getMode(),
-                enabled ? null : "feature flag disabled"
+                enabled ? null : "feature flag disabled",
+                "抖音图文支持 Open API 自动提交；需要 OAuth 授权账号、1-30 张 JPG/PNG 图片素材，文案不超过 1000 字。"
         );
     }
 

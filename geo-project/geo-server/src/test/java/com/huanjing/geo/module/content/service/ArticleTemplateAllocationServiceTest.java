@@ -24,7 +24,7 @@ class ArticleTemplateAllocationServiceTest {
     void setUp() {
         templateMapper = mock(ArticlePromptTemplateMapper.class);
         versionMapper = mock(ArticlePromptTemplateVersionMapper.class);
-        service = new ArticleTemplateAllocationService(templateMapper, versionMapper);
+        service = new ArticleTemplateAllocationService(templateMapper, versionMapper, new QuestionScenePlatformSuggestionService());
     }
 
     @Test

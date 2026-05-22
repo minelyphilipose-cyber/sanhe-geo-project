@@ -15,11 +15,12 @@
   "host_permissions": [
     "http://119.45.154.127/*",
     "https://*.toutiao.com/*",
-    "https://*.zhihu.com/*"
+    "https://*.zhihu.com/*",
+    "https://*.xiaohongshu.com/*"
   ],
   "content_scripts": [
     {
-      "matches": ["https://mp.toutiao.com/*", "https://www.zhihu.com/*", "https://zhuanlan.zhihu.com/*"],
+      "matches": ["https://mp.toutiao.com/*", "https://www.zhihu.com/*", "https://zhuanlan.zhihu.com/*", "https://creator.xiaohongshu.com/*"],
       "js": ["assets/content-script.js"],
       "run_at": "document_idle"
     },

@@ -271,6 +271,28 @@
               <el-input v-model="form.userPromptTemplate" class="prompt-textarea user-prompt" type="textarea" :rows="18" />
             </div>
           </div>
+          <div class="variable-panel">
+            <div class="variable-panel-head">
+              <div>
+                <h4>可用变量</h4>
+                <p>保存时只允许使用以下变量，未注册变量会被拦截。</p>
+              </div>
+              <span>{{ promptVariables.length }} 个变量</span>
+            </div>
+            <div class="variable-chip-list">
+              <button
+                v-for="variable in promptVariables"
+                :key="variable.code"
+                class="variable-chip"
+                type="button"
+                @click="copyVariable(variable.code)"
+              >
+                <strong>{{ variable.name }}</strong>
+                <code>{{ variableToken(variable.code) }}</code>
+                <small>{{ variable.emptyStrategyLabel }}</small>
+              </button>
+            </div>
+          </div>
         </section>
 
         <section class="editor-section">
@@ -349,8 +371,10 @@ import {
   createArticlePromptTemplate,
   getArticlePromptTemplate,
   getArticlePromptTemplates,
+  getArticlePromptTemplateVariables,
   updateArticlePromptTemplate,
   updateArticlePromptTemplateWeight,
+  type ArticlePromptVariable,
   type ArticlePromptTemplate,
   type ArticlePromptTemplateDetail,
   type ArticlePromptTemplateDetailResponse,
@@ -376,7 +400,7 @@ const subOptions: Record<string, Array<{ label: string; value: string }>> = {
     { label: '今日头条', value: 'toutiao' },
     { label: '公众号', value: 'wechat' },
     { label: '知乎', value: 'zhihu' },
-    { label: '抖音图文', value: 'douyin_image_text' },
+    { label: '抖音图文', value: 'douyin' },
     { label: '小红书', value: 'xiaohongshu' },
     { label: '百家号', value: 'baijiahao' },
     { label: '网易', value: 'netease' },
@@ -427,6 +451,7 @@ const detailLoading = ref(false)
 const editorVisible = ref(false)
 const detailVisible = ref(false)
 const templates = ref<ArticlePromptTemplate[]>([])
+const variables = ref<ArticlePromptVariable[]>([])
 const templateDetail = ref<ArticlePromptTemplateDetail | null>(null)
 const editingDetail = ref<ArticlePromptTemplateDetail | null>(null)
 const editingId = ref<number | null>(null)
@@ -448,6 +473,8 @@ const form = reactive<ArticlePromptTemplateSaveRequest>({
   contactDisclosureMode: 'none',
   systemPrompt: '',
   userPromptTemplate: '',
+  variablesJson: '[]',
+  qualityRulesJson: '{}',
   changeNote: '',
 })
 
@@ -506,6 +533,11 @@ const groupedTemplateSections = computed(() => {
     items: groups.get(code) || [],
   }))
 })
+const variableCodeSet = computed(() => new Set(variables.value.map((item) => item.code)))
+const promptVariables = computed(() => variables.value.map((item) => ({
+  ...item,
+  emptyStrategyLabel: emptyStrategyLabel(item),
+})))
 
 function channelGroupLabel(value: string) {
   return channelGroups.find((item) => item.value === value)?.label || value
@@ -543,6 +575,13 @@ function questionSceneLabel(value?: string | null) {
 
 function contactModeLabel(value?: string | null) {
   return contactModes.find((item) => item.value === value)?.label || '不露出'
+}
+
+function emptyStrategyLabel(variable: ArticlePromptVariable) {
+  if (variable.emptyStrategy === 'KEEP_EMPTY') return '空值留空'
+  if (variable.emptyStrategy === 'DASH') return '空值为 -'
+  if (variable.emptyStrategy === 'SAFE_TEXT') return variable.emptyText || '安全兜底'
+  return variable.emptyStrategy
 }
 
 function statusLabel(value: string) {
@@ -704,6 +743,16 @@ async function loadTemplates() {
   }
 }
 
+async function loadVariables() {
+  try {
+    const { data } = await getArticlePromptTemplateVariables()
+    variables.value = data.data || []
+  } catch (err) {
+    console.error(err)
+    ElMessage.error('加载模板变量清单失败')
+  }
+}
+
 function resetForm() {
   Object.assign(form, {
     name: '',
@@ -720,6 +769,8 @@ function resetForm() {
     contactDisclosureMode: 'none',
     systemPrompt: '你是专业 GEO 内容编辑。',
     userPromptTemplate: '请围绕“{{topicAsQuestion}}”生成一篇适合{{channelName}}发布的文章。',
+    variablesJson: '[]',
+    qualityRulesJson: '{}',
     changeNote: '',
   })
 }
@@ -729,6 +780,33 @@ function openCreate() {
   editingDetail.value = null
   resetForm()
   editorVisible.value = true
+}
+
+function extractTemplateVariables(...texts: string[]) {
+  const variables = new Set<string>()
+  const pattern = /\{\{\s*([a-zA-Z][a-zA-Z0-9_]*)\s*}}/g
+  texts.forEach((text) => {
+    if (!text) return
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(text)) !== null) {
+      variables.add(match[1])
+    }
+  })
+  return Array.from(variables)
+}
+
+async function copyVariable(code: string) {
+  const text = variableToken(code)
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success(`已复制 ${text}`)
+  } catch {
+    ElMessage.info(text)
+  }
+}
+
+function variableToken(code: string) {
+  return `{{${code}}}`
 }
 
 function fillFormFromDetail(detail: ArticlePromptTemplateDetail) {
@@ -748,6 +826,8 @@ function fillFormFromDetail(detail: ArticlePromptTemplateDetail) {
     contactDisclosureMode: detail.contactDisclosureMode || 'none',
     systemPrompt: currentVersion?.systemPrompt || '',
     userPromptTemplate: currentVersion?.userPromptTemplate || '',
+    variablesJson: currentVersion?.variablesJson || '[]',
+    qualityRulesJson: currentVersion?.qualityRulesJson || '{}',
     changeNote: '',
   })
 }
@@ -812,6 +892,12 @@ async function saveTemplate() {
     ElMessage.warning('请选择渠道小类')
     return
   }
+  const usedVariables = extractTemplateVariables(form.systemPrompt, form.userPromptTemplate)
+  const unknownVariables = usedVariables.filter((item) => !variableCodeSet.value.has(item))
+  if (unknownVariables.length > 0) {
+    ElMessage.warning(`存在未注册变量：${unknownVariables.join('、')}`)
+    return
+  }
   saving.value = true
   try {
     const payload = {
@@ -819,6 +905,7 @@ async function saveTemplate() {
       channelSubCode: form.channelSubCode || null,
       agentSiteModule: form.channelGroupCode === 'agent_site' ? form.agentSiteModule : null,
       questionSceneCode: form.questionSceneCode || null,
+      variablesJson: JSON.stringify(usedVariables),
     }
     if (editingId.value) {
       await updateArticlePromptTemplate(editingId.value, payload)
@@ -859,7 +946,7 @@ async function confirmWeight(item: ArticlePromptTemplate, weight: number) {
 
 onMounted(async () => {
   applyRouteFilters()
-  await loadTemplates()
+  await Promise.all([loadVariables(), loadTemplates()])
 })
 </script>
 
@@ -1478,6 +1565,94 @@ onMounted(async () => {
   min-height: 420px !important;
 }
 
+.variable-panel {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+}
+
+.variable-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.variable-panel-head h4 {
+  margin: 0;
+  color: #172033;
+  font-size: 14px;
+}
+
+.variable-panel-head p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.variable-panel-head span {
+  flex: 0 0 auto;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.variable-chip-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 230px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.variable-chip {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+}
+
+.variable-chip:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  transform: translateY(-1px);
+}
+
+.variable-chip strong,
+.variable-chip code,
+.variable-chip small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.variable-chip strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.variable-chip code {
+  margin-top: 5px;
+  color: #2563eb;
+  font-family: "JetBrains Mono", Consolas, "Courier New", monospace;
+  font-size: 12px;
+}
+
+.variable-chip small {
+  margin-top: 5px;
+  color: #64748b;
+  font-size: 11px;
+}
+
 .editor-footer {
   width: 100%;
   display: flex;
@@ -1700,6 +1875,10 @@ onMounted(async () => {
   .prompt-editor-grid {
     grid-template-columns: 1fr;
   }
+
+  .variable-chip-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 760px) {
@@ -1723,7 +1902,8 @@ onMounted(async () => {
   .template-grid,
   .channel-tabs,
   .form-grid,
-  .detail-info-grid {
+  .detail-info-grid,
+  .variable-chip-list {
     grid-template-columns: 1fr;
   }
 

@@ -49,8 +49,12 @@ public class SelfMediaAccountService {
                 : "wechat_open_platform_review_pending";
         return new WechatMpCapabilityVO(
                 openPlatformProperties.isDraftDistributionEnabled(),
+                openPlatformProperties.isAutoPublishEnabled(),
                 clientProperties.getMode(),
-                reason
+                reason,
+                openPlatformProperties.isAutoPublishEnabled()
+                        ? "微信公众号已支持自动提交发布；提交后进入微信官方发布/审核流程。"
+                        : "微信公众号当前默认保存到草稿箱，适合联调测试；配置 WECHAT_AUTO_PUBLISH_ENABLED=true 且请求 publishAction=publish 后可提交发布。"
         );
     }
 

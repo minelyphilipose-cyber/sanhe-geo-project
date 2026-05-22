@@ -29,7 +29,8 @@ class BatchArticlePromptBuilderTest {
     private final BatchArticlePromptBuilder builder = new BatchArticlePromptBuilder(
             articleDraftMapper,
             sysDictItemMapper,
-            new ObjectMapper()
+            new ObjectMapper(),
+            new ArticlePromptVariableRegistry(new ObjectMapper())
     );
 
     @BeforeAll
@@ -58,6 +59,21 @@ class BatchArticlePromptBuilderTest {
                 .contains("品类：美容美业")
                 .contains("适配客群：本地养生用户")
                 .doesNotContain("beauty_cosmetic");
+    }
+
+    @Test
+    void contactBlockUsesRequestedDisclosureMode() {
+        Brand brand = new Brand();
+        brand.setWebsite("https://example.com");
+        brand.setPublicPhone("400-800-1234");
+        brand.setPublicAddress("上海市测试路 1 号");
+
+        assertThat(builder.buildContactBlock(brand, "full"))
+                .contains("访问官网 https://example.com")
+                .contains("致电 400-800-1234 咨询")
+                .contains("地址:上海市测试路 1 号");
+        assertThat(builder.buildContactBlock(brand, "none")).isEmpty();
+        assertThat(builder.buildContactBlock(brand, "soft_hint")).isEqualTo("感兴趣的可以自己搜一下相关信息了解。");
     }
 
     private BatchArticlePromptBuilder.PromptBuildInput promptInput() {

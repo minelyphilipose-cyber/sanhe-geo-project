@@ -30,6 +30,10 @@ public class BatchArticleGenerationTask {
     private Long promptTemplateVersionId;
     private String allocationMode;
     private String templateSource;
+    private String suggestedPlatformCodes;
+    private String selectedPlatformCodes;
+    private Boolean readinessWarningConfirmed;
+    private String readinessWarningCodes;
     private String length;
     private String topic;
     private String topicAsQuestion;

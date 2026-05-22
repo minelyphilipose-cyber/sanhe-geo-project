@@ -92,4 +92,15 @@ public final class ArticlePromptTemplateDtos {
 
     public record WeightUpdateRequest(@NotNull @Min(0) @Max(100) Integer weight) {
     }
+
+    public record VariableVO(
+            String code,
+            String name,
+            String description,
+            String source,
+            String emptyStrategy,
+            String emptyText,
+            String sampleValue
+    ) {
+    }
 }

@@ -8,6 +8,7 @@ import com.huanjing.geo.module.content.mapper.ArticlePromptTemplateMapper;
 import com.huanjing.geo.module.content.mapper.ArticlePromptTemplateVersionMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -37,7 +38,8 @@ class ArticlePromptTemplateServiceTest {
         SysUser user = new SysUser();
         user.setId(7L);
         when(currentUserService.requireCurrentUser()).thenReturn(user);
-        service = new ArticlePromptTemplateService(templateMapper, versionMapper, currentUserService, auditService);
+        service = new ArticlePromptTemplateService(templateMapper, versionMapper, currentUserService, auditService,
+                new ArticlePromptVariableRegistry(new ObjectMapper()));
     }
 
     @Test
@@ -104,7 +106,7 @@ class ArticlePromptTemplateServiceTest {
                 ArticlePromptTemplateService.CONTACT_FULL,
                 systemPrompt,
                 userPromptTemplate,
-                "{}",
+                "[]",
                 "{}",
                 null
         );

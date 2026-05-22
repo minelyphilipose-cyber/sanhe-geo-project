@@ -339,7 +339,7 @@ function resolvePlatform(contentStyle: string): {
     toutiao: '今日头条不允许自动发布',
     wechat: '公众号不允许自动发布',
     zhihu: '知乎不允许自动发布',
-    douyin_image_text: '抖音图文不允许自动发布',
+    douyin: '抖音图文暂不纳入批量发布',
     netease: '网易不允许自动发布',
     authority_media: '权威媒体不允许自动发布',
   }
@@ -374,7 +374,7 @@ function contentStyleLabel(v?: string | null) {
     toutiao: '今日头条',
     wechat: '公众号',
     zhihu: '知乎',
-    douyin_image_text: '抖音图文',
+    douyin: '抖音图文',
     linkedin: '领英风格',
     agent_site_article: 'Agent 官网文章',
     industry_site: '行业资讯站',

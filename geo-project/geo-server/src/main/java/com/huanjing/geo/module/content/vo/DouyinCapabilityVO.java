@@ -9,4 +9,5 @@ public class DouyinCapabilityVO {
     private boolean enabled;
     private String mode;
     private String disabledReason;
+    private String description;
 }

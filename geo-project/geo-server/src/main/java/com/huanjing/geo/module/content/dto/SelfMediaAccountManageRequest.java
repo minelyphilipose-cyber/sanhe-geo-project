@@ -6,7 +6,7 @@ import jakarta.validation.constraints.Size;
 
 public record SelfMediaAccountManageRequest(
         @NotBlank
-        @Pattern(regexp = "toutiao|zhihu", message = "platform must be toutiao or zhihu")
+        @Pattern(regexp = "toutiao|zhihu|xiaohongshu", message = "platform must be toutiao, zhihu or xiaohongshu")
         String platform,
 
         @NotBlank

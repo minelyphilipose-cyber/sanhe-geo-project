@@ -82,7 +82,7 @@
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span>自媒体账号</span>
-            <el-tag type="info">头条 / 知乎</el-tag>
+            <el-tag type="info">头条 / 知乎 / 小红书</el-tag>
           </div>
           <el-button v-if="canUpdateBrand" type="primary" link @click="openSelfMediaAccountCreate">新增账号</el-button>
         </div>
@@ -92,7 +92,7 @@
         type="info"
         show-icon
         :closable="false"
-        title="头条、知乎使用浏览器扩展捕获登录凭证。账号建好后，请在扩展里选择账号并捕获凭证。"
+        title="头条、知乎、小红书使用浏览器扩展捕获登录凭证。账号建好后，请在扩展里选择账号并捕获凭证。"
       />
       <el-table v-loading="selfMediaAccountsLoading" :data="semiAutoSelfMediaAccounts" border>
         <el-table-column prop="platform" label="平台" width="110">
@@ -247,6 +247,7 @@
           <el-select v-model="selfMediaAccountForm.platform" style="width: 100%">
             <el-option label="头条" value="toutiao" />
             <el-option label="知乎" value="zhihu" />
+            <el-option label="小红书" value="xiaohongshu" />
           </el-select>
         </el-form-item>
         <el-form-item label="账号名称" prop="accountName" required>
@@ -301,7 +302,7 @@ const canUpdateBrand = computed(() => userStore.hasPermission('brand.update'))
 const canDeleteBrand = computed(() => userStore.hasPermission('brand.delete'))
 const canCreateProject = computed(() => userStore.hasPermission('project.create'))
 
-type SemiAutoPlatform = 'toutiao' | 'zhihu'
+type SemiAutoPlatform = 'toutiao' | 'zhihu' | 'xiaohongshu'
 type SemiAutoSelfMediaAccount = SelfMediaAccount & {
   platform: SemiAutoPlatform | string
   cookieCredentialStatus?: string | null
@@ -372,7 +373,7 @@ const selfMediaAccountRules: FormRules = {
 }
 
 const semiAutoSelfMediaAccounts = computed(() =>
-  selfMediaAccounts.value.filter((item) => item.platform === 'toutiao' || item.platform === 'zhihu'),
+  selfMediaAccounts.value.filter((item) => item.platform === 'toutiao' || item.platform === 'zhihu' || item.platform === 'xiaohongshu'),
 )
 
 const regionText = computed(() => {
@@ -428,6 +429,7 @@ function industryLabel(value?: string | null) {
 function selfMediaPlatformLabel(value?: string | null) {
   if (value === 'toutiao') return '头条'
   if (value === 'zhihu') return '知乎'
+  if (value === 'xiaohongshu') return '小红书'
   return value || '-'
 }
 
@@ -551,10 +553,14 @@ function openSelfMediaAccountCreate() {
 
 function openSelfMediaAccountEdit(account: SemiAutoSelfMediaAccount) {
   editingSelfMediaAccount.value = account
-  selfMediaAccountForm.platform = account.platform === 'zhihu' ? 'zhihu' : 'toutiao'
+  selfMediaAccountForm.platform = isSemiAutoPlatform(account.platform) ? account.platform : 'toutiao'
   selfMediaAccountForm.accountName = account.accountName || ''
   selfMediaAccountForm.status = account.status === 'disabled' ? 'disabled' : 'active'
   selfMediaAccountVisible.value = true
+}
+
+function isSemiAutoPlatform(platform?: string | null): platform is SemiAutoPlatform {
+  return platform === 'toutiao' || platform === 'zhihu' || platform === 'xiaohongshu'
 }
 
 async function submitSelfMediaAccount() {

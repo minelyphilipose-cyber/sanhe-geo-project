@@ -16,6 +16,7 @@ public class WechatOpenPlatformProperties {
     private String token;
     private String encodingAesKey;
     private boolean draftDistributionEnabled = false;
+    private boolean autoPublishEnabled = false;
     private boolean funcScopeStrictMode = false;
     private List<Integer> requiredDraftFuncScopes = new ArrayList<>(List.of(1, 13));
     private int authType = 1;

@@ -184,7 +184,13 @@
                               可用模板 {{ platform.templateCount || 0 }} 个
                             </button>
                           </el-tooltip>
-                          <el-tag v-if="topic.platformAllocationModes[platform.value] === 'custom'" size="small" type="warning">自定义</el-tag>
+                          <span class="platform-tags">
+                            <el-tag v-if="isSuggestedPlatform(topic, platform)" size="small" type="success">推荐</el-tag>
+                            <el-tag v-if="topic.platformAllocationModes[platform.value] === 'custom'" size="small" type="warning">自定义</el-tag>
+                          </span>
+                        </div>
+                        <div v-if="dealNonSuggestedPlatformSelected(topic, platform)" class="platform-warning">
+                          成交场景非主推平台，请确认发布目的
                         </div>
                         <div v-if="platform.disabledReason" class="platform-disabled-reason">{{ platform.disabledReason }}</div>
                         <el-input-number
@@ -408,6 +414,7 @@ interface SelectedTopic {
   questionSceneCode?: string | null
   keywordGroupId?: number
   keywordGroupName?: string
+  recommendationApplied?: boolean
   platformCounts: Record<string, number>
   platformAllocationModes: Record<string, 'auto' | 'custom'>
   platformTemplateCounts: Record<string, BatchArticleGenerateTemplateCount[]>
@@ -423,7 +430,7 @@ const STATIC_PLATFORM_GROUPS: PlatformGroup[] = [
       { value: 'self_media:toutiao', label: '今日头条', desc: '泛资讯阅读，结论前置', icon: '头', contentStyle: 'toutiao', channelGroupCode: 'self_media', channelSubCode: 'toutiao' },
       { value: 'self_media:wechat', label: '公众号', desc: '完整长文，结构稳', icon: '公', contentStyle: 'wechat', channelGroupCode: 'self_media', channelSubCode: 'wechat' },
       { value: 'self_media:zhihu', label: '知乎', desc: '问题回答，判断清晰', icon: '知', contentStyle: 'zhihu', channelGroupCode: 'self_media', channelSubCode: 'zhihu' },
-      { value: 'self_media:douyin_image_text', label: '抖音图文', desc: '图文卡片式阅读', icon: '抖', contentStyle: 'douyin_image_text', channelGroupCode: 'self_media', channelSubCode: 'douyin_image_text' },
+      { value: 'self_media:douyin', label: '抖音图文', desc: '图文卡片式阅读', icon: '抖', contentStyle: 'douyin', channelGroupCode: 'self_media', channelSubCode: 'douyin' },
       { value: 'self_media:netease', label: '网易', desc: '门户资讯阅读，媒体感强', icon: '网', contentStyle: 'netease', channelGroupCode: 'self_media', channelSubCode: 'netease' },
     ],
   },
@@ -491,6 +498,10 @@ const allocationModeOptions = [
 const platformGroups = computed(() => buildPlatformGroups())
 const platformOptions = computed(() => platformGroups.value.flatMap((group) => group.platforms))
 const activePlatformOptions = computed(() => platformOptions.value.filter((platform) => !platform.disabled))
+const suggestionMap = computed(() => {
+  const entries = generationOptions.value?.questionScenePlatformSuggestions || []
+  return Object.fromEntries(entries.map((item) => [item.questionSceneCode, item.platformCodes || []])) as Record<string, string[]>
+})
 const projectCascadeProps = {
   value: 'value',
   label: 'label',
@@ -552,6 +563,24 @@ function topicCustomPlatformCount(topic: SelectedTopic) {
 
 function topicSceneSummary(topic: SelectedTopic) {
   return topic.questionSceneCode ? `场景：${sceneLabel(topic.questionSceneCode)}` : '未绑定问题场景'
+}
+
+function platformCode(platform: ContentStyleOption) {
+  return `${platform.channelGroupCode}:${platform.channelSubCode || ''}`
+}
+
+function suggestedPlatformCodes(topic: SelectedTopic) {
+  return topic.questionSceneCode ? suggestionMap.value[topic.questionSceneCode] || [] : []
+}
+
+function isSuggestedPlatform(topic: SelectedTopic, platform: ContentStyleOption) {
+  return suggestedPlatformCodes(topic).includes(platformCode(platform))
+}
+
+function dealNonSuggestedPlatformSelected(topic: SelectedTopic, platform: ContentStyleOption) {
+  return topic.questionSceneCode === 'deal'
+    && Number(topic.platformCounts[platform.value] || 0) > 0
+    && !isSuggestedPlatform(topic, platform)
 }
 
 function platformGroupGeneratedCount(topic: SelectedTopic, group: PlatformGroup) {
@@ -637,7 +666,33 @@ function syncTopicPlatformKeys() {
       if (!topic.platformTemplateCounts[platform.value]) topic.platformTemplateCounts[platform.value] = []
       if (!topic.platformPreviewCounts[platform.value]) topic.platformPreviewCounts[platform.value] = []
     }
+    applySuggestedPlatformDefaults(topic)
     collapseMissingPlatformGroups(topic)
+  }
+}
+
+function applySuggestedPlatformDefaults(topic: SelectedTopic) {
+  if (!generationOptions.value) {
+    return
+  }
+  if (topic.recommendationApplied || topicGeneratedCount(topic) > 0) {
+    return
+  }
+  const suggested = new Set(suggestedPlatformCodes(topic))
+  if (!suggested.size) {
+    topic.recommendationApplied = true
+    return
+  }
+  let applied = false
+  for (const platform of activePlatformOptions.value) {
+    if (suggested.has(platformCode(platform))) {
+      topic.platformCounts[platform.value] = 1
+      topic.platformAllocationModes[platform.value] = 'auto'
+      applied = true
+    }
+  }
+  if (applied) {
+    topic.recommendationApplied = true
   }
 }
 
@@ -683,6 +738,7 @@ function appendTopic(topic: SelectedTopic) {
     return false
   }
   selectedTopics.value.push(topic)
+  applySuggestedPlatformDefaults(topic)
   collapseMissingPlatformGroups(topic)
   return true
 }
@@ -698,6 +754,7 @@ function removeTopic(topicId: string) {
 }
 
 function setTopicPreset(topic: SelectedTopic, count: number) {
+  topic.recommendationApplied = true
   for (const platform of activePlatformOptions.value) {
     topic.platformCounts[platform.value] = count
     topic.platformAllocationModes[platform.value] = 'auto'
@@ -705,6 +762,7 @@ function setTopicPreset(topic: SelectedTopic, count: number) {
 }
 
 function clearTopicCounts(topic: SelectedTopic) {
+  topic.recommendationApplied = true
   for (const platform of platformOptions.value) {
     topic.platformCounts[platform.value] = 0
     topic.platformTemplateCounts[platform.value] = []
@@ -714,6 +772,7 @@ function clearTopicCounts(topic: SelectedTopic) {
 }
 
 function setPlatformGroupPreset(topic: SelectedTopic, group: PlatformGroup, count: number) {
+  topic.recommendationApplied = true
   for (const platform of group.platforms.filter((item) => !item.disabled)) {
     topic.platformCounts[platform.value] = count
     topic.platformAllocationModes[platform.value] = 'auto'
@@ -721,6 +780,7 @@ function setPlatformGroupPreset(topic: SelectedTopic, group: PlatformGroup, coun
 }
 
 function clearPlatformGroupCounts(topic: SelectedTopic, group: PlatformGroup) {
+  topic.recommendationApplied = true
   for (const platform of group.platforms) {
     topic.platformCounts[platform.value] = 0
     topic.platformTemplateCounts[platform.value] = []
@@ -809,11 +869,13 @@ function confirmAllocationDialog() {
   if (!topic || !platform) return
   const rows = allocationRows.value.map(toTemplateCount).filter((item) => item.count > 0)
   if (allocationMode.value === 'custom') {
+    topic.recommendationApplied = true
     const total = rows.reduce((sum, item) => sum + item.count, 0)
     topic.platformCounts[platform.value] = total
     topic.platformTemplateCounts[platform.value] = rows
     topic.platformAllocationModes[platform.value] = 'custom'
   } else {
+    topic.recommendationApplied = true
     topic.platformPreviewCounts[platform.value] = rows
     topic.platformTemplateCounts[platform.value] = []
     topic.platformAllocationModes[platform.value] = 'auto'
@@ -1003,7 +1065,7 @@ function channelIcon(group: string, sub?: string | null) {
     toutiao: '头',
     wechat: '公',
     zhihu: '知',
-    douyin_image_text: '抖',
+    douyin: '抖',
     xiaohongshu: '红',
     baijiahao: '百',
     netease: '网',
@@ -1247,6 +1309,10 @@ async function submitBatchGeneration() {
     ElMessage.warning('请先选择项目、添加主题并配置生成数量')
     return
   }
+  const confirmedPlatformWarnings = await confirmPlatformWarnings()
+  if (!confirmedPlatformWarnings) {
+    return
+  }
   const payloadTopics = selectedTopics.value.map((topic) => ({
     topic: topic.topic,
     topicAsQuestion: topic.topicAsQuestion,
@@ -1286,6 +1352,47 @@ async function submitBatchGeneration() {
   } finally {
     batchSubmitting.value = false
   }
+}
+
+async function confirmPlatformWarnings(): Promise<boolean> {
+  const nonSuggestedDealSelections = selectedTopics.value.flatMap((topic) => (
+    topic.questionSceneCode === 'deal'
+      ? activePlatformOptions.value
+          .filter((platform) => dealNonSuggestedPlatformSelected(topic, platform))
+          .map((platform) => `${topic.topic}｜${platform.label}`)
+      : []
+  ))
+
+  if (!nonSuggestedDealSelections.length) {
+    return true
+  }
+
+  const nonSuggestedList = nonSuggestedDealSelections.map((item) => `<li>${escapeHtml(item)}</li>`).join('')
+
+  try {
+    await ElMessageBox.confirm(
+      `<div class="generation-notice-box"><p>以下成交场景选择了非推荐平台，请确认发布目的：</p><ul>${nonSuggestedList}</ul></div>`,
+      '确认生成风险',
+      {
+        dangerouslyUseHTMLString: true,
+        confirmButtonText: '仍要生成',
+        cancelButtonText: '返回修改',
+        type: 'warning',
+      },
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
 
 async function showGenerationNotices(totalCount: number, notices: BatchArticleGenerateNotice[]) {
@@ -1768,6 +1875,14 @@ onMounted(() => {
   color: #2563eb;
 }
 
+.platform-tags {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .template-count-link {
   padding: 0;
   border: 0;
@@ -1784,6 +1899,13 @@ onMounted(() => {
 }
 
 .platform-disabled-reason {
+  color: #b45309;
+}
+
+.platform-warning {
+  margin: -4px 0 10px;
+  font-size: 12px;
+  line-height: 1.45;
   color: #b45309;
 }
 

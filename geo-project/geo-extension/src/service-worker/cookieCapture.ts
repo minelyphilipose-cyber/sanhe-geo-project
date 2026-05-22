@@ -6,16 +6,19 @@ import type { CookieCaptureResponse, CookieCaptureStartedResponse, ExtensionSelf
 const PLATFORM_DOMAINS: Record<string, string[]> = {
   toutiao: ['toutiao.com'],
   zhihu: ['zhihu.com'],
+  xiaohongshu: ['xiaohongshu.com'],
 }
 
 const REQUIRED_COOKIE_NAMES: Record<string, string[]> = {
   toutiao: ['sessionid', 'sessionid_ss', 'sid_tt', 'sid_guard'],
   zhihu: ['z_c0'],
+  xiaohongshu: ['web_session', 'a1'],
 }
 
 const PLATFORM_LOGIN_URLS: Record<string, string> = {
   toutiao: 'https://mp.toutiao.com/',
   zhihu: 'https://www.zhihu.com/signin',
+  xiaohongshu: 'https://creator.xiaohongshu.com/',
 }
 
 const PENDING_CAPTURE_KEY = 'geo.extension.pendingCookieCapture'

@@ -45,6 +45,11 @@ public class BatchArticleGenerateRequest {
         @Pattern(regexp = "^[a-z][a-z0-9_]{1,63}$")
         private String questionSceneCode;
 
+        private Boolean readinessWarningConfirmed;
+
+        @Size(max = 16)
+        private List<@Pattern(regexp = "^[a-z][a-z0-9_]{1,63}$") String> readinessWarningCodes;
+
         @NotEmpty
         @Size(max = 16)
         @Valid

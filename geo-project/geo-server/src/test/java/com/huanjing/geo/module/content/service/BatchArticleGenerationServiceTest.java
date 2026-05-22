@@ -71,6 +71,7 @@ class BatchArticleGenerationServiceTest {
                 promptBuilder,
                 mock(BatchArticleQualityChecker.class),
                 mock(ArticleTemplateAllocationService.class),
+                new QuestionScenePlatformSuggestionService(),
                 new ObjectMapper(),
                 mock(PlatformTransactionManager.class),
                 (Executor) Runnable::run

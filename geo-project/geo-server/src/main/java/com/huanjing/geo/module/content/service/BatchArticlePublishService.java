@@ -422,7 +422,7 @@ public class BatchArticlePublishService {
                 "toutiao", "今日头条不允许自动发布",
                 "wechat", "公众号不允许自动发布",
                 "zhihu", "知乎不允许自动发布",
-                "douyin_image_text", "抖音图文不允许自动发布",
+                "douyin", "抖音图文暂不纳入批量发布",
                 "authority_media", "权威媒体不允许自动发布"
         );
         throw new BizException(400, blocked.getOrDefault(contentStyle, "article content style does not support auto publish"));

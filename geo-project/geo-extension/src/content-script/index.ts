@@ -4,7 +4,7 @@ import { profileForUrl } from './contentProfiles'
 import { fillEditor } from './fillEditor'
 import { activatePublishListener, handlePublishClick } from './publishListener'
 
-const CAPTURE_HOSTS = new Set(['mp.toutiao.com', 'www.zhihu.com', 'zhuanlan.zhihu.com'])
+const CAPTURE_HOSTS = new Set(['mp.toutiao.com', 'www.zhihu.com', 'zhuanlan.zhihu.com', 'creator.xiaohongshu.com'])
 let captureNoticeShown = false
 
 if (CAPTURE_HOSTS.has(window.location.hostname)) {

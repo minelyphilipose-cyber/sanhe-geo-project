@@ -57,7 +57,7 @@ public class ArticleAiDraftService {
     private static final Map<String, String> CONTENT_STYLE_LABELS = Map.of(
             "wechat", "公众号",
             "toutiao", "头条",
-            "douyin_image_text", "抖音图文",
+            "douyin", "抖音图文",
             "zhihu", "知乎",
             "xiaohongshu", "小红书",
             "baijiahao", "百家号",
@@ -67,7 +67,7 @@ public class ArticleAiDraftService {
     private static final Map<String, String> CONTENT_STYLE_GUIDES = Map.of(
             "wechat", "深度长文，结构完整，重视段落层次，以分析和洞察为主，不写软文化的“种草”。",
             "toutiao", "资讯密度高，开头直接给结论，段落短，信息点清晰，以新闻或行业资讯口吻写作。",
-            "douyin_image_text", "钩子开头，语言轻快，适合图文卡片拆分，但内容必须是有价值的信息分享，不是带货话术。",
+            "douyin", "钩子开头，语言轻快，适合图文卡片拆分，但内容必须是有价值的信息分享，不是带货话术。",
             "zhihu", "问题导向，论据充分，强调分析过程和可信结论，呈现行业观察者立场。",
             "xiaohongshu", "口语化、平等交流，可以加入清单和话题标签，但以“分享经验”为主，避免“安利”式表达。",
             "baijiahao", "面向百度搜索收录，标题和前 200 字突出核心关键词，表达专业克制，信息密度高，不虚构具体数据来源。",

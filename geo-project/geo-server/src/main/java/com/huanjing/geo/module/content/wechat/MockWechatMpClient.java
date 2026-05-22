@@ -63,6 +63,13 @@ public class MockWechatMpClient implements WechatMpClient {
     }
 
     @Override
+    public PublishResult submitPublish(String authorizerAccessToken, String mediaId) {
+        failIf("permission_missing", 48001, "api unauthorized");
+        failIf("rate_limit", 45009, "reach max api daily quota limit");
+        return new PublishResult("mock_publish_id");
+    }
+
+    @Override
     public MaterialCountResult getMaterialCount(String authorizerAccessToken) {
         failIf("invalid_credential", 40001, "invalid credential");
         failIf("permission_missing", 48001, "api unauthorized");

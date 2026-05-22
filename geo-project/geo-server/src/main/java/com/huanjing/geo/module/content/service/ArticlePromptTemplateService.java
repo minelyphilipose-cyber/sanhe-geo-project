@@ -59,6 +59,12 @@ public class ArticlePromptTemplateService {
     private final ArticlePromptTemplateVersionMapper versionMapper;
     private final CurrentUserService currentUserService;
     private final AuditService auditService;
+    private final ArticlePromptVariableRegistry variableRegistry;
+
+    public List<ArticlePromptVariableRegistry.VariableDefinition> variables() {
+        currentUserService.ensurePermission("project.read");
+        return variableRegistry.list();
+    }
 
     public Page<TemplateVO> page(String channelGroupCode,
                                  String channelSubCode,
@@ -110,6 +116,7 @@ public class ArticlePromptTemplateService {
         currentUserService.ensurePermission("user.manage");
         validateTemplate(req.channelGroupCode(), req.channelSubCode(), req.agentSiteModule(), req.status(), req.weight(),
                 req.contactDisclosureMode(), req.questionSceneCode());
+        variableRegistry.validateTemplateVariables(req.systemPrompt(), req.userPromptTemplate(), req.variablesJson());
 
         ArticlePromptTemplate template = new ArticlePromptTemplate();
         fillTemplate(template, req);
@@ -135,11 +142,14 @@ public class ArticlePromptTemplateService {
         ArticlePromptTemplate template = requireTemplate(id);
         validateTemplate(req.channelGroupCode(), req.channelSubCode(), req.agentSiteModule(), req.status(), req.weight(),
                 req.contactDisclosureMode(), req.questionSceneCode());
+        boolean hasVersionPayload = StringUtils.hasText(req.systemPrompt()) && StringUtils.hasText(req.userPromptTemplate());
+        if (hasVersionPayload) {
+            variableRegistry.validateTemplateVariables(req.systemPrompt(), req.userPromptTemplate(), req.variablesJson());
+        }
         Map<String, Object> before = snapshot(template);
         fillTemplate(template, req);
         templateMapper.updateById(template);
 
-        boolean hasVersionPayload = StringUtils.hasText(req.systemPrompt()) && StringUtils.hasText(req.userPromptTemplate());
         if (hasVersionPayload) {
             upsertCurrentVersion(template, req.systemPrompt(), req.userPromptTemplate(),
                     req.variablesJson(), req.qualityRulesJson(), operator.getId());
@@ -153,6 +163,7 @@ public class ArticlePromptTemplateService {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("user.manage");
         ArticlePromptTemplate template = requireTemplate(templateId);
+        variableRegistry.validateTemplateVariables(req.systemPrompt(), req.userPromptTemplate(), req.variablesJson());
         ArticlePromptTemplateVersion version = upsertCurrentVersion(template, req.systemPrompt(),
                 req.userPromptTemplate(), req.variablesJson(), req.qualityRulesJson(), operator.getId());
         audit(operator, "article_prompt_template.version.create", templateId,
