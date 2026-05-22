@@ -643,9 +643,14 @@ function isSuggestedPlatform(topic: SelectedTopic, platform: ContentStyleOption)
   return suggestedPlatformCodes(topic).includes(platformCode(platform))
 }
 
+function isUniversalQuestionTypePlatform(platform: ContentStyleOption) {
+  return platform.channelGroupCode === 'forum'
+}
+
 function dealNonSuggestedPlatformSelected(topic: SelectedTopic, platform: ContentStyleOption) {
   return topic.questionSceneCode === 'deal'
     && Number(topic.platformCounts[platform.value] || 0) > 0
+    && !isUniversalQuestionTypePlatform(platform)
     && !isSuggestedPlatform(topic, platform)
 }
 
