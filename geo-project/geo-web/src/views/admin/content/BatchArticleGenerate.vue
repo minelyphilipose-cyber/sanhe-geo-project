@@ -189,9 +189,6 @@
                             <el-tag v-if="topic.platformAllocationModes[platform.value] === 'custom'" size="small" type="warning">自定义</el-tag>
                           </span>
                         </div>
-                        <div v-if="dealNonSuggestedPlatformSelected(topic, platform)" class="platform-warning">
-                          成交场景非主推平台，请确认发布目的
-                        </div>
                         <div v-if="platform.disabledReason" class="platform-disabled-reason">{{ platform.disabledReason }}</div>
                         <el-input-number
                           v-model="topic.platformCounts[platform.value]"
@@ -209,6 +206,9 @@
                           >
                             展开配置
                           </el-button>
+                        </div>
+                        <div v-if="dealNonSuggestedPlatformSelected(topic, platform)" class="platform-warning">
+                          成交场景非主推平台，请确认发布目的
                         </div>
                       </div>
                     </div>
@@ -468,6 +468,7 @@ const STATIC_PLATFORM_GROUPS: PlatformGroup[] = [
       { value: 'self_media:wechat', label: '公众号', desc: '完整长文，结构稳', icon: '公', contentStyle: 'wechat', channelGroupCode: 'self_media', channelSubCode: 'wechat' },
       { value: 'self_media:zhihu', label: '知乎', desc: '问题回答，判断清晰', icon: '知', contentStyle: 'zhihu', channelGroupCode: 'self_media', channelSubCode: 'zhihu' },
       { value: 'self_media:douyin', label: '抖音图文', desc: '图文卡片式阅读', icon: '抖', contentStyle: 'douyin', channelGroupCode: 'self_media', channelSubCode: 'douyin' },
+      { value: 'self_media:xiaohongshu', label: '小红书', desc: '经验笔记，清单建议', icon: '红', contentStyle: 'xiaohongshu', channelGroupCode: 'self_media', channelSubCode: 'xiaohongshu' },
       { value: 'self_media:netease', label: '网易', desc: '门户资讯阅读，媒体感强', icon: '网', contentStyle: 'netease', channelGroupCode: 'self_media', channelSubCode: 'netease' },
     ],
   },
@@ -1414,37 +1415,37 @@ async function submitBatchGeneration() {
     ElMessage.warning('请先选择项目、添加主题并配置生成数量')
     return
   }
-  const confirmedReadinessWarnings = await confirmReadinessWarnings()
-  if (!confirmedReadinessWarnings) {
-    return
-  }
-  const confirmedPlatformWarnings = await confirmPlatformWarnings()
-  if (!confirmedPlatformWarnings) {
-    return
-  }
-  const payloadTopics = selectedTopics.value.map((topic) => ({
-    topic: topic.topic,
-    topicAsQuestion: topic.topicAsQuestion,
-    questionSceneCode: topic.questionSceneCode || undefined,
-    keywordGroupId: topic.keywordGroupId,
-    keywordGroupName: topic.keywordGroupName,
-    readinessWarningConfirmed: Boolean(confirmedReadinessWarnings[topic.id]?.length),
-    readinessWarningCodes: confirmedReadinessWarnings[topic.id]?.length ? confirmedReadinessWarnings[topic.id] : undefined,
-    platforms: activePlatformOptions.value.map((platform) => {
-      const mode = topic.platformAllocationModes[platform.value] || 'auto'
-      return {
-        contentStyle: platform.contentStyle,
-        channelGroupCode: platform.channelGroupCode,
-        channelSubCode: platform.channelSubCode || undefined,
-        allocationMode: mode,
-        count: Number(topic.platformCounts[platform.value] || 0),
-        templateCounts: mode === 'custom' ? topic.platformTemplateCounts[platform.value] || [] : undefined,
-        previewTemplateCounts: mode === 'auto' ? topic.platformPreviewCounts[platform.value] || [] : undefined,
-      }
-    }),
-  }))
   batchSubmitting.value = true
   try {
+    const confirmedReadinessWarnings = await confirmReadinessWarnings()
+    if (!confirmedReadinessWarnings) {
+      return
+    }
+    const confirmedPlatformWarnings = await confirmPlatformWarnings()
+    if (!confirmedPlatformWarnings) {
+      return
+    }
+    const payloadTopics = selectedTopics.value.map((topic) => ({
+      topic: topic.topic,
+      topicAsQuestion: topic.topicAsQuestion,
+      questionSceneCode: topic.questionSceneCode || undefined,
+      keywordGroupId: topic.keywordGroupId,
+      keywordGroupName: topic.keywordGroupName,
+      readinessWarningConfirmed: Boolean(confirmedReadinessWarnings[topic.id]?.length),
+      readinessWarningCodes: confirmedReadinessWarnings[topic.id]?.length ? confirmedReadinessWarnings[topic.id] : undefined,
+      platforms: activePlatformOptions.value.map((platform) => {
+        const mode = topic.platformAllocationModes[platform.value] || 'auto'
+        return {
+          contentStyle: platform.contentStyle,
+          channelGroupCode: platform.channelGroupCode,
+          channelSubCode: platform.channelSubCode || undefined,
+          allocationMode: mode,
+          count: Number(topic.platformCounts[platform.value] || 0),
+          templateCounts: mode === 'custom' ? topic.platformTemplateCounts[platform.value] || [] : undefined,
+          previewTemplateCounts: mode === 'auto' ? topic.platformPreviewCounts[platform.value] || [] : undefined,
+        }
+      }),
+    }))
     const { data } = await createBatchContentArticles({
       projectId: batchForm.projectId!,
       topicSource: selectedTopics.value.some((topic) => topic.source === 'keyword_group') ? 'keyword_group' : 'manual',
@@ -1466,7 +1467,7 @@ async function submitBatchGeneration() {
 }
 
 async function confirmReadinessWarnings(): Promise<Record<string, string[]> | null> {
-  const report = await loadReadiness(true)
+  const report = await loadReadiness()
   if (!report) {
     return {}
   }
@@ -2066,7 +2067,9 @@ onMounted(() => {
 }
 
 .platform-warning {
-  margin: -4px 0 10px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #fed7aa;
   font-size: 12px;
   line-height: 1.45;
   color: #b45309;

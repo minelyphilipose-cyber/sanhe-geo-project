@@ -324,8 +324,8 @@ public class ArticleTemplateAllocationService {
             case "toutiao" -> "泛资讯阅读，结论前置";
             case "wechat" -> "完整长文，结构稳";
             case "zhihu" -> "问题回答，判断清晰";
-            case "douyin" -> "图文卡片式阅读；Open API 图文发布，需授权账号和图片素材";
-            case "xiaohongshu" -> "经验笔记；半自动填表，需浏览器扩展和 Cookie 凭证";
+            case "douyin" -> "图文卡片式阅读";
+            case "xiaohongshu" -> "经验笔记，清单建议";
             case "baijiahao" -> "搜索收录友好，信息密度高";
             case "netease" -> "门户资讯阅读，媒体感强";
             default -> "自媒体内容风格";
