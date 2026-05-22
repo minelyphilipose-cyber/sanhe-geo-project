@@ -1180,6 +1180,7 @@ export interface ActivityLog {
   action: string
   targetType: string
   targetId: number | null
+  targetName?: string | null
   detailJson: string | null
   ipAddress: string | null
   createdAt: string

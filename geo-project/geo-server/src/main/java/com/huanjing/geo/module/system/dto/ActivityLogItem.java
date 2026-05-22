@@ -12,6 +12,7 @@ public class ActivityLogItem {
     private String action;
     private String targetType;
     private Long targetId;
+    private String targetName;
     private String detailJson;
     private String ipAddress;
     private LocalDateTime createdAt;

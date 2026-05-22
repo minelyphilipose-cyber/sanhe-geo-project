@@ -25,6 +25,7 @@
           <el-option label="客户" value="company" />
           <el-option label="品牌" value="brand" />
           <el-option label="项目" value="project" />
+          <el-option label="平台" value="platform" />
         </el-select>
         <el-date-picker
           v-model="query.dateRange"
@@ -103,6 +104,10 @@
             <span>项目</span>
             <strong>{{ targetTypeCount.project }}</strong>
           </div>
+          <div class="scope-item">
+            <span>平台</span>
+            <strong>{{ targetTypeCount.platform }}</strong>
+          </div>
         </div>
         <div class="scope-note">统计口径为当前页数据，用于快速判断审计记录集中在哪类业务对象。</div>
       </section>
@@ -129,7 +134,7 @@
                   {{ targetInitial(row.targetType) }}
                 </div>
                 <div class="min-w-0">
-                  <div class="admin-entity-main">{{ targetTypeLabel(row.targetType) }} #{{ row.targetId || '-' }}</div>
+                  <div class="admin-entity-main">{{ targetDisplayText(row) }}</div>
                   <div class="admin-entity-sub">{{ formatDateTime(row.createdAt) }}</div>
                 </div>
               </div>
@@ -138,7 +143,7 @@
           <el-table-column prop="operatorName" label="操作人" width="140" show-overflow-tooltip />
           <el-table-column label="操作" min-width="180" show-overflow-tooltip>
             <template #default="{ row }">
-              <span class="admin-mini-pill is-blue">{{ dictStore.label('activity_action', row.action) }}</span>
+              <span class="admin-mini-pill is-blue">{{ actionLabel(row.action) }}</span>
             </template>
           </el-table-column>
           <el-table-column label="目标类型" width="120">
@@ -195,6 +200,154 @@ const detailVisible = ref(false)
 const selectedDetail = ref('{}')
 const rows = ref<ActivityLog[]>([])
 const page = reactive({ current: 1, size: 20, total: 0 })
+const ACTION_LABELS: Record<string, string> = {
+  'company.create': '创建客户',
+  'company.update': '更新客户',
+  'company.delete': '删除客户',
+  'company.account.recharge': '客户账户充值',
+  'company.account.deduct': '客户账户扣款',
+  'brand.create': '创建品牌',
+  'brand.update': '更新品牌',
+  'brand.delete': '删除品牌',
+  'brand.material.upload': '上传品牌素材',
+  'brand.material.delete': '删除品牌素材',
+  'brand.statement.generate': '生成品牌声明',
+  'brand.statement.update': '更新品牌声明',
+  'brand.statement.lock': '锁定品牌声明',
+  'project.create': '创建项目',
+  'project.update': '更新项目',
+  'project.delete': '删除项目',
+  'project.sign_and_deduct': '签约并扣款',
+  'project.status.update': '更新项目状态',
+  'project.stage.update': '更新项目阶段',
+  'project.flow.update': '更新项目流转',
+  'platform.create': '创建平台',
+  'platform.update': '更新平台',
+  'platform.delete': '删除平台',
+  'platform.presale_enabled.update': '更新售前评估开关',
+  'dispatch.task.release': '释放分发任务',
+}
+const FIELD_LABELS: Record<string, string> = {
+  id: '编号',
+  companyId: '客户',
+  companyName: '客户名称',
+  brandId: '品牌',
+  brandName: '品牌名称',
+  projectCode: '项目编码',
+  projectName: '项目名称',
+  projectAliases: '项目别名',
+  platformCode: '平台编码',
+  platformName: '平台名称',
+  priorityLevel: '优先级',
+  apiUrl: '接口地址',
+  modelId: '模型 ID',
+  lowModelId: '轻量模型 ID',
+  modelName: '模型名称',
+  rpmLimit: 'RPM 限制',
+  tpmLimit: 'TPM 限制',
+  primaryKeyRef: '主密钥引用',
+  backupKeyRef: '备用密钥引用',
+  backupProviderName: '备用供应商',
+  concurrencyLimit: '并发数',
+  enabled: '启用状态',
+  enabledForPresale: '售前可用',
+  presaleEvaluateEnabled: '售前评估',
+  enabledForArticle: '文章可用',
+  enabledForGeoQuestion: 'GEO 问题可用',
+  enabledForQuestionPoll: '问题轮询可用',
+  maxRetry: '最大重试',
+  timeoutMs: '超时时间',
+  rateLimitQps: 'QPS 限制',
+  degraded: '降级状态',
+  degradedReason: '降级原因',
+  currentHealthStatus: '健康状态',
+  status: '状态',
+  stage: '阶段',
+  from: '变更前',
+  to: '变更后',
+  fromStatus: '原状态',
+  toStatus: '新状态',
+  fromStage: '原阶段',
+  toStage: '新阶段',
+  contactName: '联系人',
+  contactPhone: '联系电话',
+  industry: '行业',
+  industryTags: '行业标签',
+  ownerType: '归属类型',
+  sourceType: '来源类型',
+  partnerId: '合伙人',
+  partnerName: '合伙人名称',
+  provinceCode: '省份编码',
+  provinceName: '省份',
+  cityCode: '城市编码',
+  cityName: '城市',
+  districtCode: '区县编码',
+  districtName: '区县',
+  targetRegions: '目标区域',
+  targetAudience: '目标人群',
+  customStatement: '定制声明',
+  contentTone: '内容语气',
+  preferredAngles: '偏好角度',
+  extraForbiddenPhrases: '额外禁用词',
+  contentNote: '内容备注',
+  customerRequirements: '客户需求',
+  remark: '备注',
+  amount: '金额',
+  txnNo: '流水号',
+  reason: '原因',
+}
+const STATUS_LABELS: Record<string, string> = {
+  active: '启用',
+  disabled: '禁用',
+  inactive: '停用',
+  paused: '暂停',
+  pending_start: '待启动',
+  expired: '已到期',
+  signed: '已签约',
+  potential: '潜在',
+  normal: '正常',
+  degraded: '已降级',
+  maintenance: '维护中',
+  slow_response: '响应慢',
+  high_failure: '高失败率',
+  manual_takeover: '人工接管',
+}
+const STAGE_LABELS: Record<string, string> = {
+  pending_start: '待启动',
+  collecting_materials: '素材收集',
+  baseline_diagnosis: '基线诊断',
+  executing: '执行中',
+  needs_renewal: '待续费',
+  high_risk: '高风险',
+  dispute_handling: '争议处理',
+  completed: '已完成',
+}
+const TARGET_NAME_KEYS: Record<string, string[]> = {
+  company: ['companyName'],
+  brand: ['brandName'],
+  project: ['projectName'],
+  platform: ['platformName'],
+}
+const SUMMARY_SKIP_KEYS = new Set([
+  'id',
+  'companyId',
+  'brandId',
+  'partnerId',
+  'salesOwnerId',
+  'selectedKeywordGroupIds',
+  'provinceCode',
+  'cityCode',
+  'districtCode',
+  'projectCode',
+  'platformCode',
+  'geoSiteCode',
+  'industrySiteCode',
+  'createdBy',
+  'createdAt',
+  'updatedAt',
+  'deletedAt',
+  'deletedBy',
+])
 const query = reactive<{
   action: string
   targetType: string
@@ -214,6 +367,7 @@ const targetTypeCount = computed(() => ({
   company: rows.value.filter((row) => row.targetType === 'company').length,
   brand: rows.value.filter((row) => row.targetType === 'brand').length,
   project: rows.value.filter((row) => row.targetType === 'project').length,
+  platform: rows.value.filter((row) => row.targetType === 'platform').length,
 }))
 const actionInsights = computed(() => {
   const counts = rows.value.reduce<Record<string, number>>((acc, row) => {
@@ -225,7 +379,7 @@ const actionInsights = computed(() => {
     .map(([action, count]) => ({
       action,
       count,
-      label: dictStore.label('activity_action', action),
+      label: actionLabel(action),
       percent: Math.max(8, Math.round((count / max) * 100)),
     }))
     .sort((a, b) => b.count - a.count)
@@ -261,6 +415,7 @@ function targetTypeLabel(type?: string) {
   if (type === 'company') return '客户'
   if (type === 'brand') return '品牌'
   if (type === 'project') return '项目'
+  if (type === 'platform') return '平台'
   return type || '-'
 }
 
@@ -268,6 +423,7 @@ function targetInitial(type?: string) {
   if (type === 'company') return '客'
   if (type === 'brand') return '品'
   if (type === 'project') return '项'
+  if (type === 'platform') return '平'
   return '记'
 }
 
@@ -275,7 +431,35 @@ function targetAvatarClass(type?: string) {
   if (type === 'company') return 'is-company'
   if (type === 'brand') return 'is-brand'
   if (type === 'project') return 'is-project'
+  if (type === 'platform') return 'is-platform'
   return 'is-muted'
+}
+
+function actionLabel(action?: string | null) {
+  if (!action) return '-'
+  const dictLabel = dictStore.label('activity_action', action)
+  if (dictLabel && dictLabel !== action) return dictLabel
+  return ACTION_LABELS[action] || humanizeKey(action)
+}
+
+function targetDisplayText(row: ActivityLog) {
+  const name = row.targetName || targetNameFromDetail(row)
+  if (name) return `${targetTypeLabel(row.targetType)} ${name}`
+  return `${targetTypeLabel(row.targetType)} ${row.targetId ? `#${row.targetId}` : '-'}`
+}
+
+function targetNameFromDetail(row: ActivityLog) {
+  const parsed = parseDetail(row.detailJson)
+  if (!parsed) return ''
+  const keys = TARGET_NAME_KEYS[row.targetType] || []
+  for (const source of [parsed.after, parsed.before, parsed.extra]) {
+    if (!source || typeof source !== 'object') continue
+    for (const key of keys) {
+      const value = (source as Record<string, unknown>)[key]
+      if (typeof value === 'string' && value.trim()) return value.trim()
+    }
+  }
+  return ''
 }
 
 function onSearch() {
@@ -303,25 +487,82 @@ function prettyJson(raw: string | null | undefined) {
 }
 
 function summaryText(raw: string | null | undefined) {
-  if (!raw) return '-'
-  try {
-    const parsed = JSON.parse(raw)
-    const from = parsed?.extra?.from
-    const to = parsed?.extra?.to
-    if (from && to) {
-      return `由 ${from} 变更为 ${to}`
-    }
-    const after = parsed?.after
-    if (after && typeof after === 'object') {
-      return Object.keys(after)
-        .slice(0, 3)
-        .map((k) => `${k}:${String(after[k])}`)
-        .join(', ')
-    }
-  } catch {
-    return raw.slice(0, 80)
+  const parsed = parseDetail(raw)
+  if (!parsed) return raw ? raw.slice(0, 80) : '-'
+
+  const extra = isRecord(parsed.extra) ? parsed.extra : null
+  if (extra?.from != null && extra?.to != null) {
+    const valueKey = extra.status != null ? 'stage' : 'status'
+    return `由 ${formatAuditValue(valueKey, extra.from)} 变更为 ${formatAuditValue(valueKey, extra.to)}`
   }
+
+  const before = isRecord(parsed.before) ? parsed.before : null
+  const after = isRecord(parsed.after) ? parsed.after : null
+  if (before && after) {
+    const changes = Object.keys(after)
+      .filter((key) => !SUMMARY_SKIP_KEYS.has(key) && !isSameValue(before[key], after[key]))
+      .slice(0, 3)
+      .map((key) => `${fieldLabel(key)}：${formatAuditValue(key, before[key])} → ${formatAuditValue(key, after[key])}`)
+    if (changes.length) return changes.join('；')
+  }
+
+  const payload = after || before || extra
+  if (payload) {
+    const pairs = Object.entries(payload)
+      .filter(([key, value]) => !SUMMARY_SKIP_KEYS.has(key) && value != null && value !== '')
+      .slice(0, 3)
+      .map(([key, value]) => `${fieldLabel(key)}：${formatAuditValue(key, value)}`)
+    if (pairs.length) return pairs.join('；')
+  }
+
   return '-'
+}
+
+function parseDetail(raw: string | null | undefined) {
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as { before?: unknown; after?: unknown; extra?: unknown }
+  } catch {
+    return null
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
+function fieldLabel(key: string) {
+  return FIELD_LABELS[key] || humanizeKey(key)
+}
+
+function formatAuditValue(key: string, value: unknown): string {
+  if (value == null || value === '') return '空'
+  if (typeof value === 'boolean') return value ? '是' : '否'
+  if (typeof value === 'string') {
+    if (key === 'status' || key.endsWith('Status') || key === 'currentHealthStatus') {
+      return STATUS_LABELS[value] || humanizeKey(value)
+    }
+    if (key === 'stage' || key.endsWith('Stage')) {
+      return STAGE_LABELS[value] || humanizeKey(value)
+    }
+    if (key.endsWith('Id') && /^\d+$/.test(value)) return value
+    return STATUS_LABELS[value] || STAGE_LABELS[value] || value
+  }
+  if (Array.isArray(value)) return value.map((item) => formatAuditValue(key, item)).join('、') || '空'
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+function isSameValue(left: unknown, right: unknown) {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null)
+}
+
+function humanizeKey(key: string) {
+  return key
+    .replace(/\./g, ' ')
+    .replace(/_/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .trim()
 }
 
 onMounted(async () => {
@@ -473,7 +714,7 @@ onMounted(async () => {
 
 .scope-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
   padding: 16px 16px 12px;
 }
@@ -572,6 +813,11 @@ onMounted(async () => {
 .log-avatar.is-project,
 .target-pill.is-project {
   background: linear-gradient(135deg, #059669, #14b8a6);
+}
+
+.log-avatar.is-platform,
+.target-pill.is-platform {
+  background: linear-gradient(135deg, #64748b, #94a3b8);
 }
 
 .log-avatar.is-muted,

@@ -4,10 +4,18 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.module.customer.entity.Brand;
+import com.huanjing.geo.module.customer.entity.Company;
+import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.customer.mapper.CompanyMapper;
+import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.dto.ActivityLogItem;
+import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.entity.ActivityLog;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.ActivityLogMapper;
+import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.mapper.SysUserMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +40,10 @@ public class ActivityLogService {
     private final ActivityLogMapper activityLogMapper;
     private final CurrentUserService currentUserService;
     private final SysUserMapper sysUserMapper;
+    private final CompanyMapper companyMapper;
+    private final BrandMapper brandMapper;
+    private final ProjectMapper projectMapper;
+    private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final ObjectMapper objectMapper;
 
     public void logAction(Long userId, String action, String targetType, Long targetId, Object before, Object after, Object extra) {
@@ -98,6 +110,7 @@ public class ActivityLogService {
         Page<ActivityLog> rawPage = activityLogMapper.selectPage(new Page<>(current, size), wrapper);
         List<ActivityLog> records = rawPage.getRecords();
         Map<Long, String> userNameMap = buildUserNameMap(records);
+        Map<String, String> targetNameMap = buildTargetNameMap(records);
 
         List<ActivityLogItem> items = records.stream().map(r -> {
             ActivityLogItem item = new ActivityLogItem();
@@ -107,6 +120,7 @@ public class ActivityLogService {
             item.setAction(r.getAction());
             item.setTargetType(r.getTargetType());
             item.setTargetId(r.getTargetId());
+            item.setTargetName(targetNameMap.get(targetKey(r.getTargetType(), r.getTargetId())));
             item.setDetailJson(r.getDetailJson());
             item.setIpAddress(r.getIpAddress());
             item.setCreatedAt(r.getCreatedAt());
@@ -137,6 +151,77 @@ public class ActivityLogService {
             map.put(user.getId(), name);
         }
         return map;
+    }
+
+    private Map<String, String> buildTargetNameMap(List<ActivityLog> records) {
+        Map<String, Set<Long>> idsByType = new HashMap<>();
+        for (ActivityLog record : records) {
+            if (!StringUtils.hasText(record.getTargetType()) || record.getTargetId() == null) {
+                continue;
+            }
+            idsByType.computeIfAbsent(record.getTargetType(), ignored -> new HashSet<>()).add(record.getTargetId());
+        }
+        if (idsByType.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<String, String> names = new HashMap<>();
+        putCompanyNames(names, idsByType.get("company"));
+        putBrandNames(names, idsByType.get("brand"));
+        putProjectNames(names, idsByType.get("project"));
+        putPlatformNames(names, idsByType.get("platform"));
+        return names;
+    }
+
+    private void putCompanyNames(Map<String, String> names, Set<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        for (Company company : companyMapper.selectBatchIds(ids)) {
+            if (company != null && StringUtils.hasText(company.getCompanyName())) {
+                names.put(targetKey("company", company.getId()), company.getCompanyName());
+            }
+        }
+    }
+
+    private void putBrandNames(Map<String, String> names, Set<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        for (Brand brand : brandMapper.selectBatchIds(ids)) {
+            if (brand != null && StringUtils.hasText(brand.getBrandName())) {
+                names.put(targetKey("brand", brand.getId()), brand.getBrandName());
+            }
+        }
+    }
+
+    private void putProjectNames(Map<String, String> names, Set<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        for (Project project : projectMapper.selectBatchIds(ids)) {
+            if (project != null && StringUtils.hasText(project.getProjectName())) {
+                names.put(targetKey("project", project.getId()), project.getProjectName());
+            }
+        }
+    }
+
+    private void putPlatformNames(Map<String, String> names, Set<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return;
+        }
+        for (AiPlatformConfig platform : aiPlatformConfigMapper.selectBatchIds(ids)) {
+            if (platform != null && StringUtils.hasText(platform.getPlatformName())) {
+                names.put(targetKey("platform", platform.getId()), platform.getPlatformName());
+            }
+        }
+    }
+
+    private String targetKey(String targetType, Long targetId) {
+        if (!StringUtils.hasText(targetType) || targetId == null) {
+            return "";
+        }
+        return targetType + ":" + targetId;
     }
 
     private String toDetailJson(Object before, Object after, Object extra) {
