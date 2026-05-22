@@ -70,6 +70,14 @@ public class MockWechatMpClient implements WechatMpClient {
     }
 
     @Override
+    public PublishStatusResult getPublishStatus(String authorizerAccessToken, String publishId) {
+        failIf("invalid_credential", 40001, "invalid credential");
+        failIf("permission_missing", 48001, "api unauthorized");
+        String raw = "{\"publish_status\":0,\"article_id\":\"mock_article_id\"}";
+        return new PublishStatusResult(0, "mock_article_id", raw, null);
+    }
+
+    @Override
     public MaterialCountResult getMaterialCount(String authorizerAccessToken) {
         failIf("invalid_credential", 40001, "invalid credential");
         failIf("permission_missing", 48001, "api unauthorized");

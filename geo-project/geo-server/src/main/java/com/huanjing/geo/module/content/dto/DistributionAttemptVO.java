@@ -19,9 +19,14 @@ public class DistributionAttemptVO {
     private String requestPayload;
     private String responsePayload;
     private String platformArticleId;
+    private String platformPublishId;
     private String externalStatus;
     private String reviewStatus;
     private String reviewFeedback;
+    private LocalDateTime submittedAt;
+    private LocalDateTime reviewCheckedAt;
+    private LocalDateTime nextReviewCheckAt;
+    private Integer reviewCheckCount;
     private LocalDateTime createdAt;
     private LocalDateTime finishedAt;
 }

@@ -108,7 +108,8 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
                 response.put("media_id", result.mediaId());
                 response.put("publish_id", publishResult.publishId());
                 response.put("message", "submitted_to_wechat_freepublish");
-                SubmitResult submitResult = SubmitResult.success(200, requestPayload, objectMapper.writeValueAsString(response), null, publishResult.publishId());
+                SubmitResult submitResult = SubmitResult.success(200, requestPayload, objectMapper.writeValueAsString(response), null);
+                submitResult.setPlatformPublishId(publishResult.publishId());
                 submitResult.setExternalStatus("submitted_to_publish");
                 submitResult.setReviewStatus(ReviewStatusResult.ReviewStatus.UNDER_REVIEW);
                 return submitResult;
@@ -118,6 +119,7 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
             response.put("message", "saved_to_wechat_draft");
             SubmitResult submitResult = SubmitResult.success(200, requestPayload, objectMapper.writeValueAsString(response), null, result.mediaId());
             submitResult.setExternalStatus("saved_to_draft");
+            submitResult.setReviewStatus(ReviewStatusResult.ReviewStatus.NOT_APPLICABLE);
             return submitResult;
         } catch (BizException ex) {
             return SubmitResult.failure(ex.getCode(), requestPayload, null, ex.getMessage(), failureKind(ex.getCode()), retryable(ex.getCode()));
@@ -129,7 +131,43 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
     @Override
     public ReviewStatusResult refreshReviewStatus(DistributionTask task,
                                                   SelfMediaAccount account) {
-        return ReviewStatusResult.notApplicable();
+        if (task == null || account == null || !PLATFORM.equals(account.getPlatform())) {
+            return ReviewStatusResult.notApplicable();
+        }
+        if (!StringUtils.hasText(task.getPlatformPublishId())) {
+            return ReviewStatusResult.unknown(null, "wechat publish_id missing", false, task.getResponsePayload());
+        }
+        try {
+            WechatMpClient.PublishStatusResult statusResult =
+                    tokenAwareExecutor.execute(account, accessToken ->
+                            wechatMpClient.getPublishStatus(accessToken, task.getPlatformPublishId()));
+            return mapPublishStatus(statusResult);
+        } catch (BizException ex) {
+            return ReviewStatusResult.unknown(null, ex.getMessage(), retryable(ex.getCode()), null);
+        } catch (Exception ex) {
+            return ReviewStatusResult.unknown(null, safeMessage(ex), false, null);
+        }
+    }
+
+    private ReviewStatusResult mapPublishStatus(WechatMpClient.PublishStatusResult result) {
+        int publishStatus = result == null ? -1 : result.publishStatus();
+        String externalStatus = String.valueOf(publishStatus);
+        String feedback = result == null ? null : result.failIndex();
+        String rawResponse = result == null ? null : result.rawResponse();
+        String articleId = result == null ? null : result.articleId();
+        if (publishStatus == 0) {
+            return new ReviewStatusResult(ReviewStatusResult.ReviewStatus.PUBLISHED, externalStatus, feedback, false, rawResponse, articleId);
+        }
+        if (publishStatus == 1) {
+            return new ReviewStatusResult(ReviewStatusResult.ReviewStatus.UNDER_REVIEW, externalStatus, feedback, true, rawResponse);
+        }
+        if (publishStatus == 2 || publishStatus == 3 || publishStatus == 4) {
+            return new ReviewStatusResult(ReviewStatusResult.ReviewStatus.REJECTED, externalStatus, feedback, false, rawResponse);
+        }
+        if (publishStatus == 5 || publishStatus == 6) {
+            return new ReviewStatusResult(ReviewStatusResult.ReviewStatus.OFFLINE, externalStatus, feedback, false, rawResponse);
+        }
+        return ReviewStatusResult.unknown(externalStatus, feedback, true, rawResponse);
     }
 
     private TargetContext.SelfMediaTarget requireTarget(TargetContext target) {

@@ -1031,9 +1031,14 @@ export interface DistributionTask {
   selfMediaAccountId?: number | null
   authorityMediaId?: number | null
   platformArticleId?: string | null
+  platformPublishId?: string | null
   externalStatus?: string | null
   reviewStatus?: string | null
   reviewFeedback?: string | null
+  submittedAt?: string | null
+  reviewCheckedAt?: string | null
+  nextReviewCheckAt?: string | null
+  reviewCheckCount?: number | null
   failureKind?: string | null
   nextRetryAt?: string | null
   requestPayload?: string | null

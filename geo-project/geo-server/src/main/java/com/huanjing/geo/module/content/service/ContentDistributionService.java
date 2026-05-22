@@ -24,7 +24,6 @@ import com.huanjing.geo.module.content.mapper.*;
 import com.huanjing.geo.module.content.service.adapter.BrandGeoSiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.FailureKind;
 import com.huanjing.geo.module.content.service.adapter.OfficialCmsSiteAdapter;
-import com.huanjing.geo.module.content.service.adapter.ReviewStatusResult;
 import com.huanjing.geo.module.content.service.adapter.SiteAdapter;
 import com.huanjing.geo.module.content.service.adapter.AutoSelfMediaAdapter;
 import com.huanjing.geo.module.content.service.adapter.SemiAutoFillTask;
@@ -74,6 +73,7 @@ public class ContentDistributionService {
     private static final String GENERAL_INDUSTRY = "general";
     private static final String AUTH_MODE_COOKIE = "COOKIE";
     private static final int MAX_FILL_PAYLOAD_BYTES = 16 * 1024;
+    private static final Duration FIRST_REVIEW_CHECK_DELAY = Duration.ofMinutes(1);
     private static final ConcurrentHashMap<String, Object> AUTHORITY_MEDIA_LOCKS = new ConcurrentHashMap<>();
 
     private final ArticleDraftMapper articleDraftMapper;
@@ -93,6 +93,7 @@ public class ContentDistributionService {
     private final CompanyChannelQuotaService companyChannelQuotaService;
     private final BrandAccessService brandAccessService;
     private final FillTokenService fillTokenService;
+    private final DistributionReviewStatusPollService reviewStatusPollService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
     private final AuthorityMediaDistributionAdapter authorityMediaDistributionAdapter;
@@ -253,19 +254,7 @@ public class ContentDistributionService {
         if (project.getBrandId() == null || !project.getBrandId().equals(account.getBrandId())) {
             throw new BizException(403, "自媒体账号与文章品牌不匹配");
         }
-        AutoSelfMediaAdapter adapter = resolveSelfMediaAdapter(account.getPlatform());
-        ReviewStatusResult result = adapter.refreshReviewStatus(task, account);
-        if (result != null
-                && result.status() != null
-                && result.status() != ReviewStatusResult.ReviewStatus.UNKNOWN) {
-            LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
-                    .eq(DistributionTask::getId, taskId)
-                    .set(DistributionTask::getReviewStatus, SubmitResult.toStorageValue(result.status()))
-                    .set(DistributionTask::getReviewFeedback, result.reviewFeedback())
-                    .set(DistributionTask::getExternalStatus, result.externalStatus());
-            distributionTaskMapper.update(null, wrapper);
-        }
-        return distributionTaskMapper.selectById(taskId);
+        return reviewStatusPollService.refreshTask(task);
     }
 
     public PublishQuotaVO quota(Long projectId) {
@@ -749,6 +738,7 @@ public class ContentDistributionService {
                 .eq(DistributionTask::getId, taskId)
                 .set(DistributionTask::getDispatchMode, "SEMI_AUTO")
                 .set(DistributionTask::getStatus, "pending")
+                .set(DistributionTask::getReviewStatus, DistributionTaskStatePolicy.REVIEW_NOT_APPLICABLE)
                 .set(DistributionTask::getFillPayload, fillPayload)
                 .set(DistributionTask::getLockedUntil, null);
         distributionTaskMapper.update(null, wrapper);
@@ -843,6 +833,7 @@ public class ContentDistributionService {
         task.setAttemptNo(maxAttempt + 1);
         task.setStatus("submitting");
         task.setIntegrationMethod(account.getPlatform());
+        task.setDispatchMode("AUTO");
         task.setRetryCount(0);
         task.setOperatorId(operatorId);
         task.setRequestId(requestId);
@@ -980,20 +971,33 @@ public class ContentDistributionService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     protected void finalizeAttemptForSelfMedia(Long taskId, SubmitResult result) {
+        LocalDateTime now = LocalDateTime.now(SH_ZONE);
+        String reviewStatus = result.getReviewStatus();
+        if (result.isSuccess() && !StringUtils.hasText(reviewStatus)) {
+            reviewStatus = DistributionTaskStatePolicy.defaultReviewStatus("AUTO", DistributionTargetKind.MP_ACCOUNT);
+        }
+        LocalDateTime nextReviewCheckAt = result.isSuccess() && shouldScheduleReviewCheck(reviewStatus)
+                ? now.plus(FIRST_REVIEW_CHECK_DELAY)
+                : null;
         LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
                 .eq(DistributionTask::getId, taskId)
                 .eq(DistributionTask::getStatus, "submitting")
                 .set(DistributionTask::getLockedUntil, null)
-                .set(DistributionTask::getFinishedAt, LocalDateTime.now(SH_ZONE))
+                .set(DistributionTask::getFinishedAt, now)
                 .set(DistributionTask::getRequestPayload, jsonColumnPayload(result.getRequestPayload()))
                 .set(DistributionTask::getResponsePayload, jsonColumnPayload(result.getResponseBody()))
                 .set(DistributionTask::getExternalStatus, result.getExternalStatus())
-                .set(DistributionTask::getReviewStatus, result.getReviewStatus())
+                .set(DistributionTask::getReviewStatus, reviewStatus)
                 .set(DistributionTask::getReviewFeedback, result.getReviewFeedback());
 
         if (result.isSuccess()) {
             wrapper.set(DistributionTask::getStatus, "submitted")
                     .set(DistributionTask::getPlatformArticleId, result.getPlatformArticleId())
+                    .set(DistributionTask::getPlatformPublishId, result.getPlatformPublishId())
+                    .set(DistributionTask::getSubmittedAt, now)
+                    .set(DistributionTask::getNextReviewCheckAt, nextReviewCheckAt)
+                    .set(DistributionTask::getReviewCheckCount, 0)
+                    .set(DistributionTask::getReviewLockedUntil, null)
                     .set(DistributionTask::getFailureKind, null)
                     .set(DistributionTask::getErrorMessage, null)
                     .set(DistributionTask::getNextRetryAt, null);
@@ -1011,6 +1015,12 @@ public class ContentDistributionService {
         if (affected == 0) {
             log.warn("finalizeAttemptForSelfMedia: task {} state changed concurrently, skipped finalize", taskId);
         }
+    }
+
+    private boolean shouldScheduleReviewCheck(String reviewStatus) {
+        String normalized = DistributionTaskStatePolicy.normalizedReview(reviewStatus);
+        return DistributionTaskStatePolicy.REVIEW_UNDER_REVIEW.equals(normalized)
+                || DistributionTaskStatePolicy.REVIEW_UNKNOWN.equals(normalized);
     }
 
     private void finalizeAttemptForIndustrySite(Long taskId, SubmitResult result) {
@@ -1343,9 +1353,14 @@ public class ContentDistributionService {
         vo.setRequestPayload(task.getRequestPayload());
         vo.setResponsePayload(task.getResponsePayload());
         vo.setPlatformArticleId(task.getPlatformArticleId());
+        vo.setPlatformPublishId(task.getPlatformPublishId());
         vo.setExternalStatus(task.getExternalStatus());
         vo.setReviewStatus(task.getReviewStatus());
         vo.setReviewFeedback(task.getReviewFeedback());
+        vo.setSubmittedAt(task.getSubmittedAt());
+        vo.setReviewCheckedAt(task.getReviewCheckedAt());
+        vo.setNextReviewCheckAt(task.getNextReviewCheckAt());
+        vo.setReviewCheckCount(task.getReviewCheckCount());
         vo.setCreatedAt(task.getCreatedAt());
         vo.setFinishedAt(task.getFinishedAt());
         return vo;

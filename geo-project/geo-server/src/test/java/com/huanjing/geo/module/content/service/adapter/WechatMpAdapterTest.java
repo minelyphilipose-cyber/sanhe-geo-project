@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
+import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import com.huanjing.geo.module.content.wechat.WechatHtmlRewriter;
@@ -69,7 +70,8 @@ class WechatMpAdapterTest {
         SubmitResult result = fixture.adapter.submitToTarget(article(), "markdown body", target);
 
         assertTrue(result.isSuccess());
-        assertEquals("publish_id", result.getPlatformArticleId());
+        assertEquals("publish_id", result.getPlatformPublishId());
+        assertEquals(null, result.getPlatformArticleId());
         assertEquals("submitted_to_publish", result.getExternalStatus());
         assertEquals("under_review", result.getReviewStatus());
         verify(fixture.wechatMpClient).submitPublish(eq("access-token"), eq("draft_media_id"));
@@ -86,6 +88,57 @@ class WechatMpAdapterTest {
         assertEquals(403, result.getStatusCode());
         assertEquals("微信公众号自动发布未开启，当前仅允许保存草稿", result.getErrorMessage());
         verify(fixture.wechatMpClient, never()).submitPublish(any(), any());
+    }
+
+    @Test
+    void refreshReviewStatus_publishedReturnsArticleId() {
+        Fixture fixture = fixture(true);
+        DistributionTask task = reviewTask("publish_id");
+        when(fixture.wechatMpClient.getPublishStatus(eq("access-token"), eq("publish_id")))
+                .thenReturn(new WechatMpClient.PublishStatusResult(0, "article_id", "{\"publish_status\":0}", null));
+
+        ReviewStatusResult result = fixture.adapter.refreshReviewStatus(task, fixture.account);
+
+        assertEquals(ReviewStatusResult.ReviewStatus.PUBLISHED, result.status());
+        assertEquals("0", result.externalStatus());
+        assertEquals("article_id", result.platformArticleId());
+    }
+
+    @Test
+    void refreshReviewStatus_publishingRemainsUnderReview() {
+        Fixture fixture = fixture(true);
+        DistributionTask task = reviewTask("publish_id");
+        when(fixture.wechatMpClient.getPublishStatus(eq("access-token"), eq("publish_id")))
+                .thenReturn(new WechatMpClient.PublishStatusResult(1, null, "{\"publish_status\":1}", null));
+
+        ReviewStatusResult result = fixture.adapter.refreshReviewStatus(task, fixture.account);
+
+        assertEquals(ReviewStatusResult.ReviewStatus.UNDER_REVIEW, result.status());
+        assertTrue(result.retryable());
+    }
+
+    @Test
+    void refreshReviewStatus_deletedOrBlockedMapsToOfflineTerminal() {
+        Fixture fixture = fixture(true);
+        DistributionTask task = reviewTask("publish_id");
+        when(fixture.wechatMpClient.getPublishStatus(eq("access-token"), eq("publish_id")))
+                .thenReturn(new WechatMpClient.PublishStatusResult(5, null, "{\"publish_status\":5}", null));
+
+        ReviewStatusResult result = fixture.adapter.refreshReviewStatus(task, fixture.account);
+
+        assertEquals(ReviewStatusResult.ReviewStatus.OFFLINE, result.status());
+        assertEquals("5", result.externalStatus());
+        assertFalse(result.retryable());
+    }
+
+    @Test
+    void refreshReviewStatus_missingPublishIdReturnsUnknown() {
+        Fixture fixture = fixture(true);
+
+        ReviewStatusResult result = fixture.adapter.refreshReviewStatus(reviewTask(null), fixture.account);
+
+        assertEquals(ReviewStatusResult.ReviewStatus.UNKNOWN, result.status());
+        assertEquals("wechat publish_id missing", result.reviewFeedback());
     }
 
     private Fixture fixture(boolean autoPublishEnabled) {
@@ -146,6 +199,14 @@ class WechatMpAdapterTest {
 
     private TargetContext.SelfMediaTarget target(SelfMediaAccount account, Map<String, Object> platformOptions) {
         return new TargetContext.SelfMediaTarget(account, 100L, List.of(), List.of(), null, null, "request-1", platformOptions);
+    }
+
+    private DistributionTask reviewTask(String publishId) {
+        DistributionTask task = new DistributionTask();
+        task.setId(10L);
+        task.setPlatformPublishId(publishId);
+        task.setResponsePayload("{}");
+        return task;
     }
 
     private record Fixture(WechatMpAdapter adapter, SelfMediaAccount account, WechatMpClient wechatMpClient) {

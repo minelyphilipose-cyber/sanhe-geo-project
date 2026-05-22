@@ -18,6 +18,8 @@ public interface WechatMpClient {
 
     PublishResult submitPublish(String authorizerAccessToken, String mediaId);
 
+    PublishStatusResult getPublishStatus(String authorizerAccessToken, String publishId);
+
     MaterialCountResult getMaterialCount(String authorizerAccessToken);
 
     void sendCustomTextMessage(String authorizerAccessToken, String openid, String content);
@@ -53,6 +55,9 @@ public interface WechatMpClient {
     }
 
     record PublishResult(String publishId) {
+    }
+
+    record PublishStatusResult(int publishStatus, String articleId, String rawResponse, String failIndex) {
     }
 
     record MaterialCountResult(int voiceCount, int videoCount, int imageCount, int newsCount) {

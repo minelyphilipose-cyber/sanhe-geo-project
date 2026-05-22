@@ -81,6 +81,7 @@ class ContentDistributionServiceTest {
     private CompanyChannelQuotaService companyChannelQuotaService;
     private BrandAccessService brandAccessService;
     private FillTokenService fillTokenService;
+    private DistributionReviewStatusPollService reviewStatusPollService;
     private AuditService auditService;
     private ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
     private ContentDistributionService contentDistributionService;
@@ -105,6 +106,7 @@ class ContentDistributionServiceTest {
         companyChannelQuotaService = mock(CompanyChannelQuotaService.class);
         brandAccessService = mock(BrandAccessService.class);
         fillTokenService = mock(FillTokenService.class);
+        reviewStatusPollService = mock(DistributionReviewStatusPollService.class);
         auditService = mock(AuditService.class);
         articleImagePublicUrlRewriter = mock(ArticleImagePublicUrlRewriter.class);
         when(articleImagePublicUrlRewriter.rewrite(any(), any())).thenAnswer(invocation -> invocation.getArgument(1));
@@ -126,6 +128,7 @@ class ContentDistributionServiceTest {
                 companyChannelQuotaService,
                 brandAccessService,
                 fillTokenService,
+                reviewStatusPollService,
                 auditService,
                 new ObjectMapper(),
                 mock(AuthorityMediaDistributionAdapter.class),
@@ -415,16 +418,15 @@ class ContentDistributionServiceTest {
         );
         when(distributionTaskMapper.selectById(700L)).thenReturn(task);
         when(selfMediaAccountMapper.selectById(40L)).thenReturn(account);
-        when(distributionTaskMapper.update(eq(null), any())).thenReturn(1);
+        DistributionTask refreshed = new DistributionTask();
+        refreshed.setId(700L);
+        refreshed.setReviewStatus("published");
+        when(reviewStatusPollService.refreshTask(task)).thenReturn(refreshed);
 
-        contentDistributionService.refreshDistributionTaskReviewStatus(700L);
+        DistributionTask result = contentDistributionService.refreshDistributionTaskReviewStatus(700L);
 
-        ArgumentCaptor<LambdaUpdateWrapper<DistributionTask>> updateCaptor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
-        verify(distributionTaskMapper).update(eq(null), updateCaptor.capture());
-        String sqlSet = updateCaptor.getValue().getSqlSet();
-        assertTrue(sqlSet.contains("review_status"));
-        assertTrue(sqlSet.contains("review_feedback"));
-        assertTrue(sqlSet.contains("external_status"));
+        assertEquals("published", result.getReviewStatus());
+        verify(reviewStatusPollService).refreshTask(task);
     }
 
     @Test
@@ -440,10 +442,11 @@ class ContentDistributionServiceTest {
         selfMediaAdapter.reviewStatusResult = ReviewStatusResult.unknown(null, null, false, null);
         when(distributionTaskMapper.selectById(701L)).thenReturn(task);
         when(selfMediaAccountMapper.selectById(40L)).thenReturn(account);
+        when(reviewStatusPollService.refreshTask(task)).thenReturn(task);
 
         contentDistributionService.refreshDistributionTaskReviewStatus(701L);
 
-        verify(distributionTaskMapper, never()).update(eq(null), any());
+        verify(reviewStatusPollService).refreshTask(task);
     }
 
     @Test

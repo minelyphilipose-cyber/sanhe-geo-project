@@ -116,6 +116,7 @@ class ContentDistributionSemiAutoServiceTest {
                 companyChannelQuotaService,
                 brandAccessService,
                 fillTokenService,
+                mock(DistributionReviewStatusPollService.class),
                 auditService,
                 new ObjectMapper(),
                 mock(AuthorityMediaDistributionAdapter.class),

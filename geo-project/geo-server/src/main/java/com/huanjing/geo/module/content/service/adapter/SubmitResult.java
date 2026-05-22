@@ -11,6 +11,7 @@ public class SubmitResult {
     private String errorMessage;
     private String publishedUrl;
     private String platformArticleId;
+    private String platformPublishId;
     private String externalStatus;
     private String reviewStatus;
     private String reviewFeedback;

@@ -96,6 +96,35 @@ public interface DistributionTaskMapper extends BaseMapper<DistributionTask> {
     );
 
     @Select("""
+            SELECT id, article_id, project_id, self_media_account_id, status, dispatch_mode,
+                   target_kind, platform_article_id, platform_publish_id, external_status,
+                   review_status, review_feedback, response_payload, submitted_at, created_at,
+                   review_check_count, next_review_check_at, review_locked_until
+            FROM distribution_tasks
+            WHERE target_kind = 'mp_account'
+              AND dispatch_mode = 'AUTO'
+              AND status = 'submitted'
+              AND review_status IN ('under_review', 'unknown')
+              AND (next_review_check_at IS NULL OR next_review_check_at <= #{now})
+              AND (review_locked_until IS NULL OR review_locked_until < #{now})
+            ORDER BY COALESCE(next_review_check_at, created_at), id
+            LIMIT #{limit}
+            """)
+    List<DistributionTask> selectDueReviewTasks(@Param("now") LocalDateTime now, @Param("limit") int limit);
+
+    @Update("""
+            UPDATE distribution_tasks
+            SET review_locked_until = #{lockedUntil}
+            WHERE id = #{taskId}
+              AND (review_locked_until IS NULL OR review_locked_until < #{now})
+              AND status = 'submitted'
+              AND review_status IN ('under_review', 'unknown')
+            """)
+    int claimReviewTask(@Param("taskId") Long taskId,
+                        @Param("now") LocalDateTime now,
+                        @Param("lockedUntil") LocalDateTime lockedUntil);
+
+    @Select("""
             SELECT t.id AS taskId,
                    COALESCE(sma.platform, t.integration_method) AS platform,
                    t.status AS status,
