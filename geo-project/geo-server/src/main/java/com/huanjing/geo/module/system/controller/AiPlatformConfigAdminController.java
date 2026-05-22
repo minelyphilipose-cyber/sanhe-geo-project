@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 @Tag(name = "AiPlatformConfigAdmin")
 @RestController
@@ -45,6 +46,12 @@ public class AiPlatformConfigAdminController {
     public R<AiPlatformConfig> updatePresaleEnabled(@PathVariable Long id,
                                                     @Valid @RequestBody AiPlatformPresaleEnabledUpdateRequest req) {
         return R.ok(aiPlatformConfigService.updatePresaleEnabled(id, req.getEnabledForPresale()));
+    }
+
+    @PostMapping("/{id}/logo")
+    public R<AiPlatformConfig> uploadLogo(@PathVariable Long id,
+                                          @RequestPart("file") MultipartFile file) {
+        return R.ok(aiPlatformConfigService.uploadLogo(id, file));
     }
 
     @DeleteMapping("/{id}")

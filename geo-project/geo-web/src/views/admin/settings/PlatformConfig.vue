@@ -72,7 +72,8 @@
             <template #default="scope">
               <div class="admin-entity-cell">
                 <div class="admin-entity-avatar platform-avatar" :class="enabledClass(scope.row.enabled)">
-                  {{ platformInitial(scope.row.platformName) }}
+                  <img v-if="scope.row.platformLogoUrl" :src="scope.row.platformLogoUrl" :alt="scope.row.platformName" />
+                  <template v-else>{{ platformInitial(scope.row.platformName) }}</template>
                 </div>
                 <div class="min-w-0">
                   <div class="admin-entity-main">{{ scope.row.platformName }}</div>
@@ -193,6 +194,19 @@
             <el-form-item label="平台地址" prop="platformHomeUrl">
               <el-input v-model="form.platformHomeUrl" placeholder="如: https://www.doubao.com/" />
             </el-form-item>
+          </div>
+          <div class="platform-logo-row">
+            <div class="platform-logo-preview platform-avatar" :class="enabledClass(form.enabled)">
+              <img v-if="form.platformLogoUrl" :src="form.platformLogoUrl" :alt="form.platformName || '平台Logo'" />
+              <template v-else>{{ platformInitial(form.platformName) }}</template>
+            </div>
+            <div class="platform-logo-actions">
+              <span>平台Logo</span>
+              <el-upload :show-file-list="false" :before-upload="handleLogoUpload" accept="image/*" :disabled="mode === 'create' || logoUploading">
+                <el-button size="small" type="primary" plain :loading="logoUploading" :disabled="mode === 'create'">上传Logo</el-button>
+              </el-upload>
+              <small>{{ mode === 'create' ? '保存平台后可上传Logo' : '支持图片上传后反显' }}</small>
+            </div>
           </div>
         </section>
 
@@ -469,7 +483,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules, type UploadRawFile } from 'element-plus'
 import { useDictStore } from '@/stores/dict'
 import { useUserStore } from '@/stores/user'
 import DataState from '@/components/ui/DataState.vue'
@@ -478,6 +492,7 @@ import {
   deletePlatformConfig,
   getPlatformConfigPage,
   updatePlatformConfig,
+  uploadPlatformLogo,
 } from '@/api/platformConfig'
 import type { AIPlatformConfigItem } from '@/types'
 
@@ -487,6 +502,7 @@ const canManage = computed(() => userStore.hasPermission('user.manage'))
 
 const loading = ref(false)
 const saving = ref(false)
+const logoUploading = ref(false)
 const rows = ref<AIPlatformConfigItem[]>([])
 const page = reactive({ current: 1, size: 10, total: 0 })
 const query = reactive<{ keyword: string; priorityLevel: string; enabled: boolean | undefined }>({
@@ -508,6 +524,7 @@ const form = reactive({
   platformCode: '',
   platformName: '',
   platformHomeUrl: '',
+  platformLogoUrl: '',
   priorityLevel: 'P1',
   apiKey: '',
   primaryKeyRef: '',
@@ -579,6 +596,7 @@ function resetForm() {
   form.platformCode = ''
   form.platformName = ''
   form.platformHomeUrl = ''
+  form.platformLogoUrl = ''
   form.priorityLevel = 'P1'
   form.apiKey = ''
   form.primaryKeyRef = ''
@@ -655,6 +673,7 @@ function openEdit(row: AIPlatformConfigItem) {
   form.platformCode = row.platformCode
   form.platformName = row.platformName
   form.platformHomeUrl = row.platformHomeUrl || ''
+  form.platformLogoUrl = row.platformLogoUrl || ''
   form.priorityLevel = row.priorityLevel
   form.apiKey = row.apiKey
   form.primaryKeyRef = row.primaryKeyRef || ''
@@ -692,6 +711,7 @@ async function submit() {
       platformCode: form.platformCode.trim(),
       platformName: form.platformName.trim(),
       platformHomeUrl: form.platformHomeUrl.trim() || undefined,
+      platformLogoUrl: form.platformLogoUrl.trim() || undefined,
       priorityLevel: form.priorityLevel,
       apiKey: form.apiKey.trim(),
       primaryKeyRef: form.primaryKeyRef.trim() || undefined,
@@ -725,6 +745,27 @@ async function submit() {
   } finally {
     saving.value = false
   }
+}
+
+async function handleLogoUpload(file: UploadRawFile) {
+  if (!editingId.value) {
+    ElMessage.warning('请先保存平台配置后再上传Logo')
+    return false
+  }
+  logoUploading.value = true
+  try {
+    const { data } = await uploadPlatformLogo(editingId.value, file as File)
+    const updated = data.data
+    form.platformLogoUrl = updated.platformLogoUrl || ''
+    const index = rows.value.findIndex((item) => item.id === updated.id)
+    if (index >= 0) {
+      rows.value[index] = updated
+    }
+    ElMessage.success('平台Logo已更新')
+  } finally {
+    logoUploading.value = false
+  }
+  return false
 }
 
 async function remove(row: AIPlatformConfigItem) {
@@ -856,6 +897,46 @@ onMounted(async () => {
 
 .platform-avatar.is-muted {
   background: linear-gradient(135deg, #64748b, #94a3b8);
+}
+
+.platform-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: inherit;
+}
+
+.platform-logo-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.platform-logo-preview {
+  flex: 0 0 auto;
+}
+
+.platform-logo-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.platform-logo-actions span {
+  color: #374151;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.platform-logo-actions small {
+  color: #94a3b8;
+  font-size: 12px;
 }
 
 .priority-pill {

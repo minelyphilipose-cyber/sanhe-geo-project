@@ -27,6 +27,7 @@ const presalePrintPocRoutes = enablePresalePrintPoc
 const publicPathPrefixes = [
   '/login',
   '/r/',
+  '/realtime-dashboard/',
   '/dashboard/',
   '/presale-print/',
   ...(enablePresalePrintPoc ? ['/presale-print-poc/'] : []),
@@ -60,6 +61,12 @@ const router = createRouter({
       name: 'ShareReport',
       component: () => import('@/views/share/ShareReport.vue'),
       meta: { title: '报表查看' },
+    },
+    {
+      path: '/realtime-dashboard/:shareCode',
+      name: 'RealtimeProjectDashboard',
+      component: () => import('@/views/admin/project/ReportList.vue'),
+      meta: { title: '项目实时数据看板' },
     },
     {
       path: '/dashboard/:shareCode',

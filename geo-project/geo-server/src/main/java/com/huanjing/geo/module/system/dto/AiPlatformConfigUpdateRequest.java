@@ -11,6 +11,7 @@ public class AiPlatformConfigUpdateRequest {
     @NotBlank
     private String platformName;
     private String platformHomeUrl;
+    private String platformLogoUrl;
     @NotBlank
     private String priorityLevel;
     private Integer rpmLimit;

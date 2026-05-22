@@ -145,8 +145,11 @@ public class DispatchPollAggregationService {
                 if (Boolean.TRUE.equals(result.getSiteMentioned())) {
                     agg.siteMentionCount++;
                 }
-                if (Boolean.TRUE.equals(result.getContactMentioned())) {
-                    agg.contactMentionCount++;
+                int contactMentionCount = result.getContactMentionCount() == null
+                        ? (Boolean.TRUE.equals(result.getContactMentioned()) ? 1 : 0)
+                        : Math.max(result.getContactMentionCount(), 0);
+                if (contactMentionCount > 0) {
+                    agg.contactMentionCount += contactMentionCount;
                 }
             } else {
                 totalFailed++;

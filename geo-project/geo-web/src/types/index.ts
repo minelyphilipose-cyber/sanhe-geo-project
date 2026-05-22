@@ -393,6 +393,7 @@ export interface AIPlatformConfigItem {
   platformCode: string
   platformName: string
   platformHomeUrl?: string | null
+  platformLogoUrl?: string | null
   priorityLevel: 'P0' | 'P1' | 'P2'
   apiKey: string
   primaryKeyRef?: string | null
@@ -489,6 +490,7 @@ export interface ProjectDashboardComparison {
 export interface ProjectDashboardPlatformItem {
   platformCode: string
   platformName: string
+  platformLogoUrl?: string | null
   hitCount: number
   contactCount: number
   siteCount: number
@@ -546,6 +548,12 @@ export interface ProjectDashboardDetailItem {
   batchDate: string
   hasSnapshot: boolean
   platformUrl?: string | null
+  platformLogoUrl?: string | null
+  answerText?: string | null
+  matchType?: string | null
+  siteMentioned?: boolean
+  contactMentioned?: boolean
+  contactMentionCount?: number
 }
 
 export interface ProjectDashboardSummaryResponse {

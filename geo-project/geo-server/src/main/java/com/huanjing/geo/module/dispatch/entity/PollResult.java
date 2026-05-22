@@ -30,6 +30,7 @@ public class PollResult {
     private String matchType;
     private Boolean siteMentioned;
     private Boolean contactMentioned;
+    private Integer contactMentionCount;
     private String recordType;
     private String detailJson;
     private LocalDateTime createdAt;

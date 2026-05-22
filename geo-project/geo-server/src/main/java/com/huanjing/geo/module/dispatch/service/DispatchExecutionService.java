@@ -252,6 +252,7 @@ public class DispatchExecutionService {
             matchDetails.put("match_type", match.matchType);
             matchDetails.put("site_mentioned", match.siteMentioned);
             matchDetails.put("contact_mentioned", match.contactMentioned);
+            matchDetails.put("contact_mention_count", match.contactMentionCount);
             detail.put("match_details", matchDetails);
         } else {
             Map<String, Object> errorPayload = new LinkedHashMap<>();
@@ -279,6 +280,7 @@ public class DispatchExecutionService {
         result.setMatchType(match.matchType);
         result.setSiteMentioned(match.siteMentioned);
         result.setContactMentioned(match.contactMentioned);
+        result.setContactMentionCount(match.contactMentionCount);
         result.setRecordType(recordType);
         result.setDetailJson(JSONUtil.toJsonStr(detail));
         return result;
@@ -1017,10 +1019,29 @@ public class DispatchExecutionService {
         }
         boolean siteMentioned = siteDomains.stream().anyMatch(lower::contains);
         String normalizedResponseDigits = normalizePhone(raw);
-        boolean phoneMentioned = phones.stream().anyMatch(p -> StringUtils.hasText(p) && normalizedResponseDigits.contains(p));
-        boolean contactTermMentioned = contactTerms.stream().anyMatch(term -> StringUtils.hasText(term) && raw.contains(term));
-        boolean contactMentioned = phoneMentioned || contactTermMentioned;
-        return new MatchInfo(nameHit, matchType, siteMentioned, contactMentioned);
+        int phoneMentionCount = phones.stream()
+                .filter(StringUtils::hasText)
+                .mapToInt(phone -> countOccurrences(normalizedResponseDigits, phone))
+                .sum();
+        int contactTermMentionCount = contactTerms.stream()
+                .filter(StringUtils::hasText)
+                .mapToInt(term -> countOccurrences(raw, term))
+                .sum();
+        int contactMentionCount = phoneMentionCount + contactTermMentionCount;
+        return new MatchInfo(nameHit, matchType, siteMentioned, contactMentionCount > 0, contactMentionCount);
+    }
+
+    private int countOccurrences(String source, String token) {
+        if (!StringUtils.hasText(source) || !StringUtils.hasText(token)) {
+            return 0;
+        }
+        int count = 0;
+        int index = 0;
+        while ((index = source.indexOf(token, index)) >= 0) {
+            count++;
+            index += token.length();
+        }
+        return count;
     }
 
     private String extractDomain(String rawUrl) {
@@ -1565,16 +1586,18 @@ public class DispatchExecutionService {
         private final String matchType;
         private final boolean siteMentioned;
         private final boolean contactMentioned;
+        private final int contactMentionCount;
 
-        private MatchInfo(boolean hit, String matchType, boolean siteMentioned, boolean contactMentioned) {
+        private MatchInfo(boolean hit, String matchType, boolean siteMentioned, boolean contactMentioned, int contactMentionCount) {
             this.hit = hit;
             this.matchType = matchType;
             this.siteMentioned = siteMentioned;
             this.contactMentioned = contactMentioned;
+            this.contactMentionCount = contactMentionCount;
         }
 
         static MatchInfo empty() {
-            return new MatchInfo(false, null, false, false);
+            return new MatchInfo(false, null, false, false, 0);
         }
     }
 

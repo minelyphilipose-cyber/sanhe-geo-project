@@ -15,6 +15,7 @@ public class AiPlatformConfig {
     private String platformCode;
     private String platformName;
     private String platformHomeUrl;
+    private String platformLogoUrl;
     private String priorityLevel;
     private Integer rpmLimit;
     private Integer tpmLimit;

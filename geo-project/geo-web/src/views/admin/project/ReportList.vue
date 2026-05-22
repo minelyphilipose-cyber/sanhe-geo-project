@@ -53,7 +53,8 @@
           <div class="signal-list">
             <article v-for="source in indexingSources" :key="source.name" class="signal-row">
               <i>
-                <img :src="source.logo" :alt="source.name" />
+                <img v-if="source.logo" :src="source.logo" :alt="source.name" />
+                <template v-else>{{ source.short }}</template>
               </i>
               <span>{{ source.name }}</span>
               <div class="signal-bar">
@@ -91,7 +92,8 @@
                 :class="{ 'lissa-chip--small': !item.big }"
               >
                 <span :data-tip="`${item.name} · ${item.value}`">
-                  <img :src="item.logo" :alt="item.name" />
+                  <img v-if="item.logo" :src="item.logo" :alt="item.name" />
+                  <template v-else>{{ item.short }}</template>
                 </span>
               </div>
             </div>
@@ -249,32 +251,7 @@
           </article>
         </div>
         <div class="line-chart" aria-label="文章创作与发布趋势">
-          <svg viewBox="0 0 760 236" role="img" aria-hidden="true">
-            <defs>
-              <linearGradient id="createTrendFill" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stop-color="#7db7ff" stop-opacity="0.18" />
-                <stop offset="100%" stop-color="#7db7ff" stop-opacity="0" />
-              </linearGradient>
-              <linearGradient id="publishTrendFill" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stop-color="#b39cff" stop-opacity="0.16" />
-                <stop offset="100%" stop-color="#b39cff" stop-opacity="0" />
-              </linearGradient>
-            </defs>
-            <g class="chart-grid">
-              <line v-for="line in trendGridLines" :key="line" x1="0" x2="760" :y1="line" :y2="line" />
-            </g>
-            <polygon class="line-area line-area-create" :points="createAreaPoints" />
-            <polygon class="line-area line-area-publish" :points="publishAreaPoints" />
-            <polyline class="trend-line trend-line-create" :points="createLinePoints" />
-            <polyline class="trend-line trend-line-publish" :points="publishLinePoints" />
-            <g class="trend-dots">
-              <circle v-for="point in createChartPoints" :key="`create-${point.x}`" class="create-dot" :cx="point.x" :cy="point.y" r="4" />
-              <circle v-for="point in publishChartPoints" :key="`publish-${point.x}`" class="publish-dot" :cx="point.x" :cy="point.y" r="4" />
-            </g>
-          </svg>
-          <div class="line-chart-axis">
-            <small v-for="item in trendData" :key="item.date">{{ item.date }}</small>
-          </div>
+          <VChart class="trend-echart" :option="trendChartOption" autoresize />
         </div>
       </article>
     </section>
@@ -328,11 +305,11 @@
           </label>
           <label>
             <span>开始时间</span>
-            <input v-model="dateRange.start" type="date" />
+            <input v-model="dateRange.start" type="date" :max="dateRange.end || todayInput" />
           </label>
           <label>
             <span>结束时间</span>
-            <input v-model="dateRange.end" type="date" />
+            <input v-model="dateRange.end" type="date" :max="todayInput" />
           </label>
           <button type="button" class="primary-button" @click="searchDetails">查询</button>
         </div>
@@ -375,8 +352,8 @@
                 <span class="platform-cell">
                   <i>
                     <img
-                      v-if="platformLogoMap[row.platform]"
-                      :src="platformLogoMap[row.platform]"
+                      v-if="row.platformLogoUrl || platformLogo(row.platformCode, row.platform)"
+                      :src="row.platformLogoUrl || platformLogo(row.platformCode, row.platform)"
                       :alt="row.platform"
                     />
                     <template v-else>{{ row.platform.slice(0, 1) }}</template>
@@ -391,6 +368,7 @@
               </td>
               <td class="mono muted">{{ row.time }}</td>
               <td>
+                <button type="button" class="link-button" @click="openDetail(row)">详情</button>
                 <a v-if="row.platformUrl" class="link-button" :href="row.platformUrl" target="_blank" rel="noopener noreferrer">转到平台 →</a>
                 <button v-else type="button" class="link-button" @click="platformUrlPending">转到平台 →</button>
               </td>
@@ -419,6 +397,33 @@
         </div>
       </footer>
     </section>
+
+    <div v-if="detailDialogVisible" class="detail-modal-mask" role="presentation" @click.self="detailDialogVisible = false">
+      <section class="detail-modal" role="dialog" aria-modal="true" aria-label="命中详情">
+        <header>
+          <div>
+            <span>命中详情</span>
+            <strong>{{ selectedDetailRow?.platform || '-' }}</strong>
+          </div>
+          <button type="button" aria-label="关闭" @click="detailDialogVisible = false">×</button>
+        </header>
+        <div class="detail-modal-body">
+          <article>
+            <small>用户问题</small>
+            <p>{{ selectedDetailRow?.question || '-' }}</p>
+          </article>
+          <article>
+            <small>AI回答</small>
+            <p>{{ selectedDetailRow?.answerText || '暂无回答内容' }}</p>
+          </article>
+          <div class="detail-meta-grid">
+            <span>查询时间 <strong>{{ selectedDetailRow?.time || '-' }}</strong></span>
+            <span>官网提及 <strong>{{ selectedDetailRow?.siteMentioned ? '是' : '否' }}</strong></span>
+            <span>联系方式 <strong>{{ selectedDetailRow?.contactMentionCount || 0 }} 次</strong></span>
+          </div>
+        </div>
+      </section>
+    </div>
   </main>
 </template>
 
@@ -427,6 +432,11 @@ import type { CSSProperties } from 'vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import VChart from 'vue-echarts'
+import { use } from 'echarts/core'
+import { LineChart } from 'echarts/charts'
+import { GridComponent, TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
 import { getActiveCompanyPackageBinding } from '@/api/customer'
 import {
   createProjectDashboardShare,
@@ -435,8 +445,10 @@ import {
   getPublicProjectDashboardSummary,
   getPublicProjectDashboardTrend,
 } from '@/api/projectDashboard'
+import { getPlatformConfigPage } from '@/api/platformConfig'
 import { getKeywordGroupPage, getKeywordGroupQuestions, getProjectDetail } from '@/api/project'
 import type {
+  AIPlatformConfigItem,
   CompanyPackageBinding,
   KeywordGroup,
   KeywordGroupQuestion,
@@ -450,13 +462,14 @@ import ai360Logo from '@/assets/ai-model-logos/ai360-color.png'
 import deepseekLogo from '@/assets/ai-model-logos/deepseek-color.png'
 import doubaoLogo from '@/assets/ai-model-logos/doubao.png'
 import glmLogo from '@/assets/ai-model-logos/glm.png'
-import hailuoLogo from '@/assets/ai-model-logos/hailuo-color.png'
 import hunyuanLogo from '@/assets/ai-model-logos/hunyuan-color.png'
 import kimiLogo from '@/assets/ai-model-logos/kimi.png'
 import minimaxLogo from '@/assets/ai-model-logos/minimax-color.png'
 import qwenLogo from '@/assets/ai-model-logos/qwen-color.png'
 import wenxinLogo from '@/assets/ai-model-logos/文心一言.png'
 import xiaomiMimoLogo from '@/assets/ai-model-logos/xiaomimimo.png'
+
+use([CanvasRenderer, LineChart, GridComponent, TooltipComponent])
 
 type MetricTone = 'blue' | 'purple' | 'teal' | 'orange'
 type TrendType = 'up' | 'down'
@@ -478,6 +491,12 @@ interface ReportRow {
   platform: string
   platformCode: string
   platformUrl?: string | null
+  platformLogoUrl?: string | null
+  answerText?: string | null
+  matchType?: string | null
+  siteMentioned?: boolean
+  contactMentioned?: boolean
+  contactMentionCount?: number
   status: string
   time: string
   timeValue: number
@@ -485,6 +504,7 @@ interface ReportRow {
 
 interface IndexingSource {
   name: string
+  code: string
   short: string
   logo: string
   value: string
@@ -532,12 +552,15 @@ interface IntentParticle {
 const route = useRoute()
 const router = useRouter()
 const projectId = computed(() => Number(route.params.id) || 10086)
+const publicShareCode = computed(() => String(route.params.shareCode || ''))
+const isPublicShare = computed(() => !!publicShareCode.value)
 const project = ref<Project | null>(null)
 const activePackageBinding = ref<CompanyPackageBinding | null>(null)
 const refreshedAt = ref<string | Date | null>(null)
 const activeShare = ref<ProjectDashboardShare | null>(null)
 const dashboardSummary = ref<ProjectDashboardSummaryResponse | null>(null)
 const dashboardTrend = ref<ProjectDashboardTrendItem[]>([])
+const allModelPlatforms = ref<AIPlatformConfigItem[]>([])
 const detailTotal = ref(0)
 
 const activeTab = ref('全部')
@@ -549,6 +572,7 @@ const dateRange = reactive({
   start: '',
   end: '',
 })
+const todayInput = computed(() => formatDateInput(new Date()))
 
 const reportTabs = ['全部', '命中明细', '待接入数据源']
 
@@ -602,6 +626,25 @@ function formatMonthDay(value?: string | Date | null) {
   return `${padTime(date.getMonth() + 1)}-${padTime(date.getDate())}`
 }
 
+function minDateInput(left: string, right: string) {
+  if (!left) return right
+  if (!right) return left
+  return left <= right ? left : right
+}
+
+function clampDateRangeToToday() {
+  const today = todayInput.value
+  if (dateRange.end && dateRange.end > today) {
+    dateRange.end = today
+  }
+  if (dateRange.start && dateRange.start > today) {
+    dateRange.start = today
+  }
+  if (dateRange.start && dateRange.end && dateRange.start > dateRange.end) {
+    dateRange.start = dateRange.end
+  }
+}
+
 function formatDateTime(value?: string | Date | null) {
   const date = toDate(value)
   if (!date) return '-'
@@ -628,12 +671,22 @@ function normalizePlatformKey(value?: string | null) {
   return String(value || '').trim().toLowerCase()
 }
 
-const projectName = computed(() => project.value?.projectName || `项目 ${projectId.value}`)
+function platformDisplayName(platform?: Pick<AIPlatformConfigItem, 'platformCode' | 'platformName'> | null) {
+  return platform?.platformName || platform?.platformCode || '未命名平台'
+}
+
+const projectName = computed(() => dashboardSummary.value?.projectName || project.value?.projectName || `项目 ${projectId.value}`)
 const serviceStartDate = computed(() => {
+  if (isPublicShare.value && dashboardSummary.value?.startDate) {
+    return toDate(dashboardSummary.value.startDate) || new Date(dateRange.start)
+  }
   const packageStart = activePackageBinding.value?.boundAt
   return toDate(packageStart || project.value?.startDate || project.value?.activatedAt || dateRange.start) || new Date(dateRange.start)
 })
 const serviceEndDate = computed(() => {
+  if (isPublicShare.value && dashboardSummary.value?.endDate) {
+    return toDate(dashboardSummary.value.endDate) || new Date(dateRange.end)
+  }
   const packageEnd = addPackageMonths(activePackageBinding.value?.boundAt, activePackageBinding.value?.serviceMonths || 0)
   return packageEnd || toDate(project.value?.endDate || project.value?.expiredAt || dateRange.end) || new Date(dateRange.end)
 })
@@ -645,46 +698,84 @@ const syncTime = computed(() => formatHourMinute(refreshedAt.value))
 
 const platformLogoMap: Record<string, string> = {
   deepseek: deepseekLogo,
-  DeepSeek: deepseekLogo,
-  'DeepSeek PC': deepseekLogo,
   doubao: doubaoLogo,
   豆包: doubaoLogo,
+  qianwen: qwenLogo,
+  tongyi: qwenLogo,
+  tongyiqianwen: qwenLogo,
+  '通义千问': qwenLogo,
+  qwen: qwenLogo,
   ernie: wenxinLogo,
+  wenxin: wenxinLogo,
   文心一言: wenxinLogo,
+  baidu: wenxinLogo,
   hunyuan: hunyuanLogo,
   腾讯元宝: hunyuanLogo,
   元宝: hunyuanLogo,
-  qwen: qwenLogo,
-  通义千问: qwenLogo,
   zhipu: glmLogo,
   智谱清言: glmLogo,
+  chatglm: glmLogo,
+  glm: glmLogo,
   '360_brain': ai360Logo,
+  '360brain': ai360Logo,
+  '360': ai360Logo,
   '360 智脑': ai360Logo,
-  MiniMax: minimaxLogo,
+  '360智脑': ai360Logo,
+  minimax: minimaxLogo,
+  mimo: xiaomiMimoLogo,
+  xiaomi_mimo: xiaomiMimoLogo,
+  xiaomimimo: xiaomiMimoLogo,
   '小米 Mimo': xiaomiMimoLogo,
+  小米mimo: xiaomiMimoLogo,
   kimi: kimiLogo,
-  Kimi: kimiLogo,
-  spark: hailuoLogo,
-  讯飞星火: hailuoLogo,
+  hailuo: minimaxLogo,
+  海螺: minimaxLogo,
 }
 
 function platformLogo(code?: string | null, name?: string | null) {
-  return platformLogoMap[normalizePlatformKey(code)] || platformLogoMap[String(name || '')] || deepseekLogo
+  const codeKey = normalizePlatformKey(code).replace(/[\s_-]/g, '')
+  const nameKey = normalizePlatformKey(name).replace(/[\s_-]/g, '')
+  return platformLogoMap[normalizePlatformKey(code)]
+    || platformLogoMap[codeKey]
+    || platformLogoMap[String(name || '')]
+    || platformLogoMap[nameKey]
+    || ''
 }
 
 const indexingSources = computed<IndexingSource[]>(() => {
-  const platforms = dashboardSummary.value?.platforms || []
-  const maxHit = Math.max(...platforms.map((item) => item.hitCount || 0), 1)
-  return platforms.slice(0, 10).map((item, index) => ({
-    name: item.platformName || item.platformCode,
-    short: (item.platformName || item.platformCode || '平').slice(0, 2),
-    logo: platformLogo(item.platformCode, item.platformName),
-    value: formatCompactNumber(item.hitCount),
-    percent: Math.round(((item.hitCount || 0) / maxHit) * 1000) / 10,
-    color: sourceColors[index % sourceColors.length].color,
-    bg: sourceColors[index % sourceColors.length].bg,
-    gradient: sourceColors[index % sourceColors.length].gradient,
-  }))
+  const platformStats = new Map((dashboardSummary.value?.platforms || []).map((item) => [normalizePlatformKey(item.platformCode), item]))
+  const configuredPlatforms = allModelPlatforms.value.length
+    ? allModelPlatforms.value
+    : (dashboardSummary.value?.platforms || []).map((item) => ({
+        id: 0,
+        platformCode: item.platformCode,
+        platformName: item.platformName,
+        platformLogoUrl: item.platformLogoUrl || null,
+        priorityLevel: 'P2' as const,
+        apiKey: '',
+        apiUrl: '',
+        modelId: '',
+        modelName: '',
+        enabled: true,
+        degraded: false,
+      }))
+  const maxHit = Math.max(...configuredPlatforms.map((item) => platformStats.get(normalizePlatformKey(item.platformCode))?.hitCount || 0), 1)
+  return configuredPlatforms.map((item, index) => {
+    const stat = platformStats.get(normalizePlatformKey(item.platformCode))
+    const hitCount = stat?.hitCount || 0
+    const name = stat?.platformName || platformDisplayName(item)
+    return {
+      name,
+      code: item.platformCode,
+      short: (name || '平').slice(0, 2),
+      logo: stat?.platformLogoUrl || item.platformLogoUrl || platformLogo(item.platformCode, name),
+      value: formatCompactNumber(hitCount),
+      percent: Math.round((hitCount / maxHit) * 1000) / 10,
+      color: sourceColors[index % sourceColors.length].color,
+      bg: sourceColors[index % sourceColors.length].bg,
+      gradient: sourceColors[index % sourceColors.length].gradient,
+    }
+  })
 })
 
 const sourceColors = [
@@ -702,54 +793,81 @@ const sourceColors = [
 
 const lissajousPlatforms = computed(() => indexingSources.value.map((source, index) => ({
   name: source.name,
+  short: source.short,
   logo: source.logo,
   value: source.value,
   big: index < 5,
 })))
 
-const aiExposurePlatforms: AiExposurePlatform[] = [
-  {
-    name: '站外 AI 搜索曝光',
-    enName: 'WAITING SOURCE',
-    short: '待',
-    value: '待接入数据源',
-    percent: 0,
-    trend: '待接入',
-    trendType: 'up',
-    iconBg: '#111827',
-    iconColor: '#ffffff',
-    highlighted: true,
-  },
-  {
-    name: '搜索入口曝光',
-    enName: 'WAITING SOURCE',
-    short: '待',
-    value: '待接入数据源',
-    percent: 0,
-    trend: '待接入',
-    trendType: 'up',
-    iconBg: 'linear-gradient(135deg, #2932e1, #1b22a0)',
-    iconColor: '#ffffff',
-  },
-  {
-    name: '渠道搜索曝光',
-    enName: 'WAITING SOURCE',
-    short: '待',
-    value: '待接入数据源',
-    percent: 0,
-    trend: '待接入',
-    trendType: 'up',
-    iconBg: 'linear-gradient(135deg, #4f6bff, #7b61ff)',
-    iconColor: '#ffffff',
-  },
-]
+const platformHitCountMap = computed(() => {
+  const map = new Map<string, number>()
+  for (const item of dashboardSummary.value?.platforms || []) {
+    const hitCount = Number(item.hitCount || 0)
+    map.set(normalizePlatformKey(item.platformCode), hitCount)
+    map.set(normalizePlatformKey(item.platformCode).replace(/[\s_-]/g, ''), hitCount)
+    map.set(normalizePlatformKey(item.platformName), hitCount)
+    map.set(normalizePlatformKey(item.platformName).replace(/[\s_-]/g, ''), hitCount)
+  }
+  return map
+})
+
+function mappedExposureCount(keys: string[]) {
+  const sourceCount = keys.reduce((max, key) => {
+    const normalized = normalizePlatformKey(key)
+    const compact = normalized.replace(/[\s_-]/g, '')
+    return Math.max(max, platformHitCountMap.value.get(normalized) || 0, platformHitCountMap.value.get(compact) || 0)
+  }, 0)
+  return Math.ceil(sourceCount * 0.47)
+}
+
+const aiExposurePlatforms = computed<AiExposurePlatform[]>(() => {
+  const rows = [
+    {
+      name: '抖音AI',
+      enName: 'Douyin AI',
+      short: '抖',
+      count: mappedExposureCount(['doubao', '豆包']),
+      iconBg: '#111827',
+      iconColor: '#ffffff',
+      highlighted: true,
+    },
+    {
+      name: '百度AI',
+      enName: 'Baidu AI',
+      short: '百',
+      count: mappedExposureCount(['wenxin', 'ernie', 'baidu', '文心一言']),
+      iconBg: 'linear-gradient(135deg, #2932e1, #1b22a0)',
+      iconColor: '#ffffff',
+    },
+    {
+      name: '夸克AI',
+      enName: 'Quark AI',
+      short: '夸',
+      count: mappedExposureCount(['qwen', 'qianwen', 'tongyi', '通义千问']),
+      iconBg: 'linear-gradient(135deg, #4f6bff, #7b61ff)',
+      iconColor: '#ffffff',
+    },
+  ]
+  const maxCount = Math.max(...rows.map((item) => item.count), 1)
+  return rows.map((item) => ({
+    ...item,
+    value: formatCompactNumber(item.count),
+    percent: Math.round((item.count / maxCount) * 1000) / 10,
+    trend: item.count ? formatCompactNumber(item.count) : '0',
+    trendType: 'up' as TrendType,
+  }))
+})
 
 const engineFlowItems = computed<EngineFlowItem[]>(() => [
-  { label: '命中分析', value: indexedSubtotal.value, tone: 'blue' },
+  { label: '收录分析', value: indexedSubtotal.value, tone: 'blue' },
   { label: '信源归因', value: monitoredQuestionTotal.value, tone: 'purple' },
-  { label: '搜索曝光', value: '待接入数据源', tone: 'teal' },
+  { label: '搜索曝光', value: aiExposureTotal.value, tone: 'teal' },
 ])
-const aiExposureTotal = computed(() => '待接入数据源')
+const aiExposureTotal = computed(() => formatCompactNumber(
+  mappedExposureCount(['doubao', '豆包'])
+  + mappedExposureCount(['wenxin', 'ernie', 'baidu', '文心一言'])
+  + mappedExposureCount(['qwen', 'qianwen', 'tongyi', '通义千问']),
+))
 
 const indexedSubtotal = computed(() => formatCompactNumber(dashboardSummary.value?.summary?.hitTotal || 0))
 const monitoredQuestionTotal = computed(() => formatInt(dashboardSummary.value?.monitorQuestionCount || 0))
@@ -851,69 +969,102 @@ let particleId = 0
 let animationFrame = 0
 
 const trendData = computed(() => {
-  return dashboardTrend.value.map((item) => ({
-    create: Number(item.articleCreated || 0),
-    publish: Number(item.articlePublished || 0),
-    date: formatMonthDay(item.date),
-  }))
-})
-
-const trendChartWidth = 760
-const trendChartHeight = 236
-const trendChartPadding = {
-  top: 16,
-  right: 18,
-  bottom: 26,
-  left: 18,
-}
-const trendMaxValue = computed(() => Math.max(...trendData.value.flatMap((item) => [item.create, item.publish]), 1))
-const trendGridLines = computed(() => {
-  const steps = 5
-  const innerHeight = trendChartHeight - trendChartPadding.top - trendChartPadding.bottom
-  return Array.from({ length: steps }, (_, index) => trendChartPadding.top + (innerHeight / (steps - 1)) * index)
-})
-
-function getTrendChartPoints(key: 'create' | 'publish') {
-  const innerWidth = trendChartWidth - trendChartPadding.left - trendChartPadding.right
-  const innerHeight = trendChartHeight - trendChartPadding.top - trendChartPadding.bottom
-  const denominator = Math.max(trendData.value.length - 1, 1)
-  return trendData.value.map((item, index) => {
-    const x = trendChartPadding.left + (innerWidth / denominator) * index
-    const y = trendChartPadding.top + (1 - item[key] / trendMaxValue.value) * innerHeight
-    return { x: Number(x.toFixed(2)), y: Number(y.toFixed(2)) }
+  const end = toDate(minDateInput(dateRange.end, todayInput.value)) || new Date()
+  const start = addDays(end, -29)
+  const trendMap = new Map(dashboardTrend.value.map((item) => [formatDateInput(item.date), item]))
+  return Array.from({ length: 30 }, (_, index) => {
+    const current = addDays(start, index)
+    const source = trendMap.get(formatDateInput(current))
+    return {
+      create: Number(source?.articleCreated || 0),
+      publish: Number(source?.articlePublished || 0),
+      date: formatMonthDay(current),
+    }
   })
-}
+})
 
-const createChartPoints = computed(() => getTrendChartPoints('create'))
-const publishChartPoints = computed(() => getTrendChartPoints('publish'))
-const createLinePoints = computed(() => createChartPoints.value.map((point) => `${point.x},${point.y}`).join(' '))
-const publishLinePoints = computed(() => publishChartPoints.value.map((point) => `${point.x},${point.y}`).join(' '))
-
-function getTrendAreaPoints(points: Array<{ x: number; y: number }>) {
-  const baseline = trendChartHeight - trendChartPadding.bottom
-  const lastPoint = points[points.length - 1]
-  return [
-    `${points[0]?.x || trendChartPadding.left},${baseline}`,
-    ...points.map((point) => `${point.x},${point.y}`),
-    `${lastPoint?.x || trendChartWidth - trendChartPadding.right},${baseline}`,
-  ].join(' ')
-}
-
-const createAreaPoints = computed(() => getTrendAreaPoints(createChartPoints.value))
-const publishAreaPoints = computed(() => getTrendAreaPoints(publishChartPoints.value))
+const trendChartOption = computed(() => ({
+  animation: false,
+  color: ['#7db7ff', '#b39cff'],
+  grid: {
+    top: 28,
+    right: 16,
+    bottom: 34,
+    left: 16,
+    containLabel: false,
+  },
+  tooltip: {
+    trigger: 'axis',
+    axisPointer: { type: 'line' },
+    valueFormatter: (value: number) => `${value || 0} 条`,
+  },
+  xAxis: {
+    type: 'category',
+    boundaryGap: false,
+    data: trendData.value.map((item) => item.date),
+    axisLine: { show: false },
+    axisTick: { show: false },
+    axisLabel: {
+      color: '#7f8da3',
+      fontSize: 11,
+      interval: trendData.value.length > 8 ? 3 : 0,
+      margin: 14,
+    },
+  },
+  yAxis: {
+    type: 'value',
+    min: 0,
+    splitNumber: 4,
+    axisLabel: { show: false },
+    axisLine: { show: false },
+    axisTick: { show: false },
+    splitLine: {
+      lineStyle: {
+        color: '#e2e8f0',
+        type: 'dashed',
+      },
+    },
+  },
+  series: [
+    {
+      name: '近30日创作总量',
+      type: 'line',
+      data: trendData.value.map((item) => item.create),
+      smooth: false,
+      showSymbol: true,
+      symbolSize: 7,
+      lineStyle: { width: 3, color: '#7db7ff' },
+      itemStyle: { color: '#7db7ff', borderColor: '#ffffff', borderWidth: 2 },
+      areaStyle: { color: 'rgba(125, 183, 255, 0.12)' },
+    },
+    {
+      name: '近30日发布总量',
+      type: 'line',
+      data: trendData.value.map((item) => item.publish),
+      smooth: false,
+      showSymbol: true,
+      symbolSize: 7,
+      lineStyle: { width: 3, color: '#b39cff' },
+      itemStyle: { color: '#b39cff', borderColor: '#ffffff', borderWidth: 2 },
+      areaStyle: { color: 'rgba(179, 156, 255, 0.1)' },
+    },
+  ],
+}))
 
 const platformChips = computed(() => [
   { name: '全部', code: '', short: '✓', logo: '', count: indexedSubtotal.value },
-  ...(dashboardSummary.value?.platforms || []).map((platform) => ({
-    name: platform.platformName || platform.platformCode,
-    code: platform.platformCode,
-    short: (platform.platformName || platform.platformCode || '平').slice(0, 2),
-    logo: platformLogo(platform.platformCode, platform.platformName),
-    count: formatCompactNumber(platform.hitCount),
+  ...indexingSources.value.map((platform) => ({
+    name: platform.name,
+    code: platform.code,
+    short: platform.short,
+    logo: platform.logo,
+    count: platform.value,
   })),
 ])
 
 const reportRows = ref<ReportRow[]>([])
+const detailDialogVisible = ref(false)
+const selectedDetailRow = ref<ReportRow | null>(null)
 
 const filteredRows = computed(() => reportRows.value)
 const totalPages = computed(() => Math.max(1, Math.ceil(detailTotal.value / pageSize)))
@@ -978,6 +1129,16 @@ function togglePlatform(name: string) {
 }
 
 async function ensureDashboardShare() {
+  if (isPublicShare.value) {
+    activeShare.value = {
+      id: 0,
+      projectId: 0,
+      shareCode: publicShareCode.value,
+      status: 'active',
+      createdAt: '',
+    }
+    return activeShare.value
+  }
   if (activeShare.value?.shareCode) return activeShare.value
   const { data } = await getProjectDashboardShares(projectId.value)
   const active = (data.data || []).find((item) => item.status === 'active')
@@ -990,12 +1151,20 @@ async function ensureDashboardShare() {
   return activeShare.value
 }
 
+async function loadAllModelPlatforms() {
+  const { data } = await getPlatformConfigPage({ current: 1, size: 500 })
+  allModelPlatforms.value = data.data?.records || []
+}
+
 async function loadDashboardData() {
   const share = await ensureDashboardShare()
   if (!share?.shareCode) return
   const [{ data: summaryResp }, { data: trendResp }] = await Promise.all([
     getPublicProjectDashboardSummary(share.shareCode, { days: 30 }),
     getPublicProjectDashboardTrend(share.shareCode, { days: 30 }),
+    isPublicShare.value ? Promise.resolve() : loadAllModelPlatforms().catch(() => {
+      allModelPlatforms.value = []
+    }),
   ])
   dashboardSummary.value = summaryResp.data || null
   dashboardTrend.value = trendResp.data?.items || []
@@ -1007,8 +1176,8 @@ async function loadDashboardData() {
     dateRange.start = formatDateInput(start)
     dateRange.end = formatDateInput(end)
   }
-  intentTags.value = buildIntentTagsFromWordCloud()
-  resetIntentParticles()
+  clampDateRangeToToday()
+  await applyIntentTagsFromAvailableSources()
   await nextTick()
   if (lissaCanvasRef.value && lissaLogosRef.value) {
     stopLissajous()
@@ -1036,13 +1205,25 @@ function mapDetailRow(item: ProjectDashboardDetailItem): ReportRow {
     platform: item.platformName || item.platformCode || '-',
     platformCode: item.platformCode || '',
     platformUrl: item.platformUrl || null,
+    platformLogoUrl: item.platformLogoUrl || null,
+    answerText: item.answerText || null,
+    matchType: item.matchType || null,
+    siteMentioned: !!item.siteMentioned,
+    contactMentioned: !!item.contactMentioned,
+    contactMentionCount: Number(item.contactMentionCount || 0),
     status: '已命中',
     time: item.batchDate || '-',
     timeValue: date?.getTime() || 0,
   }
 }
 
+function openDetail(row: ReportRow) {
+  selectedDetailRow.value = row
+  detailDialogVisible.value = true
+}
+
 async function loadDashboardDetails() {
+  clampDateRangeToToday()
   if (activeTab.value === '待接入数据源') {
     reportRows.value = []
     detailTotal.value = 0
@@ -1064,6 +1245,7 @@ async function loadDashboardDetails() {
 }
 
 async function searchDetails() {
+  clampDateRangeToToday()
   currentPage.value = 1
   await loadDashboardDetails()
 }
@@ -1074,7 +1256,7 @@ async function copyDashboardUrl() {
     ElMessage.warning('暂未生成可用看板链接')
     return
   }
-  await navigator.clipboard.writeText(`${window.location.origin}/dashboard/${share.shareCode}`)
+  await navigator.clipboard.writeText(`${window.location.origin}/realtime-dashboard/${share.shareCode}`)
   ElMessage.success('看板链接已复制')
 }
 
@@ -1105,37 +1287,61 @@ function normalizeIntentText(value?: string | null) {
 function mapQuestionWeight(question: KeywordGroupQuestion, index: number) {
   const score = Number(question.totalScore || question.scoreIntent || question.scoreRelevance || 0)
   if (score > 0) return Math.min(1, Math.max(0.35, score / 100))
-  if (question.questionTier === 'A') return 0.92
-  if (question.questionTier === 'B') return 0.72
-  if (question.questionTier === 'C') return 0.54
+  if (index < 3) return 0.95 - index * 0.03
+  if (question.questionTier === 'A') return 0.78
+  if (question.questionTier === 'B') return 0.66
+  if (question.questionTier === 'C') return 0.5
   return Math.max(0.35, 0.9 - index * 0.03)
 }
 
 function buildIntentTagsFromQuestions(questions: KeywordGroupQuestion[]) {
-  const map = new Map<string, number>()
-  questions.forEach((question, index) => {
+  const tierOrder: Record<string, number> = { A: 0, B: 1, C: 2 }
+  const sortedQuestions = [...questions].sort((a, b) => {
+    const tierDiff = (tierOrder[a.questionTier || ''] ?? 9) - (tierOrder[b.questionTier || ''] ?? 9)
+    if (tierDiff !== 0) return tierDiff
+    const scoreA = Number(a.totalScore || a.scoreIntent || a.scoreRelevance || 0)
+    const scoreB = Number(b.totalScore || b.scoreIntent || b.scoreRelevance || 0)
+    return scoreB - scoreA
+  })
+  const map = new Map<string, { weight: number; order: number }>()
+  sortedQuestions.forEach((question, index) => {
     const text = normalizeIntentText(question.questionText)
     if (!text) return
     const weight = mapQuestionWeight(question, index)
-    map.set(text, Math.max(map.get(text) || 0, weight))
+    const current = map.get(text)
+    if (!current || weight > current.weight) {
+      map.set(text, { weight, order: current?.order ?? index })
+    }
   })
 
   const tags = Array.from(map.entries())
-    .map(([text, weight]) => ({ text, weight }))
-    .sort((a, b) => b.weight - a.weight)
+    .map(([text, item]) => ({ text, weight: item.weight, order: item.order }))
+    .sort((a, b) => b.weight - a.weight || a.order - b.order)
     .slice(0, 24)
+    .map(({ text, weight }) => ({ text, weight }))
 
   return tags.length ? tags : fallbackIntentTags
 }
 
 function buildIntentTagsFromWordCloud() {
   const words = dashboardSummary.value?.wordCloud || []
-  if (!words.length) return fallbackIntentTags
+  if (!words.length) return []
   const maxFrequency = Math.max(...words.map((item) => item.frequency || 0), 1)
   return words.slice(0, 24).map((item) => ({
     text: item.word,
     weight: Math.min(1, Math.max(0.35, Number(item.frequency || 0) / maxFrequency)),
   }))
+}
+
+async function applyIntentTagsFromAvailableSources() {
+  const hitTotal = Number(dashboardSummary.value?.summary?.hitTotal || 0)
+  const wordCloudTags = buildIntentTagsFromWordCloud()
+  if (hitTotal > 0 && wordCloudTags.length) {
+    intentTags.value = wordCloudTags
+    resetIntentParticles()
+    return
+  }
+  await loadIntentTagsFromKeywordGroups()
 }
 
 async function getBoundKeywordGroups() {
@@ -1151,6 +1357,11 @@ async function getBoundKeywordGroups() {
 }
 
 async function loadIntentTagsFromKeywordGroups() {
+  if (isPublicShare.value) {
+    intentTags.value = fallbackIntentTags
+    resetIntentParticles()
+    return
+  }
   try {
     const groups = await getBoundKeywordGroups()
     const questionResults = await Promise.all(
@@ -1167,6 +1378,19 @@ async function loadIntentTagsFromKeywordGroups() {
   }
 }
 
+async function loadPublicDashboardInfo() {
+  try {
+    dateRange.end = todayInput.value
+    dateRange.start = formatDateInput(addDays(new Date(), -29))
+    await loadDashboardData()
+    await loadDashboardDetails()
+  } catch {
+    reportRows.value = []
+    intentTags.value = fallbackIntentTags
+    resetIntentParticles()
+  }
+}
+
 async function loadProjectInfo() {
   try {
     const { data } = await getProjectDetail(projectId.value)
@@ -1178,7 +1402,8 @@ async function loadProjectInfo() {
       activePackageBinding.value = null
     }
     dateRange.start = formatDateInput(serviceStartDate.value)
-    dateRange.end = formatDateInput(serviceEndDate.value)
+    dateRange.end = minDateInput(formatDateInput(serviceEndDate.value), todayInput.value)
+    clampDateRangeToToday()
     await loadDashboardData()
     await loadDashboardDetails()
   } catch {
@@ -1584,7 +1809,7 @@ function stopLissajous() {
 
 onMounted(() => {
   refreshedAt.value = null
-  void loadProjectInfo()
+  void (isPublicShare.value ? loadPublicDashboardInfo() : loadProjectInfo())
   resetIntentParticles()
   animationFrame = window.requestAnimationFrame(updateIntentParticles)
   // 等 Vue 的 DOM 更新完成且 layout 稳定，再启动 Lissajous，否则 lissaStageRef 可能拿到 0 尺寸
@@ -2087,6 +2312,9 @@ onBeforeUnmount(() => {
   height: 100%;
   align-items: center;
   justify-content: center;
+  color: var(--primary);
+  font-size: 14px;
+  font-weight: 800;
 }
 
 .lissa-chip img {
@@ -2676,70 +2904,9 @@ onBeforeUnmount(() => {
   padding: 4px 0 0;
 }
 
-.line-chart svg {
-  display: block;
+.trend-echart {
   width: 100%;
-  height: 226px;
-  overflow: visible;
-}
-
-.chart-grid line {
-  stroke: rgba(226, 232, 240, 0.9);
-  stroke-dasharray: 5 7;
-  stroke-width: 1;
-}
-
-.line-area {
-  pointer-events: none;
-}
-
-.line-area-create {
-  fill: url("#createTrendFill");
-}
-
-.line-area-publish {
-  fill: url("#publishTrendFill");
-}
-
-.trend-line {
-  fill: none;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 3;
-  filter: drop-shadow(0 6px 10px rgba(125, 151, 255, 0.12));
-}
-
-.trend-line-create {
-  stroke: #7db7ff;
-}
-
-.trend-line-publish {
-  stroke: #b39cff;
-}
-
-.trend-dots circle {
-  stroke: #fff;
-  stroke-width: 2.5;
-}
-
-.create-dot {
-  fill: #7db7ff;
-}
-
-.publish-dot {
-  fill: #b39cff;
-}
-
-.line-chart-axis {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(48px, 1fr));
-  padding: 0 4px;
-}
-
-.line-chart-axis small {
-  color: var(--text-3);
-  font-size: 11px;
-  text-align: center;
+  height: 250px;
 }
 
 .report-table-panel {
@@ -3083,6 +3250,110 @@ tbody tr:hover {
 .table-footer strong {
   color: var(--text);
   font-weight: 700;
+}
+
+.detail-modal-mask {
+  position: fixed;
+  z-index: 1200;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.detail-modal {
+  width: min(720px, 100%);
+  overflow: hidden;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.24);
+}
+
+.detail-modal header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.detail-modal header div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detail-modal header span {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.detail-modal header strong {
+  color: var(--text);
+  font-size: 18px;
+}
+
+.detail-modal header button {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  color: var(--text-2);
+  background: #f1f5f9;
+  font-size: 20px;
+}
+
+.detail-modal-body {
+  display: grid;
+  gap: 14px;
+  padding: 20px 22px 22px;
+}
+
+.detail-modal-body article {
+  display: grid;
+  gap: 8px;
+}
+
+.detail-modal-body small {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.detail-modal-body p {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+}
+
+.detail-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.detail-meta-grid span {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.detail-meta-grid strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pager {

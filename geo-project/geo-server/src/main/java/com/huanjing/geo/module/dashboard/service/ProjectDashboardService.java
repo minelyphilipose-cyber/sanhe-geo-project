@@ -239,8 +239,11 @@ public class ProjectDashboardService {
         List<PollResult> records = page.getRecords();
         Map<String, String> platformNameMap = loadPlatformNameMap(records);
         Map<String, String> platformUrlMap = loadPlatformUrlMap(records);
+        Map<String, String> platformLogoMap = loadPlatformLogoMap(records);
 
         List<Map<String, Object>> items = records.stream().map(record -> {
+            Map<String, Object> detail = parseObject(record.getDetailJson());
+            Map<String, Object> matchDetails = parseObject(JSONUtil.toJsonStr(detail.get("match_details")));
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("id", record.getId());
             row.put("questionText", resolveDisplayText(record));
@@ -249,6 +252,14 @@ public class ProjectDashboardService {
             row.put("batchDate", record.getBatchDate());
             row.put("hasSnapshot", false);
             row.put("platformUrl", platformUrlMap.get(record.getPlatformCode()));
+            row.put("platformLogoUrl", platformLogoMap.get(record.getPlatformCode()));
+            row.put("answerText", stringValue(detail.get("platform_response")));
+            row.put("matchType", record.getMatchType());
+            row.put("siteMentioned", Boolean.TRUE.equals(record.getSiteMentioned()));
+            row.put("contactMentioned", Boolean.TRUE.equals(record.getContactMentioned()));
+            row.put("contactMentionCount", record.getContactMentionCount() != null
+                    ? Math.max(record.getContactMentionCount(), 0)
+                    : longValue(matchDetails.get("contact_mention_count")));
             return row;
         }).toList();
 
@@ -394,6 +405,10 @@ public class ProjectDashboardService {
             if (!StringUtils.hasText(String.valueOf(row.get("platformName"))) && StringUtils.hasText(stringValue(value.get("platformName")))) {
                 row.put("platformName", stringValue(value.get("platformName")));
             }
+        }
+        Map<String, String> logoMap = loadAllPlatformLogoMap();
+        for (Map<String, Object> row : merged.values()) {
+            row.put("platformLogoUrl", logoMap.get(String.valueOf(row.get("platformCode"))));
         }
         return merged.values().stream()
                 .sorted((a, b) -> Long.compare(longValue(b.get("hitCount")), longValue(a.get("hitCount"))))
@@ -684,6 +699,29 @@ public class ProjectDashboardService {
                         .ne(AiPlatformConfig::getPlatformHomeUrl, "")
                         .select(AiPlatformConfig::getPlatformCode, AiPlatformConfig::getPlatformHomeUrl)
         ).stream().collect(Collectors.toMap(AiPlatformConfig::getPlatformCode, AiPlatformConfig::getPlatformHomeUrl, (a, b) -> a));
+    }
+
+    private Map<String, String> loadPlatformLogoMap(List<PollResult> records) {
+        List<String> platformCodes = records.stream().map(PollResult::getPlatformCode).filter(StringUtils::hasText).distinct().toList();
+        if (platformCodes.isEmpty()) {
+            return Map.of();
+        }
+        return aiPlatformConfigMapper.selectList(
+                new LambdaQueryWrapper<AiPlatformConfig>()
+                        .in(AiPlatformConfig::getPlatformCode, platformCodes)
+                        .isNotNull(AiPlatformConfig::getPlatformLogoUrl)
+                        .ne(AiPlatformConfig::getPlatformLogoUrl, "")
+                        .select(AiPlatformConfig::getPlatformCode, AiPlatformConfig::getPlatformLogoUrl)
+        ).stream().collect(Collectors.toMap(AiPlatformConfig::getPlatformCode, AiPlatformConfig::getPlatformLogoUrl, (a, b) -> a));
+    }
+
+    private Map<String, String> loadAllPlatformLogoMap() {
+        return aiPlatformConfigMapper.selectList(
+                new LambdaQueryWrapper<AiPlatformConfig>()
+                        .isNotNull(AiPlatformConfig::getPlatformLogoUrl)
+                        .ne(AiPlatformConfig::getPlatformLogoUrl, "")
+                        .select(AiPlatformConfig::getPlatformCode, AiPlatformConfig::getPlatformLogoUrl)
+        ).stream().collect(Collectors.toMap(AiPlatformConfig::getPlatformCode, AiPlatformConfig::getPlatformLogoUrl, (a, b) -> a));
     }
 
     private long longValue(Object value) {

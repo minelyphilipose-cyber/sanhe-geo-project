@@ -3,6 +3,7 @@ package com.huanjing.geo.module.system.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.storage.MinioStorageService;
 import com.huanjing.geo.module.system.dto.AiPlatformConfigCreateRequest;
 import com.huanjing.geo.module.system.dto.AiPlatformConfigUpdateRequest;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
@@ -11,10 +12,14 @@ import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDate;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.regex.Pattern;
 
 @Service
@@ -22,6 +27,7 @@ import java.util.regex.Pattern;
 public class AiPlatformConfigService {
 
     private static final Pattern CODE_PATTERN = Pattern.compile("^[a-z][a-z0-9_\\-]{1,63}$");
+    private static final long MAX_LOGO_FILE_SIZE = 10 * 1024 * 1024L;
     private static final Set<String> PRIORITY_SET = Set.of("P0", "P1", "P2");
     private static final Set<String> PRESALE_EVALUATE_PLATFORM_CODES = Set.of(
             "deepseek", "doubao", "qwen", "mimo", "zhipu"
@@ -32,6 +38,7 @@ public class AiPlatformConfigService {
     private final CurrentUserService currentUserService;
     private final ActivityLogService activityLogService;
     private final PlatformCredentialService platformCredentialService;
+    private final MinioStorageService minioStorageService;
 
     public Page<AiPlatformConfig> page(long current, long size, String keyword, String priorityLevel, Boolean enabled) {
         currentUserService.ensureUserManageOperator();
@@ -167,6 +174,31 @@ public class AiPlatformConfigService {
         return entity;
     }
 
+    public AiPlatformConfig uploadLogo(Long id, MultipartFile file) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission("user.manage");
+        validateLogoFile(file);
+
+        AiPlatformConfig entity = requireById(id);
+        Map<String, Object> before = snapshot(entity);
+        String originalName = StringUtils.hasText(file.getOriginalFilename()) ? file.getOriginalFilename() : "logo.png";
+        String objectKey = buildLogoObjectKey(entity.getId(), originalName);
+        String logoUrl = minioStorageService.upload(file, objectKey, file.getContentType());
+
+        entity.setPlatformLogoUrl(logoUrl);
+        aiPlatformConfigMapper.updateById(entity);
+        activityLogService.logAction(
+                operator.getId(),
+                "platform.logo.update",
+                "platform",
+                entity.getId(),
+                before,
+                snapshot(entity),
+                null
+        );
+        return entity;
+    }
+
     public void delete(Long id) {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("user.manage");
@@ -293,6 +325,7 @@ public class AiPlatformConfigService {
         entity.setPlatformCode(req.getPlatformCode().trim());
         entity.setPlatformName(req.getPlatformName().trim());
         entity.setPlatformHomeUrl(StringUtils.hasText(req.getPlatformHomeUrl()) ? req.getPlatformHomeUrl().trim() : null);
+        entity.setPlatformLogoUrl(StringUtils.hasText(req.getPlatformLogoUrl()) ? req.getPlatformLogoUrl().trim() : null);
         entity.setPriorityLevel(req.getPriorityLevel().trim());
         entity.setRpmLimit(req.getRpmLimit() != null ? req.getRpmLimit() : 60);
         entity.setTpmLimit(req.getTpmLimit() != null ? req.getTpmLimit() : 60000);
@@ -326,6 +359,7 @@ public class AiPlatformConfigService {
         entity.setPlatformCode(req.getPlatformCode().trim());
         entity.setPlatformName(req.getPlatformName().trim());
         entity.setPlatformHomeUrl(StringUtils.hasText(req.getPlatformHomeUrl()) ? req.getPlatformHomeUrl().trim() : null);
+        entity.setPlatformLogoUrl(StringUtils.hasText(req.getPlatformLogoUrl()) ? req.getPlatformLogoUrl().trim() : null);
         entity.setPriorityLevel(req.getPriorityLevel().trim());
         entity.setRpmLimit(req.getRpmLimit() != null ? req.getRpmLimit() : entity.getRpmLimit());
         entity.setTpmLimit(req.getTpmLimit() != null ? req.getTpmLimit() : entity.getTpmLimit());
@@ -359,6 +393,7 @@ public class AiPlatformConfigService {
         snapshot.put("platformCode", entity.getPlatformCode());
         snapshot.put("platformName", entity.getPlatformName());
         snapshot.put("platformHomeUrl", entity.getPlatformHomeUrl());
+        snapshot.put("platformLogoUrl", entity.getPlatformLogoUrl());
         snapshot.put("priorityLevel", entity.getPriorityLevel());
         snapshot.put("rpmLimit", entity.getRpmLimit());
         snapshot.put("tpmLimit", entity.getTpmLimit());
@@ -383,5 +418,29 @@ public class AiPlatformConfigService {
         snapshot.put("degradedReason", entity.getDegradedReason());
         snapshot.put("currentHealthStatus", entity.getCurrentHealthStatus());
         return snapshot;
+    }
+
+    private void validateLogoFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new BizException(400, "Upload file is empty");
+        }
+        if (file.getSize() > MAX_LOGO_FILE_SIZE) {
+            throw new BizException(400, "Upload file exceeds 10MB limit");
+        }
+        String contentType = file.getContentType();
+        if (!StringUtils.hasText(contentType) || !contentType.toLowerCase(Locale.ROOT).startsWith("image/")) {
+            throw new BizException(400, "Platform logo must be an image file");
+        }
+    }
+
+    private String buildLogoObjectKey(Long platformId, String originalName) {
+        String date = LocalDate.now().toString().replace("-", "");
+        String random = UUID.randomUUID().toString().replace("-", "");
+        String ext = "";
+        int dot = originalName.lastIndexOf('.');
+        if (dot > -1 && dot < originalName.length() - 1) {
+            ext = originalName.substring(dot);
+        }
+        return "ai-platform/logo/" + platformId + "/" + date + "/" + random + ext;
     }
 }

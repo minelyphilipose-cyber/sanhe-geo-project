@@ -15,6 +15,7 @@ export function createPlatformConfig(data: {
   platformCode: string
   platformName: string
   platformHomeUrl?: string
+  platformLogoUrl?: string
   priorityLevel: string
   apiKey: string
   primaryKeyRef?: string
@@ -47,6 +48,7 @@ export function updatePlatformConfig(id: number, data: {
   platformCode: string
   platformName: string
   platformHomeUrl?: string
+  platformLogoUrl?: string
   priorityLevel: string
   apiKey: string
   primaryKeyRef?: string
@@ -82,5 +84,13 @@ export function deletePlatformConfig(id: number) {
 export function updatePresaleEnabled(id: number, enabledForPresale: boolean) {
   return request.put<R<AIPlatformConfigItem>>(`/admin/platform-configs/${id}/presale-enabled`, {
     enabledForPresale,
+  })
+}
+
+export function uploadPlatformLogo(id: number, file: File) {
+  const formData = new FormData()
+  formData.append('file', file)
+  return request.post<R<AIPlatformConfigItem>>(`/admin/platform-configs/${id}/logo`, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
   })
 }
