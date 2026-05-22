@@ -173,7 +173,7 @@
             <small>平台识别与优先级</small>
             <i />
           </div>
-          <div class="form-grid is-three">
+          <div class="form-grid basic-info-grid">
             <el-form-item label="平台编码" prop="platformCode">
               <el-input v-model="form.platformCode" placeholder="如: doubao / deepseek" />
             </el-form-item>
@@ -1075,6 +1075,10 @@ onMounted(async () => {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.basic-info-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .form-grid.is-one {
   grid-template-columns: 1fr;
 }
@@ -1542,6 +1546,7 @@ onMounted(async () => {
 
   .form-grid.is-two,
   .form-grid.is-three,
+  .basic-info-grid,
   .model-main-grid,
   .capability-card-grid.is-two {
     grid-template-columns: 1fr;
