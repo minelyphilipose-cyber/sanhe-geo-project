@@ -6,7 +6,7 @@ import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
-import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
+import com.huanjing.geo.module.content.service.render.wechat.WechatArticleRenderService;
 import com.huanjing.geo.module.content.wechat.WechatHtmlRewriter;
 import com.huanjing.geo.module.content.wechat.WechatMediaService;
 import com.huanjing.geo.module.content.wechat.WechatMpClient;
@@ -142,7 +142,7 @@ class WechatMpAdapterTest {
     }
 
     private Fixture fixture(boolean autoPublishEnabled) {
-        MarkdownToHtmlRenderer markdownRenderer = mock(MarkdownToHtmlRenderer.class);
+        WechatArticleRenderService articleRenderService = mock(WechatArticleRenderService.class);
         WechatHtmlRewriter htmlRewriter = mock(WechatHtmlRewriter.class);
         WechatMediaService mediaService = mock(WechatMediaService.class);
         WechatTokenAwareExecutor tokenAwareExecutor = mock(WechatTokenAwareExecutor.class);
@@ -158,7 +158,7 @@ class WechatMpAdapterTest {
 
         when(brandService.requireExistingBrand(10L)).thenReturn(brand);
         when(mediaService.ensureThumbMediaId(account, 10L, 100L)).thenReturn("thumb_media_id");
-        when(markdownRenderer.render("markdown body")).thenReturn("<p>markdown body</p>");
+        when(articleRenderService.renderOrFallback(any(), eq("markdown body"))).thenReturn("<p>markdown body</p>");
         when(htmlRewriter.rewrite(eq("<p>markdown body</p>"), any())).thenReturn("<p>wechat body</p>");
         when(wechatMpClient.addDraft(eq("access-token"), any())).thenReturn(new WechatMpClient.DraftResult("draft_media_id"));
         when(wechatMpClient.submitPublish(eq("access-token"), eq("draft_media_id"))).thenReturn(new WechatMpClient.PublishResult("publish_id"));
@@ -168,7 +168,7 @@ class WechatMpAdapterTest {
         });
 
         WechatMpAdapter tested = new WechatMpAdapter(
-                markdownRenderer,
+                articleRenderService,
                 htmlRewriter,
                 mediaService,
                 tokenAwareExecutor,

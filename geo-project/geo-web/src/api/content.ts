@@ -37,6 +37,153 @@ export function getContentArticleDetail(articleId: number) {
   return request.get<R<ArticleDetailResponse>>(`/content/articles/${articleId}`)
 }
 
+export interface WechatRenderRoleSchema {
+  wrapperHtml: string
+}
+
+export interface WechatTemplateSlice {
+  id: string
+  order: number
+  suggestedRole: string
+  role: string
+  fingerprint: string
+  outlier: boolean
+  html: string
+  previewText?: string
+  warnings?: string[]
+}
+
+export interface WechatTemplateRoleDraft {
+  role: string
+  wrapperHtml: string
+  reuseCount: number
+  sliceIds: string[]
+  needsConfirmation: boolean
+}
+
+export interface WechatRenderWarning {
+  type: string
+  blockId?: string | null
+  role?: string | null
+  message: string
+}
+
+export interface WechatTemplateParseResponse {
+  sourceType: string
+  slices: WechatTemplateSlice[]
+  roles: WechatTemplateRoleDraft[]
+  warnings: WechatRenderWarning[]
+}
+
+export interface PlatformRenderTemplate {
+  id: number
+  platformCode: string
+  name: string
+  description?: string | null
+  status: string
+  createdBy?: number | null
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface PlatformRenderTemplateVersion {
+  id: number
+  templateId: number
+  versionNo: number
+  sourceType: string
+  sourceHtml?: string | null
+  templateSchemaJson: string
+  sanitizedPreviewHtml?: string | null
+  createdBy?: number | null
+  createdAt?: string | null
+}
+
+export interface WechatArticleBlock {
+  id: string
+  type: string
+  defaultRole: string
+  allowedRoles: string[]
+  text?: string | null
+  html?: string | null
+  imageUrl?: string | null
+  imageAlt?: string | null
+  contentHash: string
+  order: number
+}
+
+export interface WechatRenderMark {
+  blockId: string
+  order?: number | null
+  role: string
+}
+
+export interface WechatRenderInsert {
+  afterBlockId?: string | null
+  role: string
+  content?: string | null
+}
+
+export interface WechatRenderAnnotations {
+  marks: WechatRenderMark[]
+  inserts: WechatRenderInsert[]
+}
+
+export interface WechatRenderConfigResponse {
+  articleId: number
+  platformCode: string
+  templateId?: number | null
+  templateVersionId?: number | null
+  blocks: WechatArticleBlock[]
+  annotations: WechatRenderAnnotations
+  warnings: WechatRenderWarning[]
+}
+
+export interface WechatRenderPreviewResponse {
+  html: string
+  warnings: WechatRenderWarning[]
+}
+
+export function parseWechatRenderTemplate(data: { sourceHtml: string; sourceType?: string }) {
+  return request.post<R<WechatTemplateParseResponse>>('/wechat-render-templates/parse', data)
+}
+
+export function getWechatRenderTemplates(params?: { current?: number; size?: number }) {
+  return request.get<R<PageResult<PlatformRenderTemplate>>>('/wechat-render-templates', { params })
+}
+
+export function createWechatRenderTemplate(data: {
+  name: string
+  description?: string
+  sourceType: string
+  sourceHtml: string
+  roles: Record<string, WechatRenderRoleSchema>
+}) {
+  return request.post<R<PlatformRenderTemplate>>('/wechat-render-templates', data)
+}
+
+export function getWechatRenderTemplateCurrentVersion(id: number) {
+  return request.get<R<PlatformRenderTemplateVersion | null>>(`/wechat-render-templates/${id}/current-version`)
+}
+
+export function getArticleWechatRender(articleId: number) {
+  return request.get<R<WechatRenderConfigResponse>>(`/content/articles/${articleId}/wechat-render`)
+}
+
+export function saveArticleWechatRender(articleId: number, data: {
+  templateVersionId: number
+  annotations: WechatRenderAnnotations
+  renderConfig?: Record<string, unknown>
+}) {
+  return request.post<R<WechatRenderConfigResponse>>(`/content/articles/${articleId}/wechat-render`, data)
+}
+
+export function previewArticleWechatRender(articleId: number, data: {
+  templateVersionId?: number | null
+  annotations?: WechatRenderAnnotations
+}) {
+  return request.post<R<WechatRenderPreviewResponse>>(`/content/articles/${articleId}/wechat-render/preview`, data)
+}
+
 export function getSelfMediaCookieStatusBatch(data: {
   articleIds: number[]
   platforms: string[]
@@ -566,6 +713,14 @@ export function confirmManualDistribution(taskId: number, data: { publishedUrl: 
   return request.patch<R<DistributionTask>>(`/content/distribution-tasks/${taskId}/confirm-manual`, data)
 }
 
+export function confirmSemiAutoDistribution(taskId: number, data: { publishedUrl?: string | null; responsePayload?: string }) {
+  return request.patch<R<DistributionTask>>(`/content/distribution-tasks/${taskId}/confirm-semi-auto`, data)
+}
+
+export function abandonSemiAutoDistribution(taskId: number, data: { reason?: string }) {
+  return request.patch<R<DistributionTask>>(`/content/distribution-tasks/${taskId}/abandon-semi-auto`, data)
+}
+
 export function getProjectPublishQuota(projectId: number) {
   return request.get<R<PublishQuota>>(`/content/projects/${projectId}/publish-quota`)
 }
@@ -614,6 +769,10 @@ export function updateSelfMediaAccount(id: number, data: {
 
 export function checkSelfMediaAccountAuth(id: number) {
   return request.post<R<SelfMediaAccount>>(`/content/self-media-accounts/${id}/check-auth`)
+}
+
+export function destroySelfMediaCookieCredential(id: number) {
+  return request.delete<R<SelfMediaAccount>>(`/content/self-media-accounts/${id}/cookie-credential`)
 }
 
 export function distributeContentArticleToSelfMediaAccount(articleId: number, data: {

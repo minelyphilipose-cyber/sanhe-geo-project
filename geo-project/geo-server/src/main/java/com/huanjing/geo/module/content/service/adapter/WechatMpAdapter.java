@@ -8,7 +8,7 @@ import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
-import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
+import com.huanjing.geo.module.content.service.render.wechat.WechatArticleRenderService;
 import com.huanjing.geo.module.content.wechat.WechatHtmlRewriter;
 import com.huanjing.geo.module.content.wechat.WechatMediaService;
 import com.huanjing.geo.module.content.wechat.WechatMpClient;
@@ -31,7 +31,7 @@ import org.springframework.util.StringUtils;
 public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
     public static final String PLATFORM = "wechat_mp";
 
-    private final MarkdownToHtmlRenderer markdownRenderer;
+    private final WechatArticleRenderService articleRenderService;
     private final WechatHtmlRewriter htmlRewriter;
     private final WechatMediaService mediaService;
     private final WechatTokenAwareExecutor tokenAwareExecutor;
@@ -95,7 +95,7 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
         try {
             Brand brand = brandService.requireExistingBrand(account.getBrandId());
             String thumbMediaId = mediaService.ensureThumbMediaId(account, account.getBrandId(), mpTarget.coverMaterialId());
-            String html = markdownRenderer.render(contentMarkdown);
+            String html = articleRenderService.renderOrFallback(article, contentMarkdown);
             String wechatHtml = htmlRewriter.rewrite(html, src -> mediaService.ensureContentImageUrl(account, src));
             WechatMpClient.DraftArticle draftArticle = buildDraftArticle(article, brand, account, wechatHtml, thumbMediaId);
             requestPayload = buildRequestPayload(account, mpTarget.coverMaterialId(), draftArticle);

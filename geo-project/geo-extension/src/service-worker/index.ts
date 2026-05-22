@@ -2,10 +2,11 @@ import { EXTENSION_VERSION } from '@/shared/env'
 import { ExtensionApiError, extensionApi } from '@/shared/api'
 import { logger } from '@/shared/logger'
 import { sessionStorage } from '@/shared/storage'
-import { captureCookiesForAccount, handleCookieDomainReady, startCookieCaptureForAccount } from './cookieCapture'
+import { bindExtension } from '@/popup/bindFlow'
+import { captureCookiesForAccount, handleCookieDomainReady, handleCookieIdentityDecision, startCookieCaptureForAccount } from './cookieCapture'
 import { startFillTask } from './fillFlow'
 import { getActiveTask, HEARTBEAT_ALARM_NAME, handleTaskHeartbeatAlarm, handleTaskTabRemoved, publishActiveTask } from './taskLifecycle'
-import { BRIDGE_CHANNEL, pongMessage, type AdminBridgeMessage, type AdminStartCookieCapturePayload, type AdminStartFillPayload } from '@/admin-bridge/bridgeMessages'
+import { BRIDGE_CHANNEL, pongMessage, type AdminBindExtensionPayload, type AdminBridgeMessage, type AdminStartCookieCapturePayload, type AdminStartFillPayload } from '@/admin-bridge/bridgeMessages'
 import type { ExtensionMessage, ExtensionSelfMediaAccount, ExtensionTaskListItem, PublishTaskReport } from '@/types/extension'
 
 const REFRESH_ALARM = 'geo-token-refresh'
@@ -95,11 +96,22 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
     return true
   }
   if (message.type === 'GEO_COOKIE_DOMAIN_READY') {
-    void handleCookieDomainReady((message.payload as { host?: string } | undefined)?.host || '')
+    const payload = message.payload as { host?: string, platformIdentity?: unknown } | undefined
+    void handleCookieDomainReady(payload?.host || '', payload?.platformIdentity)
       .then(result => sendResponse({ ok: true, result }))
       .catch(error => sendResponse({
         ok: false,
         message: error instanceof Error ? error.message : 'cookie capture failed',
+      }))
+    return true
+  }
+  if (message.type === 'GEO_COOKIE_IDENTITY_DECISION') {
+    const payload = message.payload as { decision?: 'continue' | 'stop', host?: string, platformIdentity?: unknown } | undefined
+    void handleCookieIdentityDecision(payload)
+      .then(result => sendResponse({ ok: true, result }))
+      .catch(error => sendResponse({
+        ok: false,
+        message: error instanceof Error ? error.message : 'cookie identity decision failed',
       }))
     return true
   }
@@ -146,6 +158,9 @@ function isAdminBridgeMessage(message: ExtensionMessage): boolean {
 export async function handleAdminBridgeMessage(message: AdminBridgeMessage) {
   if (message.type === 'GEO_PING') {
     return pongMessage(message.requestId, Boolean(await sessionStorage.get()))
+  }
+  if (message.type === 'GEO_BIND_EXTENSION') {
+    return handleAdminBindExtension(message)
   }
   if (message.type === 'GEO_START_COOKIE_CAPTURE') {
     return handleAdminCookieCapture(message)
@@ -206,6 +221,42 @@ export async function handleAdminBridgeMessage(message: AdminBridgeMessage) {
       taskId: payload.taskId,
       status: 'filled',
       message: '已打开编辑器并完成填充，请在平台页面人工确认并发布。',
+    },
+  }
+}
+
+async function handleAdminBindExtension(message: AdminBridgeMessage) {
+  const existing = await sessionStorage.get()
+  if (existing) {
+    return {
+      type: 'GEO_BIND_STATUS',
+      payload: {
+        bound: true,
+        sessionId: existing.sessionId,
+        message: '扩展已绑定，无需重复绑定。',
+      },
+    }
+  }
+  const payload = message.payload as AdminBindExtensionPayload | undefined
+  if (!payload?.bindCode || !payload.brandId) {
+    return {
+      type: 'GEO_FILL_ERROR',
+      payload: {
+        code: 'BAD_BIND_PAYLOAD',
+        message: '后台绑定扩展参数不完整。',
+      },
+    }
+  }
+  const session = await bindExtension({
+    bindCode: payload.bindCode,
+    brandId: payload.brandId,
+  })
+  return {
+    type: 'GEO_BIND_STATUS',
+    payload: {
+      bound: true,
+      sessionId: session.sessionId,
+      message: '扩展已自动绑定到当前品牌。',
     },
   }
 }

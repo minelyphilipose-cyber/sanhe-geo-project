@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { sessionStorage } from '@/shared/storage'
+import { extensionApi } from '@/shared/api'
 import { BRIDGE_CHANNEL } from '@/admin-bridge/bridgeMessages'
 import { startFillTask } from './fillFlow'
 import { startCookieCaptureForAccount } from './cookieCapture'
@@ -17,6 +18,7 @@ vi.mock('@/shared/storage', () => ({
     get: vi.fn(),
     set: vi.fn(),
     clear: vi.fn(),
+    getOrCreateInstallId: vi.fn(),
   },
 }))
 vi.mock('@/shared/api', () => ({
@@ -26,6 +28,7 @@ vi.mock('@/shared/api', () => ({
     }
   },
   extensionApi: {
+    bind: vi.fn(),
     refresh: vi.fn(),
   },
 }))
@@ -69,6 +72,12 @@ beforeEach(() => {
     extensionVersion: '0.1.0',
     expiresAt: '2026-05-14T00:00:00Z',
     boundAt: '2026-05-07T00:00:00Z',
+  })
+  vi.mocked(sessionStorage.getOrCreateInstallId).mockResolvedValue('install-1')
+  vi.mocked(extensionApi.bind).mockResolvedValue({
+    token: 'ext.bound',
+    sessionId: 99,
+    expiresAt: '2026-05-15T00:00:00Z',
   })
   vi.mocked(getActiveTask).mockResolvedValue(null)
   vi.mocked(startFillTask).mockResolvedValue({ taskId: 30, status: 'filled' })
@@ -147,6 +156,34 @@ describe('admin bridge service worker messages', () => {
       type: 'GEO_FILL_ERROR',
       payload: {
         code: 'EXTENSION_UNBOUND',
+      },
+    })
+  })
+
+  it('binds extension from admin bridge command when session is not bound', async () => {
+    vi.mocked(sessionStorage.get).mockResolvedValue(null)
+    const { handleAdminBridgeMessage } = await import('./index')
+
+    const result = await handleAdminBridgeMessage({
+      channel: BRIDGE_CHANNEL,
+      type: 'GEO_BIND_EXTENSION',
+      requestId: 'req-bind',
+      payload: {
+        bindCode: 'ABCDEFGH',
+        brandId: 10,
+      },
+    })
+
+    expect(extensionApi.bind).toHaveBeenCalledWith('ABCDEFGH', 'install-1', '0.1.0', 10)
+    expect(sessionStorage.set).toHaveBeenCalledWith(expect.objectContaining({
+      token: 'ext.bound',
+      sessionId: 99,
+    }))
+    expect(result).toMatchObject({
+      type: 'GEO_BIND_STATUS',
+      payload: {
+        bound: true,
+        sessionId: 99,
       },
     })
   })

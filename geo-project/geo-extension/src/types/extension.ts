@@ -103,11 +103,21 @@ export interface ExtensionSelfMediaAccount {
   brandName?: string | null
 }
 
+export interface PlatformIdentitySnapshot {
+  status: 'detected' | 'unknown'
+  displayName?: string | null
+  source?: string | null
+  host?: string | null
+  href?: string | null
+}
+
 export interface CookieCaptureStartedResponse {
   accountId: number
   platform: string
-  status: 'captured' | 'opening_login' | 'waiting_login'
+  status: 'captured' | 'opening_login' | 'waiting_login' | 'capture_conflict' | 'identity_review_required' | 'stopped'
   message: string
+  expectedAccountName?: string | null
+  actualDisplayName?: string | null
 }
 
 export interface CookieCaptureRequest {

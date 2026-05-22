@@ -584,7 +584,7 @@
     <el-dialog v-model="mediaDistributeVisible" title="自媒体分发" width="980px" class="media-distribute-dialog">
       <div class="media-distribute">
         <el-alert
-          v-if="wechatCapability && !wechatDistributionAvailable"
+          v-if="wechatCapability && (!wechatDistributionAvailable || wechatCapability.liveVerificationBlocked)"
           class="media-capability-alert"
           type="warning"
           :closable="false"
@@ -592,12 +592,12 @@
           :title="wechatCapability.description || '微信公众号能力审核中'"
         />
         <el-alert
-          v-if="douyinCapability && !douyinCapability.enabled"
+          v-if="douyinCapability && (!douyinCapability.enabled || douyinCapability.liveVerificationBlocked)"
           class="media-capability-alert"
           type="warning"
           :closable="false"
           show-icon
-          :title="`抖音图文未开启：${douyinCapability.disabledReason || 'feature flag disabled'}`"
+          :title="douyinCapability.liveVerificationBlocked ? (douyinCapability.description || '抖音图文暂不可联调') : `抖音图文未开启：${douyinCapability.disabledReason || 'feature flag disabled'}`"
         />
 
         <div class="media-grid">
@@ -613,7 +613,7 @@
           </button>
           <button
             class="media-platform"
-            :class="{ active: selectedMediaPlatform === 'douyin', disabled: !douyinCapability?.enabled }"
+            :class="{ active: selectedMediaPlatform === 'douyin', disabled: !douyinDistributionAvailable }"
             type="button"
             @click="handleDouyinPlatformClick"
           >
@@ -666,6 +666,7 @@
               v-if="isSemiAutoPlatform(selectedMediaPlatform)"
               size="small"
               :type="semiAutoCredentialTagType(account)"
+              :title="semiAutoCredentialIdentityMessage(account)"
             >
               {{ semiAutoCredentialLabel(account) }}
             </el-tag>
@@ -694,6 +695,15 @@
               选择账号
             </el-button>
             <el-button
+              v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active' && hasActiveCookieCredential(account)"
+              size="small"
+              type="primary"
+              :loading="semiAutoAccountActionLoading(account)"
+              @click="submitSemiAutoExtensionTask(account)"
+            >
+              打开并填表
+            </el-button>
+            <el-button
               v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active' && !hasActiveCookieCredential(account)"
               size="small"
               type="warning"
@@ -701,6 +711,16 @@
               @click="submitSemiAutoExtensionTask(account)"
             >
               去登录并捕获
+            </el-button>
+            <el-button
+              v-if="isSemiAutoPlatform(selectedMediaPlatform) && hasActiveCookieCredential(account)"
+              size="small"
+              text
+              type="danger"
+              :loading="semiAutoCredentialClearingAccountId === account.id"
+              @click="clearSemiAutoCookieCredential(account)"
+            >
+              清除凭证
             </el-button>
           </div>
         </div>
@@ -850,7 +870,7 @@
             <el-table-column label="任务状态" width="130">
               <template #default="scope">
                 <el-tag size="small" :type="distributionStatusTag(scope.row.status)">
-                  {{ distributionStatusLabel(scope.row.status) }}
+                  {{ distributionTaskStatusLabel(scope.row) }}
                 </el-tag>
               </template>
             </el-table-column>
@@ -871,17 +891,35 @@
                 </div>
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="120" align="center">
+            <el-table-column label="操作" width="210" align="center">
               <template #default="scope">
                 <div class="admin-row-actions distribution-actions">
                   <el-button
-                    v-if="scope.row.reviewStatus === 'under_review'"
+                    v-if="canRefreshReviewStatus(scope.row)"
                     link
                     type="primary"
                     :loading="refreshingReviewTaskId === scope.row.id"
                     @click="refreshReviewStatus(scope.row)"
                   >
                     刷新
+                  </el-button>
+                  <el-button
+                    v-if="canOperateSemiAutoDistributionTask(scope.row)"
+                    link
+                    type="primary"
+                    :loading="semiAutoConfirmingTaskId === scope.row.id"
+                    @click="confirmSemiAutoPublished(scope.row)"
+                  >
+                    确认发布
+                  </el-button>
+                  <el-button
+                    v-if="canOperateSemiAutoDistributionTask(scope.row)"
+                    link
+                    type="danger"
+                    :loading="semiAutoAbandoningTaskId === scope.row.id"
+                    @click="abandonSemiAutoPublished(scope.row)"
+                  >
+                    放弃
                   </el-button>
                 </div>
               </template>
@@ -904,10 +942,10 @@
           v-if="selectedMediaPlatform === 'douyin' && selectedSelfMediaAccountId"
           type="primary"
           :loading="selfMediaSubmitting"
-          :disabled="!selectedDouyinImageMaterialIds.length || douyinText.length > 1000"
+          :disabled="!selectedDouyinImageMaterialIds.length || douyinText.length > 1000 || !douyinDistributionAvailable"
           @click="submitDouyinImageText"
         >
-          发布抖音图文
+          {{ douyinSubmitButtonText }}
         </el-button>
       </template>
     </el-dialog>
@@ -926,7 +964,10 @@ import { useUserStore } from '@/stores/user'
 import type { ArticleDetailResponse, ArticleDraft, AuthorityMediaResource, BrandImageFolder, BrandMaterial, DistributionTask, DouyinCapability, PublishSite, SelfMediaAccount, WechatMpCapability } from '@/types'
 import {
   checkSelfMediaAccountAuth,
+  abandonSemiAutoDistribution,
+  confirmSemiAutoDistribution,
   deleteContentArticle,
+  destroySelfMediaCookieCredential,
   distributeContentArticleToAgentSite,
   distributeContentArticleToAuthorityMedia,
   distributeContentArticleToForumSite,
@@ -948,7 +989,7 @@ import { getPublishSites } from '@/api/publishSite'
 import { getBrandDetail, getBrandImageFolders, getBrandMaterialPreviewUrl } from '@/api/customer'
 import { createExtensionBindCode, type ExtensionBindCode } from '@/api/extension'
 import { getProjectDetail } from '@/api/project'
-import { pingExtensionBridge, startExtensionCookieCapture, startExtensionFill } from '@/composables/useExtensionBridge'
+import { bindExtensionBridge, pingExtensionBridge, startExtensionCookieCapture, startExtensionFill } from '@/composables/useExtensionBridge'
 import { formatDateTime } from '@/utils/format'
 
 type MediaPlatform = 'wechat_mp' | 'douyin' | 'toutiao' | 'zhihu' | 'xiaohongshu'
@@ -959,6 +1000,9 @@ type SelfMediaAccountWithCredential = SelfMediaAccount & {
   cookieCredentialStatus?: string | null
   cookieCredentialVersion?: number | null
   cookieCredentialCapturedAt?: string | null
+  cookieCredentialIdentityStatus?: string | null
+  cookieCredentialIdentityName?: string | null
+  cookieCredentialIdentityMessage?: string | null
 }
 interface BatchPublishBlockedItem {
   title: string
@@ -1090,10 +1134,13 @@ const selectedDouyinImageMaterialIds = ref<number[]>([])
 const douyinText = ref('')
 const distributionAttempts = ref<DistributionTask[]>([])
 const refreshingReviewTaskId = ref<number | null>(null)
+const semiAutoConfirmingTaskId = ref<number | null>(null)
+const semiAutoAbandoningTaskId = ref<number | null>(null)
 const selfMediaSubmitting = ref(false)
 const extensionBindCode = ref<ExtensionBindCode | null>(null)
 const extensionBindCodeLoadingAccountId = ref<number | null>(null)
 const semiAutoCookieCaptureLoadingAccountId = ref<number | null>(null)
+const semiAutoCredentialClearingAccountId = ref<number | null>(null)
 const pendingCookieCaptureAccountId = ref<number | null>(null)
 const extensionBridgeChecking = ref(false)
 const extensionBridgeState = reactive({
@@ -1127,15 +1174,23 @@ const wechatStatusTagType = computed<'success' | 'warning' | 'info'>(() => {
   return wechatActive.value ? 'success' : 'info'
 })
 const douyinActive = computed(() => douyinAccounts.value.some((account) => account.status === 'active'))
+const douyinLiveVerificationBlocked = computed(() => !!douyinCapability.value?.liveVerificationBlocked)
+const douyinDistributionAvailable = computed(() =>
+  !!douyinCapability.value?.enabled && !douyinLiveVerificationBlocked.value,
+)
 const douyinStatusLabel = computed(() => {
   if (!douyinCapability.value?.enabled) return '未开启'
+  if (douyinLiveVerificationBlocked.value) return '待联调'
   if (douyinActive.value) return '已登录'
   return '未登录'
 })
 const douyinStatusTagType = computed<'success' | 'warning' | 'info'>(() => {
-  if (!douyinCapability.value?.enabled) return 'warning'
+  if (!douyinCapability.value?.enabled || douyinLiveVerificationBlocked.value) return 'warning'
   return douyinActive.value ? 'success' : 'info'
 })
+const douyinSubmitButtonText = computed(() =>
+  douyinLiveVerificationBlocked.value ? '抖音图文待联调' : '发布抖音图文',
+)
 const currentPlatformAccounts = computed(() => {
   switch (selectedMediaPlatform.value) {
     case 'douyin':
@@ -1427,6 +1482,8 @@ function distributionStatusLabel(v?: string | null) {
     pending: '待提交',
     submitting: '提交中',
     submitted: '已提交',
+    token_issued: '待扩展处理',
+    filling: '填表中',
     filled: '已填充',
     failed: '失败',
     confirmed: '已确认',
@@ -1435,9 +1492,16 @@ function distributionStatusLabel(v?: string | null) {
   return v ? map[v] || v : '-'
 }
 
+function distributionTaskStatusLabel(task: DistributionTask) {
+  if (task.status === 'published' && task.dispatchMode === 'SEMI_AUTO') {
+    return '已上报发布'
+  }
+  return distributionStatusLabel(task.status)
+}
+
 function distributionStatusTag(v?: string | null): 'success' | 'warning' | 'danger' | 'info' {
   if (v === 'submitted' || v === 'confirmed' || v === 'published' || v === 'filled') return 'success'
-  if (v === 'submitting' || v === 'pending') return 'warning'
+  if (v === 'submitting' || v === 'pending' || v === 'token_issued' || v === 'filling') return 'warning'
   if (v === 'failed') return 'danger'
   return 'info'
 }
@@ -2052,6 +2116,10 @@ async function handleDouyinPlatformClick() {
     ElMessage.info(douyinCapability.value?.disabledReason || '抖音图文暂未开启')
     return
   }
+  if (douyinLiveVerificationBlocked.value) {
+    ElMessage.info(douyinCapability.value?.description || '当前域名备案及开放平台审核未完成，暂不可真实联调抖音图文')
+    return
+  }
   if (!douyinActive.value) {
     if (!mediaDistributeBrandId.value) {
       ElMessage.error('当前文章未绑定品牌，无法授权抖音')
@@ -2104,14 +2172,26 @@ function hasActiveCookieCredential(account: SelfMediaAccount) {
 function semiAutoCredentialLabel(account: SelfMediaAccount) {
   const credential = account as SelfMediaAccountWithCredential
   if (credential.cookieCredentialStatus === 'active') {
-    return credential.cookieCredentialVersion ? `凭证 v${credential.cookieCredentialVersion}` : '凭证已捕获'
+    const prefix = credential.cookieCredentialVersion ? `凭证 v${credential.cookieCredentialVersion}` : '凭证已捕获'
+    if (credential.cookieCredentialIdentityStatus === 'matched') return `${prefix} · 身份匹配`
+    if (credential.cookieCredentialIdentityStatus === 'mismatch') return `${prefix} · 身份待确认`
+    if (credential.cookieCredentialIdentityStatus === 'unknown') return `${prefix} · 身份未识别`
+    return prefix
   }
   return '未捕获凭证'
 }
 
 function semiAutoCredentialTagType(account: SelfMediaAccount): 'success' | 'warning' | 'info' {
-  if (hasActiveCookieCredential(account)) return 'success'
+  const credential = account as SelfMediaAccountWithCredential
+  if (hasActiveCookieCredential(account)) {
+    return ['unknown', 'mismatch'].includes(credential.cookieCredentialIdentityStatus || '') ? 'warning' : 'success'
+  }
   return account.status === 'active' ? 'warning' : 'info'
+}
+
+function semiAutoCredentialIdentityMessage(account: SelfMediaAccount) {
+  const credential = account as SelfMediaAccountWithCredential
+  return credential.cookieCredentialIdentityMessage || ''
 }
 
 function semiAutoAccountActionLoading(account: SelfMediaAccount) {
@@ -2373,6 +2453,9 @@ async function submitSemiAutoExtensionTask(account: SelfMediaAccount) {
     await startSemiAutoCookieCapture(account)
     return
   }
+  if (!await confirmSemiAutoCredentialRisk(account)) {
+    return
+  }
   selectedSelfMediaAccountId.value = account.id
   selfMediaSubmitting.value = true
   try {
@@ -2387,8 +2470,11 @@ async function startSemiAutoCookieCapture(account: SelfMediaAccount) {
     ElMessage.error('当前文章未绑定品牌，无法捕获自媒体登录状态')
     return
   }
-  if (!await ensureExtensionBridgeReady()) {
+  if (!await ensureExtensionBridgeReady(account.id)) {
     await generateExtensionBindCodeForCapture(account)
+    return
+  }
+  if (!await confirmSemiAutoCookieCapture(account)) {
     return
   }
   selectedSelfMediaAccountId.value = account.id
@@ -2412,6 +2498,11 @@ async function startSemiAutoCookieCapture(account: SelfMediaAccount) {
       await refreshSelfMediaAccountsAfterCookieCapture(account.id, true)
       return
     }
+    if (bridgeResult.payload?.status === 'capture_conflict') {
+      ElMessage.warning(bridgeResult.payload.message || '已有其他账号正在捕获登录状态，请先完成后再切换')
+      pendingCookieCaptureAccountId.value = bridgeResult.payload.accountId ?? null
+      return
+    }
     ElMessage.info(bridgeResult.payload?.message || '已打开登录页，登录成功后将自动捕获凭证')
     startCookieCaptureStatusPolling(account.id)
   } catch (error) {
@@ -2419,6 +2510,51 @@ async function startSemiAutoCookieCapture(account: SelfMediaAccount) {
     ElMessage.warning(`${message}；请确认扩展已安装并启用。`)
   } finally {
     semiAutoCookieCaptureLoadingAccountId.value = null
+  }
+}
+
+async function confirmSemiAutoCookieCapture(account: SelfMediaAccount) {
+  try {
+    await ElMessageBox.confirm(
+      [
+        `即将为账号「${account.accountName}」捕获 ${semiAutoPlatformLabel(account.platform as SemiAutoPlatform)} 登录凭证。`,
+        '请确认当前浏览器将登录该品牌对应的真实平台账号，避免把其他品牌或其他账号的 Cookie 保存到本账号。',
+      ].join('\n'),
+      '确认捕获登录凭证',
+      {
+        confirmButtonText: '确认捕获',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function confirmSemiAutoCredentialRisk(account: SelfMediaAccount) {
+  const credential = account as SelfMediaAccountWithCredential
+  if (credential.cookieCredentialIdentityStatus !== 'mismatch') {
+    return true
+  }
+  try {
+    await ElMessageBox.confirm(
+      [
+        `账号「${account.accountName}」当前凭证标记为“身份待确认”。`,
+        credential.cookieCredentialIdentityMessage || '捕获时识别到的登录账号与系统配置账号不一致。',
+        '请确认仍要使用该凭证发起半自动分发。',
+      ].join('\n'),
+      '确认使用待确认凭证',
+      {
+        confirmButtonText: '继续使用',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -2494,7 +2630,7 @@ function scheduleDistributionStatusRefresh() {
 }
 
 async function startSemiAutoExtensionTask(articleId: number, accountId: number, platform: string) {
-  if (!await ensureExtensionBridgeReady()) {
+  if (!await ensureExtensionBridgeReady(accountId)) {
     if (mediaDistributeBrandId.value) {
       await generateExtensionBindCode(mediaDistributeBrandId.value, accountId)
     }
@@ -2542,9 +2678,12 @@ async function startSemiAutoExtensionTask(articleId: number, accountId: number, 
   ElMessage.error(task.errorMessage || '打开发布页失败')
 }
 
-async function ensureExtensionBridgeReady() {
+async function ensureExtensionBridgeReady(accountId: number | null = null) {
   if (await refreshExtensionBridgeStatus(false)) {
     return true
+  }
+  if (extensionBridgeState.status === 'unbound' && mediaDistributeBrandId.value) {
+    return autoBindExtensionBridge(mediaDistributeBrandId.value, accountId)
   }
   ElMessage.warning(extensionBridgeState.message)
   return false
@@ -2594,6 +2733,40 @@ async function generateExtensionBindCodeForCapture(account: SelfMediaAccount) {
   }
   selectedSelfMediaAccountId.value = account.id
   await generateExtensionBindCode(mediaDistributeBrandId.value, account.id)
+}
+
+async function autoBindExtensionBridge(brandId: number, accountId: number | null) {
+  extensionBindCodeLoadingAccountId.value = accountId
+  try {
+    const { data } = await createExtensionBindCode(brandId)
+    const bindCode = data.data
+    const bridgeResult = await bindExtensionBridge({
+      type: 'GEO_BIND_EXTENSION',
+      requestId: createRequestId('bind_extension'),
+      bindCode: bindCode.code,
+      brandId,
+    })
+    if (bridgeResult.type === 'GEO_BIND_STATUS' && bridgeResult.payload?.bound) {
+      extensionBindCode.value = null
+      extensionBridgeState.status = 'bound'
+      extensionBridgeState.message = bridgeResult.payload.message || '扩展已自动绑定'
+      ElMessage.success(extensionBridgeState.message)
+      return true
+    }
+    extensionBindCode.value = bindCode
+    extensionBridgeState.status = 'unbound'
+    extensionBridgeState.message = bridgeResult.payload?.message || '扩展自动绑定失败，请打开扩展手动输入绑定码。'
+    ElMessage.warning(extensionBridgeState.message)
+    return false
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '扩展自动绑定失败'
+    extensionBridgeState.status = 'unbound'
+    extensionBridgeState.message = `${message}；请打开扩展手动输入绑定码。`
+    ElMessage.warning(extensionBridgeState.message)
+    return false
+  } finally {
+    extensionBindCodeLoadingAccountId.value = null
+  }
 }
 
 async function generateExtensionBindCode(brandId: number, accountId: number) {
@@ -2665,6 +2838,82 @@ async function refreshReviewStatus(task: DistributionTask) {
   }
 }
 
+function canRefreshReviewStatus(task: DistributionTask) {
+  return task.targetKind === 'mp_account'
+    && (task.reviewStatus === 'under_review' || task.reviewStatus === 'unknown')
+}
+
+function canOperateSemiAutoDistributionTask(task: DistributionTask) {
+  return task.targetKind === 'mp_account'
+    && task.dispatchMode === 'SEMI_AUTO'
+    && ['token_issued', 'filling', 'filled'].includes(task.status)
+}
+
+async function confirmSemiAutoPublished(task: DistributionTask) {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '请填写平台发布后的文章链接；若暂时没有链接，可填写确认备注，系统会记录为“链接待补充”。',
+      '确认半自动发布',
+      {
+        confirmButtonText: '确认发布',
+        cancelButtonText: '取消',
+        inputPlaceholder: '发布链接或确认备注',
+        inputValidator: (input: string) => Boolean(input?.trim()) || '请填写发布链接或确认备注',
+      },
+    )
+    const input = value.trim()
+    const isUrl = /^https?:\/\/.+/i.test(input)
+    semiAutoConfirmingTaskId.value = task.id
+    await confirmSemiAutoDistribution(task.id, {
+      publishedUrl: isUrl ? input : null,
+      responsePayload: JSON.stringify({
+        source: 'admin_console',
+        confirmedAt: new Date().toISOString(),
+        confirmMode: isUrl ? 'published_url' : 'operator_note',
+        operatorNote: isUrl ? null : input,
+      }),
+    })
+    await refreshDistributionHistory()
+    await load()
+    ElMessage.success('已确认半自动发布')
+  } catch (error) {
+    if (error instanceof Error) {
+      ElMessage.error(error.message || '确认发布失败')
+    }
+  } finally {
+    semiAutoConfirmingTaskId.value = null
+  }
+}
+
+async function abandonSemiAutoPublished(task: DistributionTask) {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '确认放弃本次半自动分发？系统会将该任务标记为失败并退回本次分发占用，文章可重新发起分发。',
+      '放弃半自动发布',
+      {
+        confirmButtonText: '确认放弃',
+        cancelButtonText: '取消',
+        inputPlaceholder: '请填写放弃原因',
+        inputValidator: (input: string) => Boolean(input?.trim()) || '请填写放弃原因',
+        type: 'warning',
+      },
+    )
+    semiAutoAbandoningTaskId.value = task.id
+    await abandonSemiAutoDistribution(task.id, {
+      reason: value.trim(),
+    })
+    await refreshDistributionHistory()
+    await load()
+    ElMessage.success('已放弃本次半自动分发')
+  } catch (error) {
+    if (error instanceof Error) {
+      ElMessage.error(error.message || '放弃发布失败')
+    }
+  } finally {
+    semiAutoAbandoningTaskId.value = null
+  }
+}
+
 async function checkWechatAccount(id: number) {
   checkingSelfMediaAccountId.value = id
   try {
@@ -2674,6 +2923,34 @@ async function checkWechatAccount(id: number) {
     ElMessage.success(next.status === 'active' ? '登录状态有效' : '登录状态已更新')
   } finally {
     checkingSelfMediaAccountId.value = null
+  }
+}
+
+async function clearSemiAutoCookieCredential(account: SelfMediaAccount) {
+  try {
+    await ElMessageBox.confirm(
+      `确认清除账号「${account.accountName}」当前保存的浏览器登录凭证？清除后再次分发需要重新登录并捕获。`,
+      '清除登录凭证',
+      {
+        confirmButtonText: '清除',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+  semiAutoCredentialClearingAccountId.value = account.id
+  try {
+    await destroySelfMediaCookieCredential(account.id)
+    if (pendingCookieCaptureAccountId.value === account.id) {
+      pendingCookieCaptureAccountId.value = null
+      stopCookieCaptureStatusPolling()
+    }
+    await refreshSelfMediaAccounts()
+    ElMessage.success('登录凭证已清除')
+  } finally {
+    semiAutoCredentialClearingAccountId.value = null
   }
 }
 
@@ -2926,7 +3203,7 @@ function handleDouyinAuthResult() {
 function reviewStatusLabel(status?: string | null) {
   const map: Record<string, string> = {
     under_review: '审核中',
-    published: '已通过',
+    published: '平台审核通过',
     rejected: '已拒审',
     offline: '已下线',
     unknown: '未知',

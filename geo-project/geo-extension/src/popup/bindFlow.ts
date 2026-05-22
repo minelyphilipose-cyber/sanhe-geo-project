@@ -7,6 +7,7 @@ const CROCKFORD_BASE32 = /^[0-9A-HJKMNP-TV-Z]{8}$/
 
 export interface BindInput {
   bindCode: string
+  brandId?: number
 }
 
 interface BindDependencies {
@@ -45,7 +46,7 @@ export function toStoredSession(response: BindResponse, now = new Date()): Store
 export async function bindExtension(input: BindInput, deps: BindDependencies = defaultDeps): Promise<StoredSession> {
   const { bindCode } = validateBindInput(input)
   const installId = await deps.storage.getOrCreateInstallId()
-  const response = await deps.api.bind(bindCode, installId, EXTENSION_VERSION)
+  const response = await deps.api.bind(bindCode, installId, EXTENSION_VERSION, input.brandId)
   const session = toStoredSession(response)
   await deps.storage.set(session)
   return session

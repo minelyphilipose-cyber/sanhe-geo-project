@@ -1049,6 +1049,7 @@ export interface DistributionTask {
   status: 'pending' | 'submitting' | 'submitted' | 'failed' | 'confirmed' | string
   integrationMethod: 'rest_api' | 'ftp' | 'email' | 'manual' | string
   targetKind?: string | null
+  dispatchMode?: 'AUTO' | 'SEMI_AUTO' | string | null
   targetBrandId?: number | null
   brandOfficialSiteId?: number | null
   selfMediaAccountId?: number | null
@@ -1110,6 +1111,8 @@ export interface WechatMpCapability {
   autoPublishEnabled?: boolean
   clientMode: string
   reason?: string | null
+  liveVerificationBlocked?: boolean
+  liveVerificationReason?: string | null
   description?: string | null
 }
 
@@ -1122,6 +1125,8 @@ export interface DouyinCapability {
   enabled: boolean
   mode: 'mock' | 'real' | string
   disabledReason?: string | null
+  liveVerificationBlocked?: boolean
+  liveVerificationReason?: string | null
   description?: string | null
 }
 
@@ -1145,6 +1150,12 @@ export interface SelfMediaAccount {
   status: 'active' | 'expired' | 'revoked' | 'disabled' | string
   lastAuthCheckedAt?: string | null
   lastAuthError?: string | null
+  cookieCredentialStatus?: string | null
+  cookieCredentialVersion?: number | null
+  cookieCredentialCapturedAt?: string | null
+  cookieCredentialIdentityStatus?: 'matched' | 'mismatch' | 'unknown' | string | null
+  cookieCredentialIdentityName?: string | null
+  cookieCredentialIdentityMessage?: string | null
 }
 
 export interface PublishQuota {

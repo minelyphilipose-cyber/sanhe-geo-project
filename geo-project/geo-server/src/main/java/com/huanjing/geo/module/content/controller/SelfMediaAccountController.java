@@ -74,4 +74,9 @@ public class SelfMediaAccountController {
     public R<SelfMediaAccountVO> checkAuth(@PathVariable Long id) {
         return R.ok(selfMediaAccountService.checkAuth(id));
     }
+
+    @DeleteMapping("/self-media-accounts/{id}/cookie-credential")
+    public R<SelfMediaAccountVO> destroyCookieCredential(@PathVariable Long id) {
+        return R.ok(selfMediaAccountService.destroyCookieCredential(id));
+    }
 }

@@ -22,7 +22,7 @@ class SelfMediaAccountControllerTest {
         WechatMpAuthorizationService wechatAuthorizationService = mock(WechatMpAuthorizationService.class);
         DouyinAuthorizationService douyinAuthorizationService = mock(DouyinAuthorizationService.class);
         when(douyinAuthorizationService.capability())
-                .thenReturn(new DouyinCapabilityVO(true, "mock", null, "desc"));
+                .thenReturn(new DouyinCapabilityVO(true, "mock", null, false, null, "desc"));
         SelfMediaAccountController controller = new SelfMediaAccountController(
                 selfMediaAccountService,
                 brandService,

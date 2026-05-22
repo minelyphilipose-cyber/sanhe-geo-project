@@ -203,6 +203,42 @@ class ContentDistributionServiceTest {
     }
 
     @Test
+    void confirmSemiAuto_marksPublishedAndConfirmsQuota() {
+        givenCommonData();
+        DistributionTask filled = semiAutoTask("filled");
+        DistributionTask published = semiAutoTask("published");
+        published.setPublishedUrl("https://mp.toutiao.com/article/1");
+        when(distributionTaskMapper.selectById(300L)).thenReturn(filled, published);
+
+        DistributionTask result = contentDistributionService.confirmSemiAuto(
+                300L,
+                "https://mp.toutiao.com/article/1",
+                "{\"source\":\"admin_console\"}"
+        );
+
+        assertEquals("published", result.getStatus());
+        verify(companyChannelQuotaService).confirmDistribution(300L);
+        verify(distributionTaskMapper).update(eq(null), any());
+        verify(articleDraftMapper).update(eq(null), any());
+    }
+
+    @Test
+    void abandonSemiAuto_marksFailedAndRefundsQuota() {
+        givenCommonData();
+        DistributionTask filled = semiAutoTask("filled");
+        DistributionTask failed = semiAutoTask("failed");
+        when(distributionTaskMapper.selectById(300L)).thenReturn(filled, failed);
+        when(distributionTaskMapper.abandonSemiAutoTask(eq(300L), eq("运营放弃"), any())).thenReturn(1);
+
+        DistributionTask result = contentDistributionService.abandonSemiAuto(300L, "运营放弃");
+
+        assertEquals("failed", result.getStatus());
+        verify(companyChannelQuotaService).refundDistribution(300L);
+        verify(distributionTaskMapper).abandonSemiAutoTask(eq(300L), eq("运营放弃"), any());
+        verify(articleDraftMapper).update(eq(null), any());
+    }
+
+    @Test
     void distributeTo_brandOfficialSite_adapter5xx_writesServerErrorRetryable() {
         givenCommonData();
         officialCmsSiteAdapter.result = SubmitResult.failure(503, "{}", "down", "HTTP 503", FailureKind.SERVER_ERROR, true);
@@ -574,6 +610,16 @@ class ContentDistributionServiceTest {
         DistributionTask task = new DistributionTask();
         task.setId(300L);
         task.setStatus(status);
+        return task;
+    }
+
+    private DistributionTask semiAutoTask(String status) {
+        DistributionTask task = task(status);
+        task.setArticleId(1L);
+        task.setProjectId(20L);
+        task.setTargetKind("mp_account");
+        task.setDispatchMode("SEMI_AUTO");
+        task.setSelfMediaAccountId(40L);
         return task;
     }
 

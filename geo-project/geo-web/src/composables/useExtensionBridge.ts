@@ -1,8 +1,8 @@
 const BRIDGE_CHANNEL = 'GEO_EXTENSION_BRIDGE'
 const BRIDGE_TIMEOUT_MS = 3_000
 
-type BridgeInboundType = 'GEO_PONG' | 'GEO_FILL_STATUS' | 'GEO_FILL_ERROR' | 'GEO_COOKIE_CAPTURE_STATUS'
-type BridgeOutboundType = 'GEO_PING' | 'GEO_START_FILL' | 'GEO_START_COOKIE_CAPTURE'
+type BridgeInboundType = 'GEO_PONG' | 'GEO_BIND_STATUS' | 'GEO_FILL_STATUS' | 'GEO_FILL_ERROR' | 'GEO_COOKIE_CAPTURE_STATUS'
+type BridgeOutboundType = 'GEO_PING' | 'GEO_BIND_EXTENSION' | 'GEO_START_FILL' | 'GEO_START_COOKIE_CAPTURE'
 
 interface BridgeMessage<T = unknown> {
   channel: typeof BRIDGE_CHANNEL
@@ -29,16 +29,26 @@ export interface ExtensionStartCookieCaptureCommand {
   accountName?: string | null
 }
 
+export interface ExtensionBindCommand {
+  type: 'GEO_BIND_EXTENSION'
+  requestId: string
+  bindCode: string
+  brandId: number
+}
+
 export interface ExtensionBridgeResult {
   type: BridgeInboundType
   payload?: {
     taskId?: number
+    accountId?: number
+    platform?: string
     status?: string
     code?: string
     message?: string
     installed?: boolean
     extensionVersion?: string
     bound?: boolean
+    sessionId?: number
   }
 }
 
@@ -64,6 +74,13 @@ export function startExtensionCookieCapture(command: ExtensionStartCookieCapture
   }, command.requestId)
 }
 
+export function bindExtensionBridge(command: ExtensionBindCommand): Promise<ExtensionBridgeResult> {
+  return sendBridgeMessage(command.type, {
+    bindCode: command.bindCode,
+    brandId: command.brandId,
+  }, command.requestId)
+}
+
 function sendBridgeMessage<T extends object>(
   type: BridgeOutboundType,
   payload: T,
@@ -79,7 +96,7 @@ function sendBridgeMessage<T extends object>(
       if (event.source !== window) return
       if (!isBridgeMessage(event.data)) return
       if (event.data.requestId !== requestId) return
-      if (!['GEO_PONG', 'GEO_FILL_STATUS', 'GEO_FILL_ERROR', 'GEO_COOKIE_CAPTURE_STATUS'].includes(event.data.type)) return
+      if (!['GEO_PONG', 'GEO_BIND_STATUS', 'GEO_FILL_STATUS', 'GEO_FILL_ERROR', 'GEO_COOKIE_CAPTURE_STATUS'].includes(event.data.type)) return
       cleanup()
       resolve({
         type: event.data.type as BridgeInboundType,

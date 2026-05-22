@@ -31,13 +31,35 @@ describe('bind flow', () => {
       },
     )
 
-    expect(bind).toHaveBeenCalledWith('ABCDEFGH', 'install-1', '0.1.0')
+    expect(bind).toHaveBeenCalledWith('ABCDEFGH', 'install-1', '0.1.0', undefined)
     expect(set).toHaveBeenCalledWith(expect.objectContaining({
       token: 'ext.new',
       sessionId: 12,
       expiresAt: '2026-05-14T00:00:00Z',
     }))
     expect(session.token).toBe('ext.new')
+  })
+
+  it('passes brand id when binding is initiated by the admin page', async () => {
+    const bind = vi.fn(async () => ({
+      token: 'ext.new',
+      sessionId: 12,
+      expiresAt: '2026-05-14T00:00:00Z',
+    }))
+
+    await bindExtension(
+      { bindCode: 'ABCDEFGH', brandId: 10 },
+      {
+        api: { bind, revoke: vi.fn() },
+        storage: {
+          set: vi.fn(),
+          clear: vi.fn(),
+          getOrCreateInstallId: vi.fn(async () => 'install-1'),
+        },
+      },
+    )
+
+    expect(bind).toHaveBeenCalledWith('ABCDEFGH', 'install-1', '0.1.0', 10)
   })
 
   it('revokes session and clears stored token', async () => {

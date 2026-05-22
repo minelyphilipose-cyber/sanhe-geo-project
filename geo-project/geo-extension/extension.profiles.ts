@@ -9,6 +9,7 @@ export interface ExtensionProfile {
 const PLATFORM_HOST_PERMISSIONS = [
   'https://*.toutiao.com/*',
   'https://*.zhihu.com/*',
+  'https://*.xiaohongshu.com/*',
 ]
 
 export const EXTENSION_PROFILES: Record<ExtensionProfileName, ExtensionProfile> = {

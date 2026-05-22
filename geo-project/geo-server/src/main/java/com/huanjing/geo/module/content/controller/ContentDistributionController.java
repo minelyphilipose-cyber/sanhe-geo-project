@@ -10,6 +10,7 @@ import com.huanjing.geo.module.content.dto.BatchArticlePublishRequest;
 import com.huanjing.geo.module.content.dto.BatchArticlePublishResponse;
 import com.huanjing.geo.module.content.dto.BatchArticlePublishJobSummary;
 import com.huanjing.geo.module.content.dto.DistributionManualConfirmRequest;
+import com.huanjing.geo.module.content.dto.DistributionSemiAutoAbandonRequest;
 import com.huanjing.geo.module.content.dto.PublishQuotaVO;
 import com.huanjing.geo.module.content.dto.RecommendedSitesResponseVO;
 import com.huanjing.geo.module.content.dto.SelfMediaDistributeRequest;
@@ -137,6 +138,17 @@ public class ContentDistributionController {
     @PatchMapping("/distribution-tasks/{taskId}/confirm-manual")
     public R<DistributionTask> confirmManual(@PathVariable Long taskId, @Valid @RequestBody DistributionManualConfirmRequest req) {
         return R.ok(contentDistributionService.confirmManual(taskId, req.getPublishedUrl(), req.getResponsePayload()));
+    }
+
+    @PatchMapping("/distribution-tasks/{taskId}/confirm-semi-auto")
+    public R<DistributionTask> confirmSemiAuto(@PathVariable Long taskId, @Valid @RequestBody DistributionManualConfirmRequest req) {
+        return R.ok(contentDistributionService.confirmSemiAuto(taskId, req.getPublishedUrl(), req.getResponsePayload()));
+    }
+
+    @PatchMapping("/distribution-tasks/{taskId}/abandon-semi-auto")
+    public R<DistributionTask> abandonSemiAuto(@PathVariable Long taskId, @RequestBody(required = false) DistributionSemiAutoAbandonRequest req) {
+        String reason = req == null ? null : req.getReason();
+        return R.ok(contentDistributionService.abandonSemiAuto(taskId, reason));
     }
 
     @GetMapping("/projects/{projectId}/publish-quota")

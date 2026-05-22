@@ -2,8 +2,8 @@ import { EXTENSION_VERSION } from '@/shared/env'
 
 export const BRIDGE_CHANNEL = 'GEO_EXTENSION_BRIDGE'
 
-export type AdminBridgeInboundType = 'GEO_PING' | 'GEO_START_FILL' | 'GEO_START_COOKIE_CAPTURE'
-export type AdminBridgeOutboundType = 'GEO_PONG' | 'GEO_FILL_STATUS' | 'GEO_FILL_ERROR' | 'GEO_COOKIE_CAPTURE_STATUS'
+export type AdminBridgeInboundType = 'GEO_PING' | 'GEO_BIND_EXTENSION' | 'GEO_START_FILL' | 'GEO_START_COOKIE_CAPTURE'
+export type AdminBridgeOutboundType = 'GEO_PONG' | 'GEO_BIND_STATUS' | 'GEO_FILL_STATUS' | 'GEO_FILL_ERROR' | 'GEO_COOKIE_CAPTURE_STATUS'
 
 export interface AdminBridgeMessage<T = unknown> {
   channel: typeof BRIDGE_CHANNEL
@@ -26,6 +26,17 @@ export interface AdminStartCookieCapturePayload {
   accountName?: string | null
 }
 
+export interface AdminBindExtensionPayload {
+  bindCode: string
+  brandId: number
+}
+
+export interface AdminBindStatusPayload {
+  bound: boolean
+  sessionId?: number
+  message: string
+}
+
 export interface AdminFillStatusPayload {
   taskId?: number
   status: 'accepted' | 'opening_editor' | 'filled' | 'published' | 'stopped'
@@ -35,7 +46,7 @@ export interface AdminFillStatusPayload {
 export interface AdminCookieCaptureStatusPayload {
   accountId?: number
   platform?: string
-  status: 'captured' | 'opening_login' | 'waiting_login'
+  status: 'captured' | 'opening_login' | 'waiting_login' | 'capture_conflict' | 'identity_review_required' | 'stopped'
   message: string
 }
 

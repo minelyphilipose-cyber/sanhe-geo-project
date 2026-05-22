@@ -10,5 +10,7 @@ public class WechatMpCapabilityVO {
     private boolean autoPublishEnabled;
     private String clientMode;
     private String reason;
+    private boolean liveVerificationBlocked;
+    private String liveVerificationReason;
     private String description;
 }

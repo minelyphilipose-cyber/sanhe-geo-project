@@ -36,7 +36,6 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class DouyinAuthorizationService {
     private static final String PLATFORM = "douyin";
-    private static final String AUTH_PAGE = "https://open.douyin.com/platform/oauth/connect/";
     private static final String STATE_KEY_PREFIX = "douyin:auth_state:";
     private static final Duration STATE_TTL = Duration.ofMinutes(10);
 
@@ -52,8 +51,9 @@ public class DouyinAuthorizationService {
     public DouyinAuthUrlVO buildAuthUrl(Long brandId, Long redirectArticleId) {
         String clientKey = require(properties.getClientKey(), "douyin client key missing");
         String callback = require(properties.getAuthCallbackUrl(), "douyin auth callback url missing");
+        String authPage = require(properties.getAuthPageUrl(), "douyin auth page url missing");
         String state = createState(brandId, redirectArticleId);
-        String authUrl = UriComponentsBuilder.fromUriString(AUTH_PAGE)
+        String authUrl = UriComponentsBuilder.fromUriString(authPage)
                 .queryParam("client_key", clientKey)
                 .queryParam("response_type", "code")
                 .queryParam("scope", requiredScopeParam())
@@ -67,12 +67,28 @@ public class DouyinAuthorizationService {
     public DouyinCapabilityVO capability() {
         boolean enabled = featureProperties.getImageText() != null
                 && featureProperties.getImageText().isEnabled();
+        boolean configuredLiveVerificationBlocked = featureProperties.getImageText() != null
+                && featureProperties.getImageText().isLiveVerificationBlocked();
+        boolean realMode = "real".equalsIgnoreCase(clientProperties.getMode());
+        boolean liveVerificationBlocked = enabled && realMode && configuredLiveVerificationBlocked;
         return new DouyinCapabilityVO(
                 enabled,
                 clientProperties.getMode(),
                 enabled ? null : "feature flag disabled",
-                "抖音图文支持 Open API 自动提交；需要 OAuth 授权账号、1-30 张 JPG/PNG 图片素材，文案不超过 1000 字。"
+                liveVerificationBlocked,
+                liveVerificationBlocked ? featureProperties.getImageText().getLiveVerificationReason() : null,
+                douyinCapabilityDescription(liveVerificationBlocked)
         );
+    }
+
+    private String douyinCapabilityDescription(boolean liveVerificationBlocked) {
+        if (liveVerificationBlocked) {
+            return "当前域名备案及抖音开放平台审核未完成，真实图文提交/审核联调暂不可用；先保留配置、授权和 mock 链路验证。";
+        }
+        if (!"real".equalsIgnoreCase(clientProperties.getMode())) {
+            return "抖音图文 mock 链路已开放，可用于账号授权、图片选择、提交、失败映射和审核状态流程验证。";
+        }
+        return "抖音图文支持 Open API 自动提交；需要 OAuth 授权账号、1-30 张 JPG/PNG 图片素材，文案不超过 1000 字。";
     }
 
     public String handleCallback(String code, String state) {

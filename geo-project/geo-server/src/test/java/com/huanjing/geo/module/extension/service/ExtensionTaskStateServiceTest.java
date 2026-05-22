@@ -5,7 +5,6 @@ import com.huanjing.geo.module.audit.AuditMode;
 import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.service.AuditService;
-import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
@@ -226,19 +225,14 @@ class ExtensionTaskStateServiceTest {
     }
 
     @Test
-    void publishedUpdatesFilledTaskAndAuditsSuccess() {
+    void publishedRecordsPlatformClickAndAuditsSuccessWithoutFinalizingTask() {
         stubTask("filled");
-        when(taskMapper.markSemiAutoPublished(eq(30L), any(), eq(99L))).thenReturn(1);
-        when(articleDraftMapper.update(any(), any())).thenReturn(1);
 
-        assertEquals("published", service.published(30L, 99L, 7L).status());
+        assertEquals("filled", service.published(30L, 99L, 7L).status());
 
-        verify(taskMapper).markSemiAutoPublished(eq(30L), any(), eq(99L));
-        ArgumentCaptor<ArticleDraft> articleUpdate = forClass(ArticleDraft.class);
-        verify(articleDraftMapper).update(articleUpdate.capture(), any());
-        assertEquals("published", articleUpdate.getValue().getStatus());
-        assertNotNull(articleUpdate.getValue().getPublishedAt());
-        verify(companyChannelQuotaService).confirmDistribution(30L);
+        verify(taskMapper, never()).markSemiAutoPublished(any(), any(), any());
+        verifyNoInteractions(articleDraftMapper);
+        verify(companyChannelQuotaService, never()).confirmDistribution(any());
         verify(auditSupport).record(
                 eq("SEMI_AUTO_TASK_PUBLISHED"),
                 eq(AuditResult.SUCCESS),
@@ -260,14 +254,14 @@ class ExtensionTaskStateServiceTest {
     @Test
     void publishedAuditsPlatformCompletionReport() {
         stubTask("filled");
-        when(taskMapper.markSemiAutoPublished(eq(30L), any(), eq(99L))).thenReturn(1);
-        when(articleDraftMapper.update(any(), any())).thenReturn(1);
 
-        assertEquals("published", service.published(30L, 99L, 7L, new ExtensionTaskPublishReportRequest(
+        assertEquals("filled", service.published(30L, 99L, 7L, new ExtensionTaskPublishReportRequest(
                 "draft_saved_clicked",
                 "https://mp.toutiao.com/editor",
                 "toutiao",
-                "保存草稿"
+                "保存草稿",
+                "LOGIN_REQUIRED",
+                "平台页面要求重新登录"
         )).status());
 
         @SuppressWarnings("unchecked")
@@ -291,31 +285,33 @@ class ExtensionTaskStateServiceTest {
         assertEquals("draft_saved_clicked", detailCaptor.getValue().get("action"));
         assertEquals("toutiao", detailCaptor.getValue().get("platform"));
         assertEquals("保存草稿", detailCaptor.getValue().get("detectedText"));
-    }
-
-    @Test
-    void publishedNonFilledTaskIsRejected() {
-        stubTask("filling");
-        when(taskMapper.markSemiAutoPublished(eq(30L), any(), eq(99L))).thenReturn(0);
-
-        BizException ex = assertThrows(BizException.class, () -> service.published(30L, 99L, 7L));
-
-        assertEquals(ExtensionErrorCodes.TASK_STATE_CONFLICT, ex.getCode());
+        assertEquals("LOGIN_REQUIRED", detailCaptor.getValue().get("errorCode"));
+        assertEquals("平台页面要求重新登录", detailCaptor.getValue().get("errorMessage"));
+        verify(taskMapper, never()).markSemiAutoPublished(any(), any(), any());
         verifyNoInteractions(articleDraftMapper);
-        verifyNoInteractions(companyChannelQuotaService);
+        verify(companyChannelQuotaService, never()).confirmDistribution(any());
     }
 
     @Test
-    void publishedArticleStateConflictDoesNotConfirmQuota() {
+    void publishedNonFilledTaskOnlyAuditsCurrentState() {
+        stubTask("filling");
+
+        assertEquals("filling", service.published(30L, 99L, 7L).status());
+
+        verify(taskMapper, never()).markSemiAutoPublished(any(), any(), any());
+        verifyNoInteractions(articleDraftMapper);
+        verify(companyChannelQuotaService, never()).confirmDistribution(any());
+    }
+
+    @Test
+    void publishedDoesNotConfirmQuotaOrArticleWhenArticleWouldRejectOldFlow() {
         stubTask("filled");
-        when(taskMapper.markSemiAutoPublished(eq(30L), any(), eq(99L))).thenReturn(1);
-        when(articleDraftMapper.update(any(), any())).thenReturn(0);
 
-        BizException ex = assertThrows(BizException.class, () -> service.published(30L, 99L, 7L));
+        assertEquals("filled", service.published(30L, 99L, 7L).status());
 
-        assertEquals(ContentErrorCodes.ARTICLE_STATE_CONFLICT, ex.getCode());
-        verify(articleDraftMapper).update(any(), any());
-        verifyNoInteractions(companyChannelQuotaService);
+        verify(taskMapper, never()).markSemiAutoPublished(any(), any(), any());
+        verifyNoInteractions(articleDraftMapper);
+        verify(companyChannelQuotaService, never()).confirmDistribution(any());
     }
 
     @Test

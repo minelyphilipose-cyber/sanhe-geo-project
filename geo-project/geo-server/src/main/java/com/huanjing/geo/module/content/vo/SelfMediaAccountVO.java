@@ -20,6 +20,9 @@ public class SelfMediaAccountVO {
     private String cookieCredentialStatus;
     private Integer cookieCredentialVersion;
     private LocalDateTime cookieCredentialCapturedAt;
+    private String cookieCredentialIdentityStatus;
+    private String cookieCredentialIdentityName;
+    private String cookieCredentialIdentityMessage;
 
     public static SelfMediaAccountVO from(SelfMediaAccount account) {
         SelfMediaAccountVO vo = new SelfMediaAccountVO();

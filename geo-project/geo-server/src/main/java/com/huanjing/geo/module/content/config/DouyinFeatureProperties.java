@@ -13,5 +13,7 @@ public class DouyinFeatureProperties {
     @Data
     public static class ImageText {
         private boolean enabled = false;
+        private boolean liveVerificationBlocked = true;
+        private String liveVerificationReason = "domain_icp_filing_pending";
     }
 }

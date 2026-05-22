@@ -206,6 +206,71 @@ public class ContentDistributionService {
         return distributionTaskMapper.selectById(taskId);
     }
 
+    @Transactional
+    public DistributionTask confirmSemiAuto(Long taskId, String publishedUrl, String responsePayload) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission("project.write");
+        ensureDistributeRole(operator);
+        DistributionTask task = requireTask(taskId);
+        ensureSemiAutoTaskCanBeOperated(task, Set.of("token_issued", "filling", "filled"));
+        ArticleDraft article = requireArticle(task.getArticleId());
+        Project project = requireProject(task.getProjectId());
+        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
+        brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
+
+        LocalDateTime now = LocalDateTime.now(SH_ZONE);
+        String normalizedUrl = StringUtils.hasText(publishedUrl) ? publishedUrl.trim() : null;
+        LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
+                .eq(DistributionTask::getId, taskId)
+                .eq(DistributionTask::getDispatchMode, "SEMI_AUTO")
+                .in(DistributionTask::getStatus, List.of("token_issued", "filling", "filled"))
+                .set(DistributionTask::getStatus, "published")
+                .set(DistributionTask::getPublishedUrl, normalizedUrl)
+                .set(DistributionTask::getPublishedAt, now)
+                .set(DistributionTask::getPublishedBy, operator.getId())
+                .set(DistributionTask::getFinishedAt, now)
+                .set(DistributionTask::getResponsePayload, jsonColumnPayload(responsePayload))
+                .set(DistributionTask::getErrorMessage, null)
+                .set(DistributionTask::getFailureKind, null);
+        if (distributionTaskMapper.update(null, wrapper) != 1) {
+            throw new BizException(409, "Semi-auto task state conflict");
+        }
+        transitionArticleStatus(article, "distributing", "published", true);
+        companyChannelQuotaService.confirmDistribution(taskId);
+        return distributionTaskMapper.selectById(taskId);
+    }
+
+    @Transactional
+    public DistributionTask abandonSemiAuto(Long taskId, String reason) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission("project.write");
+        ensureDistributeRole(operator);
+        DistributionTask task = requireTask(taskId);
+        ensureSemiAutoTaskCanBeOperated(task, Set.of("token_issued", "filling", "filled"));
+        Project project = requireProject(task.getProjectId());
+        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
+        brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
+
+        String message = StringUtils.hasText(reason) ? reason.trim() : "运营确认放弃本次半自动分发";
+        int affected = distributionTaskMapper.abandonSemiAutoTask(taskId, message, LocalDateTime.now(SH_ZONE));
+        if (affected != 1) {
+            throw new BizException(409, "Semi-auto task state conflict");
+        }
+        restoreArticleApprovedIfDistributing(task.getArticleId());
+        companyChannelQuotaService.refundDistribution(taskId);
+        return distributionTaskMapper.selectById(taskId);
+    }
+
+    private void ensureSemiAutoTaskCanBeOperated(DistributionTask task, Set<String> allowedStatuses) {
+        if (!"SEMI_AUTO".equalsIgnoreCase(task.getDispatchMode())
+                || !"mp_account".equalsIgnoreCase(task.getTargetKind())) {
+            throw new BizException(400, "Task is not semi-auto self-media distribution");
+        }
+        if (!allowedStatuses.contains(task.getStatus())) {
+            throw new BizException(400, "Semi-auto task status does not allow this operation");
+        }
+    }
+
     public Map<String, Object> distributionHistory(Long articleId) {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
@@ -1164,6 +1229,17 @@ public class ContentDistributionService {
         }
     }
 
+    private void restoreArticleApprovedIfDistributing(Long articleId) {
+        if (articleId == null) {
+            throw new BizException(404, "task article not found");
+        }
+        LambdaUpdateWrapper<ArticleDraft> wrapper = new LambdaUpdateWrapper<ArticleDraft>()
+                .eq(ArticleDraft::getId, articleId)
+                .eq(ArticleDraft::getStatus, "distributing")
+                .set(ArticleDraft::getStatus, "approved");
+        articleDraftMapper.update(null, wrapper);
+    }
+
     private void requireDistributionAccess(SysUser operator, Long brandId) {
         brandAccessService.requireBrandAccess(brandId, operator == null ? null : operator.getId(), BrandAccessAction.OPERATE);
     }
@@ -1348,6 +1424,8 @@ public class ContentDistributionService {
         vo.setAttemptNo(task.getAttemptNo());
         vo.setStatus(task.getStatus());
         vo.setIntegrationMethod(task.getIntegrationMethod());
+        vo.setTargetKind(task.getTargetKind());
+        vo.setDispatchMode(task.getDispatchMode());
         vo.setPublishedUrl(task.getPublishedUrl());
         vo.setErrorMessage(task.getErrorMessage());
         vo.setRequestPayload(task.getRequestPayload());

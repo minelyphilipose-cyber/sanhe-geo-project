@@ -17,6 +17,8 @@ public class WechatOpenPlatformProperties {
     private String encodingAesKey;
     private boolean draftDistributionEnabled = false;
     private boolean autoPublishEnabled = false;
+    private boolean liveVerificationBlocked = true;
+    private String liveVerificationReason = "domain_icp_filing_pending";
     private boolean funcScopeStrictMode = false;
     private List<Integer> requiredDraftFuncScopes = new ArrayList<>(List.of(1, 13));
     private int authType = 1;

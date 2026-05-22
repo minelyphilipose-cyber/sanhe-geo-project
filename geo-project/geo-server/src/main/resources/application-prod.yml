@@ -68,12 +68,15 @@ geo:
     open-platform:
       client-key: ${DOUYIN_CLIENT_KEY}
       client-secret: ${DOUYIN_CLIENT_SECRET}
+      auth-page-url: ${DOUYIN_AUTH_PAGE_URL:https://open.douyin.com/platform/oauth/connect/}
       auth-callback-url: ${DOUYIN_BACKEND_AUTH_CALLBACK_URL}
       frontend-callback-url: ${DOUYIN_FRONTEND_CALLBACK_URL}
       required-scopes: [video.create.bind]
     feature:
       image-text:
         enabled: ${DOUYIN_IMAGE_TEXT_ENABLED:false}
+        live-verification-blocked: ${DOUYIN_IMAGE_TEXT_LIVE_VERIFICATION_BLOCKED:true}
+        live-verification-reason: ${DOUYIN_IMAGE_TEXT_LIVE_VERIFICATION_REASON:domain_icp_filing_pending}
   report:
     web-base-url: ${REPORT_WEB_BASE_URL:http://geo-web}
     render-timeout-ms: ${REPORT_RENDER_TIMEOUT_MS:30000}
@@ -104,6 +107,8 @@ geo:
       encoding-aes-key: ${WECHAT_ENCODING_AES_KEY}
       draft-distribution-enabled: ${WECHAT_DRAFT_DISTRIBUTION_ENABLED:false}
       auto-publish-enabled: ${WECHAT_AUTO_PUBLISH_ENABLED:false}
+      live-verification-blocked: ${WECHAT_LIVE_VERIFICATION_BLOCKED:true}
+      live-verification-reason: ${WECHAT_LIVE_VERIFICATION_REASON:domain_icp_filing_pending}
       func-scope-strict-mode: ${WECHAT_FUNC_SCOPE_STRICT_MODE:true}
       required-draft-func-scopes: [1, 13]
       auth-type: ${WECHAT_AUTH_TYPE:1}

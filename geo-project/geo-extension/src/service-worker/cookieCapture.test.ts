@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { ExtensionApiError, extensionApi } from '@/shared/api'
 import { sessionStorage } from '@/shared/storage'
-import { captureCookiesForAccount, domainsForPlatform, handleCookieDomainReady, startCookieCaptureForAccount } from './cookieCapture'
+import { captureCookiesForAccount, domainsForPlatform, handleCookieDomainReady, handleCookieIdentityDecision, startCookieCaptureForAccount } from './cookieCapture'
 
 vi.mock('@/shared/env', () => ({
   EXTENSION_VERSION: '0.1.0',
@@ -67,6 +67,7 @@ describe('cookie capture service worker flow', () => {
   it('maps platform to approved domains', () => {
     expect(domainsForPlatform('toutiao')).toEqual(['toutiao.com'])
     expect(domainsForPlatform('zhihu')).toEqual(['zhihu.com'])
+    expect(domainsForPlatform('xiaohongshu')).toEqual(['xiaohongshu.com'])
   })
 
   it('reads cookies via chrome.cookies and uploads through extension API', async () => {
@@ -91,7 +92,7 @@ describe('cookie capture service worker flow', () => {
     )
   })
 
-  it('captures immediately when required platform cookie already exists', async () => {
+  it('opens platform page and stores pending capture even when login cookie already exists', async () => {
     const result = await startCookieCaptureForAccount({
       accountId: 20,
       brandId: 10,
@@ -102,25 +103,35 @@ describe('cookie capture service worker flow', () => {
     expect(result).toMatchObject({
       accountId: 20,
       platform: 'toutiao',
-      status: 'captured',
+      status: 'opening_login',
     })
-    expect(chrome.tabs.create).not.toHaveBeenCalled()
-    expect(chrome.storage.local.remove).toHaveBeenCalled()
+    expect(chrome.storage.local.set).toHaveBeenCalledWith({
+      'geo.extension.pendingCookieCapture': expect.objectContaining({ accountId: 20, platform: 'toutiao' }),
+    })
+    expect(chrome.tabs.create).toHaveBeenCalledWith({ url: 'https://mp.toutiao.com/' })
+    expect(extensionApi.captureCookies).not.toHaveBeenCalled()
   })
 
   it('treats toutiao session alternatives as valid login cookies', async () => {
     vi.mocked(chrome.cookies.getAll).mockResolvedValueOnce([
       { name: 'sessionid_ss', value: 'secret', domain: '.toutiao.com' } as chrome.cookies.Cookie,
     ])
-
-    const result = await startCookieCaptureForAccount({
-      accountId: 20,
-      brandId: 10,
-      platform: 'toutiao',
-      accountName: 'Toutiao Account',
+    ;(chrome.storage.local.get as unknown as Mock).mockResolvedValueOnce({
+      'geo.extension.pendingCookieCapture': {
+        accountId: 20,
+        brandId: 10,
+        platform: 'toutiao',
+        accountName: 'Toutiao Account',
+      },
     })
 
-    expect(result.status).toBe('captured')
+    const result = await handleCookieDomainReady('mp.toutiao.com', {
+      status: 'detected',
+      displayName: 'Toutiao Account',
+      source: 'test',
+    })
+
+    expect(result?.status).toBe('captured')
     expect(extensionApi.captureCookies).toHaveBeenCalledTimes(1)
   })
 
@@ -142,6 +153,33 @@ describe('cookie capture service worker flow', () => {
     expect(extensionApi.captureCookies).not.toHaveBeenCalled()
   })
 
+  it('does not overwrite another pending cookie capture target', async () => {
+    vi.mocked(chrome.cookies.getAll).mockResolvedValueOnce([])
+    ;(chrome.storage.local.get as unknown as Mock).mockResolvedValueOnce({
+      'geo.extension.pendingCookieCapture': {
+        accountId: 21,
+        brandId: 10,
+        platform: 'zhihu',
+        accountName: '知乎账号',
+      },
+    })
+
+    const result = await startCookieCaptureForAccount({
+      accountId: 20,
+      brandId: 10,
+      platform: 'toutiao',
+      accountName: 'Toutiao Account',
+    })
+
+    expect(result).toMatchObject({
+      accountId: 21,
+      platform: 'zhihu',
+      status: 'capture_conflict',
+    })
+    expect(chrome.storage.local.set).not.toHaveBeenCalled()
+    expect(chrome.tabs.create).not.toHaveBeenCalled()
+  })
+
   it('captures pending account after platform page reports a logged-in cookie', async () => {
     ;(chrome.storage.local.get as unknown as Mock).mockResolvedValueOnce({
       'geo.extension.pendingCookieCapture': {
@@ -152,13 +190,108 @@ describe('cookie capture service worker flow', () => {
       },
     })
 
-    const result = await handleCookieDomainReady('mp.toutiao.com')
+    const result = await handleCookieDomainReady('mp.toutiao.com', {
+      status: 'detected',
+      displayName: 'Toutiao Account',
+      source: 'test',
+    })
 
     expect(result).toMatchObject({
       accountId: 20,
       status: 'captured',
     })
     expect(extensionApi.captureCookies).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(extensionApi.captureCookies).mock.calls[0][1].capturedFingerprintJson)
+      .toContain('"status":"matched"')
+    expect(chrome.storage.local.remove).toHaveBeenCalledWith('geo.extension.pendingCookieCapture')
+  })
+
+  it('asks for operator decision when detected identity mismatches selected account', async () => {
+    ;(chrome.storage.local.get as unknown as Mock).mockResolvedValueOnce({
+      'geo.extension.pendingCookieCapture': {
+        accountId: 20,
+        brandId: 10,
+        platform: 'toutiao',
+        accountName: 'Toutiao Account',
+      },
+    })
+
+    const result = await handleCookieDomainReady('mp.toutiao.com', {
+      status: 'detected',
+      displayName: 'Other Account',
+      source: 'test',
+    })
+
+    expect(result).toMatchObject({
+      accountId: 20,
+      platform: 'toutiao',
+      status: 'identity_review_required',
+      expectedAccountName: 'Toutiao Account',
+      actualDisplayName: 'Other Account',
+    })
+    expect(result?.message).toContain('不一致')
+    expect(extensionApi.captureCookies).not.toHaveBeenCalled()
+    expect(chrome.storage.local.remove).not.toHaveBeenCalled()
+  })
+
+  it('continues capture with audit fingerprint when operator ignores identity mismatch', async () => {
+    ;(chrome.storage.local.get as unknown as Mock).mockResolvedValueOnce({
+      'geo.extension.pendingCookieCapture': {
+        accountId: 20,
+        brandId: 10,
+        platform: 'toutiao',
+        accountName: 'Toutiao Account',
+      },
+    })
+
+    const result = await handleCookieIdentityDecision({
+      decision: 'continue',
+      host: 'mp.toutiao.com',
+      platformIdentity: {
+        status: 'detected',
+        displayName: 'Other Account',
+        source: 'test',
+      },
+    })
+
+    expect(result).toMatchObject({
+      accountId: 20,
+      platform: 'toutiao',
+      status: 'captured',
+    })
+    expect(extensionApi.captureCookies).toHaveBeenCalledTimes(1)
+    const fingerprint = vi.mocked(extensionApi.captureCookies).mock.calls[0][1].capturedFingerprintJson
+    expect(fingerprint).toContain('"status":"mismatch"')
+    expect(fingerprint).toContain('"operatorDecision":"operator_ignored_mismatch"')
+    expect(chrome.storage.local.remove).toHaveBeenCalledWith('geo.extension.pendingCookieCapture')
+  })
+
+  it('stops capture and clears pending target when operator chooses to handle account mismatch', async () => {
+    ;(chrome.storage.local.get as unknown as Mock).mockResolvedValueOnce({
+      'geo.extension.pendingCookieCapture': {
+        accountId: 20,
+        brandId: 10,
+        platform: 'toutiao',
+        accountName: 'Toutiao Account',
+      },
+    })
+
+    const result = await handleCookieIdentityDecision({
+      decision: 'stop',
+      host: 'mp.toutiao.com',
+      platformIdentity: {
+        status: 'detected',
+        displayName: 'Other Account',
+        source: 'test',
+      },
+    })
+
+    expect(result).toMatchObject({
+      accountId: 20,
+      platform: 'toutiao',
+      status: 'stopped',
+    })
+    expect(extensionApi.captureCookies).not.toHaveBeenCalled()
     expect(chrome.storage.local.remove).toHaveBeenCalledWith('geo.extension.pendingCookieCapture')
   })
 

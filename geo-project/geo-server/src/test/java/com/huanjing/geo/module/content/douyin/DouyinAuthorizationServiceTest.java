@@ -13,6 +13,7 @@ import com.huanjing.geo.module.content.douyin.client.dto.DouyinCodeTokenRequest;
 import com.huanjing.geo.module.content.douyin.client.dto.DouyinTokenResponse;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
+import com.huanjing.geo.module.content.vo.DouyinCapabilityVO;
 import com.huanjing.geo.module.system.service.MpCredentialCipherService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +26,7 @@ import java.time.Duration;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -53,6 +55,7 @@ class DouyinAuthorizationServiceTest {
         properties = new DouyinOpenPlatformProperties();
         properties.setClientKey("client-key");
         properties.setClientSecret("client-secret");
+        properties.setAuthPageUrl("https://open.douyin.com/platform/oauth/connect/");
         properties.setAuthCallbackUrl("http://localhost:8080/api/douyin/open-platform/auth/callback");
         properties.setFrontendCallbackUrl("http://localhost:5173/admin/content/execution");
         properties.setRequiredScopes(List.of("video.create.bind"));
@@ -79,10 +82,12 @@ class DouyinAuthorizationServiceTest {
 
     @Test
     void buildAuthUrl_writesStateAndContainsRequiredOAuthParams() {
+        properties.setAuthPageUrl("https://douyin-auth.example/connect/");
+
         var authUrl = service.buildAuthUrl(10L, 20L);
 
         assertEquals(600, authUrl.getExpiresIn());
-        assertTrue(authUrl.getAuthUrl().startsWith("https://open.douyin.com/platform/oauth/connect/"));
+        assertTrue(authUrl.getAuthUrl().startsWith("https://douyin-auth.example/connect/"));
         assertTrue(authUrl.getAuthUrl().contains("client_key=client-key"));
         assertTrue(authUrl.getAuthUrl().contains("response_type=code"));
         assertTrue(authUrl.getAuthUrl().contains("scope=video.create.bind"));
@@ -95,6 +100,36 @@ class DouyinAuthorizationServiceTest {
         assertTrue(keyCaptor.getValue().startsWith("douyin:auth_state:"));
         assertTrue(valueCaptor.getValue().contains("\"brandId\":10"));
         assertTrue(valueCaptor.getValue().contains("\"redirectArticleId\":20"));
+    }
+
+    @Test
+    void capabilityAllowsMockModeWhenLiveVerificationBlockedForPendingDomainReview() {
+        featureProperties.getImageText().setEnabled(true);
+        featureProperties.getImageText().setLiveVerificationBlocked(true);
+        featureProperties.getImageText().setLiveVerificationReason("domain_icp_filing_pending");
+        clientProperties.setMode("mock");
+
+        DouyinCapabilityVO capability = service.capability();
+
+        assertTrue(capability.isEnabled());
+        assertEquals("mock", capability.getMode());
+        assertEquals("抖音图文 mock 链路已开放，可用于账号授权、图片选择、提交、失败映射和审核状态流程验证。", capability.getDescription());
+        assertFalse(capability.isLiveVerificationBlocked());
+    }
+
+    @Test
+    void capabilityExposesLiveVerificationBlockedForRealModePendingDomainReview() {
+        featureProperties.getImageText().setEnabled(true);
+        featureProperties.getImageText().setLiveVerificationBlocked(true);
+        featureProperties.getImageText().setLiveVerificationReason("domain_icp_filing_pending");
+        clientProperties.setMode("real");
+
+        DouyinCapabilityVO capability = service.capability();
+
+        assertTrue(capability.isEnabled());
+        assertTrue(capability.isLiveVerificationBlocked());
+        assertEquals("domain_icp_filing_pending", capability.getLiveVerificationReason());
+        assertTrue(capability.getDescription().contains("真实图文提交/审核联调暂不可用"));
     }
 
     @Test

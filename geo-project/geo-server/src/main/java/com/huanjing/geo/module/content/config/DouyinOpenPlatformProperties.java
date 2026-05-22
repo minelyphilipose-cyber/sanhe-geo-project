@@ -13,6 +13,7 @@ import java.util.List;
 public class DouyinOpenPlatformProperties {
     private String clientKey;
     private String clientSecret;
+    private String authPageUrl = "https://open.douyin.com/platform/oauth/connect/";
     private String authCallbackUrl;
     private String frontendCallbackUrl;
     private List<String> requiredScopes = new ArrayList<>(List.of("video.create.bind"));

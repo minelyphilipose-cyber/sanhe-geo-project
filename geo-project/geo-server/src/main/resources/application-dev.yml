@@ -28,6 +28,8 @@ geo:
       encoding-aes-key: ${WECHAT_ENCODING_AES_KEY:Q8wE2rT5yU7iO9pA3sD6fG4hJ1kL8zX5cV2bN7mQ4wE}
       draft-distribution-enabled: false
       auto-publish-enabled: false
+      live-verification-blocked: ${WECHAT_LIVE_VERIFICATION_BLOCKED:true}
+      live-verification-reason: ${WECHAT_LIVE_VERIFICATION_REASON:domain_icp_filing_pending}
       func-scope-strict-mode: false
       required-draft-func-scopes: [1, 13]
       auth-type: 1
@@ -47,12 +49,15 @@ geo:
     open-platform:
       client-key: ${DOUYIN_CLIENT_KEY:}
       client-secret: ${DOUYIN_CLIENT_SECRET:}
+      auth-page-url: ${DOUYIN_AUTH_PAGE_URL:https://open.douyin.com/platform/oauth/connect/}
       auth-callback-url: http://localhost:8080/api/douyin/open-platform/auth/callback
       frontend-callback-url: http://localhost:5173/admin/content/execution
       required-scopes: [video.create.bind]
     feature:
       image-text:
-        enabled: false
+        enabled: ${DOUYIN_IMAGE_TEXT_ENABLED:true}
+        live-verification-blocked: ${DOUYIN_IMAGE_TEXT_LIVE_VERIFICATION_BLOCKED:true}
+        live-verification-reason: ${DOUYIN_IMAGE_TEXT_LIVE_VERIFICATION_REASON:domain_icp_filing_pending}
 
   cookie:
     master-key-id: local-dev-v1

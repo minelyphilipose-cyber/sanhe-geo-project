@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.content.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import cn.hutool.json.JSONObject;
+import cn.hutool.json.JSONUtil;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.config.WechatMpClientProperties;
 import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
@@ -47,15 +49,26 @@ public class SelfMediaAccountService {
         String reason = openPlatformProperties.isDraftDistributionEnabled()
                 ? null
                 : "wechat_open_platform_review_pending";
+        boolean liveVerificationBlocked = openPlatformProperties.isLiveVerificationBlocked();
         return new WechatMpCapabilityVO(
                 openPlatformProperties.isDraftDistributionEnabled(),
                 openPlatformProperties.isAutoPublishEnabled(),
                 clientProperties.getMode(),
                 reason,
-                openPlatformProperties.isAutoPublishEnabled()
-                        ? "微信公众号已支持自动提交发布；提交后进入微信官方发布/审核流程。"
-                        : "微信公众号当前默认保存到草稿箱，适合联调测试；配置 WECHAT_AUTO_PUBLISH_ENABLED=true 且请求 publishAction=publish 后可提交发布。"
+                liveVerificationBlocked,
+                liveVerificationBlocked ? openPlatformProperties.getLiveVerificationReason() : null,
+                wechatCapabilityDescription(liveVerificationBlocked)
         );
+    }
+
+    private String wechatCapabilityDescription(boolean liveVerificationBlocked) {
+        if (liveVerificationBlocked) {
+            return "当前域名备案及微信公众号第三方平台审核未完成，真实自动发布/审核联调暂不可用；草稿箱接口可继续用于测试。";
+        }
+        if (openPlatformProperties.isAutoPublishEnabled()) {
+            return "微信公众号已支持自动提交发布；提交后进入微信官方发布/审核流程。";
+        }
+        return "微信公众号当前默认保存到草稿箱，适合联调测试；配置 WECHAT_AUTO_PUBLISH_ENABLED=true 且请求 publishAction=publish 后可提交发布。";
     }
 
     public List<SelfMediaAccountVO> listByBrand(Long brandId) {
@@ -131,6 +144,22 @@ public class SelfMediaAccountService {
         return toVoWithCredentialStatus(account);
     }
 
+    @Transactional
+    public SelfMediaAccountVO destroyCookieCredential(Long id) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        SelfMediaAccount account = requireAccount(id);
+        if (!"COOKIE".equalsIgnoreCase(account.getAuthMode())) {
+            throw new BizException(400, "Only cookie self-media accounts have cookie credentials");
+        }
+        brandAccessService.requireBrandAccess(account.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
+        credentialVaultService.destroyCredentials(account.getId(), account.getBrandId(), operator.getId());
+        account.setLastAuthCheckedAt(LocalDateTime.now());
+        account.setLastAuthError("cookie credential cleared by operator");
+        account.setUpdatedAt(LocalDateTime.now());
+        selfMediaAccountMapper.updateById(account);
+        return toVoWithCredentialStatus(account);
+    }
+
     private void checkMaterialCount(SelfMediaAccount account) {
         wechatMpClient.getMaterialCount(authorizerTokenService.getAccessToken(account));
     }
@@ -200,9 +229,32 @@ public class SelfMediaAccountService {
                 vo.setCookieCredentialStatus("active");
                 vo.setCookieCredentialVersion(credential.version());
                 vo.setCookieCredentialCapturedAt(credential.capturedAt());
+                applyCookieCredentialIdentity(vo, credential);
             }
         }
         return vo;
+    }
+
+    private void applyCookieCredentialIdentity(SelfMediaAccountVO vo, CookieCredentialMeta credential) {
+        vo.setCookieCredentialIdentityStatus("unknown");
+        if (!StringUtils.hasText(credential.capturedFingerprintJson())) {
+            vo.setCookieCredentialIdentityMessage("未记录平台账号身份识别结果");
+            return;
+        }
+        try {
+            JSONObject fingerprint = JSONUtil.parseObj(credential.capturedFingerprintJson());
+            JSONObject identity = fingerprint.getJSONObject("platformIdentity");
+            JSONObject check = fingerprint.getJSONObject("identityCheck");
+            if (identity != null) {
+                vo.setCookieCredentialIdentityName(identity.getStr("displayName"));
+            }
+            if (check != null) {
+                vo.setCookieCredentialIdentityStatus(check.getStr("status", "unknown"));
+                vo.setCookieCredentialIdentityMessage(check.getStr("message"));
+            }
+        } catch (Exception ex) {
+            vo.setCookieCredentialIdentityMessage("平台账号身份识别结果解析失败");
+        }
     }
 
     private String generatedPlatformAccountId(String platform, Long brandId) {

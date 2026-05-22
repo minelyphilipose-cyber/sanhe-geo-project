@@ -1,7 +1,7 @@
 const BRIDGE_CHANNEL = 'GEO_EXTENSION_BRIDGE'
 
-type AdminBridgeInboundType = 'GEO_PING' | 'GEO_START_FILL' | 'GEO_START_COOKIE_CAPTURE'
-type AdminBridgeOutboundType = 'GEO_PONG' | 'GEO_FILL_STATUS' | 'GEO_FILL_ERROR' | 'GEO_COOKIE_CAPTURE_STATUS'
+type AdminBridgeInboundType = 'GEO_PING' | 'GEO_BIND_EXTENSION' | 'GEO_START_FILL' | 'GEO_START_COOKIE_CAPTURE'
+type AdminBridgeOutboundType = 'GEO_PONG' | 'GEO_BIND_STATUS' | 'GEO_FILL_STATUS' | 'GEO_FILL_ERROR' | 'GEO_COOKIE_CAPTURE_STATUS'
 
 interface AdminBridgeMessage<T = unknown> {
   channel: typeof BRIDGE_CHANNEL
@@ -23,6 +23,7 @@ window.addEventListener('message', event => {
   if (!isBridgeMessage(event.data)) return
   if (
     event.data.type !== 'GEO_PING'
+    && event.data.type !== 'GEO_BIND_EXTENSION'
     && event.data.type !== 'GEO_START_FILL'
     && event.data.type !== 'GEO_START_COOKIE_CAPTURE'
   ) return

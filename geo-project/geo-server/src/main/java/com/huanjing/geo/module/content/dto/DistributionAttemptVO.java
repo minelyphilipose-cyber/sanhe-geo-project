@@ -14,6 +14,8 @@ public class DistributionAttemptVO {
     private Integer attemptNo;
     private String status;
     private String integrationMethod;
+    private String targetKind;
+    private String dispatchMode;
     private String publishedUrl;
     private String errorMessage;
     private String requestPayload;

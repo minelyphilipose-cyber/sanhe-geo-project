@@ -6,7 +6,6 @@ import com.huanjing.geo.module.audit.AuditMode;
 import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.service.AuditService;
-import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
@@ -45,7 +44,6 @@ public class ExtensionTaskStateService {
     private static final String STATUS_FILLING = "filling";
     private static final String STATUS_FILLED = "filled";
     private static final String STATUS_FAILED = "failed";
-    private static final String STATUS_PUBLISHED = "published";
     private static final String ARTICLE_STATUS_APPROVED = "approved";
     private static final String ARTICLE_STATUS_DISTRIBUTING = "distributing";
     private static final Duration HEARTBEAT_RATE_LIMIT_TTL = Duration.ofSeconds(30);
@@ -116,15 +114,8 @@ public class ExtensionTaskStateService {
     ) {
         TaskContext context = requireOperableTask(taskId, operatorId, extensionSessionId, "SEMI_AUTO_TASK_PUBLISHED");
         LocalDateTime now = now();
-        int affected = taskMapper.markSemiAutoPublished(taskId, now, operatorId);
-        if (affected != 1) {
-            auditDenied("SEMI_AUTO_TASK_PUBLISHED", context, operatorId, extensionSessionId, "STALE_STATE");
-            throw new BizException(TASK_STATE_CONFLICT, "task state conflict");
-        }
-        markArticlePublished(context.task(), now);
-        companyChannelQuotaService.confirmDistribution(taskId);
         auditSuccess("SEMI_AUTO_TASK_PUBLISHED", context, operatorId, extensionSessionId, publishDetail(now, request));
-        return new ExtensionTaskStateResponse(taskId, STATUS_PUBLISHED);
+        return new ExtensionTaskStateResponse(taskId, context.task().getStatus());
     }
 
     @Transactional
@@ -350,22 +341,6 @@ public class ExtensionTaskStateService {
         return task.getLastHeartbeatAt() == null;
     }
 
-    private void markArticlePublished(DistributionTask task, LocalDateTime publishedAt) {
-        if (task.getArticleId() == null) {
-            throw new BizException(TASK_NOT_FOUND, "task article not found");
-        }
-        ArticleDraft update = new ArticleDraft();
-        update.setStatus(STATUS_PUBLISHED);
-        update.setPublishedAt(publishedAt);
-        int updated = articleDraftMapper.update(update,
-                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ArticleDraft>()
-                        .eq(ArticleDraft::getId, task.getArticleId())
-                        .eq(ArticleDraft::getStatus, ARTICLE_STATUS_DISTRIBUTING));
-        if (updated != 1) {
-            throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
-        }
-    }
-
     private void restoreArticleApproved(DistributionTask task) {
         if (task.getArticleId() == null) {
             throw new BizException(TASK_NOT_FOUND, "task article not found");
@@ -426,6 +401,8 @@ public class ExtensionTaskStateService {
         detail.put("platform", request.platform());
         detail.put("href", request.href());
         detail.put("detectedText", request.detectedText());
+        detail.put("errorCode", request.errorCode());
+        detail.put("errorMessage", request.errorMessage());
         return detail;
     }
 

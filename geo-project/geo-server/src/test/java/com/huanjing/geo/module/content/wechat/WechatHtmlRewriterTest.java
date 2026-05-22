@@ -60,6 +60,19 @@ class WechatHtmlRewriterTest {
     }
 
     @Test
+    void rewriteKeepsInlineSvgDecoration() {
+        String html = """
+                <section>
+                  <svg viewBox="0 0 10 10"><path d="M0 0L10 10" fill="#d33"></path></svg>
+                </section>
+                """;
+
+        String result = rewriter.rewrite(html, src -> src);
+
+        assertThat(result).contains("<svg", "<path", "fill=\"#d33\"");
+    }
+
+    @Test
     void rewriteRemovesRelativeLinksAndDangerousStyle() {
         String html = """
                 <p style="position:absolute">fixed</p>

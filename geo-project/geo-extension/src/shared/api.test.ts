@@ -45,6 +45,18 @@ describe('extensionApi', () => {
     })
   })
 
+  it('posts brand id when binding from admin bridge', async () => {
+    await extensionApi.bind('ABCDEFGH', 'install-1', '0.1.0', 10)
+
+    const init = vi.mocked(fetch).mock.calls[0][1] as RequestInit
+    expect(init.body).toBe(JSON.stringify({
+      bindCode: 'ABCDEFGH',
+      brandId: 10,
+      installId: 'install-1',
+      extensionVersion: '0.1.0',
+    }))
+  })
+
   it('uses auth header for token refresh and revoke without leaking token in URL', async () => {
     await extensionApi.refresh('ext.secret', '0.1.0')
     await extensionApi.revoke('ext.secret', 88)

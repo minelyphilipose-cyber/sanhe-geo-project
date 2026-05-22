@@ -18,11 +18,17 @@ public class WechatHtmlRewriter {
             "p", "br", "strong", "b", "em", "i", "u", "s",
             "blockquote", "ul", "ol", "li", "h1", "h2", "h3", "h4",
             "table", "thead", "tbody", "tr", "th", "td",
-            "img", "a", "span", "section", "div"
+            "img", "a", "span", "section", "div",
+            "svg", "g", "path", "polygon", "circle", "rect", "line", "polyline"
     );
     private static final Set<String> GLOBAL_ATTRS = Set.of("style", "align");
     private static final Set<String> IMG_ATTRS = Set.of("src", "data-src", "alt", "title", "style", "width", "height");
     private static final Set<String> A_ATTRS = Set.of("href", "title", "style");
+    private static final Set<String> SVG_ATTRS = Set.of(
+            "xmlns", "viewbox", "d", "fill", "stroke", "points", "style", "width", "height",
+            "x", "y", "cx", "cy", "r", "rx", "ry", "x1", "x2", "y1", "y2", "transform",
+            "xml:space", "id", "data-name", "fill-rule"
+    );
 
     public String rewrite(String html, Function<String, String> imageUrlRewriter) {
         if (!StringUtils.hasText(html)) {
@@ -83,6 +89,9 @@ public class WechatHtmlRewriter {
         if ("a".equalsIgnoreCase(element.tagName())) {
             return A_ATTRS.contains(key);
         }
+        if (Set.of("svg", "g", "path", "polygon", "circle", "rect", "line", "polyline").contains(element.tagName().toLowerCase())) {
+            return SVG_ATTRS.contains(key);
+        }
         return GLOBAL_ATTRS.contains(key);
     }
 
@@ -118,8 +127,8 @@ public class WechatHtmlRewriter {
         if (lower.contains("position")
                 || lower.contains("javascript:")
                 || lower.contains("expression(")
-                || lower.contains("url(")
-                || lower.contains("@import")) {
+                || lower.contains("@import")
+                || lower.contains("url(")) {
             element.removeAttr("style");
         }
     }

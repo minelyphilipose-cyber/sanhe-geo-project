@@ -40,7 +40,7 @@ export async function publishActiveTask(taskId: number, report?: PublishTaskRepo
   try {
     await extensionApi.publishedTask(task.token, taskId, report)
     await stopTaskLifecycle()
-    notifyPopup({ taskId, kind: 'published', message: '任务已上报 published。' })
+    notifyPopup({ taskId, kind: 'published', message: '已记录平台发布点击，请回后台确认最终发布结果。' })
   } finally {
     await chrome.storage.session.remove(PUBLISHING_TASK_KEY)
   }
