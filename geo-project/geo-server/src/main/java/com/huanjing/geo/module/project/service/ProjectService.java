@@ -129,6 +129,7 @@ public class ProjectService {
     private final ProjectStateGuard projectStateGuard;
     private final ActivityLogService activityLogService;
     private final ProjectDistributionChannelAllocationService channelAllocationService;
+    private final KeywordTypeConfigService keywordTypeConfigService;
 
     public Page<Project> page(long current, long size, String keyword, String status, String stage, Long partnerId, Long brandId) {
         SysUser user = currentUserService.requireCurrentUser();
@@ -1079,6 +1080,8 @@ public class ProjectService {
                     item.setProjectId(group.getProjectId());
                     item.setName(group.getName());
                     item.setType(group.getType());
+                    item.setTypeLabel(keywordTypeConfigService.labelOf(group.getType()));
+                    item.setLegacyType(keywordTypeConfigService.isLegacyType(group.getType()));
                     item.setSavedKeywordCount(savedCountMap.getOrDefault(groupId, 0L));
                     item.setSavedKeywordCountA(tierCounts == null ? 0L : tierCounts.a());
                     item.setSavedKeywordCountB(tierCounts == null ? 0L : tierCounts.b());

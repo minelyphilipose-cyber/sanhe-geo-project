@@ -81,14 +81,14 @@
         type="info"
         :closable="false"
         class="mb-3"
-        title="官网、行业资讯站额度大于 0 时才会触发文章生成；可填范围为客户套餐总额度减去当前已激活项目占用。"
+        title="仅官网、行业资讯站参与文章生成调度；额度为 0 时不会生成文章。"
       />
       <el-table :data="project.channelAllocations || []" border empty-text="暂无渠道额度">
         <el-table-column prop="channelName" label="渠道" min-width="140">
           <template #default="{ row }">
             <div class="channel-name">
               <span>{{ row.channelName || row.channelCode }}</span>
-              <el-tag v-if="isArticleGenerationChannel(row.channelCode)" size="small" type="success">文章生成</el-tag>
+              <el-tag v-if="isArticleGenerationChannel(row.channelCode)" size="small" type="success">生成文章渠道</el-tag>
             </div>
           </template>
         </el-table-column>
@@ -141,7 +141,7 @@
       <el-table :data="project.selectedKeywordGroups || []" border empty-text="暂无绑定拓词组">
         <el-table-column prop="name" label="拓词组名称" min-width="220" />
         <el-table-column prop="typeLabel" label="类型" min-width="120">
-          <template #default="{ row }">{{ row.typeLabel || row.type || '-' }}</template>
+          <template #default="{ row }">{{ keywordGroupTypeLabel(row) }}</template>
         </el-table-column>
         <el-table-column prop="savedKeywordCount" label="总问题数" width="110" />
         <el-table-column label="A/B/C" width="160">
@@ -281,13 +281,13 @@
     </el-dialog>
 
     <el-dialog v-model="channelEditVisible" title="调整分发渠道额度" width="720px" class="admin-editor-dialog">
-      <div class="channel-edit-note">官网、行业资讯站额度会参与文章生成调度；保存后若项目已启动，后端会再次校验客户剩余额度。</div>
+      <div class="channel-edit-note">官网、行业资讯站额度会参与文章生成调度；可填范围为客户套餐总额度减去当前已激活项目占用，保存时后端会再次校验。</div>
       <div v-loading="channelQuotaLoading" class="channel-allocation-panel">
         <div v-for="item in channelQuotaItems" :key="item.channelCode" class="channel-row">
           <div class="channel-meta">
             <div class="channel-name">
               <span>{{ item.channelName }}</span>
-              <el-tag v-if="isArticleGenerationChannel(item.channelCode)" size="small" type="success">文章生成</el-tag>
+              <el-tag v-if="isArticleGenerationChannel(item.channelCode)" size="small" type="success">生成文章渠道</el-tag>
             </div>
             <small>{{ channelQuotaText(item) }}</small>
           </div>
@@ -364,6 +364,19 @@ const PROJECT_STATUS_LABELS: Record<string, string> = {
   active: '已启动',
   paused: '已暂停',
   expired: '已过期',
+}
+const KEYWORD_GROUP_TYPE_LABELS: Record<string, string> = {
+  brand: '品牌词',
+  decision: '决策词',
+  transaction: '成交词',
+  comparison: '对比词',
+  qa: '问答词',
+  function: '功能词',
+  imported: '导入问题池',
+  search: '搜索词(历史)',
+  location: '地域词(历史)',
+  industry: '行业词(历史)',
+  competitor: '竞品词(历史)',
 }
 const canActivateProject = computed(() => userStore.hasPermission('project.start'))
 const canUpdateProject = computed(() => userStore.hasPermission('project.update'))
@@ -515,6 +528,12 @@ function joinArray(value?: string | string[] | null) {
 
 function isArticleGenerationChannel(channelCode?: string | null) {
   return channelCode === 'official_site' || channelCode === 'industry_site'
+}
+
+function keywordGroupTypeLabel(row: KeywordGroup) {
+  if (row.typeLabel) return row.typeLabel
+  if (!row.type) return '-'
+  return KEYWORD_GROUP_TYPE_LABELS[row.type] || row.type
 }
 
 function periodLabel(value?: string | null) {
