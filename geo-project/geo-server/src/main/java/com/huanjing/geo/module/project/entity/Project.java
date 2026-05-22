@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.project.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.FieldStrategy;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
@@ -20,9 +21,12 @@ public class Project {
     private String projectCode;
     private Long companyId;
     private String companyName;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private Long brandId;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String brandName;
     private String projectName;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String projectAliases;
     @TableField(exist = false)
     private String packageType;
@@ -48,31 +52,50 @@ public class Project {
     private String ownerType;
     private String sourceType;
     private Boolean contentGenerationEnabled;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private Long partnerId;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String provinceCode;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String provinceName;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String cityCode;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String cityName;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String districtCode;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String districtName;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String targetRegions;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String targetAudience;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String customStatement;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String contentTone;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String preferredAngles;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String extraForbiddenPhrases;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String contentNote;
     private BigDecimal discountRateSnapshot;
     private BigDecimal deductionAmount;
     private String deductionTxnNo;
     private String deliveryMode;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private LocalDateTime signedAt;
     private LocalDateTime activatedAt;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private LocalDate startDate;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private LocalDate endDate;
     private LocalDateTime expiredAt;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String primaryGoal;
     private Long createdBy;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String remark;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

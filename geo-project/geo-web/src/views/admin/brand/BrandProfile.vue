@@ -281,6 +281,7 @@ import type { Brand, BrandStatementView, BrandMaterial, BrandProfileVersion, Pub
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
+import { nullableText } from '@/utils/form'
 
 const route = useRoute()
 const router = useRouter()
@@ -445,12 +446,12 @@ async function saveInfo() {
     await updateBrand(brandId.value, {
       companyId: brand.value?.companyId,
       brandName: infoForm.brandName,
-      brandShortName: infoForm.brandShortName || undefined,
+      brandShortName: nullableText(infoForm.brandShortName),
       brandSlug: infoForm.brandSlug,
       industry: infoForm.industry,
-      mainBusiness: infoForm.mainBusiness || undefined,
-      coreProducts: infoForm.coreProducts || undefined,
-      brandPositioning: infoForm.brandPositioning || undefined,
+      mainBusiness: nullableText(infoForm.mainBusiness),
+      coreProducts: nullableText(infoForm.coreProducts),
+      brandPositioning: nullableText(infoForm.brandPositioning),
       serviceArea: region.displayName,
       provinceCode: region.provinceCode,
       provinceName: region.provinceName,
@@ -458,24 +459,24 @@ async function saveInfo() {
       cityName: region.cityName,
       districtCode: region.districtCode,
       districtName: region.districtName,
-      website: infoForm.website || undefined,
-      phone: infoForm.phone || undefined,
-      wechat: infoForm.wechat || undefined,
-      publicPhone: infoForm.publicPhone || undefined,
-      publicAddress: infoForm.publicAddress || undefined,
-      officialAccount: brand.value?.officialAccount || undefined,
-      videoAccount: brand.value?.videoAccount || undefined,
-      douyinAccount: brand.value?.douyinAccount || undefined,
-      geoSiteCode: normalizeGeoSiteCode(infoForm.geoSiteCode) || undefined,
-      geoSiteStatus: normalizeGeoSiteCode(infoForm.geoSiteCode) ? infoForm.geoSiteStatus || 'active' : undefined,
-      industrySiteName: infoForm.industrySiteName || undefined,
-      industrySiteCode: infoForm.industrySiteCode || undefined,
+      website: nullableText(infoForm.website),
+      phone: nullableText(infoForm.phone),
+      wechat: nullableText(infoForm.wechat),
+      publicPhone: nullableText(infoForm.publicPhone),
+      publicAddress: nullableText(infoForm.publicAddress),
+      officialAccount: nullableText(brand.value?.officialAccount),
+      videoAccount: nullableText(brand.value?.videoAccount),
+      douyinAccount: nullableText(brand.value?.douyinAccount),
+      geoSiteCode: normalizeGeoSiteCode(infoForm.geoSiteCode) || null,
+      geoSiteStatus: normalizeGeoSiteCode(infoForm.geoSiteCode) ? infoForm.geoSiteStatus || 'active' : null,
+      industrySiteName: nullableText(infoForm.industrySiteName),
+      industrySiteCode: nullableText(infoForm.industrySiteCode),
       status: infoForm.status,
-      description: infoForm.businessIntro || undefined,
-      businessIntro: infoForm.businessIntro || undefined,
-      brandQualificationDescription: infoForm.brandQualificationDescription || undefined,
-      brandCaseDescription: infoForm.brandCaseDescription || undefined,
-      forbiddenPhrases: infoForm.forbiddenPhrases || undefined,
+      description: nullableText(infoForm.businessIntro),
+      businessIntro: nullableText(infoForm.businessIntro),
+      brandQualificationDescription: nullableText(infoForm.brandQualificationDescription),
+      brandCaseDescription: nullableText(infoForm.brandCaseDescription),
+      forbiddenPhrases: nullableText(infoForm.forbiddenPhrases),
     })
     ElMessage.success('品牌信息已更新')
     editingInfo.value = false

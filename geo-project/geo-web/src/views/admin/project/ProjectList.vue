@@ -329,6 +329,7 @@ import type { Brand, Company, KeywordGroup, Project, ProjectChannelAllocationIte
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
+import { nullableText } from '@/utils/form'
 
 const route = useRoute()
 const router = useRouter()
@@ -705,7 +706,7 @@ async function submit() {
       districtCode: region.districtCode,
       districtName: region.districtName,
       projectName: form.projectName,
-      projectAliases: form.projectAliases || undefined,
+      projectAliases: nullableText(form.projectAliases),
       companyId: form.companyId,
       brandId: form.brandId,
       keywordGroupLimitA: form.keywordGroupLimitA,
@@ -717,16 +718,16 @@ async function submit() {
         allocatedCount,
       })),
       deliveryMode: form.deliveryMode || 'managed',
-      primaryGoal: form.primaryGoal || undefined,
+      primaryGoal: nullableText(form.primaryGoal),
       customerRequirements,
       targetRegions: form.targetRegions,
-      targetAudience: form.targetAudience || undefined,
-      customStatement: form.customStatement || undefined,
-      contentTone: form.contentTone || undefined,
+      targetAudience: nullableText(form.targetAudience),
+      customStatement: nullableText(form.customStatement),
+      contentTone: nullableText(form.contentTone),
       preferredAngles: form.preferredAngles,
       extraForbiddenPhrases: form.extraForbiddenPhrases,
-      contentNote: form.contentNote || undefined,
-      remark: form.remark || undefined,
+      contentNote: nullableText(form.contentNote),
+      remark: nullableText(form.remark),
     }
     if (lockCompanyBrandSelection.value) {
       payload.companyId = presetCompanyId.value

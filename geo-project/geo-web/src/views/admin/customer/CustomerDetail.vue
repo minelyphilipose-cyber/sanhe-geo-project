@@ -406,6 +406,7 @@ import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
 import { errorMessage } from '@/utils/error'
 import { formatDateTimeSeconds } from '@/utils/format'
+import { nullableText } from '@/utils/form'
 
 const route = useRoute()
 const router = useRouter()
@@ -789,9 +790,9 @@ async function submitCompany() {
       ownerType: companyForm.ownerType,
       partnerId: companyForm.partnerId || undefined,
       salesOwnerId: canSelectSalesOwner.value ? companyForm.salesOwnerId || undefined : undefined,
-      referralSource: companyForm.referralSource || undefined,
+      referralSource: nullableText(companyForm.referralSource),
       status: companyForm.status,
-      remark: companyForm.remark || undefined,
+      remark: nullableText(companyForm.remark),
     })
     ElMessage.success('客户信息已更新')
     editVisible.value = false
@@ -963,11 +964,11 @@ async function submitBrand() {
     const payload: Record<string, any> = {
       companyId,
       brandName: brandForm.brandName,
-      brandShortName: brandForm.brandShortName || undefined,
+      brandShortName: nullableText(brandForm.brandShortName),
       industry: brandForm.industry,
-      mainBusiness: brandForm.mainBusiness || undefined,
-      coreProducts: brandForm.coreProducts || undefined,
-      brandPositioning: brandForm.brandPositioning || undefined,
+      mainBusiness: nullableText(brandForm.mainBusiness),
+      coreProducts: nullableText(brandForm.coreProducts),
+      brandPositioning: nullableText(brandForm.brandPositioning),
       serviceArea: region.displayName,
       provinceCode: region.provinceCode,
       provinceName: region.provinceName,
@@ -975,26 +976,26 @@ async function submitBrand() {
       cityName: region.cityName,
       districtCode: region.districtCode,
       districtName: region.districtName,
-      website: brandForm.website || undefined,
-      phone: brandForm.phone || undefined,
-      wechat: brandForm.wechat || undefined,
-      officialAccount: existingBrand?.officialAccount || undefined,
-      videoAccount: existingBrand?.videoAccount || undefined,
-      douyinAccount: existingBrand?.douyinAccount || undefined,
-      publicPhone: existingBrand?.publicPhone || undefined,
-      publicAddress: existingBrand?.publicAddress || undefined,
+      website: nullableText(brandForm.website),
+      phone: nullableText(brandForm.phone),
+      wechat: nullableText(brandForm.wechat),
+      officialAccount: nullableText(existingBrand?.officialAccount),
+      videoAccount: nullableText(existingBrand?.videoAccount),
+      douyinAccount: nullableText(existingBrand?.douyinAccount),
+      publicPhone: nullableText(existingBrand?.publicPhone),
+      publicAddress: nullableText(existingBrand?.publicAddress),
       status: brandForm.status,
-      description: brandForm.businessIntro || undefined,
-      businessIntro: brandForm.businessIntro || undefined,
-      brandQualificationDescription: brandForm.brandQualificationDescription || undefined,
-      brandCaseDescription: brandForm.brandCaseDescription || undefined,
+      description: nullableText(brandForm.businessIntro),
+      businessIntro: nullableText(brandForm.businessIntro),
+      brandQualificationDescription: nullableText(brandForm.brandQualificationDescription),
+      brandCaseDescription: nullableText(brandForm.brandCaseDescription),
       forbiddenPhrases: Array.isArray(existingBrand?.forbiddenPhrases)
         ? existingBrand?.forbiddenPhrases.join('，')
-        : existingBrand?.forbiddenPhrases || undefined,
-      geoSiteCode: normalizeGeoSiteCode(existingBrand?.geoSiteCode) || undefined,
-      geoSiteStatus: normalizeGeoSiteCode(existingBrand?.geoSiteCode) ? existingBrand?.geoSiteStatus || 'active' : undefined,
-      industrySiteName: existingBrand?.industrySiteName || undefined,
-      industrySiteCode: existingBrand?.industrySiteCode || undefined,
+        : nullableText(existingBrand?.forbiddenPhrases as string | null | undefined),
+      geoSiteCode: normalizeGeoSiteCode(existingBrand?.geoSiteCode) || null,
+      geoSiteStatus: normalizeGeoSiteCode(existingBrand?.geoSiteCode) ? existingBrand?.geoSiteStatus || 'active' : null,
+      industrySiteName: nullableText(existingBrand?.industrySiteName),
+      industrySiteCode: nullableText(existingBrand?.industrySiteCode),
     }
     if (brandMode.value === 'create') {
       await createBrand(payload as any)

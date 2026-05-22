@@ -243,10 +243,17 @@ public class CompanyService {
         List<String> normalizedIndustries = normalizeIndustryTags(req.getIndustryTags(), req.getIndustry());
         company.setIndustryTags(JSONUtil.toJsonStr(normalizedIndustries));
         company.setIndustry(normalizedIndustries.get(0));
+        company.setBusinessDirection(req.getBusinessDirection());
+        company.setCompetitors(req.getCompetitors());
+        company.setOfficialWebsite(req.getOfficialWebsite());
+        company.setOfficialAccount(req.getOfficialAccount());
+        company.setVideoAccount(req.getVideoAccount());
+        company.setDouyinAccount(req.getDouyinAccount());
         applyRegionFields(company, req.getProvinceCode(), req.getProvinceName(), req.getCityCode(), req.getCityName(), req.getDistrictCode(), req.getDistrictName());
         company.setCity(StringUtils.hasText(req.getCity())
                 ? req.getCity()
                 : buildRegionDisplay(req.getProvinceName(), req.getCityName(), req.getDistrictName()));
+        company.setServiceArea(req.getServiceArea());
         company.setOwnerType(ownerType);
         company.setSourceType(sourceType);
         company.setPartnerId(partnerId);
@@ -289,10 +296,17 @@ public class CompanyService {
         List<String> normalizedIndustries = normalizeIndustryTags(req.getIndustryTags(), req.getIndustry());
         company.setIndustryTags(JSONUtil.toJsonStr(normalizedIndustries));
         company.setIndustry(normalizedIndustries.get(0));
+        company.setBusinessDirection(req.getBusinessDirection());
+        company.setCompetitors(req.getCompetitors());
+        company.setOfficialWebsite(req.getOfficialWebsite());
+        company.setOfficialAccount(req.getOfficialAccount());
+        company.setVideoAccount(req.getVideoAccount());
+        company.setDouyinAccount(req.getDouyinAccount());
         applyRegionFields(company, req.getProvinceCode(), req.getProvinceName(), req.getCityCode(), req.getCityName(), req.getDistrictCode(), req.getDistrictName());
         company.setCity(StringUtils.hasText(req.getCity())
                 ? req.getCity()
                 : buildRegionDisplay(req.getProvinceName(), req.getCityName(), req.getDistrictName()));
+        company.setServiceArea(req.getServiceArea());
         company.setOwnerType(ownerType);
         company.setSourceType(sourceType);
         company.setPartnerId(partnerId);
@@ -643,6 +657,12 @@ public class CompanyService {
         snapshot.put("contactPhone", company.getContactPhone());
         snapshot.put("industry", company.getIndustry());
         snapshot.put("industryTags", company.getIndustryTags());
+        snapshot.put("businessDirection", company.getBusinessDirection());
+        snapshot.put("competitors", company.getCompetitors());
+        snapshot.put("officialWebsite", company.getOfficialWebsite());
+        snapshot.put("officialAccount", company.getOfficialAccount());
+        snapshot.put("videoAccount", company.getVideoAccount());
+        snapshot.put("douyinAccount", company.getDouyinAccount());
         snapshot.put("ownerType", company.getOwnerType());
         snapshot.put("sourceType", company.getSourceType());
         snapshot.put("partnerId", company.getPartnerId());
@@ -653,6 +673,10 @@ public class CompanyService {
         snapshot.put("cityName", company.getCityName());
         snapshot.put("districtCode", company.getDistrictCode());
         snapshot.put("districtName", company.getDistrictName());
+        snapshot.put("serviceArea", company.getServiceArea());
+        snapshot.put("salesOwnerId", company.getSalesOwnerId());
+        snapshot.put("referralSource", company.getReferralSource());
+        snapshot.put("remark", company.getRemark());
         snapshot.put("status", company.getStatus());
         snapshot.put("sourceType", company.getSourceType());
         snapshot.put("createdBy", company.getCreatedBy());

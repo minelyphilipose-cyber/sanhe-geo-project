@@ -289,6 +289,7 @@ import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
+import { nullableText } from '@/utils/form'
 
 const route = useRoute()
 const router = useRouter()
@@ -601,12 +602,12 @@ async function submitBrand() {
     await updateBrand(brandId, {
       companyId: brand.value?.companyId,
       brandName: brandForm.brandName,
-      brandShortName: brandForm.brandShortName || undefined,
+      brandShortName: nullableText(brandForm.brandShortName),
       brandSlug: brandForm.brandSlug,
       industry: brandForm.industry,
-      mainBusiness: brandForm.mainBusiness || undefined,
-      coreProducts: brandForm.coreProducts || undefined,
-      brandPositioning: brandForm.brandPositioning || undefined,
+      mainBusiness: nullableText(brandForm.mainBusiness),
+      coreProducts: nullableText(brandForm.coreProducts),
+      brandPositioning: nullableText(brandForm.brandPositioning),
       serviceArea: region.displayName,
       provinceCode: region.provinceCode,
       provinceName: region.provinceName,
@@ -614,24 +615,24 @@ async function submitBrand() {
       cityName: region.cityName,
       districtCode: region.districtCode,
       districtName: region.districtName,
-      website: brandForm.website || undefined,
-      officialAccount: brand.value?.officialAccount || undefined,
-      videoAccount: brand.value?.videoAccount || undefined,
-      douyinAccount: brand.value?.douyinAccount || undefined,
-      phone: brandForm.phone || undefined,
-      publicPhone: brandForm.publicPhone || undefined,
-      publicAddress: brandForm.publicAddress || undefined,
-      wechat: brandForm.wechat || undefined,
+      website: nullableText(brandForm.website),
+      officialAccount: nullableText(brand.value?.officialAccount),
+      videoAccount: nullableText(brand.value?.videoAccount),
+      douyinAccount: nullableText(brand.value?.douyinAccount),
+      phone: nullableText(brandForm.phone),
+      publicPhone: nullableText(brandForm.publicPhone),
+      publicAddress: nullableText(brandForm.publicAddress),
+      wechat: nullableText(brandForm.wechat),
       status: brandForm.status,
-      description: brandForm.businessIntro || undefined,
-      businessIntro: brandForm.businessIntro || undefined,
-      brandQualificationDescription: brandForm.brandQualificationDescription || undefined,
-      brandCaseDescription: brandForm.brandCaseDescription || undefined,
-      forbiddenPhrases: brandForm.forbiddenPhrases || undefined,
-      geoSiteCode: normalizeGeoSiteCode(brandForm.geoSiteCode) || undefined,
-      geoSiteStatus: normalizeGeoSiteCode(brandForm.geoSiteCode) ? brandForm.geoSiteStatus || 'active' : undefined,
-      industrySiteName: brandForm.industrySiteName || undefined,
-      industrySiteCode: brandForm.industrySiteCode || undefined,
+      description: nullableText(brandForm.businessIntro),
+      businessIntro: nullableText(brandForm.businessIntro),
+      brandQualificationDescription: nullableText(brandForm.brandQualificationDescription),
+      brandCaseDescription: nullableText(brandForm.brandCaseDescription),
+      forbiddenPhrases: nullableText(brandForm.forbiddenPhrases),
+      geoSiteCode: normalizeGeoSiteCode(brandForm.geoSiteCode) || null,
+      geoSiteStatus: normalizeGeoSiteCode(brandForm.geoSiteCode) ? brandForm.geoSiteStatus || 'active' : null,
+      industrySiteName: nullableText(brandForm.industrySiteName),
+      industrySiteCode: nullableText(brandForm.industrySiteCode),
     })
     ElMessage.success('品牌信息已更新')
     editVisible.value = false

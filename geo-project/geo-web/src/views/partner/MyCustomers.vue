@@ -73,6 +73,7 @@ import RegionCascader from '@/components/ui/RegionCascader.vue'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
 import { useDictStore } from '@/stores/dict'
 import { useUserStore } from '@/stores/user'
+import { nullableText } from '@/utils/form'
 
 const dictStore = useDictStore()
 const userStore = useUserStore()
@@ -149,11 +150,11 @@ async function submit() {
     const regionPayload = regionPayloadFromCodes(form.regionCodes)
     const payload = {
       companyName: form.companyName,
-      contactName: form.contactName || undefined,
-      contactPhone: form.contactPhone || undefined,
-      industry: form.industry || undefined,
-      businessDirection: form.businessDirection || undefined,
-      officialWebsite: form.officialWebsite || undefined,
+      contactName: nullableText(form.contactName),
+      contactPhone: nullableText(form.contactPhone),
+      industry: nullableText(form.industry),
+      businessDirection: nullableText(form.businessDirection),
+      officialWebsite: nullableText(form.officialWebsite),
       provinceCode: regionPayload.provinceCode,
       provinceName: regionPayload.provinceName,
       cityCode: regionPayload.cityCode,
@@ -162,7 +163,7 @@ async function submit() {
       districtName: regionPayload.districtName,
       sourceType: 'partner',
       status: form.status,
-      remark: form.remark || undefined,
+      remark: nullableText(form.remark),
     }
     if (formMode.value === 'create') {
       await createCompany(payload)

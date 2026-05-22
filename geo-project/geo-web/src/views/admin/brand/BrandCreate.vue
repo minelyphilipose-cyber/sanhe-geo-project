@@ -226,6 +226,7 @@ import type { BrandMaterial, BrandProfileVersion, PublishSite } from '@/types'
 import { regionPayloadFromCodes } from '@/constants/region'
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist'
 import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.mjs?url'
+import { nullableText } from '@/utils/form'
 
 GlobalWorkerOptions.workerSrc = pdfWorkerSrc
 
@@ -451,34 +452,34 @@ async function submitBrand() {
     const serviceArea = regionPayloadFromCodes(form.serviceAreaCodes).displayName
     const commonPayload = {
       brandName: form.brandName,
-      brandShortName: form.brandShortName || undefined,
+      brandShortName: nullableText(form.brandShortName),
       status: form.status,
       industry: form.industry,
-      mainBusiness: form.mainBusiness || undefined,
-      coreProducts: form.coreProducts || undefined,
-      brandPositioning: form.brandPositioning || undefined,
-      businessIntro: form.businessIntro || undefined,
-      serviceArea: serviceArea || undefined,
+      mainBusiness: nullableText(form.mainBusiness),
+      coreProducts: nullableText(form.coreProducts),
+      brandPositioning: nullableText(form.brandPositioning),
+      businessIntro: nullableText(form.businessIntro),
+      serviceArea: nullableText(serviceArea),
       provinceCode: region.provinceCode,
       provinceName: region.provinceName,
       cityCode: region.cityCode,
       cityName: region.cityName,
       districtCode: region.districtCode,
       districtName: region.districtName,
-      phone: form.phone || undefined,
-      publicPhone: form.publicPhone || undefined,
-      publicAddress: form.publicAddress || undefined,
-      wechat: form.wechat || undefined,
-      website: form.website || undefined,
-      geoSiteCode: normalizeGeoSiteCode(form.geoSiteCode) || undefined,
-      geoSiteStatus: normalizeGeoSiteCode(form.geoSiteCode) ? form.geoSiteStatus || 'active' : undefined,
-      industrySiteName: form.industrySiteName || undefined,
-      industrySiteCode: form.industrySiteCode || undefined,
-      brandQualificationDescription: form.brandQualificationDescription || undefined,
-      brandCaseDescription: form.brandCaseDescription || undefined,
-      description: form.businessIntro || undefined,
-      forbiddenPhrases: form.forbiddenPhrases || undefined,
-      versionChangeReason: form.versionChangeReason || undefined,
+      phone: nullableText(form.phone),
+      publicPhone: nullableText(form.publicPhone),
+      publicAddress: nullableText(form.publicAddress),
+      wechat: nullableText(form.wechat),
+      website: nullableText(form.website),
+      geoSiteCode: normalizeGeoSiteCode(form.geoSiteCode) || null,
+      geoSiteStatus: normalizeGeoSiteCode(form.geoSiteCode) ? form.geoSiteStatus || 'active' : null,
+      industrySiteName: nullableText(form.industrySiteName),
+      industrySiteCode: nullableText(form.industrySiteCode),
+      brandQualificationDescription: nullableText(form.brandQualificationDescription),
+      brandCaseDescription: nullableText(form.brandCaseDescription),
+      description: nullableText(form.businessIntro),
+      forbiddenPhrases: nullableText(form.forbiddenPhrases),
+      versionChangeReason: nullableText(form.versionChangeReason),
     }
 
     if (!createdBrandId.value) {

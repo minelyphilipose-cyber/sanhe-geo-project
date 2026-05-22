@@ -353,6 +353,7 @@ import {
 } from '@/api/project'
 import type { KeywordGroup, KeywordGroupQuestion, PageResult, Project, ProjectChannelAllocationItem } from '@/types'
 import { regionDisplayFromPayload } from '@/constants/region'
+import { nullableText } from '@/utils/form'
 
 const route = useRoute()
 const router = useRouter()
@@ -586,7 +587,7 @@ function projectUpdatePayload(current: Project) {
     districtCode: current.districtCode,
     districtName: current.districtName,
     projectName: current.projectName,
-    projectAliases: current.projectAliases || undefined,
+    projectAliases: nullableText(current.projectAliases),
     companyId: current.companyId,
     brandId: current.brandId,
     keywordGroupIds: current.selectedKeywordGroupIds || [],
@@ -596,16 +597,16 @@ function projectUpdatePayload(current: Project) {
     allocationVersion: allocationVersion.value ?? current.allocationVersion,
     channelAllocations: allocationRows,
     deliveryMode: current.deliveryMode || 'managed',
-    primaryGoal: current.primaryGoal || undefined,
+    primaryGoal: nullableText(current.primaryGoal),
     customerRequirements: current.customerRequirements || [],
     targetRegions: parseStringArray(current.targetRegions),
-    targetAudience: current.targetAudience || undefined,
-    customStatement: current.customStatement || undefined,
-    contentTone: current.contentTone || undefined,
+    targetAudience: nullableText(current.targetAudience),
+    customStatement: nullableText(current.customStatement),
+    contentTone: nullableText(current.contentTone),
     preferredAngles: parseStringArray(current.preferredAngles),
     extraForbiddenPhrases: parseStringArray(current.extraForbiddenPhrases),
-    contentNote: current.contentNote || undefined,
-    remark: current.remark || undefined,
+    contentNote: nullableText(current.contentNote),
+    remark: nullableText(current.remark),
   }
 }
 
