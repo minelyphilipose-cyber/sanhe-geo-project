@@ -17,6 +17,7 @@ import com.huanjing.geo.module.dispatch.entity.PollDailyStat;
 import com.huanjing.geo.module.dispatch.entity.PollResult;
 import com.huanjing.geo.module.dispatch.mapper.PollDailyStatMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
+import com.huanjing.geo.module.project.service.KeywordGroupService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -45,6 +46,7 @@ public class ProjectDashboardSnapshotService {
     private final ArticleBatchMapper articleBatchMapper;
     private final ArticleDraftMapper articleDraftMapper;
     private final DistributionTaskMapper distributionTaskMapper;
+    private final KeywordGroupService keywordGroupService;
     private final StringRedisTemplate stringRedisTemplate;
     private final TransactionTemplate transactionTemplate;
 
@@ -92,12 +94,15 @@ public class ProjectDashboardSnapshotService {
     public void refreshProject(Long projectId) {
         LocalDateTime refreshedAt = LocalDateTime.now();
         snapshotMapper.delete(new LambdaQueryWrapper<ProjectDashboardSnapshot>()
-                .eq(ProjectDashboardSnapshot::getProjectId, projectId));
+                .eq(ProjectDashboardSnapshot::getProjectId, projectId)
+                .ne(ProjectDashboardSnapshot::getSnapshotType, "period_summary"));
 
         List<ProjectDashboardSnapshot> snapshots = new ArrayList<>();
         snapshots.add(buildSummarySnapshot(projectId, refreshedAt));
         snapshots.addAll(buildPlatformSnapshots(projectId, refreshedAt));
-        snapshots.addAll(buildDailyTrendSnapshots(projectId, refreshedAt));
+        List<ProjectDashboardSnapshot> dailyTrendSnapshots = buildDailyTrendSnapshots(projectId, refreshedAt);
+        snapshots.addAll(dailyTrendSnapshots);
+        snapshots.addAll(buildPeriodSummarySnapshots(projectId, dailyTrendSnapshots, refreshedAt));
         snapshots.addAll(buildDailyPlatformSnapshots(projectId, refreshedAt));
         snapshots.addAll(buildWordFreqSnapshots(projectId, refreshedAt));
         snapshots.add(buildContentProgressSnapshot(projectId, refreshedAt));
@@ -246,6 +251,63 @@ public class ProjectDashboardSnapshotService {
         return merged.entrySet().stream()
                 .map(entry -> createSnapshot(projectId, "daily_trend", null, JSONUtil.toJsonStr(entry.getValue()), entry.getKey(), refreshedAt))
                 .toList();
+    }
+
+    private List<ProjectDashboardSnapshot> buildPeriodSummarySnapshots(Long projectId,
+                                                                       List<ProjectDashboardSnapshot> dailyTrendSnapshots,
+                                                                       LocalDateTime refreshedAt) {
+        if (dailyTrendSnapshots == null || dailyTrendSnapshots.isEmpty()) {
+            return List.of();
+        }
+        List<Integer> periods = List.of(7, 30, 90);
+        return periods.stream()
+                .map(days -> {
+                    LocalDate startDate = LocalDate.now().minusDays(days - 1L);
+                    Map<String, Object> payload = aggregatePeriodSummary(dailyTrendSnapshots, startDate);
+                    payload.put("days", days);
+                    payload.put("periodStart", startDate);
+                    payload.put("periodEnd", LocalDate.now());
+                    payload.put("monitorQuestionCount", keywordGroupService.countSelectedSavedKeywords(projectId));
+                    return createSnapshot(projectId, "period_summary", "days:" + days, JSONUtil.toJsonStr(payload), LocalDate.now(), refreshedAt);
+                })
+                .toList();
+    }
+
+    private Map<String, Object> aggregatePeriodSummary(List<ProjectDashboardSnapshot> dailyTrendSnapshots, LocalDate startDate) {
+        long hitTotal = 0L;
+        long contactTotal = 0L;
+        long siteTotal = 0L;
+        long articleCreated = 0L;
+        long articlePublished = 0L;
+        Set<String> platformCodes = new LinkedHashSet<>();
+        for (ProjectDashboardSnapshot snapshot : dailyTrendSnapshots) {
+            if (snapshot.getSnapshotDate() == null || snapshot.getSnapshotDate().isBefore(startDate)) {
+                continue;
+            }
+            Map<String, Object> value = parseObject(snapshot.getSnapshotValue());
+            hitTotal += longValue(value.get("hitCount"));
+            contactTotal += longValue(value.get("contactCount"));
+            siteTotal += longValue(value.get("siteCount"));
+            articleCreated += longValue(value.get("articleCreated"));
+            articlePublished += longValue(value.get("articlePublished"));
+            Object codes = value.get("hitPlatformCodes");
+            if (codes instanceof Collection<?> collection) {
+                for (Object code : collection) {
+                    String platformCode = stringValue(code).trim();
+                    if (!platformCode.isEmpty()) {
+                        platformCodes.add(platformCode);
+                    }
+                }
+            }
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("hitTotal", hitTotal);
+        payload.put("platformCount", platformCodes.size());
+        payload.put("contactTotal", contactTotal);
+        payload.put("siteTotal", siteTotal);
+        payload.put("articleCreated", articleCreated);
+        payload.put("articlePublished", articlePublished);
+        return payload;
     }
 
     private List<ProjectDashboardSnapshot> buildDailyPlatformSnapshots(Long projectId, LocalDateTime refreshedAt) {
@@ -445,5 +507,17 @@ public class ProjectDashboardSnapshotService {
             return null;
         }
         return LocalDate.parse(String.valueOf(value));
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseObject(String json) {
+        if (json == null || json.isBlank()) {
+            return new LinkedHashMap<>();
+        }
+        Object parsed = JSONUtil.parse(json);
+        if (parsed instanceof Map<?, ?> map) {
+            return new LinkedHashMap<>((Map<String, Object>) map);
+        }
+        return new LinkedHashMap<>();
     }
 }

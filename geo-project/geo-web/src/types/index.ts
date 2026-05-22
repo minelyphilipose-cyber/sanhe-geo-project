@@ -392,6 +392,7 @@ export interface AIPlatformConfigItem {
   id: number
   platformCode: string
   platformName: string
+  platformHomeUrl?: string | null
   priorityLevel: 'P0' | 'P1' | 'P2'
   apiKey: string
   primaryKeyRef?: string | null
@@ -462,6 +463,27 @@ export interface ProjectDashboardSummary {
   platformCount: number
   contactTotal: number
   siteTotal: number
+}
+
+export interface ProjectDashboardComparisonMetric {
+  current: number
+  previous: number
+  delta: number
+  rate?: number | null
+}
+
+export interface ProjectDashboardComparison {
+  available: boolean
+  message?: string
+  currentRefreshedAt?: string | null
+  previousRefreshedAt?: string | null
+  hitTotal?: ProjectDashboardComparisonMetric
+  contactTotal?: ProjectDashboardComparisonMetric
+  siteTotal?: ProjectDashboardComparisonMetric
+  platformCount?: ProjectDashboardComparisonMetric
+  monitorQuestionCount?: ProjectDashboardComparisonMetric
+  articleCreated?: ProjectDashboardComparisonMetric
+  articlePublished?: ProjectDashboardComparisonMetric
 }
 
 export interface ProjectDashboardPlatformItem {
@@ -536,6 +558,7 @@ export interface ProjectDashboardSummaryResponse {
   monitorQuestionCount?: number
   days?: number
   summary: ProjectDashboardSummary
+  comparison?: ProjectDashboardComparison
   platforms: ProjectDashboardPlatformItem[]
   wordCloud: ProjectDashboardWordItem[]
   contentProgress?: ProjectDashboardContentProgress

@@ -292,6 +292,7 @@ public class AiPlatformConfigService {
     private void fillEntity(AiPlatformConfig entity, AiPlatformConfigCreateRequest req) {
         entity.setPlatformCode(req.getPlatformCode().trim());
         entity.setPlatformName(req.getPlatformName().trim());
+        entity.setPlatformHomeUrl(StringUtils.hasText(req.getPlatformHomeUrl()) ? req.getPlatformHomeUrl().trim() : null);
         entity.setPriorityLevel(req.getPriorityLevel().trim());
         entity.setRpmLimit(req.getRpmLimit() != null ? req.getRpmLimit() : 60);
         entity.setTpmLimit(req.getTpmLimit() != null ? req.getTpmLimit() : 60000);
@@ -324,6 +325,7 @@ public class AiPlatformConfigService {
     private void fillEntity(AiPlatformConfig entity, AiPlatformConfigUpdateRequest req) {
         entity.setPlatformCode(req.getPlatformCode().trim());
         entity.setPlatformName(req.getPlatformName().trim());
+        entity.setPlatformHomeUrl(StringUtils.hasText(req.getPlatformHomeUrl()) ? req.getPlatformHomeUrl().trim() : null);
         entity.setPriorityLevel(req.getPriorityLevel().trim());
         entity.setRpmLimit(req.getRpmLimit() != null ? req.getRpmLimit() : entity.getRpmLimit());
         entity.setTpmLimit(req.getTpmLimit() != null ? req.getTpmLimit() : entity.getTpmLimit());
@@ -356,6 +358,7 @@ public class AiPlatformConfigService {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("platformCode", entity.getPlatformCode());
         snapshot.put("platformName", entity.getPlatformName());
+        snapshot.put("platformHomeUrl", entity.getPlatformHomeUrl());
         snapshot.put("priorityLevel", entity.getPriorityLevel());
         snapshot.put("rpmLimit", entity.getRpmLimit());
         snapshot.put("tpmLimit", entity.getTpmLimit());

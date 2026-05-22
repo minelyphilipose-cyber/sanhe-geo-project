@@ -190,6 +190,9 @@
                 />
               </el-select>
             </el-form-item>
+            <el-form-item label="平台地址" prop="platformHomeUrl">
+              <el-input v-model="form.platformHomeUrl" placeholder="如: https://www.doubao.com/" />
+            </el-form-item>
           </div>
         </section>
 
@@ -504,6 +507,7 @@ const editingId = ref<number | null>(null)
 const form = reactive({
   platformCode: '',
   platformName: '',
+  platformHomeUrl: '',
   priorityLevel: 'P1',
   apiKey: '',
   primaryKeyRef: '',
@@ -574,6 +578,7 @@ watch(
 function resetForm() {
   form.platformCode = ''
   form.platformName = ''
+  form.platformHomeUrl = ''
   form.priorityLevel = 'P1'
   form.apiKey = ''
   form.primaryKeyRef = ''
@@ -649,6 +654,7 @@ function openEdit(row: AIPlatformConfigItem) {
   editingId.value = row.id
   form.platformCode = row.platformCode
   form.platformName = row.platformName
+  form.platformHomeUrl = row.platformHomeUrl || ''
   form.priorityLevel = row.priorityLevel
   form.apiKey = row.apiKey
   form.primaryKeyRef = row.primaryKeyRef || ''
@@ -685,6 +691,7 @@ async function submit() {
     const payload = {
       platformCode: form.platformCode.trim(),
       platformName: form.platformName.trim(),
+      platformHomeUrl: form.platformHomeUrl.trim() || undefined,
       priorityLevel: form.priorityLevel,
       apiKey: form.apiKey.trim(),
       primaryKeyRef: form.primaryKeyRef.trim() || undefined,

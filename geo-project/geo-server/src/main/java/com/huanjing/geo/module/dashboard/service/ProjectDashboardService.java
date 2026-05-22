@@ -19,10 +19,8 @@ import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.project.service.KeywordGroupService;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
-import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
-import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,7 +50,6 @@ public class ProjectDashboardService {
     private final KeywordGroupService keywordGroupService;
     private final PollResultMapper pollResultMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
-    private final SysDictItemMapper sysDictItemMapper;
     private final CurrentUserService currentUserService;
     private final ProjectDashboardSnapshotService snapshotService;
 
@@ -158,6 +155,7 @@ public class ProjectDashboardService {
         payload.put("monitorQuestionCount", countMonitorQuestions(project.getId()));
         payload.put("days", safeDays);
         payload.put("summary", readSummary(project.getId(), safeDays));
+        payload.put("comparison", readPeriodComparison(project.getId(), safeDays));
         payload.put("platforms", readPlatformSnapshots(project.getId(), safeDays));
         payload.put("wordCloud", readWordCloud(project.getId()));
         payload.put("contentProgress", readContentProgress(project.getId()));
@@ -318,6 +316,50 @@ public class ProjectDashboardService {
         payload.put("platformCount", platformCodes.size());
         payload.put("contactTotal", contactTotal);
         payload.put("siteTotal", siteTotal);
+        return payload;
+    }
+
+    private Map<String, Object> readPeriodComparison(Long projectId, int days) {
+        List<ProjectDashboardSnapshot> snapshots = snapshotMapper.selectList(
+                new LambdaQueryWrapper<ProjectDashboardSnapshot>()
+                        .eq(ProjectDashboardSnapshot::getProjectId, projectId)
+                        .eq(ProjectDashboardSnapshot::getSnapshotType, "period_summary")
+                        .eq(ProjectDashboardSnapshot::getSnapshotKey, "days:" + days)
+                        .orderByDesc(ProjectDashboardSnapshot::getRefreshedAt)
+                        .orderByDesc(ProjectDashboardSnapshot::getId)
+                        .last("LIMIT 2")
+        );
+        if (snapshots.size() < 2) {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("available", false);
+            payload.put("message", "暂无上一周期快照");
+            return payload;
+        }
+        Map<String, Object> current = parseObject(snapshots.get(0).getSnapshotValue());
+        Map<String, Object> previous = parseObject(snapshots.get(1).getSnapshotValue());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("available", true);
+        payload.put("currentRefreshedAt", snapshots.get(0).getRefreshedAt());
+        payload.put("previousRefreshedAt", snapshots.get(1).getRefreshedAt());
+        payload.put("hitTotal", compareMetric(current, previous, "hitTotal"));
+        payload.put("contactTotal", compareMetric(current, previous, "contactTotal"));
+        payload.put("siteTotal", compareMetric(current, previous, "siteTotal"));
+        payload.put("platformCount", compareMetric(current, previous, "platformCount"));
+        payload.put("monitorQuestionCount", compareMetric(current, previous, "monitorQuestionCount"));
+        payload.put("articleCreated", compareMetric(current, previous, "articleCreated"));
+        payload.put("articlePublished", compareMetric(current, previous, "articlePublished"));
+        return payload;
+    }
+
+    private Map<String, Object> compareMetric(Map<String, Object> current, Map<String, Object> previous, String key) {
+        long currentValue = longValue(current.get(key));
+        long previousValue = longValue(previous.get(key));
+        long delta = currentValue - previousValue;
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("current", currentValue);
+        payload.put("previous", previousValue);
+        payload.put("delta", delta);
+        payload.put("rate", previousValue == 0L ? null : delta * 100.0 / previousValue);
         return payload;
     }
 
@@ -635,13 +677,13 @@ public class ProjectDashboardService {
         if (platformCodes.isEmpty()) {
             return Map.of();
         }
-        return sysDictItemMapper.selectList(
-                new LambdaQueryWrapper<SysDictItem>()
-                        .eq(SysDictItem::getDictType, "dashboard_platform_jump_url")
-                        .eq(SysDictItem::getEnabled, true)
-                        .in(SysDictItem::getDictKey, platformCodes)
-                        .select(SysDictItem::getDictKey, SysDictItem::getDictValue)
-        ).stream().collect(Collectors.toMap(SysDictItem::getDictKey, SysDictItem::getDictValue, (a, b) -> a));
+        return aiPlatformConfigMapper.selectList(
+                new LambdaQueryWrapper<AiPlatformConfig>()
+                        .in(AiPlatformConfig::getPlatformCode, platformCodes)
+                        .isNotNull(AiPlatformConfig::getPlatformHomeUrl)
+                        .ne(AiPlatformConfig::getPlatformHomeUrl, "")
+                        .select(AiPlatformConfig::getPlatformCode, AiPlatformConfig::getPlatformHomeUrl)
+        ).stream().collect(Collectors.toMap(AiPlatformConfig::getPlatformCode, AiPlatformConfig::getPlatformHomeUrl, (a, b) -> a));
     }
 
     private long longValue(Object value) {

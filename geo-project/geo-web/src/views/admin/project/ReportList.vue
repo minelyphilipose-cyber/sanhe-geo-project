@@ -47,7 +47,7 @@
               <h2>大模型收录</h2>
               <span>收录来源分布</span>
             </div>
-            <strong>10 个</strong>
+            <strong>{{ indexingSources.length }} 个</strong>
           </div>
 
           <div class="signal-list">
@@ -65,7 +65,7 @@
 
           <footer>
             <span>收录小计</span>
-            <strong>60.99万</strong>
+            <strong>{{ indexedSubtotal }}</strong>
           </footer>
         </aside>
 
@@ -116,7 +116,7 @@
                 <circle cx="70" cy="70" r="42" fill="none" stroke="url(#dashboardCoreArcB)" stroke-width="1.4" stroke-dasharray="58 206" stroke-linecap="round" />
               </svg>
               <span>TOTAL</span>
-              <strong>60.99万</strong>
+              <strong>{{ indexedSubtotal }}</strong>
               <em>已收录信号</em>
             </div>
           </div>
@@ -162,7 +162,7 @@
                 </em>
               </div>
               <div class="ai-exposure-metric">
-                <strong>{{ formatInt(item.value) }}</strong>
+                <strong>{{ item.value }}</strong>
                 <span>{{ item.percent }}%</span>
               </div>
               <div class="ai-exposure-track">
@@ -173,7 +173,7 @@
 
           <footer class="ai-exposure-total">
             <span>曝光总量</span>
-            <strong>{{ formatInt(aiExposureTotal) }}</strong>
+            <strong>{{ aiExposureTotal }}</strong>
           </footer>
         </aside>
       </div>
@@ -216,7 +216,7 @@
         <div class="keyword-footer">
           <span><i></i>前三核心词</span>
           <span><i class="purple"></i>高频词</span>
-          <strong>关键词总数 328</strong>
+          <strong>关键词总数 {{ monitoredQuestionTotal }}</strong>
         </div>
       </article>
 
@@ -233,19 +233,19 @@
             <span class="dot blue"></span>
             <div>
               <small>近30日创作总量</small>
-              <strong>487 <em>条</em></strong>
+              <strong>{{ trendArticleCreatedTotal }} <em>条</em></strong>
             </div>
           </article>
           <article>
             <span class="dot purple"></span>
             <div>
               <small>近30日发布总量</small>
-              <strong>462 <em>条</em></strong>
+              <strong>{{ trendArticlePublishedTotal }} <em>条</em></strong>
             </div>
           </article>
           <article>
             <small>发布率</small>
-            <strong>94.8<em>%</em></strong>
+            <strong>{{ publishRate }}<em>{{ publishRate === '-' ? '' : '%' }}</em></strong>
           </article>
         </div>
         <div class="line-chart" aria-label="文章创作与发布趋势">
@@ -334,17 +334,16 @@
             <span>结束时间</span>
             <input v-model="dateRange.end" type="date" />
           </label>
-          <button type="button" class="primary-button">查询</button>
+          <button type="button" class="primary-button" @click="searchDetails">查询</button>
         </div>
       </div>
 
       <div class="table-toolbar">
         <div>
           <h2>智能问答命中明细</h2>
-          <span>当前展示 {{ displayedRows.length }} / {{ filteredRows.length }} 条命中记录。</span>
+          <span>当前展示 {{ displayedRows.length }} / {{ detailTotal }} 条命中记录。</span>
         </div>
         <div class="toolbar-actions">
-          <button type="button" class="ghost-button">导出</button>
           <button type="button" class="primary-button" @click="copyDashboardUrl">复制看板链接</button>
         </div>
       </div>
@@ -391,7 +390,10 @@
                 </span>
               </td>
               <td class="mono muted">{{ row.time }}</td>
-              <td><button type="button" class="link-button">转到平台 →</button></td>
+              <td>
+                <a v-if="row.platformUrl" class="link-button" :href="row.platformUrl" target="_blank" rel="noopener noreferrer">转到平台 →</a>
+                <button v-else type="button" class="link-button" @click="platformUrlPending">转到平台 →</button>
+              </td>
             </tr>
             <tr v-if="filteredRows.length === 0">
               <td class="empty-table-cell" colspan="7">暂无匹配的命中记录</td>
@@ -401,7 +403,7 @@
       </div>
 
       <footer class="table-footer">
-        <span>共 <strong>{{ filteredRows.length }}</strong> 条数据 · 每页展示 {{ pageSize }} 条</span>
+        <span>共 <strong>{{ detailTotal }}</strong> 条数据 · 每页展示 {{ pageSize }} 条</span>
         <div v-if="totalPages > 1" class="pager">
           <button type="button" :disabled="currentPage === 1" @click="changePage(currentPage - 1)">‹</button>
           <button
@@ -426,8 +428,24 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getActiveCompanyPackageBinding } from '@/api/customer'
+import {
+  createProjectDashboardShare,
+  getProjectDashboardShares,
+  getPublicProjectDashboardDetails,
+  getPublicProjectDashboardSummary,
+  getPublicProjectDashboardTrend,
+} from '@/api/projectDashboard'
 import { getKeywordGroupPage, getKeywordGroupQuestions, getProjectDetail } from '@/api/project'
-import type { CompanyPackageBinding, KeywordGroup, KeywordGroupQuestion, Project } from '@/types'
+import type {
+  CompanyPackageBinding,
+  KeywordGroup,
+  KeywordGroupQuestion,
+  Project,
+  ProjectDashboardDetailItem,
+  ProjectDashboardShare,
+  ProjectDashboardSummaryResponse,
+  ProjectDashboardTrendItem,
+} from '@/types'
 import ai360Logo from '@/assets/ai-model-logos/ai360-color.png'
 import deepseekLogo from '@/assets/ai-model-logos/deepseek-color.png'
 import doubaoLogo from '@/assets/ai-model-logos/doubao.png'
@@ -458,6 +476,8 @@ interface ReportRow {
   question: string
   type: string
   platform: string
+  platformCode: string
+  platformUrl?: string | null
   status: string
   time: string
   timeValue: number
@@ -478,7 +498,7 @@ interface AiExposurePlatform {
   name: string
   enName: string
   short: string
-  value: number
+  value: string
   percent: number
   trend: string
   trendType: TrendType
@@ -514,7 +534,11 @@ const router = useRouter()
 const projectId = computed(() => Number(route.params.id) || 10086)
 const project = ref<Project | null>(null)
 const activePackageBinding = ref<CompanyPackageBinding | null>(null)
-const refreshedAt = ref(new Date())
+const refreshedAt = ref<string | Date | null>(null)
+const activeShare = ref<ProjectDashboardShare | null>(null)
+const dashboardSummary = ref<ProjectDashboardSummaryResponse | null>(null)
+const dashboardTrend = ref<ProjectDashboardTrendItem[]>([])
+const detailTotal = ref(0)
 
 const activeTab = ref('全部')
 const searchKeyword = ref('')
@@ -522,11 +546,11 @@ const selectedPlatforms = ref(['全部'])
 const currentPage = ref(1)
 const pageSize = 5
 const dateRange = reactive({
-  start: '2026-01-01',
-  end: '2026-01-31',
+  start: '',
+  end: '',
 })
 
-const reportTabs = ['全部', '搜索报表', '问答报表', '品牌报表']
+const reportTabs = ['全部', '命中明细', '待接入数据源']
 
 function padTime(value: number) {
   return `${value}`.padStart(2, '0')
@@ -590,8 +614,18 @@ function formatHourMinute(value?: string | Date | null) {
   return `${padTime(date.getHours())}:${padTime(date.getMinutes())}`
 }
 
-function formatInt(value: number) {
-  return Math.round(value).toLocaleString('zh-CN')
+function formatInt(value?: number | null) {
+  return Math.round(Number(value || 0)).toLocaleString('zh-CN')
+}
+
+function formatCompactNumber(value?: number | null) {
+  const num = Number(value || 0)
+  if (num >= 10000) return `${(num / 10000).toFixed(num >= 100000 ? 1 : 2).replace(/\.0+$/, '')}万`
+  return formatInt(num)
+}
+
+function normalizePlatformKey(value?: string | null) {
+  return String(value || '').trim().toLowerCase()
 }
 
 const projectName = computed(() => project.value?.projectName || `项目 ${projectId.value}`)
@@ -610,129 +644,185 @@ const refreshDateTime = computed(() => formatDateTime(refreshedAt.value))
 const syncTime = computed(() => formatHourMinute(refreshedAt.value))
 
 const platformLogoMap: Record<string, string> = {
+  deepseek: deepseekLogo,
   DeepSeek: deepseekLogo,
   'DeepSeek PC': deepseekLogo,
+  doubao: doubaoLogo,
   豆包: doubaoLogo,
+  ernie: wenxinLogo,
   文心一言: wenxinLogo,
+  hunyuan: hunyuanLogo,
   腾讯元宝: hunyuanLogo,
   元宝: hunyuanLogo,
+  qwen: qwenLogo,
   通义千问: qwenLogo,
+  zhipu: glmLogo,
   智谱清言: glmLogo,
+  '360_brain': ai360Logo,
   '360 智脑': ai360Logo,
   MiniMax: minimaxLogo,
   '小米 Mimo': xiaomiMimoLogo,
+  kimi: kimiLogo,
   Kimi: kimiLogo,
+  spark: hailuoLogo,
   讯飞星火: hailuoLogo,
 }
 
-const indexingSources: IndexingSource[] = [
-  { name: 'DeepSeek', short: 'D', logo: deepseekLogo, value: '11.27万', percent: 100, color: '#2f6bff', bg: '#eef4ff', gradient: 'linear-gradient(90deg, #4f6bff, #2f4ecf)' },
-  { name: '豆包', short: '豆', logo: doubaoLogo, value: '11.12万', percent: 98.7, color: '#7b61ff', bg: '#f0edff', gradient: 'linear-gradient(90deg, #7b61ff, #5b4bd6)' },
-  { name: '文心一言', short: '文', logo: wenxinLogo, value: '9.68万', percent: 85.9, color: '#2563eb', bg: '#eff6ff', gradient: 'linear-gradient(90deg, #60a5fa, #2563eb)' },
-  { name: '腾讯元宝', short: '元', logo: hunyuanLogo, value: '8.35万', percent: 74.1, color: '#0891b2', bg: '#ecfeff', gradient: 'linear-gradient(90deg, #22d3ee, #0891b2)' },
-  { name: '通义千问', short: '通', logo: qwenLogo, value: '7.24万', percent: 64.2, color: '#4f46e5', bg: '#eef2ff', gradient: 'linear-gradient(90deg, #818cf8, #4f46e5)' },
-  { name: '智谱清言', short: '智', logo: glmLogo, value: '5.16万', percent: 45.8, color: '#0f766e', bg: '#f0fdfa', gradient: 'linear-gradient(90deg, #4dd4ac, #0f766e)' },
-  { name: '360 智脑', short: '360', logo: ai360Logo, value: '4.52万', percent: 40.1, color: '#16a34a', bg: '#f0fdf4', gradient: 'linear-gradient(90deg, #86efac, #16a34a)' },
-  { name: 'MiniMax', short: 'M', logo: minimaxLogo, value: '1.86万', percent: 16.5, color: '#d97706', bg: '#fff7ed', gradient: 'linear-gradient(90deg, #fbbf24, #d97706)' },
-  { name: '小米 Mimo', short: '米', logo: xiaomiMimoLogo, value: '1.40万', percent: 12.4, color: '#c77640', bg: '#fff7ed', gradient: 'linear-gradient(90deg, #e8985c, #c77640)' },
-  { name: 'Kimi', short: 'K', logo: kimiLogo, value: '0.39万', percent: 3.5, color: '#1f2937', bg: '#f3f4f6', gradient: 'linear-gradient(90deg, #6b7280, #111827)' },
+function platformLogo(code?: string | null, name?: string | null) {
+  return platformLogoMap[normalizePlatformKey(code)] || platformLogoMap[String(name || '')] || deepseekLogo
+}
+
+const indexingSources = computed<IndexingSource[]>(() => {
+  const platforms = dashboardSummary.value?.platforms || []
+  const maxHit = Math.max(...platforms.map((item) => item.hitCount || 0), 1)
+  return platforms.slice(0, 10).map((item, index) => ({
+    name: item.platformName || item.platformCode,
+    short: (item.platformName || item.platformCode || '平').slice(0, 2),
+    logo: platformLogo(item.platformCode, item.platformName),
+    value: formatCompactNumber(item.hitCount),
+    percent: Math.round(((item.hitCount || 0) / maxHit) * 1000) / 10,
+    color: sourceColors[index % sourceColors.length].color,
+    bg: sourceColors[index % sourceColors.length].bg,
+    gradient: sourceColors[index % sourceColors.length].gradient,
+  }))
+})
+
+const sourceColors = [
+  { color: '#2f6bff', bg: '#eef4ff', gradient: 'linear-gradient(90deg, #4f6bff, #2f4ecf)' },
+  { color: '#7b61ff', bg: '#f0edff', gradient: 'linear-gradient(90deg, #7b61ff, #5b4bd6)' },
+  { color: '#2563eb', bg: '#eff6ff', gradient: 'linear-gradient(90deg, #60a5fa, #2563eb)' },
+  { color: '#0891b2', bg: '#ecfeff', gradient: 'linear-gradient(90deg, #22d3ee, #0891b2)' },
+  { color: '#4f46e5', bg: '#eef2ff', gradient: 'linear-gradient(90deg, #818cf8, #4f46e5)' },
+  { color: '#0f766e', bg: '#f0fdfa', gradient: 'linear-gradient(90deg, #4dd4ac, #0f766e)' },
+  { color: '#16a34a', bg: '#f0fdf4', gradient: 'linear-gradient(90deg, #86efac, #16a34a)' },
+  { color: '#d97706', bg: '#fff7ed', gradient: 'linear-gradient(90deg, #fbbf24, #d97706)' },
+  { color: '#c77640', bg: '#fff7ed', gradient: 'linear-gradient(90deg, #e8985c, #c77640)' },
+  { color: '#1f2937', bg: '#f3f4f6', gradient: 'linear-gradient(90deg, #6b7280, #111827)' },
 ]
 
-const lissajousPlatforms = [
-  { name: 'DeepSeek', logo: deepseekLogo, value: '11.27万', big: true },
-  { name: '豆包', logo: doubaoLogo, value: '11.12万', big: true },
-  { name: '文心一言', logo: wenxinLogo, value: '9.68万', big: true },
-  { name: '元宝', logo: hunyuanLogo, value: '8.35万', big: true },
-  { name: '通义千问', logo: qwenLogo, value: '7.24万', big: true },
-  { name: '智谱清言', logo: glmLogo, value: '5.16万', big: false },
-  { name: '360 智脑', logo: ai360Logo, value: '4.52万', big: false },
-  { name: 'MiniMax', logo: minimaxLogo, value: '1.86万', big: false },
-  { name: '小米 Mimo', logo: xiaomiMimoLogo, value: '1.40万', big: false },
-  { name: 'Kimi', logo: kimiLogo, value: '0.39万', big: false },
-]
+const lissajousPlatforms = computed(() => indexingSources.value.map((source, index) => ({
+  name: source.name,
+  logo: source.logo,
+  value: source.value,
+  big: index < 5,
+})))
 
 const aiExposurePlatforms: AiExposurePlatform[] = [
   {
-    name: '抖音AI',
-    enName: 'Douyin AI',
-    short: '抖',
-    value: 52281,
-    percent: 44.8,
-    trend: '4.2%',
+    name: '站外 AI 搜索曝光',
+    enName: 'WAITING SOURCE',
+    short: '待',
+    value: '待接入数据源',
+    percent: 0,
+    trend: '待接入',
     trendType: 'up',
     iconBg: '#111827',
     iconColor: '#ffffff',
     highlighted: true,
   },
   {
-    name: '百度AI',
-    enName: 'Baidu AI',
-    short: '百',
-    value: 48356,
-    percent: 41.5,
-    trend: '2.1%',
+    name: '搜索入口曝光',
+    enName: 'WAITING SOURCE',
+    short: '待',
+    value: '待接入数据源',
+    percent: 0,
+    trend: '待接入',
     trendType: 'up',
     iconBg: 'linear-gradient(135deg, #2932e1, #1b22a0)',
     iconColor: '#ffffff',
   },
   {
-    name: '夸克AI',
-    enName: 'Quark AI',
-    short: '夸',
-    value: 15946,
-    percent: 13.7,
-    trend: '1.5%',
+    name: '渠道搜索曝光',
+    enName: 'WAITING SOURCE',
+    short: '待',
+    value: '待接入数据源',
+    percent: 0,
+    trend: '待接入',
     trendType: 'up',
     iconBg: 'linear-gradient(135deg, #4f6bff, #7b61ff)',
     iconColor: '#ffffff',
   },
 ]
 
-const engineFlowItems: EngineFlowItem[] = [
-  { label: '收录分析', value: '610K', tone: 'blue' },
-  { label: '信源归因', value: '328', tone: 'purple' },
-  { label: '搜索曝光', value: '116K', tone: 'teal' },
-]
-const aiExposureTotal = computed(() => aiExposurePlatforms.reduce((total, item) => total + item.value, 0))
+const engineFlowItems = computed<EngineFlowItem[]>(() => [
+  { label: '命中分析', value: indexedSubtotal.value, tone: 'blue' },
+  { label: '信源归因', value: monitoredQuestionTotal.value, tone: 'purple' },
+  { label: '搜索曝光', value: '待接入数据源', tone: 'teal' },
+])
+const aiExposureTotal = computed(() => '待接入数据源')
 
-const metricCards: MetricCard[] = [
+const indexedSubtotal = computed(() => formatCompactNumber(dashboardSummary.value?.summary?.hitTotal || 0))
+const monitoredQuestionTotal = computed(() => formatInt(dashboardSummary.value?.monitorQuestionCount || 0))
+const trendArticleCreatedTotal = computed(() => formatInt(
+  dashboardTrend.value.reduce((total, item) => total + Number(item.articleCreated || 0), 0),
+))
+const trendArticlePublishedTotal = computed(() => formatInt(
+  dashboardTrend.value.reduce((total, item) => total + Number(item.articlePublished || 0), 0),
+))
+const publishRate = computed(() => {
+  const created = dashboardTrend.value.reduce((total, item) => total + Number(item.articleCreated || 0), 0)
+  const published = dashboardTrend.value.reduce((total, item) => total + Number(item.articlePublished || 0), 0)
+  if (!created) return '-'
+  return ((published / created) * 100).toFixed(1)
+})
+
+type ComparisonKey = 'hitTotal' | 'contactTotal' | 'siteTotal' | 'platformCount' | 'monitorQuestionCount' | 'articleCreated' | 'articlePublished'
+
+function comparisonTrend(key: ComparisonKey) {
+  const comparison = dashboardSummary.value?.comparison
+  if (!comparison?.available) return '暂无上期'
+  const metric = comparison[key]
+  if (!metric) return '暂无上期'
+  if (metric.rate === null || metric.rate === undefined) {
+    return metric.delta === 0 ? '持平' : `较上期 ${metric.delta > 0 ? '+' : ''}${formatInt(metric.delta)}`
+  }
+  if (Math.abs(metric.rate) < 0.05) return '较上期持平'
+  return `较上期 ${metric.rate > 0 ? '+' : ''}${metric.rate.toFixed(1)}%`
+}
+
+function comparisonTrendType(key: ComparisonKey): TrendType {
+  const metric = dashboardSummary.value?.comparison?.[key]
+  return metric && metric.delta < 0 ? 'down' : 'up'
+}
+
+const metricCards = computed<MetricCard[]>(() => [
   {
     label: '智能平台命中总量',
-    value: '12,486',
-    caption: '本月问答与搜索累计命中',
-    trend: '18.2%',
-    trendType: 'up',
+    value: formatInt(dashboardSummary.value?.summary?.hitTotal || 0),
+    caption: '当前窗口内 AI 问答累计命中',
+    trend: comparisonTrend('hitTotal'),
+    trendType: comparisonTrendType('hitTotal'),
     tone: 'blue',
     icon: '<svg viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M8 16l3-5 4 3 5-8"/></svg>',
   },
   {
     label: '内容发布量',
-    value: '462',
-    caption: '文章、问答素材与品牌内容',
-    trend: '31 条',
-    trendType: 'up',
+    value: formatInt(dashboardSummary.value?.contentProgress?.publishedCount || 0),
+    caption: '项目累计发布成功内容',
+    trend: comparisonTrend('articlePublished'),
+    trendType: comparisonTrendType('articlePublished'),
     tone: 'purple',
     icon: '<svg viewBox="0 0 24 24"><path d="M4 5h16"/><path d="M4 12h16"/><path d="M4 19h10"/></svg>',
   },
   {
     label: '联系方式曝光量',
-    value: '830',
-    caption: '含电话、微信、邮箱与官网入口',
-    trend: '12.5%',
-    trendType: 'up',
+    value: formatInt(dashboardSummary.value?.summary?.contactTotal || 0),
+    caption: 'AI 回答中明确提及联系方式',
+    trend: comparisonTrend('contactTotal'),
+    trendType: comparisonTrendType('contactTotal'),
     tone: 'teal',
     icon: '<svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.08 4.18 2 2 0 0 1 4.06 2h3a2 2 0 0 1 2 1.72c.12.9.32 1.77.59 2.61a2 2 0 0 1-.45 2.11L8 9.64a16 16 0 0 0 6.36 6.36l1.2-1.2a2 2 0 0 1 2.11-.45c.84.27 1.71.47 2.61.59A2 2 0 0 1 22 16.92z"/></svg>',
   },
   {
     label: '品牌问题覆盖量',
-    value: '67',
-    caption: '客户关注问题覆盖与沉淀',
-    trend: '8 个',
-    trendType: 'up',
+    value: formatInt(dashboardSummary.value?.monitorQuestionCount || 0),
+    caption: '当前项目已纳入监测的问题量',
+    trend: comparisonTrend('monitorQuestionCount'),
+    trendType: comparisonTrendType('monitorQuestionCount'),
     tone: 'orange',
     icon: '<svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   },
-]
+])
 
 const fallbackIntentTags: IntentTag[] = [
   { text: '电动门厂家', weight: 1 },
@@ -760,27 +850,12 @@ const intentParticles = ref<IntentParticle[]>([])
 let particleId = 0
 let animationFrame = 0
 
-const trendValueSeries = [
-  { create: 17, publish: 17 },
-  { create: 18, publish: 18 },
-  { create: 17, publish: 16 },
-  { create: 18, publish: 18 },
-  { create: 18, publish: 17 },
-  { create: 17, publish: 18 },
-  { create: 18, publish: 17 },
-  { create: 18, publish: 6 },
-]
 const trendData = computed(() => {
-  const spanDays = dayDiff(serviceStartDate.value, serviceEndDate.value)
-  const denominator = Math.max(trendValueSeries.length - 1, 1)
-
-  return trendValueSeries.map((item, index) => {
-    const offset = Math.round((spanDays / denominator) * index)
-    return {
-      ...item,
-      date: formatMonthDay(addDays(serviceStartDate.value, offset)),
-    }
-  })
+  return dashboardTrend.value.map((item) => ({
+    create: Number(item.articleCreated || 0),
+    publish: Number(item.articlePublished || 0),
+    date: formatMonthDay(item.date),
+  }))
 })
 
 const trendChartWidth = 760
@@ -828,42 +903,26 @@ const createAreaPoints = computed(() => getTrendAreaPoints(createChartPoints.val
 const publishAreaPoints = computed(() => getTrendAreaPoints(publishChartPoints.value))
 
 const platformChips = computed(() => [
-  { name: '全部', short: '✓', logo: '', count: '60.99万' },
-  ...indexingSources.map((source) => ({
-    name: source.name,
-    short: source.short,
-    logo: source.logo,
-    count: source.value,
+  { name: '全部', code: '', short: '✓', logo: '', count: indexedSubtotal.value },
+  ...(dashboardSummary.value?.platforms || []).map((platform) => ({
+    name: platform.platformName || platform.platformCode,
+    code: platform.platformCode,
+    short: (platform.platformName || platform.platformCode || '平').slice(0, 2),
+    logo: platformLogo(platform.platformCode, platform.platformName),
+    count: formatCompactNumber(platform.hitCount),
   })),
 ])
 
 const reportRows = ref<ReportRow[]>([])
 
-const filteredRows = computed(() => {
-  const keyword = searchKeyword.value.trim().toLowerCase()
-  return reportRows.value
-    .filter((row) => {
-      const matchTab = activeTab.value === '全部' || row.type === activeTab.value
-      const matchPlatform = selectedPlatforms.value.includes('全部') || selectedPlatforms.value.includes(row.platform)
-      const matchKeyword =
-        !keyword ||
-        row.question.toLowerCase().includes(keyword) ||
-        row.platform.toLowerCase().includes(keyword) ||
-        row.type.toLowerCase().includes(keyword)
-      return matchTab && matchPlatform && matchKeyword
-    })
-    .sort((first, second) => second.timeValue - first.timeValue)
-})
-
-const totalPages = computed(() => Math.max(1, Math.ceil(filteredRows.value.length / pageSize)))
-const displayedRows = computed(() => {
-  const start = (currentPage.value - 1) * pageSize
-  return filteredRows.value.slice(start, start + pageSize)
-})
+const filteredRows = computed(() => reportRows.value)
+const totalPages = computed(() => Math.max(1, Math.ceil(detailTotal.value / pageSize)))
+const displayedRows = computed(() => filteredRows.value)
 const pageNumbers = computed(() => Array.from({ length: totalPages.value }, (_, index) => index + 1))
 
 watch([activeTab, searchKeyword, selectedPlatforms], () => {
   currentPage.value = 1
+  void loadDashboardDetails()
 })
 
 watch(filteredRows, () => {
@@ -886,7 +945,8 @@ function seededRatio(seed: number) {
 function mockHitTime(index: number) {
   const maxRange = 12 * 60 * 60 * 1000
   const offset = Math.floor(seededRatio(index + projectId.value) * maxRange)
-  const date = new Date(refreshedAt.value.getTime() - offset)
+  const base = toDate(refreshedAt.value) || new Date()
+  const date = new Date(base.getTime() - offset)
   return {
     text: formatDateTime(date),
     value: date.getTime(),
@@ -894,27 +954,12 @@ function mockHitTime(index: number) {
 }
 
 function buildReportRowsFromQuestions(questions: KeywordGroupQuestion[]): ReportRow[] {
-  const modelSources = indexingSources
-  return questions
-    .filter((question) => question.questionText?.trim())
-    .map((question, index) => {
-      const source = modelSources[index % modelSources.length]
-      const hitTime = mockHitTime(index + 1)
-      return {
-        id: question.id || index + 1,
-        question: question.questionText.trim(),
-        type: questionReportType(question),
-        platform: source.name,
-        status: '已命中',
-        time: hitTime.text,
-        timeValue: hitTime.value,
-      }
-    })
-    .sort((first, second) => second.timeValue - first.timeValue)
+  return questions.length ? [] : []
 }
 
 function changePage(page: number) {
   currentPage.value = Math.min(Math.max(page, 1), totalPages.value)
+  void loadDashboardDetails()
 }
 
 function togglePlatform(name: string) {
@@ -932,9 +977,109 @@ function togglePlatform(name: string) {
   selectedPlatforms.value = next.length ? next : ['全部']
 }
 
+async function ensureDashboardShare() {
+  if (activeShare.value?.shareCode) return activeShare.value
+  const { data } = await getProjectDashboardShares(projectId.value)
+  const active = (data.data || []).find((item) => item.status === 'active')
+  if (active) {
+    activeShare.value = active
+    return active
+  }
+  const created = await createProjectDashboardShare(projectId.value)
+  activeShare.value = created.data.data
+  return activeShare.value
+}
+
+async function loadDashboardData() {
+  const share = await ensureDashboardShare()
+  if (!share?.shareCode) return
+  const [{ data: summaryResp }, { data: trendResp }] = await Promise.all([
+    getPublicProjectDashboardSummary(share.shareCode, { days: 30 }),
+    getPublicProjectDashboardTrend(share.shareCode, { days: 30 }),
+  ])
+  dashboardSummary.value = summaryResp.data || null
+  dashboardTrend.value = trendResp.data?.items || []
+  refreshedAt.value = dashboardSummary.value?.refreshedAt || null
+  if (!dateRange.start || !dateRange.end) {
+    const end = new Date()
+    const start = new Date()
+    start.setDate(end.getDate() - 29)
+    dateRange.start = formatDateInput(start)
+    dateRange.end = formatDateInput(end)
+  }
+  intentTags.value = buildIntentTagsFromWordCloud()
+  resetIntentParticles()
+  await nextTick()
+  if (lissaCanvasRef.value && lissaLogosRef.value) {
+    stopLissajous()
+    startLissajous()
+  }
+}
+
+function selectedPlatformCode() {
+  const selected = selectedPlatforms.value.filter((item) => item !== '全部')
+  if (selected.length !== 1) return ''
+  return platformChips.value.find((item) => item.name === selected[0])?.code || ''
+}
+
+function detailTypeLabel(item: ProjectDashboardDetailItem) {
+  if (!item.hasSnapshot) return '命中明细'
+  return '命中快照'
+}
+
+function mapDetailRow(item: ProjectDashboardDetailItem): ReportRow {
+  const date = toDate(item.batchDate)
+  return {
+    id: item.id,
+    question: item.questionText || '-',
+    type: detailTypeLabel(item),
+    platform: item.platformName || item.platformCode || '-',
+    platformCode: item.platformCode || '',
+    platformUrl: item.platformUrl || null,
+    status: '已命中',
+    time: item.batchDate || '-',
+    timeValue: date?.getTime() || 0,
+  }
+}
+
+async function loadDashboardDetails() {
+  if (activeTab.value === '待接入数据源') {
+    reportRows.value = []
+    detailTotal.value = 0
+    return
+  }
+  const share = await ensureDashboardShare()
+  if (!share?.shareCode) return
+  const { data } = await getPublicProjectDashboardDetails(share.shareCode, {
+    page: currentPage.value,
+    size: pageSize,
+    platformCode: selectedPlatformCode() || undefined,
+    startDate: dateRange.start || undefined,
+    endDate: dateRange.end || undefined,
+    keyword: searchKeyword.value.trim() || undefined,
+  })
+  const payload = data.data
+  reportRows.value = (payload?.items || []).map(mapDetailRow)
+  detailTotal.value = payload?.total || 0
+}
+
+async function searchDetails() {
+  currentPage.value = 1
+  await loadDashboardDetails()
+}
+
 async function copyDashboardUrl() {
-  await navigator.clipboard.writeText(`${window.location.origin}/dashboard/demo-${projectId.value}`)
+  const share = await ensureDashboardShare()
+  if (!share?.shareCode) {
+    ElMessage.warning('暂未生成可用看板链接')
+    return
+  }
+  await navigator.clipboard.writeText(`${window.location.origin}/dashboard/${share.shareCode}`)
   ElMessage.success('看板链接已复制')
+}
+
+function platformUrlPending() {
+  ElMessage.info('平台跳转地址待接入数据源')
 }
 
 function normalizeIntentText(value?: string | null) {
@@ -983,6 +1128,16 @@ function buildIntentTagsFromQuestions(questions: KeywordGroupQuestion[]) {
   return tags.length ? tags : fallbackIntentTags
 }
 
+function buildIntentTagsFromWordCloud() {
+  const words = dashboardSummary.value?.wordCloud || []
+  if (!words.length) return fallbackIntentTags
+  const maxFrequency = Math.max(...words.map((item) => item.frequency || 0), 1)
+  return words.slice(0, 24).map((item) => ({
+    text: item.word,
+    weight: Math.min(1, Math.max(0.35, Number(item.frequency || 0) / maxFrequency)),
+  }))
+}
+
 async function getBoundKeywordGroups() {
   const selectedGroups = project.value?.selectedKeywordGroups || []
   if (selectedGroups.length) return selectedGroups
@@ -1005,11 +1160,9 @@ async function loadIntentTagsFromKeywordGroups() {
     )
     const questions = questionResults.flat()
     intentTags.value = buildIntentTagsFromQuestions(questions)
-    reportRows.value = buildReportRowsFromQuestions(questions)
     resetIntentParticles()
   } catch {
     intentTags.value = fallbackIntentTags
-    reportRows.value = []
     resetIntentParticles()
   }
 }
@@ -1026,12 +1179,13 @@ async function loadProjectInfo() {
     }
     dateRange.start = formatDateInput(serviceStartDate.value)
     dateRange.end = formatDateInput(serviceEndDate.value)
-    loadIntentTagsFromKeywordGroups()
+    await loadDashboardData()
+    await loadDashboardDetails()
   } catch {
     project.value = null
     activePackageBinding.value = null
     reportRows.value = []
-    loadIntentTagsFromKeywordGroups()
+    await loadIntentTagsFromKeywordGroups()
   }
 }
 
@@ -1374,13 +1528,13 @@ function startLissajous() {
   lissaChipNodes = Array.from(logosLayer.querySelectorAll<HTMLElement>('.lissa-chip'))
 
   const baseFreq = 0.00010
-  lissaState = lissajousPlatforms.map((_, i) => ({
+  lissaState = lissajousPlatforms.value.map((_, i) => ({
     x: 0,
     y: 0,
     hx: makeLissaHarmonic(baseFreq + i * 0.000003),
     hy: makeLissaHarmonic(baseFreq + i * 0.000003),
     // 给每个 logo 一个均匀分布在 [0, 60s] 内的时间偏移，让 10 个 logo 在 t=0 时就分布在 Lissajous 轨迹的不同位置
-    tOffset: (i / lissajousPlatforms.length) * 60000 + Math.random() * 4000,
+    tOffset: (i / Math.max(lissajousPlatforms.value.length, 1)) * 60000 + Math.random() * 4000,
     phase: 'lissa',
     vx: 0,
     vy: 0,
@@ -1429,8 +1583,8 @@ function stopLissajous() {
 }
 
 onMounted(() => {
-  refreshedAt.value = new Date()
-  loadProjectInfo()
+  refreshedAt.value = null
+  void loadProjectInfo()
   resetIntentParticles()
   animationFrame = window.requestAnimationFrame(updateIntentParticles)
   // 等 Vue 的 DOM 更新完成且 layout 稳定，再启动 Lissajous，否则 lissaStageRef 可能拿到 0 尺寸

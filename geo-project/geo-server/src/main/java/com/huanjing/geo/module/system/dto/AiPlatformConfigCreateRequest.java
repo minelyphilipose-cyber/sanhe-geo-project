@@ -10,6 +10,7 @@ public class AiPlatformConfigCreateRequest {
     private String platformCode;
     @NotBlank
     private String platformName;
+    private String platformHomeUrl;
     @NotBlank
     private String priorityLevel;
     private Integer rpmLimit;

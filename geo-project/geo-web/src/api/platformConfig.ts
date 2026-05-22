@@ -14,6 +14,7 @@ export function getPlatformConfigPage(params: {
 export function createPlatformConfig(data: {
   platformCode: string
   platformName: string
+  platformHomeUrl?: string
   priorityLevel: string
   apiKey: string
   primaryKeyRef?: string
@@ -45,6 +46,7 @@ export function createPlatformConfig(data: {
 export function updatePlatformConfig(id: number, data: {
   platformCode: string
   platformName: string
+  platformHomeUrl?: string
   priorityLevel: string
   apiKey: string
   primaryKeyRef?: string
