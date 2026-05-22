@@ -308,8 +308,8 @@ export interface ArticleGenerationChannelOption {
 }
 
 export interface ArticleGenerationChannelGroup {
-  groupCode: string
-  label: string
+  code: string
+  name: string
   description: string
   channels: ArticleGenerationChannelOption[]
 }

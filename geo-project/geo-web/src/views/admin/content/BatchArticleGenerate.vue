@@ -1048,7 +1048,7 @@ function buildPlatformGroups(): PlatformGroup[] {
   if (generationOptions.value?.groups?.length) {
     return generationOptions.value.groups.map((group, index) => ({
       key: buildPlatformGroupUiKey(group, index),
-      label: normalizePlatformGroupLabel(group.groupCode, group.label),
+      label: normalizePlatformGroupLabel(group.code, group.name),
       desc: group.description,
       platforms: group.channels.map((channel) => buildChannelOption(channel)),
     }))
@@ -1068,7 +1068,7 @@ function buildPlatformGroups(): PlatformGroup[] {
 }
 
 function buildPlatformGroupUiKey(group: ArticleGenerationOptions['groups'][number], index: number) {
-  const groupCode = group.groupCode?.trim()
+  const groupCode = group.code?.trim()
   return `${groupCode || 'platform_group'}::${index}`
 }
 
