@@ -47,7 +47,9 @@ class DispatchTaskServiceReleaseTest {
                 new DispatchProperties(),
                 mock(DispatchTaskStateService.class),
                 currentUserService,
-                activityLogService
+                activityLogService,
+                mock(DispatchPollShardPersistenceService.class),
+                mock(DispatchPollAggregationService.class)
         );
     }
 

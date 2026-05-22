@@ -1,0 +1,129 @@
+package com.huanjing.geo.module.dispatch.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.huanjing.geo.module.dispatch.entity.PollBatchShard;
+import com.huanjing.geo.module.dispatch.entity.PollBatchShardItem;
+import com.huanjing.geo.module.dispatch.entity.PollResult;
+import com.huanjing.geo.module.dispatch.mapper.PollBatchShardItemMapper;
+import com.huanjing.geo.module.dispatch.mapper.PollBatchShardMapper;
+import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+
+@Service
+@RequiredArgsConstructor
+public class DispatchPollShardPersistenceService {
+
+    static final String SHARD_STATUS_READY = "ready";
+    static final String SHARD_STATUS_RUNNING = "running";
+    static final String SHARD_STATUS_COMPLETED = "completed";
+    static final String SHARD_STATUS_FAILED = "failed";
+
+    private final PollBatchShardMapper pollBatchShardMapper;
+    private final PollBatchShardItemMapper pollBatchShardItemMapper;
+    private final PollResultMapper pollResultMapper;
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public PollBatchShard markShardRunning(Long shardId, Long taskId) {
+        PollBatchShard shard = pollBatchShardMapper.selectByIdForUpdate(shardId);
+        if (shard == null) {
+            return null;
+        }
+        if (SHARD_STATUS_COMPLETED.equals(shard.getStatus())) {
+            return shard;
+        }
+        shard.setDispatchTaskId(taskId);
+        shard.setStatus(SHARD_STATUS_RUNNING);
+        shard.setStartedAt(shard.getStartedAt() == null ? LocalDateTime.now() : shard.getStartedAt());
+        shard.setFinishedAt(null);
+        shard.setLastError(null);
+        pollBatchShardMapper.updateById(shard);
+        return shard;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public PollResult upsertPollResultAndMarkItem(PollResult result, PollBatchShardItem item) {
+        PollResult existing = pollResultMapper.selectOne(
+                new LambdaQueryWrapper<PollResult>()
+                        .eq(PollResult::getProjectId, result.getProjectId())
+                        .eq(PollResult::getPlatformId, result.getPlatformId())
+                        .eq(PollResult::getBatchDate, result.getBatchDate())
+                        .eq(PollResult::getBatchNo, result.getBatchNo())
+                        .eq(PollResult::getQuestionTier, result.getQuestionTier())
+                        .eq(PollResult::getKeywordResultId, result.getKeywordResultId())
+                        .last("LIMIT 1")
+        );
+        if (existing == null) {
+            pollResultMapper.insert(result);
+        } else {
+            result.setId(existing.getId());
+            pollResultMapper.updateById(result);
+        }
+
+        item.setPollResultId(result.getId());
+        item.setStatus("completed".equals(result.getStatus()) ? "completed" : "failed");
+        item.setLastError("completed".equals(result.getStatus()) ? null : trim(result.getDetailJson()));
+        pollBatchShardItemMapper.updateById(item);
+        return result;
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markShardCompleted(Long shardId) {
+        PollBatchShard shard = pollBatchShardMapper.selectByIdForUpdate(shardId);
+        if (shard == null) {
+            return;
+        }
+        long completed = pollBatchShardItemMapper.selectCount(
+                new LambdaQueryWrapper<PollBatchShardItem>()
+                        .eq(PollBatchShardItem::getShardId, shardId)
+                        .eq(PollBatchShardItem::getStatus, "completed")
+        );
+        long failed = pollBatchShardItemMapper.selectCount(
+                new LambdaQueryWrapper<PollBatchShardItem>()
+                        .eq(PollBatchShardItem::getShardId, shardId)
+                        .eq(PollBatchShardItem::getStatus, "failed")
+        );
+        shard.setCompletedCount((int) completed);
+        shard.setFailedCount((int) failed);
+        shard.setStatus(SHARD_STATUS_COMPLETED);
+        shard.setFinishedAt(LocalDateTime.now());
+        shard.setLastError(null);
+        pollBatchShardMapper.updateById(shard);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void markShardResourceWaiting(Long shardId, String error) {
+        PollBatchShard shard = pollBatchShardMapper.selectByIdForUpdate(shardId);
+        if (shard == null || SHARD_STATUS_COMPLETED.equals(shard.getStatus())) {
+            return;
+        }
+        shard.setStatus(SHARD_STATUS_READY);
+        shard.setResourceWaitCount((shard.getResourceWaitCount() == null ? 0 : shard.getResourceWaitCount()) + 1);
+        shard.setLastError(trim(error));
+        pollBatchShardMapper.updateById(shard);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public Long markShardFailed(Long shardId, String error) {
+        PollBatchShard shard = pollBatchShardMapper.selectByIdForUpdate(shardId);
+        if (shard == null || SHARD_STATUS_COMPLETED.equals(shard.getStatus())) {
+            return shard == null ? null : shard.getBatchId();
+        }
+        shard.setStatus(SHARD_STATUS_FAILED);
+        shard.setFinishedAt(LocalDateTime.now());
+        shard.setLastError(trim(error));
+        pollBatchShardMapper.updateById(shard);
+        return shard.getBatchId();
+    }
+
+    private String trim(String value) {
+        if (value == null) {
+            return null;
+        }
+        return value.length() <= 900 ? value : value.substring(0, 900);
+    }
+}

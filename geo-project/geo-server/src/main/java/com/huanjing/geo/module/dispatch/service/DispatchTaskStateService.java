@@ -97,6 +97,7 @@ public class DispatchTaskStateService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markResourceWaiting(Long taskId,
+                                    int nextResourceWaitCount,
                                     LocalDateTime nextRetryAt,
                                     String lastError,
                                     String errorContext,
@@ -109,6 +110,7 @@ public class DispatchTaskStateService {
         }
         task.setLastError(lastError);
         task.setErrorContext(errorContext);
+        task.setResourceWaitCount(nextResourceWaitCount);
         task.setStatus(DispatchTaskStatus.RETRY_PENDING.value());
         task.setNextRetryAt(nextRetryAt);
         dispatchTaskMapper.updateById(task);

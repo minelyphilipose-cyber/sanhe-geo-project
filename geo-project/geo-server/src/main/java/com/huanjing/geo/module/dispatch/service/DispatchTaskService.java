@@ -39,6 +39,8 @@ public class DispatchTaskService {
     private final DispatchTaskStateService dispatchTaskStateService;
     private final CurrentUserService currentUserService;
     private final ActivityLogService activityLogService;
+    private final DispatchPollShardPersistenceService pollShardPersistenceService;
+    private final DispatchPollAggregationService pollAggregationService;
 
     @Transactional
     public DispatchTask createTaskAndEnqueue(Long projectId,
@@ -61,6 +63,32 @@ public class DispatchTaskService {
                                              String idempotencyKey,
                                              String targetChannel,
                                              Integer generationSlotNo) {
+        return createTask(projectId, taskType, windowStart, windowEnd, dueTime, payload, idempotencyKey, targetChannel, generationSlotNo, true);
+    }
+
+    @Transactional
+    public DispatchTask createTaskWithoutEnqueue(Long projectId,
+                                                 DispatchTaskType taskType,
+                                                 LocalDate windowStart,
+                                                 LocalDate windowEnd,
+                                                 LocalDateTime dueTime,
+                                                 Map<String, Object> payload,
+                                                 String idempotencyKey,
+                                                 String targetChannel,
+                                                 Integer generationSlotNo) {
+        return createTask(projectId, taskType, windowStart, windowEnd, dueTime, payload, idempotencyKey, targetChannel, generationSlotNo, false);
+    }
+
+    private DispatchTask createTask(Long projectId,
+                                    DispatchTaskType taskType,
+                                    LocalDate windowStart,
+                                    LocalDate windowEnd,
+                                    LocalDateTime dueTime,
+                                    Map<String, Object> payload,
+                                    String idempotencyKey,
+                                    String targetChannel,
+                                    Integer generationSlotNo,
+                                    boolean enqueue) {
         if (idempotencyKey == null || idempotencyKey.isBlank()) {
             throw new BizException(400, "dispatch task idempotency_key is required");
         }
@@ -78,6 +106,7 @@ public class DispatchTaskService {
         task.setDueTime(dueTime);
         task.setPayloadJson(payload == null ? null : JSONUtil.toJsonStr(payload));
         task.setRetryCount(0);
+        task.setResourceWaitCount(0);
         task.setMaxRetry(3);
         task.setTimeoutAt(dueTime.plusMinutes(dispatchProperties.getTaskTimeoutMinutes()));
 
@@ -104,6 +133,7 @@ public class DispatchTaskService {
                     existing.setDueTime(dueTime);
                     existing.setPayloadJson(task.getPayloadJson());
                     existing.setRetryCount(0);
+                    existing.setResourceWaitCount(0);
                     existing.setMaxRetry(3);
                     existing.setFirstStartedAt(null);
                     existing.setLastStartedAt(null);
@@ -113,10 +143,12 @@ public class DispatchTaskService {
                     existing.setErrorContext(null);
                     existing.setTimeoutAt(dueTime.plusMinutes(dispatchProperties.getTaskTimeoutMinutes()));
                     dispatchTaskMapper.updateById(existing);
-                    safeEnqueue(existing);
+                    if (enqueue) {
+                        safeEnqueue(existing);
+                    }
                     return existing;
                 }
-                if (!DispatchTaskStatus.CANCELLED.value().equals(existing.getStatus())) {
+                if (enqueue && !DispatchTaskStatus.CANCELLED.value().equals(existing.getStatus())) {
                     safeEnqueue(existing);
                 }
                 return existing;
@@ -124,17 +156,25 @@ public class DispatchTaskService {
             throw ex;
         }
 
-        safeEnqueue(task);
+        if (enqueue) {
+            safeEnqueue(task);
+        }
         return task;
     }
 
     public void enqueueIfNeeded(DispatchTask task) {
+        if (task == null || task.getId() == null) {
+            return;
+        }
+        DispatchTask current = dispatchTaskMapper.selectById(task.getId());
+        if (current != null) {
+            task = current;
+        }
         if (!DispatchTaskType.fromValue(task.getTaskType()).isQueueTask()) {
             return;
         }
-        if (DispatchTaskStatus.COMPLETED.value().equals(task.getStatus()) ||
-                DispatchTaskStatus.DEAD_LETTER.value().equals(task.getStatus()) ||
-                DispatchTaskStatus.CANCELLED.value().equals(task.getStatus())) {
+        if (!DispatchTaskStatus.PENDING.value().equals(task.getStatus())
+                && !DispatchTaskStatus.RETRY_PENDING.value().equals(task.getStatus())) {
             return;
         }
         dispatchQueueService.enqueueTask(task.getId(), task.getPriorityLevel(), task.getCreatedAt() == null ? System.currentTimeMillis() : task.getCreatedAt().atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli());
@@ -150,7 +190,6 @@ public class DispatchTaskService {
         }
     }
 
-    @Transactional
     public void processTask(Long taskId) {
         DispatchTask task = dispatchTaskMapper.selectById(taskId);
         if (task == null) {
@@ -214,6 +253,7 @@ public class DispatchTaskService {
         LocalDateTime now = LocalDateTime.now();
         task.setStatus(DispatchTaskStatus.PENDING.value());
         task.setRetryCount(0);
+        task.setResourceWaitCount(0);
         task.setFirstStartedAt(null);
         task.setLastStartedAt(null);
         task.setTimeoutAt(now.plusMinutes(dispatchProperties.getTaskTimeoutMinutes()));
@@ -347,6 +387,11 @@ public class DispatchTaskService {
                     task.getPlatformCode(),
                     now
             ));
+            int nextResourceWaitCount = (task.getResourceWaitCount() == null ? 0 : task.getResourceWaitCount()) + 1;
+            if (nextResourceWaitCount > dispatchProperties.getResourceBusyMaxAttempts()) {
+                markDeadLetter(task, "resource unavailable after " + nextResourceWaitCount + " wait attempts: " + lastError);
+                return;
+            }
             int retryDelaySeconds = dispatchProperties.getResourceBusyRetryMinSeconds();
             int retryJitterSeconds = dispatchProperties.getResourceBusyRetryJitterSeconds();
             if (retryJitterSeconds > 0) {
@@ -354,6 +399,7 @@ public class DispatchTaskService {
             }
             dispatchTaskStateService.markResourceWaiting(
                     task.getId(),
+                    nextResourceWaitCount,
                     now.plusSeconds(retryDelaySeconds),
                     lastError,
                     errorContext,
@@ -417,6 +463,11 @@ public class DispatchTaskService {
                 task.getPayloadJson(),
                 task.getProjectId()
         );
+        Long shardId = resolveShardId(task);
+        if (shardId != null) {
+            Long batchId = pollShardPersistenceService.markShardFailed(shardId, normalizedReason);
+            pollAggregationService.tryAggregateBatch(batchId);
+        }
     }
 
     private Duration resolveRetryDelay(int retryCount) {
@@ -450,6 +501,21 @@ public class DispatchTaskService {
             return String.valueOf(payload.get("mode"));
         }
         return taskType.name();
+    }
+
+    private Long resolveShardId(DispatchTask task) {
+        if (task == null || task.getPayloadJson() == null || task.getPayloadJson().isBlank()) {
+            return null;
+        }
+        try {
+            Object value = JSONUtil.parseObj(task.getPayloadJson()).get("shardId");
+            if (value == null || String.valueOf(value).isBlank()) {
+                return null;
+            }
+            return Long.parseLong(String.valueOf(value));
+        } catch (Exception ignore) {
+            return null;
+        }
     }
 
     private Map<String, Object> buildErrorContext(String error,

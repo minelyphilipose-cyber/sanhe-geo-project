@@ -36,6 +36,7 @@ class DispatchPlannerServiceContentGenerationTest {
     private DispatchTaskMapper dispatchTaskMapper;
     private DispatchProperties dispatchProperties;
     private CustomerPackageExpiryService customerPackageExpiryService;
+    private DispatchQuestionPollPlanningService questionPollPlanningService;
     private DispatchPlannerService service;
 
     @BeforeEach
@@ -46,13 +47,15 @@ class DispatchPlannerServiceContentGenerationTest {
         dispatchTaskMapper = mock(DispatchTaskMapper.class);
         dispatchProperties = new DispatchProperties();
         customerPackageExpiryService = mock(CustomerPackageExpiryService.class);
+        questionPollPlanningService = mock(DispatchQuestionPollPlanningService.class);
         service = new DispatchPlannerService(
                 projectMapper,
                 dispatchTaskService,
                 allocationService,
                 dispatchTaskMapper,
                 dispatchProperties,
-                customerPackageExpiryService
+                customerPackageExpiryService,
+                questionPollPlanningService
         );
     }
 
@@ -156,17 +159,8 @@ class DispatchPlannerServiceContentGenerationTest {
         service.scanAndPlan(LocalDate.of(2026, 5, 3));
 
         verify(allocationService, never()).contentGenerationAllocations(anyLong());
-        verify(dispatchTaskService, times(1)).createTaskAndEnqueue(
-                eq(project.getId()),
-                eq(DispatchTaskType.BI_DAILY_POLL),
-                any(),
-                any(),
-                any(),
-                any(),
-                eq("question-poll:A"),
-                any(),
-                any()
-        );
+        verify(questionPollPlanningService, times(1))
+                .planProjectTierPoll(eq(project), eq(LocalDate.of(2026, 5, 3)), any(), eq("A"), eq(1));
     }
 
     private static Project activeProject(LocalDate activatedDate) {

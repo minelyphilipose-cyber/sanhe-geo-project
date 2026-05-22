@@ -35,6 +35,7 @@ public class DispatchPlannerService {
     private final DispatchTaskMapper dispatchTaskMapper;
     private final DispatchProperties dispatchProperties;
     private final CustomerPackageExpiryService customerPackageExpiryService;
+    private final DispatchQuestionPollPlanningService questionPollPlanningService;
 
     @Transactional
     public void scanAndPlan(LocalDate today) {
@@ -70,21 +71,12 @@ public class DispatchPlannerService {
         if (daysSinceActivation < 0 || daysSinceActivation % intervalDays != 0) {
             return;
         }
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("mode", "question-poll");
-        payload.put("questionTier", questionTier);
-        payload.put("batchDate", today.toString());
-        payload.put("batchNo", 1);
-        dispatchTaskService.createTaskAndEnqueue(
-                project.getId(),
-                DispatchTaskType.BI_DAILY_POLL,
-                today.minusDays(Math.max(intervalDays - 1, 0)),
+        questionPollPlanningService.planProjectTierPoll(
+                project,
                 today,
-                LocalDateTime.now(),
-                payload,
-                "question-poll:" + questionTier,
-                null,
-                null
+                today.minusDays(Math.max(intervalDays - 1, 0)),
+                questionTier,
+                1
         );
     }
 

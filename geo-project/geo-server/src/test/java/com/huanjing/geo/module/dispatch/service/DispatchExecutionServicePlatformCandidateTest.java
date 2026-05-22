@@ -13,6 +13,7 @@ import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.dispatch.config.DispatchProperties;
 import com.huanjing.geo.module.dispatch.enums.DispatchTaskType;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchMapper;
+import com.huanjing.geo.module.dispatch.mapper.PollBatchShardItemMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollDailyStatMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.dispatch.mapper.ProjectPollRotationMapper;
@@ -106,8 +107,6 @@ class DispatchExecutionServicePlatformCandidateTest {
                 mock(PlatformConcurrencyLimiterService.class),
                 mock(LlmPlatformRouter.class),
                 mock(ProjectMapper.class),
-                mock(ProjectKeywordGroupRelMapper.class),
-                mock(KeywordGroupResultMapper.class),
                 mock(PackageContentConfigMapper.class),
                 mock(ArticleBatchMapper.class),
                 mock(ArticleGenerationLogMapper.class),
@@ -116,15 +115,17 @@ class DispatchExecutionServicePlatformCandidateTest {
                 mock(ArticleGenerationPersistenceService.class),
                 mock(ArticleGenerationWindowLockService.class),
                 mock(PollBatchMapper.class),
+                mock(PollBatchShardItemMapper.class),
                 mock(PollResultMapper.class),
-                mock(PollDailyStatMapper.class),
-                mock(ProjectPollRotationMapper.class),
                 mock(CompanyMapper.class),
                 mock(BrandMapper.class),
                 mock(CompanyPackageBindingService.class),
                 mock(BrandStatementService.class),
                 mock(SysDictItemMapper.class),
-                new DispatchProperties()
+                new DispatchProperties(),
+                mock(DispatchQuestionPollPlanningService.class),
+                mock(DispatchPollShardPersistenceService.class),
+                mock(DispatchPollAggregationService.class)
         );
     }
 }

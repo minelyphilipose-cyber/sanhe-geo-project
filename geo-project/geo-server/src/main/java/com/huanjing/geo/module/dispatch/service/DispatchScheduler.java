@@ -20,6 +20,7 @@ public class DispatchScheduler {
     private final DispatchTaskService dispatchTaskService;
     private final DispatchAlertService dispatchAlertService;
     private final ProjectDashboardSnapshotService projectDashboardSnapshotService;
+    private final DispatchPollAggregationService dispatchPollAggregationService;
 
     @Scheduled(cron = "${geo.dispatch.cron:0 5 0 * * *}", zone = "${geo.dispatch.timezone:Asia/Shanghai}")
     public void dailyScan() {
@@ -54,6 +55,7 @@ public class DispatchScheduler {
         try {
             dispatchTaskService.enqueueRecoveryTasks();
             dispatchTaskService.reclaimTimedOutRunningTasks();
+            dispatchPollAggregationService.recoverFinishedAggregations(100);
         } catch (Exception ex) {
             log.error("Retry recovery scan failed", ex);
         }

@@ -28,6 +28,7 @@ public class DispatchTask {
     private LocalDateTime dueTime;
     private String payloadJson;
     private Integer retryCount;
+    private Integer resourceWaitCount;
     private Integer maxRetry;
     private LocalDateTime firstStartedAt;
     private LocalDateTime lastStartedAt;

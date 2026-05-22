@@ -31,20 +31,15 @@ import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.customer.service.BrandStatementService;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
 import com.huanjing.geo.module.dispatch.entity.PollBatch;
-import com.huanjing.geo.module.dispatch.entity.PollDailyStat;
+import com.huanjing.geo.module.dispatch.entity.PollBatchShard;
+import com.huanjing.geo.module.dispatch.entity.PollBatchShardItem;
 import com.huanjing.geo.module.dispatch.entity.PollResult;
-import com.huanjing.geo.module.dispatch.entity.ProjectPollRotation;
 import com.huanjing.geo.module.dispatch.enums.DispatchTaskType;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchMapper;
-import com.huanjing.geo.module.dispatch.mapper.PollDailyStatMapper;
+import com.huanjing.geo.module.dispatch.mapper.PollBatchShardItemMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
-import com.huanjing.geo.module.dispatch.mapper.ProjectPollRotationMapper;
-import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.entity.Project;
-import com.huanjing.geo.module.project.entity.ProjectKeywordGroupRel;
-import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
-import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.entity.SysDictItem;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
@@ -57,7 +52,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.net.URI;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -74,13 +68,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -103,8 +90,6 @@ public class DispatchExecutionService {
     private final PlatformConcurrencyLimiterService platformConcurrencyLimiterService;
     private final LlmPlatformRouter llmPlatformRouter;
     private final ProjectMapper projectMapper;
-    private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
-    private final KeywordGroupResultMapper keywordGroupResultMapper;
     private final PackageContentConfigMapper packageContentConfigMapper;
     private final ArticleBatchMapper articleBatchMapper;
     private final ArticleGenerationLogMapper articleGenerationLogMapper;
@@ -113,15 +98,17 @@ public class DispatchExecutionService {
     private final ArticleGenerationPersistenceService articleGenerationPersistenceService;
     private final ArticleGenerationWindowLockService articleGenerationWindowLockService;
     private final PollBatchMapper pollBatchMapper;
+    private final PollBatchShardItemMapper pollBatchShardItemMapper;
     private final PollResultMapper pollResultMapper;
-    private final PollDailyStatMapper pollDailyStatMapper;
-    private final ProjectPollRotationMapper projectPollRotationMapper;
     private final CompanyMapper companyMapper;
     private final BrandMapper brandMapper;
     private final CompanyPackageBindingService companyPackageBindingService;
     private final BrandStatementService brandStatementService;
     private final SysDictItemMapper sysDictItemMapper;
     private final DispatchProperties dispatchProperties;
+    private final DispatchQuestionPollPlanningService questionPollPlanningService;
+    private final DispatchPollShardPersistenceService pollShardPersistenceService;
+    private final DispatchPollAggregationService pollAggregationService;
 
     public void execute(DispatchTask task) {
         DispatchTaskType type = DispatchTaskType.fromValue(task.getTaskType());
@@ -170,173 +157,64 @@ public class DispatchExecutionService {
         if (project == null) {
             throw new BizException(404, "Project not found");
         }
-        String questionTier = resolveQuestionTier(task);
-        List<PollKeywordCandidate> allKeywords = loadProjectPollKeywords(project.getId(), questionTier);
-        if (allKeywords.isEmpty()) {
-            log.info("Skip BI_DAILY_POLL task {} because no {} tier saved keywords for project {}",
-                    task.getId(), questionTier, task.getProjectId());
+        Long shardId = resolveShardId(task);
+        if (shardId != null) {
+            executeQuestionPollShard(task, shardId);
             return;
         }
+        String questionTier = resolveQuestionTier(task);
+        questionPollPlanningService.planFromLegacyTask(task, project, resolveBatchDate(task), resolveBatchNo(task), questionTier);
+    }
 
-        int planCap = resolveTierPollLimit(project, questionTier);
-        int takeCount = planCap > 0 ? Math.min(planCap, allKeywords.size()) : allKeywords.size();
-        List<PollKeywordCandidate> selected = selectRotatedKeywords(project.getId(), questionTier, allKeywords, takeCount);
-
-        LocalDate batchDate = resolveBatchDate(task);
-        int batchNo = resolveBatchNo(task);
-        PollBatch batch = ensureBatch(task, project, batchDate, batchNo, questionTier, selected.size(), platformConfigs.size());
+    private void executeQuestionPollShard(DispatchTask task, Long shardId) {
+        PollBatchShard shard = pollShardPersistenceService.markShardRunning(shardId, task.getId());
+        if (shard == null) {
+            throw new BizException(404, "Question poll shard not found: " + shardId);
+        }
+        if (DispatchPollShardPersistenceService.SHARD_STATUS_COMPLETED.equals(shard.getStatus())) {
+            pollAggregationService.tryAggregateBatch(shard.getBatchId());
+            return;
+        }
+        PollBatch batch = pollBatchMapper.selectById(shard.getBatchId());
+        if (batch == null) {
+            throw new BizException(404, "Question poll batch not found: " + shard.getBatchId());
+        }
+        Project project = projectMapper.selectById(shard.getProjectId());
+        if (project == null) {
+            throw new BizException(404, "Project not found");
+        }
+        AiPlatformConfig platform = aiPlatformConfigMapper.selectById(shard.getPlatformId());
+        if (platform == null || !Boolean.TRUE.equals(platform.getEnabled())) {
+            throw new BizException(400, "Question poll platform unavailable: " + shard.getPlatformCode());
+        }
+        List<PollBatchShardItem> items = pollBatchShardItemMapper.selectByShardId(shardId);
+        if (items.isEmpty()) {
+            pollShardPersistenceService.markShardCompleted(shardId);
+            pollAggregationService.tryAggregateBatch(shard.getBatchId());
+            return;
+        }
 
         Set<String> projectNames = resolveProjectNameSet(project);
         Set<String> siteDomains = resolveSiteDomains(project);
         Set<String> normalizedPhones = resolvePhones(project);
         Set<String> contactTerms = resolveContactTerms(project);
-
-        Map<Long, PlatformAgg> aggByPlatform = new LinkedHashMap<>();
-        for (AiPlatformConfig platform : platformConfigs) {
-            aggByPlatform.put(platform.getId(), new PlatformAgg(platform));
-        }
-
-        List<PollResult> details = executePollInvocationsInParallel(
-                batch,
-                task,
-                project,
-                platformConfigs,
-                selected,
-                projectNames,
-                siteDomains,
-                normalizedPhones,
-                contactTerms
-        );
-
-        for (PollResult detail : details) {
-            upsertPollResult(detail);
-            PlatformAgg agg = aggByPlatform.get(detail.getPlatformId());
-            if (agg == null) {
-                continue;
-            }
-            agg.questionCount += 1;
-            agg.requestCount += Math.max(detail.getRequestCount() == null ? 0 : detail.getRequestCount(), 0);
-            if ("completed".equals(detail.getStatus())) {
-                agg.completedCount += 1;
-                if (Boolean.TRUE.equals(detail.getIsHit())) {
-                    agg.hitCount += 1;
-                }
-                if (Boolean.TRUE.equals(detail.getSiteMentioned())) {
-                    agg.siteMentionCount += 1;
-                }
-                if (Boolean.TRUE.equals(detail.getContactMentioned())) {
-                    agg.contactMentionCount += 1;
-                }
-            } else {
-                agg.failedCount += 1;
-            }
-        }
-
-        int totalQuestionCount = aggByPlatform.values().stream().mapToInt(a -> a.questionCount).sum();
-        int totalCompleted = aggByPlatform.values().stream().mapToInt(a -> a.completedCount).sum();
-        int totalFailed = aggByPlatform.values().stream().mapToInt(a -> a.failedCount).sum();
-        int totalHit = aggByPlatform.values().stream().mapToInt(a -> a.hitCount).sum();
-        BigDecimal overallHitRate = totalCompleted <= 0
-                ? BigDecimal.ZERO
-                : BigDecimal.valueOf(totalHit).divide(BigDecimal.valueOf(totalCompleted), 4, RoundingMode.HALF_UP);
-
-        for (PlatformAgg agg : aggByPlatform.values()) {
-            PollDailyStat stat = new PollDailyStat();
-            stat.setBatchId(batch.getId());
-            stat.setDispatchTaskId(task.getId());
-            stat.setProjectId(project.getId());
-            stat.setProjectName(project.getProjectName());
-            stat.setPlatformId(agg.platform.getId());
-            stat.setPlatformCode(agg.platform.getPlatformCode());
-            stat.setPlatformName(agg.platform.getPlatformName());
-            stat.setBatchDate(batchDate);
-            stat.setBatchNo(batchNo);
-            stat.setQuestionTier(questionTier);
-            stat.setQuestionCount(agg.questionCount);
-            stat.setRequestCount(agg.requestCount);
-            stat.setCompletedCount(agg.completedCount);
-            stat.setFailedCount(agg.failedCount);
-            stat.setHitCount(agg.hitCount);
-            stat.setSiteMentionCount(agg.siteMentionCount);
-            stat.setContactMentionCount(agg.contactMentionCount);
-            stat.setHitRate(agg.completedCount <= 0
-                    ? BigDecimal.ZERO
-                    : BigDecimal.valueOf(agg.hitCount).divide(BigDecimal.valueOf(agg.completedCount), 4, RoundingMode.HALF_UP));
-            upsertPollStat(stat);
-        }
-
-        batch.setQuestionCount(totalQuestionCount);
-        batch.setCompletedCount(totalCompleted);
-        batch.setFailedCount(totalFailed);
-        batch.setHitCount(totalHit);
-        batch.setOverallHitRate(overallHitRate);
-        batch.setFinishedAt(LocalDateTime.now());
-        pollBatchMapper.updateById(batch);
-    }
-
-    private List<PollResult> executePollInvocationsInParallel(PollBatch batch,
-                                                              DispatchTask task,
-                                                              Project project,
-                                                              List<AiPlatformConfig> platformConfigs,
-                                                              List<PollKeywordCandidate> selected,
-                                                              Set<String> projectNames,
-                                                              Set<String> siteDomains,
-                                                              Set<String> normalizedPhones,
-                                                              Set<String> contactTerms) {
-        int totalCalls = platformConfigs.size() * selected.size();
-        if (totalCalls <= 0) {
-            return List.of();
-        }
-        int poolSize = Math.max(1, Math.min(dispatchProperties.getQuestionPollConcurrency(), totalCalls));
-        ExecutorService executor = Executors.newFixedThreadPool(
-                poolSize,
-                new QuestionPollThreadFactory(task.getId(), batch.getQuestionTier())
-        );
         try {
-            List<CompletableFuture<PollResult>> futures = new ArrayList<>(totalCalls);
-            for (AiPlatformConfig platform : platformConfigs) {
-                for (PollKeywordCandidate keyword : selected) {
-                    futures.add(CompletableFuture.supplyAsync(() -> {
-                        DispatchTask invocationTask = copyTaskForPollInvocation(task);
-                        InvocationResult invokeResult = invokeMonitoringWithRouter(platform, invocationTask, keyword.keywordText());
-                        return buildPollResult(batch, task, project, platform, keyword, invokeResult,
-                                projectNames, siteDomains, normalizedPhones, contactTerms);
-                    }, executor));
+            for (PollBatchShardItem item : items) {
+                if ("completed".equals(item.getStatus())) {
+                    continue;
                 }
+                PollKeywordCandidate keyword = new PollKeywordCandidate(item.getKeywordResultId(), item.getKeywordTextSnapshot());
+                InvocationResult invokeResult = invokeMonitoringWithRouter(platform, task, keyword.keywordText());
+                PollResult detail = buildPollResult(batch, task, project, platform, keyword, invokeResult,
+                        projectNames, siteDomains, normalizedPhones, contactTerms);
+                pollShardPersistenceService.upsertPollResultAndMarkItem(detail, item);
             }
-            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
-            return futures.stream()
-                    .map(CompletableFuture::join)
-                    .toList();
-        } catch (CompletionException ex) {
-            Throwable cause = ex.getCause() == null ? ex : ex.getCause();
-            if (cause instanceof RuntimeException runtimeException) {
-                throw runtimeException;
-            }
-            throw new IllegalStateException(cause);
-        } finally {
-            executor.shutdownNow();
-            try {
-                if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-                    log.warn("question poll executor did not stop quickly, taskId={}, questionTier={}",
-                            task.getId(), batch.getQuestionTier());
-                }
-            } catch (InterruptedException ex) {
-                Thread.currentThread().interrupt();
-            }
+            pollShardPersistenceService.markShardCompleted(shardId);
+            pollAggregationService.tryAggregateBatch(shard.getBatchId());
+        } catch (DispatchResourceBusyException ex) {
+            pollShardPersistenceService.markShardResourceWaiting(shardId, ex.getMessage());
+            throw ex;
         }
-    }
-
-    private DispatchTask copyTaskForPollInvocation(DispatchTask task) {
-        DispatchTask copy = new DispatchTask();
-        copy.setId(task.getId());
-        copy.setProjectId(task.getProjectId());
-        copy.setTaskType(task.getTaskType());
-        copy.setPayloadJson(task.getPayloadJson());
-        copy.setWindowStart(task.getWindowStart());
-        copy.setWindowEnd(task.getWindowEnd());
-        copy.setDueTime(task.getDueTime());
-        return copy;
     }
 
     private PollResult buildPollResult(PollBatch batch,
@@ -870,27 +748,6 @@ public class DispatchExecutionService {
         });
     }
 
-    private void upsertPollStat(PollDailyStat stat) {
-        withTransientDbRetry("upsert poll stat", () -> {
-            PollDailyStat existing = pollDailyStatMapper.selectOne(
-                    new LambdaQueryWrapper<PollDailyStat>()
-                            .eq(PollDailyStat::getProjectId, stat.getProjectId())
-                            .eq(PollDailyStat::getPlatformId, stat.getPlatformId())
-                            .eq(PollDailyStat::getBatchDate, stat.getBatchDate())
-                            .eq(PollDailyStat::getBatchNo, stat.getBatchNo())
-                            .eq(PollDailyStat::getQuestionTier, stat.getQuestionTier())
-                            .last("LIMIT 1")
-            );
-            if (existing == null) {
-                pollDailyStatMapper.insert(stat);
-                return null;
-            }
-            stat.setId(existing.getId());
-            pollDailyStatMapper.updateById(stat);
-            return null;
-        });
-    }
-
     private <T> T withTransientDbRetry(String operation, Supplier<T> action) {
         try {
             return action.get();
@@ -931,53 +788,6 @@ public class DispatchExecutionService {
         }
     }
 
-    private PollBatch ensureBatch(DispatchTask task,
-                                  Project project,
-                                  LocalDate batchDate,
-                                  int batchNo,
-                                  String questionTier,
-                                  int totalQuestions,
-                                  int totalPlatforms) {
-        PollBatch existing = pollBatchMapper.selectOne(
-                new LambdaQueryWrapper<PollBatch>()
-                        .eq(PollBatch::getProjectId, project.getId())
-                        .eq(PollBatch::getBatchDate, batchDate)
-                        .eq(PollBatch::getBatchNo, batchNo)
-                        .eq(PollBatch::getQuestionTier, questionTier)
-                        .last("LIMIT 1")
-        );
-        if (existing != null) {
-            existing.setDispatchTaskId(task.getId());
-            existing.setTriggeredAt(LocalDateTime.now());
-            existing.setFinishedAt(null);
-            existing.setTotalQuestionCount(totalQuestions);
-            existing.setTotalPlatformCount(totalPlatforms);
-            existing.setQuestionCount(0);
-            existing.setCompletedCount(0);
-            existing.setFailedCount(0);
-            existing.setHitCount(0);
-            existing.setOverallHitRate(BigDecimal.ZERO);
-            pollBatchMapper.updateById(existing);
-            return existing;
-        }
-        PollBatch batch = new PollBatch();
-        batch.setDispatchTaskId(task.getId());
-        batch.setProjectId(project.getId());
-        batch.setBatchDate(batchDate);
-        batch.setBatchNo(batchNo);
-        batch.setQuestionTier(questionTier);
-        batch.setTriggeredAt(LocalDateTime.now());
-        batch.setTotalQuestionCount(totalQuestions);
-        batch.setTotalPlatformCount(totalPlatforms);
-        batch.setQuestionCount(0);
-        batch.setCompletedCount(0);
-        batch.setFailedCount(0);
-        batch.setHitCount(0);
-        batch.setOverallHitRate(BigDecimal.ZERO);
-        pollBatchMapper.insert(batch);
-        return batch;
-    }
-
     private LocalDate resolveBatchDate(DispatchTask task) {
         Map<String, Object> payload = parsePayload(task);
         Object batchDate = payload.get("batchDate");
@@ -1014,6 +824,18 @@ public class DispatchExecutionService {
             throw new BizException(400, "Invalid question tier for BI_DAILY_POLL: " + value);
         }
         return tier;
+    }
+
+    private Long resolveShardId(DispatchTask task) {
+        Object value = parsePayload(task).get("shardId");
+        if (value == null || !StringUtils.hasText(String.valueOf(value))) {
+            return null;
+        }
+        try {
+            return Long.parseLong(String.valueOf(value));
+        } catch (NumberFormatException ex) {
+            throw new BizException(400, "Invalid question poll shardId: " + value);
+        }
     }
 
     private int resolveTierPollLimit(Project project, String questionTier) {
@@ -1084,85 +906,6 @@ public class DispatchExecutionService {
         } catch (Exception ex) {
             return new HashMap<>();
         }
-    }
-
-    private List<PollKeywordCandidate> loadProjectPollKeywords(Long projectId, String questionTier) {
-        List<Long> groupIds = projectKeywordGroupRelMapper.selectList(
-                new LambdaQueryWrapper<ProjectKeywordGroupRel>()
-                        .eq(ProjectKeywordGroupRel::getProjectId, projectId)
-                        .select(ProjectKeywordGroupRel::getKeywordGroupId)
-        ).stream().map(ProjectKeywordGroupRel::getKeywordGroupId).filter(Objects::nonNull).distinct().toList();
-        if (groupIds.isEmpty()) {
-            return List.of();
-        }
-
-        List<KeywordGroupResult> results = keywordGroupResultMapper.selectList(
-                new LambdaQueryWrapper<KeywordGroupResult>()
-                        .in(KeywordGroupResult::getGroupId, groupIds)
-                        .eq(KeywordGroupResult::getQuestionTier, questionTier)
-                        .orderByAsc(KeywordGroupResult::getId)
-        );
-        if (results.isEmpty()) {
-            return List.of();
-        }
-
-        Map<String, PollKeywordCandidate> deduplicated = new LinkedHashMap<>();
-        for (KeywordGroupResult result : results) {
-            String keywordText = normalizeKeywordText(result.getKeywordText());
-            if (!StringUtils.hasText(keywordText)) {
-                continue;
-            }
-            deduplicated.putIfAbsent(normalizeKeywordKey(keywordText), new PollKeywordCandidate(result.getId(), keywordText));
-        }
-        return new ArrayList<>(deduplicated.values());
-    }
-
-    private List<PollKeywordCandidate> selectRotatedKeywords(Long projectId,
-                                                             String layer,
-                                                             List<PollKeywordCandidate> source,
-                                                             int takeCount) {
-        if (source == null || source.isEmpty()) {
-            return List.of();
-        }
-        ProjectPollRotation rotation = ensureRotation(projectId, layer);
-        int size = source.size();
-        int offset = rotation.getRotationOffset() == null ? 0 : rotation.getRotationOffset();
-        int normalizedOffset = Math.floorMod(offset, size);
-        int normalizedTakeCount = Math.max(1, Math.min(takeCount, size));
-
-        List<PollKeywordCandidate> picked = new ArrayList<>();
-        for (int i = 0; i < normalizedTakeCount; i++) {
-            picked.add(source.get((normalizedOffset + i) % size));
-        }
-        rotation.setRotationOffset((normalizedOffset + normalizedTakeCount) % size);
-        projectPollRotationMapper.updateById(rotation);
-        return picked;
-    }
-
-    private String normalizeKeywordText(String keywordText) {
-        return keywordText == null ? null : keywordText.trim();
-    }
-
-    private String normalizeKeywordKey(String keywordText) {
-        return normalizeKeywordText(keywordText).toLowerCase(Locale.ROOT);
-    }
-
-    private ProjectPollRotation ensureRotation(Long projectId, String layer) {
-        ProjectPollRotation rotation = projectPollRotationMapper.selectOne(
-                new LambdaQueryWrapper<ProjectPollRotation>()
-                        .eq(ProjectPollRotation::getProjectId, projectId)
-                        .eq(ProjectPollRotation::getPriorityLevel, layer)
-                        .last("LIMIT 1")
-        );
-        if (rotation != null) {
-            return rotation;
-        }
-        ProjectPollRotation created = new ProjectPollRotation();
-        created.setProjectId(projectId);
-        created.setPriorityLevel(layer);
-        created.setRotationOffset(0);
-        projectPollRotationMapper.insert(created);
-        return created;
     }
 
     private int priorityRank(String priority) {
@@ -1835,37 +1578,6 @@ public class DispatchExecutionService {
         }
     }
 
-    private static class PlatformAgg {
-        private final AiPlatformConfig platform;
-        private int questionCount;
-        private int requestCount;
-        private int completedCount;
-        private int failedCount;
-        private int hitCount;
-        private int siteMentionCount;
-        private int contactMentionCount;
-
-        private PlatformAgg(AiPlatformConfig platform) {
-            this.platform = platform;
-        }
-    }
-
     private record PollKeywordCandidate(Long keywordResultId, String keywordText) {
-    }
-
-    private static final class QuestionPollThreadFactory implements ThreadFactory {
-        private final AtomicInteger sequence = new AtomicInteger(1);
-        private final String prefix;
-
-        private QuestionPollThreadFactory(Long taskId, String questionTier) {
-            this.prefix = "question-poll-" + taskId + "-" + questionTier + "-";
-        }
-
-        @Override
-        public Thread newThread(Runnable runnable) {
-            Thread thread = new Thread(runnable, prefix + sequence.getAndIncrement());
-            thread.setDaemon(true);
-            return thread;
-        }
     }
 }

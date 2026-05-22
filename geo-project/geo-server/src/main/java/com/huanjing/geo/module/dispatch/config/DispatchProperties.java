@@ -21,13 +21,14 @@ public class DispatchProperties {
     private int taskRetentionDays = 90;
     private int modelConnectTimeoutMs = 10000;
     private int modelRequestTimeoutMs = 45000;
-    private int questionPollConcurrency = 4;
+    private int questionPollShardSize = 20;
     private int resourceBusyRetryMinSeconds = 30;
     private int resourceBusyRetryJitterSeconds = 30;
+    private int resourceBusyMaxAttempts = 60;
     private boolean autoContentGenerationEnabled = false;
 
-    public void setQuestionPollConcurrency(int questionPollConcurrency) {
-        this.questionPollConcurrency = Math.max(1, questionPollConcurrency);
+    public void setQuestionPollShardSize(int questionPollShardSize) {
+        this.questionPollShardSize = Math.max(1, questionPollShardSize);
     }
 
     public void setResourceBusyRetryMinSeconds(int resourceBusyRetryMinSeconds) {
@@ -36,5 +37,9 @@ public class DispatchProperties {
 
     public void setResourceBusyRetryJitterSeconds(int resourceBusyRetryJitterSeconds) {
         this.resourceBusyRetryJitterSeconds = Math.max(0, resourceBusyRetryJitterSeconds);
+    }
+
+    public void setResourceBusyMaxAttempts(int resourceBusyMaxAttempts) {
+        this.resourceBusyMaxAttempts = Math.max(1, resourceBusyMaxAttempts);
     }
 }

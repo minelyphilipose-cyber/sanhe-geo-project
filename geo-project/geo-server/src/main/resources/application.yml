@@ -229,9 +229,10 @@ geo:
     task-retention-days: 90
     model-connect-timeout-ms: 10000
     model-request-timeout-ms: 180000
-    question-poll-concurrency: ${DISPATCH_QUESTION_POLL_CONCURRENCY:4}
+    question-poll-shard-size: ${DISPATCH_QUESTION_POLL_SHARD_SIZE:20}
     resource-busy-retry-min-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_MIN_SECONDS:30}
     resource-busy-retry-jitter-seconds: ${DISPATCH_RESOURCE_BUSY_RETRY_JITTER_SECONDS:30}
+    resource-busy-max-attempts: ${DISPATCH_RESOURCE_BUSY_MAX_ATTEMPTS:60}
     auto-content-generation-enabled: ${DISPATCH_AUTO_CONTENT_GENERATION_ENABLED:false}
     api-key-aes-secret: ${DISPATCH_API_KEY_AES_SECRET:geo-dispatch-key}
   llm:
