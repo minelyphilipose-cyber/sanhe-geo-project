@@ -1,7 +1,9 @@
 package com.huanjing.geo.module.content.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.llm.LlmInvoker;
+import com.huanjing.geo.module.content.entity.BatchArticleGenerationBatch;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.ArticleDraftVersionMapper;
@@ -22,15 +24,18 @@ import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import java.util.List;
 import java.util.concurrent.Executor;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -40,6 +45,9 @@ class BatchArticleGenerationServiceTest {
 
     private ArticlePromptTemplateMapper promptTemplateMapper;
     private ArticlePromptTemplateVersionMapper promptTemplateVersionMapper;
+    private ProjectMapper projectMapper;
+    private BatchArticleGenerationBatchMapper batchMapper;
+    private BatchArticleGenerationTaskMapper taskMapper;
     private BatchArticlePromptBuilder promptBuilder;
     private BatchArticleGenerationService service;
 
@@ -47,9 +55,12 @@ class BatchArticleGenerationServiceTest {
     void setUp() {
         promptTemplateMapper = mock(ArticlePromptTemplateMapper.class);
         promptTemplateVersionMapper = mock(ArticlePromptTemplateVersionMapper.class);
+        projectMapper = mock(ProjectMapper.class);
+        batchMapper = mock(BatchArticleGenerationBatchMapper.class);
+        taskMapper = mock(BatchArticleGenerationTaskMapper.class);
         promptBuilder = mock(BatchArticlePromptBuilder.class);
         service = new BatchArticleGenerationService(
-                mock(ProjectMapper.class),
+                projectMapper,
                 mock(BrandMapper.class),
                 mock(KeywordGroupMapper.class),
                 mock(KeywordGroupResultMapper.class),
@@ -60,8 +71,8 @@ class BatchArticleGenerationServiceTest {
                 mock(ArticleGenerationLogMapper.class),
                 promptTemplateMapper,
                 promptTemplateVersionMapper,
-                mock(BatchArticleGenerationBatchMapper.class),
-                mock(BatchArticleGenerationTaskMapper.class),
+                batchMapper,
+                taskMapper,
                 mock(CurrentUserService.class),
                 mock(com.huanjing.geo.module.customer.access.BrandAccessService.class),
                 mock(PlatformCredentialService.class),
@@ -72,6 +83,7 @@ class BatchArticleGenerationServiceTest {
                 mock(BatchArticleQualityChecker.class),
                 mock(ArticleTemplateAllocationService.class),
                 new QuestionScenePlatformSuggestionService(),
+                mock(ArticleGenerationReadinessService.class),
                 new ObjectMapper(),
                 mock(PlatformTransactionManager.class),
                 (Executor) Runnable::run
@@ -115,6 +127,58 @@ class BatchArticleGenerationServiceTest {
         assertSame(defaultResult, result);
         assertEquals("fallback_default_prompt", task.getTemplateSource());
         verify(promptBuilder).build(input);
+    }
+
+    @Test
+    void runTaskMarksOnlyCurrentTaskFailedWhenPromptRenderThrows() {
+        Project project = new Project();
+        project.setId(1L);
+        project.setProjectName("Project");
+        project.setStatus("active");
+        when(projectMapper.selectById(1L)).thenReturn(project);
+
+        BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();
+        batch.setId(10L);
+        batch.setProjectId(1L);
+        batch.setTopicSource("manual");
+        BatchArticleGenerationTask task = new BatchArticleGenerationTask();
+        task.setId(101L);
+        task.setTopic("topic");
+        task.setTopicAsQuestion("question");
+        task.setArticleType("buying_guide");
+        task.setContentStyle("zhihu");
+        task.setLength("medium");
+        task.setArticleIndexInBatch(1);
+        when(promptBuilder.build(any())).thenThrow(new BizException(400, "Unregistered template variable: brandBasicInfo"));
+
+        ReflectionTestUtils.invokeMethod(service, "runTask", batch, task);
+
+        ArgumentCaptor<BatchArticleGenerationTask> captor = forClass(BatchArticleGenerationTask.class);
+        verify(taskMapper, org.mockito.Mockito.atLeastOnce()).updateById(captor.capture());
+        BatchArticleGenerationTask failedTask = captor.getAllValues().get(captor.getAllValues().size() - 1);
+        assertEquals("failed", failedTask.getStatus());
+        assertThat(failedTask.getErrorMessage()).contains("Unregistered template variable");
+    }
+
+    @Test
+    void completeBatchMarksPartialSuccessWhenSomeTasksFailed() {
+        BatchArticleGenerationBatch batch = new BatchArticleGenerationBatch();
+        batch.setId(10L);
+        BatchArticleGenerationTask success = new BatchArticleGenerationTask();
+        success.setStatus("success");
+        BatchArticleGenerationTask failed = new BatchArticleGenerationTask();
+        failed.setStatus("failed");
+        when(taskMapper.selectList(any())).thenReturn(List.of(success, failed));
+        when(batchMapper.selectById(10L)).thenReturn(batch);
+
+        ReflectionTestUtils.invokeMethod(service, "completeBatch", 10L);
+
+        ArgumentCaptor<BatchArticleGenerationBatch> captor = forClass(BatchArticleGenerationBatch.class);
+        verify(batchMapper).updateById(captor.capture());
+        BatchArticleGenerationBatch updated = captor.getValue();
+        assertEquals("partial_success", updated.getStatus());
+        assertEquals(1, updated.getSuccessCount());
+        assertEquals(1, updated.getFailedCount());
     }
 
     private BatchArticlePromptBuilder.PromptBuildInput promptInput() {

@@ -248,6 +248,40 @@
             <span v-if="isBatchCountExceeded" class="summary-limit-warning">已超过单次批量生成上限</span>
           </li>
         </ul>
+        <div v-if="batchForm.projectId && selectedTopics.length" v-loading="readinessLoading" class="readiness-card">
+          <div class="readiness-card-head">
+            <div>
+              <div class="readiness-title">资料预检</div>
+              <div class="readiness-subtitle">按当前问题场景提示缺失资料</div>
+            </div>
+            <el-tag :type="readinessTagType">{{ readinessStatusText }}</el-tag>
+          </div>
+          <div v-if="readinessReport" class="readiness-score-row">
+            <span class="readiness-score">{{ readinessReport.score }}</span>
+            <span class="readiness-score-label">完整度</span>
+          </div>
+          <div v-if="readinessMissingBaseItems.length" class="readiness-section">
+            <div class="readiness-section-title">基础缺失</div>
+            <div class="readiness-chip-list">
+              <el-tag v-for="item in readinessMissingBaseItems" :key="item.code" size="small" type="warning">
+                {{ item.label }}
+              </el-tag>
+            </div>
+          </div>
+          <div v-if="readinessSceneWarnings.length" class="readiness-section">
+            <div class="readiness-section-title">场景提醒</div>
+            <div v-for="scene in readinessSceneWarnings" :key="scene.questionSceneCode" class="readiness-scene">
+              <span class="readiness-scene-name">{{ scene.questionSceneName }}</span>
+              <span class="readiness-scene-message">{{ scene.items.map((item) => item.message).join('；') }}</span>
+            </div>
+          </div>
+          <div v-if="readinessReport && !readinessMissingBaseItems.length && !readinessSceneWarnings.length" class="readiness-ok">
+            当前资料可支撑所选场景生成。
+          </div>
+          <div v-if="!readinessReport && !readinessLoading" class="readiness-ok muted">
+            暂无可预检的问题场景。
+          </div>
+        </div>
       </aside>
     </main>
 
@@ -350,7 +384,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ArrowDown, ArrowRight, Back, Check, Delete } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -358,9 +392,12 @@ import type { TableInstance } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import type { Brand, KeywordGroup, KeywordGroupQuestion, Project, PublishSite } from '@/types'
 import {
+  checkBatchArticleGenerationReadiness,
   createBatchContentArticles,
   getArticleGenerationOptions,
   previewArticleTemplateAllocation,
+  type ArticleGenerationReadinessReport,
+  type ArticleGenerationReadinessSceneImpact,
   type ArticleGenerationOptions,
   type ArticleGenerationTemplateOption,
   type BatchArticleGenerateNotice,
@@ -456,6 +493,9 @@ const router = useRouter()
 const projectLoading = ref(false)
 const platformLoading = ref(false)
 const batchSubmitting = ref(false)
+const readinessLoading = ref(false)
+const readinessReport = ref<ArticleGenerationReadinessReport | null>(null)
+const readinessLoadedKey = ref('')
 const projectOptions = ref<Project[]>([])
 const publishSites = ref<PublishSite[]>([])
 const selectedBrand = ref<Brand | null>(null)
@@ -501,6 +541,32 @@ const activePlatformOptions = computed(() => platformOptions.value.filter((platf
 const suggestionMap = computed(() => {
   const entries = generationOptions.value?.questionScenePlatformSuggestions || []
   return Object.fromEntries(entries.map((item) => [item.questionSceneCode, item.platformCodes || []])) as Record<string, string[]>
+})
+const selectedSceneCodes = computed(() => Array.from(new Set(
+  selectedTopics.value
+    .map((topic) => topic.questionSceneCode)
+    .filter((code): code is string => Boolean(code)),
+)))
+const readinessRequestKey = computed(() => `${batchForm.projectId || ''}::${selectedSceneCodes.value.join('|')}`)
+const readinessSceneMap = computed<Record<string, ArticleGenerationReadinessSceneImpact>>(() => Object.fromEntries(
+  (readinessReport.value?.sceneImpacts || []).map((scene) => [scene.questionSceneCode, scene]),
+) as Record<string, ArticleGenerationReadinessSceneImpact>)
+const readinessMissingBaseItems = computed(() => (readinessReport.value?.baseItems || [])
+  .filter((item) => item.status === 'missing'))
+const readinessSceneWarnings = computed(() => (readinessReport.value?.sceneImpacts || [])
+  .filter((scene) => scene.items?.length))
+const readinessTagType = computed(() => {
+  if (!readinessReport.value) return 'info'
+  if (readinessReport.value.status === 'critical') return 'danger'
+  if (readinessReport.value.status === 'warning') return 'warning'
+  return 'success'
+})
+const readinessStatusText = computed(() => {
+  if (readinessLoading.value) return '检查中'
+  if (!readinessReport.value) return '未检查'
+  if (readinessReport.value.status === 'critical') return '需确认'
+  if (readinessReport.value.status === 'warning') return '有缺失'
+  return '正常'
 })
 const projectCascadeProps = {
   value: 'value',
@@ -701,8 +767,42 @@ async function handleBatchProjectChange() {
   selectedQuestionRows.value = []
   batchQuestionRows.value = []
   manualTopicInput.value = ''
+  readinessReport.value = null
+  readinessLoadedKey.value = ''
   await loadSelectedBrand()
   syncTopicPlatformKeys()
+}
+
+async function loadReadiness(force = false) {
+  const key = readinessRequestKey.value
+  if (!batchForm.projectId || !selectedSceneCodes.value.length) {
+    readinessReport.value = null
+    readinessLoadedKey.value = ''
+    return null
+  }
+  if (!force && readinessReport.value && readinessLoadedKey.value === key) {
+    return readinessReport.value
+  }
+  readinessLoading.value = true
+  try {
+    const { data } = await checkBatchArticleGenerationReadiness({
+      projectId: batchForm.projectId,
+      questionSceneCodes: selectedSceneCodes.value,
+    })
+    if (readinessRequestKey.value === key) {
+      readinessReport.value = data.data
+      readinessLoadedKey.value = key
+    }
+    return data.data
+  } catch (err) {
+    console.error(err)
+    readinessReport.value = null
+    readinessLoadedKey.value = ''
+    ElMessage.warning('资料预检失败，请稍后重试')
+    return null
+  } finally {
+    readinessLoading.value = false
+  }
 }
 
 function addManualTopic() {
@@ -1309,6 +1409,10 @@ async function submitBatchGeneration() {
     ElMessage.warning('请先选择项目、添加主题并配置生成数量')
     return
   }
+  const confirmedReadinessWarnings = await confirmReadinessWarnings()
+  if (!confirmedReadinessWarnings) {
+    return
+  }
   const confirmedPlatformWarnings = await confirmPlatformWarnings()
   if (!confirmedPlatformWarnings) {
     return
@@ -1319,6 +1423,8 @@ async function submitBatchGeneration() {
     questionSceneCode: topic.questionSceneCode || undefined,
     keywordGroupId: topic.keywordGroupId,
     keywordGroupName: topic.keywordGroupName,
+    readinessWarningConfirmed: Boolean(confirmedReadinessWarnings[topic.id]?.length),
+    readinessWarningCodes: confirmedReadinessWarnings[topic.id]?.length ? confirmedReadinessWarnings[topic.id] : undefined,
     platforms: activePlatformOptions.value.map((platform) => {
       const mode = topic.platformAllocationModes[platform.value] || 'auto'
       return {
@@ -1351,6 +1457,51 @@ async function submitBatchGeneration() {
     ElMessage.error('批量生成任务提交失败')
   } finally {
     batchSubmitting.value = false
+  }
+}
+
+async function confirmReadinessWarnings(): Promise<Record<string, string[]> | null> {
+  const report = await loadReadiness(true)
+  if (!report) {
+    return {}
+  }
+  const topicWarnings = selectedTopics.value.flatMap((topic) => {
+    const scene = topic.questionSceneCode ? readinessSceneMap.value[topic.questionSceneCode] : null
+    const warningCodes = (scene?.items || [])
+      .filter((item) => item.requiresConfirmation && item.warningCode)
+      .map((item) => item.warningCode!)
+    if (!warningCodes.length) {
+      return []
+    }
+    return [{
+      topicId: topic.id,
+      topic: topic.topic,
+      messages: (scene?.items || [])
+        .filter((item) => item.requiresConfirmation && item.warningCode)
+        .map((item) => item.message),
+      warningCodes,
+    }]
+  })
+  if (!topicWarnings.length) {
+    return {}
+  }
+  const detailHtml = topicWarnings
+    .map((item) => `<li>${escapeHtml(item.topic)}：${item.messages.map(escapeHtml).join('；')}</li>`)
+    .join('')
+  try {
+    await ElMessageBox.confirm(
+      `<div class="generation-notice-box"><p>以下主题资料存在关键缺失，请确认是否继续生成：</p><ul>${detailHtml}</ul></div>`,
+      '确认资料预检风险',
+      {
+        dangerouslyUseHTMLString: true,
+        confirmButtonText: '仍要生成',
+        cancelButtonText: '返回修改',
+        type: 'warning',
+      },
+    )
+    return Object.fromEntries(topicWarnings.map((item) => [item.topicId, item.warningCodes]))
+  } catch {
+    return null
   }
 }
 
@@ -1419,6 +1570,13 @@ async function showGenerationNotices(totalCount: number, notices: BatchArticleGe
 function goBack() {
   router.push('/admin/content/execution')
 }
+
+watch(
+  () => readinessRequestKey.value,
+  () => {
+    void loadReadiness()
+  },
+)
 
 onMounted(() => {
   loadProjectOptions()
@@ -2050,6 +2208,98 @@ onMounted(() => {
 
 .summary-limit-warning {
   font-size: 12px;
+}
+
+.readiness-card {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.readiness-card-head,
+.readiness-score-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.readiness-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.readiness-subtitle {
+  margin-top: 3px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-tertiary);
+}
+
+.readiness-score-row {
+  margin-top: 12px;
+  justify-content: flex-start;
+}
+
+.readiness-score {
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  color: #2563eb;
+}
+
+.readiness-score-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.readiness-section {
+  margin-top: 12px;
+}
+
+.readiness-section-title {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.readiness-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.readiness-scene {
+  padding: 8px 0;
+  border-top: 1px dashed #eef2f7;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.readiness-scene-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.readiness-scene-message,
+.readiness-ok {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.readiness-ok {
+  margin-top: 12px;
+}
+
+.readiness-ok.muted {
+  color: var(--text-tertiary);
 }
 
 .question-picker-toolbar {

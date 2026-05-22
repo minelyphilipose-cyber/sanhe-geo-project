@@ -10,6 +10,8 @@ import com.huanjing.geo.module.content.dto.ArticlePublishRequest;
 import com.huanjing.geo.module.content.dto.ArticleResubmitRequest;
 import com.huanjing.geo.module.content.dto.ArticleReviewRequest;
 import com.huanjing.geo.module.content.dto.ArticleRevisionSaveRequest;
+import com.huanjing.geo.module.content.dto.ArticleGenerationReadinessDtos.ReadinessReport;
+import com.huanjing.geo.module.content.dto.ArticleGenerationReadinessDtos.ReadinessRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerationDetailResponse;
@@ -18,6 +20,7 @@ import com.huanjing.geo.module.content.dto.SelfMediaCookieStatusBatchRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaCookieStatusBatchResponse;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.service.ArticleAiDraftService;
+import com.huanjing.geo.module.content.service.ArticleGenerationReadinessService;
 import com.huanjing.geo.module.content.service.ArticleSelfMediaCookieStatusService;
 import com.huanjing.geo.module.content.service.BatchArticleGenerationService;
 import com.huanjing.geo.module.content.service.ContentArticleService;
@@ -40,6 +43,7 @@ public class ContentArticleController {
     private final ArticleAiDraftService articleAiDraftService;
     private final ArticleSelfMediaCookieStatusService selfMediaCookieStatusService;
     private final BatchArticleGenerationService batchArticleGenerationService;
+    private final ArticleGenerationReadinessService articleGenerationReadinessService;
 
     @GetMapping
     public R<Page<ArticleDraft>> page(@RequestParam(required = false) String projectName,
@@ -77,6 +81,11 @@ public class ContentArticleController {
     @PostMapping("/batch-generate")
     public R<BatchArticleGenerateResponse> batchGenerate(@Valid @RequestBody BatchArticleGenerateRequest req) {
         return R.ok(batchArticleGenerationService.create(req));
+    }
+
+    @PostMapping("/batch-generate/readiness")
+    public R<ReadinessReport> batchGenerateReadiness(@Valid @RequestBody ReadinessRequest req) {
+        return R.ok(articleGenerationReadinessService.inspect(req.getProjectId(), req.getQuestionSceneCodes()));
     }
 
     @GetMapping("/batch-generate/{batchId}")

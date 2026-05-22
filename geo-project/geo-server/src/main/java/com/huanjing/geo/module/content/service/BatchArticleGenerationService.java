@@ -84,8 +84,6 @@ public class BatchArticleGenerationService {
     private static final String TEMPLATE_SOURCE_WEIGHTED = "weighted";
     private static final String TEMPLATE_SOURCE_CUSTOM = "custom";
     private static final String TEMPLATE_SOURCE_FALLBACK_DEFAULT_PROMPT = "fallback_default_prompt";
-    private static final String WARNING_DEAL_CONTACT_MISSING = "deal_contact_missing";
-    private static final String WARNING_DEAL_CONTACT_HIDDEN = "deal_contact_hidden";
     private static final int ARTICLE_REQUEST_TIMEOUT_MS = 120_000;
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final String SMART_TEMPLATE_MATCH_SYSTEM_PROMPT = """
@@ -136,6 +134,7 @@ public class BatchArticleGenerationService {
     private final BatchArticleQualityChecker qualityChecker;
     private final ArticleTemplateAllocationService allocationService;
     private final QuestionScenePlatformSuggestionService suggestionService;
+    private final ArticleGenerationReadinessService readinessService;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
     private final Executor articleAiDraftExecutor;
@@ -163,6 +162,7 @@ public class BatchArticleGenerationService {
                                          BatchArticleQualityChecker qualityChecker,
                                          ArticleTemplateAllocationService allocationService,
                                          QuestionScenePlatformSuggestionService suggestionService,
+                                         ArticleGenerationReadinessService readinessService,
                                          ObjectMapper objectMapper,
                                          PlatformTransactionManager transactionManager,
                                          @Qualifier("articleAiDraftExecutor") Executor articleAiDraftExecutor) {
@@ -189,6 +189,7 @@ public class BatchArticleGenerationService {
         this.qualityChecker = qualityChecker;
         this.allocationService = allocationService;
         this.suggestionService = suggestionService;
+        this.readinessService = readinessService;
         this.objectMapper = objectMapper;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.articleAiDraftExecutor = articleAiDraftExecutor;
@@ -269,7 +270,8 @@ public class BatchArticleGenerationService {
                         task.setTemplateSource(platform.templateSource());
                         task.setSuggestedPlatformCodes(writeJson(topic.suggestedPlatformCodes()));
                         task.setSelectedPlatformCodes(writeJson(topic.selectedPlatformCodes()));
-                        List<String> warningCodes = readinessWarningCodes(topic.questionSceneCode(), platform.contactDisclosureMode(), brand);
+                        List<String> warningCodes = readinessService.detectTaskReadinessWarningCodes(
+                                topic.questionSceneCode(), platform.contactDisclosureMode(), brand);
                         List<String> confirmedCodes = warningCodes.stream()
                                 .filter(topic.confirmedReadinessWarningCodes()::contains)
                                 .toList();
@@ -720,7 +722,7 @@ public class BatchArticleGenerationService {
         return codes.stream()
                 .filter(StringUtils::hasText)
                 .map(String::trim)
-                .filter(code -> WARNING_DEAL_CONTACT_MISSING.equals(code) || WARNING_DEAL_CONTACT_HIDDEN.equals(code))
+                .filter(readinessService::isKnownWarningCode)
                 .distinct()
                 .toList();
     }
@@ -1021,20 +1023,6 @@ public class BatchArticleGenerationService {
                 count,
                 trimToNull(extraPrompt)
         );
-    }
-
-    private List<String> readinessWarningCodes(String questionSceneCode, String contactDisclosureMode, Brand brand) {
-        if (!"deal".equals(questionSceneCode)) {
-            return List.of();
-        }
-        String fullContactBlock = promptBuilder.buildContactBlock(brand, "full");
-        if (!StringUtils.hasText(fullContactBlock)) {
-            return List.of(WARNING_DEAL_CONTACT_MISSING);
-        }
-        if ("none".equals(trimToNull(contactDisclosureMode))) {
-            return List.of(WARNING_DEAL_CONTACT_HIDDEN);
-        }
-        return List.of();
     }
 
     private String resolveTaskArticleType(String articleTypeCode) {

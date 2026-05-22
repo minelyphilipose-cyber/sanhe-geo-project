@@ -158,6 +158,48 @@ export function createBatchContentArticles(data: BatchArticleGenerateRequest) {
   return request.post<R<BatchArticleGenerateResponse>>('/content/articles/batch-generate', data)
 }
 
+export interface ArticleGenerationReadinessRequest {
+  projectId: number
+  questionSceneCodes: string[]
+}
+
+export interface ArticleGenerationReadinessBaseItem {
+  code: string
+  label: string
+  status: 'ok' | 'missing' | string
+  severity: 'normal' | 'warning' | 'critical' | string
+  message?: string
+  source?: string
+}
+
+export interface ArticleGenerationReadinessSceneItem {
+  code: string
+  severity: 'warning' | 'critical' | string
+  message: string
+  warningCode?: string | null
+  requiresConfirmation?: boolean
+}
+
+export interface ArticleGenerationReadinessSceneImpact {
+  questionSceneCode: string
+  questionSceneName: string
+  status: 'ok' | 'warning' | 'critical' | string
+  score: number
+  items: ArticleGenerationReadinessSceneItem[]
+}
+
+export interface ArticleGenerationReadinessReport {
+  projectId: number
+  score: number
+  status: 'ok' | 'warning' | 'critical' | string
+  baseItems: ArticleGenerationReadinessBaseItem[]
+  sceneImpacts: ArticleGenerationReadinessSceneImpact[]
+}
+
+export function checkBatchArticleGenerationReadiness(data: ArticleGenerationReadinessRequest) {
+  return request.post<R<ArticleGenerationReadinessReport>>('/content/articles/batch-generate/readiness', data)
+}
+
 export interface ArticlePromptTemplate {
   id: number
   name: string
