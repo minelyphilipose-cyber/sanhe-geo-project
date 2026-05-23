@@ -255,6 +255,13 @@ public class ProjectDashboardService {
             row.put("platformLogoUrl", platformLogoMap.get(record.getPlatformCode()));
             row.put("answerText", stringValue(detail.get("platform_response")));
             row.put("matchType", record.getMatchType());
+            row.put("effectiveHit", record.getEffectiveHit());
+            row.put("judgeStatus", record.getJudgeStatus());
+            row.put("hitLevel", record.getHitLevel());
+            row.put("hitSentiment", record.getHitSentiment());
+            row.put("mentionType", record.getMentionType());
+            row.put("judgeEvidence", record.getJudgeEvidence());
+            row.put("judgeRiskReason", record.getJudgeRiskReason());
             row.put("siteMentioned", Boolean.TRUE.equals(record.getSiteMentioned()));
             row.put("contactMentioned", Boolean.TRUE.equals(record.getContactMentioned()));
             row.put("contactMentionCount", record.getContactMentionCount() != null

@@ -368,9 +368,11 @@
               </td>
               <td class="mono muted">{{ row.time }}</td>
               <td>
-                <button type="button" class="link-button" @click="openDetail(row)">详情</button>
-                <a v-if="row.platformUrl" class="link-button" :href="row.platformUrl" target="_blank" rel="noopener noreferrer">转到平台 →</a>
-                <button v-else type="button" class="link-button" @click="platformUrlPending">转到平台 →</button>
+                <div class="table-actions">
+                  <button type="button" class="link-button" @click="openDetail(row)">详情</button>
+                  <a v-if="row.platformUrl" class="link-button" :href="row.platformUrl" target="_blank" rel="noopener noreferrer">转到平台 →</a>
+                  <button v-else type="button" class="link-button" @click="platformUrlPending">转到平台 →</button>
+                </div>
               </td>
             </tr>
             <tr v-if="filteredRows.length === 0">
@@ -414,7 +416,8 @@
           </article>
           <article>
             <small>AI回答</small>
-            <p>{{ selectedDetailRow?.answerText || '暂无回答内容' }}</p>
+            <div v-if="selectedDetailAnswerHtml" class="detail-answer-markdown" v-html="selectedDetailAnswerHtml"></div>
+            <p v-else>暂无回答内容</p>
           </article>
           <div class="detail-meta-grid">
             <span>查询时间 <strong>{{ selectedDetailRow?.time || '-' }}</strong></span>
@@ -437,6 +440,7 @@ import { use } from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
+import MarkdownIt from 'markdown-it'
 import { getActiveCompanyPackageBinding } from '@/api/customer'
 import {
   createProjectDashboardShare,
@@ -470,6 +474,8 @@ import wenxinLogo from '@/assets/ai-model-logos/文心一言.png'
 import xiaomiMimoLogo from '@/assets/ai-model-logos/xiaomimimo.png'
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent])
+
+const markdown = new MarkdownIt({ html: false, linkify: true, breaks: true })
 
 type MetricTone = 'blue' | 'purple' | 'teal' | 'orange'
 type TrendType = 'up' | 'down'
@@ -759,10 +765,19 @@ const indexingSources = computed<IndexingSource[]>(() => {
         enabled: true,
         degraded: false,
       }))
-  const maxHit = Math.max(...configuredPlatforms.map((item) => platformStats.get(normalizePlatformKey(item.platformCode))?.hitCount || 0), 1)
-  return configuredPlatforms.map((item, index) => {
-    const stat = platformStats.get(normalizePlatformKey(item.platformCode))
-    const hitCount = stat?.hitCount || 0
+  const orderedPlatforms = configuredPlatforms
+    .map((item, originalIndex) => {
+      const stat = platformStats.get(normalizePlatformKey(item.platformCode))
+      return {
+        item,
+        originalIndex,
+        stat,
+        hitCount: stat?.hitCount || 0,
+      }
+    })
+    .sort((left, right) => right.hitCount - left.hitCount || left.originalIndex - right.originalIndex)
+  const maxHit = Math.max(...orderedPlatforms.map((item) => item.hitCount), 1)
+  return orderedPlatforms.map(({ item, stat, hitCount }, index) => {
     const name = stat?.platformName || platformDisplayName(item)
     return {
       name,
@@ -963,6 +978,7 @@ const fallbackIntentTags: IntentTag[] = [
   { text: '电动门安装', weight: 0.35 },
 ]
 
+const INTENT_PARTICLE_COUNT = 10
 const intentTags = ref<IntentTag[]>(fallbackIntentTags)
 const intentParticles = ref<IntentParticle[]>([])
 let particleId = 0
@@ -1067,6 +1083,10 @@ const detailDialogVisible = ref(false)
 const selectedDetailRow = ref<ReportRow | null>(null)
 
 const filteredRows = computed(() => reportRows.value)
+const selectedDetailAnswerHtml = computed(() => {
+  const raw = selectedDetailRow.value?.answerText || ''
+  return raw.trim() ? markdown.render(raw) : ''
+})
 const totalPages = computed(() => Math.max(1, Math.ceil(detailTotal.value / pageSize)))
 const displayedRows = computed(() => filteredRows.value)
 const pageNumbers = computed(() => Array.from({ length: totalPages.value }, (_, index) => index + 1))
@@ -1415,7 +1435,7 @@ async function loadProjectInfo() {
 }
 
 function getIntentTagStyle(weight: number) {
-  const fontSize = 12 + weight * 14
+  const fontSize = 11 + weight * 5
   if (weight >= 0.85) {
     return { fontSize, color: '#2f6bff', fontWeight: 700 }
   }
@@ -1432,15 +1452,15 @@ function createIntentParticle(forceFront = false): IntentParticle {
   const sourceTags = intentTags.value.length ? intentTags.value : fallbackIntentTags
   const tag = sourceTags[Math.floor(Math.random() * sourceTags.length)]
   const angle = Math.random() * Math.PI * 2
-  const radius = Math.random() * 0.85
+  const radius = 0.2 + Math.random() * 0.75
   const { fontSize, color, fontWeight } = getIntentTagStyle(tag.weight)
 
   return {
     id: particleId++,
     text: tag.text,
     weight: tag.weight,
-    offsetX: Math.cos(angle) * radius * 190,
-    offsetY: Math.sin(angle) * radius * 110,
+    offsetX: Math.cos(angle) * radius * 210,
+    offsetY: Math.sin(angle) * radius * 92,
     z: forceFront ? Math.random() * 600 - 600 : -800,
     speed: 2.5 + Math.random() * 1.5,
     style: {
@@ -1455,7 +1475,7 @@ function createIntentParticle(forceFront = false): IntentParticle {
 
 function resetIntentParticles() {
   particleId = 0
-  intentParticles.value = Array.from({ length: 14 }, () => createIntentParticle(true))
+  intentParticles.value = Array.from({ length: INTENT_PARTICLE_COUNT }, () => createIntentParticle(true))
 }
 
 function updateIntentParticles() {
@@ -1463,7 +1483,7 @@ function updateIntentParticles() {
     .map<IntentParticle>((particle) => {
       const z = particle.z + particle.speed
       const normalized = (z + 800) / 1000
-      const scale = 0.15 + normalized * 1.4
+      const scale = 0.55 + normalized * 0.45
       let opacity = 1
 
       if (normalized < 0.2) {
@@ -1486,7 +1506,7 @@ function updateIntentParticles() {
     })
     .filter((particle) => particle.z <= 250)
 
-  while (next.length < 14) {
+  while (next.length < INTENT_PARTICLE_COUNT) {
     next.push(createIntentParticle())
   }
 
@@ -3243,6 +3263,13 @@ tbody tr:hover {
   font-weight: 600;
 }
 
+.table-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  white-space: nowrap;
+}
+
 .table-footer {
   padding: 16px 24px;
 }
@@ -3329,6 +3356,63 @@ tbody tr:hover {
   font-size: 14px;
   line-height: 1.75;
   white-space: pre-wrap;
+}
+
+.detail-answer-markdown {
+  max-height: 260px;
+  overflow: auto;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.detail-answer-markdown :deep(p) {
+  max-height: none;
+  margin: 0 0 10px;
+  overflow: visible;
+  white-space: normal;
+}
+
+.detail-answer-markdown :deep(p:last-child) {
+  margin-bottom: 0;
+}
+
+.detail-answer-markdown :deep(ul),
+.detail-answer-markdown :deep(ol) {
+  margin: 0 0 10px;
+  padding-left: 20px;
+}
+
+.detail-answer-markdown :deep(li + li) {
+  margin-top: 4px;
+}
+
+.detail-answer-markdown :deep(pre) {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  overflow: auto;
+  background: #f8fafc;
+  border-radius: 8px;
+}
+
+.detail-answer-markdown :deep(code) {
+  padding: 2px 5px;
+  background: #f1f5f9;
+  border-radius: 5px;
+  font-size: 13px;
+}
+
+.detail-answer-markdown :deep(pre code) {
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+.detail-answer-markdown :deep(blockquote) {
+  margin: 0 0 10px;
+  padding-left: 12px;
+  border-left: 3px solid var(--line-2);
+  color: var(--text-2);
 }
 
 .detail-meta-grid {

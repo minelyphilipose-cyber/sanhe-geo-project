@@ -551,6 +551,13 @@ export interface ProjectDashboardDetailItem {
   platformLogoUrl?: string | null
   answerText?: string | null
   matchType?: string | null
+  effectiveHit?: boolean | null
+  judgeStatus?: string | null
+  hitLevel?: string | null
+  hitSentiment?: string | null
+  mentionType?: string | null
+  judgeEvidence?: string | null
+  judgeRiskReason?: string | null
   siteMentioned?: boolean
   contactMentioned?: boolean
   contactMentionCount?: number

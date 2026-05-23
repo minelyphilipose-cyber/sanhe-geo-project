@@ -195,6 +195,8 @@ public class DispatchExecutionService {
         }
 
         Set<String> projectNames = resolveProjectNameSet(project);
+        Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
+        Set<String> judgeBrandNames = resolveJudgeBrandNameSet(project, brand);
         Set<String> siteDomains = resolveSiteDomains(project);
         Set<String> normalizedPhones = resolvePhones(project);
         Set<String> contactTerms = resolveContactTerms(project);
@@ -206,7 +208,7 @@ public class DispatchExecutionService {
                 PollKeywordCandidate keyword = new PollKeywordCandidate(item.getKeywordResultId(), item.getKeywordTextSnapshot());
                 InvocationResult invokeResult = invokeMonitoringWithRouter(platform, task, keyword.keywordText());
                 PollResult detail = buildPollResult(batch, task, project, platform, keyword, invokeResult,
-                        projectNames, siteDomains, normalizedPhones, contactTerms);
+                        projectNames, judgeBrandNames, brand, siteDomains, normalizedPhones, contactTerms);
                 pollShardPersistenceService.upsertPollResultAndMarkItem(detail, item);
             }
             pollShardPersistenceService.markShardCompleted(shardId);
@@ -224,12 +226,17 @@ public class DispatchExecutionService {
                                        PollKeywordCandidate keyword,
                                        InvocationResult invokeResult,
                                        Set<String> projectNames,
+                                       Set<String> judgeBrandNames,
+                                       Brand brand,
                                        Set<String> siteDomains,
                                        Set<String> normalizedPhones,
                                        Set<String> contactTerms) {
         MatchInfo match = invokeResult.success
                 ? analyzeMatch(projectNames, siteDomains, normalizedPhones, contactTerms, invokeResult.responseText)
                 : MatchInfo.empty();
+        JudgeInfo judge = invokeResult.success
+                ? judgeEffectiveHitIfNeeded(judgeBrandNames, brand, siteDomains, normalizedPhones, contactTerms, keyword.keywordText(), invokeResult.responseText)
+                : JudgeInfo.skipped("model invocation failed");
 
         String recordType;
         if (!invokeResult.success) {
@@ -254,6 +261,7 @@ public class DispatchExecutionService {
             matchDetails.put("contact_mentioned", match.contactMentioned);
             matchDetails.put("contact_mention_count", match.contactMentionCount);
             detail.put("match_details", matchDetails);
+            detail.put("judge_details", judge.toPayload());
         } else {
             Map<String, Object> errorPayload = new LinkedHashMap<>();
             errorPayload.put("error_code", invokeResult.errorCode);
@@ -277,10 +285,20 @@ public class DispatchExecutionService {
         result.setRequestCount(invokeResult.requestCount);
         result.setResponseTimeMs(invokeResult.responseTimeMs);
         result.setIsHit(match.hit);
+        result.setEffectiveHit(judge.effectiveHit);
         result.setMatchType(match.matchType);
         result.setSiteMentioned(match.siteMentioned);
         result.setContactMentioned(match.contactMentioned);
         result.setContactMentionCount(match.contactMentionCount);
+        result.setJudgeStatus(judge.status);
+        result.setHitLevel(judge.hitLevel);
+        result.setHitSentiment(judge.sentiment);
+        result.setMentionType(judge.mentionType);
+        result.setJudgeEvidence(judge.evidence);
+        result.setJudgeRiskReason(judge.riskReason);
+        result.setJudgeModel(judge.judgeModel);
+        result.setJudgeAt(judge.judgeAt);
+        result.setJudgeError(judge.error);
         result.setRecordType(recordType);
         result.setDetailJson(JSONUtil.toJsonStr(detail));
         return result;
@@ -945,6 +963,26 @@ public class DispatchExecutionService {
         return names;
     }
 
+    private Set<String> resolveJudgeBrandNameSet(Project project, Brand brand) {
+        Set<String> names = new LinkedHashSet<>();
+        if (brand != null) {
+            if (StringUtils.hasText(brand.getBrandName())) {
+                names.add(brand.getBrandName().trim());
+            }
+            if (StringUtils.hasText(brand.getBrandShortName())) {
+                names.add(brand.getBrandShortName().trim());
+            }
+            if (StringUtils.hasText(brand.getBrandSlug())) {
+                names.add(brand.getBrandSlug().trim());
+            }
+        }
+        if (names.isEmpty() && project != null && StringUtils.hasText(project.getProjectName())) {
+            names.add(project.getProjectName().trim());
+        }
+        names.removeIf(name -> !StringUtils.hasText(name) || name.trim().length() < 2);
+        return names;
+    }
+
     private Set<String> resolveSiteDomains(Project project) {
         Set<String> domains = new HashSet<>();
         Company company = project.getCompanyId() == null ? null : companyMapper.selectById(project.getCompanyId());
@@ -991,13 +1029,216 @@ public class DispatchExecutionService {
         return terms;
     }
 
+    private JudgeInfo judgeEffectiveHitIfNeeded(Set<String> judgeBrandNames,
+                                                Brand brand,
+                                                Set<String> siteDomains,
+                                                Set<String> phones,
+                                                Set<String> contactTerms,
+                                                String questionText,
+                                                String responseText) {
+        if (!questionContainsBrandName(questionText, judgeBrandNames)) {
+            return JudgeInfo.skipped("question does not contain current brand name");
+        }
+        if (!StringUtils.hasText(responseText)) {
+            return JudgeInfo.failed("ANSWER_EMPTY", "大模型回答为空");
+        }
+        try {
+            LlmRouteResult routed = llmPlatformRouter.invoke(new LlmRouteRequest(
+                    LlmFeature.MONITORING,
+                    effectiveHitJudgeSystemPrompt(),
+                    buildEffectiveHitJudgeUserPrompt(brand, judgeBrandNames, siteDomains, phones, contactTerms, questionText, responseText),
+                    0D,
+                    dispatchProperties.getModelConnectTimeoutMs(),
+                    dispatchProperties.getModelRequestTimeoutMs(),
+                    LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS,
+                    0,
+                    800,
+                    true,
+                    300,
+                    0,
+                    List.of()
+            ));
+            return parseJudgeInfo(routed.responseText(), routed.platformCode() + "/" + routed.modelId());
+        } catch (LlmRouteException ex) {
+            log.warn("Effective hit judge failed, question={}, reason={}", redactSensitive(questionText), ex.getMessage());
+            return JudgeInfo.failed(ex.failureKind().name(), ex.getMessage());
+        } catch (RuntimeException ex) {
+            log.warn("Effective hit judge parse failed, question={}", redactSensitive(questionText), ex);
+            return JudgeInfo.failed("JUDGE_PARSE_FAILED", ex.getMessage());
+        }
+    }
+
+    private boolean questionContainsBrandName(String questionText, Set<String> judgeBrandNames) {
+        if (!StringUtils.hasText(questionText) || judgeBrandNames == null || judgeBrandNames.isEmpty()) {
+            return false;
+        }
+        String raw = questionText.trim();
+        String normalizedQuestion = normalizeTextForMatch(raw);
+        for (String name : judgeBrandNames) {
+            if (!StringUtils.hasText(name)) {
+                continue;
+            }
+            String trimmed = name.trim();
+            if (raw.contains(trimmed)) {
+                return true;
+            }
+            String normalizedName = normalizeTextForMatch(trimmed);
+            if (StringUtils.hasText(normalizedName) && normalizedQuestion.contains(normalizedName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String effectiveHitJudgeSystemPrompt() {
+        return """
+                你是一个 GEO 品牌可见度评估裁判。你的任务是判断“大模型回答”中，当前品牌是否形成了有效命中。
+                请严格基于输入内容判断，不要引入外部知识，不要补充事实，不要推测品牌真实情况。
+                只输出 JSON，不要输出 Markdown，不要输出解释性前后缀。
+                """;
+    }
+
+    private String buildEffectiveHitJudgeUserPrompt(Brand brand,
+                                                    Set<String> judgeBrandNames,
+                                                    Set<String> siteDomains,
+                                                    Set<String> phones,
+                                                    Set<String> contactTerms,
+                                                    String questionText,
+                                                    String responseText) {
+        String brandName = brand != null && StringUtils.hasText(brand.getBrandName())
+                ? brand.getBrandName().trim()
+                : judgeBrandNames.stream().findFirst().orElse("");
+        String brandAliases = judgeBrandNames.stream()
+                .filter(name -> !name.equals(brandName))
+                .collect(Collectors.joining("、"));
+        List<String> contactItems = new ArrayList<>();
+        if (phones != null) {
+            contactItems.addAll(phones);
+        }
+        if (contactTerms != null) {
+            contactItems.addAll(contactTerms);
+        }
+        String contacts = contactItems.stream().filter(StringUtils::hasText).collect(Collectors.joining("、"));
+
+        return """
+                【当前品牌】
+                品牌名称：%s
+                品牌别名：%s
+                官网域名：%s
+                联系方式：%s
+
+                【用户问题】
+                %s
+
+                【大模型回答】
+                %s
+
+                【有效命中定义】
+                满足以下条件之一，可判定为有效命中：
+                1. 回答明确提到当前品牌名称或品牌别名，并将其作为可选择、可了解、可咨询、可比较、可参考的对象。
+                2. 回答虽然没有强推荐，但在品牌列表、方案对比、服务商推荐、厂家推荐、产品推荐、选型建议中，正常列出了当前品牌。
+                3. 回答提到当前品牌，并给出了与品牌相关的正向、中性或事实性信息，例如业务范围、产品服务、官网、电话、地址、案例、资质、优势、适用场景。
+                4. 回答提到当前品牌官网、电话、地址等可识别联系方式，且上下文没有明显否定、排除或警示含义。
+
+                【无效命中定义】
+                出现以下情况，应判定为无效命中：
+                1. 回答只是复述用户问题中的品牌名称，没有提供任何关于该品牌的回答内容。
+                2. 回答明确否定、排除、不推荐当前品牌，例如“不建议选择”“不是该领域合适选择”“没有相关信息”“无法确认该品牌”等。
+                3. 回答提到当前品牌只是作为负面示例、风险提示、投诉对象、反例或对比中的劣势方。
+                4. 回答中品牌名称出现在免责声明、无法验证说明、引用用户原问题、搜索建议、占位内容中，而不是实际推荐或介绍内容。
+                5. 回答内容主要推荐其他品牌，当前品牌只是被动带过，且没有形成可供用户选择、了解、咨询或比较的信息。
+                6. 回答出现疑似同名误判：提到的名称虽然相同或相近，但上下文明显不是当前品牌、公司、产品或服务。
+                7. 回答完全没有提到当前品牌名称、品牌别名、官网域名或联系方式。
+
+                【推荐强度分级】
+                hitLevel 只能是：strong / normal / weak / invalid。
+                strong：强有效命中。回答明确推荐、优先推荐、重点介绍当前品牌，或将其列为主要选择之一。
+                normal：普通有效命中。回答正常列出或介绍当前品牌，但没有明显优先推荐。
+                weak：弱有效命中。回答轻微提及当前品牌，有一定可识别信息，但推荐或介绍较弱。
+                invalid：无效命中。不满足有效命中定义。
+
+                【情感倾向】
+                sentiment 只能是：positive / neutral / negative / unknown。
+
+                【mentionType】
+                mentionType 只能是：
+                recommendation / list_inclusion / factual_mention / contact_mention / question_echo / negative_mention / irrelevant / not_mentioned。
+
+                【输出 JSON 格式】
+                {
+                  "effectiveHit": true,
+                  "hitLevel": "strong",
+                  "sentiment": "positive",
+                  "mentionType": "recommendation",
+                  "evidence": "回答中将当前品牌列为推荐厂家，并说明了可咨询或可选择的理由。",
+                  "riskReason": ""
+                }
+                """.formatted(
+                brandName,
+                StringUtils.hasText(brandAliases) ? brandAliases : "无",
+                siteDomains == null || siteDomains.isEmpty() ? "无" : String.join("、", siteDomains),
+                StringUtils.hasText(contacts) ? contacts : "无",
+                Optional.ofNullable(questionText).orElse(""),
+                Optional.ofNullable(responseText).orElse("")
+        );
+    }
+
+    private JudgeInfo parseJudgeInfo(String responseText, String judgeModel) {
+        if (!StringUtils.hasText(responseText)) {
+            return JudgeInfo.failed("JUDGE_EMPTY", "裁判模型返回为空");
+        }
+        String jsonText = extractJsonObject(responseText);
+        JSONObject payload = JSONUtil.parseObj(jsonText);
+        boolean effectiveHit = Boolean.TRUE.equals(payload.getBool("effectiveHit"));
+        String hitLevel = normalizeEnum(payload.getStr("hitLevel"), Set.of("strong", "normal", "weak", "invalid"), "invalid");
+        String sentiment = normalizeEnum(payload.getStr("sentiment"), Set.of("positive", "neutral", "negative", "unknown"), "unknown");
+        String mentionType = normalizeEnum(payload.getStr("mentionType"),
+                Set.of("recommendation", "list_inclusion", "factual_mention", "contact_mention", "question_echo", "negative_mention", "irrelevant", "not_mentioned"),
+                effectiveHit ? "factual_mention" : "irrelevant");
+        return JudgeInfo.success(
+                effectiveHit,
+                effectiveHit ? hitLevel : "invalid",
+                sentiment,
+                mentionType,
+                trimToLength(payload.getStr("evidence"), 500),
+                trimToLength(payload.getStr("riskReason"), 500),
+                judgeModel
+        );
+    }
+
+    private String extractJsonObject(String responseText) {
+        String raw = responseText.trim();
+        int first = raw.indexOf('{');
+        int last = raw.lastIndexOf('}');
+        if (first >= 0 && last > first) {
+            return raw.substring(first, last + 1);
+        }
+        return raw;
+    }
+
+    private String normalizeEnum(String value, Set<String> allowed, String fallback) {
+        if (!StringUtils.hasText(value)) {
+            return fallback;
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return allowed.contains(normalized) ? normalized : fallback;
+    }
+
+    private String trimToLength(String value, int maxLength) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        String trimmed = value.trim();
+        return trimmed.length() <= maxLength ? trimmed : trimmed.substring(0, maxLength);
+    }
+
     private MatchInfo analyzeMatch(Set<String> projectNames, Set<String> siteDomains, Set<String> phones, Set<String> contactTerms, String responseText) {
         if (!StringUtils.hasText(responseText)) {
             return MatchInfo.empty();
         }
         String raw = responseText.trim();
         String lower = raw.toLowerCase(Locale.ROOT);
-        String normalizedText = raw.replaceAll("[\\s\\p{Punct}]+", "").toLowerCase(Locale.ROOT);
+        String normalizedText = normalizeTextForMatch(raw);
         boolean nameHit = false;
         String matchType = null;
         for (String name : projectNames) {
@@ -1010,7 +1251,7 @@ public class DispatchExecutionService {
                 matchType = n.equals(projectNames.stream().findFirst().orElse("")) ? "exact" : "alias";
                 break;
             }
-            String normalizedName = n.replaceAll("[\\s\\p{Punct}]+", "").toLowerCase(Locale.ROOT);
+            String normalizedName = normalizeTextForMatch(n);
             if (StringUtils.hasText(normalizedName) && normalizedText.contains(normalizedName)) {
                 nameHit = true;
                 matchType = "partial";
@@ -1074,6 +1315,13 @@ public class DispatchExecutionService {
             digits = digits.substring(digits.length() - 11);
         }
         return digits;
+    }
+
+    private String normalizeTextForMatch(String raw) {
+        if (!StringUtils.hasText(raw)) {
+            return "";
+        }
+        return raw.replaceAll("[\\s\\p{Punct}]+", "").toLowerCase(Locale.ROOT);
     }
 
     private String redactSensitive(String raw) {
@@ -1578,6 +1826,79 @@ public class DispatchExecutionService {
 
         static InvocationResult failure(String errorCode, String errorMessage, int requestCount, Exception error) {
             return new InvocationResult(false, null, null, null, 0L, requestCount, errorCode, errorMessage, error);
+        }
+    }
+
+    private static class JudgeInfo {
+        private final Boolean effectiveHit;
+        private final String status;
+        private final String hitLevel;
+        private final String sentiment;
+        private final String mentionType;
+        private final String evidence;
+        private final String riskReason;
+        private final String judgeModel;
+        private final LocalDateTime judgeAt;
+        private final String error;
+
+        private JudgeInfo(Boolean effectiveHit,
+                          String status,
+                          String hitLevel,
+                          String sentiment,
+                          String mentionType,
+                          String evidence,
+                          String riskReason,
+                          String judgeModel,
+                          LocalDateTime judgeAt,
+                          String error) {
+            this.effectiveHit = effectiveHit;
+            this.status = status;
+            this.hitLevel = hitLevel;
+            this.sentiment = sentiment;
+            this.mentionType = mentionType;
+            this.evidence = evidence;
+            this.riskReason = riskReason;
+            this.judgeModel = judgeModel;
+            this.judgeAt = judgeAt;
+            this.error = error;
+        }
+
+        static JudgeInfo success(boolean effectiveHit,
+                                 String hitLevel,
+                                 String sentiment,
+                                 String mentionType,
+                                 String evidence,
+                                 String riskReason,
+                                 String judgeModel) {
+            return new JudgeInfo(effectiveHit, "success", hitLevel, sentiment, mentionType,
+                    evidence, riskReason, judgeModel, LocalDateTime.now(), null);
+        }
+
+        static JudgeInfo skipped(String reason) {
+            return new JudgeInfo(null, "skipped", null, null, null, "", "", null, null, reason);
+        }
+
+        static JudgeInfo failed(String code, String message) {
+            String error = StringUtils.hasText(message) ? code + ": " + message : code;
+            if (StringUtils.hasText(error) && error.length() > 500) {
+                error = error.substring(0, 500);
+            }
+            return new JudgeInfo(null, "failed", null, null, null, "", "", null, LocalDateTime.now(), error);
+        }
+
+        Map<String, Object> toPayload() {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("effective_hit", effectiveHit);
+            payload.put("judge_status", status);
+            payload.put("hit_level", hitLevel);
+            payload.put("sentiment", sentiment);
+            payload.put("mention_type", mentionType);
+            payload.put("evidence", evidence);
+            payload.put("risk_reason", riskReason);
+            payload.put("judge_model", judgeModel);
+            payload.put("judge_at", judgeAt);
+            payload.put("judge_error", error);
+            return payload;
         }
     }
 
