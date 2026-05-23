@@ -7,6 +7,8 @@ import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.Request;
+import com.microsoft.playwright.TimeoutError;
 import com.microsoft.playwright.options.Cookie;
 import com.microsoft.playwright.options.WaitUntilState;
 import jakarta.annotation.PreDestroy;
@@ -46,6 +48,7 @@ public class DiscuzHttpForumPublisher {
     private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             + "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
     private static final Semaphore PUBLISH_SLOT = new Semaphore(1);
+    private static final int POST_PAGE_NAVIGATION_ATTEMPTS = 2;
 
     private final ObjectMapper objectMapper;
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();
@@ -87,6 +90,9 @@ public class DiscuzHttpForumPublisher {
         } catch (BizException ex) {
             String failureKind = ex.getCode() == 401 ? FailureKind.AUTH_EXPIRED : FailureKind.VALIDATION;
             return SubmitResult.failure(ex.getCode(), requestPayload, null, ex.getMessage(), failureKind, false);
+        } catch (TimeoutError ex) {
+            log.warn("discuz forum publish timeout articleId={} error={}", payload.articleId(), safeMessage(ex));
+            return SubmitResult.failure(504, requestPayload, null, safeMessage(ex), FailureKind.NETWORK_ERROR, true);
         } catch (Exception ex) {
             log.warn("discuz forum publish failed articleId={} error={}", payload.articleId(), safeMessage(ex), ex);
             return SubmitResult.failure(500, requestPayload, null, safeMessage(ex), FailureKind.UNKNOWN, true);
@@ -121,19 +127,14 @@ public class DiscuzHttpForumPublisher {
         try (BrowserContext context = chromium.newContext(new Browser.NewContextOptions()
                 .setUserAgent(resolveUserAgent(account))
                 .setLocale("zh-CN"))) {
+            routeHeavyResources(context);
             context.addCookies(toPlaywrightCookies(profile, account.cookie()));
             Page page = context.newPage();
-            page.navigate(profile.postPageUri().toString(), new Page.NavigateOptions()
-                    .setWaitUntil(WaitUntilState.DOMCONTENTLOADED)
-                    .setTimeout((double) requestTimeoutMs(profile)));
-            page.waitForTimeout(6000);
-            if (page.locator("input[name='formhash']").count() == 0) {
-                page.navigate(profile.postPageUri().toString(), new Page.NavigateOptions()
-                        .setWaitUntil(WaitUntilState.DOMCONTENTLOADED)
-                        .setTimeout((double) requestTimeoutMs(profile)));
-                page.waitForTimeout(2000);
-            }
-            if (page.locator("input[name='formhash']").count() == 0 || page.locator("input[name='subject']").count() == 0) {
+            int timeoutMs = requestTimeoutMs(profile);
+            page.setDefaultTimeout(timeoutMs);
+            page.setDefaultNavigationTimeout(timeoutMs);
+            openPostPage(page, profile, payload.articleId(), timeoutMs);
+            if (!hasPostForm(page)) {
                 throw new BizException(401, "平台网站登录 Cookie 已失效或发帖页被 WAF 拦截，请重新登录后更新该平台网站账号 Cookie");
             }
 
@@ -174,6 +175,52 @@ public class DiscuzHttpForumPublisher {
             );
             return toSubmitResult(profile, payload, requestPayload, response, started);
         }
+    }
+
+    private void openPostPage(Page page, DiscuzForumProfile profile, Long articleId, int timeoutMs) {
+        TimeoutError lastTimeout = null;
+        String postPageUrl = profile.postPageUri().toString();
+        for (int attempt = 1; attempt <= POST_PAGE_NAVIGATION_ATTEMPTS; attempt++) {
+            try {
+                page.navigate(postPageUrl, new Page.NavigateOptions()
+                        .setWaitUntil(WaitUntilState.DOMCONTENTLOADED)
+                        .setTimeout((double) timeoutMs));
+                page.waitForTimeout(attempt == 1 ? 2000 : 4000);
+                if (hasPostForm(page)) {
+                    return;
+                }
+            } catch (TimeoutError ex) {
+                lastTimeout = ex;
+                log.warn("discuz post page navigation timeout articleId={} attempt={}/{} url={} error={}",
+                        articleId, attempt, POST_PAGE_NAVIGATION_ATTEMPTS, postPageUrl, safeMessage(ex));
+                if (hasPostForm(page)) {
+                    return;
+                }
+            }
+            if (attempt < POST_PAGE_NAVIGATION_ATTEMPTS) {
+                page.waitForTimeout(1000);
+            }
+        }
+        if (lastTimeout != null) {
+            throw lastTimeout;
+        }
+    }
+
+    private boolean hasPostForm(Page page) {
+        return page.locator("input[name='formhash']").count() > 0
+                && page.locator("input[name='subject']").count() > 0;
+    }
+
+    private void routeHeavyResources(BrowserContext context) {
+        context.route("**/*", route -> {
+            Request request = route.request();
+            String resourceType = request.resourceType();
+            if ("image".equals(resourceType) || "media".equals(resourceType) || "font".equals(resourceType)) {
+                route.abort();
+                return;
+            }
+            route.resume();
+        });
     }
 
     private Browser browser() {
