@@ -18,7 +18,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -149,7 +148,7 @@ public class PublishSiteService {
             result.put("reachable", reachable);
             result.put("elapsedMs", System.currentTimeMillis() - startedAt);
             if (!reachable) {
-                result.put("message", StringUtils.hasText(ping.output()) ? ping.output().trim() : "ping unreachable");
+                result.put("message", "连通测试失败，请确认域名 DNS 解析已生效，且目标服务器允许 Ping。");
             }
             return result;
         } catch (Exception ex) {
@@ -165,11 +164,12 @@ public class PublishSiteService {
                 .redirectErrorStream(true)
                 .start();
         boolean finished = process.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
-        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         if (!finished) {
             process.destroyForcibly();
+            return new PingResult(false, "");
         }
-        return new PingResult(finished && process.exitValue() == 0, output);
+        String output = new String(process.getInputStream().readAllBytes());
+        return new PingResult(process.exitValue() == 0, output);
     }
 
     private PublishSite requireById(Long id) {

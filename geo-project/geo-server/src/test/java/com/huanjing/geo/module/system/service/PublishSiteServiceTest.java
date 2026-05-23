@@ -56,6 +56,21 @@ class PublishSiteServiceTest {
         assertEquals("BRAND_GEO_SITE_ENDPOINT is not configured", result.get("message"));
     }
 
+    @Test
+    void connectivityFailureReturnsBusinessMessage() {
+        TestPublishSiteService service = new TestPublishSiteService();
+        service.nextPingResult = new PublishSiteService.PingResult(false, "Ping �����Ҳ������� api.example.test");
+        givenManagerUser();
+        when(publishSiteMapper.selectById(8L)).thenReturn(restApiSite());
+
+        Map<String, Object> result = service.testConnectivity(8L);
+
+        assertFalse((Boolean) result.get("success"));
+        assertFalse((Boolean) result.get("reachable"));
+        assertEquals("ping", result.get("testType"));
+        assertEquals("连通测试失败，请确认域名 DNS 解析已生效，且目标服务器允许 Ping。", result.get("message"));
+    }
+
     private void givenManagerUser() {
         SysUser user = new SysUser();
         user.setRole("manager");
@@ -68,6 +83,15 @@ class PublishSiteServiceTest {
         site.setSiteName("Agent 官网");
         site.setDomain("agent-site.local");
         site.setIntegrationMethod("brand_geo_site");
+        return site;
+    }
+
+    private PublishSite restApiSite() {
+        PublishSite site = new PublishSite();
+        site.setId(8L);
+        site.setSiteName("智装");
+        site.setDomain("api.example.test");
+        site.setIntegrationMethod("rest_api");
         return site;
     }
 
