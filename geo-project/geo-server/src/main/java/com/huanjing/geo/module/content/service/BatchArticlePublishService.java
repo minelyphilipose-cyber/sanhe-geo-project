@@ -17,6 +17,7 @@ import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticlePublishItemMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticlePublishJobMapper;
+import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -59,6 +60,7 @@ public class BatchArticlePublishService {
     private final BatchArticlePublishItemMapper itemMapper;
     private final ArticleDraftMapper articleDraftMapper;
     private final BatchArticleGenerationTaskMapper generationTaskMapper;
+    private final DistributionTaskMapper distributionTaskMapper;
     private final ProjectMapper projectMapper;
     private final BrandMapper brandMapper;
     private final PublishSiteMapper publishSiteMapper;
@@ -374,6 +376,10 @@ public class BatchArticlePublishService {
         vo.setPlannedAt(item.getPlannedAt());
         vo.setStatus(item.getStatus());
         vo.setDistributionTaskId(item.getDistributionTaskId());
+        if (item.getDistributionTaskId() != null) {
+            DistributionTask task = distributionTaskMapper.selectById(item.getDistributionTaskId());
+            vo.setPublishedAt(task == null ? null : task.getPublishedAt());
+        }
         vo.setErrorMessage(item.getErrorMessage());
         return vo;
     }

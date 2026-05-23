@@ -30,6 +30,7 @@ public class BatchArticlePublishResponse {
         private String targetSiteName;
         private Long targetBrandId;
         private LocalDateTime plannedAt;
+        private LocalDateTime publishedAt;
         private String status;
         private Long distributionTaskId;
         private String errorMessage;

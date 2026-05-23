@@ -626,6 +626,7 @@ export interface BatchArticlePublishItem {
   targetSiteName?: string | null
   targetBrandId?: number | null
   plannedAt: string
+  publishedAt?: string | null
   status: 'pending' | 'running' | 'success' | 'failed' | string
   distributionTaskId?: number | null
   errorMessage?: string | null
