@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.presale.generate;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.llm.pool.LlmPermitScope;
+import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
 import com.huanjing.geo.module.presale.generate.llm.LlmCallResult;
 import com.huanjing.geo.module.presale.generate.llm.LlmInvokeException;
 import com.huanjing.geo.module.presale.generate.llm.PlatformCallContext;
@@ -74,6 +76,7 @@ class PresaleJudgeServiceTest {
         );
         ReflectionTestUtils.setField(judgeService, "judgeMaxAttempts", 2);
         ReflectionTestUtils.setField(judgeService, "judgeTemperature", 0D);
+        ReflectionTestUtils.setField(judgeService, "permitBusyBackoffMs", 0L);
 
         AiPlatformConfig config = new AiPlatformConfig();
         config.setPlatformCode("kimi");
@@ -150,6 +153,27 @@ class PresaleJudgeServiceTest {
         PresaleAiPromptJudgeResult saved = captor.getValue();
         assertEquals("FAILED", saved.getJudgeStatus());
         assertEquals(1, saved.getJudgeAttemptCount());
+        assertNotNull(saved.getJudgeError());
+    }
+
+    @Test
+    void shouldOuterRetryWhenEvaluationPermitBusy() throws Exception {
+        PresaleJudgeCandidateRow row = baseCandidate();
+        row.setBatchNo(1);
+        row.setCategory("认知型");
+        when(promptResultMapper.selectJudgeCandidatesByVersionAndCategory(1L, 1, "认知型"))
+                .thenReturn(List.of(row));
+        when(llmInvoker.judge(any(), anyString(), anyDouble()))
+                .thenThrow(new LlmPermitUnavailableException(LlmPermitScope.PLATFORM, "deepseek"));
+
+        judgeService.judgeCognitiveAfterBatch1(1L, "目标品牌", 100L, true);
+
+        verify(llmInvoker, times(2)).judge(any(), anyString(), anyDouble());
+        ArgumentCaptor<PresaleAiPromptJudgeResult> captor = ArgumentCaptor.forClass(PresaleAiPromptJudgeResult.class);
+        verify(judgeResultMapper, times(1)).upsertByPromptResultId(captor.capture());
+        PresaleAiPromptJudgeResult saved = captor.getValue();
+        assertEquals("FAILED", saved.getJudgeStatus());
+        assertEquals(2, saved.getJudgeAttemptCount());
         assertNotNull(saved.getJudgeError());
     }
 

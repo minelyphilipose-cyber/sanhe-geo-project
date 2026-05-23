@@ -39,6 +39,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
@@ -73,6 +74,9 @@ public class PresaleJudgeService {
 
     @Value("${presale.judge.temperature:0}")
     private double judgeTemperature;
+
+    @Value("${presale.judge.retry.permit-busy-backoff-ms:1000}")
+    private long permitBusyBackoffMs;
 
     public PresaleJudgeService(PresaleAiPromptResultMapper promptResultMapper,
                                PresaleAiPromptJudgeResultMapper judgeResultMapper,
@@ -217,6 +221,7 @@ public class PresaleJudgeService {
                 if (!ex.retryableInOuterLoop()) {
                     break;
                 }
+                sleepBeforeRetry(candidate, attempt, maxAttempts, ex);
             }
         }
 
@@ -291,8 +296,29 @@ public class PresaleJudgeService {
                         sourceCtx.versionId(), sourceCtx.platformCode(), candidate.platformCode());
             }
         }
-        throw new JudgeAttemptError(JudgeErrorCode.LLM_CALL_FAILED,
+        throw new JudgeAttemptError(JudgeErrorCode.LLM_PERMIT_BUSY,
                 "JUDGE_LLM_PERMIT_BUSY: all presale evaluation models are busy", null, lastBusy, lastPlatformCode);
+    }
+
+    private void sleepBeforeRetry(PresaleJudgeCandidateRow candidate,
+                                  int attempt,
+                                  int maxAttempts,
+                                  JudgeAttemptError error) {
+        if (attempt >= maxAttempts || error.code() != JudgeErrorCode.LLM_PERMIT_BUSY) {
+            return;
+        }
+        long sleepMs = Math.max(0L, permitBusyBackoffMs) * attempt;
+        if (sleepMs <= 0L) {
+            return;
+        }
+        try {
+            TimeUnit.MILLISECONDS.sleep(sleepMs);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            log.warn("Interrupted while backing off presale judge retry, versionId={}, promptResultId={}",
+                    candidate == null ? null : candidate.getVersionId(),
+                    candidate == null ? null : candidate.getPromptResultId());
+        }
     }
 
     private void applySuccessMeta(PresaleAiPromptJudgeResult row,
@@ -754,6 +780,7 @@ public class PresaleJudgeService {
 
     private enum JudgeErrorCode {
         LLM_CALL_FAILED(false),
+        LLM_PERMIT_BUSY(true),
         EMPTY_RESPONSE(true),
         RESPONSE_NOT_OBJECT(true),
         JSON_PARSE_FAILED(true),
@@ -799,6 +826,10 @@ public class PresaleJudgeService {
 
         private boolean retryableInOuterLoop() {
             return code != null && code.retryableInOuterLoop();
+        }
+
+        private JudgeErrorCode code() {
+            return code;
         }
 
         private String judgePlatformCode() {

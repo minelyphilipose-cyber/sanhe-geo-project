@@ -157,6 +157,9 @@ public class PresaleGenerateOrchestrator {
     @Value("${presale.generate.db-write-max-concurrency:12}")
     private int dbWriteMaxConcurrency = 12;
 
+    @Value("${presale.generate.max-concurrent-reports:1}")
+    private int maxConcurrentReports = 1;
+
     public PresaleGenerateOrchestrator(PresaleReportVersionMapper versionMapper,
                                        PresaleReportMapper reportMapper,
                                        AiPlatformConfigMapper aiPlatformConfigMapper,
@@ -275,9 +278,15 @@ public class PresaleGenerateOrchestrator {
     }
 
     private void doTriggerGenerate(Long versionId, Long operatorUserId, boolean isManager) {
-        int updated = versionMapper.tryTransitionToRunning(versionId);
+        int updated = versionMapper.tryTransitionToRunning(versionId, safeMaxConcurrentReports());
         if (updated == 0) {
-            log.info("version={} not in QUEUED state, skip duplicate trigger", versionId);
+            PresaleReportVersion current = versionMapper.selectById(versionId);
+            if (current != null && PresaleGenerateStatus.QUEUED.name().equals(current.getGenerationStatus())) {
+                log.info("version={} remains QUEUED because presale generation capacity is full, maxConcurrentReports={}",
+                        versionId, safeMaxConcurrentReports());
+            } else {
+                log.info("version={} not in QUEUED state, skip duplicate trigger", versionId);
+            }
             return;
         }
         cancellationRegistry.clear(versionId);
@@ -287,6 +296,10 @@ public class PresaleGenerateOrchestrator {
             return;
         }
         runRealFullFlow(versionId, operatorUserId, isManager);
+    }
+
+    private int safeMaxConcurrentReports() {
+        return Math.max(1, maxConcurrentReports);
     }
 
     private void runMockFlow(Long versionId) {

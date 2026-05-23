@@ -65,6 +65,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.doAnswer;
@@ -148,7 +149,7 @@ class PresaleGenerateOrchestratorTest {
                 .thenAnswer(inv -> inv.getArgument(0, String.class));
         lenient().when(aiPlatformConfigMapper.selectList(any())).thenReturn(platforms("kimi"));
         lenient().when(aiPlatformConfigMapper.selectCount(any())).thenReturn(1L);
-        lenient().when(versionMapper.tryTransitionToRunning(anyLong())).thenReturn(1);
+        lenient().when(versionMapper.tryTransitionToRunning(anyLong(), anyInt())).thenReturn(1);
         lenient().when(rawSnapshotAssembler.assemble(anyLong(), any(), any(), any(), any()))
                 .thenReturn("{\"client_info\":{\"brand_name\":\"Acme\",\"industry\":\"Software\"},\"test_summary\":{\"total_platforms\":1,\"total_prompts\":1},\"benchmarks_frozen\":{\"industry_avg\":{\"overall\":50.0}},\"competitors\":[]}");
         lenient().when(computedSnapshotEnricher.enrichAndValidate(anyLong(), anyString(), nullable(String.class), anyBoolean()))
@@ -792,14 +793,14 @@ class PresaleGenerateOrchestratorTest {
     @Test
     void doTriggerGenerate_versionAlreadyRunning_skipSilently() throws Exception {
         ReflectionTestUtils.setField(orchestrator, "mockEnabled", false);
-        when(versionMapper.tryTransitionToRunning(3010L)).thenReturn(0);
+        when(versionMapper.tryTransitionToRunning(eq(3010L), anyInt())).thenReturn(0);
 
         Method doTriggerGenerate = PresaleGenerateOrchestrator.class
                 .getDeclaredMethod("doTriggerGenerate", Long.class, Long.class, boolean.class);
         doTriggerGenerate.setAccessible(true);
         doTriggerGenerate.invoke(orchestrator, 3010L, 1L, false);
 
-        verify(versionMapper, never()).selectById(3010L);
+        verify(versionMapper).selectById(3010L);
         verify(reportMapper, never()).selectById(anyLong());
         verify(aiPlatformConfigMapper, never()).selectCount(any());
         verify(versionPromptTemplateMapper, never()).selectCount(any());

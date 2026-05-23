@@ -5,13 +5,55 @@ import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
 import java.util.List;
 
 @Mapper
 public interface PresaleReportVersionMapper extends BaseMapper<PresaleReportVersion> {
-    int tryTransitionToRunning(@Param("versionId") Long versionId);
+    int tryTransitionToRunning(@Param("versionId") Long versionId,
+                               @Param("maxRunning") int maxRunning);
+
+    @Select("""
+            SELECT COUNT(1)
+            FROM presale_report_version
+            WHERE generation_status = 'RUNNING'
+            """)
+    int countRunningGenerations();
+
+    @Select("""
+            SELECT *
+            FROM presale_report_version
+            WHERE generation_status = 'QUEUED'
+            ORDER BY updated_at ASC, id ASC
+            LIMIT #{limit}
+            """)
+    List<PresaleReportVersion> selectQueuedForDispatch(@Param("limit") int limit);
+
+    @Select("""
+            SELECT *
+            FROM presale_report_version
+            WHERE generation_status = 'RUNNING'
+              AND updated_at <= #{deadline}
+            ORDER BY updated_at ASC, id ASC
+            LIMIT #{limit}
+            """)
+    List<PresaleReportVersion> selectStaleRunning(@Param("deadline") LocalDateTime deadline,
+                                                  @Param("limit") int limit);
+
+    @Update("""
+            UPDATE presale_report_version
+            SET generation_status = 'FAILED',
+                generation_stage = NULL,
+                failure_category = 'WORKER_HEARTBEAT_TIMEOUT',
+                failure_reason = #{failureReason},
+                updated_at = NOW()
+            WHERE id = #{versionId}
+              AND generation_status = 'RUNNING'
+            """)
+    int markStaleRunningFailed(@Param("versionId") Long versionId,
+                               @Param("failureReason") String failureReason);
 
     /**
      * 取指定 report 的最大 version_no(用于派生新版本递增编号)。

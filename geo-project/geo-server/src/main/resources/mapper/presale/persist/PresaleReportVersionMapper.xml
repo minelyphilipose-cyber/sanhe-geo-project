@@ -8,6 +8,14 @@
             updated_at = NOW()
         WHERE id = #{versionId}
           AND generation_status = 'QUEUED'
+          AND (
+              SELECT running_count
+              FROM (
+                  SELECT COUNT(1) AS running_count
+                  FROM presale_report_version
+                  WHERE generation_status = 'RUNNING'
+              ) active_generations
+          ) &lt; #{maxRunning}
     </update>
 
 </mapper>
