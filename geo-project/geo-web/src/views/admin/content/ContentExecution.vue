@@ -419,9 +419,21 @@
           </button>
         </div>
       </DataState>
+      <div v-if="selectedForumSiteId && selectedForumBoards.length" class="forum-board-picker">
+        <div class="industry-site-meta-label">发布版块</div>
+        <el-select v-model="selectedForumFid" placeholder="自动匹配发布版块" style="width: 100%">
+          <el-option label="自动匹配（服务区域 / 行业 / 默认版块）" :value="0" />
+          <el-option
+            v-for="board in selectedForumBoards"
+            :key="board.fid"
+            :label="`${board.name}（fid: ${board.fid}）`"
+            :value="board.fid"
+          />
+        </el-select>
+      </div>
       <template #footer>
         <el-button @click="forumSiteVisible = false">取消</el-button>
-        <el-button type="primary" :loading="forumSiteSubmitting" :disabled="!selectedForumSiteId" @click="submitForumSite">
+        <el-button type="primary" :loading="forumSiteSubmitting" :disabled="!canSubmitForumSite" @click="submitForumSite">
           确认分发
         </el-button>
       </template>
@@ -996,6 +1008,13 @@ type MediaPlatform = 'wechat_mp' | 'douyin' | 'toutiao' | 'zhihu' | 'xiaohongshu
 type SemiAutoPlatform = 'toutiao' | 'zhihu' | 'xiaohongshu'
 type ExtensionBridgeStatus = 'unknown' | 'checking' | 'bound' | 'unbound' | 'missing' | 'error'
 type DistributionChannel = 'official_site' | 'industry_site' | 'forum' | 'self_media' | 'authority_media'
+
+interface ForumBoardOption {
+  fid: number
+  name: string
+  enabled: boolean
+  default: boolean
+}
 type SelfMediaAccountWithCredential = SelfMediaAccount & {
   cookieCredentialStatus?: string | null
   cookieCredentialVersion?: number | null
@@ -1082,6 +1101,13 @@ const forumSiteSubmitting = ref(false)
 const forumSiteArticle = ref<ArticleDraft | null>(null)
 const forumSites = ref<PublishSite[]>([])
 const selectedForumSiteId = ref<number | null>(null)
+const selectedForumFid = ref<number | null>(null)
+const selectedForumSite = computed(() => forumSites.value.find((site) => site.id === selectedForumSiteId.value) || null)
+const selectedForumBoards = computed(() => enabledForumBoards(selectedForumSite.value))
+const canSubmitForumSite = computed(() => {
+  if (!selectedForumSiteId.value) return false
+  return true
+})
 
 const authorityMediaVisible = ref(false)
 const authorityLoading = ref(false)
@@ -1866,6 +1892,7 @@ async function openIndustrySiteDistribute(row: ArticleDraft) {
 async function openForumSiteDistribute(row: ArticleDraft) {
   forumSiteArticle.value = row
   selectedForumSiteId.value = null
+  selectedForumFid.value = null
   forumSites.value = []
   forumSiteVisible.value = true
   forumSiteLoading.value = true
@@ -1885,6 +1912,7 @@ function selectIndustrySite(row?: PublishSite) {
 
 function selectForumSite(row?: PublishSite) {
   selectedForumSiteId.value = row?.id || null
+  selectedForumFid.value = null
 }
 
 async function submitIndustrySite() {
@@ -1911,7 +1939,7 @@ async function submitForumSite() {
   if (!row || !selectedForumSiteId.value) return
   forumSiteSubmitting.value = true
   try {
-    const result = await distributeContentArticleToForumSite(row.id, selectedForumSiteId.value)
+    const result = await distributeContentArticleToForumSite(row.id, selectedForumSiteId.value, selectedForumFid.value)
     const task = result.data.data
     if (task.status === 'submitted') {
       ElMessage.success('平台网站分发成功')
@@ -3000,6 +3028,24 @@ function parseIndustryTags(raw?: string | string[] | null) {
   }
 }
 
+function enabledForumBoards(site?: PublishSite | null): ForumBoardOption[] {
+  if (!site?.contentConstraints || site.integrationMethod !== 'discuz_http') return []
+  try {
+    const parsed = JSON.parse(site.contentConstraints)
+    const boards = Array.isArray(parsed?.boards) ? parsed.boards : []
+    return boards
+      .map((board: any) => ({
+        fid: Number(board?.fid),
+        name: String(board?.name || board?.fid || ''),
+        enabled: board?.enabled !== false,
+        default: board?.default === true,
+      }))
+      .filter((board: ForumBoardOption) => Number.isInteger(board.fid) && board.fid > 0 && board.enabled)
+  } catch {
+    return []
+  }
+}
+
 function isAgentPublishSite(site: PublishSite) {
   return site.integrationMethod === 'brand_geo_site' || site.siteCode === 'agent_official_site'
 }
@@ -4040,6 +4086,14 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   margin-right: 6px;
   color: #94a3b8;
   font-weight: 700;
+}
+
+.forum-board-picker {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #dbe3ef;
+  border-radius: 10px;
+  background: #f8fafc;
 }
 
 .authority-media-dialog {

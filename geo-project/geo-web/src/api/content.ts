@@ -591,8 +591,11 @@ export function distributeContentArticleToIndustrySite(articleId: number, siteId
   return request.post<R<DistributionTask>>(`/content/articles/${articleId}/distribute-to-industry-site`, { siteId })
 }
 
-export function distributeContentArticleToForumSite(articleId: number, siteId: number) {
-  return request.post<R<DistributionTask>>(`/content/articles/${articleId}/distribute-to-forum-site`, { siteId })
+export function distributeContentArticleToForumSite(articleId: number, siteId: number, fid?: number | null) {
+  return request.post<R<DistributionTask>>(`/content/articles/${articleId}/distribute-to-forum-site`, {
+    siteId,
+    fid: fid || undefined,
+  })
 }
 
 export function distributeContentArticleToGeoSite(articleId: number, brandId: number) {
@@ -613,6 +616,7 @@ export interface BatchArticlePublishRequest {
   platformConcurrency: number
   industrySiteId?: number
   forumSiteId?: number
+  forumFid?: number
 }
 
 export interface BatchArticlePublishItem {
@@ -624,6 +628,7 @@ export interface BatchArticlePublishItem {
   contentStyle?: string | null
   targetSiteId?: number | null
   targetSiteName?: string | null
+  targetForumFid?: number | null
   targetBrandId?: number | null
   plannedAt: string
   publishedAt?: string | null

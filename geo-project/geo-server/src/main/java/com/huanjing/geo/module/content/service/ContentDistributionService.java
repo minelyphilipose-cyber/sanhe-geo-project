@@ -98,6 +98,7 @@ public class ContentDistributionService {
     private final ObjectMapper objectMapper;
     private final AuthorityMediaDistributionAdapter authorityMediaDistributionAdapter;
     private final ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
+    private final ForumBoardRoutingService forumBoardRoutingService;
 
     @Transactional
     public DistributionTask distribute(Long articleId, Long siteId) {
@@ -113,9 +114,14 @@ public class ContentDistributionService {
 
     @Transactional
     public DistributionTask distributeToForumSite(Long articleId, Long siteId) {
+        return distributeToForumSite(articleId, siteId, null);
+    }
+
+    @Transactional
+    public DistributionTask distributeToForumSite(Long articleId, Long siteId, Integer fid) {
         PublishSite site = requireSite(siteId);
         requireForumPublishSite(site);
-        return distributeTo(articleId, new TargetContext.ForumSiteTarget(site));
+        return distributeTo(articleId, new TargetContext.ForumSiteTarget(site, null, fid));
     }
 
     @Transactional
@@ -678,10 +684,13 @@ public class ContentDistributionService {
             throw ex;
         }
 
+        Brand brand = project.getBrandId() == null ? null : brandService.requireExistingBrand(project.getBrandId());
+        Integer forumFid = forumBoardRoutingService.resolveForumFid(site, project, brand, target.forumFid());
+
         SubmitResult submitResult;
         try {
             submitResult = resolveForumSiteAdapter(site.getIntegrationMethod())
-                    .submitToTarget(article, content, new TargetContext.ForumSiteTarget(site, project));
+                    .submitToTarget(article, content, new TargetContext.ForumSiteTarget(site, project, forumFid));
         } catch (Exception ex) {
             submitResult = SubmitResult.failure(500, null, null, trimError(ex.getMessage()), FailureKind.UNKNOWN, false);
         }

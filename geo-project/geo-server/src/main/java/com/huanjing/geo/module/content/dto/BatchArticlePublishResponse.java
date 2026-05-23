@@ -28,6 +28,7 @@ public class BatchArticlePublishResponse {
         private String contentStyle;
         private Long targetSiteId;
         private String targetSiteName;
+        private Integer targetForumFid;
         private Long targetBrandId;
         private LocalDateTime plannedAt;
         private LocalDateTime publishedAt;

@@ -38,8 +38,6 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,6 +64,7 @@ public class BatchArticlePublishService {
     private final PublishSiteMapper publishSiteMapper;
     private final CurrentUserService currentUserService;
     private final ContentDistributionService contentDistributionService;
+    private final ForumBoardRoutingService forumBoardRoutingService;
     @Resource(name = "taskExecutor")
     private Executor batchPublishExecutor;
 
@@ -90,7 +89,6 @@ public class BatchArticlePublishService {
 
         PublishSite manualIndustrySite = request.getIndustrySiteId() == null ? null : requireIndustrySite(request.getIndustrySiteId());
         PublishSite manualForumSite = request.getForumSiteId() == null ? null : requireForumSite(request.getForumSiteId());
-        List<PublishSite> forumSites = manualForumSite == null ? new ArrayList<>() : new ArrayList<>(List.of(manualForumSite));
 
         BatchArticlePublishJob job = new BatchArticlePublishJob();
         job.setPublishMode(publishMode);
@@ -105,7 +103,6 @@ public class BatchArticlePublishService {
         jobMapper.insert(job);
 
         Map<String, Integer> platformIndex = new HashMap<>();
-        Map<String, Integer> forumIndex = new HashMap<>();
         for (Long articleId : articleIds) {
             BatchArticlePublishItem item = buildItem(
                     job.getId(),
@@ -113,9 +110,9 @@ public class BatchArticlePublishService {
                     baseTime,
                     intervalMinutes,
                     platformIndex,
-                    forumIndex,
                     manualIndustrySite,
-                    forumSites
+                    manualForumSite,
+                    request.getForumFid()
             );
             itemMapper.insert(item);
         }
@@ -169,9 +166,9 @@ public class BatchArticlePublishService {
                                               LocalDateTime baseTime,
                                               int intervalMinutes,
                                               Map<String, Integer> platformIndex,
-                                              Map<String, Integer> forumIndex,
                                               PublishSite industrySite,
-                                              List<PublishSite> forumSites) {
+                                              PublishSite forumSite,
+                                              Integer forumFid) {
         ArticleDraft article = requireArticle(articleId);
         if (!ACTIVE_ARTICLE_STATUS.contains(article.getStatus())) {
             throw new BizException(400, "article " + articleId + " is not approved or unpublished");
@@ -191,13 +188,11 @@ public class BatchArticlePublishService {
             resolvedIndustrySite = resolveBrandIndustrySite(project);
         }
         PublishSite resolvedForumSite = null;
-        if ("forum_site".equals(platform.platformKey()) && resolvedForumSite == null) {
-            if (forumSites == null || forumSites.isEmpty()) {
-                forumSites.addAll(resolveActiveForumSites());
-                Collections.shuffle(forumSites);
-            }
-            int index = forumIndex.merge(platform.platformKey(), 1, Integer::sum) - 1;
-            resolvedForumSite = forumSites.get(Math.floorMod(index, forumSites.size()));
+        Integer resolvedForumFid = null;
+        if ("forum_site".equals(platform.platformKey())) {
+            resolvedForumSite = forumSite == null ? resolveDefaultForumSite() : forumSite;
+            Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
+            resolvedForumFid = forumBoardRoutingService.resolveForumFid(resolvedForumSite, project, brand, forumFid);
         }
 
         int index = platformIndex.merge(platform.platformKey(), 1, Integer::sum) - 1;
@@ -212,6 +207,7 @@ public class BatchArticlePublishService {
             case "forum_site" -> resolvedForumSite.getId();
             default -> null;
         });
+        item.setTargetForumFid("forum_site".equals(platform.platformKey()) ? resolvedForumFid : null);
         item.setTargetBrandId("agent_site".equals(platform.platformKey()) ? project.getBrandId() : null);
         item.setPlannedAt(baseTime.plusMinutes((long) index * intervalMinutes));
         item.setStatus("pending");
@@ -277,7 +273,7 @@ public class BatchArticlePublishService {
             PublishSite site = requireForumSite(item.getTargetSiteId());
             return contentDistributionService.distributeToAsOperator(
                     item.getArticleId(),
-                    new TargetContext.ForumSiteTarget(site),
+                    new TargetContext.ForumSiteTarget(site, null, item.getTargetForumFid()),
                     operatorId
             );
         }
@@ -368,6 +364,7 @@ public class BatchArticlePublishService {
         vo.setPlatformKey(item.getPlatformKey());
         vo.setContentStyle(item.getContentStyle());
         vo.setTargetSiteId(item.getTargetSiteId());
+        vo.setTargetForumFid(item.getTargetForumFid());
         if (item.getTargetSiteId() != null) {
             PublishSite site = publishSiteMapper.selectById(item.getTargetSiteId());
             vo.setTargetSiteName(site == null ? null : site.getSiteName());
@@ -497,9 +494,6 @@ public class BatchArticlePublishService {
 
     private PublishSite resolveDefaultForumSite() {
         List<PublishSite> sites = resolveActiveForumSites();
-        if (sites.size() > 1) {
-            Collections.shuffle(sites);
-        }
         return sites.get(0);
     }
 

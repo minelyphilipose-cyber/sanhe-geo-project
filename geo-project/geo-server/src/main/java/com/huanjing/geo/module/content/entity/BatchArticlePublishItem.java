@@ -18,6 +18,7 @@ public class BatchArticlePublishItem {
     private String platformKey;
     private String contentStyle;
     private Long targetSiteId;
+    private Integer targetForumFid;
     private Long targetBrandId;
     private LocalDateTime plannedAt;
     private String status;

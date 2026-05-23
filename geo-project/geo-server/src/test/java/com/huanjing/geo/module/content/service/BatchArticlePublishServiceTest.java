@@ -18,6 +18,7 @@ import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticlePublishItemMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticlePublishJobMapper;
+import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.project.entity.Project;
@@ -55,11 +56,13 @@ class BatchArticlePublishServiceTest {
     private BatchArticlePublishItemMapper itemMapper;
     private ArticleDraftMapper articleDraftMapper;
     private BatchArticleGenerationTaskMapper generationTaskMapper;
+    private DistributionTaskMapper distributionTaskMapper;
     private ProjectMapper projectMapper;
     private BrandMapper brandMapper;
     private PublishSiteMapper publishSiteMapper;
     private CurrentUserService currentUserService;
     private ContentDistributionService contentDistributionService;
+    private ForumBoardRoutingService forumBoardRoutingService;
     private BatchArticlePublishService service;
     private final List<BatchArticlePublishJob> insertedJobs = new ArrayList<>();
     private final List<BatchArticlePublishItem> insertedItems = new ArrayList<>();
@@ -78,21 +81,25 @@ class BatchArticlePublishServiceTest {
         itemMapper = mock(BatchArticlePublishItemMapper.class);
         articleDraftMapper = mock(ArticleDraftMapper.class);
         generationTaskMapper = mock(BatchArticleGenerationTaskMapper.class);
+        distributionTaskMapper = mock(DistributionTaskMapper.class);
         projectMapper = mock(ProjectMapper.class);
         brandMapper = mock(BrandMapper.class);
         publishSiteMapper = mock(PublishSiteMapper.class);
         currentUserService = mock(CurrentUserService.class);
         contentDistributionService = mock(ContentDistributionService.class);
+        forumBoardRoutingService = mock(ForumBoardRoutingService.class);
         service = new BatchArticlePublishService(
                 jobMapper,
                 itemMapper,
                 articleDraftMapper,
                 generationTaskMapper,
+                distributionTaskMapper,
                 projectMapper,
                 brandMapper,
                 publishSiteMapper,
                 currentUserService,
-                contentDistributionService
+                contentDistributionService,
+                forumBoardRoutingService
         );
         ReflectionTestUtils.setField(service, "batchPublishExecutor", (Executor) command -> {
         });

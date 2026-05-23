@@ -266,6 +266,36 @@
             ></textarea>
             <div class="hint">支持多个账号，发布时随机选择一个 active 账号；Cookie 为空时才会尝试账号密码登录。编辑时留空表示不修改已保存凭证。</div>
           </div>
+          <div v-if="drawerForm.categoryCode === 'forum' && drawerForm.integrationMethod === 'discuz_http'" class="form-row">
+            <div class="forum-board-header">
+              <label>版块配置</label>
+              <button class="btn btn-ghost btn-sm" type="button" @click="addForumBoard">添加版块</button>
+            </div>
+            <div class="forum-board-table">
+              <div class="forum-board-row forum-board-row-head">
+                <span>版块名称</span>
+                <span>fid</span>
+                <span>默认</span>
+                <span>启用</span>
+                <span></span>
+              </div>
+              <div v-for="(board, index) in drawerForm.forumBoards" :key="index" class="forum-board-row">
+                <input v-model="board.name" class="input" type="text" placeholder="综合交流" />
+                <input v-model.number="board.fid" class="input mono" type="number" min="1" placeholder="12" />
+                <label class="checkbox-cell">
+                  <input type="radio" :checked="board.default" name="forumDefaultBoard" @change="setDefaultForumBoard(index)" />
+                </label>
+                <label class="switch compact">
+                  <input v-model="board.enabled" type="checkbox" />
+                  <span class="slider"></span>
+                </label>
+                <button class="icon-action danger" type="button" title="删除版块" @click="removeForumBoard(index)">
+                  <el-icon><Close /></el-icon>
+                </button>
+              </div>
+            </div>
+            <div class="hint">仅启用版块会出现在单篇和批量发布选择中；默认版块用于兼容旧调用。</div>
+          </div>
         </section>
 
         <section class="drawer-section">
@@ -399,6 +429,13 @@ interface TargetConfig {
   publishSite?: PublishSite
   updating?: boolean
   fields: TargetField[]
+}
+
+interface ForumBoardConfig {
+  fid: number | null
+  name: string
+  enabled: boolean
+  default: boolean
 }
 
 const categories: CategoryConfig[] = [
@@ -603,6 +640,7 @@ const drawerForm = reactive({
   integrationMethod: 'rest_api',
   headers: '{\n  "X-Admin-Token": ""\n}',
   apiCredential: '',
+  forumBoards: [] as ForumBoardConfig[],
   remark: '该平台当前仅支持人工发布',
 })
 
@@ -722,6 +760,7 @@ function resetSiteConnectionForm() {
   drawerForm.integrationMethod = drawerForm.categoryCode === 'forum' ? 'discuz_http' : 'rest_api'
   drawerForm.headers = '{\n  "X-Admin-Token": ""\n}'
   drawerForm.apiCredential = ''
+  drawerForm.forumBoards = drawerForm.categoryCode === 'forum' ? [emptyForumBoard(true)] : []
 }
 
 function fillSiteConnectionForm(target?: TargetConfig) {
@@ -738,6 +777,9 @@ function fillSiteConnectionForm(target?: TargetConfig) {
   drawerForm.integrationMethod = site.integrationMethod || 'rest_api'
   drawerForm.headers = formatHeaders(site.requestHeaderTemplate)
   drawerForm.apiCredential = ''
+  drawerForm.forumBoards = target.categoryCode === 'forum'
+    ? parseForumBoards(site.contentConstraints)
+    : []
 }
 
 function resolveContentStyle(target?: TargetConfig) {
@@ -877,6 +919,96 @@ function normalizeCredential(raw: string) {
   }
 }
 
+function emptyForumBoard(defaultBoard = false): ForumBoardConfig {
+  return {
+    fid: null,
+    name: '',
+    enabled: true,
+    default: defaultBoard,
+  }
+}
+
+function parseForumBoards(raw?: string | null): ForumBoardConfig[] {
+  if (!raw) return [emptyForumBoard(true)]
+  try {
+    const parsed = JSON.parse(raw)
+    const boards = Array.isArray(parsed?.boards) ? parsed.boards : []
+    const normalized = boards.map((board: any) => ({
+      fid: Number.isFinite(Number(board?.fid)) ? Number(board.fid) : null,
+      name: String(board?.name || ''),
+      enabled: board?.enabled !== false,
+      default: board?.default === true,
+    }))
+    return normalized.length ? ensureSingleDefaultBoard(normalized) : [emptyForumBoard(true)]
+  } catch {
+    return [emptyForumBoard(true)]
+  }
+}
+
+function ensureSingleDefaultBoard(boards: ForumBoardConfig[]) {
+  let defaultSeen = false
+  const normalized = boards.map((board) => {
+    const isDefault = board.default && !defaultSeen
+    if (isDefault) defaultSeen = true
+    return {
+      ...board,
+      default: isDefault,
+    }
+  })
+  if (!defaultSeen && normalized.length) {
+    const firstEnabled = normalized.find((board) => board.enabled)
+    const defaultBoard = firstEnabled || normalized[0]
+    defaultBoard.default = true
+  }
+  return normalized
+}
+
+function buildForumContentConstraints() {
+  const boards = drawerForm.forumBoards
+    .map((board) => ({
+      fid: Number(board.fid),
+      name: board.name.trim(),
+      enabled: board.enabled,
+      default: board.default,
+    }))
+  return JSON.stringify({
+    baseUrl: normalizeForumBaseUrl(drawerForm.domain || drawerForm.apiEndpoint),
+    boards,
+    requestTimeoutMs: 30000,
+    successUrlRegex: '(thread|forum)-\\d+',
+  })
+}
+
+function normalizeForumBaseUrl(raw: string) {
+  const value = raw.trim()
+  if (!value) return ''
+  const normalized = value.startsWith('http://') || value.startsWith('https://') ? value : `https://${value}`
+  const forumIndex = normalized.indexOf('/forum.php')
+  const base = forumIndex > 0 ? normalized.slice(0, forumIndex + 1) : normalized
+  return base.endsWith('/') ? base : `${base}/`
+}
+
+function addForumBoard() {
+  drawerForm.forumBoards.push(emptyForumBoard(!drawerForm.forumBoards.some((board) => board.default)))
+}
+
+function removeForumBoard(index: number) {
+  drawerForm.forumBoards.splice(index, 1)
+  if (!drawerForm.forumBoards.length) {
+    drawerForm.forumBoards.push(emptyForumBoard(true))
+    return
+  }
+  if (!drawerForm.forumBoards.some((board) => board.default)) {
+    drawerForm.forumBoards[0].default = true
+  }
+}
+
+function setDefaultForumBoard(index: number) {
+  drawerForm.forumBoards.forEach((board, boardIndex) => {
+    board.default = boardIndex === index
+  })
+}
+
 function integrationMethodLabel(v?: string | null) {
   if (v === 'rest_api') return 'REST API'
   if (v === 'discuz_http') return 'Discuz HTTP 直发'
@@ -965,6 +1097,37 @@ function validateIndustrySiteForm() {
       return false
     }
   }
+  if (drawerForm.categoryCode === 'forum' && drawerForm.integrationMethod === 'discuz_http') {
+    const seen = new Set<number>()
+    let enabledCount = 0
+    let defaultCount = 0
+    for (const board of drawerForm.forumBoards) {
+      if (!board.name.trim()) {
+        ElMessage.warning('请输入版块名称')
+        return false
+      }
+      const fid = Number(board.fid)
+      if (!Number.isInteger(fid) || fid <= 0) {
+        ElMessage.warning('版块 fid 必须是正整数')
+        return false
+      }
+      if (seen.has(fid)) {
+        ElMessage.warning(`版块 fid 重复：${fid}`)
+        return false
+      }
+      seen.add(fid)
+      if (board.enabled) enabledCount += 1
+      if (board.default) defaultCount += 1
+    }
+    if (enabledCount === 0) {
+      ElMessage.warning('至少启用一个版块')
+      return false
+    }
+    if (defaultCount > 1) {
+      ElMessage.warning('只能设置一个默认版块')
+      return false
+    }
+  }
   if (drawerForm.categoryCode !== 'forum' && !parseIndustryTagsInput(drawerForm.industryTags).length) {
     ElMessage.warning('请输入至少一个行业分类')
     return false
@@ -1005,6 +1168,9 @@ function buildPublishSitePayload() {
     requestBodyTemplate: '{"title":"{{title}}","content":"{{content}}","contentMarkdown":"{{contentMarkdown}}","contentHtml":"{{contentHtml}}","author":"{{author}}"}',
     apiCredential: drawerForm.categoryCode === 'forum' ? normalizeCredential(drawerForm.apiCredential) : undefined,
     authType: drawerForm.categoryCode === 'forum' ? 'account_cookie' : undefined,
+    contentConstraints: drawerForm.categoryCode === 'forum' && drawerForm.integrationMethod === 'discuz_http'
+      ? buildForumContentConstraints()
+      : undefined,
     remark: drawerForm.remark.trim() || undefined,
   }
 }
@@ -2020,6 +2186,63 @@ textarea {
 .input.mono {
   font-family: var(--font-mono);
   font-size: 12.5px;
+}
+
+.forum-board-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.forum-board-header label {
+  margin-bottom: 0;
+}
+
+.forum-board-table {
+  display: grid;
+  gap: 6px;
+}
+
+.forum-board-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(96px, 0.7fr) 56px 56px 36px;
+  gap: 8px;
+  align-items: center;
+}
+
+.forum-board-row-head {
+  color: var(--text-faint);
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.checkbox-cell {
+  display: grid !important;
+  place-items: center;
+  margin: 0 !important;
+}
+
+.switch.compact {
+  margin: 0 auto;
+}
+
+.icon-action {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  color: var(--text-muted);
+  cursor: pointer;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.icon-action.danger:hover {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--border));
 }
 
 .toggle-row {

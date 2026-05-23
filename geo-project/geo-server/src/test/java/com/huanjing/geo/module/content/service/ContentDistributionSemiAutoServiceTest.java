@@ -120,7 +120,8 @@ class ContentDistributionSemiAutoServiceTest {
                 auditService,
                 new ObjectMapper(),
                 mock(AuthorityMediaDistributionAdapter.class),
-                articleImagePublicUrlRewriter
+                articleImagePublicUrlRewriter,
+                mock(ForumBoardRoutingService.class)
         );
     }
 

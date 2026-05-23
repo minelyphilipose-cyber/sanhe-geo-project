@@ -65,7 +65,7 @@ public class ContentDistributionController {
     @PostMapping("/articles/{articleId}/distribute-to-forum-site")
     public R<DistributionTask> distributeToForumSite(@PathVariable Long articleId,
                                                      @Valid @RequestBody ArticleDistributeRequest req) {
-        return R.ok(contentDistributionService.distributeToForumSite(articleId, req.getSiteId()));
+        return R.ok(contentDistributionService.distributeToForumSite(articleId, req.getSiteId(), req.getFid()));
     }
 
     @PostMapping("/articles/{articleId}/distribute-to-self-media")

@@ -39,9 +39,13 @@ public sealed interface TargetContext
         }
     }
 
-    record ForumSiteTarget(PublishSite site, Project project) implements TargetContext {
+    record ForumSiteTarget(PublishSite site, Project project, Integer forumFid) implements TargetContext {
         public ForumSiteTarget(PublishSite site) {
-            this(site, null);
+            this(site, null, null);
+        }
+
+        public ForumSiteTarget(PublishSite site, Project project) {
+            this(site, project, null);
         }
     }
 

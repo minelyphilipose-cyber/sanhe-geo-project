@@ -29,4 +29,7 @@ public class BatchArticlePublishRequest {
     private Long industrySiteId;
 
     private Long forumSiteId;
+
+    @Min(1)
+    private Integer forumFid;
 }

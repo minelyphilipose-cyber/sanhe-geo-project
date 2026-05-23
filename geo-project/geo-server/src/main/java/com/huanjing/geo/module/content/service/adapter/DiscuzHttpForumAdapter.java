@@ -54,7 +54,8 @@ public class DiscuzHttpForumAdapter implements SiteAdapter {
         }
         DiscuzForumProfile profile = parseProfile(site, errors);
         if (profile != null) {
-            if (profile.getFid() == null || profile.getFid() <= 0) {
+            validateBoards(profile, errors);
+            if (!profile.hasBoards() && (profile.getFid() == null || profile.getFid() <= 0)) {
                 errors.add("discuz fid is required");
             }
             if (!StringUtils.hasText(profile.getBaseUrl()) && !StringUtils.hasText(site.getApiEndpoint())) {
@@ -69,28 +70,7 @@ public class DiscuzHttpForumAdapter implements SiteAdapter {
 
     @Override
     public SubmitResult submit(ArticleDraft article, String contentMarkdown, PublishSite site) {
-        ValidationResult validation = validate(article, contentMarkdown, site);
-        if (!validation.isPassed()) {
-            return SubmitResult.failure(400, null, null, String.join("; ", validation.getErrors()),
-                    FailureKind.VALIDATION, false);
-        }
-        try {
-            DiscuzForumProfile profile = parseProfile(site, new ArrayList<>());
-            ForumCredential credential = objectMapper.readValue(resolveCredential(site), ForumCredential.class);
-            String bbcode = bbcodeRenderer.render(contentMarkdown);
-            ForumPublishPayload payload = new ForumPublishPayload(
-                    article.getId(),
-                    article.getProjectId(),
-                    article.getTitle(),
-                    contentMarkdown,
-                    bbcode,
-                    article.getCategory(),
-                    parseTags(article.getTagsJson())
-            );
-            return publisher.publish(site.getId(), profile, credential, payload, bbcode);
-        } catch (Exception ex) {
-            return SubmitResult.failure(500, null, null, safeMessage(ex), FailureKind.UNKNOWN, true);
-        }
+        return submit(article, contentMarkdown, site, null);
     }
 
     @Override
@@ -109,11 +89,36 @@ public class DiscuzHttpForumAdapter implements SiteAdapter {
     public SubmitResult submitToTarget(ArticleDraft article, String contentMarkdown, TargetContext target) {
         TargetContext.ForumSiteTarget forumTarget = requireTarget(target);
         Project project = forumTarget.project();
-        SubmitResult result = submit(article, contentMarkdown, forumTarget.site());
+        SubmitResult result = submit(article, contentMarkdown, forumTarget.site(), forumTarget.forumFid());
         if (project != null && result.getRequestPayload() != null) {
             result.setRequestPayload(appendProjectContext(result.getRequestPayload(), project));
         }
         return result;
+    }
+
+    private SubmitResult submit(ArticleDraft article, String contentMarkdown, PublishSite site, Integer requestedFid) {
+        ValidationResult validation = validate(article, contentMarkdown, site);
+        if (!validation.isPassed()) {
+            return SubmitResult.failure(400, null, null, String.join("; ", validation.getErrors()),
+                    FailureKind.VALIDATION, false);
+        }
+        try {
+            DiscuzForumProfile profile = resolveProfile(site, requestedFid);
+            ForumCredential credential = objectMapper.readValue(resolveCredential(site), ForumCredential.class);
+            String bbcode = bbcodeRenderer.render(contentMarkdown);
+            ForumPublishPayload payload = new ForumPublishPayload(
+                    article.getId(),
+                    article.getProjectId(),
+                    article.getTitle(),
+                    contentMarkdown,
+                    bbcode,
+                    article.getCategory(),
+                    parseTags(article.getTagsJson())
+            );
+            return publisher.publish(site.getId(), profile, credential, payload, bbcode);
+        } catch (Exception ex) {
+            return SubmitResult.failure(500, null, null, safeMessage(ex), FailureKind.UNKNOWN, true);
+        }
     }
 
     private DiscuzForumProfile parseProfile(PublishSite site, List<String> errors) {
@@ -131,6 +136,57 @@ public class DiscuzHttpForumAdapter implements SiteAdapter {
         } catch (Exception ex) {
             errors.add("discuz contentConstraints profile is invalid JSON");
             return null;
+        }
+    }
+
+    private DiscuzForumProfile resolveProfile(PublishSite site, Integer requestedFid) {
+        List<String> errors = new ArrayList<>();
+        DiscuzForumProfile profile = parseProfile(site, errors);
+        if (profile == null) {
+            throw new IllegalArgumentException(String.join("; ", errors));
+        }
+        DiscuzForumProfile.Board board = profile.resolveBoard(requestedFid)
+                .orElseThrow(() -> new IllegalArgumentException(requestedFid == null
+                        ? "discuz enabled board is required"
+                        : "discuz fid is not enabled: " + requestedFid));
+        Integer fid = board.getFid() == null ? profile.getFid() : board.getFid();
+        if (fid == null || fid <= 0) {
+            throw new IllegalArgumentException("discuz fid is required");
+        }
+        return profile.withFid(fid);
+    }
+
+    private void validateBoards(DiscuzForumProfile profile, List<String> errors) {
+        if (!profile.hasBoards()) {
+            return;
+        }
+        long defaultCount = profile.getBoards().stream()
+                .filter(java.util.Objects::nonNull)
+                .filter(DiscuzForumProfile.Board::isEnabled)
+                .filter(board -> Boolean.TRUE.equals(board.getDefaultBoard()))
+                .count();
+        if (defaultCount > 1) {
+            errors.add("discuz boards can have only one enabled default board");
+        }
+        boolean hasEnabled = false;
+        java.util.Set<Integer> fids = new java.util.HashSet<>();
+        for (DiscuzForumProfile.Board board : profile.getBoards()) {
+            if (board == null) {
+                continue;
+            }
+            if (board.getFid() == null || board.getFid() <= 0) {
+                errors.add("discuz board fid must be positive");
+                continue;
+            }
+            if (!fids.add(board.getFid())) {
+                errors.add("discuz board fid is duplicated: " + board.getFid());
+            }
+            if (board.isEnabled()) {
+                hasEnabled = true;
+            }
+        }
+        if (!hasEnabled) {
+            errors.add("discuz boards must include at least one enabled board");
         }
     }
 

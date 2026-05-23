@@ -129,14 +129,28 @@
           <div v-if="group.platformKey === 'forum_site'" class="target-row">
             <div class="target-info">
               <div class="target-label">平台网站目标</div>
-              <div class="target-desc">不选择时，系统会把平台网站文章平均分发到所有启用的平台网站；余数随机落到其中部分平台网站</div>
+              <div class="target-desc">选择一个已启用的平台网站，发布版块默认按服务区域、行业和默认版块逐篇自动匹配。</div>
             </div>
-            <el-select v-model="forumTargetSiteId" clearable placeholder="自动均分到全部启用平台网站" class="target-select">
+            <el-select v-model="forumTargetSiteId" placeholder="请选择平台网站" class="target-select" @change="handleForumSiteChange">
               <el-option
                 v-for="site in activeForumSites"
                 :key="site.id"
                 :label="forumSiteOptionLabel(site)"
                 :value="site.id"
+              />
+            </el-select>
+            <el-select
+              v-if="selectedForumBoards.length"
+              v-model="forumTargetFid"
+              placeholder="自动匹配发布版块"
+              class="target-select"
+            >
+              <el-option label="自动匹配（服务区域 / 行业 / 默认版块）" :value="0" />
+              <el-option
+                v-for="board in selectedForumBoards"
+                :key="board.fid"
+                :label="`${board.name}（fid: ${board.fid}）`"
+                :value="board.fid"
               />
             </el-select>
           </div>
@@ -215,6 +229,13 @@ interface BatchPublishItem {
   distributionTaskId?: number | null
 }
 
+interface ForumBoardOption {
+  fid: number
+  name: string
+  enabled: boolean
+  default: boolean
+}
+
 const route = useRoute()
 const router = useRouter()
 
@@ -229,6 +250,7 @@ const intervalUnit = ref<'minutes' | 'hours'>('minutes')
 const platformConcurrency = ref(1)
 const industryTargetSiteId = ref<number | null>(null)
 const forumTargetSiteId = ref<number | null>(null)
+const forumTargetFid = ref<number | null>(null)
 
 const validItems = computed(() => articleItems.value.filter((item) => item.platformKey && !item.invalidReason))
 const invalidItems = computed(() => articleItems.value.filter((item) => item.invalidReason))
@@ -244,6 +266,8 @@ const activeIndustrySites = computed(() => publishSites.value.filter((site) => {
 const activeForumSites = computed(() => publishSites.value.filter((site) => {
   return site.status === 'active' && ['forum_playwright', 'discuz_http'].includes(site.integrationMethod || '')
 }))
+const selectedForumSite = computed(() => activeForumSites.value.find((site) => site.id === forumTargetSiteId.value) || null)
+const selectedForumBoards = computed(() => enabledForumBoards(selectedForumSite.value))
 const publishGroups = computed(() => {
   const grouped = new Map<PublishPlatformKey, BatchPublishItem[]>()
   for (const item of validItems.value) {
@@ -260,7 +284,9 @@ const publishGroups = computed(() => {
 const canSubmit = computed(() => {
   if (submitting.value || loading.value || !validItems.value.length || invalidItems.value.length) return false
   if (publishMode.value === 'scheduled' && !scheduledAt.value) return false
-  if (validItems.value.some((item) => item.platformKey === 'forum_site') && !activeForumSites.value.length) return false
+  if (validItems.value.some((item) => item.platformKey === 'forum_site')) {
+    if (!activeForumSites.value.length || !forumTargetSiteId.value) return false
+  }
   return true
 })
 
@@ -282,7 +308,9 @@ async function loadPage() {
     publishSites.value = siteResponse || []
     const firstIndustrySite = activeIndustrySites.value[0]
     industryTargetSiteId.value = firstIndustrySite?.id || null
-    forumTargetSiteId.value = null
+    const firstForumSite = activeForumSites.value[0]
+    forumTargetSiteId.value = firstForumSite?.id || null
+    forumTargetFid.value = null
     articleItems.value = detailResponses.map(toBatchPublishItem)
   } catch {
     ElMessage.error('加载批量发布数据失败')
@@ -424,6 +452,7 @@ async function submitPublish() {
       platformConcurrency: platformConcurrency.value,
       industrySiteId: industryTargetSiteId.value || undefined,
       forumSiteId: forumTargetSiteId.value || undefined,
+      forumFid: forumTargetFid.value || undefined,
     })
     applyPublishResponse(data.data)
     ElMessage.success(publishMode.value === 'scheduled' ? '定时发布任务已创建' : '批量发布提交完成')
@@ -463,6 +492,28 @@ function applyPublishResponse(response: BatchArticlePublishResponse) {
 function forumSiteOptionLabel(site: PublishSite) {
   const health = site.currentHealthStatus && site.currentHealthStatus !== 'normal' ? ` · ${healthLabel(site.currentHealthStatus)}` : ''
   return `${site.siteName}（${site.siteCode}）${health}`
+}
+
+function handleForumSiteChange() {
+  forumTargetFid.value = null
+}
+
+function enabledForumBoards(site?: PublishSite | null): ForumBoardOption[] {
+  if (!site?.contentConstraints || site.integrationMethod !== 'discuz_http') return []
+  try {
+    const parsed = JSON.parse(site.contentConstraints)
+    const boards = Array.isArray(parsed?.boards) ? parsed.boards : []
+    return boards
+      .map((board: any) => ({
+        fid: Number(board?.fid),
+        name: String(board?.name || board?.fid || ''),
+        enabled: board?.enabled !== false,
+        default: board?.default === true,
+      }))
+      .filter((board: ForumBoardOption) => Number.isInteger(board.fid) && board.fid > 0 && board.enabled)
+  } catch {
+    return []
+  }
 }
 
 function healthLabel(status?: string | null) {
