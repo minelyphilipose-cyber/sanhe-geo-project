@@ -19,6 +19,7 @@ import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.service.BatchArticlePublishService;
 import com.huanjing.geo.module.content.service.ContentDistributionService;
+import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.service.BrandService;
@@ -126,8 +127,23 @@ public class ContentDistributionController {
     }
 
     @GetMapping("/articles/{articleId}/distribution")
-    public R<Map<String, Object>> distribution(@PathVariable Long articleId) {
-        return R.ok(contentDistributionService.distributionHistory(articleId));
+    public R<Map<String, Object>> distribution(@PathVariable Long articleId,
+                                               @RequestParam(required = false) String targetKind) {
+        String normalizedTargetKind = StringUtils.hasText(targetKind) ? targetKind.trim() : null;
+        if (StringUtils.hasText(normalizedTargetKind) && !allowedDistributionTargetKind(normalizedTargetKind)) {
+            throw new BizException(400, "Invalid distribution target kind");
+        }
+        return R.ok(contentDistributionService.distributionHistory(articleId, normalizedTargetKind));
+    }
+
+    private boolean allowedDistributionTargetKind(String targetKind) {
+        return DistributionTargetKind.SITE.equals(targetKind)
+                || DistributionTargetKind.MP_ACCOUNT.equals(targetKind)
+                || DistributionTargetKind.BRAND_OFFICIAL_SITE.equals(targetKind)
+                || DistributionTargetKind.BRAND_GEO_SITE.equals(targetKind)
+                || DistributionTargetKind.INDUSTRY_SITE.equals(targetKind)
+                || DistributionTargetKind.FORUM_SITE.equals(targetKind)
+                || DistributionTargetKind.AUTHORITY_MEDIA.equals(targetKind);
     }
 
     @PostMapping("/distribution-tasks/{taskId}/retry")

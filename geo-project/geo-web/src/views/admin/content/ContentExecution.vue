@@ -2080,7 +2080,7 @@ async function openMediaDistribute(row: ArticleDraft) {
       getContentArticleDetail(row.id),
       getWechatMpCapability(),
       getDouyinCapability(),
-      getArticleDistribution(row.id),
+      getArticleDistribution(row.id, { targetKind: 'mp_account' }),
     ])
     const brandId = detailRes.data.data.project?.brandId
     if (!brandId) {
@@ -2950,7 +2950,7 @@ async function copyText(text: string) {
 
 async function refreshDistributionHistory() {
   if (!mediaDistributeArticleId.value) return
-  const { data } = await getArticleDistribution(mediaDistributeArticleId.value)
+  const { data } = await getArticleDistribution(mediaDistributeArticleId.value, { targetKind: 'mp_account' })
   distributionAttempts.value = data.data.attempts || []
 }
 

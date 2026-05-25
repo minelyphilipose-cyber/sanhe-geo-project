@@ -277,17 +277,20 @@ public class ContentDistributionService {
         }
     }
 
-    public Map<String, Object> distributionHistory(Long articleId) {
+    public Map<String, Object> distributionHistory(Long articleId, String targetKind) {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
         ArticleDraft article = requireArticle(articleId);
         Project project = requireProject(article.getProjectId());
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
 
+        LambdaQueryWrapper<DistributionTask> wrapper = new LambdaQueryWrapper<DistributionTask>()
+                .eq(DistributionTask::getArticleId, articleId);
+        if (StringUtils.hasText(targetKind)) {
+            wrapper.eq(DistributionTask::getTargetKind, targetKind);
+        }
         List<DistributionTask> tasks = distributionTaskMapper.selectList(
-                new LambdaQueryWrapper<DistributionTask>()
-                        .eq(DistributionTask::getArticleId, articleId)
-                        .orderByDesc(DistributionTask::getCreatedAt, DistributionTask::getAttemptNo)
+                wrapper.orderByDesc(DistributionTask::getCreatedAt, DistributionTask::getAttemptNo)
         );
         Set<Long> targetSiteIds = tasks.stream()
                 .map(this::distributionSiteId)

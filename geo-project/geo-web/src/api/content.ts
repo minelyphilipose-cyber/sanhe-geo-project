@@ -759,8 +759,8 @@ export function distributeContentArticleToAuthorityMedia(articleId: number, data
   return request.post<R<DistributionTask>>(`/content/articles/${articleId}/distribute-to-authority-media`, data)
 }
 
-export function getArticleDistribution(articleId: number) {
-  return request.get<R<{ articleId: number; articleStatus: string; attempts: DistributionTask[] }>>(`/content/articles/${articleId}/distribution`)
+export function getArticleDistribution(articleId: number, params?: { targetKind?: string }) {
+  return request.get<R<{ articleId: number; articleStatus: string; attempts: DistributionTask[] }>>(`/content/articles/${articleId}/distribution`, { params })
 }
 
 export function retryDistributionTask(taskId: number) {
