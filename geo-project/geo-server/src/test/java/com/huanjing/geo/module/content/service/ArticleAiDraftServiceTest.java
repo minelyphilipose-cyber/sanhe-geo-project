@@ -27,6 +27,7 @@ import org.junit.jupiter.api.*;
 import org.mockito.ArgumentCaptor;
 import org.springframework.transaction.*;
 
+import java.util.List;
 import java.util.concurrent.ExecutionException;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -64,21 +65,38 @@ class ArticleAiDraftServiceTest {
         ArticleAiDraftPromptFilter promptFilter = mock(ArticleAiDraftPromptFilter.class);
         rateLimiter = mock(ArticleAiDraftRateLimiter.class);
         auditService = mock(AuditService.class);
+        SysDictItemMapper sysDictItemMapper = mock(SysDictItemMapper.class);
+        ObjectMapper objectMapper = new ObjectMapper();
 
         when(currentUserService.requireCurrentUser()).thenReturn(user(7L));
         when(projectMapper.selectById(10L)).thenReturn(project());
         when(brandMapper.selectById(20L)).thenReturn(brand());
+        when(articleMapper.selectList(any())).thenReturn(List.of());
         when(configMapper.selectOne(any())).thenReturn(aiConfig());
+        when(sysDictItemMapper.selectOne(any())).thenReturn(null);
         when(credentialService.resolveApiKey(eq("openai"), any(), any())).thenReturn("sk-test");
         when(promptFilter.filterOutboundPrompt(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
         when(promptFilter.filterOutboundPrompt(any(), any(), any(), anyBoolean())).thenAnswer(i -> i.getArgument(0));
         when(promptFilter.filterGeneratedContent(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
         when(promptFilter.filterGeneratedContent(any(), any(), any(), anyBoolean())).thenAnswer(i -> i.getArgument(0));
+        ArticleModelResolver modelResolver = new ArticleModelResolver(configMapper, credentialService);
+        ArticleGenerationEngine generationEngine = new ArticleGenerationEngine(
+                llmInvoker,
+                modelResolver,
+                mock(MarkdownImageReferenceValidator.class),
+                promptFilter,
+                mock(BatchArticleQualityChecker.class)
+        );
+        BatchArticlePromptBuilder promptBuilder = new BatchArticlePromptBuilder(
+                articleMapper,
+                sysDictItemMapper,
+                objectMapper,
+                mock(ArticlePromptVariableRegistry.class)
+        );
 
-        service = new ArticleAiDraftService(projectMapper, brandMapper, articleMapper, versionMapper, configMapper,
-                currentUserService, brandAccessService, credentialService, llmInvoker,
-                mock(MarkdownImageReferenceValidator.class), promptFilter, rateLimiter, auditService,
-                new ObjectMapper(), txManager(), Runnable::run);
+        service = new ArticleAiDraftService(projectMapper, brandMapper, articleMapper, versionMapper,
+                currentUserService, brandAccessService, promptBuilder, generationEngine, rateLimiter, auditService,
+                objectMapper, txManager(), Runnable::run);
     }
 
     @Test
@@ -143,8 +161,9 @@ class ArticleAiDraftServiceTest {
 
         verify(llmInvoker).invoke(promptCaptor.capture(), configCaptor.capture());
         assertTrue(configCaptor.getValue().systemPrompt().contains("行业观察者"));
-        assertTrue(promptCaptor.getValue().contains("如有必要可提及的品牌名"));
-        assertTrue(promptCaptor.getValue().contains("# 品牌处理规则"));
+        assertTrue(promptCaptor.getValue().contains("AI topic"));
+        assertTrue(promptCaptor.getValue().contains("# GEO 可引用性要求"));
+        assertTrue(promptCaptor.getValue().contains("# 平台风格规则"));
         assertFalse(promptCaptor.getValue().contains("对外公开电话"));
         assertFalse(promptCaptor.getValue().contains("对外公开地址"));
     }

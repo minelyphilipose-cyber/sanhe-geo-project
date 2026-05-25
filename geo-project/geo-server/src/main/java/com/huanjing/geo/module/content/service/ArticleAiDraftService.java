@@ -1,6 +1,5 @@
 package com.huanjing.geo.module.content.service;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
@@ -18,8 +17,7 @@ import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
-import com.huanjing.geo.module.system.entity.*;
-import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
+import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -28,6 +26,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -45,7 +44,6 @@ public class ArticleAiDraftService {
     private static final String DEFAULT_CONTENT_STYLE = "wechat";
     private static final String DEFAULT_TONE = "professional";
     private static final String DEFAULT_LENGTH = "medium";
-    private static final int ARTICLE_PREVIEW_REQUEST_TIMEOUT_MS = 120_000;
     private static final String ARTICLE_PREVIEW_SYSTEM_PROMPT = """
             你是一名中文 GEO 内容写作助手，负责为品牌项目生成可被大模型引用的高质量 Markdown 文章草稿。
             内容立场是行业观察者，而非品牌方市场人员。只输出完整 Markdown 正文，不输出提示词解释。
@@ -54,49 +52,21 @@ public class ArticleAiDraftService {
             "联系", "咨询", "电话", "地址", "怎么找", "在哪里", "到店", "预约", "客服", "门店", "网点"
     );
 
-    private static final Map<String, String> CONTENT_STYLE_LABELS = Map.of(
-            "wechat", "公众号",
-            "toutiao", "头条",
-            "douyin", "抖音图文",
-            "zhihu", "知乎",
-            "xiaohongshu", "小红书",
-            "baijiahao", "百家号",
-            "netease", "网易",
-            "linkedin", "领英"
-    );
-    private static final Map<String, String> CONTENT_STYLE_GUIDES = Map.of(
-            "wechat", "深度长文，结构完整，重视段落层次，以分析和洞察为主，不写软文化的“种草”。",
-            "toutiao", "资讯密度高，开头直接给结论，段落短，信息点清晰，以新闻或行业资讯口吻写作。",
-            "douyin", "钩子开头，语言轻快，适合图文卡片拆分，但内容必须是有价值的信息分享，不是带货话术。",
-            "zhihu", "问题导向，论据充分，强调分析过程和可信结论，呈现行业观察者立场。",
-            "xiaohongshu", "口语化、平等交流，可以加入清单和话题标签，但以“分享经验”为主，避免“安利”式表达。",
-            "baijiahao", "面向百度搜索收录，标题和前 200 字突出核心关键词，表达专业克制，信息密度高，不虚构具体数据来源。",
-            "netease", "面向门户资讯阅读和搜索收录，标题和前 200 字突出核心关键词，表达专业克制，信息密度高，不虚构具体数据来源。",
-            "linkedin", "商务专业，强调洞察、案例和可执行建议，行业视角，不做品牌宣传。"
-    );
     private static final Map<String, String> TONE_LABELS = Map.of(
             "professional", "专业严谨",
             "friendly", "亲切自然",
             "sharp", "观点鲜明",
             "storytelling", "故事化"
     );
-    private static final Map<String, String> LENGTH_LABELS = Map.of(
-            "short", "短文，约 600 字",
-            "medium", "中等篇幅，约 1500 字",
-            "long", "长文，约 3000 字"
-    );
 
     private final ProjectMapper projectMapper;
     private final BrandMapper brandMapper;
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
-    private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final CurrentUserService currentUserService;
     private final BrandAccessService brandAccessService;
-    private final PlatformCredentialService platformCredentialService;
-    private final LlmInvoker llmInvoker;
-    private final MarkdownImageReferenceValidator markdownImageReferenceValidator;
-    private final ArticleAiDraftPromptFilter promptFilter;
+    private final BatchArticlePromptBuilder promptBuilder;
+    private final ArticleGenerationEngine articleGenerationEngine;
     private final ArticleAiDraftRateLimiter rateLimiter;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
@@ -105,19 +75,20 @@ public class ArticleAiDraftService {
 
     public ArticleAiDraftService(ProjectMapper projectMapper, BrandMapper brandMapper,
                                  ArticleDraftMapper articleDraftMapper, ArticleDraftVersionMapper articleDraftVersionMapper,
-                                 AiPlatformConfigMapper aiPlatformConfigMapper, CurrentUserService currentUserService,
-                                 BrandAccessService brandAccessService, PlatformCredentialService platformCredentialService,
-                                 LlmInvoker llmInvoker, MarkdownImageReferenceValidator markdownImageReferenceValidator,
-                                 ArticleAiDraftPromptFilter promptFilter, ArticleAiDraftRateLimiter rateLimiter,
+                                 CurrentUserService currentUserService,
+                                 BrandAccessService brandAccessService,
+                                 BatchArticlePromptBuilder promptBuilder,
+                                 ArticleGenerationEngine articleGenerationEngine,
+                                 ArticleAiDraftRateLimiter rateLimiter,
                                  AuditService auditService, ObjectMapper objectMapper,
                                  PlatformTransactionManager transactionManager,
                                  @Qualifier("articleAiDraftExecutor") Executor articleAiDraftExecutor) {
         this.projectMapper = projectMapper; this.brandMapper = brandMapper;
         this.articleDraftMapper = articleDraftMapper; this.articleDraftVersionMapper = articleDraftVersionMapper;
-        this.aiPlatformConfigMapper = aiPlatformConfigMapper; this.currentUserService = currentUserService;
-        this.brandAccessService = brandAccessService; this.platformCredentialService = platformCredentialService;
-        this.llmInvoker = llmInvoker; this.markdownImageReferenceValidator = markdownImageReferenceValidator;
-        this.promptFilter = promptFilter; this.rateLimiter = rateLimiter;
+        this.currentUserService = currentUserService;
+        this.brandAccessService = brandAccessService;
+        this.promptBuilder = promptBuilder;
+        this.articleGenerationEngine = articleGenerationEngine; this.rateLimiter = rateLimiter;
         this.auditService = auditService; this.objectMapper = objectMapper;
         this.transactionManager = transactionManager; this.articleAiDraftExecutor = articleAiDraftExecutor;
     }
@@ -134,11 +105,10 @@ public class ArticleAiDraftService {
         String articleType = normalizeArticleType(req.getArticleType());
         String originalPrompt = req.getPrompt().trim();
         Brand brand = resolveBrand(project.getBrandId());
-        String outboundPrompt = promptFilter.filterOutboundPrompt(originalPrompt, project, brand);
-        ModelSelection model = resolveModel(req.getModelPlatformCode(), req.getModelId(), false);
 
         return CompletableFuture.supplyAsync(
-                () -> generateInWorker(project, brand, operator, articleType, originalPrompt, outboundPrompt, model),
+                () -> generateInWorker(project, brand, operator, articleType, originalPrompt,
+                        req.getModelPlatformCode(), req.getModelId()),
                 articleAiDraftExecutor
         );
     }
@@ -154,42 +124,49 @@ public class ArticleAiDraftService {
 
         String articleType = normalizeArticleType(req.getArticleType());
         Brand brand = resolveBrand(project.getBrandId());
-        String prompt = buildPreviewPrompt(req, articleType, project, brand);
+        BatchArticlePromptBuilder.PromptBuildResult prompt = buildPreviewPrompt(req, articleType, project, brand);
         boolean allowContactInfo = shouldIncludeContactInfo(articleType, req.getTopic());
-        String outboundPrompt = promptFilter.filterOutboundPrompt(prompt, project, brand, allowContactInfo);
-        ModelSelection model = resolveModel(req.getModelPlatformCode(), req.getModelId(), true);
-        String inputSnapshot = previewInputSnapshot(req, articleType, project, brand);
+        String inputSnapshot = prompt.inputSnapshot();
 
         return CompletableFuture.supplyAsync(
-                () -> previewInWorker(project, operator, prompt, outboundPrompt, inputSnapshot, model, allowContactInfo),
+                () -> previewInWorker(project, operator, prompt, inputSnapshot,
+                        req.getModelPlatformCode(), req.getModelId(), allowContactInfo),
                 articleAiDraftExecutor
         );
     }
 
     private ArticleAiDraftPreviewResponse previewInWorker(Project project,
                                                           SysUser operator,
-                                                          String originalPrompt,
-                                                          String outboundPrompt,
+                                                          BatchArticlePromptBuilder.PromptBuildResult prompt,
                                                           String inputSnapshot,
-                                                          ModelSelection model,
+                                                          String requestedPlatformCode,
+                                                          String requestedModelId,
                                                           boolean allowContactInfo) {
         long started = System.nanoTime();
+        ArticleModelResolver.ModelSelection model = null;
         try {
-            LlmInvokeResult result = llmInvoker.invoke(outboundPrompt, model.config());
-            String content = promptFilter.filterGeneratedContent(
-                    result.responseText(), project, resolveBrand(project.getBrandId()), allowContactInfo
-            ).trim();
-            if (!StringUtils.hasText(content)) {
-                throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI generated empty article");
-            }
-            markdownImageReferenceValidator.validate(project, content);
-            String promptSnapshot = promptSnapshot(originalPrompt, result);
-            String responseSnapshot = modelResponseSnapshot(result);
-            auditGenerated(AuditResult.SUCCESS, operator, project, null, originalPrompt.length(),
+            ArticleGenerationEngine.GeneratedArticle generated = articleGenerationEngine.generate(
+                    new ArticleGenerationEngine.GenerateInput(
+                            project,
+                            resolveBrand(project.getBrandId()),
+                            prompt.systemPrompt(),
+                            prompt.userPrompt(),
+                            requestedPlatformCode,
+                            requestedModelId,
+                            true,
+                            allowContactInfo,
+                            false,
+                            List.of()
+                    )
+            );
+            model = generated.model();
+            String promptSnapshot = enrichPromptSnapshot(prompt.promptSnapshot(), generated.result());
+            String responseSnapshot = modelResponseSnapshot(generated.result());
+            auditGenerated(AuditResult.SUCCESS, operator, project, null, prompt.userPrompt().length(),
                     model.platformCode(), model.modelId(), elapsedMs(started), "preview_generated", null);
             return new ArticleAiDraftPreviewResponse(
-                    extractTitle(content),
-                    content,
+                    generated.title(),
+                    generated.content(),
                     promptSnapshot,
                     inputSnapshot,
                     responseSnapshot,
@@ -198,21 +175,21 @@ public class ArticleAiDraftService {
                     model.config().modelName()
             );
         } catch (BizException ex) {
-            auditGenerated(AuditResult.FAILURE, operator, project, null, originalPrompt.length(),
-                    model.platformCode(), model.modelId(), elapsedMs(started), "preview_failed", ex.getCode());
+            auditGenerated(AuditResult.FAILURE, operator, project, null, prompt.userPrompt().length(),
+                    platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "preview_failed", ex.getCode());
             throw ex;
         } catch (LlmInvokeException ex) {
             log.warn("AI article draft preview LLM invoke failed projectId={} platform={} model={} msg={}",
-                    project.getId(), model.platformCode(), model.modelId(), ex.getMessage());
+                    project.getId(), platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), ex.getMessage());
             BizException mapped = mapLlmInvokeFailure(ex, "AI article draft preview failed");
-            auditGenerated(AuditResult.FAILURE, operator, project, null, originalPrompt.length(),
-                    model.platformCode(), model.modelId(), elapsedMs(started), "preview_failed", mapped.getCode());
+            auditGenerated(AuditResult.FAILURE, operator, project, null, prompt.userPrompt().length(),
+                    platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "preview_failed", mapped.getCode());
             throw mapped;
         } catch (Exception ex) {
             log.warn("AI article draft preview failed projectId={} platform={} model={}",
-                    project.getId(), model.platformCode(), model.modelId(), ex);
-            auditGenerated(AuditResult.FAILURE, operator, project, null, originalPrompt.length(),
-                    model.platformCode(), model.modelId(), elapsedMs(started), "preview_failed",
+                    project.getId(), platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), ex);
+            auditGenerated(AuditResult.FAILURE, operator, project, null, prompt.userPrompt().length(),
+                    platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "preview_failed",
                     ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED);
             throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI article draft preview failed");
         }
@@ -223,44 +200,53 @@ public class ArticleAiDraftService {
                                                     SysUser operator,
                                                     String articleType,
                                                     String originalPrompt,
-                                                    String outboundPrompt,
-                                                    ModelSelection model) {
+                                                    String requestedPlatformCode,
+                                                    String requestedModelId) {
         long started = System.nanoTime();
+        ArticleModelResolver.ModelSelection model = null;
         try {
-            LlmInvokeResult result = llmInvoker.invoke(outboundPrompt, model.config());
-            String content = promptFilter.filterGeneratedContent(result.responseText(), project, brand).trim();
-            if (!StringUtils.hasText(content)) {
-                throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI generated empty article");
-            }
-            markdownImageReferenceValidator.validate(project, content);
-
-            ArticleDraft draft = persistDraft(project, operator, articleType, content, originalPrompt, model, result);
+            ArticleGenerationEngine.GeneratedArticle generated = articleGenerationEngine.generate(
+                    new ArticleGenerationEngine.GenerateInput(
+                            project,
+                            brand,
+                            ARTICLE_PREVIEW_SYSTEM_PROMPT,
+                            originalPrompt,
+                            requestedPlatformCode,
+                            requestedModelId,
+                            false,
+                            false,
+                            false,
+                            List.of()
+                    )
+            );
+            model = generated.model();
+            ArticleDraft draft = persistDraft(project, operator, articleType, generated.content(), originalPrompt, model, generated.result());
             auditGenerated(AuditResult.SUCCESS, operator, project, draft.getId(), originalPrompt.length(),
                     model.platformCode(), model.modelId(), elapsedMs(started), STATUS_APPROVED, null);
             return new ArticleAiDraftResponse(draft.getId(), STATUS_APPROVED);
         } catch (BizException ex) {
             auditGenerated(AuditResult.FAILURE, operator, project, null, originalPrompt.length(),
-                    model.platformCode(), model.modelId(), elapsedMs(started), "generation_failed", ex.getCode());
+                    platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "generation_failed", ex.getCode());
             throw ex;
         } catch (LlmInvokeException ex) {
             log.warn("AI article draft LLM invoke failed projectId={} platform={} model={} msg={}",
-                    project.getId(), model.platformCode(), model.modelId(), ex.getMessage());
+                    project.getId(), platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), ex.getMessage());
             BizException mapped = mapLlmInvokeFailure(ex, "AI article draft generation failed");
             auditGenerated(AuditResult.FAILURE, operator, project, null, originalPrompt.length(),
-                    model.platformCode(), model.modelId(), elapsedMs(started), "generation_failed", mapped.getCode());
+                    platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "generation_failed", mapped.getCode());
             throw mapped;
         } catch (Exception ex) {
             log.warn("AI article draft generation failed projectId={} platform={} model={}",
-                    project.getId(), model.platformCode(), model.modelId(), ex);
+                    project.getId(), platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), ex);
             auditGenerated(AuditResult.FAILURE, operator, project, null, originalPrompt.length(),
-                    model.platformCode(), model.modelId(), elapsedMs(started), "generation_failed",
+                    platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "generation_failed",
                     ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED);
             throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI article draft generation failed");
         }
     }
 
     private ArticleDraft persistDraft(Project project, SysUser operator, String articleType, String content,
-                                      String originalPrompt, ModelSelection model, LlmInvokeResult result) {
+                                      String originalPrompt, ArticleModelResolver.ModelSelection model, LlmInvokeResult result) {
         TransactionTemplate template = new TransactionTemplate(transactionManager);
         return Objects.requireNonNull(template.execute(status -> {
             String title = extractTitle(content);
@@ -317,68 +303,6 @@ public class ArticleAiDraftService {
         return brand;
     }
 
-    private ModelSelection resolveModel(String platformCode, String modelId, boolean longForm) {
-        LambdaQueryWrapper<AiPlatformConfig> wrapper = new LambdaQueryWrapper<AiPlatformConfig>()
-                .eq(AiPlatformConfig::getEnabled, true)
-                .eq(AiPlatformConfig::getEnabledForArticle, true)
-                .orderByAsc(AiPlatformConfig::getId);
-        if (StringUtils.hasText(platformCode)) {
-            wrapper.eq(AiPlatformConfig::getPlatformCode, platformCode.trim());
-        }
-        if (StringUtils.hasText(modelId)) {
-            String trimmedModelId = modelId.trim();
-            wrapper.and(w -> w.eq(AiPlatformConfig::getModelId, trimmedModelId)
-                    .or()
-                    .eq(AiPlatformConfig::getLowModelId, trimmedModelId));
-        }
-        AiPlatformConfig config = aiPlatformConfigMapper.selectOne(wrapper.last("LIMIT 1"));
-        if (config == null || !StringUtils.hasText(config.getApiUrl())) {
-            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_CONFIG_MISSING, "AI article model config missing");
-        }
-        String resolvedModelId = StringUtils.hasText(modelId)
-                ? modelId.trim()
-                : (StringUtils.hasText(config.getModelId()) ? config.getModelId().trim() : config.getLowModelId());
-        if (!StringUtils.hasText(resolvedModelId)) {
-            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_CONFIG_MISSING, "AI article model config missing");
-        }
-        String apiKey = platformCredentialService.resolveApiKey(
-                config.getPlatformCode(), config.getPrimaryKeyRef(), config.getApiKey()
-        );
-        if (!StringUtils.hasText(apiKey)) {
-            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_CONFIG_MISSING, "AI article model config missing");
-        }
-        LlmModelConfig modelConfig = new LlmModelConfig(config.getPlatformCode(), config.getPlatformName(),
-                resolvedModelId, resolveModelDisplayName(config, resolvedModelId), config.getApiUrl(), apiKey,
-                ARTICLE_PREVIEW_SYSTEM_PROMPT, 0.4D,
-                LlmModelConfig.DEFAULT_CONNECT_TIMEOUT_MS,
-                longForm ? resolveArticleRequestTimeout(config.getTimeoutMs()) : resolveStandardRequestTimeout(config.getTimeoutMs()),
-                normalize(config.getMaxRetry(), 2), Math.max(1, normalize(config.getRateLimitQps(), 1)), null, false,
-                longForm ? LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS : LlmModelConfig.MAX_REQUEST_TIMEOUT_MS);
-        return new ModelSelection(config.getPlatformCode(), resolvedModelId, modelConfig);
-    }
-
-    private int resolveStandardRequestTimeout(Integer configuredTimeoutMs) {
-        int timeout = normalize(configuredTimeoutMs, LlmModelConfig.DEFAULT_REQUEST_TIMEOUT_MS);
-        return Math.min(timeout, LlmModelConfig.MAX_REQUEST_TIMEOUT_MS);
-    }
-
-    private int resolveArticleRequestTimeout(Integer configuredTimeoutMs) {
-        int timeout = normalize(configuredTimeoutMs, ARTICLE_PREVIEW_REQUEST_TIMEOUT_MS);
-        timeout = Math.max(timeout, ARTICLE_PREVIEW_REQUEST_TIMEOUT_MS);
-        return Math.min(timeout, LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS);
-    }
-
-    private String resolveModelDisplayName(AiPlatformConfig config, String modelId) {
-        if (StringUtils.hasText(config.getModelName()) && modelId.equals(config.getModelId())) {
-            return config.getModelName().trim();
-        }
-        return modelId;
-    }
-
-    private int normalize(Integer value, int fallback) {
-        return value == null || value <= 0 ? fallback : value;
-    }
-
     private BizException mapLlmInvokeFailure(LlmInvokeException ex, String fallbackMessage) {
         if (isLlmAuthFailure(ex)) {
             return new BizException(
@@ -420,6 +344,14 @@ public class ArticleAiDraftService {
         }
     }
 
+    private String enrichPromptSnapshot(String promptSnapshot, LlmInvokeResult result) {
+        Map<String, Object> snapshot = readJson(promptSnapshot);
+        snapshot.put("contentSource", "AI_PREVIEW");
+        snapshot.put("promptTokens", result.promptTokens());
+        snapshot.put("completionTokens", result.completionTokens());
+        return writeJson(snapshot);
+    }
+
     private String modelResponseSnapshot(LlmInvokeResult result) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
         snapshot.put("responseText", result.responseText());
@@ -439,93 +371,93 @@ public class ArticleAiDraftService {
         }
     }
 
-    private String previewInputSnapshot(ArticleAiDraftPreviewRequest req,
-                                        String articleType,
-                                        Project project,
-                                        Brand brand) {
-        Map<String, Object> snapshot = new LinkedHashMap<>();
-        snapshot.put("projectId", project.getId());
-        snapshot.put("brandId", project.getBrandId());
-        snapshot.put("brandName", brand == null ? null : brand.getBrandName());
-        snapshot.put("articleType", articleType);
-        snapshot.put("contentStyle", normalizeOption(req.getContentStyle()));
-        snapshot.put("tone", normalizeOption(req.getTone()));
-        snapshot.put("length", normalizeOption(req.getLength()));
-        snapshot.put("topic", trim(req.getTopic()));
-        snapshot.put("extraPrompt", trim(req.getExtraPrompt()));
-        snapshot.put("referenceMaterials", trim(req.getReferenceMaterials()));
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> readJson(String value) {
+        if (!StringUtils.hasText(value)) {
+            return new LinkedHashMap<>();
+        }
         try {
-            return objectMapper.writeValueAsString(snapshot);
+            return objectMapper.readValue(value, LinkedHashMap.class);
+        } catch (Exception ex) {
+            return new LinkedHashMap<>();
+        }
+    }
+
+    private String writeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
         } catch (JsonProcessingException ex) {
             return "{}";
         }
     }
 
-    private String buildPreviewPrompt(ArticleAiDraftPreviewRequest req,
-                                      String articleType,
-                                      Project project,
-                                      Brand brand) {
-        String contentStyle = normalizeOption(req.getContentStyle());
-        String tone = normalizeOption(req.getTone());
-        String length = normalizeOption(req.getLength());
-        String styleLabel = CONTENT_STYLE_LABELS.getOrDefault(contentStyle, CONTENT_STYLE_LABELS.get(DEFAULT_CONTENT_STYLE));
-        String styleGuide = CONTENT_STYLE_GUIDES.getOrDefault(contentStyle, CONTENT_STYLE_GUIDES.get(DEFAULT_CONTENT_STYLE));
-        String toneLabel = TONE_LABELS.getOrDefault(tone, TONE_LABELS.get(DEFAULT_TONE));
-        String lengthLabel = LENGTH_LABELS.getOrDefault(length, LENGTH_LABELS.get(DEFAULT_LENGTH));
-        String contactInfo = buildContactInfo(articleType, req.getTopic(), brand);
-
-        return """
-                # 角色
-                你是一名中文 GEO 内容写作助手，以行业观察者视角为项目生成可审核的 Markdown 文章草稿。
-
-                # 项目信息
-                - 项目名称：%s
-                - 所属行业：%s
-                - 主营业务：%s
-                - 文章类型：%s
-                - 如有必要可提及的品牌名：%s
-                %s
-
-                # 写作要求
-                - 内容风格：%s
-                - 风格说明：%s
-                - 语气：%s
-                - 篇幅：%s
-                - 选题：%s
-
-                # 补充要求
-                %s
-
-                # 参考资料
-                %s
-
-                # 品牌处理规则
-                - 全文品牌名最多出现 1-2 次，且必须出现在自然语境下，例如作为场景参考、可选方案之一或信息来源之一。
-                - 不得在开头段或结尾段强调品牌。
-                - 不得使用“推荐”“首选”“值得信赖”“欢迎咨询”等推销性表达。
-                - 文章主体围绕选题本身展开，品牌只是参考点之一。
-                - 不得编造联系方式、价格、资质、客户案例或不可验证数据。
-
-                # 输出要求
-                - 只输出 Markdown 正文，不要解释提示词
-                - 第一行必须是一级标题，格式为 "# 标题"。
-                - 正文至少包含 3 个二级标题，格式为 "## 小标题"。
-                - 避免空泛套话，给出具体分析和可执行建议。
-                """.formatted(
-                nullToDash(project.getProjectName()),
-                brand == null ? "-" : nullToDash(brand.getIndustry()),
-                brand == null ? "-" : nullToDash(brand.getMainBusiness()),
+    private BatchArticlePromptBuilder.PromptBuildResult buildPreviewPrompt(ArticleAiDraftPreviewRequest req,
+                                                                           String articleType,
+                                                                           Project project,
+                                                                           Brand brand) {
+        String topic = trim(req.getTopic());
+        return promptBuilder.build(new BatchArticlePromptBuilder.PromptBuildInput(
+                project,
+                brand,
+                resolveBrandStatement(project, brand),
+                "manual_preview",
+                topic,
+                promptBuilder.topicAsQuestion(topic, articleType, 1),
+                null,
+                null,
+                List.of(),
                 articleType,
-                brand == null ? "-" : nullToDash(brand.getBrandName()),
-                contactInfo,
-                styleLabel,
-                styleGuide,
-                toneLabel,
-                lengthLabel,
-                trim(req.getTopic()),
-                StringUtils.hasText(req.getExtraPrompt()) ? req.getExtraPrompt().trim() : "无",
-                StringUtils.hasText(req.getReferenceMaterials()) ? req.getReferenceMaterials().trim() : "无"
-        );
+                defaultOption(req.getContentStyle(), DEFAULT_CONTENT_STYLE),
+                defaultOption(req.getLength(), DEFAULT_LENGTH),
+                buildPreviewExtraPrompt(req, articleType, brand),
+                1,
+                List.of(),
+                null
+        ));
+    }
+
+    private String buildPreviewExtraPrompt(ArticleAiDraftPreviewRequest req, String articleType, Brand brand) {
+        List<String> parts = new ArrayList<>();
+        String tone = defaultOption(req.getTone(), DEFAULT_TONE);
+        parts.add("语气：" + TONE_LABELS.getOrDefault(tone, TONE_LABELS.get(DEFAULT_TONE)));
+        if (StringUtils.hasText(req.getExtraPrompt())) {
+            parts.add("补充要求：" + req.getExtraPrompt().trim());
+        }
+        if (StringUtils.hasText(req.getReferenceMaterials())) {
+            parts.add("参考资料：" + req.getReferenceMaterials().trim());
+        }
+        String contactInfo = buildContactInfo(articleType, req.getTopic(), brand);
+        if (StringUtils.hasText(contactInfo)) {
+            parts.add(contactInfo);
+        }
+        return String.join("\n", parts);
+    }
+
+    private String resolveBrandStatement(Project project, Brand brand) {
+        if (StringUtils.hasText(project.getCustomStatement())) {
+            return project.getCustomStatement().trim();
+        }
+        if (brand == null) {
+            return null;
+        }
+        return buildBrandProfileStatement(brand);
+    }
+
+    private String buildBrandProfileStatement(Brand brand) {
+        List<String> parts = new ArrayList<>();
+        addPart(parts, "品牌定位", brand.getBrandPositioning());
+        addPart(parts, "主营业务", brand.getMainBusiness());
+        addPart(parts, "核心产品", brand.getCoreProducts());
+        addPart(parts, "业务介绍", brand.getBusinessIntro());
+        addPart(parts, "资质背书", brand.getBrandQualificationDescription());
+        addPart(parts, "案例素材", brand.getBrandCaseDescription());
+        return parts.isEmpty() ? null : String.join("；", parts);
+    }
+
+    private void addPart(List<String> parts, String label, String value) {
+        if (StringUtils.hasText(value)) {
+            parts.add(label + "：" + value.trim());
+        }
     }
 
     private String buildContactInfo(String articleType, String topic, Brand brand) {
@@ -556,8 +488,8 @@ public class ArticleAiDraftService {
         return CONTACT_INTENT_KEYWORDS.stream().anyMatch(normalized::contains);
     }
 
-    private String normalizeOption(String value) {
-        return StringUtils.hasText(value) ? value.trim() : "";
+    private String defaultOption(String value, String fallback) {
+        return StringUtils.hasText(value) ? value.trim() : fallback;
     }
 
     private String trim(String value) {
@@ -581,6 +513,14 @@ public class ArticleAiDraftService {
             return trimmed.length() > 120 ? trimmed.substring(0, 120) : trimmed;
         }
         return "AI 草稿";
+    }
+
+    private String platformCode(ArticleModelResolver.ModelSelection model, String fallback) {
+        return model == null ? (StringUtils.hasText(fallback) ? fallback : "unknown") : model.platformCode();
+    }
+
+    private String modelId(ArticleModelResolver.ModelSelection model, String fallback) {
+        return model == null ? (StringUtils.hasText(fallback) ? fallback : "unknown") : model.modelId();
     }
 
     private void auditGenerated(AuditResult result, SysUser operator, Project project, Long articleId,
@@ -612,6 +552,4 @@ public class ArticleAiDraftService {
         return (System.nanoTime() - started) / 1_000_000;
     }
 
-    private record ModelSelection(String platformCode, String modelId, LlmModelConfig config) {
-    }
 }

@@ -19,7 +19,6 @@ import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
-import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,7 +64,6 @@ class BatchArticleGenerationServiceTest {
                 mock(KeywordGroupMapper.class),
                 mock(KeywordGroupResultMapper.class),
                 mock(ProjectKeywordGroupRelMapper.class),
-                mock(AiPlatformConfigMapper.class),
                 mock(ArticleDraftMapper.class),
                 mock(ArticleDraftVersionMapper.class),
                 mock(ArticleGenerationLogMapper.class),
@@ -79,6 +77,8 @@ class BatchArticleGenerationServiceTest {
                 mock(LlmInvoker.class),
                 mock(MarkdownImageReferenceValidator.class),
                 mock(ArticleAiDraftPromptFilter.class),
+                mock(ArticleGenerationEngine.class),
+                mock(ArticleModelResolver.class),
                 promptBuilder,
                 mock(BatchArticleQualityChecker.class),
                 mock(ArticleTemplateAllocationService.class),

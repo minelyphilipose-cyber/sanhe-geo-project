@@ -500,7 +500,7 @@ class ContentDistributionServiceTest {
         task.setAttemptNo(1);
         when(distributionTaskMapper.selectList(any())).thenReturn(List.of(task));
 
-        Map<String, Object> result = contentDistributionService.distributionHistory(1L);
+        Map<String, Object> result = contentDistributionService.distributionHistory(1L, null);
 
         assertEquals(1L, result.get("articleId"));
         @SuppressWarnings("unchecked")

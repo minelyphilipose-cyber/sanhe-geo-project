@@ -71,6 +71,25 @@ class ArticleAiDraftPromptFilterTest {
     }
 
     @Test
+    void generatedContentDoesNotExposeRedactionPlaceholders() {
+        SysDictItemMapper mapper = mock(SysDictItemMapper.class);
+        when(mapper.selectList(any())).thenReturn(List.of());
+        ArticleAiDraftPromptFilter filter = new ArticleAiDraftPromptFilter(mapper);
+
+        String filtered = filter.filterGeneratedContent("""
+                # 标题
+
+                电话 13812345678
+                地址 北京市朝阳区测试路88号
+                正文内容
+                """, null, null, false);
+
+        assertFalse(filtered.contains("[PHONE_REDACTED]"));
+        assertFalse(filtered.contains("[ADDRESS_REDACTED]"));
+        assertTrue(filtered.contains("正文内容"));
+    }
+
+    @Test
     void allowedContactInfoOnlyPreservesBrandPublicContact() {
         SysDictItemMapper mapper = mock(SysDictItemMapper.class);
         when(mapper.selectList(any())).thenReturn(List.of());

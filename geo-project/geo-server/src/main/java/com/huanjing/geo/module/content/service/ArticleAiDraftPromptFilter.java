@@ -43,7 +43,7 @@ public class ArticleAiDraftPromptFilter {
     }
 
     public String filterGeneratedContent(String content, Project project, Brand brand, boolean allowContactInfo) {
-        return filterOutboundPrompt(content, project, brand, allowContactInfo);
+        return removeGeneratedRedactionMarkers(filterOutboundPrompt(content, project, brand, allowContactInfo));
     }
 
     private String redactPii(String value, Brand brand, boolean allowContactInfo) {
@@ -51,6 +51,40 @@ public class ArticleAiDraftPromptFilter {
         redacted = redactMobiles(redacted, allowedPhones(brand, allowContactInfo));
         redacted = redactAddresses(redacted, brand, allowContactInfo);
         return redactBankCards(ID_CARD.matcher(redacted).replaceAll("[ID_REDACTED]"));
+    }
+
+    private String removeGeneratedRedactionMarkers(String value) {
+        if (!StringUtils.hasText(value) || !value.contains("_REDACTED]")) {
+            return value;
+        }
+        StringBuilder cleaned = new StringBuilder();
+        for (String line : value.split("\\r?\\n", -1)) {
+            String replaced = line
+                    .replace("[ADDRESS_REDACTED]", "")
+                    .replace("[PHONE_REDACTED]", "")
+                    .replace("[EMAIL_REDACTED]", "")
+                    .replace("[ID_REDACTED]", "")
+                    .replace("[NUMBER_REDACTED]", "")
+                    .replaceAll("[：:，,。；;、\\s]+$", "")
+                    .trim();
+            if (line.contains("_REDACTED]") && isEmptyContactLine(replaced)) {
+                continue;
+            }
+            cleaned.append(replaced).append('\n');
+        }
+        return cleaned.toString().trim();
+    }
+
+    private boolean isEmptyContactLine(String value) {
+        if (!StringUtils.hasText(value)) {
+            return true;
+        }
+        String normalized = value.replaceAll("[#*\\-\\s：:，,。；;、]", "");
+        return normalized.isEmpty()
+                || "地址".equals(normalized)
+                || "电话".equals(normalized)
+                || "邮箱".equals(normalized)
+                || "联系方式".equals(normalized);
     }
 
     private String redactMobiles(String value, Set<String> allowedPhones) {

@@ -8,7 +8,6 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.llm.LlmInvokeException;
 import com.huanjing.geo.common.llm.LlmInvokeResult;
 import com.huanjing.geo.common.llm.LlmInvoker;
-import com.huanjing.geo.common.llm.LlmModelConfig;
 import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
@@ -41,9 +40,7 @@ import com.huanjing.geo.module.project.mapper.KeywordGroupMapper;
 import com.huanjing.geo.module.project.mapper.KeywordGroupResultMapper;
 import com.huanjing.geo.module.project.mapper.ProjectKeywordGroupRelMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
-import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.entity.SysUser;
-import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.PlatformCredentialService;
 import lombok.extern.slf4j.Slf4j;
@@ -84,7 +81,6 @@ public class BatchArticleGenerationService {
     private static final String TEMPLATE_SOURCE_WEIGHTED = "weighted";
     private static final String TEMPLATE_SOURCE_CUSTOM = "custom";
     private static final String TEMPLATE_SOURCE_FALLBACK_DEFAULT_PROMPT = "fallback_default_prompt";
-    private static final int ARTICLE_REQUEST_TIMEOUT_MS = 120_000;
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
     private static final String SMART_TEMPLATE_MATCH_SYSTEM_PROMPT = """
             你是文章提示词模板匹配器。你的任务是根据文章主题、渠道和可用模板摘要，选择最适合生成该主题文章的模板。
@@ -116,7 +112,6 @@ public class BatchArticleGenerationService {
     private final KeywordGroupMapper keywordGroupMapper;
     private final KeywordGroupResultMapper keywordGroupResultMapper;
     private final ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper;
-    private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
     private final ArticleGenerationLogMapper articleGenerationLogMapper;
@@ -130,6 +125,8 @@ public class BatchArticleGenerationService {
     private final LlmInvoker llmInvoker;
     private final MarkdownImageReferenceValidator markdownImageReferenceValidator;
     private final ArticleAiDraftPromptFilter promptFilter;
+    private final ArticleGenerationEngine articleGenerationEngine;
+    private final ArticleModelResolver articleModelResolver;
     private final BatchArticlePromptBuilder promptBuilder;
     private final BatchArticleQualityChecker qualityChecker;
     private final ArticleTemplateAllocationService allocationService;
@@ -144,7 +141,6 @@ public class BatchArticleGenerationService {
                                          KeywordGroupMapper keywordGroupMapper,
                                          KeywordGroupResultMapper keywordGroupResultMapper,
                                          ProjectKeywordGroupRelMapper projectKeywordGroupRelMapper,
-                                         AiPlatformConfigMapper aiPlatformConfigMapper,
                                          ArticleDraftMapper articleDraftMapper,
                                          ArticleDraftVersionMapper articleDraftVersionMapper,
                                          ArticleGenerationLogMapper articleGenerationLogMapper,
@@ -158,6 +154,8 @@ public class BatchArticleGenerationService {
                                          LlmInvoker llmInvoker,
                                          MarkdownImageReferenceValidator markdownImageReferenceValidator,
                                          ArticleAiDraftPromptFilter promptFilter,
+                                         ArticleGenerationEngine articleGenerationEngine,
+                                         ArticleModelResolver articleModelResolver,
                                          BatchArticlePromptBuilder promptBuilder,
                                          BatchArticleQualityChecker qualityChecker,
                                          ArticleTemplateAllocationService allocationService,
@@ -171,7 +169,6 @@ public class BatchArticleGenerationService {
         this.keywordGroupMapper = keywordGroupMapper;
         this.keywordGroupResultMapper = keywordGroupResultMapper;
         this.projectKeywordGroupRelMapper = projectKeywordGroupRelMapper;
-        this.aiPlatformConfigMapper = aiPlatformConfigMapper;
         this.articleDraftMapper = articleDraftMapper;
         this.articleDraftVersionMapper = articleDraftVersionMapper;
         this.articleGenerationLogMapper = articleGenerationLogMapper;
@@ -185,6 +182,8 @@ public class BatchArticleGenerationService {
         this.llmInvoker = llmInvoker;
         this.markdownImageReferenceValidator = markdownImageReferenceValidator;
         this.promptFilter = promptFilter;
+        this.articleGenerationEngine = articleGenerationEngine;
+        this.articleModelResolver = articleModelResolver;
         this.promptBuilder = promptBuilder;
         this.qualityChecker = qualityChecker;
         this.allocationService = allocationService;
@@ -412,23 +411,25 @@ public class BatchArticleGenerationService {
             task.setContentAngle(prompt.contentAngle());
             task.setAudiencePerspective(prompt.audiencePerspective());
 
-            ModelSelection model = resolveModel(prompt.systemPrompt());
-            String outboundPrompt = promptFilter.filterOutboundPrompt(prompt.userPrompt(), project, brand, true);
-            LlmInvokeResult result = llmInvoker.invoke(outboundPrompt, model.config());
-            String content = normalizeContent(promptFilter.filterGeneratedContent(result.responseText(), project, brand, true));
-
-            BatchArticleQualityChecker.QualityResult quality = qualityChecker.check(
-                    content, brand, forbiddenPhrases(project, brand)
+            List<String> forbiddenPhrases = forbiddenPhrases(project, brand);
+            ArticleGenerationEngine.GeneratedArticle generated = articleGenerationEngine.generate(
+                    new ArticleGenerationEngine.GenerateInput(
+                            project,
+                            brand,
+                            prompt.systemPrompt(),
+                            prompt.userPrompt(),
+                            null,
+                            null,
+                            true,
+                            true,
+                            true,
+                            forbiddenPhrases
+                    )
             );
             int retryCount = 0;
 
-            if (!StringUtils.hasText(content)) {
-                throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI generated empty article");
-            }
-            markdownImageReferenceValidator.validate(project, content);
-            String title = extractTitle(content);
-            Long articleId = persistArticle(project, task, title, content, prompt, model, result);
-            markTaskSuccess(task, articleId, prompt, model, result, quality, retryCount);
+            Long articleId = persistArticle(project, task, generated.title(), generated.content(), prompt, generated.model(), generated.result());
+            markTaskSuccess(task, articleId, prompt, generated.model(), generated.result(), generated.quality(), retryCount);
         } catch (Exception ex) {
             log.warn("Batch article generation task failed batchId={} taskId={}", batch.getId(), task.getId(), ex);
             markTaskFailed(task, ex);
@@ -440,7 +441,7 @@ public class BatchArticleGenerationService {
                                 String title,
                                 String content,
                                 BatchArticlePromptBuilder.PromptBuildResult prompt,
-                                ModelSelection model,
+                                ArticleModelResolver.ModelSelection model,
                                 LlmInvokeResult result) {
         return Objects.requireNonNull(transactionTemplate.execute(status -> {
             ArticleDraft draft = new ArticleDraft();
@@ -507,47 +508,8 @@ public class BatchArticleGenerationService {
         return promptBuilder.buildFromTemplate(input, template, version);
     }
 
-    private ModelSelection resolveModel(String systemPrompt) {
-        AiPlatformConfig config = aiPlatformConfigMapper.selectOne(
-                new LambdaQueryWrapper<AiPlatformConfig>()
-                        .eq(AiPlatformConfig::getEnabled, true)
-                        .eq(AiPlatformConfig::getEnabledForArticle, true)
-                        .orderByAsc(AiPlatformConfig::getId)
-                        .last("LIMIT 1")
-        );
-        if (config == null || !StringUtils.hasText(config.getApiUrl())) {
-            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_CONFIG_MISSING, "AI article model config missing");
-        }
-        String modelId = StringUtils.hasText(config.getModelId()) ? config.getModelId().trim() : config.getLowModelId();
-        if (!StringUtils.hasText(modelId)) {
-            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_CONFIG_MISSING, "AI article model config missing");
-        }
-        String apiKey = platformCredentialService.resolveApiKey(
-                config.getPlatformCode(), config.getPrimaryKeyRef(), config.getApiKey()
-        );
-        if (!StringUtils.hasText(apiKey)) {
-            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_CONFIG_MISSING, "AI article model config missing");
-        }
-        int timeout = Math.min(Math.max(normalize(config.getTimeoutMs(), ARTICLE_REQUEST_TIMEOUT_MS),
-                ARTICLE_REQUEST_TIMEOUT_MS), LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS);
-        LlmModelConfig modelConfig = new LlmModelConfig(
-                config.getPlatformCode(),
-                config.getPlatformName(),
-                modelId,
-                StringUtils.hasText(config.getModelName()) ? config.getModelName().trim() : modelId,
-                config.getApiUrl(),
-                apiKey,
-                systemPrompt,
-                0.4D,
-                LlmModelConfig.DEFAULT_CONNECT_TIMEOUT_MS,
-                timeout,
-                normalize(config.getMaxRetry(), 2),
-                Math.max(1, normalize(config.getRateLimitQps(), 1)),
-                null,
-                false,
-                LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS
-        );
-        return new ModelSelection(config.getPlatformCode(), modelId, modelConfig);
+    private ArticleModelResolver.ModelSelection resolveModel(String systemPrompt) {
+        return articleModelResolver.resolve(null, null, systemPrompt, true);
     }
 
     private void markBatchRunning(BatchArticleGenerationBatch batch) {
@@ -590,7 +552,7 @@ public class BatchArticleGenerationService {
     private void markTaskSuccess(BatchArticleGenerationTask task,
                                  Long articleId,
                                  BatchArticlePromptBuilder.PromptBuildResult prompt,
-                                 ModelSelection model,
+                                 ArticleModelResolver.ModelSelection model,
                                  LlmInvokeResult result,
                                  BatchArticleQualityChecker.QualityResult quality,
                                  int retryCount) {
@@ -842,7 +804,7 @@ public class BatchArticleGenerationService {
             return Map.of();
         }
         try {
-            ModelSelection model = resolveModel(SMART_TEMPLATE_MATCH_SYSTEM_PROMPT);
+            ArticleModelResolver.ModelSelection model = resolveModel(SMART_TEMPLATE_MATCH_SYSTEM_PROMPT);
             LlmInvokeResult result = llmInvoker.invoke(buildSmartTemplateMatchPrompt(units), model.config());
             Map<String, SmartTemplateSelection> selections = parseSmartTemplateMatchResult(result.responseText(), units);
             if (!selections.isEmpty()) {
@@ -1505,9 +1467,6 @@ public class BatchArticleGenerationService {
             return "AI article generation failed";
         }
         return StringUtils.hasText(ex.getMessage()) ? ex.getMessage() : ex.getClass().getSimpleName();
-    }
-
-    private record ModelSelection(String platformCode, String modelId, LlmModelConfig config) {
     }
 
     private record ValidatedTopic(String topic,
