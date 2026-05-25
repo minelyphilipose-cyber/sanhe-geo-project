@@ -3,8 +3,8 @@
     <header class="page-head">
       <div>
         <div class="page-kicker">公众号排版</div>
-        <h1>应用公众号样式</h1>
-        <p>选择模板、替换图片、查看实时预览。大部分文章保持默认识别即可。</p>
+        <h1>设置公众号展示效果</h1>
+        <p>按顺序选模板、换图片、标重点，右侧会实时显示最终效果。</p>
       </div>
       <div class="head-actions">
         <el-button @click="router.back()">返回</el-button>
@@ -30,8 +30,8 @@
           <div class="card-title">
             <span class="step-badge">1</span>
             <div>
-              <strong>选择样式模板</strong>
-              <p>选择后会自动生成右侧预览。</p>
+              <strong>选择模板</strong>
+              <p>选一个公众号样式，系统会自动套到文章上。</p>
             </div>
           </div>
           <el-select
@@ -50,7 +50,7 @@
             <span class="step-badge">2</span>
             <div>
               <strong>替换图片</strong>
-              <p>上传要发布的图片，模板样式会保留。</p>
+              <p>有图片位时，上传正式发布要用的图片。</p>
             </div>
           </div>
           <el-empty v-if="!imageBlocks.length" description="这篇文章暂无图片位" />
@@ -96,36 +96,66 @@
           <div class="card-title">
             <span class="step-badge">3</span>
             <div>
-              <strong>结尾引导</strong>
-              <p>需要时加到文章最后，不需要可以关闭。</p>
+              <strong>标出重点段落</strong>
+              <p>给重要内容加浅色背景框，让读者更容易看到。</p>
             </div>
           </div>
-          <el-switch v-model="endingCtaEnabled" active-text="添加结尾引导" inactive-text="不添加" />
-          <el-input
-            v-if="endingCtaEnabled"
-            :model-value="endingCtaContent"
-            class="cta-input"
-            type="textarea"
-            :rows="3"
-            placeholder="例如：欢迎联系了解更多。"
-            @input="setEndingCtaContent"
+          <el-alert
+            v-if="!highlightRoleAvailable"
+            title="当前模板没有重点背景框样式，可以跳过这一步"
+            type="info"
+            show-icon
+            :closable="false"
+            class="render-mode-alert"
           />
+          <template v-else>
+            <div class="quick-action-card">
+              <div>
+                <strong>智能推荐</strong>
+                <p>{{ backgroundBoxSummary }}</p>
+              </div>
+              <div class="quick-action-card__actions">
+                <el-button type="primary" @click="applySuggestedBackgroundBoxes">一键标重点</el-button>
+                <el-button v-if="backgroundBoxAppliedCount" plain @click="clearBackgroundBoxes">全部取消</el-button>
+              </div>
+            </div>
+            <el-collapse class="simple-collapse">
+              <el-collapse-item title="手动选择重点段落" name="background-boxes">
+                <div class="box-helper">
+                  打开开关后，这段会套用模板里的背景框；关闭后恢复普通正文。
+                </div>
+                <div v-for="block in backgroundBoxBlocks" :key="blockKey(block)" class="box-row">
+                  <div class="box-row__text">
+                    <strong>{{ blockDisplayName(block) }}</strong>
+                    <span>{{ blockPreviewText(block) }}</span>
+                  </div>
+                  <el-switch
+                    :model-value="isBackgroundBoxApplied(block)"
+                    active-text="突出显示"
+                    inactive-text="普通"
+                    @change="(enabled: string | number | boolean) => toggleBackgroundBox(block, Boolean(enabled))"
+                  />
+                </div>
+                <el-empty v-if="!backgroundBoxBlocks.length" description="暂无可添加背景框的正文段落" />
+              </el-collapse-item>
+            </el-collapse>
+          </template>
         </section>
 
         <section class="setup-card">
           <div class="card-title">
             <span class="step-badge">4</span>
             <div>
-              <strong>正文样式</strong>
-              <p>默认使用安全排版。模板正文样式确认干净时，可以一键套用。</p>
+              <strong>正文排版</strong>
+              <p>默认使用稳妥排版；模板正文干净时，可以让正文更像示例。</p>
             </div>
           </div>
           <div class="paragraph-wrapper-option">
             <el-switch
               v-model="paragraphWrapperEnabled"
               :disabled="!paragraphWrapperSafe"
-              active-text="套用模板正文样式"
-              inactive-text="基础排版"
+              active-text="更像模板示例"
+              inactive-text="稳妥排版"
             />
             <el-alert
               :title="paragraphRenderStatus.title"
@@ -142,53 +172,29 @@
           <div class="card-title">
             <span class="step-badge">5</span>
             <div>
-              <strong>当前效果</strong>
-              <p>这里显示最终预览和发布会使用的设置。</p>
+              <strong>结尾引导</strong>
+              <p>需要时加到文章最后，不需要可以关闭。</p>
             </div>
           </div>
-          <div class="effect-list">
-            <div v-for="item in renderEffectItems" :key="item.label" class="effect-item">
-              <span>{{ item.label }}</span>
-              <strong>{{ item.value }}</strong>
-              <p>{{ item.description }}</p>
-            </div>
-          </div>
+          <el-switch v-model="endingCtaEnabled" active-text="添加结尾引导" inactive-text="不添加" />
+          <el-input
+            v-if="endingCtaEnabled"
+            :model-value="endingCtaContent"
+            class="cta-input"
+            type="textarea"
+            :rows="3"
+            placeholder="例如：欢迎联系了解更多。"
+            @input="setEndingCtaContent"
+          />
         </section>
 
-        <section class="setup-card">
-          <div class="card-title">
-            <span class="step-badge">6</span>
-            <div>
-              <strong>识别不准时再改</strong>
-              <p>一般不用处理。只有某段样式识别错了，再打开调整。</p>
-            </div>
-          </div>
-          <el-collapse>
-            <el-collapse-item title="修改某段的样式" name="roles">
-              <div v-for="block in editableBlocks" :key="blockKey(block)" class="role-row">
-                <div class="role-row__text">
-                  <strong>{{ blockDisplayName(block) }}</strong>
-                  <span>{{ blockPreviewText(block) }}</span>
-                </div>
-                <el-select
-                  :model-value="roleFor(block)"
-                  class="role-select"
-                  @change="(role: string | number | boolean) => setRole(block, String(role))"
-                >
-                  <el-option v-for="role in block.allowedRoles" :key="role" :label="roleLabel(role)" :value="role" />
-                </el-select>
-              </div>
-              <el-empty v-if="!editableBlocks.length" description="暂无需要单独调整的内容" />
-            </el-collapse-item>
-          </el-collapse>
-        </section>
       </aside>
 
       <main class="preview-panel">
         <div class="preview-head">
           <div>
             <strong>实时预览</strong>
-            <span>{{ previewing ? '正在更新预览...' : '修改左侧设置后会自动更新' }}</span>
+            <span>{{ previewing ? '正在更新预览...' : '左侧每一步修改都会自动更新' }}</span>
           </div>
           <div class="preview-actions">
             <el-tag v-if="selectedTemplateVersionId" type="success">已选择模板</el-tag>
@@ -197,8 +203,8 @@
           </div>
         </div>
         <div class="preview-status">
-          <span>{{ paragraphRenderStatus.title }}</span>
-          <em>{{ paragraphRenderStatus.description }}</em>
+          <span>{{ previewSummary }}</span>
+          <em>保存前可随时调整；发布前预览会使用同一套渲染结果。</em>
         </div>
         <div class="phone-frame" v-loading="loading">
           <div class="phone-top">
@@ -228,8 +234,8 @@
       />
       <div class="final-preview-body" v-loading="finalPreviewing">
         <div class="dialog-status">
-          <span>{{ paragraphRenderStatus.title }}</span>
-          <em>{{ paragraphRenderStatus.description }}</em>
+          <span>{{ previewSummary }}</span>
+          <em>这是发布前会使用的完整效果。</em>
         </div>
         <div class="phone-frame phone-frame--dialog">
           <div class="phone-top">
@@ -301,6 +307,7 @@ let previewTimer: number | undefined
 
 const annotations = reactive<WechatRenderAnnotations>({
   marks: [],
+  textMarks: [],
   inserts: [],
 })
 
@@ -315,9 +322,48 @@ const duplicateBlockIds = computed(() => {
 })
 
 const imageBlocks = computed(() => blocks.value.filter((block) => block.imageUrl || block.defaultRole === 'image_block' || block.type === 'image'))
-const editableBlocks = computed(() =>
-  blocks.value.filter((block) => block.allowedRoles.length > 1 && !imageBlocks.value.includes(block) && block.defaultRole !== 'native_html'),
+const highlightRoleAvailable = computed(() => !!templateRoles.value.highlight_block?.wrapperHtml)
+const backgroundBoxBlocks = computed(() =>
+  blocks.value.filter((block) =>
+    block.allowedRoles.includes('highlight_block')
+    && ['paragraph', 'blockquote'].includes(block.defaultRole)
+    && !imageBlocks.value.includes(block)
+    && block.defaultRole !== 'native_html',
+  ),
 )
+const suggestedBackgroundBoxKeys = computed(() => {
+  const keys = new Set<string>()
+  let waitingForFirstParagraph = false
+  for (const block of blocks.value) {
+    if (block.defaultRole === 'heading') {
+      waitingForFirstParagraph = true
+      continue
+    }
+    if (!waitingForFirstParagraph) {
+      continue
+    }
+    if (backgroundBoxBlocks.value.includes(block)) {
+      keys.add(blockKey(block))
+      waitingForFirstParagraph = false
+      continue
+    }
+    if (block.defaultRole !== 'native_html' && !imageBlocks.value.includes(block)) {
+      waitingForFirstParagraph = false
+    }
+  }
+  return keys
+})
+const backgroundBoxAppliedCount = computed(() => backgroundBoxBlocks.value.filter((block) => isBackgroundBoxApplied(block)).length)
+const backgroundBoxSummary = computed(() => {
+  const suggestedCount = suggestedBackgroundBoxKeys.value.size
+  if (!suggestedCount) {
+    return '这篇文章暂时没有识别到适合自动标重点的段落。'
+  }
+  if (backgroundBoxAppliedCount.value) {
+    return `已标出 ${backgroundBoxAppliedCount.value} 段重点内容，可以继续手动调整。`
+  }
+  return `系统建议标出 ${suggestedCount} 段重点内容。`
+})
 
 const endingCta = computed(() => annotations.inserts.find((item) => item.role === 'ending_cta'))
 const endingCtaEnabled = computed({
@@ -363,42 +409,32 @@ const paragraphRenderStatus = computed(() => {
     description: '模板正文样式可用，但当前未开启；普通正文只应用字号、行高、段距等基础排版。',
   }
 })
-const renderEffectItems = computed(() => {
-  const hasImageReplacement = Object.values(imageOverrides).some((item) => item.imageUrl?.trim())
-  return [
-    {
-      label: '模板',
-      value: selectedTemplateVersionId.value ? '已选择' : '未选择',
-      description: selectedTemplateId.value
-        ? templates.value.find((item) => item.id === selectedTemplateId.value)?.name || '已选择公众号模板'
-        : '选择模板后，标题、重点段落、图片位会按模板渲染。',
-    },
-    {
-      label: '正文',
-      value: paragraphWrapperEnabled.value && paragraphWrapperSafe.value ? '已套用模板正文样式' : '基础排版',
-      description: paragraphWrapperSafe.value
-        ? '模板正文样式较干净，开启后会应用到普通正文。'
-        : '当前模板正文外框不可套用，系统只应用字号、行高、段距等基础排版。',
-    },
-    {
-      label: '图片',
-      value: hasImageReplacement ? `已替换 ${Object.values(imageOverrides).filter((item) => item.imageUrl?.trim()).length} 张` : imageBlocks.value.length ? `${imageBlocks.value.length} 个图片位` : '无图片',
-      description: hasImageReplacement ? '预览和发布会使用替换后的图片。' : '未替换时，会保留原图或显示占位图。',
-    },
-    {
-      label: '结尾引导',
-      value: endingCtaEnabled.value ? '已添加' : '未添加',
-      description: endingCtaEnabled.value ? '引导语会追加到文章末尾。' : '不需要时可以保持关闭。',
-    },
-  ]
+const previewSummary = computed(() => {
+  const items: string[] = []
+  if (selectedTemplateVersionId.value) {
+    items.push('模板已应用')
+  } else {
+    items.push('未选择模板')
+  }
+  const replacedImages = Object.values(imageOverrides).filter((item) => item.imageUrl?.trim()).length
+  if (replacedImages) {
+    items.push(`已替换 ${replacedImages} 张图片`)
+  }
+  if (backgroundBoxAppliedCount.value) {
+    items.push(`${backgroundBoxAppliedCount.value} 段重点`)
+  }
+  if (endingCtaEnabled.value) {
+    items.push('已添加结尾引导')
+  }
+  return items.join(' · ')
 })
-
 const roleLabels: Record<string, string> = {
   article_title: '文章标题',
   heading: '小标题',
   paragraph: '正文',
   highlight_block: '重点框',
   golden_sentence_block: '整段金句',
+  golden_sentence_text: '句子金句',
   quote_block: '引用',
   image_block: '图片',
   native_html: '列表/表格',
@@ -428,6 +464,42 @@ function setRole(block: WechatArticleBlock, role: string) {
   const existing = annotations.marks.find((item) => markMatchesBlock(item, block))
   if (existing) existing.role = role
   else annotations.marks.push({ blockId: block.id, order: block.order, role })
+}
+
+function isBackgroundBoxApplied(block: WechatArticleBlock) {
+  return roleFor(block) === 'highlight_block'
+}
+
+function toggleBackgroundBox(block: WechatArticleBlock, enabled: boolean) {
+  setRole(block, enabled ? 'highlight_block' : block.defaultRole)
+  schedulePreview()
+}
+
+function applySuggestedBackgroundBoxes() {
+  if (!highlightRoleAvailable.value) {
+    ElMessage.info('当前模板没有重点背景框样式')
+    return
+  }
+  let count = 0
+  for (const block of backgroundBoxBlocks.value) {
+    if (!suggestedBackgroundBoxKeys.value.has(blockKey(block))) {
+      continue
+    }
+    if (!isBackgroundBoxApplied(block)) {
+      setRole(block, 'highlight_block')
+      count++
+    }
+  }
+  schedulePreview()
+  ElMessage.success(count ? `已为 ${count} 段正文添加重点背景框` : '推荐段落已是重点背景框')
+}
+
+function clearBackgroundBoxes() {
+  const before = annotations.marks.length
+  annotations.marks = annotations.marks.filter((mark) => mark.role !== 'highlight_block')
+  if (before !== annotations.marks.length) {
+    schedulePreview()
+  }
 }
 
 function blockKey(block: WechatArticleBlock) {
@@ -623,6 +695,7 @@ async function loadConfig() {
     selectedTemplateId.value = renderRes.data.data.templateId || null
     selectedTemplateVersionId.value = renderRes.data.data.templateVersionId || null
     annotations.marks = renderRes.data.data.annotations?.marks || []
+    annotations.textMarks = renderRes.data.data.annotations?.textMarks || []
     annotations.inserts = renderRes.data.data.annotations?.inserts || []
     applyRenderConfig(renderRes.data.data.renderConfig)
     await refreshMaterialPreviewUrls()
@@ -735,7 +808,7 @@ function buildPreviewDocument(content: string) {
 }
 
 watch(
-  () => [annotations.marks, annotations.inserts, { ...imageOverrides }, paragraphWrapperEnabled.value],
+  () => [annotations.marks, annotations.textMarks, annotations.inserts, { ...imageOverrides }, paragraphWrapperEnabled.value],
   schedulePreview,
   { deep: true },
 )
@@ -962,75 +1035,104 @@ onBeforeUnmount(() => {
   margin-top: 2px;
 }
 
-.effect-list {
+.quick-action-card {
   display: grid;
-  gap: 10px;
-}
-
-.effect-item {
-  padding: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px;
   background: #f8fafc;
   border: 1px solid #e2e8f0;
-  border-radius: 8px;
+  border-radius: 10px;
 }
 
-.effect-item span,
-.effect-item strong {
+.quick-action-card strong {
   display: block;
-}
-
-.effect-item span {
-  color: #64748b;
-  font-size: 12px;
-}
-
-.effect-item strong {
-  margin-top: 3px;
   color: #0f172a;
   font-size: 14px;
 }
 
-.effect-item p {
-  margin: 6px 0 0;
+.quick-action-card p {
+  margin: 4px 0 0;
   color: #64748b;
   font-size: 12px;
   line-height: 1.5;
 }
 
-.role-row {
+.quick-action-card__actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.simple-collapse {
+  margin-top: 10px;
+  border: 0;
+}
+
+:deep(.simple-collapse .el-collapse-item__header) {
+  height: 36px;
+  color: #2563eb;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 36px;
+}
+
+:deep(.simple-collapse .el-collapse-item__wrap) {
+  border-bottom: 0;
+}
+
+:deep(.simple-collapse .el-collapse-item__content) {
+  padding-bottom: 0;
+}
+
+.box-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.box-helper {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.box-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 130px;
+  grid-template-columns: minmax(0, 1fr) 150px;
   gap: 10px;
   align-items: center;
-  padding: 10px 0;
+  padding: 12px 0;
   border-top: 1px solid #f1f5f9;
 }
 
-.role-row:first-child {
+.box-row:first-of-type {
   border-top: 0;
 }
 
-.role-row__text {
+.box-row__text {
   display: grid;
   gap: 3px;
   min-width: 0;
 }
 
-.role-row__text strong {
+.box-row__text strong {
   color: #0f172a;
   font-size: 13px;
 }
 
-.role-row__text span {
+.box-row__text span {
   overflow: hidden;
   color: #64748b;
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.role-select {
-  width: 130px;
 }
 
 .preview-panel {

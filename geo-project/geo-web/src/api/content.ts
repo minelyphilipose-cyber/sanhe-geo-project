@@ -137,8 +137,20 @@ export interface WechatRenderInsert {
   content?: string | null
 }
 
+export interface WechatRenderTextMark {
+  blockId: string
+  order?: number | null
+  role: string
+  quote: string
+  prefix?: string | null
+  suffix?: string | null
+  start?: number | null
+  end?: number | null
+}
+
 export interface WechatRenderAnnotations {
   marks: WechatRenderMark[]
+  textMarks: WechatRenderTextMark[]
   inserts: WechatRenderInsert[]
 }
 

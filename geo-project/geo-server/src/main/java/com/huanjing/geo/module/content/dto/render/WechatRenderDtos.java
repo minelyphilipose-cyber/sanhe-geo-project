@@ -138,6 +138,7 @@ public final class WechatRenderDtos {
     @Data
     public static class RenderAnnotations {
         private List<RenderMark> marks = new ArrayList<>();
+        private List<RenderTextMark> textMarks = new ArrayList<>();
         private List<RenderInsert> inserts = new ArrayList<>();
     }
 
@@ -153,6 +154,18 @@ public final class WechatRenderDtos {
         private String afterBlockId;
         private String role;
         private String content;
+    }
+
+    @Data
+    public static class RenderTextMark {
+        private String blockId;
+        private Integer order;
+        private String role;
+        private String quote;
+        private String prefix;
+        private String suffix;
+        private Integer start;
+        private Integer end;
     }
 
     @Data

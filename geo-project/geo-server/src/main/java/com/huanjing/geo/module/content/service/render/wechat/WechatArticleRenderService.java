@@ -12,6 +12,7 @@ import com.huanjing.geo.module.content.dto.render.WechatRenderDtos.BodyStyle;
 import com.huanjing.geo.module.content.dto.render.WechatRenderDtos.RenderAnnotations;
 import com.huanjing.geo.module.content.dto.render.WechatRenderDtos.RenderInsert;
 import com.huanjing.geo.module.content.dto.render.WechatRenderDtos.RenderMark;
+import com.huanjing.geo.module.content.dto.render.WechatRenderDtos.RenderTextMark;
 import com.huanjing.geo.module.content.dto.render.WechatRenderDtos.RenderWarning;
 import com.huanjing.geo.module.content.dto.render.WechatRenderDtos.RoleSchema;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
@@ -59,6 +60,9 @@ public class WechatArticleRenderService {
     private enum MaterialUrlMode {
         PREVIEW,
         PUBLIC
+    }
+
+    private record ResolvedTextMark(int start, int end, String quote, String role) {
     }
 
     public String renderOrFallback(ArticleDraft article, String contentMarkdown) {
@@ -182,6 +186,7 @@ public class WechatArticleRenderService {
             }
         }
         Map<String, List<RenderInsert>> inserts = insertsByAnchor(annotations);
+        Map<String, List<ResolvedTextMark>> textMarks = textMarksByBlock(blocks, annotations, warnings);
         StringBuilder html = new StringBuilder();
         int headingIndex = 0;
         String lastBlockId = null;
@@ -190,7 +195,8 @@ public class WechatArticleRenderService {
             if ("heading".equals(role)) {
                 headingIndex++;
             }
-            html.append(renderBlock(article, block, role, roles, bodyStyle, useParagraphWrapper, headingIndex, warnings));
+            html.append(renderBlock(article, block, role, roles, bodyStyle, useParagraphWrapper, headingIndex,
+                    textMarks.getOrDefault(markKey(block), List.of()), warnings));
             lastBlockId = block.getId();
             appendInserts(article, html, inserts.remove(block.getId()), roles, warnings);
         }
@@ -214,6 +220,7 @@ public class WechatArticleRenderService {
                                BodyStyle bodyStyle,
                                boolean useParagraphWrapper,
                                int headingIndex,
+                               List<ResolvedTextMark> textMarks,
                                List<RenderWarning> warnings) {
         if ("native_html".equals(role)) {
             return htmlSanitizer.sanitizeNativeHtml(block.getHtml());
@@ -221,7 +228,7 @@ public class WechatArticleRenderService {
         if ("article_title".equals(role)) {
             RoleSchema schema = roles.get("article_title");
             if (schema != null) {
-                return fillWrapper(schema.getWrapperHtml(), block, 0, articleTitleForRender(article));
+                return fillWrapper(schema.getWrapperHtml(), block, 0, articleTitleForRender(article), textMarks);
             }
             return defaultArticleTitleHtml(block);
         }
@@ -236,9 +243,9 @@ public class WechatArticleRenderService {
             return htmlSanitizer.sanitizeNativeHtml(block.getHtml());
         }
         if ("paragraph".equals(effectiveRole) && !useParagraphWrapper) {
-            return applyBodyStyle(defaultParagraphHtml(block), bodyStyle);
+            return applyBodyStyle(defaultParagraphHtml(block, textMarks), bodyStyle);
         }
-        String html = fillWrapper(schema.getWrapperHtml(), block, headingIndex, articleTitleForRender(article));
+        String html = fillWrapper(schema.getWrapperHtml(), block, headingIndex, articleTitleForRender(article), textMarks);
         return "paragraph".equals(effectiveRole) ? applyBodyStyle(html, bodyStyle) : html;
     }
 
@@ -291,9 +298,17 @@ public class WechatArticleRenderService {
     }
 
     private String fillWrapper(String wrapper, ArticleBlock block, int index, String articleTitle) {
+        return fillWrapper(wrapper, block, index, articleTitle, List.of());
+    }
+
+    private String fillWrapper(String wrapper,
+                               ArticleBlock block,
+                               int index,
+                               String articleTitle,
+                               List<ResolvedTextMark> textMarks) {
         String text = Objects.toString(block.getText(), "");
         String result = wrapper;
-        result = result.replace("{{content}}", htmlContent(block));
+        result = result.replace("{{content}}", htmlContent(block, textMarks));
         result = result.replace("{{text}}", escapeText(text));
         result = result.replace("{{index}}", index > 0 ? String.format("%02d", index) : "");
         result = result.replace("{{title}}", escapeText(articleTitle));
@@ -408,6 +423,13 @@ public class WechatArticleRenderService {
     }
 
     private String htmlContent(ArticleBlock block) {
+        return htmlContent(block, List.of());
+    }
+
+    private String htmlContent(ArticleBlock block, List<ResolvedTextMark> textMarks) {
+        if (textMarks != null && !textMarks.isEmpty()) {
+            return renderMarkedText(block, textMarks);
+        }
         String html = Objects.toString(block.getHtml(), "");
         Document document = Jsoup.parseBodyFragment(html);
         Element body = document.body();
@@ -418,6 +440,13 @@ public class WechatArticleRenderService {
     }
 
     private String defaultParagraphHtml(ArticleBlock block) {
+        return defaultParagraphHtml(block, List.of());
+    }
+
+    private String defaultParagraphHtml(ArticleBlock block, List<ResolvedTextMark> textMarks) {
+        if (textMarks != null && !textMarks.isEmpty()) {
+            return "<p>" + renderMarkedText(block, textMarks) + "</p>";
+        }
         String html = Objects.toString(block.getHtml(), "");
         if (StringUtils.hasText(html)) {
             return html;
@@ -495,6 +524,130 @@ public class WechatArticleRenderService {
         return null;
     }
 
+    private Map<String, List<ResolvedTextMark>> textMarksByBlock(List<ArticleBlock> blocks,
+                                                                 RenderAnnotations annotations,
+                                                                 List<RenderWarning> warnings) {
+        Map<String, List<ResolvedTextMark>> result = new LinkedHashMap<>();
+        if (annotations == null || annotations.getTextMarks() == null || annotations.getTextMarks().isEmpty()) {
+            return result;
+        }
+        Map<String, ArticleBlock> blockMap = new HashMap<>();
+        Map<String, ArticleBlock> blockIdMap = new HashMap<>();
+        Map<String, Long> blockIdCounts = blockIdCounts(blocks);
+        for (ArticleBlock block : blocks) {
+            blockMap.put(markKey(block), block);
+            blockIdMap.put(block.getId(), block);
+        }
+        for (RenderTextMark mark : annotations.getTextMarks()) {
+            ArticleBlock block = mark.getOrder() == null
+                    ? (blockIdCounts.getOrDefault(mark.getBlockId(), 0L) <= 1 ? blockIdMap.get(mark.getBlockId()) : null)
+                    : blockMap.get(markKey(mark.getBlockId(), mark.getOrder()));
+            if (block == null) {
+                continue;
+            }
+            if (!supportsTextMark(block)) {
+                warnings.add(RenderWarning.of("text_mark_unsupported", block.getId(), mark.getRole(), "该内容类型暂不支持句子级金句"));
+                continue;
+            }
+            ResolvedTextMark resolved = resolveTextMark(block, mark);
+            if (resolved == null) {
+                warnings.add(RenderWarning.of("text_mark_anchor_lost", block.getId(), mark.getRole(), "金句原文已变化，请重新标注"));
+                continue;
+            }
+            result.computeIfAbsent(markKey(block), ignored -> new ArrayList<>()).add(resolved);
+        }
+        for (Map.Entry<String, List<ResolvedTextMark>> entry : result.entrySet()) {
+            entry.setValue(normalizeTextMarks(entry.getKey(), entry.getValue(), warnings));
+        }
+        return result;
+    }
+
+    private boolean supportsTextMark(ArticleBlock block) {
+        return StringUtils.hasText(block.getText())
+                && Set.of("paragraph", "heading", "article_title").contains(block.getDefaultRole());
+    }
+
+    private ResolvedTextMark resolveTextMark(ArticleBlock block, RenderTextMark mark) {
+        String text = Objects.toString(block.getText(), "");
+        String quote = Objects.toString(mark.getQuote(), "");
+        if (!StringUtils.hasText(text) || !StringUtils.hasText(quote)) {
+            return null;
+        }
+        Integer start = mark.getStart();
+        Integer end = mark.getEnd();
+        if (start != null && end != null && start >= 0 && end > start && end <= text.length()
+                && quote.equals(text.substring(start, end))) {
+            return new ResolvedTextMark(start, end, text.substring(start, end), mark.getRole());
+        }
+        int fallbackStart = locateQuote(text, quote, mark.getPrefix(), mark.getSuffix());
+        if (fallbackStart < 0) {
+            return null;
+        }
+        return new ResolvedTextMark(fallbackStart, fallbackStart + quote.length(), quote, mark.getRole());
+    }
+
+    private int locateQuote(String text, String quote, String prefix, String suffix) {
+        int from = 0;
+        while (from <= text.length()) {
+            int index = text.indexOf(quote, from);
+            if (index < 0) {
+                return -1;
+            }
+            if (contextMatches(text, index, quote.length(), prefix, suffix)) {
+                return index;
+            }
+            from = index + Math.max(quote.length(), 1);
+        }
+        return -1;
+    }
+
+    private boolean contextMatches(String text, int start, int quoteLength, String prefix, String suffix) {
+        String expectedPrefix = Objects.toString(prefix, "");
+        String expectedSuffix = Objects.toString(suffix, "");
+        boolean prefixMatched = !StringUtils.hasText(expectedPrefix)
+                || text.substring(0, start).endsWith(expectedPrefix);
+        boolean suffixMatched = !StringUtils.hasText(expectedSuffix)
+                || text.substring(start + quoteLength).startsWith(expectedSuffix);
+        return prefixMatched && suffixMatched;
+    }
+
+    private List<ResolvedTextMark> normalizeTextMarks(String blockKey,
+                                                      List<ResolvedTextMark> marks,
+                                                      List<RenderWarning> warnings) {
+        List<ResolvedTextMark> sorted = new ArrayList<>(marks);
+        sorted.sort(Comparator.comparingInt(ResolvedTextMark::start).thenComparingInt(ResolvedTextMark::end));
+        List<ResolvedTextMark> result = new ArrayList<>();
+        int lastEnd = -1;
+        for (ResolvedTextMark mark : sorted) {
+            if (mark.start() < lastEnd) {
+                warnings.add(RenderWarning.of("text_mark_overlap", blockKey, mark.role(), "同一段内存在重叠金句，已跳过后一个"));
+                continue;
+            }
+            result.add(mark);
+            lastEnd = mark.end();
+        }
+        return result;
+    }
+
+    private String renderMarkedText(ArticleBlock block, List<ResolvedTextMark> textMarks) {
+        String text = Objects.toString(block.getText(), "");
+        StringBuilder html = new StringBuilder();
+        int cursor = 0;
+        for (ResolvedTextMark mark : textMarks) {
+            if (mark.start() > cursor) {
+                html.append(escapeText(text.substring(cursor, mark.start())));
+            }
+            html.append("<span style=\"color:#c2410c;font-weight:700;background:linear-gradient(transparent 62%,#fde68a 0);padding:0 2px;\">")
+                    .append(escapeText(text.substring(mark.start(), mark.end())))
+                    .append("</span>");
+            cursor = mark.end();
+        }
+        if (cursor < text.length()) {
+            html.append(escapeText(text.substring(cursor)));
+        }
+        return html.toString().replace("\n", "<br>");
+    }
+
     private String blockKey(ArticleBlock block) {
         return block.getId() + "#" + block.getOrder();
     }
@@ -558,6 +711,20 @@ public class WechatArticleRenderService {
                     : blockMap.containsKey(markKey(mark.getBlockId(), mark.getOrder()));
             if (!matched) {
                 warnings.add(RenderWarning.of("mark_anchor_lost", mark.getBlockId(), mark.getRole(), "标注对应段落已变化，请重新确认"));
+            }
+        }
+        if (annotations.getTextMarks() != null) {
+            for (RenderTextMark mark : annotations.getTextMarks()) {
+                if (mark.getOrder() == null && blockIdCounts.getOrDefault(mark.getBlockId(), 0L) > 1) {
+                    warnings.add(RenderWarning.of("text_mark_order_missing", mark.getBlockId(), mark.getRole(), "该金句缺少段落序号且命中重复段落，请重新标注"));
+                    continue;
+                }
+                boolean matched = mark.getOrder() == null
+                        ? blockIdMap.containsKey(mark.getBlockId())
+                        : blockMap.containsKey(markKey(mark.getBlockId(), mark.getOrder()));
+                if (!matched) {
+                    warnings.add(RenderWarning.of("text_mark_anchor_lost", mark.getBlockId(), mark.getRole(), "金句所在段落已变化，请重新标注"));
+                }
             }
         }
         return warnings;

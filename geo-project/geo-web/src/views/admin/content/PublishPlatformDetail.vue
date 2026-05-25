@@ -14,6 +14,7 @@
         </div>
       </div>
       <div class="header-actions">
+        <button v-if="isWechatPlatform" class="btn btn-ghost" type="button" @click="goWechatTemplates">样式模板</button>
         <button v-if="platform?.source === 'publish_site'" class="btn btn-ghost" type="button" :disabled="testing" @click="testSite">
           {{ testing ? '测试中...' : '测试连通' }}
         </button>
@@ -40,6 +41,17 @@
           <div class="summary-row">
             <span>自动发布</span>
             <strong :class="platform.autoPublish ? 'ok' : 'muted'">{{ platform.autoPublish ? '已开启' : '未开启' }}</strong>
+          </div>
+        </section>
+
+        <section v-if="isWechatPlatform" class="detail-card">
+          <div class="card-title">公众号样式模板</div>
+          <div class="template-entry">
+            <div>
+              <strong>管理公众号文章渲染样式</strong>
+              <p>用于文章详情中的公众号样式渲染，维护标题、正文、强调块等样式片段。</p>
+            </div>
+            <button class="btn btn-primary" type="button" @click="goWechatTemplates">进入管理</button>
           </div>
         </section>
 
@@ -160,6 +172,7 @@ const platform = computed<PlatformDetail | null>(() => {
   if (site) return toPublishSiteDetail(site)
   return staticPlatforms.find((item) => item.code === routeCode.value) || null
 })
+const isWechatPlatform = computed(() => platform.value?.code === 'wechat')
 
 function staticPlatform(code: string, name: string, logoText: string, logoClass: string, categoryName: string): PlatformDetail {
   return {
@@ -279,6 +292,10 @@ function goBack() {
 
 function goManagement() {
   router.push({ name: 'PublishPlatformManagement' })
+}
+
+function goWechatTemplates() {
+  router.push({ path: '/admin/content/wechat-templates' })
 }
 
 onMounted(loadDetail)
@@ -485,6 +502,28 @@ onMounted(loadDetail)
   line-height: 1.7;
 }
 
+.template-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.template-entry strong {
+  display: block;
+  margin-bottom: 6px;
+  color: #111827;
+  font-size: 14px;
+}
+
+.template-entry p {
+  max-width: 520px;
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 .min-w-0 {
   min-width: 0;
 }
@@ -501,6 +540,11 @@ onMounted(loadDetail)
 
   .header-actions {
     width: 100%;
+  }
+
+  .template-entry {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .detail-grid,

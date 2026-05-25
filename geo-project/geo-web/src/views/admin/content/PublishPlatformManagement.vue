@@ -157,6 +157,9 @@
             </div>
 
             <div class="target-actions" @click.stop>
+              <button v-if="isWechatTarget(target)" class="btn btn-link" type="button" @click="openWechatTemplateManagement">
+                样式模板
+              </button>
               <button class="btn btn-link" type="button" @click="openDrawer(target.drawerType || target.code, target)">编辑</button>
               <button v-if="target.source === 'publish_site'" class="btn btn-link" type="button" @click="testIndustrySite(target)">测试连通</button>
               <button v-if="!target.locked" class="btn btn-danger-link" type="button" @click="toggleTarget(target)">
@@ -727,6 +730,16 @@ function openPlatformDetail(target: TargetConfig) {
   router.push({
     name: 'PublishPlatformDetail',
     params: { code: target.code },
+  })
+}
+
+function isWechatTarget(target: TargetConfig) {
+  return target.categoryCode === 'self_media' && target.code === 'wechat'
+}
+
+function openWechatTemplateManagement() {
+  router.push({
+    path: '/admin/content/wechat-templates',
   })
 }
 
