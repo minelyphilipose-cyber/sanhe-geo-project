@@ -50,44 +50,53 @@
     <el-card shadow="never" class="jobs-table-card">
       <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无批量发布任务">
         <el-table :data="rows" class="jobs-table" table-layout="fixed">
-          <el-table-column label="发布方式" width="136">
+          <el-table-column label="任务名称" min-width="330" show-overflow-tooltip>
+            <template #default="{ row }">
+              <div class="job-name-cell">
+                <span class="job-name-main">{{ row.jobName || fallbackJobName(row) }}</span>
+                <span class="job-name-sub">{{ publishModeLabel(row.publishMode) }} · {{ row.totalCount || 0 }} 篇文章</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="发布方式" width="120">
             <template #default="{ row }">
               <span class="publish-mode-pill" :class="{ 'is-scheduled': row.publishMode === 'scheduled' }">
                 {{ publishModeLabel(row.publishMode) }}
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="状态" width="120">
+          <el-table-column label="状态" width="108">
             <template #default="{ row }">
               <span class="admin-status-tag" :class="statusClass(row.status)">
                 {{ jobStatusLabel(row.status) }}
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="进度" min-width="220">
+          <el-table-column label="进度" width="116">
             <template #default="{ row }">
               <div class="job-progress-summary">
-                <span class="job-progress-primary">{{ row.successCount || 0 }} / {{ row.totalCount || 0 }} 成功</span>
+                <span class="job-progress-count">{{ row.successCount || 0 }}/{{ row.totalCount || 0 }}</span>
+                <span class="job-progress-label">成功</span>
                 <span v-if="row.failedCount" class="job-progress-failed">{{ row.failedCount }} 失败</span>
-                <span v-if="pendingJobCount(row)" class="job-progress-pending">{{ pendingJobCount(row) }} 待执行</span>
+                <span v-else-if="pendingJobCount(row)" class="job-progress-pending">{{ pendingJobCount(row) }} 待执行</span>
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="计划开始" width="180">
+          <el-table-column label="计划开始" width="170">
             <template #default="{ row }">{{ formatJobScheduledAt(row) }}</template>
           </el-table-column>
-          <el-table-column label="发布间隔" width="110">
+          <el-table-column label="发布间隔" width="104">
             <template #default="{ row }">
               <span class="interval-pill">{{ row.intervalMinutes }} 分钟</span>
             </template>
           </el-table-column>
-          <el-table-column label="创建时间" width="180">
+          <el-table-column label="创建时间" width="170">
             <template #default="{ row }">{{ formatNullableDateTime(row.createdAt) }}</template>
           </el-table-column>
-          <el-table-column label="完成时间" width="180">
+          <el-table-column label="完成时间" width="170">
             <template #default="{ row }">{{ formatNullableDateTime(row.finishedAt) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="100" fixed="right">
+          <el-table-column label="操作" width="88" align="center">
             <template #default="{ row }">
               <el-button link type="primary" @click="openDetail(row.jobId)">详情</el-button>
             </template>
@@ -116,7 +125,7 @@
             </div>
             <div class="batch-detail-main">
               <div class="batch-detail-kicker">批量发布任务</div>
-              <h2>{{ publishModeLabel(detail.publishMode) }}</h2>
+              <h2>{{ detail.jobName || publishModeLabel(detail.publishMode) }}</h2>
               <div class="batch-detail-meta">
                 <span class="admin-status-tag" :class="statusClass(detail.status)">
                   {{ jobStatusLabel(detail.status) }}
@@ -361,6 +370,10 @@ function publishModeLabel(v: string) {
   return v === 'scheduled' ? '定时发布' : '立刻发布'
 }
 
+function fallbackJobName(row: BatchArticlePublishJobSummary) {
+  return `${publishModeLabel(row.publishMode)}任务 · ${row.totalCount || 0} 篇 · ${formatJobScheduledAt(row)}`
+}
+
 function jobStatusLabel(v: string) {
   const map: Record<string, string> = {
     pending: '待执行',
@@ -581,6 +594,35 @@ function goBack() {
   border-bottom-color: #edf2f7;
 }
 
+.jobs-table :deep(.el-table__body td) {
+  padding: 11px 0;
+}
+
+.job-name-cell {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.job-name-main {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-name-sub {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .publish-mode-pill,
 .interval-pill {
   display: inline-flex;
@@ -609,37 +651,36 @@ function goBack() {
 .job-progress-summary {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.job-progress-primary,
-.job-progress-failed,
-.job-progress-pending {
-  display: inline-flex;
-  align-items: center;
-  min-height: 26px;
-  border-radius: 999px;
-  padding: 0 10px;
-  background: #f8fafc;
-  color: #334155;
+  gap: 5px;
+  color: #64748b;
   font-size: 13px;
-  font-weight: 800;
-}
-
-.job-progress-primary {
-  background: #f0fdf4;
-  color: #047857;
-}
-
-.job-progress-failed {
-  background: #fef2f2;
-  color: #dc2626;
   white-space: nowrap;
 }
 
+.job-progress-count {
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.job-progress-label {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.job-progress-failed,
 .job-progress-pending {
-  background: #fffbeb;
+  margin-left: 4px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.job-progress-failed {
+  color: #dc2626;
+}
+
+.job-progress-pending {
   color: #b45309;
 }
 

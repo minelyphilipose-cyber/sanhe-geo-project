@@ -693,6 +693,7 @@ export interface BatchArticlePublishItem {
 
 export interface BatchArticlePublishResponse {
   jobId: number
+  jobName?: string | null
   publishMode: 'now' | 'scheduled' | string
   status: string
   scheduledAt?: string | null
@@ -705,6 +706,7 @@ export interface BatchArticlePublishResponse {
 
 export interface BatchArticlePublishJobSummary {
   jobId: number
+  jobName?: string | null
   publishMode: 'now' | 'scheduled' | string
   status: string
   scheduledAt?: string | null

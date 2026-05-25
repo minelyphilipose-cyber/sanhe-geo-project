@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 @Data
 public class BatchArticlePublishJobSummary {
     private Long jobId;
+    private String jobName;
     private String publishMode;
     private String status;
     private LocalDateTime scheduledAt;

@@ -85,9 +85,8 @@
               <el-button class="toolbar-more-action">更多</el-button>
               <template #dropdown>
                 <el-dropdown-menu>
-                  <el-dropdown-item command="jobs">发布任务</el-dropdown-item>
-                  <el-dropdown-item command="templates">文章模板</el-dropdown-item>
-                  <el-dropdown-item command="wechatTemplates">公众号样式模板</el-dropdown-item>
+                  <el-dropdown-item command="jobs">批量任务列表</el-dropdown-item>
+                  <el-dropdown-item command="templates">文章提示词模板</el-dropdown-item>
                   <el-dropdown-item command="platforms">发布平台管理</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -169,11 +168,10 @@
           <el-table-column label="创建时间" width="180">
             <template #default="scope">{{ formatDateTime(scope.row.createdAt) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="360" fixed="right">
+          <el-table-column label="操作" width="300" fixed="right">
             <template #default="scope">
               <div class="admin-row-actions">
                 <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
-                <el-button v-if="isWechatArticle(scope.row)" link type="primary" @click="openWechatRender(scope.row.id)">公众号样式</el-button>
                 <el-button v-if="canWrite && canEdit(scope.row.status)" class="content-neutral-action" link @click="openRevision(scope.row)">修订</el-button>
                 <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openDistributionChannel(scope.row)">分发</el-button>
                 <el-button v-if="canWrite && canDeleteArticle(scope.row.status)" link type="danger" @click="deleteArticle(scope.row)">删除</el-button>
@@ -212,7 +210,21 @@
               >
                 编辑文章
               </el-button>
-              <el-button v-if="isWechatArticle(detailData.article)" size="small" @click="openWechatRender(detailData.article.id)">公众号样式</el-button>
+              <el-dropdown
+                v-if="canStyleRender(detailData.article)"
+                trigger="click"
+                @command="handleDetailStyleRenderCommand"
+              >
+                <el-button size="small">
+                  样式渲染
+                  <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item command="wechat">公众号</el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
               <el-tag :type="statusTagType(detailData.article.status)">
                 {{ statusLabel(detailData.article.status) }}
               </el-tag>
@@ -1416,6 +1428,21 @@ function isWechatArticle(row: Pick<ArticleDraft, 'channelGroupCode' | 'channelSu
   return row.channelGroupCode === 'self_media' && row.channelSubCode === 'wechat'
 }
 
+function canStyleRender(row: Pick<ArticleDraft, 'channelGroupCode' | 'channelSubCode'>) {
+  return isWechatArticle(row)
+}
+
+function handleDetailStyleRenderCommand(command: string | number | object) {
+  if (!detailData.value) return
+  handleStyleRenderCommand(String(command), detailData.value.article.id)
+}
+
+function handleStyleRenderCommand(command: string, articleId: number) {
+  if (command === 'wechat') {
+    openWechatRender(articleId)
+  }
+}
+
 function openWechatRender(articleId: number) {
   router.push({
     path: `/admin/content/articles/${articleId}/wechat-render`,
@@ -1680,12 +1707,6 @@ function openPromptTemplateManagement() {
   })
 }
 
-function openWechatTemplateManagement() {
-  router.push({
-    path: '/admin/content/wechat-templates',
-  })
-}
-
 function openBatchPublishJobs() {
   router.push({
     path: '/admin/content/articles/batch-publish-jobs',
@@ -1697,8 +1718,6 @@ function handleToolbarMoreCommand(command: string) {
     openBatchPublishJobs()
   } else if (command === 'templates') {
     openPromptTemplateManagement()
-  } else if (command === 'wechatTemplates') {
-    openWechatTemplateManagement()
   } else if (command === 'platforms') {
     openPublishPlatformManagement()
   }

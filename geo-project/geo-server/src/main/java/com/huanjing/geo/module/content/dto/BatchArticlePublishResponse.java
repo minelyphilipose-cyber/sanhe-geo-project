@@ -9,6 +9,7 @@ import java.util.List;
 @Data
 public class BatchArticlePublishResponse {
     private Long jobId;
+    private String jobName;
     private String publishMode;
     private String status;
     private LocalDateTime scheduledAt;

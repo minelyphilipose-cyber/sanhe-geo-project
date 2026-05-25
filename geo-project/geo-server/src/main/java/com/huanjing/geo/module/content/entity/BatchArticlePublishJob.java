@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 public class BatchArticlePublishJob {
     @TableId(type = IdType.AUTO)
     private Long id;
+    private String jobName;
     private String publishMode;
     private String status;
     private LocalDateTime scheduledAt;

@@ -53,6 +53,7 @@ public class BatchArticlePublishService {
 
     private static final Set<String> ACTIVE_ARTICLE_STATUS = Set.of("approved", "unpublished");
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter JOB_NAME_DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
     private final BatchArticlePublishJobMapper jobMapper;
     private final BatchArticlePublishItemMapper itemMapper;
@@ -91,6 +92,7 @@ public class BatchArticlePublishService {
         PublishSite manualForumSite = request.getForumSiteId() == null ? null : requireForumSite(request.getForumSiteId());
 
         BatchArticlePublishJob job = new BatchArticlePublishJob();
+        job.setJobName(buildJobName(publishMode, articleIds, baseTime));
         job.setPublishMode(publishMode);
         job.setStatus("pending");
         job.setScheduledAt("scheduled".equals(publishMode) ? baseTime : null);
@@ -323,6 +325,7 @@ public class BatchArticlePublishService {
         );
         BatchArticlePublishResponse response = new BatchArticlePublishResponse();
         response.setJobId(job.getId());
+        response.setJobName(job.getJobName());
         response.setPublishMode(job.getPublishMode());
         response.setStatus(job.getStatus());
         response.setScheduledAt(job.getScheduledAt());
@@ -337,6 +340,7 @@ public class BatchArticlePublishService {
     private BatchArticlePublishJobSummary toSummary(BatchArticlePublishJob job) {
         BatchArticlePublishJobSummary summary = new BatchArticlePublishJobSummary();
         summary.setJobId(job.getId());
+        summary.setJobName(job.getJobName());
         summary.setPublishMode(job.getPublishMode());
         summary.setStatus(job.getStatus());
         summary.setScheduledAt(job.getScheduledAt());
@@ -349,6 +353,41 @@ public class BatchArticlePublishService {
         summary.setStartedAt(job.getStartedAt());
         summary.setFinishedAt(job.getFinishedAt());
         return summary;
+    }
+
+    private String buildJobName(String publishMode, List<Long> articleIds, LocalDateTime baseTime) {
+        String subjectName = "任务";
+        ArticleDraft firstArticle = articleIds.isEmpty() ? null : articleDraftMapper.selectById(articleIds.get(0));
+        if (firstArticle != null && firstArticle.getProjectId() != null) {
+            Project project = projectMapper.selectById(firstArticle.getProjectId());
+            Brand brand = project == null || project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
+            subjectName = compactJobNamePart(firstText(
+                    brand == null ? null : brand.getBrandShortName(),
+                    brand == null ? null : brand.getBrandName(),
+                    project == null ? null : project.getBrandName(),
+                    project == null ? null : project.getProjectName(),
+                    firstArticle.getTitle()
+            ));
+        }
+        return "批量_" + subjectName + "_" + baseTime.format(JOB_NAME_DATE);
+    }
+
+    private String compactJobNamePart(String name) {
+        String text = StringUtils.hasText(name) ? name.trim().replaceAll("\\s+", "") : "任务";
+        int maxLength = 24;
+        if (text.length() <= maxLength) {
+            return text;
+        }
+        return text.substring(0, maxLength) + "...";
+    }
+
+    private String firstText(String... values) {
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                return value;
+            }
+        }
+        return null;
     }
 
     private BatchArticlePublishResponse.Item toResponseItem(BatchArticlePublishItem item) {
