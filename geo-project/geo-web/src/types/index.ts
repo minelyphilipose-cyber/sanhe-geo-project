@@ -1218,6 +1218,7 @@ export interface PublishSite {
   httpMethod?: 'POST' | 'PUT' | string | null
   authType?: 'api_key' | 'bearer_token' | 'basic_auth' | 'oauth2' | string | null
   credentialRef?: string | null
+  apiCredential?: string | null
   apiCredentialEncrypted?: string | null
   requestHeaderTemplate?: string | null
   requestBodyTemplate?: string | null

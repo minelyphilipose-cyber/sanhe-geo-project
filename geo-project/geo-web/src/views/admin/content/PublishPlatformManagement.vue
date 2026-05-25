@@ -120,6 +120,10 @@
             :key="target.code"
             class="target-card fade-in"
             :class="{ disabled: !target.enabled }"
+            role="button"
+            tabindex="0"
+            @click="openPlatformDetail(target)"
+            @keydown.enter.prevent="openPlatformDetail(target)"
           >
             <div class="target-card-top">
               <div class="target-name-block">
@@ -129,7 +133,7 @@
                   <div class="target-id">{{ target.code }}</div>
                 </div>
               </div>
-              <label class="switch" :class="{ disabled: target.locked || target.updating }">
+              <label class="switch" :class="{ disabled: target.locked || target.updating }" @click.stop>
                 <input
                   :checked="target.enabled"
                   type="checkbox"
@@ -152,7 +156,7 @@
               </div>
             </div>
 
-            <div class="target-actions">
+            <div class="target-actions" @click.stop>
               <button class="btn btn-link" type="button" @click="openDrawer(target.drawerType || target.code, target)">编辑</button>
               <button v-if="target.source === 'publish_site'" class="btn btn-link" type="button" @click="testIndustrySite(target)">测试连通</button>
               <button v-if="!target.locked" class="btn btn-danger-link" type="button" @click="toggleTarget(target)">
@@ -258,13 +262,17 @@
             <div class="hint">由原“发布站点配置”迁入，后续保存时会写入行业资讯站点配置。</div>
           </div>
           <div v-if="drawerForm.categoryCode === 'forum'" class="form-row">
-            <label>账号 / Cookie 配置</label>
+            <label>账号 Cookie 设置</label>
             <textarea
               v-model="drawerForm.apiCredential"
               class="input textarea mono credential-textarea"
-              placeholder='{"accounts":[{"username":"账号","password":"密码","cookie":"完整 Cookie","status":"active"}]}'
+              placeholder="请输入账号认证 JSON"
             ></textarea>
-            <div class="hint">支持多个账号，发布时随机选择一个 active 账号；Cookie 为空时才会尝试账号密码登录。编辑时留空表示不修改已保存凭证。</div>
+            <div class="credential-sample">
+              <div class="credential-sample-title">样例 JSON</div>
+              <pre>{{ forumCredentialSample }}</pre>
+            </div>
+            <div class="hint">支持多个账号，发布时随机选择一个 active 账号；Cookie 为空时才会尝试账号密码登录。编辑页会反显当前认证信息，修改后保存需要二次确认。</div>
           </div>
           <div v-if="drawerForm.categoryCode === 'forum' && drawerForm.integrationMethod === 'discuz_http'" class="form-row">
             <div class="forum-board-header">
@@ -373,7 +381,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { createPublishSite, getPublishSites, testPublishSite, updatePublishSite, updatePublishSiteStatus } from '@/api/publishSite'
 import type { PublishSite } from '@/types'
 import {
@@ -612,6 +621,7 @@ const staticTargets = reactive<TargetConfig[]>([
 ])
 
 const keyword = ref('')
+const router = useRouter()
 const activeCategoryCode = ref('self_media')
 const targetPaneRef = ref<HTMLElement>()
 const drawerVisible = ref(false)
@@ -621,6 +631,17 @@ const publishSites = ref<PublishSite[]>([])
 const publishSiteLoading = ref(false)
 const saving = ref(false)
 const editingPublishSiteId = ref<number | null>(null)
+const originalApiCredential = ref('')
+const forumCredentialSample = `{
+  "accounts": [
+    {
+      "username": "账号",
+      "password": "密码",
+      "cookie": "完整 Cookie",
+      "status": "active"
+    }
+  ]
+}`
 
 const drawerForm = reactive({
   categoryCode: 'self_media',
@@ -702,6 +723,13 @@ function switchCategory(categoryCode: string) {
   targetPaneRef.value?.scrollTo({ top: 0, behavior: 'smooth' })
 }
 
+function openPlatformDetail(target: TargetConfig) {
+  router.push({
+    name: 'PublishPlatformDetail',
+    params: { code: target.code },
+  })
+}
+
 function refreshPage() {
   keyword.value = ''
   if (activeCategoryCode.value === 'industry_site' || activeCategoryCode.value === 'agent_site' || activeCategoryCode.value === 'forum') {
@@ -760,6 +788,7 @@ function resetSiteConnectionForm() {
   drawerForm.integrationMethod = drawerForm.categoryCode === 'forum' ? 'discuz_http' : 'rest_api'
   drawerForm.headers = '{\n  "X-Admin-Token": ""\n}'
   drawerForm.apiCredential = ''
+  originalApiCredential.value = ''
   drawerForm.forumBoards = drawerForm.categoryCode === 'forum' ? [emptyForumBoard(true)] : []
 }
 
@@ -776,7 +805,9 @@ function fillSiteConnectionForm(target?: TargetConfig) {
   drawerForm.industryTags = parseIndustryTags(site.industryTags).join(', ')
   drawerForm.integrationMethod = site.integrationMethod || 'rest_api'
   drawerForm.headers = formatHeaders(site.requestHeaderTemplate)
-  drawerForm.apiCredential = ''
+  const credentialText = target.categoryCode === 'forum' ? formatJsonText(site.apiCredential) : ''
+  drawerForm.apiCredential = credentialText
+  originalApiCredential.value = credentialText
   drawerForm.forumBoards = target.categoryCode === 'forum'
     ? parseForumBoards(site.contentConstraints)
     : []
@@ -899,6 +930,15 @@ function formatHeaders(raw?: string | null) {
   }
 }
 
+function formatJsonText(raw?: string | null) {
+  if (!raw) return ''
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2)
+  } catch {
+    return raw
+  }
+}
+
 function normalizeHeaders(raw: string) {
   const text = raw.trim()
   if (!text) return undefined
@@ -916,6 +956,36 @@ function normalizeCredential(raw: string) {
     return JSON.stringify(JSON.parse(text))
   } catch {
     return text
+  }
+}
+
+function normalizeCredentialForCompare(raw: string) {
+  const text = raw.trim()
+  if (!text) return ''
+  try {
+    return JSON.stringify(JSON.parse(text))
+  } catch {
+    return text
+  }
+}
+
+function hasForumCredentialChanged() {
+  return drawerForm.categoryCode === 'forum'
+    && Boolean(editingPublishSiteId.value)
+    && normalizeCredentialForCompare(drawerForm.apiCredential) !== normalizeCredentialForCompare(originalApiCredential.value)
+}
+
+async function confirmForumCredentialChangeIfNeeded() {
+  if (!hasForumCredentialChanged()) return true
+  try {
+    await ElMessageBox.confirm('账号认证信息已修改，是否确认保存', '确认保存', {
+      confirmButtonText: '是',
+      cancelButtonText: '否',
+      type: 'warning',
+    })
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -1213,6 +1283,7 @@ async function submitDrawer() {
     return
   }
   if (!validateIndustrySiteForm()) return
+  if (!await confirmForumCredentialChangeIfNeeded()) return
   saving.value = true
   try {
     const payload = buildPublishSitePayload()
@@ -1786,6 +1857,7 @@ textarea {
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
+  cursor: pointer;
   transition: all 0.2s ease;
 }
 
@@ -1793,6 +1865,12 @@ textarea {
   border-color: var(--border-strong);
   box-shadow: var(--shadow-md);
   transform: translateY(-1px);
+}
+
+.target-card:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
 .target-card.disabled {
@@ -2046,9 +2124,9 @@ textarea {
   inset: 0;
   z-index: 50;
   pointer-events: none;
-  background: oklch(15% 0.02 250 / 0.35);
+  background: oklch(18% 0.018 250 / 0.42);
   opacity: 0;
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(4px);
   transition: opacity 0.2s;
 }
 
@@ -2064,10 +2142,11 @@ textarea {
   z-index: 60;
   display: flex;
   flex-direction: column;
-  width: 480px;
+  width: min(720px, calc(100vw - 32px));
   height: 100vh;
-  background: var(--bg-elev);
-  box-shadow: -8px 0 32px -8px oklch(20% 0.02 250 / 0.2);
+  background: var(--bg);
+  border-left: 1px solid var(--border);
+  box-shadow: -18px 0 42px -18px oklch(20% 0.02 250 / 0.32);
   transform: translateX(100%);
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -2080,21 +2159,22 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 24px;
+  padding: 20px 28px 18px;
+  background: linear-gradient(180deg, var(--bg-elev), var(--bg-subtle));
   border-bottom: 1px solid var(--border);
 }
 
 .drawer-title {
-  font-size: 16px;
+  color: var(--text);
+  font-size: 18px;
   font-weight: 700;
   letter-spacing: 0;
 }
 
 .drawer-subtitle {
-  margin-top: 2px;
+  margin-top: 4px;
   color: var(--text-faint);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 12.5px;
 }
 
 .drawer-close {
@@ -2115,34 +2195,58 @@ textarea {
 
 .drawer-body {
   flex: 1;
-  padding: 20px 24px;
+  padding: 22px 28px 28px;
   overflow-y: auto;
 }
 
+.drawer-section {
+  padding: 18px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-xs);
+}
+
 .drawer-section + .drawer-section {
-  margin-top: 22px;
+  margin-top: 14px;
 }
 
 .form-section-label {
-  padding-bottom: 8px;
-  margin-bottom: 10px;
-  color: var(--text-faint);
-  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+  color: var(--text);
+  font-size: 13px;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  border-bottom: 1px dashed var(--border);
+  letter-spacing: 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.form-section-label::before {
+  display: block;
+  width: 3px;
+  height: 14px;
+  content: '';
+  background: var(--accent);
+  border-radius: 999px;
 }
 
 .form-row {
   min-width: 0;
-  margin-bottom: 14px;
+  margin-bottom: 16px;
+}
+
+.form-row:last-child {
+  margin-bottom: 0;
 }
 
 .form-row label {
   display: block;
-  margin-bottom: 6px;
-  color: var(--text);
-  font-size: 12.5px;
+  margin-bottom: 7px;
+  color: var(--text-muted);
+  font-size: 12px;
   font-weight: 600;
 }
 
@@ -2153,13 +2257,38 @@ textarea {
   line-height: 1.5;
 }
 
+.credential-sample {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: oklch(98% 0.004 250);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+}
+
+.credential-sample-title {
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.credential-sample pre {
+  margin: 0;
+  overflow-x: auto;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
 .input,
 .select,
 .textarea {
   box-sizing: border-box;
   width: 100%;
-  height: 34px;
-  padding: 0 11px;
+  height: 40px;
+  padding: 0 12px;
   color: var(--text);
   background: var(--bg-elev);
   border: 1px solid var(--border-strong);
@@ -2170,8 +2299,8 @@ textarea {
 
 .textarea {
   height: auto;
-  min-height: 72px;
-  padding: 9px 11px;
+  min-height: 86px;
+  padding: 10px 12px;
   line-height: 1.5;
   resize: vertical;
 }
@@ -2188,12 +2317,16 @@ textarea {
   font-size: 12.5px;
 }
 
+.credential-textarea {
+  min-height: 138px;
+}
+
 .forum-board-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .forum-board-header label {
@@ -2202,7 +2335,11 @@ textarea {
 
 .forum-board-table {
   display: grid;
-  gap: 6px;
+  gap: 8px;
+  padding: 10px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
 }
 
 .forum-board-row {
@@ -2212,7 +2349,15 @@ textarea {
   align-items: center;
 }
 
+.forum-board-row:not(.forum-board-row-head) {
+  padding: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-md);
+}
+
 .forum-board-row-head {
+  padding: 0 8px;
   color: var(--text-faint);
   font-size: 11.5px;
   font-weight: 700;
@@ -2249,10 +2394,10 @@ textarea {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 14px;
-  margin-bottom: 8px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
+  padding: 14px;
+  margin-bottom: 10px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--r-md);
 }
 
@@ -2263,7 +2408,7 @@ textarea {
 .toggle-title {
   margin-bottom: 2px;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .toggle-desc {
@@ -2274,22 +2419,23 @@ textarea {
 }
 
 .drawer-executor-row {
-  margin-top: 12px;
+  margin-top: 16px;
 }
 
 .form-grid-2 {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px;
+  gap: 14px;
 }
 
 .interval-input {
-  display: flex;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: 1fr 96px;
+  gap: 10px;
 }
 
 .interval-input .input {
-  flex: 1;
+  min-width: 0;
 }
 
 .unit-select {
@@ -2299,10 +2445,11 @@ textarea {
 .drawer-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 14px 24px;
-  background: var(--bg-subtle);
+  gap: 10px;
+  padding: 16px 28px;
+  background: oklch(100% 0 0 / 0.92);
   border-top: 1px solid var(--border);
+  backdrop-filter: blur(8px);
 }
 
 .fade-in {
@@ -2376,7 +2523,7 @@ textarea {
   }
 
   .drawer {
-    width: min(100vw, 480px);
+    width: 100vw;
   }
 }
 </style>

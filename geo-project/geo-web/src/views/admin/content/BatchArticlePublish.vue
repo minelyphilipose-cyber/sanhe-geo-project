@@ -140,7 +140,7 @@
               />
             </el-select>
             <el-select
-              v-if="selectedForumBoards.length"
+              v-if="selectedForumBoards.length > 1"
               v-model="forumTargetFid"
               placeholder="自动匹配发布版块"
               class="target-select"
@@ -149,7 +149,7 @@
               <el-option
                 v-for="board in selectedForumBoards"
                 :key="board.fid"
-                :label="`${board.name}（fid: ${board.fid}）`"
+                :label="board.name"
                 :value="board.fid"
               />
             </el-select>

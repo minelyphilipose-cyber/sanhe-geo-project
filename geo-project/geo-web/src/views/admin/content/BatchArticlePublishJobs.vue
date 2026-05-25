@@ -1,6 +1,32 @@
 <template>
   <div class="batch-publish-jobs-page">
-    <el-card shadow="never" class="mb-3">
+    <section class="jobs-hero">
+      <div>
+        <div class="jobs-kicker">内容分发</div>
+        <h1>批量发布任务</h1>
+        <p>查看批量发布任务的计划、执行进度与发布结果。</p>
+      </div>
+      <div class="jobs-stat-grid">
+        <div class="jobs-stat-card">
+          <span>任务总数</span>
+          <strong>{{ jobStats.total }}</strong>
+        </div>
+        <div class="jobs-stat-card is-warning">
+          <span>执行中</span>
+          <strong>{{ jobStats.running }}</strong>
+        </div>
+        <div class="jobs-stat-card is-success">
+          <span>已完成</span>
+          <strong>{{ jobStats.completed }}</strong>
+        </div>
+        <div class="jobs-stat-card is-danger">
+          <span>异常任务</span>
+          <strong>{{ jobStats.failed }}</strong>
+        </div>
+      </div>
+    </section>
+
+    <el-card shadow="never" class="jobs-toolbar-card">
       <div class="toolbar">
         <div class="toolbar-left">
           <el-select v-model="query.status" clearable placeholder="任务状态" style="width: 180px">
@@ -21,37 +47,45 @@
       </div>
     </el-card>
 
-    <el-card shadow="never">
+    <el-card shadow="never" class="jobs-table-card">
       <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无批量发布任务">
-        <el-table :data="rows" border>
-          <el-table-column prop="jobId" label="任务ID" width="100">
-            <template #default="{ row }">#{{ row.jobId }}</template>
-          </el-table-column>
-          <el-table-column label="发布方式" width="120">
-            <template #default="{ row }">{{ publishModeLabel(row.publishMode) }}</template>
+        <el-table :data="rows" class="jobs-table" table-layout="fixed">
+          <el-table-column label="发布方式" width="136">
+            <template #default="{ row }">
+              <span class="publish-mode-pill" :class="{ 'is-scheduled': row.publishMode === 'scheduled' }">
+                {{ publishModeLabel(row.publishMode) }}
+              </span>
+            </template>
           </el-table-column>
           <el-table-column label="状态" width="120">
             <template #default="{ row }">
-              <el-tag :type="statusTagType(row.status)">{{ jobStatusLabel(row.status) }}</el-tag>
+              <span class="admin-status-tag" :class="statusClass(row.status)">
+                {{ jobStatusLabel(row.status) }}
+              </span>
             </template>
           </el-table-column>
-          <el-table-column label="进度" min-width="180">
+          <el-table-column label="进度" min-width="220">
             <template #default="{ row }">
-              {{ row.successCount || 0 }} / {{ row.totalCount || 0 }} 成功
-              <span v-if="row.failedCount">，{{ row.failedCount }} 失败</span>
+              <div class="job-progress-summary">
+                <span class="job-progress-primary">{{ row.successCount || 0 }} / {{ row.totalCount || 0 }} 成功</span>
+                <span v-if="row.failedCount" class="job-progress-failed">{{ row.failedCount }} 失败</span>
+                <span v-if="pendingJobCount(row)" class="job-progress-pending">{{ pendingJobCount(row) }} 待执行</span>
+              </div>
             </template>
           </el-table-column>
-          <el-table-column label="计划开始" width="170">
-            <template #default="{ row }">{{ row.scheduledAt ? formatDateTimeSeconds(row.scheduledAt) : '-' }}</template>
+          <el-table-column label="计划开始" width="180">
+            <template #default="{ row }">{{ formatJobScheduledAt(row) }}</template>
           </el-table-column>
           <el-table-column label="发布间隔" width="110">
-            <template #default="{ row }">{{ row.intervalMinutes }} 分钟</template>
+            <template #default="{ row }">
+              <span class="interval-pill">{{ row.intervalMinutes }} 分钟</span>
+            </template>
           </el-table-column>
-          <el-table-column label="创建时间" width="170">
-            <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+          <el-table-column label="创建时间" width="180">
+            <template #default="{ row }">{{ formatNullableDateTime(row.createdAt) }}</template>
           </el-table-column>
-          <el-table-column label="完成时间" width="170">
-            <template #default="{ row }">{{ row.finishedAt || '-' }}</template>
+          <el-table-column label="完成时间" width="180">
+            <template #default="{ row }">{{ formatNullableDateTime(row.finishedAt) }}</template>
           </el-table-column>
           <el-table-column label="操作" width="100" fixed="right">
             <template #default="{ row }">
@@ -81,7 +115,7 @@
               {{ jobStatusShortLabel(detail.status) }}
             </div>
             <div class="batch-detail-main">
-              <div class="batch-detail-kicker">批量发布任务 #{{ detail.jobId }}</div>
+              <div class="batch-detail-kicker">批量发布任务</div>
               <h2>{{ publishModeLabel(detail.publishMode) }}</h2>
               <div class="batch-detail-meta">
                 <span class="admin-status-tag" :class="statusClass(detail.status)">
@@ -89,7 +123,7 @@
                 </span>
                 <span class="admin-mini-pill is-blue">间隔 {{ detail.intervalMinutes }} 分钟</span>
                 <span class="admin-mini-pill is-green">{{ detailPlatformText }}</span>
-                <span class="admin-mini-pill">{{ detail.scheduledAt ? formatDateTimeSeconds(detail.scheduledAt) : '未设置计划开始时间' }}</span>
+                <span class="admin-mini-pill">{{ formatDetailScheduledAt(detail) }}</span>
               </div>
             </div>
           </section>
@@ -141,7 +175,16 @@
               <el-table-column label="文章标题" min-width="260" show-overflow-tooltip>
                 <template #default="{ row }">
                   <div class="admin-cell-stack">
-                    <span class="admin-cell-main">{{ row.articleTitle || '-' }}</span>
+                    <el-button
+                      v-if="row.articleId"
+                      link
+                      type="primary"
+                      class="article-title-link"
+                      @click="openArticleDetail(row.articleId)"
+                    >
+                      {{ row.articleTitle || '查看文章详情' }}
+                    </el-button>
+                    <span v-else class="admin-cell-main">{{ row.articleTitle || '-' }}</span>
                     <span class="admin-cell-sub">{{ row.errorMessage || '暂无异常信息' }}</span>
                   </div>
                 </template>
@@ -167,9 +210,6 @@
                   </span>
                 </template>
               </el-table-column>
-              <el-table-column label="分发任务" width="116">
-                <template #default="{ row }">{{ row.distributionTaskId ? `#${row.distributionTaskId}` : '-' }}</template>
-              </el-table-column>
               <el-table-column label="失败原因" min-width="220" show-overflow-tooltip>
                 <template #default="{ row }">{{ row.errorMessage || '-' }}</template>
               </el-table-column>
@@ -185,7 +225,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DataState from '@/components/ui/DataState.vue'
-import { formatDateTime, formatDateTimeSeconds } from '@/utils/format'
+import { formatDateTimeSeconds } from '@/utils/format'
 import {
   getBatchArticlePublish,
   getBatchArticlePublishJobs,
@@ -204,6 +244,16 @@ const detailVisible = ref(false)
 const page = reactive({ current: 1, size: 10, total: 0 })
 const query = reactive({ status: '' })
 let refreshTimer: number | null = null
+
+const jobStats = computed(() => {
+  const currentRows = rows.value
+  return {
+    total: page.total || currentRows.length,
+    running: currentRows.filter((row) => row.status === 'running').length,
+    completed: currentRows.filter((row) => row.status === 'completed').length,
+    failed: currentRows.filter((row) => row.status === 'failed' || row.status === 'partial_failed').length,
+  }
+})
 
 const detailPendingCount = computed(() => {
   const current = detail.value
@@ -332,13 +382,6 @@ function itemStatusLabel(v: string) {
   return map[v] || v
 }
 
-function statusTagType(v: string): 'success' | 'warning' | 'danger' | 'info' {
-  if (v === 'completed') return 'success'
-  if (v === 'failed' || v === 'partial_failed') return 'danger'
-  if (v === 'running') return 'warning'
-  return 'info'
-}
-
 function statusClass(v: string) {
   if (v === 'completed') return 'is-success'
   if (v === 'failed' || v === 'partial_failed') return 'is-danger'
@@ -368,12 +411,145 @@ function platformLabel(v: string) {
   return v || '-'
 }
 
+function pendingJobCount(row: BatchArticlePublishJobSummary) {
+  const total = row.totalCount || 0
+  const done = (row.successCount || 0) + (row.failedCount || 0)
+  return Math.max(total - done, 0)
+}
+
+function formatNullableDateTime(value?: string | null) {
+  return value ? formatDateTimeSeconds(value) : '-'
+}
+
+function resolveJobScheduledAt(row: BatchArticlePublishJobSummary) {
+  return row.scheduledAt || (row.publishMode === 'now' ? row.createdAt : null)
+}
+
+function formatJobScheduledAt(row: BatchArticlePublishJobSummary) {
+  return formatNullableDateTime(resolveJobScheduledAt(row))
+}
+
+function resolveDetailScheduledAt(current: BatchArticlePublishResponse) {
+  return current.scheduledAt || (current.publishMode === 'now' ? current.items?.[0]?.plannedAt || null : null)
+}
+
+function formatDetailScheduledAt(current: BatchArticlePublishResponse) {
+  return formatNullableDateTime(resolveDetailScheduledAt(current))
+}
+
+function openArticleDetail(articleId: number) {
+  router.push({
+    path: '/admin/content/execution',
+    query: { articleId: String(articleId) },
+  })
+}
+
 function goBack() {
   router.push('/admin/content/execution')
 }
 </script>
 
 <style scoped>
+.batch-publish-jobs-page {
+  display: grid;
+  gap: 16px;
+}
+
+.jobs-hero {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.82fr) minmax(460px, 1fr);
+  gap: 18px;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid #dbe7f5;
+  border-radius: 16px;
+  background:
+    linear-gradient(135deg, #ffffff 0%, #f8fbff 55%, #eef6ff 100%);
+  padding: 20px;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+}
+
+.jobs-kicker {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.jobs-hero h1 {
+  margin: 6px 0 8px;
+  color: #0f172a;
+  font-size: 26px;
+  line-height: 1.25;
+  font-weight: 800;
+}
+
+.jobs-hero p {
+  max-width: 520px;
+  margin: 0;
+  color: #64748b;
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.jobs-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.jobs-stat-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.86);
+  padding: 14px;
+  box-shadow: inset 3px 0 0 #3b82f6;
+}
+
+.jobs-stat-card span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.jobs-stat-card strong {
+  color: #0f172a;
+  font-size: 26px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.jobs-stat-card.is-warning {
+  box-shadow: inset 3px 0 0 #f59e0b;
+}
+
+.jobs-stat-card.is-success {
+  box-shadow: inset 3px 0 0 #10b981;
+}
+
+.jobs-stat-card.is-danger {
+  box-shadow: inset 3px 0 0 #ef4444;
+}
+
+.jobs-toolbar-card,
+.jobs-table-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.045);
+}
+
+.jobs-toolbar-card :deep(.el-card__body) {
+  padding: 14px 16px;
+}
+
+.jobs-table-card :deep(.el-card__body) {
+  padding: 0;
+}
+
 .toolbar {
   display: flex;
   align-items: center;
@@ -391,11 +567,91 @@ function goBack() {
 .pager {
   display: flex;
   justify-content: flex-end;
-  margin-top: 16px;
+  padding: 16px;
+  border-top: 1px solid #eef2f7;
 }
 
-.mb-3 {
-  margin-bottom: 16px;
+.jobs-table :deep(.el-table__header th) {
+  background: #f8fafc;
+  color: #475569;
+  font-weight: 800;
+}
+
+.jobs-table :deep(.el-table__cell) {
+  border-bottom-color: #edf2f7;
+}
+
+.publish-mode-pill,
+.interval-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  border-radius: 999px;
+  padding: 0 10px;
+  color: #2563eb;
+  background: #eff6ff;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.publish-mode-pill.is-scheduled {
+  color: #7c3aed;
+  background: #f5f3ff;
+}
+
+.interval-pill {
+  color: #475569;
+  background: #f1f5f9;
+}
+
+.job-progress-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.job-progress-primary,
+.job-progress-failed,
+.job-progress-pending {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  border-radius: 999px;
+  padding: 0 10px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.job-progress-primary {
+  background: #f0fdf4;
+  color: #047857;
+}
+
+.job-progress-failed {
+  background: #fef2f2;
+  color: #dc2626;
+  white-space: nowrap;
+}
+
+.job-progress-pending {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.article-title-link {
+  height: auto;
+  justify-content: flex-start;
+  padding: 0;
+  color: #2563eb;
+  font-weight: 800;
+  line-height: 1.45;
+  white-space: normal;
+  text-align: left;
 }
 
 .batch-detail-drawer :deep(.el-drawer__header) {
@@ -625,6 +881,11 @@ function goBack() {
 }
 
 @media (max-width: 768px) {
+  .jobs-hero,
+  .jobs-stat-grid {
+    grid-template-columns: 1fr;
+  }
+
   .toolbar {
     align-items: stretch;
     flex-direction: column;

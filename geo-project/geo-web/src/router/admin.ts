@@ -168,6 +168,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '发布平台管理', hidden: true, permissions: ['project.read'] },
     },
     {
+      path: 'content/publish-platforms/:code',
+      name: 'PublishPlatformDetail',
+      component: () => import('@/views/admin/content/PublishPlatformDetail.vue'),
+      meta: { title: '发布平台详情', hidden: true, permissions: ['project.read'] },
+    },
+    {
       path: 'keyword-groups',
       name: 'KeywordGroupManage',
       redirect: '/admin/layered-keyword-groups',

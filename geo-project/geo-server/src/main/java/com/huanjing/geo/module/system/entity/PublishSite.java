@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.system.entity;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
@@ -26,6 +27,8 @@ public class PublishSite {
     private String authType;
     private String credentialRef;
     private String apiCredentialEncrypted;
+    @TableField(exist = false)
+    private String apiCredential;
     private String requestHeaderTemplate;
     private String requestBodyTemplate;
     private String responseUrlPath;

@@ -375,7 +375,7 @@ public class BatchArticlePublishService {
         vo.setDistributionTaskId(item.getDistributionTaskId());
         if (item.getDistributionTaskId() != null) {
             DistributionTask task = distributionTaskMapper.selectById(item.getDistributionTaskId());
-            vo.setPublishedAt(task == null ? null : task.getPublishedAt());
+            vo.setPublishedAt(task == null ? null : (task.getPublishedAt() != null ? task.getPublishedAt() : task.getFinishedAt()));
         }
         vo.setErrorMessage(item.getErrorMessage());
         return vo;

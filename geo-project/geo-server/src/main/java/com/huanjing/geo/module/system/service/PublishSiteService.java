@@ -63,12 +63,14 @@ public class PublishSiteService {
         if (StringUtils.hasText(industry)) {
             wrapper.like(PublishSite::getIndustryTags, industry.trim().toLowerCase(Locale.ROOT));
         }
-        return publishSiteMapper.selectList(wrapper);
+        List<PublishSite> sites = publishSiteMapper.selectList(wrapper);
+        sites.forEach(this::attachPlainCredential);
+        return sites;
     }
 
     public PublishSite detail(Long id) {
         ensureReadRole();
-        return requireById(id);
+        return attachPlainCredential(requireById(id));
     }
 
     public PublishSite create(PublishSiteCreateRequest req) {
@@ -81,7 +83,7 @@ public class PublishSiteService {
                 req.getCredentialRef(), req.getApiCredential(), req.getRequestHeaderTemplate(), req.getRequestBodyTemplate(),
                 req.getResponseUrlPath(), req.getContentConstraints(), req.getCurrentHealthStatus(), req.getRemark());
         publishSiteMapper.insert(site);
-        return site;
+        return attachPlainCredential(site);
     }
 
     public PublishSite update(Long id, PublishSiteUpdateRequest req) {
@@ -94,7 +96,7 @@ public class PublishSiteService {
                 req.getCredentialRef(), req.getApiCredential(), req.getRequestHeaderTemplate(), req.getRequestBodyTemplate(),
                 req.getResponseUrlPath(), req.getContentConstraints(), req.getCurrentHealthStatus(), req.getRemark());
         publishSiteMapper.updateById(site);
-        return site;
+        return attachPlainCredential(site);
     }
 
     public PublishSite updateStatus(Long id, PublishSiteStatusUpdateRequest req) {
@@ -105,7 +107,7 @@ public class PublishSiteService {
         PublishSite site = requireById(id);
         site.setStatus(req.getStatus().trim().toLowerCase(Locale.ROOT));
         publishSiteMapper.updateById(site);
-        return site;
+        return attachPlainCredential(site);
     }
 
     public Map<String, Object> testConnectivity(Long id) {
@@ -178,6 +180,21 @@ public class PublishSiteService {
             throw new BizException(404, "Publish site not found");
         }
         return site;
+    }
+
+    private PublishSite attachPlainCredential(PublishSite site) {
+        if (site == null) {
+            return null;
+        }
+        if (isForumSite(site)) {
+            site.setApiCredential(platformCredentialService.resolveCredential(site.getCredentialRef(), site.getApiCredentialEncrypted()));
+        }
+        return site;
+    }
+
+    private boolean isForumSite(PublishSite site) {
+        String method = site.getIntegrationMethod();
+        return "discuz_http".equalsIgnoreCase(method) || "forum_playwright".equalsIgnoreCase(method);
     }
 
     private void fill(PublishSite site,
