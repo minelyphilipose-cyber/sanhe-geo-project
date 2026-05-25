@@ -52,7 +52,7 @@
               @change="onFilterChange"
             />
             <el-select v-model="filters.taskType" clearable placeholder="任务类型" size="small" style="width: 170px" @change="onFilterChange">
-              <el-option label="双日跑批" value="BI_DAILY_POLL" />
+              <el-option label="问题池跑批" value="BI_DAILY_POLL" />
               <el-option label="双周报" value="BIWEEKLY_REPORT" />
               <el-option label="月报" value="MONTHLY_REPORT" />
               <el-option label="季报" value="QUARTERLY_REPORT" />
@@ -74,7 +74,7 @@
       <DataState :loading="loading" :empty="!loading && tasks.length === 0" empty-text="该项目暂无监测任务">
         <el-table :data="tasks" border>
           <el-table-column label="任务类型" min-width="150">
-            <template #default="{ row }">{{ taskTypeLabel(row.taskType) }}</template>
+            <template #default="{ row }">{{ taskTypeLabel(row) }}</template>
           </el-table-column>
           <el-table-column prop="platformCode" label="平台" width="130" />
           <el-table-column label="执行通道" width="110">
@@ -228,9 +228,11 @@ async function handleReplay(taskId: number) {
   }
 }
 
-function taskTypeLabel(type?: string) {
+function taskTypeLabel(task?: DispatchTaskItem | string) {
+  const type = typeof task === 'string' ? task : task?.taskType
+  if (typeof task !== 'string' && task?.taskDisplayName) return task.taskDisplayName
   const map: Record<string, string> = {
-    BI_DAILY_POLL: '双日跑批',
+    BI_DAILY_POLL: '问题池跑批',
     BRAND_STATEMENT_GENERATION: '品牌标准表达生成',
     BIWEEKLY_REPORT: '双周报',
     MONTHLY_REPORT: '月报',

@@ -653,6 +653,7 @@ export interface DispatchTaskItem {
   platformCode?: string | null
   currentChannel?: 'primary' | 'backup_key' | 'backup_provider' | null
   taskType: string
+  taskDisplayName?: string | null
   priorityLevel: number
   status: string
   windowStart: string

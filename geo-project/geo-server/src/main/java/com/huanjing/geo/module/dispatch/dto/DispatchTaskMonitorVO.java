@@ -14,6 +14,7 @@ public class DispatchTaskMonitorVO {
     private String platformCode;
     private String currentChannel;
     private String taskType;
+    private String taskDisplayName;
     private Integer priorityLevel;
     private String status;
     private LocalDate windowStart;

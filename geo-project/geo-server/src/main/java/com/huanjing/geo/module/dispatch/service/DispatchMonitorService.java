@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.dispatch.service;
 
+import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
@@ -10,8 +11,11 @@ import com.huanjing.geo.module.dispatch.dto.DispatchPlatformHealthVO;
 import com.huanjing.geo.module.dispatch.dto.DispatchTaskMonitorVO;
 import com.huanjing.geo.module.dispatch.entity.DispatchAlert;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
+import com.huanjing.geo.module.dispatch.entity.PollBatchShard;
+import com.huanjing.geo.module.dispatch.enums.DispatchTaskType;
 import com.huanjing.geo.module.dispatch.mapper.DispatchAlertMapper;
 import com.huanjing.geo.module.dispatch.mapper.DispatchTaskMapper;
+import com.huanjing.geo.module.dispatch.mapper.PollBatchShardMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
@@ -39,6 +43,7 @@ public class DispatchMonitorService {
     private final CurrentUserService currentUserService;
     private final DispatchTaskMapper dispatchTaskMapper;
     private final DispatchAlertMapper dispatchAlertMapper;
+    private final PollBatchShardMapper pollBatchShardMapper;
     private final ProjectMapper projectMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final DispatchAlertService dispatchAlertService;
@@ -341,6 +346,7 @@ public class DispatchMonitorService {
         vo.setPlatformCode(task.getPlatformCode());
         vo.setCurrentChannel(task.getCurrentChannel());
         vo.setTaskType(task.getTaskType());
+        vo.setTaskDisplayName(resolveTaskDisplayName(task));
         vo.setPriorityLevel(task.getPriorityLevel());
         vo.setStatus(task.getStatus());
         vo.setWindowStart(task.getWindowStart());
@@ -359,5 +365,52 @@ public class DispatchMonitorService {
         vo.setCreatedAt(task.getCreatedAt());
         vo.setUpdatedAt(task.getUpdatedAt());
         return vo;
+    }
+
+    private String resolveTaskDisplayName(DispatchTask task) {
+        if (task == null || !DispatchTaskType.BI_DAILY_POLL.name().equalsIgnoreCase(task.getTaskType())) {
+            return null;
+        }
+        String tier = resolveQuestionTier(task);
+        return StringUtils.hasText(tier) ? "问题池跑批（" + tier + "）" : "问题池跑批";
+    }
+
+    private String resolveQuestionTier(DispatchTask task) {
+        Map<String, Object> payload = parsePayload(task.getPayloadJson());
+        Object questionTier = payload.get("questionTier");
+        if (questionTier != null && StringUtils.hasText(String.valueOf(questionTier))) {
+            return normalizeQuestionTier(String.valueOf(questionTier));
+        }
+        Object shardId = payload.get("shardId");
+        if (shardId == null || !StringUtils.hasText(String.valueOf(shardId))) {
+            return null;
+        }
+        try {
+            PollBatchShard shard = pollBatchShardMapper.selectById(Long.parseLong(String.valueOf(shardId)));
+            return shard == null ? null : normalizeQuestionTier(shard.getQuestionTier());
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private Map<String, Object> parsePayload(String payloadJson) {
+        if (!StringUtils.hasText(payloadJson)) {
+            return Map.of();
+        }
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            JSONUtil.parseObj(payloadJson).forEach((key, value) -> payload.put(String.valueOf(key), value));
+            return payload;
+        } catch (Exception ex) {
+            return Map.of();
+        }
+    }
+
+    private String normalizeQuestionTier(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String tier = value.trim().toUpperCase();
+        return List.of("A", "B", "C").contains(tier) ? tier : value.trim();
     }
 }
