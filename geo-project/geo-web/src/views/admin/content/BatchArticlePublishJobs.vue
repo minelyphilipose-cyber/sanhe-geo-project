@@ -50,7 +50,7 @@
     <el-card shadow="never" class="jobs-table-card">
       <DataState :loading="loading" :empty="!loading && rows.length === 0" empty-text="暂无批量发布任务">
         <el-table :data="rows" class="jobs-table" table-layout="fixed">
-          <el-table-column label="任务名称" min-width="330" show-overflow-tooltip>
+          <el-table-column label="任务名称" min-width="260" show-overflow-tooltip>
             <template #default="{ row }">
               <div class="job-name-cell">
                 <span class="job-name-main">{{ row.jobName || fallbackJobName(row) }}</span>
@@ -72,7 +72,7 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="进度" width="116">
+          <el-table-column label="进度" min-width="190">
             <template #default="{ row }">
               <div class="job-progress-summary">
                 <span class="job-progress-count">{{ row.successCount || 0 }}/{{ row.totalCount || 0 }}</span>
