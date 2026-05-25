@@ -501,30 +501,97 @@ onMounted(loadTemplates)
   white-space: nowrap;
 }
 
+.template-preview-drawer :deep(.el-drawer__header) {
+  padding: 20px 24px 16px;
+  margin-bottom: 0;
+  border-bottom: 1px solid #e5eaf3;
+}
+
+.template-preview-drawer :deep(.el-drawer__title) {
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.template-preview-drawer :deep(.el-drawer__body) {
+  padding: 20px 24px 28px;
+  background: #f6f8fc;
+}
+
 .preview-head {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  padding: 16px 18px;
   margin-bottom: 12px;
+  background: #fff;
+  border: 1px solid #e5eaf3;
+  border-radius: 12px;
+  box-shadow: 0 10px 24px rgb(15 23 42 / 4%);
 }
 
 .preview-head strong {
   color: #0f172a;
-  font-size: 18px;
+  font-size: 20px;
+  line-height: 1.3;
 }
 
 .preview-head span {
   color: #64748b;
   font-size: 13px;
+  line-height: 1.6;
 }
 
 .preview-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  padding: 10px 12px;
   margin-bottom: 16px;
+  background: #fff;
+  border: 1px solid #e5eaf3;
+  border-radius: 10px;
   color: #64748b;
   font-size: 12px;
+}
+
+.preview-roles {
+  padding: 14px 16px;
+  margin-bottom: 18px;
+  background: #fff;
+  border: 1px solid #e5eaf3;
+  border-radius: 12px;
+  box-shadow: 0 10px 24px rgb(15 23 42 / 4%);
+}
+
+.preview-roles > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.preview-roles strong {
+  color: #0f172a;
+  font-size: 14px;
+}
+
+.preview-roles span {
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.role-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.role-tags :deep(.el-tag) {
+  padding: 0 10px;
+  border-radius: 999px;
 }
 
 .phone-frame {
@@ -534,6 +601,7 @@ onMounted(loadTemplates)
   margin: 0 auto;
   background: #132033;
   border-radius: 30px;
+  box-shadow: 0 22px 52px rgb(15 23 42 / 18%);
 }
 
 .phone-top {
@@ -572,6 +640,16 @@ onMounted(loadTemplates)
   justify-content: center;
   color: #94a3b8;
   font-size: 14px;
+}
+
+@media (max-width: 720px) {
+  .template-preview-drawer :deep(.el-drawer__body) {
+    padding: 16px;
+  }
+
+  .phone-frame {
+    width: min(390px, 100%);
+  }
 }
 
 </style>
