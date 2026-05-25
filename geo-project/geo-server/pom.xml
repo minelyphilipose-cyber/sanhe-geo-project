@@ -32,6 +32,7 @@
         <flyway.version>9.22.3</flyway.version>
         <commonmark.version>0.22.0</commonmark.version>
         <jsoup.version>1.17.2</jsoup.version>
+        <owasp-html-sanitizer.version>20240325.1</owasp-html-sanitizer.version>
     </properties>
 
     <dependencies>
@@ -149,6 +150,11 @@
             <groupId>org.jsoup</groupId>
             <artifactId>jsoup</artifactId>
             <version>${jsoup.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.googlecode.owasp-java-html-sanitizer</groupId>
+            <artifactId>owasp-java-html-sanitizer</artifactId>
+            <version>${owasp-html-sanitizer.version}</version>
         </dependency>
 
         <!-- MapStruct -->

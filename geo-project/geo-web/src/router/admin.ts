@@ -126,6 +126,30 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '文章提示词模板', hidden: true, permissions: ['project.read'] },
     },
     {
+      path: 'content/wechat-templates',
+      name: 'WechatRenderTemplates',
+      component: () => import('@/views/admin/content/wechat-template/TemplateList.vue'),
+      meta: { title: '公众号样式模板', hidden: true, permissions: ['project.read'] },
+    },
+    {
+      path: 'content/wechat-templates/import',
+      name: 'WechatRenderTemplateImport',
+      component: () => import('@/views/admin/content/wechat-template/TemplateImport.vue'),
+      meta: { title: '导入公众号模板', hidden: true, permissions: ['project.read'] },
+    },
+    {
+      path: 'content/wechat-templates/:templateId/edit',
+      name: 'WechatRenderTemplateEdit',
+      component: () => import('@/views/admin/content/wechat-template/TemplateImport.vue'),
+      meta: { title: '编辑公众号模板', hidden: true, permissions: ['project.read'] },
+    },
+    {
+      path: 'content/articles/:articleId/wechat-render',
+      name: 'WechatArticleRender',
+      component: () => import('@/views/admin/content/wechat-render/WechatRenderPage.vue'),
+      meta: { title: '公众号渲染', hidden: true, permissions: ['project.read'] },
+    },
+    {
       path: 'content/articles/batch-publish',
       name: 'BatchArticlePublish',
       component: () => import('@/views/admin/content/BatchArticlePublish.vue'),

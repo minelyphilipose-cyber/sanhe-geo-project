@@ -158,7 +158,7 @@ class WechatMpAdapterTest {
 
         when(brandService.requireExistingBrand(10L)).thenReturn(brand);
         when(mediaService.ensureThumbMediaId(account, 10L, 100L)).thenReturn("thumb_media_id");
-        when(articleRenderService.renderOrFallback(any(), eq("markdown body"))).thenReturn("<p>markdown body</p>");
+        when(articleRenderService.renderOrFallbackForPublish(any(), eq("markdown body"))).thenReturn("<p>markdown body</p>");
         when(htmlRewriter.rewrite(eq("<p>markdown body</p>"), any())).thenReturn("<p>wechat body</p>");
         when(wechatMpClient.addDraft(eq("access-token"), any())).thenReturn(new WechatMpClient.DraftResult("draft_media_id"));
         when(wechatMpClient.submitPublish(eq("access-token"), eq("draft_media_id"))).thenReturn(new WechatMpClient.PublishResult("publish_id"));

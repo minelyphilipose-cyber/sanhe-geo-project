@@ -39,6 +39,16 @@ export function getContentArticleDetail(articleId: number) {
 
 export interface WechatRenderRoleSchema {
   wrapperHtml: string
+  wrapperSafe?: boolean | null
+}
+
+export interface WechatBodyStyle {
+  fontSize?: string | null
+  lineHeight?: string | null
+  letterSpacing?: string | null
+  color?: string | null
+  textAlign?: string | null
+  paragraphMargin?: string | null
 }
 
 export interface WechatTemplateSlice {
@@ -50,12 +60,14 @@ export interface WechatTemplateSlice {
   outlier: boolean
   html: string
   previewText?: string
+  previewHtml?: string
   warnings?: string[]
 }
 
 export interface WechatTemplateRoleDraft {
   role: string
   wrapperHtml: string
+  wrapperSafe?: boolean | null
   reuseCount: number
   sliceIds: string[]
   needsConfirmation: boolean
@@ -70,6 +82,7 @@ export interface WechatRenderWarning {
 
 export interface WechatTemplateParseResponse {
   sourceType: string
+  bodyStyle?: WechatBodyStyle | null
   slices: WechatTemplateSlice[]
   roles: WechatTemplateRoleDraft[]
   warnings: WechatRenderWarning[]
@@ -82,6 +95,7 @@ export interface PlatformRenderTemplate {
   description?: string | null
   status: string
   createdBy?: number | null
+  createdByName?: string | null
   createdAt?: string | null
   updatedAt?: string | null
 }
@@ -135,6 +149,7 @@ export interface WechatRenderConfigResponse {
   templateVersionId?: number | null
   blocks: WechatArticleBlock[]
   annotations: WechatRenderAnnotations
+  renderConfig?: Record<string, unknown> | null
   warnings: WechatRenderWarning[]
 }
 
@@ -151,18 +166,48 @@ export function getWechatRenderTemplates(params?: { current?: number; size?: num
   return request.get<R<PageResult<PlatformRenderTemplate>>>('/wechat-render-templates', { params })
 }
 
+export function getWechatRenderTemplate(id: number) {
+  return request.get<R<PlatformRenderTemplate>>(`/wechat-render-templates/${id}`)
+}
+
 export function createWechatRenderTemplate(data: {
   name: string
   description?: string
   sourceType: string
   sourceHtml: string
   roles: Record<string, WechatRenderRoleSchema>
+  bodyStyle?: WechatBodyStyle | null
 }) {
   return request.post<R<PlatformRenderTemplate>>('/wechat-render-templates', data)
 }
 
+export function updateWechatRenderTemplate(id: number, data: {
+  name: string
+  description?: string
+  status?: 'enabled' | 'disabled'
+}) {
+  return request.put<R<PlatformRenderTemplate>>(`/wechat-render-templates/${id}`, data)
+}
+
+export function createWechatRenderTemplateVersion(id: number, data: {
+  sourceType: string
+  sourceHtml: string
+  roles: Record<string, WechatRenderRoleSchema>
+  bodyStyle?: WechatBodyStyle | null
+}) {
+  return request.post<R<PlatformRenderTemplateVersion>>(`/wechat-render-templates/${id}/versions`, data)
+}
+
 export function getWechatRenderTemplateCurrentVersion(id: number) {
   return request.get<R<PlatformRenderTemplateVersion | null>>(`/wechat-render-templates/${id}/current-version`)
+}
+
+export function updateWechatRenderTemplateStatus(id: number, status: 'enabled' | 'disabled') {
+  return request.put<R<void>>(`/wechat-render-templates/${id}/status`, undefined, { params: { status } })
+}
+
+export function deleteWechatRenderTemplate(id: number) {
+  return request.delete<R<void>>(`/wechat-render-templates/${id}`)
 }
 
 export function getArticleWechatRender(articleId: number) {
@@ -180,8 +225,17 @@ export function saveArticleWechatRender(articleId: number, data: {
 export function previewArticleWechatRender(articleId: number, data: {
   templateVersionId?: number | null
   annotations?: WechatRenderAnnotations
+  renderConfig?: Record<string, unknown>
 }) {
   return request.post<R<WechatRenderPreviewResponse>>(`/content/articles/${articleId}/wechat-render/preview`, data)
+}
+
+export function finalPreviewArticleWechatRender(articleId: number, data?: {
+  templateVersionId?: number | null
+  annotations?: WechatRenderAnnotations
+  renderConfig?: Record<string, unknown>
+}) {
+  return request.post<R<WechatRenderPreviewResponse>>(`/content/articles/${articleId}/wechat-render/final-preview`, data || {})
 }
 
 export function getSelfMediaCookieStatusBatch(data: {

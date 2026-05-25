@@ -41,6 +41,7 @@ public class BrandProfileService {
     private final ActivityLogService activityLogService;
     private final MinioStorageService minioStorageService;
     private final BrandImageFolderService brandImageFolderService;
+    private final BrandMaterialPublicUrlService publicUrlService;
     private final ObjectMapper objectMapper;
 
     public List<BrandMaterial> listMaterials(Long brandId, String category) {
@@ -97,6 +98,10 @@ public class BrandProfileService {
             throw new BizException(400, "Material object key is empty");
         }
         return minioStorageService.buildPresignedDownloadUrl(material.getObjectKey(), 600);
+    }
+
+    public String buildMaterialPublicUrl(Long brandId, Long materialId) {
+        return publicUrlService.buildPublicStreamUrl(materialDetail(brandId, materialId));
     }
 
     @Transactional

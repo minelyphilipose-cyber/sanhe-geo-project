@@ -87,6 +87,7 @@
                 <el-dropdown-menu>
                   <el-dropdown-item command="jobs">发布任务</el-dropdown-item>
                   <el-dropdown-item command="templates">文章模板</el-dropdown-item>
+                  <el-dropdown-item command="wechatTemplates">公众号样式模板</el-dropdown-item>
                   <el-dropdown-item command="platforms">发布平台管理</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -168,10 +169,11 @@
           <el-table-column label="创建时间" width="180">
             <template #default="scope">{{ formatDateTime(scope.row.createdAt) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="300" fixed="right">
+          <el-table-column label="操作" width="360" fixed="right">
             <template #default="scope">
               <div class="admin-row-actions">
                 <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
+                <el-button v-if="isWechatArticle(scope.row)" link type="primary" @click="openWechatRender(scope.row.id)">公众号样式</el-button>
                 <el-button v-if="canWrite && canEdit(scope.row.status)" class="content-neutral-action" link @click="openRevision(scope.row)">修订</el-button>
                 <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openDistributionChannel(scope.row)">分发</el-button>
                 <el-button v-if="canWrite && canDeleteArticle(scope.row.status)" link type="danger" @click="deleteArticle(scope.row)">删除</el-button>
@@ -210,6 +212,7 @@
               >
                 编辑文章
               </el-button>
+              <el-button v-if="isWechatArticle(detailData.article)" size="small" @click="openWechatRender(detailData.article.id)">公众号样式</el-button>
               <el-tag :type="statusTagType(detailData.article.status)">
                 {{ statusLabel(detailData.article.status) }}
               </el-tag>
@@ -419,14 +422,14 @@
           </button>
         </div>
       </DataState>
-      <div v-if="selectedForumSiteId && selectedForumBoards.length" class="forum-board-picker">
+      <div v-if="selectedForumSiteId && selectedForumBoards.length > 1" class="forum-board-picker">
         <div class="industry-site-meta-label">发布版块</div>
         <el-select v-model="selectedForumFid" placeholder="自动匹配发布版块" style="width: 100%">
           <el-option label="自动匹配（服务区域 / 行业 / 默认版块）" :value="0" />
           <el-option
             v-for="board in selectedForumBoards"
             :key="board.fid"
-            :label="`${board.name}（fid: ${board.fid}）`"
+            :label="board.name"
             :value="board.fid"
           />
         </el-select>
@@ -1409,6 +1412,16 @@ function articleChannelLabel(row: ArticleDraft) {
   return '-'
 }
 
+function isWechatArticle(row: Pick<ArticleDraft, 'channelGroupCode' | 'channelSubCode'>) {
+  return row.channelGroupCode === 'self_media' && row.channelSubCode === 'wechat'
+}
+
+function openWechatRender(articleId: number) {
+  router.push({
+    path: `/admin/content/articles/${articleId}/wechat-render`,
+  })
+}
+
 function templateSourceLabel(v?: string | null) {
   const label = templateSourceValueLabel(v)
   return label === '-' ? '模板来源：-' : `模板来源：${label}`
@@ -1667,6 +1680,12 @@ function openPromptTemplateManagement() {
   })
 }
 
+function openWechatTemplateManagement() {
+  router.push({
+    path: '/admin/content/wechat-templates',
+  })
+}
+
 function openBatchPublishJobs() {
   router.push({
     path: '/admin/content/articles/batch-publish-jobs',
@@ -1678,6 +1697,8 @@ function handleToolbarMoreCommand(command: string) {
     openBatchPublishJobs()
   } else if (command === 'templates') {
     openPromptTemplateManagement()
+  } else if (command === 'wechatTemplates') {
+    openWechatTemplateManagement()
   } else if (command === 'platforms') {
     openPublishPlatformManagement()
   }

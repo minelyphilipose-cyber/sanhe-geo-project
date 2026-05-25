@@ -33,7 +33,7 @@ import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
-import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
+import com.huanjing.geo.module.content.service.render.wechat.WechatArticleRenderService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -101,7 +101,7 @@ class ContentArticleServiceTest {
                 mock(SysDictItemMapper.class),
                 currentUserService,
                 mock(MarkdownImageReferenceValidator.class),
-                new MarkdownToHtmlRenderer(),
+                mock(WechatArticleRenderService.class),
                 articleImagePublicUrlRewriter,
                 brandAccessService,
                 auditService

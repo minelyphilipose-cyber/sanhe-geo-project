@@ -95,7 +95,7 @@ public class WechatMpAdapter implements SiteAdapter, AutoSelfMediaAdapter {
         try {
             Brand brand = brandService.requireExistingBrand(account.getBrandId());
             String thumbMediaId = mediaService.ensureThumbMediaId(account, account.getBrandId(), mpTarget.coverMaterialId());
-            String html = articleRenderService.renderOrFallback(article, contentMarkdown);
+            String html = articleRenderService.renderOrFallbackForPublish(article, contentMarkdown);
             String wechatHtml = htmlRewriter.rewrite(html, src -> mediaService.ensureContentImageUrl(account, src));
             WechatMpClient.DraftArticle draftArticle = buildDraftArticle(article, brand, account, wechatHtml, thumbMediaId);
             requestPayload = buildRequestPayload(account, mpTarget.coverMaterialId(), draftArticle);

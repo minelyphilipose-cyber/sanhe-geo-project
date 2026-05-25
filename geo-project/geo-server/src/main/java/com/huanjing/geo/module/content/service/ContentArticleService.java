@@ -19,7 +19,7 @@ import com.huanjing.geo.module.content.dto.ArticleRevisionSaveRequest;
 import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
 import com.huanjing.geo.module.content.entity.*;
 import com.huanjing.geo.module.content.mapper.*;
-import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
+import com.huanjing.geo.module.content.service.render.wechat.WechatArticleRenderService;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -59,7 +59,7 @@ public class ContentArticleService {
     private final SysDictItemMapper sysDictItemMapper;
     private final CurrentUserService currentUserService;
     private final MarkdownImageReferenceValidator markdownImageReferenceValidator;
-    private final MarkdownToHtmlRenderer markdownToHtmlRenderer;
+    private final WechatArticleRenderService wechatArticleRenderService;
     private final ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
     private final BrandAccessService brandAccessService;
     private final AuditService auditService;
@@ -230,7 +230,7 @@ public class ContentArticleService {
         String title = StringUtils.hasText(version.getTitle()) ? version.getTitle() : article.getTitle();
         String content = Optional.ofNullable(version.getContentMarkdown()).orElse("");
         Project project = requireProject(article.getProjectId());
-        String html = markdownToHtmlRenderer.render(articleImagePublicUrlRewriter.rewrite(project, content));
+        String html = wechatArticleRenderService.renderOrFallback(article, articleImagePublicUrlRewriter.rewrite(project, content));
         return """
                 <!doctype html>
                 <html lang="zh-CN">
@@ -247,9 +247,9 @@ public class ContentArticleService {
                     th,td{border:1px solid #e2e8f0;padding:8px;text-align:left}
                   </style>
                 </head>
-                <body><main><h1>%s</h1>%s</main></body>
+                <body><main>%s</main></body>
                 </html>
-                """.formatted(escapeHtml(title), escapeHtml(title), html);
+                """.formatted(escapeHtml(title), html);
     }
 
     public Map<String, Object> detail(Long articleId) {
