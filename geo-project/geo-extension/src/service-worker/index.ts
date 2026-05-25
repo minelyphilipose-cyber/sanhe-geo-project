@@ -89,7 +89,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
       .catch(error => sendResponse({
         type: 'GEO_FILL_ERROR',
         payload: {
-          code: 'SERVICE_WORKER_ERROR',
+          code: error instanceof ExtensionApiError && error.code ? String(error.code) : 'SERVICE_WORKER_ERROR',
           message: error instanceof Error ? error.message : '扩展后台处理失败',
         },
       }))

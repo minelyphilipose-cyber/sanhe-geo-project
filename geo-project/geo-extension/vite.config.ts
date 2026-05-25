@@ -65,7 +65,12 @@ function extensionManifestPlugin(profile: ExtensionProfile): Plugin {
         host_permissions: profile.hostPermissions,
         content_scripts: [
           {
-            matches: ['https://mp.toutiao.com/*', 'https://www.zhihu.com/*', 'https://zhuanlan.zhihu.com/*'],
+            matches: [
+              'https://mp.toutiao.com/*',
+              'https://www.zhihu.com/*',
+              'https://zhuanlan.zhihu.com/*',
+              'https://creator.xiaohongshu.com/*',
+            ],
             js: ['assets/content-script.js'],
             run_at: 'document_idle',
           },
