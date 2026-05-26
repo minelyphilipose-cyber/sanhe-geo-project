@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.llm.*;
+import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
 import com.huanjing.geo.module.audit.*;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.service.AuditService;
@@ -185,6 +186,13 @@ public class ArticleAiDraftService {
             auditGenerated(AuditResult.FAILURE, operator, project, null, prompt.userPrompt().length(),
                     platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "preview_failed", mapped.getCode());
             throw mapped;
+        } catch (LlmPermitUnavailableException ex) {
+            log.warn("AI article draft preview LLM permit busy projectId={} platform={} model={} scope={}",
+                    project.getId(), platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), ex.getScope());
+            auditGenerated(AuditResult.FAILURE, operator, project, null, prompt.userPrompt().length(),
+                    platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "preview_failed",
+                    ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED);
+            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI 模型当前繁忙，请稍后重试");
         } catch (Exception ex) {
             log.warn("AI article draft preview failed projectId={} platform={} model={}",
                     project.getId(), platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), ex);
@@ -235,6 +243,13 @@ public class ArticleAiDraftService {
             auditGenerated(AuditResult.FAILURE, operator, project, null, originalPrompt.length(),
                     platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "generation_failed", mapped.getCode());
             throw mapped;
+        } catch (LlmPermitUnavailableException ex) {
+            log.warn("AI article draft generation LLM permit busy projectId={} platform={} model={} scope={}",
+                    project.getId(), platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), ex.getScope());
+            auditGenerated(AuditResult.FAILURE, operator, project, null, originalPrompt.length(),
+                    platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "generation_failed",
+                    ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED);
+            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI 模型当前繁忙，请稍后重试");
         } catch (Exception ex) {
             log.warn("AI article draft generation failed projectId={} platform={} model={}",
                     project.getId(), platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), ex);

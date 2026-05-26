@@ -6,6 +6,8 @@ import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.llm.*;
+import com.huanjing.geo.common.llm.pool.LlmPermitScope;
+import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
 import com.huanjing.geo.module.audit.*;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.service.AuditService;
@@ -183,6 +185,21 @@ class ArticleAiDraftServiceTest {
     }
 
     @Test
+    void previewUsesArticleFeatureAndConfiguredPlatformConcurrency() throws Exception {
+        AiPlatformConfig config = aiConfig();
+        config.setConcurrencyLimit(3);
+        when(configMapper.selectOne(any())).thenReturn(config);
+        when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
+        ArgumentCaptor<LlmModelConfig> configCaptor = ArgumentCaptor.forClass(LlmModelConfig.class);
+
+        service.preview(previewRequest()).get();
+
+        verify(llmInvoker).invoke(any(), configCaptor.capture());
+        assertEquals("article", configCaptor.getValue().feature());
+        assertEquals(3, configCaptor.getValue().concurrencyLimit());
+    }
+
+    @Test
     void llmFailureDoesNotPersistDraft() throws Exception {
         when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenThrow(new LlmInvokeException("boom"));
 
@@ -204,6 +221,21 @@ class ArticleAiDraftServiceTest {
         BizException cause = (BizException) ex.getCause();
         assertEquals(ContentErrorCodes.ARTICLE_AI_DRAFT_CONFIG_MISSING, cause.getCode());
         assertEquals("AI 模型认证失败，请检查模型平台 API Key 配置", cause.getMessage());
+        verify(articleMapper, never()).insert(any());
+        verify(versionMapper, never()).insert(any());
+        verifyAudit(AuditResult.FAILURE, "preview_failed");
+    }
+
+    @Test
+    void previewPermitBusyReturnsUserFriendlyBusyMessage() throws Exception {
+        when(llmInvoker.invoke(any(), any(LlmModelConfig.class)))
+                .thenThrow(new LlmPermitUnavailableException(LlmPermitScope.PLATFORM, "openai"));
+
+        ExecutionException ex = assertThrows(ExecutionException.class, () -> service.preview(previewRequest()).get());
+
+        BizException cause = (BizException) ex.getCause();
+        assertEquals(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, cause.getCode());
+        assertEquals("AI 模型当前繁忙，请稍后重试", cause.getMessage());
         verify(articleMapper, never()).insert(any());
         verify(versionMapper, never()).insert(any());
         verifyAudit(AuditResult.FAILURE, "preview_failed");
@@ -319,6 +351,7 @@ class ArticleAiDraftServiceTest {
         config.setApiKey("encrypted");
         config.setModelId("gpt-test");
         config.setModelName("gpt-test");
+        config.setConcurrencyLimit(2);
         return config;
     }
 

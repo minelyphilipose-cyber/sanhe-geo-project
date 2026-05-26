@@ -16,6 +16,7 @@ import org.springframework.util.StringUtils;
 public class ArticleModelResolver {
 
     private static final int ARTICLE_REQUEST_TIMEOUT_MS = 120_000;
+    private static final String ARTICLE_FEATURE = "article";
 
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PlatformCredentialService platformCredentialService;
@@ -67,7 +68,9 @@ public class ArticleModelResolver {
                 Math.max(1, normalize(config.getRateLimitQps(), 1)),
                 null,
                 false,
-                longForm ? LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS : LlmModelConfig.MAX_REQUEST_TIMEOUT_MS
+                longForm ? LlmModelConfig.LONG_FORM_MAX_REQUEST_TIMEOUT_MS : LlmModelConfig.MAX_REQUEST_TIMEOUT_MS,
+                ARTICLE_FEATURE,
+                config.getConcurrencyLimit()
         );
         return new ModelSelection(config.getPlatformCode(), resolvedModelId, modelConfig);
     }
