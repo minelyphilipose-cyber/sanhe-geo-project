@@ -9,10 +9,12 @@ import com.huanjing.geo.module.dispatch.dto.DispatchDashboardVO;
 import com.huanjing.geo.module.dispatch.dto.DispatchDateRange;
 import com.huanjing.geo.module.dispatch.dto.DispatchPlatformHealthVO;
 import com.huanjing.geo.module.dispatch.dto.DispatchTaskMonitorVO;
+import com.huanjing.geo.module.dispatch.dto.PlatformHealthAggregateRow;
 import com.huanjing.geo.module.dispatch.entity.DispatchAlert;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
 import com.huanjing.geo.module.dispatch.entity.PollBatchShard;
 import com.huanjing.geo.module.dispatch.enums.DispatchTaskType;
+import com.huanjing.geo.module.dispatch.mapper.AiPlatformHealthEventMapper;
 import com.huanjing.geo.module.dispatch.mapper.DispatchAlertMapper;
 import com.huanjing.geo.module.dispatch.mapper.DispatchTaskMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchShardMapper;
@@ -27,6 +29,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -46,6 +49,7 @@ public class DispatchMonitorService {
     private final PollBatchShardMapper pollBatchShardMapper;
     private final ProjectMapper projectMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
+    private final AiPlatformHealthEventMapper aiPlatformHealthEventMapper;
     private final DispatchAlertService dispatchAlertService;
     private final LlmExecutionGateway llmExecutionGateway;
 
@@ -194,8 +198,21 @@ public class DispatchMonitorService {
         );
         Map<String, Long> exceptionCountMap = exceptionTasks.stream()
                 .collect(Collectors.groupingBy(DispatchTask::getPlatformCode, Collectors.counting()));
+        Map<String, PlatformHealthAggregateRow> healthStats = aiPlatformHealthEventMapper
+                .aggregateByPlatform(codes, range.getStartAt(), range.getEndAtExclusive())
+                .stream()
+                .collect(Collectors.toMap(PlatformHealthAggregateRow::getPlatformCode, item -> item, (a, b) -> a));
 
         return platforms.stream().map(p -> {
+            PlatformHealthAggregateRow stats = healthStats.get(p.getPlatformCode());
+            long taskExceptionCount = exceptionCountMap.getOrDefault(p.getPlatformCode(), 0L);
+            long failureCount = value(stats == null ? null : stats.getFailureCount());
+            long rateLimitedCount = value(stats == null ? null : stats.getRateLimitedCount());
+            long permitBusyCount = value(stats == null ? null : stats.getPermitBusyCount());
+            long circuitOpenCount = value(stats == null ? null : stats.getCircuitOpenCount());
+            long healthExceptionCount = failureCount + rateLimitedCount + permitBusyCount + circuitOpenCount;
+            long successCount = value(stats == null ? null : stats.getSuccessCount());
+            long invocationCount = successCount + healthExceptionCount;
             DispatchPlatformHealthVO vo = new DispatchPlatformHealthVO();
             vo.setId(p.getId());
             vo.setPlatformCode(p.getPlatformCode());
@@ -209,10 +226,34 @@ public class DispatchMonitorService {
             vo.setDegraded(p.getDegraded());
             vo.setDegradedReason(p.getDegradedReason());
             vo.setCurrentHealthStatus(p.getCurrentHealthStatus());
-            vo.setLastFailureAt(p.getLastFailureAt());
-            vo.setExceptionCount(exceptionCountMap.getOrDefault(p.getPlatformCode(), 0L));
+            vo.setLastFailureAt(resolveLatest(p.getLastFailureAt(), stats == null ? null : stats.getLastFailureAt()));
+            vo.setExceptionCount(healthExceptionCount > 0 ? healthExceptionCount : taskExceptionCount);
+            vo.setInvocationCount(invocationCount);
+            vo.setSuccessCount(successCount);
+            vo.setFailureCount(failureCount);
+            vo.setRateLimitedCount(rateLimitedCount);
+            vo.setPermitBusyCount(permitBusyCount);
+            vo.setCircuitOpenCount(circuitOpenCount);
+            vo.setSlowResponseCount(value(stats == null ? null : stats.getSlowResponseCount()));
+            vo.setFailureRate(invocationCount <= 0 ? 0D : Math.round((healthExceptionCount * 10000D) / invocationCount) / 100D);
+            vo.setAvgDurationMs(value(stats == null ? null : stats.getAvgDurationMs()));
+            vo.setLastSuccessAt(stats == null ? null : stats.getLastSuccessAt());
             return vo;
         }).toList();
+    }
+
+    private long value(Long value) {
+        return value == null ? 0L : value;
+    }
+
+    private LocalDateTime resolveLatest(LocalDateTime first, LocalDateTime second) {
+        if (first == null) {
+            return second;
+        }
+        if (second == null) {
+            return first;
+        }
+        return first.isAfter(second) ? first : second;
     }
 
     public Page<DispatchAlertVO> alertPage(long current,

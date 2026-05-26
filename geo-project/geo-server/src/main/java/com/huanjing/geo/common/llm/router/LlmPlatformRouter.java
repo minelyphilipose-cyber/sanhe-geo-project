@@ -7,6 +7,7 @@ import com.huanjing.geo.common.llm.LlmModelConfig;
 import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
 import com.huanjing.geo.common.llm.pool.LlmExecutionPermit;
 import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
+import com.huanjing.geo.module.dispatch.service.AiPlatformHealthMonitorService;
 import com.huanjing.geo.module.dispatch.service.PlatformRateLimiterService;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import lombok.RequiredArgsConstructor;
@@ -24,6 +25,7 @@ public class LlmPlatformRouter {
     private final LlmCircuitBreakerService circuitBreakerService;
     private final LlmInvoker llmInvoker;
     private final LlmExecutionGateway executionGateway;
+    private final AiPlatformHealthMonitorService platformHealthMonitorService;
 
     public LlmRouteResult invoke(LlmRouteRequest request) {
         List<LlmPlatformCandidate> candidates = selectionStrategy.selectCandidates(request);
@@ -46,6 +48,7 @@ public class LlmPlatformRouter {
             }
             if (!circuitBreakerService.allowRequest(candidate.platformCode())) {
                 circuitOpen++;
+                platformHealthMonitorService.recordCircuitOpen(candidate.platformCode(), request.feature());
                 continue;
             }
             requestCount++;
@@ -54,6 +57,7 @@ public class LlmPlatformRouter {
                 if (!platformRateLimiterService.tryAcquire(config, request.tokenCost())) {
                     rateLimited++;
                     requestCount--;
+                    platformHealthMonitorService.recordRateLimited(candidate.platformCode(), request.feature());
                     continue;
                 }
                 LlmInvokeResult result = llmInvoker.invoke(request.userPrompt(), buildModelConfig(request, candidate));
@@ -72,6 +76,7 @@ public class LlmPlatformRouter {
             } catch (LlmPermitUnavailableException ex) {
                 permitBusy++;
                 lastError = ex;
+                platformHealthMonitorService.recordPermitBusy(candidate.platformCode(), request.feature());
                 log.debug("LLM permit busy, feature={}, platform={}, channel={}",
                         request.feature(), candidate.platformCode(), candidate.channel());
             } catch (LlmInvokeException ex) {

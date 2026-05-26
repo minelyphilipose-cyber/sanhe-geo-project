@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
 import com.huanjing.geo.common.llm.pool.LlmExecutionPermit;
 import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
+import com.huanjing.geo.module.dispatch.service.AiPlatformHealthMonitorService;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -25,21 +26,25 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
     private final LlmHttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final LlmExecutionGateway executionGateway;
+    private final AiPlatformHealthMonitorService platformHealthMonitorService;
     private final ConcurrentHashMap<String, PlatformThrottleState> throttleStates = new ConcurrentHashMap<>();
 
     @Autowired
     public OpenAiCompatibleLlmInvoker(LlmHttpClient httpClient,
                                       ObjectMapper objectMapper,
-                                      ObjectProvider<LlmExecutionGateway> executionGatewayProvider) {
+                                      ObjectProvider<LlmExecutionGateway> executionGatewayProvider,
+                                      ObjectProvider<AiPlatformHealthMonitorService> platformHealthMonitorServiceProvider) {
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
         this.executionGateway = executionGatewayProvider.getIfAvailable();
+        this.platformHealthMonitorService = platformHealthMonitorServiceProvider.getIfAvailable();
     }
 
     public OpenAiCompatibleLlmInvoker(LlmHttpClient httpClient, ObjectMapper objectMapper) {
         this.httpClient = httpClient;
         this.objectMapper = objectMapper;
         this.executionGateway = null;
+        this.platformHealthMonitorService = null;
     }
 
     @Override
@@ -62,6 +67,7 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
                         ? normalizeJsonText(response.text())
                         : response.text();
                 long durationMs = Math.max(1L, System.currentTimeMillis() - started);
+                recordSuccess(modelConfig, durationMs);
                 return new LlmInvokeResult(
                         responseText,
                         response.promptTokens(),
@@ -84,7 +90,22 @@ public class OpenAiCompatibleLlmInvoker implements LlmInvoker {
             }
         }
         String reason = lastError == null ? "unknown error" : lastError.getMessage();
+        recordFailure(modelConfig, reason);
         throw new LlmInvokeException("LLM invoke failed after retries: " + reason, lastError);
+    }
+
+    private void recordSuccess(LlmModelConfig modelConfig, long durationMs) {
+        if (platformHealthMonitorService == null || modelConfig == null) {
+            return;
+        }
+        platformHealthMonitorService.recordSuccess(modelConfig.platformCode(), modelConfig.feature(), durationMs);
+    }
+
+    private void recordFailure(LlmModelConfig modelConfig, String reason) {
+        if (platformHealthMonitorService == null || modelConfig == null) {
+            return;
+        }
+        platformHealthMonitorService.recordFailure(modelConfig.platformCode(), modelConfig.feature(), reason);
     }
 
     private InvocationResponse invokeOnce(String prompt, LlmModelConfig modelConfig) throws Exception {

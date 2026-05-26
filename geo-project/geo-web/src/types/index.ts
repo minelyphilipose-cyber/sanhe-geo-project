@@ -886,6 +886,16 @@ export interface DispatchPlatformHealthItem {
   currentHealthStatus?: string | null
   lastFailureAt?: string | null
   exceptionCount: number
+  invocationCount?: number | null
+  successCount?: number | null
+  failureCount?: number | null
+  rateLimitedCount?: number | null
+  permitBusyCount?: number | null
+  circuitOpenCount?: number | null
+  slowResponseCount?: number | null
+  failureRate?: number | null
+  avgDurationMs?: number | null
+  lastSuccessAt?: string | null
 }
 
 export interface LlmPoolSnapshot {

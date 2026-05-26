@@ -132,16 +132,26 @@
               <strong>{{ item.activePermitCount || 0 }} / {{ item.concurrencyLimit || 1 }}</strong>
             </div>
             <div class="platform-limit-item">
-              <span>异常次数</span>
+              <span>真实调用</span>
+              <strong>{{ item.invocationCount || 0 }}</strong>
+            </div>
+            <div class="platform-limit-item">
+              <span>异常信号</span>
               <strong>{{ item.exceptionCount || 0 }}</strong>
             </div>
           </div>
           <div class="platform-progress-row">
-            <span>异常占比</span>
+            <span>真实失败率</span>
             <strong>{{ platformPercent(item) }}%</strong>
           </div>
           <el-progress :percentage="platformPercent(item)" :status="platformProgressStatus(item)" />
+          <div class="platform-observe-row">
+            <span>成功 {{ item.successCount || 0 }}</span>
+            <span>限流 {{ item.rateLimitedCount || 0 }}</span>
+            <span>平均 {{ formatDuration(item.avgDurationMs) }}</span>
+          </div>
           <div v-if="item.degradedReason" class="platform-risk">{{ item.degradedReason }}</div>
+          <div v-if="item.lastSuccessAt" class="platform-fail-time">最近成功：{{ item.lastSuccessAt }}</div>
           <div v-if="item.lastFailureAt" class="platform-fail-time">最近失败：{{ item.lastFailureAt }}</div>
         </article>
       </div>
@@ -229,6 +239,9 @@ function buildRangeParams(): DispatchRangeParams {
 }
 
 function platformPercent(item: DispatchPlatformHealthItem) {
+  if ((item.invocationCount || 0) > 0) {
+    return Math.min(100, Math.round(Number(item.failureRate || 0)))
+  }
   const limit = item.rpmLimit || 0
   if (limit <= 0) return 0
   return Math.min(100, Math.round(((item.exceptionCount || 0) / limit) * 100))
@@ -236,30 +249,47 @@ function platformPercent(item: DispatchPlatformHealthItem) {
 
 function platformStatusText(item: DispatchPlatformHealthItem) {
   if (item.degraded) return '已降级'
+  const status = item.currentHealthStatus || 'normal'
+  if (status === 'maintenance') return '维护中'
+  if (status === 'manual_takeover') return '人工接管'
+  if (status === 'degraded') return '熔断降级'
+  if (status === 'high_failure') return '高失败率'
+  if (status === 'slow_response') return '响应慢'
   const p = platformPercent(item)
   if (p >= 80) return '接近阈值'
   return '正常'
 }
 
 function platformProgressStatus(item: DispatchPlatformHealthItem): '' | 'success' | 'warning' | 'exception' {
-  if (item.degraded) return 'exception'
+  if (item.degraded || item.currentHealthStatus === 'high_failure' || item.currentHealthStatus === 'degraded') return 'exception'
+  if (item.currentHealthStatus === 'slow_response') return 'warning'
   const p = platformPercent(item)
   if (p >= 80) return 'warning'
   return 'success'
 }
 
 function platformCardClass(item: DispatchPlatformHealthItem) {
-  if (item.degraded) return 'platform-card-danger'
+  if (item.degraded || item.currentHealthStatus === 'high_failure' || item.currentHealthStatus === 'degraded') return 'platform-card-danger'
+  if (item.currentHealthStatus === 'slow_response') return 'platform-card-warning'
   const p = platformPercent(item)
   if (p >= 80) return 'platform-card-warning'
   return 'platform-card-success'
 }
 
 function platformStatusClass(item: DispatchPlatformHealthItem) {
-  if (item.degraded) return 'dot-red'
+  if (item.degraded || item.currentHealthStatus === 'high_failure' || item.currentHealthStatus === 'degraded') return 'dot-red'
+  if (item.currentHealthStatus === 'slow_response') return 'dot-yellow'
+  if (item.currentHealthStatus === 'manual_takeover' || item.currentHealthStatus === 'maintenance') return 'dot-gray'
   const p = platformPercent(item)
   if (p >= 80) return 'dot-yellow'
   return 'dot-green'
+}
+
+function formatDuration(value?: number | null) {
+  const ms = Number(value || 0)
+  if (ms <= 0) return '-'
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(1)}s`
 }
 
 function platformInitial(value?: string | null) {
@@ -656,6 +686,29 @@ onBeforeUnmount(() => {
 
 .platform-progress-row strong {
   color: #0f172a;
+}
+
+.platform-observe-row {
+  display: flex;
+  position: relative;
+  z-index: 1;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.platform-observe-row span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid #e7edf5;
+  border-radius: 999px;
+  background: rgba(248, 250, 252, 0.86);
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .platform-card :deep(.el-progress) {

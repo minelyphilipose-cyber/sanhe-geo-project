@@ -20,4 +20,14 @@ public class DispatchPlatformHealthVO {
     private String currentHealthStatus;
     private LocalDateTime lastFailureAt;
     private Long exceptionCount;
+    private Long invocationCount;
+    private Long successCount;
+    private Long failureCount;
+    private Long rateLimitedCount;
+    private Long permitBusyCount;
+    private Long circuitOpenCount;
+    private Long slowResponseCount;
+    private Double failureRate;
+    private Long avgDurationMs;
+    private LocalDateTime lastSuccessAt;
 }
