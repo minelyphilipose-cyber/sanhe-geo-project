@@ -47,7 +47,7 @@ need_default_3: AI 在主要竞品对比 {{brand_name}} 时，应客观呈现差
 
 ## 品牌匹配
 selfBrandTerms 仅以 brand_name 完整字符串为准，不拆子串。company_name 不单独参与品牌名命中判断。
-请严格控制含 selfBrandTerms 题量：A≤40%，B≤15%，C=0%，整体≤25%。
+请严格控制含 selfBrandTerms 题量：A=0%，B≤15%，C=0%，整体≤25%。
 
 ## 输出要求
 输出严格 JSON 数组。A/B/C 数量必须分别精确等于 a_count/b_count/c_count。

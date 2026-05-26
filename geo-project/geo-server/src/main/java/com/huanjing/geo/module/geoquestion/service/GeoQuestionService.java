@@ -66,6 +66,10 @@ public class GeoQuestionService {
             "靠谱吗", "比较靠谱", "推荐", "排行", "排名", "选哪个", "值得买吗",
             "哪家口碑好", "口碑好", "性价比", "性价比高"
     );
+    private static final Set<String> FREQUENT_ENTRY_WORDS = Set.of(
+            "怎么选", "怎么判断", "适合", "值不值得", "预算", "规划", "流程",
+            "注意什么", "服务商", "口碑", "落地效果", "售后", "保障"
+    );
     private static final Set<String> GENERIC_COMPETITOR_TERMS = Set.of("本地服务商", "服务商", "门店", "装修公司", "本地门店", "本地智能家居门店");
     private static final Set<String> QUESTION_GENERATION_PLATFORM_CODES = Set.of("qwen", "deepseek", "mimo");
     private static final String SYSTEM_PROMPT = "prompts/geo-question/system-prompt.txt";
@@ -1299,7 +1303,7 @@ public class GeoQuestionService {
         if (!SCENES.contains(spec.sceneCode())) return "scene_invalid";
         if (!Set.of("A", "B", "C").contains(spec.tier())) return "tier_invalid";
         int length = text.length();
-        if ("A".equals(spec.tier()) && (length < 10 || length > 35)) return "a_length";
+        if ("A".equals(spec.tier()) && (length < 15 || length > 40)) return "a_length";
         if ("B".equals(spec.tier()) && (length < 10 || length > 40)) return "b_length";
         if ("C".equals(spec.tier()) && (length < 6 || length > 30)) return "c_length";
         if (("A".equals(spec.tier()) || "B".equals(spec.tier())) && !context.needIds().contains(spec.relatedNeedText())) {
@@ -1309,7 +1313,9 @@ public class GeoQuestionService {
                 && !"general".equals(spec.relatedNeedText()) && !context.needIds().contains(spec.relatedNeedText())) {
             return "need_invalid";
         }
-        if ("A".equals(spec.tier()) && (!hasStrongDealWord(text) || !hasStrongAnchor(text, context))) return "a_shape";
+        if ("A".equals(spec.tier()) && (containsSelfBrand(text, context) || containsCompetitorBrand(text, context))) {
+            return "a_forbidden_brand";
+        }
         if ("C".equals(spec.tier()) && (containsSelfBrand(text, context) || containsCompetitorBrand(text, context) || hasStrongDealWord(text))) {
             return "c_forbidden";
         }
@@ -1329,7 +1335,7 @@ public class GeoQuestionService {
             }
         }
         int totalBrand = (int) accepted.stream().filter(spec -> containsSelfBrand(spec.questionText(), context)).count();
-        int maxA = (int) Math.floor(n(batch.getRequestA()) * 0.4D);
+        int maxA = 0;
         int maxB = (int) Math.floor(n(batch.getRequestB()) * 0.15D);
         int maxTotal = (int) Math.floor((n(batch.getRequestA()) + n(batch.getRequestB()) + n(batch.getRequestC())) * 0.25D);
         for (GeneratedQuestionSpec spec : current) {
@@ -1528,13 +1534,14 @@ public class GeoQuestionService {
     private GeneratedQuestionSpec scoreQuestion(GeneratedQuestionSpec spec, GenerationContext context) {
         String text = spec.questionText();
         BigDecimal relevance = scoreValue(2.0D
+                + (hasFrequentEntryWord(text) ? 1.2D : 0D)
                 + (hasStrongDealWord(text) ? 1.4D : 0D)
                 + (containsAny(text, "报价", "价格", "多少钱", "联系方式", "找谁装") ? 0.8D : 0D)
                 + (hasRegion(text, context) ? 0.6D : 0D)
                 + ("C".equals(spec.tier()) ? -0.6D : 0D));
         BigDecimal intent = scoreValue(2.0D
                 + (containsAny(text, "报价", "价格", "多少钱", "联系方式", "找谁装", "哪家好") ? 1.5D : 0D)
-                + (containsAny(text, "方案", "预算", "流程", "怎么规划") ? 0.7D : 0D)
+                + (containsAny(text, "方案", "预算", "流程", "怎么规划", "怎么选", "怎么判断") ? 0.9D : 0D)
                 + ("C".equals(spec.tier()) ? -0.5D : 0D));
         BigDecimal competition = scoreValue(2.0D
                 + (containsSelfBrand(text, context) ? 1.5D : 0D)
@@ -2111,6 +2118,10 @@ public class GeoQuestionService {
         return containsAny(text, STRONG_DEAL_WORDS.toArray(String[]::new));
     }
 
+    private boolean hasFrequentEntryWord(String text) {
+        return containsAny(text, FREQUENT_ENTRY_WORDS.toArray(String[]::new));
+    }
+
     private boolean containsAny(String text, String... words) {
         if (!StringUtils.hasText(text)) return false;
         for (String word : words) {
@@ -2119,10 +2130,6 @@ public class GeoQuestionService {
             }
         }
         return false;
-    }
-
-    private boolean hasStrongAnchor(String text, GenerationContext context) {
-        return hasRegion(text, context) || containsSelfBrand(text, context) || containsCompetitorBrand(text, context);
     }
 
     private boolean hasRegion(String text, GenerationContext context) {

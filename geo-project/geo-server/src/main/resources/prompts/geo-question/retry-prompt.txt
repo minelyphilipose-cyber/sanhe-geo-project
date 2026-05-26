@@ -38,10 +38,12 @@ C 类可以绑定 need_N，也可以使用 general。
 ## 补足要求
 只生成缺口数量：A={{retry_a_count}}，B={{retry_b_count}}，C={{retry_c_count}}，总计 {{retry_total}}。
 继续遵守 A/B/C 形态定义、C 类禁词、sceneCode 枚举和 5 个英文 key。
-如果上一轮出现 a_length/b_length/c_length，本轮避免短句：A 尽量 15-35 字，B 尽量 15-40 字，C 尽量 10-30 字。
-A 类含 brand_name 不得超过 A 类数量 40%，B 类不得超过 15%，C 类必须为 0，整体不得超过 25%。
+如果上一轮出现 a_length/b_length/c_length，本轮避免短句：A 尽量 15-40 字，B 尽量 15-40 字，C 尽量 10-30 字。
+A 类含 brand_name 必须为 0，B 类不得超过 15%，C 类必须为 0，整体不得超过 25%。
 C 类禁止出现 competitor_brand_terms 中任一品牌名。
 如果上一轮因品牌名比例超限被剔除，本轮优先生成不含自家品牌的问题。
-补足 B/C 类时，questionText 禁止出现 brand_name；补足 A 类时优先使用地域或竞品锚点。
+补足 A/C 类时，questionText 禁止出现 brand_name；补足 A 类时也禁止直接点名 competitor_brand_terms 中任一品牌名。
+补足 A 类时优先生成高频服务需求入口题，例如服务怎么选、方案怎么规划、预算怎么判断、服务商怎么看、流程和效果如何评估。
+如果上一轮出现 a_forbidden_brand，本轮 A 类必须使用无品牌、无竞品的自然问法。
 如果上一轮因 C 类含品牌或强成交词被剔除，本轮 C 类必须使用中立科普、流程、功能或长尾维度。
 输出严格 JSON 数组，不要 markdown，不要解释。

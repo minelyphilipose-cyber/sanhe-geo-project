@@ -508,7 +508,7 @@ const QuotaCard = defineComponent({
       h('div', { class: 'card-head' }, [h('span', props.title)]),
       h('div', { class: 'card-body' }, [
         h('div', { class: 'quota-card-list' }, [
-          tier('A 类', '高意图 / 承诺考核', 'A'),
+          tier('A 类', '高频入口 / 品牌推荐', 'A'),
           tier('B 类', '重点观察 / 场景拓展', 'B'),
           tier('C 类', '长尾铺底 / 覆盖补充', 'C'),
         ]),
