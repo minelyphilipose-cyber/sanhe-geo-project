@@ -31,6 +31,7 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
@@ -63,6 +64,7 @@ class BatchArticlePublishServiceTest {
     private CurrentUserService currentUserService;
     private ContentDistributionService contentDistributionService;
     private ForumBoardRoutingService forumBoardRoutingService;
+    private StringRedisTemplate redisTemplate;
     private BatchArticlePublishService service;
     private final List<BatchArticlePublishJob> insertedJobs = new ArrayList<>();
     private final List<BatchArticlePublishItem> insertedItems = new ArrayList<>();
@@ -88,6 +90,7 @@ class BatchArticlePublishServiceTest {
         currentUserService = mock(CurrentUserService.class);
         contentDistributionService = mock(ContentDistributionService.class);
         forumBoardRoutingService = mock(ForumBoardRoutingService.class);
+        redisTemplate = mock(StringRedisTemplate.class);
         service = new BatchArticlePublishService(
                 jobMapper,
                 itemMapper,
@@ -99,7 +102,8 @@ class BatchArticlePublishServiceTest {
                 publishSiteMapper,
                 currentUserService,
                 contentDistributionService,
-                forumBoardRoutingService
+                forumBoardRoutingService,
+                redisTemplate
         );
         ReflectionTestUtils.setField(service, "batchPublishExecutor", (Executor) command -> {
         });

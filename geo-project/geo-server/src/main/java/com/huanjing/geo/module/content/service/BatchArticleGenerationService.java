@@ -197,11 +197,23 @@ public class BatchArticleGenerationService {
     public BatchArticleGenerateResponse create(BatchArticleGenerateRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.update");
+        return createInternal(req, operator, true);
+    }
 
+    public BatchArticleGenerateResponse createSystemBatch(BatchArticleGenerateRequest req, Long operatorId) {
+        SysUser operator = operatorId == null ? null : currentUserService.requireById(operatorId);
+        return createInternal(req, operator, false);
+    }
+
+    private BatchArticleGenerateResponse createInternal(BatchArticleGenerateRequest req,
+                                                        SysUser operator,
+                                                        boolean checkAccess) {
         Project project = requireActiveProject(req.getProjectId());
-        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
-        if (project.getBrandId() != null) {
+        if (checkAccess) {
+            currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
+        }
+        if (checkAccess && project.getBrandId() != null) {
             brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
         }
 
@@ -241,7 +253,7 @@ public class BatchArticleGenerationService {
             batch.setFailedCount(0);
             batch.setWarningCount(0);
             batch.setStatus(STATUS_PENDING);
-            batch.setCreatedBy(operator.getId());
+            batch.setCreatedBy(operator == null ? null : operator.getId());
             batchMapper.insert(batch);
 
             int articleIndexInBatch = 1;

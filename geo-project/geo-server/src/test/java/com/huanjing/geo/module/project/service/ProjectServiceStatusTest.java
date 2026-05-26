@@ -63,6 +63,8 @@ class ProjectServiceStatusTest {
     private BrandStatementDispatchService brandStatementDispatchService;
     @Mock
     private ProjectDistributionChannelAllocationService channelAllocationService;
+    @Mock
+    private KeywordTypeConfigService keywordTypeConfigService;
 
     @InjectMocks
     private ProjectService projectService;
@@ -139,6 +141,8 @@ class ProjectServiceStatusTest {
         when(keywordGroupService.calcSavedCountsByGroupIds(any())).thenReturn(Map.of(101L, 3L));
         when(keywordGroupService.calcSavedTierCountsByGroupIds(any()))
                 .thenReturn(Map.of(101L, new KeywordGroupService.KeywordTierCounts(1L, 1L, 1L)));
+        when(keywordTypeConfigService.labelOf("imported")).thenReturn("导入词");
+        when(keywordTypeConfigService.isLegacyType("imported")).thenReturn(false);
 
         Project detail = projectService.detail(20L);
 

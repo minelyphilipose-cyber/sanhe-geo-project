@@ -199,6 +199,22 @@ geo:
   report:
     web-base-url: ${REPORT_WEB_BASE_URL:http://127.0.0.1:3000}
     render-timeout-ms: ${REPORT_RENDER_TIMEOUT_MS:30000}
+  content:
+    batch-publish:
+      poll-ms: ${CONTENT_BATCH_PUBLISH_POLL_MS:30000}
+      lock-key: ${CONTENT_BATCH_PUBLISH_LOCK_KEY:geo:content:batch-publish:scheduler:lock}
+      lock-ttl-seconds: ${CONTENT_BATCH_PUBLISH_LOCK_TTL_SECONDS:120}
+    auto-distribution:
+      enabled: ${CONTENT_AUTO_DISTRIBUTION_ENABLED:true}
+      cron: "${CONTENT_AUTO_DISTRIBUTION_CRON:0 0 1 * * ?}"
+      progress-poll-ms: ${CONTENT_AUTO_DISTRIBUTION_PROGRESS_POLL_MS:60000}
+      lock-key: ${CONTENT_AUTO_DISTRIBUTION_LOCK_KEY:geo:content:auto-distribution:daily-lock}
+      progress-lock-key: ${CONTENT_AUTO_DISTRIBUTION_PROGRESS_LOCK_KEY:geo:content:auto-distribution:progress-lock}
+      lock-ttl-seconds: ${CONTENT_AUTO_DISTRIBUTION_LOCK_TTL_SECONDS:1800}
+      publish-window-start: ${CONTENT_AUTO_DISTRIBUTION_PUBLISH_WINDOW_START:01:00}
+      publish-window-end: ${CONTENT_AUTO_DISTRIBUTION_PUBLISH_WINDOW_END:23:00}
+      publish-time-jitter-minutes: ${CONTENT_AUTO_DISTRIBUTION_JITTER_MINUTES:15}
+      operator-user-id: ${CONTENT_AUTO_DISTRIBUTION_OPERATOR_USER_ID:0}
   presale-export:
     browser:
       enabled: ${PRESALE_EXPORT_BROWSER_ENABLED:true}

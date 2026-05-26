@@ -29,6 +29,8 @@ import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import jakarta.annotation.Resource;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,11 +41,14 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 @Service
@@ -66,8 +71,13 @@ public class BatchArticlePublishService {
     private final CurrentUserService currentUserService;
     private final ContentDistributionService contentDistributionService;
     private final ForumBoardRoutingService forumBoardRoutingService;
+    private final StringRedisTemplate redisTemplate;
     @Resource(name = "taskExecutor")
     private Executor batchPublishExecutor;
+    @Value("${geo.content.batch-publish.lock-key:geo:content:batch-publish:scheduler:lock}")
+    private String schedulerLockKey;
+    @Value("${geo.content.batch-publish.lock-ttl-seconds:120}")
+    private long schedulerLockTtlSeconds;
 
     @Transactional
     public BatchArticlePublishResponse submit(BatchArticlePublishRequest request) {
@@ -125,12 +135,83 @@ public class BatchArticlePublishService {
         return response(job.getId());
     }
 
+    @Transactional
+    public SystemPublishJobResult createSystemScheduledJob(String jobName,
+                                                           Long operatorId,
+                                                           List<SystemPublishPlan> plans) {
+        if (plans == null || plans.isEmpty()) {
+            throw new BizException(400, "publish plans cannot be empty");
+        }
+        BatchArticlePublishJob job = new BatchArticlePublishJob();
+        job.setJobName(StringUtils.hasText(jobName) ? compactJobNamePart(jobName) : "自动分发_" + LocalDateTime.now().format(JOB_NAME_DATE));
+        job.setPublishMode("scheduled");
+        job.setStatus("pending");
+        job.setScheduledAt(plans.stream().map(SystemPublishPlan::plannedAt).min(LocalDateTime::compareTo).orElse(LocalDateTime.now()));
+        job.setIntervalMinutes(0);
+        job.setPlatformConcurrency(1);
+        job.setTotalCount(plans.size());
+        job.setSuccessCount(0);
+        job.setFailedCount(0);
+        job.setCreatedBy(operatorId);
+        jobMapper.insert(job);
+
+        Map<Long, Long> itemIdsByArticleId = new LinkedHashMap<>();
+        for (SystemPublishPlan plan : plans) {
+            ArticleDraft article = requireArticle(plan.articleId());
+            if (!ACTIVE_ARTICLE_STATUS.contains(article.getStatus())) {
+                throw new BizException(400, "article " + plan.articleId() + " is not approved or unpublished");
+            }
+            BatchArticlePublishItem item = new BatchArticlePublishItem();
+            item.setJobId(job.getId());
+            item.setArticleId(plan.articleId());
+            item.setProjectId(article.getProjectId());
+            item.setPlatformKey(plan.platformKey());
+            item.setContentStyle(plan.contentStyle());
+            item.setTargetSiteId(plan.targetSiteId());
+            item.setTargetForumFid(plan.targetForumFid());
+            item.setTargetBrandId(plan.targetBrandId());
+            item.setPlannedAt(plan.plannedAt());
+            item.setStatus("pending");
+            itemMapper.insert(item);
+            itemIdsByArticleId.put(plan.articleId(), item.getId());
+        }
+        triggerAsyncExecutionAfterCommit();
+        return new SystemPublishJobResult(job.getId(), itemIdsByArticleId);
+    }
+
     @Scheduled(fixedDelayString = "${geo.content.batch-publish.poll-ms:30000}")
     public void executeScheduledItems() {
+        String lockValue = UUID.randomUUID().toString();
         try {
+            if (!tryAcquireSchedulerLock(lockValue)) {
+                return;
+            }
             executeDueItems(20);
         } catch (Exception ex) {
             log.warn("batch article publish scheduler failed: {}", ex.getMessage(), ex);
+        } finally {
+            releaseSchedulerLock(lockValue);
+        }
+    }
+
+    private boolean tryAcquireSchedulerLock(String lockValue) {
+        Boolean locked = redisTemplate.opsForValue().setIfAbsent(
+                schedulerLockKey,
+                lockValue,
+                Math.max(schedulerLockTtlSeconds, 1),
+                TimeUnit.SECONDS
+        );
+        return Boolean.TRUE.equals(locked);
+    }
+
+    private void releaseSchedulerLock(String lockValue) {
+        try {
+            String current = redisTemplate.opsForValue().get(schedulerLockKey);
+            if (lockValue.equals(current)) {
+                redisTemplate.delete(schedulerLockKey);
+            }
+        } catch (Exception ex) {
+            log.warn("batch article publish scheduler lock release failed: {}", ex.getMessage());
         }
     }
 
@@ -360,10 +441,7 @@ public class BatchArticlePublishService {
         ArticleDraft firstArticle = articleIds.isEmpty() ? null : articleDraftMapper.selectById(articleIds.get(0));
         if (firstArticle != null && firstArticle.getProjectId() != null) {
             Project project = projectMapper.selectById(firstArticle.getProjectId());
-            Brand brand = project == null || project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
             subjectName = compactJobNamePart(firstText(
-                    brand == null ? null : brand.getBrandShortName(),
-                    brand == null ? null : brand.getBrandName(),
                     project == null ? null : project.getBrandName(),
                     project == null ? null : project.getProjectName(),
                     firstArticle.getTitle()
@@ -627,5 +705,17 @@ public class BatchArticlePublishService {
     }
 
     private record PlatformTarget(String platformKey) {
+    }
+
+    public record SystemPublishPlan(Long articleId,
+                                    String platformKey,
+                                    String contentStyle,
+                                    Long targetSiteId,
+                                    Long targetBrandId,
+                                    Integer targetForumFid,
+                                    LocalDateTime plannedAt) {
+    }
+
+    public record SystemPublishJobResult(Long jobId, Map<Long, Long> itemIdsByArticleId) {
     }
 }

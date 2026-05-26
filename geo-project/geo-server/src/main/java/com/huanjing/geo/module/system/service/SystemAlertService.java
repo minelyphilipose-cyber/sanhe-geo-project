@@ -2,8 +2,11 @@ package com.huanjing.geo.module.system.service;
 
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.huanjing.geo.module.system.dto.SystemAlertTodoVO;
 import com.huanjing.geo.module.system.entity.SystemAlert;
 import com.huanjing.geo.module.system.mapper.SystemAlertMapper;
+import com.huanjing.geo.module.system.entity.SysUser;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -15,6 +18,7 @@ import java.util.Map;
 public class SystemAlertService {
 
     private final SystemAlertMapper systemAlertMapper;
+    private final CurrentUserService currentUserService;
 
     public void createAlert(String alertType,
                             String severity,
@@ -57,5 +61,31 @@ public class SystemAlertService {
         alert.setDedupeKey(StringUtils.hasText(dedupeKey) ? dedupeKey.trim() : null);
         alert.setIsResolved(false);
         systemAlertMapper.insert(alert);
+    }
+
+    public Page<SystemAlertTodoVO> myTodos(long current, long size) {
+        SysUser user = currentUserService.requireCurrentUser();
+        Page<SystemAlert> page = systemAlertMapper.selectPage(new Page<>(current, size),
+                new LambdaQueryWrapper<SystemAlert>()
+                        .eq(SystemAlert::getIsResolved, false)
+                        .and(wrapper -> wrapper.eq(SystemAlert::getRecipientUserId, user.getId())
+                                .or()
+                                .eq(SystemAlert::getRecipientRole, user.getRole()))
+                        .orderByDesc(SystemAlert::getCreatedAt));
+        Page<SystemAlertTodoVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        result.setRecords(page.getRecords().stream().map(this::toTodoVO).toList());
+        return result;
+    }
+
+    private SystemAlertTodoVO toTodoVO(SystemAlert alert) {
+        SystemAlertTodoVO vo = new SystemAlertTodoVO();
+        vo.setId(alert.getId());
+        vo.setAlertType(alert.getAlertType());
+        vo.setSeverity(alert.getSeverity());
+        vo.setSource(alert.getSource());
+        vo.setMessage(alert.getMessage());
+        vo.setContextJson(alert.getContextJson());
+        vo.setCreatedAt(alert.getCreatedAt());
+        return vo;
     }
 }
