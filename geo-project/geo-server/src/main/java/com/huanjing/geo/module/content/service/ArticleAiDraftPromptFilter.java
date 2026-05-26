@@ -54,8 +54,11 @@ public class ArticleAiDraftPromptFilter {
     }
 
     private String removeGeneratedRedactionMarkers(String value) {
-        if (!StringUtils.hasText(value) || !value.contains("_REDACTED]")) {
+        if (!StringUtils.hasText(value)) {
             return value;
+        }
+        if (!value.contains("_REDACTED]")) {
+            return removeTemplatePlaceholders(value);
         }
         StringBuilder cleaned = new StringBuilder();
         for (String line : value.split("\\r?\\n", -1)) {
@@ -72,7 +75,14 @@ public class ArticleAiDraftPromptFilter {
             }
             cleaned.append(replaced).append('\n');
         }
-        return cleaned.toString().trim();
+        return removeTemplatePlaceholders(cleaned.toString().trim());
+    }
+
+    private String removeTemplatePlaceholders(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        return value.replaceAll("\\{\\{[a-zA-Z][a-zA-Z0-9_]*}}", "").trim();
     }
 
     private boolean isEmptyContactLine(String value) {

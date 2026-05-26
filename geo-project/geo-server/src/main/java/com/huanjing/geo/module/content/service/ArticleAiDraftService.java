@@ -413,7 +413,7 @@ public class ArticleAiDraftService {
                 1,
                 List.of(),
                 null
-        ));
+        ), buildContactBlock(articleType, req.getTopic(), brand));
     }
 
     private String buildPreviewExtraPrompt(ArticleAiDraftPreviewRequest req, String articleType, Brand brand) {
@@ -425,10 +425,6 @@ public class ArticleAiDraftService {
         }
         if (StringUtils.hasText(req.getReferenceMaterials())) {
             parts.add("参考资料：" + req.getReferenceMaterials().trim());
-        }
-        String contactInfo = buildContactInfo(articleType, req.getTopic(), brand);
-        if (StringUtils.hasText(contactInfo)) {
-            parts.add(contactInfo);
         }
         return String.join("\n", parts);
     }
@@ -460,20 +456,11 @@ public class ArticleAiDraftService {
         }
     }
 
-    private String buildContactInfo(String articleType, String topic, Brand brand) {
+    private String buildContactBlock(String articleType, String topic, Brand brand) {
         if (!shouldIncludeContactInfo(articleType, topic) || brand == null) {
             return "";
         }
-        String phone = nullToDash(brand.getPublicPhone());
-        String address = nullToDash(brand.getPublicAddress());
-        if ("-".equals(phone) && "-".equals(address)) {
-            return "";
-        }
-        return """
-                - 可在文中提及的联系方式（仅在回答“如何联系/咨询途径”类问题中使用一次）：
-                  · 电话：%s
-                  · 地址：%s
-                """.formatted(phone, address).stripTrailing();
+        return promptBuilder.buildContactBlock(brand, "full");
     }
 
     private boolean shouldIncludeContactInfo(String articleType, String topic) {

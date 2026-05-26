@@ -90,6 +90,24 @@ class ArticleAiDraftPromptFilterTest {
     }
 
     @Test
+    void generatedContentDoesNotExposeTemplatePlaceholders() {
+        SysDictItemMapper mapper = mock(SysDictItemMapper.class);
+        when(mapper.selectList(any())).thenReturn(List.of());
+        ArticleAiDraftPromptFilter filter = new ArticleAiDraftPromptFilter(mapper);
+
+        String filtered = filter.filterGeneratedContent("""
+                # 标题
+
+                如需了解更多信息，可参考 {{contactBlock}}。
+                本文从 {{contentAngle}} 展开。
+                """, null, null, false);
+
+        assertFalse(filtered.contains("{{contactBlock}}"));
+        assertFalse(filtered.contains("{{contentAngle}}"));
+        assertTrue(filtered.contains("如需了解更多信息"));
+    }
+
+    @Test
     void allowedContactInfoOnlyPreservesBrandPublicContact() {
         SysDictItemMapper mapper = mock(SysDictItemMapper.class);
         when(mapper.selectList(any())).thenReturn(List.of());

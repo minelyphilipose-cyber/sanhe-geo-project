@@ -143,6 +143,10 @@ public class BatchArticlePromptBuilder {
     private final ArticlePromptVariableRegistry variableRegistry;
 
     public PromptBuildResult build(PromptBuildInput input) {
+        return build(input, "");
+    }
+
+    public PromptBuildResult build(PromptBuildInput input, String contactBlock) {
         String contentAngle = resolveContentAngle(input.articleIndexInBatch());
         String audiencePerspective = resolveAudiencePerspective(input.articleIndexInBatch());
         String businessFocus = resolveBusinessFocus(input.brandStatement(), input.brand());
@@ -150,13 +154,23 @@ public class BatchArticlePromptBuilder {
         String userPrompt = buildUserPrompt(input, contentAngle, audiencePerspective, businessFocus, recentTitles);
         userPrompt = withTitleGuideInstruction(userPrompt, input.titleGuide());
 
+        String resolvedContactBlock = StringUtils.hasText(contactBlock) ? contactBlock.trim() : "";
+        String systemPrompt = resolveGlobalRuleVariables(
+                withGlobalRules(SYSTEM_PROMPT, input.forbiddenPhrases()),
+                input,
+                contentAngle,
+                recentTitles,
+                resolvedContactBlock
+        );
+
         Map<String, Object> promptSnapshot = new LinkedHashMap<>();
         promptSnapshot.put("promptVersion", PROMPT_VERSION);
-        promptSnapshot.put("systemPrompt", SYSTEM_PROMPT);
+        promptSnapshot.put("systemPrompt", systemPrompt);
         promptSnapshot.put("userPrompt", userPrompt);
         promptSnapshot.put("contentAngle", contentAngle);
         promptSnapshot.put("audiencePerspective", audiencePerspective);
         promptSnapshot.put("recentTitles", recentTitles);
+        promptSnapshot.put("contactBlock", resolvedContactBlock);
         promptSnapshot.put("titleGuide", input.titleGuide());
 
         Map<String, Object> inputSnapshot = new LinkedHashMap<>();
@@ -174,9 +188,9 @@ public class BatchArticlePromptBuilder {
         inputSnapshot.put("length", input.length());
         inputSnapshot.put("extraPrompt", input.extraPrompt());
         inputSnapshot.put("businessFocus", businessFocus);
+        inputSnapshot.put("contactBlock", resolvedContactBlock);
         inputSnapshot.put("titleGuide", input.titleGuide());
 
-        String systemPrompt = withGlobalRules(SYSTEM_PROMPT, input.forbiddenPhrases());
         return new PromptBuildResult(
                 systemPrompt,
                 systemPrompt + "\n\n" + userPrompt,
@@ -197,7 +211,13 @@ public class BatchArticlePromptBuilder {
         String contactBlock = buildContactBlock(template, input.brand());
         Map<String, String> brandFacts = buildBrandFacts(input);
         String templateSystemPrompt = StringUtils.hasText(version.getSystemPrompt()) ? version.getSystemPrompt() : SYSTEM_PROMPT;
-        String systemPrompt = withGlobalRules(templateSystemPrompt, input.forbiddenPhrases()).replace("{{contactBlock}}", contactBlock);
+        String systemPrompt = resolveGlobalRuleVariables(
+                withGlobalRules(templateSystemPrompt, input.forbiddenPhrases()),
+                input,
+                contentAngle,
+                recentTitles,
+                contactBlock
+        );
         String userPrompt = renderTemplate(version.getUserPromptTemplate(), input, template, contentAngle,
                 audiencePerspective, businessFocus, recentTitles, contactBlock, brandFacts);
         userPrompt = withTitleGuideInstruction(userPrompt, input.titleGuide());
@@ -431,6 +451,20 @@ public class BatchArticlePromptBuilder {
                 + forbiddenPhrasesInstruction(forbiddenPhrases)
                 + "\n\n# 模板级系统提示词\n\n"
                 + (StringUtils.hasText(systemPrompt) ? systemPrompt.trim() : SYSTEM_PROMPT);
+    }
+
+    private String resolveGlobalRuleVariables(String prompt,
+                                              PromptBuildInput input,
+                                              String contentAngle,
+                                              List<String> recentTitles,
+                                              String contactBlock) {
+        return prompt
+                .replace("{{contactBlock}}", contactBlock == null ? "" : contactBlock)
+                .replace("{{topic}}", trimToDash(input.topic()))
+                .replace("{{contentAngle}}", contentAngle == null ? "" : contentAngle)
+                .replace("{{recentTitles}}", recentTitles == null || recentTitles.isEmpty()
+                        ? ""
+                        : String.join("；", recentTitles));
     }
 
     public String buildContactBlock(Brand brand, String contactDisclosureMode) {
