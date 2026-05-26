@@ -633,6 +633,16 @@ export interface SystemAlert {
   createdAt: string
 }
 
+export interface SystemAlertTodoItem {
+  id: number
+  alertType: string
+  severity: AlertSeverity
+  source: string
+  message: string
+  contextJson?: string | null
+  createdAt: string
+}
+
 export interface DispatchDashboardMetrics {
   activeProjectCount: number
   dueTaskCount: number

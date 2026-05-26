@@ -46,7 +46,7 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
 
     @Override
     public SubmitResult submit(ArticleDraft article, String contentMarkdown, PublishSite site) {
-        throw new UnsupportedOperationException("Use submitToTarget for brand_geo_site");
+        throw new UnsupportedOperationException("Agent 官网发布请使用指定目标发布入口");
     }
 
     @Override
@@ -66,7 +66,7 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
         }
 
         if (!StringUtils.hasText(properties.getEndpoint())) {
-            return SubmitResult.failure(500, requestPayload, null, "brand geo site endpoint is not configured",
+            return SubmitResult.failure(500, requestPayload, null, "Agent 官网发布接口未配置",
                     FailureKind.SERVER_ERROR, true);
         }
 
@@ -98,7 +98,7 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
                     safeMessage(ex),
                     ex);
             return SubmitResult.failure(500, requestPayload, null,
-                    "network error: " + safeMessage(ex) + " while POST " + properties.getEndpoint(),
+                    "Agent 官网发布请求失败：" + safeMessage(ex),
                     FailureKind.SERVER_ERROR, true);
         }
     }
@@ -140,13 +140,16 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
         int httpCode = response.statusCode();
         String body = response.body();
         if (httpCode == 429) {
-            return SubmitResult.failure(httpCode, requestPayload, body, "HTTP 429", FailureKind.SERVER_ERROR, true);
+            return SubmitResult.failure(httpCode, requestPayload, body, "Agent 官网发布接口请求过于频繁", FailureKind.SERVER_ERROR, true);
+        }
+        if (httpCode == 401 || httpCode == 403) {
+            return SubmitResult.failure(httpCode, requestPayload, body, "Agent 官网登录认证信息已过期，请更新", FailureKind.AUTH_EXPIRED, false);
         }
         if (httpCode >= 400 && httpCode < 500) {
-            return SubmitResult.failure(httpCode, requestPayload, body, "HTTP " + httpCode, FailureKind.CLIENT_ERROR, false);
+            return SubmitResult.failure(httpCode, requestPayload, body, "Agent 官网发布请求参数异常，状态码：" + httpCode, FailureKind.CLIENT_ERROR, false);
         }
         if (httpCode < 200 || httpCode >= 300) {
-            return SubmitResult.failure(httpCode, requestPayload, body, "HTTP " + httpCode, FailureKind.SERVER_ERROR, true);
+            return SubmitResult.failure(httpCode, requestPayload, body, "Agent 官网发布接口异常，状态码：" + httpCode, FailureKind.SERVER_ERROR, true);
         }
 
         JsonNode root;
@@ -158,14 +161,14 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
 
         int bizCode = root.path("code").asInt(-1);
         if (bizCode != 200) {
-            String message = root.path("message").asText("business error");
+            String message = root.path("message").asText("业务处理失败");
             return SubmitResult.failure(httpCode, requestPayload, body, "body code " + bizCode + ": " + message,
-                    FailureKind.CLIENT_ERROR, false);
+                    classifyBusinessFailure(message), false);
         }
 
         JsonNode idNode = root.path("data").path("id");
         if (!idNode.canConvertToLong()) {
-            return SubmitResult.failure(httpCode, requestPayload, body, "response data.id missing or invalid",
+            return SubmitResult.failure(httpCode, requestPayload, body, "Agent 官网返回结果缺少文章 ID",
                     FailureKind.SERVER_ERROR, true);
         }
 
@@ -190,5 +193,14 @@ public class BrandGeoSiteAdapter implements SiteAdapter {
 
     private String safeMessage(Exception ex) {
         return StringUtils.hasText(ex.getMessage()) ? ex.getMessage() : ex.getClass().getSimpleName();
+    }
+
+    private String classifyBusinessFailure(String message) {
+        String lowered = message == null ? "" : message.toLowerCase();
+        if (lowered.contains("auth") || lowered.contains("token") || lowered.contains("login")
+                || lowered.contains("认证") || lowered.contains("登录") || lowered.contains("未授权")) {
+            return FailureKind.AUTH_EXPIRED;
+        }
+        return FailureKind.CLIENT_ERROR;
     }
 }

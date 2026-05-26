@@ -42,7 +42,7 @@ class IndustryNewsSiteAdapterTest {
     }
 
     @Test
-    void treatsSuccessFalseAsBusinessFailure() {
+    void treatsTokenFailureAsAuthExpired() {
         CapturingAdapter adapter = new CapturingAdapter(objectMapper,
                 new HttpClientUtil.HttpResult(200, "{\"success\":false,\"data\":{},\"message\":\"token invalid\"}", Map.of()));
 
@@ -50,6 +50,18 @@ class IndustryNewsSiteAdapterTest {
 
         assertThat(result.isSuccess()).isFalse();
         assertThat(result.getErrorMessage()).isEqualTo("token invalid");
+        assertThat(result.getFailureKind()).isEqualTo(FailureKind.AUTH_EXPIRED);
+    }
+
+    @Test
+    void treatsSuccessFalseWithoutAuthSignalAsBusinessFailure() {
+        CapturingAdapter adapter = new CapturingAdapter(objectMapper,
+                new HttpClientUtil.HttpResult(200, "{\"success\":false,\"data\":{},\"message\":\"category missing\"}", Map.of()));
+
+        SubmitResult result = adapter.submitToTarget(article(), "# 标题\n\n正文", new TargetContext.IndustrySiteTarget(site(), project()));
+
+        assertThat(result.isSuccess()).isFalse();
+        assertThat(result.getErrorMessage()).isEqualTo("category missing");
         assertThat(result.getFailureKind()).isEqualTo(FailureKind.CLIENT_ERROR);
     }
 

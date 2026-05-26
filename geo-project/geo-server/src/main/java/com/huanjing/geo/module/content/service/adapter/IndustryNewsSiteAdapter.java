@@ -125,7 +125,7 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
                     safeMessage(ex),
                     ex);
             return SubmitResult.failure(500, requestPayload, null,
-                    "network error: " + safeMessage(ex) + " while POST " + site.getApiEndpoint(),
+                    "行业资讯站发布请求失败：" + safeMessage(ex),
                     FailureKind.SERVER_ERROR, true);
         }
     }
@@ -136,21 +136,21 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
                                                   Project project) {
         java.util.ArrayList<String> errors = new java.util.ArrayList<>();
         if (site == null || !StringUtils.hasText(site.getApiEndpoint())) {
-            errors.add("industry site apiEndpoint is required");
+            errors.add("行业资讯站发布接口不能为空");
         }
         if (article == null || !StringUtils.hasText(article.getTitle())) {
-            errors.add("title is empty");
+            errors.add("文章标题不能为空");
         }
         if (!StringUtils.hasText(contentMarkdown)) {
-            errors.add("markdown is empty");
+            errors.add("文章正文不能为空");
         }
         String categorySlug = resolveCategorySlug(article, project);
         if ("region".equals(categorySlug)) {
             if (project == null || !StringUtils.hasText(project.getProvinceName())) {
-                errors.add("province is required for region category");
+                errors.add("区域类文章需要配置省份");
             }
             if (project == null || !StringUtils.hasText(project.getCityName())) {
-                errors.add("city is required for region category");
+                errors.add("区域类文章需要配置城市");
             }
         }
         return errors.isEmpty() ? ValidationResult.pass() : ValidationResult.fail(errors);
@@ -197,14 +197,17 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
     private SubmitResult toSubmitResult(HttpClientUtil.HttpResult response, String requestPayload, PublishSite site) {
         int httpCode = response.statusCode();
         String body = response.body();
+        if (httpCode == 401 || httpCode == 403) {
+            return SubmitResult.failure(httpCode, requestPayload, body, "行业资讯站登录认证信息已过期，请更新", FailureKind.AUTH_EXPIRED, false);
+        }
         if (httpCode == 429) {
-            return SubmitResult.failure(httpCode, requestPayload, body, "HTTP 429", FailureKind.SERVER_ERROR, true);
+            return SubmitResult.failure(httpCode, requestPayload, body, "行业资讯站发布接口请求过于频繁", FailureKind.SERVER_ERROR, true);
         }
         if (httpCode >= 400 && httpCode < 500) {
-            return SubmitResult.failure(httpCode, requestPayload, body, "HTTP " + httpCode, FailureKind.CLIENT_ERROR, false);
+            return SubmitResult.failure(httpCode, requestPayload, body, "行业资讯站发布请求参数异常，状态码：" + httpCode, FailureKind.CLIENT_ERROR, false);
         }
         if (httpCode < 200 || httpCode >= 300) {
-            return SubmitResult.failure(httpCode, requestPayload, body, "HTTP " + httpCode, FailureKind.SERVER_ERROR, true);
+            return SubmitResult.failure(httpCode, requestPayload, body, "行业资讯站发布接口异常，状态码：" + httpCode, FailureKind.SERVER_ERROR, true);
         }
 
         JsonNode root;
@@ -215,8 +218,8 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
         }
 
         if (!root.path("success").asBoolean(false)) {
-            String message = root.path("message").asText("business error");
-            return SubmitResult.failure(httpCode, requestPayload, body, message, FailureKind.CLIENT_ERROR, false);
+            String message = root.path("message").asText("业务处理失败");
+            return SubmitResult.failure(httpCode, requestPayload, body, message, classifyBusinessFailure(message), false);
         }
 
         String publishedUrl = parsePublishedUrl(body, site);
@@ -350,5 +353,14 @@ public class IndustryNewsSiteAdapter implements SiteAdapter {
 
     private String safeMessage(Exception ex) {
         return StringUtils.hasText(ex.getMessage()) ? ex.getMessage() : ex.getClass().getSimpleName();
+    }
+
+    private String classifyBusinessFailure(String message) {
+        String lowered = message == null ? "" : message.toLowerCase(Locale.ROOT);
+        if (lowered.contains("auth") || lowered.contains("token") || lowered.contains("login")
+                || lowered.contains("认证") || lowered.contains("登录") || lowered.contains("未授权")) {
+            return FailureKind.AUTH_EXPIRED;
+        }
+        return FailureKind.CLIENT_ERROR;
     }
 }

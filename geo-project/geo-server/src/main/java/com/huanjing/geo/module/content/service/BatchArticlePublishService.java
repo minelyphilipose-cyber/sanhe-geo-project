@@ -92,10 +92,10 @@ public class BatchArticlePublishService {
                 .distinct()
                 .toList();
         if (articleIds.isEmpty()) {
-            throw new BizException(400, "articleIds cannot be empty");
+            throw new BizException(400, "请选择需要发布的文章");
         }
         if (articleIds.size() > 100) {
-            throw new BizException(400, "single batch publish cannot exceed 100 articles");
+            throw new BizException(400, "单次批量发布不能超过 100 篇文章");
         }
 
         PublishSite manualIndustrySite = request.getIndustrySiteId() == null ? null : requireIndustrySite(request.getIndustrySiteId());
@@ -138,9 +138,9 @@ public class BatchArticlePublishService {
     @Transactional
     public SystemPublishJobResult createSystemScheduledJob(String jobName,
                                                            Long operatorId,
-                                                           List<SystemPublishPlan> plans) {
+        List<SystemPublishPlan> plans) {
         if (plans == null || plans.isEmpty()) {
-            throw new BizException(400, "publish plans cannot be empty");
+            throw new BizException(400, "请配置发布计划");
         }
         BatchArticlePublishJob job = new BatchArticlePublishJob();
         job.setJobName(StringUtils.hasText(jobName) ? compactJobNamePart(jobName) : "自动分发_" + LocalDateTime.now().format(JOB_NAME_DATE));
@@ -320,6 +320,12 @@ public class BatchArticlePublishService {
         try {
             BatchArticlePublishJob job = jobMapper.selectById(item.getJobId());
             DistributionTask task = executeDistribution(item, job.getCreatedBy());
+            if ("failed".equals(task.getStatus())) {
+                itemMapper.update(null, new LambdaUpdateWrapper<BatchArticlePublishItem>()
+                        .eq(BatchArticlePublishItem::getId, item.getId())
+                        .set(BatchArticlePublishItem::getDistributionTaskId, task.getId()));
+                throw new BizException(500, StringUtils.hasText(task.getErrorMessage()) ? task.getErrorMessage() : "文章分发失败");
+            }
             itemMapper.update(null, new LambdaUpdateWrapper<BatchArticlePublishItem>()
                     .eq(BatchArticlePublishItem::getId, item.getId())
                     .set(BatchArticlePublishItem::getStatus, "success")
@@ -360,7 +366,7 @@ public class BatchArticlePublishService {
                     operatorId
             );
         }
-        throw new BizException(400, "unsupported publish platform: " + item.getPlatformKey());
+        throw new BizException(400, "不支持的发布平台：" + item.getPlatformKey());
     }
 
     private void markJobRunning(Long jobId) {
@@ -397,7 +403,7 @@ public class BatchArticlePublishService {
     public BatchArticlePublishResponse response(Long jobId) {
         BatchArticlePublishJob job = jobMapper.selectById(jobId);
         if (job == null) {
-            throw new BizException(404, "batch publish job not found");
+            throw new BizException(404, "批量发布任务不存在");
         }
         List<BatchArticlePublishItem> items = itemMapper.selectList(
                 new LambdaQueryWrapper<BatchArticlePublishItem>()
@@ -500,11 +506,11 @@ public class BatchArticlePublishService {
 
     private String normalizePublishMode(String publishMode) {
         if (!StringUtils.hasText(publishMode)) {
-            throw new BizException(400, "publishMode is required");
+            throw new BizException(400, "请选择发布模式");
         }
         String value = publishMode.trim();
         if (!Set.of("now", "scheduled").contains(value)) {
-            throw new BizException(400, "publishMode must be now or scheduled");
+            throw new BizException(400, "发布模式只能为立即发布或定时发布");
         }
         return value;
     }
@@ -514,16 +520,16 @@ public class BatchArticlePublishService {
             return LocalDateTime.now();
         }
         if (!StringUtils.hasText(scheduledAt)) {
-            throw new BizException(400, "scheduledAt is required");
+            throw new BizException(400, "请选择计划发布时间");
         }
         LocalDateTime time;
         try {
             time = LocalDateTime.parse(scheduledAt.trim(), DATE_TIME);
         } catch (Exception ex) {
-            throw new BizException(400, "scheduledAt format must be yyyy-MM-dd HH:mm:ss");
+            throw new BizException(400, "计划发布时间格式必须为 yyyy-MM-dd HH:mm:ss");
         }
         if (time.isBefore(LocalDateTime.now())) {
-            throw new BizException(400, "scheduledAt cannot be earlier than now");
+            throw new BizException(400, "计划发布时间不能早于当前时间");
         }
         return time;
     }
@@ -551,7 +557,7 @@ public class BatchArticlePublishService {
     private ArticleDraft requireArticle(Long articleId) {
         ArticleDraft article = articleDraftMapper.selectById(articleId);
         if (article == null) {
-            throw new BizException(404, "article not found: " + articleId);
+            throw new BizException(404, "文章不存在：" + articleId);
         }
         return article;
     }
@@ -559,7 +565,7 @@ public class BatchArticlePublishService {
     private Project requireProject(Long projectId) {
         Project project = projectMapper.selectById(projectId);
         if (project == null) {
-            throw new BizException(404, "project not found: " + projectId);
+            throw new BizException(404, "项目不存在：" + projectId);
         }
         return project;
     }
@@ -576,7 +582,7 @@ public class BatchArticlePublishService {
     private PublishSite requireIndustrySite(Long siteId) {
         PublishSite site = publishSiteMapper.selectById(siteId);
         if (site == null) {
-            throw new BizException(404, "publish site not found");
+            throw new BizException(404, "发布站点不存在");
         }
         if (!"active".equalsIgnoreCase(site.getStatus())) {
             throw new BizException(400, "publish site is not active");
@@ -596,7 +602,7 @@ public class BatchArticlePublishService {
     private PublishSite requireForumSite(Long siteId) {
         PublishSite site = publishSiteMapper.selectById(siteId);
         if (site == null) {
-            throw new BizException(404, "forum publish site not found");
+            throw new BizException(404, "论坛发布站点不存在");
         }
         if (!"active".equalsIgnoreCase(site.getStatus())) {
             throw new BizException(400, "forum publish site is not active");
@@ -633,7 +639,7 @@ public class BatchArticlePublishService {
         }
         Brand brand = brandMapper.selectById(project.getBrandId());
         if (brand == null || brand.getDeletedAt() != null) {
-            throw new BizException(404, "brand not found");
+            throw new BizException(404, "品牌不存在");
         }
         if (!StringUtils.hasText(brand.getIndustrySiteCode())) {
             throw new BizException(400, "brand industry site code is not configured");
@@ -651,7 +657,7 @@ public class BatchArticlePublishService {
             );
         }
         if (site == null) {
-            throw new BizException(404, "brand configured industry publish site not found");
+            throw new BizException(404, "品牌配置的行业资讯站不存在");
         }
         return requireIndustrySite(site.getId());
     }
@@ -699,7 +705,7 @@ public class BatchArticlePublishService {
 
     private String trimError(String message) {
         if (!StringUtils.hasText(message)) {
-            return "unknown error";
+            return "未知错误";
         }
         return message.length() > 1000 ? message.substring(0, 1000) : message;
     }

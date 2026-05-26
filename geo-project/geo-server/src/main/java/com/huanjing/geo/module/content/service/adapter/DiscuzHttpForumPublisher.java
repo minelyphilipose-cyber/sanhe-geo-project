@@ -499,13 +499,13 @@ public class DiscuzHttpForumPublisher {
             Document document = Jsoup.parse(response.body(), profile.baseUri().toString());
             Element form = document.selectFirst("form#postform");
             if (form == null) {
-                throw new BizException(400, "discuz post form not found");
+                throw new BizException(400, "Discuz 发帖表单不存在");
             }
             String formhash = valueOf(form, "input[name=formhash]");
             String posttime = valueOf(form, "input[name=posttime]");
             String wysiwyg = valueOf(form, "input[name=wysiwyg]");
             if (!StringUtils.hasText(formhash) || !StringUtils.hasText(posttime)) {
-                throw new BizException(400, "discuz post formhash or posttime not found");
+                throw new BizException(400, "Discuz 发帖表单缺少 formhash 或 posttime");
             }
             return new DiscuzPostForm(formhash, posttime, StringUtils.hasText(wysiwyg) ? wysiwyg : "1");
         }
@@ -518,7 +518,7 @@ public class DiscuzHttpForumPublisher {
                 formhash = valueOf(document, "input[name=formhash]");
             }
             if (!StringUtils.hasText(formhash)) {
-                throw new BizException(400, "discuz login formhash not found");
+                throw new BizException(400, "Discuz 登录表单缺少 formhash");
             }
             return new DiscuzLoginForm(formhash);
         }

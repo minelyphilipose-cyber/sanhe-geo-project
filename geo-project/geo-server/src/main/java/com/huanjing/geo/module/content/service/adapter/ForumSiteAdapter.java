@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.service.adapter;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
@@ -40,28 +41,28 @@ public class ForumSiteAdapter implements SiteAdapter {
     public ValidationResult validate(ArticleDraft article, String contentMarkdown, PublishSite site) {
         java.util.ArrayList<String> errors = new java.util.ArrayList<>();
         if (article == null || !StringUtils.hasText(article.getTitle())) {
-            errors.add("title is empty");
+            errors.add("文章标题不能为空");
         }
         if (!StringUtils.hasText(contentMarkdown)) {
-            errors.add("markdown is empty");
+            errors.add("文章正文不能为空");
         }
         if (site == null) {
-            errors.add("forum site is required");
+            errors.add("论坛站点不能为空");
             return ValidationResult.fail(errors);
         }
         ForumPublishProfile profile = parseProfile(site, errors);
         if (profile != null) {
-            requireText(profile.getLoginUrl(), "forum loginUrl is required", errors);
-            requireText(profile.getPostUrl(), "forum postUrl is required", errors);
-            requireText(profile.getSelectors().getUsername(), "forum username selector is required", errors);
-            requireText(profile.getSelectors().getPassword(), "forum password selector is required", errors);
-            requireText(profile.getSelectors().getLoginSubmit(), "forum loginSubmit selector is required", errors);
-            requireText(profile.getSelectors().getTitle(), "forum title selector is required", errors);
-            requireText(profile.getSelectors().getEditor(), "forum editor selector is required", errors);
-            requireText(profile.getSelectors().getSubmit(), "forum submit selector is required", errors);
+            requireText(profile.getLoginUrl(), "论坛登录页地址不能为空", errors);
+            requireText(profile.getPostUrl(), "论坛发帖页地址不能为空", errors);
+            requireText(profile.getSelectors().getUsername(), "论坛账号输入框选择器不能为空", errors);
+            requireText(profile.getSelectors().getPassword(), "论坛密码输入框选择器不能为空", errors);
+            requireText(profile.getSelectors().getLoginSubmit(), "论坛登录按钮选择器不能为空", errors);
+            requireText(profile.getSelectors().getTitle(), "论坛标题输入框选择器不能为空", errors);
+            requireText(profile.getSelectors().getEditor(), "论坛正文编辑器选择器不能为空", errors);
+            requireText(profile.getSelectors().getSubmit(), "论坛提交按钮选择器不能为空", errors);
         }
         if (!StringUtils.hasText(resolveCredential(site))) {
-            errors.add("forum credential is required");
+            errors.add("论坛登录信息不能为空");
         }
         return errors.isEmpty() ? ValidationResult.pass() : ValidationResult.fail(errors);
     }
@@ -87,7 +88,7 @@ public class ForumSiteAdapter implements SiteAdapter {
             );
             return browserPublisher.publish(profile, credential, payload);
         } catch (Exception ex) {
-            return SubmitResult.failure(500, null, null, safeMessage(ex), FailureKind.UNKNOWN, false);
+            return SubmitResult.failure(statusCode(ex), null, null, safeMessage(ex), classifyFailure(ex), false);
         }
     }
 
@@ -123,7 +124,7 @@ public class ForumSiteAdapter implements SiteAdapter {
 
     private ForumPublishProfile parseProfile(PublishSite site, List<String> errors) {
         if (!StringUtils.hasText(site.getContentConstraints())) {
-            errors.add("forum contentConstraints profile is required");
+            errors.add("论坛发布配置不能为空");
             return null;
         }
         try {
@@ -133,7 +134,7 @@ public class ForumSiteAdapter implements SiteAdapter {
             }
             return profile;
         } catch (Exception ex) {
-            errors.add("forum contentConstraints profile is invalid JSON");
+            errors.add("论坛发布配置不是合法 JSON");
             return null;
         }
     }
@@ -179,5 +180,21 @@ public class ForumSiteAdapter implements SiteAdapter {
 
     private String safeMessage(Exception ex) {
         return StringUtils.hasText(ex.getMessage()) ? ex.getMessage() : ex.getClass().getSimpleName();
+    }
+
+    private int statusCode(Exception ex) {
+        return ex instanceof BizException bizException ? bizException.getCode() : 500;
+    }
+
+    private String classifyFailure(Exception ex) {
+        if (ex instanceof BizException bizException && (bizException.getCode() == 401 || bizException.getCode() == 403)) {
+            return FailureKind.AUTH_EXPIRED;
+        }
+        String message = safeMessage(ex).toLowerCase();
+        if (message.contains("auth") || message.contains("login") || message.contains("cookie")
+                || message.contains("认证") || message.contains("登录")) {
+            return FailureKind.AUTH_EXPIRED;
+        }
+        return FailureKind.UNKNOWN;
     }
 }

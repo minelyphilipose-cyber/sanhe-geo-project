@@ -278,7 +278,7 @@ public class ContentAutoDistributionService {
         for (ContentAutoDistributionItem item : generatingItems) {
             BatchArticleGenerationTask task = generationTaskMapper.selectById(item.getGenerationTaskId());
             if (task == null) {
-                markItemFailed(item.getId(), "generation task not found");
+                markItemFailed(item.getId(), "文章生成任务不存在");
             } else if ("success".equals(task.getStatus()) && task.getArticleId() != null) {
                 itemMapper.update(null, new LambdaUpdateWrapper<ContentAutoDistributionItem>()
                         .eq(ContentAutoDistributionItem::getId, item.getId())
@@ -585,6 +585,8 @@ public class ContentAutoDistributionService {
             if (site != null) {
                 createCredentialAlert(site, DistributionTargetKind.FORUM_SITE.equals(item.getTargetKind()) ? "论坛" : "行业资讯站");
             }
+        } else if (DistributionTargetKind.BRAND_GEO_SITE.equals(item.getTargetKind()) && item.getTargetId() != null) {
+            createBrandGeoSiteCredentialAlert(item.getTargetId());
         }
     }
 
@@ -606,6 +608,29 @@ public class ContentAutoDistributionService {
                     null,
                     role,
                     "publish-credential-expired:" + site.getId() + ":" + role
+            );
+        }
+    }
+
+    private void createBrandGeoSiteCredentialAlert(Long brandId) {
+        Brand brand = brandMapper.selectById(brandId);
+        String name = brand == null || !StringUtils.hasText(brand.getBrandName()) ? "Agent 官网" : brand.getBrandName() + " Agent 官网";
+        Map<String, Object> context = new LinkedHashMap<>();
+        context.put("action", "brand_geo_site_edit");
+        context.put("brandId", brandId);
+        context.put("route", "/admin/brands/" + brandId);
+        context.put("targetLabel", "Agent 官网");
+        String message = name + "登录信息已过期，请更新";
+        for (String role : List.of("super_admin", "manager", "admin")) {
+            systemAlertService.createRecipientAlert(
+                    "publish_credential_expired",
+                    "warn",
+                    "content_auto_distribution",
+                    message,
+                    context,
+                    null,
+                    role,
+                    "brand-geo-site-credential-expired:" + brandId + ":" + role
             );
         }
     }
@@ -668,7 +693,7 @@ public class ContentAutoDistributionService {
 
     private String trimError(String value) {
         if (!StringUtils.hasText(value)) {
-            return "unknown error";
+            return "未知错误";
         }
         return value.length() > 1000 ? value.substring(0, 1000) : value;
     }

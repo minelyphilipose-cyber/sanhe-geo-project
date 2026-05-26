@@ -175,7 +175,7 @@ public class ForumBrowserPublisher {
                 .filter(StringUtils::hasText)
                 .anyMatch(selector -> page.locator(selector).count() > 0);
         if (!matched) {
-            throw new ForumPublishException(401, FailureKind.AUTH, false, "forum login did not reach an authenticated page");
+            throw new ForumPublishException(401, FailureKind.AUTH, false, "论坛登录认证信息已过期，请更新");
         }
     }
 
@@ -192,7 +192,7 @@ public class ForumBrowserPublisher {
     private void fillEditor(Page page, ForumPublishProfile profile, ForumPublishPayload payload) {
         String selector = profile.getSelectors().getEditor();
         if (!StringUtils.hasText(selector)) {
-            throw new ForumPublishException(400, FailureKind.VALIDATION, false, "forum editor selector is required");
+            throw new ForumPublishException(400, FailureKind.VALIDATION, false, "论坛正文编辑器选择器不能为空");
         }
         String value = "markdown".equalsIgnoreCase(profile.getContentMode())
                 ? payload.contentMarkdown()
@@ -223,10 +223,10 @@ public class ForumBrowserPublisher {
 
     private void fillRequired(Page page, String selector, String value, String name) {
         if (!StringUtils.hasText(selector)) {
-            throw new ForumPublishException(400, FailureKind.VALIDATION, false, "forum " + name + " selector is required");
+            throw new ForumPublishException(400, FailureKind.VALIDATION, false, "论坛" + selectorLabel(name) + "选择器不能为空");
         }
         if (!StringUtils.hasText(value)) {
-            throw new ForumPublishException(400, FailureKind.VALIDATION, false, "forum " + name + " value is required");
+            throw new ForumPublishException(400, FailureKind.VALIDATION, false, "论坛" + selectorLabel(name) + "内容不能为空");
         }
         page.locator(selector).fill(value);
     }
@@ -239,9 +239,21 @@ public class ForumBrowserPublisher {
 
     private void clickRequired(Page page, String selector, String name) {
         if (!StringUtils.hasText(selector)) {
-            throw new ForumPublishException(400, FailureKind.VALIDATION, false, "forum " + name + " selector is required");
+            throw new ForumPublishException(400, FailureKind.VALIDATION, false, "论坛" + selectorLabel(name) + "选择器不能为空");
         }
         page.locator(selector).click();
+    }
+
+    private String selectorLabel(String name) {
+        return switch (name) {
+            case "username" -> "账号输入框";
+            case "password" -> "密码输入框";
+            case "title" -> "标题输入框";
+            case "editor" -> "正文编辑器";
+            case "submit" -> "提交按钮";
+            case "loginSubmit" -> "登录按钮";
+            default -> name;
+        };
     }
 
     private String resolvePublishedUrl(Page page, ForumPublishProfile profile) {

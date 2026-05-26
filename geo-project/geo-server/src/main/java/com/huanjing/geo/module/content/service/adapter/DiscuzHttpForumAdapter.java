@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.service.adapter;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.service.render.MarkdownToBbcodeRenderer;
@@ -41,29 +42,29 @@ public class DiscuzHttpForumAdapter implements SiteAdapter {
     public ValidationResult validate(ArticleDraft article, String contentMarkdown, PublishSite site) {
         List<String> errors = new ArrayList<>();
         if (article == null || !StringUtils.hasText(article.getTitle())) {
-            errors.add("title is empty");
+            errors.add("文章标题不能为空");
         } else if (article.getTitle().trim().length() < 8 || article.getTitle().trim().length() > 80) {
-            errors.add("discuz title length must be 8-80 characters");
+            errors.add("Discuz 标题长度需为 8-80 个字符");
         }
         if (!StringUtils.hasText(contentMarkdown)) {
-            errors.add("markdown is empty");
+            errors.add("文章正文不能为空");
         }
         if (site == null) {
-            errors.add("forum site is required");
+            errors.add("论坛站点不能为空");
             return ValidationResult.fail(errors);
         }
         DiscuzForumProfile profile = parseProfile(site, errors);
         if (profile != null) {
             validateBoards(profile, errors);
             if (!profile.hasBoards() && (profile.getFid() == null || profile.getFid() <= 0)) {
-                errors.add("discuz fid is required");
+                errors.add("Discuz 版块 fid 不能为空");
             }
             if (!StringUtils.hasText(profile.getBaseUrl()) && !StringUtils.hasText(site.getApiEndpoint())) {
-                errors.add("discuz baseUrl or apiEndpoint is required");
+                errors.add("Discuz 站点地址或发帖接口不能为空");
             }
         }
         if (!hasUsableCredential(site, errors)) {
-            errors.add("forum credential is required");
+            errors.add("论坛登录信息不能为空");
         }
         return errors.isEmpty() ? ValidationResult.pass() : ValidationResult.fail(errors);
     }
@@ -117,7 +118,7 @@ public class DiscuzHttpForumAdapter implements SiteAdapter {
             );
             return publisher.publish(site.getId(), profile, credential, payload, bbcode);
         } catch (Exception ex) {
-            return SubmitResult.failure(500, null, null, safeMessage(ex), FailureKind.UNKNOWN, true);
+            return SubmitResult.failure(statusCode(ex), null, null, safeMessage(ex), classifyFailure(ex), retryable(ex));
         }
     }
 
@@ -134,7 +135,7 @@ public class DiscuzHttpForumAdapter implements SiteAdapter {
             }
             return profile;
         } catch (Exception ex) {
-            errors.add("discuz contentConstraints profile is invalid JSON");
+            errors.add("Discuz 发布配置不是合法 JSON");
             return null;
         }
     }
@@ -147,11 +148,11 @@ public class DiscuzHttpForumAdapter implements SiteAdapter {
         }
         DiscuzForumProfile.Board board = profile.resolveBoard(requestedFid)
                 .orElseThrow(() -> new IllegalArgumentException(requestedFid == null
-                        ? "discuz enabled board is required"
-                        : "discuz fid is not enabled: " + requestedFid));
+                        ? "Discuz 至少需要一个启用版块"
+                        : "Discuz 版块 fid 不存在或未启用：" + requestedFid));
         Integer fid = board.getFid() == null ? profile.getFid() : board.getFid();
         if (fid == null || fid <= 0) {
-            throw new IllegalArgumentException("discuz fid is required");
+            throw new IllegalArgumentException("Discuz 版块 fid 不能为空");
         }
         return profile.withFid(fid);
     }
@@ -166,7 +167,7 @@ public class DiscuzHttpForumAdapter implements SiteAdapter {
                 .filter(board -> Boolean.TRUE.equals(board.getDefaultBoard()))
                 .count();
         if (defaultCount > 1) {
-            errors.add("discuz boards can have only one enabled default board");
+            errors.add("Discuz 只能设置一个启用的默认版块");
         }
         boolean hasEnabled = false;
         java.util.Set<Integer> fids = new java.util.HashSet<>();
@@ -175,18 +176,18 @@ public class DiscuzHttpForumAdapter implements SiteAdapter {
                 continue;
             }
             if (board.getFid() == null || board.getFid() <= 0) {
-                errors.add("discuz board fid must be positive");
+                errors.add("Discuz 版块 fid 必须为正整数");
                 continue;
             }
             if (!fids.add(board.getFid())) {
-                errors.add("discuz board fid is duplicated: " + board.getFid());
+                errors.add("Discuz 版块 fid 重复：" + board.getFid());
             }
             if (board.isEnabled()) {
                 hasEnabled = true;
             }
         }
         if (!hasEnabled) {
-            errors.add("discuz boards must include at least one enabled board");
+            errors.add("Discuz 至少需要一个启用版块");
         }
     }
 
@@ -232,7 +233,7 @@ public class DiscuzHttpForumAdapter implements SiteAdapter {
             ForumCredential credential = objectMapper.readValue(raw, ForumCredential.class);
             return credential.hasUsableCredential();
         } catch (Exception ex) {
-            errors.add("forum credential JSON is invalid");
+            errors.add("论坛登录信息不是合法 JSON");
             return false;
         }
     }
@@ -265,5 +266,26 @@ public class DiscuzHttpForumAdapter implements SiteAdapter {
 
     private String safeMessage(Exception ex) {
         return StringUtils.hasText(ex.getMessage()) ? ex.getMessage() : ex.getClass().getSimpleName();
+    }
+
+    private int statusCode(Exception ex) {
+        return ex instanceof BizException bizException ? bizException.getCode() : 500;
+    }
+
+    private boolean retryable(Exception ex) {
+        String failureKind = classifyFailure(ex);
+        return !FailureKind.AUTH.equals(failureKind) && !FailureKind.AUTH_EXPIRED.equals(failureKind);
+    }
+
+    private String classifyFailure(Exception ex) {
+        if (ex instanceof BizException bizException && (bizException.getCode() == 401 || bizException.getCode() == 403)) {
+            return FailureKind.AUTH_EXPIRED;
+        }
+        String message = safeMessage(ex).toLowerCase();
+        if (message.contains("auth") || message.contains("login") || message.contains("cookie")
+                || message.contains("认证") || message.contains("登录")) {
+            return FailureKind.AUTH_EXPIRED;
+        }
+        return FailureKind.UNKNOWN;
     }
 }

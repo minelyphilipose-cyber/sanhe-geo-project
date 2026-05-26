@@ -15,7 +15,12 @@
       </div>
     </div>
 
-    <el-card shadow="never" class="admin-surface alert-toolbar-card">
+    <el-tabs v-model="activeTab" class="alert-tabs" @tab-change="onTabChange">
+      <el-tab-pane label="调度告警" name="dispatch" />
+      <el-tab-pane label="系统待办" name="system" />
+    </el-tabs>
+
+    <el-card v-if="activeTab === 'dispatch'" shadow="never" class="admin-surface alert-toolbar-card">
       <div class="alert-toolbar">
         <div class="alert-filters">
           <el-select v-model="filters.rangeType" style="width: 140px" @change="onFilterChange">
@@ -49,7 +54,7 @@
       </div>
     </el-card>
 
-    <div class="admin-metric-grid alert-metric-grid">
+    <div v-if="activeTab === 'dispatch'" class="admin-metric-grid alert-metric-grid">
       <div class="admin-metric-card" style="--metric-accent: #ef4444; --metric-tone: #fef2f2">
         <span class="admin-metric-label">待处理告警</span>
         <strong class="admin-metric-value">{{ openCount }}</strong>
@@ -72,7 +77,7 @@
       </div>
     </div>
 
-    <div class="alert-focus-grid">
+    <div v-if="activeTab === 'dispatch'" class="alert-focus-grid">
       <section class="alert-focus-card is-critical">
         <div class="focus-label">优先级队列</div>
         <strong>{{ priorityMessage.title }}</strong>
@@ -90,7 +95,7 @@
       </section>
     </div>
 
-    <el-card shadow="never" class="admin-table-card alert-table-card">
+    <el-card v-if="activeTab === 'dispatch'" shadow="never" class="admin-table-card alert-table-card">
       <div class="table-header">
         <div>
           <div class="table-title">告警列表</div>
@@ -177,23 +182,99 @@
         />
       </div>
     </el-card>
+
+    <el-card v-else shadow="never" class="admin-table-card alert-table-card">
+      <div class="table-header">
+        <div>
+          <div class="table-title">系统待办</div>
+          <div class="table-subtitle">自动分发产生的配置类待办，处理后可在此标记闭环。</div>
+        </div>
+        <div class="chips">
+          <span class="chip chip-muted">总计 {{ systemPage.total }}</span>
+          <span class="chip chip-danger">待处理 {{ systemRows.length }}</span>
+        </div>
+      </div>
+
+      <DataState :loading="loading" :empty="!loading && systemRows.length === 0" empty-text="暂无系统待办">
+        <el-table :data="systemRows" border table-layout="fixed">
+          <el-table-column label="待办事项" min-width="260" show-overflow-tooltip>
+            <template #default="scope">
+              <div class="admin-entity-cell">
+                <div class="admin-entity-avatar alert-avatar" :class="severityClass(scope.row.severity)">
+                  {{ alertInitial(scope.row.message) }}
+                </div>
+                <div class="min-w-0">
+                  <div class="admin-entity-main">{{ scope.row.message }}</div>
+                  <div class="admin-entity-sub">{{ scope.row.source || scope.row.alertType }}</div>
+                </div>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="createdAt" label="时间" width="170">
+            <template #default="scope">{{ formatDateTime(scope.row.createdAt) }}</template>
+          </el-table-column>
+          <el-table-column prop="severity" label="级别" width="110">
+            <template #default="scope">
+              <span class="admin-status-tag" :class="severityClass(scope.row.severity)">
+                {{ severityLabel(scope.row.severity) }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="详情" min-width="260">
+            <template #default="scope">
+              <el-popover trigger="click" width="520" placement="top">
+                <template #reference>
+                  <el-button link type="primary">{{ shortText(scope.row.contextJson || '-') }}</el-button>
+                </template>
+                <div class="detail-wrap">
+                  <pre>{{ scope.row.contextJson || '-' }}</pre>
+                </div>
+              </el-popover>
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="190" fixed="right">
+            <template #default="scope">
+              <el-button link type="primary" @click="openSystemTodo(scope.row)">去处理</el-button>
+              <el-button link type="success" @click="resolveSystemTodo(scope.row)">标记已处理</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </DataState>
+
+      <div class="admin-table-footer">
+        <el-pagination
+          background
+          layout="prev, pager, next, total"
+          :current-page="systemPage.current"
+          :page-size="systemPage.size"
+          :total="systemPage.total"
+          @current-change="onSystemPageChange"
+        />
+      </div>
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import { getDispatchAlerts, resolveDispatchAlert, type DispatchAlertQuery } from '@/api/dispatch'
-import type { DispatchAlertItem } from '@/types'
+import { getMySystemAlertTodos, resolveSystemAlert } from '@/api/systemAlert'
+import type { DispatchAlertItem, SystemAlertTodoItem } from '@/types'
 import { useUserStore } from '@/stores/user'
 
 const userStore = useUserStore()
+const router = useRouter()
 const canResolveAlert = userStore.hasPermission('dispatch.alert.resolve')
 
+const activeTab = ref<'dispatch' | 'system'>('dispatch')
 const loading = ref(false)
 const rows = ref<DispatchAlertItem[]>([])
 const page = reactive({ current: 1, size: 20, total: 0 })
+const systemRows = ref<SystemAlertTodoItem[]>([])
+const systemPage = reactive({ current: 1, size: 20, total: 0 })
 
 const filters = reactive({
   rangeType: 'today' as 'today' | 'last7' | 'last30' | 'custom',
@@ -291,6 +372,14 @@ function formatDateTime(value?: string | null) {
 }
 
 async function loadAlerts() {
+  if (activeTab.value === 'system') {
+    await loadSystemTodos()
+    return
+  }
+  await loadDispatchAlerts()
+}
+
+async function loadDispatchAlerts() {
   if (filters.rangeType === 'custom' && (!filters.customRange?.[0] || !filters.customRange?.[1])) {
     ElMessage.warning('请选择完整的自定义日期范围')
     return
@@ -305,6 +394,20 @@ async function loadAlerts() {
   }
 }
 
+async function loadSystemTodos() {
+  loading.value = true
+  try {
+    const { data } = await getMySystemAlertTodos({
+      current: systemPage.current,
+      size: systemPage.size,
+    })
+    systemRows.value = data.data.records || []
+    systemPage.total = data.data.total || 0
+  } finally {
+    loading.value = false
+  }
+}
+
 function onFilterChange() {
   page.current = 1
   loadAlerts()
@@ -312,6 +415,15 @@ function onFilterChange() {
 
 function onPageChange(v: number) {
   page.current = v
+  loadAlerts()
+}
+
+function onSystemPageChange(v: number) {
+  systemPage.current = v
+  loadSystemTodos()
+}
+
+function onTabChange() {
   loadAlerts()
 }
 
@@ -328,6 +440,31 @@ async function resolve(row: DispatchAlertItem) {
   await resolveDispatchAlert(row.id, value?.trim() || undefined)
   ElMessage.success('已标记处理')
   await loadAlerts()
+}
+
+function parseSystemTodoContext(row: SystemAlertTodoItem) {
+  if (!row.contextJson) return {}
+  try {
+    return JSON.parse(row.contextJson) as Record<string, unknown>
+  } catch {
+    return {}
+  }
+}
+
+function openSystemTodo(row: SystemAlertTodoItem) {
+  const context = parseSystemTodoContext(row)
+  const route = typeof context.route === 'string' ? context.route : ''
+  if (!route) {
+    ElMessage.warning('该待办未配置跳转地址')
+    return
+  }
+  router.push(route)
+}
+
+async function resolveSystemTodo(row: SystemAlertTodoItem) {
+  await resolveSystemAlert(row.id)
+  ElMessage.success('已标记处理')
+  await loadSystemTodos()
 }
 
 function startAutoRefresh() {

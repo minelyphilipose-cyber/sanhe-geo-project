@@ -1125,7 +1125,7 @@ public class ContentDistributionService {
                     .set(DistributionTask::getErrorMessage, trimError(result.getErrorMessage()))
                     .set(DistributionTask::getNextRetryAt, nextRetryAt);
             if (FailureKind.AUTH.equals(result.getFailureKind()) || FailureKind.AUTH_EXPIRED.equals(result.getFailureKind())) {
-                markForumSiteCredentialExpired(taskId);
+                markPublishSiteCredentialExpired(taskId);
             }
         }
 
@@ -1160,6 +1160,9 @@ public class ContentDistributionService {
                     .set(DistributionTask::getFailureKind, result.getFailureKind())
                     .set(DistributionTask::getErrorMessage, trimError(result.getErrorMessage()))
                     .set(DistributionTask::getNextRetryAt, nextRetryAt);
+            if (FailureKind.AUTH.equals(result.getFailureKind()) || FailureKind.AUTH_EXPIRED.equals(result.getFailureKind())) {
+                markPublishSiteCredentialExpired(taskId);
+            }
         }
 
         int affected = distributionTaskMapper.update(null, wrapper);
@@ -1168,7 +1171,7 @@ public class ContentDistributionService {
         }
     }
 
-    private void markForumSiteCredentialExpired(Long taskId) {
+    private void markPublishSiteCredentialExpired(Long taskId) {
         DistributionTask task = distributionTaskMapper.selectById(taskId);
         Long siteId = task == null ? null : task.getIndustrySiteId();
         if (siteId == null) {

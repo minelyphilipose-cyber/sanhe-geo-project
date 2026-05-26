@@ -30,6 +30,7 @@ import TopBar from './components/TopBar.vue'
 import { useAppStore } from '@/stores/app'
 import { useUserStore } from '@/stores/user'
 import { getDispatchAlerts } from '@/api/dispatch'
+import { getMySystemAlertTodos } from '@/api/systemAlert'
 import type { RoleType } from '@/types'
 
 interface MenuItem {
@@ -117,8 +118,11 @@ async function loadOpenAlertCount() {
     return
   }
   try {
-    const { data } = await getDispatchAlerts({ current: 1, size: 1, rangeType: 'last7', status: 'open' })
-    openAlertCount.value = Number(data.data?.total || 0)
+    const [dispatchRes, systemRes] = await Promise.all([
+      getDispatchAlerts({ current: 1, size: 1, rangeType: 'last7', status: 'open' }),
+      getMySystemAlertTodos({ current: 1, size: 1 }),
+    ])
+    openAlertCount.value = Number(dispatchRes.data.data?.total || 0) + Number(systemRes.data.data?.total || 0)
   } catch {
     openAlertCount.value = 0
   }

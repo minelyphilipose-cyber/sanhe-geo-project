@@ -3,6 +3,7 @@ package com.huanjing.geo.module.system.service;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.system.dto.SystemAlertTodoVO;
 import com.huanjing.geo.module.system.entity.SystemAlert;
 import com.huanjing.geo.module.system.mapper.SystemAlertMapper;
@@ -11,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDateTime;
 import java.util.Map;
 
 @Service
@@ -66,15 +68,34 @@ public class SystemAlertService {
     public Page<SystemAlertTodoVO> myTodos(long current, long size) {
         SysUser user = currentUserService.requireCurrentUser();
         Page<SystemAlert> page = systemAlertMapper.selectPage(new Page<>(current, size),
-                new LambdaQueryWrapper<SystemAlert>()
+                visibleAlertWrapper(user)
                         .eq(SystemAlert::getIsResolved, false)
-                        .and(wrapper -> wrapper.eq(SystemAlert::getRecipientUserId, user.getId())
-                                .or()
-                                .eq(SystemAlert::getRecipientRole, user.getRole()))
                         .orderByDesc(SystemAlert::getCreatedAt));
         Page<SystemAlertTodoVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
         result.setRecords(page.getRecords().stream().map(this::toTodoVO).toList());
         return result;
+    }
+
+    public void resolve(Long alertId) {
+        SysUser user = currentUserService.requireCurrentUser();
+        SystemAlert alert = systemAlertMapper.selectOne(visibleAlertWrapper(user)
+                .eq(SystemAlert::getId, alertId)
+                .eq(SystemAlert::getIsResolved, false)
+                .last("LIMIT 1"));
+        if (alert == null) {
+            throw new BizException(404, "待办不存在或已处理");
+        }
+        alert.setIsResolved(true);
+        alert.setResolvedBy(user.getId());
+        alert.setResolvedAt(LocalDateTime.now());
+        systemAlertMapper.updateById(alert);
+    }
+
+    private LambdaQueryWrapper<SystemAlert> visibleAlertWrapper(SysUser user) {
+        return new LambdaQueryWrapper<SystemAlert>()
+                .and(wrapper -> wrapper.eq(SystemAlert::getRecipientUserId, user.getId())
+                        .or()
+                        .eq(SystemAlert::getRecipientRole, user.getRole()));
     }
 
     private SystemAlertTodoVO toTodoVO(SystemAlert alert) {

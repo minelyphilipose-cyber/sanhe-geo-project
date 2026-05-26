@@ -383,8 +383,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { createPublishSite, getPublishSites, testPublishSite, updatePublishSite, updatePublishSiteStatus } from '@/api/publishSite'
 import type { PublishSite } from '@/types'
@@ -624,6 +624,7 @@ const staticTargets = reactive<TargetConfig[]>([
 ])
 
 const keyword = ref('')
+const route = useRoute()
 const router = useRouter()
 const activeCategoryCode = ref('self_media')
 const targetPaneRef = ref<HTMLElement>()
@@ -1122,6 +1123,20 @@ async function loadPublishSites() {
   }
 }
 
+function openSiteFromQuery() {
+  const rawSiteId = route.query.siteId
+  const siteId = Number(Array.isArray(rawSiteId) ? rawSiteId[0] : rawSiteId)
+  if (!Number.isFinite(siteId) || siteId <= 0) return
+  const target = targets.value.find((item) => item.publishSite?.id === siteId)
+  if (!target) {
+    ElMessage.warning('未找到对应发布平台，请确认平台配置是否仍存在')
+    return
+  }
+  activeCategoryCode.value = target.categoryCode
+  keyword.value = ''
+  openDrawer(target.drawerType || target.code, target)
+}
+
 async function toggleTarget(target: TargetConfig) {
   if (target.locked || target.updating) return
   if (target.source !== 'publish_site') {
@@ -1317,8 +1332,17 @@ function closeDrawer() {
   drawerVisible.value = false
 }
 
-onMounted(() => {
-  loadPublishSites()
+onMounted(async () => {
+  await loadPublishSites()
+  openSiteFromQuery()
+})
+
+watch(() => route.query.siteId, async () => {
+  if (!route.query.siteId) return
+  if (!publishSites.value.length) {
+    await loadPublishSites()
+  }
+  openSiteFromQuery()
 })
 </script>
 
