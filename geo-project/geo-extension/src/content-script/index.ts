@@ -125,8 +125,8 @@ function showIdentityReviewDialog(
 
   const actions = document.createElement('div')
   actions.style.cssText = 'display:flex;gap:10px;justify-content:flex-end;padding:12px 18px 16px;background:#fff'
-  const continueButton = button('捕获错误，忽略', '#ea580c', '#fff')
-  const stopButton = button('确认，我来处理', '#fff', '#9a3412')
+  const continueButton = button('仍要保存', '#ea580c', '#fff')
+  const stopButton = button('停止并重新登录', '#fff', '#9a3412')
   stopButton.style.border = '1px solid #fed7aa'
 
   continueButton.addEventListener('click', () => {
@@ -208,12 +208,13 @@ function detectPlatformIdentity() {
 }
 
 function detectIdentityFromStorage() {
+  const reliableIdentityKeyPattern = /(^|[_-])(user|account|profile|author|creator)(info|profile|account)?($|[_-])|^(userInfo|accountInfo|profileInfo|creatorInfo|authorInfo)$/i
   for (const storageName of ['localStorage', 'sessionStorage'] as const) {
     try {
       const storage = window[storageName]
       for (let i = 0; i < storage.length; i++) {
         const key = storage.key(i) || ''
-        if (!/(user|account|profile|author|creator)/i.test(key)) continue
+        if (!reliableIdentityKeyPattern.test(key)) continue
         const raw = storage.getItem(key)
         if (!raw || raw.length > 20_000) continue
         const displayName = findIdentityName(parseMaybeJson(raw))
@@ -230,13 +231,14 @@ function detectIdentityFromStorage() {
 
 function detectIdentityFromDom() {
   const selectors = [
-    '[data-testid*="user"]',
+    '[data-testid*="nickname"]',
+    '[data-testid*="username"]',
+    '[data-testid*="account-name"]',
     '[class*="user-name"]',
     '[class*="username"]',
     '[class*="account-name"]',
     '[class*="nickname"]',
     '[class*="creator"] [class*="name"]',
-    'img[alt]',
   ]
   for (const selector of selectors) {
     const element = document.querySelector(selector)

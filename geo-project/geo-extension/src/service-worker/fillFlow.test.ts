@@ -37,8 +37,6 @@ beforeEach(() => {
     expiresAt: 200,
     nonce: 'nonce-1',
     platform: 'toutiao',
-    credentialVersion: 3,
-    cookiesJson: JSON.stringify([{ name: 'sessionid', value: 'secret-cookie', domain: '.toutiao.com', path: '/', secure: true }]),
     fillPayload: JSON.stringify({
       platform: 'toutiao',
       publishUrl: 'https://mp.toutiao.com/editor',
@@ -49,7 +47,6 @@ beforeEach(() => {
   })
   vi.mocked(extensionApi.ackTask).mockResolvedValue({ taskId: 30, status: 'filled' })
   vi.stubGlobal('chrome', {
-    cookies: { set: vi.fn(async () => ({})) },
     tabs: {
       create: vi.fn(async () => ({ id: 9 })),
       sendMessage: vi.fn(async () => ({ ok: true })),
@@ -65,7 +62,7 @@ beforeEach(() => {
 })
 
 describe('fill service worker flow', () => {
-  it('issues, consumes, injects cookies, fills editor, and acks task', async () => {
+  it('issues, consumes, opens editor, fills editor, and acks task without loading cookies', async () => {
     const promise = startFillTask(task())
     await vi.waitFor(() => expect(readyListener).toBeTypeOf('function'))
     readyListener?.({ type: 'GEO_EDITOR_READY' }, { tab: { id: 9 } } as chrome.runtime.MessageSender)
@@ -75,9 +72,8 @@ describe('fill service worker flow', () => {
     expect(result.status).toBe('filled')
     expect(extensionApi.issueFillToken).toHaveBeenCalledWith('ext.secret', expect.objectContaining({ taskTargetId: 30 }))
     expect(extensionApi.consumeFillToken).toHaveBeenCalledTimes(1)
-    expect(chrome.cookies.set).toHaveBeenCalledWith(expect.objectContaining({ name: 'sessionid', value: 'secret-cookie' }))
+    expect(chrome.cookies?.set).toBeUndefined()
     expect(chrome.tabs.create).toHaveBeenCalledWith({ url: 'https://mp.toutiao.com/editor' })
-    expect(JSON.stringify(vi.mocked(chrome.tabs.sendMessage).mock.calls[0][1])).not.toContain('secret-cookie')
     expect(vi.mocked(chrome.tabs.sendMessage).mock.calls[0][1]).toMatchObject({
       type: 'GEO_FILL_TASK',
       payload: expect.objectContaining({ title: 'Draft', contentHtml: '<p>Hello</p><script>bad()</script>' }),
@@ -94,7 +90,6 @@ describe('fill service worker flow', () => {
       expiresAt: 200,
       nonce: 'nonce-1',
       platform: 'toutiao',
-      cookiesJson: '[]',
       fillPayload: JSON.stringify({
         platform: 'toutiao',
         publishUrl: 'https://mp.toutiao.com/editor',
@@ -113,13 +108,12 @@ describe('fill service worker flow', () => {
     expect(message).toContain('javascript:')
   })
 
-  it('does not retry consume failure or set cookies', async () => {
+  it('does not retry consume failure', async () => {
     vi.mocked(extensionApi.consumeFillToken).mockRejectedValue(new Error('used'))
 
     await expect(startFillTask(task())).rejects.toThrow('used')
 
     expect(extensionApi.consumeFillToken).toHaveBeenCalledTimes(1)
-    expect(chrome.cookies.set).not.toHaveBeenCalled()
   })
 
   it('ignores task list publishUrl and validates fill payload publishUrl after consuming token', async () => {
@@ -138,7 +132,6 @@ describe('fill service worker flow', () => {
       expiresAt: 200,
       nonce: 'nonce-1',
       platform: 'toutiao',
-      cookiesJson: '[]',
       fillPayload: JSON.stringify({
         platform: 'toutiao',
         publishUrl: 'https://evil.example/editor',
@@ -151,33 +144,6 @@ describe('fill service worker flow', () => {
 
     expect(extensionApi.issueFillToken).toHaveBeenCalledTimes(1)
     expect(extensionApi.consumeFillToken).toHaveBeenCalledTimes(1)
-    expect(chrome.cookies.set).not.toHaveBeenCalled()
-  })
-
-  it('validates all cookie domains before writing any cookie', async () => {
-    vi.mocked(extensionApi.consumeFillToken).mockResolvedValue({
-      taskTargetId: 30,
-      expiresAt: 200,
-      nonce: 'nonce-1',
-      platform: 'toutiao',
-      cookiesJson: JSON.stringify([
-        { name: 'a', value: '1', domain: '.toutiao.com', path: '/' },
-        { name: 'b', value: '2', domain: '.toutiao.com', path: '/' },
-        { name: 'c', value: '3', domain: '.evil.example', path: '/' },
-        { name: 'd', value: '4', domain: '.toutiao.com', path: '/' },
-        { name: 'e', value: '5', domain: '.toutiao.com', path: '/' },
-      ]),
-      fillPayload: JSON.stringify({
-        platform: 'toutiao',
-        publishUrl: 'https://mp.toutiao.com/editor',
-        title: 'Draft',
-        renderedHtml: '<p>Hello</p>',
-      }),
-    })
-
-    await expect(startFillTask(task())).rejects.toThrow('cookie 域名')
-
-    expect(chrome.cookies.set).not.toHaveBeenCalled()
   })
 })
 

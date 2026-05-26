@@ -47,6 +47,10 @@ beforeEach(() => {
   vi.stubGlobal('chrome', {
     cookies: {
       getAll: vi.fn(async () => [{ name: 'sessionid', value: 'secret', domain: '.toutiao.com' }]),
+      remove: vi.fn(async () => ({ name: 'sessionid', url: 'https://toutiao.com/' })),
+    },
+    browsingData: {
+      remove: vi.fn(async () => undefined),
     },
     storage: {
       local: {
@@ -56,6 +60,8 @@ beforeEach(() => {
       },
     },
     tabs: {
+      query: vi.fn(async () => []),
+      remove: vi.fn(async () => undefined),
       create: vi.fn(async () => ({ id: 9 })),
     },
   })
@@ -93,6 +99,10 @@ describe('cookie capture service worker flow', () => {
   })
 
   it('opens platform page and stores pending capture even when login cookie already exists', async () => {
+    vi.mocked(chrome.tabs.query).mockResolvedValueOnce([
+      { id: 2, url: 'https://mp.toutiao.com/profile' } as chrome.tabs.Tab,
+      { id: 3, url: 'https://example.com/' } as chrome.tabs.Tab,
+    ])
     const result = await startCookieCaptureForAccount({
       accountId: 20,
       brandId: 10,
@@ -108,6 +118,20 @@ describe('cookie capture service worker flow', () => {
     expect(chrome.storage.local.set).toHaveBeenCalledWith({
       'geo.extension.pendingCookieCapture': expect.objectContaining({ accountId: 20, platform: 'toutiao' }),
     })
+    expect(chrome.tabs.remove).toHaveBeenCalledWith(2)
+    expect(chrome.cookies.remove).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'sessionid',
+      url: 'http://toutiao.com/',
+    }))
+    expect(chrome.browsingData.remove).toHaveBeenCalledWith(
+      { origins: ['https://mp.toutiao.com', 'https://www.toutiao.com', 'https://sso.toutiao.com'] },
+      expect.objectContaining({
+        cookies: true,
+        indexedDB: true,
+        localStorage: true,
+        serviceWorkers: true,
+      }),
+    )
     expect(chrome.tabs.create).toHaveBeenCalledWith({ url: 'https://mp.toutiao.com/' })
     expect(extensionApi.captureCookies).not.toHaveBeenCalled()
   })
@@ -232,6 +256,32 @@ describe('cookie capture service worker flow', () => {
     expect(result?.message).toContain('不一致')
     expect(extensionApi.captureCookies).not.toHaveBeenCalled()
     expect(chrome.storage.local.remove).not.toHaveBeenCalled()
+  })
+
+  it('skips account-name comparison when platform identity cannot be detected', async () => {
+    ;(chrome.storage.local.get as unknown as Mock).mockResolvedValueOnce({
+      'geo.extension.pendingCookieCapture': {
+        accountId: 20,
+        brandId: 10,
+        platform: 'toutiao',
+        accountName: '系统平台账号',
+      },
+    })
+
+    const result = await handleCookieDomainReady('mp.toutiao.com', {
+      status: 'unknown',
+      displayName: null,
+      source: 'test',
+    })
+
+    expect(result).toMatchObject({
+      accountId: 20,
+      platform: 'toutiao',
+      status: 'captured',
+    })
+    const fingerprint = vi.mocked(extensionApi.captureCookies).mock.calls[0][1].capturedFingerprintJson
+    expect(fingerprint).toContain('"status":"unknown"')
+    expect(fingerprint).toContain('已跳过账号名称比对')
   })
 
   it('continues capture with audit fingerprint when operator ignores identity mismatch', async () => {

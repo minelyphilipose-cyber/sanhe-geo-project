@@ -132,11 +132,10 @@ public class ExtensionController {
                 ? request.extensionVersion()
                 : session.getExtensionVersion();
         versionService.requireSupported(platform, version);
-        return R.ok(credentialService.consumeFillTokenAndDecrypt(
+        return R.ok(credentialService.consumeFillToken(
                 request.fillToken(),
                 session.getOperatorId(),
-                session.getId(),
-                clientIp(servletRequest)
+                session.getId()
         ));
     }
 

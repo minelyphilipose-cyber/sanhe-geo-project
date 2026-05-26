@@ -732,7 +732,7 @@
               :loading="semiAutoAccountActionLoading(account)"
               @click="submitSemiAutoExtensionTask(account)"
             >
-              打开并填表
+              切换登录并填表
             </el-button>
           </div>
         </div>

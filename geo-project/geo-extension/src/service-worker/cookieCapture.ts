@@ -21,6 +21,18 @@ const PLATFORM_LOGIN_URLS: Record<string, string> = {
   xiaohongshu: 'https://creator.xiaohongshu.com/',
 }
 
+const PLATFORM_HOST_SUFFIXES: Record<string, string[]> = {
+  toutiao: ['toutiao.com', 'bytedance.com', 'byteacctimg.com'],
+  zhihu: ['zhihu.com'],
+  xiaohongshu: ['xiaohongshu.com'],
+}
+
+const PLATFORM_SITE_ORIGINS: Record<string, string[]> = {
+  toutiao: ['https://mp.toutiao.com', 'https://www.toutiao.com', 'https://sso.toutiao.com'],
+  zhihu: ['https://www.zhihu.com', 'https://zhuanlan.zhihu.com'],
+  xiaohongshu: ['https://creator.xiaohongshu.com', 'https://www.xiaohongshu.com', 'https://edith.xiaohongshu.com'],
+}
+
 const PENDING_CAPTURE_KEY = 'geo.extension.pendingCookieCapture'
 
 export async function captureCookiesForAccount(
@@ -65,13 +77,16 @@ export async function startCookieCaptureForAccount(
     }
   }
 
+  const cleared = await clearPlatformLoginState(account.platform)
   await savePendingCookieCapture(account)
   await chrome.tabs.create({ url: loginUrlForPlatform(account.platform) })
   return {
     accountId: account.accountId,
     platform: account.platform,
     status: 'opening_login',
-    message: '已打开平台页面，请确认登录账号；登录成功后扩展会自动捕获凭证。',
+    message: cleared.closedTabsCount > 0
+      ? '已关闭当前平台页面并清理本地登录状态，请登录目标账号；登录成功后扩展会自动捕获。'
+      : '已清理当前平台本地登录状态并打开登录页，请登录目标账号；登录成功后扩展会自动捕获。',
   }
 }
 
@@ -212,6 +227,65 @@ function loginUrlForPlatform(platform: string) {
   return url
 }
 
+async function clearPlatformLoginState(platform: string) {
+  const closedTabsCount = await closePlatformTabs(platform)
+  const removedCookieCount = await removePlatformCookies(platform)
+  await chrome.browsingData.remove({
+    origins: PLATFORM_SITE_ORIGINS[platform] ?? [new URL(loginUrlForPlatform(platform)).origin],
+  }, {
+    cache: true,
+    cacheStorage: true,
+    cookies: true,
+    fileSystems: true,
+    indexedDB: true,
+    localStorage: true,
+    serviceWorkers: true,
+    webSQL: true,
+  })
+  return { closedTabsCount, removedCookieCount }
+}
+
+async function closePlatformTabs(platform: string) {
+  const suffixes = PLATFORM_HOST_SUFFIXES[platform] ?? domainsForPlatform(platform)
+  const tabs = await chrome.tabs.query({})
+  let count = 0
+  for (const tab of tabs) {
+    const host = safeHostname(tab.url)
+    if (!tab.id || !host || !hostMatches(host, suffixes)) continue
+    await chrome.tabs.remove(tab.id).catch(() => undefined)
+    count += 1
+  }
+  return count
+}
+
+async function removePlatformCookies(platform: string) {
+  const suffixes = PLATFORM_HOST_SUFFIXES[platform] ?? domainsForPlatform(platform)
+  const cookies = await chrome.cookies.getAll({})
+  let count = 0
+  for (const cookie of cookies) {
+    const domain = cookie.domain.replace(/^\./, '')
+    if (!hostMatches(domain, suffixes)) continue
+    const url = `${cookie.secure ? 'https' : 'http'}://${domain}${cookie.path || '/'}`
+    const details: chrome.cookies.Details = { url, name: cookie.name }
+    if (cookie.storeId) details.storeId = cookie.storeId
+    const removed = await chrome.cookies.remove(details).catch(() => null)
+    if (removed) count += 1
+  }
+  return count
+}
+
+function hostMatches(host: string, suffixes: string[]) {
+  return suffixes.some(suffix => host === suffix || host.endsWith(`.${suffix}`))
+}
+
+function safeHostname(url?: string) {
+  try {
+    return url ? new URL(url).hostname : null
+  } catch {
+    return null
+  }
+}
+
 async function savePendingCookieCapture(account: ExtensionSelfMediaAccount) {
   await chrome.storage.local.set({ [PENDING_CAPTURE_KEY]: account })
 }
@@ -262,9 +336,7 @@ function checkPlatformIdentity(account: ExtensionSelfMediaAccount, identity: Pla
       status: 'unknown',
       expectedAccountName: account.accountName || null,
       actualDisplayName: identity.displayName || null,
-      message: identity.displayName
-        ? `已识别当前平台账号为「${identity.displayName}」，系统账号名称不足以自动比对。`
-        : '未能自动识别当前平台登录账号，请运营人工确认账号无误。',
+      message: '未能自动识别当前平台账号昵称，已跳过账号名称比对。',
     }
   }
   const matched = expected.includes(actual) || actual.includes(expected)
@@ -280,7 +352,7 @@ function checkPlatformIdentity(account: ExtensionSelfMediaAccount, identity: Pla
     status: 'mismatch',
     expectedAccountName: account.accountName || null,
     actualDisplayName: identity.displayName || null,
-    message: `当前登录账号「${identity.displayName}」与系统账号「${account.accountName}」不一致。`,
+    message: `当前平台账号「${identity.displayName}」与系统账号「${account.accountName}」不一致。`,
   }
 }
 

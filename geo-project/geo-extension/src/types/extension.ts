@@ -55,11 +55,7 @@ export interface FillTokenConsumeResponse {
   taskTargetId: number
   expiresAt: number
   nonce: string
-  platform: string
-  credentialVersion?: number
-  cookiesJson: string
-  userAgent?: string
-  requiredCookieCheckJson?: string
+  platform?: string
   fillPayload: string
 }
 

@@ -61,7 +61,7 @@ function extensionManifestPlugin(profile: ExtensionProfile): Plugin {
           service_worker: 'assets/service-worker.js',
           type: 'module',
         },
-        permissions: ['alarms', 'cookies', 'storage', 'tabs', 'scripting'],
+        permissions: ['alarms', 'browsingData', 'cookies', 'storage', 'tabs', 'scripting'],
         host_permissions: profile.hostPermissions,
         content_scripts: [
           {
