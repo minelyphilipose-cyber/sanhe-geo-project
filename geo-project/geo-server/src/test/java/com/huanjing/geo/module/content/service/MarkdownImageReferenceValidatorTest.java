@@ -3,6 +3,7 @@ package com.huanjing.geo.module.content.service;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
+import com.huanjing.geo.module.customer.service.BrandMaterialPublicUrlService;
 import com.huanjing.geo.module.project.entity.Project;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,12 +21,14 @@ import static org.mockito.Mockito.when;
 class MarkdownImageReferenceValidatorTest {
 
     private BrandMaterialMapper brandMaterialMapper;
+    private BrandMaterialPublicUrlService publicUrlService;
     private MarkdownImageReferenceValidator validator;
 
     @BeforeEach
     void setUp() {
         brandMaterialMapper = mock(BrandMaterialMapper.class);
-        validator = new MarkdownImageReferenceValidator(brandMaterialMapper);
+        publicUrlService = mock(BrandMaterialPublicUrlService.class);
+        validator = new MarkdownImageReferenceValidator(brandMaterialMapper, publicUrlService);
     }
 
     @Test
@@ -43,6 +46,17 @@ class MarkdownImageReferenceValidatorTest {
         BizException ex = assertThrows(BizException.class,
                 () -> validator.validate(project(1L), "![产品图](https://other.example.com/a.png)"));
         assertEquals(400, ex.getCode());
+    }
+
+    @Test
+    void validate_publicMaterialUrl_passes() {
+        String url = "https://app.example.com/api/public/brand-materials/10/stream?sig=abc";
+        BrandMaterial material = material(url, "png");
+        material.setBrandId(1L);
+        when(brandMaterialMapper.selectList(any())).thenReturn(List.of());
+        when(publicUrlService.verifyPublicAccess(10L, "abc")).thenReturn(material);
+
+        assertDoesNotThrow(() -> validator.validate(project(1L), "![产品图](" + url + ")"));
     }
 
     @Test

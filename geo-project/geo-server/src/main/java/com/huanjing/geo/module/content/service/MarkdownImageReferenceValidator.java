@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
+import com.huanjing.geo.module.customer.service.BrandMaterialPublicUrlService;
 import com.huanjing.geo.module.project.entity.Project;
 import lombok.RequiredArgsConstructor;
 import org.jsoup.Jsoup;
@@ -24,9 +25,11 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class MarkdownImageReferenceValidator {
     private static final Pattern MARKDOWN_IMAGE_PATTERN = Pattern.compile("!\\[[^\\]]*]\\(([^\\s)]+)(?:\\s+\"[^\"]*\")?\\)");
+    private static final Pattern PUBLIC_MATERIAL_PATH_PATTERN = Pattern.compile(".*/api/public/brand-materials/(\\d+)/stream$");
     private static final Set<String> IMAGE_TYPES = Set.of("jpg", "jpeg", "png", "gif", "webp", "svg");
 
     private final BrandMaterialMapper brandMaterialMapper;
+    private final BrandMaterialPublicUrlService publicUrlService;
 
     public void validate(Project project, String markdown) {
         Set<String> imageUrls = extractImageUrls(markdown);
@@ -51,7 +54,7 @@ public class MarkdownImageReferenceValidator {
                 .collect(Collectors.toSet());
 
         List<String> invalidUrls = imageUrls.stream()
-                .filter(url -> !allowedUrls.contains(url))
+                .filter(url -> !allowedUrls.contains(url) && !isValidPublicMaterialUrl(project.getBrandId(), url))
                 .toList();
         if (!invalidUrls.isEmpty()) {
             throw new BizException(400, "文章图片必须从当前项目品牌图库中选择");
@@ -94,6 +97,36 @@ public class MarkdownImageReferenceValidator {
         } catch (Exception ex) {
             throw new BizException(400, "文章图片地址仅支持当前品牌图库中的 http/https URL");
         }
+    }
+
+    private boolean isValidPublicMaterialUrl(Long brandId, String imageUrl) {
+        try {
+            URI uri = URI.create(imageUrl);
+            Matcher matcher = PUBLIC_MATERIAL_PATH_PATTERN.matcher(uri.getPath());
+            if (!matcher.matches()) {
+                return false;
+            }
+            String signature = queryParam(uri.getRawQuery(), "sig");
+            BrandMaterial material = publicUrlService.verifyPublicAccess(Long.valueOf(matcher.group(1)), signature);
+            return material != null
+                    && brandId.equals(material.getBrandId())
+                    && IMAGE_TYPES.contains(normalizeType(material.getFileType()));
+        } catch (Exception ex) {
+            return false;
+        }
+    }
+
+    private String queryParam(String rawQuery, String name) {
+        if (!StringUtils.hasText(rawQuery)) {
+            return null;
+        }
+        String prefix = name + "=";
+        for (String part : rawQuery.split("&")) {
+            if (part.startsWith(prefix)) {
+                return part.substring(prefix.length());
+            }
+        }
+        return null;
     }
 
     private String normalizeUrl(String value) {

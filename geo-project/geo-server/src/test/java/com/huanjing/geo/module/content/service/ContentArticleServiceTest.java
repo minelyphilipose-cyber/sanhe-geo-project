@@ -67,6 +67,7 @@ class ContentArticleServiceTest {
     private BrandAccessService brandAccessService;
     private AuditService auditService;
     private ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
+    private ArticleAutoImageInsertionService autoImageInsertionService;
     private ContentArticleService service;
 
     @BeforeEach
@@ -82,12 +83,14 @@ class ContentArticleServiceTest {
         brandAccessService = mock(BrandAccessService.class);
         auditService = mock(AuditService.class);
         articleImagePublicUrlRewriter = mock(ArticleImagePublicUrlRewriter.class);
+        autoImageInsertionService = mock(ArticleAutoImageInsertionService.class);
         projectMapper = mock(ProjectMapper.class);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
 
         when(currentUserService.requireCurrentUser()).thenReturn(operator(7L));
         when(projectMapper.selectById(10L)).thenReturn(project());
         when(articleImagePublicUrlRewriter.rewrite(any(), any())).thenAnswer(invocation -> invocation.getArgument(1));
+        when(autoImageInsertionService.insertForChannel(any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(2));
 
         service = new ContentArticleService(
                 articleDraftMapper,
@@ -103,6 +106,7 @@ class ContentArticleServiceTest {
                 mock(MarkdownImageReferenceValidator.class),
                 mock(WechatArticleRenderService.class),
                 articleImagePublicUrlRewriter,
+                autoImageInsertionService,
                 brandAccessService,
                 auditService
         );

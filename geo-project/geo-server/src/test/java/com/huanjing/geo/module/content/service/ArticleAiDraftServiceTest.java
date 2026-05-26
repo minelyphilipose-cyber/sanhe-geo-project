@@ -285,7 +285,8 @@ class ArticleAiDraftServiceTest {
                 mock(BatchArticleGenerationTaskMapper.class), mock(ArticlePromptTemplateMapper.class), mock(BrandMapper.class),
                 projectMapper, mock(SysDictItemMapper.class), currentUserService,
                 mock(MarkdownImageReferenceValidator.class), mock(com.huanjing.geo.module.content.service.render.wechat.WechatArticleRenderService.class),
-                mock(ArticleImagePublicUrlRewriter.class), brandAccessService, mock(AuditService.class));
+                mock(ArticleImagePublicUrlRewriter.class), mock(ArticleAutoImageInsertionService.class),
+                brandAccessService, mock(AuditService.class));
     }
 
     private void verifyAudit(AuditResult result, String status) {

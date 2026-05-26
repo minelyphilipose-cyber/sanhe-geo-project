@@ -127,6 +127,7 @@ public class BatchArticleGenerationService {
     private final ArticleAiDraftPromptFilter promptFilter;
     private final ArticleGenerationEngine articleGenerationEngine;
     private final ArticleModelResolver articleModelResolver;
+    private final ArticleAutoImageInsertionService autoImageInsertionService;
     private final BatchArticlePromptBuilder promptBuilder;
     private final BatchArticleQualityChecker qualityChecker;
     private final ArticleTemplateAllocationService allocationService;
@@ -156,6 +157,7 @@ public class BatchArticleGenerationService {
                                          ArticleAiDraftPromptFilter promptFilter,
                                          ArticleGenerationEngine articleGenerationEngine,
                                          ArticleModelResolver articleModelResolver,
+                                         ArticleAutoImageInsertionService autoImageInsertionService,
                                          BatchArticlePromptBuilder promptBuilder,
                                          BatchArticleQualityChecker qualityChecker,
                                          ArticleTemplateAllocationService allocationService,
@@ -184,6 +186,7 @@ public class BatchArticleGenerationService {
         this.promptFilter = promptFilter;
         this.articleGenerationEngine = articleGenerationEngine;
         this.articleModelResolver = articleModelResolver;
+        this.autoImageInsertionService = autoImageInsertionService;
         this.promptBuilder = promptBuilder;
         this.qualityChecker = qualityChecker;
         this.allocationService = allocationService;
@@ -483,7 +486,7 @@ public class BatchArticleGenerationService {
             version.setArticleId(draft.getId());
             version.setVersionNo(1);
             version.setTitle(title);
-            version.setContentMarkdown(content);
+            version.setContentMarkdown(autoImageInsertionService.insertForChannel(project, task.getChannelGroupCode(), content));
             version.setPromptSnapshot(enrichPromptSnapshot(prompt.promptSnapshot(), result));
             version.setInputSnapshot(prompt.inputSnapshot());
             version.setModelPlatformCode(model.platformCode());

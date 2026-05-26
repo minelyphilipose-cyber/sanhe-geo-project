@@ -61,6 +61,7 @@ public class ContentArticleService {
     private final MarkdownImageReferenceValidator markdownImageReferenceValidator;
     private final WechatArticleRenderService wechatArticleRenderService;
     private final ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
+    private final ArticleAutoImageInsertionService autoImageInsertionService;
     private final BrandAccessService brandAccessService;
     private final AuditService auditService;
 
@@ -570,6 +571,7 @@ public class ContentArticleService {
                                               String periodType,
                                               String periodKey,
                                               Integer generationSlotNo) {
+        contentMarkdown = autoImageInsertionService.insertForChannel(project, targetChannel, contentMarkdown);
         markdownImageReferenceValidator.validate(project, contentMarkdown);
         ArticleDraft draft = new ArticleDraft();
         draft.setBatchId(batchId);

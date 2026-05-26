@@ -79,6 +79,7 @@ class BatchArticleGenerationServiceTest {
                 mock(ArticleAiDraftPromptFilter.class),
                 mock(ArticleGenerationEngine.class),
                 mock(ArticleModelResolver.class),
+                passThroughAutoImageInsertionService(),
                 promptBuilder,
                 mock(BatchArticleQualityChecker.class),
                 mock(ArticleTemplateAllocationService.class),
@@ -217,5 +218,11 @@ class BatchArticleGenerationServiceTest {
                 "{}",
                 "{}"
         );
+    }
+
+    private ArticleAutoImageInsertionService passThroughAutoImageInsertionService() {
+        ArticleAutoImageInsertionService service = mock(ArticleAutoImageInsertionService.class);
+        when(service.insertForChannel(any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(2));
+        return service;
     }
 }
