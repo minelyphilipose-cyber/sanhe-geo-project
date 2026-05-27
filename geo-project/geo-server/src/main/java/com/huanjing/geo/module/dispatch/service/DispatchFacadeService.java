@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.dispatch.service;
 
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
@@ -23,6 +24,7 @@ public class DispatchFacadeService {
     private final CompanyMapper companyMapper;
     private final CurrentUserService currentUserService;
     private final PermissionService permissionService;
+    private final InternalScopeService internalScopeService;
 
     public void replayTask(Long taskId) {
         SysUser operator = currentUserService.requireCurrentUser();
@@ -34,15 +36,22 @@ public class DispatchFacadeService {
     }
 
     public List<DispatchTask> listReplayableTasks(Long projectId, Integer limit) {
+        SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
+        String projectScopeSql = null;
         if (projectId != null) {
             Project project = projectMapper.selectById(projectId);
             if (project == null || project.getDeletedAt() != null) {
                 throw new BizException(404, "Project not found");
             }
+            internalScopeService.ensureProjectAccess(operator, project, "project");
             currentUserService.ensurePartnerResourceAccess(currentUserService.requireCurrentUser(), project.getPartnerId(), "project");
+        } else if (internalScopeService.requiresOwnerScope(operator)) {
+            projectScopeSql = internalScopeService.ownerProjectIdSql(operator);
+        } else if (!internalScopeService.isGlobalInternal(operator) && !currentUserService.isPartnerUser(operator)) {
+            projectScopeSql = "select id from project where 1 = 0";
         }
-        return dispatchTaskService.listReplayableTasks(projectId, limit == null ? 20 : limit);
+        return dispatchTaskService.listReplayableTasks(projectId, limit == null ? 20 : limit, projectScopeSql);
     }
 
     public DispatchTask getTaskStatus(Long taskId) {
@@ -72,6 +81,7 @@ public class DispatchFacadeService {
             if (project == null || project.getDeletedAt() != null) {
                 throw new BizException(404, "Project not found");
             }
+            internalScopeService.ensureProjectAccess(operator, project, "project");
             currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         }
         return task;

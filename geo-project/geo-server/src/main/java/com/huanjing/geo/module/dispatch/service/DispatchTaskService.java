@@ -223,9 +223,14 @@ public class DispatchTaskService {
     }
 
     public List<DispatchTask> listReplayableTasks(Long projectId, int limit) {
+        return listReplayableTasks(projectId, limit, null);
+    }
+
+    public List<DispatchTask> listReplayableTasks(Long projectId, int limit, String projectScopeSql) {
         return dispatchTaskMapper.selectList(
                 new LambdaQueryWrapper<DispatchTask>()
                         .eq(projectId != null, DispatchTask::getProjectId, projectId)
+                        .inSql(projectScopeSql != null, DispatchTask::getProjectId, projectScopeSql)
                         .in(DispatchTask::getStatus, List.of(DispatchTaskStatus.FAILED.value(), DispatchTaskStatus.DEAD_LETTER.value()))
                         .orderByDesc(DispatchTask::getUpdatedAt)
                         .last("LIMIT " + Math.max(limit, 1))

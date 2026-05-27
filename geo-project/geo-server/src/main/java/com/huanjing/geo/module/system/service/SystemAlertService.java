@@ -77,6 +77,7 @@ public class SystemAlertService {
     }
 
     public void resolve(Long alertId) {
+        currentUserService.ensurePermission("system.alert.resolve");
         SysUser user = currentUserService.requireCurrentUser();
         SystemAlert alert = systemAlertMapper.selectOne(visibleAlertWrapper(user)
                 .eq(SystemAlert::getId, alertId)

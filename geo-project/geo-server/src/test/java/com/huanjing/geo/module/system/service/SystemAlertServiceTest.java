@@ -17,7 +17,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -68,6 +70,7 @@ class SystemAlertServiceTest {
 
         systemAlertService.resolve(9L);
 
+        verify(currentUserService).ensurePermission("system.alert.resolve");
         ArgumentCaptor<SystemAlert> captor = ArgumentCaptor.forClass(SystemAlert.class);
         verify(systemAlertMapper).updateById(captor.capture());
         SystemAlert updated = captor.getValue();
@@ -82,6 +85,17 @@ class SystemAlertServiceTest {
         when(systemAlertMapper.selectOne(any())).thenReturn(null);
 
         assertThrows(BizException.class, () -> systemAlertService.resolve(9L));
+    }
+
+    @Test
+    void resolveRequiresSystemAlertPermission() {
+        doThrow(new BizException(403, "No permission: system.alert.resolve"))
+                .when(currentUserService).ensurePermission("system.alert.resolve");
+
+        assertThrows(BizException.class, () -> systemAlertService.resolve(9L));
+
+        verify(systemAlertMapper, never()).selectOne(any());
+        verify(systemAlertMapper, never()).updateById(any());
     }
 
     private SysUser user() {

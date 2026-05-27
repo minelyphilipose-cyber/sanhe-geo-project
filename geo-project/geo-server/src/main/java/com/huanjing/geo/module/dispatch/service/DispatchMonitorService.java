@@ -18,9 +18,11 @@ import com.huanjing.geo.module.dispatch.mapper.AiPlatformHealthEventMapper;
 import com.huanjing.geo.module.dispatch.mapper.DispatchAlertMapper;
 import com.huanjing.geo.module.dispatch.mapper.DispatchTaskMapper;
 import com.huanjing.geo.module.dispatch.mapper.PollBatchShardMapper;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
+import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.common.llm.pool.LlmExecutionGateway;
@@ -52,68 +54,77 @@ public class DispatchMonitorService {
     private final AiPlatformHealthEventMapper aiPlatformHealthEventMapper;
     private final DispatchAlertService dispatchAlertService;
     private final LlmExecutionGateway llmExecutionGateway;
+    private final InternalScopeService internalScopeService;
 
     public DispatchDashboardVO dashboard(String rangeType, LocalDate startDate, LocalDate endDate, Long projectId) {
-        ensureMonitorAccess();
+        SysUser user = ensureMonitorAccess();
         DispatchDateRange range = resolveDateRange(rangeType, startDate, endDate);
-        ensureProjectExists(projectId);
+        ensureProjectVisible(user, projectId);
 
         DispatchDashboardVO vo = new DispatchDashboardVO();
         vo.setRangeLabel(range.getStartDate() + " ~ " + range.getEndDate());
-        vo.setActiveProjectCount(projectMapper.selectCount(
-                new LambdaQueryWrapper<Project>()
-                        .eq(Project::getStatus, "active")
-                        .eq(projectId != null, Project::getId, projectId)
-        ));
-        vo.setDueTaskCount(dispatchTaskMapper.selectCount(
+        LambdaQueryWrapper<Project> activeProjectWrapper = new LambdaQueryWrapper<Project>()
+                .eq(Project::getStatus, "active")
+                .eq(projectId != null, Project::getId, projectId);
+        internalScopeService.applyProjectScope(activeProjectWrapper, user);
+        vo.setActiveProjectCount(projectMapper.selectCount(activeProjectWrapper));
+
+        vo.setDueTaskCount(dispatchTaskMapper.selectCount(applyDispatchTaskScope(
                 new LambdaQueryWrapper<DispatchTask>()
                         .eq(projectId != null, DispatchTask::getProjectId, projectId)
                         .ge(DispatchTask::getDueTime, range.getStartAt())
-                        .lt(DispatchTask::getDueTime, range.getEndAtExclusive())
-        ));
-        vo.setRunningTaskCount(dispatchTaskMapper.selectCount(
+                        .lt(DispatchTask::getDueTime, range.getEndAtExclusive()),
+                user
+        )));
+        vo.setRunningTaskCount(dispatchTaskMapper.selectCount(applyDispatchTaskScope(
                 new LambdaQueryWrapper<DispatchTask>()
                         .eq(projectId != null, DispatchTask::getProjectId, projectId)
                         .eq(DispatchTask::getStatus, "running")
                         .ge(DispatchTask::getDueTime, range.getStartAt())
-                        .lt(DispatchTask::getDueTime, range.getEndAtExclusive())
-        ));
-        vo.setCompletedTaskCount(dispatchTaskMapper.selectCount(
+                        .lt(DispatchTask::getDueTime, range.getEndAtExclusive()),
+                user
+        )));
+        vo.setCompletedTaskCount(dispatchTaskMapper.selectCount(applyDispatchTaskScope(
                 new LambdaQueryWrapper<DispatchTask>()
                         .eq(projectId != null, DispatchTask::getProjectId, projectId)
                         .eq(DispatchTask::getStatus, "completed")
                         .ge(DispatchTask::getFinishedAt, range.getStartAt())
-                        .lt(DispatchTask::getFinishedAt, range.getEndAtExclusive())
-        ));
-        vo.setFailedTaskCount(dispatchTaskMapper.selectCount(
+                        .lt(DispatchTask::getFinishedAt, range.getEndAtExclusive()),
+                user
+        )));
+        vo.setFailedTaskCount(dispatchTaskMapper.selectCount(applyDispatchTaskScope(
                 new LambdaQueryWrapper<DispatchTask>()
                         .eq(projectId != null, DispatchTask::getProjectId, projectId)
                         .isNotNull(DispatchTask::getLastError)
                         .ge(DispatchTask::getUpdatedAt, range.getStartAt())
-                        .lt(DispatchTask::getUpdatedAt, range.getEndAtExclusive())
-        ));
-        vo.setDeadLetterPendingCount(dispatchTaskMapper.selectCount(
+                        .lt(DispatchTask::getUpdatedAt, range.getEndAtExclusive()),
+                user
+        )));
+        vo.setDeadLetterPendingCount(dispatchTaskMapper.selectCount(applyDispatchTaskScope(
                 new LambdaQueryWrapper<DispatchTask>()
                         .eq(projectId != null, DispatchTask::getProjectId, projectId)
-                        .eq(DispatchTask::getStatus, "dead_letter")
-        ));
-        vo.setPlatformExceptionCount(dispatchTaskMapper.selectCount(
+                        .eq(DispatchTask::getStatus, "dead_letter"),
+                user
+        )));
+        vo.setPlatformExceptionCount(dispatchTaskMapper.selectCount(applyDispatchTaskScope(
                 new LambdaQueryWrapper<DispatchTask>()
                         .eq(projectId != null, DispatchTask::getProjectId, projectId)
                         .isNotNull(DispatchTask::getPlatformCode)
                         .isNotNull(DispatchTask::getLastError)
                         .ge(DispatchTask::getUpdatedAt, range.getStartAt())
-                        .lt(DispatchTask::getUpdatedAt, range.getEndAtExclusive())
-        ));
+                        .lt(DispatchTask::getUpdatedAt, range.getEndAtExclusive()),
+                user
+        )));
 
         List<DispatchTask> completed = dispatchTaskMapper.selectList(
-                new LambdaQueryWrapper<DispatchTask>()
+                applyDispatchTaskScope(new LambdaQueryWrapper<DispatchTask>()
                         .eq(projectId != null, DispatchTask::getProjectId, projectId)
                         .eq(DispatchTask::getStatus, "completed")
                         .isNotNull(DispatchTask::getFirstStartedAt)
                         .isNotNull(DispatchTask::getFinishedAt)
                         .ge(DispatchTask::getFinishedAt, range.getStartAt())
-                        .lt(DispatchTask::getFinishedAt, range.getEndAtExclusive())
+                        .lt(DispatchTask::getFinishedAt, range.getEndAtExclusive()),
+                        user)
         );
         long avgMs = completed.isEmpty() ? 0 : Math.round(
                 completed.stream()
@@ -134,17 +145,17 @@ public class DispatchMonitorService {
                                                 String taskType,
                                                 String status,
                                                 String keyword) {
-        ensureMonitorAccess();
+        SysUser user = ensureMonitorAccess();
         DispatchDateRange range = resolveDateRange(rangeType, startDate, endDate);
-        ensureProjectExists(projectId);
+        ensureProjectVisible(user, projectId);
 
-        LambdaQueryWrapper<DispatchTask> wrapper = new LambdaQueryWrapper<DispatchTask>()
+        LambdaQueryWrapper<DispatchTask> wrapper = applyDispatchTaskScope(new LambdaQueryWrapper<DispatchTask>()
                 .ge(DispatchTask::getDueTime, range.getStartAt())
                 .lt(DispatchTask::getDueTime, range.getEndAtExclusive())
                 .eq(projectId != null, DispatchTask::getProjectId, projectId)
                 .eq(StringUtils.hasText(taskType), DispatchTask::getTaskType, taskType)
                 .eq(StringUtils.hasText(status), DispatchTask::getStatus, status)
-                .orderByDesc(DispatchTask::getCreatedAt);
+                .orderByDesc(DispatchTask::getCreatedAt), user);
 
         if (StringUtils.hasText(keyword)) {
             List<Long> matchedProjectIds = projectMapper.selectList(
@@ -168,11 +179,12 @@ public class DispatchMonitorService {
     }
 
     public DispatchTaskMonitorVO taskDetail(Long taskId) {
-        ensureMonitorAccess();
+        SysUser user = ensureMonitorAccess();
         DispatchTask task = dispatchTaskMapper.selectById(taskId);
         if (task == null) {
             throw new BizException(404, "Dispatch task not found");
         }
+        ensureProjectVisible(user, task.getProjectId());
         Map<Long, String> projectNameMap = projectNameMap(List.of(task.getProjectId()));
         return toTaskMonitorVO(task, projectNameMap.getOrDefault(task.getProjectId(), "-"));
     }
@@ -263,17 +275,17 @@ public class DispatchMonitorService {
                                            LocalDate endDate,
                                            String severity,
                                            String status) {
-        ensureMonitorAccess();
+        SysUser user = ensureMonitorAccess();
         DispatchDateRange range = resolveDateRange(rangeType, startDate, endDate);
 
         Page<DispatchAlert> page = dispatchAlertMapper.selectPage(
                 new Page<>(current, size),
-                new LambdaQueryWrapper<DispatchAlert>()
+                applyDispatchAlertScope(new LambdaQueryWrapper<DispatchAlert>()
                         .eq(StringUtils.hasText(severity), DispatchAlert::getSeverity, severity)
                         .eq(StringUtils.hasText(status), DispatchAlert::getStatus, status)
                         .ge(DispatchAlert::getCreatedAt, range.getStartAt())
                         .lt(DispatchAlert::getCreatedAt, range.getEndAtExclusive())
-                        .orderByDesc(DispatchAlert::getCreatedAt)
+                        .orderByDesc(DispatchAlert::getCreatedAt), user)
         );
 
         Map<Long, String> projectNameMap = projectNameMap(page.getRecords().stream()
@@ -310,11 +322,36 @@ public class DispatchMonitorService {
         dispatchAlertService.resolveAlert(id, userId, note);
     }
 
-    private void ensureMonitorAccess() {
+    private SysUser ensureMonitorAccess() {
         var user = currentUserService.requireCurrentUser();
         if (!INTERNAL_MONITOR_ROLES.contains(user.getRole())) {
             throw new BizException(403, "No permission for monitoring center");
         }
+        return user;
+    }
+
+    private LambdaQueryWrapper<DispatchTask> applyDispatchTaskScope(LambdaQueryWrapper<DispatchTask> wrapper, SysUser user) {
+        if (internalScopeService.isGlobalInternal(user)) {
+            return wrapper;
+        }
+        if (internalScopeService.requiresOwnerScope(user)) {
+            wrapper.inSql(DispatchTask::getProjectId, internalScopeService.ownerProjectIdSql(user));
+        } else {
+            internalScopeService.applyNoRows(wrapper);
+        }
+        return wrapper;
+    }
+
+    private LambdaQueryWrapper<DispatchAlert> applyDispatchAlertScope(LambdaQueryWrapper<DispatchAlert> wrapper, SysUser user) {
+        if (internalScopeService.isGlobalInternal(user)) {
+            return wrapper;
+        }
+        if (internalScopeService.requiresOwnerScope(user)) {
+            wrapper.inSql(DispatchAlert::getProjectId, internalScopeService.ownerProjectIdSql(user));
+        } else {
+            internalScopeService.applyNoRows(wrapper);
+        }
+        return wrapper;
     }
 
     private DispatchDateRange resolveDateRange(String rangeType, LocalDate startDate, LocalDate endDate) {
@@ -368,7 +405,7 @@ public class DispatchMonitorService {
                 .collect(Collectors.toMap(Project::getId, Project::getProjectName, (a, b) -> a, LinkedHashMap::new));
     }
 
-    private void ensureProjectExists(Long projectId) {
+    private void ensureProjectVisible(SysUser user, Long projectId) {
         if (projectId == null) {
             return;
         }
@@ -376,6 +413,7 @@ public class DispatchMonitorService {
         if (project == null) {
             throw new BizException(404, "Project not found");
         }
+        internalScopeService.ensureProjectAccess(user, project, "project");
     }
 
     private DispatchTaskMonitorVO toTaskMonitorVO(DispatchTask task, String projectName) {
