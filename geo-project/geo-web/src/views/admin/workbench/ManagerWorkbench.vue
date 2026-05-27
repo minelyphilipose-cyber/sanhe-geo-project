@@ -81,7 +81,7 @@ const metrics = computed(() => [
   { key: 'users', label: '启用用户', value: overview.value?.activeUserCount, hint: `运营 ${displayNumber(overview.value?.activeOperatorCount)}`, icon: 'User', color: '#2563eb', bg: '#dbeafe' },
   { key: 'alerts', label: '系统告警', value: overview.value?.openSystemAlertCount, hint: `高优先级 ${displayNumber(overview.value?.highSeveritySystemAlertCount)}`, icon: 'Bell', color: '#dc2626', bg: '#fee2e2' },
   { key: 'platforms', label: 'AI 平台', value: overview.value?.aiPlatformConfigCount, hint: `站点 ${displayNumber(overview.value?.publishSiteCount)}`, icon: 'Setting', color: '#059669', bg: '#d1fae5' },
-  { key: 'permissions', label: '有效权限', value: overview.value?.permissionCount, hint: 'active + deprecated', icon: 'Key', color: '#7c3aed', bg: '#ede9fe' },
+  { key: 'permissions', label: '有效权限', value: overview.value?.permissionCount, hint: '含历史兼容权限', icon: 'Key', color: '#7c3aed', bg: '#ede9fe' },
 ])
 
 const latestAlerts = computed<SystemAlertTodoItem[]>(() => overview.value?.latestSystemAlerts || [])

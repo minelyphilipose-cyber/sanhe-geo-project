@@ -2,7 +2,7 @@
   <div class="role-workbench">
     <header class="role-workbench__header">
       <div>
-        <p class="role-workbench__eyebrow">Super Admin Console</p>
+        <p class="role-workbench__eyebrow">最高权限总控台</p>
         <h1 class="role-workbench__title">全局总控</h1>
         <p class="role-workbench__subtitle">最高权限兜底视角，集中查看系统级风险信号。</p>
       </div>
@@ -30,17 +30,17 @@
         <div class="panel-heading">
           <div>
             <h2>全局风险信号</h2>
-            <p>用于发现迁移遗漏、脏数据和仍在生效的历史权限。</p>
+            <p>用于发现迁移遗漏、数据归属异常和仍在生效的历史权限。</p>
           </div>
           <el-tag :type="riskType">{{ riskLabel }}</el-tag>
         </div>
         <div class="risk-list">
           <div class="risk-item">
-            <strong>NULL owner 客户</strong>
+            <strong>未分配负责人的客户</strong>
             <p>{{ displayNumber(overview?.nullOwnerCompanyCount) }} 个客户需要确认负责人。</p>
           </div>
           <div class="risk-item">
-            <strong>deprecated 仍生效权限</strong>
+            <strong>仍在生效的历史权限</strong>
             <p>{{ displayNumber(overview?.deprecatedEffectivePermissionCount) }} 个历史权限仍绑定角色。</p>
           </div>
           <div class="risk-item">
@@ -82,8 +82,8 @@ const overview = ref<SuperAdminWorkbenchOverview | null>(null)
 const metrics = computed(() => [
   { key: 'users', label: '全局用户', value: overview.value?.totalUserCount, hint: `启用 ${displayNumber(overview.value?.activeUserCount)}`, icon: 'User', color: '#2563eb', bg: '#dbeafe' },
   { key: 'companies', label: '全局客户', value: overview.value?.totalCompanyCount, hint: `项目 ${displayNumber(overview.value?.totalProjectCount)}`, icon: 'OfficeBuilding', color: '#059669', bg: '#d1fae5' },
-  { key: 'nullOwner', label: 'NULL owner', value: overview.value?.nullOwnerCompanyCount, hint: '客户负责人缺失', icon: 'Warning', color: '#dc2626', bg: '#fee2e2' },
-  { key: 'deprecated', label: '历史权限', value: overview.value?.deprecatedEffectivePermissionCount, hint: 'deprecated 仍绑定', icon: 'Key', color: '#7c3aed', bg: '#ede9fe' },
+  { key: 'unassignedOwner', label: '未分配负责人', value: overview.value?.nullOwnerCompanyCount, hint: '客户负责人缺失', icon: 'Warning', color: '#dc2626', bg: '#fee2e2' },
+  { key: 'legacyPermissions', label: '历史权限仍生效', value: overview.value?.deprecatedEffectivePermissionCount, hint: '仍绑定角色', icon: 'Key', color: '#7c3aed', bg: '#ede9fe' },
 ])
 
 const riskTotal = computed(() =>
