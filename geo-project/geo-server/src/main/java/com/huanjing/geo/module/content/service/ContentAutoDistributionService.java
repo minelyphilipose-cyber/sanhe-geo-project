@@ -314,7 +314,7 @@ public class ContentAutoDistributionService {
         if (generated.isEmpty()) {
             return;
         }
-        String jobName = "自动分发_" + batch.getProjectId() + "_" + batch.getPlanDate();
+        String jobName = buildAutoDistributionJobName(batch);
         List<BatchArticlePublishService.SystemPublishPlan> plans = generated.stream()
                 .map(item -> new BatchArticlePublishService.SystemPublishPlan(
                         item.getArticleId(),
@@ -362,6 +362,26 @@ public class ContentAutoDistributionService {
                         .set(ContentAutoDistributionItem::getFailureReason, publishItem.getErrorMessage()));
             }
         }
+    }
+
+    private String buildAutoDistributionJobName(ContentAutoDistributionBatch batch) {
+        String subjectName = "项目";
+        if (batch.getProjectId() != null) {
+            Project project = projectMapper.selectById(batch.getProjectId());
+            if (project != null && StringUtils.hasText(project.getProjectName())) {
+                subjectName = compactNamePart(project.getProjectName());
+            }
+        }
+        return "自动分发_" + subjectName + "_" + batch.getPlanDate();
+    }
+
+    private String compactNamePart(String name) {
+        String text = StringUtils.hasText(name) ? name.trim().replaceAll("\\s+", "") : "项目";
+        int maxLength = 24;
+        if (text.length() <= maxLength) {
+            return text;
+        }
+        return text.substring(0, maxLength) + "...";
     }
 
     private void refreshBatchCounters(Long batchId) {

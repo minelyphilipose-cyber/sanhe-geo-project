@@ -50,6 +50,8 @@ import java.util.UUID;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @RequiredArgsConstructor
@@ -59,6 +61,8 @@ public class BatchArticlePublishService {
     private static final Set<String> ACTIVE_ARTICLE_STATUS = Set.of("approved", "unpublished");
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final DateTimeFormatter JOB_NAME_DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final Pattern LEGACY_AUTO_DISTRIBUTION_JOB_NAME =
+            Pattern.compile("^自动分发_(\\d+)_(\\d{4}-\\d{2}-\\d{2})$");
 
     private final BatchArticlePublishJobMapper jobMapper;
     private final BatchArticlePublishItemMapper itemMapper;
@@ -412,7 +416,7 @@ public class BatchArticlePublishService {
         );
         BatchArticlePublishResponse response = new BatchArticlePublishResponse();
         response.setJobId(job.getId());
-        response.setJobName(job.getJobName());
+        response.setJobName(displayJobName(job.getJobName()));
         response.setPublishMode(job.getPublishMode());
         response.setStatus(job.getStatus());
         response.setScheduledAt(job.getScheduledAt());
@@ -427,7 +431,7 @@ public class BatchArticlePublishService {
     private BatchArticlePublishJobSummary toSummary(BatchArticlePublishJob job) {
         BatchArticlePublishJobSummary summary = new BatchArticlePublishJobSummary();
         summary.setJobId(job.getId());
-        summary.setJobName(job.getJobName());
+        summary.setJobName(displayJobName(job.getJobName()));
         summary.setPublishMode(job.getPublishMode());
         summary.setStatus(job.getStatus());
         summary.setScheduledAt(job.getScheduledAt());
@@ -454,6 +458,27 @@ public class BatchArticlePublishService {
             ));
         }
         return "批量_" + subjectName + "_" + baseTime.format(JOB_NAME_DATE);
+    }
+
+    private String displayJobName(String jobName) {
+        if (!StringUtils.hasText(jobName)) {
+            return jobName;
+        }
+        Matcher matcher = LEGACY_AUTO_DISTRIBUTION_JOB_NAME.matcher(jobName.trim());
+        if (!matcher.matches()) {
+            return jobName;
+        }
+        Long projectId;
+        try {
+            projectId = Long.valueOf(matcher.group(1));
+        } catch (NumberFormatException ex) {
+            return jobName;
+        }
+        Project project = projectMapper.selectById(projectId);
+        if (project == null || !StringUtils.hasText(project.getProjectName())) {
+            return jobName;
+        }
+        return "自动分发_" + compactJobNamePart(project.getProjectName()) + "_" + matcher.group(2);
     }
 
     private String compactJobNamePart(String name) {

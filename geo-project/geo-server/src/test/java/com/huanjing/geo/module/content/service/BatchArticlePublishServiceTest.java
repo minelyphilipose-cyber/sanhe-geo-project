@@ -229,6 +229,7 @@ class BatchArticlePublishServiceTest {
     void page_mapsJobSummaryForListPage() {
         BatchArticlePublishJob job = new BatchArticlePublishJob();
         job.setId(900L);
+        job.setJobName("日常分发");
         job.setPublishMode("scheduled");
         job.setStatus("running");
         job.setTotalCount(2);
@@ -242,9 +243,41 @@ class BatchArticlePublishServiceTest {
 
         assertEquals(1, result.getTotal());
         assertEquals(900L, result.getRecords().get(0).getJobId());
+        assertEquals("日常分发", result.getRecords().get(0).getJobName());
         assertEquals("running", result.getRecords().get(0).getStatus());
         assertEquals(2, result.getRecords().get(0).getTotalCount());
         verify(currentUserService).ensurePermission("project.read");
+    }
+
+    @Test
+    void page_rewritesLegacyAutoDistributionJobNameWithProjectName() {
+        BatchArticlePublishJob job = new BatchArticlePublishJob();
+        job.setId(900L);
+        job.setJobName("自动分发_20_2026-05-27");
+        job.setPublishMode("scheduled");
+        job.setStatus("pending");
+        job.setTotalCount(1);
+        Page<BatchArticlePublishJob> mapperPage = new Page<>(1, 10, 1);
+        mapperPage.setRecords(List.of(job));
+        when(jobMapper.selectPage(any(Page.class), any())).thenReturn(mapperPage);
+        when(projectMapper.selectById(20L)).thenReturn(project(20L, 30L, "北京火锅项目"));
+
+        Page<BatchArticlePublishJobSummary> result = service.page(1, 10, null);
+
+        assertEquals("自动分发_北京火锅项目_2026-05-27", result.getRecords().get(0).getJobName());
+    }
+
+    @Test
+    void response_rewritesLegacyAutoDistributionJobNameWithProjectName() {
+        BatchArticlePublishJob job = publishJob();
+        job.setJobName("自动分发_20_2026-05-27");
+        when(jobMapper.selectById(900L)).thenReturn(job);
+        when(itemMapper.selectList(any())).thenReturn(List.of());
+        when(projectMapper.selectById(20L)).thenReturn(project(20L, 30L, "北京火锅项目"));
+
+        BatchArticlePublishResponse response = service.response(900L);
+
+        assertEquals("自动分发_北京火锅项目_2026-05-27", response.getJobName());
     }
 
     @Test
