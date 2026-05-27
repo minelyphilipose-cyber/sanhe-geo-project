@@ -28,6 +28,9 @@ import java.util.Set;
 @Service
 @RequiredArgsConstructor
 public class ArticleGenerationReadinessService {
+    private static final Set<String> LEGACY_PROJECT_UPDATE_ROLES =
+            Set.of("operator", "delivery_manager", "partner", "partner_staff");
+
 
     public static final String WARNING_DEAL_CONTACT_MISSING = "deal_contact_missing";
     public static final String WARNING_DEAL_CONTACT_HIDDEN = "deal_contact_hidden";
@@ -68,7 +71,7 @@ public class ArticleGenerationReadinessService {
 
     public ReadinessReport inspect(Long projectId, List<String> questionSceneCodes) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.update");
+        currentUserService.ensurePermissionOrLegacy("content.ai.generate", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
         Project project = requireActiveProject(projectId);
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         Brand brand = loadBrand(project, operator);

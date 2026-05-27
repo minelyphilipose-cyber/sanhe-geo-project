@@ -47,6 +47,9 @@ import java.util.Set;
 @Service
 @RequiredArgsConstructor
 public class WechatArticleRenderService {
+    private static final Set<String> LEGACY_PROJECT_UPDATE_ROLES =
+            Set.of("operator", "delivery_manager", "partner", "partner_staff");
+
     private final ArticlePlatformRenderMapper articleRenderMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
     private final ArticleMarkdownBlockParser blockParser;
@@ -109,7 +112,7 @@ public class WechatArticleRenderService {
     @Transactional
     public ArticleRenderConfigResponse save(Long articleId, ArticleRenderSaveRequest request) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.update");
+        currentUserService.ensurePermissionOrLegacy("content.article.write", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
         PlatformRenderTemplateVersion version = templateService.requireVersion(request.getTemplateVersionId());
         validateAnnotations(blockParser.parse(latestContent(articleId), articleTitle(articleId)), request.getAnnotations());
         ArticlePlatformRender config = currentConfig(articleId);

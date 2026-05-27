@@ -14,8 +14,10 @@ import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticlePublishItemMapper;
 import com.huanjing.geo.module.content.mapper.ContentAutoDistributionBatchMapper;
 import com.huanjing.geo.module.content.mapper.ContentAutoDistributionItemMapper;
+import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.project.entity.KeywordGroupResult;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.entity.ProjectChannelAllocation;
@@ -71,6 +73,7 @@ public class ContentAutoDistributionService {
     private final ProjectChannelAllocationMapper allocationMapper;
     private final KeywordGroupResultMapper keywordGroupResultMapper;
     private final BrandMapper brandMapper;
+    private final CompanyMapper companyMapper;
     private final PublishSiteMapper publishSiteMapper;
     private final SysUserMapper sysUserMapper;
     private final ContentAutoDistributionBatchMapper batchMapper;
@@ -117,7 +120,6 @@ public class ContentAutoDistributionService {
     }
 
     public void createDailyPlan(LocalDate planDate) {
-        Long operatorId = resolveOperatorUserId();
         List<Project> projects = projectMapper.selectList(new LambdaQueryWrapper<Project>()
                 .eq(Project::getStatus, "active")
                 .isNull(Project::getDeletedAt)
@@ -127,6 +129,7 @@ public class ContentAutoDistributionService {
                 .orderByAsc(Project::getId));
         for (Project project : projects) {
             try {
+                Long operatorId = resolveOperatorUserId(project);
                 createProjectPlan(project, planDate, operatorId);
             } catch (Exception ex) {
                 log.warn("auto distribution plan failed projectId={} date={} error={}",
@@ -327,7 +330,7 @@ public class ContentAutoDistributionService {
                 ))
                 .toList();
         BatchArticlePublishService.SystemPublishJobResult result =
-                publishService.createSystemScheduledJob(jobName, resolveOperatorUserId(), plans);
+                publishService.createSystemScheduledJob(jobName, resolveOperatorUserId(batch.getProjectId()), plans);
         Map<Long, Long> publishItemIds = result.itemIdsByArticleId();
         for (ContentAutoDistributionItem item : generated) {
             itemMapper.update(null, new LambdaUpdateWrapper<ContentAutoDistributionItem>()
@@ -671,23 +674,72 @@ public class ContentAutoDistributionService {
         return "forum_site";
     }
 
-    private Long resolveOperatorUserId() {
-        if (configuredOperatorUserId > 0) {
-            return configuredOperatorUserId;
+    private Long resolveOperatorUserId(Long projectId) {
+        Project project = projectId == null ? null : projectMapper.selectById(projectId);
+        return resolveOperatorUserId(project);
+    }
+
+    private Long resolveOperatorUserId(Project project) {
+        Long ownerId = resolveProjectOwnerId(project);
+        if (ownerId != null) {
+            return ownerId;
+        }
+        Long fallbackId = resolveConfiguredSuperAdminId();
+        if (fallbackId != null) {
+            log.warn("auto distribution uses configured super_admin fallback projectId={}", project == null ? null : project.getId());
+            return fallbackId;
+        }
+        SysUser fallback = firstActiveSuperAdmin();
+        if (fallback != null) {
+            log.warn("auto distribution uses super_admin fallback projectId={} userId={}", project == null ? null : project.getId(), fallback.getId());
+            return fallback.getId();
         }
         SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getIsActive, true)
+                .orderByAsc(SysUser::getId)
+                .last("LIMIT 1"));
+        log.warn("auto distribution fallback super_admin missing projectId={}, using first active user userId={}",
+                project == null ? null : project.getId(), user == null ? null : user.getId());
+        return user == null ? null : user.getId();
+    }
+
+    private Long resolveProjectOwnerId(Project project) {
+        if (project == null || project.getCompanyId() == null) {
+            return null;
+        }
+        Company company = companyMapper.selectById(project.getCompanyId());
+        if (company == null || company.getDeletedAt() != null || company.getOwnerId() == null) {
+            log.warn("auto distribution project owner missing projectId={} companyId={}",
+                    project.getId(), project.getCompanyId());
+            return null;
+        }
+        SysUser owner = sysUserMapper.selectById(company.getOwnerId());
+        if (owner == null || !Boolean.TRUE.equals(owner.getIsActive()) || !"operator".equals(owner.getRole())) {
+            log.warn("auto distribution project owner invalid projectId={} companyId={} ownerId={}",
+                    project.getId(), project.getCompanyId(), company.getOwnerId());
+            return null;
+        }
+        return owner.getId();
+    }
+
+    private Long resolveConfiguredSuperAdminId() {
+        if (configuredOperatorUserId <= 0) {
+            return null;
+        }
+        SysUser configured = sysUserMapper.selectById(configuredOperatorUserId);
+        if (configured != null && Boolean.TRUE.equals(configured.getIsActive()) && "super_admin".equals(configured.getRole())) {
+            return configured.getId();
+        }
+        log.warn("auto distribution configured fallback user is not active super_admin userId={}", configuredOperatorUserId);
+        return null;
+    }
+
+    private SysUser firstActiveSuperAdmin() {
+        return sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
                 .eq(SysUser::getRole, "super_admin")
                 .eq(SysUser::getIsActive, true)
                 .orderByAsc(SysUser::getId)
                 .last("LIMIT 1"));
-        if (user != null) {
-            return user.getId();
-        }
-        user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getIsActive, true)
-                .orderByAsc(SysUser::getId)
-                .last("LIMIT 1"));
-        return user == null ? null : user.getId();
     }
 
     private void withLock(String key, Runnable runnable) {

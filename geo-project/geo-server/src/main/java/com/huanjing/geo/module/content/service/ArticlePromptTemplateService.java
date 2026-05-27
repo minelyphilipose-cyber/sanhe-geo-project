@@ -113,7 +113,7 @@ public class ArticlePromptTemplateService {
     @Transactional
     public TemplateDetailVO create(TemplateSaveRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("user.manage");
+        currentUserService.ensurePermission("content.prompt_template.manage");
         validateTemplate(req.channelGroupCode(), req.channelSubCode(), req.agentSiteModule(), req.status(), req.weight(),
                 req.contactDisclosureMode(), req.questionSceneCode());
         variableRegistry.validateTemplateVariables(req.systemPrompt(), req.userPromptTemplate(), req.variablesJson());
@@ -138,7 +138,7 @@ public class ArticlePromptTemplateService {
     @Transactional
     public TemplateDetailVO update(Long id, TemplateSaveRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("user.manage");
+        currentUserService.ensurePermission("content.prompt_template.manage");
         ArticlePromptTemplate template = requireTemplate(id);
         validateTemplate(req.channelGroupCode(), req.channelSubCode(), req.agentSiteModule(), req.status(), req.weight(),
                 req.contactDisclosureMode(), req.questionSceneCode());
@@ -161,7 +161,7 @@ public class ArticlePromptTemplateService {
     @Transactional
     public TemplateDetailVO createVersion(Long templateId, VersionCreateRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("user.manage");
+        currentUserService.ensurePermission("content.prompt_template.manage");
         ArticlePromptTemplate template = requireTemplate(templateId);
         variableRegistry.validateTemplateVariables(req.systemPrompt(), req.userPromptTemplate(), req.variablesJson());
         ArticlePromptTemplateVersion version = upsertCurrentVersion(template, req.systemPrompt(),
@@ -174,7 +174,7 @@ public class ArticlePromptTemplateService {
     @Transactional
     public TemplateDetailVO publishVersion(Long templateId, Long versionId) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("user.manage");
+        currentUserService.ensurePermission("content.prompt_template.manage");
         ArticlePromptTemplate template = requireTemplate(templateId);
         ArticlePromptTemplateVersion version = requireVersion(templateId, versionId);
         if (!version.getId().equals(template.getCurrentVersionId())) {
@@ -191,7 +191,7 @@ public class ArticlePromptTemplateService {
     @Transactional
     public TemplateVO updateWeight(Long id, WeightUpdateRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("user.manage");
+        currentUserService.ensurePermission("content.prompt_template.manage");
         validateWeight(req.weight());
         ArticlePromptTemplate template = requireTemplate(id);
         Integer before = template.getWeight();

@@ -74,7 +74,7 @@ public class WechatRenderTemplateService {
     @Transactional
     public PlatformRenderTemplate create(TemplateSaveRequest request) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.update");
+        currentUserService.ensurePermission("content.wechat_template.manage");
         PlatformRenderTemplate template = new PlatformRenderTemplate();
         template.setPlatformCode(PLATFORM);
         template.setName(request.getName().trim());
@@ -88,7 +88,7 @@ public class WechatRenderTemplateService {
 
     @Transactional
     public PlatformRenderTemplate update(Long templateId, TemplateUpdateRequest request) {
-        currentUserService.ensurePermission("project.update");
+        currentUserService.ensurePermission("content.wechat_template.manage");
         PlatformRenderTemplate template = requireTemplate(templateId);
         template.setName(request.getName().trim());
         template.setDescription(trimToNull(request.getDescription()));
@@ -103,14 +103,14 @@ public class WechatRenderTemplateService {
     @Transactional
     public PlatformRenderTemplateVersion createVersion(Long templateId, TemplateVersionSaveRequest request) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.update");
+        currentUserService.ensurePermission("content.wechat_template.manage");
         requireTemplate(templateId);
         return createVersion(templateId, request.getSourceType(), request.getSourceHtml(), request.getRoles(), request.getBodyStyle(), operator.getId());
     }
 
     @Transactional
     public void updateStatus(Long templateId, String status) {
-        currentUserService.ensurePermission("project.update");
+        currentUserService.ensurePermission("content.wechat_template.manage");
         PlatformRenderTemplate template = requireTemplate(templateId);
         template.setStatus(normalizeStatus(status));
         templateMapper.updateById(template);
@@ -118,7 +118,7 @@ public class WechatRenderTemplateService {
 
     @Transactional
     public void delete(Long templateId) {
-        currentUserService.ensurePermission("project.update");
+        currentUserService.ensurePermission("content.wechat_template.manage");
         requireTemplate(templateId);
         if (isTemplateReferenced(templateId)) {
             throw new BizException(400, "该模板已被文章使用，不能删除；如不再使用，请先停用模板");

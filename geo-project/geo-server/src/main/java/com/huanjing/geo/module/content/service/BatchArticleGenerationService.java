@@ -67,6 +67,9 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class BatchArticleGenerationService {
+    private static final Set<String> LEGACY_PROJECT_UPDATE_ROLES =
+            Set.of("operator", "delivery_manager", "partner", "partner_staff");
+
 
     private static final int MAX_BATCH_ARTICLE_COUNT = 30;
     private static final String STATUS_PENDING = "pending";
@@ -129,6 +132,7 @@ public class BatchArticleGenerationService {
     private final ArticleModelResolver articleModelResolver;
     private final ArticleAutoImageInsertionService autoImageInsertionService;
     private final BatchArticlePromptBuilder promptBuilder;
+    private final ArticleGenerationPromptContextFactory promptContextFactory;
     private final BatchArticleQualityChecker qualityChecker;
     private final ArticleTemplateAllocationService allocationService;
     private final QuestionScenePlatformSuggestionService suggestionService;
@@ -159,6 +163,7 @@ public class BatchArticleGenerationService {
                                          ArticleModelResolver articleModelResolver,
                                          ArticleAutoImageInsertionService autoImageInsertionService,
                                          BatchArticlePromptBuilder promptBuilder,
+                                         ArticleGenerationPromptContextFactory promptContextFactory,
                                          BatchArticleQualityChecker qualityChecker,
                                          ArticleTemplateAllocationService allocationService,
                                          QuestionScenePlatformSuggestionService suggestionService,
@@ -188,6 +193,7 @@ public class BatchArticleGenerationService {
         this.articleModelResolver = articleModelResolver;
         this.autoImageInsertionService = autoImageInsertionService;
         this.promptBuilder = promptBuilder;
+        this.promptContextFactory = promptContextFactory;
         this.qualityChecker = qualityChecker;
         this.allocationService = allocationService;
         this.suggestionService = suggestionService;
@@ -199,7 +205,7 @@ public class BatchArticleGenerationService {
 
     public BatchArticleGenerateResponse create(BatchArticleGenerateRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.update");
+        currentUserService.ensurePermissionOrLegacy("content.ai.generate", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
         return createInternal(req, operator, true);
     }
 
@@ -396,37 +402,17 @@ public class BatchArticleGenerationService {
             if (project == null) {
                 throw new BizException(404, "Project not found");
             }
-            String topic = StringUtils.hasText(task.getTopic()) ? task.getTopic() : batch.getTopic();
-            String topicAsQuestion = StringUtils.hasText(task.getTopicAsQuestion())
-                    ? task.getTopicAsQuestion()
-                    : promptBuilder.topicAsQuestion(topic, task.getArticleType(), task.getArticleIndexInBatch());
-            task.setTopicAsQuestion(topicAsQuestion);
-            List<String> relatedKeywords = relatedKeywords(batch.getProjectId(), task);
-            String brandStatement = resolveBrandStatement(project, brand);
-            String titleGuide = buildTitleGuide(task, project, brand, topic);
-            BatchArticlePromptBuilder.PromptBuildInput promptInput = new BatchArticlePromptBuilder.PromptBuildInput(
-                    project,
-                    brand,
-                    brandStatement,
-                    batch.getTopicSource(),
-                    topic,
-                    topicAsQuestion,
-                    task.getKeywordGroupId(),
-                    task.getKeywordGroupName(),
-                    relatedKeywords,
-                    task.getArticleType(),
-                    task.getContentStyle(),
-                    task.getLength(),
-                    task.getExtraPrompt(),
-                    task.getArticleIndexInBatch(),
-                    forbiddenPhrases(project, brand),
-                    titleGuide
-            );
-            BatchArticlePromptBuilder.PromptBuildResult prompt = buildPrompt(task, promptInput);
+            ArticleGenerationPromptContextFactory.PromptContextResult promptContext =
+                    promptContextFactory.buildForBatch(batch, task);
+            task.setTopicAsQuestion(promptContext.topicAsQuestion());
+            if (promptContext.fallbackToDefaultPrompt()) {
+                task.setTemplateSource(TEMPLATE_SOURCE_FALLBACK_DEFAULT_PROMPT);
+            }
+            BatchArticlePromptBuilder.PromptBuildResult prompt = promptContext.prompt();
             task.setContentAngle(prompt.contentAngle());
             task.setAudiencePerspective(prompt.audiencePerspective());
 
-            List<String> forbiddenPhrases = forbiddenPhrases(project, brand);
+            List<String> forbiddenPhrases = promptContext.forbiddenPhrases();
             ArticleGenerationEngine.GeneratedArticle generated = articleGenerationEngine.generate(
                     new ArticleGenerationEngine.GenerateInput(
                             project,

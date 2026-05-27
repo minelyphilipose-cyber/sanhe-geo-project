@@ -69,7 +69,9 @@ public class ContentDistributionService {
     private static final ZoneId SH_ZONE = ZoneId.of("Asia/Shanghai");
     private static final Set<String> SUCCESS_TASK_STATUS = Set.of("submitted", "confirmed", "published");
     private static final Set<String> ACTIVE_ARTICLE_STATUS = Set.of("approved", "unpublished");
-    private static final Set<String> DISTRIBUTE_ALLOWED_ROLES = Set.of("super_admin", "manager", "delivery_manager", "operator");
+    private static final Set<String> DISTRIBUTE_ALLOWED_ROLES = Set.of("super_admin", "delivery_manager", "operator");
+    private static final Set<String> LEGACY_PROJECT_WRITE_ROLES =
+            Set.of("operator", "delivery_manager", "partner", "partner_staff");
     private static final String GENERAL_INDUSTRY = "general";
     private static final String AUTH_MODE_COOKIE = "COOKIE";
     private static final int MAX_FILL_PAYLOAD_BYTES = 16 * 1024;
@@ -127,7 +129,7 @@ public class ContentDistributionService {
     @Transactional
     public DistributionTask distributeTo(Long articleId, TargetContext target) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.write");
+        currentUserService.ensurePermissionOrLegacy("content.distribution.operate", "project.write", LEGACY_PROJECT_WRITE_ROLES);
         return distributeToWithOperator(articleId, target, operator);
     }
 
@@ -180,7 +182,7 @@ public class ContentDistributionService {
     @Transactional
     public DistributionTask confirmManual(Long taskId, String publishedUrl, String responsePayload) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.write");
+        currentUserService.ensurePermissionOrLegacy("content.distribution.operate", "project.write", LEGACY_PROJECT_WRITE_ROLES);
         ensureDistributeRole(operator);
         DistributionTask task = requireTask(taskId);
         if (!"manual".equalsIgnoreCase(task.getIntegrationMethod())) {
@@ -215,7 +217,7 @@ public class ContentDistributionService {
     @Transactional
     public DistributionTask confirmSemiAuto(Long taskId, String publishedUrl, String responsePayload) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.write");
+        currentUserService.ensurePermissionOrLegacy("content.distribution.operate", "project.write", LEGACY_PROJECT_WRITE_ROLES);
         ensureDistributeRole(operator);
         DistributionTask task = requireTask(taskId);
         ensureSemiAutoTaskCanBeOperated(task, Set.of("token_issued", "filling", "filled"));
@@ -249,7 +251,7 @@ public class ContentDistributionService {
     @Transactional
     public DistributionTask abandonSemiAuto(Long taskId, String reason) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.write");
+        currentUserService.ensurePermissionOrLegacy("content.distribution.operate", "project.write", LEGACY_PROJECT_WRITE_ROLES);
         ensureDistributeRole(operator);
         DistributionTask task = requireTask(taskId);
         ensureSemiAutoTaskCanBeOperated(task, Set.of("token_issued", "filling", "filled"));
@@ -311,7 +313,7 @@ public class ContentDistributionService {
     @Transactional
     public DistributionTask refreshDistributionTaskReviewStatus(Long taskId) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.write");
+        currentUserService.ensurePermissionOrLegacy("content.distribution.retry", "project.write", LEGACY_PROJECT_WRITE_ROLES);
         ensureDistributeRole(operator);
         DistributionTask task = requireTask(taskId);
         if (!DistributionTargetKind.MP_ACCOUNT.equals(task.getTargetKind()) || task.getSelfMediaAccountId() == null) {

@@ -47,6 +47,8 @@ import java.util.stream.Collectors;
 public class ContentArticleService {
 
     private static final Set<String> AUTO_APPROVED_GENERATED_BY = Set.of("ai", "system", "batch_ai", "ai_preview");
+    private static final Set<String> LEGACY_PROJECT_UPDATE_ROLES =
+            Set.of("operator", "delivery_manager", "partner", "partner_staff");
 
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
@@ -296,7 +298,7 @@ public class ContentArticleService {
     @Transactional
     public ArticleDraft createManual(ManualArticleCreateRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.update");
+        currentUserService.ensurePermissionOrLegacy("content.article.write", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
         Project project = requireProject(req.getProjectId());
         ensureProjectAccess(operator, project, true);
         brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
@@ -418,7 +420,7 @@ public class ContentArticleService {
     @Transactional
     public void saveRevision(Long articleId, ArticleRevisionSaveRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.update");
+        currentUserService.ensurePermissionOrLegacy("content.article.write", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
         ArticleDraft article = requireArticle(articleId);
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
@@ -467,7 +469,7 @@ public class ContentArticleService {
     @Transactional
     public void resubmit(Long articleId, ArticleResubmitRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.update");
+        currentUserService.ensurePermissionOrLegacy("content.article.write", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
         ArticleDraft article = requireArticle(articleId);
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
@@ -478,7 +480,7 @@ public class ContentArticleService {
     @Transactional
     public void review(Long articleId, ArticleReviewRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.update");
+        currentUserService.ensurePermissionOrLegacy("content.article.write", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
         ArticleDraft article = requireArticle(articleId);
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
@@ -489,7 +491,7 @@ public class ContentArticleService {
     @Transactional
     public void publish(Long articleId, ArticlePublishRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.update");
+        currentUserService.ensurePermissionOrLegacy("content.publish.operate", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
         ArticleDraft article = requireArticle(articleId);
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
@@ -535,7 +537,7 @@ public class ContentArticleService {
     @Transactional
     public void deleteUnpublished(Long articleId) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.update");
+        currentUserService.ensurePermissionOrLegacy("content.article.write", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
         ArticleDraft article = requireArticle(articleId);
         Project project = requireProject(article.getProjectId());
         ensureProjectAccess(operator, project, true);
@@ -776,9 +778,6 @@ public class ContentArticleService {
 
     private void ensureProjectAccess(SysUser operator, Project project, boolean write) {
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
-        if (write) {
-            currentUserService.ensurePermission("project.update");
-        }
     }
 
     private void auditArticleTransition(

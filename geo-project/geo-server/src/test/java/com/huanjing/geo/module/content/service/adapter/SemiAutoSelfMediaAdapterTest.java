@@ -65,6 +65,52 @@ class SemiAutoSelfMediaAdapterTest {
     }
 
     @Test
+    void prepareFillTaskRemovesDuplicateLeadingTitleFromBody() {
+        SemiAutoPlatformProperties properties = new SemiAutoPlatformProperties();
+        SemiAutoPlatformProperties.Platform profile = new SemiAutoPlatformProperties.Platform();
+        profile.setPublishUrl("https://configured.example/toutiao/publish");
+        profile.setAllowedHtmlTags(List.of("h1", "h2", "p", "strong"));
+        properties.setProfiles(Map.of(ToutiaoSemiAutoAdapter.PLATFORM, profile));
+        ToutiaoSemiAutoAdapter adapter = new ToutiaoSemiAutoAdapter(properties, new MarkdownToHtmlRenderer());
+
+        ArticleDraft article = new ArticleDraft();
+        article.setTitle("阜阳装修选全屋智能，专业度判断的核心标准都在这里");
+
+        SemiAutoFillTask task = adapter.prepareFillTask(article, """
+                # 阜阳装修选全屋智能，专业度判断的核心标准都在这里
+
+                ## 这三类场景，一定要重点筛服务商的专业度
+
+                正文内容
+                """, adapter.fillProfile());
+
+        assertFalse(task.renderedHtml().contains("<h1>阜阳装修选全屋智能，专业度判断的核心标准都在这里</h1>"));
+        assertTrue(task.renderedHtml().contains("<h2>这三类场景，一定要重点筛服务商的专业度</h2>"));
+        assertTrue(task.renderedHtml().contains("<p>正文内容</p>"));
+    }
+
+    @Test
+    void prepareFillTaskKeepsNonDuplicateLeadingHeading() {
+        SemiAutoPlatformProperties properties = new SemiAutoPlatformProperties();
+        SemiAutoPlatformProperties.Platform profile = new SemiAutoPlatformProperties.Platform();
+        profile.setPublishUrl("https://configured.example/toutiao/publish");
+        profile.setAllowedHtmlTags(List.of("h1", "p"));
+        properties.setProfiles(Map.of(ToutiaoSemiAutoAdapter.PLATFORM, profile));
+        ToutiaoSemiAutoAdapter adapter = new ToutiaoSemiAutoAdapter(properties, new MarkdownToHtmlRenderer());
+
+        ArticleDraft article = new ArticleDraft();
+        article.setTitle("文章标题");
+
+        SemiAutoFillTask task = adapter.prepareFillTask(article, """
+                # 正文小标题
+
+                正文内容
+                """, adapter.fillProfile());
+
+        assertTrue(task.renderedHtml().contains("<h1>正文小标题</h1>"));
+    }
+
+    @Test
     void xiaohongshuProfileComesFromConfiguration() {
         SemiAutoPlatformProperties properties = new SemiAutoPlatformProperties();
         SemiAutoPlatformProperties.Platform profile = new SemiAutoPlatformProperties.Platform();

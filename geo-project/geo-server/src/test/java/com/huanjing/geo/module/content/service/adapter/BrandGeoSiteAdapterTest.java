@@ -132,7 +132,7 @@ class BrandGeoSiteAdapterTest {
         SubmitResult result = adapter.submitToTarget(article("Title", "faq"), "body", target("no-id"));
 
         assertEquals(FailureKind.SERVER_ERROR, result.getFailureKind());
-        assertEquals("response data.id missing or invalid", result.getErrorMessage());
+        assertEquals("Agent 官网返回结果缺少文章 ID", result.getErrorMessage());
         assertTrue(result.isRetryable());
     }
 

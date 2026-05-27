@@ -7,9 +7,11 @@ import com.microsoft.playwright.BrowserContext;
 import com.microsoft.playwright.BrowserType;
 import com.microsoft.playwright.Page;
 import com.microsoft.playwright.Playwright;
+import com.microsoft.playwright.PlaywrightException;
 import com.microsoft.playwright.Request;
 import com.microsoft.playwright.TimeoutError;
 import com.microsoft.playwright.options.Cookie;
+import com.microsoft.playwright.options.LoadState;
 import com.microsoft.playwright.options.WaitUntilState;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -134,7 +136,7 @@ public class DiscuzHttpForumPublisher {
             page.setDefaultTimeout(timeoutMs);
             page.setDefaultNavigationTimeout(timeoutMs);
             openPostPage(page, profile, payload.articleId(), timeoutMs);
-            if (!hasPostForm(page)) {
+            if (!hasPostForm(page, payload.articleId(), "final-check")) {
                 throw new BizException(401, "平台网站登录 Cookie 已失效或发帖页被 WAF 拦截，请重新登录后更新该平台网站账号 Cookie");
             }
 
@@ -179,6 +181,7 @@ public class DiscuzHttpForumPublisher {
 
     private void openPostPage(Page page, DiscuzForumProfile profile, Long articleId, int timeoutMs) {
         TimeoutError lastTimeout = null;
+        PlaywrightException lastNavigationError = null;
         String postPageUrl = profile.postPageUri().toString();
         for (int attempt = 1; attempt <= POST_PAGE_NAVIGATION_ATTEMPTS; attempt++) {
             try {
@@ -186,16 +189,22 @@ public class DiscuzHttpForumPublisher {
                         .setWaitUntil(WaitUntilState.DOMCONTENTLOADED)
                         .setTimeout((double) timeoutMs));
                 page.waitForTimeout(attempt == 1 ? 2000 : 4000);
-                if (hasPostForm(page)) {
+                if (hasPostForm(page, articleId, "attempt-" + attempt)) {
                     return;
                 }
             } catch (TimeoutError ex) {
                 lastTimeout = ex;
                 log.warn("discuz post page navigation timeout articleId={} attempt={}/{} url={} error={}",
                         articleId, attempt, POST_PAGE_NAVIGATION_ATTEMPTS, postPageUrl, safeMessage(ex));
-                if (hasPostForm(page)) {
+                stabilizePageAfterNavigationTimeout(page, articleId, timeoutMs);
+                if (hasPostForm(page, articleId, "timeout-attempt-" + attempt)) {
                     return;
                 }
+            } catch (PlaywrightException ex) {
+                lastNavigationError = ex;
+                log.warn("discuz post page navigation failed articleId={} attempt={}/{} url={} error={}",
+                        articleId, attempt, POST_PAGE_NAVIGATION_ATTEMPTS, postPageUrl, safeMessage(ex));
+                stabilizePageAfterNavigationTimeout(page, articleId, timeoutMs);
             }
             if (attempt < POST_PAGE_NAVIGATION_ATTEMPTS) {
                 page.waitForTimeout(1000);
@@ -204,11 +213,41 @@ public class DiscuzHttpForumPublisher {
         if (lastTimeout != null) {
             throw lastTimeout;
         }
+        if (lastNavigationError != null) {
+            throw lastNavigationError;
+        }
     }
 
-    private boolean hasPostForm(Page page) {
-        return page.locator("input[name='formhash']").count() > 0
-                && page.locator("input[name='subject']").count() > 0;
+    private boolean hasPostForm(Page page, Long articleId, String stage) {
+        try {
+            return page.locator("input[name='formhash']").count() > 0
+                    && page.locator("input[name='subject']").count() > 0;
+        } catch (PlaywrightException ex) {
+            log.warn("discuz post form check failed articleId={} stage={} url={} error={}",
+                    articleId, stage, safePageUrl(page), safeMessage(ex));
+            return false;
+        }
+    }
+
+    private void stabilizePageAfterNavigationTimeout(Page page, Long articleId, int timeoutMs) {
+        try {
+            page.waitForLoadState(LoadState.DOMCONTENTLOADED, new Page.WaitForLoadStateOptions()
+                    .setTimeout(Math.min(5000, Math.max(1000, timeoutMs / 6.0))));
+        } catch (PlaywrightException ex) {
+            log.debug("discuz post page did not reach domcontentloaded after timeout articleId={} url={} error={}",
+                    articleId, safePageUrl(page), safeMessage(ex));
+        }
+        try {
+            page.evaluate("() => window.stop()");
+        } catch (PlaywrightException ex) {
+            log.debug("discuz post page stop loading failed articleId={} url={} error={}",
+                    articleId, safePageUrl(page), safeMessage(ex));
+        }
+        try {
+            page.waitForTimeout(500);
+        } catch (PlaywrightException ex) {
+            log.debug("discuz post page settle wait failed articleId={} error={}", articleId, safeMessage(ex));
+        }
     }
 
     private void routeHeavyResources(BrowserContext context) {
@@ -434,6 +473,14 @@ public class DiscuzHttpForumPublisher {
 
     private String safeMessage(Exception ex) {
         return StringUtils.hasText(ex.getMessage()) ? ex.getMessage() : ex.getClass().getSimpleName();
+    }
+
+    private String safePageUrl(Page page) {
+        try {
+            return page.url();
+        } catch (PlaywrightException ex) {
+            return "";
+        }
     }
 
     private record DiscuzPostForm(String formhash, String posttime, String wysiwyg) {

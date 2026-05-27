@@ -39,6 +39,7 @@ import static org.mockito.Mockito.*;
 class ArticleAiDraftServiceTest {
 
     private ProjectMapper projectMapper;
+    private BrandMapper brandMapper;
     private ArticleDraftMapper articleMapper;
     private ArticleDraftVersionMapper versionMapper;
     private AiPlatformConfigMapper configMapper;
@@ -56,7 +57,7 @@ class ArticleAiDraftServiceTest {
         TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), AiPlatformConfig.class);
 
         projectMapper = mock(ProjectMapper.class);
-        BrandMapper brandMapper = mock(BrandMapper.class);
+        brandMapper = mock(BrandMapper.class);
         articleMapper = mock(ArticleDraftMapper.class);
         versionMapper = mock(ArticleDraftVersionMapper.class);
         configMapper = mock(AiPlatformConfigMapper.class);
@@ -97,7 +98,8 @@ class ArticleAiDraftServiceTest {
         );
 
         service = new ArticleAiDraftService(projectMapper, brandMapper, articleMapper, versionMapper,
-                currentUserService, brandAccessService, promptBuilder, generationEngine, rateLimiter, auditService,
+                currentUserService, brandAccessService, promptBuilder, mock(ArticleGenerationPromptContextFactory.class),
+                generationEngine, rateLimiter, auditService,
                 objectMapper, txManager(), Runnable::run);
     }
 
@@ -166,8 +168,28 @@ class ArticleAiDraftServiceTest {
         assertTrue(promptCaptor.getValue().contains("AI topic"));
         assertTrue(promptCaptor.getValue().contains("# GEO 可引用性要求"));
         assertTrue(promptCaptor.getValue().contains("# 平台风格规则"));
+        assertFalse(promptCaptor.getValue().contains("{{contactBlock}}"));
+        assertFalse(promptCaptor.getValue().contains("{{topic}}"));
+        assertFalse(promptCaptor.getValue().contains("{{contentAngle}}"));
         assertFalse(promptCaptor.getValue().contains("对外公开电话"));
         assertFalse(promptCaptor.getValue().contains("对外公开地址"));
+    }
+
+    @Test
+    void previewContactIntentUsesResolvedContactBlock() throws Exception {
+        Brand brand = brand();
+        brand.setPublicPhone("13812345678");
+        brand.setPublicAddress("北京市朝阳区测试路88号");
+        when(brandMapper.selectById(20L)).thenReturn(brand);
+        when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+
+        service.preview(contactPreviewRequest()).get();
+
+        verify(llmInvoker).invoke(promptCaptor.capture(), any(LlmModelConfig.class));
+        assertTrue(promptCaptor.getValue().contains("13812345678"));
+        assertTrue(promptCaptor.getValue().contains("北京市朝阳区测试路88号"));
+        assertFalse(promptCaptor.getValue().contains("{{contactBlock}}"));
     }
 
     @Test
@@ -334,6 +356,13 @@ class ArticleAiDraftServiceTest {
         req.setReferenceMaterials("reference");
         req.setModelPlatformCode("openai");
         req.setModelId("gpt-test");
+        return req;
+    }
+
+    private ArticleAiDraftPreviewRequest contactPreviewRequest() {
+        ArticleAiDraftPreviewRequest req = previewRequest();
+        req.setArticleType(ArticleTypes.FAQ);
+        req.setTopic("怎么联系门店预约咨询");
         return req;
     }
 

@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.service.render.MarkdownToHtmlRenderer;
 import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Document.OutputSettings;
+import org.jsoup.nodes.Element;
 import org.jsoup.safety.Safelist;
 import org.springframework.util.StringUtils;
 
@@ -24,9 +26,13 @@ public interface SemiAutoSelfMediaAdapter extends SelfMediaAdapter {
     MarkdownToHtmlRenderer markdownToHtmlRenderer();
 
     default String renderContent(String markdown, PlatformFillProfile profile) {
+        return renderContent(markdown, null, profile);
+    }
+
+    default String renderContent(String markdown, String title, PlatformFillProfile profile) {
         validateFillProfile(profile);
         String html = markdownToHtmlRenderer().render(markdown);
-        return applyPlatformHtmlPolicy(html, profile);
+        return applyPlatformHtmlPolicy(removeDuplicateLeadingTitle(html, title), profile);
     }
 
     default SemiAutoFillTask prepareFillTask(ArticleDraft article,
@@ -36,7 +42,7 @@ public interface SemiAutoSelfMediaAdapter extends SelfMediaAdapter {
                 platform(),
                 profile.publishUrl(),
                 article == null ? null : article.getTitle(),
-                renderContent(contentMarkdown, profile),
+                renderContent(contentMarkdown, article == null ? null : article.getTitle(), profile),
                 article == null ? null : article.getCoverImageUrl(),
                 parseTags(article == null ? null : article.getTagsJson()),
                 article == null ? null : article.getCategory(),
@@ -55,6 +61,38 @@ public interface SemiAutoSelfMediaAdapter extends SelfMediaAdapter {
             safelist.addProtocols("img", "src", "http", "https");
         }
         return Jsoup.clean(html == null ? "" : html, "", safelist, new OutputSettings().prettyPrint(false));
+    }
+
+    default String removeDuplicateLeadingTitle(String html, String title) {
+        if (!StringUtils.hasText(html) || !StringUtils.hasText(title)) {
+            return html;
+        }
+        Document document = Jsoup.parseBodyFragment(html);
+        document.outputSettings().prettyPrint(false);
+        Element firstBlock = document.body().children().stream()
+                .filter(this::isContentBlock)
+                .filter(element -> StringUtils.hasText(element.text()))
+                .findFirst()
+                .orElse(null);
+        if (firstBlock == null || !normalizeArticleText(firstBlock.text()).equals(normalizeArticleText(title))) {
+            return html;
+        }
+        firstBlock.remove();
+        return document.body().html();
+    }
+
+    default boolean isContentBlock(Element element) {
+        return Set.of("h1", "h2", "h3", "h4", "h5", "h6", "p").contains(element.tagName().toLowerCase());
+    }
+
+    default String normalizeArticleText(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        return value.replace('\u00A0', ' ')
+                .replaceAll("\\s+", "")
+                .replaceAll("[，。！？、,.!?;；:：\"'“”‘’（）()\\[\\]【】《》<>]", "")
+                .trim();
     }
 
     default void validateFillProfile(PlatformFillProfile profile) {

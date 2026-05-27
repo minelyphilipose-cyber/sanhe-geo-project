@@ -10,6 +10,8 @@ import com.huanjing.geo.module.content.dto.ArticlePublishRequest;
 import com.huanjing.geo.module.content.dto.ArticleResubmitRequest;
 import com.huanjing.geo.module.content.dto.ArticleReviewRequest;
 import com.huanjing.geo.module.content.dto.ArticleRevisionSaveRequest;
+import com.huanjing.geo.module.content.dto.ArticleTemplatePreviewRequest;
+import com.huanjing.geo.module.content.dto.ArticleTemplatePreviewResponse;
 import com.huanjing.geo.module.content.dto.ArticleGenerationReadinessDtos.ReadinessReport;
 import com.huanjing.geo.module.content.dto.ArticleGenerationReadinessDtos.ReadinessRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
@@ -76,6 +78,13 @@ public class ContentArticleController {
             @Valid @RequestBody ArticleAiDraftPreviewRequest req
     ) throws Exception {
         return R.ok(await(articleAiDraftService.preview(req)));
+    }
+
+    @PostMapping("/template-preview")
+    public R<ArticleTemplatePreviewResponse> templatePreview(
+            @Valid @RequestBody ArticleTemplatePreviewRequest req
+    ) throws Exception {
+        return R.ok(await(articleAiDraftService.templatePreview(req)));
     }
 
     @PostMapping("/batch-generate")

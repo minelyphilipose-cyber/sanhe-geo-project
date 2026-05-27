@@ -48,6 +48,7 @@ class BatchArticleGenerationServiceTest {
     private BatchArticleGenerationBatchMapper batchMapper;
     private BatchArticleGenerationTaskMapper taskMapper;
     private BatchArticlePromptBuilder promptBuilder;
+    private ArticleGenerationPromptContextFactory promptContextFactory;
     private BatchArticleGenerationService service;
 
     @BeforeEach
@@ -58,6 +59,7 @@ class BatchArticleGenerationServiceTest {
         batchMapper = mock(BatchArticleGenerationBatchMapper.class);
         taskMapper = mock(BatchArticleGenerationTaskMapper.class);
         promptBuilder = mock(BatchArticlePromptBuilder.class);
+        promptContextFactory = mock(ArticleGenerationPromptContextFactory.class);
         service = new BatchArticleGenerationService(
                 projectMapper,
                 mock(BrandMapper.class),
@@ -81,6 +83,7 @@ class BatchArticleGenerationServiceTest {
                 mock(ArticleModelResolver.class),
                 passThroughAutoImageInsertionService(),
                 promptBuilder,
+                promptContextFactory,
                 mock(BatchArticleQualityChecker.class),
                 mock(ArticleTemplateAllocationService.class),
                 new QuestionScenePlatformSuggestionService(),
@@ -150,7 +153,8 @@ class BatchArticleGenerationServiceTest {
         task.setContentStyle("zhihu");
         task.setLength("medium");
         task.setArticleIndexInBatch(1);
-        when(promptBuilder.build(any())).thenThrow(new BizException(400, "Unregistered template variable: brandBasicInfo"));
+        when(promptContextFactory.buildForBatch(batch, task))
+                .thenThrow(new BizException(400, "Unregistered template variable: brandBasicInfo"));
 
         ReflectionTestUtils.invokeMethod(service, "runTask", batch, task);
 

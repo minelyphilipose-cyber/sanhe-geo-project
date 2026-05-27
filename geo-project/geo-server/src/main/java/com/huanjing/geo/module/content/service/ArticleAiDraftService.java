@@ -33,12 +33,18 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
 public class ArticleAiDraftService {
+    private static final Set<String> LEGACY_PROJECT_UPDATE_ROLES =
+            Set.of("operator", "delivery_manager", "partner", "partner_staff");
+
 
     private static final String STATUS_APPROVED = "approved";
     private static final String GENERATED_BY_AI = "ai";
@@ -67,6 +73,7 @@ public class ArticleAiDraftService {
     private final CurrentUserService currentUserService;
     private final BrandAccessService brandAccessService;
     private final BatchArticlePromptBuilder promptBuilder;
+    private final ArticleGenerationPromptContextFactory promptContextFactory;
     private final ArticleGenerationEngine articleGenerationEngine;
     private final ArticleAiDraftRateLimiter rateLimiter;
     private final AuditService auditService;
@@ -79,6 +86,7 @@ public class ArticleAiDraftService {
                                  CurrentUserService currentUserService,
                                  BrandAccessService brandAccessService,
                                  BatchArticlePromptBuilder promptBuilder,
+                                 ArticleGenerationPromptContextFactory promptContextFactory,
                                  ArticleGenerationEngine articleGenerationEngine,
                                  ArticleAiDraftRateLimiter rateLimiter,
                                  AuditService auditService, ObjectMapper objectMapper,
@@ -89,6 +97,7 @@ public class ArticleAiDraftService {
         this.currentUserService = currentUserService;
         this.brandAccessService = brandAccessService;
         this.promptBuilder = promptBuilder;
+        this.promptContextFactory = promptContextFactory;
         this.articleGenerationEngine = articleGenerationEngine; this.rateLimiter = rateLimiter;
         this.auditService = auditService; this.objectMapper = objectMapper;
         this.transactionManager = transactionManager; this.articleAiDraftExecutor = articleAiDraftExecutor;
@@ -96,7 +105,7 @@ public class ArticleAiDraftService {
 
     public CompletableFuture<ArticleAiDraftResponse> generate(ArticleAiDraftRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.update");
+        currentUserService.ensurePermissionOrLegacy("content.ai.generate", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
 
         Project project = requireProject(req.getProjectId());
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
@@ -116,7 +125,7 @@ public class ArticleAiDraftService {
 
     public CompletableFuture<ArticleAiDraftPreviewResponse> preview(ArticleAiDraftPreviewRequest req) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.update");
+        currentUserService.ensurePermissionOrLegacy("content.ai.generate", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
 
         Project project = requireProject(req.getProjectId());
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
@@ -134,6 +143,114 @@ public class ArticleAiDraftService {
                         req.getModelPlatformCode(), req.getModelId(), allowContactInfo),
                 articleAiDraftExecutor
         );
+    }
+
+    public CompletableFuture<ArticleTemplatePreviewResponse> templatePreview(ArticleTemplatePreviewRequest req) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermissionOrLegacy("content.ai.generate", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
+
+        Project project = requireProject(req.getProjectId());
+        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
+        brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
+        rateLimiter.check(operator.getId());
+
+        String topicSource = req.getKeywordGroupId() == null ? "manual" : "keyword_group";
+        PromptContextRequest contextRequest = new PromptContextRequest(
+                req.getProjectId(),
+                topicSource,
+                req.getArticleType(),
+                req.getChannelGroupCode(),
+                req.getChannelSubCode(),
+                req.getTopic(),
+                req.getTopicAsQuestion(),
+                defaultOption(req.getLength(), DEFAULT_LENGTH),
+                req.getKeywordGroupId(),
+                null,
+                req.getExtraPrompt(),
+                req.getPromptTemplateId(),
+                req.getPromptTemplateVersionId(),
+                1
+        );
+        ArticleGenerationPromptContextFactory.PromptContextResult context = promptContextFactory.buildStrict(contextRequest);
+
+        return CompletableFuture.supplyAsync(
+                () -> templatePreviewInWorker(context, operator, req.getModelPlatformCode(), req.getModelId()),
+                articleAiDraftExecutor
+        );
+    }
+
+    private ArticleTemplatePreviewResponse templatePreviewInWorker(ArticleGenerationPromptContextFactory.PromptContextResult context,
+                                                                   SysUser operator,
+                                                                   String requestedPlatformCode,
+                                                                   String requestedModelId) {
+        long started = System.nanoTime();
+        ArticleModelResolver.ModelSelection model = null;
+        try {
+            ArticleGenerationEngine.GeneratedArticle generated = articleGenerationEngine.generate(
+                    new ArticleGenerationEngine.GenerateInput(
+                            context.project(),
+                            context.brand(),
+                            context.prompt().systemPrompt(),
+                            context.prompt().userPrompt(),
+                            requestedPlatformCode,
+                            requestedModelId,
+                            true,
+                            true,
+                            true,
+                            context.forbiddenPhrases()
+                    )
+            );
+            model = generated.model();
+            auditGenerated(AuditResult.SUCCESS, operator, context.project(), null, context.prompt().userPrompt().length(),
+                    model.platformCode(), model.modelId(), elapsedMs(started), "template_preview_generated", null);
+            return new ArticleTemplatePreviewResponse(
+                    generated.title(),
+                    generated.content(),
+                    enrichPromptSnapshot(context.prompt().promptSnapshot(), generated.result()),
+                    context.prompt().inputSnapshot(),
+                    context.template().getId(),
+                    context.version().getId(),
+                    context.template().getName(),
+                    context.channelGroupCode(),
+                    context.channelSubCode(),
+                    context.contentStyle(),
+                    context.topicAsQuestion(),
+                    generated.quality() == null ? null : generated.quality().status(),
+                    generated.quality() == null ? List.of() : generated.quality().issues(),
+                    unresolvedVariables(context.prompt().systemPrompt(), context.prompt().userPrompt(), generated.content()),
+                    model.platformCode(),
+                    model.modelId(),
+                    model.config().modelName(),
+                    generated.result().promptTokens(),
+                    generated.result().completionTokens(),
+                    generated.result().durationMs()
+            );
+        } catch (BizException ex) {
+            auditGenerated(AuditResult.FAILURE, operator, context.project(), null, context.prompt().userPrompt().length(),
+                    platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "template_preview_failed", ex.getCode());
+            throw ex;
+        } catch (LlmInvokeException ex) {
+            log.warn("AI article template preview LLM invoke failed projectId={} platform={} model={} msg={}",
+                    context.project().getId(), platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), ex.getMessage());
+            BizException mapped = mapLlmInvokeFailure(ex, "AI article template preview failed");
+            auditGenerated(AuditResult.FAILURE, operator, context.project(), null, context.prompt().userPrompt().length(),
+                    platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "template_preview_failed", mapped.getCode());
+            throw mapped;
+        } catch (LlmPermitUnavailableException ex) {
+            log.warn("AI article template preview LLM permit busy projectId={} platform={} model={} scope={}",
+                    context.project().getId(), platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), ex.getScope());
+            auditGenerated(AuditResult.FAILURE, operator, context.project(), null, context.prompt().userPrompt().length(),
+                    platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "template_preview_failed",
+                    ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED);
+            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI 模型当前繁忙，请稍后重试");
+        } catch (Exception ex) {
+            log.warn("AI article template preview failed projectId={} platform={} model={}",
+                    context.project().getId(), platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), ex);
+            auditGenerated(AuditResult.FAILURE, operator, context.project(), null, context.prompt().userPrompt().length(),
+                    platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "template_preview_failed",
+                    ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED);
+            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI article template preview failed");
+        }
     }
 
     private ArticleAiDraftPreviewResponse previewInWorker(Project project,
@@ -406,6 +523,27 @@ public class ArticleAiDraftService {
         }
     }
 
+    private List<String> unresolvedVariables(String... values) {
+        Pattern pattern = Pattern.compile("\\{\\{\\s*([a-zA-Z0-9_]+)\\s*}}");
+        List<String> result = new ArrayList<>();
+        if (values == null) {
+            return result;
+        }
+        for (String value : values) {
+            if (!StringUtils.hasText(value)) {
+                continue;
+            }
+            Matcher matcher = pattern.matcher(value);
+            while (matcher.find()) {
+                String variable = matcher.group(1);
+                if (!result.contains(variable)) {
+                    result.add(variable);
+                }
+            }
+        }
+        return result;
+    }
+
     private BatchArticlePromptBuilder.PromptBuildResult buildPreviewPrompt(ArticleAiDraftPreviewRequest req,
                                                                            String articleType,
                                                                            Project project,
@@ -496,10 +634,6 @@ public class ArticleAiDraftService {
 
     private String trim(String value) {
         return StringUtils.hasText(value) ? value.trim() : "";
-    }
-
-    private String nullToDash(String value) {
-        return StringUtils.hasText(value) ? value.trim() : "-";
     }
 
     private String extractTitle(String content) {

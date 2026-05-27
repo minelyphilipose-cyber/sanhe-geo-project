@@ -59,6 +59,8 @@ import java.util.regex.Pattern;
 public class BatchArticlePublishService {
 
     private static final Set<String> ACTIVE_ARTICLE_STATUS = Set.of("approved", "unpublished");
+    private static final Set<String> LEGACY_PROJECT_WRITE_ROLES =
+            Set.of("operator", "delivery_manager", "partner", "partner_staff");
     private static final DateTimeFormatter DATE_TIME = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final DateTimeFormatter JOB_NAME_DATE = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     private static final Pattern LEGACY_AUTO_DISTRIBUTION_JOB_NAME =
@@ -86,7 +88,7 @@ public class BatchArticlePublishService {
     @Transactional
     public BatchArticlePublishResponse submit(BatchArticlePublishRequest request) {
         SysUser operator = currentUserService.requireCurrentUser();
-        currentUserService.ensurePermission("project.write");
+        currentUserService.ensurePermissionOrLegacy("content.publish.operate", "project.write", LEGACY_PROJECT_WRITE_ROLES);
         String publishMode = normalizePublishMode(request.getPublishMode());
         int intervalMinutes = request.getIntervalMinutes() == null ? 30 : request.getIntervalMinutes();
         LocalDateTime baseTime = resolveBaseTime(publishMode, request.getScheduledAt());

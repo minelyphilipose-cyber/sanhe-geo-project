@@ -56,6 +56,16 @@ class MarkdownToHtmlRendererTest {
     }
 
     @Test
+    void render_inlineImageStyle_keepsContainSizing() {
+        String html = renderer.render("""
+                <p><img src="https://app.example.com/api/public/brand-materials/1/stream?sig=a" alt="品牌图" style="display:block;max-width:100%;width:auto;height:auto;object-fit:contain;margin:16px auto;border-radius:6px;" /></p>
+                """);
+
+        assertTrue(html.contains("height:auto"));
+        assertTrue(html.contains("object-fit:contain"));
+    }
+
+    @Test
     void render_dataImage_removesImage() {
         String html = renderer.render("![alt](data:image/png;base64,abc)");
         assertFalse(html.contains("<img"));
