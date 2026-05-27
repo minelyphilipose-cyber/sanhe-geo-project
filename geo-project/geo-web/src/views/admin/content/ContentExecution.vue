@@ -71,23 +71,23 @@
             />
           </div>
         </div>
-        <div v-if="canWrite" class="toolbar-action-row">
+        <div v-if="hasToolbarActions" class="toolbar-action-row">
           <div class="toolbar-primary-actions">
-            <el-button type="primary" @click="openBatchGeneration">批量生成文章</el-button>
-            <el-button @click="goManualCreate">单篇生成文章</el-button>
+            <el-button v-if="canAiGenerate" type="primary" @click="openBatchGeneration">批量生成文章</el-button>
+            <el-button v-if="canArticleWrite" @click="goManualCreate">单篇生成文章</el-button>
           </div>
           <div class="toolbar-secondary-actions">
             <span v-if="selectedRows.length" class="toolbar-selection-hint">已选 {{ selectedRows.length }} 篇</span>
-            <el-button :disabled="!selectedRows.length || batchPublishChecking" :loading="batchPublishChecking" @click="openBatchPublish">
+            <el-button v-if="canPublish" :disabled="!selectedRows.length || batchPublishChecking" :loading="batchPublishChecking" @click="openBatchPublish">
               批量发布{{ selectedRows.length ? `（${selectedRows.length}）` : '' }}
             </el-button>
-            <el-dropdown trigger="click" @command="handleToolbarMoreCommand">
+            <el-dropdown v-if="hasToolbarMoreActions" trigger="click" @command="handleToolbarMoreCommand">
               <el-button class="toolbar-more-action">更多</el-button>
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="jobs">批量任务列表</el-dropdown-item>
-                  <el-dropdown-item command="templates">文章提示词模板</el-dropdown-item>
-                  <el-dropdown-item command="platforms">发布平台管理</el-dropdown-item>
+                  <el-dropdown-item v-if="canManagePromptTemplates" command="templates">文章提示词模板</el-dropdown-item>
+                  <el-dropdown-item v-if="canManagePublishPlatforms" command="platforms">发布平台管理</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -172,9 +172,9 @@
             <template #default="scope">
               <div class="admin-row-actions">
                 <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
-                <el-button v-if="canWrite && canEdit(scope.row.status)" class="content-neutral-action" link @click="openRevision(scope.row)">修订</el-button>
-                <el-button v-if="canWrite && canDistribute(scope.row.status)" link type="success" @click="openDistributionChannel(scope.row)">分发</el-button>
-                <el-button v-if="canWrite && canDeleteArticle(scope.row.status)" link type="danger" @click="deleteArticle(scope.row)">删除</el-button>
+                <el-button v-if="canArticleWrite && canEdit(scope.row.status)" class="content-neutral-action" link @click="openRevision(scope.row)">修订</el-button>
+                <el-button v-if="canDistributeOperate && canDistribute(scope.row.status)" link type="success" @click="openDistributionChannel(scope.row)">分发</el-button>
+                <el-button v-if="canArticleWrite && canDeleteArticle(scope.row.status)" link type="danger" @click="deleteArticle(scope.row)">删除</el-button>
               </div>
             </template>
           </el-table-column>
@@ -203,7 +203,7 @@
             </div>
             <div class="detail-summary-actions">
               <el-button
-                v-if="canWrite && canEditFromDetail(detailData.article.status)"
+                v-if="canArticleWrite && canEditFromDetail(detailData.article.status)"
                 size="small"
                 type="primary"
                 @click="openRevisionFromDetail"
@@ -680,6 +680,40 @@
           </button>
         </div>
 
+        <div v-if="isSemiAutoPlatform(selectedMediaPlatform)" class="local-helper-panel">
+          <div class="local-helper-head">
+            <div>
+              <strong>指纹浏览器环境</strong>
+              <span>通过本地助手启动 AdsPower 环境，环境内扩展领取任务并填充草稿。</span>
+            </div>
+            <el-tag size="small" type="info">PoC</el-tag>
+          </div>
+          <el-form :model="localHelperConfig" label-width="86px" class="local-helper-form">
+            <el-form-item label="助手地址">
+              <el-input
+                v-model="localHelperConfig.helperBase"
+                placeholder="http://127.0.0.1:17891"
+                @change="saveLocalHelperConfig"
+              />
+            </el-form-item>
+            <el-form-item label="助手 Token">
+              <el-input
+                v-model="localHelperConfig.helperToken"
+                placeholder="与 geo-local-helper/config.local.json 中 helperToken 一致"
+                show-password
+                @change="saveLocalHelperConfig"
+              />
+            </el-form-item>
+            <el-form-item label="环境标识">
+              <el-input
+                v-model="localHelperConfig.environmentKey"
+                placeholder="例如 geo_b"
+                @change="saveLocalHelperConfig"
+              />
+            </el-form-item>
+          </el-form>
+        </div>
+
         <div v-if="currentPlatformAccounts.length" class="self-media-account-list">
           <div v-for="account in currentPlatformAccounts" :key="account.id" class="self-media-account-row">
             <div class="self-media-account-main">
@@ -717,22 +751,13 @@
               选择账号
             </el-button>
             <el-button
-              v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active' && hasActiveCookieCredential(account)"
+              v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active'"
               size="small"
               type="primary"
               :loading="semiAutoAccountActionLoading(account)"
-              @click="submitSemiAutoExtensionTask(account)"
+              @click="submitSemiAutoEnvironmentTask(account)"
             >
-              打开并填表
-            </el-button>
-            <el-button
-              v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active' && !hasActiveCookieCredential(account)"
-              size="small"
-              type="primary"
-              :loading="semiAutoAccountActionLoading(account)"
-              @click="submitSemiAutoExtensionTask(account)"
-            >
-              切换登录并填表
+              打开环境并填充
             </el-button>
           </div>
         </div>
@@ -984,6 +1009,7 @@ import { getPublishSites } from '@/api/publishSite'
 import { getBrandDetail, getBrandImageFolders, getBrandMaterialPreviewUrl } from '@/api/customer'
 import { createExtensionBindCode, type ExtensionBindCode } from '@/api/extension'
 import { getProjectDetail } from '@/api/project'
+import { createAndLaunchLocalHelperTask } from '@/api/localHelper'
 import { bindExtensionBridge, pingExtensionBridge, startExtensionCookieCapture, startExtensionFill, type ExtensionBridgeResult } from '@/composables/useExtensionBridge'
 import { formatDateTime } from '@/utils/format'
 
@@ -1027,7 +1053,24 @@ interface RiskWordHit {
 const userStore = useUserStore()
 const route = useRoute()
 const router = useRouter()
-const canWrite = computed(() => userStore.hasPermission('project.write'))
+const canArticleWrite = computed(() => userStore.hasPermission('content.article.write'))
+const canAiGenerate = computed(() => userStore.hasPermission('content.ai.generate'))
+const canDistributeOperate = computed(() => userStore.hasPermission('content.distribution.operate'))
+const canPublish = computed(() => userStore.hasPermission('content.publish.operate'))
+const canManagePromptTemplates = computed(() => userStore.hasPermission('content.prompt_template.manage'))
+const canManagePublishPlatforms = computed(() => userStore.hasPermission('user.manage'))
+const canViewBatchPublishJobs = computed(() => userStore.hasPermission('content.read'))
+const hasToolbarMoreActions = computed(() =>
+  canViewBatchPublishJobs.value || canManagePromptTemplates.value || canManagePublishPlatforms.value,
+)
+const hasToolbarActions = computed(() =>
+  canArticleWrite.value
+  || canAiGenerate.value
+  || canPublish.value
+  || canViewBatchPublishJobs.value
+  || canManagePromptTemplates.value
+  || canManagePublishPlatforms.value,
+)
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -1165,6 +1208,11 @@ const extensionBridgeState = reactive({
   status: 'unknown' as ExtensionBridgeStatus,
   message: '正在等待检测浏览器扩展状态',
   extensionVersion: '',
+})
+const localHelperConfig = reactive({
+  helperBase: 'http://127.0.0.1:17891',
+  helperToken: '',
+  environmentKey: 'geo_b',
 })
 
 let cookieCapturePollTimer: number | null = null
@@ -1654,7 +1702,7 @@ function onSelectionChange(selection: ArticleDraft[]) {
 }
 
 function canSelectForBatchPublish(row: ArticleDraft) {
-  return canDistribute(row.status)
+  return canPublish.value && canDistribute(row.status)
 }
 
 function goManualCreate() {
@@ -1701,6 +1749,10 @@ function handleToolbarMoreCommand(command: string) {
 }
 
 async function openBatchPublish() {
+  if (!canPublish.value) {
+    ElMessage.warning('当前账号没有批量发布权限')
+    return
+  }
   const selected = selectedRows.value.filter((row) => canDistribute(row.status))
   if (!selected.length) {
     ElMessage.warning('请选择已就绪或已下架的文章')
@@ -2202,12 +2254,12 @@ function semiAutoPlatformLabel(platform: string) {
 function semiAutoStatusLabel(accounts: SelfMediaAccount[]) {
   if (!accounts.length) return '未配置'
   if (!accounts.some((account) => account.status === 'active')) return '不可用'
-  return accounts.some(hasActiveCookieCredential) ? '已登录' : '未登录'
+  return '可打开环境'
 }
 
 function semiAutoStatusTagType(accounts: SelfMediaAccount[]): 'success' | 'warning' | 'info' {
   if (!accounts.length) return 'info'
-  return accounts.some((account) => account.status === 'active' && hasActiveCookieCredential(account)) ? 'success' : 'warning'
+  return accounts.some((account) => account.status === 'active') ? 'success' : 'warning'
 }
 
 function hasActiveCookieCredential(account: SelfMediaAccount) {
@@ -2215,20 +2267,11 @@ function hasActiveCookieCredential(account: SelfMediaAccount) {
 }
 
 function semiAutoCredentialLabel(account: SelfMediaAccount) {
-  const credential = account as SelfMediaAccountWithCredential
-  if (credential.cookieCredentialStatus === 'active') {
-    if (credential.cookieCredentialIdentityStatus === 'mismatch') return '已登录 · 待确认'
-    return '已登录'
-  }
-  return '未登录'
+  return account.status === 'active' ? '环境内校验' : '不可用'
 }
 
 function semiAutoCredentialTagType(account: SelfMediaAccount): 'success' | 'warning' | 'info' {
-  const credential = account as SelfMediaAccountWithCredential
-  if (hasActiveCookieCredential(account)) {
-    return ['unknown', 'mismatch'].includes(credential.cookieCredentialIdentityStatus || '') ? 'warning' : 'success'
-  }
-  return account.status === 'active' ? 'warning' : 'info'
+  return account.status === 'active' ? 'info' : 'warning'
 }
 
 function semiAutoCredentialIdentityMessage(account: SelfMediaAccount) {
@@ -2237,10 +2280,7 @@ function semiAutoCredentialIdentityMessage(account: SelfMediaAccount) {
 }
 
 function semiAutoAccountActionLoading(account: SelfMediaAccount) {
-  if (hasActiveCookieCredential(account)) {
-    return selfMediaSubmitting.value && selectedSelfMediaAccountId.value === account.id
-  }
-  return semiAutoCookieCaptureLoadingAccountId.value === account.id || extensionBindCodeLoadingAccountId.value === account.id
+  return selfMediaSubmitting.value && selectedSelfMediaAccountId.value === account.id
 }
 
 function handleSemiAutoPlatformClick(platform: SemiAutoPlatform) {
@@ -2253,14 +2293,9 @@ function handleSemiAutoPlatformClick(platform: SemiAutoPlatform) {
     ElMessage.info(`当前品牌暂无${semiAutoPlatformLabel(platform)}账号`)
     return
   }
-  const readyAccount = accounts.find((account) => account.status === 'active' && hasActiveCookieCredential(account))
-  if (readyAccount) {
-    void submitSemiAutoExtensionTask(readyAccount)
-    return
-  }
-  const loginAccount = accounts.find((account) => account.status === 'active')
-  if (loginAccount) {
-    void startSemiAutoCookieCapture(loginAccount)
+  const activeAccount = accounts.find((account) => account.status === 'active')
+  if (activeAccount) {
+    void submitSemiAutoEnvironmentTask(activeAccount)
     return
   }
   ElMessage.info(`${semiAutoPlatformLabel(platform)}账号不可用，请先在账号管理中启用`)

@@ -301,6 +301,58 @@ export function previewAiContentArticleDraft(data: ArticleAiDraftPreviewRequest)
   })
 }
 
+export interface ArticleTemplatePreviewRequest {
+  projectId: number
+  articleType: string
+  channelGroupCode: string
+  channelSubCode?: string | null
+  topic: string
+  topicAsQuestion?: string
+  length?: 'short' | 'medium' | 'long' | string
+  keywordGroupId?: number
+  extraPrompt?: string
+  promptTemplateId?: number
+  promptTemplateVersionId: number
+  modelPlatformCode?: string
+  modelId?: string
+}
+
+export interface ArticleTemplatePreviewIssue {
+  code?: string
+  level?: string
+  message?: string
+  [key: string]: unknown
+}
+
+export interface ArticleTemplatePreviewResponse {
+  title: string
+  contentMarkdown: string
+  promptSnapshot?: string | null
+  inputSnapshot?: string | null
+  templateId?: number | null
+  templateVersionId?: number | null
+  templateName?: string | null
+  channelGroupCode?: string | null
+  channelSubCode?: string | null
+  contentStyle?: string | null
+  topicAsQuestion?: string | null
+  qualityStatus?: string | null
+  qualityIssues?: ArticleTemplatePreviewIssue[] | null
+  unresolvedVariables?: string[] | null
+  modelPlatformCode?: string | null
+  modelId?: string | null
+  modelName?: string | null
+  promptTokens?: number | null
+  completionTokens?: number | null
+  durationMs?: number | null
+}
+
+export function previewArticleTemplate(data: ArticleTemplatePreviewRequest) {
+  return request.post<R<ArticleTemplatePreviewResponse>>('/content/articles/template-preview', data, {
+    timeout: 180000,
+  })
+}
+
 export interface BatchArticleGeneratePlatform {
   contentStyle?: string
   channelGroupCode?: string

@@ -100,6 +100,13 @@
             </el-button>
           </header>
           <div class="section-body">
+            <div class="ai-mode-row">
+              <el-segmented v-model="aiGenerateMode" :options="aiGenerateModeOptions" />
+              <span class="form-help">
+                {{ aiGenerateMode === 'template' ? '使用批量同源模板装配，适合验证正式投放效果' : '保留原自由提示词生成逻辑' }}
+              </span>
+            </div>
+
             <div class="form-item topic-field">
               <div class="topic-label-row">
                 <label class="form-label required">选题 / 主题</label>
@@ -120,37 +127,128 @@
               </div>
             </div>
 
-            <div class="ai-control-grid">
-              <div class="form-item">
-                <label class="form-label">语气</label>
-                <el-segmented v-model="aiForm.tone" :options="toneOptions" block />
+            <template v-if="aiGenerateMode === 'free'">
+              <div class="ai-control-grid">
+                <div class="form-item">
+                  <label class="form-label">语气</label>
+                  <el-segmented v-model="aiForm.tone" :options="toneOptions" block />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">篇幅</label>
+                  <el-segmented v-model="aiForm.length" :options="lengthOptions" block />
+                </div>
               </div>
-              <div class="form-item">
-                <label class="form-label">篇幅</label>
-                <el-segmented v-model="aiForm.length" :options="lengthOptions" block />
-              </div>
-            </div>
 
-            <div class="form-item style-field">
-              <label class="form-label required">内容风格</label>
-              <div class="style-grid">
-                <button
-                  v-for="item in contentStyleOptions"
-                  :key="item.value"
-                  type="button"
-                  class="style-tile"
-                  :class="{ active: aiForm.contentStyle === item.value }"
-                  @click="aiForm.contentStyle = item.value"
-                >
-                  <span class="style-icon">{{ item.icon }}</span>
-                  <span class="style-copy">
-                    <span class="style-name">{{ item.label }}</span>
-                    <span class="style-desc">{{ item.desc }}</span>
-                  </span>
-                  <el-icon v-if="aiForm.contentStyle === item.value" class="style-check"><Check /></el-icon>
-                </button>
+              <div class="form-item style-field">
+                <label class="form-label required">内容风格</label>
+                <div class="style-grid">
+                  <button
+                    v-for="item in contentStyleOptions"
+                    :key="item.value"
+                    type="button"
+                    class="style-tile"
+                    :class="{ active: aiForm.contentStyle === item.value }"
+                    @click="aiForm.contentStyle = item.value"
+                  >
+                    <span class="style-icon">{{ item.icon }}</span>
+                    <span class="style-copy">
+                      <span class="style-name">{{ item.label }}</span>
+                      <span class="style-desc">{{ item.desc }}</span>
+                    </span>
+                    <el-icon v-if="aiForm.contentStyle === item.value" class="style-check"><Check /></el-icon>
+                  </button>
+                </div>
               </div>
-            </div>
+            </template>
+
+            <template v-else>
+              <div class="template-control-grid">
+                <div class="form-item">
+                  <label class="form-label required">发布渠道</label>
+                  <el-select
+                    v-model="templateForm.channelKey"
+                    filterable
+                    placeholder="选择渠道"
+                    :loading="generationOptionsLoading"
+                    @change="handleTemplateChannelChange"
+                  >
+                    <el-option-group
+                      v-for="group in templateChannelGroups"
+                      :key="group.code"
+                      :label="group.name"
+                    >
+                      <el-option
+                        v-for="channel in group.channels"
+                        :key="channelKey(channel)"
+                        :label="channel.label"
+                        :value="channelKey(channel)"
+                        :disabled="!channel.enabled || channel.templateCount <= 0"
+                      >
+                        <div class="template-option-line">
+                          <span>{{ channel.label }}</span>
+                          <small>{{ channel.templateCount }} 个模板</small>
+                        </div>
+                      </el-option>
+                    </el-option-group>
+                  </el-select>
+                </div>
+                <div class="form-item">
+                  <label class="form-label">篇幅</label>
+                  <el-segmented v-model="aiForm.length" :options="lengthOptions" block />
+                </div>
+              </div>
+
+              <div class="template-control-grid">
+                <div class="form-item">
+                  <label class="form-label">模板选择方式</label>
+                  <el-segmented v-model="templateForm.selectionMode" :options="templateSelectionModeOptions" block @change="handleTemplateSelectionModeChange" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label required">提示词模板</label>
+                  <el-select
+                    v-model="templateForm.templateVersionKey"
+                    filterable
+                    placeholder="选择模板版本"
+                    :disabled="!selectedTemplateChannel"
+                  >
+                    <el-option
+                      v-for="item in availableTemplateOptions"
+                      :key="templateVersionKey(item)"
+                      :label="templateOptionLabel(item)"
+                      :value="templateVersionKey(item)"
+                    >
+                      <div class="template-option-line">
+                        <span>{{ item.templateName }}</span>
+                        <small>{{ item.questionSceneName || item.questionSceneCode || '通用' }}</small>
+                      </div>
+                    </el-option>
+                  </el-select>
+                </div>
+              </div>
+
+              <div class="template-control-grid">
+                <div class="form-item">
+                  <label class="form-label">关键词组</label>
+                  <el-select v-model="templateForm.keywordGroupId" clearable filterable placeholder="不指定，走项目绑定关键词 fallback">
+                    <el-option
+                      v-for="group in selectedProjectKeywordGroups"
+                      :key="group.id"
+                      :label="group.name"
+                      :value="group.id"
+                    />
+                  </el-select>
+                </div>
+                <div class="form-item">
+                  <label class="form-label">问题表达</label>
+                  <el-input
+                    v-model="templateForm.topicAsQuestion"
+                    maxlength="1000"
+                    clearable
+                    placeholder="留空则按批量逻辑自动生成"
+                  />
+                </div>
+              </div>
+            </template>
 
             <el-collapse class="ai-extra-collapse">
               <el-collapse-item title="补充提示词与参考资料（可选）" name="extra">
@@ -163,6 +261,7 @@
                     placeholder="如：避免空泛描述；多举具体案例；最后给出落地清单"
                   />
                   <el-input
+                    v-if="aiGenerateMode === 'free'"
                     v-model="aiForm.referenceMaterials"
                     type="textarea"
                     :rows="3"
@@ -489,8 +588,14 @@ import {
 import type { BrandImageFolder, BrandMaterial, KeywordGroup, KeywordGroupQuestion, Project } from '@/types'
 import {
   createManualContentArticle,
+  getArticleGenerationOptions,
+  previewArticleTemplate,
   previewAiContentArticleDraft,
+  type ArticleGenerationChannelGroup,
+  type ArticleGenerationChannelOption,
+  type ArticleGenerationTemplateOption,
   type ArticleAiDraftPreviewResponse,
+  type ArticleTemplatePreviewResponse,
 } from '@/api/content'
 import { getBrandImageFolders, getBrandMaterialPreviewUrl } from '@/api/customer'
 import { getKeywordGroupQuestions, getProjectDetail, getProjectList } from '@/api/project'
@@ -512,6 +617,8 @@ interface ArticleTypeOption {
 }
 
 type CreateMode = 'manual' | 'auto'
+type AiGenerateMode = 'free' | 'template'
+type TemplateSelectionMode = 'smart' | 'manual'
 type ParseStatus = 'success' | 'partial' | 'failed'
 type NoticeType = 'success' | 'warning' | 'error' | 'info'
 
@@ -581,8 +688,11 @@ const router = useRouter()
 const dictStore = useDictStore()
 
 const createMode = ref<CreateMode>('manual')
+const aiGenerateMode = ref<AiGenerateMode>('free')
 const submitting = ref(false)
 const generating = ref(false)
+const generationOptionsLoading = ref(false)
+const generationOptions = ref<{ groups: ArticleGenerationChannelGroup[] } | null>(null)
 const projectLoading = ref(false)
 const projectOptions = ref<Project[]>([])
 const focusedSectionId = ref<number | null>(null)
@@ -627,6 +737,14 @@ const aiForm = reactive({
   referenceMaterials: '',
 })
 
+const templateForm = reactive({
+  channelKey: '',
+  selectionMode: 'smart' as TemplateSelectionMode,
+  templateVersionKey: '',
+  keywordGroupId: undefined as number | undefined,
+  topicAsQuestion: '',
+})
+
 const questionFilters = reactive({
   tier: 'all',
   keyword: '',
@@ -654,6 +772,14 @@ const articleTypeOptions = computed<ArticleTypeOption[]>(() => {
 const contentStyleOptions = computed(() => CONTENT_STYLE_OPTIONS)
 const toneOptions = computed(() => TONE_OPTIONS)
 const lengthOptions = computed(() => LENGTH_OPTIONS)
+const aiGenerateModeOptions = [
+  { label: '自由生成', value: 'free' },
+  { label: '模板生成', value: 'template' },
+]
+const templateSelectionModeOptions = [
+  { label: '智能匹配', value: 'smart' },
+  { label: '手动选择', value: 'manual' },
+]
 const projectCascadeProps = {
   value: 'value',
   label: 'label',
@@ -662,10 +788,19 @@ const projectCascadeProps = {
 }
 const projectCascadeOptions = computed(() => buildProjectCascadeOptions(projectOptions.value))
 const selectedProject = computed(() => projectOptions.value.find((project) => project.id === manualForm.projectId) || null)
+const selectedProjectKeywordGroups = computed(() => selectedProject.value?.selectedKeywordGroups || [])
 const selectedArticleTypeLabel = computed(() => articleTypeOptions.value.find((item) => item.value === manualForm.articleType)?.label || manualForm.articleType)
 const selectedContentStyleLabel = computed(() => contentStyleOptions.value.find((item) => item.value === aiForm.contentStyle)?.label || 'AI 风格')
 const draftContentStyle = computed(() => createMode.value === 'auto' ? aiForm.contentStyle : manualForm.contentStyle)
 const draftTopic = computed(() => createMode.value === 'auto' ? aiForm.topic.trim() : manualForm.topic.trim())
+const templateChannelGroups = computed(() => generationOptions.value?.groups || [])
+const selectedTemplateChannel = computed(() => findTemplateChannel(templateForm.channelKey))
+const availableTemplateOptions = computed(() => {
+  const channel = selectedTemplateChannel.value
+  if (!channel) return []
+  return (channel.templates || []).filter((item) => item.articleTypeCode === manualForm.articleType)
+})
+const selectedTemplateOption = computed(() => availableTemplateOptions.value.find((item) => templateVersionKey(item) === templateForm.templateVersionKey) || null)
 const generatedManualMarkdown = computed(() => buildManualMarkdown())
 const manualMarkdown = computed({
   get: () => markdownOverridden.value ? markdownOverride.value : generatedManualMarkdown.value,
@@ -714,7 +849,11 @@ const canSubmit = computed(() => Boolean(
   && manualForm.title.trim()
   && manualMarkdown.value.trim(),
 ) && !generating.value)
-const canGenerate = computed(() => Boolean(manualForm.projectId && manualForm.articleType && aiForm.topic.trim()) && !generating.value)
+const canGenerate = computed(() => {
+  if (!manualForm.projectId || !manualForm.articleType || !aiForm.topic.trim() || generating.value) return false
+  if (aiGenerateMode.value === 'free') return true
+  return Boolean(selectedTemplateChannel.value && selectedTemplateOption.value)
+})
 const submitStateText = computed(() => {
   if (canSubmit.value) return '字段已就绪'
   if (createMode.value === 'auto' && aiMetadata.value && manualMarkdown.value.trim()) return '请确认 AI 草稿'
@@ -802,6 +941,82 @@ async function loadProjectOptions() {
   } finally {
     projectLoading.value = false
   }
+}
+
+async function loadGenerationOptions() {
+  if (generationOptions.value || generationOptionsLoading.value) return
+  generationOptionsLoading.value = true
+  try {
+    const { data } = await getArticleGenerationOptions()
+    generationOptions.value = data.data
+    ensureTemplateDefaults()
+  } catch (err) {
+    console.error(err)
+    ElMessage.error('加载文章模板配置失败')
+  } finally {
+    generationOptionsLoading.value = false
+  }
+}
+
+function channelKey(channel: Pick<ArticleGenerationChannelOption, 'channelGroupCode' | 'channelSubCode'>) {
+  return `${channel.channelGroupCode}:${channel.channelSubCode || ''}`
+}
+
+function templateVersionKey(item: Pick<ArticleGenerationTemplateOption, 'templateId' | 'templateVersionId'>) {
+  return `${item.templateId}:${item.templateVersionId}`
+}
+
+function templateOptionLabel(item: ArticleGenerationTemplateOption) {
+  const scene = item.questionSceneName || item.questionSceneCode || '通用'
+  return `${item.templateName} / ${scene}`
+}
+
+function findTemplateChannel(key: string) {
+  if (!key) return null
+  for (const group of templateChannelGroups.value) {
+    const channel = group.channels.find((item) => channelKey(item) === key)
+    if (channel) return channel
+  }
+  return null
+}
+
+function ensureTemplateDefaults() {
+  if (aiGenerateMode.value !== 'template') return
+  if (!templateForm.channelKey) {
+    const firstChannel = templateChannelGroups.value
+      .flatMap((group) => group.channels)
+      .find((channel) => channel.enabled && channel.templateCount > 0)
+    if (firstChannel) {
+      templateForm.channelKey = channelKey(firstChannel)
+    }
+  }
+  syncTemplateSelection()
+}
+
+function handleTemplateChannelChange() {
+  templateForm.templateVersionKey = ''
+  syncTemplateSelection()
+}
+
+function handleTemplateSelectionModeChange() {
+  syncTemplateSelection()
+}
+
+function syncTemplateSelection() {
+  const options = availableTemplateOptions.value
+  if (!options.length) {
+    templateForm.templateVersionKey = ''
+    return
+  }
+  if (templateForm.selectionMode === 'manual' && options.some((item) => templateVersionKey(item) === templateForm.templateVersionKey)) {
+    return
+  }
+  const selectedScene = selectedQuestion.value?.sceneCode
+  const recommended = selectedScene
+    ? options.find((item) => item.questionSceneCode === selectedScene)
+    : null
+  const fallback = options.find((item) => !item.questionSceneCode) || options[0]
+  templateForm.templateVersionKey = templateVersionKey(recommended || fallback)
 }
 
 async function loadInheritedProject(projectId: number) {
@@ -1025,6 +1240,11 @@ async function confirmSelectedQuestion() {
       { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' },
     )
     aiForm.topic = question.questionText
+    if (aiGenerateMode.value === 'template') {
+      templateForm.keywordGroupId = question.groupId
+      templateForm.topicAsQuestion = question.questionText
+      syncTemplateSelection()
+    }
     questionPickerVisible.value = false
     ElMessage.success('问题词已回显至选题 / 主题')
   } catch (err: any) {
@@ -1226,6 +1446,10 @@ async function generateAiPreview() {
     ElMessage.warning('请填写选题 / 主题')
     return
   }
+  if (aiGenerateMode.value === 'template') {
+    await generateTemplatePreview()
+    return
+  }
   generating.value = true
   generationNotice.value = {
     type: 'info',
@@ -1262,6 +1486,67 @@ async function generateAiPreview() {
       type: 'error',
       title: aiGenerationFailureTitle(err),
       description: errorMessage(err, '生成失败，请稍后重试。已保留当前生成设置。'),
+    }
+  } finally {
+    generating.value = false
+    clearStillGeneratingTimer()
+  }
+}
+
+async function generateTemplatePreview() {
+  if (!manualForm.projectId) {
+    ElMessage.warning('请选择绑定项目')
+    return
+  }
+  const channel = selectedTemplateChannel.value
+  if (!channel) {
+    ElMessage.warning('请选择发布渠道')
+    return
+  }
+  const template = selectedTemplateOption.value
+  if (!template) {
+    ElMessage.warning('请选择可用的提示词模板版本')
+    return
+  }
+  generating.value = true
+  generationNotice.value = {
+    type: 'info',
+    title: '正在按模板生成草稿',
+    description: '本次使用批量同源模板装配，代表批次首篇效果。',
+  }
+  parseNotice.value = null
+  clearStillGeneratingTimer()
+  stillGeneratingTimer = setTimeout(() => {
+    if (generating.value) {
+      generationNotice.value = {
+        type: 'info',
+        title: '仍在生成中',
+        description: '模板生成正在等待模型返回，已保留你的全部输入。',
+      }
+    }
+  }, 90000)
+
+  try {
+    const { data } = await previewArticleTemplate({
+      projectId: manualForm.projectId,
+      articleType: manualForm.articleType,
+      channelGroupCode: channel.channelGroupCode,
+      channelSubCode: channel.channelSubCode || undefined,
+      topic: aiForm.topic.trim(),
+      topicAsQuestion: templateForm.topicAsQuestion.trim() || undefined,
+      length: aiForm.length,
+      keywordGroupId: templateForm.keywordGroupId || undefined,
+      extraPrompt: aiForm.extraPrompt.trim() || undefined,
+      promptTemplateId: template.templateId,
+      promptTemplateVersionId: template.templateVersionId,
+    })
+    applyTemplatePreview(data.data)
+  } catch (err) {
+    console.error(err)
+    generationNotice.value = {
+      type: 'error',
+      title: aiGenerationFailureTitle(err),
+      description: errorMessage(err, '模板生成失败，请检查模板、渠道和关键词组配置。'),
     }
   } finally {
     generating.value = false
@@ -1320,6 +1605,62 @@ function applyAiPreview(response: ArticleAiDraftPreviewResponse) {
     type: 'success',
     title: 'AI 草稿已生成',
     description: '内容已回填到编辑区，可继续修改后提交。',
+  }
+}
+
+function applyTemplatePreview(response: ArticleTemplatePreviewResponse) {
+  if (response.contentStyle) {
+    aiForm.contentStyle = response.contentStyle
+  }
+  const contentMarkdown = response.contentMarkdown || ''
+  const parsed = parseGeneratedMarkdown(contentMarkdown, response.title || '')
+  aiMetadata.value = {
+    generationMode: 'template_preview',
+    inputSnapshot: response.inputSnapshot,
+    promptSnapshot: response.promptSnapshot,
+    templateId: response.templateId,
+    templateVersionId: response.templateVersionId,
+    templateName: response.templateName,
+    channelGroupCode: response.channelGroupCode,
+    channelSubCode: response.channelSubCode,
+    contentStyle: response.contentStyle,
+    topicAsQuestion: response.topicAsQuestion,
+    qualityStatus: response.qualityStatus,
+    qualityIssues: response.qualityIssues,
+    unresolvedVariables: response.unresolvedVariables,
+    modelPlatformCode: response.modelPlatformCode,
+    modelId: response.modelId,
+    modelName: response.modelName,
+    promptTokens: response.promptTokens,
+    completionTokens: response.completionTokens,
+    durationMs: response.durationMs,
+  }
+
+  if (parsed.status === 'failed') {
+    manualMarkdown.value = contentMarkdown
+    sourceExpanded.value = true
+    parseNotice.value = {
+      type: 'error',
+      title: '结构解析失败',
+      description: '已保留完整 Markdown 源码，请在源码区编辑或手动整理为标题和段落。',
+    }
+  } else {
+    manualForm.title = parsed.title || response.title || manualForm.title
+    manualForm.sections = parsed.sections.length ? parsed.sections : [createSection()]
+    restoreFieldSync()
+    parseNotice.value = parsed.status === 'partial'
+      ? {
+          type: 'warning',
+          title: '结构解析部分成功',
+          description: '模板生成内容已回填，请提交前检查标题和段落结构。',
+        }
+      : null
+  }
+
+  generationNotice.value = {
+    type: response.qualityStatus === 'risk' || (response.unresolvedVariables?.length || 0) > 0 ? 'warning' : 'success',
+    title: '模板草稿已生成',
+    description: '内容已回填到编辑区。本次代表批次首篇，后续批量篇目的回答角度和时间锚点会轮换。',
   }
 }
 
@@ -1398,7 +1739,7 @@ async function submitManualCreate() {
       articleType: manualForm.articleType,
       contentStyle: draftContentStyle.value,
       topic: draftTopic.value,
-      topicAsQuestion: createMode.value === 'auto' ? selectedQuestion.value?.questionText : undefined,
+      topicAsQuestion: resolveDraftTopicAsQuestion(),
       title: manualForm.title.trim(),
       contentMarkdown,
       source: aiMetadata.value ? 'ai_preview' : 'manual',
@@ -1419,6 +1760,16 @@ async function submitManualCreate() {
   } finally {
     submitting.value = false
   }
+}
+
+function resolveDraftTopicAsQuestion() {
+  if (createMode.value !== 'auto') return undefined
+  if (aiGenerateMode.value === 'template') {
+    const metadataQuestion = aiMetadata.value?.topicAsQuestion
+    if (typeof metadataQuestion === 'string' && metadataQuestion.trim()) return metadataQuestion.trim()
+    return templateForm.topicAsQuestion.trim() || selectedQuestion.value?.questionText || undefined
+  }
+  return selectedQuestion.value?.questionText
 }
 
 function goBack() {
@@ -1450,7 +1801,12 @@ watch(() => manualForm.projectId, () => {
   questionRows.value = []
   selectedQuestionKey.value = ''
   questionLoadedProjectId.value = null
+  templateForm.keywordGroupId = undefined
   cleanupImageThumbs()
+})
+
+watch(() => manualForm.articleType, () => {
+  syncTemplateSelection()
 })
 
 watch(createMode, (mode) => {
@@ -1458,6 +1814,22 @@ watch(createMode, (mode) => {
     aiMetadata.value = null
     generationNotice.value = null
     parseNotice.value = null
+  }
+})
+
+watch(aiGenerateMode, async (mode) => {
+  aiMetadata.value = null
+  generationNotice.value = null
+  parseNotice.value = null
+  if (mode === 'template') {
+    await loadGenerationOptions()
+    ensureTemplateDefaults()
+  }
+})
+
+watch(selectedQuestion, () => {
+  if (aiGenerateMode.value === 'template' && templateForm.selectionMode === 'smart') {
+    syncTemplateSelection()
   }
 })
 
@@ -1669,6 +2041,13 @@ onBeforeUnmount(() => {
   cursor: not-allowed;
 }
 
+.ai-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
 .ai-grid,
 .ai-extra-grid {
   display: grid;
@@ -1701,6 +2080,33 @@ onBeforeUnmount(() => {
 
 .length-label {
   margin-top: 12px;
+}
+
+.template-control-grid,
+.ai-control-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.template-option-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.template-option-line span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.template-option-line small {
+  flex-shrink: 0;
+  color: #94a3b8;
 }
 
 .style-field {

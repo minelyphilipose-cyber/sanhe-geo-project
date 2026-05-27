@@ -71,6 +71,7 @@ interface MenuItem {
   title: string
   icon?: string
   roles?: RoleType[]
+  excludeRoles?: RoleType[]
   permissions?: string[]
   badgeCount?: number
 }
@@ -114,8 +115,9 @@ const visibleGroups = computed(() =>
       ...group,
       menus: group.menus.filter((m) => {
         const rolePass = !m.roles || m.roles.length === 0 || userStore.hasRole(m.roles)
+        const excludePass = !m.excludeRoles || m.excludeRoles.length === 0 || !userStore.hasRole(m.excludeRoles)
         const permPass = !m.permissions || m.permissions.length === 0 || userStore.hasPermission(m.permissions)
-        return rolePass && permPass
+        return rolePass && excludePass && permPass
       }),
     }))
     .filter((group) => group.menus.length > 0),

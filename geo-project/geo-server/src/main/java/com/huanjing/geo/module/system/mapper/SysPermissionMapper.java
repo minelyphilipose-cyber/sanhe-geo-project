@@ -20,4 +20,12 @@ public interface SysPermissionMapper extends BaseMapper<SysPermission> {
         WHERE ur.user_id = #{userId}
         """)
     List<String> selectPermKeysByUserId(@Param("userId") Long userId);
+
+    @Select("""
+        SELECT COUNT(DISTINCT p.id)
+        FROM sys_permission p
+        JOIN sys_role_permission rp ON rp.permission_id = p.id
+        WHERE p.status = 'deprecated'
+        """)
+    Long countDeprecatedBoundPermissions();
 }

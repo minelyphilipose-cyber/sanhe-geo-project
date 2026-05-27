@@ -10,7 +10,7 @@
         <el-button @click="router.back()">返回</el-button>
         <el-button :loading="previewing" @click="preview">刷新预览</el-button>
         <el-button :loading="finalPreviewing" @click="openFinalPreview">发布前预览</el-button>
-        <el-button :loading="saving" type="primary" @click="save">保存样式</el-button>
+        <el-button v-if="canArticleWrite" :loading="saving" type="primary" @click="save">保存样式</el-button>
       </div>
     </header>
 
@@ -115,8 +115,8 @@
                 <p>{{ backgroundBoxSummary }}</p>
               </div>
               <div class="quick-action-card__actions">
-                <el-button type="primary" @click="applySuggestedBackgroundBoxes">一键标重点</el-button>
-                <el-button v-if="backgroundBoxAppliedCount" plain @click="clearBackgroundBoxes">全部取消</el-button>
+                <el-button v-if="canArticleWrite" type="primary" @click="applySuggestedBackgroundBoxes">一键标重点</el-button>
+                <el-button v-if="canArticleWrite && backgroundBoxAppliedCount" plain @click="clearBackgroundBoxes">全部取消</el-button>
               </div>
             </div>
             <el-collapse class="simple-collapse">
@@ -272,6 +272,7 @@ import {
   type WechatRenderRoleSchema,
   type WechatRenderWarning,
 } from '@/api/content'
+import { useUserStore } from '@/stores/user'
 import { getBrandMaterialPreviewUrl, uploadBrandMaterial } from '@/api/customer'
 
 type ImageOverride = {
@@ -285,6 +286,8 @@ type ImageOverride = {
 
 const route = useRoute()
 const router = useRouter()
+const userStore = useUserStore()
+const canArticleWrite = computed(() => userStore.hasPermission('content.article.write'))
 const articleId = computed(() => Number(route.params.articleId))
 const loading = ref(false)
 const saving = ref(false)
@@ -707,6 +710,10 @@ async function loadConfig() {
 }
 
 async function save() {
+  if (!canArticleWrite.value) {
+    ElMessage.warning('当前账号没有保存排版权限')
+    return
+  }
   if (!selectedTemplateVersionId.value) {
     ElMessage.warning('请先选择模板')
     return

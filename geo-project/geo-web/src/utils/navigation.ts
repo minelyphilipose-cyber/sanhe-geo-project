@@ -18,10 +18,10 @@ export function resolvePostLoginPath(ctx: AccessContext): string | null {
     roles?: RoleType[]
     permissions?: string[]
   }> = [
-    { path: '/admin/overview', permissions: ['company.read'] },
+    { path: '/admin/overview' },
     { path: '/admin/customers', permissions: ['company.read'] },
     { path: '/admin/projects', permissions: ['project.read'] },
-    { path: '/admin/content/execution', permissions: ['project.read'] },
+    { path: '/admin/content/execution', permissions: ['content.read'] },
     { path: '/admin/presale/report', permissions: ['presale.report.list'] },
     { path: '/admin/monitoring/tasks', roles: OPS_ROLES },
     { path: '/admin/alerts', roles: OPS_ROLES },

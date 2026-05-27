@@ -39,6 +39,7 @@ interface MenuItem {
   title: string
   icon?: string
   roles?: RoleType[]
+  excludeRoles?: RoleType[]
   permissions?: string[]
   badgeCount?: number
 }
@@ -58,7 +59,10 @@ const sidebarGroups: MenuGroup[] = [
   {
     key: 'workspace',
     menus: [
-      { path: '/admin/overview', name: 'Overview', title: '工作台', icon: 'Odometer', permissions: ['company.read'] },
+      { path: '/admin/workbench/operator', name: 'OperatorWorkbench', title: '运营工作台', icon: 'Odometer', permissions: ['workbench.operator.read'], excludeRoles: ['super_admin'] },
+      { path: '/admin/workbench/delivery', name: 'DeliveryWorkbench', title: '交付工作台', icon: 'DataAnalysis', permissions: ['delivery.overview.read'], excludeRoles: ['super_admin'] },
+      { path: '/admin/workbench/manager', name: 'ManagerWorkbench', title: '系统工作台', icon: 'Setting', permissions: ['workbench.manager.read'], excludeRoles: ['super_admin'] },
+      { path: '/admin/workbench/super-admin', name: 'SuperAdminWorkbench', title: '全局总控', icon: 'DataBoard', roles: ['super_admin'] },
     ],
   },
   {
@@ -69,7 +73,7 @@ const sidebarGroups: MenuGroup[] = [
       { path: '/admin/customers', name: 'CustomerList', title: '客户管理', icon: 'User', roles: ['sales', 'operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['company.read'] },
       { path: '/admin/projects', name: 'ProjectList', title: '项目管理', icon: 'Folder', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['project.read'] },
       { path: '/admin/layered-keyword-groups', name: 'LayeredKeywordGroupManage', title: '拓词管理', icon: 'Collection', roles: ['sales', 'operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['keyword_group.read'] },
-      { path: '/admin/content/execution', name: 'ContentExecution', title: '内容与执行', icon: 'Memo', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['project.read'] },
+      { path: '/admin/content/execution', name: 'ContentExecution', title: '内容与执行', icon: 'Memo', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['content.read'] },
     ],
   },
   {
