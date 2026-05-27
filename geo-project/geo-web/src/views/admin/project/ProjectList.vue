@@ -241,8 +241,16 @@
             <el-button class="requirement-add" plain @click="addCustomerRequirement">新增需求</el-button>
           </div>
         </el-form-item>
-        <el-divider class="is-full" content-position="left">内容策略配置（选填）</el-divider>
-        <el-form-item class="is-full" label="目标区域词">
+        <el-divider class="is-full" content-position="left">内容策略配置</el-divider>
+        <el-form-item class="is-full" label="核心关键词" prop="coreKeywords" required>
+          <el-input
+            v-model="form.coreKeywords"
+            maxlength="200"
+            show-word-limit
+            placeholder="可填多个，用逗号隔开，例如：装修公司,旧房翻新,局部改造"
+          />
+        </el-form-item>
+        <el-form-item class="is-full" label="目标区域词" prop="targetRegions" required>
           <el-select
             v-model="form.targetRegions"
             multiple
@@ -253,7 +261,7 @@
             placeholder="输入并回车，例如：北京、上海、广州"
           />
         </el-form-item>
-        <el-form-item label="目标受众">
+        <el-form-item label="目标受众" prop="targetAudience" required>
           <el-input v-model="form.targetAudience" placeholder="例如：装修业主、二手房翻新用户" />
         </el-form-item>
         <el-form-item class="is-full" label="项目定制表述">
@@ -393,6 +401,7 @@ const form = reactive({
   primaryGoal: '',
   customerRequirements: [''],
   targetRegions: [] as string[],
+  coreKeywords: '',
   targetAudience: '',
   customStatement: '',
   contentTone: '',
@@ -417,6 +426,12 @@ const rules: FormRules = {
   projectName: [{ required: true, message: '请输入项目名称', trigger: 'blur' }],
   companyId: [{ required: true, message: '请选择客户', trigger: 'change' }],
   brandId: [{ required: true, message: '请选择品牌', trigger: 'change' }],
+  coreKeywords: [
+    { required: true, message: '请输入核心关键词', trigger: 'blur' },
+    { max: 200, message: '核心关键词不能超过 200 字', trigger: 'blur' },
+  ],
+  targetRegions: [{ required: true, type: 'array', min: 1, message: '请输入目标区域词', trigger: 'change' }],
+  targetAudience: [{ required: true, message: '请输入目标受众', trigger: 'blur' }],
 }
 
 function regionDisplay(project: Project) {
@@ -466,6 +481,7 @@ function resetForm() {
   form.primaryGoal = ''
   form.customerRequirements = ['']
   form.targetRegions = []
+  form.coreKeywords = ''
   form.targetAudience = ''
   form.customStatement = ''
   form.contentTone = ''
@@ -663,6 +679,7 @@ async function openEdit(row: Project) {
   form.primaryGoal = row.primaryGoal || ''
   form.customerRequirements = normalizeCustomerRequirementInputs(row.customerRequirements)
   form.targetRegions = parseStringArray(row.targetRegions)
+  form.coreKeywords = row.coreKeywords || ''
   form.targetAudience = row.targetAudience || ''
   form.customStatement = row.customStatement || ''
   form.contentTone = row.contentTone || ''
@@ -721,6 +738,7 @@ async function submit() {
       primaryGoal: nullableText(form.primaryGoal),
       customerRequirements,
       targetRegions: form.targetRegions,
+      coreKeywords: nullableText(form.coreKeywords),
       targetAudience: nullableText(form.targetAudience),
       customStatement: nullableText(form.customStatement),
       contentTone: nullableText(form.contentTone),

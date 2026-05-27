@@ -122,6 +122,29 @@
           </div>
         </el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="form.regionCodes" /></el-form-item>
+        <el-divider content-position="left">内容策略配置</el-divider>
+        <el-form-item label="核心关键词" prop="coreKeywords" required>
+          <el-input
+            v-model="form.coreKeywords"
+            maxlength="200"
+            show-word-limit
+            placeholder="可填多个，用逗号隔开，例如：装修公司,旧房翻新,局部改造"
+          />
+        </el-form-item>
+        <el-form-item label="目标区域词" prop="targetRegions" required>
+          <el-select
+            v-model="form.targetRegions"
+            multiple
+            filterable
+            allow-create
+            default-first-option
+            style="width: 100%"
+            placeholder="输入并回车，例如：北京、上海、广州"
+          />
+        </el-form-item>
+        <el-form-item label="目标受众" prop="targetAudience" required>
+          <el-input v-model="form.targetAudience" placeholder="例如：装修业主、二手房翻新用户" />
+        </el-form-item>
         <el-form-item label="交付模式"><el-input v-model="form.deliveryMode" /></el-form-item>
         <el-form-item label="主目标"><el-input v-model="form.primaryGoal" type="textarea" :rows="3" /></el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="3" /></el-form-item>
@@ -189,6 +212,9 @@ const form = reactive({
   keywordGroupLimitC: 0,
   channelAllocations: {} as Record<string, number>,
   regionCodes: [] as string[],
+  targetRegions: [] as string[],
+  coreKeywords: '',
+  targetAudience: '',
   deliveryMode: 'managed',
   primaryGoal: '',
   remark: '',
@@ -199,6 +225,12 @@ const rules: FormRules = {
   companyId: [{ required: true, message: '请选择客户', trigger: 'change' }],
   brandId: [{ required: true, message: '请选择品牌', trigger: 'change' }],
   keywordGroupIds: [{ required: true, type: 'array', min: 1, max: 10, message: '请选择 1-10 个拓词组', trigger: 'change' }],
+  coreKeywords: [
+    { required: true, message: '请输入核心关键词', trigger: 'blur' },
+    { max: 200, message: '核心关键词不能超过 200 字', trigger: 'blur' },
+  ],
+  targetRegions: [{ required: true, type: 'array', min: 1, message: '请输入目标区域词', trigger: 'change' }],
+  targetAudience: [{ required: true, message: '请输入目标受众', trigger: 'blur' }],
 }
 
 const dependencyLoading = computed(() => brandLoading.value || keywordGroupLoading.value)
@@ -219,6 +251,29 @@ function projectStatusLabel(status?: string | null) {
   return dictStore.label('project_status', status) || status
 }
 
+function parseStringArray(value?: string | string[] | null) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter((item, index, arr) => item.length > 0 && arr.indexOf(item) === index)
+  }
+  if (!value) {
+    return [] as string[]
+  }
+  try {
+    const parsed = JSON.parse(value)
+    if (Array.isArray(parsed)) {
+      return parsed
+        .map((item) => String(item).trim())
+        .filter((item, index, arr) => item.length > 0 && arr.indexOf(item) === index)
+    }
+  } catch {
+    return String(value)
+      .split(/[,，、;；\n\r]+/)
+      .map((item) => item.trim())
+      .filter((item, index, arr) => item.length > 0 && arr.indexOf(item) === index)
+  }
+  return []
+}
+
 function resetForm() {
   form.projectName = ''
   form.projectAliases = ''
@@ -233,6 +288,9 @@ function resetForm() {
   channelQuotaItems.value = []
   allocationVersion.value = null
   form.regionCodes = []
+  form.targetRegions = []
+  form.coreKeywords = ''
+  form.targetAudience = ''
   form.deliveryMode = 'managed'
   form.primaryGoal = ''
   form.remark = ''
@@ -335,6 +393,9 @@ async function openEdit(row: Project) {
   form.keywordGroupLimitB = row.planKeywordGroupLimitB ?? 0
   form.keywordGroupLimitC = row.planKeywordGroupLimitC ?? 0
   form.regionCodes = regionCodesFromPayload(row)
+  form.targetRegions = parseStringArray(row.targetRegions)
+  form.coreKeywords = row.coreKeywords || ''
+  form.targetAudience = row.targetAudience || ''
   form.deliveryMode = row.deliveryMode || 'managed'
   form.primaryGoal = row.primaryGoal || ''
   form.remark = row.remark || ''
@@ -379,6 +440,9 @@ async function submit() {
       cityName: region.cityName,
       districtCode: region.districtCode,
       districtName: region.districtName,
+      targetRegions: form.targetRegions,
+      coreKeywords: form.coreKeywords || undefined,
+      targetAudience: form.targetAudience || undefined,
       primaryGoal: form.primaryGoal || undefined,
       remark: form.remark || undefined,
     }

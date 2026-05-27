@@ -69,6 +69,8 @@ public class Project {
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String targetRegions;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String coreKeywords;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String targetAudience;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String customStatement;

@@ -284,6 +284,7 @@ const FIELD_LABELS: Record<string, string> = {
   districtCode: '区县编码',
   districtName: '区县',
   targetRegions: '目标区域',
+  coreKeywords: '核心关键词',
   targetAudience: '目标人群',
   customStatement: '定制声明',
   contentTone: '内容语气',

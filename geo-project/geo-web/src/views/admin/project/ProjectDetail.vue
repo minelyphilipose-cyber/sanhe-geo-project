@@ -159,6 +159,7 @@
     <el-card v-if="project" class="admin-rich-card">
       <template #header><span>内容策略配置</span></template>
       <el-descriptions :column="2" border>
+        <el-descriptions-item label="核心关键词">{{ project.coreKeywords || '-' }}</el-descriptions-item>
         <el-descriptions-item label="目标区域词">{{ joinArray(project.targetRegions) }}</el-descriptions-item>
         <el-descriptions-item label="目标受众">{{ project.targetAudience || '-' }}</el-descriptions-item>
         <el-descriptions-item label="内容调性">{{ project.contentTone || '-' }}</el-descriptions-item>
@@ -619,6 +620,7 @@ function projectUpdatePayload(current: Project) {
     primaryGoal: nullableText(current.primaryGoal),
     customerRequirements: current.customerRequirements || [],
     targetRegions: parseStringArray(current.targetRegions),
+    coreKeywords: current.coreKeywords,
     targetAudience: nullableText(current.targetAudience),
     customStatement: nullableText(current.customStatement),
     contentTone: nullableText(current.contentTone),

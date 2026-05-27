@@ -242,6 +242,7 @@ public class ProjectService {
         applyContentStrategyFields(
                 project,
                 req.getTargetRegions(),
+                req.getCoreKeywords(),
                 req.getTargetAudience(),
                 req.getCustomStatement(),
                 req.getContentTone(),
@@ -308,6 +309,7 @@ public class ProjectService {
         applyContentStrategyFields(
                 project,
                 req.getTargetRegions(),
+                req.getCoreKeywords(),
                 req.getTargetAudience(),
                 req.getCustomStatement(),
                 req.getContentTone(),
@@ -1135,6 +1137,7 @@ public class ProjectService {
         snapshot.put("districtCode", project.getDistrictCode());
         snapshot.put("districtName", project.getDistrictName());
         snapshot.put("targetRegions", project.getTargetRegions());
+        snapshot.put("coreKeywords", project.getCoreKeywords());
         snapshot.put("targetAudience", project.getTargetAudience());
         snapshot.put("customStatement", project.getCustomStatement());
         snapshot.put("contentTone", project.getContentTone());
@@ -1188,14 +1191,25 @@ public class ProjectService {
 
     private void applyContentStrategyFields(Project project,
                                             List<String> targetRegions,
+                                            String coreKeywords,
                                             String targetAudience,
                                             String customStatement,
                                             String contentTone,
                                             List<String> preferredAngles,
                                             List<String> extraForbiddenPhrases,
                                             String contentNote) {
-        project.setTargetRegions(normalizeJsonStringList(targetRegions));
-        project.setTargetAudience(trimToNull(targetAudience));
+        String normalizedTargetRegions = normalizeJsonStringList(targetRegions);
+        if (!StringUtils.hasText(normalizedTargetRegions)) {
+            throw new BizException(400, "目标区域词不能为空");
+        }
+        String normalizedCoreKeywords = normalizeCommaText(coreKeywords, 200, "核心关键词");
+        String normalizedTargetAudience = trimToNull(targetAudience);
+        if (!StringUtils.hasText(normalizedTargetAudience)) {
+            throw new BizException(400, "目标受众不能为空");
+        }
+        project.setTargetRegions(normalizedTargetRegions);
+        project.setCoreKeywords(normalizedCoreKeywords);
+        project.setTargetAudience(normalizedTargetAudience);
         project.setCustomStatement(trimToNull(customStatement));
         project.setContentTone(trimToNull(contentTone));
         project.setPreferredAngles(normalizeJsonStringList(preferredAngles));
@@ -1224,6 +1238,24 @@ public class ProjectService {
             return null;
         }
         return JSONUtil.toJsonStr(normalized);
+    }
+
+    private String normalizeCommaText(String value, int maxLength, String fieldLabel) {
+        if (!StringUtils.hasText(value)) {
+            throw new BizException(400, fieldLabel + "不能为空");
+        }
+        String joined = Arrays.stream(value.replace('，', ',').split("[,、;；\\n\\r]+"))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .collect(Collectors.joining(","));
+        if (!StringUtils.hasText(joined)) {
+            throw new BizException(400, fieldLabel + "不能为空");
+        }
+        if (joined.length() > maxLength) {
+            throw new BizException(400, fieldLabel + "不能超过 " + maxLength + " 字");
+        }
+        return joined;
     }
 
     private String normalizeAliases(String value) {

@@ -101,6 +101,19 @@ class ArticleGenerationPromptContextFactoryTest {
         assertThat(fromBatch.prompt().inputSnapshot()).isEqualTo(fromRequest.prompt().inputSnapshot());
     }
 
+    @Test
+    void relatedKeywordsPreferProjectCoreKeywords() {
+        Project project = project();
+        project.setCoreKeywords("阜阳SPA,养生馆，按摩放松");
+        when(projectMapper.selectById(10L)).thenReturn(project);
+
+        ArticleGenerationPromptContextFactory.PromptContextResult result =
+                factory.buildStrict(equivalentRequest());
+
+        assertThat(result.promptInput().relatedKeywords()).containsExactly("阜阳SPA", "养生馆", "按摩放松");
+        assertThat(result.prompt().userPrompt()).contains("关键词: 阜阳SPA、养生馆、按摩放松");
+    }
+
     private void assertPromptInputEquivalent(BatchArticlePromptBuilder.PromptBuildInput actual,
                                              BatchArticlePromptBuilder.PromptBuildInput expected) {
         assertThat(actual.project().getId()).isEqualTo(expected.project().getId());

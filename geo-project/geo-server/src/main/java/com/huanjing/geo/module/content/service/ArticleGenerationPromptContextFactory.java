@@ -101,7 +101,7 @@ public class ArticleGenerationPromptContextFactory {
                 topicAsQuestion,
                 keywordGroupId,
                 keywordGroupName,
-                relatedKeywords(project.getId(), keywordGroupId),
+                relatedKeywords(project, keywordGroupId),
                 articleType,
                 channel.contentStyle(),
                 StringUtils.hasText(request.length()) ? request.length().trim() : "medium",
@@ -220,14 +220,18 @@ public class ArticleGenerationPromptContextFactory {
         }
     }
 
-    private List<String> relatedKeywords(Long projectId, Long keywordGroupId) {
+    private List<String> relatedKeywords(Project project, Long keywordGroupId) {
+        List<String> coreKeywords = parseCommaKeywords(project.getCoreKeywords());
+        if (!coreKeywords.isEmpty()) {
+            return coreKeywords;
+        }
         List<Long> groupIds = new ArrayList<>();
         if (keywordGroupId != null) {
             groupIds.add(keywordGroupId);
         } else {
             groupIds.addAll(projectKeywordGroupRelMapper.selectList(
                     new LambdaQueryWrapper<ProjectKeywordGroupRel>()
-                            .eq(ProjectKeywordGroupRel::getProjectId, projectId)
+                            .eq(ProjectKeywordGroupRel::getProjectId, project.getId())
                             .orderByAsc(ProjectKeywordGroupRel::getId)
             ).stream().map(ProjectKeywordGroupRel::getKeywordGroupId).distinct().toList());
         }
@@ -244,6 +248,18 @@ public class ArticleGenerationPromptContextFactory {
                 .filter(StringUtils::hasText)
                 .map(String::trim)
                 .distinct()
+                .toList();
+    }
+
+    private List<String> parseCommaKeywords(String value) {
+        if (!StringUtils.hasText(value)) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(value.replace('，', ',').split("[,、;；\\n\\r]+"))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .limit(12)
                 .toList();
     }
 

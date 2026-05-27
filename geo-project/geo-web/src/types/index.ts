@@ -253,6 +253,7 @@ export interface Project {
   districtCode?: string | null
   districtName?: string | null
   targetRegions?: string | string[] | null
+  coreKeywords?: string | null
   targetAudience?: string | null
   customStatement?: string | null
   contentTone?: string | null

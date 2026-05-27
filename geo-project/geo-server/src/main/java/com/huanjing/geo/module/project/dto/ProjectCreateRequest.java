@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.project.dto;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
@@ -32,7 +33,12 @@ public class ProjectCreateRequest {
     private String primaryGoal;
     @Size(max = 20)
     private List<String> customerRequirements;
+    @NotEmpty
     private List<String> targetRegions;
+    @NotBlank
+    @Size(max = 200)
+    private String coreKeywords;
+    @NotBlank
     private String targetAudience;
     private String customStatement;
     private String contentTone;
