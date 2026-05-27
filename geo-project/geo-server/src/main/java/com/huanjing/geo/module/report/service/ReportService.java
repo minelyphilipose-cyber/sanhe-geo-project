@@ -10,6 +10,7 @@ import com.huanjing.geo.module.content.entity.ArticleBatch;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.mapper.ArticleBatchMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
@@ -57,6 +58,7 @@ public class ReportService {
     private final BrandMapper brandMapper;
     private final CompanyMapper companyMapper;
     private final CurrentUserService currentUserService;
+    private final InternalScopeService internalScopeService;
     private final PermissionService permissionService;
     private final StringRedisTemplate stringRedisTemplate;
     private final ReportPdfService reportPdfService;
@@ -68,12 +70,14 @@ public class ReportService {
     private final DistributionTaskMapper distributionTaskMapper;
 
     public Page<Report> page(long current, long size, Long projectId, String keyword, String status) {
+        SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
         LambdaQueryWrapper<Report> wrapper = new LambdaQueryWrapper<Report>()
                 .orderByDesc(Report::getCreatedAt)
                 .notIn(Report::getReportType, DISABLED_POSTSALE_TYPES)
                 .notIn(Report::getReportType, LEGACY_PRESALE_TYPES);
         if (projectId != null) {
+            ensureProjectReadable(projectId);
             wrapper.eq(Report::getProjectId, projectId);
         }
         if (StringUtils.hasText(keyword)) {
@@ -96,6 +100,17 @@ public class ReportService {
         }
         if (StringUtils.hasText(status)) {
             wrapper.eq(Report::getStatus, status.trim());
+        }
+        Long scopePartnerId = currentUserService.requirePartnerScope(user);
+        if (scopePartnerId != null) {
+            wrapper.inSql(Report::getProjectId,
+                    "select id from project where deleted_at is null and partner_id = " + scopePartnerId);
+        } else if (internalScopeService.isSalesUser(user)) {
+            internalScopeService.applyNoRows(wrapper);
+        } else if (internalScopeService.requiresOwnerScope(user)) {
+            wrapper.inSql(Report::getProjectId,
+                    "select p.id from project p join company c on c.id = p.company_id " +
+                            "where p.deleted_at is null and c.deleted_at is null and c.owner_id = " + user.getId());
         }
         Page<Report> pageData = reportMapper.selectPage(new Page<>(current, size), wrapper);
         fillProjectNames(pageData.getRecords());
@@ -784,7 +799,9 @@ public class ReportService {
         if (project == null || project.getDeletedAt() != null) {
             throw new BizException(404, "Project not found");
         }
-        currentUserService.ensurePartnerResourceAccess(currentUserService.requireCurrentUser(), project.getPartnerId(), "project");
+        SysUser user = currentUserService.requireCurrentUser();
+        currentUserService.ensurePartnerResourceAccess(user, project.getPartnerId(), "project");
+        internalScopeService.ensureProjectAccess(user, project, "project");
     }
 
     private Map<String, Object> buildReportSubject(Long projectId) {

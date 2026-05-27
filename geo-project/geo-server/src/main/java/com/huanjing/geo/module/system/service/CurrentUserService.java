@@ -3,6 +3,7 @@ package com.huanjing.geo.module.system.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.util.SecurityUtils;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
@@ -13,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.Locale;
 import java.util.Set;
 
 @Service
@@ -24,6 +26,7 @@ public class CurrentUserService {
     private final PermissionService permissionService;
     private final BrandMapper brandMapper;
     private final CompanyMapper companyMapper;
+    private final InternalScopeService internalScopeService;
 
     public SysUser requireCurrentUser() {
         Long userId = SecurityUtils.getCurrentUserId();
@@ -46,7 +49,7 @@ public class CurrentUserService {
     }
 
     public boolean isPartnerUser(SysUser user) {
-        return PARTNER_ROLES.contains(user.getRole());
+        return user != null && PARTNER_ROLES.contains(normalizeRole(user.getRole()));
     }
 
     public void ensureInternalOperator() {
@@ -85,6 +88,21 @@ public class CurrentUserService {
         if (!permissionService.hasPerm(user, permKey)) {
             throw new BizException(403, "No permission: " + permKey);
         }
+    }
+
+    public void ensurePermissionOrLegacy(String permKey, String legacyPermKey, Set<String> legacyAllowedRoles) {
+        SysUser user = requireCurrentUser();
+        if (permissionService.hasPerm(user, permKey)) {
+            return;
+        }
+        String role = normalizeRole(user.getRole());
+        if (StringUtils.hasText(legacyPermKey)
+                && legacyAllowedRoles != null
+                && legacyAllowedRoles.contains(role)
+                && permissionService.hasPerm(user, legacyPermKey)) {
+            return;
+        }
+        throw new BizException(403, "No permission: " + permKey);
     }
 
     public boolean hasPermission(String permKey) {
@@ -130,5 +148,10 @@ public class CurrentUserService {
         }
         String resolvedTag = StringUtils.hasText(resourceTag) ? resourceTag : "brand";
         ensurePartnerResourceAccess(operator, company.getPartnerId(), resolvedTag);
+        internalScopeService.ensureCompanyAccess(operator, company, resolvedTag);
+    }
+
+    private String normalizeRole(String role) {
+        return StringUtils.hasText(role) ? role.trim().toLowerCase(Locale.ROOT) : "";
     }
 }

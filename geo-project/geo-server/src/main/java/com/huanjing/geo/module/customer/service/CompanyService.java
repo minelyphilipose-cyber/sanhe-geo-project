@@ -8,12 +8,14 @@ import com.huanjing.geo.common.util.QuotaPeriodResolver;
 import com.huanjing.geo.module.content.dto.ChannelQuotaSnapshotItem;
 import com.huanjing.geo.module.content.entity.CompanyChannelQuotaUsage;
 import com.huanjing.geo.module.content.mapper.CompanyChannelQuotaUsageMapper;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.dto.CompanyDeductRequest;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.dto.CompanyCreateRequest;
 import com.huanjing.geo.module.customer.dto.CompanyDistributionQuotaItemVO;
 import com.huanjing.geo.module.customer.dto.CompanyDistributionQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyKeywordGroupQuotaVO;
+import com.huanjing.geo.module.customer.dto.CompanyOwnerTransferRequest;
 import com.huanjing.geo.module.customer.dto.CompanyRechargeRequest;
 import com.huanjing.geo.module.customer.dto.CompanyUpdateRequest;
 import com.huanjing.geo.module.customer.dto.SalesOwnerOptionVO;
@@ -88,6 +90,7 @@ public class CompanyService {
     private final SysDictItemMapper sysDictItemMapper;
     private final SysUserMapper sysUserMapper;
     private final CurrentUserService currentUserService;
+    private final InternalScopeService internalScopeService;
     private final CompanyPackageBindingService companyPackageBindingService;
     private final CompanyChannelQuotaUsageMapper companyChannelQuotaUsageMapper;
     private final KeywordGroupService keywordGroupService;
@@ -112,9 +115,11 @@ public class CompanyService {
         if (scopePartnerId != null) {
             wrapper.eq(Company::getPartnerId, scopePartnerId);
         }
-        if ("sales".equals(user.getRole())) {
+        if (internalScopeService.isSalesUser(user)) {
             wrapper.eq(Company::getSalesOwnerId, user.getId())
                     .eq(Company::getStatus, "signed");
+        } else {
+            internalScopeService.applyCompanyScope(wrapper, user);
         }
 
         return companyMapper.selectPage(new Page<>(current, size), wrapper);
@@ -125,6 +130,7 @@ public class CompanyService {
         currentUserService.ensurePermission("company.read");
         Company company = requireCompany(id);
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "company");
+        internalScopeService.ensureCompanyAccess(user, company, "company");
         ensureSalesCompanyAccess(user, company);
         return company;
     }
@@ -134,6 +140,7 @@ public class CompanyService {
         currentUserService.ensurePermission("company.read");
         Company company = requireCompany(companyId);
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "company");
+        internalScopeService.ensureCompanyAccess(user, company, "company");
         ensureSalesCompanyAccess(user, company);
 
         CompanyPackageBinding binding = companyPackageBindingService.activeBinding(companyId);
@@ -202,6 +209,7 @@ public class CompanyService {
         currentUserService.ensurePermission("company.read");
         Company company = requireCompany(companyId);
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "company");
+        internalScopeService.ensureCompanyAccess(user, company, "company");
         ensureSalesCompanyAccess(user, company);
 
         CompanyPackageBinding binding = companyPackageBindingService.activeBinding(companyId);
@@ -263,6 +271,7 @@ public class CompanyService {
         company.setStatus(status);
         company.setRemark(req.getRemark());
         company.setCreatedBy(operator.getId());
+        company.setOwnerId(operator.getId());
         companyMapper.insert(company);
         ensureAccount(company.getId());
         activityLogService.logAction(
@@ -282,6 +291,7 @@ public class CompanyService {
         SysUser operator = currentUserService.requireCurrentUser();
         Company company = requireCompany(id);
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "company");
+        internalScopeService.ensureCompanyAccess(operator, company, "company");
         String ownerType = resolveUpdateOwnerType(operator, req.getOwnerType(), company.getOwnerType());
         Long partnerId = resolveUpdatePartnerId(operator, req.getPartnerId(), ownerType, company.getPartnerId());
         String sourceType = resolveUpdateSourceType(operator, req.getSourceType(), company.getSourceType());
@@ -328,11 +338,44 @@ public class CompanyService {
         return company;
     }
 
+    @Transactional
+    public Company transferOwner(Long id, CompanyOwnerTransferRequest req) {
+        currentUserService.ensurePermission("delivery.assignment.manage");
+        SysUser operator = currentUserService.requireCurrentUser();
+        Company company = requireCompany(id);
+        Long oldOwnerId = company.getOwnerId();
+        SysUser newOwner = requireActiveOperator(req.getNewOwnerId());
+        if (newOwner.getId().equals(oldOwnerId)) {
+            throw new BizException(400, "New owner is already assigned to this company");
+        }
+
+        Map<String, Object> before = snapshotCompany(company);
+        company.setOwnerId(newOwner.getId());
+        companyMapper.updateById(company);
+
+        Map<String, Object> extra = new LinkedHashMap<>();
+        extra.put("oldOwnerId", oldOwnerId);
+        extra.put("newOwnerId", newOwner.getId());
+        extra.put("newOwnerName", displayName(newOwner));
+        extra.put("reason", trimToNull(req.getReason()));
+        activityLogService.logActionRequired(
+                operator.getId(),
+                "company.owner.transfer",
+                "company",
+                company.getId(),
+                before,
+                snapshotCompany(company),
+                extra
+        );
+        return company;
+    }
+
     public CompanyAccount account(Long companyId) {
         SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("company.read");
         Company company = requireCompany(companyId);
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "company");
+        internalScopeService.ensureCompanyAccess(user, company, "company");
         ensureSalesCompanyAccess(user, company);
         return ensureAccount(companyId);
     }
@@ -343,6 +386,7 @@ public class CompanyService {
         currentUserService.ensurePermission("company.read");
         Company company = requireCompany(companyId);
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "company");
+        internalScopeService.ensureCompanyAccess(user, company, "company");
         ensureSalesCompanyAccess(user, company);
 
         LambdaQueryWrapper<CompanyAccountTxn> wrapper = new LambdaQueryWrapper<CompanyAccountTxn>()
@@ -371,6 +415,7 @@ public class CompanyService {
         SysUser operator = currentUserService.requireCurrentUser();
         Company company = requireCompany(companyId);
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "company");
+        internalScopeService.ensureCompanyAccess(operator, company, "company");
         if (req.getAmount() == null || req.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
             throw new BizException(400, "Recharge amount must be positive");
         }
@@ -415,6 +460,7 @@ public class CompanyService {
         SysUser operator = currentUserService.requireCurrentUser();
         Company company = requireCompany(companyId);
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "company");
+        internalScopeService.ensureCompanyAccess(operator, company, "company");
         if (req.getAmount() == null || req.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
             throw new BizException(400, "Deduct amount must be positive");
         }
@@ -461,6 +507,7 @@ public class CompanyService {
         SysUser operator = currentUserService.requireCurrentUser();
         Company company = requireCompany(id);
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "company");
+        internalScopeService.ensureCompanyAccess(operator, company, "company");
 
         Long brandCount = brandMapper.selectCount(
                 new LambdaQueryWrapper<Brand>()
@@ -680,6 +727,7 @@ public class CompanyService {
         snapshot.put("status", company.getStatus());
         snapshot.put("sourceType", company.getSourceType());
         snapshot.put("createdBy", company.getCreatedBy());
+        snapshot.put("ownerId", company.getOwnerId());
         return snapshot;
     }
 
@@ -886,12 +934,27 @@ public class CompanyService {
         }
     }
 
+    private SysUser requireActiveOperator(Long userId) {
+        if (userId == null) {
+            throw new BizException(400, "newOwnerId is required");
+        }
+        SysUser user = sysUserMapper.selectById(userId);
+        if (user == null || !Boolean.TRUE.equals(user.getIsActive()) || !"operator".equals(user.getRole())) {
+            throw new BizException(400, "New owner must be an active operator");
+        }
+        return user;
+    }
+
     private SalesOwnerOptionVO toSalesOwnerOption(SysUser user) {
         SalesOwnerOptionVO vo = new SalesOwnerOptionVO();
         vo.setId(user.getId());
-        vo.setDisplayName(StringUtils.hasText(user.getDisplayName()) ? user.getDisplayName() : user.getUsername());
+        vo.setDisplayName(displayName(user));
         vo.setUsername(user.getUsername());
         return vo;
+    }
+
+    private String displayName(SysUser user) {
+        return StringUtils.hasText(user.getDisplayName()) ? user.getDisplayName() : user.getUsername();
     }
 
     private List<String> normalizeIndustryTags(List<String> industryTags, String legacyIndustry) {

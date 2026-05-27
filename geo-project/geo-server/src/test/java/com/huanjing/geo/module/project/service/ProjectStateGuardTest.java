@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.project.service;
 
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
@@ -21,6 +22,8 @@ class ProjectStateGuardTest {
 
     @Mock
     private CurrentUserService currentUserService;
+    @Mock
+    private InternalScopeService internalScopeService;
 
     @InjectMocks
     private ProjectStateGuard projectStateGuard;

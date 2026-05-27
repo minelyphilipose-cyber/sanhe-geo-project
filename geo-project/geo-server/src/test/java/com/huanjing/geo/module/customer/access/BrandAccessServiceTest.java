@@ -8,11 +8,9 @@ import com.huanjing.geo.module.audit.service.AuditService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
-import com.huanjing.geo.module.customer.mapper.BrandOperatorAssignmentMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysUserMapper;
-import com.huanjing.geo.module.system.mapper.SysUserRoleMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.PermissionService;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,8 +19,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-
-import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -45,15 +41,13 @@ class BrandAccessServiceTest {
     @Mock
     private CompanyMapper companyMapper;
     @Mock
-    private BrandOperatorAssignmentMapper assignmentMapper;
-    @Mock
     private SysUserMapper sysUserMapper;
-    @Mock
-    private SysUserRoleMapper sysUserRoleMapper;
     @Mock
     private CurrentUserService currentUserService;
     @Mock
     private PermissionService permissionService;
+    @Mock
+    private InternalScopeService internalScopeService;
     @Mock
     private AuditService auditService;
 
@@ -64,11 +58,10 @@ class BrandAccessServiceTest {
         accessService = new BrandAccessService(
                 brandMapper,
                 companyMapper,
-                assignmentMapper,
                 sysUserMapper,
-                sysUserRoleMapper,
                 currentUserService,
                 permissionService,
+                internalScopeService,
                 auditService
         );
         when(brandMapper.selectById(BRAND_ID)).thenReturn(brand());
@@ -79,21 +72,20 @@ class BrandAccessServiceTest {
         SysUser manager = user(OPERATOR_ID, "operator");
         when(sysUserMapper.selectById(OPERATOR_ID)).thenReturn(manager);
         when(permissionService.hasPerm(manager, "company.read")).thenReturn(true);
-        when(sysUserRoleMapper.selectRoleKeysByUserId(OPERATOR_ID)).thenReturn(List.of("manager"));
+        when(internalScopeService.isGlobalInternal(manager)).thenReturn(true);
 
         Brand brand = accessService.requireBrandAccess(BRAND_ID, OPERATOR_ID, BrandAccessAction.OPERATE);
 
         assertEquals(BRAND_ID, brand.getId());
-        verify(assignmentMapper, never()).selectActiveRole(BRAND_ID, OPERATOR_ID);
+        verify(companyMapper, never()).selectById(COMPANY_ID);
     }
 
     @Test
-    void requireBrandAccess_primaryCanManage() {
+    void requireBrandAccess_ownerCanManage() {
         SysUser operator = user(OPERATOR_ID, "operator");
         when(sysUserMapper.selectById(OPERATOR_ID)).thenReturn(operator);
         when(permissionService.hasPerm(operator, "brand.update")).thenReturn(true);
-        when(sysUserRoleMapper.selectRoleKeysByUserId(OPERATOR_ID)).thenReturn(List.of("operator"));
-        when(assignmentMapper.selectActiveRole(BRAND_ID, OPERATOR_ID)).thenReturn("PRIMARY");
+        when(companyMapper.selectById(COMPANY_ID)).thenReturn(company(PARTNER_ID, OPERATOR_ID));
 
         Brand brand = accessService.requireBrandAccess(BRAND_ID, OPERATOR_ID, BrandAccessAction.MANAGE);
 
@@ -101,36 +93,32 @@ class BrandAccessServiceTest {
     }
 
     @Test
-    void requireBrandAccess_secondaryCanOperateButCannotManage() {
+    void requireBrandAccess_nonOwnerCannotManage() {
         SysUser operator = user(OPERATOR_ID, "operator");
         when(sysUserMapper.selectById(OPERATOR_ID)).thenReturn(operator);
         when(permissionService.hasPerm(operator, "brand.update")).thenReturn(true);
-        when(sysUserRoleMapper.selectRoleKeysByUserId(OPERATOR_ID)).thenReturn(List.of("operator"));
-        when(assignmentMapper.selectActiveRole(BRAND_ID, OPERATOR_ID)).thenReturn("SECONDARY");
+        when(companyMapper.selectById(COMPANY_ID)).thenReturn(company(PARTNER_ID, 999L));
 
         BizException ex = assertThrows(BizException.class,
                 () -> accessService.requireBrandAccess(BRAND_ID, OPERATOR_ID, BrandAccessAction.MANAGE));
 
         assertEquals(BrandAccessErrorCodes.BRAND_ACCESS_DENIED, ex.getCode());
-        assertPermissionDeniedAudit("ASSIGNMENT_ROLE_DENIED", BrandAccessAction.MANAGE);
+        assertPermissionDeniedAudit("OWNER_SCOPE_DENIED", BrandAccessAction.MANAGE);
     }
 
     @Test
-    void requireBrandAccess_viewerCanReadButCannotOperate() {
+    void requireBrandAccess_ownerCanReadAndOperate() {
         SysUser operator = user(OPERATOR_ID, "operator");
         when(sysUserMapper.selectById(OPERATOR_ID)).thenReturn(operator);
         when(permissionService.hasPerm(operator, "company.read")).thenReturn(true);
-        when(sysUserRoleMapper.selectRoleKeysByUserId(OPERATOR_ID)).thenReturn(List.of("operator"));
-        when(assignmentMapper.selectActiveRole(BRAND_ID, OPERATOR_ID)).thenReturn("VIEWER");
+        when(companyMapper.selectById(COMPANY_ID)).thenReturn(company(PARTNER_ID, OPERATOR_ID));
 
         Brand brand = accessService.requireBrandAccess(BRAND_ID, OPERATOR_ID, BrandAccessAction.READ);
 
         assertEquals(BRAND_ID, brand.getId());
 
-        BizException ex = assertThrows(BizException.class,
-                () -> accessService.requireBrandAccess(BRAND_ID, OPERATOR_ID, BrandAccessAction.OPERATE));
-
-        assertEquals(BrandAccessErrorCodes.BRAND_ACCESS_DENIED, ex.getCode());
+        Brand operated = accessService.requireBrandAccess(BRAND_ID, OPERATOR_ID, BrandAccessAction.OPERATE);
+        assertEquals(BRAND_ID, operated.getId());
     }
 
     @Test
@@ -139,28 +127,26 @@ class BrandAccessServiceTest {
         partner.setPartnerId(PARTNER_ID);
         when(sysUserMapper.selectById(OPERATOR_ID)).thenReturn(partner);
         when(permissionService.hasPerm(partner, "company.read")).thenReturn(true);
-        when(sysUserRoleMapper.selectRoleKeysByUserId(OPERATOR_ID)).thenReturn(List.of("partner"));
-        when(companyMapper.selectById(COMPANY_ID)).thenReturn(company(PARTNER_ID));
+        when(currentUserService.isPartnerUser(partner)).thenReturn(true);
+        when(companyMapper.selectById(COMPANY_ID)).thenReturn(company(PARTNER_ID, null));
 
         Brand brand = accessService.requireBrandAccess(BRAND_ID, OPERATOR_ID, BrandAccessAction.READ);
 
         assertEquals(BRAND_ID, brand.getId());
-        verify(assignmentMapper, never()).selectActiveRole(BRAND_ID, OPERATOR_ID);
     }
 
     @Test
-    void requireBrandAccess_missingAssignmentAuditsDenied() {
+    void requireBrandAccess_nullOwnerAuditsDenied() {
         SysUser operator = user(OPERATOR_ID, "operator");
         when(sysUserMapper.selectById(OPERATOR_ID)).thenReturn(operator);
         when(permissionService.hasPerm(operator, "company.read")).thenReturn(true);
-        when(sysUserRoleMapper.selectRoleKeysByUserId(OPERATOR_ID)).thenReturn(List.of("operator"));
-        when(assignmentMapper.selectActiveRole(BRAND_ID, OPERATOR_ID)).thenReturn(null);
+        when(companyMapper.selectById(COMPANY_ID)).thenReturn(company(PARTNER_ID, null));
 
         BizException ex = assertThrows(BizException.class,
                 () -> accessService.requireBrandAccess(BRAND_ID, OPERATOR_ID, BrandAccessAction.OPERATE));
 
         assertEquals(BrandAccessErrorCodes.BRAND_ACCESS_DENIED, ex.getCode());
-        assertPermissionDeniedAudit("ASSIGNMENT_MISSING", BrandAccessAction.OPERATE);
+        assertPermissionDeniedAudit("OWNER_SCOPE_DENIED", BrandAccessAction.OPERATE);
     }
 
     @Test
@@ -204,7 +190,7 @@ class BrandAccessServiceTest {
         partner.setPartnerId(PARTNER_ID);
         when(sysUserMapper.selectById(OPERATOR_ID)).thenReturn(partner);
         when(permissionService.hasPerm(partner, "company.read")).thenReturn(true);
-        when(sysUserRoleMapper.selectRoleKeysByUserId(OPERATOR_ID)).thenReturn(List.of("partner"));
+        when(currentUserService.isPartnerUser(partner)).thenReturn(true);
         when(companyMapper.selectById(COMPANY_ID)).thenReturn(null);
 
         BizException ex = assertThrows(BizException.class,
@@ -231,8 +217,7 @@ class BrandAccessServiceTest {
         SysUser operator = user(OPERATOR_ID, "operator");
         when(sysUserMapper.selectById(OPERATOR_ID)).thenReturn(operator);
         when(permissionService.hasPerm(operator, "company.read")).thenReturn(true);
-        when(sysUserRoleMapper.selectRoleKeysByUserId(OPERATOR_ID)).thenReturn(List.of("operator"));
-        when(assignmentMapper.selectActiveRole(BRAND_ID, OPERATOR_ID)).thenReturn("SECONDARY");
+        when(companyMapper.selectById(COMPANY_ID)).thenReturn(company(PARTNER_ID, OPERATOR_ID));
 
         boolean result = accessService.hasBrandAccess(BRAND_ID, OPERATOR_ID, BrandAccessAction.OPERATE);
 
@@ -245,7 +230,7 @@ class BrandAccessServiceTest {
         when(currentUserService.requireCurrentUser()).thenReturn(current);
         when(sysUserMapper.selectById(OPERATOR_ID)).thenReturn(current);
         when(permissionService.hasPerm(current, "company.read")).thenReturn(true);
-        when(sysUserRoleMapper.selectRoleKeysByUserId(OPERATOR_ID)).thenReturn(List.of("manager"));
+        when(internalScopeService.isGlobalInternal(current)).thenReturn(true);
 
         Brand brand = accessService.requireCurrentUserBrandAccess(BRAND_ID, BrandAccessAction.READ);
 
@@ -275,10 +260,11 @@ class BrandAccessServiceTest {
         return brand;
     }
 
-    private static Company company(Long partnerId) {
+    private static Company company(Long partnerId, Long ownerId) {
         Company company = new Company();
         company.setId(COMPANY_ID);
         company.setPartnerId(partnerId);
+        company.setOwnerId(ownerId);
         return company;
     }
 

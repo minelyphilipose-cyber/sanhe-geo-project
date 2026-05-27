@@ -6,6 +6,7 @@ import com.huanjing.geo.module.customer.dto.CompanyCreateRequest;
 import com.huanjing.geo.module.customer.dto.CompanyDeductRequest;
 import com.huanjing.geo.module.customer.dto.CompanyDistributionQuotaVO;
 import com.huanjing.geo.module.customer.dto.CompanyKeywordGroupQuotaVO;
+import com.huanjing.geo.module.customer.dto.CompanyOwnerTransferRequest;
 import com.huanjing.geo.module.customer.dto.CompanyPackageBindRequest;
 import com.huanjing.geo.module.customer.dto.CompanyRechargeRequest;
 import com.huanjing.geo.module.customer.dto.CompanyUpdateRequest;
@@ -61,6 +62,11 @@ public class CompanyController {
     @PutMapping("/{id}")
     public R<Company> update(@PathVariable Long id, @Valid @RequestBody CompanyUpdateRequest req) {
         return R.ok(companyService.update(id, req));
+    }
+
+    @PostMapping("/{id}/owner-transfer")
+    public R<Company> transferOwner(@PathVariable Long id, @Valid @RequestBody CompanyOwnerTransferRequest req) {
+        return R.ok(companyService.transferOwner(id, req));
     }
 
     @DeleteMapping("/{id}")

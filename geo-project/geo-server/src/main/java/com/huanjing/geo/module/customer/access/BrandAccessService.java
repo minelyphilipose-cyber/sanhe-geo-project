@@ -9,39 +9,28 @@ import com.huanjing.geo.module.audit.service.AuditService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
-import com.huanjing.geo.module.customer.mapper.BrandOperatorAssignmentMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysUserMapper;
-import com.huanjing.geo.module.system.mapper.SysUserRoleMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.PermissionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
-import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
 public class BrandAccessService {
 
-    private static final Set<String> GLOBAL_BRAND_ROLES = Set.of(
-            "super_admin", "manager", "delivery_manager"
-    );
-    private static final Set<String> PARTNER_ROLES = Set.of("partner", "partner_staff", "partner_viewer");
-
     private final BrandMapper brandMapper;
     private final CompanyMapper companyMapper;
-    private final BrandOperatorAssignmentMapper assignmentMapper;
     private final SysUserMapper sysUserMapper;
-    private final SysUserRoleMapper sysUserRoleMapper;
     private final CurrentUserService currentUserService;
     private final PermissionService permissionService;
+    private final InternalScopeService internalScopeService;
     private final AuditService auditService;
 
     public Brand requireCurrentUserBrandAccess(Long brandId, BrandAccessAction action) {
@@ -50,7 +39,7 @@ public class BrandAccessService {
     }
 
     /**
-     * Brand-level data-scope gate for internal semi-auto self-media operations.
+     * Brand-level data-scope gate for interactive brand operations.
      *
      * <p>Role resolution is intentionally compatible with both the legacy {@code sys_user.role}
      * column and the newer {@code sys_user_role/sys_role} RBAC table. The legacy column keeps
@@ -63,9 +52,10 @@ public class BrandAccessService {
      *
      * Checks brand-level access for a concrete operator id.
      *
-     * <p>Security contract: this is the central data-scope gate for semi-auto self-media
-     * operations. Credential decrypt/fill-token paths must call this method before touching
-     * {@code CredentialVaultService}. Permission deny is audited explicitly here instead of via
+     * <p>Security contract: this is the central real-time data-scope gate. In-flight
+     * semi-auto extension tasks use {@code SemiAutoTaskAccessService} instead, because
+     * their authorization is bound to the task's signed operator rather than the brand's
+     * current company owner. Permission deny is audited explicitly here instead of via
      * {@code @AuditOperation}, because allowed checks are high-volume and should not create
      * misleading {@code PERMISSION_DENY/SUCCESS} rows.</p>
      */
@@ -102,10 +92,19 @@ public class BrandAccessService {
         if (!hasBasePermission(operator, resolved) || isPartnerUser(operator) && resolved != BrandAccessAction.READ) {
             return List.of();
         }
-        if (hasGlobalBrandRole(operator)) {
+        if (internalScopeService.isGlobalInternal(operator)) {
             return brandMapper.selectActiveBrandIds();
         }
-        return assignmentMapper.selectActiveBrandIdsByRoles(operatorId, assignmentRolesFor(resolved));
+        if (internalScopeService.requiresOwnerScope(operator)) {
+            return brandMapper.selectList(
+                    new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<Brand>()
+                            .isNull(Brand::getDeletedAt)
+                            .inSql(Brand::getCompanyId,
+                                    "select id from company where deleted_at is null and owner_id = " + operatorId)
+                            .select(Brand::getId)
+            ).stream().map(Brand::getId).toList();
+        }
+        return List.of();
     }
 
     private Brand checkBrandAccess(Long brandId, Long operatorId, BrandAccessAction action, boolean auditDenied) {
@@ -134,20 +133,17 @@ public class BrandAccessService {
         if (!hasBasePermission(operator, action)) {
             return AccessDecision.deny("BASE_PERMISSION_MISSING");
         }
-        if (hasGlobalBrandRole(operator)) {
+        if (internalScopeService.isGlobalInternal(operator)) {
             return AccessDecision.allow();
         }
         if (isPartnerUser(operator)) {
             return partnerReadAccess(operator, brand, action, auditDenied);
         }
-        String assignmentRole = assignmentMapper.selectActiveRole(brand.getId(), operator.getId());
-        if (!StringUtils.hasText(assignmentRole)) {
-            return AccessDecision.deny("ASSIGNMENT_MISSING");
-        }
-        if (assignmentAllows(assignmentRole, action)) {
+        Company company = requireCompany(brand.getCompanyId(), operator.getId(), brand.getId(), action, auditDenied);
+        if (company.getOwnerId() != null && company.getOwnerId().equals(operator.getId())) {
             return AccessDecision.allow();
         }
-        return AccessDecision.deny("ASSIGNMENT_ROLE_DENIED");
+        return AccessDecision.deny("OWNER_SCOPE_DENIED");
     }
 
     private boolean hasBasePermission(SysUser operator, BrandAccessAction action) {
@@ -166,46 +162,8 @@ public class BrandAccessService {
         return AccessDecision.allow();
     }
 
-    private boolean assignmentAllows(String assignmentRole, BrandAccessAction action) {
-        String role = assignmentRole.trim().toUpperCase(Locale.ROOT);
-        return switch (role) {
-            case "PRIMARY" -> true;
-            case "SECONDARY" -> action != BrandAccessAction.MANAGE;
-            case "VIEWER" -> action == BrandAccessAction.READ;
-            default -> false;
-        };
-    }
-
-    private List<String> assignmentRolesFor(BrandAccessAction action) {
-        return switch (action) {
-            case MANAGE -> List.of("PRIMARY");
-            case OPERATE -> List.of("PRIMARY", "SECONDARY");
-            case READ -> List.of("PRIMARY", "SECONDARY", "VIEWER");
-        };
-    }
-
-    private boolean hasGlobalBrandRole(SysUser operator) {
-        if (operator == null) {
-            return false;
-        }
-        if (GLOBAL_BRAND_ROLES.contains(normalizeRole(operator.getRole()))) {
-            return true;
-        }
-        var roleKeys = sysUserRoleMapper.selectRoleKeysByUserId(operator.getId());
-        if (roleKeys == null) {
-            return false;
-        }
-        return roleKeys.stream()
-                .map(this::normalizeRole)
-                .anyMatch(GLOBAL_BRAND_ROLES::contains);
-    }
-
     private boolean isPartnerUser(SysUser operator) {
-        return PARTNER_ROLES.contains(normalizeRole(operator.getRole()));
-    }
-
-    private String normalizeRole(String role) {
-        return StringUtils.hasText(role) ? role.trim().toLowerCase(Locale.ROOT) : "";
+        return currentUserService.isPartnerUser(operator);
     }
 
     private Brand requireBrand(Long brandId, Long operatorId, BrandAccessAction action, boolean auditDenied) {

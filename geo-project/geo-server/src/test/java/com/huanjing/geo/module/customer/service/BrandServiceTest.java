@@ -3,6 +3,7 @@ package com.huanjing.geo.module.customer.service;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.dto.BrandCreateRequest;
 import com.huanjing.geo.module.customer.dto.BrandUpdateRequest;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -29,6 +30,7 @@ class BrandServiceTest {
     private BrandMapper brandMapper;
     private CompanyMapper companyMapper;
     private CurrentUserService currentUserService;
+    private InternalScopeService internalScopeService;
     private BrandService brandService;
 
     @BeforeEach
@@ -37,6 +39,7 @@ class BrandServiceTest {
         brandMapper = mock(BrandMapper.class);
         companyMapper = mock(CompanyMapper.class);
         currentUserService = mock(CurrentUserService.class);
+        internalScopeService = mock(InternalScopeService.class);
         brandService = new BrandService(
                 brandMapper,
                 mock(BrandMaterialMapper.class),
@@ -44,6 +47,7 @@ class BrandServiceTest {
                 companyMapper,
                 mock(ProjectMapper.class),
                 currentUserService,
+                internalScopeService,
                 mock(ActivityLogService.class),
                 mock(BrandProfileService.class)
         );

@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.project.service;
 
 import com.huanjing.geo.module.dispatch.service.BrandStatementDispatchService;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.partner.entity.PartnerAccount;
@@ -55,6 +56,8 @@ class ProjectServiceStatusTest {
     private PartnerAccountTxnMapper partnerAccountTxnMapper;
     @Mock
     private CurrentUserService currentUserService;
+    @Mock
+    private InternalScopeService internalScopeService;
     @Mock
     private ProjectStateGuard projectStateGuard;
     @Mock

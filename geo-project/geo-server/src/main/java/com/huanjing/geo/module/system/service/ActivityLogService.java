@@ -48,18 +48,22 @@ public class ActivityLogService {
 
     public void logAction(Long userId, String action, String targetType, Long targetId, Object before, Object after, Object extra) {
         try {
-            ActivityLog logItem = new ActivityLog();
-            logItem.setUserId(userId);
-            logItem.setAction(action);
-            logItem.setTargetType(targetType);
-            logItem.setTargetId(targetId);
-            logItem.setIpAddress(resolveClientIp());
-            logItem.setDetailJson(toDetailJson(before, after, extra));
-            activityLogMapper.insert(logItem);
+            logActionRequired(userId, action, targetType, targetId, before, after, extra);
         } catch (Exception ex) {
             log.warn("Write activity log failed, action={}, targetType={}, targetId={}, err={}",
                     action, targetType, targetId, ex.getMessage());
         }
+    }
+
+    public void logActionRequired(Long userId, String action, String targetType, Long targetId, Object before, Object after, Object extra) {
+        ActivityLog logItem = new ActivityLog();
+        logItem.setUserId(userId);
+        logItem.setAction(action);
+        logItem.setTargetType(targetType);
+        logItem.setTargetId(targetId);
+        logItem.setIpAddress(resolveClientIp());
+        logItem.setDetailJson(toDetailJson(before, after, extra));
+        activityLogMapper.insert(logItem);
     }
 
     public Page<ActivityLogItem> page(long current, long size,

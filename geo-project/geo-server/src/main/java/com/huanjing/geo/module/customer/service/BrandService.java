@@ -4,6 +4,7 @@ import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.dto.BrandCreateRequest;
 import com.huanjing.geo.module.customer.dto.BrandUpdateRequest;
 import com.huanjing.geo.module.customer.entity.Brand;
@@ -50,6 +51,7 @@ public class BrandService {
     private final CompanyMapper companyMapper;
     private final ProjectMapper projectMapper;
     private final CurrentUserService currentUserService;
+    private final InternalScopeService internalScopeService;
     private final ActivityLogService activityLogService;
     private final BrandProfileService brandProfileService;
 
@@ -64,6 +66,7 @@ public class BrandService {
         if (companyId != null) {
             Company filterCompany = requireCompany(companyId);
             currentUserService.ensurePartnerResourceAccess(user, filterCompany.getPartnerId(), "company");
+            internalScopeService.ensureCompanyAccess(user, filterCompany, "company");
             wrapper.eq(Brand::getCompanyId, companyId);
         }
         if (StringUtils.hasText(keyword)) {
@@ -74,6 +77,7 @@ public class BrandService {
         if (scopePartnerId != null) {
             wrapper.inSql(Brand::getCompanyId, "select id from company where partner_id = " + scopePartnerId);
         }
+        internalScopeService.applyBrandScope(wrapper, user);
 
         return brandMapper.selectPage(new Page<>(current, size), wrapper);
     }
@@ -84,6 +88,7 @@ public class BrandService {
         Brand brand = requireBrand(id);
         Company company = requireCompany(brand.getCompanyId());
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "brand");
+        internalScopeService.ensureCompanyAccess(user, company, "brand");
         return brand;
     }
 
@@ -93,6 +98,7 @@ public class BrandService {
         Brand brand = requireBrand(id);
         Company company = requireCompany(brand.getCompanyId());
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "brand");
+        internalScopeService.ensureCompanyAccess(user, company, "brand");
         return brand;
     }
 
@@ -102,6 +108,7 @@ public class BrandService {
         Company company = requireCompany(req.getCompanyId());
         validateBrandStatus(StringUtils.hasText(req.getStatus()) ? req.getStatus() : "active");
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "company");
+        internalScopeService.ensureCompanyAccess(operator, company, "company");
 
         Brand brand = new Brand();
         brand.setCompanyId(req.getCompanyId());
@@ -159,6 +166,7 @@ public class BrandService {
         Brand brand = requireBrand(id);
         Company company = requireCompany(brand.getCompanyId());
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "brand");
+        internalScopeService.ensureCompanyAccess(operator, company, "brand");
         validateBrandStatus(req.getStatus());
         Map<String, Object> before = snapshotBrand(brand);
         Brand existed = brandMapper.selectOne(new LambdaQueryWrapper<Brand>()
@@ -224,6 +232,7 @@ public class BrandService {
         Brand brand = requireBrand(id);
         Company company = requireCompany(brand.getCompanyId());
         currentUserService.ensurePartnerResourceAccess(operator, company.getPartnerId(), "brand");
+        internalScopeService.ensureCompanyAccess(operator, company, "brand");
 
         List<Long> projectIds = projectMapper.selectList(
                 new LambdaQueryWrapper<Project>()

@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.system.service;
 
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
@@ -31,6 +32,8 @@ class CurrentUserServiceTest {
     private BrandMapper brandMapper;
     @Mock
     private CompanyMapper companyMapper;
+    @Mock
+    private InternalScopeService internalScopeService;
 
     @InjectMocks
     private CurrentUserService currentUserService;

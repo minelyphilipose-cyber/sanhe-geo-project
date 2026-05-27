@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.project.service;
 
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
@@ -13,6 +14,7 @@ import org.springframework.util.StringUtils;
 public class ProjectStateGuard {
 
     private final CurrentUserService currentUserService;
+    private final InternalScopeService internalScopeService;
 
     public void ensureCanEditBasicInfo(Project project, SysUser operator) {
         currentUserService.ensurePermission("project.update");
@@ -83,6 +85,7 @@ public class ProjectStateGuard {
 
     private void ensureVisiblePartnerResource(Project project, SysUser operator) {
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
+        internalScopeService.ensureProjectAccess(operator, project, "project");
     }
 
     private void ensureNotTerminal(Project project) {

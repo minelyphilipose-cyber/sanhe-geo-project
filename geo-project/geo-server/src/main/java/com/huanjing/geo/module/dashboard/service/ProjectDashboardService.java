@@ -13,6 +13,7 @@ import com.huanjing.geo.module.dashboard.entity.ProjectDashboardSnapshot;
 import com.huanjing.geo.module.dashboard.mapper.ProjectDashboardAdviceMapper;
 import com.huanjing.geo.module.dashboard.mapper.ProjectDashboardShareMapper;
 import com.huanjing.geo.module.dashboard.mapper.ProjectDashboardSnapshotMapper;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.dispatch.entity.PollResult;
 import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.project.entity.Project;
@@ -51,6 +52,7 @@ public class ProjectDashboardService {
     private final PollResultMapper pollResultMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final CurrentUserService currentUserService;
+    private final InternalScopeService internalScopeService;
     private final ProjectDashboardSnapshotService snapshotService;
 
     public ProjectDashboardAdviceVO getAdvice(Long projectId) {
@@ -667,6 +669,7 @@ public class ProjectDashboardService {
         Project project = requireProject(projectId);
         SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePartnerResourceAccess(user, project.getPartnerId(), "project");
+        internalScopeService.ensureProjectAccess(user, project, "project");
         return project;
     }
 
@@ -675,6 +678,7 @@ public class ProjectDashboardService {
         Project project = requireProject(projectId);
         SysUser user = currentUserService.requireCurrentUser();
         currentUserService.ensurePartnerResourceAccess(user, project.getPartnerId(), "project");
+        internalScopeService.ensureProjectAccess(user, project, "project");
         return project;
     }
 

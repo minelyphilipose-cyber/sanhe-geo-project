@@ -22,6 +22,7 @@ import com.huanjing.geo.module.content.mapper.ArticlePublishLogMapper;
 import com.huanjing.geo.module.content.mapper.ArticleReviewLogMapper;
 import com.huanjing.geo.module.content.mapper.ContentQuestionRotationMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
@@ -126,6 +127,7 @@ public class ProjectService {
     private final ReportAccessLogMapper reportAccessLogMapper;
     private final ReportMapper reportMapper;
     private final CurrentUserService currentUserService;
+    private final InternalScopeService internalScopeService;
     private final ProjectStateGuard projectStateGuard;
     private final ActivityLogService activityLogService;
     private final ProjectDistributionChannelAllocationService channelAllocationService;
@@ -160,7 +162,7 @@ public class ProjectService {
         if (scopePartnerId != null) {
             wrapper.eq(Project::getPartnerId, scopePartnerId);
         }
-        if ("sales".equals(user.getRole())) {
+        if (internalScopeService.isSalesUser(user)) {
             List<Long> signedCompanyIds = companyMapper.selectList(
                     new LambdaQueryWrapper<Company>()
                             .isNull(Company::getDeletedAt)
@@ -172,6 +174,8 @@ public class ProjectService {
                 return new Page<>(current, size);
             }
             wrapper.in(Project::getCompanyId, signedCompanyIds);
+        } else {
+            internalScopeService.applyProjectScope(wrapper, user);
         }
 
         Page<Project> page = projectMapper.selectPage(new Page<>(current, size), wrapper);
@@ -188,6 +192,7 @@ public class ProjectService {
         currentUserService.ensurePermission("project.read");
         Project project = requireProject(id);
         currentUserService.ensurePartnerResourceAccess(user, project.getPartnerId(), "project");
+        internalScopeService.ensureProjectAccess(user, project, "project");
         ensureSalesProjectAccess(user, project);
         attachPlatformSelections(Collections.singletonList(project));
         attachCustomerRequirements(Collections.singletonList(project));
@@ -201,6 +206,7 @@ public class ProjectService {
         currentUserService.ensurePermission("project.create");
         SysUser operator = currentUserService.requireCurrentUser();
         Company company = validateCompanyBrand(req.getCompanyId(), req.getBrandId());
+        internalScopeService.ensureCompanyAccess(operator, company, "project");
         String ownerType = resolveOwnerTypeByCompany(company);
         Long partnerId = resolvePartnerIdByCompany(company);
         validateOwnerBinding(ownerType, partnerId);
@@ -275,6 +281,8 @@ public class ProjectService {
         Project project = requireProject(id);
         projectStateGuard.ensureCanEditBasicInfo(project, operator);
         Company company = validateCompanyBrand(req.getCompanyId(), req.getBrandId());
+        internalScopeService.ensureProjectAccess(operator, project, "project");
+        internalScopeService.ensureCompanyAccess(operator, company, "project");
         String ownerType = resolveOwnerTypeByCompany(company);
         Long partnerId = resolvePartnerIdByCompany(company);
         validateOwnerBinding(ownerType, partnerId);
@@ -342,6 +350,7 @@ public class ProjectService {
         SysUser operator = currentUserService.requireCurrentUser();
         validateStage(req.getStage());
         Project project = requireProject(id);
+        internalScopeService.ensureProjectAccess(operator, project, "project");
         projectStateGuard.ensureCanChangeStage(project, operator, req.getStage());
         ensureStageBoundary(project.getStatus(), project.getStage(), req.getStage());
         if (req.getStage().equals(project.getStage())) {
@@ -366,6 +375,7 @@ public class ProjectService {
         SysUser operator = currentUserService.requireCurrentUser();
         validateStatus(req.getStatus());
         Project project = requireProject(id);
+        internalScopeService.ensureProjectAccess(operator, project, "project");
         ensureStatusOperatePermission(project, req.getStatus(), operator);
         ensureStatusTransition(project.getStatus(), req.getStatus());
         if (req.getStatus().equals(project.getStatus())) {
@@ -401,6 +411,7 @@ public class ProjectService {
         validateStage(req.getStage());
 
         Project project = requireProject(id);
+        internalScopeService.ensureProjectAccess(operator, project, "project");
         if (!req.getStatus().equals(project.getStatus())) {
             ensureStatusOperatePermission(project, req.getStatus(), operator);
         }
@@ -443,6 +454,7 @@ public class ProjectService {
     public void delete(Long id) {
         SysUser operator = currentUserService.requireCurrentUser();
         Project project = requireProject(id);
+        internalScopeService.ensureProjectAccess(operator, project, "project");
         projectStateGuard.ensureCanDelete(project, operator);
         if ("active".equals(project.getStatus())) {
             channelAllocationService.lockCompany(project.getCompanyId());
@@ -726,6 +738,7 @@ public class ProjectService {
         currentUserService.ensurePermission("project.read");
         Company company = validateCompany(companyId);
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "company");
+        internalScopeService.ensureCompanyAccess(user, company, "company");
         if ("sales".equals(user.getRole())) {
             if (company.getSalesOwnerId() == null || !company.getSalesOwnerId().equals(user.getId())) {
                 throw new BizException(403, "No permission to access this company");
@@ -742,6 +755,7 @@ public class ProjectService {
         currentUserService.ensurePermission("project.read");
         Company company = validateCompany(companyId);
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "company");
+        internalScopeService.ensureCompanyAccess(user, company, "company");
         if ("sales".equals(user.getRole())) {
             if (company.getSalesOwnerId() == null || !company.getSalesOwnerId().equals(user.getId())) {
                 throw new BizException(403, "No permission to access this company");
