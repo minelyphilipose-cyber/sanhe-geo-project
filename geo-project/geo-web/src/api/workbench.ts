@@ -27,6 +27,17 @@ export interface ManagerWorkbenchOverview {
   latestSystemAlerts: SystemAlertTodoItem[]
 }
 
+export interface SalesWorkbenchOverview {
+  customerCount: number
+  signedCustomerCount: number
+  potentialCustomerCount: number
+  reportCount: number
+  monthlyReportCount: number
+  generatingReportCount: number
+  doneReportCount: number
+  failedReportCount: number
+}
+
 export interface SuperAdminWorkbenchOverview {
   totalUserCount: number
   activeUserCount: number
@@ -39,6 +50,10 @@ export interface SuperAdminWorkbenchOverview {
 
 export function getOperatorWorkbenchOverview() {
   return request.get<R<OperatorWorkbenchOverview>>('/workbench/operator/overview')
+}
+
+export function getSalesWorkbenchOverview() {
+  return request.get<R<SalesWorkbenchOverview>>('/workbench/sales/overview')
 }
 
 export function getManagerWorkbenchOverview() {

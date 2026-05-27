@@ -25,6 +25,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '运营工作台', icon: 'Odometer', permissions: ['workbench.operator.read'] },
     },
     {
+      path: 'workbench/sales',
+      name: 'SalesWorkbench',
+      component: () => import('@/views/admin/workbench/SalesWorkbench.vue'),
+      meta: { title: '销售工作台', icon: 'TrendCharts', permissions: ['workbench.sales.read'] },
+    },
+    {
       path: 'workbench/delivery',
       name: 'DeliveryWorkbench',
       component: () => import('@/views/admin/delivery/DeliveryDashboard.vue'),
@@ -123,7 +129,7 @@ const adminRoutes: RouteRecordRaw = {
     {
       path: 'monitoring',
       redirect: '/admin/monitoring/tasks',
-      meta: { hidden: true, roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
+      meta: { hidden: true },
     },
     {
       path: 'delivery/dashboard',
@@ -135,7 +141,7 @@ const adminRoutes: RouteRecordRaw = {
       path: 'monitoring/tasks',
       name: 'MonitoringTasks',
       component: () => import('@/views/admin/monitoring/MonitoringDashboard.vue'),
-      meta: { title: '调度监控', icon: 'Monitor', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
+      meta: { title: '调度监控', icon: 'Monitor', permissions: ['content.distribution.retry', 'dispatch.alert.resolve', 'dispatch.task.replay.dead_letter'] },
     },
     {
       path: 'content/execution',
@@ -225,7 +231,7 @@ const adminRoutes: RouteRecordRaw = {
       path: 'monitoring/platforms',
       name: 'PlatformHealth',
       component: () => import('@/views/admin/monitoring/PlatformHealth.vue'),
-      meta: { title: '平台健康', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
+      meta: { title: '平台健康', permissions: ['content.read', 'delivery.overview.read', 'user.manage'] },
     },
     {
       path: 'reports/:id',
@@ -333,7 +339,7 @@ const adminRoutes: RouteRecordRaw = {
       path: 'alerts',
       name: 'AlertCenter',
       component: () => import('@/views/admin/alert/AlertCenter.vue'),
-      meta: { title: '告警中心', icon: 'Bell', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
+      meta: { title: '告警中心', icon: 'Bell', permissions: ['content.distribution.retry', 'dispatch.alert.resolve', 'system.alert.resolve'] },
     },
     {
       path: 'activity-logs',

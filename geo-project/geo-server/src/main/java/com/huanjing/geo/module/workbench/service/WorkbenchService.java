@@ -11,6 +11,8 @@ import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
+import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.report.entity.Report;
@@ -28,6 +30,7 @@ import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.PermissionService;
 import com.huanjing.geo.module.workbench.dto.ManagerWorkbenchOverviewVO;
 import com.huanjing.geo.module.workbench.dto.OperatorWorkbenchOverviewVO;
+import com.huanjing.geo.module.workbench.dto.SalesWorkbenchOverviewVO;
 import com.huanjing.geo.module.workbench.dto.SuperAdminWorkbenchOverviewVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -44,11 +47,13 @@ public class WorkbenchService {
     private static final Set<String> ACTIVE_PROJECT_STATUSES = Set.of("active", "pending_start", "paused");
     private static final Set<String> COMPLETED_DISTRIBUTION_STATUSES = Set.of("submitted", "confirmed", "published");
     private static final Set<String> IN_FLIGHT_EXTENSION_STATUSES = Set.of("token_issued", "filling", "filled");
+    private static final Set<String> PRESALE_IN_FLIGHT_STATUSES = Set.of("INIT", "QUEUED", "RUNNING");
 
     private final CurrentUserService currentUserService;
     private final PermissionService permissionService;
     private final CompanyMapper companyMapper;
     private final BrandMapper brandMapper;
+    private final PresaleReportMapper presaleReportMapper;
     private final ProjectMapper projectMapper;
     private final ReportMapper reportMapper;
     private final ArticleDraftMapper articleDraftMapper;
@@ -96,6 +101,27 @@ public class WorkbenchService {
                 .in(DistributionTask::getStatus, IN_FLIGHT_EXTENSION_STATUSES)));
         vo.setCompletedDistributionTaskCount(distributionTaskMapper.selectCount(operatorTaskWrapper(operatorId)
                 .in(DistributionTask::getStatus, COMPLETED_DISTRIBUTION_STATUSES)));
+        return vo;
+    }
+
+    public SalesWorkbenchOverviewVO salesOverview() {
+        SysUser user = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermission("workbench.sales.read");
+        Long salesId = user.getId();
+        LocalDateTime monthStart = LocalDate.now().withDayOfMonth(1).atStartOfDay();
+
+        SalesWorkbenchOverviewVO vo = new SalesWorkbenchOverviewVO();
+        vo.setCustomerCount(companyMapper.selectCount(salesCompanyWrapper(salesId)));
+        vo.setSignedCustomerCount(companyMapper.selectCount(salesCompanyWrapper(salesId)
+                .eq(Company::getStatus, "signed")));
+        vo.setPotentialCustomerCount(companyMapper.selectCount(salesCompanyWrapper(salesId)
+                .eq(Company::getStatus, "potential")));
+        vo.setReportCount(presaleReportMapper.selectCount(salesReportWrapper(salesId)));
+        vo.setMonthlyReportCount(presaleReportMapper.selectCount(salesReportWrapper(salesId)
+                .ge(PresaleReport::getCreatedAt, monthStart)));
+        vo.setGeneratingReportCount(countSalesReportsByStatus(salesId, PRESALE_IN_FLIGHT_STATUSES));
+        vo.setDoneReportCount(countSalesReportsByStatus(salesId, Set.of("DONE")));
+        vo.setFailedReportCount(countSalesReportsByStatus(salesId, Set.of("FAILED")));
         return vo;
     }
 
@@ -181,6 +207,23 @@ public class WorkbenchService {
     private LambdaQueryWrapper<DistributionTask> operatorTaskWrapper(Long operatorId) {
         return new LambdaQueryWrapper<DistributionTask>()
                 .eq(DistributionTask::getOperatorId, operatorId);
+    }
+
+    private LambdaQueryWrapper<Company> salesCompanyWrapper(Long salesId) {
+        return new LambdaQueryWrapper<Company>()
+                .isNull(Company::getDeletedAt)
+                .eq(Company::getSalesOwnerId, salesId);
+    }
+
+    private LambdaQueryWrapper<PresaleReport> salesReportWrapper(Long salesId) {
+        return new LambdaQueryWrapper<PresaleReport>()
+                .isNull(PresaleReport::getDeletedAt)
+                .eq(PresaleReport::getCreatedBy, salesId);
+    }
+
+    private Long countSalesReportsByStatus(Long salesId, Set<String> statuses) {
+        return presaleReportMapper.selectCount(salesReportWrapper(salesId)
+                .in(PresaleReport::getStatus, statuses));
     }
 
     private String ownerCompanyIdSql(Long ownerId) {

@@ -117,6 +117,8 @@ export interface Company {
   partnerName?: string | null
   referralSource: string | null
   salesOwnerId: number | null
+  ownerId?: number | null
+  ownerName?: string | null
   status?: string
   remark?: string | null
   createdBy?: number | null

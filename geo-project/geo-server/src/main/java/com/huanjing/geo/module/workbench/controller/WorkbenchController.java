@@ -3,6 +3,7 @@ package com.huanjing.geo.module.workbench.controller;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.workbench.dto.ManagerWorkbenchOverviewVO;
 import com.huanjing.geo.module.workbench.dto.OperatorWorkbenchOverviewVO;
+import com.huanjing.geo.module.workbench.dto.SalesWorkbenchOverviewVO;
 import com.huanjing.geo.module.workbench.dto.SuperAdminWorkbenchOverviewVO;
 import com.huanjing.geo.module.workbench.service.WorkbenchService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -22,6 +23,11 @@ public class WorkbenchController {
     @GetMapping("/operator/overview")
     public R<OperatorWorkbenchOverviewVO> operatorOverview() {
         return R.ok(workbenchService.operatorOverview());
+    }
+
+    @GetMapping("/sales/overview")
+    public R<SalesWorkbenchOverviewVO> salesOverview() {
+        return R.ok(workbenchService.salesOverview());
     }
 
     @GetMapping("/manager/overview")

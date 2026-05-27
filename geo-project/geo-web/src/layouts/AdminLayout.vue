@@ -60,6 +60,7 @@ const sidebarGroups: MenuGroup[] = [
     key: 'workspace',
     menus: [
       { path: '/admin/workbench/operator', name: 'OperatorWorkbench', title: '运营工作台', icon: 'Odometer', permissions: ['workbench.operator.read'], excludeRoles: ['super_admin'] },
+      { path: '/admin/workbench/sales', name: 'SalesWorkbench', title: '销售工作台', icon: 'TrendCharts', permissions: ['workbench.sales.read'], excludeRoles: ['super_admin'] },
       { path: '/admin/workbench/delivery', name: 'DeliveryWorkbench', title: '交付工作台', icon: 'DataAnalysis', permissions: ['delivery.overview.read'], excludeRoles: ['super_admin'] },
       { path: '/admin/workbench/manager', name: 'ManagerWorkbench', title: '系统工作台', icon: 'Setting', permissions: ['workbench.manager.read'], excludeRoles: ['super_admin'] },
       { path: '/admin/workbench/super-admin', name: 'SuperAdminWorkbench', title: '全局总控', icon: 'DataBoard', roles: ['super_admin'] },
@@ -80,9 +81,9 @@ const sidebarGroups: MenuGroup[] = [
     key: 'monitoring',
     title: '监控中心',
     menus: [
-      { path: '/admin/monitoring/tasks', name: 'MonitoringTasks', title: '调度监控', icon: 'Monitor', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
-      { path: '/admin/monitoring/platforms', name: 'PlatformHealth', title: '平台健康', icon: 'Cpu', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'] },
-      { path: '/admin/alerts', name: 'AlertCenter', title: '告警中心', icon: 'Bell', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], badgeCount: 0 },
+      { path: '/admin/monitoring/tasks', name: 'MonitoringTasks', title: '调度监控', icon: 'Monitor', permissions: ['content.distribution.retry', 'dispatch.alert.resolve', 'dispatch.task.replay.dead_letter'] },
+      { path: '/admin/monitoring/platforms', name: 'PlatformHealth', title: '平台健康', icon: 'Cpu', permissions: ['content.read', 'delivery.overview.read', 'user.manage'] },
+      { path: '/admin/alerts', name: 'AlertCenter', title: '告警中心', icon: 'Bell', permissions: ['content.distribution.retry', 'dispatch.alert.resolve', 'system.alert.resolve'], badgeCount: 0 },
       { path: '/admin/activity-logs', name: 'ActivityLogs', title: '操作日志', icon: 'Document', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['user.manage'] },
     ],
   },
@@ -117,16 +118,22 @@ const sidebarGroupsWithBadge = computed<MenuGroup[]>(() =>
 )
 
 async function loadOpenAlertCount() {
-  if (!userStore.hasRole(['operator', 'delivery_manager', 'manager', 'super_admin'])) {
+  const canViewDispatchAlerts = userStore.hasPermission(['content.distribution.retry', 'dispatch.alert.resolve'])
+  const canViewSystemAlerts = userStore.hasPermission('system.alert.resolve')
+  if (!canViewDispatchAlerts && !canViewSystemAlerts) {
     openAlertCount.value = 0
     return
   }
   try {
     const [dispatchRes, systemRes] = await Promise.all([
-      getDispatchAlerts({ current: 1, size: 1, rangeType: 'last7', status: 'open' }),
-      getMySystemAlertTodos({ current: 1, size: 1 }),
+      canViewDispatchAlerts
+        ? getDispatchAlerts({ current: 1, size: 1, rangeType: 'last7', status: 'open' })
+        : Promise.resolve(null),
+      canViewSystemAlerts ? getMySystemAlertTodos({ current: 1, size: 1 }) : Promise.resolve(null),
     ])
-    openAlertCount.value = Number(dispatchRes.data.data?.total || 0) + Number(systemRes.data.data?.total || 0)
+    openAlertCount.value =
+      Number(dispatchRes?.data.data?.total || 0) +
+      Number(systemRes?.data.data?.total || 0)
   } catch {
     openAlertCount.value = 0
   }

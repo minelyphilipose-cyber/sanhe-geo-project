@@ -1054,6 +1054,7 @@ const customerBasicInfoItems = computed(() => [
   { label: '行业', value: companyIndustryText.value },
   { label: '地区', value: companyRegion(company.value) },
   { label: '归属', value: dictStore.label('owner_type', company.value?.ownerType) || '-' },
+  { label: '运营负责人', value: company.value?.ownerName || '未分配' },
   { label: '合伙人', value: (company.value as any)?.partnerName || '-' },
   { label: '状态', value: dictStore.label('company_status', (company.value as any)?.status) || '-' },
   { label: '创建时间', value: formatDateTimeSeconds(company.value?.createdAt) },

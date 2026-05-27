@@ -98,7 +98,7 @@
         @click="handleUnfreeze"
       >
         <el-icon><Unlock /></el-icon>
-        解冻(manager)
+        解冻版本
       </el-button>
 
       <!-- retry 仅 FAILED 可见 -->
@@ -133,7 +133,7 @@
         @click="handleDelete"
       >
         <el-icon><Delete /></el-icon>
-        删除版本(manager)
+        删除版本
       </el-button>
 
       <el-button

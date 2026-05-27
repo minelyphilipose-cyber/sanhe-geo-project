@@ -29,6 +29,9 @@ function resolveWorkbenchPath(): string {
   if (userStore.hasPermission('workbench.operator.read')) {
     return '/admin/workbench/operator'
   }
+  if (userStore.hasPermission('workbench.sales.read')) {
+    return '/admin/workbench/sales'
+  }
   return '/admin/no-workbench'
 }
 

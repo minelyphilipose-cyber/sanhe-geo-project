@@ -67,7 +67,7 @@ import java.util.Set;
  * <p>权限 key 约定:
  * <ul>
  *   <li>编辑类操作 —— manager 或报告创建者本人可执行</li>
- *   <li>{@code presale.report.manage} —— unfreeze/delete,V65 新增 seed(见 V65__seed_presale_manage_permission.sql)</li>
+ *   <li>{@code presale.report.manage} —— 全局管理;报告创建者本人可管理自己的版本</li>
  * </ul>
  * 所有异常消息使用英文,对齐仓库现状(CurrentUserService 同风格),避免跨平台编码风险。
  * </p>
@@ -81,7 +81,7 @@ public class PresaleReportVersionActionService {
 
     /**
      * V65 新增 seed:presale.report.manage。
-     * unfreeze/delete 是管理员级别操作,独立权限 key,只绑 manager 角色。
+     * 该权限代表全局管理;报告创建者本人无需全局权限即可管理自己的报告版本。
      */
     private static final String PERM_MANAGE = "presale.report.manage";
     private static final String ERR_CONTENT_CONFLICT = "content_conflict";
@@ -520,15 +520,14 @@ public class PresaleReportVersionActionService {
     }
 
     // ---------------------------------------------------------------
-    // 4. POST unfreeze -- manager only
+    // 4. POST unfreeze -- global manager or report owner
     // ---------------------------------------------------------------
 
     @Transactional
     public VersionActionResponse unfreeze(Long reportId, Integer versionNo) {
-        currentUserService.ensurePermission(PERM_MANAGE);
         SysUser user = currentUserService.requireCurrentUser();
 
-        PresaleReport report = accessService.requireReportWithAccess(reportId);
+        PresaleReport report = requireManageableReport(reportId);
         PresaleReportVersion version = accessService.requireVersionWithAccess(report.getId(), versionNo);
 
         if (version.getFrozenAt() == null) {
@@ -543,7 +542,7 @@ public class PresaleReportVersionActionService {
                 .set(PresaleReportVersion::getFrozenReason, null);
         versionMapper.update(null, update);
 
-        log.info("presale.unfreeze report={} version={} by manager={}",
+        log.info("presale.unfreeze report={} version={} by user={}",
                 report.getId(), versionNo, user.getId());
 
         return VersionActionResponse.builder()
@@ -556,15 +555,14 @@ public class PresaleReportVersionActionService {
     }
 
     // ---------------------------------------------------------------
-    // 5. DELETE -- manager only, physical delete, exported forbidden
+    // 5. DELETE -- global manager or report owner, physical delete, exported forbidden
     // ---------------------------------------------------------------
 
     @Transactional
     public void delete(Long reportId, Integer versionNo) {
-        currentUserService.ensurePermission(PERM_MANAGE);
         SysUser user = currentUserService.requireCurrentUser();
 
-        PresaleReport report = accessService.requireReportWithAccess(reportId);
+        PresaleReport report = requireManageableReport(reportId);
         PresaleReportVersion version = accessService.requireVersionWithAccess(report.getId(), versionNo);
 
         // 已导出过的版本禁删(定稿条款)
@@ -594,12 +592,20 @@ public class PresaleReportVersionActionService {
                     .set(PresaleReport::getLatestVersionId, newLatestId);
             reportMapper.update(null, reportUpdate);
 
-            log.info("presale.delete report={} version={} was latest, rollback latestVersionId to {} by manager={}",
+            log.info("presale.delete report={} version={} was latest, rollback latestVersionId to {} by user={}",
                     report.getId(), versionNo, newLatestId, user.getId());
         } else {
-            log.info("presale.delete report={} version={} by manager={}",
+            log.info("presale.delete report={} version={} by user={}",
                     report.getId(), versionNo, user.getId());
         }
+    }
+
+    private PresaleReport requireManageableReport(Long reportId) {
+        PresaleReport report = accessService.requireReportWithAccess(reportId);
+        if (!currentUserService.hasPermission(PERM_MANAGE) && !accessService.canEditCurrentUser(report)) {
+            throw new BizException(403, "No manage access to this report");
+        }
+        return report;
     }
 
     // ---------------------------------------------------------------

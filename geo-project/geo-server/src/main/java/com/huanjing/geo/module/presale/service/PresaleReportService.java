@@ -229,6 +229,9 @@ public class PresaleReportService {
     public void deleteReport(Long reportId) {
         currentUserService.ensurePermission(PERM_DELETE);
         PresaleReport report = accessService.requireReportWithAccess(reportId);
+        if (!accessService.canEditCurrentUser(report)) {
+            throw new BizException(403, "No delete access to this report");
+        }
         if (report.getDeletedAt() != null) {
             return;
         }

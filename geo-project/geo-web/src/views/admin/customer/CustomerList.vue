@@ -96,6 +96,11 @@
             </span>
           </template>
         </el-table-column>
+        <el-table-column label="运营负责人" min-width="140" show-overflow-tooltip>
+          <template #default="scope">
+            {{ scope.row.ownerName || '未分配' }}
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="220" fixed="right">
           <template #default="scope">
             <div class="admin-row-actions">

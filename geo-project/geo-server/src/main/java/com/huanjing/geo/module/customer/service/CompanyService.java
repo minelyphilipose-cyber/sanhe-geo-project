@@ -116,13 +116,14 @@ public class CompanyService {
             wrapper.eq(Company::getPartnerId, scopePartnerId);
         }
         if (internalScopeService.isSalesUser(user)) {
-            wrapper.eq(Company::getSalesOwnerId, user.getId())
-                    .eq(Company::getStatus, "signed");
+            wrapper.eq(Company::getSalesOwnerId, user.getId());
         } else {
             internalScopeService.applyCompanyScope(wrapper, user);
         }
 
-        return companyMapper.selectPage(new Page<>(current, size), wrapper);
+        Page<Company> result = companyMapper.selectPage(new Page<>(current, size), wrapper);
+        attachOwnerNames(result.getRecords());
+        return result;
     }
 
     public Company detail(Long id) {
@@ -132,6 +133,7 @@ public class CompanyService {
         currentUserService.ensurePartnerResourceAccess(user, company.getPartnerId(), "company");
         internalScopeService.ensureCompanyAccess(user, company, "company");
         ensureSalesCompanyAccess(user, company);
+        attachOwnerName(company);
         return company;
     }
 
@@ -283,6 +285,7 @@ public class CompanyService {
                 snapshotCompany(company),
                 null
         );
+        attachOwnerName(company);
         return company;
     }
 
@@ -335,6 +338,7 @@ public class CompanyService {
                 snapshotCompany(company),
                 null
         );
+        attachOwnerName(company);
         return company;
     }
 
@@ -367,6 +371,7 @@ public class CompanyService {
                 snapshotCompany(company),
                 extra
         );
+        attachOwnerName(company);
         return company;
     }
 
@@ -738,8 +743,31 @@ public class CompanyService {
         if (company.getSalesOwnerId() == null || !company.getSalesOwnerId().equals(user.getId())) {
             throw new BizException(403, "No permission to access this company");
         }
-        if (!"signed".equals(company.getStatus())) {
-            throw new BizException(403, "Sales can only access signed companies");
+    }
+
+    private void attachOwnerName(Company company) {
+        if (company == null || company.getOwnerId() == null) {
+            return;
+        }
+        SysUser owner = sysUserMapper.selectById(company.getOwnerId());
+        company.setOwnerName(displayName(owner));
+    }
+
+    private void attachOwnerNames(List<Company> companies) {
+        if (companies == null || companies.isEmpty()) {
+            return;
+        }
+        Set<Long> ownerIds = companies.stream()
+                .map(Company::getOwnerId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (ownerIds.isEmpty()) {
+            return;
+        }
+        Map<Long, String> ownerNameById = sysUserMapper.selectBatchIds(ownerIds).stream()
+                .collect(Collectors.toMap(SysUser::getId, this::displayName, (left, right) -> left));
+        for (Company company : companies) {
+            company.setOwnerName(ownerNameById.get(company.getOwnerId()));
         }
     }
 
@@ -954,6 +982,9 @@ public class CompanyService {
     }
 
     private String displayName(SysUser user) {
+        if (user == null) {
+            return null;
+        }
         return StringUtils.hasText(user.getDisplayName()) ? user.getDisplayName() : user.getUsername();
     }
 
