@@ -216,12 +216,13 @@ class ExtensionTaskStateServiceTest {
     }
 
     @Test
-    void publishedRecordsPlatformClickAndAuditsSuccessWithoutFinalizingTask() {
+    void publishedMarksFilledTaskAsPublishedAndAuditsSuccess() {
         stubTask("filled");
+        when(taskMapper.markSemiAutoPublished(eq(30L), any(), eq(99L))).thenReturn(1);
 
-        assertEquals("filled", service.published(30L, 99L, 7L).status());
+        assertEquals("published", service.published(30L, 99L, 7L).status());
 
-        verify(taskMapper, never()).markSemiAutoPublished(any(), any(), any());
+        verify(taskMapper).markSemiAutoPublished(eq(30L), any(), eq(99L));
         verifyNoInteractions(articleDraftMapper);
         verify(companyChannelQuotaService, never()).confirmDistribution(any());
         verify(auditSupport).record(
@@ -284,6 +285,33 @@ class ExtensionTaskStateServiceTest {
     }
 
     @Test
+    void publishedRejectsStaleFilledTaskWhenFinalizingFails() {
+        stubTask("filled");
+        when(taskMapper.markSemiAutoPublished(eq(30L), any(), eq(99L))).thenReturn(0);
+
+        BizException ex = assertThrows(BizException.class, () -> service.published(30L, 99L, 7L));
+
+        assertEquals(ExtensionErrorCodes.TASK_STATE_CONFLICT, ex.getCode());
+        verify(taskMapper).markSemiAutoPublished(eq(30L), any(), eq(99L));
+        verify(auditSupport).record(
+                eq("SEMI_AUTO_TASK_PUBLISHED"),
+                eq(AuditResult.DENIED),
+                eq(AuditMode.SYNC),
+                eq(false),
+                eq(99L),
+                eq(10L),
+                eq(20L),
+                eq(30L),
+                eq(7L),
+                eq("DISTRIBUTION_TASK"),
+                eq("30"),
+                eq(String.valueOf(ExtensionErrorCodes.TASK_STATE_CONFLICT)),
+                eq("STALE_STATE"),
+                any()
+        );
+    }
+
+    @Test
     void publishedNonFilledTaskOnlyAuditsCurrentState() {
         stubTask("filling");
 
@@ -297,10 +325,11 @@ class ExtensionTaskStateServiceTest {
     @Test
     void publishedDoesNotConfirmQuotaOrArticleWhenArticleWouldRejectOldFlow() {
         stubTask("filled");
+        when(taskMapper.markSemiAutoPublished(eq(30L), any(), eq(99L))).thenReturn(1);
 
-        assertEquals("filled", service.published(30L, 99L, 7L).status());
+        assertEquals("published", service.published(30L, 99L, 7L).status());
 
-        verify(taskMapper, never()).markSemiAutoPublished(any(), any(), any());
+        verify(taskMapper).markSemiAutoPublished(eq(30L), any(), eq(99L));
         verifyNoInteractions(articleDraftMapper);
         verify(companyChannelQuotaService, never()).confirmDistribution(any());
     }

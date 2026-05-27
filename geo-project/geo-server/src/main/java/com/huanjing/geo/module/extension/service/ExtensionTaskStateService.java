@@ -18,6 +18,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -40,6 +41,7 @@ public class ExtensionTaskStateService {
 
     private static final String STATUS_TOKEN_ISSUED = "token_issued";
     private static final String STATUS_FILLED = "filled";
+    private static final String STATUS_PUBLISHED = "published";
     private static final String STATUS_FAILED = "failed";
     private static final String ARTICLE_STATUS_APPROVED = "approved";
     private static final String ARTICLE_STATUS_DISTRIBUTING = "distributing";
@@ -111,6 +113,15 @@ public class ExtensionTaskStateService {
     ) {
         TaskContext context = requireOperableTask(taskId, operatorId, extensionSessionId, "SEMI_AUTO_TASK_PUBLISHED");
         LocalDateTime now = now();
+        if (STATUS_FILLED.equals(context.task().getStatus()) && !hasPublishFailure(request)) {
+            int affected = taskMapper.markSemiAutoPublished(taskId, now, operatorId);
+            if (affected != 1) {
+                auditDenied("SEMI_AUTO_TASK_PUBLISHED", context, operatorId, extensionSessionId, "STALE_STATE");
+                throw new BizException(TASK_STATE_CONFLICT, "task state conflict");
+            }
+            auditSuccess("SEMI_AUTO_TASK_PUBLISHED", context, operatorId, extensionSessionId, publishDetail(now, request));
+            return new ExtensionTaskStateResponse(taskId, STATUS_PUBLISHED);
+        }
         auditSuccess("SEMI_AUTO_TASK_PUBLISHED", context, operatorId, extensionSessionId, publishDetail(now, request));
         return new ExtensionTaskStateResponse(taskId, context.task().getStatus());
     }
@@ -363,6 +374,10 @@ public class ExtensionTaskStateService {
         detail.put("errorCode", request.errorCode());
         detail.put("errorMessage", request.errorMessage());
         return detail;
+    }
+
+    private boolean hasPublishFailure(ExtensionTaskPublishReportRequest request) {
+        return request != null && StringUtils.hasText(request.errorCode());
     }
 
     private LocalDateTime now() {
