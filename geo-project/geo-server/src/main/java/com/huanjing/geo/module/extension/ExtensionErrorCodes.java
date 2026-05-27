@@ -18,6 +18,8 @@ public final class ExtensionErrorCodes {
     public static final int COOKIE_CAPTURE_CONFIRM_REQUIRED = 70014;
     public static final int COOKIE_CAPTURE_ACCOUNT_BRAND_MISMATCH = 70015;
     public static final int COOKIE_CAPTURE_NONCE_REPLAYED = 70016;
+    public static final int FILL_TOKEN_OPERATOR_MISMATCH = 70017;
+    public static final int FILL_TOKEN_BINDING_MISMATCH = 70018;
 
     private ExtensionErrorCodes() {
     }

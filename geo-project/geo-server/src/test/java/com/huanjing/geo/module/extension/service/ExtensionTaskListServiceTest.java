@@ -2,9 +2,6 @@ package com.huanjing.geo.module.extension.service;
 
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
-import com.huanjing.geo.module.customer.access.BrandAccessAction;
-import com.huanjing.geo.module.customer.access.BrandAccessErrorCodes;
-import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.extension.config.ExtensionProperties;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskListItemResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskListRow;
@@ -16,7 +13,6 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -24,16 +20,14 @@ import static org.mockito.Mockito.when;
 class ExtensionTaskListServiceTest {
 
     private DistributionTaskMapper taskMapper;
-    private BrandAccessService brandAccessService;
     private ExtensionTaskListService service;
 
     @BeforeEach
     void setUp() {
         taskMapper = mock(DistributionTaskMapper.class);
-        brandAccessService = mock(BrandAccessService.class);
         ExtensionProperties properties = new ExtensionProperties();
         properties.getFillToken().setTtlSeconds(300);
-        service = new ExtensionTaskListService(taskMapper, brandAccessService, properties);
+        service = new ExtensionTaskListService(taskMapper, properties);
     }
 
     @Test
@@ -50,7 +44,6 @@ class ExtensionTaskListServiceTest {
         assertEquals("token_issued", task.status());
         assertEquals("文章标题", task.title());
         assertEquals(issuedAt.plusMinutes(5), task.expiresAt());
-        verify(brandAccessService).requireBrandAccess(10L, 99L, BrandAccessAction.OPERATE);
     }
 
     @Test
@@ -69,17 +62,6 @@ class ExtensionTaskListServiceTest {
         BizException ex = assertThrows(BizException.class, () -> service.listTasksForSessionOperator(99L));
 
         assertEquals(70012, ex.getCode());
-    }
-
-    @Test
-    void propagatesBrandAccessRejection() {
-        when(taskMapper.selectExtensionSemiAutoTasks(99L, 20)).thenReturn(List.of(row(30L, 99L, "filled", LocalDateTime.now())));
-        when(brandAccessService.requireBrandAccess(eq(10L), eq(99L), eq(BrandAccessAction.OPERATE)))
-                .thenThrow(new BizException(BrandAccessErrorCodes.BRAND_ACCESS_DENIED, "denied"));
-
-        BizException ex = assertThrows(BizException.class, () -> service.listTasksForSessionOperator(99L));
-
-        assertEquals(BrandAccessErrorCodes.BRAND_ACCESS_DENIED, ex.getCode());
     }
 
     @Test

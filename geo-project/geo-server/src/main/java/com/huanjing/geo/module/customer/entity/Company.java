@@ -63,6 +63,8 @@ public class Company {
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String remark;
     private Long createdBy;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private Long ownerId;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime deletedAt;

@@ -2,8 +2,6 @@ package com.huanjing.geo.module.extension.service;
 
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
-import com.huanjing.geo.module.customer.access.BrandAccessAction;
-import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.extension.config.ExtensionProperties;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskListItemResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskListRow;
@@ -23,7 +21,6 @@ public class ExtensionTaskListService {
     private static final int TASK_LIMIT = 20;
 
     private final DistributionTaskMapper taskMapper;
-    private final BrandAccessService brandAccessService;
     private final ExtensionProperties properties;
 
     public List<ExtensionTaskListItemResponse> listTasksForSessionOperator(Long operatorId) {
@@ -37,7 +34,6 @@ public class ExtensionTaskListService {
         if (!Objects.equals(row.getOperatorId(), sessionOperatorId)) {
             throw new BizException(TASK_STATE_CONFLICT, "task operator mismatch");
         }
-        brandAccessService.requireBrandAccess(row.getBrandId(), sessionOperatorId, BrandAccessAction.OPERATE);
         LocalDateTime expiresAt = row.getFillTokenIssuedAt() == null
                 ? null
                 : row.getFillTokenIssuedAt().plusSeconds(properties.getFillToken().getTtlSeconds());

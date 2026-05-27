@@ -5,11 +5,8 @@ import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.service.CompanyChannelQuotaService;
-import com.huanjing.geo.module.customer.access.BrandAccessAction;
-import com.huanjing.geo.module.customer.access.BrandAccessService;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.extension.ExtensionErrorCodes;
-import com.huanjing.geo.module.project.entity.Project;
-import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.test.AbstractAuditDbIntegrationTest;
 import org.junit.jupiter.api.Test;
 
@@ -23,8 +20,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.when;
 
 class ExtensionTaskStateServiceHeartbeatAuditDbTest extends AbstractAuditDbIntegrationTest {
@@ -34,18 +29,18 @@ class ExtensionTaskStateServiceHeartbeatAuditDbTest extends AbstractAuditDbInteg
         insertSemiAutoTaskFixture("filling", false);
         DistributionTaskMapper taskMapper = mock(DistributionTaskMapper.class);
         ArticleDraftMapper articleDraftMapper = mock(ArticleDraftMapper.class);
-        ProjectMapper projectMapper = mock(ProjectMapper.class);
-        BrandAccessService brandAccessService = mock(BrandAccessService.class);
+        SemiAutoTaskAccessService semiAutoTaskAccessService = mock(SemiAutoTaskAccessService.class);
         CompanyChannelQuotaService companyChannelQuotaService = mock(CompanyChannelQuotaService.class);
         ExtensionRedisStore redisStore = mock(ExtensionRedisStore.class);
         DistributionTask firstLoad = task("filling", null);
         DistributionTask secondLoad = task("filling", LocalDateTime.now());
-        when(taskMapper.selectById(TEST_TASK_ID)).thenReturn(firstLoad, secondLoad);
+        when(semiAutoTaskAccessService.requireOperableTask(TEST_TASK_ID, TEST_OPERATOR_ID))
+                .thenReturn(new SemiAutoTaskAccessService.SemiAutoTaskContext(firstLoad, TEST_BRAND_ID))
+                .thenReturn(new SemiAutoTaskAccessService.SemiAutoTaskContext(secondLoad, TEST_BRAND_ID));
         when(taskMapper.touchSemiAutoHeartbeat(eq(TEST_TASK_ID), any())).thenReturn(1);
-        when(projectMapper.selectById(TEST_PROJECT_ID)).thenReturn(project());
         when(redisStore.incrementWithTtl(eq("extension:task:heartbeat:" + TEST_TASK_ID), any(Duration.class)))
                 .thenReturn(1L);
-        ExtensionTaskStateService taskStateService = service(taskMapper, articleDraftMapper, projectMapper, brandAccessService, companyChannelQuotaService, redisStore);
+        ExtensionTaskStateService taskStateService = service(taskMapper, articleDraftMapper, semiAutoTaskAccessService, companyChannelQuotaService, redisStore);
 
         assertEquals("filling", taskStateService.heartbeat(TEST_TASK_ID, TEST_OPERATOR_ID, null).status());
         assertEquals("filling", taskStateService.heartbeat(TEST_TASK_ID, TEST_OPERATOR_ID, null).status());
@@ -58,7 +53,6 @@ class ExtensionTaskStateServiceHeartbeatAuditDbTest extends AbstractAuditDbInteg
         assertEquals(TEST_TASK_ID, ((Number) audit.get("task_id")).longValue());
         assertEquals("SUCCESS", audit.get("result"));
         assertFalse(Boolean.TRUE.equals(audit.get("sensitive")));
-        verify(brandAccessService, times(2)).requireBrandAccess(TEST_BRAND_ID, TEST_OPERATOR_ID, BrandAccessAction.OPERATE);
     }
 
     @Test
@@ -66,16 +60,15 @@ class ExtensionTaskStateServiceHeartbeatAuditDbTest extends AbstractAuditDbInteg
         insertSemiAutoTaskFixture("pending", false);
         DistributionTaskMapper taskMapper = mock(DistributionTaskMapper.class);
         ArticleDraftMapper articleDraftMapper = mock(ArticleDraftMapper.class);
-        ProjectMapper projectMapper = mock(ProjectMapper.class);
-        BrandAccessService brandAccessService = mock(BrandAccessService.class);
+        SemiAutoTaskAccessService semiAutoTaskAccessService = mock(SemiAutoTaskAccessService.class);
         CompanyChannelQuotaService companyChannelQuotaService = mock(CompanyChannelQuotaService.class);
         ExtensionRedisStore redisStore = mock(ExtensionRedisStore.class);
-        when(taskMapper.selectById(TEST_TASK_ID)).thenReturn(task("pending", null));
+        when(semiAutoTaskAccessService.requireOperableTask(TEST_TASK_ID, TEST_OPERATOR_ID))
+                .thenReturn(new SemiAutoTaskAccessService.SemiAutoTaskContext(task("pending", null), TEST_BRAND_ID));
         when(taskMapper.touchSemiAutoHeartbeat(eq(TEST_TASK_ID), any())).thenReturn(0);
-        when(projectMapper.selectById(TEST_PROJECT_ID)).thenReturn(project());
         when(redisStore.incrementWithTtl(eq("extension:task:heartbeat:" + TEST_TASK_ID), any(Duration.class)))
                 .thenReturn(1L);
-        ExtensionTaskStateService taskStateService = service(taskMapper, articleDraftMapper, projectMapper, brandAccessService, companyChannelQuotaService, redisStore);
+        ExtensionTaskStateService taskStateService = service(taskMapper, articleDraftMapper, semiAutoTaskAccessService, companyChannelQuotaService, redisStore);
 
         BizException ex = assertThrows(BizException.class,
                 () -> taskStateService.heartbeat(TEST_TASK_ID, TEST_OPERATOR_ID, null));
@@ -90,16 +83,15 @@ class ExtensionTaskStateServiceHeartbeatAuditDbTest extends AbstractAuditDbInteg
     private ExtensionTaskStateService service(
             DistributionTaskMapper taskMapper,
             ArticleDraftMapper articleDraftMapper,
-            ProjectMapper projectMapper,
-            BrandAccessService brandAccessService,
+            SemiAutoTaskAccessService semiAutoTaskAccessService,
             CompanyChannelQuotaService companyChannelQuotaService,
             ExtensionRedisStore redisStore
     ) {
         return new ExtensionTaskStateService(
                 taskMapper,
                 articleDraftMapper,
-                projectMapper,
-                brandAccessService,
+                semiAutoTaskAccessService,
+                mock(InternalScopeService.class),
                 companyChannelQuotaService,
                 redisStore,
                 new ExtensionAuditSupport(auditService),
@@ -118,10 +110,4 @@ class ExtensionTaskStateServiceHeartbeatAuditDbTest extends AbstractAuditDbInteg
         return task;
     }
 
-    private Project project() {
-        Project project = new Project();
-        project.setId(TEST_PROJECT_ID);
-        project.setBrandId(TEST_BRAND_ID);
-        return project;
-    }
 }

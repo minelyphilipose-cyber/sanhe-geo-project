@@ -10,15 +10,12 @@ import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.content.service.CompanyChannelQuotaService;
-import com.huanjing.geo.module.customer.access.BrandAccessAction;
-import com.huanjing.geo.module.customer.access.BrandAccessErrorCodes;
-import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskPublishReportRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskStateResponse;
-import com.huanjing.geo.module.project.entity.Project;
-import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,15 +30,15 @@ import java.util.Map;
 import static com.huanjing.geo.module.extension.ExtensionErrorCodes.TASK_NOT_FOUND;
 import static com.huanjing.geo.module.extension.ExtensionErrorCodes.TASK_RATE_LIMITED;
 import static com.huanjing.geo.module.extension.ExtensionErrorCodes.TASK_STATE_CONFLICT;
+import static com.huanjing.geo.module.extension.ExtensionErrorCodes.FILL_TOKEN_BINDING_MISMATCH;
+import static com.huanjing.geo.module.extension.ExtensionErrorCodes.FILL_TOKEN_OPERATOR_MISMATCH;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ExtensionTaskStateService {
 
-    private static final String DISPATCH_MODE_SEMI_AUTO = "SEMI_AUTO";
-    private static final String STATUS_PENDING = "pending";
     private static final String STATUS_TOKEN_ISSUED = "token_issued";
-    private static final String STATUS_FILLING = "filling";
     private static final String STATUS_FILLED = "filled";
     private static final String STATUS_FAILED = "failed";
     private static final String ARTICLE_STATUS_APPROVED = "approved";
@@ -52,8 +49,8 @@ public class ExtensionTaskStateService {
 
     private final DistributionTaskMapper taskMapper;
     private final ArticleDraftMapper articleDraftMapper;
-    private final ProjectMapper projectMapper;
-    private final BrandAccessService brandAccessService;
+    private final SemiAutoTaskAccessService semiAutoTaskAccessService;
+    private final InternalScopeService internalScopeService;
     private final CompanyChannelQuotaService companyChannelQuotaService;
     private final ExtensionRedisStore redisStore;
     private final ExtensionAuditSupport auditSupport;
@@ -145,11 +142,12 @@ public class ExtensionTaskStateService {
         );
         int reclaimed = 0;
         for (DistributionTask task : staleTasks) {
-            int affected = taskMapper.reclaimSemiAutoTask(task.getId(), task.getStatus(), now);
+            Long reassignedOperatorId = resolveReclaimOperatorId(task);
+            int affected = taskMapper.reclaimSemiAutoTask(task.getId(), task.getStatus(), reassignedOperatorId, now);
             if (affected == 1) {
                 restoreArticleApproved(task);
                 reclaimed++;
-                auditReclaimed(task, tokenIssuedBefore, heartbeatBefore);
+                auditReclaimed(task, tokenIssuedBefore, heartbeatBefore, reassignedOperatorId);
             }
         }
         return reclaimed;
@@ -180,11 +178,13 @@ public class ExtensionTaskStateService {
             );
             throw new BizException(TASK_NOT_FOUND, "task not found");
         }
-        DistributionTask task = taskMapper.selectById(taskId);
-        if (task == null) {
+        SemiAutoTaskAccessService.SemiAutoTaskContext accessContext;
+        try {
+            accessContext = semiAutoTaskAccessService.requireOperableTask(taskId, operatorId);
+        } catch (BizException ex) {
             auditSupport.record(
                     eventType,
-                    AuditResult.NOT_FOUND,
+                    auditResultFor(ex),
                     AuditMode.SYNC,
                     false,
                     operatorId,
@@ -194,49 +194,13 @@ public class ExtensionTaskStateService {
                     extensionSessionId,
                     "DISTRIBUTION_TASK",
                     String.valueOf(taskId),
-                    String.valueOf(TASK_NOT_FOUND),
-                    "TASK_NOT_FOUND",
+                    String.valueOf(ex.getCode()),
+                    ex.getMessage(),
                     null
             );
-            throw new BizException(TASK_NOT_FOUND, "task not found");
-        }
-        Long brandId = resolveBrandId(task, operatorId, extensionSessionId, eventType);
-        TaskContext context = new TaskContext(task, brandId);
-        if (!DISPATCH_MODE_SEMI_AUTO.equals(task.getDispatchMode())) {
-            auditDenied(eventType, context, operatorId, extensionSessionId, "NOT_SEMI_AUTO_TASK");
-            throw new BizException(TASK_STATE_CONFLICT, "task state conflict");
-        }
-        try {
-            brandAccessService.requireBrandAccess(brandId, operatorId, BrandAccessAction.OPERATE);
-        } catch (BizException ex) {
-            auditAccessFailure(eventType, context, extensionSessionId, operatorId, ex);
             throw ex;
         }
-        return context;
-    }
-
-    private Long resolveBrandId(DistributionTask task, Long operatorId, Long extensionSessionId, String eventType) {
-        Project project = task.getProjectId() == null ? null : projectMapper.selectById(task.getProjectId());
-        if (project == null || project.getBrandId() == null) {
-            auditSupport.record(
-                    eventType,
-                    AuditResult.NOT_FOUND,
-                    AuditMode.SYNC,
-                    false,
-                    operatorId,
-                    null,
-                    task.getSelfMediaAccountId(),
-                    task.getId(),
-                    extensionSessionId,
-                    "DISTRIBUTION_TASK",
-                    String.valueOf(task.getId()),
-                    String.valueOf(TASK_NOT_FOUND),
-                    "TASK_BRAND_NOT_FOUND",
-                    detail("projectId", task.getProjectId())
-            );
-            throw new BizException(TASK_NOT_FOUND, "task brand not found");
-        }
-        return project.getBrandId();
+        return new TaskContext(accessContext.task(), accessContext.brandId());
     }
 
     private void enforceHeartbeatRateLimit(Long taskId) {
@@ -299,38 +263,13 @@ public class ExtensionTaskStateService {
         );
     }
 
-    private void auditAccessFailure(
-            String eventType,
-            TaskContext context,
-            Long extensionSessionId,
-            Long operatorId,
-            BizException ex
-    ) {
-        auditSupport.record(
-                eventType,
-                auditResultFor(ex),
-                AuditMode.SYNC,
-                false,
-                operatorId,
-                context.brandId(),
-                context.task().getSelfMediaAccountId(),
-                context.task().getId(),
-                extensionSessionId,
-                "DISTRIBUTION_TASK",
-                String.valueOf(context.task().getId()),
-                String.valueOf(ex.getCode()),
-                ex.getMessage(),
-                detail("status", context.task().getStatus())
-        );
-    }
-
     private AuditResult auditResultFor(BizException ex) {
-        if (ex.getCode() == BrandAccessErrorCodes.BRAND_ACCESS_NOT_FOUND || ex.getCode() == TASK_NOT_FOUND) {
+        if (ex.getCode() == TASK_NOT_FOUND) {
             return AuditResult.NOT_FOUND;
         }
-        if (ex.getCode() == BrandAccessErrorCodes.BRAND_ACCESS_DENIED
-                || ex.getCode() == BrandAccessErrorCodes.BRAND_ACCESS_UNAUTHORIZED
-                || ex.getCode() == TASK_STATE_CONFLICT
+        if (ex.getCode() == TASK_STATE_CONFLICT
+                || ex.getCode() == FILL_TOKEN_OPERATOR_MISMATCH
+                || ex.getCode() == FILL_TOKEN_BINDING_MISMATCH
                 || ex.getCode() == TASK_RATE_LIMITED) {
             return AuditResult.DENIED;
         }
@@ -356,7 +295,8 @@ public class ExtensionTaskStateService {
     private void auditReclaimed(
             DistributionTask task,
             LocalDateTime tokenIssuedBefore,
-            LocalDateTime heartbeatBefore
+            LocalDateTime heartbeatBefore,
+            Long reassignedOperatorId
     ) {
         AuditEvent event = new AuditEvent();
         event.setEventType("SEMI_AUTO_TASK_RECLAIMED");
@@ -376,9 +316,28 @@ public class ExtensionTaskStateService {
                 "tokenIssuedBefore", tokenIssuedBefore,
                 "heartbeatBefore", heartbeatBefore,
                 "newStatus", STATUS_TOKEN_ISSUED,
-                "tokenReissued", true
+                "tokenReissued", true,
+                "previousOperatorId", task.getOperatorId(),
+                "operatorId", reassignedOperatorId,
+                "operatorReassigned", task.getOperatorId() != null && !task.getOperatorId().equals(reassignedOperatorId)
         ));
         auditService.record(event);
+    }
+
+    private Long resolveReclaimOperatorId(DistributionTask task) {
+        try {
+            Long currentOwnerId = internalScopeService.resolveProjectOwnerId(task.getProjectId());
+            if (currentOwnerId == null) {
+                log.warn("stale semi-auto task has NULL project owner, keep original operator. taskId={}, projectId={}",
+                        task.getId(), task.getProjectId());
+                return task.getOperatorId();
+            }
+            return currentOwnerId;
+        } catch (BizException ex) {
+            log.warn("failed to resolve project owner for stale semi-auto task, keep original operator. taskId={}, projectId={}, code={}",
+                    task.getId(), task.getProjectId(), ex.getCode());
+            return task.getOperatorId();
+        }
     }
 
     private Map<String, Object> detail(Object... values) {

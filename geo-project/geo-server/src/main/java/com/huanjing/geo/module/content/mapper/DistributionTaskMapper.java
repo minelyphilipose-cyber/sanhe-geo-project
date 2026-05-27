@@ -77,7 +77,7 @@ public interface DistributionTaskMapper extends BaseMapper<DistributionTask> {
     );
 
     @Select("""
-            SELECT id, article_id, project_id, self_media_account_id, status, dispatch_mode,
+            SELECT id, article_id, project_id, self_media_account_id, status, dispatch_mode, operator_id,
                    fill_token_issued_at, filled_at, last_heartbeat_at
             FROM distribution_tasks
             WHERE dispatch_mode = 'SEMI_AUTO'
@@ -161,13 +161,15 @@ public interface DistributionTaskMapper extends BaseMapper<DistributionTask> {
             SET status = 'token_issued',
                 fill_token_issued_at = #{reissuedAt},
                 filled_at = NULL,
-                last_heartbeat_at = NULL
+                last_heartbeat_at = NULL,
+                operator_id = #{operatorId}
             WHERE id = #{taskId}
               AND status = #{expectedStatus}
               AND dispatch_mode = 'SEMI_AUTO'
             """)
     int reclaimSemiAutoTask(@Param("taskId") Long taskId,
                              @Param("expectedStatus") String expectedStatus,
+                             @Param("operatorId") Long operatorId,
                              @Param("reissuedAt") LocalDateTime reissuedAt);
 
     @Update("""

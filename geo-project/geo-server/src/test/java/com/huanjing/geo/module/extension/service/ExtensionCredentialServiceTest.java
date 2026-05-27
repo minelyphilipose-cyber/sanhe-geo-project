@@ -2,10 +2,8 @@ package com.huanjing.geo.module.extension.service;
 
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.entity.DistributionTask;
-import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.extension.ExtensionErrorCodes;
 import com.huanjing.geo.module.extension.dto.ExtensionFillTokenConsumeResponse;
-import com.huanjing.geo.module.extension.dto.FillTokenConsumeResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -20,30 +18,23 @@ import static org.mockito.Mockito.when;
 class ExtensionCredentialServiceTest {
 
     private FillTokenService fillTokenService;
-    private DistributionTaskMapper taskMapper;
     private ExtensionTaskStateService taskStateService;
+    private SemiAutoTaskAccessService semiAutoTaskAccessService;
     private ExtensionCredentialService service;
 
     @BeforeEach
     void setUp() {
         fillTokenService = mock(FillTokenService.class);
-        taskMapper = mock(DistributionTaskMapper.class);
         taskStateService = mock(ExtensionTaskStateService.class);
-        service = new ExtensionCredentialService(fillTokenService, taskMapper, taskStateService);
+        semiAutoTaskAccessService = mock(SemiAutoTaskAccessService.class);
+        service = new ExtensionCredentialService(fillTokenService, taskStateService, semiAutoTaskAccessService);
     }
 
     @Test
     void consumeFillTokenReturnsFillPayloadWithoutCookieSecrets() {
-        FillTokenConsumeResponse consumed = new FillTokenConsumeResponse(
-                20L,
-                10L,
-                99L,
-                30L,
-                200L,
-                "nonce-1"
-        );
-        when(fillTokenService.consume("fill-token", 99L, 7L)).thenReturn(consumed);
-        mockFillPayload();
+        FillTokenPayload payload = new FillTokenPayload(1, 20, 10, 99, 30, 200, 100, "nonce-1");
+        when(fillTokenService.verify("fill-token")).thenReturn(payload);
+        when(semiAutoTaskAccessService.validateFillTokenTask(payload, 99L)).thenReturn(contextWithFillPayload());
 
         ExtensionFillTokenConsumeResponse response = service.consumeFillToken("fill-token", 99L, 7L);
 
@@ -51,12 +42,14 @@ class ExtensionCredentialServiceTest {
         assertEquals(200L, response.expiresAt());
         assertEquals("nonce-1", response.nonce());
         assertEquals("{\"title\":\"draft\"}", response.fillPayload());
+        verify(fillTokenService).reserveConsume("fill-token", payload);
         verify(taskStateService).markFillingFromFillTokenConsume(30L, 99L, 7L);
+        verify(fillTokenService).completeConsume("fill-token", payload);
     }
 
     @Test
     void fillTokenConsumeFailureDoesNotMarkTaskFilling() {
-        when(fillTokenService.consume("fill-token", 99L, 7L))
+        when(fillTokenService.verify("fill-token"))
                 .thenThrow(new BizException(ExtensionErrorCodes.FILL_TOKEN_USED_OR_EXPIRED, "used"));
 
         BizException ex = assertThrows(BizException.class,
@@ -68,9 +61,12 @@ class ExtensionCredentialServiceTest {
 
     @Test
     void missingFillPayloadDoesNotMarkTaskFilling() {
-        FillTokenConsumeResponse consumed = new FillTokenConsumeResponse(20L, 10L, 99L, 30L, 200L, "nonce-1");
-        when(fillTokenService.consume("fill-token", 99L, 7L)).thenReturn(consumed);
-        when(taskMapper.selectExtensionFillContext(30L)).thenReturn(new DistributionTask());
+        FillTokenPayload payload = new FillTokenPayload(1, 20, 10, 99, 30, 200, 100, "nonce-1");
+        when(fillTokenService.verify("fill-token")).thenReturn(payload);
+        DistributionTask task = new DistributionTask();
+        task.setId(30L);
+        when(semiAutoTaskAccessService.validateFillTokenTask(payload, 99L))
+                .thenReturn(new SemiAutoTaskAccessService.SemiAutoTaskContext(task, 10L));
 
         BizException ex = assertThrows(BizException.class,
                 () -> service.consumeFillToken("fill-token", 99L, 7L));
@@ -79,10 +75,11 @@ class ExtensionCredentialServiceTest {
         verify(taskStateService, never()).markFillingFromFillTokenConsume(any(), any(), any());
     }
 
-    private void mockFillPayload() {
+    private SemiAutoTaskAccessService.SemiAutoTaskContext contextWithFillPayload() {
         DistributionTask task = new DistributionTask();
         task.setId(30L);
+        task.setArticleId(50L);
         task.setFillPayload("{\"title\":\"draft\"}");
-        when(taskMapper.selectExtensionFillContext(30L)).thenReturn(task);
+        return new SemiAutoTaskAccessService.SemiAutoTaskContext(task, 10L);
     }
 }

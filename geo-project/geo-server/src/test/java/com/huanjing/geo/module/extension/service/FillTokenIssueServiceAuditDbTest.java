@@ -1,7 +1,5 @@
 package com.huanjing.geo.module.extension.service;
 
-import com.huanjing.geo.module.customer.access.BrandAccessAction;
-import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.test.AbstractAuditDbIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -23,8 +21,6 @@ class FillTokenIssueServiceAuditDbTest extends AbstractAuditDbIntegrationTest {
     @MockBean
     private ExtensionRedisStore redisStore;
     @MockBean
-    private BrandAccessService brandAccessService;
-    @MockBean
     private ExtensionVersionService versionService;
 
     @Test
@@ -43,7 +39,6 @@ class FillTokenIssueServiceAuditDbTest extends AbstractAuditDbIntegrationTest {
         assertTrue(Boolean.TRUE.equals(audit.get("sensitive")));
         assertAuditDetailNotContains(audit, "ft.");
         verify(versionService).requireSupported("toutiao", "0.1.0");
-        verify(brandAccessService).requireBrandAccess(TEST_BRAND_ID, TEST_OPERATOR_ID, BrandAccessAction.OPERATE);
         verify(redisStore).set(any(), eq("1"), any(Duration.class));
     }
 }

@@ -39,10 +39,23 @@ public class ExtensionRedisStore {
                     return 0
                     """, Long.class);
 
+    private static final DefaultRedisScript<Long> COMPARE_AND_SET_WITH_TTL_SCRIPT =
+            new DefaultRedisScript<>("""
+                    if redis.call('GET', KEYS[1]) == ARGV[1] then
+                        redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+                        return 1
+                    end
+                    return 0
+                    """, Long.class);
+
     private final StringRedisTemplate stringRedisTemplate;
 
     public void set(String key, String value, Duration ttl) {
         stringRedisTemplate.opsForValue().set(key, value, ttl);
+    }
+
+    public String get(String key) {
+        return stringRedisTemplate.opsForValue().get(key);
     }
 
     public String getAndDelete(String key) {
@@ -66,5 +79,16 @@ public class ExtensionRedisStore {
     public boolean releaseLock(String key, String value) {
         Long released = stringRedisTemplate.execute(RELEASE_LOCK_SCRIPT, List.of(key), value);
         return released != null && released > 0;
+    }
+
+    public boolean compareAndSet(String key, String expectedValue, String newValue, Duration ttl) {
+        Long updated = stringRedisTemplate.execute(
+                COMPARE_AND_SET_WITH_TTL_SCRIPT,
+                List.of(key),
+                expectedValue,
+                newValue,
+                String.valueOf(ttl.toSeconds())
+        );
+        return updated != null && updated > 0;
     }
 }

@@ -1,14 +1,12 @@
 package com.huanjing.geo.module.extension.service;
 
 import com.huanjing.geo.common.exception.BizException;
-import com.huanjing.geo.module.content.entity.DistributionTask;
-import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.extension.dto.ExtensionFillTokenConsumeResponse;
-import com.huanjing.geo.module.extension.dto.FillTokenConsumeResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import static com.huanjing.geo.module.extension.ExtensionErrorCodes.FILL_TOKEN_BINDING_MISMATCH;
 import static com.huanjing.geo.module.extension.ExtensionErrorCodes.TASK_NOT_FOUND;
 
 /**
@@ -23,30 +21,41 @@ import static com.huanjing.geo.module.extension.ExtensionErrorCodes.TASK_NOT_FOU
 public class ExtensionCredentialService {
 
     private final FillTokenService fillTokenService;
-    private final DistributionTaskMapper taskMapper;
     private final ExtensionTaskStateService taskStateService;
+    private final SemiAutoTaskAccessService semiAutoTaskAccessService;
 
     public ExtensionFillTokenConsumeResponse consumeFillToken(
             String fillToken,
             Long expectedOperatorId,
             Long extensionSessionId
     ) {
-        FillTokenConsumeResponse consumed = fillTokenService.consume(fillToken, expectedOperatorId, extensionSessionId);
-        DistributionTask task = taskMapper.selectExtensionFillContext(consumed.taskTargetId());
-        if (task == null || !StringUtils.hasText(task.getFillPayload())) {
+        FillTokenPayload payload = fillTokenService.verify(fillToken);
+        SemiAutoTaskAccessService.SemiAutoTaskContext context =
+                semiAutoTaskAccessService.validateFillTokenTask(payload, expectedOperatorId);
+        if (!StringUtils.hasText(context.task().getFillPayload())) {
             throw new BizException(TASK_NOT_FOUND, "fill payload not found");
         }
-        taskStateService.markFillingFromFillTokenConsume(
-                consumed.taskTargetId(),
-                consumed.operatorId(),
-                extensionSessionId
-        );
+        if (context.task().getArticleId() == null) {
+            throw new BizException(FILL_TOKEN_BINDING_MISMATCH, "task article binding missing");
+        }
+        fillTokenService.reserveConsume(fillToken, payload);
+        try {
+            taskStateService.markFillingFromFillTokenConsume(
+                    payload.tid(),
+                    payload.op(),
+                    extensionSessionId
+            );
+            fillTokenService.completeConsume(fillToken, payload);
+        } catch (RuntimeException ex) {
+            fillTokenService.restoreConsume(fillToken, payload);
+            throw ex;
+        }
 
         return new ExtensionFillTokenConsumeResponse(
-                consumed.taskTargetId(),
-                consumed.expiresAt(),
-                consumed.nonce(),
-                task.getFillPayload()
+                payload.tid(),
+                payload.exp(),
+                payload.n(),
+                context.task().getFillPayload()
         );
     }
 }

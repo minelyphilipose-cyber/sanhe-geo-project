@@ -10,13 +10,9 @@ import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.service.CompanyChannelQuotaService;
-import com.huanjing.geo.module.customer.access.BrandAccessAction;
-import com.huanjing.geo.module.customer.access.BrandAccessErrorCodes;
-import com.huanjing.geo.module.customer.access.BrandAccessService;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.extension.ExtensionErrorCodes;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskPublishReportRequest;
-import com.huanjing.geo.module.project.entity.Project;
-import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -42,8 +38,8 @@ class ExtensionTaskStateServiceTest {
 
     private DistributionTaskMapper taskMapper;
     private ArticleDraftMapper articleDraftMapper;
-    private ProjectMapper projectMapper;
-    private BrandAccessService brandAccessService;
+    private SemiAutoTaskAccessService semiAutoTaskAccessService;
+    private InternalScopeService internalScopeService;
     private CompanyChannelQuotaService companyChannelQuotaService;
     private ExtensionRedisStore redisStore;
     private ExtensionAuditSupport auditSupport;
@@ -54,8 +50,8 @@ class ExtensionTaskStateServiceTest {
     void setUp() {
         taskMapper = mock(DistributionTaskMapper.class);
         articleDraftMapper = mock(ArticleDraftMapper.class);
-        projectMapper = mock(ProjectMapper.class);
-        brandAccessService = mock(BrandAccessService.class);
+        semiAutoTaskAccessService = mock(SemiAutoTaskAccessService.class);
+        internalScopeService = mock(InternalScopeService.class);
         companyChannelQuotaService = mock(CompanyChannelQuotaService.class);
         redisStore = mock(ExtensionRedisStore.class);
         auditSupport = mock(ExtensionAuditSupport.class);
@@ -63,8 +59,8 @@ class ExtensionTaskStateServiceTest {
         service = new ExtensionTaskStateService(
                 taskMapper,
                 articleDraftMapper,
-                projectMapper,
-                brandAccessService,
+                semiAutoTaskAccessService,
+                internalScopeService,
                 companyChannelQuotaService,
                 redisStore,
                 auditSupport,
@@ -79,7 +75,6 @@ class ExtensionTaskStateServiceTest {
 
         assertEquals("filled", service.ackFilled(30L, 99L, 7L).status());
 
-        verify(brandAccessService).requireBrandAccess(10L, 99L, BrandAccessAction.OPERATE);
         verify(taskMapper).markSemiAutoFilled(eq(30L), any());
         verify(auditSupport).record(
                 eq("SEMI_AUTO_TASK_FILLED"),
@@ -138,14 +133,13 @@ class ExtensionTaskStateServiceTest {
     }
 
     @Test
-    void ackBrandAccessDeniedDoesNotUpdateTask() {
-        stubTask("filling");
-        when(brandAccessService.requireBrandAccess(10L, 99L, BrandAccessAction.OPERATE))
-                .thenThrow(new BizException(BrandAccessErrorCodes.BRAND_ACCESS_DENIED, "denied"));
+    void ackTaskAccessDeniedDoesNotUpdateTask() {
+        when(semiAutoTaskAccessService.requireOperableTask(30L, 99L))
+                .thenThrow(new BizException(ExtensionErrorCodes.FILL_TOKEN_OPERATOR_MISMATCH, "operator mismatch"));
 
         BizException ex = assertThrows(BizException.class, () -> service.ackFilled(30L, 99L, 7L));
 
-        assertEquals(BrandAccessErrorCodes.BRAND_ACCESS_DENIED, ex.getCode());
+        assertEquals(ExtensionErrorCodes.FILL_TOKEN_OPERATOR_MISMATCH, ex.getCode());
         verify(taskMapper, never()).markSemiAutoFilled(any(), any());
         verify(auditSupport).record(
                 eq("SEMI_AUTO_TASK_FILLED"),
@@ -153,14 +147,14 @@ class ExtensionTaskStateServiceTest {
                 eq(AuditMode.SYNC),
                 eq(false),
                 eq(99L),
-                eq(10L),
-                eq(20L),
+                eq(null),
+                eq(null),
                 eq(30L),
                 eq(7L),
                 eq("DISTRIBUTION_TASK"),
                 eq("30"),
-                eq(String.valueOf(BrandAccessErrorCodes.BRAND_ACCESS_DENIED)),
-                eq("denied"),
+                eq(String.valueOf(ExtensionErrorCodes.FILL_TOKEN_OPERATOR_MISMATCH)),
+                eq("operator mismatch"),
                 any()
         );
     }
@@ -209,11 +203,8 @@ class ExtensionTaskStateServiceTest {
     void heartbeatAcceptsFilledTaskAfterAckAndKeepsFilledStatus() {
         DistributionTask task = task("filled");
         task.setFilledAt(LocalDateTime.now());
-        when(taskMapper.selectById(30L)).thenReturn(task);
-        Project project = new Project();
-        project.setId(40L);
-        project.setBrandId(10L);
-        when(projectMapper.selectById(40L)).thenReturn(project);
+        when(semiAutoTaskAccessService.requireOperableTask(30L, 99L))
+                .thenReturn(new SemiAutoTaskAccessService.SemiAutoTaskContext(task, 10L));
         when(redisStore.incrementWithTtl(eq("extension:task:heartbeat:30"), any(Duration.class))).thenReturn(1L);
         when(taskMapper.touchSemiAutoHeartbeat(eq(30L), any())).thenReturn(1);
 
@@ -362,12 +353,13 @@ class ExtensionTaskStateServiceTest {
         DistributionTask task = task("token_issued");
         task.setFillTokenIssuedAt(LocalDateTime.now().minusMinutes(20));
         when(taskMapper.selectStaleSemiAutoTasks(any(), any(), eq(100))).thenReturn(List.of(task));
-        when(taskMapper.reclaimSemiAutoTask(eq(30L), eq("token_issued"), any())).thenReturn(1);
+        when(internalScopeService.resolveProjectOwnerId(40L)).thenReturn(99L);
+        when(taskMapper.reclaimSemiAutoTask(eq(30L), eq("token_issued"), eq(99L), any())).thenReturn(1);
         when(articleDraftMapper.update(any(), any())).thenReturn(1);
 
         assertEquals(1, service.reclaimStaleTasks());
 
-        verify(taskMapper).reclaimSemiAutoTask(eq(30L), eq("token_issued"), any());
+        verify(taskMapper).reclaimSemiAutoTask(eq(30L), eq("token_issued"), eq(99L), any());
         verify(articleDraftMapper).update(any(), any());
         verify(auditService).record(any(AuditEvent.class));
     }
@@ -377,12 +369,13 @@ class ExtensionTaskStateServiceTest {
         DistributionTask task = task("filling");
         task.setLastHeartbeatAt(LocalDateTime.now().minusMinutes(20));
         when(taskMapper.selectStaleSemiAutoTasks(any(), any(), eq(100))).thenReturn(List.of(task));
-        when(taskMapper.reclaimSemiAutoTask(eq(30L), eq("filling"), any())).thenReturn(1);
+        when(internalScopeService.resolveProjectOwnerId(40L)).thenReturn(99L);
+        when(taskMapper.reclaimSemiAutoTask(eq(30L), eq("filling"), eq(99L), any())).thenReturn(1);
         when(articleDraftMapper.update(any(), any())).thenReturn(1);
 
         assertEquals(1, service.reclaimStaleTasks());
 
-        verify(taskMapper).reclaimSemiAutoTask(eq(30L), eq("filling"), any());
+        verify(taskMapper).reclaimSemiAutoTask(eq(30L), eq("filling"), eq(99L), any());
     }
 
     @Test
@@ -390,12 +383,13 @@ class ExtensionTaskStateServiceTest {
         DistributionTask task = task("filled");
         task.setFilledAt(LocalDateTime.now().minusMinutes(20));
         when(taskMapper.selectStaleSemiAutoTasks(any(), any(), eq(100))).thenReturn(List.of(task));
-        when(taskMapper.reclaimSemiAutoTask(eq(30L), eq("filled"), any())).thenReturn(1);
+        when(internalScopeService.resolveProjectOwnerId(40L)).thenReturn(99L);
+        when(taskMapper.reclaimSemiAutoTask(eq(30L), eq("filled"), eq(99L), any())).thenReturn(1);
         when(articleDraftMapper.update(any(), any())).thenReturn(1);
 
         assertEquals(1, service.reclaimStaleTasks());
 
-        verify(taskMapper).reclaimSemiAutoTask(eq(30L), eq("filled"), any());
+        verify(taskMapper).reclaimSemiAutoTask(eq(30L), eq("filled"), eq(99L), any());
     }
 
     @Test
@@ -404,15 +398,13 @@ class ExtensionTaskStateServiceTest {
 
         assertEquals(0, service.reclaimStaleTasks());
 
-        verify(taskMapper, never()).reclaimSemiAutoTask(any(), any(), any());
+        verify(taskMapper, never()).reclaimSemiAutoTask(any(), any(), any(), any());
     }
 
     private void stubTask(String status) {
-        when(taskMapper.selectById(30L)).thenReturn(task(status));
-        Project project = new Project();
-        project.setId(40L);
-        project.setBrandId(10L);
-        when(projectMapper.selectById(40L)).thenReturn(project);
+        DistributionTask task = task(status);
+        when(semiAutoTaskAccessService.requireOperableTask(30L, 99L))
+                .thenReturn(new SemiAutoTaskAccessService.SemiAutoTaskContext(task, 10L));
     }
 
     private DistributionTask task(String status) {
@@ -421,6 +413,7 @@ class ExtensionTaskStateServiceTest {
         task.setArticleId(50L);
         task.setProjectId(40L);
         task.setSelfMediaAccountId(20L);
+        task.setOperatorId(99L);
         task.setDispatchMode("SEMI_AUTO");
         task.setStatus(status);
         return task;

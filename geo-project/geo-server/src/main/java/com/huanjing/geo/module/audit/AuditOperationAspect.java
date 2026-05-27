@@ -31,6 +31,8 @@ public class AuditOperationAspect {
             ExtensionErrorCodes.EXTENSION_UNAUTHORIZED,
             ExtensionErrorCodes.EXTENSION_VERSION_TOO_LOW,
             ExtensionErrorCodes.FILL_TOKEN_INVALID,
+            ExtensionErrorCodes.FILL_TOKEN_OPERATOR_MISMATCH,
+            ExtensionErrorCodes.FILL_TOKEN_BINDING_MISMATCH,
             ExtensionErrorCodes.FILL_TOKEN_USED_OR_EXPIRED,
             ExtensionErrorCodes.BIND_CODE_INVALID,
             ExtensionErrorCodes.BIND_RATE_LIMIT_EXCEEDED,
