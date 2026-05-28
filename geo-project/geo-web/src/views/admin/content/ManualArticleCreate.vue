@@ -1677,7 +1677,7 @@ async function generateTemplatePreview() {
   generationNotice.value = {
     type: 'info',
     title: '正在按模板生成草稿',
-    description: '本次使用批量同源模板装配，代表批次首篇效果。',
+    description: '请稍等。',
   }
   parseNotice.value = null
   clearStillGeneratingTimer()
@@ -1913,9 +1913,12 @@ function parseGeneratedMarkdown(markdownText: string, fallbackTitle = ''): Parse
       sections.push(current)
       continue
     }
-    if (current) {
-      current.content = appendMarkdownLine(current.content, line)
+    if (!current) {
+      if (!line.trim()) continue
+      current = { id: nextSectionId++, heading: '', content: '', collapsed: false }
+      sections.push(current)
     }
+    current.content = appendMarkdownLine(current.content, line)
   }
 
   title = title || fallbackTitle.trim()
