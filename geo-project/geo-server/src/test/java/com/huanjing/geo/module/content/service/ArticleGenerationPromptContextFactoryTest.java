@@ -152,6 +152,37 @@ class ArticleGenerationPromptContextFactoryTest {
         verify(projectKeywordGroupRelMapper).selectList(any());
     }
 
+    @Test
+    void selfMediaTemplateGenerationDoesNotInjectContentAngle() {
+        when(promptTemplateMapper.selectById(101L)).thenReturn(selfMediaTemplate());
+        when(promptTemplateVersionMapper.selectById(201L)).thenReturn(selfMediaVersion());
+
+        ArticleGenerationPromptContextFactory.PromptContextResult result =
+                factory.buildStrict(new PromptContextRequest(
+                        10L,
+                        "manual",
+                        "industry_article",
+                        "self_media",
+                        "baijiahao",
+                        "阜阳SPA行业发展趋势",
+                        null,
+                        "medium",
+                        null,
+                        null,
+                        null,
+                        101L,
+                        201L,
+                        3
+                ));
+
+        assertThat(result.promptInput().topicAsQuestion()).isEqualTo("如何理解阜阳SPA行业发展趋势的选择逻辑和常见误区？");
+        assertThat(result.prompt().contentAngle()).isNull();
+        assertThat(result.prompt().promptSnapshot()).contains("\"contentAngle\":null");
+        assertThat(result.prompt().userPrompt()).doesNotContain("本篇从");
+        assertThat(result.prompt().userPrompt()).doesNotContain("内容角度");
+        assertThat(result.prompt().userPrompt()).doesNotContain("{{contentAngle}}");
+    }
+
     private void assertPromptInputEquivalent(BatchArticlePromptBuilder.PromptBuildInput actual,
                                              BatchArticlePromptBuilder.PromptBuildInput expected) {
         assertThat(actual.project().getId()).isEqualTo(expected.project().getId());
@@ -274,6 +305,35 @@ class ArticleGenerationPromptContextFactoryTest {
                 问题: {{topicAsQuestion}}
                 关键词: {{relatedKeywords}}
                 标题参考: {{titleGuide}}
+                """);
+        return version;
+    }
+
+    private ArticlePromptTemplate selfMediaTemplate() {
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setId(101L);
+        template.setName("百家号行业分析模板");
+        template.setChannelGroupCode("self_media");
+        template.setChannelSubCode("baijiahao");
+        template.setArticleTypeCode("industry_article");
+        template.setContactDisclosureMode("none");
+        template.setStatus(ArticlePromptTemplateService.STATUS_ACTIVE);
+        template.setCurrentVersionId(201L);
+        template.setUpdatedAt(LocalDateTime.of(2026, 5, 27, 16, 0));
+        return template;
+    }
+
+    private ArticlePromptTemplateVersion selfMediaVersion() {
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(201L);
+        version.setTemplateId(101L);
+        version.setVersionNo(1);
+        version.setStatus(ArticlePromptTemplateService.VERSION_PUBLISHED);
+        version.setSystemPrompt("系统提示 {{contentAngle}}");
+        version.setUserPromptTemplate("""
+                主题: {{topic}}
+                问题: {{topicAsQuestion}}
+                角度: {{contentAngle}}
                 """);
         return version;
     }

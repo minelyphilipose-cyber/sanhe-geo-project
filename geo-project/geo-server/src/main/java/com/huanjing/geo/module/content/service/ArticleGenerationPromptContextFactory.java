@@ -84,7 +84,7 @@ public class ArticleGenerationPromptContextFactory {
         int articleIndexInBatch = request.articleIndexInBatch();
         String topicAsQuestion = StringUtils.hasText(request.topicAsQuestion())
                 ? request.topicAsQuestion().trim()
-                : promptBuilder.topicAsQuestion(topic, articleType, articleIndexInBatch);
+                : promptBuilder.topicAsQuestion(topic, articleType, articleIndexInBatch, channel.contentStyle());
         KeywordGroup keywordGroup = validateKeywordGroup(project.getId(), request.keywordGroupId());
         Long keywordGroupId = keywordGroup == null ? null : keywordGroup.getId();
         String keywordGroupName = keywordGroup == null ? trimToNull(request.keywordGroupName()) : keywordGroup.getName();

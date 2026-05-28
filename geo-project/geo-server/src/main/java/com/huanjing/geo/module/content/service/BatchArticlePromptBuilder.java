@@ -147,7 +147,7 @@ public class BatchArticlePromptBuilder {
     }
 
     public PromptBuildResult build(PromptBuildInput input, String contactBlock) {
-        String contentAngle = resolveContentAngle(input.articleIndexInBatch());
+        String contentAngle = resolveContentAngle(input);
         String audiencePerspective = resolveAudiencePerspective(input.articleIndexInBatch());
         String businessFocus = resolveBusinessFocus(input.brandStatement(), input.brand());
         List<String> recentTitles = resolveHistoryTitles(input.project().getId(), 10);
@@ -156,7 +156,7 @@ public class BatchArticlePromptBuilder {
 
         String resolvedContactBlock = StringUtils.hasText(contactBlock) ? contactBlock.trim() : "";
         String systemPrompt = resolveGlobalRuleVariables(
-                withGlobalRules(SYSTEM_PROMPT, input.forbiddenPhrases()),
+                withGlobalRules(SYSTEM_PROMPT, input.forbiddenPhrases(), input),
                 input,
                 contentAngle,
                 recentTitles,
@@ -204,7 +204,7 @@ public class BatchArticlePromptBuilder {
     public PromptBuildResult buildFromTemplate(PromptBuildInput input,
                                                ArticlePromptTemplate template,
                                                ArticlePromptTemplateVersion version) {
-        String contentAngle = resolveContentAngle(input.articleIndexInBatch());
+        String contentAngle = resolveContentAngle(input);
         String audiencePerspective = resolveAudiencePerspective(input.articleIndexInBatch());
         String businessFocus = resolveBusinessFocus(input.brandStatement(), input.brand());
         List<String> recentTitles = resolveHistoryTitles(input.project().getId(), 10);
@@ -212,7 +212,7 @@ public class BatchArticlePromptBuilder {
         Map<String, String> brandFacts = buildBrandFacts(input);
         String templateSystemPrompt = StringUtils.hasText(version.getSystemPrompt()) ? version.getSystemPrompt() : SYSTEM_PROMPT;
         String systemPrompt = resolveGlobalRuleVariables(
-                withGlobalRules(templateSystemPrompt, input.forbiddenPhrases()),
+                withGlobalRules(templateSystemPrompt, input.forbiddenPhrases(), input),
                 input,
                 contentAngle,
                 recentTitles,
@@ -268,6 +268,10 @@ public class BatchArticlePromptBuilder {
     }
 
     public String topicAsQuestion(String topic, String articleType, int articleIndexInBatch) {
+        return topicAsQuestion(topic, articleType, articleIndexInBatch, null);
+    }
+
+    public String topicAsQuestion(String topic, String articleType, int articleIndexInBatch, String contentStyle) {
         String normalized = trimToNull(topic);
         if (normalized == null) {
             return "";
@@ -277,13 +281,16 @@ public class BatchArticlePromptBuilder {
                 || normalized.contains("为什么") || normalized.contains("哪些")) {
             return normalized;
         }
-        String angle = resolveContentAngle(articleIndexInBatch);
-        return switch (normalize(articleType)) {
+        String question = switch (normalize(articleType)) {
             case "faq" -> normalized + "常见问题有哪些？";
             case "scenario_content" -> "什么场景下需要重点关注" + normalized + "？";
             case "stage_advice" -> "围绕" + normalized + "，不同阶段应该注意什么？";
             default -> "如何理解" + normalized + "的选择逻辑和常见误区？";
-        } + " 本篇从“" + angle + "”角度回答。";
+        };
+        if (isSelfMediaContentStyle(contentStyle)) {
+            return question;
+        }
+        return question + " 本篇从“" + resolveContentAngle(articleIndexInBatch) + "”角度回答。";
     }
 
     private String buildUserPrompt(PromptBuildInput input,
@@ -445,8 +452,13 @@ public class BatchArticlePromptBuilder {
         return facts;
     }
 
-    private String withGlobalRules(String systemPrompt, List<String> forbiddenPhrases) {
-        return GLOBAL_TRUTHFULNESS_RULES
+    private String withGlobalRules(String systemPrompt, List<String> forbiddenPhrases, PromptBuildInput input) {
+        String globalRules = isSelfMediaContentStyle(input.contentStyle())
+                ? GLOBAL_TRUTHFULNESS_RULES.replace(
+                "生成标题时必须结合 {{topic}}、{{contentAngle}}、{{recentTitles}} 做差异化表达。",
+                "生成标题时必须结合 {{topic}}、{{recentTitles}} 做差异化表达。")
+                : GLOBAL_TRUTHFULNESS_RULES;
+        return globalRules
                 + "\n\n# 禁用表达\n\n"
                 + forbiddenPhrasesInstruction(forbiddenPhrases)
                 + "\n\n# 模板级系统提示词\n\n"
@@ -627,6 +639,14 @@ public class BatchArticlePromptBuilder {
 
     private String resolveContentAngle(int articleIndexInBatch) {
         return CONTENT_ANGLES.get(Math.floorMod(articleIndexInBatch - 1, CONTENT_ANGLES.size()));
+    }
+
+    private String resolveContentAngle(PromptBuildInput input) {
+        return isSelfMediaContentStyle(input.contentStyle()) ? null : resolveContentAngle(input.articleIndexInBatch());
+    }
+
+    private boolean isSelfMediaContentStyle(String contentStyle) {
+        return ArticlePromptChannels.SELF_MEDIA_SUBS.contains(normalize(contentStyle));
     }
 
     private String resolveAudiencePerspective(int articleIndexInBatch) {
