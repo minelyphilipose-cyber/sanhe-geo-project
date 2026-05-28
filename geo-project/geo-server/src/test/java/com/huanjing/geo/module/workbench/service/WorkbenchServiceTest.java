@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.workbench.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.DistributionTask;
@@ -10,6 +12,8 @@ import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
+import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleReportMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.report.entity.Report;
@@ -25,11 +29,14 @@ import com.huanjing.geo.module.system.mapper.SystemAlertMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.PermissionService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.mockito.ArgumentCaptor;
 
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -43,6 +50,7 @@ class WorkbenchServiceTest {
     private PermissionService permissionService;
     private CompanyMapper companyMapper;
     private BrandMapper brandMapper;
+    private PresaleReportMapper presaleReportMapper;
     private ProjectMapper projectMapper;
     private ReportMapper reportMapper;
     private ArticleDraftMapper articleDraftMapper;
@@ -54,12 +62,25 @@ class WorkbenchServiceTest {
     private PublishSiteMapper publishSiteMapper;
     private WorkbenchService workbenchService;
 
+    @BeforeAll
+    static void initTableInfo() {
+        initTableInfo(Company.class);
+        initTableInfo(Brand.class);
+        initTableInfo(Project.class);
+        initTableInfo(Report.class);
+        initTableInfo(ArticleDraft.class);
+        initTableInfo(DistributionTask.class);
+        initTableInfo(PresaleReport.class);
+        initTableInfo(SystemAlert.class);
+    }
+
     @BeforeEach
     void setUp() {
         currentUserService = mock(CurrentUserService.class);
         permissionService = mock(PermissionService.class);
         companyMapper = mock(CompanyMapper.class);
         brandMapper = mock(BrandMapper.class);
+        presaleReportMapper = mock(PresaleReportMapper.class);
         projectMapper = mock(ProjectMapper.class);
         reportMapper = mock(ReportMapper.class);
         articleDraftMapper = mock(ArticleDraftMapper.class);
@@ -74,6 +95,7 @@ class WorkbenchServiceTest {
                 permissionService,
                 companyMapper,
                 brandMapper,
+                presaleReportMapper,
                 projectMapper,
                 reportMapper,
                 articleDraftMapper,
@@ -84,6 +106,36 @@ class WorkbenchServiceTest {
                 aiPlatformConfigMapper,
                 publishSiteMapper
         );
+    }
+
+    @Test
+    void salesOverviewUsesSalesOwnerForCustomersAndCreatedByForReports() {
+        SysUser sales = user(66L, "sales");
+        when(currentUserService.requireCurrentUser()).thenReturn(sales);
+        when(companyMapper.selectCount(any())).thenReturn(3L);
+        when(presaleReportMapper.selectCount(any())).thenReturn(7L);
+
+        var overview = workbenchService.salesOverview();
+
+        verify(currentUserService).ensurePermission("workbench.sales.read");
+        assertEquals(3L, overview.getCustomerCount());
+        assertEquals(7L, overview.getReportCount());
+
+        ArgumentCaptor<LambdaQueryWrapper<Company>> companyScope = wrapperCaptor();
+        verify(companyMapper, org.mockito.Mockito.times(3)).selectCount(companyScope.capture());
+        for (LambdaQueryWrapper<Company> wrapper : companyScope.getAllValues()) {
+            String sql = wrapper.getSqlSegment();
+            assertTrue(sql.contains("sales_owner_id"));
+        }
+
+        ArgumentCaptor<LambdaQueryWrapper<PresaleReport>> reportScope = wrapperCaptor();
+        verify(presaleReportMapper, org.mockito.Mockito.times(5)).selectCount(reportScope.capture());
+        for (LambdaQueryWrapper<PresaleReport> wrapper : reportScope.getAllValues()) {
+            String sql = wrapper.getSqlSegment();
+            assertTrue(sql.contains("created_by"));
+            assertFalse(sql.contains("sales_owner_id"));
+            assertFalse(sql.contains("owner_id"));
+        }
     }
 
     @Test
@@ -165,5 +217,13 @@ class WorkbenchServiceTest {
         user.setRole(role);
         user.setIsActive(true);
         return user;
+    }
+
+    private static void initTableInfo(Class<?> entityType) {
+        try {
+            TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), entityType);
+        } catch (IllegalStateException ignored) {
+            // MyBatis-Plus keeps table metadata in a static cache shared across tests.
+        }
     }
 }
