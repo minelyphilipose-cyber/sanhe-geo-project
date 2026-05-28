@@ -59,8 +59,10 @@ public class ArticleGenerationPromptContextFactory {
                 StringUtils.hasText(task.getTopic()) ? task.getTopic() : batch.getTopic(),
                 task.getTopicAsQuestion(),
                 task.getLength(),
-                task.getKeywordGroupId(),
-                task.getKeywordGroupName(),
+                // Batch topic provenance stays on the task; prompt keyword selection follows
+                // the same project-level rules as single template generation.
+                null,
+                null,
                 task.getExtraPrompt(),
                 task.getPromptTemplateId(),
                 task.getPromptTemplateVersionId(),
@@ -241,8 +243,8 @@ public class ArticleGenerationPromptContextFactory {
         return keywordGroupResultMapper.selectList(
                 new LambdaQueryWrapper<KeywordGroupResult>()
                         .in(KeywordGroupResult::getGroupId, groupIds)
-                        .orderByAsc(KeywordGroupResult::getGroupId, KeywordGroupResult::getSortOrder, KeywordGroupResult::getId)
-                        .last("LIMIT 12")
+                        .eq(KeywordGroupResult::getQuestionTier, "A")
+                        .last("ORDER BY RAND() LIMIT 5")
         ).stream()
                 .map(KeywordGroupResult::getKeywordText)
                 .filter(StringUtils::hasText)

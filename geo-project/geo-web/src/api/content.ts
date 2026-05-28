@@ -347,8 +347,19 @@ export interface ArticleTemplatePreviewResponse {
   durationMs?: number | null
 }
 
+export interface ArticleTemplateGenerateResponse {
+  articleId: number
+  status: string
+}
+
 export function previewArticleTemplate(data: ArticleTemplatePreviewRequest) {
   return request.post<R<ArticleTemplatePreviewResponse>>('/content/articles/template-preview', data, {
+    timeout: 180000,
+  })
+}
+
+export function generateArticleTemplate(data: ArticleTemplatePreviewRequest) {
+  return request.post<R<ArticleTemplateGenerateResponse>>('/content/articles/template-generate', data, {
     timeout: 180000,
   })
 }

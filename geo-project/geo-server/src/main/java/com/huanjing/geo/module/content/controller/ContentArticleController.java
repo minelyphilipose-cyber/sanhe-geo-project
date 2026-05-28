@@ -87,6 +87,13 @@ public class ContentArticleController {
         return R.ok(await(articleAiDraftService.templatePreview(req)));
     }
 
+    @PostMapping("/template-generate")
+    public R<ArticleAiDraftResponse> templateGenerate(
+            @Valid @RequestBody ArticleTemplatePreviewRequest req
+    ) throws Exception {
+        return R.ok(await(articleAiDraftService.templateGenerate(req)));
+    }
+
     @PostMapping("/batch-generate")
     public R<BatchArticleGenerateResponse> batchGenerate(@Valid @RequestBody BatchArticleGenerateRequest req) {
         return R.ok(batchArticleGenerationService.create(req));

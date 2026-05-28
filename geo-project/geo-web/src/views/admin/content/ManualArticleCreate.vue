@@ -93,17 +93,28 @@
             <div class="section-header-left">
               <span class="section-index">1</span>
               <span class="section-title">AI 生成设置</span>
-              <span class="section-desc">生成后回填为可编辑草稿，保存后直接进入就绪状态</span>
+              <span class="section-desc">生成草稿可编辑；生成并保存会直接落为正式文章</span>
             </div>
-            <el-button class="generate-button" type="primary" :loading="generating" :disabled="!canGenerate" @click="generateAiPreview">
-              {{ generating ? '生成中' : aiMetadata ? '重新生成' : '生成草稿' }}
-            </el-button>
+            <div class="ai-actions">
+              <el-button class="generate-button" type="primary" :loading="generating" :disabled="!canGenerate" @click="generateAiPreview">
+                {{ generating ? '生成中' : aiMetadata ? '重新生成' : '生成草稿' }}
+              </el-button>
+              <el-button
+                v-if="aiGenerateMode === 'template'"
+                class="generate-button save-template-button"
+                :loading="templateSaving"
+                :disabled="!canTemplateGenerateAndSave"
+                @click="generateAndSaveTemplateArticle"
+              >
+                {{ templateSaving ? '保存中' : '生成并保存' }}
+              </el-button>
+            </div>
           </header>
           <div class="section-body">
             <div class="ai-mode-row">
               <el-segmented v-model="aiGenerateMode" :options="aiGenerateModeOptions" />
               <span class="form-help">
-                {{ aiGenerateMode === 'template' ? '使用批量同源模板装配，适合验证正式投放效果' : '保留原自由提示词生成逻辑' }}
+                {{ aiGenerateMode === 'template' ? '使用批量同源模板装配；可先试写编辑，也可直接生成正式文章' : '保留原自由提示词生成逻辑' }}
               </span>
             </div>
 
@@ -121,6 +132,7 @@
                 maxlength="1000"
                 show-word-limit
                 placeholder="如：2026 年 RAG 在法律行业的落地路径"
+                @input="handleAiTopicInput"
               />
               <div v-if="selectedQuestion" class="selected-question-line">
                 已选问题词：{{ selectedQuestion.questionText }}
@@ -162,54 +174,51 @@
             </template>
 
             <template v-else>
-              <div class="template-control-grid">
-                <div class="form-item">
-                  <label class="form-label required">发布渠道</label>
-                  <el-select
-                    v-model="templateForm.channelKey"
-                    filterable
-                    placeholder="选择渠道"
-                    :loading="generationOptionsLoading"
-                    @change="handleTemplateChannelChange"
-                  >
-                    <el-option-group
-                      v-for="group in templateChannelGroups"
-                      :key="group.code"
-                      :label="group.name"
+              <div class="template-settings">
+                <div class="template-control-grid template-primary-grid">
+                  <div class="form-item">
+                    <label class="form-label required">发布渠道</label>
+                    <el-select
+                      v-model="templateForm.channelKey"
+                      filterable
+                      placeholder="选择渠道"
+                      :loading="generationOptionsLoading"
+                      @change="handleTemplateChannelChange"
                     >
-                      <el-option
-                        v-for="channel in group.channels"
-                        :key="channelKey(channel)"
-                        :label="channel.label"
-                        :value="channelKey(channel)"
-                        :disabled="!channel.enabled || channel.templateCount <= 0"
+                      <el-option-group
+                        v-for="group in templateChannelGroups"
+                        :key="group.code"
+                        :label="group.name"
                       >
-                        <div class="template-option-line">
-                          <span>{{ channel.label }}</span>
-                          <small>{{ channel.templateCount }} 个模板</small>
-                        </div>
-                      </el-option>
-                    </el-option-group>
-                  </el-select>
+                        <el-option
+                          v-for="channel in group.channels"
+                          :key="channelKey(channel)"
+                          :label="channel.label"
+                          :value="channelKey(channel)"
+                          :disabled="!channel.enabled || channel.templateCount <= 0"
+                        >
+                          <div class="template-option-line">
+                            <span>{{ channel.label }}</span>
+                            <small>{{ channel.templateCount }} 个模板</small>
+                          </div>
+                        </el-option>
+                      </el-option-group>
+                    </el-select>
+                  </div>
+                  <div class="form-item">
+                    <label class="form-label">模板选择方式</label>
+                    <el-segmented v-model="templateForm.selectionMode" :options="templateSelectionModeOptions" block @change="handleTemplateSelectionModeChange" />
+                  </div>
                 </div>
-                <div class="form-item">
-                  <label class="form-label">篇幅</label>
-                  <el-segmented v-model="aiForm.length" :options="lengthOptions" block />
-                </div>
-              </div>
 
-              <div class="template-control-grid">
-                <div class="form-item">
-                  <label class="form-label">模板选择方式</label>
-                  <el-segmented v-model="templateForm.selectionMode" :options="templateSelectionModeOptions" block @change="handleTemplateSelectionModeChange" />
-                </div>
-                <div class="form-item">
+                <div class="form-item template-version-field">
                   <label class="form-label required">提示词模板</label>
                   <el-select
                     v-model="templateForm.templateVersionKey"
                     filterable
                     placeholder="选择模板版本"
                     :disabled="!selectedTemplateChannel"
+                    @change="handleTemplateVersionChange"
                   >
                     <el-option
                       v-for="item in availableTemplateOptions"
@@ -219,39 +228,38 @@
                     >
                       <div class="template-option-line">
                         <span>{{ item.templateName }}</span>
-                        <small>{{ item.questionSceneName || item.questionSceneCode || '通用' }}</small>
+                        <small>{{ templateOptionMeta(item) }}</small>
                       </div>
                     </el-option>
                   </el-select>
+                  <div v-if="templateForm.selectionMode === 'manual'" class="form-help template-select-help">
+                    手动选择会展示当前渠道下所有启用模板，选中后文章类型随模板调整。
+                  </div>
                 </div>
-              </div>
 
-              <div class="template-control-grid">
-                <div class="form-item">
-                  <label class="form-label">关键词组</label>
-                  <el-select v-model="templateForm.keywordGroupId" clearable filterable placeholder="不指定，走项目绑定关键词 fallback">
-                    <el-option
-                      v-for="group in selectedProjectKeywordGroups"
-                      :key="group.id"
-                      :label="group.name"
-                      :value="group.id"
+                <div class="template-control-grid template-secondary-grid" :class="{ 'is-single': !hasProjectCoreKeywords }">
+                  <div v-if="hasProjectCoreKeywords" class="form-item keyword-source-field">
+                    <label class="form-label">关键词来源</label>
+                    <div class="keyword-source-box">
+                      <span class="keyword-source-title">内容策略核心关键词</span>
+                      <span class="keyword-source-text">{{ projectCoreKeywordsText }}</span>
+                    </div>
+                  </div>
+                  <div class="form-item">
+                    <label class="form-label">问题表达</label>
+                    <el-input
+                      v-model="templateForm.topicAsQuestion"
+                      maxlength="1000"
+                      clearable
+                      placeholder="留空则按批量逻辑自动生成"
                     />
-                  </el-select>
-                </div>
-                <div class="form-item">
-                  <label class="form-label">问题表达</label>
-                  <el-input
-                    v-model="templateForm.topicAsQuestion"
-                    maxlength="1000"
-                    clearable
-                    placeholder="留空则按批量逻辑自动生成"
-                  />
+                  </div>
                 </div>
               </div>
             </template>
 
             <el-collapse class="ai-extra-collapse">
-              <el-collapse-item title="补充提示词与参考资料（可选）" name="extra">
+              <el-collapse-item :title="aiGenerateMode === 'template' ? '补充要求（可选）' : '补充提示词与参考资料（可选）'" name="extra">
                 <div class="ai-extra-stack">
                   <el-input
                     v-model="aiForm.extraPrompt"
@@ -395,12 +403,60 @@
             <span>{{ selectedArticleTypeLabel }}</span>
             <span class="meta-dot" />
             <span v-if="createMode === 'auto'" class="ai-preview-badge">AI</span>
-            <span v-if="createMode === 'auto'">{{ selectedContentStyleLabel }}</span>
+            <span v-if="createMode === 'auto'">{{ previewContentStyleLabel }}</span>
             <span v-if="createMode === 'auto'" class="meta-dot" />
             <span>{{ selectedProject?.projectName || selectedProject?.brandName || '未绑定项目' }}</span>
             <span class="meta-dot" />
             <span>{{ todayText }}</span>
           </div>
+          <section v-if="templateDiagnosticsVisible" class="template-diagnostics">
+            <div class="diagnostics-head">
+              <div>
+                <strong>{{ templateDiagnosticTitle }}</strong>
+                <span>{{ templateDiagnosticSubtitle }}</span>
+              </div>
+              <el-tag :type="templateQualityTagType" size="small">
+                {{ templateQualityLabel }}
+              </el-tag>
+            </div>
+            <div class="diagnostics-grid">
+              <div>
+                <label>渠道风格</label>
+                <span>{{ templateMetadataText('channelGroupCode') }} / {{ templateMetadataText('channelSubCode') || '-' }} / {{ templateMetadataText('contentStyle') || '-' }}</span>
+              </div>
+              <div>
+                <label>问题表达</label>
+                <span>{{ templateMetadataText('topicAsQuestion') || templateForm.topicAsQuestion || '自动生成' }}</span>
+              </div>
+              <div>
+                <label>模型</label>
+                <span>{{ templateMetadataText('modelName') || templateMetadataText('modelId') || '-' }}</span>
+              </div>
+              <div>
+                <label>耗时</label>
+                <span>{{ templateDurationText }}</span>
+              </div>
+            </div>
+            <div v-if="templateUnresolvedVariables.length" class="diagnostics-warning">
+              <strong>未解析变量</strong>
+              <el-tag v-for="item in templateUnresolvedVariables" :key="item" type="danger" size="small">
+                {{ item }}
+              </el-tag>
+            </div>
+            <div v-if="templateQualityIssues.length" class="diagnostics-issues">
+              <strong>质量风险</strong>
+              <ul>
+                <li v-for="(issue, index) in templateQualityIssues" :key="index">
+                  {{ issue.message || issue.code || JSON.stringify(issue) }}
+                </li>
+              </ul>
+            </div>
+            <details v-if="templateMetadataText('promptSnapshot') || templateMetadataText('inputSnapshot')" class="diagnostics-snapshot">
+              <summary>查看 Prompt / 输入快照</summary>
+              <pre v-if="templateMetadataText('promptSnapshot')">{{ templateMetadataText('promptSnapshot') }}</pre>
+              <pre v-if="templateMetadataText('inputSnapshot')">{{ templateMetadataText('inputSnapshot') }}</pre>
+            </details>
+          </section>
           <div v-if="previewMode === 'rendered'" class="md-body" v-html="manualHtml"></div>
           <pre v-else class="raw-markdown">{{ manualMarkdown }}</pre>
         </article>
@@ -588,6 +644,7 @@ import {
 import type { BrandImageFolder, BrandMaterial, KeywordGroup, KeywordGroupQuestion, Project } from '@/types'
 import {
   createManualContentArticle,
+  generateArticleTemplate,
   getArticleGenerationOptions,
   previewArticleTemplate,
   previewAiContentArticleDraft,
@@ -595,6 +652,7 @@ import {
   type ArticleGenerationChannelOption,
   type ArticleGenerationTemplateOption,
   type ArticleAiDraftPreviewResponse,
+  type ArticleTemplatePreviewRequest,
   type ArticleTemplatePreviewResponse,
 } from '@/api/content'
 import { getBrandImageFolders, getBrandMaterialPreviewUrl } from '@/api/customer'
@@ -691,6 +749,7 @@ const createMode = ref<CreateMode>('manual')
 const aiGenerateMode = ref<AiGenerateMode>('free')
 const submitting = ref(false)
 const generating = ref(false)
+const templateSaving = ref(false)
 const generationOptionsLoading = ref(false)
 const generationOptions = ref<{ groups: ArticleGenerationChannelGroup[] } | null>(null)
 const projectLoading = ref(false)
@@ -777,7 +836,7 @@ const aiGenerateModeOptions = [
   { label: '模板生成', value: 'template' },
 ]
 const templateSelectionModeOptions = [
-  { label: '智能匹配', value: 'smart' },
+  { label: '按配置推荐', value: 'smart' },
   { label: '手动选择', value: 'manual' },
 ]
 const projectCascadeProps = {
@@ -789,8 +848,17 @@ const projectCascadeProps = {
 const projectCascadeOptions = computed(() => buildProjectCascadeOptions(projectOptions.value))
 const selectedProject = computed(() => projectOptions.value.find((project) => project.id === manualForm.projectId) || null)
 const selectedProjectKeywordGroups = computed(() => selectedProject.value?.selectedKeywordGroups || [])
+const projectCoreKeywords = computed(() => parseKeywordText(selectedProject.value?.coreKeywords))
+const hasProjectCoreKeywords = computed(() => projectCoreKeywords.value.length > 0)
+const projectCoreKeywordsText = computed(() => projectCoreKeywords.value.join('、'))
 const selectedArticleTypeLabel = computed(() => articleTypeOptions.value.find((item) => item.value === manualForm.articleType)?.label || manualForm.articleType)
 const selectedContentStyleLabel = computed(() => contentStyleOptions.value.find((item) => item.value === aiForm.contentStyle)?.label || 'AI 风格')
+const previewContentStyleLabel = computed(() => {
+  if (aiGenerateMode.value !== 'template') return selectedContentStyleLabel.value
+  const metadataStyle = templateMetadataText('contentStyle')
+  const style = metadataStyle || selectedTemplateChannel.value?.contentStyle || aiForm.contentStyle
+  return contentStyleOptions.value.find((item) => item.value === style)?.label || style || '模板风格'
+})
 const draftContentStyle = computed(() => createMode.value === 'auto' ? aiForm.contentStyle : manualForm.contentStyle)
 const draftTopic = computed(() => createMode.value === 'auto' ? aiForm.topic.trim() : manualForm.topic.trim())
 const templateChannelGroups = computed(() => generationOptions.value?.groups || [])
@@ -798,9 +866,13 @@ const selectedTemplateChannel = computed(() => findTemplateChannel(templateForm.
 const availableTemplateOptions = computed(() => {
   const channel = selectedTemplateChannel.value
   if (!channel) return []
-  return (channel.templates || []).filter((item) => item.articleTypeCode === manualForm.articleType)
+  const templates = templateForm.selectionMode === 'manual'
+    ? channel.templates || []
+    : (channel.templates || []).filter((item) => item.articleTypeCode === manualForm.articleType)
+  return [...templates].sort(compareTemplateOption)
 })
 const selectedTemplateOption = computed(() => availableTemplateOptions.value.find((item) => templateVersionKey(item) === templateForm.templateVersionKey) || null)
+const selectedTemplateArticleType = computed(() => selectedTemplateOption.value?.articleTypeCode || manualForm.articleType)
 const generatedManualMarkdown = computed(() => buildManualMarkdown())
 const manualMarkdown = computed({
   get: () => markdownOverridden.value ? markdownOverride.value : generatedManualMarkdown.value,
@@ -848,12 +920,13 @@ const canSubmit = computed(() => Boolean(
   && draftTopic.value
   && manualForm.title.trim()
   && manualMarkdown.value.trim(),
-) && !generating.value)
+) && !generating.value && !templateSaving.value)
 const canGenerate = computed(() => {
-  if (!manualForm.projectId || !manualForm.articleType || !aiForm.topic.trim() || generating.value) return false
+  if (!manualForm.projectId || !manualForm.articleType || !aiForm.topic.trim() || generating.value || templateSaving.value) return false
   if (aiGenerateMode.value === 'free') return true
   return Boolean(selectedTemplateChannel.value && selectedTemplateOption.value)
 })
+const canTemplateGenerateAndSave = computed(() => aiGenerateMode.value === 'template' && canGenerate.value && !templateSaving.value)
 const submitStateText = computed(() => {
   if (canSubmit.value) return '字段已就绪'
   if (createMode.value === 'auto' && aiMetadata.value && manualMarkdown.value.trim()) return '请确认 AI 草稿'
@@ -890,6 +963,41 @@ const filteredQuestionRows = computed(() => {
   })
 })
 const selectedQuestion = computed(() => questionRows.value.find((row) => questionKey(row) === selectedQuestionKey.value) || null)
+const templateDiagnosticsVisible = computed(() => createMode.value === 'auto' && aiMetadata.value?.generationMode === 'template_preview')
+const templateDiagnosticTitle = computed(() => {
+  const name = templateMetadataText('templateName')
+  const version = templateMetadataText('templateVersionId')
+  return name ? `${name}${version ? ` / v${version}` : ''}` : '模板生成诊断'
+})
+const templateDiagnosticSubtitle = computed(() => '本次代表批次首篇，后续批量篇目的回答角度和时间锚点会轮换。')
+const templateQualityIssues = computed(() => Array.isArray(aiMetadata.value?.qualityIssues) ? aiMetadata.value.qualityIssues as any[] : [])
+const templateUnresolvedVariables = computed(() => Array.isArray(aiMetadata.value?.unresolvedVariables) ? aiMetadata.value.unresolvedVariables as string[] : [])
+const templateQualityStatus = computed(() => templateMetadataText('qualityStatus').toLowerCase())
+const templateQualityLabel = computed(() => {
+  if (templateUnresolvedVariables.value.length > 0) return '变量未解析'
+  const status = templateQualityStatus.value
+  if (!status) return '未检查'
+  const labels: Record<string, string> = {
+    pass: '通过',
+    passed: '通过',
+    ok: '通过',
+    warning: '有风险',
+    risk: '有风险',
+    failed: '未通过',
+  }
+  return labels[status] || status
+})
+const templateQualityTagType = computed(() => {
+  const status = templateQualityStatus.value
+  if (templateUnresolvedVariables.value.length > 0 || status === 'failed' || status === 'risk') return 'danger'
+  if (templateQualityIssues.value.length > 0 || status === 'warning') return 'warning'
+  if (status === 'pass' || status === 'passed' || status === 'ok') return 'success'
+  return 'info'
+})
+const templateDurationText = computed(() => {
+  const value = aiMetadata.value?.durationMs
+  return typeof value === 'number' ? `${value} ms` : '-'
+})
 
 function createSection(): ManualSection {
   return {
@@ -958,6 +1066,20 @@ async function loadGenerationOptions() {
   }
 }
 
+async function ensureSelectedProjectDetail() {
+  const projectId = manualForm.projectId
+  if (!projectId) return
+  const project = selectedProject.value
+  if (project?.selectedKeywordGroups !== undefined && project.coreKeywords !== undefined) return
+  try {
+    const { data } = await getProjectDetail(projectId)
+    projectOptions.value = mergeProjects([data.data], projectOptions.value)
+  } catch (err) {
+    console.error(err)
+    ElMessage.warning('项目关键词组加载失败，请稍后重试')
+  }
+}
+
 function channelKey(channel: Pick<ArticleGenerationChannelOption, 'channelGroupCode' | 'channelSubCode'>) {
   return `${channel.channelGroupCode}:${channel.channelSubCode || ''}`
 }
@@ -967,8 +1089,36 @@ function templateVersionKey(item: Pick<ArticleGenerationTemplateOption, 'templat
 }
 
 function templateOptionLabel(item: ArticleGenerationTemplateOption) {
+  return `${item.templateName} / ${templateOptionMeta(item)}`
+}
+
+function templateOptionMeta(item: ArticleGenerationTemplateOption) {
+  const type = item.articleTypeName || articleTypeOptions.value.find((option) => option.value === item.articleTypeCode)?.label || item.articleTypeCode || '文章'
   const scene = item.questionSceneName || item.questionSceneCode || '通用'
-  return `${item.templateName} / ${scene}`
+  return `${type} · ${scene}`
+}
+
+function parseKeywordText(value?: string | string[] | null) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean)
+  }
+  if (!value) return []
+  return value.split(/[,，、\n\r]+/).map((item) => item.trim()).filter(Boolean)
+}
+
+function compareTemplateOption(a: ArticleGenerationTemplateOption, b: ArticleGenerationTemplateOption) {
+  const typeOrder = articleTypeIndex(a.articleTypeCode) - articleTypeIndex(b.articleTypeCode)
+  if (typeOrder !== 0) return typeOrder
+  const sceneOrder = Number(Boolean(a.questionSceneCode)) - Number(Boolean(b.questionSceneCode))
+  if (sceneOrder !== 0) return sceneOrder
+  const sortOrder = (a.sortOrder || 0) - (b.sortOrder || 0)
+  if (sortOrder !== 0) return sortOrder
+  return (b.weight || 0) - (a.weight || 0)
+}
+
+function articleTypeIndex(value?: string | null) {
+  const index = articleTypeOptions.value.findIndex((item) => item.value === value)
+  return index >= 0 ? index : 999
 }
 
 function findTemplateChannel(key: string) {
@@ -1002,6 +1152,13 @@ function handleTemplateSelectionModeChange() {
   syncTemplateSelection()
 }
 
+function handleTemplateVersionChange() {
+  const template = selectedTemplateOption.value
+  if (template?.articleTypeCode && manualForm.articleType !== template.articleTypeCode) {
+    manualForm.articleType = template.articleTypeCode
+  }
+}
+
 function syncTemplateSelection() {
   const options = availableTemplateOptions.value
   if (!options.length) {
@@ -1017,6 +1174,26 @@ function syncTemplateSelection() {
     : null
   const fallback = options.find((item) => !item.questionSceneCode) || options[0]
   templateForm.templateVersionKey = templateVersionKey(recommended || fallback)
+  handleTemplateVersionChange()
+}
+
+function handleAiTopicInput() {
+  if (aiGenerateMode.value !== 'template') return
+  if (!selectedQuestion.value && !templateForm.topicAsQuestion.trim()) return
+  selectedQuestionKey.value = ''
+  templateForm.topicAsQuestion = ''
+  templateForm.keywordGroupId = undefined
+  if (templateForm.selectionMode === 'smart') {
+    syncTemplateSelection()
+  }
+}
+
+function templateMetadataText(key: string) {
+  const value = aiMetadata.value?.[key]
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  return ''
 }
 
 async function loadInheritedProject(projectId: number) {
@@ -1032,7 +1209,7 @@ async function loadInheritedProject(projectId: number) {
 
 function mergeProjects(primary: Project[], secondary: Project[]) {
   const map = new Map<number, Project>()
-  for (const item of [...primary, ...secondary]) {
+  for (const item of [...secondary, ...primary]) {
     map.set(item.id, item)
   }
   return Array.from(map.values())
@@ -1241,7 +1418,7 @@ async function confirmSelectedQuestion() {
     )
     aiForm.topic = question.questionText
     if (aiGenerateMode.value === 'template') {
-      templateForm.keywordGroupId = question.groupId
+      templateForm.keywordGroupId = undefined
       templateForm.topicAsQuestion = question.questionText
       syncTemplateSelection()
     }
@@ -1494,20 +1671,8 @@ async function generateAiPreview() {
 }
 
 async function generateTemplatePreview() {
-  if (!manualForm.projectId) {
-    ElMessage.warning('请选择绑定项目')
-    return
-  }
-  const channel = selectedTemplateChannel.value
-  if (!channel) {
-    ElMessage.warning('请选择发布渠道')
-    return
-  }
-  const template = selectedTemplateOption.value
-  if (!template) {
-    ElMessage.warning('请选择可用的提示词模板版本')
-    return
-  }
+  const requestData = buildTemplateRequest()
+  if (!requestData) return
   generating.value = true
   generationNotice.value = {
     type: 'info',
@@ -1527,30 +1692,96 @@ async function generateTemplatePreview() {
   }, 90000)
 
   try {
-    const { data } = await previewArticleTemplate({
-      projectId: manualForm.projectId,
-      articleType: manualForm.articleType,
-      channelGroupCode: channel.channelGroupCode,
-      channelSubCode: channel.channelSubCode || undefined,
-      topic: aiForm.topic.trim(),
-      topicAsQuestion: templateForm.topicAsQuestion.trim() || undefined,
-      length: aiForm.length,
-      keywordGroupId: templateForm.keywordGroupId || undefined,
-      extraPrompt: aiForm.extraPrompt.trim() || undefined,
-      promptTemplateId: template.templateId,
-      promptTemplateVersionId: template.templateVersionId,
-    })
+    const { data } = await previewArticleTemplate(requestData)
     applyTemplatePreview(data.data)
   } catch (err) {
     console.error(err)
     generationNotice.value = {
       type: 'error',
       title: aiGenerationFailureTitle(err),
-      description: errorMessage(err, '模板生成失败，请检查模板、渠道和关键词组配置。'),
+      description: errorMessage(err, '模板生成失败，请检查模板和渠道配置。'),
     }
   } finally {
     generating.value = false
     clearStillGeneratingTimer()
+  }
+}
+
+async function generateAndSaveTemplateArticle() {
+  const requestData = buildTemplateRequest()
+  if (!requestData) return
+  templateSaving.value = true
+  generationNotice.value = {
+    type: 'info',
+    title: '正在按模板生成并保存',
+    description: '本次会直接生成正式草稿，不回填到编辑区。需要人工修改时请先生成草稿。',
+  }
+  parseNotice.value = null
+  clearStillGeneratingTimer()
+  stillGeneratingTimer = setTimeout(() => {
+    if (templateSaving.value) {
+      generationNotice.value = {
+        type: 'info',
+        title: '仍在生成中',
+        description: '模板生成并保存正在等待模型返回，已保留你的全部输入。',
+      }
+    }
+  }, 90000)
+
+  try {
+    const { data } = await generateArticleTemplate(requestData)
+    ElMessage.success('模板文章已生成并保存，可直接发布')
+    router.push({
+      path: '/admin/content/execution',
+      query: {
+        projectId: String(manualForm.projectId),
+        articleType: requestData.articleType,
+        articleId: String(data.data.articleId),
+      },
+    })
+  } catch (err) {
+    console.error(err)
+    generationNotice.value = {
+      type: 'error',
+      title: aiGenerationFailureTitle(err),
+      description: errorMessage(err, '模板生成并保存失败，请检查模板和渠道配置。'),
+    }
+  } finally {
+    templateSaving.value = false
+    clearStillGeneratingTimer()
+  }
+}
+
+function buildTemplateRequest(): ArticleTemplatePreviewRequest | null {
+  if (!manualForm.projectId) {
+    ElMessage.warning('请选择绑定项目')
+    return null
+  }
+  if (!aiForm.topic.trim()) {
+    ElMessage.warning('请填写选题 / 主题')
+    return null
+  }
+  const channel = selectedTemplateChannel.value
+  if (!channel) {
+    ElMessage.warning('请选择发布渠道')
+    return null
+  }
+  const template = selectedTemplateOption.value
+  if (!template) {
+    ElMessage.warning('请选择可用的提示词模板版本')
+    return null
+  }
+  return {
+    projectId: manualForm.projectId,
+    articleType: selectedTemplateArticleType.value,
+    channelGroupCode: channel.channelGroupCode,
+    channelSubCode: channel.channelSubCode || undefined,
+    topic: aiForm.topic.trim(),
+    topicAsQuestion: templateForm.topicAsQuestion.trim() || undefined,
+    keywordGroupId: undefined,
+    extraPrompt: aiForm.extraPrompt.trim() || undefined,
+    promptTemplateId: template.templateId,
+    promptTemplateVersionId: template.templateVersionId,
   }
 }
 
@@ -1793,7 +2024,7 @@ onMounted(async () => {
   }
 })
 
-watch(() => manualForm.projectId, () => {
+watch(() => manualForm.projectId, async () => {
   imageFolders.value = []
   selectedImageFolderId.value = null
   selectedImageMaterialId.value = null
@@ -1802,11 +2033,19 @@ watch(() => manualForm.projectId, () => {
   selectedQuestionKey.value = ''
   questionLoadedProjectId.value = null
   templateForm.keywordGroupId = undefined
+  templateForm.topicAsQuestion = ''
+  if (aiGenerateMode.value === 'template') {
+    await ensureSelectedProjectDetail()
+  }
   cleanupImageThumbs()
 })
 
 watch(() => manualForm.articleType, () => {
   syncTemplateSelection()
+})
+
+watch(hasProjectCoreKeywords, () => {
+  templateForm.keywordGroupId = undefined
 })
 
 watch(createMode, (mode) => {
@@ -1822,6 +2061,7 @@ watch(aiGenerateMode, async (mode) => {
   generationNotice.value = null
   parseNotice.value = null
   if (mode === 'template') {
+    await ensureSelectedProjectDetail()
     await loadGenerationOptions()
     ensureTemplateDefaults()
   }
@@ -2024,11 +2264,24 @@ onBeforeUnmount(() => {
   background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
 }
 
+.ai-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .generate-button {
   min-width: 96px;
   height: 34px;
   border-radius: 7px;
   font-weight: 700;
+}
+
+.save-template-button {
+  border-color: #2563eb;
+  color: #1d4ed8;
 }
 
 .generate-button.is-disabled,
@@ -2046,6 +2299,22 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
+  padding: 4px;
+  border: 1px solid #e6eef8;
+  border-radius: 10px;
+  background: #f8fbff;
+}
+
+.ai-mode-row :deep(.el-segmented) {
+  --el-segmented-item-selected-bg-color: #2563eb;
+  --el-segmented-item-selected-color: #ffffff;
+  flex-shrink: 0;
+  border-radius: 8px;
+}
+
+.ai-mode-row .form-help {
+  min-width: 0;
+  line-height: 1.5;
 }
 
 .ai-grid,
@@ -2090,6 +2359,85 @@ onBeforeUnmount(() => {
   margin-top: 16px;
 }
 
+.template-settings {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #e2eaf5;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.template-settings .template-control-grid {
+  margin-top: 0;
+}
+
+.template-primary-grid {
+  align-items: end;
+}
+
+.template-version-field,
+.template-secondary-grid {
+  margin-top: 14px;
+}
+
+.template-secondary-grid.is-single {
+  grid-template-columns: 1fr;
+}
+
+.template-settings :deep(.el-select__wrapper),
+.template-settings :deep(.el-input__wrapper) {
+  min-height: 38px;
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px #dbe4f0 inset;
+}
+
+.template-settings :deep(.el-select__wrapper:hover),
+.template-settings :deep(.el-input__wrapper:hover) {
+  box-shadow: 0 0 0 1px #bfdbfe inset;
+}
+
+.template-settings :deep(.el-select__wrapper.is-focused),
+.template-settings :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px #2563eb inset, 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.template-settings :deep(.el-segmented) {
+  min-height: 38px;
+  border-radius: 8px;
+  background: #eef3f9;
+}
+
+.template-settings :deep(.el-segmented__item) {
+  border-radius: 7px;
+}
+
+.keyword-source-box {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #eff6ff;
+}
+
+.keyword-source-title {
+  flex-shrink: 0;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.keyword-source-text {
+  min-width: 0;
+  overflow: hidden;
+  color: #334155;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .template-option-line {
   display: flex;
   align-items: center;
@@ -2107,6 +2455,100 @@ onBeforeUnmount(() => {
 .template-option-line small {
   flex-shrink: 0;
   color: #94a3b8;
+}
+
+.template-diagnostics {
+  margin-bottom: 22px;
+  padding: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 7px;
+  background: #f8fbff;
+}
+
+.diagnostics-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.diagnostics-head strong,
+.diagnostics-issues strong,
+.diagnostics-warning strong {
+  display: block;
+  color: #1f2937;
+  font-size: 13px;
+}
+
+.diagnostics-head span {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+
+.diagnostics-grid label {
+  display: block;
+  margin-bottom: 3px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.diagnostics-grid span {
+  display: block;
+  overflow-wrap: anywhere;
+  color: #334155;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.diagnostics-warning,
+.diagnostics-issues,
+.diagnostics-snapshot {
+  margin-top: 12px;
+}
+
+.diagnostics-warning {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.diagnostics-issues ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #b45309;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.diagnostics-snapshot summary {
+  color: #2563eb;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.diagnostics-snapshot pre {
+  max-height: 240px;
+  overflow: auto;
+  margin: 10px 0 0;
+  padding: 10px;
+  border-radius: 7px;
+  background: #0f172a;
+  color: #dbeafe;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .style-field {
@@ -3358,6 +3800,11 @@ onBeforeUnmount(() => {
   color: #64748b;
 }
 
+.template-select-help {
+  margin-top: 6px;
+  font-size: 12px;
+}
+
 .paragraph-block {
   border-color: #dbeafe;
   border-radius: 12px;
@@ -3826,7 +4273,9 @@ onBeforeUnmount(() => {
 
   .sub-toolbar-left,
   .inline-field,
-  .ai-control-grid {
+  .ai-control-grid,
+  .template-control-grid,
+  .diagnostics-grid {
     align-items: stretch;
     flex-direction: column;
   }
@@ -3835,7 +4284,9 @@ onBeforeUnmount(() => {
     flex-direction: row;
   }
 
-  .ai-control-grid {
+  .ai-control-grid,
+  .template-control-grid,
+  .diagnostics-grid {
     display: flex;
   }
 

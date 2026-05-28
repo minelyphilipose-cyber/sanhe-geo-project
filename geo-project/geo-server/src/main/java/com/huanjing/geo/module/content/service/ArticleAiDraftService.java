@@ -48,6 +48,9 @@ public class ArticleAiDraftService {
 
     private static final String STATUS_APPROVED = "approved";
     private static final String GENERATED_BY_AI = "ai";
+    private static final String GENERATED_BY_TEMPLATE_AI = "template_ai";
+    private static final String ALLOCATION_MODE_CUSTOM = "custom";
+    private static final String TEMPLATE_SOURCE_CUSTOM = "custom";
     private static final String DEFAULT_CONTENT_STYLE = "wechat";
     private static final String DEFAULT_TONE = "professional";
     private static final String DEFAULT_LENGTH = "medium";
@@ -149,6 +152,28 @@ public class ArticleAiDraftService {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermissionOrLegacy("content.ai.generate", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
 
+        ArticleGenerationPromptContextFactory.PromptContextResult context = prepareTemplateContext(req, operator);
+
+        return CompletableFuture.supplyAsync(
+                () -> templatePreviewInWorker(context, operator, req.getModelPlatformCode(), req.getModelId()),
+                articleAiDraftExecutor
+        );
+    }
+
+    public CompletableFuture<ArticleAiDraftResponse> templateGenerate(ArticleTemplatePreviewRequest req) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermissionOrLegacy("content.ai.generate", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
+
+        ArticleGenerationPromptContextFactory.PromptContextResult context = prepareTemplateContext(req, operator);
+
+        return CompletableFuture.supplyAsync(
+                () -> templateGenerateInWorker(context, operator, req.getModelPlatformCode(), req.getModelId()),
+                articleAiDraftExecutor
+        );
+    }
+
+    private ArticleGenerationPromptContextFactory.PromptContextResult prepareTemplateContext(ArticleTemplatePreviewRequest req,
+                                                                                            SysUser operator) {
         Project project = requireProject(req.getProjectId());
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
@@ -171,12 +196,7 @@ public class ArticleAiDraftService {
                 req.getPromptTemplateVersionId(),
                 1
         );
-        ArticleGenerationPromptContextFactory.PromptContextResult context = promptContextFactory.buildStrict(contextRequest);
-
-        return CompletableFuture.supplyAsync(
-                () -> templatePreviewInWorker(context, operator, req.getModelPlatformCode(), req.getModelId()),
-                articleAiDraftExecutor
-        );
+        return promptContextFactory.buildStrict(contextRequest);
     }
 
     private ArticleTemplatePreviewResponse templatePreviewInWorker(ArticleGenerationPromptContextFactory.PromptContextResult context,
@@ -206,7 +226,7 @@ public class ArticleAiDraftService {
             return new ArticleTemplatePreviewResponse(
                     generated.title(),
                     generated.content(),
-                    enrichPromptSnapshot(context.prompt().promptSnapshot(), generated.result()),
+                    enrichPromptSnapshot(context.prompt().promptSnapshot(), generated.result(), "AI_PREVIEW"),
                     context.prompt().inputSnapshot(),
                     context.template().getId(),
                     context.version().getId(),
@@ -253,6 +273,60 @@ public class ArticleAiDraftService {
         }
     }
 
+    private ArticleAiDraftResponse templateGenerateInWorker(ArticleGenerationPromptContextFactory.PromptContextResult context,
+                                                            SysUser operator,
+                                                            String requestedPlatformCode,
+                                                            String requestedModelId) {
+        long started = System.nanoTime();
+        ArticleModelResolver.ModelSelection model = null;
+        try {
+            ArticleGenerationEngine.GeneratedArticle generated = articleGenerationEngine.generate(
+                    new ArticleGenerationEngine.GenerateInput(
+                            context.project(),
+                            context.brand(),
+                            context.prompt().systemPrompt(),
+                            context.prompt().userPrompt(),
+                            requestedPlatformCode,
+                            requestedModelId,
+                            true,
+                            true,
+                            true,
+                            context.forbiddenPhrases()
+                    )
+            );
+            model = generated.model();
+            ArticleDraft draft = persistTemplateDraft(context, operator, generated, model);
+            auditGenerated(AuditResult.SUCCESS, operator, context.project(), draft.getId(), context.prompt().userPrompt().length(),
+                    model.platformCode(), model.modelId(), elapsedMs(started), "template_generation_generated", null);
+            return new ArticleAiDraftResponse(draft.getId(), STATUS_APPROVED);
+        } catch (BizException ex) {
+            auditGenerated(AuditResult.FAILURE, operator, context.project(), null, context.prompt().userPrompt().length(),
+                    platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "template_generation_failed", ex.getCode());
+            throw ex;
+        } catch (LlmInvokeException ex) {
+            log.warn("AI article template generation LLM invoke failed projectId={} platform={} model={} msg={}",
+                    context.project().getId(), platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), ex.getMessage());
+            BizException mapped = mapLlmInvokeFailure(ex, "AI article template generation failed");
+            auditGenerated(AuditResult.FAILURE, operator, context.project(), null, context.prompt().userPrompt().length(),
+                    platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "template_generation_failed", mapped.getCode());
+            throw mapped;
+        } catch (LlmPermitUnavailableException ex) {
+            log.warn("AI article template generation LLM permit busy projectId={} platform={} model={} scope={}",
+                    context.project().getId(), platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), ex.getScope());
+            auditGenerated(AuditResult.FAILURE, operator, context.project(), null, context.prompt().userPrompt().length(),
+                    platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "template_generation_failed",
+                    ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED);
+            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI 模型当前繁忙，请稍后重试");
+        } catch (Exception ex) {
+            log.warn("AI article template generation failed projectId={} platform={} model={}",
+                    context.project().getId(), platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), ex);
+            auditGenerated(AuditResult.FAILURE, operator, context.project(), null, context.prompt().userPrompt().length(),
+                    platformCode(model, requestedPlatformCode), modelId(model, requestedModelId), elapsedMs(started), "template_generation_failed",
+                    ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED);
+            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "AI article template generation failed");
+        }
+    }
+
     private ArticleAiDraftPreviewResponse previewInWorker(Project project,
                                                           SysUser operator,
                                                           BatchArticlePromptBuilder.PromptBuildResult prompt,
@@ -278,7 +352,7 @@ public class ArticleAiDraftService {
                     )
             );
             model = generated.model();
-            String promptSnapshot = enrichPromptSnapshot(prompt.promptSnapshot(), generated.result());
+            String promptSnapshot = enrichPromptSnapshot(prompt.promptSnapshot(), generated.result(), "AI_PREVIEW");
             String responseSnapshot = modelResponseSnapshot(generated.result());
             auditGenerated(AuditResult.SUCCESS, operator, project, null, prompt.userPrompt().length(),
                     model.platformCode(), model.modelId(), elapsedMs(started), "preview_generated", null);
@@ -408,6 +482,54 @@ public class ArticleAiDraftService {
         }));
     }
 
+    private ArticleDraft persistTemplateDraft(ArticleGenerationPromptContextFactory.PromptContextResult context,
+                                              SysUser operator,
+                                              ArticleGenerationEngine.GeneratedArticle generated,
+                                              ArticleModelResolver.ModelSelection model) {
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        return Objects.requireNonNull(template.execute(status -> {
+            BatchArticlePromptBuilder.PromptBuildInput input = context.promptInput();
+            String title = StringUtils.hasText(generated.title()) ? generated.title().trim() : extractTitle(generated.content());
+
+            ArticleDraft draft = new ArticleDraft();
+            draft.setBatchId(null);
+            draft.setProjectId(context.project().getId());
+            draft.setArticleType(input.articleType());
+            draft.setContentStyle(context.contentStyle());
+            draft.setChannelGroupCode(context.channelGroupCode());
+            draft.setChannelSubCode(context.channelSubCode());
+            draft.setAgentSiteModule(context.template().getAgentSiteModule());
+            draft.setArticleTypeCode(context.template().getArticleTypeCode());
+            draft.setPromptTemplateId(context.template().getId());
+            draft.setPromptTemplateVersionId(context.version().getId());
+            draft.setAllocationMode(ALLOCATION_MODE_CUSTOM);
+            draft.setTemplateSource(TEMPLATE_SOURCE_CUSTOM);
+            draft.setTopic(input.topic());
+            draft.setTopicAsQuestion(context.topicAsQuestion());
+            draft.setTitle(title);
+            draft.setStatus(STATUS_APPROVED);
+            draft.setCurrentVersionNo(1);
+            draft.setHasRisk(false);
+            draft.setRiskSeverity("none");
+            draft.setIsDuplicateTitle(false);
+            articleDraftMapper.insert(draft);
+
+            ArticleDraftVersion version = new ArticleDraftVersion();
+            version.setArticleId(draft.getId());
+            version.setVersionNo(1);
+            version.setTitle(title);
+            version.setContentMarkdown(generated.content());
+            version.setPromptSnapshot(enrichPromptSnapshot(context.prompt().promptSnapshot(), generated.result(), "AI_TEMPLATE"));
+            version.setInputSnapshot(context.prompt().inputSnapshot());
+            version.setModelPlatformCode(model.platformCode());
+            version.setModelId(model.modelId());
+            version.setGeneratedBy(GENERATED_BY_TEMPLATE_AI);
+            version.setCreatedBy(operator.getId());
+            articleDraftVersionMapper.insert(version);
+            return draft;
+        }));
+    }
+
     private Project requireProject(Long projectId) {
         Project project = projectMapper.selectById(projectId);
         if (project == null || project.getDeletedAt() != null) {
@@ -476,9 +598,9 @@ public class ArticleAiDraftService {
         }
     }
 
-    private String enrichPromptSnapshot(String promptSnapshot, LlmInvokeResult result) {
+    private String enrichPromptSnapshot(String promptSnapshot, LlmInvokeResult result, String contentSource) {
         Map<String, Object> snapshot = readJson(promptSnapshot);
-        snapshot.put("contentSource", "AI_PREVIEW");
+        snapshot.put("contentSource", contentSource);
         snapshot.put("promptTokens", result.promptTokens());
         snapshot.put("completionTokens", result.completionTokens());
         return writeJson(snapshot);

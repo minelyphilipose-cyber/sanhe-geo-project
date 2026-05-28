@@ -48,6 +48,7 @@ class ArticleAiDraftServiceTest {
     private LlmInvoker llmInvoker;
     private ArticleAiDraftRateLimiter rateLimiter;
     private AuditService auditService;
+    private ArticleGenerationPromptContextFactory promptContextFactory;
     private ArticleAiDraftService service;
 
     @BeforeEach
@@ -90,6 +91,7 @@ class ArticleAiDraftServiceTest {
                 promptFilter,
                 mock(BatchArticleQualityChecker.class)
         );
+        promptContextFactory = mock(ArticleGenerationPromptContextFactory.class);
         BatchArticlePromptBuilder promptBuilder = new BatchArticlePromptBuilder(
                 articleMapper,
                 sysDictItemMapper,
@@ -98,7 +100,7 @@ class ArticleAiDraftServiceTest {
         );
 
         service = new ArticleAiDraftService(projectMapper, brandMapper, articleMapper, versionMapper,
-                currentUserService, brandAccessService, promptBuilder, mock(ArticleGenerationPromptContextFactory.class),
+                currentUserService, brandAccessService, promptBuilder, promptContextFactory,
                 generationEngine, rateLimiter, auditService,
                 objectMapper, txManager(), Runnable::run);
     }
@@ -142,6 +144,55 @@ class ArticleAiDraftServiceTest {
         verify(articleMapper, never()).insert(any());
         verify(versionMapper, never()).insert(any());
         verifyAudit(AuditResult.SUCCESS, "preview_generated");
+    }
+
+    @Test
+    void templateGeneratePersistsTemplateDraftWithPromptContext() throws Exception {
+        mockInsertId();
+        when(promptContextFactory.buildStrict(any(PromptContextRequest.class))).thenReturn(templateContext());
+        when(llmInvoker.invoke(any(), any(LlmModelConfig.class))).thenReturn(llmResult());
+
+        ArticleAiDraftResponse response = service.templateGenerate(templateRequest()).get();
+
+        assertEquals(99L, response.articleId());
+        assertEquals("approved", response.status());
+
+        ArgumentCaptor<PromptContextRequest> requestCaptor = ArgumentCaptor.forClass(PromptContextRequest.class);
+        verify(promptContextFactory).buildStrict(requestCaptor.capture());
+        assertEquals("keyword_group", requestCaptor.getValue().topicSource());
+        assertEquals(1, requestCaptor.getValue().articleIndexInBatch());
+        assertEquals(31L, requestCaptor.getValue().keywordGroupId());
+
+        ArgumentCaptor<ArticleDraft> draftCaptor = ArgumentCaptor.forClass(ArticleDraft.class);
+        verify(articleMapper).insert(draftCaptor.capture());
+        ArticleDraft draft = draftCaptor.getValue();
+        assertEquals(10L, draft.getProjectId());
+        assertEquals(ArticleTypes.INDUSTRY_ARTICLE, draft.getArticleType());
+        assertEquals("wechat", draft.getContentStyle());
+        assertEquals("social", draft.getChannelGroupCode());
+        assertEquals("wechat_mp", draft.getChannelSubCode());
+        assertEquals("recommendation", draft.getAgentSiteModule());
+        assertEquals("industry_article", draft.getArticleTypeCode());
+        assertEquals(41L, draft.getPromptTemplateId());
+        assertEquals(42L, draft.getPromptTemplateVersionId());
+        assertEquals("custom", draft.getAllocationMode());
+        assertEquals("custom", draft.getTemplateSource());
+        assertEquals("AI topic", draft.getTopic());
+        assertEquals("AI topic?", draft.getTopicAsQuestion());
+        assertEquals("AI title", draft.getTitle());
+
+        ArgumentCaptor<ArticleDraftVersion> versionCaptor = ArgumentCaptor.forClass(ArticleDraftVersion.class);
+        verify(versionMapper).insert(versionCaptor.capture());
+        ArticleDraftVersion version = versionCaptor.getValue();
+        assertEquals(99L, version.getArticleId());
+        assertEquals("# AI title\n\nbody", version.getContentMarkdown());
+        assertEquals("openai", version.getModelPlatformCode());
+        assertEquals("gpt-test", version.getModelId());
+        assertEquals("template_ai", version.getGeneratedBy());
+        assertEquals(7L, version.getCreatedBy());
+        assertTrue(version.getPromptSnapshot().contains("\"contentSource\":\"AI_TEMPLATE\""));
+        assertTrue(version.getInputSnapshot().contains("\"topic\":\"AI topic\""));
+        verifyAudit(AuditResult.SUCCESS, "template_generation_generated");
     }
 
     @Test
@@ -364,6 +415,75 @@ class ArticleAiDraftServiceTest {
         req.setArticleType(ArticleTypes.FAQ);
         req.setTopic("怎么联系门店预约咨询");
         return req;
+    }
+
+    private ArticleTemplatePreviewRequest templateRequest() {
+        ArticleTemplatePreviewRequest req = new ArticleTemplatePreviewRequest();
+        req.setProjectId(10L);
+        req.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
+        req.setChannelGroupCode("social");
+        req.setChannelSubCode("wechat_mp");
+        req.setTopic("AI topic");
+        req.setLength("medium");
+        req.setKeywordGroupId(31L);
+        req.setPromptTemplateId(41L);
+        req.setPromptTemplateVersionId(42L);
+        req.setModelPlatformCode("openai");
+        req.setModelId("gpt-test");
+        return req;
+    }
+
+    private ArticleGenerationPromptContextFactory.PromptContextResult templateContext() {
+        ArticlePromptTemplate template = new ArticlePromptTemplate();
+        template.setId(41L);
+        template.setName("Template");
+        template.setAgentSiteModule("recommendation");
+        template.setArticleTypeCode("industry_article");
+
+        ArticlePromptTemplateVersion version = new ArticlePromptTemplateVersion();
+        version.setId(42L);
+        version.setTemplateId(41L);
+
+        BatchArticlePromptBuilder.PromptBuildInput input = new BatchArticlePromptBuilder.PromptBuildInput(
+                project(),
+                brand(),
+                "Brand statement",
+                "keyword_group",
+                "AI topic",
+                "AI topic?",
+                31L,
+                "Keyword group",
+                List.of("AI", "GEO"),
+                ArticleTypes.INDUSTRY_ARTICLE,
+                "wechat",
+                "medium",
+                "extra",
+                1,
+                List.of("forbidden"),
+                "title guide"
+        );
+        BatchArticlePromptBuilder.PromptBuildResult prompt = new BatchArticlePromptBuilder.PromptBuildResult(
+                "system prompt",
+                "user prompt {{topic}}",
+                "content angle",
+                "audience",
+                "{\"templateId\":41}",
+                "{\"topic\":\"AI topic\"}"
+        );
+        return new ArticleGenerationPromptContextFactory.PromptContextResult(
+                project(),
+                brand(),
+                input,
+                prompt,
+                List.of("forbidden"),
+                template,
+                version,
+                "social",
+                "wechat_mp",
+                "wechat",
+                "AI topic?",
+                false
+        );
     }
 
     private LlmInvokeResult llmResult() {

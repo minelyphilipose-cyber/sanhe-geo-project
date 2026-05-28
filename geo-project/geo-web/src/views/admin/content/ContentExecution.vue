@@ -258,7 +258,9 @@
           <el-table :data="detailData.versions" border>
             <el-table-column prop="versionNo" label="版本" width="80" />
             <el-table-column prop="title" label="标题" min-width="220" />
-            <el-table-column prop="generatedBy" label="来源" width="130" />
+            <el-table-column label="来源" width="130">
+              <template #default="scope">{{ generatedByLabel(scope.row.generatedBy) }}</template>
+            </el-table-column>
             <el-table-column label="时间" width="180">
               <template #default="scope">{{ formatDateTime(scope.row.createdAt) }}</template>
             </el-table-column>
@@ -689,6 +691,13 @@
             <el-tag size="small" type="info">PoC</el-tag>
           </div>
           <el-form :model="localHelperConfig" label-width="86px" class="local-helper-form">
+            <el-form-item label="后台地址">
+              <el-input
+                v-model="localHelperConfig.backendBase"
+                placeholder="默认使用当前后台地址"
+                @change="saveLocalHelperConfig"
+              />
+            </el-form-item>
             <el-form-item label="助手地址">
               <el-input
                 v-model="localHelperConfig.helperBase"
@@ -1210,6 +1219,7 @@ const extensionBridgeState = reactive({
   extensionVersion: '',
 })
 const localHelperConfig = reactive({
+  backendBase: '',
   helperBase: 'http://127.0.0.1:17891',
   helperToken: '',
   environmentKey: 'geo_b',
@@ -1515,8 +1525,21 @@ function templateSourceValueLabel(v?: string | null) {
 
 function generationModeLabel(row: ArticleDraft) {
   if (row.generationMode === 'batch') return '批量生成'
+  if (row.generatedBy === 'template_ai') return '单篇模板'
   if (row.generationMode === 'single') return '单篇生成'
   return row.systemGenerated ? '批量生成' : '单篇生成'
+}
+
+function generatedByLabel(v?: string | null) {
+  const map: Record<string, string> = {
+    ai: '自由 AI',
+    ai_preview: 'AI 试写',
+    template_ai: '单篇模板',
+    batch_ai: '批量 AI',
+    manual: '手动',
+    system: '系统',
+  }
+  return v ? map[v] || v : '-'
 }
 
 function statusLabel(v: string) {
@@ -2523,6 +2546,104 @@ async function submitDouyinImageText() {
   }
 }
 
+const LOCAL_HELPER_CONFIG_KEY = 'geo_local_helper_config_v1'
+
+function loadLocalHelperConfig() {
+  if (typeof window === 'undefined') return
+  localHelperConfig.backendBase = window.location.origin
+  const raw = window.localStorage.getItem(LOCAL_HELPER_CONFIG_KEY)
+  if (!raw) return
+  try {
+    const saved = JSON.parse(raw) as Partial<typeof localHelperConfig>
+    localHelperConfig.backendBase = saved.backendBase || localHelperConfig.backendBase
+    localHelperConfig.helperBase = saved.helperBase || localHelperConfig.helperBase
+    localHelperConfig.helperToken = saved.helperToken || ''
+    localHelperConfig.environmentKey = saved.environmentKey || localHelperConfig.environmentKey
+  } catch {
+    window.localStorage.removeItem(LOCAL_HELPER_CONFIG_KEY)
+  }
+}
+
+function saveLocalHelperConfig() {
+  if (typeof window === 'undefined') return
+  window.localStorage.setItem(LOCAL_HELPER_CONFIG_KEY, JSON.stringify({
+    backendBase: localHelperConfig.backendBase.trim(),
+    helperBase: localHelperConfig.helperBase.trim(),
+    helperToken: localHelperConfig.helperToken.trim(),
+    environmentKey: localHelperConfig.environmentKey.trim(),
+  }))
+}
+
+function getBackendAccessToken() {
+  if (typeof window === 'undefined') return ''
+  try {
+    const auth = JSON.parse(window.localStorage.getItem('geo_auth_v1') || '{}') as {
+      accessToken?: string
+      token?: string
+    }
+    return auth.accessToken || auth.token || ''
+  } catch {
+    return ''
+  }
+}
+
+function defaultSemiAutoPublishUrl(platform: string) {
+  if (platform === 'toutiao') return 'https://mp.toutiao.com/profile_v4/graphic/publish'
+  if (platform === 'zhihu') return 'https://zhuanlan.zhihu.com/write'
+  if (platform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/publish/publish'
+  return undefined
+}
+
+async function submitSemiAutoEnvironmentTask(account: SelfMediaAccount) {
+  if (!mediaDistributeArticleId.value) {
+    ElMessage.warning('请选择文章')
+    return
+  }
+  if (!mediaDistributeBrandId.value) {
+    ElMessage.warning('当前文章未绑定品牌，无法启动自媒体环境')
+    return
+  }
+  const helperBase = localHelperConfig.helperBase.trim()
+  const backendBase = localHelperConfig.backendBase.trim() || window.location.origin
+  const helperToken = localHelperConfig.helperToken.trim()
+  const environmentKey = localHelperConfig.environmentKey.trim()
+  if (!helperBase || !helperToken || !environmentKey) {
+    ElMessage.warning('请先填写本地助手地址、Token 和环境标识')
+    return
+  }
+  const backendToken = getBackendAccessToken()
+  if (!backendToken) {
+    ElMessage.warning('未读取到后台登录 Token，请重新登录后台后再试')
+    return
+  }
+  saveLocalHelperConfig()
+  selectedSelfMediaAccountId.value = account.id
+  selfMediaSubmitting.value = true
+  try {
+    await createAndLaunchLocalHelperTask(
+      { helperBase, helperToken },
+      {
+        environmentKey,
+        backendBase,
+        backendToken,
+        brandId: mediaDistributeBrandId.value,
+        articleId: mediaDistributeArticleId.value,
+        selfMediaAccountId: account.id,
+        platform: account.platform,
+        url: defaultSemiAutoPublishUrl(account.platform),
+        requestId: createRequestId(`env_${account.platform}`),
+      },
+    )
+    ElMessage.success('已启动 AdsPower 环境，环境内扩展将领取任务并填充草稿')
+    await refreshDistributionHistory()
+    await load()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '启动本地助手任务失败')
+  } finally {
+    selfMediaSubmitting.value = false
+  }
+}
+
 async function submitSemiAutoExtensionTask(account: SelfMediaAccount) {
   if (!mediaDistributeArticleId.value) {
     ElMessage.warning('请选择文章')
@@ -3301,6 +3422,7 @@ async function submitRevision() {
 }
 
 onMounted(async () => {
+  loadLocalHelperConfig()
   handleWechatAuthResult()
   handleDouyinAuthResult()
   await handleManualCreateResult()
@@ -4706,6 +4828,47 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   color: #0f172a;
   font-size: 15px;
   font-weight: 800;
+}
+
+.local-helper-panel {
+  padding: 14px 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.045);
+}
+
+.local-helper-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.local-helper-head strong {
+  display: block;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.local-helper-head span {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.local-helper-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr);
+  gap: 10px 14px;
+}
+
+.local-helper-form :deep(.el-form-item) {
+  margin-bottom: 0;
 }
 
 .self-media-account-list {

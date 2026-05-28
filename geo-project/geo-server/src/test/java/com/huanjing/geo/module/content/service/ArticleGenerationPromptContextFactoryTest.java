@@ -34,6 +34,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class ArticleGenerationPromptContextFactoryTest {
@@ -112,6 +113,43 @@ class ArticleGenerationPromptContextFactoryTest {
 
         assertThat(result.promptInput().relatedKeywords()).containsExactly("阜阳SPA", "养生馆", "按摩放松");
         assertThat(result.prompt().userPrompt()).contains("关键词: 阜阳SPA、养生馆、按摩放松");
+    }
+
+    @Test
+    void relatedKeywordsFallbackToProjectTierAQuestions() {
+        ProjectKeywordGroupRel rel = new ProjectKeywordGroupRel();
+        rel.setProjectId(10L);
+        rel.setKeywordGroupId(90L);
+        when(projectKeywordGroupRelMapper.selectList(any())).thenReturn(List.of(rel));
+
+        ArticleGenerationPromptContextFactory.PromptContextResult result =
+                factory.buildStrict(equivalentRequest());
+
+        assertThat(result.promptInput().relatedKeywords()).containsExactly("阜阳SPA推荐", "颍州区养生馆");
+        assertThat(result.prompt().userPrompt()).contains("关键词: 阜阳SPA推荐、颍州区养生馆");
+    }
+
+    @Test
+    void batchPromptKeywordsUseProjectFallbackEvenWhenTaskHasKeywordGroup() {
+        ProjectKeywordGroupRel rel = new ProjectKeywordGroupRel();
+        rel.setProjectId(10L);
+        rel.setKeywordGroupId(90L);
+        when(projectKeywordGroupRelMapper.selectList(any())).thenReturn(List.of(rel));
+
+        BatchArticleGenerationBatch batch = batch();
+        batch.setTopicSource("keyword_group");
+        BatchArticleGenerationTask task = task();
+        task.setKeywordGroupId(91L);
+        task.setKeywordGroupName("得闲spa_拓词组");
+
+        ArticleGenerationPromptContextFactory.PromptContextResult result =
+                factory.buildForBatch(batch, task);
+
+        assertThat(result.promptInput().topicSource()).isEqualTo("keyword_group");
+        assertThat(result.promptInput().keywordGroupId()).isNull();
+        assertThat(result.promptInput().keywordGroupName()).isNull();
+        assertThat(result.promptInput().relatedKeywords()).containsExactly("阜阳SPA推荐", "颍州区养生馆");
+        verify(projectKeywordGroupRelMapper).selectList(any());
     }
 
     private void assertPromptInputEquivalent(BatchArticlePromptBuilder.PromptBuildInput actual,

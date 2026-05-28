@@ -972,6 +972,7 @@ export interface ArticleDraft {
   currentVersionNo: number
   systemGenerated?: boolean | null
   generationMode?: 'batch' | 'single' | string | null
+  generatedBy?: string | null
   createdAt: string
   updatedAt: string
   publishedAt?: string | null
