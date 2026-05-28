@@ -42,9 +42,6 @@ public class PublicBrandMaterialController {
                 .contentType(MediaType.parseMediaType(resolveContentType(material.getFileType())))
                 .cacheControl(CacheControl.maxAge(30, TimeUnit.DAYS).cachePublic())
                 .header(HttpHeaders.CONTENT_DISPOSITION, "inline");
-        if (material.getFileSize() != null && material.getFileSize() > 0) {
-            builder.contentLength(material.getFileSize());
-        }
         return builder.body(body);
     }
 
