@@ -172,6 +172,9 @@ public class BatchArticlePromptBuilder {
         promptSnapshot.put("recentTitles", recentTitles);
         promptSnapshot.put("contactBlock", resolvedContactBlock);
         promptSnapshot.put("titleGuide", input.titleGuide());
+        promptSnapshot.put("perspectiveCode", input.perspectiveCode());
+        promptSnapshot.put("perspectiveMatchedScope", input.perspectiveMatchedScope());
+        promptSnapshot.put("perspectiveMatchedConfigId", input.perspectiveMatchedConfigId());
 
         Map<String, Object> inputSnapshot = new LinkedHashMap<>();
         inputSnapshot.put("promptVersion", PROMPT_VERSION);
@@ -190,6 +193,9 @@ public class BatchArticlePromptBuilder {
         inputSnapshot.put("businessFocus", businessFocus);
         inputSnapshot.put("contactBlock", resolvedContactBlock);
         inputSnapshot.put("titleGuide", input.titleGuide());
+        inputSnapshot.put("perspectiveCode", input.perspectiveCode());
+        inputSnapshot.put("perspectiveMatchedScope", input.perspectiveMatchedScope());
+        inputSnapshot.put("perspectiveMatchedConfigId", input.perspectiveMatchedConfigId());
 
         return new PromptBuildResult(
                 systemPrompt,
@@ -236,6 +242,9 @@ public class BatchArticlePromptBuilder {
         promptSnapshot.put("contactBlock", contactBlock);
         promptSnapshot.put("brandFacts", brandFacts);
         promptSnapshot.put("titleGuide", input.titleGuide());
+        promptSnapshot.put("perspectiveCode", input.perspectiveCode());
+        promptSnapshot.put("perspectiveMatchedScope", input.perspectiveMatchedScope());
+        promptSnapshot.put("perspectiveMatchedConfigId", input.perspectiveMatchedConfigId());
 
         Map<String, Object> inputSnapshot = new LinkedHashMap<>();
         inputSnapshot.put("promptVersion", "template_v" + version.getVersionNo());
@@ -255,6 +264,9 @@ public class BatchArticlePromptBuilder {
         inputSnapshot.put("channelSubCode", template.getChannelSubCode());
         inputSnapshot.put("agentSiteModule", template.getAgentSiteModule());
         inputSnapshot.put("articleTypeCode", template.getArticleTypeCode());
+        inputSnapshot.put("perspectiveCode", input.perspectiveCode());
+        inputSnapshot.put("perspectiveMatchedScope", input.perspectiveMatchedScope());
+        inputSnapshot.put("perspectiveMatchedConfigId", input.perspectiveMatchedConfigId());
         inputSnapshot.put("length", input.length());
         inputSnapshot.put("extraPrompt", input.extraPrompt());
         inputSnapshot.put("businessFocus", businessFocus);
@@ -728,7 +740,10 @@ public class BatchArticlePromptBuilder {
                                    String extraPrompt,
                                    int articleIndexInBatch,
                                    List<String> forbiddenPhrases,
-                                   String titleGuide) {
+                                   String titleGuide,
+                                   String perspectiveCode,
+                                   String perspectiveMatchedScope,
+                                   Long perspectiveMatchedConfigId) {
     }
 
     public record PromptBuildResult(String systemPrompt,

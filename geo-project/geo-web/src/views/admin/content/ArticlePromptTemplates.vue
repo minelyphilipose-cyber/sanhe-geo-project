@@ -72,6 +72,9 @@
         <el-select v-model="filters.questionSceneCode" clearable placeholder="问题场景">
           <el-option v-for="item in questionScenes" :key="item.value" :label="item.label" :value="item.value" />
         </el-select>
+        <el-select v-model="filters.perspectiveCode" clearable placeholder="写作视角">
+          <el-option v-for="item in perspectiveOptions" :key="item.code" :label="item.name" :value="item.code" />
+        </el-select>
         <el-select v-model="filters.status" clearable placeholder="状态">
           <el-option label="启用" value="active" />
           <el-option label="停用" value="disabled" />
@@ -117,6 +120,7 @@
               <p class="template-desc">{{ item.description || '未填写模板说明' }}</p>
               <div class="template-facts">
                 <span>{{ questionSceneLabel(item.questionSceneCode) }}</span>
+                <span>{{ perspectiveLabel(item.perspectiveCode) }}</span>
                 <span>{{ item.articleTypeName || articleTypeLabel(item.articleTypeCode) }}</span>
                 <span>{{ contactModeLabel(item.contactDisclosureMode) }}</span>
                 <span>{{ formatDateTime(item.updatedAt) }}</span>
@@ -214,6 +218,11 @@
             <el-form-item label="关联问题场景">
               <el-select v-model="form.questionSceneCode" clearable placeholder="通用 / 未绑定">
                 <el-option v-for="item in questionScenes" :key="item.value" :label="item.label" :value="item.value" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="写作视角">
+              <el-select v-model="form.perspectiveCode">
+                <el-option v-for="item in enabledPerspectiveOptions" :key="item.code" :label="item.name" :value="item.code" />
               </el-select>
             </el-form-item>
             <el-form-item label="样文链接">
@@ -335,6 +344,7 @@
             <div v-if="isAgentSiteTemplate(templateDetail)"><label>官网归属</label><strong>{{ agentSiteModuleLabel(templateDetail.agentSiteModule || 'knowledge') }}</strong></div>
             <div><label>文章类型</label><strong>{{ templateDetail.articleTypeName || articleTypeLabel(templateDetail.articleTypeCode) }}</strong></div>
             <div><label>关联问题场景</label><strong>{{ questionSceneLabel(templateDetail.questionSceneCode) }}</strong></div>
+            <div><label>写作视角</label><strong>{{ perspectiveLabel(templateDetail.perspectiveCode) }}</strong></div>
             <div><label>联系方式露出</label><strong>{{ contactModeLabel(templateDetail.contactDisclosureMode) }}</strong></div>
             <div><label>权重</label><strong>{{ templateDetail.weight }}</strong></div>
             <div><label>更新时间</label><strong>{{ formatDateTime(templateDetail.updatedAt) }}</strong></div>
@@ -372,6 +382,7 @@ import {
   getArticlePromptTemplate,
   getArticlePromptTemplates,
   getArticlePromptTemplateVariables,
+  getTemplatePerspectives,
   updateArticlePromptTemplate,
   updateArticlePromptTemplateWeight,
   type ArticlePromptVariable,
@@ -379,6 +390,7 @@ import {
   type ArticlePromptTemplateDetail,
   type ArticlePromptTemplateDetailResponse,
   type ArticlePromptTemplateSaveRequest,
+  type TemplatePerspective,
 } from '@/api/content'
 
 const channelGroups = [
@@ -452,12 +464,15 @@ const editorVisible = ref(false)
 const detailVisible = ref(false)
 const templates = ref<ArticlePromptTemplate[]>([])
 const variables = ref<ArticlePromptVariable[]>([])
+const perspectiveOptions = ref<TemplatePerspective[]>([
+  { code: 'customer', name: '客户视角', enabled: true, sortOrder: 10 },
+])
 const templateDetail = ref<ArticlePromptTemplateDetail | null>(null)
 const editingDetail = ref<ArticlePromptTemplateDetail | null>(null)
 const editingId = ref<number | null>(null)
 const route = useRoute()
 const pagination = reactive({ current: 1, size: 12, total: 0 })
-const filters = reactive({ channelGroupCode: '', channelSubCode: '', questionSceneCode: '', status: '', keyword: '' })
+const filters = reactive({ channelGroupCode: '', channelSubCode: '', questionSceneCode: '', perspectiveCode: '', status: '', keyword: '' })
 const form = reactive<ArticlePromptTemplateSaveRequest>({
   name: '',
   description: '',
@@ -466,6 +481,7 @@ const form = reactive<ArticlePromptTemplateSaveRequest>({
   agentSiteModule: 'knowledge',
   articleTypeCode: 'industry_article',
   questionSceneCode: null,
+  perspectiveCode: 'customer',
   status: 'active',
   weight: 1,
   sortOrder: 0,
@@ -538,6 +554,10 @@ const promptVariables = computed(() => variables.value.map((item) => ({
   ...item,
   emptyStrategyLabel: emptyStrategyLabel(item),
 })))
+const enabledPerspectiveOptions = computed(() => {
+  const enabled = perspectiveOptions.value.filter((item) => item.enabled)
+  return enabled.length ? enabled : perspectiveOptions.value
+})
 
 function channelGroupLabel(value: string) {
   return channelGroups.find((item) => item.value === value)?.label || value
@@ -571,6 +591,11 @@ function articleTypeLabel(value: string) {
 function questionSceneLabel(value?: string | null) {
   if (!value) return '通用 / 未绑定'
   return questionScenes.find((item) => item.value === value)?.label || value
+}
+
+function perspectiveLabel(value?: string | null) {
+  const code = value || 'customer'
+  return perspectiveOptions.value.find((item) => item.code === code)?.name || code
 }
 
 function contactModeLabel(value?: string | null) {
@@ -620,11 +645,13 @@ function applyRouteFilters() {
   const channelSubCode = queryStringValue(route.query.channelSubCode)
   const status = queryStringValue(route.query.status)
   const questionSceneCode = queryStringValue(route.query.questionSceneCode)
+  const perspectiveCode = queryStringValue(route.query.perspectiveCode)
   const keyword = queryStringValue(route.query.keyword)
   if (channelGroupCode) filters.channelGroupCode = channelGroupCode
   if (channelSubCode) filters.channelSubCode = channelSubCode
   if (status) filters.status = status
   if (questionSceneCode) filters.questionSceneCode = questionSceneCode
+  if (perspectiveCode) filters.perspectiveCode = perspectiveCode
   if (keyword) filters.keyword = keyword
   pagination.current = 1
 }
@@ -679,6 +706,7 @@ const templateFallbackKeys = [
   'articleTypeName',
   'questionSceneCode',
   'questionSceneName',
+  'perspectiveCode',
   'status',
   'weight',
   'sortOrder',
@@ -753,6 +781,16 @@ async function loadVariables() {
   }
 }
 
+async function loadPerspectives() {
+  try {
+    const { data } = await getTemplatePerspectives({ includeDisabled: true })
+    perspectiveOptions.value = data.data || perspectiveOptions.value
+  } catch (err) {
+    console.error(err)
+    ElMessage.error('加载写作视角失败')
+  }
+}
+
 function resetForm() {
   Object.assign(form, {
     name: '',
@@ -762,6 +800,7 @@ function resetForm() {
     agentSiteModule: 'knowledge',
     articleTypeCode: 'industry_article',
     questionSceneCode: null,
+    perspectiveCode: 'customer',
     status: 'active',
     weight: 1,
     sortOrder: 0,
@@ -819,6 +858,7 @@ function fillFormFromDetail(detail: ArticlePromptTemplateDetail) {
     agentSiteModule: detail.channelGroupCode === 'agent_site' ? (detail.agentSiteModule || 'knowledge') : null,
     articleTypeCode: detail.articleTypeCode,
     questionSceneCode: detail.questionSceneCode || null,
+    perspectiveCode: detail.perspectiveCode || 'customer',
     status: detail.status,
     weight: detail.weight,
     sortOrder: detail.sortOrder,
@@ -905,6 +945,7 @@ async function saveTemplate() {
       channelSubCode: form.channelSubCode || null,
       agentSiteModule: form.channelGroupCode === 'agent_site' ? form.agentSiteModule : null,
       questionSceneCode: form.questionSceneCode || null,
+      perspectiveCode: form.perspectiveCode || 'customer',
       variablesJson: JSON.stringify(usedVariables),
     }
     if (editingId.value) {
@@ -946,7 +987,7 @@ async function confirmWeight(item: ArticlePromptTemplate, weight: number) {
 
 onMounted(async () => {
   applyRouteFilters()
-  await Promise.all([loadVariables(), loadTemplates()])
+  await Promise.all([loadVariables(), loadPerspectives(), loadTemplates()])
 })
 </script>
 

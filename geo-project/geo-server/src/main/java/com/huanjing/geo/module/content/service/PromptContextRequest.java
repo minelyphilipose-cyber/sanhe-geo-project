@@ -13,5 +13,8 @@ public record PromptContextRequest(Long projectId,
                                    String extraPrompt,
                                    Long promptTemplateId,
                                    Long promptTemplateVersionId,
+                                   String perspectiveCode,
+                                   String perspectiveMatchedScope,
+                                   Long perspectiveMatchedConfigId,
                                    int articleIndexInBatch) {
 }

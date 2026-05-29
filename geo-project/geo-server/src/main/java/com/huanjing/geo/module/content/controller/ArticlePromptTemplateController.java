@@ -13,6 +13,9 @@ import com.huanjing.geo.module.content.dto.ArticlePromptTemplateDtos.VersionCrea
 import com.huanjing.geo.module.content.dto.ArticlePromptTemplateDtos.WeightUpdateRequest;
 import com.huanjing.geo.module.content.service.ArticlePromptTemplateService;
 import com.huanjing.geo.module.content.service.ArticleTemplateAllocationService;
+import com.huanjing.geo.module.content.service.TemplatePerspectiveService;
+import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -24,17 +27,21 @@ public class ArticlePromptTemplateController {
 
     private final ArticlePromptTemplateService templateService;
     private final ArticleTemplateAllocationService allocationService;
+    private final TemplatePerspectiveService perspectiveService;
+    private final ProjectMapper projectMapper;
 
     @GetMapping
     public R<Page<TemplateVO>> page(@RequestParam(required = false) String channelGroupCode,
                                     @RequestParam(required = false) String channelSubCode,
                                     @RequestParam(required = false) String agentSiteModule,
                                     @RequestParam(required = false) String questionSceneCode,
+                                    @RequestParam(required = false) String perspectiveCode,
                                     @RequestParam(required = false) String status,
                                     @RequestParam(required = false) String keyword,
                                     @RequestParam(defaultValue = "1") long current,
                                     @RequestParam(defaultValue = "10") long size) {
-        return R.ok(templateService.page(channelGroupCode, channelSubCode, agentSiteModule, questionSceneCode, status, keyword, current, size));
+        return R.ok(templateService.page(channelGroupCode, channelSubCode, agentSiteModule, questionSceneCode,
+                perspectiveCode, status, keyword, current, size));
     }
 
     @GetMapping("/variables")
@@ -89,6 +96,17 @@ public class ArticlePromptTemplateController {
 
     @PostMapping("/preview-allocation")
     public R<AllocationPreviewResponse> previewAllocation(@Valid @RequestBody AllocationPreviewRequest req) {
-        return R.ok(allocationService.preview(req.channelGroupCode(), req.channelSubCode(), req.questionSceneCode(), req.count()));
+        TemplatePerspectiveService.ResolvedPerspective perspective = resolvePreviewPerspective(req);
+        return R.ok(allocationService.preview(req.channelGroupCode(), req.channelSubCode(), req.questionSceneCode(),
+                perspective.perspectiveCode(), req.count()));
+    }
+
+    private TemplatePerspectiveService.ResolvedPerspective resolvePreviewPerspective(AllocationPreviewRequest req) {
+        if (req.projectId() == null) {
+            return TemplatePerspectiveService.ResolvedPerspective.customer();
+        }
+        Project project = projectMapper.selectById(req.projectId());
+        Long brandId = project == null ? null : project.getBrandId();
+        return perspectiveService.resolve(brandId, req.channelGroupCode(), req.channelSubCode());
     }
 }

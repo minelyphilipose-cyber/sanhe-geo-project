@@ -930,6 +930,7 @@ async function loadAllocationPreview(topic: SelectedTopic, platform: ContentStyl
   try {
     const count = Number(topic.platformCounts[platform.value] || 0)
     const { data } = await previewArticleTemplateAllocation({
+      projectId: batchForm.projectId,
       channelGroupCode: platform.channelGroupCode,
       channelSubCode: platform.channelSubCode || null,
       questionSceneCode: topic.questionSceneCode || null,
@@ -950,21 +951,27 @@ function hydrateTemplateRows(platform: ContentStyleOption, counts: BatchArticleG
   const templateMap = new Map((platform.templates || []).map((template) => [template.templateId, template]))
   const countMap = new Map(counts.map((item) => [item.templateId, item]))
   const baseCounts = includeAllTemplates
-    ? (platform.templates || []).map((template) => ({
-        templateId: template.templateId,
-        templateVersionId: template.templateVersionId,
-        count: Number(countMap.get(template.templateId)?.count || 0),
-        extraPrompt: countMap.get(template.templateId)?.extraPrompt,
-      }))
+    ? [
+        ...(platform.templates || []).map((template) => ({
+          templateId: template.templateId,
+          templateVersionId: template.templateVersionId,
+          templateName: template.templateName,
+          articleTypeName: template.articleTypeName,
+          agentSiteModule: template.agentSiteModule,
+          count: Number(countMap.get(template.templateId)?.count || 0),
+          extraPrompt: countMap.get(template.templateId)?.extraPrompt,
+        })),
+        ...counts.filter((item) => !templateMap.has(item.templateId)),
+      ]
     : counts
   return baseCounts.map((item) => {
     const template = templateMap.get(item.templateId)
     return {
       ...item,
       templateVersionId: item.templateVersionId || template?.templateVersionId,
-      templateName: template?.templateName || `模板 #${item.templateId}`,
-      articleTypeName: template?.articleTypeName,
-      agentSiteModule: template?.agentSiteModule,
+      templateName: template?.templateName || item.templateName || `模板 #${item.templateId}`,
+      articleTypeName: template?.articleTypeName || item.articleTypeName,
+      agentSiteModule: template?.agentSiteModule || item.agentSiteModule,
     }
   })
 }

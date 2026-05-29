@@ -92,7 +92,7 @@
         type="info"
         show-icon
         :closable="false"
-        title="头条、知乎、小红书使用浏览器扩展捕获登录凭证。账号建好后，请在扩展里选择账号并捕获凭证。"
+        title="头条、知乎、小红书使用 AdsPower 指纹浏览器环境保持登录态。账号绑定环境后，由环境内扩展上报登录状态；任务执行以环境登录状态为准。"
       />
       <el-table v-loading="selfMediaAccountsLoading" :data="semiAutoSelfMediaAccounts" border>
         <el-table-column prop="platform" label="平台" width="110">
@@ -106,19 +106,62 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="凭证" width="130">
+        <el-table-column label="环境登录" width="130">
           <template #default="{ row }">
-            <el-tag size="small" :type="row.cookieCredentialStatus === 'active' ? 'success' : 'warning'">
-              {{ row.cookieCredentialStatus === 'active' ? `v${row.cookieCredentialVersion || '-'}` : '未捕获' }}
+            <el-tag size="small" :type="browserEnvironmentLoginStatusTagType(row)">
+              {{ browserEnvironmentLoginStatusLabel(row) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="捕获时间" min-width="170">
-          <template #default="{ row }">{{ row.cookieCredentialCapturedAt || '-' }}</template>
+        <el-table-column label="最近上报" min-width="210">
+          <template #default="{ row }">
+            <div>{{ browserEnvironmentLastReportTime(row) }}</div>
+            <div v-if="browserEnvironmentAccountOf(row)?.environmentKey" class="table-subtext">
+              环境：{{ browserEnvironmentAccountOf(row)?.environmentKey }}
+            </div>
+          </template>
         </el-table-column>
         <el-table-column v-if="canUpdateBrand" label="操作" width="100" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openSelfMediaAccountEdit(row)">编辑</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <el-card class="admin-table-card">
+      <template #header>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span>文章视角配置</span>
+            <el-tag type="info">按渠道覆盖</el-tag>
+          </div>
+          <el-button v-if="canUpdateBrand" type="primary" link @click="openPerspectiveConfigCreate">新增配置</el-button>
+        </div>
+      </template>
+      <el-table v-loading="perspectiveConfigLoading" :data="perspectiveConfigs" border empty-text="未配置时默认使用客户视角">
+        <el-table-column label="渠道大类" min-width="140">
+          <template #default="{ row }">{{ channelGroupLabel(row.channelGroupCode) }}</template>
+        </el-table-column>
+        <el-table-column label="渠道小类" min-width="140">
+          <template #default="{ row }">{{ channelSubLabel(row.channelGroupCode, row.channelSubCode) }}</template>
+        </el-table-column>
+        <el-table-column label="写作视角" min-width="160">
+          <template #default="{ row }">
+            <el-tag>{{ row.perspectiveName || perspectiveLabel(row.perspectiveCode) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.enabled ? 'success' : 'info'">
+              {{ row.enabled ? '启用' : '停用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="canUpdateBrand" label="操作" width="130" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openPerspectiveConfigEdit(row)">编辑</el-button>
+            <el-button link type="danger" @click="removePerspectiveConfig(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -265,6 +308,54 @@
         <el-button type="primary" :loading="selfMediaAccountSaving" @click="submitSelfMediaAccount">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="perspectiveConfigVisible"
+      :title="editingPerspectiveConfig ? '编辑文章视角配置' : '新增文章视角配置'"
+      width="560px"
+      class="admin-editor-dialog"
+    >
+      <el-form
+        ref="perspectiveConfigFormRef"
+        :model="perspectiveConfigForm"
+        :rules="perspectiveConfigRules"
+        label-width="100px"
+      >
+        <el-form-item label="渠道大类" prop="channelGroupCode" required>
+          <el-select v-model="perspectiveConfigForm.channelGroupCode" style="width: 100%" @change="handlePerspectiveGroupChange">
+            <el-option v-for="item in channelGroups" :key="item.value" :label="item.label" :value="item.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="渠道小类" prop="channelSubCode" required>
+          <el-select v-model="perspectiveConfigForm.channelSubCode" style="width: 100%">
+            <el-option label="全部平台" value="_ALL_" />
+            <el-option
+              v-for="item in channelSubOptions(perspectiveConfigForm.channelGroupCode)"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="写作视角" prop="perspectiveCode" required>
+          <el-select v-model="perspectiveConfigForm.perspectiveCode" style="width: 100%">
+            <el-option
+              v-for="item in enabledPerspectives"
+              :key="item.code"
+              :label="item.name"
+              :value="item.code"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="状态" prop="enabled" required>
+          <el-switch v-model="perspectiveConfigForm.enabled" active-text="启用" inactive-text="停用" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="perspectiveConfigVisible = false">取消</el-button>
+        <el-button type="primary" :loading="perspectiveConfigSaving" @click="submitPerspectiveConfig">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -273,9 +364,14 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import {
+  deleteBrandTemplatePerspectiveConfig,
+  getBrandTemplatePerspectiveConfigs,
   createSelfMediaAccount,
+  saveBrandTemplatePerspectiveConfig,
   getSelfMediaAccountsByBrand,
   updateSelfMediaAccount,
+  type BrandChannelTemplatePerspective,
+  type TemplatePerspective,
 } from '@/api/content'
 import {
   getBrandDetail,
@@ -283,6 +379,10 @@ import {
   deleteBrand,
   getCompanyDetail,
 } from '@/api/customer'
+import {
+  getBrowserEnvironmentAccountBySelfMedia,
+  type BrowserEnvironmentAccount,
+} from '@/api/browserEnvironment'
 import { getPublishSites } from '@/api/publishSite'
 import type { Brand, PublishSite, SelfMediaAccount } from '@/types'
 import { useUserStore } from '@/stores/user'
@@ -317,8 +417,14 @@ const editVisible = ref(false)
 const selfMediaAccountsLoading = ref(false)
 const selfMediaAccountSaving = ref(false)
 const selfMediaAccountVisible = ref(false)
+const perspectiveConfigLoading = ref(false)
+const perspectiveConfigSaving = ref(false)
+const perspectiveConfigVisible = ref(false)
 const brand = ref<Brand | null>(null)
 const selfMediaAccounts = ref<SemiAutoSelfMediaAccount[]>([])
+const browserEnvironmentAccounts = ref<Record<number, BrowserEnvironmentAccount | null>>({})
+const perspectiveConfigs = ref<BrandChannelTemplatePerspective[]>([])
+const templatePerspectives = ref<TemplatePerspective[]>([])
 const publishSites = ref<PublishSite[]>([])
 const GEO_SITE_CODE_PATTERN = /^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$/
 const editingSelfMediaAccount = ref<SemiAutoSelfMediaAccount | null>(null)
@@ -326,6 +432,7 @@ const companyName = ref('')
 const companyIndustryTags = ref<string[]>([])
 const brandFormRef = ref<FormInstance>()
 const selfMediaAccountFormRef = ref<FormInstance>()
+const perspectiveConfigFormRef = ref<FormInstance>()
 
 const brandForm = reactive({
   brandName: '',
@@ -358,6 +465,15 @@ const selfMediaAccountForm = reactive({
   status: 'active' as 'active' | 'disabled',
 })
 
+const perspectiveConfigForm = reactive({
+  channelGroupCode: 'self_media',
+  channelSubCode: '_ALL_',
+  perspectiveCode: 'customer',
+  enabled: true,
+})
+
+const editingPerspectiveConfig = ref<BrandChannelTemplatePerspective | null>(null)
+
 const brandRules: FormRules = {
   brandName: [{ required: true, message: '请输入品牌名称', trigger: 'blur' }],
   industry: [{ required: true, message: '请选择品牌行业', trigger: 'change' }],
@@ -373,9 +489,45 @@ const selfMediaAccountRules: FormRules = {
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
 }
 
+const perspectiveConfigRules: FormRules = {
+  channelGroupCode: [{ required: true, message: '请选择渠道大类', trigger: 'change' }],
+  channelSubCode: [{ required: true, message: '请选择渠道小类', trigger: 'change' }],
+  perspectiveCode: [{ required: true, message: '请选择写作视角', trigger: 'change' }],
+}
+
+const channelGroups = [
+  { label: '官网', value: 'agent_site' },
+  { label: '行业资讯站', value: 'industry_site' },
+  { label: '自媒体平台', value: 'self_media' },
+  { label: '权威媒体', value: 'authority_media' },
+  { label: '平台网站', value: 'forum' },
+]
+
+const subOptions: Record<string, Array<{ label: string; value: string }>> = {
+  self_media: [
+    { label: '今日头条', value: 'toutiao' },
+    { label: '公众号', value: 'wechat' },
+    { label: '知乎', value: 'zhihu' },
+    { label: '抖音图文', value: 'douyin' },
+    { label: '小红书', value: 'xiaohongshu' },
+    { label: '百家号', value: 'baijiahao' },
+    { label: '网易', value: 'netease' },
+  ],
+  authority_media: [
+    { label: '行业媒体', value: 'industry_media' },
+    { label: '地方媒体', value: 'local_media' },
+    { label: '财经媒体', value: 'finance_media' },
+    { label: '科技媒体', value: 'tech_media' },
+    { label: '新闻源媒体', value: 'news_source' },
+    { label: '门户媒体', value: 'portal_media' },
+  ],
+}
+
 const semiAutoSelfMediaAccounts = computed(() =>
   selfMediaAccounts.value.filter((item) => item.platform === 'toutiao' || item.platform === 'zhihu' || item.platform === 'xiaohongshu'),
 )
+
+const enabledPerspectives = computed(() => templatePerspectives.value.filter((item) => item.enabled))
 
 const regionText = computed(() => {
   if (!brand.value) return '-'
@@ -432,6 +584,54 @@ function selfMediaPlatformLabel(value?: string | null) {
   if (value === 'zhihu') return '知乎'
   if (value === 'xiaohongshu') return '小红书'
   return value || '-'
+}
+
+function browserEnvironmentAccountOf(account: SemiAutoSelfMediaAccount) {
+  return browserEnvironmentAccounts.value[account.id] || null
+}
+
+function browserEnvironmentLoginStatusLabel(account: SemiAutoSelfMediaAccount) {
+  const binding = browserEnvironmentAccountOf(account)
+  if (!binding) return '未绑定环境'
+  if (binding.loginStatus === 'logged_in') return '环境已登录'
+  if (binding.loginStatus === 'mismatch') return '账号不一致'
+  if (binding.loginStatus === 'login_required') return '需重新登录'
+  if (binding.loginStatus === 'expired') return '登录过期'
+  if (binding.loginStatus === 'error') return '环境异常'
+  if (binding.loginStatus === 'unknown') return '待首次登录'
+  return binding.loginStatus || '未知'
+}
+
+function browserEnvironmentLoginStatusTagType(account: SemiAutoSelfMediaAccount) {
+  const status = browserEnvironmentAccountOf(account)?.loginStatus
+  if (status === 'logged_in') return 'success'
+  if (status === 'mismatch' || status === 'expired' || status === 'error') return 'danger'
+  if (status === 'login_required' || status === 'unknown') return 'warning'
+  return 'info'
+}
+
+function browserEnvironmentLastReportTime(account: SemiAutoSelfMediaAccount) {
+  const binding = browserEnvironmentAccountOf(account)
+  return binding?.lastVerifiedAt || binding?.lastLoginSeenAt || '-'
+}
+
+function channelGroupLabel(value?: string | null) {
+  if (!value) return '-'
+  return channelGroups.find((item) => item.value === value)?.label || value
+}
+
+function channelSubOptions(groupCode?: string | null) {
+  return groupCode ? (subOptions[groupCode] || []) : []
+}
+
+function channelSubLabel(groupCode?: string | null, subCode?: string | null) {
+  if (!subCode || subCode === '_ALL_') return '全部平台'
+  return channelSubOptions(groupCode).find((item) => item.value === subCode)?.label || subCode
+}
+
+function perspectiveLabel(code?: string | null) {
+  if (!code) return '-'
+  return templatePerspectives.value.find((item) => item.code === code)?.name || code
 }
 
 function agentSiteLabel(code?: string | null) {
@@ -524,11 +724,12 @@ async function load() {
       companyName.value = ''
       companyIndustryTags.value = []
     }
-    await loadSelfMediaAccounts()
+    await Promise.all([loadSelfMediaAccounts(), loadPerspectiveConfigs()])
   } catch {
     brand.value = null
     companyName.value = ''
     selfMediaAccounts.value = []
+    browserEnvironmentAccounts.value = {}
   } finally {
     loading.value = false
   }
@@ -538,9 +739,39 @@ async function loadSelfMediaAccounts() {
   selfMediaAccountsLoading.value = true
   try {
     const { data } = await getSelfMediaAccountsByBrand(brandId)
-    selfMediaAccounts.value = data.data as SemiAutoSelfMediaAccount[]
+    const accounts = data.data as SemiAutoSelfMediaAccount[]
+    selfMediaAccounts.value = accounts
+    await loadBrowserEnvironmentAccounts(accounts)
   } finally {
     selfMediaAccountsLoading.value = false
+  }
+}
+
+async function loadBrowserEnvironmentAccounts(accounts: SemiAutoSelfMediaAccount[]) {
+  const targets = accounts.filter((item) => isSemiAutoPlatform(item.platform))
+  if (!targets.length) {
+    browserEnvironmentAccounts.value = {}
+    return
+  }
+  const entries = await Promise.all(targets.map(async (account) => {
+    try {
+      const { data } = await getBrowserEnvironmentAccountBySelfMedia(account.id)
+      return [account.id, data.data || null] as const
+    } catch {
+      return [account.id, null] as const
+    }
+  }))
+  browserEnvironmentAccounts.value = Object.fromEntries(entries)
+}
+
+async function loadPerspectiveConfigs() {
+  perspectiveConfigLoading.value = true
+  try {
+    const { data } = await getBrandTemplatePerspectiveConfigs(brandId)
+    templatePerspectives.value = data.data.perspectives || []
+    perspectiveConfigs.value = data.data.configs || []
+  } finally {
+    perspectiveConfigLoading.value = false
   }
 }
 
@@ -584,6 +815,67 @@ async function submitSelfMediaAccount() {
     await loadSelfMediaAccounts()
   } finally {
     selfMediaAccountSaving.value = false
+  }
+}
+
+function openPerspectiveConfigCreate() {
+  editingPerspectiveConfig.value = null
+  perspectiveConfigForm.channelGroupCode = 'self_media'
+  perspectiveConfigForm.channelSubCode = '_ALL_'
+  perspectiveConfigForm.perspectiveCode = enabledPerspectives.value[0]?.code || 'customer'
+  perspectiveConfigForm.enabled = true
+  perspectiveConfigVisible.value = true
+}
+
+function openPerspectiveConfigEdit(config: BrandChannelTemplatePerspective) {
+  editingPerspectiveConfig.value = config
+  perspectiveConfigForm.channelGroupCode = config.channelGroupCode
+  perspectiveConfigForm.channelSubCode = config.channelSubCode || '_ALL_'
+  perspectiveConfigForm.perspectiveCode = config.perspectiveCode
+  perspectiveConfigForm.enabled = config.enabled
+  perspectiveConfigVisible.value = true
+}
+
+function handlePerspectiveGroupChange() {
+  perspectiveConfigForm.channelSubCode = '_ALL_'
+}
+
+async function submitPerspectiveConfig() {
+  const valid = await perspectiveConfigFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+  perspectiveConfigSaving.value = true
+  try {
+    await saveBrandTemplatePerspectiveConfig({
+      brandId,
+      channelGroupCode: perspectiveConfigForm.channelGroupCode,
+      channelSubCode: perspectiveConfigForm.channelSubCode || '_ALL_',
+      perspectiveCode: perspectiveConfigForm.perspectiveCode,
+      enabled: perspectiveConfigForm.enabled,
+    })
+    ElMessage.success('文章视角配置已保存')
+    perspectiveConfigVisible.value = false
+    await loadPerspectiveConfigs()
+  } finally {
+    perspectiveConfigSaving.value = false
+  }
+}
+
+async function removePerspectiveConfig(config: BrandChannelTemplatePerspective) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除「${channelGroupLabel(config.channelGroupCode)} / ${channelSubLabel(config.channelGroupCode, config.channelSubCode)}」的文章视角配置？`,
+      '删除确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+      },
+    )
+    await deleteBrandTemplatePerspectiveConfig(config.id)
+    ElMessage.success('文章视角配置已删除')
+    await loadPerspectiveConfigs()
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return
   }
 }
 
@@ -814,6 +1106,13 @@ onMounted(async () => {
   color: #64748b;
   font-size: 12px;
   line-height: 1.55;
+}
+
+.table-subtext {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 @media (max-width: 960px) {

@@ -48,6 +48,7 @@ public final class ArticleGenerationOptionDtos {
             String articleTypeName,
             String questionSceneCode,
             String questionSceneName,
+            String perspectiveCode,
             Integer weight,
             Integer sortOrder
     ) {
@@ -61,6 +62,7 @@ public final class ArticleGenerationOptionDtos {
     }
 
     public record AllocationPreviewRequest(
+            Long projectId,
             @NotBlank String channelGroupCode,
             String channelSubCode,
             String questionSceneCode,
@@ -85,6 +87,7 @@ public final class ArticleGenerationOptionDtos {
             String questionSceneCode,
             String questionSceneName,
             String agentSiteModule,
+            String perspectiveCode,
             Integer weight,
             Integer count
     ) {

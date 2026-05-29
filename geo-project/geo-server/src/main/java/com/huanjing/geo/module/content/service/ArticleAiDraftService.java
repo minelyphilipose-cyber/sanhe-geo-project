@@ -194,6 +194,9 @@ public class ArticleAiDraftService {
                 req.getExtraPrompt(),
                 req.getPromptTemplateId(),
                 req.getPromptTemplateVersionId(),
+                null,
+                null,
+                null,
                 1
         );
         return promptContextFactory.buildStrict(contextRequest);
@@ -687,6 +690,9 @@ public class ArticleAiDraftService {
                 buildPreviewExtraPrompt(req, articleType, brand),
                 1,
                 List.of(),
+                null,
+                com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes.CUSTOMER,
+                TemplatePerspectiveService.MATCH_SCOPE_DEFAULT,
                 null
         ), buildContactBlock(articleType, req.getTopic(), brand));
     }

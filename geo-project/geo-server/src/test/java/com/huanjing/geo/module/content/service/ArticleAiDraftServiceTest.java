@@ -460,7 +460,10 @@ class ArticleAiDraftServiceTest {
                 "extra",
                 1,
                 List.of("forbidden"),
-                "title guide"
+                "title guide",
+                "customer",
+                TemplatePerspectiveService.MATCH_SCOPE_DEFAULT,
+                null
         );
         BatchArticlePromptBuilder.PromptBuildResult prompt = new BatchArticlePromptBuilder.PromptBuildResult(
                 "system prompt",
@@ -482,6 +485,9 @@ class ArticleAiDraftServiceTest {
                 "wechat_mp",
                 "wechat",
                 "AI topic?",
+                "customer",
+                TemplatePerspectiveService.MATCH_SCOPE_DEFAULT,
+                null,
                 false
         );
     }

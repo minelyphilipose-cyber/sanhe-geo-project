@@ -381,6 +381,8 @@ export interface BatchArticleGenerateTemplateCount {
   templateId: number
   templateVersionId?: number
   templateName?: string
+  articleTypeName?: string | null
+  agentSiteModule?: string | null
   count: number
   extraPrompt?: string
 }
@@ -489,6 +491,7 @@ export interface ArticlePromptTemplate {
   articleTypeName?: string | null
   questionSceneCode?: string | null
   questionSceneName?: string | null
+  perspectiveCode: string
   status: 'draft' | 'active' | 'disabled' | string
   weight: number
   sortOrder: number
@@ -532,6 +535,7 @@ export interface ArticlePromptTemplateSaveRequest {
   agentSiteModule?: string | null
   articleTypeCode: string
   questionSceneCode?: string | null
+  perspectiveCode?: string | null
   status: 'draft' | 'active' | 'disabled' | string
   weight: number
   sortOrder: number
@@ -565,6 +569,7 @@ export interface ArticleGenerationTemplateOption {
   articleTypeName?: string | null
   questionSceneCode?: string | null
   questionSceneName?: string | null
+  perspectiveCode?: string | null
   weight: number
   sortOrder: number
 }
@@ -610,6 +615,7 @@ export interface ArticleAllocationItem {
   questionSceneCode?: string | null
   questionSceneName?: string | null
   agentSiteModule?: string | null
+  perspectiveCode?: string | null
   weight: number
   count: number
 }
@@ -626,12 +632,81 @@ export function getArticlePromptTemplates(params?: {
   channelSubCode?: string
   agentSiteModule?: string
   questionSceneCode?: string
+  perspectiveCode?: string
   status?: string
   keyword?: string
   current?: number
   size?: number
 }) {
   return request.get<R<PageResult<ArticlePromptTemplate>>>('/content/article-prompt-templates', { params })
+}
+
+export interface TemplatePerspective {
+  code: string
+  name: string
+  description?: string | null
+  enabled: boolean
+  sortOrder: number
+}
+
+export interface BrandChannelTemplatePerspective {
+  id: number
+  brandId: number
+  channelGroupCode: string
+  channelSubCode: string
+  perspectiveCode: string
+  perspectiveName?: string | null
+  enabled: boolean
+  createdAt?: string | null
+  updatedAt?: string | null
+}
+
+export interface BrandChannelTemplatePerspectiveSaveRequest {
+  brandId: number
+  channelGroupCode: string
+  channelSubCode?: string | null
+  perspectiveCode: string
+  enabled?: boolean
+}
+
+export interface TemplatePerspectiveResolveResponse {
+  perspectiveCode: string
+  perspectiveName?: string | null
+  matchedScope: 'exact' | 'channel_all' | 'default' | string
+  matchedConfigId?: number | null
+}
+
+export interface TemplatePerspectiveConfigListResponse {
+  perspectives: TemplatePerspective[]
+  configs: BrandChannelTemplatePerspective[]
+}
+
+export function getTemplatePerspectives(params?: { includeDisabled?: boolean }) {
+  return request.get<R<TemplatePerspective[]>>('/content/template-perspectives', { params })
+}
+
+export function updateTemplatePerspectiveEnabled(code: string, enabled: boolean) {
+  return request.patch<R<TemplatePerspective>>(`/content/template-perspectives/${code}/enabled`, { enabled })
+}
+
+export function getBrandTemplatePerspectiveConfigs(brandId: number) {
+  return request.get<R<TemplatePerspectiveConfigListResponse>>('/content/template-perspectives/brand-configs', { params: { brandId } })
+}
+
+export function saveBrandTemplatePerspectiveConfig(data: BrandChannelTemplatePerspectiveSaveRequest) {
+  return request.post<R<BrandChannelTemplatePerspective>>('/content/template-perspectives/brand-configs', data)
+}
+
+export function deleteBrandTemplatePerspectiveConfig(id: number) {
+  return request.delete<R<void>>(`/content/template-perspectives/brand-configs/${id}`)
+}
+
+export function resolveTemplatePerspective(params: {
+  brandId: number
+  channelGroupCode: string
+  channelSubCode?: string | null
+}) {
+  return request.get<R<TemplatePerspectiveResolveResponse>>('/content/template-perspectives/resolve', { params })
 }
 
 export function getArticlePromptTemplate(id: number) {
@@ -671,6 +746,7 @@ export function getArticleGenerationOptions() {
 }
 
 export function previewArticleTemplateAllocation(data: {
+  projectId?: number
   channelGroupCode: string
   channelSubCode?: string | null
   questionSceneCode?: string | null

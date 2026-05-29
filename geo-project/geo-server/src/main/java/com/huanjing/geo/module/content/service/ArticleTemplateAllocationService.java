@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
+import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.dto.ArticleGenerationOptionDtos.AllocationItemVO;
 import com.huanjing.geo.module.content.dto.ArticleGenerationOptionDtos.AllocationPreviewResponse;
 import com.huanjing.geo.module.content.dto.ArticleGenerationOptionDtos.ChannelGroupVO;
@@ -74,8 +75,16 @@ public class ArticleTemplateAllocationService {
     }
 
     public AllocationPreviewResponse preview(String groupCode, String subCode, String questionSceneCode, int count) {
+        return preview(groupCode, subCode, questionSceneCode, TemplatePerspectiveCodes.CUSTOMER, count);
+    }
+
+    public AllocationPreviewResponse preview(String groupCode,
+                                             String subCode,
+                                             String questionSceneCode,
+                                             String perspectiveCode,
+                                             int count) {
         subCode = ArticlePromptChannels.canonicalSubCode(groupCode, subCode);
-        List<AllocatedTemplate> allocated = allocate(groupCode, subCode, questionSceneCode, count);
+        List<AllocatedTemplate> allocated = allocate(groupCode, subCode, questionSceneCode, perspectiveCode, count);
         return new AllocationPreviewResponse(
                 groupCode,
                 trimToNull(subCode),
@@ -89,10 +98,18 @@ public class ArticleTemplateAllocationService {
     }
 
     public List<AllocatedTemplate> allocate(String groupCode, String subCode, String questionSceneCode, int count) {
+        return allocate(groupCode, subCode, questionSceneCode, TemplatePerspectiveCodes.CUSTOMER, count);
+    }
+
+    public List<AllocatedTemplate> allocate(String groupCode,
+                                            String subCode,
+                                            String questionSceneCode,
+                                            String perspectiveCode,
+                                            int count) {
         if (count <= 0) {
             return List.of();
         }
-        List<TemplateWithVersion> candidates = activeTemplates(groupCode, subCode, questionSceneCode).stream()
+        List<TemplateWithVersion> candidates = activeTemplates(groupCode, subCode, questionSceneCode, perspectiveCode).stream()
                 .filter(item -> item.template().getWeight() != null && item.template().getWeight() > 0)
                 .toList();
         return allocateCandidates(candidates, count);
@@ -142,12 +159,21 @@ public class ArticleTemplateAllocationService {
     }
 
     public List<TemplateWithVersion> activeTemplates(String groupCode, String subCode, String questionSceneCode) {
+        return activeTemplates(groupCode, subCode, questionSceneCode, TemplatePerspectiveCodes.CUSTOMER);
+    }
+
+    public List<TemplateWithVersion> activeTemplates(String groupCode,
+                                                     String subCode,
+                                                     String questionSceneCode,
+                                                     String perspectiveCode) {
         subCode = ArticlePromptChannels.canonicalSubCode(groupCode, subCode);
+        String normalizedPerspective = TemplatePerspectiveCodes.normalize(perspectiveCode);
         List<ArticlePromptTemplate> templates = templateMapper.selectList(
                 new LambdaQueryWrapper<ArticlePromptTemplate>()
                         .eq(ArticlePromptTemplate::getChannelGroupCode, groupCode)
                         .eq(StringUtils.hasText(subCode), ArticlePromptTemplate::getChannelSubCode, trimToNull(subCode))
                         .isNull(!StringUtils.hasText(subCode), ArticlePromptTemplate::getChannelSubCode)
+                        .eq(ArticlePromptTemplate::getPerspectiveCode, normalizedPerspective)
                         .eq(ArticlePromptTemplate::getStatus, ArticlePromptTemplateService.STATUS_ACTIVE)
                         .isNotNull(ArticlePromptTemplate::getCurrentVersionId)
                         .orderByDesc(ArticlePromptTemplate::getUpdatedAt, ArticlePromptTemplate::getId)
@@ -163,6 +189,10 @@ public class ArticleTemplateAllocationService {
     }
 
     public TemplateWithVersion resolveTemplate(Long templateId, Long versionId) {
+        return resolveTemplate(templateId, versionId, null);
+    }
+
+    public TemplateWithVersion resolveTemplate(Long templateId, Long versionId, String expectedPerspectiveCode) {
         ArticlePromptTemplate template = templateMapper.selectById(templateId);
         ArticlePromptTemplateVersion version = versionId == null ? null : versionMapper.selectById(versionId);
         if (template == null || version == null || !template.getId().equals(version.getTemplateId())) {
@@ -171,6 +201,11 @@ public class ArticleTemplateAllocationService {
         if (!ArticlePromptTemplateService.STATUS_ACTIVE.equals(template.getStatus())
                 || !ArticlePromptTemplateService.VERSION_PUBLISHED.equals(version.getStatus())
                 || !version.getId().equals(template.getCurrentVersionId())) {
+            return null;
+        }
+        if (StringUtils.hasText(expectedPerspectiveCode)
+                && !TemplatePerspectiveCodes.normalize(expectedPerspectiveCode)
+                .equals(TemplatePerspectiveCodes.normalize(template.getPerspectiveCode()))) {
             return null;
         }
         return new TemplateWithVersion(template, version);
@@ -282,6 +317,7 @@ public class ArticleTemplateAllocationService {
                 ArticlePromptChannels.ARTICLE_TYPE_LABELS.getOrDefault(template.getArticleTypeCode(), template.getArticleTypeCode()),
                 template.getQuestionSceneCode(),
                 questionSceneLabel(template.getQuestionSceneCode()),
+                TemplatePerspectiveCodes.normalize(template.getPerspectiveCode()),
                 template.getWeight(),
                 template.getSortOrder()
         );
@@ -314,6 +350,7 @@ public class ArticleTemplateAllocationService {
                 template.getQuestionSceneCode(),
                 questionSceneLabel(template.getQuestionSceneCode()),
                 template.getAgentSiteModule(),
+                TemplatePerspectiveCodes.normalize(template.getPerspectiveCode()),
                 template.getWeight(),
                 item.count()
         );

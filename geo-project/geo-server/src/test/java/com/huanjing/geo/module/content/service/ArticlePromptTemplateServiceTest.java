@@ -38,8 +38,9 @@ class ArticlePromptTemplateServiceTest {
         SysUser user = new SysUser();
         user.setId(7L);
         when(currentUserService.requireCurrentUser()).thenReturn(user);
+        TemplatePerspectiveService perspectiveService = mock(TemplatePerspectiveService.class);
         service = new ArticlePromptTemplateService(templateMapper, versionMapper, currentUserService, auditService,
-                new ArticlePromptVariableRegistry(new ObjectMapper()));
+                new ArticlePromptVariableRegistry(new ObjectMapper()), perspectiveService);
     }
 
     @Test
@@ -71,6 +72,7 @@ class ArticlePromptTemplateServiceTest {
         template.setChannelGroupCode("forum");
         template.setArticleTypeCode("faq");
         template.setQuestionSceneCode("qa");
+        template.setPerspectiveCode("customer");
         template.setWeight(10);
         template.setSortOrder(0);
         template.setStatus(ArticlePromptTemplateService.STATUS_ACTIVE);
@@ -99,6 +101,7 @@ class ArticlePromptTemplateServiceTest {
                 null,
                 "faq",
                 "qa",
+                "customer",
                 10,
                 0,
                 ArticlePromptTemplateService.STATUS_ACTIVE,

@@ -8,6 +8,7 @@ import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.service.AuditService;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
+import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.dto.ArticlePromptTemplateDtos.TemplateDetailVO;
 import com.huanjing.geo.module.content.dto.ArticlePromptTemplateDtos.TemplateSaveRequest;
 import com.huanjing.geo.module.content.dto.ArticlePromptTemplateDtos.TemplateVO;
@@ -60,6 +61,7 @@ public class ArticlePromptTemplateService {
     private final CurrentUserService currentUserService;
     private final AuditService auditService;
     private final ArticlePromptVariableRegistry variableRegistry;
+    private final TemplatePerspectiveService perspectiveService;
 
     public List<ArticlePromptVariableRegistry.VariableDefinition> variables() {
         currentUserService.ensurePermission("project.read");
@@ -70,6 +72,7 @@ public class ArticlePromptTemplateService {
                                  String channelSubCode,
                                  String agentSiteModule,
                                  String questionSceneCode,
+                                 String perspectiveCode,
                                  String status,
                                  String keyword,
                                  long current,
@@ -80,6 +83,8 @@ public class ArticlePromptTemplateService {
                 .eq(StringUtils.hasText(channelSubCode), ArticlePromptTemplate::getChannelSubCode, trim(channelSubCode))
                 .eq(StringUtils.hasText(agentSiteModule), ArticlePromptTemplate::getAgentSiteModule, trim(agentSiteModule))
                 .eq(StringUtils.hasText(questionSceneCode), ArticlePromptTemplate::getQuestionSceneCode, trim(questionSceneCode))
+                .eq(StringUtils.hasText(perspectiveCode), ArticlePromptTemplate::getPerspectiveCode,
+                        TemplatePerspectiveCodes.normalize(perspectiveCode))
                 .eq(StringUtils.hasText(status), ArticlePromptTemplate::getStatus, trim(status))
                 .and(StringUtils.hasText(keyword), q -> q
                         .like(ArticlePromptTemplate::getName, trim(keyword))
@@ -115,7 +120,7 @@ public class ArticlePromptTemplateService {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("content.prompt_template.manage");
         validateTemplate(req.channelGroupCode(), req.channelSubCode(), req.agentSiteModule(), req.status(), req.weight(),
-                req.contactDisclosureMode(), req.questionSceneCode());
+                req.contactDisclosureMode(), req.questionSceneCode(), req.perspectiveCode());
         variableRegistry.validateTemplateVariables(req.systemPrompt(), req.userPromptTemplate(), req.variablesJson());
 
         ArticlePromptTemplate template = new ArticlePromptTemplate();
@@ -141,7 +146,7 @@ public class ArticlePromptTemplateService {
         currentUserService.ensurePermission("content.prompt_template.manage");
         ArticlePromptTemplate template = requireTemplate(id);
         validateTemplate(req.channelGroupCode(), req.channelSubCode(), req.agentSiteModule(), req.status(), req.weight(),
-                req.contactDisclosureMode(), req.questionSceneCode());
+                req.contactDisclosureMode(), req.questionSceneCode(), req.perspectiveCode());
         boolean hasVersionPayload = StringUtils.hasText(req.systemPrompt()) && StringUtils.hasText(req.userPromptTemplate());
         if (hasVersionPayload) {
             variableRegistry.validateTemplateVariables(req.systemPrompt(), req.userPromptTemplate(), req.variablesJson());
@@ -226,6 +231,7 @@ public class ArticlePromptTemplateService {
         template.setAgentSiteModule(trimToNull(req.agentSiteModule()));
         template.setArticleTypeCode(trim(req.articleTypeCode()));
         template.setQuestionSceneCode(normalizeQuestionScene(req.questionSceneCode()));
+        template.setPerspectiveCode(TemplatePerspectiveCodes.normalize(req.perspectiveCode()));
         template.setWeight(req.weight());
         template.setSortOrder(req.sortOrder() == null ? 0 : req.sortOrder());
         template.setStatus(trim(req.status()));
@@ -234,7 +240,7 @@ public class ArticlePromptTemplateService {
     }
 
     private void validateTemplate(String groupCode, String subCode, String module, String status, Integer weight,
-                                  String contactDisclosureMode, String questionSceneCode) {
+                                  String contactDisclosureMode, String questionSceneCode, String perspectiveCode) {
         String group = trim(groupCode);
         String sub = trimToNull(subCode);
         if (!ArticlePromptChannels.isValidCode(group)) {
@@ -255,6 +261,7 @@ public class ArticlePromptTemplateService {
         if (scene != null && !QUESTION_SCENE_LABELS.containsKey(scene)) {
             throw new BizException(400, "Invalid question scene");
         }
+        perspectiveService.assertPerspectiveSelectable(TemplatePerspectiveCodes.normalize(perspectiveCode));
         if (ArticlePromptChannels.AGENT_SITE.equals(group)) {
             if (!ArticlePromptChannels.AGENT_SITE_MODULES.contains(trim(module))) {
                 throw new BizException(400, "Agent site module is required");
@@ -357,6 +364,7 @@ public class ArticlePromptTemplateService {
                 ArticlePromptChannels.ARTICLE_TYPE_LABELS.getOrDefault(template.getArticleTypeCode(), template.getArticleTypeCode()),
                 template.getQuestionSceneCode(),
                 questionSceneLabel(template.getQuestionSceneCode()),
+                TemplatePerspectiveCodes.normalize(template.getPerspectiveCode()),
                 template.getWeight(),
                 template.getSortOrder(),
                 template.getStatus(),
@@ -392,6 +400,7 @@ public class ArticlePromptTemplateService {
         map.put("agentSiteModule", template.getAgentSiteModule());
         map.put("articleTypeCode", template.getArticleTypeCode());
         map.put("questionSceneCode", template.getQuestionSceneCode());
+        map.put("perspectiveCode", TemplatePerspectiveCodes.normalize(template.getPerspectiveCode()));
         map.put("weight", template.getWeight());
         map.put("status", template.getStatus());
         map.put("sampleOutputUrl", template.getSampleOutputUrl());

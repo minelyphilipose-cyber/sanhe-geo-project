@@ -8,25 +8,17 @@ import lombok.Data;
 import java.time.LocalDateTime;
 
 @Data
-@TableName("article_prompt_template")
-public class ArticlePromptTemplate {
+@TableName("brand_channel_template_perspective")
+public class BrandChannelTemplatePerspective {
     @TableId(type = IdType.AUTO)
     private Long id;
-    private String name;
-    private String description;
+    private Long brandId;
     private String channelGroupCode;
     private String channelSubCode;
-    private String agentSiteModule;
-    private String articleTypeCode;
-    private String questionSceneCode;
     private String perspectiveCode;
-    private Integer weight;
-    private Integer sortOrder;
-    private String status;
-    private String sampleOutputUrl;
-    private String contactDisclosureMode;
-    private Long currentVersionId;
+    private Boolean enabled;
     private Long createdBy;
+    private Long updatedBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

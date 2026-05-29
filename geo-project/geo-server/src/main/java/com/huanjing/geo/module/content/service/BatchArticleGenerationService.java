@@ -11,6 +11,7 @@ import com.huanjing.geo.common.llm.LlmInvoker;
 import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
+import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerationDetailResponse;
@@ -135,6 +136,7 @@ public class BatchArticleGenerationService {
     private final ArticleGenerationPromptContextFactory promptContextFactory;
     private final BatchArticleQualityChecker qualityChecker;
     private final ArticleTemplateAllocationService allocationService;
+    private final TemplatePerspectiveService perspectiveService;
     private final QuestionScenePlatformSuggestionService suggestionService;
     private final ArticleGenerationReadinessService readinessService;
     private final ObjectMapper objectMapper;
@@ -166,6 +168,7 @@ public class BatchArticleGenerationService {
                                          ArticleGenerationPromptContextFactory promptContextFactory,
                                          BatchArticleQualityChecker qualityChecker,
                                          ArticleTemplateAllocationService allocationService,
+                                         TemplatePerspectiveService perspectiveService,
                                          QuestionScenePlatformSuggestionService suggestionService,
                                          ArticleGenerationReadinessService readinessService,
                                          ObjectMapper objectMapper,
@@ -196,6 +199,7 @@ public class BatchArticleGenerationService {
         this.promptContextFactory = promptContextFactory;
         this.qualityChecker = qualityChecker;
         this.allocationService = allocationService;
+        this.perspectiveService = perspectiveService;
         this.suggestionService = suggestionService;
         this.readinessService = readinessService;
         this.objectMapper = objectMapper;
@@ -232,8 +236,10 @@ public class BatchArticleGenerationService {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST,
                     "Single batch article generation count must be <= " + MAX_BATCH_ARTICLE_COUNT);
         }
-        Map<String, SmartTemplateSelection> smartSelections = selectSmartTemplates(req);
-        List<ValidatedTopic> topics = validateTopics(project.getId(), topicSource, req.getTopics(), notices, smartSelections);
+        Map<String, TemplatePerspectiveService.ResolvedPerspective> perspectiveMemo = new HashMap<>();
+        Map<String, SmartTemplateSelection> smartSelections = selectSmartTemplates(req, project.getBrandId(), perspectiveMemo);
+        List<ValidatedTopic> topics = validateTopics(project.getId(), project.getBrandId(), topicSource, req.getTopics(),
+                notices, smartSelections, perspectiveMemo);
         int totalCount = topics.stream()
                 .flatMap(topic -> topic.platforms().stream())
                 .mapToInt(platform -> platform.count() == null ? 0 : platform.count())
@@ -286,6 +292,9 @@ public class BatchArticleGenerationService {
                         task.setArticleTypeCode(platform.articleTypeCode());
                         task.setPromptTemplateId(platform.templateId());
                         task.setPromptTemplateVersionId(platform.templateVersionId());
+                        task.setPerspectiveCode(platform.perspectiveCode());
+                        task.setPerspectiveMatchedScope(platform.perspectiveMatchedScope());
+                        task.setPerspectiveMatchedConfigId(platform.perspectiveMatchedConfigId());
                         task.setAllocationMode(platform.allocationMode());
                         task.setTemplateSource(platform.templateSource());
                         task.setSuggestedPlatformCodes(writeJson(topic.suggestedPlatformCodes()));
@@ -347,6 +356,9 @@ public class BatchArticleGenerationService {
                         task.getAudiencePerspective(),
                         task.getPromptTemplateId(),
                         task.getPromptTemplateVersionId(),
+                        task.getPerspectiveCode(),
+                        task.getPerspectiveMatchedScope(),
+                        task.getPerspectiveMatchedConfigId(),
                         task.getAllocationMode(),
                         task.getTemplateSource(),
                         task.getSuggestedPlatformCodes(),
@@ -456,6 +468,7 @@ public class BatchArticleGenerationService {
             draft.setArticleTypeCode(task.getArticleTypeCode());
             draft.setPromptTemplateId(task.getPromptTemplateId());
             draft.setPromptTemplateVersionId(task.getPromptTemplateVersionId());
+            draft.setPerspectiveCode(TemplatePerspectiveCodes.normalize(task.getPerspectiveCode()));
             draft.setAllocationMode(task.getAllocationMode());
             draft.setTemplateSource(task.getTemplateSource());
             draft.setTopic(task.getTopic());
@@ -611,10 +624,12 @@ public class BatchArticleGenerationService {
     }
 
     private List<ValidatedTopic> validateTopics(Long projectId,
+                                                Long brandId,
                                                 String topicSource,
                                                 List<BatchArticleGenerateRequest.TopicConfig> topics,
                                                 List<BatchArticleGenerateResponse.Notice> notices,
-                                                Map<String, SmartTemplateSelection> smartSelections) {
+                                                Map<String, SmartTemplateSelection> smartSelections,
+                                                Map<String, TemplatePerspectiveService.ResolvedPerspective> perspectiveMemo) {
         if (topics == null || topics.isEmpty()) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Topics are required");
         }
@@ -632,8 +647,8 @@ public class BatchArticleGenerationService {
             List<String> confirmedReadinessWarningCodes = Boolean.TRUE.equals(topicConfig.getReadinessWarningConfirmed())
                     ? normalizeWarningCodes(topicConfig.getReadinessWarningCodes())
                     : List.of();
-            List<ValidatedPlatform> platforms = validatePlatforms(topicIndex, topic, questionSceneCode,
-                    topicConfig.getPlatforms(), notices, smartSelections);
+            List<ValidatedPlatform> platforms = validatePlatforms(topicIndex, brandId, topic, questionSceneCode,
+                    topicConfig.getPlatforms(), notices, smartSelections, perspectiveMemo);
             if (platforms.stream().mapToInt(platform -> platform.count() == null ? 0 : platform.count()).sum() <= 0) {
                 continue;
             }
@@ -691,11 +706,13 @@ public class BatchArticleGenerationService {
     }
 
     private List<ValidatedPlatform> validatePlatforms(int topicIndex,
+                                                      Long brandId,
                                                       String topic,
                                                       String questionSceneCode,
                                                       List<BatchArticleGenerateRequest.PlatformCount> platforms,
                                                       List<BatchArticleGenerateResponse.Notice> notices,
-                                                      Map<String, SmartTemplateSelection> smartSelections) {
+                                                      Map<String, SmartTemplateSelection> smartSelections,
+                                                      Map<String, TemplatePerspectiveService.ResolvedPerspective> perspectiveMemo) {
         if (platforms == null || platforms.isEmpty()) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Platform counts are required");
         }
@@ -707,21 +724,23 @@ public class BatchArticleGenerationService {
             }
             String allocationMode = StringUtils.hasText(platform.getAllocationMode()) ? platform.getAllocationMode().trim() : "auto";
             if ("custom".equals(allocationMode)) {
-                result.addAll(validateCustomPlatform(topic, platform, notices));
+                result.addAll(validateCustomPlatform(brandId, topic, platform, notices, perspectiveMemo));
                 continue;
             }
-            result.addAll(validateAutoPlatform(unitKey(topicIndex, platformIndex), topic, platform,
-                    questionSceneCode, notices, smartSelections));
+            result.addAll(validateAutoPlatform(unitKey(topicIndex, platformIndex), brandId, topic, platform,
+                    questionSceneCode, notices, smartSelections, perspectiveMemo));
         }
         return result;
     }
 
     private List<ValidatedPlatform> validateAutoPlatform(String unitKey,
+                                                         Long brandId,
                                                          String topic,
                                                          BatchArticleGenerateRequest.PlatformCount platform,
                                                          String questionSceneCode,
                                                          List<BatchArticleGenerateResponse.Notice> notices,
-                                                         Map<String, SmartTemplateSelection> smartSelections) {
+                                                         Map<String, SmartTemplateSelection> smartSelections,
+                                                         Map<String, TemplatePerspectiveService.ResolvedPerspective> perspectiveMemo) {
         int count = platform.getCount() == null ? 0 : platform.getCount();
         if (count < 0) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid article count");
@@ -730,15 +749,19 @@ public class BatchArticleGenerationService {
             return List.of();
         }
         ChannelRef channel = resolveChannel(platform);
-        AutoTemplateAllocation allocation = allocateAutoTemplates(unitKey, channel, questionSceneCode, count, smartSelections);
+        TemplatePerspectiveService.ResolvedPerspective perspective = resolvePerspective(brandId, channel, perspectiveMemo);
+        AutoTemplateAllocation allocation = allocateAutoTemplates(unitKey, channel, questionSceneCode, perspective, count, smartSelections);
         if (allocation.templates().isEmpty()) {
+            if (TemplatePerspectiveCodes.isSpecial(perspective.perspectiveCode())) {
+                throw missingTemplateException(topic, channel, questionSceneCode, perspective.perspectiveCode());
+            }
             addSkippedNotice(notices, topic, channel, null, null, count, "未配置启用模板");
             return List.of();
         }
         maybeAddAllocationChangedNotice(topic, channel, platform.getPreviewTemplateCounts(), allocation.templates(), notices);
         return allocation.templates().stream()
                 .map(item -> toValidatedPlatform(channel, item.template(), item.version(), item.count(),
-                        platform.getExtraPrompt(), "auto", allocation.templateSource()))
+                        platform.getExtraPrompt(), "auto", allocation.templateSource(), perspective))
                 .toList();
     }
 
@@ -746,16 +769,18 @@ public class BatchArticleGenerationService {
             String unitKey,
             ChannelRef channel,
             String questionSceneCode,
+            TemplatePerspectiveService.ResolvedPerspective perspective,
             int count,
             Map<String, SmartTemplateSelection> smartSelections) {
         SmartTemplateSelection selection = smartSelections == null ? null : smartSelections.get(unitKey);
         if (selection == null || selection.templateIds().isEmpty()) {
             return new AutoTemplateAllocation(
-                    allocationService.allocate(channel.groupCode(), channel.subCode(), questionSceneCode, count),
+                    allocationService.allocate(channel.groupCode(), channel.subCode(), questionSceneCode, perspective.perspectiveCode(), count),
                     TEMPLATE_SOURCE_WEIGHTED
             );
         }
-        List<ArticleTemplateAllocationService.TemplateWithVersion> candidates = allocationService.activeTemplates(channel.groupCode(), channel.subCode(), questionSceneCode).stream()
+        List<ArticleTemplateAllocationService.TemplateWithVersion> candidates = allocationService.activeTemplates(
+                        channel.groupCode(), channel.subCode(), questionSceneCode, perspective.perspectiveCode()).stream()
                 .filter(item -> selection.templateIds().contains(item.template().getId()))
                 .toList();
         List<ArticleTemplateAllocationService.AllocatedTemplate> allocated = allocationService.allocateCandidates(candidates, count);
@@ -763,14 +788,16 @@ public class BatchArticleGenerationService {
             return new AutoTemplateAllocation(allocated, TEMPLATE_SOURCE_SMART);
         }
         return new AutoTemplateAllocation(
-                allocationService.allocate(channel.groupCode(), channel.subCode(), questionSceneCode, count),
+                allocationService.allocate(channel.groupCode(), channel.subCode(), questionSceneCode, perspective.perspectiveCode(), count),
                 TEMPLATE_SOURCE_WEIGHTED
         );
     }
 
-    private List<ValidatedPlatform> validateCustomPlatform(String topic,
+    private List<ValidatedPlatform> validateCustomPlatform(Long brandId,
+                                                           String topic,
                                                            BatchArticleGenerateRequest.PlatformCount platform,
-                                                           List<BatchArticleGenerateResponse.Notice> notices) {
+                                                           List<BatchArticleGenerateResponse.Notice> notices,
+                                                           Map<String, TemplatePerspectiveService.ResolvedPerspective> perspectiveMemo) {
         if (platform.getTemplateCounts() == null || platform.getTemplateCounts().isEmpty()) {
             return List.of();
         }
@@ -780,12 +807,16 @@ public class BatchArticleGenerationService {
             if (count <= 0) {
                 continue;
             }
+            ChannelRef requestedChannel = resolveChannel(platform);
+            TemplatePerspectiveService.ResolvedPerspective perspective = resolvePerspective(brandId, requestedChannel, perspectiveMemo);
             ArticleTemplateAllocationService.TemplateWithVersion resolved = allocationService.resolveTemplate(
-                    templateCount.getTemplateId(), templateCount.getTemplateVersionId()
+                    templateCount.getTemplateId(), templateCount.getTemplateVersionId(), perspective.perspectiveCode()
             );
             if (resolved == null) {
-                ChannelRef channel = resolveChannel(platform);
-                addSkippedNotice(notices, topic, channel, templateCount.getTemplateId(), null, count, "模板已失效");
+                if (TemplatePerspectiveCodes.isSpecial(perspective.perspectiveCode())) {
+                    throw missingTemplateException(topic, requestedChannel, null, perspective.perspectiveCode());
+                }
+                addSkippedNotice(notices, topic, requestedChannel, templateCount.getTemplateId(), null, count, "模板已失效");
                 continue;
             }
             ChannelRef channel = new ChannelRef(
@@ -794,13 +825,16 @@ public class BatchArticleGenerationService {
                     ArticlePromptChannels.contentStyle(resolved.template().getChannelGroupCode(), resolved.template().getChannelSubCode())
             );
             result.add(toValidatedPlatform(channel, resolved.template(), resolved.version(), count,
-                    templateCount.getExtraPrompt(), "custom", TEMPLATE_SOURCE_CUSTOM));
+                    templateCount.getExtraPrompt(), "custom", TEMPLATE_SOURCE_CUSTOM, perspective));
         }
         return result;
     }
 
-    private Map<String, SmartTemplateSelection> selectSmartTemplates(BatchArticleGenerateRequest req) {
-        List<SmartTemplateMatchUnit> units = collectSmartTemplateMatchUnits(req);
+    private Map<String, SmartTemplateSelection> selectSmartTemplates(
+            BatchArticleGenerateRequest req,
+            Long brandId,
+            Map<String, TemplatePerspectiveService.ResolvedPerspective> perspectiveMemo) {
+        List<SmartTemplateMatchUnit> units = collectSmartTemplateMatchUnits(req, brandId, perspectiveMemo);
         if (units.isEmpty()) {
             return Map.of();
         }
@@ -817,7 +851,10 @@ public class BatchArticleGenerationService {
         return Map.of();
     }
 
-    private List<SmartTemplateMatchUnit> collectSmartTemplateMatchUnits(BatchArticleGenerateRequest req) {
+    private List<SmartTemplateMatchUnit> collectSmartTemplateMatchUnits(
+            BatchArticleGenerateRequest req,
+            Long brandId,
+            Map<String, TemplatePerspectiveService.ResolvedPerspective> perspectiveMemo) {
         if (req.getTopics() == null || req.getTopics().isEmpty()) {
             return List.of();
         }
@@ -839,7 +876,9 @@ public class BatchArticleGenerationService {
                 }
                 String questionSceneCode = normalizeQuestionScene(topic.getQuestionSceneCode());
                 ChannelRef channel = resolveChannel(platform);
-                List<ArticleTemplateAllocationService.TemplateWithVersion> candidates = allocationService.activeTemplates(channel.groupCode(), channel.subCode(), questionSceneCode).stream()
+                TemplatePerspectiveService.ResolvedPerspective perspective = resolvePerspective(brandId, channel, perspectiveMemo);
+                List<ArticleTemplateAllocationService.TemplateWithVersion> candidates = allocationService.activeTemplates(
+                                channel.groupCode(), channel.subCode(), questionSceneCode, perspective.perspectiveCode()).stream()
                         .filter(item -> item.template().getWeight() != null && item.template().getWeight() > 0)
                         .toList();
                 if (candidates.size() <= 1) {
@@ -971,7 +1010,8 @@ public class BatchArticleGenerationService {
                                                   int count,
                                                   String extraPrompt,
                                                   String allocationMode,
-                                                  String templateSource) {
+                                                  String templateSource,
+                                                  TemplatePerspectiveService.ResolvedPerspective perspective) {
         return new ValidatedPlatform(
                 channel.contentStyle(),
                 channel.groupCode(),
@@ -980,6 +1020,9 @@ public class BatchArticleGenerationService {
                 template.getArticleTypeCode(),
                 template.getId(),
                 version.getId(),
+                perspective.perspectiveCode(),
+                perspective.matchedScope(),
+                perspective.matchedConfigId(),
                 template.getContactDisclosureMode(),
                 allocationMode,
                 templateSource,
@@ -1011,6 +1054,27 @@ public class BatchArticleGenerationService {
         }
         sub = ArticlePromptChannels.canonicalSubCode(group, sub);
         return new ChannelRef(group, sub, ArticlePromptChannels.contentStyle(group, sub));
+    }
+
+    private TemplatePerspectiveService.ResolvedPerspective resolvePerspective(
+            Long brandId,
+            ChannelRef channel,
+            Map<String, TemplatePerspectiveService.ResolvedPerspective> perspectiveMemo) {
+        String key = (brandId == null ? 0 : brandId) + ":" + channel.groupCode() + ":" + (channel.subCode() == null ? "" : channel.subCode());
+        return perspectiveMemo.computeIfAbsent(key,
+                ignored -> perspectiveService.resolve(brandId, channel.groupCode(), channel.subCode()));
+    }
+
+    private BizException missingTemplateException(String topic,
+                                                  ChannelRef channel,
+                                                  String questionSceneCode,
+                                                  String perspectiveCode) {
+        String message = "特殊视角缺少启用模板: topic=" + topic
+                + ", channelGroup=" + channel.groupCode()
+                + ", channelSub=" + (channel.subCode() == null ? "" : channel.subCode())
+                + ", questionScene=" + (questionSceneCode == null ? "" : questionSceneCode)
+                + ", perspective=" + perspectiveCode;
+        return new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, message);
     }
 
     private String groupFromContentStyle(String contentStyle) {
@@ -1491,6 +1555,9 @@ public class BatchArticleGenerationService {
                                      String articleTypeCode,
                                      Long templateId,
                                      Long templateVersionId,
+                                     String perspectiveCode,
+                                     String perspectiveMatchedScope,
+                                     Long perspectiveMatchedConfigId,
                                      String contactDisclosureMode,
                                      String allocationMode,
                                      String templateSource,

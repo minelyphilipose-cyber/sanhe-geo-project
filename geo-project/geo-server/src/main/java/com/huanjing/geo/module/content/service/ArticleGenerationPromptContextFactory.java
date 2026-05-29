@@ -6,6 +6,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
+import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplate;
 import com.huanjing.geo.module.content.entity.ArticlePromptTemplateVersion;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationBatch;
@@ -47,6 +48,7 @@ public class ArticleGenerationPromptContextFactory {
     private final ArticlePromptTemplateMapper promptTemplateMapper;
     private final ArticlePromptTemplateVersionMapper promptTemplateVersionMapper;
     private final BatchArticlePromptBuilder promptBuilder;
+    private final TemplatePerspectiveService perspectiveService;
 
     public PromptContextResult buildForBatch(BatchArticleGenerationBatch batch,
                                              BatchArticleGenerationTask task) {
@@ -66,6 +68,9 @@ public class ArticleGenerationPromptContextFactory {
                 task.getExtraPrompt(),
                 task.getPromptTemplateId(),
                 task.getPromptTemplateVersionId(),
+                task.getPerspectiveCode(),
+                task.getPerspectiveMatchedScope(),
+                task.getPerspectiveMatchedConfigId(),
                 task.getArticleIndexInBatch()
         );
         return build(request, true);
@@ -79,6 +84,7 @@ public class ArticleGenerationPromptContextFactory {
         Project project = requireProject(request.projectId());
         Brand brand = project.getBrandId() == null ? null : brandMapper.selectById(project.getBrandId());
         ChannelRef channel = resolveChannel(request.channelGroupCode(), request.channelSubCode());
+        TemplatePerspectiveService.ResolvedPerspective perspective = resolvePerspective(project, request, channel);
         String topic = requireTopic(request.topic());
         String articleType = normalizeArticleType(request.articleType());
         int articleIndexInBatch = request.articleIndexInBatch();
@@ -110,16 +116,20 @@ public class ArticleGenerationPromptContextFactory {
                 trimToNull(request.extraPrompt()),
                 articleIndexInBatch,
                 forbiddenPhrases,
-                titleGuide
+                titleGuide,
+                perspective.perspectiveCode(),
+                perspective.matchedScope(),
+                perspective.matchedConfigId()
         );
 
-        TemplateResolution resolution = resolveTemplate(request, channel, articleType, allowDefaultPromptFallback);
+        TemplateResolution resolution = resolveTemplate(request, channel, articleType, perspective, allowDefaultPromptFallback);
         BatchArticlePromptBuilder.PromptBuildResult prompt = resolution.template() == null
                 ? promptBuilder.build(input)
                 : promptBuilder.buildFromTemplate(input, resolution.template(), resolution.version());
         return new PromptContextResult(project, brand, input, prompt, forbiddenPhrases,
                 resolution.template(), resolution.version(), channel.groupCode(), channel.subCode(), channel.contentStyle(),
-                topicAsQuestion, resolution.fallbackToDefaultPrompt());
+                topicAsQuestion, perspective.perspectiveCode(), perspective.matchedScope(), perspective.matchedConfigId(),
+                resolution.fallbackToDefaultPrompt());
     }
 
     private Project requireProject(Long projectId) {
@@ -181,6 +191,7 @@ public class ArticleGenerationPromptContextFactory {
     private TemplateResolution resolveTemplate(PromptContextRequest request,
                                                ChannelRef channel,
                                                String articleType,
+                                               TemplatePerspectiveService.ResolvedPerspective perspective,
                                                boolean allowDefaultPromptFallback) {
         if ((request.promptTemplateId() == null && allowDefaultPromptFallback) || request.promptTemplateVersionId() == null) {
             if (allowDefaultPromptFallback) {
@@ -198,7 +209,7 @@ public class ArticleGenerationPromptContextFactory {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Prompt template version not found");
         }
         if (!allowDefaultPromptFallback) {
-            validateTemplateApplicable(template, version, channel, articleType);
+            validateTemplateApplicable(template, version, channel, articleType, perspective.perspectiveCode());
         }
         return new TemplateResolution(template, version, false);
     }
@@ -206,7 +217,8 @@ public class ArticleGenerationPromptContextFactory {
     private void validateTemplateApplicable(ArticlePromptTemplate template,
                                             ArticlePromptTemplateVersion version,
                                             ChannelRef channel,
-                                            String articleType) {
+                                            String articleType,
+                                            String perspectiveCode) {
         if (!ArticlePromptTemplateService.STATUS_ACTIVE.equals(template.getStatus())
                 || !ArticlePromptTemplateService.VERSION_PUBLISHED.equals(version.getStatus())
                 || !Objects.equals(template.getCurrentVersionId(), version.getId())) {
@@ -220,6 +232,25 @@ public class ArticleGenerationPromptContextFactory {
         if (!Objects.equals(templateArticleType, articleType)) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Prompt template does not match article type");
         }
+        if (!Objects.equals(TemplatePerspectiveCodes.normalize(template.getPerspectiveCode()),
+                TemplatePerspectiveCodes.normalize(perspectiveCode))) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Prompt template does not match perspective");
+        }
+    }
+
+    private TemplatePerspectiveService.ResolvedPerspective resolvePerspective(Project project,
+                                                                              PromptContextRequest request,
+                                                                              ChannelRef channel) {
+        if (StringUtils.hasText(request.perspectiveCode())) {
+            return new TemplatePerspectiveService.ResolvedPerspective(
+                    TemplatePerspectiveCodes.normalize(request.perspectiveCode()),
+                    StringUtils.hasText(request.perspectiveMatchedScope())
+                            ? request.perspectiveMatchedScope().trim()
+                            : TemplatePerspectiveService.MATCH_SCOPE_DEFAULT,
+                    request.perspectiveMatchedConfigId()
+            );
+        }
+        return perspectiveService.resolve(project.getBrandId(), channel.groupCode(), channel.subCode());
     }
 
     private List<String> relatedKeywords(Project project, Long keywordGroupId) {
@@ -503,6 +534,9 @@ public class ArticleGenerationPromptContextFactory {
                                       String channelSubCode,
                                       String contentStyle,
                                       String topicAsQuestion,
+                                      String perspectiveCode,
+                                      String perspectiveMatchedScope,
+                                      Long perspectiveMatchedConfigId,
                                       boolean fallbackToDefaultPrompt) {
     }
 }

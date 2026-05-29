@@ -28,6 +28,9 @@ public class BatchArticleGenerationTask {
     private String articleTypeCode;
     private Long promptTemplateId;
     private Long promptTemplateVersionId;
+    private String perspectiveCode;
+    private String perspectiveMatchedScope;
+    private Long perspectiveMatchedConfigId;
     private String allocationMode;
     private String templateSource;
     private String suggestedPlatformCodes;

@@ -106,7 +106,10 @@ class BatchArticlePromptBuilderTest {
                 null,
                 0,
                 List.of(),
-                ""
+                "",
+                "customer",
+                TemplatePerspectiveService.MATCH_SCOPE_DEFAULT,
+                null
         );
     }
 

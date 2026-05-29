@@ -3,6 +3,10 @@ package com.huanjing.geo.module.content.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.llm.LlmInvoker;
+import com.huanjing.geo.module.content.ContentErrorCodes;
+import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
+import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
+import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationBatch;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
@@ -28,11 +32,13 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.Executor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentCaptor.forClass;
 import static org.mockito.Mockito.mock;
@@ -49,6 +55,8 @@ class BatchArticleGenerationServiceTest {
     private BatchArticleGenerationTaskMapper taskMapper;
     private BatchArticlePromptBuilder promptBuilder;
     private ArticleGenerationPromptContextFactory promptContextFactory;
+    private ArticleTemplateAllocationService allocationService;
+    private TemplatePerspectiveService perspectiveService;
     private BatchArticleGenerationService service;
 
     @BeforeEach
@@ -60,6 +68,8 @@ class BatchArticleGenerationServiceTest {
         taskMapper = mock(BatchArticleGenerationTaskMapper.class);
         promptBuilder = mock(BatchArticlePromptBuilder.class);
         promptContextFactory = mock(ArticleGenerationPromptContextFactory.class);
+        allocationService = mock(ArticleTemplateAllocationService.class);
+        perspectiveService = mock(TemplatePerspectiveService.class);
         service = new BatchArticleGenerationService(
                 projectMapper,
                 mock(BrandMapper.class),
@@ -85,7 +95,8 @@ class BatchArticleGenerationServiceTest {
                 promptBuilder,
                 promptContextFactory,
                 mock(BatchArticleQualityChecker.class),
-                mock(ArticleTemplateAllocationService.class),
+                allocationService,
+                perspectiveService,
                 new QuestionScenePlatformSuggestionService(),
                 mock(ArticleGenerationReadinessService.class),
                 new ObjectMapper(),
@@ -186,6 +197,66 @@ class BatchArticleGenerationServiceTest {
         assertEquals(1, updated.getFailedCount());
     }
 
+    @Test
+    void validateAutoPlatformFailsFastWhenSpecialPerspectiveHasNoTemplate() {
+        BatchArticleGenerateRequest.PlatformCount platform = platform("self_media", "wechat", 1);
+        when(perspectiveService.resolve(2L, "self_media", "wechat"))
+                .thenReturn(new TemplatePerspectiveService.ResolvedPerspective(
+                        TemplatePerspectiveCodes.INDUSTRY_NEUTRAL,
+                        TemplatePerspectiveService.MATCH_SCOPE_EXACT,
+                        31L
+                ));
+        when(allocationService.allocate("self_media", "wechat", "problem_solution",
+                TemplatePerspectiveCodes.INDUSTRY_NEUTRAL, 1)).thenReturn(List.of());
+
+        BizException ex = assertThrows(BizException.class, () -> ReflectionTestUtils.invokeMethod(
+                service,
+                "validateAutoPlatform",
+                "0:0",
+                2L,
+                "topic",
+                platform,
+                "problem_solution",
+                new java.util.ArrayList<>(),
+                Map.of(),
+                new java.util.HashMap<>()
+        ));
+
+        assertEquals(ContentErrorCodes.ARTICLE_BAD_REQUEST, ex.getCode());
+        assertThat(ex.getMessage()).contains("特殊视角缺少启用模板")
+                .contains("perspective=industry_neutral")
+                .contains("questionScene=problem_solution");
+    }
+
+    @Test
+    void validateAutoPlatformKeepsCustomerFallbackWhenNoTemplate() {
+        BatchArticleGenerateRequest.PlatformCount platform = platform("self_media", "wechat", 2);
+        when(perspectiveService.resolve(2L, "self_media", "wechat"))
+                .thenReturn(TemplatePerspectiveService.ResolvedPerspective.customer());
+        when(allocationService.allocate("self_media", "wechat", "problem_solution",
+                TemplatePerspectiveCodes.CUSTOMER, 2)).thenReturn(List.of());
+        List<BatchArticleGenerateResponse.Notice> notices = new java.util.ArrayList<>();
+
+        List<?> result = ReflectionTestUtils.invokeMethod(
+                service,
+                "validateAutoPlatform",
+                "0:0",
+                2L,
+                "topic",
+                platform,
+                "problem_solution",
+                notices,
+                Map.of(),
+                new java.util.HashMap<>()
+        );
+
+        assertThat(result).isEmpty();
+        assertThat(notices).hasSize(1);
+        assertEquals("custom_template_skipped", notices.get(0).type());
+        assertThat(notices.get(0).items()).hasSize(1);
+        assertThat(notices.get(0).items().get(0).reason()).contains("未配置启用模板");
+    }
+
     private BatchArticlePromptBuilder.PromptBuildInput promptInput() {
         Project project = new Project();
         project.setId(1L);
@@ -209,6 +280,9 @@ class BatchArticleGenerationServiceTest {
                 null,
                 1,
                 List.of(),
+                null,
+                "customer",
+                TemplatePerspectiveService.MATCH_SCOPE_DEFAULT,
                 null
         );
     }
@@ -222,6 +296,15 @@ class BatchArticleGenerationServiceTest {
                 "{}",
                 "{}"
         );
+    }
+
+    private BatchArticleGenerateRequest.PlatformCount platform(String group, String sub, int count) {
+        BatchArticleGenerateRequest.PlatformCount platform = new BatchArticleGenerateRequest.PlatformCount();
+        platform.setChannelGroupCode(group);
+        platform.setChannelSubCode(sub);
+        platform.setAllocationMode("auto");
+        platform.setCount(count);
+        return platform;
     }
 
     private ArticleAutoImageInsertionService passThroughAutoImageInsertionService() {

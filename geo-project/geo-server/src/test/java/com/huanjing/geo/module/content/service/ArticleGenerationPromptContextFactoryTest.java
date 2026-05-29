@@ -48,6 +48,7 @@ class ArticleGenerationPromptContextFactoryTest {
     private final ArticlePromptTemplateVersionMapper promptTemplateVersionMapper = mock(ArticlePromptTemplateVersionMapper.class);
     private final ArticleDraftMapper articleDraftMapper = mock(ArticleDraftMapper.class);
     private final SysDictItemMapper sysDictItemMapper = mock(SysDictItemMapper.class);
+    private final TemplatePerspectiveService perspectiveService = mock(TemplatePerspectiveService.class);
 
     private ArticleGenerationPromptContextFactory factory;
 
@@ -78,7 +79,8 @@ class ArticleGenerationPromptContextFactoryTest {
                 projectKeywordGroupRelMapper,
                 promptTemplateMapper,
                 promptTemplateVersionMapper,
-                promptBuilder
+                promptBuilder,
+                perspectiveService
         );
 
         when(projectMapper.selectById(10L)).thenReturn(project());
@@ -88,6 +90,8 @@ class ArticleGenerationPromptContextFactoryTest {
         when(sysDictItemMapper.selectOne(any())).thenReturn(null);
         when(promptTemplateMapper.selectById(100L)).thenReturn(template());
         when(promptTemplateVersionMapper.selectById(200L)).thenReturn(version());
+        when(perspectiveService.resolve(any(), any(), any()))
+                .thenReturn(TemplatePerspectiveService.ResolvedPerspective.customer());
     }
 
     @Test
@@ -172,6 +176,9 @@ class ArticleGenerationPromptContextFactoryTest {
                         null,
                         101L,
                         201L,
+                        null,
+                        null,
+                        null,
                         3
                 ));
 
@@ -242,6 +249,9 @@ class ArticleGenerationPromptContextFactoryTest {
                 "保持真实讨论帖语气",
                 100L,
                 200L,
+                null,
+                null,
+                null,
                 1
         );
     }

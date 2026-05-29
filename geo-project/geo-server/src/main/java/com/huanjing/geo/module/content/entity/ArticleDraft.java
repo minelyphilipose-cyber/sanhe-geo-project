@@ -28,6 +28,7 @@ public class ArticleDraft {
     private String articleTypeCode;
     private Long promptTemplateId;
     private Long promptTemplateVersionId;
+    private String perspectiveCode;
     private String allocationMode;
     private String templateSource;
     private String topic;
@@ -53,6 +54,8 @@ public class ArticleDraft {
     private Boolean systemGenerated;
     @TableField(exist = false)
     private String generationMode;
+    @TableField(exist = false)
+    private String generatedBy;
     @TableField(exist = false)
     private String promptTemplateName;
 }
