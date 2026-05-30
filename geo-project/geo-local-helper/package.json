@@ -1,0 +1,14 @@
+{
+  "name": "geo-local-helper",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "check": "node --check src/server.js",
+    "security:c2": "node scripts/c2-security-check.mjs"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.10.0"
+  }
+}

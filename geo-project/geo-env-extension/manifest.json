@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "GEO Env Fill PoC",
+  "description": "Independent PoC extension for AdsPower environment task filling.",
+  "version": "0.1.0",
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "service-worker.js"
+  },
+  "permissions": [
+    "storage",
+    "tabs",
+    "debugger",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://119.45.154.127/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*",
+    "https://mp.toutiao.com/*",
+    "https://zhuanlan.zhihu.com/*",
+    "https://www.zhihu.com/*",
+    "https://creator.xiaohongshu.com/*",
+    "https://www.xiaohongshu.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://mp.toutiao.com/*",
+        "https://zhuanlan.zhihu.com/*",
+        "https://www.zhihu.com/*",
+        "https://creator.xiaohongshu.com/*",
+        "https://www.xiaohongshu.com/*"
+      ],
+      "js": [
+        "content-script.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

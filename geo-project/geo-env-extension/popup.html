@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <title>GEO Env Fill PoC</title>
+    <style>
+      body {
+        width: 360px;
+        margin: 0;
+        padding: 14px;
+        color: #172033;
+        font: 13px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: #f7f8fb;
+      }
+      h1 {
+        margin: 0 0 10px;
+        font-size: 16px;
+      }
+      label {
+        display: block;
+        margin: 8px 0 4px;
+        font-weight: 600;
+      }
+      input {
+        box-sizing: border-box;
+        width: 100%;
+        padding: 8px 9px;
+        border: 1px solid #cfd6e4;
+        border-radius: 6px;
+        background: #fff;
+      }
+      .check {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 10px;
+        font-weight: 600;
+      }
+      .check input {
+        width: auto;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      button {
+        width: 100%;
+        margin-top: 10px;
+        padding: 9px 10px;
+        border: 0;
+        border-radius: 6px;
+        color: #fff;
+        background: #245bff;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button.secondary {
+        color: #172033;
+        background: #e8ecf6;
+      }
+      button:disabled {
+        cursor: not-allowed;
+        opacity: .55;
+      }
+      pre {
+        max-height: 150px;
+        overflow: auto;
+        padding: 9px;
+        border-radius: 6px;
+        background: #111827;
+        color: #d1fae5;
+        white-space: pre-wrap;
+      }
+      .status {
+        margin-top: 10px;
+        padding: 8px;
+        border-radius: 6px;
+        background: #fff;
+        border: 1px solid #dce2ee;
+      }
+      .hint {
+        margin: 4px 0 0;
+        color: #64748b;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>GEO 环境填充 PoC</h1>
+
+    <label for="apiBase">后台地址</label>
+    <input id="apiBase" placeholder="http://119.45.154.127">
+
+    <label for="helperBase">本地助手地址</label>
+    <input id="helperBase" placeholder="http://127.0.0.1:17891">
+    <p class="hint">本地助手请求只使用后台签发的 C2 签名，不再使用静态 Token。</p>
+
+    <label for="environmentKey">环境标识</label>
+    <input id="environmentKey" placeholder="geo_b">
+
+    <div class="row">
+      <div>
+        <label for="environmentAccountId">环境账号ID（兼容）</label>
+        <input id="environmentAccountId" placeholder="可留空，按环境+平台识别">
+      </div>
+      <div>
+        <label for="selfMediaAccountId">自媒体账号ID（可选）</label>
+        <input id="selfMediaAccountId" placeholder="可留空，后端按环境账号绑定识别">
+      </div>
+    </div>
+
+    <label for="platform">平台</label>
+    <input id="platform" placeholder="toutiao / zhihu / xiaohongshu">
+
+    <div class="row">
+      <div>
+        <label for="brandId">品牌 ID</label>
+        <input id="brandId" placeholder="可选">
+      </div>
+      <div>
+        <label for="bindCode">绑定码</label>
+        <input id="bindCode" placeholder="ABCD-EFGH">
+      </div>
+    </div>
+
+    <button id="saveBtn">保存配置</button>
+    <label class="check">
+      <input id="autoRun" type="checkbox">
+      打开平台页后自动领取并填充
+    </label>
+    <button id="bindBtn" class="secondary">绑定后台</button>
+    <button id="reportLoginBtn" class="secondary">上报当前页登录状态</button>
+    <button id="pollBtn">领取任务并填充一次</button>
+    <button id="selfTestBtn" class="secondary">运行安全自检</button>
+
+    <div class="status" id="status">未加载配置</div>
+    <pre id="log"></pre>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

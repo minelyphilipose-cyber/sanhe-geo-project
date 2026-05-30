@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <title>GEO 本地助手 PoC</title>
+    <style>
+      body {
+        margin: 0;
+        color: #172033;
+        background: #f5f7fb;
+        font: 14px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      main {
+        max-width: 880px;
+        margin: 32px auto;
+        padding: 0 20px;
+      }
+      h1 {
+        margin: 0 0 18px;
+        font-size: 22px;
+      }
+      section {
+        margin-bottom: 16px;
+        padding: 18px;
+        border: 1px solid #dbe3f0;
+        border-radius: 8px;
+        background: #fff;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+      label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: 600;
+      }
+      input,
+      select {
+        box-sizing: border-box;
+        width: 100%;
+        height: 38px;
+        padding: 7px 9px;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+      }
+      button {
+        height: 38px;
+        padding: 0 16px;
+        border: 0;
+        border-radius: 6px;
+        color: #fff;
+        background: #245bff;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      button.secondary {
+        color: #172033;
+        background: #e8edf7;
+      }
+      .actions {
+        display: flex;
+        gap: 10px;
+        margin-top: 14px;
+      }
+      pre {
+        min-height: 180px;
+        max-height: 340px;
+        overflow: auto;
+        padding: 12px;
+        border-radius: 8px;
+        color: #d1fae5;
+        background: #111827;
+        white-space: pre-wrap;
+      }
+      .hint {
+        color: #5f6b7a;
+        margin: 0 0 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>GEO 本地助手 PoC</h1>
+
+      <section>
+        <p class="hint">生产化 v1 推荐先生成一次性配对码，在后台自媒体分发弹窗中手动输入完成本机助手配对；配对后后台会用签名请求访问本地助手。</p>
+        <div class="grid">
+          <div>
+            <label for="helperName">助手名称</label>
+            <input id="helperName" value="本机助手">
+          </div>
+          <div>
+            <label for="pairingCode">一次性配对码</label>
+            <input id="pairingCode" readonly placeholder="点击生成配对码">
+          </div>
+        </div>
+        <div class="actions">
+          <button id="pairingBtn">生成配对码</button>
+          <button id="pairingStatusBtn" class="secondary">检查配对状态</button>
+        </div>
+      </section>
+
+      <section>
+        <p class="hint">AdsPower API Key 只保存在本机助手运行目录，不需要也不应该写入 config.local.json。AdsPower Local API 地址默认即可，只有本机端口不是 50325 时才需要修改。</p>
+        <div class="grid">
+          <div>
+            <label for="adspowerApiBase">AdsPower Local API</label>
+            <input id="adspowerApiBase" value="http://localhost:50325">
+          </div>
+          <div>
+            <label for="adspowerApiKey">AdsPower API Key</label>
+            <input id="adspowerApiKey" type="password" placeholder="留空表示保留已保存 Key">
+          </div>
+        </div>
+        <div class="actions">
+          <button id="saveAdspowerBtn">保存 AdsPower 配置</button>
+          <button id="refreshAdspowerBtn" class="secondary">查看配置状态</button>
+        </div>
+      </section>
+
+      <section>
+        <p class="hint">PoC 推荐用“一键创建任务并启动环境”，它会绕开当前后台页面的生产扩展检测，直接调用后台接口创建半自动任务。</p>
+        <div class="grid">
+          <div>
+            <label for="token">本地助手 Token</label>
+            <input id="token" placeholder="与 config.local.json 中 helperToken 一致">
+          </div>
+          <div>
+            <label for="backendBase">后台地址</label>
+            <input id="backendBase" value="http://119.45.154.127">
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <label for="backendToken">后台 Access Token</label>
+            <input id="backendToken" placeholder="可从后台页面一键打开本页自动带入">
+          </div>
+          <div>
+            <label for="environmentKey">环境标识</label>
+            <input id="environmentKey" value="geo_b">
+          </div>
+          <div>
+            <label for="platform">平台</label>
+            <select id="platform">
+              <option value="toutiao">今日头条</option>
+              <option value="zhihu">知乎</option>
+              <option value="xiaohongshu">小红书</option>
+            </select>
+          </div>
+          <div>
+            <label for="brandId">品牌 ID</label>
+            <input id="brandId" value="1">
+          </div>
+          <div>
+            <label for="articleId">文章 ID</label>
+            <input id="articleId" placeholder="内容文章 ID">
+          </div>
+          <div>
+            <label for="selfMediaAccountId">平台账号记录 ID</label>
+            <input id="selfMediaAccountId" placeholder="selfMediaAccountId">
+          </div>
+          <div>
+            <label for="accountSelect">从后台查询账号</label>
+            <select id="accountSelect">
+              <option value="">先查询账号</option>
+            </select>
+          </div>
+          <div>
+            <label for="taskId">已有任务 ID</label>
+            <input id="taskId" placeholder="已有 data.id 时才填">
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <label for="url">启动后打开页面</label>
+            <input id="url" value="https://mp.toutiao.com/">
+          </div>
+        </div>
+        <div class="actions">
+          <button id="accountsBtn" class="secondary">查询账号</button>
+          <button id="createLaunchBtn">创建任务并启动环境</button>
+          <button id="launchBtn" class="secondary">仅启动已有任务</button>
+          <button id="tasksBtn" class="secondary">查看本地任务</button>
+          <button id="requeueBtn" class="secondary">重置指定任务</button>
+          <button id="cancelBtn" class="secondary">取消指定任务</button>
+          <button id="stopBtn" class="secondary">停止当前环境</button>
+        </div>
+      </section>
+
+      <section>
+        <p class="hint">启动成功后，回到 AdsPower 环境里的 PoC 扩展，点“领取任务并填充一次”。</p>
+        <pre id="log"></pre>
+      </section>
+    </main>
+
+    <script>
+      const $ = (id) => document.getElementById(id)
+      const logEl = $('log')
+      let accountById = new Map()
+
+      const platformUrls = {
+        toutiao: 'https://mp.toutiao.com/',
+        zhihu: 'https://zhuanlan.zhihu.com/write',
+        xiaohongshu: 'https://creator.xiaohongshu.com/publish/publish'
+      }
+
+      const hashParams = new URLSearchParams(location.hash.replace(/^#/, ''))
+      let pairingPollTimer = null
+      let pairingPollAttempts = 0
+      if (hashParams.get('backendToken')) {
+        $('backendToken').value = hashParams.get('backendToken')
+        history.replaceState(null, '', location.pathname)
+      }
+
+      async function loadAdspowerSettings() {
+        const result = await c2Request('/v1/settings/adspower')
+        const settings = result.adspower || {}
+        $('adspowerApiBase').value = settings.apiBase || 'http://localhost:50325'
+        $('adspowerApiKey').value = ''
+        appendLog({
+          adspower: {
+            apiBase: settings.apiBase,
+            apiKeyConfigured: settings.apiKeyConfigured,
+            apiKeyPreview: settings.apiKeyPreview || ''
+          }
+        })
+        return result
+      }
+
+      $('platform').addEventListener('change', () => {
+        $('url').value = platformUrls[$('platform').value] || ''
+      })
+
+      $('refreshAdspowerBtn').addEventListener('click', async () => {
+        try {
+          await loadAdspowerSettings()
+        } catch (error) {
+          appendLog(`读取 AdsPower 配置失败：${error.message}`)
+        }
+      })
+
+      $('saveAdspowerBtn').addEventListener('click', async () => {
+        try {
+          const result = await c2Request('/v1/settings/adspower', {
+            method: 'POST',
+            body: JSON.stringify({
+              apiBase: $('adspowerApiBase').value,
+              apiKey: $('adspowerApiKey').value
+            })
+          })
+          $('adspowerApiKey').value = ''
+          appendLog({
+            saved: true,
+            adspower: result.adspower
+          })
+        } catch (error) {
+          appendLog(`保存 AdsPower 配置失败：${error.message}`)
+        }
+      })
+
+      $('accountSelect').addEventListener('change', () => {
+        const accountId = $('accountSelect').value
+        $('selfMediaAccountId').value = accountId
+        const account = accountById.get(String(accountId))
+        if (account?.platform) {
+          $('platform').value = account.platform
+          $('url').value = platformUrls[account.platform] || $('url').value
+        }
+      })
+
+      function appendLog(value) {
+        const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+        logEl.textContent = `${new Date().toLocaleTimeString()} ${text}\n\n${logEl.textContent}`.slice(0, 12000)
+      }
+
+      async function request(path, options = {}) {
+        const response = await fetch(path, {
+          ...options,
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Geo-Helper-Token': $('token').value,
+            ...(options.headers || {})
+          }
+        })
+        const body = await response.json().catch(() => ({}))
+        if (!response.ok || body.ok === false) throw new Error(body.error || `请求失败：${response.status}`)
+        return body
+      }
+
+      async function c2Request(path, options = {}) {
+        const response = await fetch(path, {
+          ...options,
+          headers: {
+            'Content-Type': 'application/json',
+            ...(options.headers || {})
+          }
+        })
+        const body = await response.json().catch(() => ({}))
+        if (!response.ok || body.ok === false) throw new Error(body.error || `请求失败：${response.status}`)
+        return body
+      }
+
+      function stopPairingPolling() {
+        if (pairingPollTimer !== null) {
+          window.clearTimeout(pairingPollTimer)
+          pairingPollTimer = null
+        }
+      }
+
+      async function checkPairingStatus({ silent = false } = {}) {
+        const result = await c2Request('/v1/c2/pairing-status', {
+          method: 'POST',
+          body: JSON.stringify({})
+        })
+        if (!silent || result.paired) appendLog(result)
+        if (result.paired) {
+          stopPairingPolling()
+          appendLog('本地助手已完成 C2 配对，后续无需重复生成绑定码')
+          return result
+        }
+        return result
+      }
+
+      function startPairingPolling() {
+        stopPairingPolling()
+        pairingPollAttempts = 0
+        const poll = async () => {
+          pairingPollAttempts += 1
+          try {
+            const result = await checkPairingStatus({ silent: true })
+            if (result.paired) return
+          } catch (error) {
+            appendLog(`自动检查配对状态失败：${error.message}`)
+          }
+          if (pairingPollAttempts < 60) {
+            pairingPollTimer = window.setTimeout(poll, 3000)
+          } else {
+            pairingPollTimer = null
+            appendLog('配对码已超过自动等待时间，如仍未配对请重新生成配对码')
+          }
+        }
+        pairingPollTimer = window.setTimeout(poll, 3000)
+      }
+
+      $('pairingBtn').addEventListener('click', async () => {
+        try {
+          const result = await c2Request('/v1/c2/pairing-code', {
+            method: 'POST',
+            body: JSON.stringify({ helperName: $('helperName').value || '本机助手' })
+          })
+          $('pairingCode').value = result.pairingCode || ''
+          appendLog({
+            pairingCode: result.pairingCode,
+            expiresAt: result.expiresAt,
+            next: '请把配对码手动输入后台自媒体分发弹窗的“配对码”输入框；本页会自动检查并完成绑定'
+          })
+          startPairingPolling()
+        } catch (error) {
+          appendLog(`生成配对码失败：${error.message}`)
+        }
+      })
+
+      $('pairingStatusBtn').addEventListener('click', async () => {
+        try {
+          await checkPairingStatus()
+        } catch (error) {
+          appendLog(`检查配对状态失败：${error.message}`)
+        }
+      })
+
+      $('launchBtn').addEventListener('click', async () => {
+        try {
+          const taskId = Number($('taskId').value)
+          if (!Number.isFinite(taskId) || taskId <= 0) throw new Error('请填写有效任务 ID')
+          const body = {
+            environmentKey: $('environmentKey').value,
+            taskId,
+            platform: $('platform').value,
+            url: $('url').value
+          }
+          const result = await request('/v1/poc/launch', {
+            method: 'POST',
+            body: JSON.stringify(body)
+          })
+          appendLog(result)
+        } catch (error) {
+          appendLog(`启动失败：${error.message}`)
+        }
+      })
+
+      $('accountsBtn').addEventListener('click', async () => {
+        try {
+          if (!$('backendToken').value) throw new Error('请填写后台 Access Token')
+          const result = await request('/v1/poc/accounts', {
+            method: 'POST',
+            body: JSON.stringify({
+              backendBase: $('backendBase').value,
+              backendToken: $('backendToken').value,
+              brandId: Number($('brandId').value)
+            })
+          })
+          const accounts = result.accounts || []
+          accountById = new Map(accounts.map((account) => [String(account.id), account]))
+          $('accountSelect').innerHTML = '<option value="">请选择账号</option>' + accounts
+            .map((account) => {
+              const label = `${account.id} / ${account.platform} / ${account.accountName || ''} / ${account.platformAccountId || ''}`
+              return `<option value="${account.id}">${label}</option>`
+            })
+            .join('')
+          appendLog({ accounts })
+        } catch (error) {
+          appendLog(`查询账号失败：${error.message}`)
+        }
+      })
+
+      $('createLaunchBtn').addEventListener('click', async () => {
+        try {
+          const articleId = Number($('articleId').value)
+          if (!Number.isFinite(articleId) || articleId <= 0) throw new Error('请填写有效文章 ID')
+          if (!$('backendToken').value) throw new Error('请填写后台 Access Token')
+          const body = {
+            backendBase: $('backendBase').value,
+            backendToken: $('backendToken').value,
+            environmentKey: $('environmentKey').value,
+            brandId: Number($('brandId').value),
+            articleId,
+            selfMediaAccountId: $('selfMediaAccountId').value ? Number($('selfMediaAccountId').value) : null,
+            platform: $('platform').value,
+            url: $('url').value
+          }
+          const result = await request('/v1/poc/create-and-launch', {
+            method: 'POST',
+            body: JSON.stringify(body)
+          })
+          appendLog(result)
+        } catch (error) {
+          appendLog(`创建并启动失败：${error.message}`)
+        }
+      })
+
+      $('tasksBtn').addEventListener('click', async () => {
+        try {
+          appendLog(await request('/v1/poc/tasks'))
+        } catch (error) {
+          appendLog(`查询失败：${error.message}`)
+        }
+      })
+
+      $('requeueBtn').addEventListener('click', async () => {
+        try {
+          appendLog(await request('/v1/poc/requeue', {
+            method: 'POST',
+            body: JSON.stringify({
+              environmentKey: $('environmentKey').value,
+              taskId: $('taskId').value ? Number($('taskId').value) : null
+            })
+          }))
+        } catch (error) {
+          appendLog(`重置失败：${error.message}`)
+        }
+      })
+
+      $('cancelBtn').addEventListener('click', async () => {
+        try {
+          const taskId = Number($('taskId').value)
+          if (!Number.isFinite(taskId) || taskId <= 0) throw new Error('请填写要取消的任务 ID')
+          appendLog(await request('/v1/poc/cancel', {
+            method: 'POST',
+            body: JSON.stringify({
+              environmentKey: $('environmentKey').value,
+              taskId
+            })
+          }))
+        } catch (error) {
+          appendLog(`取消失败：${error.message}`)
+        }
+      })
+
+      $('stopBtn').addEventListener('click', async () => {
+        try {
+          appendLog(await request('/v1/poc/stop', {
+            method: 'POST',
+            body: JSON.stringify({ environmentKey: $('environmentKey').value })
+          }))
+        } catch (error) {
+          appendLog(`停止失败：${error.message}`)
+        }
+      })
+
+      loadAdspowerSettings().catch(() => {})
+    </script>
+  </body>
+</html>
