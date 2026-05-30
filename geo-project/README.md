@@ -43,6 +43,11 @@ npm run dev
 
 默认管理员账号: admin / admin123
 
+## 自媒体分发 v1 文档
+
+- [本地助手 v1 交付说明](docs/self-media-local-helper-v1-delivery.md)
+- [自媒体分发 v1 回归清单](docs/self-media-v1-regression-checklist.md)
+
 ## Presale PR2 说明
 
 - 本次为内部系统先跑通实现,裁判管线同步执行。
