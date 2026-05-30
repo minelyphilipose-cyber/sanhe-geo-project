@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/server.js",
     "check": "node --check src/server.js",
-    "security:c2": "node scripts/c2-security-check.mjs"
+    "security:c2": "node scripts/c2-security-check.mjs",
+    "package:delivery": "powershell -ExecutionPolicy Bypass -File scripts/package-delivery.ps1"
   },
   "dependencies": {
     "puppeteer-core": "^24.10.0"

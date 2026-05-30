@@ -42,7 +42,27 @@ npm start
 http://127.0.0.1:17891/
 ```
 
-生产交付包完成前，运营电脑仍按上述方式启动；后续会固化为一键启动包。
+当前 v1 先提供可审计的压缩交付包，运营电脑仍需要安装 Node.js 18+ 后启动；一键安装器和自动升级放到后续版本。
+
+生成交付包：
+
+```powershell
+cd D:\code\sanhe-geo-project\geo-project\geo-local-helper
+npm run package:delivery
+```
+
+生成结果：
+
+```text
+D:\code\sanhe-geo-project\geo-project\geo-local-helper\dist\geo-local-helper-v0.1.0.zip
+```
+
+交付包只包含本地助手运行所需源码、静态页面、`package-lock.json`、`config.example.json` 和交付说明，不包含：
+
+- `node_modules`
+- `runtime`
+- `config.local.json`
+- 已配对 session、nonce、AdsPower API Key 等本机敏感数据
 
 ### 2. 绑定本地助手
 
