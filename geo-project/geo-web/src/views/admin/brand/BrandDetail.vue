@@ -81,10 +81,12 @@
       <template #header>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
-            <span>自媒体账号</span>
-            <el-tag type="info">头条 / 知乎 / 小红书</el-tag>
+            <span>指纹浏览器环境</span>
+            <el-tag type="info">AdsPower</el-tag>
           </div>
-          <el-button v-if="canUpdateBrand" type="primary" link @click="openSelfMediaAccountCreate">新增账号</el-button>
+          <el-button v-if="canUpdateBrand" type="primary" link @click="openBrowserEnvironmentCreate">
+            {{ browserEnvironments.length ? '编辑/更换环境' : '配置环境' }}
+          </el-button>
         </div>
       </template>
       <el-alert
@@ -92,7 +94,60 @@
         type="info"
         show-icon
         :closable="false"
-        title="头条、知乎、小红书使用 AdsPower 指纹浏览器环境保持登录态。账号绑定环境后，由环境内扩展上报登录状态；任务执行以环境登录状态为准。"
+        title="同一品牌默认使用一个 AdsPower 环境；AdsPower API Key 在「个人中心 > 本地助手」配置。新增头条/知乎/小红书账号时会自动绑定当前启用环境；文章分发时只消费这里的绑定关系。"
+      />
+      <el-table v-loading="browserEnvironmentsLoading" :data="browserEnvironments" border empty-text="暂无指纹浏览器环境">
+        <el-table-column prop="name" label="环境名称" min-width="160">
+          <template #default="{ row }">{{ row.name || row.environmentKey }}</template>
+        </el-table-column>
+        <el-table-column prop="environmentKey" label="环境标识" min-width="150" />
+        <el-table-column prop="providerProfileId" label="AdsPower 环境 ID" min-width="190" />
+        <el-table-column prop="status" label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">
+              {{ row.status === 'active' ? '启用' : '停用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column v-if="canUpdateBrand" label="操作" width="150" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openBrowserEnvironmentEdit(row)">编辑</el-button>
+            <el-button link type="danger" @click="removeBrowserEnvironment(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <el-card class="admin-table-card">
+      <template #header>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <span>自媒体账号</span>
+            <el-tag type="info">头条 / 知乎 / 小红书</el-tag>
+          </div>
+          <div class="flex items-center gap-2">
+            <el-button
+              v-if="canUpdateBrand"
+              type="primary"
+              link
+              :disabled="!defaultBrowserEnvironment || !hasUnboundSemiAutoAccounts"
+              :loading="environmentBindingSaving"
+              @click="bindAllUnboundSemiAutoAccounts"
+            >
+              补齐环境绑定
+            </el-button>
+            <el-button v-if="canUpdateBrand" type="primary" link @click="openSelfMediaAccountCreate">新增账号</el-button>
+          </div>
+        </div>
+      </template>
+      <el-alert
+        class="mb-3"
+        type="warning"
+        show-icon
+        :closable="false"
+        :title="defaultBrowserEnvironment
+          ? `当前默认环境：${browserEnvironmentOptionLabel(defaultBrowserEnvironment)}。新增账号将自动绑定该环境，绑定后需在对应平台完成登录，环境内扩展会自动上报登录状态。`
+          : '请先配置并启用品牌 AdsPower 环境；新增账号后需要绑定环境并完成平台登录，扩展自动上报登录状态后才能分发。'"
       />
       <el-table v-loading="selfMediaAccountsLoading" :data="semiAutoSelfMediaAccounts" border>
         <el-table-column prop="platform" label="平台" width="110">
@@ -121,9 +176,33 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column v-if="canUpdateBrand" label="操作" width="100" fixed="right">
+        <el-table-column v-if="canUpdateBrand" label="操作" width="250" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openSelfMediaAccountEdit(row)">编辑</el-button>
+            <el-button
+              v-if="!browserEnvironmentAccountOf(row)"
+              link
+              type="primary"
+              @click="openEnvironmentBindingDialog(row)"
+            >
+              绑定环境
+            </el-button>
+            <el-button
+              v-if="browserEnvironmentAccountOf(row)"
+              link
+              type="warning"
+              @click="resetEnvironmentAccountIdentity(row)"
+            >
+              重置校验
+            </el-button>
+            <el-button
+              v-if="browserEnvironmentAccountOf(row)"
+              link
+              type="danger"
+              @click="unbindEnvironmentAccount(row)"
+            >
+              解绑
+            </el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -174,6 +253,88 @@
         <el-button @click="router.push(`/admin/brands/${brandId}/assets`)">品牌资产</el-button>
       </div>
     </el-card>
+
+    <el-dialog v-model="browserEnvironmentVisible" :title="editingBrowserEnvironment ? '编辑指纹环境' : '新增指纹环境'" width="620px">
+      <el-form class="admin-dialog-form" :model="browserEnvironmentForm" label-width="120px">
+        <el-form-item label="环境标识" required>
+          <el-input
+            v-model="browserEnvironmentForm.environmentKey"
+            :disabled="!!editingBrowserEnvironment"
+            placeholder="例如 geo_b"
+          />
+        </el-form-item>
+        <el-form-item label="AdsPower ID" required>
+          <el-input v-model="browserEnvironmentForm.providerProfileId" placeholder="AdsPower 环境 user_id" />
+        </el-form-item>
+        <el-form-item label="环境名称">
+          <el-input v-model="browserEnvironmentForm.name" placeholder="运营可识别的名称" />
+        </el-form-item>
+        <el-form-item v-if="editingBrowserEnvironment" label="状态">
+          <el-select v-model="browserEnvironmentForm.status">
+            <el-option label="启用" value="active" />
+            <el-option label="停用" value="disabled" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="browserEnvironmentVisible = false">取消</el-button>
+        <el-button type="primary" :loading="browserEnvironmentSaving" @click="submitBrowserEnvironment">
+          保存
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="environmentBindingVisible" title="绑定指纹浏览器环境" width="620px">
+      <div v-if="environmentBindingTargetAccount">
+        <el-alert
+          type="warning"
+          show-icon
+          :closable="false"
+          title="绑定后该账号将立即切换到指纹浏览器环境模型；需在对应环境中登录平台，环境内扩展自动上报登录状态后才能恢复可分发。"
+        />
+        <el-descriptions class="environment-binding-summary" :column="1" border>
+          <el-descriptions-item label="平台">
+            {{ selfMediaPlatformLabel(environmentBindingTargetAccount.platform) }}
+          </el-descriptions-item>
+          <el-descriptions-item label="自媒体账号">
+            {{ environmentBindingTargetAccount.accountName }}
+          </el-descriptions-item>
+        </el-descriptions>
+        <el-form class="admin-dialog-form" :model="environmentBindingForm" label-width="110px">
+          <el-form-item label="指纹环境" required>
+            <el-select
+              v-model="environmentBindingForm.browserEnvironmentId"
+              class="environment-binding-select"
+              filterable
+              clearable
+              placeholder="选择当前品牌下已启用的 AdsPower 环境"
+            >
+              <el-option
+                v-for="environment in activeBrowserEnvironments"
+                :key="environment.id"
+                :label="browserEnvironmentOptionLabel(environment)"
+                :value="environment.id"
+              />
+            </el-select>
+          </el-form-item>
+        </el-form>
+        <el-empty
+          v-if="activeBrowserEnvironments.length === 0"
+          description="当前品牌暂无启用的指纹环境，请先新增环境。"
+        />
+      </div>
+      <template #footer>
+        <el-button @click="environmentBindingVisible = false">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="environmentBindingSaving"
+          :disabled="!environmentBindingForm.browserEnvironmentId"
+          @click="submitEnvironmentBinding"
+        >
+          创建绑定
+        </el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog v-model="editVisible" title="编辑品牌" width="980px" class="admin-editor-dialog brand-editor-dialog">
       <el-form ref="brandFormRef" class="brand-form" :model="brandForm" :rules="brandRules" label-position="top">
@@ -380,7 +541,15 @@ import {
   getCompanyDetail,
 } from '@/api/customer'
 import {
+  createBrowserEnvironment,
+  createBrowserEnvironmentAccount,
+  deleteBrowserEnvironment,
+  deleteBrowserEnvironmentAccount,
   getBrowserEnvironmentAccountBySelfMedia,
+  listBrowserEnvironments,
+  updateBrowserEnvironment,
+  updateBrowserEnvironmentAccount,
+  type BrowserEnvironment,
   type BrowserEnvironmentAccount,
 } from '@/api/browserEnvironment'
 import { getPublishSites } from '@/api/publishSite'
@@ -422,7 +591,15 @@ const perspectiveConfigSaving = ref(false)
 const perspectiveConfigVisible = ref(false)
 const brand = ref<Brand | null>(null)
 const selfMediaAccounts = ref<SemiAutoSelfMediaAccount[]>([])
+const browserEnvironments = ref<BrowserEnvironment[]>([])
+const browserEnvironmentsLoading = ref(false)
+const browserEnvironmentVisible = ref(false)
+const browserEnvironmentSaving = ref(false)
+const editingBrowserEnvironment = ref<BrowserEnvironment | null>(null)
 const browserEnvironmentAccounts = ref<Record<number, BrowserEnvironmentAccount | null>>({})
+const environmentBindingVisible = ref(false)
+const environmentBindingSaving = ref(false)
+const environmentBindingTargetAccount = ref<SemiAutoSelfMediaAccount | null>(null)
 const perspectiveConfigs = ref<BrandChannelTemplatePerspective[]>([])
 const templatePerspectives = ref<TemplatePerspective[]>([])
 const publishSites = ref<PublishSite[]>([])
@@ -470,6 +647,17 @@ const perspectiveConfigForm = reactive({
   channelSubCode: '_ALL_',
   perspectiveCode: 'customer',
   enabled: true,
+})
+
+const browserEnvironmentForm = reactive({
+  environmentKey: '',
+  providerProfileId: '',
+  name: '',
+  status: 'active',
+})
+
+const environmentBindingForm = reactive({
+  browserEnvironmentId: null as number | null,
 })
 
 const editingPerspectiveConfig = ref<BrandChannelTemplatePerspective | null>(null)
@@ -525,6 +713,12 @@ const subOptions: Record<string, Array<{ label: string; value: string }>> = {
 
 const semiAutoSelfMediaAccounts = computed(() =>
   selfMediaAccounts.value.filter((item) => item.platform === 'toutiao' || item.platform === 'zhihu' || item.platform === 'xiaohongshu'),
+)
+
+const activeBrowserEnvironments = computed(() => browserEnvironments.value.filter((item) => item.status === 'active'))
+const defaultBrowserEnvironment = computed(() => activeBrowserEnvironments.value[0] || null)
+const hasUnboundSemiAutoAccounts = computed(() =>
+  semiAutoSelfMediaAccounts.value.some((account) => !browserEnvironmentAccountOf(account)),
 )
 
 const enabledPerspectives = computed(() => templatePerspectives.value.filter((item) => item.enabled))
@@ -613,6 +807,215 @@ function browserEnvironmentLoginStatusTagType(account: SemiAutoSelfMediaAccount)
 function browserEnvironmentLastReportTime(account: SemiAutoSelfMediaAccount) {
   const binding = browserEnvironmentAccountOf(account)
   return binding?.lastVerifiedAt || binding?.lastLoginSeenAt || '-'
+}
+
+function browserEnvironmentOptionLabel(environment: BrowserEnvironment) {
+  const name = environment.name || environment.environmentKey
+  return `${name}（${environment.environmentKey}）`
+}
+
+function openBrowserEnvironmentCreate() {
+  editingBrowserEnvironment.value = null
+  browserEnvironmentForm.environmentKey = ''
+  browserEnvironmentForm.providerProfileId = ''
+  browserEnvironmentForm.name = ''
+  browserEnvironmentForm.status = 'active'
+  browserEnvironmentVisible.value = true
+}
+
+function openBrowserEnvironmentEdit(environment: BrowserEnvironment) {
+  editingBrowserEnvironment.value = environment
+  browserEnvironmentForm.environmentKey = environment.environmentKey
+  browserEnvironmentForm.providerProfileId = environment.providerProfileId
+  browserEnvironmentForm.name = environment.name || ''
+  browserEnvironmentForm.status = environment.status || 'active'
+  browserEnvironmentVisible.value = true
+}
+
+async function submitBrowserEnvironment() {
+  const environmentKey = browserEnvironmentForm.environmentKey.trim()
+  const providerProfileId = browserEnvironmentForm.providerProfileId.trim()
+  if (!environmentKey || !providerProfileId) {
+    ElMessage.warning('请填写环境标识和 AdsPower 环境 ID')
+    return
+  }
+  browserEnvironmentSaving.value = true
+  try {
+    if (editingBrowserEnvironment.value) {
+      await updateBrowserEnvironment(editingBrowserEnvironment.value.id, {
+        providerProfileId,
+        name: browserEnvironmentForm.name.trim() || environmentKey,
+        status: browserEnvironmentForm.status,
+      })
+    } else {
+      await createBrowserEnvironment({
+        brandId,
+        provider: 'adspower',
+        environmentKey,
+        providerProfileId,
+        name: browserEnvironmentForm.name.trim() || environmentKey,
+      })
+    }
+    ElMessage.success('指纹浏览器环境已保存')
+    browserEnvironmentVisible.value = false
+    await loadBrowserEnvironments()
+    if (!editingBrowserEnvironment.value) {
+      await bindAllUnboundSemiAutoAccounts()
+    }
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '保存指纹浏览器环境失败')
+  } finally {
+    browserEnvironmentSaving.value = false
+  }
+}
+
+async function removeBrowserEnvironment(environment: BrowserEnvironment) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除指纹环境「${environment.name || environment.environmentKey}」？已绑定账号需要先解绑后才能删除。`,
+      '删除确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+      },
+    )
+    await deleteBrowserEnvironment(environment.id)
+    ElMessage.success('指纹浏览器环境已删除')
+    await loadBrowserEnvironments()
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(err instanceof Error ? err.message : '删除指纹浏览器环境失败')
+  }
+}
+
+function openEnvironmentBindingDialog(account: SemiAutoSelfMediaAccount) {
+  environmentBindingTargetAccount.value = account
+  environmentBindingForm.browserEnvironmentId = defaultBrowserEnvironment.value?.id || null
+  environmentBindingVisible.value = true
+}
+
+async function bindAccountToDefaultEnvironment(account: SemiAutoSelfMediaAccount, silent = false) {
+  const environment = defaultBrowserEnvironment.value
+  if (!environment) {
+    if (!silent) ElMessage.warning('请先配置并启用品牌 AdsPower 环境')
+    return false
+  }
+  if (browserEnvironmentAccountOf(account)) {
+    return true
+  }
+  await createBrowserEnvironmentAccount({
+    browserEnvironmentId: environment.id,
+    selfMediaAccountId: account.id,
+    expectedPlatformAccountId: null,
+    expectedAccountName: null,
+  })
+  return true
+}
+
+async function submitEnvironmentBinding() {
+  const account = environmentBindingTargetAccount.value
+  if (!account || !environmentBindingForm.browserEnvironmentId) {
+    ElMessage.warning('请选择要绑定的指纹浏览器环境')
+    return
+  }
+  environmentBindingSaving.value = true
+  try {
+    await createBrowserEnvironmentAccount({
+      browserEnvironmentId: environmentBindingForm.browserEnvironmentId,
+      selfMediaAccountId: account.id,
+      expectedPlatformAccountId: null,
+      expectedAccountName: null,
+    })
+    ElMessage.success('已绑定环境，请在对应环境登录平台，扩展会自动上报登录状态')
+    environmentBindingVisible.value = false
+    environmentBindingTargetAccount.value = null
+    environmentBindingForm.browserEnvironmentId = null
+    await loadSelfMediaAccounts()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '创建环境绑定失败')
+  } finally {
+    environmentBindingSaving.value = false
+  }
+}
+
+async function bindAllUnboundSemiAutoAccounts() {
+  if (!defaultBrowserEnvironment.value) {
+    ElMessage.warning('请先配置并启用品牌 AdsPower 环境')
+    return
+  }
+  const targets = semiAutoSelfMediaAccounts.value.filter((account) => !browserEnvironmentAccountOf(account))
+  if (!targets.length) {
+    ElMessage.success('所有头条/知乎/小红书账号均已绑定环境')
+    return
+  }
+  environmentBindingSaving.value = true
+  try {
+    let count = 0
+    for (const account of targets) {
+      if (await bindAccountToDefaultEnvironment(account, true)) count += 1
+    }
+    ElMessage.success(`已为 ${count} 个账号绑定默认环境`)
+    await loadSelfMediaAccounts()
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '补齐环境绑定失败')
+  } finally {
+    environmentBindingSaving.value = false
+  }
+}
+
+async function resetEnvironmentAccountIdentity(account: SemiAutoSelfMediaAccount) {
+  const binding = browserEnvironmentAccountOf(account)
+  if (!binding) return
+  try {
+    await ElMessageBox.confirm(
+      `确认重置「${account.accountName}」的账号校验？重置后请重新打开环境登录，扩展会自动上报登录状态。`,
+      '重置确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认重置',
+        cancelButtonText: '取消',
+      },
+    )
+    const { data } = await updateBrowserEnvironmentAccount(binding.id, {
+      expectedPlatformAccountId: '',
+      expectedAccountName: '',
+      loginStatus: 'unknown',
+    })
+    browserEnvironmentAccounts.value = {
+      ...browserEnvironmentAccounts.value,
+      [account.id]: data.data,
+    }
+    ElMessage.success('账号校验已重置')
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(err instanceof Error ? err.message : '重置账号校验失败')
+  }
+}
+
+async function unbindEnvironmentAccount(account: SemiAutoSelfMediaAccount) {
+  const binding = browserEnvironmentAccountOf(account)
+  if (!binding) return
+  try {
+    await ElMessageBox.confirm(
+      `确认解除「${account.accountName}」与指纹环境「${binding.environmentKey || '-'}」的绑定？解绑后该账号不能使用新环境模型分发。`,
+      '解绑确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认解绑',
+        cancelButtonText: '取消',
+      },
+    )
+    await deleteBrowserEnvironmentAccount(binding.id)
+    browserEnvironmentAccounts.value = {
+      ...browserEnvironmentAccounts.value,
+      [account.id]: null,
+    }
+    ElMessage.success('环境绑定已解除')
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(err instanceof Error ? err.message : '解除环境绑定失败')
+  }
 }
 
 function channelGroupLabel(value?: string | null) {
@@ -724,14 +1127,25 @@ async function load() {
       companyName.value = ''
       companyIndustryTags.value = []
     }
-    await Promise.all([loadSelfMediaAccounts(), loadPerspectiveConfigs()])
+    await Promise.all([loadBrowserEnvironments(), loadSelfMediaAccounts(), loadPerspectiveConfigs()])
   } catch {
     brand.value = null
     companyName.value = ''
     selfMediaAccounts.value = []
+    browserEnvironments.value = []
     browserEnvironmentAccounts.value = {}
   } finally {
     loading.value = false
+  }
+}
+
+async function loadBrowserEnvironments() {
+  browserEnvironmentsLoading.value = true
+  try {
+    const { data } = await listBrowserEnvironments(brandId)
+    browserEnvironments.value = data.data || []
+  } finally {
+    browserEnvironmentsLoading.value = false
   }
 }
 
@@ -808,9 +1222,13 @@ async function submitSelfMediaAccount() {
     if (editingSelfMediaAccount.value) {
       await updateSelfMediaAccount(editingSelfMediaAccount.value.id, payload)
     } else {
-      await createSelfMediaAccount(brandId, payload)
+      const { data } = await createSelfMediaAccount(brandId, payload)
+      const created = data.data as SemiAutoSelfMediaAccount | undefined
+      if (created && isSemiAutoPlatform(created.platform)) {
+        await bindAccountToDefaultEnvironment(created, true)
+      }
     }
-    ElMessage.success('自媒体账号已保存')
+    ElMessage.success(defaultBrowserEnvironment.value ? '自媒体账号已保存，并已绑定默认环境' : '自媒体账号已保存')
     selfMediaAccountVisible.value = false
     await loadSelfMediaAccounts()
   } finally {
@@ -1113,6 +1531,14 @@ onMounted(async () => {
   color: #64748b;
   font-size: 12px;
   line-height: 1.35;
+}
+
+.environment-binding-summary {
+  margin: 14px 0;
+}
+
+.environment-binding-select {
+  width: 100%;
 }
 
 @media (max-width: 960px) {

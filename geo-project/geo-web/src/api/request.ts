@@ -3,6 +3,7 @@ import { ElMessage } from 'element-plus'
 import { useUserStore } from '@/stores/user'
 import router from '@/router'
 import type { R } from '@/types'
+import { normalizeLocalAgentErrorMessage } from '@/api/localAgentErrorMessages'
 
 const request = axios.create({
   baseURL: '/api',
@@ -25,6 +26,11 @@ function isAuthRequest(url?: string): boolean {
 function isRefreshRequest(url?: string): boolean {
   if (!url) return false
   return url.includes('/auth/refresh')
+}
+
+function isLocalAgentRequest(url?: string): boolean {
+  if (!url) return false
+  return url.includes('/local-agent/')
 }
 
 request.interceptors.request.use(
@@ -99,6 +105,10 @@ request.interceptors.response.use(
     const isAuthApi = isAuthRequest(reqUrl)
 
     if (res.code !== 0) {
+      if (isLocalAgentRequest(reqUrl)) {
+        const msg = normalizeLocalAgentErrorMessage(res.message, '本地助手请求失败')
+        return Promise.reject(buildApiError(msg, res.code, res.data, response.status))
+      }
       if (isRefreshRequest(reqUrl)) {
         return Promise.reject(buildApiError(SESSION_EXPIRED_MESSAGE, 401, res.data, response.status))
       }
@@ -205,12 +215,22 @@ request.interceptors.response.use(
 
     const responseData = error.response?.data
     if (responseData && typeof responseData === 'object' && 'code' in responseData) {
-      const msg = responseData.message || error.message || '网络异常'
+      const msg = isLocalAgentRequest(originalRequest?.url)
+        ? normalizeLocalAgentErrorMessage(responseData.message || error.message, '本地助手请求失败')
+        : responseData.message || error.message || '网络异常'
+      if (isLocalAgentRequest(originalRequest?.url)) {
+        return Promise.reject(buildApiError(msg, responseData.code, responseData.data, error.response?.status))
+      }
       ElMessage.error(msg)
       return Promise.reject(buildApiError(msg, responseData.code, responseData.data, error.response?.status))
     }
 
-    const msg = error.response?.data?.message || error.message || '网络异常'
+    const msg = isLocalAgentRequest(originalRequest?.url)
+      ? normalizeLocalAgentErrorMessage(error.response?.data?.message || error.message, '本地助手请求失败')
+      : error.response?.data?.message || error.message || '网络异常'
+    if (isLocalAgentRequest(originalRequest?.url)) {
+      return Promise.reject(buildApiError(msg, undefined, error.response?.data, error.response?.status))
+    }
     ElMessage.error(msg)
     return Promise.reject(error)
   },

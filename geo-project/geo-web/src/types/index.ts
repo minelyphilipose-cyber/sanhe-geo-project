@@ -1093,6 +1093,14 @@ export interface DistributionTask {
   targetBrandId?: number | null
   brandOfficialSiteId?: number | null
   selfMediaAccountId?: number | null
+  browserEnvironmentId?: number | null
+  browserEnvironmentAccountId?: number | null
+  environmentKey?: string | null
+  environmentProvider?: string | null
+  providerProfileId?: string | null
+  fillToken?: string | null
+  fillTokenExpiresAt?: number | null
+  fillTokenNonce?: string | null
   authorityMediaId?: number | null
   platformArticleId?: string | null
   platformPublishId?: string | null

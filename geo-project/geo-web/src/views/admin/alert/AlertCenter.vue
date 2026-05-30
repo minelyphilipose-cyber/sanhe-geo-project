@@ -16,11 +16,11 @@
     </div>
 
     <el-tabs v-model="activeTab" class="alert-tabs" @tab-change="onTabChange">
-      <el-tab-pane label="调度告警" name="dispatch" />
-      <el-tab-pane label="系统待办" name="system" />
+      <el-tab-pane v-if="canViewDispatchAlerts" label="调度告警" name="dispatch" />
+      <el-tab-pane v-if="canViewSystemAlerts" label="系统待办" name="system" />
     </el-tabs>
 
-    <el-card v-if="activeTab === 'dispatch'" shadow="never" class="admin-surface alert-toolbar-card">
+    <el-card v-if="activeTab === 'dispatch' && canViewDispatchAlerts" shadow="never" class="admin-surface alert-toolbar-card">
       <div class="alert-toolbar">
         <div class="alert-filters">
           <el-select v-model="filters.rangeType" style="width: 140px" @change="onFilterChange">
@@ -54,7 +54,7 @@
       </div>
     </el-card>
 
-    <div v-if="activeTab === 'dispatch'" class="admin-metric-grid alert-metric-grid">
+    <div v-if="activeTab === 'dispatch' && canViewDispatchAlerts" class="admin-metric-grid alert-metric-grid">
       <div class="admin-metric-card" style="--metric-accent: #ef4444; --metric-tone: #fef2f2">
         <span class="admin-metric-label">待处理告警</span>
         <strong class="admin-metric-value">{{ openCount }}</strong>
@@ -77,7 +77,7 @@
       </div>
     </div>
 
-    <div v-if="activeTab === 'dispatch'" class="alert-focus-grid">
+    <div v-if="activeTab === 'dispatch' && canViewDispatchAlerts" class="alert-focus-grid">
       <section class="alert-focus-card is-critical">
         <div class="focus-label">优先级队列</div>
         <strong>{{ priorityMessage.title }}</strong>
@@ -95,7 +95,7 @@
       </section>
     </div>
 
-    <el-card v-if="activeTab === 'dispatch'" shadow="never" class="admin-table-card alert-table-card">
+    <el-card v-if="activeTab === 'dispatch' && canViewDispatchAlerts" shadow="never" class="admin-table-card alert-table-card">
       <div class="table-header">
         <div>
           <div class="table-title">告警列表</div>
@@ -161,7 +161,7 @@
               <el-button
                 link
                 type="primary"
-                :disabled="scope.row.status !== 'open' || !canResolveAlert"
+                :disabled="scope.row.status !== 'open' || !canResolveDispatchAlert"
                 @click="resolve(scope.row)"
               >
                 标记已处理
@@ -183,7 +183,7 @@
       </div>
     </el-card>
 
-    <el-card v-else shadow="never" class="admin-table-card alert-table-card">
+    <el-card v-if="activeTab === 'system' && canViewSystemAlerts" shadow="never" class="admin-table-card alert-table-card">
       <div class="table-header">
         <div>
           <div class="table-title">系统待办</div>
@@ -235,7 +235,7 @@
           <el-table-column label="操作" width="190" fixed="right">
             <template #default="scope">
               <el-button link type="primary" @click="openSystemTodo(scope.row)">去处理</el-button>
-              <el-button link type="success" @click="resolveSystemTodo(scope.row)">标记已处理</el-button>
+              <el-button link type="success" :disabled="!canResolveSystemAlert" @click="resolveSystemTodo(scope.row)">标记已处理</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -267,9 +267,12 @@ import { useUserStore } from '@/stores/user'
 
 const userStore = useUserStore()
 const router = useRouter()
-const canResolveAlert = userStore.hasPermission('dispatch.alert.resolve')
+const canViewDispatchAlerts = userStore.hasPermission(['content.distribution.retry', 'dispatch.alert.resolve'])
+const canViewSystemAlerts = userStore.hasPermission('system.alert.resolve')
+const canResolveDispatchAlert = userStore.hasPermission('dispatch.alert.resolve')
+const canResolveSystemAlert = userStore.hasPermission('system.alert.resolve')
 
-const activeTab = ref<'dispatch' | 'system'>('dispatch')
+const activeTab = ref<'dispatch' | 'system'>(canViewDispatchAlerts ? 'dispatch' : 'system')
 const loading = ref(false)
 const rows = ref<DispatchAlertItem[]>([])
 const page = reactive({ current: 1, size: 20, total: 0 })
@@ -372,6 +375,12 @@ function formatDateTime(value?: string | null) {
 }
 
 async function loadAlerts() {
+  if (activeTab.value === 'dispatch' && !canViewDispatchAlerts) {
+    activeTab.value = canViewSystemAlerts ? 'system' : 'dispatch'
+  }
+  if (activeTab.value === 'system' && !canViewSystemAlerts) {
+    activeTab.value = canViewDispatchAlerts ? 'dispatch' : 'system'
+  }
   if (activeTab.value === 'system') {
     await loadSystemTodos()
     return
@@ -380,6 +389,7 @@ async function loadAlerts() {
 }
 
 async function loadDispatchAlerts() {
+  if (!canViewDispatchAlerts) return
   if (filters.rangeType === 'custom' && (!filters.customRange?.[0] || !filters.customRange?.[1])) {
     ElMessage.warning('请选择完整的自定义日期范围')
     return
@@ -395,6 +405,7 @@ async function loadDispatchAlerts() {
 }
 
 async function loadSystemTodos() {
+  if (!canViewSystemAlerts) return
   loading.value = true
   try {
     const { data } = await getMySystemAlertTodos({
@@ -428,7 +439,7 @@ function onTabChange() {
 }
 
 async function resolve(row: DispatchAlertItem) {
-  if (!canResolveAlert) {
+  if (!canResolveDispatchAlert) {
     ElMessage.warning('当前账号无告警处理权限')
     return
   }
@@ -462,6 +473,10 @@ function openSystemTodo(row: SystemAlertTodoItem) {
 }
 
 async function resolveSystemTodo(row: SystemAlertTodoItem) {
+  if (!canResolveSystemAlert) {
+    ElMessage.warning('当前账号无系统待办处理权限')
+    return
+  }
   await resolveSystemAlert(row.id)
   ElMessage.success('已标记处理')
   await loadSystemTodos()

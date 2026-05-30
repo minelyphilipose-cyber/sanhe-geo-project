@@ -273,7 +273,7 @@
               <template #default="scope">
                 <el-button link type="primary" @click="openTaskDetail(scope.row.id)">详情</el-button>
                 <el-button
-                  v-if="scope.row.status === 'failed' || scope.row.status === 'dead_letter'"
+                  v-if="canReplayDeadLetter && (scope.row.status === 'failed' || scope.row.status === 'dead_letter')"
                   link
                   type="primary"
                   @click="replay(scope.row.id)"
@@ -374,11 +374,14 @@ import {
   type DispatchTaskQuery,
 } from '@/api/dispatch'
 import type { DispatchDashboardMetrics, DispatchTaskItem } from '@/types'
+import { useUserStore } from '@/stores/user'
 
+const userStore = useUserStore()
 const activeTab = ref<'dashboard' | 'tasks'>('tasks')
 const loading = ref(false)
 const autoRefresh = ref(true)
 let timer: number | null = null
+const canReplayDeadLetter = computed(() => userStore.hasPermission('dispatch.task.replay.dead_letter'))
 
 const filters = reactive({
   rangeType: 'today' as 'today' | 'last7' | 'last30' | 'custom',
@@ -673,6 +676,10 @@ async function loadTasks() {
 }
 
 async function replay(taskId: number) {
+  if (!canReplayDeadLetter.value) {
+    ElMessage.warning('当前账号无死信任务重放权限')
+    return
+  }
   await replayDispatchTask(taskId)
   ElMessage.success('任务已重新入队')
   await loadTasks()

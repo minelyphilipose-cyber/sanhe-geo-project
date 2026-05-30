@@ -682,47 +682,6 @@
           </button>
         </div>
 
-        <div v-if="isSemiAutoPlatform(selectedMediaPlatform)" class="local-helper-panel">
-          <div class="local-helper-head">
-            <div>
-              <strong>指纹浏览器环境</strong>
-              <span>通过本地助手启动 AdsPower 环境，环境内扩展领取任务并填充草稿。</span>
-            </div>
-            <el-tag size="small" type="info">PoC</el-tag>
-          </div>
-          <el-form :model="localHelperConfig" label-width="86px" class="local-helper-form">
-            <el-form-item label="后台地址">
-              <el-input
-                v-model="localHelperConfig.backendBase"
-                placeholder="默认使用当前后台地址"
-                @change="saveLocalHelperConfig"
-              />
-            </el-form-item>
-            <el-form-item label="助手地址">
-              <el-input
-                v-model="localHelperConfig.helperBase"
-                placeholder="http://127.0.0.1:17891"
-                @change="saveLocalHelperConfig"
-              />
-            </el-form-item>
-            <el-form-item label="助手 Token">
-              <el-input
-                v-model="localHelperConfig.helperToken"
-                placeholder="与 geo-local-helper/config.local.json 中 helperToken 一致"
-                show-password
-                @change="saveLocalHelperConfig"
-              />
-            </el-form-item>
-            <el-form-item label="环境标识">
-              <el-input
-                v-model="localHelperConfig.environmentKey"
-                placeholder="例如 geo_b"
-                @change="saveLocalHelperConfig"
-              />
-            </el-form-item>
-          </el-form>
-        </div>
-
         <div v-if="currentPlatformAccounts.length" class="self-media-account-list">
           <div v-for="account in currentPlatformAccounts" :key="account.id" class="self-media-account-row">
             <div class="self-media-account-main">
@@ -734,6 +693,9 @@
             </el-tag>
             <el-tag v-if="isSemiAutoPlatform(selectedMediaPlatform)" size="small" :type="semiAutoCredentialTagType(account)">
               {{ semiAutoCredentialLabel(account) }}
+            </el-tag>
+            <el-tag v-if="isSemiAutoPlatform(selectedMediaPlatform)" size="small" :type="environmentAccountTagType(account)">
+              {{ environmentAccountLabel(account) }}
             </el-tag>
             <el-button
               v-if="selectedMediaPlatform === 'wechat_mp' && account.status === 'active'"
@@ -762,8 +724,35 @@
             <el-button
               v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active'"
               size="small"
+              :disabled="!!environmentAccountOf(account)"
+              @click="router.push(`/admin/brands/${mediaDistributeBrandId}`)"
+            >
+              {{ environmentAccountOf(account) ? '已绑定环境' : '去品牌配置环境' }}
+            </el-button>
+            <el-button
+              v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active' && environmentAccountOf(account) && !canSubmitSemiAutoEnvironmentTask(account)"
+              size="small"
+              :loading="semiAutoLoginOpeningAccountId === account.id"
+              @click="openSemiAutoEnvironmentForLogin(account)"
+            >
+              打开环境登录
+            </el-button>
+            <el-button
+              v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active' && environmentAccountOf(account)?.loginStatus === 'mismatch'"
+              size="small"
+              type="warning"
+              plain
+              :loading="environmentAccountResettingId === account.id"
+              @click="resetEnvironmentAccountIdentity(account)"
+            >
+              重置账号校验
+            </el-button>
+            <el-button
+              v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active'"
+              size="small"
               type="primary"
               :loading="semiAutoAccountActionLoading(account)"
+              :disabled="!canSubmitSemiAutoEnvironmentTask(account)"
               @click="submitSemiAutoEnvironmentTask(account)"
             >
               打开环境并填充
@@ -1017,8 +1006,17 @@ import {
 import { getPublishSites } from '@/api/publishSite'
 import { getBrandDetail, getBrandImageFolders, getBrandMaterialPreviewUrl } from '@/api/customer'
 import { createExtensionBindCode, type ExtensionBindCode } from '@/api/extension'
+import {
+  getBrowserEnvironmentAccountBySelfMedia,
+  updateBrowserEnvironmentAccount,
+  type BrowserEnvironmentAccount,
+} from '@/api/browserEnvironment'
+import {
+  listLocalAgentSessions,
+  type LocalAgentSession,
+} from '@/api/localAgent'
 import { getProjectDetail } from '@/api/project'
-import { createAndLaunchLocalHelperTask } from '@/api/localHelper'
+import { getLocalHelperHealth, launchLocalHelperTask, openLocalHelperEnvironment } from '@/api/localHelper'
 import { bindExtensionBridge, pingExtensionBridge, startExtensionCookieCapture, startExtensionFill, type ExtensionBridgeResult } from '@/composables/useExtensionBridge'
 import { formatDateTime } from '@/utils/format'
 
@@ -1204,6 +1202,7 @@ const distributionAttempts = ref<DistributionTask[]>([])
 const refreshingReviewTaskId = ref<number | null>(null)
 const semiAutoConfirmingTaskId = ref<number | null>(null)
 const semiAutoAbandoningTaskId = ref<number | null>(null)
+const semiAutoLoginOpeningAccountId = ref<number | null>(null)
 const selfMediaSubmitting = ref(false)
 const extensionBindCode = ref<ExtensionBindCode | null>(null)
 const extensionBindCodeLoadingAccountId = ref<number | null>(null)
@@ -1212,6 +1211,9 @@ const semiAutoCredentialClearingAccountId = ref<number | null>(null)
 const pendingCookieCaptureAccountId = ref<number | null>(null)
 const pendingCookieCaptureAutoFill = ref(false)
 const pendingCookieCaptureFillTask = ref<PendingSemiAutoFillTask | null>(null)
+const browserEnvironmentAccounts = ref<Record<number, BrowserEnvironmentAccount | null>>({})
+const localAgentSessions = ref<LocalAgentSession[]>([])
+const environmentAccountResettingId = ref<number | null>(null)
 const extensionBridgeChecking = ref(false)
 const extensionBridgeState = reactive({
   status: 'unknown' as ExtensionBridgeStatus,
@@ -1219,13 +1221,13 @@ const extensionBridgeState = reactive({
   extensionVersion: '',
 })
 const localHelperConfig = reactive({
-  backendBase: '',
   helperBase: 'http://127.0.0.1:17891',
-  helperToken: '',
-  environmentKey: 'geo_b',
+  localAgentSessionId: null as number | null,
 })
 
 let cookieCapturePollTimer: number | null = null
+let browserEnvironmentStatusPollTimer: number | null = null
+let browserEnvironmentStatusPollingInFlight = false
 
 const markdown = new MarkdownIt({
   html: false,
@@ -1236,6 +1238,22 @@ const markdown = new MarkdownIt({
 const detailMarkdown = computed(() => detailData.value?.versions?.[0]?.contentMarkdown || '')
 const detailHtml = computed(() => renderArticlePreviewMarkdown(detailMarkdown.value || ''))
 const revisionHtml = computed(() => renderArticlePreviewMarkdown(revisionForm.contentMarkdown || ''))
+function localAgentSessionTimeValue(session: LocalAgentSession) {
+  const value = session.lastSeenAt || session.boundAt || session.expiresAt || ''
+  const timestamp = value ? new Date(value).getTime() : 0
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+const activeLocalAgentSessions = computed(() =>
+  localAgentSessions.value
+    .filter((session) => session.status === 'active')
+    .slice()
+    .sort((left, right) => {
+      const timeDelta = localAgentSessionTimeValue(right) - localAgentSessionTimeValue(left)
+      if (timeDelta !== 0) return timeDelta
+      return right.id - left.id
+    }),
+)
 const wechatActive = computed(() => wechatAccounts.value.some((account) => account.status === 'active'))
 const wechatDistributionAvailable = computed(() =>
   !!wechatCapability.value?.draftDistributionEnabled || !!wechatCapability.value?.autoPublishEnabled,
@@ -2132,6 +2150,7 @@ async function submitAuthorityMedia() {
 }
 
 async function openMediaDistribute(row: ArticleDraft) {
+  stopBrowserEnvironmentStatusPolling()
   mediaDistributeArticleId.value = row.id
   mediaDistributeBrandId.value = null
   selectedMediaPlatform.value = 'wechat_mp'
@@ -2148,6 +2167,8 @@ async function openMediaDistribute(row: ArticleDraft) {
   selectedDouyinImageMaterialIds.value = []
   douyinText.value = row.title || ''
   distributionAttempts.value = []
+  browserEnvironmentAccounts.value = {}
+  localAgentSessions.value = []
   extensionBindCode.value = null
   extensionBindCodeLoadingAccountId.value = null
   try {
@@ -2175,10 +2196,15 @@ async function openMediaDistribute(row: ArticleDraft) {
       }),
     ])
     applySelfMediaAccounts(accountRes.data.data || [])
+    await Promise.all([
+      loadBrowserEnvironmentAccountStatuses(accountRes.data.data || []),
+      refreshLocalAgentSessions(),
+    ])
     brandImageFolders.value = folderRes.data.data || []
     ensureSelectedImageFolder()
     await loadMaterialThumbs()
     mediaDistributeVisible.value = true
+    startBrowserEnvironmentStatusPolling()
   } catch {
     ElMessage.error('加载自媒体账号失败')
   }
@@ -2192,10 +2218,78 @@ function applySelfMediaAccounts(accounts: SelfMediaAccount[]) {
   xiaohongshuAccounts.value = accounts.filter((account) => account.platform === 'xiaohongshu')
 }
 
+async function loadBrowserEnvironmentAccountStatuses(accounts: SelfMediaAccount[]) {
+  const semiAutoAccounts = accounts.filter((account) => isSemiAutoPlatform(account.platform as MediaPlatform))
+  if (!semiAutoAccounts.length) {
+    browserEnvironmentAccounts.value = {}
+    return
+  }
+  const entries = await Promise.all(semiAutoAccounts.map(async (account) => {
+    try {
+      const { data } = await getBrowserEnvironmentAccountBySelfMedia(account.id)
+      return [account.id, data.data || null] as const
+    } catch {
+      return [account.id, null] as const
+    }
+  }))
+  browserEnvironmentAccounts.value = Object.fromEntries(entries)
+}
+
+async function refreshBrowserEnvironmentAccountStatuses() {
+  const accounts = [
+    ...toutiaoAccounts.value,
+    ...zhihuAccounts.value,
+    ...xiaohongshuAccounts.value,
+  ]
+  await loadBrowserEnvironmentAccountStatuses(accounts)
+}
+
+async function pollBrowserEnvironmentAccountStatusesOnce() {
+  if (!mediaDistributeVisible.value || browserEnvironmentStatusPollingInFlight) return
+  browserEnvironmentStatusPollingInFlight = true
+  try {
+    await refreshBrowserEnvironmentAccountStatuses()
+  } finally {
+    browserEnvironmentStatusPollingInFlight = false
+  }
+}
+
+function startBrowserEnvironmentStatusPolling() {
+  stopBrowserEnvironmentStatusPolling()
+  void pollBrowserEnvironmentAccountStatusesOnce()
+  browserEnvironmentStatusPollTimer = window.setInterval(() => {
+    void pollBrowserEnvironmentAccountStatusesOnce()
+  }, 3000)
+}
+
+function stopBrowserEnvironmentStatusPolling() {
+  if (browserEnvironmentStatusPollTimer !== null) {
+    window.clearInterval(browserEnvironmentStatusPollTimer)
+    browserEnvironmentStatusPollTimer = null
+  }
+  browserEnvironmentStatusPollingInFlight = false
+}
+
+async function refreshLocalAgentSessions() {
+  try {
+    const { data } = await listLocalAgentSessions()
+    localAgentSessions.value = data.data || []
+    const activeIds = new Set(activeLocalAgentSessions.value.map((session) => session.id))
+    if (!localHelperConfig.localAgentSessionId || !activeIds.has(localHelperConfig.localAgentSessionId)) {
+      localHelperConfig.localAgentSessionId = activeLocalAgentSessions.value[0]?.id || null
+    }
+  } catch {
+    localAgentSessions.value = []
+    localHelperConfig.localAgentSessionId = null
+  }
+}
+
 async function refreshSelfMediaAccounts() {
   if (!mediaDistributeBrandId.value) return
   const { data } = await getSelfMediaAccountsByBrand(mediaDistributeBrandId.value)
-  applySelfMediaAccounts(data.data || [])
+  const accounts = data.data || []
+  applySelfMediaAccounts(accounts)
+  await loadBrowserEnvironmentAccountStatuses(accounts)
 }
 
 async function handleWechatPlatformClick() {
@@ -2297,6 +2391,51 @@ function semiAutoCredentialTagType(account: SelfMediaAccount): 'success' | 'warn
   return account.status === 'active' ? 'info' : 'warning'
 }
 
+function environmentAccountOf(account: SelfMediaAccount) {
+  return browserEnvironmentAccounts.value[account.id] || null
+}
+
+function environmentAccountLabel(account: SelfMediaAccount) {
+  const binding = environmentAccountOf(account)
+  if (!binding) return '未配置环境'
+  if (binding.loginStatus === 'logged_in') return '环境已就绪'
+  if (binding.loginStatus === 'unknown') return '需登录'
+  if (binding.loginStatus === 'mismatch') return '账号不一致'
+  if (binding.loginStatus === 'expired') return '需重新登录'
+  if (binding.loginStatus === 'login_required') return '需重新登录'
+  if (binding.loginStatus === 'error') return '环境异常'
+  return '环境状态未知'
+}
+
+function environmentAccountActionHint(account: SelfMediaAccount) {
+  const binding = environmentAccountOf(account)
+  if (!binding) return '该账号未配置指纹浏览器环境，请到「品牌详情 > 自媒体账号 > 指纹浏览器环境」完成绑定'
+  if (binding.loginStatus === 'logged_in') return '环境已就绪，可以打开环境并填充'
+  if (binding.loginStatus === 'unknown') return '请点击「打开环境登录」，在 AdsPower 环境完成登录；扩展会自动上报登录状态'
+  if (binding.loginStatus === 'login_required') return '请点击「打开环境登录」，在 AdsPower 环境重新登录；扩展会自动上报登录状态'
+  if (binding.loginStatus === 'expired') return '登录状态已过期，请点击「打开环境登录」重新登录，扩展会自动上报登录状态'
+  if (binding.loginStatus === 'mismatch') return '当前环境登录账号与系统绑定账号不一致，请在本页面点击「重置账号校验」后重新打开环境登录，扩展会自动上报登录状态'
+  if (binding.loginStatus === 'error') return '环境状态异常，请到「品牌详情 > 自媒体账号 > 指纹浏览器环境」检查绑定，或重新打开环境登录'
+  return '环境状态未知，请打开环境确认登录状态'
+}
+
+function browserEnvironmentProviderProfileIdOf(binding: BrowserEnvironmentAccount | null | undefined) {
+  return String(binding?.providerProfileId || '').trim()
+}
+
+function environmentAccountTagType(account: SelfMediaAccount): 'success' | 'warning' | 'danger' | 'info' {
+  const binding = environmentAccountOf(account)
+  if (!binding) return 'info'
+  if (binding.loginStatus === 'logged_in') return 'success'
+  if (binding.loginStatus === 'mismatch' || binding.loginStatus === 'error') return 'danger'
+  return 'warning'
+}
+
+function canSubmitSemiAutoEnvironmentTask(account: SelfMediaAccount) {
+  const binding = environmentAccountOf(account)
+  return account.status === 'active' && !!binding && binding.loginStatus === 'logged_in'
+}
+
 function semiAutoCredentialIdentityMessage(account: SelfMediaAccount) {
   const credential = account as SelfMediaAccountWithCredential
   return credential.cookieCredentialIdentityMessage || ''
@@ -2306,22 +2445,199 @@ function semiAutoAccountActionLoading(account: SelfMediaAccount) {
   return selfMediaSubmitting.value && selectedSelfMediaAccountId.value === account.id
 }
 
-function handleSemiAutoPlatformClick(platform: SemiAutoPlatform) {
+type SetupPromptTarget = 'localAgent' | 'brandEnvironment' | 'selfMediaAccounts'
+
+interface SetupPromptOptions {
+  title: string
+  issue: string
+  location: string
+  action: string
+  target?: SetupPromptTarget
+}
+
+function setupPromptPath(target?: SetupPromptTarget) {
+  if (target === 'localAgent') return userStore.isPartner ? '/partner/profile' : '/admin/profile'
+  if (target === 'brandEnvironment' || target === 'selfMediaAccounts') {
+    return mediaDistributeBrandId.value ? `/admin/brands/${mediaDistributeBrandId.value}` : '/admin/brands'
+  }
+  return ''
+}
+
+async function showSetupPrompt(options: SetupPromptOptions) {
+  const targetPath = setupPromptPath(options.target)
+  const message = [
+    options.issue,
+    '',
+    `设置位置：${options.location}`,
+    `处理方式：${options.action}`,
+  ].join('\n')
+
+  try {
+    await ElMessageBox.confirm(message, options.title, {
+      confirmButtonText: targetPath ? '前往设置' : '我知道了',
+      cancelButtonText: '取消',
+      type: 'warning',
+    })
+  } catch {
+    return
+  }
+
+  if (targetPath) {
+    await router.push(targetPath)
+  }
+}
+
+function showLocalAgentSetupPrompt(issue = '当前电脑尚未完成本地助手配对，系统无法安全调用本地助手打开 AdsPower 环境。') {
+  const isAdspowerConfigIssue = /AdsPower|API Key/i.test(issue)
+  return showSetupPrompt({
+    title: isAdspowerConfigIssue ? 'AdsPower 连接未配置' : '本地助手未就绪',
+    issue,
+    location: '右上角头像 > 个人中心 > 本地助手',
+    action: isAdspowerConfigIssue
+      ? '先启动本地助手，在个人中心填写 AdsPower API 地址和 API Key，保存后回到当前分发页面继续操作。'
+      : '先启动本地助手，在助手页面生成一次性配对码，再回到个人中心完成绑定。绑定成功后回到当前分发页面继续操作。',
+    target: 'localAgent',
+  })
+}
+
+function showBrandEnvironmentSetupPrompt(issue: string) {
+  return showSetupPrompt({
+    title: '指纹浏览器环境未配置',
+    issue,
+    location: '品牌详情 > 自媒体账号 > 指纹浏览器环境',
+    action: '为该品牌配置 AdsPower 环境，并确认该平台账号已绑定到品牌环境。',
+    target: 'brandEnvironment',
+  })
+}
+
+function showSelfMediaAccountSetupPrompt(platform: SemiAutoPlatform, issue: string) {
+  return showSetupPrompt({
+    title: `${semiAutoPlatformLabel(platform)}账号未就绪`,
+    issue,
+    location: '品牌详情 > 自媒体账号',
+    action: `新增或启用${semiAutoPlatformLabel(platform)}账号后，确认该账号已绑定品牌的 AdsPower 环境。`,
+    target: 'selfMediaAccounts',
+  })
+}
+
+function isLocalAgentSetupError(error: unknown) {
+  if (!(error instanceof Error)) return false
+  return /本地助手|local agent|helper/i.test(error.message)
+}
+
+async function openSemiAutoEnvironmentForLogin(account: SelfMediaAccount) {
+  const binding = environmentAccountOf(account)
+  if (!binding) {
+    await showBrandEnvironmentSetupPrompt('当前自媒体账号未绑定指纹浏览器环境，无法打开 AdsPower 环境进行登录。')
+    return
+  }
+  const environmentKey = binding.environmentKey || ''
+  if (!environmentKey) {
+    await showBrandEnvironmentSetupPrompt('当前账号绑定缺少环境标识，无法定位要打开的 AdsPower 环境。')
+    return
+  }
+  const providerProfileId = browserEnvironmentProviderProfileIdOf(binding)
+  if (!providerProfileId) {
+    await showBrandEnvironmentSetupPrompt('当前账号绑定缺少 AdsPower 环境 ID，无法启动对应浏览器环境。')
+    return
+  }
+  semiAutoLoginOpeningAccountId.value = account.id
+  try {
+    await openLocalHelperEnvironment(
+      await currentLocalHelperAuthConfig(),
+      {
+        environmentKey,
+        providerProfileId,
+        environmentName: binding.environmentKey || account.accountName || null,
+        url: defaultSemiAutoLoginReportUrl(account.platform),
+      },
+    )
+    ElMessage.success('已打开对应 AdsPower 环境。登录完成后，环境内扩展会自动上报登录状态')
+  } catch (error) {
+    if (isLocalAgentSetupError(error)) {
+      await showLocalAgentSetupPrompt(error instanceof Error ? error.message : undefined)
+    } else {
+      ElMessage.error(error instanceof Error ? error.message : '打开指纹浏览器环境失败')
+    }
+  } finally {
+    semiAutoLoginOpeningAccountId.value = null
+  }
+}
+
+async function resetEnvironmentAccountIdentity(account: SelfMediaAccount) {
+  const binding = environmentAccountOf(account)
+  if (!binding) {
+    ElMessage.warning('当前账号未绑定指纹浏览器环境')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认重置账号「${account.accountName}」的环境账号校验？这会清除当前已登记的平台身份，状态回到待首次登录。重置后请重新打开环境登录，扩展会自动上报登录状态。`,
+      '重置账号校验',
+      {
+        confirmButtonText: '确认重置',
+        cancelButtonText: '取消',
+        type: 'warning',
+      },
+    )
+  } catch {
+    return
+  }
+
+  environmentAccountResettingId.value = account.id
+  try {
+    const { data } = await updateBrowserEnvironmentAccount(binding.id, {
+      expectedPlatformAccountId: '',
+      expectedAccountName: '',
+      loginStatus: 'unknown',
+    })
+    browserEnvironmentAccounts.value = {
+      ...browserEnvironmentAccounts.value,
+      [account.id]: data.data,
+    }
+    ElMessage.success('已重置账号校验，请重新打开环境登录，扩展会自动上报登录状态')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '重置账号校验失败')
+  } finally {
+    environmentAccountResettingId.value = null
+  }
+}
+
+async function handleSemiAutoPlatformClick(platform: SemiAutoPlatform) {
+  if (selfMediaSubmitting.value) {
+    ElMessage.info('已有分发任务正在处理，请稍候')
+    return
+  }
   selectedMediaPlatform.value = platform
   selectedSelfMediaAccountId.value = null
   selectedCoverMaterialId.value = null
   selectedDouyinImageMaterialIds.value = []
   const accounts = semiAutoAccountsByPlatform(platform)
   if (!accounts.length) {
-    ElMessage.info(`当前品牌暂无${semiAutoPlatformLabel(platform)}账号`)
+    await showSelfMediaAccountSetupPrompt(platform, `当前品牌暂无${semiAutoPlatformLabel(platform)}账号，无法创建分发任务。`)
     return
   }
-  const activeAccount = accounts.find((account) => account.status === 'active')
+  await refreshBrowserEnvironmentAccountStatuses()
+  const activeAccounts = accounts.filter((account) => account.status === 'active')
+  const fillableAccount = activeAccounts.find((account) => canSubmitSemiAutoEnvironmentTask(account))
+  if (fillableAccount) {
+    void submitSemiAutoEnvironmentTask(fillableAccount)
+    return
+  }
+
+  const loginRequiredAccount = activeAccounts.find((account) => environmentAccountOf(account))
+  if (loginRequiredAccount) {
+    ElMessage.warning(`${semiAutoPlatformLabel(platform)}当前不能填充：${environmentAccountActionHint(loginRequiredAccount)}`)
+    void openSemiAutoEnvironmentForLogin(loginRequiredAccount)
+    return
+  }
+
+  const activeAccount = activeAccounts[0]
   if (activeAccount) {
-    void submitSemiAutoEnvironmentTask(activeAccount)
+    await showBrandEnvironmentSetupPrompt(`${semiAutoPlatformLabel(platform)}账号尚未绑定指纹浏览器环境，当前不能打开环境并填充。`)
     return
   }
-  ElMessage.info(`${semiAutoPlatformLabel(platform)}账号不可用，请先在账号管理中启用`)
+  await showSelfMediaAccountSetupPrompt(platform, `${semiAutoPlatformLabel(platform)}账号当前不可用，无法创建分发任务。`)
 }
 
 function semiAutoAccountsByPlatform(platform: SemiAutoPlatform) {
@@ -2546,47 +2862,6 @@ async function submitDouyinImageText() {
   }
 }
 
-const LOCAL_HELPER_CONFIG_KEY = 'geo_local_helper_config_v1'
-
-function loadLocalHelperConfig() {
-  if (typeof window === 'undefined') return
-  localHelperConfig.backendBase = window.location.origin
-  const raw = window.localStorage.getItem(LOCAL_HELPER_CONFIG_KEY)
-  if (!raw) return
-  try {
-    const saved = JSON.parse(raw) as Partial<typeof localHelperConfig>
-    localHelperConfig.backendBase = saved.backendBase || localHelperConfig.backendBase
-    localHelperConfig.helperBase = saved.helperBase || localHelperConfig.helperBase
-    localHelperConfig.helperToken = saved.helperToken || ''
-    localHelperConfig.environmentKey = saved.environmentKey || localHelperConfig.environmentKey
-  } catch {
-    window.localStorage.removeItem(LOCAL_HELPER_CONFIG_KEY)
-  }
-}
-
-function saveLocalHelperConfig() {
-  if (typeof window === 'undefined') return
-  window.localStorage.setItem(LOCAL_HELPER_CONFIG_KEY, JSON.stringify({
-    backendBase: localHelperConfig.backendBase.trim(),
-    helperBase: localHelperConfig.helperBase.trim(),
-    helperToken: localHelperConfig.helperToken.trim(),
-    environmentKey: localHelperConfig.environmentKey.trim(),
-  }))
-}
-
-function getBackendAccessToken() {
-  if (typeof window === 'undefined') return ''
-  try {
-    const auth = JSON.parse(window.localStorage.getItem('geo_auth_v1') || '{}') as {
-      accessToken?: string
-      token?: string
-    }
-    return auth.accessToken || auth.token || ''
-  } catch {
-    return ''
-  }
-}
-
 function defaultSemiAutoPublishUrl(platform: string) {
   if (platform === 'toutiao') return 'https://mp.toutiao.com/profile_v4/graphic/publish'
   if (platform === 'zhihu') return 'https://zhuanlan.zhihu.com/write'
@@ -2594,51 +2869,137 @@ function defaultSemiAutoPublishUrl(platform: string) {
   return undefined
 }
 
+function defaultSemiAutoLoginReportUrl(platform: string) {
+  if (platform === 'toutiao') return 'https://mp.toutiao.com/profile_v4'
+  if (platform === 'zhihu') return 'https://www.zhihu.com/'
+  if (platform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/'
+  return defaultSemiAutoPublishUrl(platform)
+}
+
+async function syncLocalAgentSessionFromHelper() {
+  const helperBase = localHelperConfig.helperBase.trim()
+  if (!helperBase) return
+  const health = await getLocalHelperHealth(helperBase)
+  const helperSessionId = Number(health.session?.sessionId)
+  if (!health.paired || !Number.isFinite(helperSessionId) || helperSessionId <= 0) return
+
+  if (localHelperConfig.localAgentSessionId !== helperSessionId) {
+    localHelperConfig.localAgentSessionId = helperSessionId
+  }
+
+  const knownActiveIds = new Set(activeLocalAgentSessions.value.map((session) => session.id))
+  if (!knownActiveIds.has(helperSessionId)) {
+    await refreshLocalAgentSessions()
+    if (localHelperConfig.localAgentSessionId !== helperSessionId) {
+      localHelperConfig.localAgentSessionId = helperSessionId
+    }
+  }
+  return health
+}
+
+async function currentLocalHelperAuthConfig() {
+  const health = await syncLocalAgentSessionFromHelper()
+  const helperBase = localHelperConfig.helperBase.trim()
+  const localAgentSessionId = localHelperConfig.localAgentSessionId || activeLocalAgentSessions.value[0]?.id || null
+  if (!helperBase) {
+    throw new Error('请先到「个人中心 > 本地助手」完成本机配对')
+  }
+  if (!localAgentSessionId) {
+    throw new Error('请先完成本地助手配对')
+  }
+  if (health && !health.adspower?.apiKeyConfigured) {
+    throw new Error('请先到「个人中心 > 本地助手」配置 AdsPower API Key')
+  }
+  return {
+    helperBase,
+    localAgentSessionId,
+  }
+}
+
 async function submitSemiAutoEnvironmentTask(account: SelfMediaAccount) {
+  if (selfMediaSubmitting.value) {
+    ElMessage.info('已有分发任务正在处理，请稍候')
+    return
+  }
   if (!mediaDistributeArticleId.value) {
-    ElMessage.warning('请选择文章')
+    ElMessage.warning('请选择要分发的文章')
     return
   }
   if (!mediaDistributeBrandId.value) {
-    ElMessage.warning('当前文章未绑定品牌，无法启动自媒体环境')
+    await showSetupPrompt({
+      title: '文章品牌缺失',
+      issue: '当前文章未绑定品牌，系统无法判断要使用哪个品牌的自媒体账号和 AdsPower 环境。',
+      location: '内容管理 > 文章详情',
+      action: '先为文章选择所属品牌，再回到自媒体分发继续操作。',
+    })
     return
   }
-  const helperBase = localHelperConfig.helperBase.trim()
-  const backendBase = localHelperConfig.backendBase.trim() || window.location.origin
-  const helperToken = localHelperConfig.helperToken.trim()
-  const environmentKey = localHelperConfig.environmentKey.trim()
-  if (!helperBase || !helperToken || !environmentKey) {
-    ElMessage.warning('请先填写本地助手地址、Token 和环境标识')
+  await refreshBrowserEnvironmentAccountStatuses()
+  const binding = environmentAccountOf(account)
+  if (!binding) {
+    await showBrandEnvironmentSetupPrompt('当前自媒体账号未绑定指纹浏览器环境，无法打开 AdsPower 环境并填充。')
     return
   }
-  const backendToken = getBackendAccessToken()
-  if (!backendToken) {
-    ElMessage.warning('未读取到后台登录 Token，请重新登录后台后再试')
+  if (binding.loginStatus !== 'logged_in') {
+    ElMessage.warning(environmentAccountActionHint(account))
     return
   }
-  saveLocalHelperConfig()
+  const backendBase = window.location.origin
+  const environmentKey = binding.environmentKey || ''
+  if (!environmentKey) {
+    await showBrandEnvironmentSetupPrompt('当前账号绑定缺少环境标识，无法定位要打开的 AdsPower 环境。')
+    return
+  }
+  const providerProfileId = browserEnvironmentProviderProfileIdOf(binding)
+  if (!providerProfileId) {
+    await showBrandEnvironmentSetupPrompt('当前账号绑定缺少 AdsPower 环境 ID，无法启动对应浏览器环境。')
+    return
+  }
+  let helperAuthConfig: Awaited<ReturnType<typeof currentLocalHelperAuthConfig>>
+  try {
+    helperAuthConfig = await currentLocalHelperAuthConfig()
+  } catch (error) {
+    await showLocalAgentSetupPrompt(error instanceof Error ? error.message : undefined)
+    return
+  }
   selectedSelfMediaAccountId.value = account.id
   selfMediaSubmitting.value = true
   try {
-    await createAndLaunchLocalHelperTask(
-      { helperBase, helperToken },
+    const requestId = createRequestId(`env_${account.platform}`)
+    const taskResult = await distributeContentArticleToSelfMediaAccount(mediaDistributeArticleId.value, {
+      selfMediaAccountId: account.id,
+      requestId,
+    })
+    const backendTask = taskResult.data.data
+    if (!backendTask?.id) {
+      throw new Error('后台未返回分发任务')
+    }
+    await launchLocalHelperTask(
+      helperAuthConfig,
       {
         environmentKey,
+        providerProfileId,
+        environmentName: binding.environmentKey || account.accountName || null,
         backendBase,
-        backendToken,
-        brandId: mediaDistributeBrandId.value,
-        articleId: mediaDistributeArticleId.value,
+        taskId: backendTask.id,
         selfMediaAccountId: account.id,
+        browserEnvironmentAccountId: binding.id,
         platform: account.platform,
         url: defaultSemiAutoPublishUrl(account.platform),
-        requestId: createRequestId(`env_${account.platform}`),
+        expectedPlatformAccountId: binding.expectedPlatformAccountId || account.platformAccountId || null,
+        expectedAccountName: binding.expectedAccountName || account.accountName || null,
+        backendTask,
       },
     )
     ElMessage.success('已启动 AdsPower 环境，环境内扩展将领取任务并填充草稿')
     await refreshDistributionHistory()
     await load()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '启动本地助手任务失败')
+    if (isLocalAgentSetupError(error)) {
+      await showLocalAgentSetupPrompt(error instanceof Error ? error.message : undefined)
+    } else {
+      ElMessage.error(error instanceof Error ? error.message : '启动本地助手任务失败')
+    }
   } finally {
     selfMediaSubmitting.value = false
   }
@@ -3422,7 +3783,6 @@ async function submitRevision() {
 }
 
 onMounted(async () => {
-  loadLocalHelperConfig()
   handleWechatAuthResult()
   handleDouyinAuthResult()
   await handleManualCreateResult()
@@ -3432,6 +3792,7 @@ onMounted(async () => {
 
 watch(mediaDistributeVisible, (visible) => {
   if (!visible) {
+    stopBrowserEnvironmentStatusPolling()
     stopCookieCaptureStatusPolling()
     pendingCookieCaptureAccountId.value = null
     semiAutoCookieCaptureLoadingAccountId.value = null
@@ -3445,6 +3806,7 @@ document.addEventListener('visibilitychange', handleVisibilityChangeForCookieCap
 onBeforeUnmount(() => {
   window.removeEventListener('focus', handleWindowFocusForCookieCapture)
   document.removeEventListener('visibilitychange', handleVisibilityChangeForCookieCapture)
+  stopBrowserEnvironmentStatusPolling()
   stopCookieCaptureStatusPolling()
   cleanupMaterialThumbs()
 })
@@ -4830,47 +5192,6 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   font-weight: 800;
 }
 
-.local-helper-panel {
-  padding: 14px 16px;
-  border: 1px solid #dbeafe;
-  border-radius: 14px;
-  background: linear-gradient(180deg, #ffffff, #f8fbff);
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.045);
-}
-
-.local-helper-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.local-helper-head strong {
-  display: block;
-  color: #0f172a;
-  font-size: 14px;
-  font-weight: 800;
-}
-
-.local-helper-head span {
-  display: block;
-  margin-top: 4px;
-  color: #64748b;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.local-helper-form {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr);
-  gap: 10px 14px;
-}
-
-.local-helper-form :deep(.el-form-item) {
-  margin-bottom: 0;
-}
-
 .self-media-account-list {
   overflow: hidden;
   border: 1px solid #dbeafe;
@@ -4885,7 +5206,7 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   min-height: 64px;
   padding: 12px 14px;
   border-bottom: 1px solid #e2e8f0;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
   gap: 12px;
 }
 
@@ -5064,6 +5385,31 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 .douyin-text-editor,
 .distribution-history {
   margin-top: 12px;
+}
+
+.environment-binding-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.environment-binding-summary {
+  margin-top: 2px;
+}
+
+.environment-binding-form {
+  margin-top: 0;
+}
+
+.environment-binding-select {
+  width: 100%;
+}
+
+.environment-binding-option-sub {
+  float: right;
+  margin-left: 16px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 
 .distribution-history {
