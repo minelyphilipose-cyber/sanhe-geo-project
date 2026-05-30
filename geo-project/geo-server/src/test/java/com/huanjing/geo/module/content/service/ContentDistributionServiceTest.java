@@ -129,6 +129,7 @@ class ContentDistributionServiceTest {
                 brandAccessService,
                 fillTokenService,
                 reviewStatusPollService,
+                mock(BrowserEnvironmentService.class),
                 auditService,
                 new ObjectMapper(),
                 mock(AuthorityMediaDistributionAdapter.class),

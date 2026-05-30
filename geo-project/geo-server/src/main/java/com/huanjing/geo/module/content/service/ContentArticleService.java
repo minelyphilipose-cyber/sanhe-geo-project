@@ -46,7 +46,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ContentArticleService {
 
-    private static final Set<String> AUTO_APPROVED_GENERATED_BY = Set.of("ai", "system", "batch_ai", "ai_preview");
+    private static final Set<String> AUTO_APPROVED_GENERATED_BY = Set.of("ai", "system", "batch_ai", "ai_preview", "template_ai");
     private static final Set<String> LEGACY_PROJECT_UPDATE_ROLES =
             Set.of("operator", "delivery_manager", "partner", "partner_staff");
 
@@ -686,17 +686,24 @@ public class ContentArticleService {
                 fillArticleFromGenerationTask(article, task);
             }
         }
-        Map<Long, Boolean> generatedArticleMap = articleDraftVersionMapper.selectList(
+        Map<Long, String> generatedByMap = articleDraftVersionMapper.selectList(
                         new LambdaQueryWrapper<ArticleDraftVersion>()
                                 .in(ArticleDraftVersion::getArticleId, articleIds)
                                 .select(ArticleDraftVersion::getArticleId, ArticleDraftVersion::getGeneratedBy)
+                                .orderByDesc(ArticleDraftVersion::getVersionNo)
                 ).stream()
                 .filter(Objects::nonNull)
                 .filter(version -> version.getArticleId() != null)
-                .filter(version -> isAutoApprovedGeneratedBy(version.getGeneratedBy()))
-                .collect(Collectors.toMap(ArticleDraftVersion::getArticleId, version -> true, (a, b) -> true));
+                .filter(version -> StringUtils.hasText(version.getGeneratedBy()))
+                .collect(Collectors.toMap(
+                        ArticleDraftVersion::getArticleId,
+                        version -> version.getGeneratedBy().trim().toLowerCase(Locale.ROOT),
+                        (first, ignored) -> first
+                ));
         for (ArticleDraft article : articles) {
-            if (Boolean.TRUE.equals(generatedArticleMap.get(article.getId()))) {
+            String generatedBy = generatedByMap.get(article.getId());
+            article.setGeneratedBy(generatedBy);
+            if (isAutoApprovedGeneratedBy(generatedBy)) {
                 article.setSystemGenerated(true);
             }
         }

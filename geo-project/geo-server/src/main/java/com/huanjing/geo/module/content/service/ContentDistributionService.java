@@ -5,6 +5,7 @@ import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.audit.ActorType;
 import com.huanjing.geo.module.audit.AuditMode;
@@ -96,6 +97,7 @@ public class ContentDistributionService {
     private final BrandAccessService brandAccessService;
     private final FillTokenService fillTokenService;
     private final DistributionReviewStatusPollService reviewStatusPollService;
+    private final BrowserEnvironmentService browserEnvironmentService;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
     private final AuthorityMediaDistributionAdapter authorityMediaDistributionAdapter;
@@ -143,12 +145,16 @@ public class ContentDistributionService {
         ensureDistributeRole(operator);
 
         ArticleDraft article = requireArticle(articleId);
-        if (!ACTIVE_ARTICLE_STATUS.contains(article.getStatus())) {
-            throw new BizException(400, "Only approved/unpublished article can distribute");
-        }
         Project project = requireProject(article.getProjectId());
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         requireDistributionAccess(operator, project.getBrandId());
+        if (!ACTIVE_ARTICLE_STATUS.contains(article.getStatus())) {
+            if (target instanceof TargetContext.SelfMediaTarget selfMediaTarget
+                    && "distributing".equals(article.getStatus())) {
+                return reuseExistingSemiAutoSelfMediaTask(article, project, operator, selfMediaTarget);
+            }
+            throw new BizException(400, "Only approved/unpublished article can distribute");
+        }
 
         if (target instanceof TargetContext.BrandOfficialSiteTarget brandTarget) {
             return distributeToBrandOfficialSite(article, project, operator, brandTarget);
@@ -581,6 +587,14 @@ public class ContentDistributionService {
             throw new BizException(403, "自媒体账号与文章品牌不匹配");
         }
         requireDistributionAccess(operator, account.getBrandId());
+        DistributionTask reusable = findReusableSemiAutoTask(article.getId(), account.getId());
+        if (reusable != null) {
+            BrowserEnvironmentAccount reusableEnvironmentBinding = browserEnvironmentService.validateForTaskCreation(account);
+            if (reusableEnvironmentBinding != null || AUTH_MODE_COOKIE.equalsIgnoreCase(account.getAuthMode())) {
+                return reissueReusableSemiAutoSelfMediaTask(article, project, operator, account, reusable, reusableEnvironmentBinding);
+            }
+            return reusable;
+        }
         DistributionTask existed = distributionTaskMapper.selectOne(
                 new LambdaQueryWrapper<DistributionTask>()
                         .eq(DistributionTask::getRequestId, mpTarget.requestId().trim())
@@ -589,8 +603,9 @@ public class ContentDistributionService {
         if (existed != null) {
             return existed;
         }
-        if (AUTH_MODE_COOKIE.equalsIgnoreCase(account.getAuthMode())) {
-            return createSemiAutoSelfMediaTask(article, project, operator, account, mpTarget);
+        BrowserEnvironmentAccount environmentBinding = browserEnvironmentService.validateForTaskCreation(account);
+        if (environmentBinding != null || AUTH_MODE_COOKIE.equalsIgnoreCase(account.getAuthMode())) {
+            return createSemiAutoSelfMediaTask(article, project, operator, account, mpTarget, environmentBinding);
         }
 
         String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
@@ -618,6 +633,88 @@ public class ContentDistributionService {
             companyChannelQuotaService.refundDistribution(task.getId());
         }
         return distributionTaskMapper.selectById(task.getId());
+    }
+
+    private DistributionTask reuseExistingSemiAutoSelfMediaTask(ArticleDraft article,
+                                                                Project project,
+                                                                SysUser operator,
+                                                                TargetContext.SelfMediaTarget mpTarget) {
+        SelfMediaAccount account = mpTarget.account();
+        if (account == null || account.getId() == null) {
+            throw new BizException(400, "self media account missing");
+        }
+        if (!"active".equalsIgnoreCase(account.getStatus())) {
+            throw new BizException(400, "自媒体账号不可用，请重新授权");
+        }
+        if (project.getBrandId() == null || !project.getBrandId().equals(account.getBrandId())) {
+            throw new BizException(403, "自媒体账号与文章品牌不匹配");
+        }
+        requireDistributionAccess(operator, account.getBrandId());
+        DistributionTask reusable = findReusableSemiAutoTask(article.getId(), account.getId());
+        if (reusable == null) {
+            throw new BizException(400, "Article is already distributing and no reusable semi-auto task was found");
+        }
+        BrowserEnvironmentAccount environmentBinding = browserEnvironmentService.validateForTaskCreation(account);
+        if (environmentBinding != null || AUTH_MODE_COOKIE.equalsIgnoreCase(account.getAuthMode())) {
+            return reissueReusableSemiAutoSelfMediaTask(article, project, operator, account, reusable, environmentBinding);
+        }
+        return reusable;
+    }
+
+    private DistributionTask findReusableSemiAutoTask(Long articleId, Long selfMediaAccountId) {
+        return distributionTaskMapper.selectOne(
+                new LambdaQueryWrapper<DistributionTask>()
+                        .eq(DistributionTask::getArticleId, articleId)
+                        .eq(DistributionTask::getSelfMediaAccountId, selfMediaAccountId)
+                        .eq(DistributionTask::getDispatchMode, "SEMI_AUTO")
+                        .in(DistributionTask::getStatus, List.of("pending", "token_issued", "filling", "filled"))
+                        .orderByDesc(DistributionTask::getId)
+                        .last("LIMIT 1")
+        );
+    }
+
+    private DistributionTask reissueReusableSemiAutoSelfMediaTask(ArticleDraft article,
+                                                                  Project project,
+                                                                  SysUser operator,
+                                                                  SelfMediaAccount account,
+                                                                  DistributionTask reusable,
+                                                                  BrowserEnvironmentAccount environmentBinding) {
+        if (!List.of("pending", "token_issued", "filling", "filled").contains(reusable.getStatus())) {
+            return reusable;
+        }
+        if (!"token_issued".equals(reusable.getStatus())) {
+            String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
+            SemiAutoSelfMediaAdapter adapter = resolveSemiAutoSelfMediaAdapter(account.getPlatform());
+            SemiAutoFillTask fillTask = adapter.prepareFillTask(article, content, adapter.fillProfile());
+            String fillPayload = toFillPayload(fillTask, environmentBinding);
+            updateSemiAutoTaskPrepared(reusable.getId(), fillPayload);
+        }
+
+        FillTokenIssueResponse token;
+        try {
+            token = fillTokenService.issueInternalWithoutVersionCheck(
+                    account.getId(),
+                    account.getBrandId(),
+                    operator.getId(),
+                    reusable.getId()
+            );
+        } catch (BizException ex) {
+            auditSemiAutoTaskCreationFailed(article, account, operator, reusable, ex);
+            throw ex;
+        }
+        LocalDateTime issuedAt = LocalDateTime.now(SH_ZONE);
+        updateSemiAutoTaskTokenIssued(reusable.getId(), issuedAt);
+
+        DistributionTask returned = distributionTaskMapper.selectById(reusable.getId());
+        if (returned == null) {
+            returned = reusable;
+        }
+        returned.setFillToken(token.fillToken());
+        returned.setFillTokenExpiresAt(token.expiresAt());
+        returned.setFillTokenNonce(token.nonce());
+        applyEnvironmentInfo(returned, environmentBinding);
+        auditSemiAutoTaskTokenReissued(article, account, operator, returned, token, reusable.getStatus());
+        return returned;
     }
 
     private DistributionTask distributeToIndustrySite(ArticleDraft article,
@@ -762,12 +859,13 @@ public class ContentDistributionService {
                                                         Project project,
                                                         SysUser operator,
                                                         SelfMediaAccount account,
-                                                        TargetContext.SelfMediaTarget mpTarget) {
+                                                        TargetContext.SelfMediaTarget mpTarget,
+                                                        BrowserEnvironmentAccount environmentBinding) {
         brandAccessService.requireBrandAccess(account.getBrandId(), operator.getId(), BrandAccessAction.OPERATE);
         String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
         SemiAutoSelfMediaAdapter adapter = resolveSemiAutoSelfMediaAdapter(account.getPlatform());
         SemiAutoFillTask fillTask = adapter.prepareFillTask(article, content, adapter.fillProfile());
-        String fillPayload = toFillPayload(fillTask);
+        String fillPayload = toFillPayload(fillTask, environmentBinding);
         DistributionTask task = createAttemptForSelfMedia(article, account, operator.getId(), mpTarget.requestId().trim());
         updateSemiAutoTaskPrepared(task.getId(), fillPayload);
 
@@ -808,8 +906,19 @@ public class ContentDistributionService {
         returned.setFillToken(token.fillToken());
         returned.setFillTokenExpiresAt(token.expiresAt());
         returned.setFillTokenNonce(token.nonce());
+        applyEnvironmentInfo(returned, environmentBinding);
         auditSemiAutoTaskCreated(article, account, operator, task, token);
         return returned;
+    }
+
+    private void applyEnvironmentInfo(DistributionTask task, BrowserEnvironmentAccount environmentBinding) {
+        if (task == null || environmentBinding == null) return;
+        BrowserEnvironment environment = browserEnvironmentService.getEnvironmentForBinding(environmentBinding);
+        task.setBrowserEnvironmentId(environment.getId());
+        task.setBrowserEnvironmentAccountId(environmentBinding.getId());
+        task.setEnvironmentKey(environment.getEnvironmentKey());
+        task.setEnvironmentProvider(environment.getProvider());
+        task.setProviderProfileId(environment.getProviderProfileId());
     }
 
     private void updateSemiAutoTaskPrepared(Long taskId, String fillPayload) {
@@ -1317,8 +1426,21 @@ public class ContentDistributionService {
     }
 
     private String toFillPayload(SemiAutoFillTask fillTask) {
+        return toFillPayload(fillTask, null);
+    }
+
+    private String toFillPayload(SemiAutoFillTask fillTask, BrowserEnvironmentAccount environmentBinding) {
         try {
-            String payload = objectMapper.writeValueAsString(fillTask);
+            ObjectNode payloadNode = objectMapper.valueToTree(fillTask);
+            if (environmentBinding != null) {
+                if (StringUtils.hasText(environmentBinding.getExpectedPlatformAccountId())) {
+                    payloadNode.put("expectedPlatformAccountId", environmentBinding.getExpectedPlatformAccountId());
+                }
+                if (StringUtils.hasText(environmentBinding.getExpectedAccountName())) {
+                    payloadNode.put("expectedAccountName", environmentBinding.getExpectedAccountName());
+                }
+            }
+            String payload = objectMapper.writeValueAsString(payloadNode);
             if (payload.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > MAX_FILL_PAYLOAD_BYTES) {
                 throw new BizException(400, "semi-auto fill payload too large");
             }
@@ -1354,6 +1476,35 @@ public class ContentDistributionService {
                 "platform", account.getPlatform(),
                 "fillTokenExpiresAt", token.expiresAt(),
                 "fillTokenNonce", token.nonce()
+        ));
+        auditService.record(event);
+    }
+
+    private void auditSemiAutoTaskTokenReissued(ArticleDraft article,
+                                                SelfMediaAccount account,
+                                                SysUser operator,
+                                                DistributionTask task,
+                                                FillTokenIssueResponse token,
+                                                String previousTaskStatus) {
+        AuditEvent event = new AuditEvent();
+        event.setEventType("SEMI_AUTO_TASK_FILL_TOKEN_REISSUED");
+        event.setActorType(ActorType.OPERATOR);
+        event.setActorId(operator.getId());
+        event.setBrandId(account.getBrandId());
+        event.setAccountId(account.getId());
+        event.setTaskId(task.getId());
+        event.setTargetType("DISTRIBUTION_TASK");
+        event.setTargetId(String.valueOf(task.getId()));
+        event.setResult(AuditResult.SUCCESS);
+        event.setMode(AuditMode.ASYNC);
+        event.setSensitive(false);
+        event.setDetail(Map.of(
+                "articleId", article.getId(),
+                "platform", account.getPlatform(),
+                "previousTaskStatus", previousTaskStatus,
+                "fillTokenExpiresAt", token.expiresAt(),
+                "fillTokenNonce", token.nonce(),
+                "reason", "reuse_existing_semi_auto_task"
         ));
         auditService.record(event);
     }

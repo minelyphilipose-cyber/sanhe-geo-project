@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
 
@@ -85,6 +86,15 @@ public class GlobalExceptionHandler {
         return R.fail(400, e.getMessage());
     }
 
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public R<?> handleTypeMismatch(MethodArgumentTypeMismatchException e, HttpServletRequest request, HttpServletResponse response) {
+        response.setStatus(400);
+        String msg = e.getName() + " must be a valid " + requiredTypeName(e);
+        log.warn("Type mismatch path={} method={} ip={} msg={}",
+                request.getRequestURI(), request.getMethod(), request.getRemoteAddr(), msg);
+        return R.fail(400, msg);
+    }
+
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public R<?> handleMessageNotReadable(HttpMessageNotReadableException e, HttpServletRequest request, HttpServletResponse response) {
         response.setStatus(400);
@@ -125,6 +135,18 @@ public class GlobalExceptionHandler {
             current = current.getCause();
         }
         return "Invalid request body";
+    }
+
+    private String requiredTypeName(MethodArgumentTypeMismatchException e) {
+        Class<?> requiredType = e.getRequiredType();
+        if (requiredType == null) {
+            return "value";
+        }
+        if (Long.class.equals(requiredType) || Long.TYPE.equals(requiredType)
+                || Integer.class.equals(requiredType) || Integer.TYPE.equals(requiredType)) {
+            return "number";
+        }
+        return requiredType.getSimpleName();
     }
 
     @ExceptionHandler(Exception.class)

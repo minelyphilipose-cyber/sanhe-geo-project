@@ -78,4 +78,19 @@ public class DistributionTask {
 
     @TableField(exist = false)
     private String fillTokenNonce;
+
+    @TableField(exist = false)
+    private Long browserEnvironmentId;
+
+    @TableField(exist = false)
+    private Long browserEnvironmentAccountId;
+
+    @TableField(exist = false)
+    private String environmentKey;
+
+    @TableField(exist = false)
+    private String environmentProvider;
+
+    @TableField(exist = false)
+    private String providerProfileId;
 }

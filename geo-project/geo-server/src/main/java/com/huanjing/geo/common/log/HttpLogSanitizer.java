@@ -15,6 +15,9 @@ public final class HttpLogSanitizer {
             "x-api-key",
             "x-access-token",
             "x-refresh-token",
+            "x-ext-token",
+            "x-geo-helper-access",
+            "x-geo-helper-signature",
             "cookie",
             "set-cookie"
     );
@@ -25,6 +28,12 @@ public final class HttpLogSanitizer {
             Pattern.compile("(\"token\"\\s*:\\s*\")[^\"]*(\")", Pattern.CASE_INSENSITIVE),
             Pattern.compile("(\"refreshToken\"\\s*:\\s*\")[^\"]*(\")", Pattern.CASE_INSENSITIVE),
             Pattern.compile("(\"accessToken\"\\s*:\\s*\")[^\"]*(\")", Pattern.CASE_INSENSITIVE),
+            Pattern.compile("(\"helperAccessToken\"\\s*:\\s*\")[^\"]*(\")", Pattern.CASE_INSENSITIVE),
+            Pattern.compile("(\"backendToken\"\\s*:\\s*\")[^\"]*(\")", Pattern.CASE_INSENSITIVE),
+            Pattern.compile("(\"fillToken\"\\s*:\\s*\")[^\"]*(\")", Pattern.CASE_INSENSITIVE),
+            Pattern.compile("(\"hmacSecret\"\\s*:\\s*\")[^\"]*(\")", Pattern.CASE_INSENSITIVE),
+            Pattern.compile("(\"pairingCode\"\\s*:\\s*\")[^\"]*(\")", Pattern.CASE_INSENSITIVE),
+            Pattern.compile("(\"cookie\"\\s*:\\s*\")[^\"]*(\")", Pattern.CASE_INSENSITIVE),
             Pattern.compile("(\"authorization\"\\s*:\\s*\")[^\"]*(\")", Pattern.CASE_INSENSITIVE)
     };
 

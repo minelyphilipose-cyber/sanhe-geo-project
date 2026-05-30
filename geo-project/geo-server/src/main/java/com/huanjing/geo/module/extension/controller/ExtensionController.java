@@ -1,6 +1,9 @@
 package com.huanjing.geo.module.extension.controller;
 
 import com.huanjing.geo.common.result.R;
+import com.huanjing.geo.module.content.dto.BrowserEnvironmentLoginStatusRequest;
+import com.huanjing.geo.module.content.service.BrowserEnvironmentService;
+import com.huanjing.geo.module.content.vo.BrowserEnvironmentAccountVO;
 import com.huanjing.geo.module.extension.dto.BindCodeCreateRequest;
 import com.huanjing.geo.module.extension.dto.BindCodeCreateResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionBindRequest;
@@ -13,6 +16,8 @@ import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskListItemResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskPublishReportRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskStateResponse;
+import com.huanjing.geo.module.extension.dto.LocalAgentExtensionSignRequest;
+import com.huanjing.geo.module.extension.dto.LocalAgentSignResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionVersionCheckRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionVersionCheckResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionFillTokenConsumeResponse;
@@ -28,6 +33,7 @@ import com.huanjing.geo.module.extension.service.ExtensionSessionService;
 import com.huanjing.geo.module.extension.service.ExtensionTaskListService;
 import com.huanjing.geo.module.extension.service.ExtensionTaskStateService;
 import com.huanjing.geo.module.extension.service.ExtensionVersionService;
+import com.huanjing.geo.module.extension.service.LocalAgentSessionService;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -56,6 +62,8 @@ public class ExtensionController {
     private final ExtensionTaskListService taskListService;
     private final ExtensionTaskStateService taskStateService;
     private final CurrentUserService currentUserService;
+    private final BrowserEnvironmentService browserEnvironmentService;
+    private final LocalAgentSessionService localAgentSessionService;
 
     @PostMapping("/bind-codes")
     public R<BindCodeCreateResponse> createBindCode(@Valid @RequestBody BindCodeCreateRequest request) {
@@ -155,6 +163,44 @@ public class ExtensionController {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
         versionService.requireSupported("chrome", session.getExtensionVersion());
         return R.ok(cookieCaptureService.listAccounts(session.getOperatorId()));
+    }
+
+    @PostMapping("/browser-environment-accounts/{id}/login-status")
+    public R<BrowserEnvironmentAccountVO> reportBrowserEnvironmentLoginStatus(
+            @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
+            @PathVariable Long id,
+            @Valid @RequestBody BrowserEnvironmentLoginStatusRequest request
+    ) {
+        ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        versionService.requireSupported("chrome", session.getExtensionVersion());
+        return R.ok(browserEnvironmentService.reportLoginStatusForExtension(
+                id,
+                request,
+                session.getOperatorId()
+        ));
+    }
+
+    @PostMapping("/browser-environment-login-status")
+    public R<BrowserEnvironmentAccountVO> reportBrowserEnvironmentLoginStatusByEnvironmentAndPlatform(
+            @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
+            @Valid @RequestBody BrowserEnvironmentLoginStatusRequest request
+    ) {
+        ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        versionService.requireSupported("chrome", session.getExtensionVersion());
+        return R.ok(browserEnvironmentService.reportLoginStatusForExtensionByEnvironmentAndPlatform(
+                request,
+                session.getOperatorId()
+        ));
+    }
+
+    @PostMapping("/local-agent/sign")
+    public R<LocalAgentSignResponse> signLocalAgentRequest(
+            @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
+            @Valid @RequestBody LocalAgentExtensionSignRequest request
+    ) {
+        ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        versionService.requireSupported("chrome", session.getExtensionVersion());
+        return R.ok(localAgentSessionService.signRequestForExtension(session, request));
     }
 
     @PostMapping("/cookies/capture")
