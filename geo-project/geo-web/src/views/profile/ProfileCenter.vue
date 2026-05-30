@@ -106,7 +106,7 @@
             <div class="profile-card__header">
               <div>
                 <div class="profile-card__title">本地助手</div>
-                <div class="profile-card__desc">当前账号只需绑定一次本机助手，后续可用于打开有权限品牌的 AdsPower 环境。</div>
+                <div class="profile-card__desc">当前账号只需绑定一次本机助手，后续可用于打开有权限品牌的 AdsPower 浏览器环境。</div>
               </div>
               <el-button link type="primary" :loading="localAgentSessionsLoading" @click="refreshLocalAgentSessions">
                 刷新
@@ -142,7 +142,7 @@
               <div>
                 <div class="local-agent-settings-panel__title">AdsPower 连接</div>
                 <div class="local-agent-settings-panel__desc">
-                  当前电脑的本地助手使用这组配置启动 AdsPower 环境。
+                  当前电脑的本地助手使用这组配置启动 AdsPower 浏览器环境。
                 </div>
               </div>
               <el-tag :type="adspowerSettings.apiKeyConfigured ? 'success' : 'warning'" round>
@@ -169,7 +169,7 @@
               </el-form-item>
               <div class="local-agent-settings-actions">
                 <span>
-                  {{ adspowerSettings.apiKeyConfigured ? '留空保存时会保留当前 API Key。' : '未配置 API Key 时无法启动 AdsPower 环境。' }}
+                  {{ adspowerSettings.apiKeyConfigured ? '留空保存时会保留当前 API Key。' : '未配置 API Key 时无法启动 AdsPower 浏览器环境。' }}
                 </span>
                 <el-button
                   type="primary"
@@ -503,7 +503,7 @@ async function approveLocalAgentPairingFromProfile() {
 async function revokeLocalAgentSessionFromProfile(session: LocalAgentSession) {
   try {
     await ElMessageBox.confirm(
-      `确认吊销「${session.helperName || '本地助手'}」？吊销后当前电脑需要重新配对才能继续打开 AdsPower 环境。`,
+      `确认吊销「${session.helperName || '本地助手'}」？吊销后当前电脑需要重新配对才能继续打开 AdsPower 浏览器环境。`,
       '吊销本地助手',
       {
         confirmButtonText: '确认吊销',

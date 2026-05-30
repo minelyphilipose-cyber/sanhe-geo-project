@@ -94,14 +94,14 @@
         type="info"
         show-icon
         :closable="false"
-        title="同一品牌默认使用一个 AdsPower 环境；AdsPower API Key 在「个人中心 > 本地助手」配置。新增头条/知乎/小红书账号时会自动绑定当前启用环境；文章分发时只消费这里的绑定关系。"
+        title="同一品牌默认使用一个 AdsPower 浏览器环境。新增头条、知乎、小红书账号时会自动绑定当前启用环境；AdsPower API Key 在「个人中心 > 本地助手」配置。"
       />
       <el-table v-loading="browserEnvironmentsLoading" :data="browserEnvironments" border empty-text="暂无指纹浏览器环境">
         <el-table-column prop="name" label="环境名称" min-width="160">
           <template #default="{ row }">{{ row.name || row.environmentKey }}</template>
         </el-table-column>
-        <el-table-column prop="environmentKey" label="环境标识" min-width="150" />
-        <el-table-column prop="providerProfileId" label="AdsPower 环境 ID" min-width="190" />
+        <el-table-column prop="environmentKey" label="环境代号" min-width="150" />
+        <el-table-column prop="providerProfileId" label="AdsPower 浏览器编号" min-width="190" />
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
             <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">
@@ -147,7 +147,7 @@
         :closable="false"
         :title="defaultBrowserEnvironment
           ? `当前默认环境：${browserEnvironmentOptionLabel(defaultBrowserEnvironment)}。新增账号将自动绑定该环境，绑定后需在对应平台完成登录，环境内扩展会自动上报登录状态。`
-          : '请先配置并启用品牌 AdsPower 环境；新增账号后需要绑定环境并完成平台登录，扩展自动上报登录状态后才能分发。'"
+          : '请先配置并启用品牌 AdsPower 浏览器环境；新增账号后需要绑定环境并完成平台登录，扩展自动上报登录状态后才能分发。'"
       />
       <el-table v-loading="selfMediaAccountsLoading" :data="semiAutoSelfMediaAccounts" border>
         <el-table-column prop="platform" label="平台" width="110">
@@ -172,7 +172,7 @@
           <template #default="{ row }">
             <div>{{ browserEnvironmentLastReportTime(row) }}</div>
             <div v-if="browserEnvironmentAccountOf(row)?.environmentKey" class="table-subtext">
-              环境：{{ browserEnvironmentAccountOf(row)?.environmentKey }}
+              已绑定：{{ browserEnvironmentAccountOf(row)?.environmentKey }}
             </div>
           </template>
         </el-table-column>
@@ -254,20 +254,22 @@
       </div>
     </el-card>
 
-    <el-dialog v-model="browserEnvironmentVisible" :title="editingBrowserEnvironment ? '编辑指纹环境' : '新增指纹环境'" width="620px">
+    <el-dialog v-model="browserEnvironmentVisible" :title="editingBrowserEnvironment ? '编辑 AdsPower 浏览器环境' : '新增 AdsPower 浏览器环境'" width="620px">
       <el-form class="admin-dialog-form" :model="browserEnvironmentForm" label-width="120px">
-        <el-form-item label="环境标识" required>
+        <el-form-item label="环境代号" required>
           <el-input
             v-model="browserEnvironmentForm.environmentKey"
             :disabled="!!editingBrowserEnvironment"
-            placeholder="例如 geo_b"
+            placeholder="例如 dexian_adspower"
           />
+          <div class="form-item-hint">用于系统内部识别，建议使用品牌或门店拼音，创建后不再修改。</div>
         </el-form-item>
-        <el-form-item label="AdsPower ID" required>
-          <el-input v-model="browserEnvironmentForm.providerProfileId" placeholder="AdsPower 环境 user_id" />
+        <el-form-item label="浏览器编号" required>
+          <el-input v-model="browserEnvironmentForm.providerProfileId" placeholder="填写 AdsPower 浏览器编号" />
+          <div class="form-item-hint">在 AdsPower 环境列表中复制对应浏览器环境的编号，系统会按该编号打开浏览器。</div>
         </el-form-item>
         <el-form-item label="环境名称">
-          <el-input v-model="browserEnvironmentForm.name" placeholder="运营可识别的名称" />
+          <el-input v-model="browserEnvironmentForm.name" placeholder="例如 得闲_adspower" />
         </el-form-item>
         <el-form-item v-if="editingBrowserEnvironment" label="状态">
           <el-select v-model="browserEnvironmentForm.status">
@@ -284,13 +286,13 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="environmentBindingVisible" title="绑定指纹浏览器环境" width="620px">
+    <el-dialog v-model="environmentBindingVisible" title="绑定 AdsPower 浏览器环境" width="620px">
       <div v-if="environmentBindingTargetAccount">
         <el-alert
           type="warning"
           show-icon
           :closable="false"
-          title="绑定后该账号将立即切换到指纹浏览器环境模型；需在对应环境中登录平台，环境内扩展自动上报登录状态后才能恢复可分发。"
+          title="绑定后该账号会使用所选 AdsPower 浏览器环境分发；请在该环境内完成平台登录，扩展会自动上报登录状态。"
         />
         <el-descriptions class="environment-binding-summary" :column="1" border>
           <el-descriptions-item label="平台">
@@ -301,13 +303,13 @@
           </el-descriptions-item>
         </el-descriptions>
         <el-form class="admin-dialog-form" :model="environmentBindingForm" label-width="110px">
-          <el-form-item label="指纹环境" required>
+          <el-form-item label="浏览器环境" required>
             <el-select
               v-model="environmentBindingForm.browserEnvironmentId"
               class="environment-binding-select"
               filterable
               clearable
-              placeholder="选择当前品牌下已启用的 AdsPower 环境"
+              placeholder="选择当前品牌下已启用的 AdsPower 浏览器环境"
             >
               <el-option
                 v-for="environment in activeBrowserEnvironments"
@@ -320,7 +322,7 @@
         </el-form>
         <el-empty
           v-if="activeBrowserEnvironments.length === 0"
-          description="当前品牌暂无启用的指纹环境，请先新增环境。"
+          description="当前品牌暂无启用的 AdsPower 浏览器环境，请先新增环境。"
         />
       </div>
       <template #footer>
@@ -836,7 +838,7 @@ async function submitBrowserEnvironment() {
   const environmentKey = browserEnvironmentForm.environmentKey.trim()
   const providerProfileId = browserEnvironmentForm.providerProfileId.trim()
   if (!environmentKey || !providerProfileId) {
-    ElMessage.warning('请填写环境标识和 AdsPower 环境 ID')
+    ElMessage.warning('请填写环境代号和 AdsPower 浏览器编号')
     return
   }
   browserEnvironmentSaving.value = true
@@ -856,14 +858,14 @@ async function submitBrowserEnvironment() {
         name: browserEnvironmentForm.name.trim() || environmentKey,
       })
     }
-    ElMessage.success('指纹浏览器环境已保存')
+    ElMessage.success('AdsPower 浏览器环境已保存')
     browserEnvironmentVisible.value = false
     await loadBrowserEnvironments()
     if (!editingBrowserEnvironment.value) {
       await bindAllUnboundSemiAutoAccounts()
     }
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '保存指纹浏览器环境失败')
+    ElMessage.error(error instanceof Error ? error.message : '保存 AdsPower 浏览器环境失败')
   } finally {
     browserEnvironmentSaving.value = false
   }
@@ -872,7 +874,7 @@ async function submitBrowserEnvironment() {
 async function removeBrowserEnvironment(environment: BrowserEnvironment) {
   try {
     await ElMessageBox.confirm(
-      `确认删除指纹环境「${environment.name || environment.environmentKey}」？已绑定账号需要先解绑后才能删除。`,
+      `确认删除 AdsPower 浏览器环境「${environment.name || environment.environmentKey}」？已绑定账号需要先解绑后才能删除。`,
       '删除确认',
       {
         type: 'warning',
@@ -881,11 +883,11 @@ async function removeBrowserEnvironment(environment: BrowserEnvironment) {
       },
     )
     await deleteBrowserEnvironment(environment.id)
-    ElMessage.success('指纹浏览器环境已删除')
+    ElMessage.success('AdsPower 浏览器环境已删除')
     await loadBrowserEnvironments()
   } catch (err: any) {
     if (err === 'cancel' || err === 'close') return
-    ElMessage.error(err instanceof Error ? err.message : '删除指纹浏览器环境失败')
+    ElMessage.error(err instanceof Error ? err.message : '删除 AdsPower 浏览器环境失败')
   }
 }
 
@@ -898,7 +900,7 @@ function openEnvironmentBindingDialog(account: SemiAutoSelfMediaAccount) {
 async function bindAccountToDefaultEnvironment(account: SemiAutoSelfMediaAccount, silent = false) {
   const environment = defaultBrowserEnvironment.value
   if (!environment) {
-    if (!silent) ElMessage.warning('请先配置并启用品牌 AdsPower 环境')
+    if (!silent) ElMessage.warning('请先配置并启用品牌 AdsPower 浏览器环境')
     return false
   }
   if (browserEnvironmentAccountOf(account)) {
@@ -916,7 +918,7 @@ async function bindAccountToDefaultEnvironment(account: SemiAutoSelfMediaAccount
 async function submitEnvironmentBinding() {
   const account = environmentBindingTargetAccount.value
   if (!account || !environmentBindingForm.browserEnvironmentId) {
-    ElMessage.warning('请选择要绑定的指纹浏览器环境')
+    ElMessage.warning('请选择要绑定的 AdsPower 浏览器环境')
     return
   }
   environmentBindingSaving.value = true
@@ -927,13 +929,13 @@ async function submitEnvironmentBinding() {
       expectedPlatformAccountId: null,
       expectedAccountName: null,
     })
-    ElMessage.success('已绑定环境，请在对应环境登录平台，扩展会自动上报登录状态')
+    ElMessage.success('已绑定浏览器环境，请在对应环境登录平台，扩展会自动上报登录状态')
     environmentBindingVisible.value = false
     environmentBindingTargetAccount.value = null
     environmentBindingForm.browserEnvironmentId = null
     await loadSelfMediaAccounts()
   } catch (error) {
-    ElMessage.error(error instanceof Error ? error.message : '创建环境绑定失败')
+    ElMessage.error(error instanceof Error ? error.message : '创建浏览器环境绑定失败')
   } finally {
     environmentBindingSaving.value = false
   }
@@ -941,12 +943,12 @@ async function submitEnvironmentBinding() {
 
 async function bindAllUnboundSemiAutoAccounts() {
   if (!defaultBrowserEnvironment.value) {
-    ElMessage.warning('请先配置并启用品牌 AdsPower 环境')
+    ElMessage.warning('请先配置并启用品牌 AdsPower 浏览器环境')
     return
   }
   const targets = semiAutoSelfMediaAccounts.value.filter((account) => !browserEnvironmentAccountOf(account))
   if (!targets.length) {
-    ElMessage.success('所有头条/知乎/小红书账号均已绑定环境')
+    ElMessage.success('所有头条/知乎/小红书账号均已绑定浏览器环境')
     return
   }
   environmentBindingSaving.value = true
@@ -955,7 +957,7 @@ async function bindAllUnboundSemiAutoAccounts() {
     for (const account of targets) {
       if (await bindAccountToDefaultEnvironment(account, true)) count += 1
     }
-    ElMessage.success(`已为 ${count} 个账号绑定默认环境`)
+    ElMessage.success(`已为 ${count} 个账号绑定默认浏览器环境`)
     await loadSelfMediaAccounts()
   } catch (error) {
     ElMessage.error(error instanceof Error ? error.message : '补齐环境绑定失败')
@@ -998,7 +1000,7 @@ async function unbindEnvironmentAccount(account: SemiAutoSelfMediaAccount) {
   if (!binding) return
   try {
     await ElMessageBox.confirm(
-      `确认解除「${account.accountName}」与指纹环境「${binding.environmentKey || '-'}」的绑定？解绑后该账号不能使用新环境模型分发。`,
+      `确认解除「${account.accountName}」与浏览器环境「${binding.environmentKey || '-'}」的绑定？解绑后该账号不能使用 AdsPower 浏览器环境分发。`,
       '解绑确认',
       {
         type: 'warning',
@@ -1520,6 +1522,13 @@ onMounted(async () => {
 }
 
 .brand-field-help {
+  margin-top: 6px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.form-item-hint {
   margin-top: 6px;
   color: #64748b;
   font-size: 12px;

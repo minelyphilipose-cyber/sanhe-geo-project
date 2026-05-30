@@ -2411,8 +2411,8 @@ function environmentAccountActionHint(account: SelfMediaAccount) {
   const binding = environmentAccountOf(account)
   if (!binding) return '该账号未配置指纹浏览器环境，请到「品牌详情 > 自媒体账号 > 指纹浏览器环境」完成绑定'
   if (binding.loginStatus === 'logged_in') return '环境已就绪，可以打开环境并填充'
-  if (binding.loginStatus === 'unknown') return '请点击「打开环境登录」，在 AdsPower 环境完成登录；扩展会自动上报登录状态'
-  if (binding.loginStatus === 'login_required') return '请点击「打开环境登录」，在 AdsPower 环境重新登录；扩展会自动上报登录状态'
+  if (binding.loginStatus === 'unknown') return '请点击「打开环境登录」，在 AdsPower 浏览器环境完成登录；扩展会自动上报登录状态'
+  if (binding.loginStatus === 'login_required') return '请点击「打开环境登录」，在 AdsPower 浏览器环境重新登录；扩展会自动上报登录状态'
   if (binding.loginStatus === 'expired') return '登录状态已过期，请点击「打开环境登录」重新登录，扩展会自动上报登录状态'
   if (binding.loginStatus === 'mismatch') return '当前环境登录账号与系统绑定账号不一致，请在本页面点击「重置账号校验」后重新打开环境登录，扩展会自动上报登录状态'
   if (binding.loginStatus === 'error') return '环境状态异常，请到「品牌详情 > 自媒体账号 > 指纹浏览器环境」检查绑定，或重新打开环境登录'
@@ -2487,7 +2487,7 @@ async function showSetupPrompt(options: SetupPromptOptions) {
   }
 }
 
-function showLocalAgentSetupPrompt(issue = '当前电脑尚未完成本地助手配对，系统无法安全调用本地助手打开 AdsPower 环境。') {
+function showLocalAgentSetupPrompt(issue = '当前电脑尚未完成本地助手配对，系统无法打开 AdsPower 浏览器环境。') {
   const isAdspowerConfigIssue = /AdsPower|API Key/i.test(issue)
   return showSetupPrompt({
     title: isAdspowerConfigIssue ? 'AdsPower 连接未配置' : '本地助手未就绪',
@@ -2502,10 +2502,10 @@ function showLocalAgentSetupPrompt(issue = '当前电脑尚未完成本地助手
 
 function showBrandEnvironmentSetupPrompt(issue: string) {
   return showSetupPrompt({
-    title: '指纹浏览器环境未配置',
+    title: 'AdsPower 浏览器环境未配置',
     issue,
     location: '品牌详情 > 自媒体账号 > 指纹浏览器环境',
-    action: '为该品牌配置 AdsPower 环境，并确认该平台账号已绑定到品牌环境。',
+    action: '为该品牌配置 AdsPower 浏览器环境，并确认该平台账号已绑定到品牌环境。',
     target: 'brandEnvironment',
   })
 }
@@ -2515,7 +2515,7 @@ function showSelfMediaAccountSetupPrompt(platform: SemiAutoPlatform, issue: stri
     title: `${semiAutoPlatformLabel(platform)}账号未就绪`,
     issue,
     location: '品牌详情 > 自媒体账号',
-    action: `新增或启用${semiAutoPlatformLabel(platform)}账号后，确认该账号已绑定品牌的 AdsPower 环境。`,
+    action: `新增或启用${semiAutoPlatformLabel(platform)}账号后，确认该账号已绑定品牌的 AdsPower 浏览器环境。`,
     target: 'selfMediaAccounts',
   })
 }
@@ -2528,17 +2528,17 @@ function isLocalAgentSetupError(error: unknown) {
 async function openSemiAutoEnvironmentForLogin(account: SelfMediaAccount) {
   const binding = environmentAccountOf(account)
   if (!binding) {
-    await showBrandEnvironmentSetupPrompt('当前自媒体账号未绑定指纹浏览器环境，无法打开 AdsPower 环境进行登录。')
+    await showBrandEnvironmentSetupPrompt('当前自媒体账号未绑定 AdsPower 浏览器环境，无法打开对应环境进行登录。')
     return
   }
   const environmentKey = binding.environmentKey || ''
   if (!environmentKey) {
-    await showBrandEnvironmentSetupPrompt('当前账号绑定缺少环境标识，无法定位要打开的 AdsPower 环境。')
+    await showBrandEnvironmentSetupPrompt('当前账号的浏览器环境配置不完整，请到品牌详情重新保存或重新绑定。')
     return
   }
   const providerProfileId = browserEnvironmentProviderProfileIdOf(binding)
   if (!providerProfileId) {
-    await showBrandEnvironmentSetupPrompt('当前账号绑定缺少 AdsPower 环境 ID，无法启动对应浏览器环境。')
+    await showBrandEnvironmentSetupPrompt('当前账号的 AdsPower 浏览器编号缺失，请到品牌详情补全环境配置。')
     return
   }
   semiAutoLoginOpeningAccountId.value = account.id
@@ -2552,7 +2552,7 @@ async function openSemiAutoEnvironmentForLogin(account: SelfMediaAccount) {
         url: defaultSemiAutoLoginReportUrl(account.platform),
       },
     )
-    ElMessage.success('已打开对应 AdsPower 环境。登录完成后，环境内扩展会自动上报登录状态')
+    ElMessage.success('已打开对应 AdsPower 浏览器环境。登录完成后，环境内扩展会自动上报登录状态')
   } catch (error) {
     if (isLocalAgentSetupError(error)) {
       await showLocalAgentSetupPrompt(error instanceof Error ? error.message : undefined)
@@ -2928,7 +2928,7 @@ async function submitSemiAutoEnvironmentTask(account: SelfMediaAccount) {
   if (!mediaDistributeBrandId.value) {
     await showSetupPrompt({
       title: '文章品牌缺失',
-      issue: '当前文章未绑定品牌，系统无法判断要使用哪个品牌的自媒体账号和 AdsPower 环境。',
+      issue: '当前文章未绑定品牌，系统无法判断要使用哪个品牌的自媒体账号和 AdsPower 浏览器环境。',
       location: '内容管理 > 文章详情',
       action: '先为文章选择所属品牌，再回到自媒体分发继续操作。',
     })
@@ -2937,7 +2937,7 @@ async function submitSemiAutoEnvironmentTask(account: SelfMediaAccount) {
   await refreshBrowserEnvironmentAccountStatuses()
   const binding = environmentAccountOf(account)
   if (!binding) {
-    await showBrandEnvironmentSetupPrompt('当前自媒体账号未绑定指纹浏览器环境，无法打开 AdsPower 环境并填充。')
+    await showBrandEnvironmentSetupPrompt('当前自媒体账号未绑定 AdsPower 浏览器环境，无法打开对应环境并填充。')
     return
   }
   if (binding.loginStatus !== 'logged_in') {
@@ -2947,12 +2947,12 @@ async function submitSemiAutoEnvironmentTask(account: SelfMediaAccount) {
   const backendBase = window.location.origin
   const environmentKey = binding.environmentKey || ''
   if (!environmentKey) {
-    await showBrandEnvironmentSetupPrompt('当前账号绑定缺少环境标识，无法定位要打开的 AdsPower 环境。')
+    await showBrandEnvironmentSetupPrompt('当前账号的浏览器环境配置不完整，请到品牌详情重新保存或重新绑定。')
     return
   }
   const providerProfileId = browserEnvironmentProviderProfileIdOf(binding)
   if (!providerProfileId) {
-    await showBrandEnvironmentSetupPrompt('当前账号绑定缺少 AdsPower 环境 ID，无法启动对应浏览器环境。')
+    await showBrandEnvironmentSetupPrompt('当前账号的 AdsPower 浏览器编号缺失，请到品牌详情补全环境配置。')
     return
   }
   let helperAuthConfig: Awaited<ReturnType<typeof currentLocalHelperAuthConfig>>
@@ -2991,7 +2991,7 @@ async function submitSemiAutoEnvironmentTask(account: SelfMediaAccount) {
         backendTask,
       },
     )
-    ElMessage.success('已启动 AdsPower 环境，环境内扩展将领取任务并填充草稿')
+    ElMessage.success('已启动 AdsPower 浏览器环境，环境内扩展将领取任务并填充草稿')
     await refreshDistributionHistory()
     await load()
   } catch (error) {
