@@ -317,8 +317,14 @@ public class ContentAutoDistributionService {
         if (generated.isEmpty()) {
             return;
         }
+        List<ContentAutoDistributionItem> publishable = generated.stream()
+                .filter(this::markFailedIfIndustrySiteTargetStale)
+                .toList();
+        if (publishable.isEmpty()) {
+            return;
+        }
         String jobName = buildAutoDistributionJobName(batch);
-        List<BatchArticlePublishService.SystemPublishPlan> plans = generated.stream()
+        List<BatchArticlePublishService.SystemPublishPlan> plans = publishable.stream()
                 .map(item -> new BatchArticlePublishService.SystemPublishPlan(
                         item.getArticleId(),
                         platformKey(item),
@@ -332,13 +338,26 @@ public class ContentAutoDistributionService {
         BatchArticlePublishService.SystemPublishJobResult result =
                 publishService.createSystemScheduledJob(jobName, resolveOperatorUserId(batch.getProjectId()), plans);
         Map<Long, Long> publishItemIds = result.itemIdsByArticleId();
-        for (ContentAutoDistributionItem item : generated) {
+        for (ContentAutoDistributionItem item : publishable) {
             itemMapper.update(null, new LambdaUpdateWrapper<ContentAutoDistributionItem>()
                     .eq(ContentAutoDistributionItem::getId, item.getId())
                     .set(ContentAutoDistributionItem::getPublishJobId, result.jobId())
                     .set(ContentAutoDistributionItem::getPublishItemId, publishItemIds.get(item.getArticleId()))
                     .set(ContentAutoDistributionItem::getStatus, "publish_scheduled"));
         }
+    }
+
+    private boolean markFailedIfIndustrySiteTargetStale(ContentAutoDistributionItem item) {
+        if (!DistributionTargetKind.INDUSTRY_SITE.equals(item.getTargetKind())) {
+            return true;
+        }
+        Project project = projectMapper.selectById(item.getProjectId());
+        PublishSite currentSite = resolveBrandIndustrySite(project);
+        if (currentSite != null && Objects.equals(currentSite.getId(), item.getTargetId())) {
+            return true;
+        }
+        markItemFailed(item.getId(), "品牌行业资讯站配置已取消或变更，跳过旧自动分发计划");
+        return false;
     }
 
     private void refreshPublishedItems(Long batchId) {

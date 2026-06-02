@@ -325,7 +325,7 @@ public class BatchArticlePublishService {
         markJobRunning(item.getJobId());
         try {
             BatchArticlePublishJob job = jobMapper.selectById(item.getJobId());
-            DistributionTask task = executeDistribution(item, job.getCreatedBy());
+            DistributionTask task = executeDistribution(item, job);
             if ("failed".equals(task.getStatus())) {
                 itemMapper.update(null, new LambdaUpdateWrapper<BatchArticlePublishItem>()
                         .eq(BatchArticlePublishItem::getId, item.getId())
@@ -348,7 +348,8 @@ public class BatchArticlePublishService {
         }
     }
 
-    private DistributionTask executeDistribution(BatchArticlePublishItem item, Long operatorId) {
+    private DistributionTask executeDistribution(BatchArticlePublishItem item, BatchArticlePublishJob job) {
+        Long operatorId = job == null ? null : job.getCreatedBy();
         if ("agent_site".equals(item.getPlatformKey())) {
             return contentDistributionService.distributeToAsOperator(
                     item.getArticleId(),
@@ -358,6 +359,7 @@ public class BatchArticlePublishService {
         }
         if ("industry_site".equals(item.getPlatformKey())) {
             PublishSite site = requireIndustrySite(item.getTargetSiteId());
+            requireCurrentBrandIndustrySiteForAutoJob(item, site, job);
             return contentDistributionService.distributeToAsOperator(
                     item.getArticleId(),
                     new TargetContext.IndustrySiteTarget(site),
@@ -373,6 +375,32 @@ public class BatchArticlePublishService {
             );
         }
         throw new BizException(400, "不支持的发布平台：" + item.getPlatformKey());
+    }
+
+    private void requireCurrentBrandIndustrySiteForAutoJob(BatchArticlePublishItem item,
+                                                           PublishSite targetSite,
+                                                           BatchArticlePublishJob job) {
+        if (!isAutoDistributionJob(job)) {
+            return;
+        }
+        Project project = requireProject(item.getProjectId());
+        if (project.getBrandId() == null) {
+            throw new BizException(400, "品牌行业资讯站配置已取消或变更，跳过旧自动分发计划");
+        }
+        Brand brand = brandMapper.selectById(project.getBrandId());
+        if (brand == null || brand.getDeletedAt() != null || !StringUtils.hasText(brand.getIndustrySiteCode())) {
+            throw new BizException(400, "品牌行业资讯站配置已取消或变更，跳过旧自动分发计划");
+        }
+        PublishSite currentSite = resolveBrandIndustrySite(project);
+        if (!Objects.equals(currentSite.getId(), targetSite.getId())) {
+            throw new BizException(400, "品牌行业资讯站配置已取消或变更，跳过旧自动分发计划");
+        }
+    }
+
+    private boolean isAutoDistributionJob(BatchArticlePublishJob job) {
+        return job != null
+                && StringUtils.hasText(job.getJobName())
+                && job.getJobName().trim().startsWith("自动分发_");
     }
 
     private void markJobRunning(Long jobId) {

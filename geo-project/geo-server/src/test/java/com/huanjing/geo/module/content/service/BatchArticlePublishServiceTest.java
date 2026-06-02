@@ -347,6 +347,31 @@ class BatchArticlePublishServiceTest {
         verify(jobMapper, org.mockito.Mockito.atLeastOnce()).update(eq(null), any());
     }
 
+    @Test
+    void executeDueItems_autoDistributionIndustrySiteFailsWhenBrandConfigRemoved() {
+        BatchArticlePublishJob job = publishJob();
+        job.setJobName("自动分发_天勇云服务_2026-06-01");
+        BatchArticlePublishItem item = publishItem(1000L, "industry_site", "pending");
+        item.setTargetSiteId(66L);
+        PublishSite staleSite = industrySite(66L, "智装", "zz");
+        when(itemMapper.selectList(any())).thenReturn(List.of(item), List.of(item));
+        when(itemMapper.selectCount(any())).thenReturn(0L, 0L);
+        when(itemMapper.update(eq(null), any())).thenReturn(1);
+        when(jobMapper.selectById(900L)).thenReturn(job);
+        when(publishSiteMapper.selectById(66L)).thenReturn(staleSite);
+        when(projectMapper.selectById(20L)).thenReturn(project(20L, 30L, "天勇云服务"));
+        when(brandMapper.selectById(30L)).thenReturn(brand(30L, null, null));
+
+        service.executeDueItems(20);
+
+        ArgumentCaptor<LambdaUpdateWrapper<BatchArticlePublishItem>> captor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(itemMapper, org.mockito.Mockito.times(2)).update(eq(null), captor.capture());
+        assertTrue(captor.getAllValues().get(1).getParamNameValuePairs().values().contains("failed"));
+        assertTrue(captor.getAllValues().get(1).getParamNameValuePairs().values()
+                .contains("品牌行业资讯站配置已取消或变更，跳过旧自动分发计划"));
+        verify(contentDistributionService, never()).distributeToAsOperator(any(), any(), any());
+    }
+
     private BatchArticlePublishRequest scheduledRequest(List<Long> articleIds, Long industrySiteId) {
         BatchArticlePublishRequest request = new BatchArticlePublishRequest();
         request.setArticleIds(articleIds);
