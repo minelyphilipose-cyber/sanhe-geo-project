@@ -3,13 +3,17 @@ package com.huanjing.geo.module.extension.service;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.audit.AuditMode;
 import com.huanjing.geo.module.audit.AuditResult;
+import com.huanjing.geo.module.customer.access.BrandAccessAction;
+import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.extension.config.ExtensionProperties;
 import com.huanjing.geo.module.extension.dto.ExtensionBindResponse;
+import com.huanjing.geo.module.extension.dto.ExtensionSessionVO;
 import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshResponse;
 import com.huanjing.geo.module.extension.entity.ExtensionSession;
 import com.huanjing.geo.module.extension.mapper.ExtensionSessionMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysUserMapper;
+import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +25,7 @@ import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -41,6 +46,8 @@ public class ExtensionSessionService {
     private final ExtensionVersionService versionService;
     private final ExtensionAuditSupport auditSupport;
     private final SysUserMapper sysUserMapper;
+    private final BrandAccessService brandAccessService;
+    private final CurrentUserService currentUserService;
     private final Clock clock = Clock.systemUTC();
     private static final Set<String> GLOBAL_REVOKE_ROLES = Set.of("super_admin", "manager", "delivery_manager");
 
@@ -62,6 +69,7 @@ public class ExtensionSessionService {
             String userAgent
     ) {
         ExtensionBindResponse response = doCreateBoundSession(
+                brandId,
                 operatorId,
                 installId,
                 deviceFingerprint,
@@ -88,6 +96,7 @@ public class ExtensionSessionService {
     }
 
     private ExtensionBindResponse doCreateBoundSession(
+            Long brandId,
             Long operatorId,
             String installId,
             String deviceFingerprint,
@@ -101,6 +110,7 @@ public class ExtensionSessionService {
         LocalDateTime now = now();
         LocalDateTime expiresAt = now.plusDays(properties.getLongToken().getTtlDays());
         ExtensionSession session = new ExtensionSession();
+        session.setBrandId(brandId);
         session.setOperatorId(operatorId);
         session.setTokenLookupHash(HashSupport.sha256Hex(token.plaintext()));
         session.setTokenHash(HashSupport.saltedSha256Hex(token.saltHex(), token.plaintext()));
@@ -144,6 +154,7 @@ public class ExtensionSessionService {
 
         sessionMapper.revokeActive(session.getId(), now, session.getOperatorId());
         ExtensionBindResponse renewed = doCreateBoundSession(
+                session.getBrandId(),
                 session.getOperatorId(),
                 session.getInstallId(),
                 null,
@@ -152,6 +163,14 @@ public class ExtensionSessionService {
         );
         auditTokenRefresh(session, true, renewed.expiresAt(), renewed.sessionId());
         return new ExtensionTokenRefreshResponse(renewed.token(), true, renewed.expiresAt(), renewed.sessionId());
+    }
+
+    public List<ExtensionSessionVO> listActiveByBrand(Long brandId) {
+        SysUser current = currentUserService.requireCurrentUser();
+        brandAccessService.requireBrandAccess(brandId, current.getId(), BrandAccessAction.MANAGE);
+        return sessionMapper.selectActiveByBrandId(brandId).stream()
+                .map(ExtensionSessionVO::from)
+                .toList();
     }
 
     public void revoke(Long sessionId, Long operatorId) {
@@ -197,6 +216,38 @@ public class ExtensionSessionService {
                 null,
                 null,
                 Map.of("sessionOperatorId", session.getOperatorId())
+        );
+    }
+
+    public void revokeForBrand(Long brandId, Long sessionId) {
+        SysUser current = currentUserService.requireCurrentUser();
+        brandAccessService.requireBrandAccess(brandId, current.getId(), BrandAccessAction.MANAGE);
+        if (sessionId == null) {
+            throw new BizException(EXTENSION_BAD_REQUEST, "sessionId is required");
+        }
+        ExtensionSession session = sessionMapper.selectById(sessionId);
+        if (session == null || !"active".equals(session.getStatus())) {
+            throw new BizException(EXTENSION_NOT_FOUND, "extension session not found");
+        }
+        if (!brandId.equals(session.getBrandId())) {
+            throw new BizException(EXTENSION_DENIED, "extension session does not belong to this brand");
+        }
+        sessionMapper.revokeActive(sessionId, now(), current.getId());
+        auditSupport.record(
+                "EXTENSION_TOKEN_REVOKE",
+                AuditResult.SUCCESS,
+                AuditMode.SYNC,
+                true,
+                current.getId(),
+                brandId,
+                null,
+                null,
+                sessionId,
+                "EXTENSION_SESSION",
+                String.valueOf(sessionId),
+                null,
+                null,
+                Map.of("sessionOperatorId", session.getOperatorId(), "scope", "BRAND")
         );
     }
 

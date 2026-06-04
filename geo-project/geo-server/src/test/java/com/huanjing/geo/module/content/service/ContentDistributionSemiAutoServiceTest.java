@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.content.service;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
@@ -11,6 +12,8 @@ import com.huanjing.geo.module.content.authoritymedia.AuthorityMediaDistribution
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.ArticleDraftVersion;
+import com.huanjing.geo.module.content.entity.BrowserEnvironment;
+import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
@@ -42,6 +45,7 @@ import com.huanjing.geo.module.system.service.SystemAlertService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.mockito.ArgumentCaptor;
 
 import java.util.List;
 import java.util.Map;
@@ -74,6 +78,7 @@ class ContentDistributionSemiAutoServiceTest {
     private CompanyChannelQuotaService companyChannelQuotaService;
     private AuditService auditService;
     private ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
+    private BrowserEnvironmentService browserEnvironmentService;
     private ContentDistributionService service;
 
     @BeforeEach
@@ -91,6 +96,7 @@ class ContentDistributionSemiAutoServiceTest {
         companyChannelQuotaService = mock(CompanyChannelQuotaService.class);
         auditService = mock(AuditService.class);
         articleImagePublicUrlRewriter = mock(ArticleImagePublicUrlRewriter.class);
+        browserEnvironmentService = mock(BrowserEnvironmentService.class);
         when(articleImagePublicUrlRewriter.rewrite(any(), any())).thenAnswer(invocation -> invocation.getArgument(1));
         when(articleDraftMapper.update(eq(null), any())).thenReturn(1);
 
@@ -117,7 +123,7 @@ class ContentDistributionSemiAutoServiceTest {
                 brandAccessService,
                 fillTokenService,
                 mock(DistributionReviewStatusPollService.class),
-                mock(BrowserEnvironmentService.class),
+                browserEnvironmentService,
                 auditService,
                 new ObjectMapper(),
                 mock(AuthorityMediaDistributionAdapter.class),
@@ -262,8 +268,137 @@ class ContentDistributionSemiAutoServiceTest {
                         && AuditResult.DENIED == event.getResult()
                         && AuditMode.ASYNC == event.getMode()
                         && String.valueOf(ExtensionErrorCodes.FILL_TOKEN_INVALID).equals(event.getErrorCode())
-                        && Long.valueOf(50L).equals(event.getTaskId())
+                && Long.valueOf(50L).equals(event.getTaskId())
         ));
+    }
+
+    @Test
+    void schedulePlatformOptionsAreIncludedInSemiAutoFillPayload() throws Exception {
+        stubApprovedArticleProjectAndContent();
+        when(distributionTaskMapper.selectList(any())).thenReturn(List.of());
+        when(distributionTaskMapper.insert(any())).thenAnswer(invocation -> {
+            DistributionTask task = invocation.getArgument(0);
+            task.setId(50L);
+            return 1;
+        });
+        when(fillTokenService.issueInternalWithoutVersionCheck(60L, 10L, 99L, 50L))
+                .thenReturn(new FillTokenIssueResponse("ft.token", 200L, "nonce"));
+
+        DistributionTask task = service.distributeTo(
+                20L,
+                new TargetContext.SelfMediaTarget(
+                        cookieAccount(),
+                        null,
+                        List.of(),
+                        List.of(),
+                        null,
+                        null,
+                        "schedule-1-gen-1",
+                        Map.of(
+                                "scheduleId", 1L,
+                                "scheduledAt", "2026-06-03T15:53:00",
+                                "platformScheduledAt", "2026-06-03T15:53:00"
+                        )
+                )
+        );
+
+        var payload = new ObjectMapper().readTree(task.getFillPayload());
+        assertEquals(1L, payload.path("platformOptions").path("scheduleId").asLong());
+        assertEquals("2026-06-03T15:53:00", payload.path("platformOptions").path("scheduledAt").asText());
+        assertEquals("2026-06-03T15:53:00", payload.path("platformOptions").path("platformScheduledAt").asText());
+    }
+
+    @Test
+    void redistributesExistingSemiAutoTaskByReplacingActiveFillToken() {
+        SysUser operator = new SysUser();
+        operator.setId(99L);
+        operator.setRole("operator");
+        when(currentUserService.requireCurrentUser()).thenReturn(operator);
+
+        ArticleDraft article = new ArticleDraft();
+        article.setId(20L);
+        article.setProjectId(30L);
+        article.setTitle("Title");
+        article.setStatus("distributing");
+        when(articleDraftMapper.selectById(20L)).thenReturn(article);
+
+        Project project = new Project();
+        project.setId(30L);
+        project.setCompanyId(40L);
+        project.setBrandId(10L);
+        when(projectMapper.selectById(30L)).thenReturn(project);
+
+        DistributionTask reusable = new DistributionTask();
+        reusable.setId(50L);
+        reusable.setArticleId(20L);
+        reusable.setSelfMediaAccountId(60L);
+        reusable.setDispatchMode("SEMI_AUTO");
+        reusable.setStatus("token_issued");
+        reusable.setFillPayload("{}");
+        when(distributionTaskMapper.selectOne(any())).thenReturn(reusable);
+        when(distributionTaskMapper.selectById(50L)).thenReturn(reusable);
+        when(fillTokenService.replaceActiveAndIssueInternalWithoutVersionCheck(60L, 10L, 99L, 50L))
+                .thenReturn(new FillTokenIssueResponse("ft.reissued", 300L, "nonce-2"));
+
+        DistributionTask task = service.distributeTo(
+                20L,
+                new TargetContext.SelfMediaTarget(cookieAccount(), null, List.of(), List.of(), null, null, "req-1", Map.of())
+        );
+
+        assertEquals(50L, task.getId());
+        assertEquals("ft.reissued", task.getFillToken());
+        assertEquals(300L, task.getFillTokenExpiresAt());
+        assertEquals("nonce-2", task.getFillTokenNonce());
+        verify(fillTokenService).replaceActiveAndIssueInternalWithoutVersionCheck(60L, 10L, 99L, 50L);
+        verify(fillTokenService, never()).issueInternalWithoutVersionCheck(60L, 10L, 99L, 50L);
+    }
+
+    @Test
+    void semiAutoTaskPersistsBrowserEnvironmentScopeFromAccountBinding() {
+        stubApprovedArticleProjectAndContent();
+        when(distributionTaskMapper.selectList(any())).thenReturn(List.of());
+        when(distributionTaskMapper.insert(any())).thenAnswer(invocation -> {
+            DistributionTask task = invocation.getArgument(0);
+            task.setId(50L);
+            return 1;
+        });
+        when(fillTokenService.issueInternalWithoutVersionCheck(60L, 10L, 99L, 50L))
+                .thenReturn(new FillTokenIssueResponse("ft.token", 200L, "nonce"));
+
+        BrowserEnvironmentAccount binding = new BrowserEnvironmentAccount();
+        binding.setId(70L);
+        binding.setBrandId(10L);
+        binding.setBrowserEnvironmentId(80L);
+        binding.setSelfMediaAccountId(60L);
+        binding.setPlatform("toutiao");
+        BrowserEnvironment environment = new BrowserEnvironment();
+        environment.setId(80L);
+        environment.setEnvironmentKey("geo_huawei");
+        environment.setProvider("adspower");
+        environment.setProviderProfileId("k1cvxpjx");
+        when(browserEnvironmentService.validateForTaskCreation(any())).thenReturn(binding);
+        when(browserEnvironmentService.getEnvironmentForBinding(binding)).thenReturn(environment);
+
+        SelfMediaAccount account = cookieAccount();
+        account.setAuthMode("ADSPower");
+        DistributionTask task = service.distributeTo(
+                20L,
+                new TargetContext.SelfMediaTarget(account, null, List.of(), List.of(), null, null, "req-1", Map.of())
+        );
+
+        assertEquals(80L, task.getBrowserEnvironmentId());
+        assertEquals(70L, task.getBrowserEnvironmentAccountId());
+        assertEquals("geo_huawei", task.getEnvironmentKey());
+        assertEquals("adspower", task.getEnvironmentProvider());
+        assertEquals("k1cvxpjx", task.getProviderProfileId());
+
+        ArgumentCaptor<LambdaUpdateWrapper<DistributionTask>> updateCaptor = ArgumentCaptor.forClass(LambdaUpdateWrapper.class);
+        verify(distributionTaskMapper, times(4)).update(eq(null), updateCaptor.capture());
+        assertTrue(updateCaptor.getAllValues().stream()
+                .map(LambdaUpdateWrapper::getSqlSet)
+                .anyMatch(sqlSet -> sqlSet != null
+                        && sqlSet.contains("environment_key")
+                        && sqlSet.contains("provider_profile_id")));
     }
 
     private void stubApprovedArticleProjectAndContent() {

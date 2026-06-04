@@ -143,6 +143,18 @@ public class FillTokenService {
         }
     }
 
+    public FillTokenIssueResponse replaceActiveAndIssueInternalWithoutVersionCheck(
+            Long accountId,
+            Long brandId,
+            Long operatorId,
+            Long taskTargetId
+    ) {
+        if (taskTargetId != null) {
+            redisStore.getAndDelete(fillTokenTaskKey(taskTargetId));
+        }
+        return issueInternalWithoutVersionCheck(accountId, brandId, operatorId, taskTargetId);
+    }
+
     public FillTokenConsumeResponse consume(String token, Long expectedOperatorId) {
         return consume(token, expectedOperatorId, null);
     }

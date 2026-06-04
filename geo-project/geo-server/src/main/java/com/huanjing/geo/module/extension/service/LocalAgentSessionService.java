@@ -49,6 +49,7 @@ public class LocalAgentSessionService {
     private static final String TOKEN_PREFIX = "helper.";
     private static final String HELPER_ACCESS_PREFIX = "helper.session.";
     private static final String HMAC_ALGORITHM = "HmacSHA256";
+    private static final int SIGNATURE_MAX_SKEW_SECONDS = 300;
     private static final Pattern HEX_64 = Pattern.compile("^[a-f0-9]{64}$");
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final Base64.Encoder BASE64_URL_ENCODER = Base64.getUrlEncoder().withoutPadding();
@@ -166,6 +167,53 @@ public class LocalAgentSessionService {
         return signRequestForSession(session, request.method(), request.path(), request.bodyHash());
     }
 
+    public LocalAgentSession verifySignedRequest(String methodValue,
+                                                 String pathValue,
+                                                 String bodyHashValue,
+                                                 String helperAccessValue,
+                                                 String timestampValue,
+                                                 String nonceValue,
+                                                 String signatureValue,
+                                                 String userAgent) {
+        String method = requireMethod(methodValue);
+        String path = requirePath(pathValue);
+        String bodyHash = requireHexHash(bodyHashValue, "bodyHash is invalid");
+        String helperAccess = requireText(helperAccessValue, "helper access is required");
+        if (!helperAccess.startsWith(HELPER_ACCESS_PREFIX)) {
+            throw new BizException(401, "invalid local helper access");
+        }
+        Long sessionId;
+        try {
+            sessionId = Long.parseLong(helperAccess.substring(HELPER_ACCESS_PREFIX.length()));
+        } catch (NumberFormatException ex) {
+            throw new BizException(401, "invalid local helper access");
+        }
+        LocalAgentSession session = requireActiveSessionById(sessionId);
+        String timestamp = requireText(timestampValue, "timestamp is required");
+        long timestampSeconds;
+        try {
+            timestampSeconds = Long.parseLong(timestamp);
+        } catch (NumberFormatException ex) {
+            throw new BizException(401, "invalid local helper timestamp");
+        }
+        long nowSeconds = clock.instant().getEpochSecond();
+        if (Math.abs(nowSeconds - timestampSeconds) > SIGNATURE_MAX_SKEW_SECONDS) {
+            throw new BizException(401, "local helper signature expired");
+        }
+        String nonce = requireText(nonceValue, "nonce is required");
+        if (!redisStore.tryLock(nonceKey(sessionId, nonce), timestamp, Duration.ofSeconds(SIGNATURE_MAX_SKEW_SECONDS))) {
+            throw new BizException(401, "local helper nonce replayed");
+        }
+        String signature = requireText(signatureValue, "signature is required");
+        String canonical = canonical(method, path, bodyHash, timestamp, nonce, helperAccess);
+        String expected = hmacSha256Base64Url(session.getHmacSecret(), canonical);
+        if (!constantTimeEquals(signature, expected)) {
+            throw new BizException(401, "local helper signature invalid");
+        }
+        sessionMapper.touchActive(sessionId, now(), userAgent);
+        return session;
+    }
+
     private LocalAgentSignResponse signRequestForSession(LocalAgentSession session,
                                                          String methodValue,
                                                          String pathValue,
@@ -222,7 +270,9 @@ public class LocalAgentSessionService {
 
     private String requirePath(String value) {
         String path = requireText(value, "path is required");
-        if (!path.startsWith("/v1/poc/") && !path.startsWith("/v1/extension/")) {
+        if (!path.startsWith("/v1/poc/")
+                && !path.startsWith("/v1/extension/")
+                && !path.startsWith("/api/v1/local-agent/")) {
             throw new BizException(400, "unsupported local helper path");
         }
         if (path.contains("..") || path.contains("\n") || path.contains("\r")) {
@@ -294,6 +344,12 @@ public class LocalAgentSessionService {
         }
     }
 
+    private boolean constantTimeEquals(String left, String right) {
+        byte[] leftBytes = left.getBytes(StandardCharsets.UTF_8);
+        byte[] rightBytes = right.getBytes(StandardCharsets.UTF_8);
+        return leftBytes.length == rightBytes.length && MessageDigest.isEqual(leftBytes, rightBytes);
+    }
+
     private String sha256Hex(String value) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -343,6 +399,10 @@ public class LocalAgentSessionService {
 
     private String claimKey(String codeHash) {
         return "local_agent:pairing:claim:" + codeHash;
+    }
+
+    private String nonceKey(Long sessionId, String nonce) {
+        return "local_agent:request_nonce:" + sessionId + ":" + nonce;
     }
 
     private record PairingIntentPayload(String deviceSecretHash, String helperName, LocalDateTime expiresAt) {

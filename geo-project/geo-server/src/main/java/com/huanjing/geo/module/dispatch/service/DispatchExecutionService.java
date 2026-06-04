@@ -524,7 +524,7 @@ public class DispatchExecutionService {
         try {
             LlmRouteResult routed = llmPlatformRouter.invoke(new LlmRouteRequest(
                     LlmFeature.MONITORING,
-                    "You are a GEO monitoring assistant.",
+                    "You are a GEO (Generative Engine Optimization) monitoring assistant.",
                     questionText,
                     0D,
                     dispatchProperties.getModelConnectTimeoutMs(),
@@ -602,7 +602,7 @@ public class DispatchExecutionService {
     private String buildBrandStatementPrompt(Project project, Brand brand) {
         String projectName = project == null ? "" : Optional.ofNullable(project.getProjectName()).orElse("");
         String projectAliases = project == null ? "" : Optional.ofNullable(project.getProjectAliases()).orElse("");
-        return "You are a GEO content strategist. Generate a structured brand statement JSON with keys: "
+        return "You are a GEO (Generative Engine Optimization) content strategist. Generate a structured brand statement JSON with keys: "
                 + "positioning, selling_points, differentiation, brand_paragraph.\n"
                 + "Rules:\n"
                 + "- positioning: <=20 Chinese characters\n"
@@ -1092,7 +1092,7 @@ public class DispatchExecutionService {
 
     private String effectiveHitJudgeSystemPrompt() {
         return """
-                你是一个 GEO 品牌可见度评估裁判。你的任务是判断“大模型回答”中，当前品牌是否形成了有效命中。
+                你是一个 GEO（生成式引擎优化）品牌可见度评估裁判。你的任务是判断“大模型回答”中，当前品牌是否形成了有效命中。
                 请严格基于输入内容判断，不要引入外部知识，不要补充事实，不要推测品牌真实情况。
                 只输出 JSON，不要输出 Markdown，不要输出解释性前后缀。
                 """;
@@ -1675,7 +1675,7 @@ public class DispatchExecutionService {
     }
 
     private String invokeModelApi(String apiUrl, String modelId, String apiKey, String prompt) {
-        return invokeModelApi(apiUrl, modelId, apiKey, "You are a GEO monitoring assistant.", prompt, 0D);
+        return invokeModelApi(apiUrl, modelId, apiKey, "You are a GEO (Generative Engine Optimization) monitoring assistant.", prompt, 0D);
     }
 
     private String invokeModelApi(String apiUrl, String modelId, String apiKey, String systemPrompt, String userPrompt) {

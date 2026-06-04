@@ -14,11 +14,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
-import java.io.InputStream;
 import java.util.Locale;
-import java.util.concurrent.TimeUnit;
 
 @RestController
 @RequestMapping("/api/public/brand-materials")
@@ -29,20 +26,16 @@ public class PublicBrandMaterialController {
     private final BrandProfileService brandProfileService;
 
     @GetMapping("/{materialId}/stream")
-    public ResponseEntity<StreamingResponseBody> stream(@PathVariable Long materialId,
-                                                        @RequestParam("sig") String signature) {
+    public ResponseEntity<byte[]> stream(@PathVariable Long materialId,
+                                         @RequestParam("sig") String signature) {
         BrandMaterial material = publicUrlService.verifyPublicAccess(materialId, signature);
-        InputStream inputStream = brandProfileService.openVerifiedMaterialStream(material);
-        StreamingResponseBody body = outputStream -> {
-            try (inputStream) {
-                inputStream.transferTo(outputStream);
-            }
-        };
+        byte[] bytes = brandProfileService.readVerifiedMaterialBytes(material);
         ResponseEntity.BodyBuilder builder = ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(resolveContentType(material.getFileType())))
-                .cacheControl(CacheControl.maxAge(30, TimeUnit.DAYS).cachePublic())
-                .header(HttpHeaders.CONTENT_DISPOSITION, "inline");
-        return builder.body(body);
+                .cacheControl(CacheControl.noCache().cachePublic())
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline")
+                .contentLength(bytes.length);
+        return builder.body(bytes);
     }
 
     private String resolveContentType(String fileType) {

@@ -33,6 +33,8 @@ public class BrandUpdateRequest {
     private String phone;
     private String publicPhone;
     private String publicAddress;
+    @Size(max = 64)
+    private String selfMediaPublishLocationName;
     private String wechat;
     private String description;
     private String businessIntro;

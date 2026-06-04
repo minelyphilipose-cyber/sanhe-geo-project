@@ -92,6 +92,7 @@ class BatchArticleGenerationServiceTest {
                 mock(ArticleGenerationEngine.class),
                 mock(ArticleModelResolver.class),
                 passThroughAutoImageInsertionService(),
+                mock(ArticleCoverSelectionService.class),
                 promptBuilder,
                 promptContextFactory,
                 mock(BatchArticleQualityChecker.class),

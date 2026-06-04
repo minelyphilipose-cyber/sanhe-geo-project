@@ -8,6 +8,7 @@ import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Mapper
 public interface ExtensionSessionMapper extends BaseMapper<ExtensionSession> {
@@ -20,6 +21,15 @@ public interface ExtensionSessionMapper extends BaseMapper<ExtensionSession> {
             LIMIT 1
             """)
     ExtensionSession selectActiveByLookupHash(@Param("lookupHash") String lookupHash);
+
+    @Select("""
+            SELECT *
+            FROM extension_session
+            WHERE brand_id = #{brandId}
+              AND status = 'active'
+            ORDER BY last_seen_at DESC, bound_at DESC
+            """)
+    List<ExtensionSession> selectActiveByBrandId(@Param("brandId") Long brandId);
 
     @Update("""
             UPDATE extension_session

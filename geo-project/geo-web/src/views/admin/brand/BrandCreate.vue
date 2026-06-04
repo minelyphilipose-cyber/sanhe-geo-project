@@ -78,6 +78,9 @@
           <el-form-item label="联系电话"><el-input v-model="form.phone" /></el-form-item>
           <el-form-item label="对外公开电话"><el-input v-model="form.publicPhone" /></el-form-item>
           <el-form-item label="对外公开地址"><el-input v-model="form.publicAddress" /></el-form-item>
+          <el-form-item label="默认发布位置">
+            <el-input v-model="form.selfMediaPublishLocationName" maxlength="64" placeholder="用于头条等自媒体发布页添加位置" />
+          </el-form-item>
           <el-form-item label="微信"><el-input v-model="form.wechat" /></el-form-item>
           <el-form-item class="is-wide" label="官网"><el-input v-model="form.website" /></el-form-item>
         </div>
@@ -256,6 +259,7 @@ const form = reactive({
   phone: '',
   publicPhone: '',
   publicAddress: '',
+  selfMediaPublishLocationName: '',
   wechat: '',
   website: '',
   officialAccount: '',
@@ -469,6 +473,7 @@ async function submitBrand() {
       phone: nullableText(form.phone),
       publicPhone: nullableText(form.publicPhone),
       publicAddress: nullableText(form.publicAddress),
+      selfMediaPublishLocationName: nullableText(form.selfMediaPublishLocationName),
       wechat: nullableText(form.wechat),
       website: nullableText(form.website),
       geoSiteCode: normalizeGeoSiteCode(form.geoSiteCode) || null,

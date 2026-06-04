@@ -265,6 +265,7 @@ export function createManualContentArticle(data: {
   topicAsQuestion?: string
   title?: string
   contentMarkdown: string
+  coverMaterialId?: number
   source?: 'manual' | 'ai_preview' | string
   aiMetadata?: Record<string, unknown>
 }) {

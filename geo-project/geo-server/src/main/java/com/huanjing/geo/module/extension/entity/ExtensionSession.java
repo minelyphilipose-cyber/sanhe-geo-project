@@ -12,6 +12,7 @@ import java.time.LocalDateTime;
 public class ExtensionSession {
     @TableId(type = IdType.AUTO)
     private Long id;
+    private Long brandId;
     private Long operatorId;
     private String tokenLookupHash;
     private String tokenHash;

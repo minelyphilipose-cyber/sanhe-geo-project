@@ -9,6 +9,7 @@ import com.huanjing.geo.module.audit.*;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.service.AuditService;
 import com.huanjing.geo.module.content.ContentErrorCodes;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
 import com.huanjing.geo.module.content.dto.*;
 import com.huanjing.geo.module.content.entity.*;
@@ -55,7 +56,7 @@ public class ArticleAiDraftService {
     private static final String DEFAULT_TONE = "professional";
     private static final String DEFAULT_LENGTH = "medium";
     private static final String ARTICLE_PREVIEW_SYSTEM_PROMPT = """
-            你是一名中文 GEO 内容写作助手，负责为品牌项目生成可被大模型引用的高质量 Markdown 文章草稿。
+            你是一名中文 GEO（生成式引擎优化）内容写作助手，负责为品牌项目生成可被大模型引用的高质量 Markdown 文章草稿。
             内容立场是行业观察者，而非品牌方市场人员。只输出完整 Markdown 正文，不输出提示词解释。
             """;
     private static final List<String> CONTACT_INTENT_KEYWORDS = List.of(
@@ -78,6 +79,7 @@ public class ArticleAiDraftService {
     private final BatchArticlePromptBuilder promptBuilder;
     private final ArticleGenerationPromptContextFactory promptContextFactory;
     private final ArticleGenerationEngine articleGenerationEngine;
+    private final ArticleCoverSelectionService coverSelectionService;
     private final ArticleAiDraftRateLimiter rateLimiter;
     private final AuditService auditService;
     private final ObjectMapper objectMapper;
@@ -91,6 +93,7 @@ public class ArticleAiDraftService {
                                  BatchArticlePromptBuilder promptBuilder,
                                  ArticleGenerationPromptContextFactory promptContextFactory,
                                  ArticleGenerationEngine articleGenerationEngine,
+                                 ArticleCoverSelectionService coverSelectionService,
                                  ArticleAiDraftRateLimiter rateLimiter,
                                  AuditService auditService, ObjectMapper objectMapper,
                                  PlatformTransactionManager transactionManager,
@@ -101,7 +104,9 @@ public class ArticleAiDraftService {
         this.brandAccessService = brandAccessService;
         this.promptBuilder = promptBuilder;
         this.promptContextFactory = promptContextFactory;
-        this.articleGenerationEngine = articleGenerationEngine; this.rateLimiter = rateLimiter;
+        this.articleGenerationEngine = articleGenerationEngine;
+        this.coverSelectionService = coverSelectionService;
+        this.rateLimiter = rateLimiter;
         this.auditService = auditService; this.objectMapper = objectMapper;
         this.transactionManager = transactionManager; this.articleAiDraftExecutor = articleAiDraftExecutor;
     }
@@ -510,6 +515,9 @@ public class ArticleAiDraftService {
             draft.setTopic(input.topic());
             draft.setTopicAsQuestion(context.topicAsQuestion());
             draft.setTitle(title);
+            if (ArticlePromptChannels.SELF_MEDIA.equals(context.channelGroupCode())) {
+                draft.setCoverImageUrl(coverSelectionService.selectRandomCoverUrl(context.project().getBrandId()));
+            }
             draft.setStatus(STATUS_APPROVED);
             draft.setCurrentVersionNo(1);
             draft.setHasRisk(false);

@@ -573,6 +573,7 @@ public class ContentDistributionService {
                                                    Project project,
                                                    SysUser operator,
                                                    TargetContext.SelfMediaTarget mpTarget) {
+        mpTarget = withBrandSelfMediaPublishOptions(mpTarget, project);
         SelfMediaAccount account = mpTarget.account();
         if (account == null || account.getId() == null) {
             throw new BizException(400, "self media account missing");
@@ -587,7 +588,7 @@ public class ContentDistributionService {
             throw new BizException(403, "自媒体账号与文章品牌不匹配");
         }
         requireDistributionAccess(operator, account.getBrandId());
-        DistributionTask reusable = findReusableSemiAutoTask(article.getId(), account.getId());
+        DistributionTask reusable = isScheduleTarget(mpTarget) ? null : findReusableSemiAutoTask(article.getId(), account.getId());
         if (reusable != null) {
             BrowserEnvironmentAccount reusableEnvironmentBinding = browserEnvironmentService.validateForTaskCreation(account);
             if (reusableEnvironmentBinding != null || AUTH_MODE_COOKIE.equalsIgnoreCase(account.getAuthMode())) {
@@ -635,6 +636,32 @@ public class ContentDistributionService {
         return distributionTaskMapper.selectById(task.getId());
     }
 
+    private TargetContext.SelfMediaTarget withBrandSelfMediaPublishOptions(TargetContext.SelfMediaTarget target, Project project) {
+        if (target == null || project == null || project.getBrandId() == null) {
+            return target;
+        }
+        Brand brand = brandService.requireExistingBrand(project.getBrandId());
+        String locationName = resolveBrandSelfMediaPublishLocationName(brand);
+        if (!StringUtils.hasText(locationName)) {
+            return target;
+        }
+        Map<String, Object> options = new LinkedHashMap<>();
+        if (target.platformOptions() != null) {
+            options.putAll(target.platformOptions());
+        }
+        options.putIfAbsent("locationName", locationName);
+        return new TargetContext.SelfMediaTarget(
+                target.account(),
+                target.coverMaterialId(),
+                target.imageMaterialIds(),
+                target.hashtags(),
+                target.privateStatus(),
+                target.downloadType(),
+                target.requestId(),
+                options
+        );
+    }
+
     private DistributionTask reuseExistingSemiAutoSelfMediaTask(ArticleDraft article,
                                                                 Project project,
                                                                 SysUser operator,
@@ -673,6 +700,14 @@ public class ContentDistributionService {
         );
     }
 
+    private boolean isScheduleTarget(TargetContext.SelfMediaTarget target) {
+        if (target == null || target.platformOptions() == null) {
+            return false;
+        }
+        Object scheduleId = target.platformOptions().get("scheduleId");
+        return scheduleId != null && StringUtils.hasText(String.valueOf(scheduleId));
+    }
+
     private DistributionTask reissueReusableSemiAutoSelfMediaTask(ArticleDraft article,
                                                                   Project project,
                                                                   SysUser operator,
@@ -686,13 +721,14 @@ public class ContentDistributionService {
             String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
             SemiAutoSelfMediaAdapter adapter = resolveSemiAutoSelfMediaAdapter(account.getPlatform());
             SemiAutoFillTask fillTask = adapter.prepareFillTask(article, content, adapter.fillProfile());
-            String fillPayload = toFillPayload(fillTask, environmentBinding);
+            String fillPayload = toFillPayload(fillTask, environmentBinding, project);
             updateSemiAutoTaskPrepared(reusable.getId(), fillPayload);
         }
+        applyEnvironmentInfo(reusable, environmentBinding);
 
         FillTokenIssueResponse token;
         try {
-            token = fillTokenService.issueInternalWithoutVersionCheck(
+            token = fillTokenService.replaceActiveAndIssueInternalWithoutVersionCheck(
                     account.getId(),
                     account.getBrandId(),
                     operator.getId(),
@@ -865,7 +901,7 @@ public class ContentDistributionService {
         String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
         SemiAutoSelfMediaAdapter adapter = resolveSemiAutoSelfMediaAdapter(account.getPlatform());
         SemiAutoFillTask fillTask = adapter.prepareFillTask(article, content, adapter.fillProfile());
-        String fillPayload = toFillPayload(fillTask, environmentBinding);
+        String fillPayload = toFillPayload(fillTask, environmentBinding, project, mpTarget.platformOptions());
         DistributionTask task = createAttemptForSelfMedia(article, account, operator.getId(), mpTarget.requestId().trim());
         updateSemiAutoTaskPrepared(task.getId(), fillPayload);
 
@@ -890,6 +926,7 @@ public class ContentDistributionService {
         task.setFillPayload(fillPayload);
         task.setFillTokenIssuedAt(issuedAt);
         task.setLockedUntil(null);
+        applyEnvironmentInfo(task, environmentBinding);
 
         try {
             transitionArticleStatus(article, article.getStatus(), "distributing", false);
@@ -914,11 +951,23 @@ public class ContentDistributionService {
     private void applyEnvironmentInfo(DistributionTask task, BrowserEnvironmentAccount environmentBinding) {
         if (task == null || environmentBinding == null) return;
         BrowserEnvironment environment = browserEnvironmentService.getEnvironmentForBinding(environmentBinding);
+        if (environment == null) return;
         task.setBrowserEnvironmentId(environment.getId());
         task.setBrowserEnvironmentAccountId(environmentBinding.getId());
         task.setEnvironmentKey(environment.getEnvironmentKey());
         task.setEnvironmentProvider(environment.getProvider());
         task.setProviderProfileId(environment.getProviderProfileId());
+        if (task.getId() == null) {
+            return;
+        }
+        LambdaUpdateWrapper<DistributionTask> wrapper = new LambdaUpdateWrapper<DistributionTask>()
+                .eq(DistributionTask::getId, task.getId())
+                .set(DistributionTask::getBrowserEnvironmentId, environment.getId())
+                .set(DistributionTask::getBrowserEnvironmentAccountId, environmentBinding.getId())
+                .set(DistributionTask::getEnvironmentKey, environment.getEnvironmentKey())
+                .set(DistributionTask::getEnvironmentProvider, environment.getProvider())
+                .set(DistributionTask::getProviderProfileId, environment.getProviderProfileId());
+        distributionTaskMapper.update(null, wrapper);
     }
 
     private void updateSemiAutoTaskPrepared(Long taskId, String fillPayload) {
@@ -1426,12 +1475,26 @@ public class ContentDistributionService {
     }
 
     private String toFillPayload(SemiAutoFillTask fillTask) {
-        return toFillPayload(fillTask, null);
+        return toFillPayload(fillTask, null, null);
     }
 
     private String toFillPayload(SemiAutoFillTask fillTask, BrowserEnvironmentAccount environmentBinding) {
+        return toFillPayload(fillTask, environmentBinding, null);
+    }
+
+    private String toFillPayload(SemiAutoFillTask fillTask, BrowserEnvironmentAccount environmentBinding, Project project) {
+        return toFillPayload(fillTask, environmentBinding, project, null);
+    }
+
+    private String toFillPayload(SemiAutoFillTask fillTask,
+                                 BrowserEnvironmentAccount environmentBinding,
+                                 Project project,
+                                 Map<String, Object> platformOptions) {
         try {
             ObjectNode payloadNode = objectMapper.valueToTree(fillTask);
+            rewriteFillPayloadCoverImageUrl(payloadNode, project);
+            appendTargetPlatformOptions(payloadNode, platformOptions);
+            appendBrandSelfMediaPublishOptions(payloadNode, project);
             if (environmentBinding != null) {
                 if (StringUtils.hasText(environmentBinding.getExpectedPlatformAccountId())) {
                     payloadNode.put("expectedPlatformAccountId", environmentBinding.getExpectedPlatformAccountId());
@@ -1448,6 +1511,60 @@ public class ContentDistributionService {
         } catch (JsonProcessingException ex) {
             throw new BizException(500, "semi-auto fill payload serialization failed", ex);
         }
+    }
+
+    private void appendTargetPlatformOptions(ObjectNode payloadNode, Map<String, Object> platformOptions) {
+        if (payloadNode == null || platformOptions == null || platformOptions.isEmpty()) {
+            return;
+        }
+        ObjectNode target = payloadNode.has("platformOptions") && payloadNode.get("platformOptions").isObject()
+                ? (ObjectNode) payloadNode.get("platformOptions")
+                : payloadNode.putObject("platformOptions");
+        ObjectNode source = objectMapper.valueToTree(platformOptions);
+        source.fields().forEachRemaining(entry -> target.set(entry.getKey(), entry.getValue()));
+    }
+
+    private void rewriteFillPayloadCoverImageUrl(ObjectNode payloadNode, Project project) {
+        if (payloadNode == null || project == null || !payloadNode.hasNonNull("coverImageUrl")) {
+            return;
+        }
+        String rewritten = articleImagePublicUrlRewriter.rewriteUrl(project, payloadNode.path("coverImageUrl").asText());
+        if (StringUtils.hasText(rewritten)) {
+            payloadNode.put("coverImageUrl", rewritten);
+        }
+    }
+
+    private void appendBrandSelfMediaPublishOptions(ObjectNode payloadNode, Project project) {
+        if (payloadNode == null || project == null || project.getBrandId() == null) {
+            return;
+        }
+        Brand brand = brandService.requireExistingBrand(project.getBrandId());
+        String locationName = resolveBrandSelfMediaPublishLocationName(brand);
+        if (!StringUtils.hasText(locationName)) {
+            return;
+        }
+        ObjectNode platformOptions = payloadNode.has("platformOptions") && payloadNode.get("platformOptions").isObject()
+                ? (ObjectNode) payloadNode.get("platformOptions")
+                : payloadNode.putObject("platformOptions");
+        if (!platformOptions.hasNonNull("locationName")) {
+            platformOptions.put("locationName", locationName);
+        }
+    }
+
+    private String resolveBrandSelfMediaPublishLocationName(Brand brand) {
+        if (brand == null) {
+            return null;
+        }
+        if (StringUtils.hasText(brand.getSelfMediaPublishLocationName())) {
+            return brand.getSelfMediaPublishLocationName().trim();
+        }
+        if (StringUtils.hasText(brand.getCityName())) {
+            return brand.getCityName().trim();
+        }
+        if (StringUtils.hasText(brand.getServiceArea())) {
+            return brand.getServiceArea().trim();
+        }
+        return null;
     }
 
     private String jsonColumnPayload(String payload) {

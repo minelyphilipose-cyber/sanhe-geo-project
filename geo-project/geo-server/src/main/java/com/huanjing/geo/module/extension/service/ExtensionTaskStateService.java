@@ -1,5 +1,7 @@
 package com.huanjing.geo.module.extension.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.audit.ActorType;
 import com.huanjing.geo.module.audit.AuditMode;
@@ -10,8 +12,9 @@ import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
-import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.content.service.CompanyChannelQuotaService;
+import com.huanjing.geo.module.content.service.SelfMediaPublishScheduleService;
+import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskPublishReportRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskStateResponse;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +30,7 @@ import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static com.huanjing.geo.module.extension.ExtensionErrorCodes.TASK_NOT_FOUND;
 import static com.huanjing.geo.module.extension.ExtensionErrorCodes.TASK_RATE_LIMITED;
@@ -47,16 +51,28 @@ public class ExtensionTaskStateService {
     private static final String ARTICLE_STATUS_DISTRIBUTING = "distributing";
     private static final Duration HEARTBEAT_RATE_LIMIT_TTL = Duration.ofSeconds(30);
     private static final Duration STALE_THRESHOLD = Duration.ofMinutes(10);
+    private static final Duration SCHEDULE_RETRY_BACKOFF = Duration.ofMinutes(3);
     private static final int RECLAIM_BATCH_LIMIT = 100;
+    private static final Set<String> SCHEDULE_RETRYABLE_FAILURE_CODES = Set.of(
+            "PAGE_LOAD_TIMEOUT",
+            "EDITOR_NOT_READY",
+            "COVER_UPLOAD_TIMEOUT",
+            "SCHEDULE_DIALOG_NOT_READY",
+            "PREVIEW_PAGE_NOT_READY",
+            "WORKS_LIST_VERIFY_TIMEOUT",
+            "LOCAL_HELPER_TEMPORARY_ERROR"
+    );
 
     private final DistributionTaskMapper taskMapper;
     private final ArticleDraftMapper articleDraftMapper;
     private final SemiAutoTaskAccessService semiAutoTaskAccessService;
     private final InternalScopeService internalScopeService;
     private final CompanyChannelQuotaService companyChannelQuotaService;
+    private final SelfMediaPublishScheduleService selfMediaPublishScheduleService;
     private final ExtensionRedisStore redisStore;
     private final ExtensionAuditSupport auditSupport;
     private final AuditService auditService;
+    private final ObjectMapper objectMapper;
     private final Clock clock = Clock.systemUTC();
 
     @Transactional
@@ -69,8 +85,15 @@ public class ExtensionTaskStateService {
         }
     }
 
-    @Transactional
     public ExtensionTaskStateResponse ackFilled(Long taskId, Long operatorId, Long extensionSessionId) {
+        return ackFilled(taskId, operatorId, extensionSessionId, null);
+    }
+
+    @Transactional
+    public ExtensionTaskStateResponse ackFilled(Long taskId,
+                                                Long operatorId,
+                                                Long extensionSessionId,
+                                                Map<String, Object> request) {
         TaskContext context = requireOperableTask(taskId, operatorId, extensionSessionId, "SEMI_AUTO_TASK_FILLED");
         LocalDateTime now = now();
         int affected = taskMapper.markSemiAutoFilled(taskId, now);
@@ -79,6 +102,12 @@ public class ExtensionTaskStateService {
             throw new BizException(TASK_STATE_CONFLICT, "task state conflict");
         }
         auditSuccess("SEMI_AUTO_TASK_FILLED", context, operatorId, extensionSessionId, detail("filledAt", now));
+        String diagnosticsJson = diagnosticsJson(request);
+        if (hasVerifiedScheduledPublishResult(request)) {
+            selfMediaPublishScheduleService.markDistributionTaskScheduled(taskId, diagnosticsJson);
+        } else {
+            selfMediaPublishScheduleService.markDistributionTaskFilled(taskId, diagnosticsJson);
+        }
         return new ExtensionTaskStateResponse(taskId, STATUS_FILLED);
     }
 
@@ -138,6 +167,37 @@ public class ExtensionTaskStateService {
         restoreArticleApproved(context.task());
         companyChannelQuotaService.refundDistribution(taskId);
         auditSuccess("SEMI_AUTO_TASK_ABANDONED", context, operatorId, extensionSessionId, detail("abandonedAt", now));
+        return new ExtensionTaskStateResponse(taskId, STATUS_FAILED);
+    }
+
+    @Transactional
+    public ExtensionTaskStateResponse fail(Long taskId,
+                                           Long operatorId,
+                                           Long extensionSessionId,
+                                           Map<String, Object> request) {
+        TaskContext context = requireOperableTask(taskId, operatorId, extensionSessionId, "SEMI_AUTO_TASK_FILL_FAILED");
+        LocalDateTime now = now();
+        String errorMessage = extractFailureMessage(request);
+        String failureKind = extractFailureCode(request, errorMessage);
+        int affected = taskMapper.markSemiAutoFailed(taskId, failureKind, errorMessage, now);
+        if (affected != 1) {
+            auditDenied("SEMI_AUTO_TASK_FILL_FAILED", context, operatorId, extensionSessionId, "STALE_STATE");
+            throw new BizException(TASK_STATE_CONFLICT, "task state conflict");
+        }
+        restoreArticleApproved(context.task());
+        companyChannelQuotaService.refundDistribution(taskId);
+        LocalDateTime nextAttemptAt = isScheduleRetryableFailure(failureKind)
+                ? now.plus(SCHEDULE_RETRY_BACKOFF)
+                : null;
+        selfMediaPublishScheduleService.markDistributionTaskScheduleFailed(
+                taskId,
+                failureKind,
+                errorMessage,
+                diagnosticsJson(request),
+                nextAttemptAt
+        );
+        auditSuccess("SEMI_AUTO_TASK_FILL_FAILED", context, operatorId, extensionSessionId,
+                detail("failedAt", now, "failureKind", failureKind, "errorMessage", errorMessage));
         return new ExtensionTaskStateResponse(taskId, STATUS_FAILED);
     }
 
@@ -357,6 +417,80 @@ public class ExtensionTaskStateService {
             detail.put(String.valueOf(values[i]), values[i + 1]);
         }
         return detail;
+    }
+
+    private boolean hasVerifiedScheduledPublishResult(Map<String, Object> request) {
+        Object fillResult = request == null ? null : request.get("fillResult");
+        if (!(fillResult instanceof Map<?, ?> fillResultMap)) {
+            return false;
+        }
+        Object publishOptions = fillResultMap.get("publishOptions");
+        if (!(publishOptions instanceof Map<?, ?> options) || !Boolean.TRUE.equals(options.get("scheduled"))) {
+            return false;
+        }
+        Object verification = options.get("publishVerification");
+        if (verification instanceof Map<?, ?> verificationMap) {
+            return Boolean.TRUE.equals(verificationMap.get("verified"));
+        }
+        return false;
+    }
+
+    private String extractFailureCode(Map<String, Object> request, String message) {
+        Object error = request == null ? null : request.get("error");
+        if (error instanceof Map<?, ?> errorMap) {
+            Object code = errorMap.get("code");
+            if (code != null && StringUtils.hasText(String.valueOf(code))) {
+                return String.valueOf(code).trim();
+            }
+        }
+        return classifyFailureKind(message);
+    }
+
+    private String extractFailureMessage(Map<String, Object> request) {
+        Object error = request == null ? null : request.get("error");
+        if (error instanceof Map<?, ?> errorMap) {
+            Object message = errorMap.get("message");
+            if (message != null && StringUtils.hasText(String.valueOf(message))) {
+                return String.valueOf(message).trim();
+            }
+        }
+        Object message = request == null ? null : request.get("message");
+        if (message != null && StringUtils.hasText(String.valueOf(message))) {
+            return String.valueOf(message).trim();
+        }
+        return "页面填充失败";
+    }
+
+    private String classifyFailureKind(String message) {
+        String text = message == null ? "" : message;
+        if (text.contains("定时发布时间") || text.contains("定时发布")) {
+            return "SCHEDULE_TIME_OR_SELECTOR_FAILED";
+        }
+        if (text.contains("账号不一致")) {
+            return "ACCOUNT_MISMATCH";
+        }
+        if (text.contains("未登录") || text.contains("需登录")) {
+            return "LOGIN_REQUIRED";
+        }
+        if (text.contains("未找到") || text.contains("超时")) {
+            return "EDITOR_NOT_FOUND";
+        }
+        return "FILL_FAILED";
+    }
+
+    private boolean isScheduleRetryableFailure(String code) {
+        return SCHEDULE_RETRYABLE_FAILURE_CODES.contains(code);
+    }
+
+    private String diagnosticsJson(Map<String, Object> request) {
+        if (request == null || request.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(request);
+        } catch (JsonProcessingException ex) {
+            return "{\"serialization\":\"failed\"}";
+        }
     }
 
     private Map<String, Object> publishDetail(

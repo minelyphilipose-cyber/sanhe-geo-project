@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.extension.controller;
 
 import com.huanjing.geo.common.result.R;
+import com.huanjing.geo.module.content.dto.BrowserEnvironmentBrandLoginStatusRequest;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentLoginStatusRequest;
 import com.huanjing.geo.module.content.service.BrowserEnvironmentService;
 import com.huanjing.geo.module.content.vo.BrowserEnvironmentAccountVO;
@@ -11,6 +12,7 @@ import com.huanjing.geo.module.extension.dto.ExtensionBindResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionCookieCaptureRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionCookieCaptureResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionSelfMediaAccountResponse;
+import com.huanjing.geo.module.extension.dto.ExtensionSessionVO;
 import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshRequest;
 import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskListItemResponse;
@@ -44,6 +46,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 @Tag(name = "Extension")
 @RestController
@@ -106,6 +109,17 @@ public class ExtensionController {
     public R<Void> revokeToken(@PathVariable Long sessionId) {
         SysUser current = currentUserService.requireCurrentUser();
         sessionService.revoke(sessionId, current.getId());
+        return R.ok();
+    }
+
+    @GetMapping("/brands/{brandId}/sessions")
+    public R<List<ExtensionSessionVO>> listBrandSessions(@PathVariable Long brandId) {
+        return R.ok(sessionService.listActiveByBrand(brandId));
+    }
+
+    @PostMapping("/brands/{brandId}/sessions/{sessionId}/revoke")
+    public R<Void> revokeBrandSession(@PathVariable Long brandId, @PathVariable Long sessionId) {
+        sessionService.revokeForBrand(brandId, sessionId);
         return R.ok();
     }
 
@@ -193,6 +207,24 @@ public class ExtensionController {
         ));
     }
 
+    @PostMapping("/brands/{brandId}/browser-environment-login-status")
+    public R<BrowserEnvironmentAccountVO> reportBrowserEnvironmentLoginStatusByBrandAndPlatform(
+            @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
+            @PathVariable Long brandId,
+            @Valid @RequestBody BrowserEnvironmentBrandLoginStatusRequest request
+    ) {
+        ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        versionService.requireSupported("chrome", session.getExtensionVersion());
+        if (!brandId.equals(session.getBrandId())) {
+            return R.fail(403, "brandId does not match extension session");
+        }
+        return R.ok(browserEnvironmentService.reportLoginStatusForExtensionByBrandAndPlatform(
+                brandId,
+                request,
+                session.getOperatorId()
+        ));
+    }
+
     @PostMapping("/local-agent/sign")
     public R<LocalAgentSignResponse> signLocalAgentRequest(
             @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
@@ -216,11 +248,12 @@ public class ExtensionController {
     @PostMapping("/tasks/{taskId}/ack")
     public R<ExtensionTaskStateResponse> ackTask(
             @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
-            @PathVariable Long taskId
+            @PathVariable Long taskId,
+            @RequestBody(required = false) Map<String, Object> request
     ) {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
         versionService.requireSupported("chrome", session.getExtensionVersion());
-        return R.ok(taskStateService.ackFilled(taskId, session.getOperatorId(), session.getId()));
+        return R.ok(taskStateService.ackFilled(taskId, session.getOperatorId(), session.getId(), request));
     }
 
     @PostMapping("/tasks/{taskId}/heartbeat")
@@ -256,6 +289,17 @@ public class ExtensionController {
         ExtensionSession session = sessionService.requireActiveSession(extensionToken);
         versionService.requireSupported("chrome", session.getExtensionVersion());
         return R.ok(taskStateService.abandon(taskId, session.getOperatorId(), session.getId()));
+    }
+
+    @PostMapping("/tasks/{taskId}/fail")
+    public R<ExtensionTaskStateResponse> failTask(
+            @RequestHeader(EXTENSION_TOKEN_HEADER) String extensionToken,
+            @PathVariable Long taskId,
+            @RequestBody(required = false) Map<String, Object> request
+    ) {
+        ExtensionSession session = sessionService.requireActiveSession(extensionToken);
+        versionService.requireSupported("chrome", session.getExtensionVersion());
+        return R.ok(taskStateService.fail(taskId, session.getOperatorId(), session.getId(), request));
     }
 
     private String clientIp(HttpServletRequest request) {

@@ -10,6 +10,12 @@ public record ExtensionTaskListItemResponse(
         String title,
         LocalDateTime createdAt,
         LocalDateTime fillTokenIssuedAt,
-        LocalDateTime expiresAt
+        LocalDateTime expiresAt,
+        Long selfMediaAccountId,
+        Long browserEnvironmentId,
+        Long browserEnvironmentAccountId,
+        String environmentKey,
+        String environmentProvider,
+        String providerProfileId
 ) {
 }

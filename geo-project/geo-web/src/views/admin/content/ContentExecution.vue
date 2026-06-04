@@ -251,6 +251,15 @@
               </div>
             </el-descriptions-item>
           </el-descriptions>
+          <div v-if="detailCoverImageUrl" class="detail-cover-panel">
+            <div class="detail-cover-copy">
+              <span>文章封面</span>
+              <strong>{{ detailData.article.title || '封面图片' }}</strong>
+            </div>
+            <a :href="detailCoverImageUrl" target="_blank" rel="noreferrer">
+              <img :src="detailCoverImageUrl" :alt="detailData.article.title || '文章封面'" loading="lazy" />
+            </a>
+          </div>
         </div>
 
         <div class="detail-section-panel">
@@ -1104,6 +1113,7 @@ const detailData = ref<ArticleDetailResponse | null>(null)
 const detailViewMode = ref<'preview' | 'markdown'>('preview')
 const currentArticleId = ref<number | null>(null)
 const articleImagePreviewUrls = ref<Record<string, string>>({})
+const detailCoverImageUrl = computed(() => normalizeDisplayImageUrl(detailData.value?.article.coverImageUrl))
 
 const revisionVisible = ref(false)
 const revisionViewMode = ref<'preview' | 'markdown'>('markdown')
@@ -2677,6 +2687,27 @@ function renderArticlePreviewMarkdown(content: string) {
   return template.innerHTML
 }
 
+function normalizeDisplayImageUrl(value?: string | null) {
+  const url = value?.trim()
+  if (!url) return ''
+  if (/^https?:\/\//i.test(url)) return withArticlePreviewCacheBuster(url)
+  if (url.startsWith('data:')) return url
+  if (url.startsWith('//')) return `${window.location.protocol}${url}`
+  if (url.startsWith('/')) return withArticlePreviewCacheBuster(`${window.location.origin}${url}`)
+  return url
+}
+
+function withArticlePreviewCacheBuster(url: string) {
+  if (!url.includes('/api/public/brand-materials/')) return url
+  try {
+    const parsed = new URL(url)
+    parsed.searchParams.set('preview', 'article')
+    return parsed.toString()
+  } catch {
+    return url
+  }
+}
+
 async function loadArticleImagePreviewUrls(markdownContent: string, brandId?: number | null, projectId?: number | null) {
   if (!brandId || !markdownContent.trim()) {
     articleImagePreviewUrls.value = {}
@@ -2974,16 +3005,22 @@ async function submitSemiAutoEnvironmentTask(account: SelfMediaAccount) {
     if (!backendTask?.id) {
       throw new Error('后台未返回分发任务')
     }
+    const taskEnvironmentKey = backendTask.environmentKey || environmentKey
+    const taskProviderProfileId = backendTask.providerProfileId || providerProfileId
+    const taskBrowserEnvironmentAccountId = backendTask.browserEnvironmentAccountId || binding.id
+    if (!taskEnvironmentKey || !taskProviderProfileId) {
+      throw new Error('后台分发任务未返回浏览器环境信息，请刷新品牌环境绑定后重试')
+    }
     await launchLocalHelperTask(
       helperAuthConfig,
       {
-        environmentKey,
-        providerProfileId,
-        environmentName: binding.environmentKey || account.accountName || null,
+        environmentKey: taskEnvironmentKey,
+        providerProfileId: taskProviderProfileId,
+        environmentName: taskEnvironmentKey || account.accountName || null,
         backendBase,
         taskId: backendTask.id,
         selfMediaAccountId: account.id,
-        browserEnvironmentAccountId: binding.id,
+        browserEnvironmentAccountId: taskBrowserEnvironmentAccountId,
         platform: account.platform,
         url: defaultSemiAutoPublishUrl(account.platform),
         expectedPlatformAccountId: binding.expectedPlatformAccountId || account.platformAccountId || null,
@@ -4280,6 +4317,60 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   color: #2563eb;
   font-size: 12px;
   font-weight: 700;
+}
+
+.detail-cover-panel {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 280px);
+  align-items: center;
+  gap: 16px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: rgba(239, 246, 255, 0.72);
+}
+
+.detail-cover-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-cover-copy span {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.detail-cover-copy strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 15px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-cover-panel a {
+  display: block;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #e2e8f0;
+}
+
+.detail-cover-panel img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+@media (max-width: 760px) {
+  .detail-cover-panel {
+    grid-template-columns: 1fr;
+  }
 }
 
 .detail-header {

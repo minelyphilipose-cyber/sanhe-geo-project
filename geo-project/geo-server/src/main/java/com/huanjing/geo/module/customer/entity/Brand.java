@@ -55,6 +55,8 @@ public class Brand {
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String publicAddress;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String selfMediaPublishLocationName;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String wechat;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String description;

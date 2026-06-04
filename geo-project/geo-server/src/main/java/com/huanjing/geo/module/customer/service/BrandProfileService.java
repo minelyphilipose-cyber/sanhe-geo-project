@@ -92,6 +92,13 @@ public class BrandProfileService {
         return minioStorageService.openObjectStream(material.getObjectKey());
     }
 
+    public byte[] readVerifiedMaterialBytes(BrandMaterial material) {
+        if (!StringUtils.hasText(material.getObjectKey())) {
+            throw new BizException(400, "Material object key is empty");
+        }
+        return minioStorageService.getObjectBytes(material.getObjectKey());
+    }
+
     public String buildMaterialPreviewUrl(Long brandId, Long materialId) {
         BrandMaterial material = materialDetail(brandId, materialId);
         if (!StringUtils.hasText(material.getObjectKey())) {
@@ -335,6 +342,7 @@ public class BrandProfileService {
         snapshot.put("phone", brand.getPhone());
         snapshot.put("publicPhone", brand.getPublicPhone());
         snapshot.put("publicAddress", brand.getPublicAddress());
+        snapshot.put("selfMediaPublishLocationName", brand.getSelfMediaPublishLocationName());
         snapshot.put("wechat", brand.getWechat());
         snapshot.put("description", brand.getDescription());
         snapshot.put("businessIntro", brand.getBusinessIntro());

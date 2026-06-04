@@ -15,4 +15,10 @@ public class ExtensionTaskListRow {
     private LocalDateTime fillTokenIssuedAt;
     private Long operatorId;
     private Long brandId;
+    private Long selfMediaAccountId;
+    private Long browserEnvironmentId;
+    private Long browserEnvironmentAccountId;
+    private String environmentKey;
+    private String environmentProvider;
+    private String providerProfileId;
 }

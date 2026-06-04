@@ -33,5 +33,7 @@ public class ManualArticleCreateRequest {
     @Size(max = 16)
     private String source;
 
+    private Long coverMaterialId;
+
     private Map<String, Object> aiMetadata;
 }

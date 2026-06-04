@@ -3,6 +3,7 @@ const INSTALL_ID_KEY = 'geoEnvInstallId'
 const EVENT_LOG_KEY = 'geoEnvEventLog'
 const IDENTITY_PRECHECK_PLATFORMS = new Set(['toutiao', 'zhihu', 'xiaohongshu'])
 const autoLoginReportAtByKey = new Map()
+const MAX_IMAGE_FETCH_BYTES = 20 * 1024 * 1024
 
 function normalizeBaseUrl(value) {
   return String(value || '').replace(/\/+$/, '')
@@ -78,9 +79,50 @@ async function apiRequest(config, path, init = {}, extensionToken) {
   })
   const body = await response.json().catch(() => ({}))
   if (!response.ok || (body.code !== undefined && body.code !== 0)) {
-    throw new Error(body.message || `后台请求失败：${response.status}`)
+    const error = new Error(body.message || `后台请求失败：${response.status}`)
+    error.status = response.status
+    error.code = body.code
+    throw error
   }
   return body.data
+}
+
+function isExtensionUnauthorized(error) {
+  return error?.status === 401 || error?.code === 70002 || String(error?.message || '').toLowerCase() === 'unauthorized'
+}
+
+async function clearExtensionSession() {
+  await storageSet({ geoEnvSession: null })
+}
+
+async function refreshExtensionSession(config, session, options = {}) {
+  if (!session?.extensionToken) return session
+  const refreshedAt = Date.parse(session.refreshedAt || '')
+  if (!options.force && Number.isFinite(refreshedAt) && Date.now() - refreshedAt < 5 * 60 * 1000) {
+    return session
+  }
+
+  try {
+    const refreshed = await apiRequest(config, '/api/v1/extension/token/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ extensionVersion: EXTENSION_VERSION }),
+    }, session.extensionToken)
+    const nextSession = {
+      ...session,
+      sessionId: refreshed?.sessionId || session.sessionId,
+      extensionToken: refreshed?.token || session.extensionToken,
+      expiresAt: refreshed?.expiresAt || session.expiresAt,
+      refreshedAt: new Date().toISOString(),
+    }
+    await storageSet({ geoEnvSession: nextSession })
+    return nextSession
+  } catch (error) {
+    if (isExtensionUnauthorized(error)) {
+      await clearExtensionSession()
+      throw new Error('扩展后台绑定已失效，请在扩展弹窗重新绑定后台')
+    }
+    throw error
+  }
 }
 
 function requestBodyText(init = {}) {
@@ -91,17 +133,30 @@ function requestBodyText(init = {}) {
 
 async function signedHelperHeaders(config, path, init = {}, session = null) {
   if (!session?.extensionToken) return null
+  const activeSession = await refreshExtensionSession(config, session)
   const method = String(init.method || 'GET').toUpperCase()
   const bodyHash = await sha256Hex(requestBodyText(init))
-  const signed = await apiRequest(config, '/api/v1/extension/local-agent/sign', {
-    method: 'POST',
-    body: JSON.stringify({
-      method,
-      path,
-      bodyHash,
-    }),
-  }, session.extensionToken)
-  return signed?.headers || null
+  const body = JSON.stringify({
+    method,
+    path,
+    bodyHash,
+  })
+
+  try {
+    const signed = await apiRequest(config, '/api/v1/extension/local-agent/sign', {
+      method: 'POST',
+      body,
+    }, activeSession.extensionToken)
+    return signed?.headers || null
+  } catch (error) {
+    if (!isExtensionUnauthorized(error)) throw error
+    const refreshedSession = await refreshExtensionSession(config, activeSession, { force: true })
+    const signed = await apiRequest(config, '/api/v1/extension/local-agent/sign', {
+      method: 'POST',
+      body,
+    }, refreshedSession.extensionToken)
+    return signed?.headers || null
+  }
 }
 
 async function helperRequest(config, path, init = {}, session = null) {
@@ -176,13 +231,38 @@ async function bindExtension(bindCode) {
 async function pollOnce(options = {}) {
   const { config, session } = await getConfig()
   if (!session?.extensionToken) throw new Error('请先绑定后台')
+  const platform = options.platform || ''
 
-  const next = await helperRequest(
-    config,
-    `/v1/extension/tasks/next?environmentKey=${encodeURIComponent(config.environmentKey)}`,
-    {},
-    session,
-  )
+  let next = null
+  let activeConfig = config
+  if (platform) {
+    next = await helperRequest(
+      config,
+      `/v1/extension/tasks/next?platform=${encodeURIComponent(platform)}`,
+      {},
+      session,
+    )
+    if (next.task?.environmentKey) {
+      activeConfig = { ...config, environmentKey: next.task.environmentKey }
+    }
+  }
+
+  const candidateKeys = next?.task ? [] : await resolveCandidateEnvironmentKeys(config, session, platform)
+  for (const environmentKey of candidateKeys) {
+    const scopedConfig = { ...config, environmentKey }
+    const candidate = await helperRequest(
+      scopedConfig,
+      `/v1/extension/tasks/next?environmentKey=${encodeURIComponent(environmentKey)}${platform ? `&platform=${encodeURIComponent(platform)}` : ''}`,
+      {},
+      session,
+    )
+    if (candidate.task || candidate.status) {
+      next = candidate
+      activeConfig = scopedConfig
+      break
+    }
+    next = candidate
+  }
   if (!next.task) {
     return {
       ok: true,
@@ -193,22 +273,70 @@ async function pollOnce(options = {}) {
 
   try {
     const identityTabId = options.identityTabId || await findActivePlatformTabId(next.task.platform)
-    const fillResult = await handleTask(config, session, next.task, { identityTabId })
-    await helperRequest(config, `/v1/extension/tasks/${next.task.taskId}/complete`, {
+    const fillResult = await handleTask(activeConfig, session, next.task, { identityTabId })
+    await helperRequest(activeConfig, `/v1/extension/tasks/${next.task.taskId}/complete`, {
       method: 'POST',
-      body: JSON.stringify({ environmentKey: config.environmentKey, fillResult }),
+      body: JSON.stringify({ environmentKey: activeConfig.environmentKey, fillResult }),
     }, session)
-    return { ok: true, message: '任务已填充', taskId: next.task.taskId, platform: next.task.platform }
+    return {
+      ok: true,
+      message: '任务已填充',
+      taskId: next.task.taskId,
+      platform: next.task.platform,
+      environmentKey: activeConfig.environmentKey,
+    }
   } catch (error) {
-    await helperRequest(config, `/v1/extension/tasks/${next.task.taskId}/fail`, {
+    const failure = classifyTaskFailure(error.message)
+    await apiRequest(activeConfig, `/api/v1/extension/tasks/${next.task.taskId}/fail`, {
       method: 'POST',
       body: JSON.stringify({
-        environmentKey: config.environmentKey,
-        error: { message: error.message },
+        error: failure,
+      }),
+    }, session.extensionToken).catch(() => {})
+    await helperRequest(activeConfig, `/v1/extension/tasks/${next.task.taskId}/fail`, {
+      method: 'POST',
+      body: JSON.stringify({
+        environmentKey: activeConfig.environmentKey,
+        error: failure,
       }),
     }, session).catch(() => {})
     throw error
   }
+}
+
+function classifyTaskFailure(message) {
+  const text = String(message || '')
+  const code = text.match(/^([A-Z0-9_]{3,80})[：:]/)?.[1] || classifyTaskFailureCode(text)
+  return {
+    code,
+    message: text || '页面填充失败',
+    retryable: isRetryableTaskFailureCode(code),
+  }
+}
+
+function classifyTaskFailureCode(text) {
+  if (text.includes('作品列表') || text.includes('作品管理页') || text.includes('WORKS_LIST_VERIFY_TIMEOUT')) return 'WORKS_LIST_VERIFY_TIMEOUT'
+  if (text.includes('账号不一致')) return 'ACCOUNT_MISMATCH'
+  if (text.includes('IDENTITY_EXPECTATION_MISSING')) return 'IDENTITY_EXPECTATION_MISSING'
+  if (text.includes('平台定时发布能力')) return 'PLATFORM_CAPABILITY_UNVERIFIED'
+  if (text.includes('Material not found') || text.includes('素材不存在')) return 'COVER_MATERIAL_NOT_FOUND'
+  if (text.includes('封面图片类型不支持') || text.includes('图片类型不支持')) return 'COVER_IMAGE_UNSUPPORTED'
+  if (text.includes('定时发布时间已过期') || text.includes('定时发布时间无效')) return 'SCHEDULE_TIME_INVALID'
+  if (text.includes('页面填充执行超时') || text.includes('超时')) return 'PAGE_LOAD_TIMEOUT'
+  if (text.includes('未找到') || text.includes('编辑器')) return 'EDITOR_NOT_READY'
+  return 'FILL_FAILED'
+}
+
+function isRetryableTaskFailureCode(code) {
+  return [
+    'PAGE_LOAD_TIMEOUT',
+    'EDITOR_NOT_READY',
+    'COVER_UPLOAD_TIMEOUT',
+    'SCHEDULE_DIALOG_NOT_READY',
+    'PREVIEW_PAGE_NOT_READY',
+    'WORKS_LIST_VERIFY_TIMEOUT',
+    'LOCAL_HELPER_TEMPORARY_ERROR',
+  ].includes(code)
 }
 
 async function autoPollOnce(reason, senderTabId) {
@@ -216,8 +344,24 @@ async function autoPollOnce(reason, senderTabId) {
     const { config, session } = await getConfig()
     if (config.autoRun === false) return { ok: true, skipped: true, reason: 'auto_run_disabled' }
     if (!session?.extensionToken) return { ok: true, skipped: true, reason: 'not_bound' }
-    await autoReportLoginStatusFromTab(config, session, senderTabId).catch(() => null)
-    const result = await pollOnce({ identityTabId: senderTabId })
+    const tab = senderTabId ? await chrome.tabs.get(senderTabId).catch(() => null) : null
+    const platform = inferPlatformFromUrl(tab?.url)
+    const result = await pollOnce({ identityTabId: senderTabId, platform })
+    if (result.taskId && result.environmentKey) {
+      await autoReportLoginStatusFromTab(config, session, senderTabId, {
+        platform,
+        environmentKey: result.environmentKey,
+        requireTaskEnvironment: true,
+      }).catch((error) => appendEventLog({ type: 'login_report', ok: false, reason, platform, error: error.message }))
+    } else {
+      await appendEventLog({
+        type: 'login_report',
+        ok: false,
+        reason,
+        platform,
+        error: '跳过登录上报：未领取到带环境标识的任务',
+      })
+    }
     await setBadge(result.taskId ? 'OK' : '')
     if (result.taskId) {
       await appendEventLog({ type: 'auto_fill', ok: true, reason, taskId: result.taskId, platform: result.platform })
@@ -230,28 +374,80 @@ async function autoPollOnce(reason, senderTabId) {
   }
 }
 
-async function autoReportLoginStatusFromTab(config, session, tabId) {
-  if (!tabId || !session?.extensionToken || !config.environmentKey) return null
+async function autoReportLoginStatusFromTab(config, session, tabId, options = {}) {
+  if (!tabId || !session?.extensionToken) {
+    await appendEventLog({ type: 'login_report', ok: false, platform: options.platform || '-', error: '跳过登录上报：缺少 tab 或后台绑定' })
+    return null
+  }
   const tab = await chrome.tabs.get(tabId).catch(() => null)
-  const platform = inferPlatformFromUrl(tab?.url)
-  if (!platform || !isAllowedLoginReportUrl(platform, tab.url)) return null
+  const platform = options.platform || inferPlatformFromUrl(tab?.url)
+  if (!platform || !isAllowedLoginReportUrl(platform, tab?.url)) {
+    await appendEventLog({ type: 'login_report', ok: false, platform: platform || '-', error: `跳过登录上报：当前页不允许或无法识别平台，url=${tab?.url || '-'}` })
+    return null
+  }
 
-  const throttleKey = `${config.environmentKey}:${platform}:${tabId}`
+  const environmentKey = options.environmentKey || (options.requireTaskEnvironment
+    ? ''
+    : await resolveLoginReportEnvironmentKey(config, session, platform))
+  if (!environmentKey) {
+    await appendEventLog({ type: 'login_report', ok: false, platform, error: '跳过登录上报：未解析到环境标识' })
+    return null
+  }
+  const reportConfig = { ...config, environmentKey }
+  const throttleKey = `${environmentKey}:${platform}:${tabId}`
   const now = Date.now()
   if (now - (autoLoginReportAtByKey.get(throttleKey) || 0) < 10_000) return null
   autoLoginReportAtByKey.set(throttleKey, now)
 
   await ensureContentScript(tabId)
   await waitForContentScript(tabId, 8, 500)
-  const identity = await readIdentityFromTab(tabId, platform, { requireIdentity: true })
-  if (!identity) return null
-  return reportLoginStatus(config, session, {
+  const identity = await readIdentityFromTab(tabId, platform, { requireIdentity: false })
+  if (!identity) {
+    await appendEventLog({ type: 'login_report', ok: false, platform, environmentKey, error: '跳过登录上报：content-script 未返回身份诊断' })
+    return null
+  }
+  const status = await reportLoginStatus(reportConfig, session, {
     environmentAccountId: null,
-    environmentKey: config.environmentKey,
+    environmentKey,
     selfMediaAccountId: null,
     platform,
     identity,
   })
+  await appendEventLog({ type: 'login_report', ok: true, platform, environmentKey, status: status?.loginStatus || '-' })
+  return status
+}
+
+async function resolveCandidateEnvironmentKeys(config, session, platform) {
+  const keys = []
+  const add = (value) => {
+    const key = String(value || '').trim()
+    if (key && !keys.includes(key)) keys.push(key)
+  }
+  for (const task of await listHelperTasks(config, session)) {
+    if (task.status === 'completed' || task.status === 'cancelled') continue
+    if (platform && task.platform && normalizePlatform(task.platform) !== normalizePlatform(platform)) continue
+    add(task.environmentKey)
+  }
+  add(config.environmentKey)
+  return keys
+}
+
+async function resolveLoginReportEnvironmentKey(config, session, platform) {
+  for (const task of await listHelperTasks(config, session)) {
+    if (task.status === 'completed' || task.status === 'cancelled') continue
+    if (platform && task.platform && normalizePlatform(task.platform) !== normalizePlatform(platform)) continue
+    if (task.environmentKey) return String(task.environmentKey).trim()
+  }
+  return config.environmentKey || ''
+}
+
+async function listHelperTasks(config, session) {
+  try {
+    const result = await helperRequest(config, '/v1/extension/tasks', {}, session)
+    return Array.isArray(result?.tasks) ? result.tasks : []
+  } catch {
+    return []
+  }
 }
 
 async function handleTask(config, session, task, options = {}) {
@@ -278,6 +474,7 @@ async function handleTask(config, session, task, options = {}) {
 
   payload.platform = task.platform
   payload.taskId = task.taskId
+  payload.environmentKey = task.environmentKey || config.environmentKey || null
   payload.expectedPlatformAccountId = task.expectedPlatformAccountId || payload.expectedPlatformAccountId || null
   payload.expectedAccountName = task.expectedAccountName || payload.expectedAccountName || null
   assertExpectedIdentityPresent(payload)
@@ -290,11 +487,13 @@ async function handleTask(config, session, task, options = {}) {
     type: 'GEO_ENV_FILL_TASK',
     payload,
   })
+  const fillResult = fillResponse?.result || fillResponse
 
   await apiRequest(taskApiConfig, `/api/v1/extension/tasks/${task.taskId}/ack`, {
     method: 'POST',
+    body: JSON.stringify({ fillResult }),
   }, session.extensionToken)
-  return fillResponse?.result || fillResponse
+  return fillResult
 }
 
 async function reportTaskLoginStatus(config, session, task, identityCheck) {
@@ -315,32 +514,36 @@ async function reportTaskLoginStatus(config, session, task, identityCheck) {
 async function reportActiveTabLoginStatus() {
   const { config, session } = await getConfig()
   if (!session?.extensionToken) throw new Error('请先绑定后台')
-  if (!config.environmentKey || !config.platform) {
-    throw new Error('请先填写环境标识和平台')
-  }
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => [])
-  if (!tab?.id || !tab.url || !isAllowedPlatformUrl(config.platform, tab.url)) {
-    throw new Error(`请先切换到 ${config.platform} 对应的平台页面`)
+  const platform = inferPlatformFromUrl(tab?.url) || config.platform
+  const environmentKey = await resolveLoginReportEnvironmentKey(config, session, platform)
+  if (!environmentKey || !platform) {
+    throw new Error('请先切换到平台页面，或填写环境标识和平台')
   }
-  if (!isAllowedLoginReportUrl(config.platform, tab.url)) {
-    throw new Error(`请在 ${platformReportPageHint(config.platform)} 上报登录状态，当前页面不允许用于账号登记`)
+  if (!tab?.id || !tab.url || !isAllowedPlatformUrl(platform, tab.url)) {
+    throw new Error(`请先切换到 ${platform} 对应的平台页面`)
+  }
+  if (!isAllowedLoginReportUrl(platform, tab.url)) {
+    throw new Error(`请在 ${platformReportPageHint(platform)} 上报登录状态，当前页面不允许用于账号登记`)
   }
   await ensureContentScript(tab.id)
   await waitForContentScript(tab.id, 8, 500)
   const response = await chrome.tabs.sendMessage(tab.id, {
     type: 'GEO_ENV_READ_IDENTITY',
-    payload: { platform: config.platform },
+    payload: { platform },
   })
   if (!response?.ok) throw new Error(response?.error || '读取平台账号身份失败')
   const identity = response.result?.identity || null
-  const status = await reportLoginStatus(config, session, {
+  const reportConfig = { ...config, environmentKey }
+  const status = await reportLoginStatus(reportConfig, session, {
     environmentAccountId: null,
-    environmentKey: config.environmentKey,
+    environmentKey,
     selfMediaAccountId: null,
-    platform: config.platform,
+    platform,
     identity,
   })
-  return { platform: config.platform, detectedIdentity: identity, backendStatus: status }
+  await appendEventLog({ type: 'login_report', ok: true, platform, environmentKey, status: status?.loginStatus || '-' })
+  return { platform, environmentKey, detectedIdentity: identity, backendStatus: status }
 }
 
 async function readIdentityFromTab(tabId, platform, options = {}) {
@@ -366,7 +569,7 @@ async function ensureContentScript(tabId) {
   const ping = await chrome.tabs.sendMessage(tabId, { type: 'GEO_ENV_PING' }).catch(() => null)
   if (ping?.ok) return
   await chrome.scripting.executeScript({
-    target: { tabId },
+    target: { tabId, allFrames: true },
     files: ['content-script.js'],
   })
   await delay(200)
@@ -378,21 +581,27 @@ async function reportLoginStatus(config, session, report) {
   const accountNames = firstArray(identity.accountNames, identity.currentAccountNames)
   assertSingleIdentityCandidate(accountIds, accountNames, identity)
   const hasIdentity = accountIds.length > 0 || accountNames.length > 0
+  const brandId = session?.brandId || report.brandId || null
   const path = report.environmentAccountId
     ? `/api/v1/extension/browser-environment-accounts/${report.environmentAccountId}/login-status`
-    : '/api/v1/extension/browser-environment-login-status'
+    : brandId
+      ? `/api/v1/extension/brands/${brandId}/browser-environment-login-status`
+      : '/api/v1/extension/browser-environment-login-status'
+  const body = {
+    selfMediaAccountId: report.selfMediaAccountId,
+    platform: report.platform,
+    actualPlatformAccountId: accountIds[0] || null,
+    actualAccountName: accountNames[0] || null,
+    loginStatus: hasIdentity ? 'logged_in' : 'login_required',
+    errorCode: hasIdentity ? null : 'IDENTITY_NOT_READ',
+    errorMessage: hasIdentity ? null : (identity.diagnostics || '未读取到平台账号身份'),
+  }
+  if (!brandId || report.environmentAccountId) {
+    body.environmentKey = report.environmentKey
+  }
   return apiRequest(config, path, {
     method: 'POST',
-    body: JSON.stringify({
-      environmentKey: report.environmentKey,
-      selfMediaAccountId: report.selfMediaAccountId,
-      platform: report.platform,
-      actualPlatformAccountId: accountIds[0] || null,
-      actualAccountName: accountNames[0] || null,
-      loginStatus: hasIdentity ? 'logged_in' : 'login_required',
-      errorCode: hasIdentity ? null : 'IDENTITY_NOT_READ',
-      errorMessage: hasIdentity ? null : (identity.diagnostics || '未读取到平台账号身份'),
-    }),
+    body: JSON.stringify(body),
   }, session.extensionToken)
 }
 
@@ -529,8 +738,50 @@ function assertExpectedIdentityPresent(payload) {
   throw error
 }
 
-function runSelfTest() {
+async function runSelfTest() {
   const checks = []
+  const { config, session } = await getConfig()
+
+  checks.push({
+    name: 'extension_bound',
+    ok: Boolean(session?.extensionToken),
+    detail: session?.extensionToken ? `sessionId=${session.sessionId || '-'}` : '未绑定后台',
+  })
+
+  try {
+    const health = await fetch(`${normalizeBaseUrl(config.helperBase)}/health`)
+      .then((response) => response.json())
+    checks.push({
+      name: 'local_helper_health',
+      ok: Boolean(health?.ok),
+      detail: `paired=${Boolean(health?.paired)}`,
+    })
+  } catch (error) {
+    checks.push({
+      name: 'local_helper_health',
+      ok: false,
+      error: `本地助手不可访问：${error.message}`,
+    })
+  }
+
+  if (session?.extensionToken) {
+    try {
+      await signedHelperHeaders(
+        config,
+        `/v1/extension/tasks/next?environmentKey=${encodeURIComponent(config.environmentKey || '')}`,
+        {},
+        session,
+      )
+      checks.push({ name: 'local_agent_sign', ok: true })
+    } catch (error) {
+      checks.push({
+        name: 'local_agent_sign',
+        ok: false,
+        error: error.message,
+      })
+    }
+  }
+
   for (const platform of IDENTITY_PRECHECK_PLATFORMS) {
     try {
       assertExpectedIdentityPresent({ platform })
@@ -575,12 +826,34 @@ function isAllowedPlatformUrl(platform, urlValue) {
   }
 }
 
+function isAutoPollReadyUrl(urlValue) {
+  try {
+    const url = new URL(urlValue)
+    const platform = inferPlatformFromUrl(urlValue)
+    if (platform === 'toutiao') {
+      return url.hostname === 'mp.toutiao.com' && url.pathname.includes('/graphic/publish')
+    }
+    if (platform === 'zhihu') {
+      return (url.hostname === 'www.zhihu.com' || url.hostname === 'zhuanlan.zhihu.com')
+        && url.pathname.startsWith('/write')
+    }
+    if (platform === 'xiaohongshu') {
+      return url.hostname === 'creator.xiaohongshu.com' && url.pathname.includes('/publish/publish')
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
 function isAllowedLoginReportUrl(platform, urlValue) {
   try {
     const url = new URL(urlValue)
     const normalizedPlatform = normalizePlatform(platform)
     if (normalizedPlatform === 'toutiao') {
-      return url.hostname === 'mp.toutiao.com' && !url.pathname.includes('/graphic/publish')
+      return url.hostname === 'mp.toutiao.com'
+        && !isToutiaoArticlePreviewUrl(url)
+        && !url.pathname.includes('/graphic/publish')
     }
     if (normalizedPlatform === 'zhihu') {
       return url.hostname === 'www.zhihu.com'
@@ -592,6 +865,10 @@ function isAllowedLoginReportUrl(platform, urlValue) {
   } catch {
     return false
   }
+}
+
+function isToutiaoArticlePreviewUrl(url) {
+  return url.hostname === 'mp.toutiao.com' && url.pathname.includes('/mp-article-preview/')
 }
 
 function inferPlatformFromUrl(urlValue) {
@@ -701,9 +978,68 @@ async function waitForContentScript(tabId, attempts, delayMs) {
 }
 
 async function sendFillMessageOnce(tabId, message) {
-  const response = await chrome.tabs.sendMessage(tabId, message)
+  const response = await withTimeout(
+    chrome.tabs.sendMessage(tabId, message),
+    90_000,
+    '页面填充执行超时，请检查定时发布弹窗或平台页面是否阻塞',
+  )
   if (!response?.ok) throw new Error(response?.error || '页面填充失败')
   return response
+}
+
+async function fillToutiaoScheduleAcrossFrames(tabId, value, platform) {
+  if (!tabId) throw new Error('跨 frame 设置定时发布缺少 tabId')
+  await ensureContentScript(tabId)
+  await chrome.scripting.executeScript({
+    target: { tabId, allFrames: true },
+    files: ['content-script.js'],
+  }).catch(() => {})
+  await delay(200)
+
+  const frames = await chrome.scripting.executeScript({
+    target: { tabId, allFrames: true },
+    func: () => {
+      const text = String(document.body?.innerText || document.body?.textContent || '').replace(/\s+/g, '')
+      const hasScheduleDialog = text.includes('定时发布')
+        && (text.includes('请选择当前时间后') || text.includes('本文将于北京时间') || text.includes('预览并定时发布'))
+      const hasScheduleControls = /月\d{1,2}日/.test(text) && text.includes('时') && text.includes('分')
+      return {
+        href: location.href,
+        title: document.title,
+        hasScheduleDialog,
+        hasScheduleControls,
+        text: text.slice(0, 160),
+      }
+    },
+  })
+  const frame = frames
+    .filter((item) => item?.result?.hasScheduleDialog || item?.result?.hasScheduleControls)
+    .sort((left, right) => Number(Boolean(right.result?.hasScheduleDialog)) - Number(Boolean(left.result?.hasScheduleDialog)))[0]
+  if (!frame) {
+    const diagnostic = frames.map((item) => `${item.frameId}:${item.result?.text || '-'}`).join('|').slice(0, 600)
+    throw new Error(`头条定时发布弹窗 frame 未找到；frames=${diagnostic}`)
+  }
+  const response = await withTimeout(
+    chrome.tabs.sendMessage(tabId, {
+      type: 'GEO_ENV_FILL_TOUTIAO_SCHEDULE_FRAME',
+      value,
+      platform,
+    }, { frameId: frame.frameId }),
+    30_000,
+    '头条定时发布跨 frame 设置超时',
+  )
+  if (!response?.ok) throw new Error(response?.error || '头条定时发布跨 frame 设置失败')
+  return response.result || response
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timeout = null
+  const timer = new Promise((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(message)), timeoutMs)
+  })
+  return Promise.race([promise, timer]).finally(() => {
+    if (timeout) clearTimeout(timeout)
+  })
 }
 
 async function dispatchTrustedClick(tabId, click) {
@@ -711,8 +1047,8 @@ async function dispatchTrustedClick(tabId, click) {
     throw new Error('真实点击参数不完整')
   }
   const tab = await chrome.tabs.get(tabId).catch(() => null)
-  if (!tab?.url || !isAllowedPlatformUrl('xiaohongshu', tab.url)) {
-    throw new Error('真实点击仅允许用于小红书页面')
+  if (!tab?.url || (!isAllowedPlatformUrl('xiaohongshu', tab.url) && !isAllowedPlatformUrl('toutiao', tab.url))) {
+    throw new Error('真实点击仅允许用于小红书或头条页面')
   }
   const target = { tabId }
   await chrome.debugger.attach(target, '1.3')
@@ -743,6 +1079,193 @@ async function dispatchTrustedClick(tabId, click) {
   return { ok: true }
 }
 
+async function setFileInputFromUrl(tabId, urlValue, options = {}) {
+  if (!tabId || !urlValue) throw new Error('文件上传参数不完整')
+  const tab = await chrome.tabs.get(tabId).catch(() => null)
+  if (!tab?.url || !isAllowedPlatformUrl('toutiao', tab.url)) {
+    throw new Error('本地文件上传仅允许用于头条页面')
+  }
+  const { config, session } = await getConfig()
+  const uploaded = await helperRequest(config, '/v1/extension/files/upload-image-to-page', {
+    method: 'POST',
+    body: JSON.stringify({
+      url: urlValue,
+      backendBase: config.apiBase,
+      taskId: options.taskId || null,
+      environmentKey: options.environmentKey || config.environmentKey,
+      platform: 'toutiao',
+    }),
+  }, session)
+  if (!uploaded?.ok) throw new Error('本地助手未完成头条文件上传')
+  return {
+    ok: true,
+    fileName: uploaded?.image?.fileName || '',
+    contentType: uploaded?.image?.contentType || '',
+    size: uploaded?.image?.size || 0,
+    inputState: uploaded?.upload?.inputState || null,
+    fileInputCount: uploaded?.upload?.fileInputCount || null,
+    pageUrl: uploaded?.upload?.pageUrl || '',
+  }
+}
+
+async function setLatestFileInputFiles(tabId, filePath) {
+  const target = { tabId }
+  await chrome.debugger.attach(target, '1.3')
+  try {
+    const documentResult = await chrome.debugger.sendCommand(target, 'DOM.getDocument', { depth: -1, pierce: true })
+    const rootNodeId = documentResult?.root?.nodeId
+    if (!rootNodeId) throw new Error('未获取到页面 DOM 根节点')
+    const query = await chrome.debugger.sendCommand(target, 'DOM.querySelectorAll', {
+      nodeId: rootNodeId,
+      selector: 'input[type="file"]',
+    })
+    const nodeIds = Array.isArray(query?.nodeIds) ? query.nodeIds : []
+    const chosen = await chooseImageFileInputNode(target, nodeIds)
+    const nodeId = chosen?.nodeId || null
+    if (!nodeId) throw new Error('头条封面本地上传文件框未找到')
+    await chrome.debugger.sendCommand(target, 'DOM.setFileInputFiles', {
+      nodeId,
+      files: [filePath],
+    })
+    const state = await dispatchFileInputEvents(target, nodeId)
+    return { ...state, chosenInput: chosen?.attrs || null, fileInputCount: nodeIds.length }
+  } finally {
+    await chrome.debugger.detach(target).catch(() => {})
+  }
+}
+
+async function chooseImageFileInputNode(target, nodeIds) {
+  let fallback = null
+  const preferred = []
+  for (const nodeId of nodeIds) {
+    const described = await chrome.debugger.sendCommand(target, 'DOM.describeNode', { nodeId }).catch(() => null)
+    const attrs = attributesToObject(described?.node?.attributes || [])
+    const item = { nodeId, attrs }
+    if (!fallback) fallback = item
+    const accept = String(attrs.accept || '').toLowerCase()
+    const name = String(attrs.name || attrs.class || attrs.id || '').toLowerCase()
+    if (accept.includes('image') || accept.includes('jpg') || accept.includes('png') || /image|upload|cover|file/.test(name)) {
+      preferred.push(item)
+    }
+  }
+  if (preferred.length) return preferred[preferred.length - 1]
+  return nodeIds.length ? { nodeId: nodeIds[nodeIds.length - 1], attrs: {} } : fallback
+}
+
+function attributesToObject(attributes) {
+  const result = {}
+  for (let index = 0; index < attributes.length; index += 2) {
+    result[attributes[index]] = attributes[index + 1] || ''
+  }
+  return result
+}
+
+async function dispatchFileInputEvents(target, nodeId) {
+  const resolved = await chrome.debugger.sendCommand(target, 'DOM.resolveNode', { nodeId })
+  const objectId = resolved?.object?.objectId
+  if (!objectId) return { filesLength: null }
+  const result = await chrome.debugger.sendCommand(target, 'Runtime.callFunctionOn', {
+    objectId,
+    returnByValue: true,
+    functionDeclaration: `function() {
+      this.dispatchEvent(new Event('input', { bubbles: true }));
+      this.dispatchEvent(new Event('change', { bubbles: true }));
+      return {
+        filesLength: this.files ? this.files.length : 0,
+        fileName: this.files && this.files[0] ? this.files[0].name : '',
+        accept: this.getAttribute('accept') || '',
+        id: this.id || '',
+        name: this.name || '',
+      };
+    }`,
+  })
+  return result?.result?.value || { filesLength: null }
+}
+
+async function fetchImageDataUrl(urlValue, depth = 0) {
+  const url = new URL(urlValue)
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    throw new Error('封面图片地址仅支持 http/https')
+  }
+  const response = await fetch(url.href)
+  if (!response.ok) {
+    throw new Error(`封面图片下载失败：HTTP ${response.status}`)
+  }
+  const type = response.headers.get('content-type') || 'image/jpeg'
+  if (!type.startsWith('image/')) {
+    const bodyText = await response.text().catch(() => '')
+    const nestedUrl = extractImageUrlFromJsonText(bodyText)
+    if (nestedUrl && depth < 2) {
+      return fetchImageDataUrl(nestedUrl, depth + 1)
+    }
+    const backendUrl = await rewritePublicMaterialUrlToConfiguredBackend(url.href)
+    if (backendUrl && depth < 2) {
+      return fetchImageDataUrl(backendUrl, depth + 1)
+    }
+    throw new Error(`封面图片类型不支持：${type}；url=${url.href}；响应=${bodyText.slice(0, 240) || '-'}`)
+  }
+  const buffer = await response.arrayBuffer()
+  if (buffer.byteLength > MAX_IMAGE_FETCH_BYTES) {
+    throw new Error('封面图片超过 20MB，头条本地上传不支持')
+  }
+  return {
+    dataUrl: `data:${type};base64,${arrayBufferToBase64(buffer)}`,
+    type,
+    size: buffer.byteLength,
+  }
+}
+
+function extractImageUrlFromJsonText(text) {
+  try {
+    const json = JSON.parse(text)
+    return firstText(
+      json?.url,
+      json?.data?.url,
+      json?.data?.previewUrl,
+      json?.data?.downloadUrl,
+      json?.data?.fileUrl,
+      json?.result?.url,
+      json?.result?.previewUrl,
+      json?.result?.downloadUrl,
+    )
+  } catch {
+    const match = String(text || '').match(/https?:\/\/[^"'\\\s]+/i)
+    return match?.[0] || ''
+  }
+}
+
+async function rewritePublicMaterialUrlToConfiguredBackend(urlValue) {
+  try {
+    const url = new URL(urlValue)
+    if (!url.pathname.startsWith('/api/public/brand-materials/')) return ''
+    const { config } = await getConfig()
+    if (!config?.apiBase) return ''
+    const backend = new URL(config.apiBase)
+    if (backend.origin === url.origin) return ''
+    return `${backend.origin}${url.pathname}${url.search}`
+  } catch {
+    return ''
+  }
+}
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer)
+  const chunkSize = 0x8000
+  let binary = ''
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.subarray(index, index + chunkSize)
+    binary += String.fromCharCode(...chunk)
+  }
+  return btoa(binary)
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
 async function setBadge(text) {
   try {
     await chrome.action.setBadgeText({ text })
@@ -766,13 +1289,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return { ok: true, status }
     }
     if (message?.type === 'GEO_ENV_SELF_TEST') {
-      return { ok: true, checks: runSelfTest() }
+      return { ok: true, checks: await runSelfTest() }
     }
     if (message?.type === 'GEO_ENV_EDITOR_READY') {
+      const readyUrl = sender.url || message.href || sender.tab?.url || ''
+      const frameId = Number.isInteger(sender.frameId) ? sender.frameId : 0
+      if (frameId !== 0 || !isAutoPollReadyUrl(readyUrl)) {
+        return { ok: true, skipped: true, reason: 'not_publish_editor_ready' }
+      }
       return autoPollOnce(message.href || 'editor_ready', sender.tab?.id || null)
     }
     if (message?.type === 'GEO_ENV_TRUSTED_CLICK') {
       return dispatchTrustedClick(sender.tab?.id || null, message.click || {})
+    }
+    if (message?.type === 'GEO_ENV_SET_FILE_INPUT_FROM_URL') {
+      return setFileInputFromUrl(sender.tab?.id || null, message.url, {
+        taskId: message.taskId || null,
+        environmentKey: message.environmentKey || null,
+      })
+    }
+    if (message?.type === 'GEO_ENV_FETCH_IMAGE_DATA_URL') {
+      const result = await fetchImageDataUrl(message.url)
+      return { ok: true, result }
+    }
+    if (message?.type === 'GEO_ENV_FILL_TOUTIAO_SCHEDULE_ACROSS_FRAMES') {
+      const result = await fillToutiaoScheduleAcrossFrames(sender.tab?.id || null, message.value || {}, message.platform || 'toutiao')
+      return { ok: true, result }
     }
     return { ok: false, error: 'unknown message' }
   }

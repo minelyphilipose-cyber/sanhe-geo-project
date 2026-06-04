@@ -325,6 +325,29 @@
               <div class="form-help">建议 15-40 字，会作为 Markdown 一级标题</div>
             </div>
 
+            <div v-if="requiresCover" class="form-item cover-field">
+              <div class="cover-label-row">
+                <label class="form-label required">文章封面</label>
+                <el-button size="small" :icon="Picture" :disabled="!selectedProject?.brandId" @click="openCoverPicker">
+                  选择封面
+                </el-button>
+              </div>
+              <div v-if="selectedCoverMaterial" class="cover-card">
+                <img :src="materialThumbUrl(selectedCoverMaterial)" :alt="selectedCoverMaterial.fileName" />
+                <div class="cover-card-body">
+                  <strong>{{ selectedCoverMaterial.fileName }}</strong>
+                  <span>来自品牌素材库，会用于自媒体平台封面上传。</span>
+                </div>
+                <el-button link type="danger" @click="clearSelectedCover">移除</el-button>
+              </div>
+              <el-alert
+                v-else
+                type="warning"
+                :closable="false"
+                title="当前文章将分发到自媒体平台，保存前必须从品牌素材库选择封面。"
+              />
+            </div>
+
             <div class="paragraph-header">
               <label class="form-label">小标题段落</label>
               <span class="form-help">共 {{ manualForm.sections.length }} 段 · 使用操作调整顺序</span>
@@ -573,7 +596,7 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="imagePickerVisible" title="选择品牌图片" width="860px">
+    <el-dialog v-model="imagePickerVisible" :title="imagePickerMode === 'cover' ? '选择文章封面' : '选择品牌图片'" width="860px">
       <div class="image-picker">
         <div class="image-picker-toolbar">
           <el-select
@@ -605,7 +628,7 @@
               :key="material.id"
               type="button"
               class="image-tile"
-              :class="{ selected: selectedImageMaterialId === material.id }"
+              :class="{ selected: activePickerMaterialId === material.id }"
               @click="selectImageMaterial(material)"
             >
               <img :src="materialThumbUrl(material)" :alt="material.fileName" loading="lazy" />
@@ -616,8 +639,8 @@
       </div>
       <template #footer>
         <el-button @click="imagePickerVisible = false">取消</el-button>
-        <el-button type="primary" :disabled="!selectedImageMaterial" @click="insertSelectedImage">
-          插入文章
+        <el-button type="primary" :disabled="!activePickerMaterial" @click="confirmImagePicker">
+          {{ imagePickerMode === 'cover' ? '设为封面' : '插入文章' }}
         </el-button>
       </template>
     </el-dialog>
@@ -760,6 +783,7 @@ const markdownOverridden = ref(false)
 const sourceExpanded = ref(false)
 const previewMode = ref<'rendered' | 'markdown'>('rendered')
 const imagePickerVisible = ref(false)
+const imagePickerMode = ref<'insert' | 'cover'>('insert')
 const questionPickerVisible = ref(false)
 const questionPickerLoading = ref(false)
 const imageFoldersLoading = ref(false)
@@ -768,6 +792,7 @@ const imageThumbUrls = ref<Record<number, string | null>>({})
 const imagePreviewUrls = ref<Record<string, string>>({})
 const selectedImageFolderId = ref<number | null>(null)
 const selectedImageMaterialId = ref<number | null>(null)
+const selectedCoverMaterialId = ref<number | null>(null)
 const imageAltText = ref('')
 const generationNotice = ref<NoticeState | null>(null)
 const parseNotice = ref<NoticeState | null>(null)
@@ -861,6 +886,7 @@ const previewContentStyleLabel = computed(() => {
 })
 const draftContentStyle = computed(() => createMode.value === 'auto' ? aiForm.contentStyle : manualForm.contentStyle)
 const draftTopic = computed(() => createMode.value === 'auto' ? aiForm.topic.trim() : manualForm.topic.trim())
+const requiresCover = computed(() => isSelfMediaStyle(draftContentStyle.value))
 const templateChannelGroups = computed(() => generationOptions.value?.groups || [])
 const selectedTemplateChannel = computed(() => findTemplateChannel(templateForm.channelKey))
 const availableTemplateOptions = computed(() => {
@@ -919,7 +945,8 @@ const canSubmit = computed(() => Boolean(
   && draftContentStyle.value
   && draftTopic.value
   && manualForm.title.trim()
-  && manualMarkdown.value.trim(),
+  && manualMarkdown.value.trim()
+  && (!requiresCover.value || createMode.value === 'auto' || selectedCoverMaterialId.value)
 ) && !generating.value && !templateSaving.value)
 const canGenerate = computed(() => {
   if (!manualForm.projectId || !manualForm.articleType || !aiForm.topic.trim() || generating.value || templateSaving.value) return false
@@ -945,6 +972,11 @@ const imageMaterials = computed(() => {
   return (folder?.materials || []).filter((material) => material.category === 'brand_image' && isImageType(material.fileType) && Boolean(material.fileUrl))
 })
 const selectedImageMaterial = computed(() => imageMaterials.value.find((item) => item.id === selectedImageMaterialId.value) || null)
+const allImageMaterials = computed(() => imageFolders.value.flatMap((folder) => folder.materials || [])
+  .filter((material) => material.category === 'brand_image' && isImageType(material.fileType) && Boolean(material.fileUrl)))
+const selectedCoverMaterial = computed(() => allImageMaterials.value.find((item) => item.id === selectedCoverMaterialId.value) || null)
+const activePickerMaterialId = computed(() => imagePickerMode.value === 'cover' ? selectedCoverMaterialId.value : selectedImageMaterialId.value)
+const activePickerMaterial = computed(() => imagePickerMode.value === 'cover' ? selectedCoverMaterial.value : selectedImageMaterial.value)
 const questionSceneOptions: QuestionSceneOption[] = [
   { value: 'brand', label: '品牌场景' },
   { value: 'decision', label: '决策场景' },
@@ -1326,6 +1358,21 @@ async function openImagePicker() {
     ElMessage.warning('请先选择绑定项目')
     return
   }
+  imagePickerMode.value = 'insert'
+  imagePickerVisible.value = true
+  if (!imageFolders.value.length) {
+    await loadImageFolders()
+  } else if (!Object.keys(imageThumbUrls.value).length) {
+    await loadImageThumbs(selectedProject.value.brandId)
+  }
+}
+
+async function openCoverPicker() {
+  if (!selectedProject.value?.brandId) {
+    ElMessage.warning('请先选择绑定项目')
+    return
+  }
+  imagePickerMode.value = 'cover'
   imagePickerVisible.value = true
   if (!imageFolders.value.length) {
     await loadImageFolders()
@@ -1491,7 +1538,11 @@ async function loadImageFolders() {
 }
 
 function selectImageMaterial(material: BrandMaterial) {
-  selectedImageMaterialId.value = material.id
+  if (imagePickerMode.value === 'cover') {
+    selectedCoverMaterialId.value = material.id
+  } else {
+    selectedImageMaterialId.value = material.id
+  }
   if (!imageAltText.value.trim()) {
     imageAltText.value = filenameWithoutExt(material.fileName)
   }
@@ -1560,6 +1611,27 @@ function renderPreviewMarkdown(content: string) {
   return template.innerHTML
 }
 
+function confirmImagePicker() {
+  if (imagePickerMode.value === 'cover') {
+    selectCoverImage()
+    return
+  }
+  insertSelectedImage()
+}
+
+function selectCoverImage() {
+  if (!selectedCoverMaterial.value) {
+    ElMessage.warning('请选择可用图片')
+    return
+  }
+  imagePickerVisible.value = false
+  ElMessage.success('封面已选择')
+}
+
+function clearSelectedCover() {
+  selectedCoverMaterialId.value = null
+}
+
 function insertSelectedImage() {
   const material = selectedImageMaterial.value
   if (!material?.fileUrl) {
@@ -1605,6 +1677,10 @@ function filenameWithoutExt(fileName?: string | null) {
 function isImageType(fileType?: string | null) {
   if (!fileType) return false
   return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(fileType.toLowerCase())
+}
+
+function isSelfMediaStyle(style?: string | null) {
+  return ['wechat', 'toutiao', 'douyin', 'zhihu', 'xiaohongshu', 'baijiahao', 'netease'].includes((style || '').trim())
 }
 
 function clearStillGeneratingTimer() {
@@ -1966,6 +2042,10 @@ async function submitManualCreate() {
     ElMessage.warning('正文不能为空')
     return
   }
+  if (requiresCover.value && createMode.value !== 'auto' && !selectedCoverMaterialId.value) {
+    ElMessage.warning('自媒体文章必须选择封面')
+    return
+  }
   submitting.value = true
   try {
     const { data } = await createManualContentArticle({
@@ -1976,6 +2056,7 @@ async function submitManualCreate() {
       topicAsQuestion: resolveDraftTopicAsQuestion(),
       title: manualForm.title.trim(),
       contentMarkdown,
+      coverMaterialId: requiresCover.value && selectedCoverMaterialId.value ? selectedCoverMaterialId.value : undefined,
       source: aiMetadata.value ? 'ai_preview' : 'manual',
       aiMetadata: aiMetadata.value || undefined,
     })
@@ -2031,6 +2112,7 @@ watch(() => manualForm.projectId, async () => {
   imageFolders.value = []
   selectedImageFolderId.value = null
   selectedImageMaterialId.value = null
+  selectedCoverMaterialId.value = null
   imageAltText.value = ''
   questionRows.value = []
   selectedQuestionKey.value = ''
@@ -2045,6 +2127,12 @@ watch(() => manualForm.projectId, async () => {
 
 watch(() => manualForm.articleType, () => {
   syncTemplateSelection()
+})
+
+watch(draftContentStyle, () => {
+  if (!requiresCover.value) {
+    selectedCoverMaterialId.value = null
+  }
 })
 
 watch(hasProjectCoreKeywords, () => {
@@ -2943,6 +3031,56 @@ onBeforeUnmount(() => {
   height: auto;
   margin: 18px auto;
   border-radius: 6px;
+}
+
+.cover-field {
+  padding: 14px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-fill-color-extra-light);
+}
+
+.cover-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.cover-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 86px;
+}
+
+.cover-card img {
+  width: 112px;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--el-fill-color-light);
+}
+
+.cover-card-body {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.cover-card-body strong,
+.cover-card-body span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cover-card-body span {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 
 .image-empty,

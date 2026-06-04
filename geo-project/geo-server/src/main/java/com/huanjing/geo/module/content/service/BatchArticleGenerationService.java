@@ -132,6 +132,7 @@ public class BatchArticleGenerationService {
     private final ArticleGenerationEngine articleGenerationEngine;
     private final ArticleModelResolver articleModelResolver;
     private final ArticleAutoImageInsertionService autoImageInsertionService;
+    private final ArticleCoverSelectionService coverSelectionService;
     private final BatchArticlePromptBuilder promptBuilder;
     private final ArticleGenerationPromptContextFactory promptContextFactory;
     private final BatchArticleQualityChecker qualityChecker;
@@ -164,6 +165,7 @@ public class BatchArticleGenerationService {
                                          ArticleGenerationEngine articleGenerationEngine,
                                          ArticleModelResolver articleModelResolver,
                                          ArticleAutoImageInsertionService autoImageInsertionService,
+                                         ArticleCoverSelectionService coverSelectionService,
                                          BatchArticlePromptBuilder promptBuilder,
                                          ArticleGenerationPromptContextFactory promptContextFactory,
                                          BatchArticleQualityChecker qualityChecker,
@@ -195,6 +197,7 @@ public class BatchArticleGenerationService {
         this.articleGenerationEngine = articleGenerationEngine;
         this.articleModelResolver = articleModelResolver;
         this.autoImageInsertionService = autoImageInsertionService;
+        this.coverSelectionService = coverSelectionService;
         this.promptBuilder = promptBuilder;
         this.promptContextFactory = promptContextFactory;
         this.qualityChecker = qualityChecker;
@@ -474,6 +477,9 @@ public class BatchArticleGenerationService {
             draft.setTopic(task.getTopic());
             draft.setTopicAsQuestion(task.getTopicAsQuestion());
             draft.setTitle(title);
+            if (ArticlePromptChannels.SELF_MEDIA.equals(task.getChannelGroupCode())) {
+                draft.setCoverImageUrl(coverSelectionService.selectRandomCoverUrl(project.getBrandId()));
+            }
             draft.setStatus("approved");
             draft.setCurrentVersionNo(1);
             draft.setHasRisk(false);

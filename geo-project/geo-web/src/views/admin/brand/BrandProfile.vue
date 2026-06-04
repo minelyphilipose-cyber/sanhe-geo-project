@@ -50,6 +50,7 @@
             <el-descriptions-item label="微信">{{ brand?.wechat || '-' }}</el-descriptions-item>
             <el-descriptions-item label="对外公开电话">{{ brand?.publicPhone || '-' }}</el-descriptions-item>
             <el-descriptions-item label="对外公开地址">{{ brand?.publicAddress || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="自媒体默认发布位置">{{ brand?.selfMediaPublishLocationName || '-' }}</el-descriptions-item>
             <el-descriptions-item label="Agent 官网">{{ agentSiteLabel(brand?.geoSiteCode) }}</el-descriptions-item>
             <el-descriptions-item label="行业资讯站">{{ brand?.industrySiteName || '-' }}</el-descriptions-item>
             <el-descriptions-item label="业务介绍" :span="3">{{ brand?.businessIntro || '-' }}</el-descriptions-item>
@@ -118,6 +119,9 @@
               </el-form-item>
               <el-form-item label="对外公开地址">
                 <el-input v-model="infoForm.publicAddress" />
+              </el-form-item>
+              <el-form-item label="默认发布位置">
+                <el-input v-model="infoForm.selfMediaPublishLocationName" maxlength="64" placeholder="用于头条等自媒体发布页添加位置" />
               </el-form-item>
               <el-form-item label="Agent 官网">
                 <el-select
@@ -320,6 +324,7 @@ const infoForm = reactive({
   wechat: '',
   publicPhone: '',
   publicAddress: '',
+  selfMediaPublishLocationName: '',
   geoSiteCode: '',
   geoSiteStatus: '',
   industrySiteName: '',
@@ -415,6 +420,7 @@ function fillInfoForm(data: Brand) {
   infoForm.wechat = data.wechat || ''
   infoForm.publicPhone = data.publicPhone || ''
   infoForm.publicAddress = data.publicAddress || ''
+  infoForm.selfMediaPublishLocationName = data.selfMediaPublishLocationName || ''
   infoForm.geoSiteCode = data.geoSiteCode || ''
   infoForm.geoSiteStatus = data.geoSiteStatus || ''
   infoForm.industrySiteName = data.industrySiteName || ''
@@ -464,6 +470,7 @@ async function saveInfo() {
       wechat: nullableText(infoForm.wechat),
       publicPhone: nullableText(infoForm.publicPhone),
       publicAddress: nullableText(infoForm.publicAddress),
+      selfMediaPublishLocationName: nullableText(infoForm.selfMediaPublishLocationName),
       officialAccount: nullableText(brand.value?.officialAccount),
       videoAccount: nullableText(brand.value?.videoAccount),
       douyinAccount: nullableText(brand.value?.douyinAccount),

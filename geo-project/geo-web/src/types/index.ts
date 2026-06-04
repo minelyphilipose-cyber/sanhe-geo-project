@@ -149,6 +149,7 @@ export interface Brand {
   phone: string | null
   publicPhone?: string | null
   publicAddress?: string | null
+  selfMediaPublishLocationName?: string | null
   wechat: string | null
   description: string | null
   businessIntro?: string | null
@@ -962,6 +963,7 @@ export interface ArticleDraft {
   topic?: string | null
   topicAsQuestion?: string | null
   title: string
+  coverImageUrl?: string | null
   status: 'approved' | 'distributing' | 'distributed' | 'published' | 'unpublished' | string
   hasRisk: boolean
   riskSeverity: 'none' | 'warn' | 'block' | string

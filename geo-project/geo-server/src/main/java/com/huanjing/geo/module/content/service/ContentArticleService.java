@@ -64,6 +64,7 @@ public class ContentArticleService {
     private final WechatArticleRenderService wechatArticleRenderService;
     private final ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
     private final ArticleAutoImageInsertionService autoImageInsertionService;
+    private final ArticleCoverSelectionService coverSelectionService;
     private final BrandAccessService brandAccessService;
     private final AuditService auditService;
 
@@ -313,6 +314,8 @@ public class ContentArticleService {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Title is required");
         }
         String contentStyle = StringUtils.hasText(req.getContentStyle()) ? req.getContentStyle().trim() : "";
+        String channelGroupCode = groupFromContentStyle(contentStyle);
+        String channelSubCode = subFromContentStyle(contentStyle);
         String topic = StringUtils.hasText(req.getTopic()) ? req.getTopic().trim() : "";
         String topicAsQuestion = StringUtils.hasText(req.getTopicAsQuestion()) ? req.getTopicAsQuestion().trim() : null;
         if (!StringUtils.hasText(contentStyle)) {
@@ -321,9 +324,10 @@ public class ContentArticleService {
         if (!StringUtils.hasText(topic)) {
             throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Topic is required");
         }
+        String createSource = normalizeCreateSource(req.getSource());
+        String coverImageUrl = resolveManualCreateCoverUrl(project, req, channelGroupCode, channelSubCode, contentStyle, createSource);
         markdownImageReferenceValidator.validate(project, content);
 
-        String createSource = normalizeCreateSource(req.getSource());
         String initialStatus = "approved";
 
         ArticleDraft draft = new ArticleDraft();
@@ -331,11 +335,12 @@ public class ContentArticleService {
         draft.setArticleType(articleType);
         draft.setArticleTypeCode(articleType);
         draft.setContentStyle(contentStyle);
-        draft.setChannelGroupCode(groupFromContentStyle(contentStyle));
-        draft.setChannelSubCode(subFromContentStyle(contentStyle));
+        draft.setChannelGroupCode(channelGroupCode);
+        draft.setChannelSubCode(channelSubCode);
         draft.setTopic(topic);
         draft.setTopicAsQuestion(topicAsQuestion);
         draft.setTitle(title);
+        draft.setCoverImageUrl(coverImageUrl);
         draft.setStatus(initialStatus);
         draft.setCurrentVersionNo(1);
         draft.setHasRisk(false);
@@ -368,6 +373,21 @@ public class ContentArticleService {
         draft.setProjectName(project.getProjectName());
         auditArticleTransition("ARTICLE_CREATED", AuditResult.SUCCESS, operator, project, draft, null, initialStatus, "manual create", null);
         return draft;
+    }
+
+    private String resolveManualCreateCoverUrl(Project project,
+                                               ManualArticleCreateRequest req,
+                                               String channelGroupCode,
+                                               String channelSubCode,
+                                               String contentStyle,
+                                               String createSource) {
+        if (!isSelfMediaChannel(channelGroupCode, channelSubCode, contentStyle)) {
+            return null;
+        }
+        if ("ai_preview".equals(createSource) && req.getCoverMaterialId() == null) {
+            return coverSelectionService.selectRandomCoverUrl(project.getBrandId());
+        }
+        return coverSelectionService.requireManualCoverUrl(project.getBrandId(), req.getCoverMaterialId());
     }
 
     private String normalizeCreateSource(String source) {
@@ -585,6 +605,9 @@ public class ContentArticleService {
         draft.setArticleType(articleType);
         draft.setArticleTypeCode(articleType);
         draft.setTitle(title);
+        if (isSelfMediaTargetChannel(targetChannel)) {
+            draft.setCoverImageUrl(coverSelectionService.selectRandomCoverUrl(project.getBrandId()));
+        }
         draft.setStatus("approved");
         draft.setCurrentVersionNo(1);
         draft.setHasRisk(false);
@@ -654,6 +677,24 @@ public class ContentArticleService {
         for (ArticleDraft article : articles) {
             article.setProjectName(projectNameMap.getOrDefault(article.getProjectId(), "-"));
         }
+    }
+
+    private boolean isSelfMediaChannel(String channelGroupCode, String channelSubCode, String contentStyle) {
+        if (ArticlePromptChannels.SELF_MEDIA.equals(channelGroupCode)) {
+            return true;
+        }
+        if (StringUtils.hasText(channelSubCode) && ArticlePromptChannels.SELF_MEDIA_SUBS.contains(channelSubCode.trim())) {
+            return true;
+        }
+        return StringUtils.hasText(contentStyle) && ArticlePromptChannels.SELF_MEDIA_SUBS.contains(contentStyle.trim());
+    }
+
+    private boolean isSelfMediaTargetChannel(String targetChannel) {
+        if (!StringUtils.hasText(targetChannel)) {
+            return false;
+        }
+        String channel = targetChannel.trim();
+        return ArticlePromptChannels.SELF_MEDIA.equals(channel) || channel.startsWith(ArticlePromptChannels.SELF_MEDIA + ":");
     }
 
     private void fillGenerationMetadata(List<ArticleDraft> articles) {

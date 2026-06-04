@@ -84,8 +84,8 @@
             <span>指纹浏览器环境</span>
             <el-tag type="info">AdsPower</el-tag>
           </div>
-          <el-button v-if="canUpdateBrand" type="primary" link @click="openBrowserEnvironmentCreate">
-            {{ browserEnvironments.length ? '编辑/更换环境' : '配置环境' }}
+          <el-button v-if="canUpdateBrand" type="primary" link @click="openBrowserEnvironmentPrimaryAction">
+            {{ browserEnvironments.length ? '编辑环境' : '配置环境' }}
           </el-button>
         </div>
       </template>
@@ -116,6 +116,56 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div v-if="canUpdateBrand" class="extension-binding-panel">
+        <div class="extension-binding-head">
+          <div>
+            <h3>环境扩展绑定</h3>
+            <p>用于 AdsPower 环境内 GEO 扩展绑定当前品牌后台；出现异常时可吊销旧会话后重新绑定。</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <el-button :loading="extensionSessionsLoading" @click="loadExtensionSessions">刷新状态</el-button>
+            <el-button type="primary" :loading="extensionBindCodeLoading" @click="generateBrandExtensionBindCode">
+              生成绑定码
+            </el-button>
+          </div>
+        </div>
+
+        <div v-if="extensionBindCode" class="extension-bind-code-box">
+          <div>
+            <span>扩展绑定码</span>
+            <strong>{{ extensionBindCode.code }}</strong>
+            <small>{{ extensionBindCode.expiresInSeconds }} 秒内有效，请在 AdsPower 环境扩展弹窗中绑定后台。</small>
+          </div>
+          <el-button type="primary" plain @click="copyBrandExtensionBindCode">复制绑定码</el-button>
+        </div>
+
+        <el-table
+          v-loading="extensionSessionsLoading"
+          :data="extensionSessions"
+          border
+          empty-text="暂无已绑定扩展会话"
+        >
+          <el-table-column prop="id" label="Session ID" width="110" />
+          <el-table-column prop="extensionVersion" label="版本" width="110">
+            <template #default="{ row }">{{ row.extensionVersion || '-' }}</template>
+          </el-table-column>
+          <el-table-column prop="installId" label="安装标识" min-width="180">
+            <template #default="{ row }">{{ row.installId || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="最近活跃" min-width="170">
+            <template #default="{ row }">{{ row.lastSeenAt || row.boundAt || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="过期时间" min-width="170">
+            <template #default="{ row }">{{ row.expiresAt || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="100" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="danger" @click="revokeBrandExtension(row)">解绑</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
     </el-card>
 
     <el-card class="admin-table-card">
@@ -381,6 +431,9 @@
           <el-form-item label="对外公开电话"><el-input v-model="brandForm.publicPhone" /></el-form-item>
           <el-form-item label="微信"><el-input v-model="brandForm.wechat" /></el-form-item>
           <el-form-item class="is-wide" label="对外公开地址"><el-input v-model="brandForm.publicAddress" /></el-form-item>
+          <el-form-item label="默认发布位置">
+            <el-input v-model="brandForm.selfMediaPublishLocationName" maxlength="64" placeholder="用于头条等自媒体发布页添加位置" />
+          </el-form-item>
           <el-form-item label="Agent 官网">
             <el-select
               v-model="brandForm.geoSiteCode"
@@ -554,6 +607,13 @@ import {
   type BrowserEnvironment,
   type BrowserEnvironmentAccount,
 } from '@/api/browserEnvironment'
+import {
+  createExtensionBindCode,
+  listBrandExtensionSessions,
+  revokeBrandExtensionSession,
+  type ExtensionBindCode,
+  type ExtensionSession,
+} from '@/api/extension'
 import { getPublishSites } from '@/api/publishSite'
 import type { Brand, PublishSite, SelfMediaAccount } from '@/types'
 import { useUserStore } from '@/stores/user'
@@ -599,6 +659,10 @@ const browserEnvironmentVisible = ref(false)
 const browserEnvironmentSaving = ref(false)
 const editingBrowserEnvironment = ref<BrowserEnvironment | null>(null)
 const browserEnvironmentAccounts = ref<Record<number, BrowserEnvironmentAccount | null>>({})
+const extensionSessions = ref<ExtensionSession[]>([])
+const extensionSessionsLoading = ref(false)
+const extensionBindCode = ref<ExtensionBindCode | null>(null)
+const extensionBindCodeLoading = ref(false)
 const environmentBindingVisible = ref(false)
 const environmentBindingSaving = ref(false)
 const environmentBindingTargetAccount = ref<SemiAutoSelfMediaAccount | null>(null)
@@ -626,6 +690,7 @@ const brandForm = reactive({
   phone: '',
   publicPhone: '',
   publicAddress: '',
+  selfMediaPublishLocationName: '',
   wechat: '',
   status: 'active',
   businessIntro: '',
@@ -758,6 +823,7 @@ const brandContactInfoItems = computed(() => [
   { label: '联系电话', value: brand.value?.phone || '-' },
   { label: '对外公开电话', value: brand.value?.publicPhone || '-' },
   { label: '对外公开地址', value: brand.value?.publicAddress || '-' },
+  { label: '自媒体默认发布位置', value: brand.value?.selfMediaPublishLocationName || '-' },
   { label: '微信', value: brand.value?.wechat || '-' },
   { label: 'Agent 官网', value: agentSiteLabel(brand.value?.geoSiteCode) },
   { label: '行业资讯站', value: brand.value?.industrySiteName || '-' },
@@ -823,6 +889,15 @@ function openBrowserEnvironmentCreate() {
   browserEnvironmentForm.name = ''
   browserEnvironmentForm.status = 'active'
   browserEnvironmentVisible.value = true
+}
+
+function openBrowserEnvironmentPrimaryAction() {
+  const environment = defaultBrowserEnvironment.value || browserEnvironments.value[0]
+  if (environment) {
+    openBrowserEnvironmentEdit(environment)
+  } else {
+    openBrowserEnvironmentCreate()
+  }
 }
 
 function openBrowserEnvironmentEdit(environment: BrowserEnvironment) {
@@ -1088,6 +1163,7 @@ function fillForm(data: Brand) {
   brandForm.phone = data.phone || ''
   brandForm.publicPhone = data.publicPhone || ''
   brandForm.publicAddress = data.publicAddress || ''
+  brandForm.selfMediaPublishLocationName = data.selfMediaPublishLocationName || ''
   brandForm.wechat = data.wechat || ''
   brandForm.status = data.status || 'active'
   brandForm.businessIntro = data.businessIntro || ''
@@ -1129,13 +1205,14 @@ async function load() {
       companyName.value = ''
       companyIndustryTags.value = []
     }
-    await Promise.all([loadBrowserEnvironments(), loadSelfMediaAccounts(), loadPerspectiveConfigs()])
+    await Promise.all([loadBrowserEnvironments(), loadSelfMediaAccounts(), loadPerspectiveConfigs(), loadExtensionSessions()])
   } catch {
     brand.value = null
     companyName.value = ''
     selfMediaAccounts.value = []
     browserEnvironments.value = []
     browserEnvironmentAccounts.value = {}
+    extensionSessions.value = []
   } finally {
     loading.value = false
   }
@@ -1149,6 +1226,76 @@ async function loadBrowserEnvironments() {
   } finally {
     browserEnvironmentsLoading.value = false
   }
+}
+
+async function loadExtensionSessions() {
+  if (!hasValidId || !canUpdateBrand.value) return
+  extensionSessionsLoading.value = true
+  try {
+    const { data } = await listBrandExtensionSessions(brandId)
+    extensionSessions.value = data.data || []
+  } catch (error) {
+    extensionSessions.value = []
+    ElMessage.error(error instanceof Error ? error.message : '加载扩展绑定状态失败')
+  } finally {
+    extensionSessionsLoading.value = false
+  }
+}
+
+async function generateBrandExtensionBindCode() {
+  if (!brand.value) return
+  extensionBindCodeLoading.value = true
+  try {
+    const { data } = await createExtensionBindCode(brandId)
+    extensionBindCode.value = data.data
+    ElMessage.success('扩展绑定码已生成')
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : '生成扩展绑定码失败')
+  } finally {
+    extensionBindCodeLoading.value = false
+  }
+}
+
+async function copyBrandExtensionBindCode() {
+  if (!extensionBindCode.value?.code) return
+  await copyText(extensionBindCode.value.code)
+  ElMessage.success('绑定码已复制')
+}
+
+async function revokeBrandExtension(session: ExtensionSession) {
+  try {
+    await ElMessageBox.confirm(
+      `确认解绑扩展会话 ${session.id}？解绑后该 AdsPower 环境里的旧扩展 token 会失效，需要重新生成绑定码并绑定。`,
+      '扩展解绑确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认解绑',
+        cancelButtonText: '取消',
+      },
+    )
+    await revokeBrandExtensionSession(brandId, session.id)
+    ElMessage.success('扩展会话已解绑')
+    await loadExtensionSessions()
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(err instanceof Error ? err.message : '扩展解绑失败')
+  }
+}
+
+async function copyText(text: string) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const input = document.createElement('textarea')
+  input.value = text
+  input.setAttribute('readonly', 'readonly')
+  input.style.position = 'fixed'
+  input.style.opacity = '0'
+  document.body.appendChild(input)
+  input.select()
+  document.execCommand('copy')
+  document.body.removeChild(input)
 }
 
 async function loadSelfMediaAccounts() {
@@ -1334,6 +1481,7 @@ async function submitBrand() {
       phone: nullableText(brandForm.phone),
       publicPhone: nullableText(brandForm.publicPhone),
       publicAddress: nullableText(brandForm.publicAddress),
+      selfMediaPublishLocationName: nullableText(brandForm.selfMediaPublishLocationName),
       wechat: nullableText(brandForm.wechat),
       status: brandForm.status,
       description: nullableText(brandForm.businessIntro),
@@ -1542,6 +1690,73 @@ onMounted(async () => {
   line-height: 1.35;
 }
 
+.extension-binding-panel {
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.extension-binding-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.extension-binding-head h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.extension-binding-head p {
+  margin: 6px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.extension-bind-code-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+  padding: 14px;
+  border: 1px dashed #93c5fd;
+  border-radius: 10px;
+  background: #eff6ff;
+}
+
+.extension-bind-code-box div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.extension-bind-code-box span {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.extension-bind-code-box strong {
+  color: #0f172a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 20px;
+  letter-spacing: 0;
+}
+
+.extension-bind-code-box small {
+  color: #64748b;
+  font-size: 12px;
+}
+
 .environment-binding-summary {
   margin: 14px 0;
 }
@@ -1554,6 +1769,12 @@ onMounted(async () => {
   .brand-info-grid,
   .brand-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .extension-binding-head,
+  .extension-bind-code-box {
+    align-items: stretch;
+    flex-direction: column;
   }
 }
 </style>

@@ -6,6 +6,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.BrowserEnvironmentConstants;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentAccountCreateRequest;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentAccountUpdateRequest;
+import com.huanjing.geo.module.content.dto.BrowserEnvironmentBrandLoginStatusRequest;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentCreateRequest;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentLoginStatusRequest;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentUpdateRequest;
@@ -22,6 +23,7 @@ import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
@@ -69,7 +71,11 @@ public class BrowserEnvironmentService {
         row.setUpdatedBy(operator.getId());
         row.setCreatedAt(now);
         row.setUpdatedAt(now);
-        environmentMapper.insert(row);
+        try {
+            environmentMapper.insert(row);
+        } catch (DuplicateKeyException ex) {
+            throw duplicateEnvironmentException();
+        }
         return BrowserEnvironmentVO.from(row);
     }
 
@@ -95,7 +101,11 @@ public class BrowserEnvironmentService {
         }
         row.setUpdatedBy(operator.getId());
         row.setUpdatedAt(LocalDateTime.now());
-        environmentMapper.updateById(row);
+        try {
+            environmentMapper.updateById(row);
+        } catch (DuplicateKeyException ex) {
+            throw duplicateEnvironmentException();
+        }
         return BrowserEnvironmentVO.from(row);
     }
 
@@ -254,6 +264,41 @@ public class BrowserEnvironmentService {
         return reportLoginStatusForOperator(rows.get(0).getId(), request, operatorId);
     }
 
+    @Transactional
+    public BrowserEnvironmentAccountVO reportLoginStatusForExtensionByBrandAndPlatform(
+            Long brandId,
+            BrowserEnvironmentBrandLoginStatusRequest request,
+            Long operatorId) {
+        if (brandId == null) {
+            fail("BRAND_REQUIRED", "品牌不能为空");
+        }
+        String platform = trimToNull(request.platform());
+        if (!StringUtils.hasText(platform)) {
+            fail("PLATFORM_REQUIRED", "平台不能为空");
+        }
+        brandAccessService.requireBrandAccess(brandId, operatorId, BrandAccessAction.OPERATE);
+        List<BrowserEnvironmentAccount> rows =
+                environmentAccountMapper.selectActiveByBrandIdAndPlatform(brandId, platform);
+        if (rows == null || rows.isEmpty()) {
+            fail("BRAND_PLATFORM_BINDING_NOT_FOUND", "未找到品牌与平台对应的环境账号绑定");
+        }
+        if (rows.size() > 1) {
+            fail("BRAND_PLATFORM_BINDING_AMBIGUOUS", "同一品牌与平台存在多个环境账号绑定，请改用环境标识上报");
+        }
+        BrowserEnvironment environment = requireEnvironment(rows.get(0).getBrowserEnvironmentId());
+        BrowserEnvironmentLoginStatusRequest normalizedRequest = new BrowserEnvironmentLoginStatusRequest(
+                environment.getEnvironmentKey(),
+                request.selfMediaAccountId(),
+                platform,
+                request.actualPlatformAccountId(),
+                request.actualAccountName(),
+                request.loginStatus(),
+                request.errorCode(),
+                request.errorMessage()
+        );
+        return reportLoginStatusForOperator(rows.get(0).getId(), normalizedRequest, operatorId);
+    }
+
     private BrowserEnvironmentAccountVO reportLoginStatusForOperator(Long id,
                                                                      BrowserEnvironmentLoginStatusRequest request,
                                                                      Long operatorId) {
@@ -389,7 +434,9 @@ public class BrowserEnvironmentService {
     private void assertTransitionAllowed(String from, String to) {
         String normalizedFrom = StringUtils.hasText(from) ? from : BrowserEnvironmentConstants.LOGIN_UNKNOWN;
         if (BrowserEnvironmentConstants.LOGIN_MISMATCH.equals(normalizedFrom)
-                && !BrowserEnvironmentConstants.LOGIN_UNKNOWN.equals(to)) {
+                && !BrowserEnvironmentConstants.LOGIN_UNKNOWN.equals(to)
+                && !BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(to)
+                && !BrowserEnvironmentConstants.LOGIN_MISMATCH.equals(to)) {
             fail(BrowserEnvironmentConstants.ERR_ENVIRONMENT_ACCOUNT_MISMATCH, "账号不一致状态必须先人工重置为 unknown");
         }
     }
@@ -467,6 +514,10 @@ public class BrowserEnvironmentService {
                 .replaceAll("(?i)(token[=:]\\s*)[^\\s,;]+", "$1***")
                 .replaceAll("(?i)(cookie[=:]\\s*)[^\\s,;]+", "$1***");
         return sanitized.length() > 512 ? sanitized.substring(0, 512) : sanitized;
+    }
+
+    private BizException duplicateEnvironmentException() {
+        return new BizException(400, "AdsPower 浏览器编号或环境代号已被其他启用环境使用，请编辑已有环境或换一个编号");
     }
 
     private void fail(String code, String message) {

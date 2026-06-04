@@ -5,6 +5,7 @@ import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.service.CompanyChannelQuotaService;
+import com.huanjing.geo.module.content.service.SelfMediaPublishScheduleService;
 import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.extension.ExtensionErrorCodes;
 import com.huanjing.geo.test.AbstractAuditDbIntegrationTest;
@@ -93,6 +94,7 @@ class ExtensionTaskStateServiceHeartbeatAuditDbTest extends AbstractAuditDbInteg
                 semiAutoTaskAccessService,
                 mock(InternalScopeService.class),
                 companyChannelQuotaService,
+                mock(SelfMediaPublishScheduleService.class),
                 redisStore,
                 new ExtensionAuditSupport(auditService),
                 auditService

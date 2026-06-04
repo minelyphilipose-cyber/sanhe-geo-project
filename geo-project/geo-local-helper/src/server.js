@@ -1,7 +1,8 @@
 import http from 'node:http'
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
-import { URL } from 'node:url'
+import path from 'node:path'
+import { fileURLToPath, URL } from 'node:url'
 import crypto from 'node:crypto'
 
 const CONFIG_PATH = new URL('../config.local.json', import.meta.url)
@@ -12,6 +13,7 @@ const TASKS_PATH = new URL('tasks.json', RUNTIME_DIR)
 const SESSION_PATH = new URL('session.json', RUNTIME_DIR)
 const NONCES_PATH = new URL('nonces.json', RUNTIME_DIR)
 const SETTINGS_PATH = new URL('settings.json', RUNTIME_DIR)
+const TEMP_FILES_DIR = new URL('temp-files/', RUNTIME_DIR)
 const tasksById = new Map()
 const CLAIM_TIMEOUT_MS = 30_000
 const CLAIMABLE_STATUSES = new Set(['pending', 'requeued'])
@@ -618,6 +620,39 @@ async function trustedBackendRequest(config, path, init = {}) {
   return body.data
 }
 
+function signedBackendHeaders(method, path, bodyText = '') {
+  if (!runtimeSession?.sessionId || !runtimeSession?.hmacSecret) {
+    const error = new Error('local helper is not paired with backend')
+    error.statusCode = 401
+    throw error
+  }
+  const normalizedMethod = String(method || 'GET').toUpperCase()
+  const timestamp = String(Math.floor(Date.now() / 1000))
+  const nonce = crypto.randomBytes(16).toString('hex')
+  const helperAccess = `helper.session.${runtimeSession.sessionId}`
+  const bodyHash = sha256Hex(bodyText || '')
+  const canonical = canonicalRequest(normalizedMethod, path, bodyHash, timestamp, nonce, helperAccess)
+  return {
+    'X-Geo-Helper-Access': helperAccess,
+    'X-Geo-Helper-Timestamp': timestamp,
+    'X-Geo-Helper-Nonce': nonce,
+    'X-Geo-Helper-Signature': hmacSha256Base64Url(runtimeSession.hmacSecret, canonical),
+  }
+}
+
+async function signedTrustedBackendRequest(config, path, init = {}) {
+  const method = String(init.method || 'GET').toUpperCase()
+  const bodyText = typeof init.body === 'string' ? init.body : ''
+  return trustedBackendRequest(config, path, {
+    ...init,
+    method,
+    headers: {
+      ...(init.headers || {}),
+      ...signedBackendHeaders(method, path, bodyText),
+    },
+  })
+}
+
 async function openUrlWithPuppeteer(wsEndpoint, targetUrl) {
   if (!wsEndpoint || !targetUrl) return { opened: false, reason: 'missing_ws_or_url' }
 
@@ -694,6 +729,68 @@ async function handleLaunch(req, res, config) {
   upsertTask(task)
   await saveRuntimeTasks()
   sendJson(req, res, config, 200, { ok: true, task })
+}
+
+async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
+  const path = `/api/v1/local-agent/self-media-schedules/claim-next?platform=${encodeURIComponent(platform)}`
+  const claim = await signedTrustedBackendRequest(config, path, { method: 'GET' })
+  if (!claim?.task || !claim?.launch) {
+    return { ok: true, claimed: false }
+  }
+  const taskId = Number(claim.launch.taskId || claim.task.id)
+  const existing = tasksById.get(taskId)
+  if (existing && !isTerminalStatus(existing.status) && existing.adspower?.puppeteerWs) {
+    return { ok: true, claimed: true, reused: true, task: existing, schedule: claim.schedule }
+  }
+  const environment = normalizeProviderEnvironment(
+    config,
+    claim.launch.environmentKey,
+    claim.launch.providerProfileId,
+    claim.launch.environmentName,
+  )
+  const profileId = encodeURIComponent(environment.providerProfileId)
+  const data = await adspowerGet(
+    config,
+    `/api/v1/browser/start?user_id=${profileId}&open_tabs=1&ip_tab=0`,
+  )
+  const task = normalizeLaunchTask({
+    taskId,
+    platform: claim.launch.platform || claim.task.platform,
+    backendBase: config.trustedBackendBase,
+    backendTask: claim.task,
+    url: claim.launch.url || defaultPublishUrlForPlatform(claim.launch.platform || claim.task.platform),
+    selfMediaAccountId: claim.launch.selfMediaAccountId || claim.task.selfMediaAccountId,
+    browserEnvironmentAccountId: claim.launch.browserEnvironmentAccountId || claim.task.browserEnvironmentAccountId,
+    expectedPlatformAccountId: claim.launch.expectedPlatformAccountId,
+    expectedAccountName: claim.launch.expectedAccountName,
+    environmentKey: claim.launch.environmentKey || claim.task.environmentKey,
+    providerProfileId: claim.launch.providerProfileId || claim.task.providerProfileId,
+    environmentName: claim.launch.environmentName || claim.launch.environmentKey || claim.task.environmentKey,
+  }, environment, data)
+  task.schedule = claim.schedule || null
+  task.platformScheduledAt = claim.schedule?.platformScheduledAt || null
+  upsertTask(task)
+  await saveRuntimeTasks()
+  task.openResult = await openUrlWithPuppeteer(data?.ws?.puppeteer, task.url)
+  upsertTask(task)
+  await saveRuntimeTasks()
+  return { ok: true, claimed: true, task, schedule: claim.schedule }
+}
+
+async function handleSchedulePollOnce(req, res, config) {
+  await requireHelperAccess(req, config)
+  const body = req.method === 'POST' ? await readJson(req) : {}
+  const platform = String(body.platform || 'toutiao').trim() || 'toutiao'
+  const result = await claimAndLaunchScheduledTask(config, platform)
+  sendJson(req, res, config, 200, result)
+}
+
+function defaultPublishUrlForPlatform(platform) {
+  const normalized = String(platform || '').trim().toLowerCase()
+  if (normalized === 'toutiao') return 'https://mp.toutiao.com/profile_v4/graphic/publish'
+  if (normalized === 'zhihu') return 'https://www.zhihu.com/'
+  if (normalized === 'xiaohongshu') return 'https://www.xiaohongshu.com/'
+  return null
 }
 
 async function handleOpenEnvironment(req, res, config) {
@@ -879,18 +976,27 @@ async function handleStop(req, res, config) {
 
 async function handleNextTask(req, res, config, url) {
   await requireHelperAccess(req, config)
-  const environmentKey = requireEnvironmentKey(url.searchParams.get('environmentKey'))
-  await requeueTimedOutClaims(environmentKey)
-  const task = findNextClaimableTask(environmentKey)
+  const environmentKey = String(url.searchParams.get('environmentKey') || '').trim()
+  const platform = String(url.searchParams.get('platform') || '').trim()
+  if (environmentKey) {
+    await requeueTimedOutClaims(environmentKey)
+  } else {
+    await requeueTimedOutClaimsByPlatform(platform)
+  }
+  const task = findNextClaimableTask(environmentKey, platform)
   if (!task) {
-    const active = listTasks().find((item) => item.environmentKey === environmentKey && !isTerminalStatus(item.status))
+    const active = listTasks().find((item) => (
+      (!environmentKey || item.environmentKey === environmentKey)
+      && (!platform || item.platform === platform)
+      && !isTerminalStatus(item.status)
+    ))
     sendJson(req, res, config, 200, { ok: true, task: null, status: active?.status || null })
     return
   }
   task.status = 'claimed'
   task.claimedAt = nowIso()
   task.claimOwner = {
-    environmentKey,
+    environmentKey: task.environmentKey,
     claimedAt: task.claimedAt,
   }
   await saveRuntimeTasks()
@@ -913,9 +1019,27 @@ async function requeueTimedOutClaims(environmentKey) {
   if (changed) await saveRuntimeTasks()
 }
 
-function findNextClaimableTask(environmentKey) {
+async function requeueTimedOutClaimsByPlatform(platform) {
+  let changed = false
+  for (const task of tasksById.values()) {
+    if (platform && task.platform !== platform) continue
+    if (task.status !== 'claimed' || !task.claimedAt) continue
+    const claimedMs = Date.now() - Date.parse(task.claimedAt)
+    if (claimedMs <= CLAIM_TIMEOUT_MS) continue
+    task.status = 'requeued'
+    task.claimedAt = null
+    task.claimOwner = null
+    task.requeuedAt = nowIso()
+    task.lastError = { message: 'claimed task timed out and was requeued' }
+    changed = true
+  }
+  if (changed) await saveRuntimeTasks()
+}
+
+function findNextClaimableTask(environmentKey, platform = '') {
   return listTasks().find((task) => (
-    task.environmentKey === environmentKey
+    (!environmentKey || task.environmentKey === environmentKey)
+    && (!platform || task.platform === platform)
     && CLAIMABLE_STATUSES.has(task.status)
   )) || null
 }
@@ -1031,6 +1155,240 @@ async function handleTasks(req, res, config) {
   sendJson(req, res, config, 200, { ok: true, tasks: listTasks() })
 }
 
+async function handleDownloadImageFile(req, res, config) {
+  const body = await readJson(req)
+  await requireHelperAccess(req, config)
+  const result = await downloadImageToTempFile(config, body.url, 0, body.backendBase)
+  sendJson(req, res, config, 200, { ok: true, ...result })
+}
+
+async function handleUploadImageToPage(req, res, config) {
+  const body = await readJson(req)
+  await requireHelperAccess(req, config)
+  const image = await downloadImageToTempFile(config, body.url, 0, body.backendBase)
+  const upload = await uploadImageFileToAdsPowerPage(body, image.filePath)
+  sendJson(req, res, config, 200, { ok: true, image, upload })
+}
+
+async function uploadImageFileToAdsPowerPage(body, filePath) {
+  const task = resolveTaskWithPuppeteerWs(body)
+  if (!task?.adspower?.puppeteerWs) {
+    throw new Error(`no active AdsPower puppeteer session for environmentKey=${body.environmentKey || '-'}`)
+  }
+  const { default: puppeteer } = await import('puppeteer-core')
+  const browser = await puppeteer.connect({ browserWSEndpoint: task.adspower.puppeteerWs })
+  try {
+    const pages = await browser.pages()
+    const page = pages.find((item) => {
+      const pageUrl = item.url()
+      return pageUrl.includes('mp.toutiao.com') && pageUrl.includes('/graphic/publish')
+    }) || pages.find((item) => item.url().includes('mp.toutiao.com'))
+    if (!page) {
+      throw new Error('AdsPower browser has no active Toutiao page')
+    }
+    await page.bringToFront().catch(() => {})
+    await page.waitForSelector('input[type="file"]', { timeout: 8_000 })
+    const chooserState = await acceptToutiaoFileChooser(page, filePath)
+    if (chooserState?.accepted) {
+      return chooserState
+    }
+    const inputs = await page.$$('input[type="file"]')
+    const targets = await choosePuppeteerImageInputs(inputs)
+    if (!targets.length) {
+      throw new Error('Toutiao file input not found')
+    }
+    const states = []
+    for (const target of targets) {
+      await target.uploadFile(filePath)
+      states.push(await readAndDispatchFileInputState(target))
+    }
+    return {
+      pageUrl: page.url(),
+      fileInputCount: inputs.length,
+      inputState: states[0] || null,
+      inputStates: states,
+    }
+  } finally {
+    await browser.disconnect()
+  }
+}
+
+async function acceptToutiaoFileChooser(page, filePath) {
+  const chooserPromise = page.waitForFileChooser({ timeout: 3_000 }).catch(() => null)
+  const clicked = await page.evaluate(() => {
+    function visible(el) {
+      const style = window.getComputedStyle(el)
+      const rect = el.getBoundingClientRect()
+      return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0
+    }
+    const candidates = Array.from(document.querySelectorAll('button, [role="button"], div, span, label'))
+      .filter(visible)
+      .filter((el) => {
+        const text = String(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\s+/g, '')
+        return text === '本地上传' || text === '上传图片' || text === '选择图片'
+      })
+    const target = candidates.find((el) => String(el.textContent || '').replace(/\s+/g, '') === '本地上传') || candidates[0]
+    if (!target) return false
+    const clickable = target.closest('button, label, [role="button"]') || target
+    clickable.click()
+    return true
+  }).catch(() => false)
+  if (!clicked) return null
+
+  const chooser = await chooserPromise
+  if (!chooser) return null
+  await chooser.accept([filePath])
+  await delay(500)
+  const inputs = await page.$$('input[type="file"]')
+  const states = []
+  for (const input of inputs) {
+    states.push(await readAndDispatchFileInputState(input))
+  }
+  return {
+    accepted: true,
+    pageUrl: page.url(),
+    fileInputCount: inputs.length,
+    inputState: states.find((state) => state.filesLength > 0) || states[0] || null,
+    inputStates: states,
+  }
+}
+
+async function choosePuppeteerImageInputs(inputs) {
+  const preferred = []
+  const fallback = []
+  for (const input of inputs) {
+    const meta = await input.evaluate((el) => ({
+      accept: el.getAttribute('accept') || '',
+      id: el.id || '',
+      name: el.name || '',
+      className: String(el.className || ''),
+    })).catch(() => ({}))
+    const text = `${meta.accept} ${meta.id} ${meta.name} ${meta.className}`.toLowerCase()
+    if (text.includes('image') || text.includes('jpg') || text.includes('png') || /upload|cover|file/.test(text)) {
+      if (text.includes('drag')) fallback.push(input)
+      else preferred.push(input)
+    }
+  }
+  return preferred.concat(fallback).length ? preferred.concat(fallback) : inputs.slice().reverse()
+}
+
+async function readAndDispatchFileInputState(input) {
+  return input.evaluate((el) => {
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    el.dispatchEvent(new Event('change', { bubbles: true }))
+    return {
+      filesLength: el.files ? el.files.length : 0,
+      fileName: el.files && el.files[0] ? el.files[0].name : '',
+      accept: el.getAttribute('accept') || '',
+      id: el.id || '',
+      name: el.name || '',
+      className: String(el.className || ''),
+    }
+  }).catch((error) => ({ error: error.message }))
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function resolveTaskWithPuppeteerWs(body) {
+  const taskId = Number(body.taskId)
+  if (Number.isFinite(taskId) && taskId > 0) {
+    const task = tasksById.get(taskId)
+    if (task?.adspower?.puppeteerWs) return task
+  }
+  const environmentKey = String(body.environmentKey || '').trim()
+  const platform = String(body.platform || '').trim()
+  const candidates = listTasks()
+    .filter((task) => !isTerminalStatus(task.status))
+    .filter((task) => task.adspower?.puppeteerWs)
+    .filter((task) => !environmentKey || task.environmentKey === environmentKey)
+    .filter((task) => !platform || task.platform === platform)
+  return candidates[candidates.length - 1] || null
+}
+
+async function downloadImageToTempFile(config, urlValue, depth = 0, backendBase = '') {
+  const url = new URL(String(urlValue || '').trim())
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    const error = new Error('image url only supports http/https')
+    error.statusCode = 400
+    throw error
+  }
+  const response = await fetch(url.href)
+  if (!response.ok) {
+    throw new Error(`image download failed: HTTP ${response.status}`)
+  }
+  const contentType = response.headers.get('content-type') || 'image/jpeg'
+  if (!contentType.startsWith('image/')) {
+    const bodyText = await response.text().catch(() => '')
+    const nestedUrl = extractImageUrlFromJsonText(bodyText) || rewritePublicMaterialUrlToTrustedBackend(config, url.href, backendBase)
+    if (nestedUrl && depth < 3) return downloadImageToTempFile(config, nestedUrl, depth + 1, backendBase)
+    throw new Error(`image content-type is not supported: ${contentType}; url=${url.href}; body=${bodyText.slice(0, 240) || '-'}`)
+  }
+  const buffer = Buffer.from(await response.arrayBuffer())
+  if (buffer.byteLength > 20 * 1024 * 1024) {
+    throw new Error('image exceeds 20MB')
+  }
+  await fs.mkdir(TEMP_FILES_DIR, { recursive: true })
+  const ext = imageExtension(contentType)
+  const fileName = `geo-cover-${Date.now()}-${crypto.randomBytes(6).toString('hex')}.${ext}`
+  const filePath = path.join(fileURLToPath(TEMP_FILES_DIR), fileName)
+  await fs.writeFile(filePath, buffer)
+  return {
+    filePath,
+    fileName,
+    contentType,
+    size: buffer.byteLength,
+    sourceUrl: url.href,
+  }
+}
+
+function extractImageUrlFromJsonText(text) {
+  try {
+    const json = JSON.parse(text)
+    return firstText(
+      json?.url,
+      json?.data?.url,
+      json?.data?.previewUrl,
+      json?.data?.downloadUrl,
+      json?.data?.fileUrl,
+      json?.result?.url,
+      json?.result?.previewUrl,
+      json?.result?.downloadUrl,
+    )
+  } catch {
+    const match = String(text || '').match(/https?:\/\/[^"'\\\s]+/i)
+    return match?.[0] || ''
+  }
+}
+
+function rewritePublicMaterialUrlToTrustedBackend(config, urlValue, backendBase = '') {
+  try {
+    const url = new URL(urlValue)
+    if (!url.pathname.startsWith('/api/public/brand-materials/')) return ''
+    const backend = new URL(firstText(backendBase, config.trustedBackendBase, config.backendBase))
+    if (backend.origin === url.origin) return ''
+    return `${backend.origin}${url.pathname}${url.search}`
+  } catch {
+    return ''
+  }
+}
+
+function imageExtension(contentType) {
+  const type = String(contentType || '').toLowerCase()
+  if (type.includes('png')) return 'png'
+  if (type.includes('webp')) return 'webp'
+  if (type.includes('gif')) return 'gif'
+  return 'jpg'
+}
+
+function firstText(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
 async function route(req, res, config) {
   if (req.method === 'OPTIONS') {
     sendJson(req, res, config, 204, {})
@@ -1061,12 +1419,16 @@ async function route(req, res, config) {
   if (req.method === 'POST' && url.pathname === '/v1/poc/launch') return handleLaunch(req, res, config)
   if (req.method === 'POST' && url.pathname === '/v1/poc/open-environment') return handleOpenEnvironment(req, res, config)
   if (req.method === 'POST' && url.pathname === '/v1/poc/create-and-launch') return handleCreateAndLaunch(req, res, config)
+  if ((req.method === 'GET' || req.method === 'POST') && url.pathname === '/v1/poc/schedule-poll-once') return handleSchedulePollOnce(req, res, config)
   if (req.method === 'POST' && url.pathname === '/v1/poc/accounts') return handleAccounts(req, res, config)
   if (req.method === 'POST' && url.pathname === '/v1/poc/requeue') return handleRequeue(req, res, config)
   if (req.method === 'POST' && url.pathname === '/v1/poc/cancel') return handleCancel(req, res, config)
   if (req.method === 'POST' && url.pathname === '/v1/poc/stop') return handleStop(req, res, config)
   if (req.method === 'GET' && url.pathname === '/v1/poc/tasks') return handleTasks(req, res, config)
+  if (req.method === 'GET' && url.pathname === '/v1/extension/tasks') return handleTasks(req, res, config)
   if (req.method === 'GET' && url.pathname === '/v1/extension/tasks/next') return handleNextTask(req, res, config, url)
+  if (req.method === 'POST' && url.pathname === '/v1/extension/files/download-image') return handleDownloadImageFile(req, res, config)
+  if (req.method === 'POST' && url.pathname === '/v1/extension/files/upload-image-to-page') return handleUploadImageToPage(req, res, config)
 
   const completeMatch = url.pathname.match(/^\/v1\/extension\/tasks\/(\d+)\/complete$/)
   if (req.method === 'POST' && completeMatch) return handleTaskComplete(req, res, config, completeMatch[1], 'completed')
@@ -1096,6 +1458,19 @@ const server = http.createServer((req, res) => {
 server.listen(config.port, config.host, () => {
   console.log(`GEO local helper listening on http://${config.host}:${config.port}`)
 })
+
+function startSchedulePoller(config) {
+  const intervalMs = Number(config.selfMediaSchedulePollIntervalMs || 30_000)
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) return
+  setInterval(() => {
+    if (!runtimeSession?.sessionId || !runtimeSession?.hmacSecret) return
+    claimAndLaunchScheduledTask(config, 'toutiao').catch((error) => {
+      console.error('GEO self-media schedule poll failed:', error.message)
+    })
+  }, Math.max(intervalMs, 10_000)).unref?.()
+}
+
+startSchedulePoller(config)
 
 async function shutdown() {
   try {

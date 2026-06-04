@@ -101,7 +101,7 @@ class ArticleAiDraftServiceTest {
 
         service = new ArticleAiDraftService(projectMapper, brandMapper, articleMapper, versionMapper,
                 currentUserService, brandAccessService, promptBuilder, promptContextFactory,
-                generationEngine, rateLimiter, auditService,
+                generationEngine, mock(ArticleCoverSelectionService.class), rateLimiter, auditService,
                 objectMapper, txManager(), Runnable::run);
     }
 
@@ -217,7 +217,7 @@ class ArticleAiDraftServiceTest {
         verify(llmInvoker).invoke(promptCaptor.capture(), configCaptor.capture());
         assertTrue(configCaptor.getValue().systemPrompt().contains("行业观察者"));
         assertTrue(promptCaptor.getValue().contains("AI topic"));
-        assertTrue(promptCaptor.getValue().contains("# GEO 可引用性要求"));
+        assertTrue(promptCaptor.getValue().contains("# GEO（生成式引擎优化）可引用性要求"));
         assertTrue(promptCaptor.getValue().contains("# 平台风格规则"));
         assertFalse(promptCaptor.getValue().contains("{{contactBlock}}"));
         assertFalse(promptCaptor.getValue().contains("{{topic}}"));
@@ -359,6 +359,7 @@ class ArticleAiDraftServiceTest {
                 projectMapper, mock(SysDictItemMapper.class), currentUserService,
                 mock(MarkdownImageReferenceValidator.class), mock(com.huanjing.geo.module.content.service.render.wechat.WechatArticleRenderService.class),
                 mock(ArticleImagePublicUrlRewriter.class), mock(ArticleAutoImageInsertionService.class),
+                mock(ArticleCoverSelectionService.class),
                 brandAccessService, mock(AuditService.class));
     }
 

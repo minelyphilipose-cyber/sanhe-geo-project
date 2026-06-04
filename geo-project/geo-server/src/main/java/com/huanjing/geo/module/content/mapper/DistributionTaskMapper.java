@@ -76,6 +76,24 @@ public interface DistributionTaskMapper extends BaseMapper<DistributionTask> {
             @Param("abandonedAt") LocalDateTime abandonedAt
     );
 
+    @Update("""
+            UPDATE distribution_tasks
+            SET status = 'failed',
+                failure_kind = #{failureKind},
+                error_message = #{errorMessage},
+                finished_at = #{failedAt},
+                locked_until = NULL
+            WHERE id = #{taskId}
+              AND status IN ('token_issued', 'filling', 'filled')
+              AND dispatch_mode = 'SEMI_AUTO'
+            """)
+    int markSemiAutoFailed(
+            @Param("taskId") Long taskId,
+            @Param("failureKind") String failureKind,
+            @Param("errorMessage") String errorMessage,
+            @Param("failedAt") LocalDateTime failedAt
+    );
+
     @Select("""
             SELECT id, article_id, project_id, self_media_account_id, status, dispatch_mode, operator_id,
                    fill_token_issued_at, filled_at, last_heartbeat_at
@@ -133,7 +151,13 @@ public interface DistributionTaskMapper extends BaseMapper<DistributionTask> {
                    t.created_at AS createdAt,
                    t.fill_token_issued_at AS fillTokenIssuedAt,
                    t.operator_id AS operatorId,
-                   p.brand_id AS brandId
+                   p.brand_id AS brandId,
+                   t.self_media_account_id AS selfMediaAccountId,
+                   t.browser_environment_id AS browserEnvironmentId,
+                   t.browser_environment_account_id AS browserEnvironmentAccountId,
+                   t.environment_key AS environmentKey,
+                   t.environment_provider AS environmentProvider,
+                   t.provider_profile_id AS providerProfileId
             FROM distribution_tasks t
             INNER JOIN article_draft a ON a.id = t.article_id
             INNER JOIN project p ON p.id = t.project_id
@@ -150,7 +174,9 @@ public interface DistributionTaskMapper extends BaseMapper<DistributionTask> {
     );
 
     @Select("""
-            SELECT id, project_id, self_media_account_id, status, dispatch_mode, operator_id, fill_payload
+            SELECT id, project_id, self_media_account_id, status, dispatch_mode, operator_id, fill_payload,
+                   browser_environment_id, browser_environment_account_id, environment_key,
+                   environment_provider, provider_profile_id
             FROM distribution_tasks
             WHERE id = #{taskId}
             """)

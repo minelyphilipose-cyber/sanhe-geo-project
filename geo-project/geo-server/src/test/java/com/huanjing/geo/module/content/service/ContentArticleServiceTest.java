@@ -68,6 +68,7 @@ class ContentArticleServiceTest {
     private AuditService auditService;
     private ArticleImagePublicUrlRewriter articleImagePublicUrlRewriter;
     private ArticleAutoImageInsertionService autoImageInsertionService;
+    private ArticleCoverSelectionService coverSelectionService;
     private ContentArticleService service;
 
     @BeforeEach
@@ -84,6 +85,7 @@ class ContentArticleServiceTest {
         auditService = mock(AuditService.class);
         articleImagePublicUrlRewriter = mock(ArticleImagePublicUrlRewriter.class);
         autoImageInsertionService = mock(ArticleAutoImageInsertionService.class);
+        coverSelectionService = mock(ArticleCoverSelectionService.class);
         projectMapper = mock(ProjectMapper.class);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
 
@@ -91,6 +93,7 @@ class ContentArticleServiceTest {
         when(projectMapper.selectById(10L)).thenReturn(project());
         when(articleImagePublicUrlRewriter.rewrite(any(), any())).thenAnswer(invocation -> invocation.getArgument(1));
         when(autoImageInsertionService.insertForChannel(any(), any(), any())).thenAnswer(invocation -> invocation.getArgument(2));
+        when(coverSelectionService.requireManualCoverUrl(any(), any())).thenReturn("https://example.test/cover.jpg");
 
         service = new ContentArticleService(
                 articleDraftMapper,
@@ -107,6 +110,7 @@ class ContentArticleServiceTest {
                 mock(WechatArticleRenderService.class),
                 articleImagePublicUrlRewriter,
                 autoImageInsertionService,
+                coverSelectionService,
                 brandAccessService,
                 auditService
         );
@@ -125,6 +129,7 @@ class ContentArticleServiceTest {
         request.setProjectId(10L);
         request.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
         request.setContentStyle("zhihu");
+        request.setCoverMaterialId(88L);
         request.setTopic("Manual topic");
         request.setTitle("Manual title");
         String markdown = "## Heading\n\n[official link](https://ok.example)\n\n- bullet";
@@ -173,6 +178,7 @@ class ContentArticleServiceTest {
                 "modelId", "gpt-test",
                 "modelName", "GPT Test"
         ));
+        when(coverSelectionService.selectRandomCoverUrl(20L)).thenReturn("https://example.test/random-cover.jpg");
 
         service.createManual(request);
 
@@ -181,6 +187,7 @@ class ContentArticleServiceTest {
         assertEquals("wechat", draftCaptor.getValue().getContentStyle());
         assertEquals("AI topic", draftCaptor.getValue().getTopic());
         assertEquals("AI question", draftCaptor.getValue().getTopicAsQuestion());
+        assertEquals("https://example.test/random-cover.jpg", draftCaptor.getValue().getCoverImageUrl());
         assertEquals("approved", draftCaptor.getValue().getStatus());
         ArgumentCaptor<ArticleDraftVersion> versionCaptor = ArgumentCaptor.forClass(ArticleDraftVersion.class);
         verify(articleDraftVersionMapper).insert(versionCaptor.capture());

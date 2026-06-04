@@ -4,7 +4,9 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.BrowserEnvironmentConstants;
+import com.huanjing.geo.module.content.dto.BrowserEnvironmentCreateRequest;
 import com.huanjing.geo.module.content.dto.BrowserEnvironmentLoginStatusRequest;
+import com.huanjing.geo.module.content.dto.BrowserEnvironmentUpdateRequest;
 import com.huanjing.geo.module.content.entity.BrowserEnvironment;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
@@ -18,12 +20,15 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DuplicateKeyException;
 
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -81,12 +86,12 @@ class BrowserEnvironmentServiceTest {
     }
 
     @Test
-    void reportLoginStatus_mismatchCannotRecoverToLoggedInWithoutManualReset() {
+    void reportLoginStatus_mismatchCanRecoverToLoggedInWhenIdentityMatchesExpected() {
         when(environmentAccountMapper.selectById(30L)).thenReturn(binding("expected", "name", BrowserEnvironmentConstants.LOGIN_MISMATCH));
         when(environmentMapper.selectById(20L)).thenReturn(environment());
         when(selfMediaAccountMapper.selectById(10L)).thenReturn(account());
 
-        assertThrows(BizException.class, () -> service.reportLoginStatus(30L, new BrowserEnvironmentLoginStatusRequest(
+        service.reportLoginStatus(30L, new BrowserEnvironmentLoginStatusRequest(
                 "geo_b",
                 10L,
                 "toutiao",
@@ -95,7 +100,33 @@ class BrowserEnvironmentServiceTest {
                 BrowserEnvironmentConstants.LOGIN_LOGGED_IN,
                 null,
                 null
-        )));
+        ));
+
+        ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
+        verify(environmentAccountMapper).updateById(captor.capture());
+        assertEquals(BrowserEnvironmentConstants.LOGIN_LOGGED_IN, captor.getValue().getLoginStatus());
+    }
+
+    @Test
+    void reportLoginStatus_mismatchReportIsIdempotentWhenIdentityStillDoesNotMatchExpected() {
+        when(environmentAccountMapper.selectById(30L)).thenReturn(binding("expected", "name", BrowserEnvironmentConstants.LOGIN_MISMATCH));
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(selfMediaAccountMapper.selectById(10L)).thenReturn(account());
+
+        service.reportLoginStatus(30L, new BrowserEnvironmentLoginStatusRequest(
+                "geo_b",
+                10L,
+                "toutiao",
+                "other",
+                "other-name",
+                BrowserEnvironmentConstants.LOGIN_LOGGED_IN,
+                null,
+                null
+        ));
+
+        ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
+        verify(environmentAccountMapper).updateById(captor.capture());
+        assertEquals(BrowserEnvironmentConstants.LOGIN_MISMATCH, captor.getValue().getLoginStatus());
     }
 
     @Test
@@ -204,6 +235,37 @@ class BrowserEnvironmentServiceTest {
         service.deleteEnvironment(20L);
 
         verify(environmentMapper).update(any(), any());
+    }
+
+    @Test
+    void createEnvironment_duplicateProviderProfileReturnsBusinessMessage() {
+        doThrow(new DuplicateKeyException("duplicate")).when(environmentMapper).insert(any(BrowserEnvironment.class));
+
+        BizException ex = assertThrows(BizException.class, () -> service.createEnvironment(new BrowserEnvironmentCreateRequest(
+                1L,
+                BrowserEnvironmentConstants.PROVIDER_ADSPOWER,
+                "geo_b",
+                "profile-1",
+                "环境"
+        )));
+
+        assertTrue(ex.getMessage().contains("AdsPower 浏览器编号或环境代号已被其他启用环境使用"));
+    }
+
+    @Test
+    void updateEnvironment_duplicateProviderProfileReturnsBusinessMessage() {
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        doThrow(new DuplicateKeyException("duplicate")).when(environmentMapper).updateById(any(BrowserEnvironment.class));
+
+        BizException ex = assertThrows(BizException.class, () -> service.updateEnvironment(20L, new BrowserEnvironmentUpdateRequest(
+                "profile-2",
+                "环境",
+                BrowserEnvironmentConstants.ENV_STATUS_ACTIVE,
+                null,
+                null
+        )));
+
+        assertTrue(ex.getMessage().contains("AdsPower 浏览器编号或环境代号已被其他启用环境使用"));
     }
 
     private BrowserEnvironment environment() {

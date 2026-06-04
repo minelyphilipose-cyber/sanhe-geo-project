@@ -25,7 +25,7 @@ D:\code\sanhe-geo-project\geo-project\geo-env-extension
 
 打开扩展弹窗，填写：
 
-- 后台地址：`http://119.45.154.127`
+- 后台地址：生产环境填 `http://119.45.154.127`；本地联调必须填当前本地后端地址，例如 `http://127.0.0.1:8080`
 - 本地助手地址：`http://127.0.0.1:17891`
 - 本地助手 Token：PoC 兜底字段，可留空。扩展绑定后台且本地助手完成 C2 配对后，会优先使用后台签发的 `helper.session.{sessionId}` + HMAC 签名访问本地助手。
 - 环境标识：例如 `geo_b`
@@ -37,6 +37,14 @@ D:\code\sanhe-geo-project\geo-project\geo-env-extension
 - 自动领取：默认开启。AdsPower 环境打开平台页后，扩展会自动向本地助手领取当前环境任务并填充；关闭后可继续用弹窗按钮手动领取。
 
 点击“保存配置”，再点击“绑定后台”。
+
+如果自动填充日志出现 `本地助手签名失败：Unauthorized`，通常说明 AdsPower 扩展保存的是旧的后台绑定，或“后台地址”指向了另一个后端环境。处理方式：
+
+1. 确认扩展弹窗里的后台地址与当前后台页面、当前本地助手配对的后端一致。
+2. 点击“保存配置”。
+3. 在后台重新生成一次扩展绑定码。
+4. 在 AdsPower 扩展弹窗重新“绑定后台”。
+5. 点击“自检”，确认 `extension_bound`、`local_helper_health`、`local_agent_sign` 均通过。
 
 ## 上报环境登录状态
 
@@ -89,7 +97,11 @@ fetch('/api/v1/extension/bind-codes', {
   "environmentKey": "geo_b",
   "taskId": 123,
   "platform": "toutiao",
-  "url": "https://mp.toutiao.com/"
+  "url": "https://mp.toutiao.com/",
+  "coverImageUrl": "https://example.com/cover.jpg",
+  "platformOptions": {
+    "locationName": "阜阳"
+  }
 }
 ```
 
@@ -123,6 +135,7 @@ geo-project\geo-env-extension\POC_STATUS.md
 当前已验证：
 
 - 今日头条：进入发布页、标题/正文填充、读回校验、账号 ID/名称校验。
+- 今日头条发布设置：支持展示封面（单图/三图/无封面）、封面本地上传、添加位置输入并选择下拉匹配项。
 - 知乎：进入写文章页、标题/正文填充、读回校验、账号名称/标识探测校验。
 - 小红书：进入写长文、点击新的创作、标题/正文填充、读回校验、账号名称校验。
 

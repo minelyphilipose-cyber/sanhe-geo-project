@@ -35,7 +35,8 @@ public class BrandMaterialPublicUrlService {
     public String buildPublicStreamUrl(BrandMaterial material) {
         requirePublicMaterial(material);
         String baseUrl = normalizeBaseUrl(publicBaseUrl);
-        return baseUrl + PUBLIC_STREAM_PATH.formatted(material.getId()) + "?sig=" + sign(material);
+        return baseUrl + PUBLIC_STREAM_PATH.formatted(material.getId()) + "?sig=" + sign(material)
+                + "&v=" + publicVersion(material);
     }
 
     public BrandMaterial verifyPublicAccess(Long materialId, String signature) {
@@ -72,6 +73,16 @@ public class BrandMaterialPublicUrlService {
         }
     }
 
+    private String publicVersion(BrandMaterial material) {
+        if (material.getUpdatedAt() != null) {
+            return String.valueOf(java.sql.Timestamp.valueOf(material.getUpdatedAt()).getTime());
+        }
+        if (material.getFileSize() != null && material.getFileSize() > 0) {
+            return String.valueOf(material.getFileSize());
+        }
+        return String.valueOf(material.getId());
+    }
+
     private String resolveSecret() {
         if (StringUtils.hasText(materialPublicTokenSecret)) {
             return materialPublicTokenSecret.trim();
@@ -84,7 +95,7 @@ public class BrandMaterialPublicUrlService {
 
     private String normalizeBaseUrl(String value) {
         if (!StringUtils.hasText(value)) {
-            throw new BizException(500, "APP_PUBLIC_URL is required for external image urls");
+            throw new BizException(500, "APP_PUBLIC_URL 或 geo.public-base-url 未配置；自媒体封面图片需要公网可访问的后端地址");
         }
         return value.trim().replaceAll("/+$", "");
     }

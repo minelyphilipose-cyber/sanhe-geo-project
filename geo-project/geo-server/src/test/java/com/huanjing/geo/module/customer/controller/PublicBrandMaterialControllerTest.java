@@ -6,9 +6,6 @@ import com.huanjing.geo.module.customer.service.BrandProfileService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
-
-import java.io.ByteArrayInputStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -17,7 +14,7 @@ import static org.mockito.Mockito.when;
 class PublicBrandMaterialControllerTest {
 
     @Test
-    void stream_doesNotTrustStoredFileSizeAsContentLength() {
+    void stream_usesActualObjectBytesAsContentLength() {
         BrandMaterial material = new BrandMaterial();
         material.setId(10L);
         material.setBrandId(1L);
@@ -27,12 +24,13 @@ class PublicBrandMaterialControllerTest {
         BrandMaterialPublicUrlService publicUrlService = mock(BrandMaterialPublicUrlService.class);
         BrandProfileService brandProfileService = mock(BrandProfileService.class);
         when(publicUrlService.verifyPublicAccess(10L, "sig")).thenReturn(material);
-        when(brandProfileService.openVerifiedMaterialStream(material))
-                .thenReturn(new ByteArrayInputStream("full-image-bytes".getBytes()));
+        byte[] bytes = "full-image-bytes".getBytes();
+        when(brandProfileService.readVerifiedMaterialBytes(material)).thenReturn(bytes);
 
         PublicBrandMaterialController controller = new PublicBrandMaterialController(publicUrlService, brandProfileService);
-        ResponseEntity<StreamingResponseBody> response = controller.stream(10L, "sig");
+        ResponseEntity<byte[]> response = controller.stream(10L, "sig");
 
-        assertThat(response.getHeaders().containsKey(HttpHeaders.CONTENT_LENGTH)).isFalse();
+        assertThat(response.getHeaders().getFirst(HttpHeaders.CONTENT_LENGTH)).isEqualTo(String.valueOf(bytes.length));
+        assertThat(response.getBody()).isEqualTo(bytes);
     }
 }

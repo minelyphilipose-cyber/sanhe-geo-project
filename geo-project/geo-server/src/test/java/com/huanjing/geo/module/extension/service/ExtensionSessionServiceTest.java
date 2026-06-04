@@ -8,8 +8,10 @@ import com.huanjing.geo.module.extension.dto.ExtensionBindResponse;
 import com.huanjing.geo.module.extension.dto.ExtensionTokenRefreshResponse;
 import com.huanjing.geo.module.extension.entity.ExtensionSession;
 import com.huanjing.geo.module.extension.mapper.ExtensionSessionMapper;
+import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.mapper.SysUserMapper;
+import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -37,6 +39,8 @@ class ExtensionSessionServiceTest {
     private ExtensionVersionService versionService;
     private ExtensionAuditSupport auditSupport;
     private SysUserMapper sysUserMapper;
+    private BrandAccessService brandAccessService;
+    private CurrentUserService currentUserService;
     private ExtensionSessionService service;
 
     @BeforeEach
@@ -45,7 +49,17 @@ class ExtensionSessionServiceTest {
         versionService = mock(ExtensionVersionService.class);
         auditSupport = mock(ExtensionAuditSupport.class);
         sysUserMapper = mock(SysUserMapper.class);
-        service = new ExtensionSessionService(sessionMapper, new ExtensionProperties(), versionService, auditSupport, sysUserMapper);
+        brandAccessService = mock(BrandAccessService.class);
+        currentUserService = mock(CurrentUserService.class);
+        service = new ExtensionSessionService(
+                sessionMapper,
+                new ExtensionProperties(),
+                versionService,
+                auditSupport,
+                sysUserMapper,
+                brandAccessService,
+                currentUserService
+        );
     }
 
     @Test

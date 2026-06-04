@@ -46,6 +46,16 @@ public class ArticleImagePublicUrlRewriter {
         return rewritten;
     }
 
+    public String rewriteUrl(Project project, String imageUrl) {
+        String normalized = normalizeUrl(imageUrl);
+        if (!StringUtils.hasText(normalized) || project == null || project.getBrandId() == null) {
+            return imageUrl;
+        }
+        Map<String, BrandMaterial> replacements = resolveMaterials(project.getBrandId(), Set.of(normalized));
+        BrandMaterial material = replacements.get(normalized);
+        return material == null ? imageUrl : publicUrlService.buildPublicStreamUrl(material);
+    }
+
     private Map<String, BrandMaterial> resolveMaterials(Long brandId, Set<String> imageUrls) {
         if (imageUrls.isEmpty()) {
             return Map.of();

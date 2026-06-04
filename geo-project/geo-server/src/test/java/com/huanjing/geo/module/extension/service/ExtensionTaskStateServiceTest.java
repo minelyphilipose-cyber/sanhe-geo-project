@@ -10,9 +10,11 @@ import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
 import com.huanjing.geo.module.content.service.CompanyChannelQuotaService;
+import com.huanjing.geo.module.content.service.SelfMediaPublishScheduleService;
 import com.huanjing.geo.module.customer.access.InternalScopeService;
 import com.huanjing.geo.module.extension.ExtensionErrorCodes;
 import com.huanjing.geo.module.extension.dto.ExtensionTaskPublishReportRequest;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -41,6 +43,7 @@ class ExtensionTaskStateServiceTest {
     private SemiAutoTaskAccessService semiAutoTaskAccessService;
     private InternalScopeService internalScopeService;
     private CompanyChannelQuotaService companyChannelQuotaService;
+    private SelfMediaPublishScheduleService selfMediaPublishScheduleService;
     private ExtensionRedisStore redisStore;
     private ExtensionAuditSupport auditSupport;
     private AuditService auditService;
@@ -53,6 +56,7 @@ class ExtensionTaskStateServiceTest {
         semiAutoTaskAccessService = mock(SemiAutoTaskAccessService.class);
         internalScopeService = mock(InternalScopeService.class);
         companyChannelQuotaService = mock(CompanyChannelQuotaService.class);
+        selfMediaPublishScheduleService = mock(SelfMediaPublishScheduleService.class);
         redisStore = mock(ExtensionRedisStore.class);
         auditSupport = mock(ExtensionAuditSupport.class);
         auditService = mock(AuditService.class);
@@ -62,9 +66,11 @@ class ExtensionTaskStateServiceTest {
                 semiAutoTaskAccessService,
                 internalScopeService,
                 companyChannelQuotaService,
+                selfMediaPublishScheduleService,
                 redisStore,
                 auditSupport,
-                auditService
+                auditService,
+                new ObjectMapper()
         );
     }
 
@@ -92,6 +98,45 @@ class ExtensionTaskStateServiceTest {
                 eq(null),
                 any()
         );
+    }
+
+    @Test
+    void ackFilledMarksScheduleScheduledOnlyWhenPlatformVerificationPassed() {
+        stubTask("filling");
+        when(taskMapper.markSemiAutoFilled(eq(30L), any())).thenReturn(1);
+        Map<String, Object> request = Map.of(
+                "fillResult", Map.of(
+                        "publishOptions", Map.of(
+                                "scheduled", true,
+                                "publishVerification", Map.of(
+                                        "verified", true,
+                                        "platformStatus", "scheduled",
+                                        "matchedTitle", "title"
+                                )
+                        )
+                )
+        );
+
+        assertEquals("filled", service.ackFilled(30L, 99L, 7L, request).status());
+
+        verify(selfMediaPublishScheduleService).markDistributionTaskScheduled(eq(30L), any(String.class));
+        verify(selfMediaPublishScheduleService, never()).markDistributionTaskFilled(any(), any());
+    }
+
+    @Test
+    void ackFilledWithoutPublishVerificationDoesNotMarkScheduleScheduled() {
+        stubTask("filling");
+        when(taskMapper.markSemiAutoFilled(eq(30L), any())).thenReturn(1);
+        Map<String, Object> request = Map.of(
+                "fillResult", Map.of(
+                        "publishOptions", Map.of("scheduled", true)
+                )
+        );
+
+        assertEquals("filled", service.ackFilled(30L, 99L, 7L, request).status());
+
+        verify(selfMediaPublishScheduleService).markDistributionTaskFilled(eq(30L), any(String.class));
+        verify(selfMediaPublishScheduleService, never()).markDistributionTaskScheduled(any(), any());
     }
 
     @Test
@@ -375,6 +420,52 @@ class ExtensionTaskStateServiceTest {
         assertEquals(ExtensionErrorCodes.TASK_STATE_CONFLICT, ex.getCode());
         verifyNoInteractions(articleDraftMapper);
         verifyNoInteractions(companyChannelQuotaService);
+    }
+
+    @Test
+    void failRetryableScheduleVerificationErrorPassesNextAttemptToScheduleService() {
+        stubTask("filling");
+        when(taskMapper.markSemiAutoFailed(eq(30L), eq("WORKS_LIST_VERIFY_TIMEOUT"), any(), any())).thenReturn(1);
+        when(articleDraftMapper.update(any(), any())).thenReturn(1);
+        Map<String, Object> request = Map.of(
+                "error", Map.of(
+                        "code", "WORKS_LIST_VERIFY_TIMEOUT",
+                        "message", "作品列表未匹配到定时文章"
+                )
+        );
+
+        assertEquals("failed", service.fail(30L, 99L, 7L, request).status());
+
+        verify(selfMediaPublishScheduleService).markDistributionTaskScheduleFailed(
+                eq(30L),
+                eq("WORKS_LIST_VERIFY_TIMEOUT"),
+                eq("作品列表未匹配到定时文章"),
+                any(String.class),
+                any(LocalDateTime.class)
+        );
+    }
+
+    @Test
+    void failManualRequiredErrorDoesNotPassRetryTimeToScheduleService() {
+        stubTask("filling");
+        when(taskMapper.markSemiAutoFailed(eq(30L), eq("ACCOUNT_MISMATCH"), any(), any())).thenReturn(1);
+        when(articleDraftMapper.update(any(), any())).thenReturn(1);
+        Map<String, Object> request = Map.of(
+                "error", Map.of(
+                        "code", "ACCOUNT_MISMATCH",
+                        "message", "账号不一致"
+                )
+        );
+
+        assertEquals("failed", service.fail(30L, 99L, 7L, request).status());
+
+        verify(selfMediaPublishScheduleService).markDistributionTaskScheduleFailed(
+                eq(30L),
+                eq("ACCOUNT_MISMATCH"),
+                eq("账号不一致"),
+                any(String.class),
+                eq(null)
+        );
     }
 
     @Test

@@ -45,7 +45,13 @@ public class ExtensionTaskListService {
                 row.getTitle(),
                 row.getCreatedAt(),
                 row.getFillTokenIssuedAt(),
-                expiresAt
+                expiresAt,
+                row.getSelfMediaAccountId(),
+                row.getBrowserEnvironmentId(),
+                row.getBrowserEnvironmentAccountId(),
+                row.getEnvironmentKey(),
+                row.getEnvironmentProvider(),
+                row.getProviderProfileId()
         );
     }
 }

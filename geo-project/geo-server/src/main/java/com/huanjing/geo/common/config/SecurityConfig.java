@@ -79,6 +79,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/v1/extension/tasks/*/published").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/local-agent/pairing-intents").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/local-agent/pairings/claim").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/v1/local-agent/self-media-schedules/claim-next").permitAll()
                 .requestMatchers("/doc.html", "/swagger-ui/**", "/v3/api-docs/**", "/webjars/**").permitAll()
                 .requestMatchers("/actuator/**").permitAll()
                 .requestMatchers(HttpMethod.OPTIONS).permitAll()

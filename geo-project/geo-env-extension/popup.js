@@ -62,6 +62,10 @@ function renderStoredLogs(events) {
   if (!Array.isArray(events) || !events.length) return
   const text = events.slice(0, 20).map((event) => {
     const time = event.at ? new Date(event.at).toLocaleTimeString() : ''
+    if (event.type === 'login_report') {
+      if (event.ok) return `${time} 登录状态上报成功：environmentKey=${event.environmentKey || '-'}，platform=${event.platform || '-'}，status=${event.status || '-'}`
+      return `${time} 登录状态上报失败：platform=${event.platform || '-'}，${event.error || 'unknown error'}`
+    }
     if (event.ok) return `${time} 自动处理成功：taskId=${event.taskId || '-'}，platform=${event.platform || '-'}`
     return `${time} 自动处理失败：${event.error || 'unknown error'}`
   }).join('\n')
@@ -72,7 +76,7 @@ function collectConfig() {
   return {
     apiBase: normalizeBaseUrl(fields.apiBase.value || 'http://119.45.154.127'),
     helperBase: normalizeBaseUrl(fields.helperBase.value || 'http://127.0.0.1:17891'),
-    environmentKey: fields.environmentKey.value || 'geo_b',
+    environmentKey: fields.environmentKey.value.trim() || 'geo_b',
     environmentAccountId: fields.environmentAccountId.value ? Number(fields.environmentAccountId.value) : null,
     selfMediaAccountId: fields.selfMediaAccountId.value ? Number(fields.selfMediaAccountId.value) : null,
     platform: normalizePlatform(fields.platform.value),
@@ -108,7 +112,7 @@ saveBtn.addEventListener('click', async () => {
   try {
     const config = collectConfig()
     await chrome.storage.local.set({ geoEnvConfig: config })
-    log('配置已保存')
+    log(`配置已保存：environmentKey=${config.environmentKey}`)
   } catch (error) {
     log(`保存失败：${error.message}`)
   }
