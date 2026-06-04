@@ -1,0 +1,388 @@
+<template>
+  <el-drawer v-model="visible" title="文章详情" size="70%" class="content-detail-drawer">
+    <div v-if="detailData" class="detail-wrap">
+      <div class="detail-summary-panel">
+        <div class="detail-summary-head">
+          <div>
+            <span class="detail-kicker">文章信息</span>
+            <h3>{{ detailData.article.title || '未命名文章' }}</h3>
+          </div>
+          <div class="detail-summary-actions">
+            <el-button
+              v-if="canArticleWrite && canEditFromDetail(detailData.article.status)"
+              size="small"
+              type="primary"
+              @click="emit('revision')"
+            >
+              编辑文章
+            </el-button>
+            <el-dropdown
+              v-if="canStyleRender(detailData.article)"
+              trigger="click"
+              @command="emit('styleRender', String($event))"
+            >
+              <el-button size="small">
+                样式渲染
+                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="wechat">公众号</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+            <el-tag :type="statusTagType(detailData.article.status)">
+              {{ statusLabel(detailData.article.status) }}
+            </el-tag>
+          </div>
+        </div>
+        <el-descriptions :column="2" border>
+          <el-descriptions-item label="文章ID">{{ detailData.article.id }}</el-descriptions-item>
+          <el-descriptions-item label="项目">{{ detailData.project?.projectName || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="文章类型">{{ articleTypeLabel(detailData.article.articleTypeCode) }}</el-descriptions-item>
+          <el-descriptions-item label="发布渠道">{{ detailChannelLabel(detailData) }}</el-descriptions-item>
+          <el-descriptions-item label="文章模板">{{ detailTemplateUsageLabel(detailData) }}</el-descriptions-item>
+          <el-descriptions-item label="文章主题" :span="2">{{ detailTopic(detailData) || '-' }}</el-descriptions-item>
+          <el-descriptions-item v-if="riskWordHits(detailData.article).length" label="风险词" :span="2">
+            <div class="risk-word-list">
+              <el-tag
+                v-for="hit in riskWordHits(detailData.article)"
+                :key="`${hit.severity}-${hit.source}-${hit.word}`"
+                size="small"
+                :type="hit.severity === 'block' ? 'danger' : 'warning'"
+                effect="light"
+              >
+                {{ riskSeverityLabel(hit.severity) }} · {{ riskSourceLabel(hit.source) }}: {{ hit.word }}
+              </el-tag>
+            </div>
+          </el-descriptions-item>
+        </el-descriptions>
+        <div v-if="coverImageUrl" class="detail-cover-panel">
+          <div class="detail-cover-copy">
+            <span>文章封面</span>
+            <strong>{{ detailData.article.title || '封面图片' }}</strong>
+          </div>
+          <a :href="coverImageUrl" target="_blank" rel="noreferrer">
+            <img :src="coverImageUrl" :alt="detailData.article.title || '文章封面'" loading="lazy" />
+          </a>
+        </div>
+      </div>
+
+      <div class="detail-section-panel">
+        <h4 class="detail-title">版本记录</h4>
+        <el-table :data="detailData.versions" border>
+          <el-table-column prop="versionNo" label="版本" width="80" />
+          <el-table-column prop="title" label="标题" min-width="220" />
+          <el-table-column label="来源" width="130">
+            <template #default="scope">{{ generatedByLabel(scope.row.generatedBy) }}</template>
+          </el-table-column>
+          <el-table-column label="时间" width="180">
+            <template #default="scope">{{ formatDateTime(scope.row.createdAt) }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+
+      <div class="detail-section-panel detail-preview-panel">
+        <div class="detail-header">
+          <h4 class="detail-title">内容预览</h4>
+          <el-radio-group v-model="viewMode" size="small">
+            <el-radio-button label="preview">预览</el-radio-button>
+            <el-radio-button label="markdown">Markdown</el-radio-button>
+          </el-radio-group>
+        </div>
+        <el-input v-if="viewMode === 'markdown'" type="textarea" :rows="14" :model-value="markdown" readonly />
+        <div v-else class="markdown-preview" v-html="html"></div>
+      </div>
+    </div>
+  </el-drawer>
+</template>
+
+<script setup lang="ts">
+import { computed } from 'vue'
+import { ArrowDown } from '@element-plus/icons-vue'
+import type { ArticleDetailResponse, ArticleDraft } from '@/types'
+import { formatDateTime } from '@/utils/format'
+
+type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
+type ViewMode = 'preview' | 'markdown'
+type RiskWordHit = {
+  word: string
+  severity: string
+  source: string
+}
+
+const props = defineProps<{
+  modelValue: boolean
+  viewMode: ViewMode
+  detailData: ArticleDetailResponse | null
+  coverImageUrl: string
+  markdown: string
+  html: string
+  canArticleWrite: boolean
+  canEditFromDetail: (status: string) => boolean
+  canStyleRender: (article: Pick<ArticleDraft, 'channelGroupCode' | 'channelSubCode'>) => boolean
+  statusTagType: (status: string) => TagType
+  statusLabel: (status: string) => string
+  articleTypeLabel: (value?: string | null) => string
+  detailChannelLabel: (detail: ArticleDetailResponse) => string
+  detailTemplateUsageLabel: (detail: ArticleDetailResponse) => string
+  detailTopic: (detail: ArticleDetailResponse) => string
+  riskWordHits: (article?: Pick<ArticleDraft, 'riskWordsJson'> | null) => RiskWordHit[]
+  riskSeverityLabel: (severity?: string | null) => string
+  riskSourceLabel: (source?: string | null) => string
+  generatedByLabel: (value?: string | null) => string
+}>()
+
+const emit = defineEmits<{
+  'update:modelValue': [value: boolean]
+  'update:viewMode': [value: ViewMode]
+  revision: []
+  styleRender: [command: string]
+}>()
+
+const visible = computed({
+  get: () => props.modelValue,
+  set: (value) => emit('update:modelValue', value),
+})
+
+const viewMode = computed({
+  get: () => props.viewMode,
+  set: (value) => emit('update:viewMode', value),
+})
+</script>
+
+<style scoped>
+.detail-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.content-detail-drawer :deep(.el-drawer__header) {
+  margin-bottom: 0;
+  padding: 18px 22px;
+  border-bottom: 1px solid #e2e8f0;
+  background: linear-gradient(135deg, #f8fbff, #eff6ff 58%, #ecfdf5);
+}
+
+.content-detail-drawer :deep(.el-drawer__title) {
+  color: #0f172a;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.content-detail-drawer :deep(.el-drawer__body) {
+  padding: 18px 22px 24px;
+  background: #f7fbff;
+}
+
+.detail-summary-panel,
+.detail-section-panel {
+  border: 1px solid #dbeafe;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
+  overflow: hidden;
+}
+
+.detail-summary-panel {
+  padding: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.08), transparent 30%),
+    linear-gradient(135deg, #ffffff, #f8fbff);
+}
+
+.detail-summary-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.detail-summary-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 10px;
+}
+
+.detail-summary-head h3 {
+  margin: 5px 0 0;
+  color: #0f172a;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.detail-kicker {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.detail-cover-panel {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 280px);
+  align-items: center;
+  gap: 16px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: rgba(239, 246, 255, 0.72);
+}
+
+.detail-cover-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.detail-cover-copy span {
+  color: #2563eb;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.detail-cover-copy strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 15px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.detail-cover-panel a {
+  display: block;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #e2e8f0;
+}
+
+.detail-cover-panel img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+@media (max-width: 760px) {
+  .detail-cover-panel {
+    grid-template-columns: 1fr;
+  }
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detail-title {
+  margin: 0;
+  padding: 14px 16px;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.detail-section-panel > .el-table {
+  border-top: 1px solid #e2e8f0;
+}
+
+.detail-preview-panel {
+  padding-bottom: 16px;
+}
+
+.detail-preview-panel .detail-header {
+  padding-right: 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.markdown-preview {
+  min-height: 360px;
+  margin: 16px;
+  padding: 22px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, #ffffff 0%, #ffffff 74%, #f8fafc 100%);
+  overflow: auto;
+  line-height: 1.75;
+  color: var(--el-text-color-primary);
+}
+
+.markdown-preview :deep(h1),
+.markdown-preview :deep(h2),
+.markdown-preview :deep(h3),
+.markdown-preview :deep(h4) {
+  margin: 1.1em 0 0.6em;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.markdown-preview :deep(p),
+.markdown-preview :deep(ul),
+.markdown-preview :deep(ol),
+.markdown-preview :deep(blockquote) {
+  margin: 0 0 0.9em;
+}
+
+.markdown-preview :deep(ul),
+.markdown-preview :deep(ol) {
+  padding-left: 1.4em;
+}
+
+.markdown-preview :deep(code) {
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  background: #f5f7fa;
+  font-size: 0.92em;
+}
+
+.markdown-preview :deep(pre) {
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #0f172a;
+  color: #e2e8f0;
+  overflow: auto;
+}
+
+.markdown-preview :deep(pre code) {
+  padding: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.markdown-preview :deep(blockquote) {
+  margin-left: 0;
+  padding-left: 12px;
+  border-left: 4px solid #cbd5e1;
+  color: #475569;
+}
+
+.markdown-preview :deep(img) {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 14px auto;
+  border-radius: 6px;
+}
+
+.markdown-preview :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1em;
+}
+
+.markdown-preview :deep(th),
+.markdown-preview :deep(td) {
+  padding: 8px 10px;
+  border: 1px solid #e5e7eb;
+  text-align: left;
+}
+</style>

@@ -194,137 +194,38 @@
       </DataState>
     </el-card>
 
-    <el-drawer v-model="detailVisible" title="文章详情" size="70%" class="content-detail-drawer">
-      <div v-if="detailData" class="detail-wrap">
-        <div class="detail-summary-panel">
-          <div class="detail-summary-head">
-            <div>
-              <span class="detail-kicker">文章信息</span>
-              <h3>{{ detailData.article.title || '未命名文章' }}</h3>
-            </div>
-            <div class="detail-summary-actions">
-              <el-button
-                v-if="canArticleWrite && canEditFromDetail(detailData.article.status)"
-                size="small"
-                type="primary"
-                @click="openRevisionFromDetail"
-              >
-                编辑文章
-              </el-button>
-              <el-dropdown
-                v-if="canStyleRender(detailData.article)"
-                trigger="click"
-                @command="handleDetailStyleRenderCommand"
-              >
-                <el-button size="small">
-                  样式渲染
-                  <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-                </el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item command="wechat">公众号</el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
-              <el-tag :type="statusTagType(detailData.article.status)">
-                {{ statusLabel(detailData.article.status) }}
-              </el-tag>
-            </div>
-          </div>
-          <el-descriptions :column="2" border>
-            <el-descriptions-item label="文章ID">{{ detailData.article.id }}</el-descriptions-item>
-            <el-descriptions-item label="项目">{{ detailData.project?.projectName || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="文章类型">{{ articleTypeLabel(detailData.article.articleTypeCode) }}</el-descriptions-item>
-            <el-descriptions-item label="发布渠道">{{ detailChannelLabel(detailData) }}</el-descriptions-item>
-            <el-descriptions-item label="文章模板">{{ detailTemplateUsageLabel(detailData) }}</el-descriptions-item>
-            <el-descriptions-item label="文章主题" :span="2">{{ detailTopic(detailData) || '-' }}</el-descriptions-item>
-            <el-descriptions-item v-if="riskWordHits(detailData.article).length" label="风险词" :span="2">
-              <div class="risk-word-list">
-                <el-tag
-                  v-for="hit in riskWordHits(detailData.article)"
-                  :key="`${hit.severity}-${hit.source}-${hit.word}`"
-                  size="small"
-                  :type="hit.severity === 'block' ? 'danger' : 'warning'"
-                  effect="light"
-                >
-                  {{ riskSeverityLabel(hit.severity) }} · {{ riskSourceLabel(hit.source) }}: {{ hit.word }}
-                </el-tag>
-              </div>
-            </el-descriptions-item>
-          </el-descriptions>
-          <div v-if="detailCoverImageUrl" class="detail-cover-panel">
-            <div class="detail-cover-copy">
-              <span>文章封面</span>
-              <strong>{{ detailData.article.title || '封面图片' }}</strong>
-            </div>
-            <a :href="detailCoverImageUrl" target="_blank" rel="noreferrer">
-              <img :src="detailCoverImageUrl" :alt="detailData.article.title || '文章封面'" loading="lazy" />
-            </a>
-          </div>
-        </div>
+    <ArticleDetailDrawer
+      v-model="detailVisible"
+      v-model:view-mode="detailViewMode"
+      :detail-data="detailData"
+      :cover-image-url="detailCoverImageUrl"
+      :markdown="detailMarkdown"
+      :html="detailHtml"
+      :can-article-write="canArticleWrite"
+      :can-edit-from-detail="canEditFromDetail"
+      :can-style-render="canStyleRender"
+      :status-tag-type="statusTagType"
+      :status-label="statusLabel"
+      :article-type-label="articleTypeLabel"
+      :detail-channel-label="detailChannelLabel"
+      :detail-template-usage-label="detailTemplateUsageLabel"
+      :detail-topic="detailTopic"
+      :risk-word-hits="riskWordHits"
+      :risk-severity-label="riskSeverityLabel"
+      :risk-source-label="riskSourceLabel"
+      :generated-by-label="generatedByLabel"
+      @revision="openRevisionFromDetail"
+      @style-render="handleDetailStyleRenderCommand"
+    />
 
-        <div class="detail-section-panel">
-          <h4 class="detail-title">版本记录</h4>
-          <el-table :data="detailData.versions" border>
-            <el-table-column prop="versionNo" label="版本" width="80" />
-            <el-table-column prop="title" label="标题" min-width="220" />
-            <el-table-column label="来源" width="130">
-              <template #default="scope">{{ generatedByLabel(scope.row.generatedBy) }}</template>
-            </el-table-column>
-            <el-table-column label="时间" width="180">
-              <template #default="scope">{{ formatDateTime(scope.row.createdAt) }}</template>
-            </el-table-column>
-          </el-table>
-        </div>
-
-        <div class="detail-section-panel detail-preview-panel">
-          <div class="detail-header">
-            <h4 class="detail-title">内容预览</h4>
-            <el-radio-group v-model="detailViewMode" size="small">
-              <el-radio-button label="preview">预览</el-radio-button>
-              <el-radio-button label="markdown">Markdown</el-radio-button>
-            </el-radio-group>
-          </div>
-          <el-input v-if="detailViewMode === 'markdown'" type="textarea" :rows="14" :model-value="detailMarkdown" readonly />
-          <div v-else class="markdown-preview" v-html="detailHtml"></div>
-        </div>
-      </div>
-    </el-drawer>
-
-    <el-dialog v-model="revisionVisible" title="修订文章" width="840px" class="admin-editor-dialog">
-      <el-form class="admin-dialog-form content-revision-form" :model="revisionForm" label-width="90px">
-        <el-form-item class="is-full revision-title-field" label="标题">
-          <el-input
-            v-model="revisionForm.title"
-            type="textarea"
-            :autosize="{ minRows: 2, maxRows: 4 }"
-            maxlength="160"
-            show-word-limit
-            placeholder="请输入文章标题"
-          />
-        </el-form-item>
-        <el-form-item class="is-full" label="正文" required>
-          <div class="editor-wrap">
-            <div class="detail-header editor-header">
-              <span class="editor-title">内容编辑</span>
-              <el-radio-group v-model="revisionViewMode" size="small">
-                <el-radio-button label="markdown">Markdown</el-radio-button>
-                <el-radio-button label="preview">预览</el-radio-button>
-              </el-radio-group>
-            </div>
-            <el-input v-if="revisionViewMode === 'markdown'" v-model="revisionForm.contentMarkdown" type="textarea" :rows="14" />
-            <div v-else class="markdown-preview editor-preview" v-html="revisionHtml"></div>
-          </div>
-        </el-form-item>
-        <el-form-item class="is-full" label="备注">
-          <el-input v-model="revisionForm.note" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="revisionVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitRevision">保存修订</el-button>
-      </template>
-    </el-dialog>
+    <ArticleRevisionDialog
+      v-model="revisionVisible"
+      v-model:view-mode="revisionViewMode"
+      :form="revisionForm"
+      :html="revisionHtml"
+      :submitting="submitting"
+      @submit="submitRevision"
+    />
 
     <el-dialog v-model="distributionChannelVisible" title="选择分发渠道" width="760px" class="distribution-channel-dialog">
       <div class="distribution-channel-intro">
@@ -620,363 +521,44 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="mediaDistributeVisible" title="自媒体分发" width="980px" class="media-distribute-dialog">
-      <div class="media-distribute">
-        <el-alert
-          v-if="wechatCapability && (!wechatDistributionAvailable || wechatCapability.liveVerificationBlocked)"
-          class="media-capability-alert"
-          type="warning"
-          :closable="false"
-          show-icon
-          :title="wechatCapability.description || '微信公众号能力审核中'"
-        />
-        <el-alert
-          v-if="douyinCapability && (!douyinCapability.enabled || douyinCapability.liveVerificationBlocked)"
-          class="media-capability-alert"
-          type="warning"
-          :closable="false"
-          show-icon
-          :title="douyinCapability.liveVerificationBlocked ? (douyinCapability.description || '抖音图文暂不可联调') : `抖音图文未开启：${douyinCapability.disabledReason || 'feature flag disabled'}`"
-        />
-
-        <div class="media-grid">
-          <button
-            class="media-platform"
-            :class="{ active: selectedMediaPlatform === 'wechat_mp', disabled: !wechatDistributionAvailable }"
-            type="button"
-            @click="handleWechatPlatformClick"
-          >
-            <span class="wechat-mark">微</span>
-            <span class="media-name">微信公众号</span>
-            <el-tag size="small" :type="wechatStatusTagType">{{ wechatStatusLabel }}</el-tag>
-          </button>
-          <button
-            class="media-platform"
-            :class="{ active: selectedMediaPlatform === 'douyin', disabled: !douyinDistributionAvailable }"
-            type="button"
-            @click="handleDouyinPlatformClick"
-          >
-            <span class="douyin-mark">抖</span>
-            <span class="media-name">抖音图文</span>
-            <el-tag size="small" :type="douyinStatusTagType">{{ douyinStatusLabel }}</el-tag>
-          </button>
-          <button
-            class="media-platform"
-            :class="{ active: selectedMediaPlatform === 'toutiao', disabled: !toutiaoAccounts.length }"
-            type="button"
-            @click="handleSemiAutoPlatformClick('toutiao')"
-          >
-            <span class="toutiao-mark">头</span>
-            <span class="media-name">头条</span>
-            <el-tag size="small" :type="semiAutoStatusTagType(toutiaoAccounts)">{{ semiAutoStatusLabel(toutiaoAccounts) }}</el-tag>
-          </button>
-          <button
-            class="media-platform"
-            :class="{ active: selectedMediaPlatform === 'zhihu', disabled: !zhihuAccounts.length }"
-            type="button"
-            @click="handleSemiAutoPlatformClick('zhihu')"
-          >
-            <span class="zhihu-mark">知</span>
-            <span class="media-name">知乎</span>
-            <el-tag size="small" :type="semiAutoStatusTagType(zhihuAccounts)">{{ semiAutoStatusLabel(zhihuAccounts) }}</el-tag>
-          </button>
-          <button
-            class="media-platform"
-            :class="{ active: selectedMediaPlatform === 'xiaohongshu', disabled: !xiaohongshuAccounts.length }"
-            type="button"
-            @click="handleSemiAutoPlatformClick('xiaohongshu')"
-          >
-            <span class="xiaohongshu-mark">红</span>
-            <span class="media-name">小红书</span>
-            <el-tag size="small" :type="semiAutoStatusTagType(xiaohongshuAccounts)">{{ semiAutoStatusLabel(xiaohongshuAccounts) }}</el-tag>
-          </button>
-        </div>
-
-        <div v-if="currentPlatformAccounts.length" class="self-media-account-list">
-          <div v-for="account in currentPlatformAccounts" :key="account.id" class="self-media-account-row">
-            <div class="self-media-account-main">
-              <div class="self-media-account-title">{{ account.accountName }}</div>
-              <div class="self-media-account-meta">{{ account.platformAccountId }}</div>
-            </div>
-            <el-tag size="small" :type="selfMediaAccountStatusTag(account)">
-              {{ selfMediaAccountStatusLabel(account) }}
-            </el-tag>
-            <el-tag v-if="isSemiAutoPlatform(selectedMediaPlatform)" size="small" :type="semiAutoCredentialTagType(account)">
-              {{ semiAutoCredentialLabel(account) }}
-            </el-tag>
-            <el-tag v-if="isSemiAutoPlatform(selectedMediaPlatform)" size="small" :type="environmentAccountTagType(account)">
-              {{ environmentAccountLabel(account) }}
-            </el-tag>
-            <el-button
-              v-if="selectedMediaPlatform === 'wechat_mp' && account.status === 'active'"
-              size="small"
-              :loading="checkingSelfMediaAccountId === account.id"
-              @click="checkWechatAccount(account.id)"
-            >
-              检测登录
-            </el-button>
-            <el-button
-              v-if="selectedMediaPlatform === 'wechat_mp' && account.status === 'active'"
-              size="small"
-              type="primary"
-              @click="startWechatDraft(account)"
-            >
-              保存草稿
-            </el-button>
-            <el-button
-              v-if="selectedMediaPlatform === 'douyin' && account.status === 'active'"
-              size="small"
-              type="primary"
-              @click="startDouyinImageText(account)"
-            >
-              选择账号
-            </el-button>
-            <el-button
-              v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active'"
-              size="small"
-              :disabled="!!environmentAccountOf(account)"
-              @click="router.push(`/admin/brands/${mediaDistributeBrandId}`)"
-            >
-              {{ environmentAccountOf(account) ? '已绑定环境' : '去品牌配置环境' }}
-            </el-button>
-            <el-button
-              v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active' && environmentAccountOf(account) && !canSubmitSemiAutoEnvironmentTask(account)"
-              size="small"
-              :loading="semiAutoLoginOpeningAccountId === account.id"
-              @click="openSemiAutoEnvironmentForLogin(account)"
-            >
-              打开环境登录
-            </el-button>
-            <el-button
-              v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active' && environmentAccountOf(account)?.loginStatus === 'mismatch'"
-              size="small"
-              type="warning"
-              plain
-              :loading="environmentAccountResettingId === account.id"
-              @click="resetEnvironmentAccountIdentity(account)"
-            >
-              重置账号校验
-            </el-button>
-            <el-button
-              v-if="isSemiAutoPlatform(selectedMediaPlatform) && account.status === 'active'"
-              size="small"
-              type="primary"
-              :loading="semiAutoAccountActionLoading(account)"
-              :disabled="!canSubmitSemiAutoEnvironmentTask(account)"
-              @click="submitSemiAutoEnvironmentTask(account)"
-            >
-              打开环境并填充
-            </el-button>
-          </div>
-        </div>
-        <el-empty
-          v-else-if="isSemiAutoPlatform(selectedMediaPlatform)"
-          :description="`当前品牌暂无可用的${semiAutoPlatformLabel(selectedMediaPlatform)}账号`"
-        />
-
-        <div v-if="selectedMediaPlatform === 'wechat_mp' && selectedSelfMediaAccountId" class="cover-picker">
-          <div class="cover-picker-header">
-            <span>选择公众号封面</span>
-            <el-tag size="small" type="info">{{ imageMaterials.length }} 张图片</el-tag>
-          </div>
-          <div class="folder-toolbar">
-            <el-radio-group v-model="imageFolderScope" size="small" @change="handleFolderScopeChange">
-              <el-radio-button label="project">项目关联</el-radio-button>
-              <el-radio-button label="all">品牌全部</el-radio-button>
-            </el-radio-group>
-          </div>
-          <div v-if="displayImageFolders.length" class="folder-list">
-            <button
-              v-for="folder in displayImageFolders"
-              :key="folder.id"
-              type="button"
-              class="folder-item"
-              :class="{ selected: selectedImageFolderId === folder.id }"
-              @click="selectImageFolder(folder.id)"
-            >
-              <span>{{ folder.folderName }}</span>
-              <el-tag v-if="folder.projectRelated" size="small" type="success">项目</el-tag>
-              <el-tag size="small" type="info">{{ folder.materialCount || folder.materials.length }}</el-tag>
-            </button>
-          </div>
-          <el-empty v-if="!imageMaterials.length" description="当前品牌暂无可用图片素材" />
-          <div v-else class="cover-grid">
-            <button
-              v-for="material in imageMaterials"
-              :key="material.id"
-              type="button"
-              class="cover-item"
-              :class="{ selected: selectedCoverMaterialId === material.id }"
-              @click="selectedCoverMaterialId = material.id"
-            >
-              <img :src="materialThumbUrl(material)" :alt="material.fileName" loading="lazy" />
-              <span>{{ material.fileName }}</span>
-            </button>
-          </div>
-        </div>
-
-        <div v-if="selectedMediaPlatform === 'douyin' && selectedSelfMediaAccountId" class="cover-picker">
-          <div class="cover-picker-header">
-            <span>选择抖音图文图片</span>
-            <el-tag size="small" type="info">{{ selectedDouyinImageMaterialIds.length }}/30</el-tag>
-          </div>
-          <div class="folder-toolbar">
-            <el-radio-group v-model="imageFolderScope" size="small" @change="handleFolderScopeChange">
-              <el-radio-button label="project">项目关联</el-radio-button>
-              <el-radio-button label="all">品牌全部</el-radio-button>
-            </el-radio-group>
-          </div>
-          <div v-if="displayImageFolders.length" class="folder-list">
-            <button
-              v-for="folder in displayImageFolders"
-              :key="folder.id"
-              type="button"
-              class="folder-item"
-              :class="{ selected: selectedImageFolderId === folder.id }"
-              @click="selectImageFolder(folder.id)"
-            >
-              <span>{{ folder.folderName }}</span>
-              <el-tag v-if="folder.projectRelated" size="small" type="success">项目</el-tag>
-              <el-tag size="small" type="info">{{ folder.materialCount || folder.materials.length }}</el-tag>
-            </button>
-          </div>
-          <el-empty v-if="!douyinImageMaterials.length" description="当前品牌暂无 JPG/PNG 图片素材" />
-          <div v-else class="cover-grid">
-            <button
-              v-for="material in douyinImageMaterials"
-              :key="material.id"
-              type="button"
-              class="cover-item"
-              :class="{ selected: selectedDouyinImageMaterialIds.includes(material.id) }"
-              @click="toggleDouyinImage(material.id)"
-            >
-              <img :src="materialThumbUrl(material)" :alt="material.fileName" loading="lazy" />
-              <span>{{ material.fileName }}</span>
-            </button>
-          </div>
-          <div v-if="selectedDouyinMaterials.length" class="douyin-selected-list">
-            <div v-for="(material, index) in selectedDouyinMaterials" :key="material.id" class="douyin-selected-row">
-              <span class="douyin-selected-index">{{ index + 1 }}</span>
-              <span class="douyin-selected-name">{{ material.fileName }}</span>
-              <el-button size="small" :disabled="index === 0" @click="moveDouyinImage(index, -1)">上移</el-button>
-              <el-button size="small" :disabled="index === selectedDouyinMaterials.length - 1" @click="moveDouyinImage(index, 1)">下移</el-button>
-            </div>
-          </div>
-          <div class="douyin-text-editor">
-            <div class="cover-picker-header">
-              <span>图文文案</span>
-              <el-tag size="small" :type="douyinText.length > 1000 ? 'danger' : 'info'">{{ douyinText.length }}/1000</el-tag>
-            </div>
-            <el-input
-              v-model="douyinText"
-              type="textarea"
-              :rows="4"
-              maxlength="1000"
-              show-word-limit
-              placeholder="可填写抖音图文文案；不填时后端使用文章标题"
-            />
-          </div>
-        </div>
-
-        <div v-if="distributionAttempts.length" class="distribution-history">
-          <div class="cover-picker-header">
-            <span>分发记录</span>
-            <el-tag size="small" type="info">{{ distributionAttempts.length }} 条</el-tag>
-          </div>
-          <el-table class="distribution-history-table" :data="distributionAttempts" max-height="260">
-            <el-table-column label="平台" min-width="180">
-              <template #default="scope">
-                <div class="distribution-target-cell">
-                  <span class="distribution-target-avatar">{{ distributionPlatformInitial(scope.row.integrationMethod) }}</span>
-                  <span class="distribution-target-main">
-                    <span class="distribution-target-title">{{ distributionPlatformLabel(scope.row.integrationMethod) }}</span>
-                    <span class="distribution-target-sub">{{ scope.row.siteName || scope.row.domain || `任务 #${scope.row.id}` }}</span>
-                  </span>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="任务状态" width="130">
-              <template #default="scope">
-                <el-tag size="small" :type="distributionStatusTag(scope.row.status)">
-                  {{ distributionTaskStatusLabel(scope.row) }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="审核状态" width="120">
-              <template #default="scope">
-                <el-tag v-if="scope.row.reviewStatus" size="small" :type="reviewStatusTag(scope.row.reviewStatus)">
-                  {{ reviewStatusLabel(scope.row.reviewStatus) }}
-                </el-tag>
-                <span v-else>-</span>
-              </template>
-            </el-table-column>
-            <el-table-column label="平台反馈" min-width="230" show-overflow-tooltip>
-              <template #default="scope">
-                <div class="distribution-feedback">
-                  <span class="distribution-feedback-main">{{ scope.row.externalStatus || '暂无平台状态' }}</span>
-                  <span v-if="scope.row.errorMessage" class="distribution-feedback-error">{{ scope.row.errorMessage }}</span>
-                  <span v-else class="distribution-feedback-muted">未返回错误</span>
-                </div>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="210" align="center">
-              <template #default="scope">
-                <div class="admin-row-actions distribution-actions">
-                  <el-button
-                    v-if="canRefreshReviewStatus(scope.row)"
-                    link
-                    type="primary"
-                    :loading="refreshingReviewTaskId === scope.row.id"
-                    @click="refreshReviewStatus(scope.row)"
-                  >
-                    刷新
-                  </el-button>
-                  <el-button
-                    v-if="canOperateSemiAutoDistributionTask(scope.row)"
-                    link
-                    type="primary"
-                    :loading="semiAutoConfirmingTaskId === scope.row.id"
-                    @click="confirmSemiAutoPublished(scope.row)"
-                  >
-                    确认发布
-                  </el-button>
-                  <el-button
-                    v-if="canOperateSemiAutoDistributionTask(scope.row)"
-                    link
-                    type="danger"
-                    :loading="semiAutoAbandoningTaskId === scope.row.id"
-                    @click="abandonSemiAutoPublished(scope.row)"
-                  >
-                    放弃
-                  </el-button>
-                </div>
-              </template>
-            </el-table-column>
-          </el-table>
-        </div>
-      </div>
-      <template #footer>
-        <el-button @click="mediaDistributeVisible = false">关闭</el-button>
-        <el-button
-          v-if="selectedMediaPlatform === 'wechat_mp' && selectedSelfMediaAccountId"
-          type="primary"
-          :loading="selfMediaSubmitting"
-          :disabled="!selectedCoverMaterialId"
-          @click="submitWechatDraft"
-        >
-          保存至公众号草稿箱
-        </el-button>
-        <el-button
-          v-if="selectedMediaPlatform === 'douyin' && selectedSelfMediaAccountId"
-          type="primary"
-          :loading="selfMediaSubmitting"
-          :disabled="!selectedDouyinImageMaterialIds.length || douyinText.length > 1000 || !douyinDistributionAvailable"
-          @click="submitDouyinImageText"
-        >
-          {{ douyinSubmitButtonText }}
-        </el-button>
-      </template>
-    </el-dialog>
+    <SelfMediaDistributeDialog
+      v-model="mediaDistributeVisible"
+      v-model:image-folder-scope="imageFolderScope"
+      v-model:selected-cover-material-id="selectedCoverMaterialId"
+      v-model:douyin-text="douyinText"
+      :selected-media-platform="selectedMediaPlatform"
+      :wechat-capability="wechatCapability"
+      :wechat-distribution-available="wechatDistributionAvailable"
+      :wechat-status-tag-type="wechatStatusTagType"
+      :wechat-status-label="wechatStatusLabel"
+      :douyin-capability="douyinCapability"
+      :douyin-distribution-available="douyinDistributionAvailable"
+      :douyin-status-tag-type="douyinStatusTagType"
+      :douyin-status-label="douyinStatusLabel"
+      :toutiao-accounts="toutiaoAccounts"
+      :zhihu-accounts="zhihuAccounts"
+      :xiaohongshu-accounts="xiaohongshuAccounts"
+      :current-platform-accounts="currentPlatformAccounts"
+      :selected-self-media-account-id="selectedSelfMediaAccountId"
+      :checking-self-media-account-id="checkingSelfMediaAccountId"
+      :media-distribute-brand-id="mediaDistributeBrandId"
+      :semi-auto-login-opening-account-id="semiAutoLoginOpeningAccountId"
+      :environment-account-resetting-id="environmentAccountResettingId"
+      :image-materials="imageMaterials"
+      :display-image-folders="displayImageFolders"
+      :selected-image-folder-id="selectedImageFolderId"
+      :douyin-image-materials="douyinImageMaterials"
+      :selected-douyin-image-material-ids="selectedDouyinImageMaterialIds"
+      :selected-douyin-materials="selectedDouyinMaterials"
+      :distribution-attempts="distributionAttempts"
+      :refreshing-review-task-id="refreshingReviewTaskId"
+      :semi-auto-confirming-task-id="semiAutoConfirmingTaskId"
+      :semi-auto-abandoning-task-id="semiAutoAbandoningTaskId"
+      :self-media-submitting="selfMediaSubmitting"
+      :douyin-submit-button-text="douyinSubmitButtonText"
+      :actions="selfMediaDistributeActions"
+      @brand-config="openBrandConfig"
+    />
 
     <SelfMediaScheduleDrawer
       v-model="scheduleDrawerVisible"
@@ -994,6 +576,9 @@ import MarkdownIt from 'markdown-it'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, ArrowUp, Calendar, Refresh, Search } from '@element-plus/icons-vue'
 import DataState from '@/components/ui/DataState.vue'
+import ArticleDetailDrawer from './components/ArticleDetailDrawer.vue'
+import ArticleRevisionDialog from './components/ArticleRevisionDialog.vue'
+import SelfMediaDistributeDialog from './components/SelfMediaDistributeDialog.vue'
 import SelfMediaScheduleDrawer from './components/SelfMediaScheduleDrawer.vue'
 import { useUserStore } from '@/stores/user'
 import type { ArticleDetailResponse, ArticleDraft, AuthorityMediaResource, BrandImageFolder, BrandMaterial, DistributionTask, DouyinCapability, PublishSite, SelfMediaAccount, WechatMpCapability } from '@/types'
@@ -1220,6 +805,49 @@ const selectedCoverMaterialId = ref<number | null>(null)
 const selectedDouyinImageMaterialIds = ref<number[]>([])
 const douyinText = ref('')
 const distributionAttempts = ref<DistributionTask[]>([])
+
+const selfMediaDistributeActions = {
+  semiAutoStatusTagType,
+  semiAutoStatusLabel,
+  handleWechatPlatformClick,
+  handleDouyinPlatformClick,
+  handleSemiAutoPlatformClick,
+  selfMediaAccountStatusTag,
+  selfMediaAccountStatusLabel,
+  isSemiAutoPlatform,
+  semiAutoCredentialTagType,
+  semiAutoCredentialLabel,
+  environmentAccountTagType,
+  environmentAccountLabel,
+  checkWechatAccount,
+  startWechatDraft,
+  startDouyinImageText,
+  environmentAccountOf,
+  canSubmitSemiAutoEnvironmentTask,
+  openSemiAutoEnvironmentForLogin,
+  resetEnvironmentAccountIdentity,
+  semiAutoAccountActionLoading,
+  submitSemiAutoEnvironmentTask,
+  semiAutoPlatformLabel,
+  handleFolderScopeChange,
+  selectImageFolder,
+  materialThumbUrl,
+  toggleDouyinImage,
+  moveDouyinImage,
+  distributionPlatformInitial,
+  distributionPlatformLabel,
+  distributionStatusTag,
+  distributionTaskStatusLabel,
+  reviewStatusTag,
+  reviewStatusLabel,
+  canRefreshReviewStatus,
+  refreshReviewStatus,
+  canOperateSemiAutoDistributionTask,
+  confirmSemiAutoPublished,
+  abandonSemiAutoPublished,
+  submitWechatDraft,
+  submitDouyinImageText,
+}
 const refreshingReviewTaskId = ref<number | null>(null)
 const semiAutoConfirmingTaskId = ref<number | null>(null)
 const semiAutoAbandoningTaskId = ref<number | null>(null)
@@ -1802,6 +1430,11 @@ function openBatchPublishJobs() {
 
 function openScheduleDrawer() {
   scheduleDrawerVisible.value = true
+}
+
+function openBrandConfig(brandId?: number | null) {
+  if (!brandId) return
+  router.push(`/admin/brands/${brandId}`)
 }
 
 function handleToolbarMoreCommand(command: string) {
@@ -4267,267 +3900,6 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
   color: #334155;
 }
 
-.detail-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.content-detail-drawer :deep(.el-drawer__header) {
-  margin-bottom: 0;
-  padding: 18px 22px;
-  border-bottom: 1px solid #e2e8f0;
-  background: linear-gradient(135deg, #f8fbff, #eff6ff 58%, #ecfdf5);
-}
-
-.content-detail-drawer :deep(.el-drawer__title) {
-  color: #0f172a;
-  font-size: 18px;
-  font-weight: 800;
-}
-
-.content-detail-drawer :deep(.el-drawer__body) {
-  padding: 18px 22px 24px;
-  background: #f7fbff;
-}
-
-.detail-summary-panel,
-.detail-section-panel {
-  border: 1px solid #dbeafe;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.06);
-  overflow: hidden;
-}
-
-.detail-summary-panel {
-  padding: 16px;
-  background:
-    radial-gradient(circle at top right, rgba(37, 99, 235, 0.08), transparent 30%),
-    linear-gradient(135deg, #ffffff, #f8fbff);
-}
-
-.detail-summary-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  margin-bottom: 14px;
-}
-
-.detail-summary-actions {
-  display: flex;
-  align-items: center;
-  flex-shrink: 0;
-  gap: 10px;
-}
-
-.detail-summary-head h3 {
-  margin: 5px 0 0;
-  color: #0f172a;
-  font-size: 20px;
-  font-weight: 800;
-  line-height: 1.35;
-}
-
-.detail-kicker {
-  color: #2563eb;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.detail-cover-panel {
-  display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(180px, 280px);
-  align-items: center;
-  gap: 16px;
-  margin-top: 14px;
-  padding: 14px;
-  border: 1px solid #bfdbfe;
-  border-radius: 12px;
-  background: rgba(239, 246, 255, 0.72);
-}
-
-.detail-cover-copy {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.detail-cover-copy span {
-  color: #2563eb;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.detail-cover-copy strong {
-  overflow: hidden;
-  color: #0f172a;
-  font-size: 15px;
-  line-height: 1.45;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.detail-cover-panel a {
-  display: block;
-  overflow: hidden;
-  border-radius: 10px;
-  background: #e2e8f0;
-}
-
-.detail-cover-panel img {
-  display: block;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-}
-
-@media (max-width: 760px) {
-  .detail-cover-panel {
-    grid-template-columns: 1fr;
-  }
-}
-
-.detail-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.detail-title {
-  margin: 0;
-  padding: 14px 16px;
-  color: #0f172a;
-  font-size: 15px;
-  font-weight: 800;
-}
-
-.detail-section-panel > .el-table {
-  border-top: 1px solid #e2e8f0;
-}
-
-.detail-preview-panel {
-  padding-bottom: 16px;
-}
-
-.detail-preview-panel .detail-header {
-  padding-right: 16px;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.markdown-preview {
-  min-height: 360px;
-  margin: 16px;
-  padding: 22px;
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
-  background:
-    linear-gradient(180deg, #ffffff 0%, #ffffff 74%, #f8fafc 100%);
-  overflow: auto;
-  line-height: 1.75;
-  color: var(--el-text-color-primary);
-}
-
-.markdown-preview :deep(h1),
-.markdown-preview :deep(h2),
-.markdown-preview :deep(h3),
-.markdown-preview :deep(h4) {
-  margin: 1.1em 0 0.6em;
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.markdown-preview :deep(p),
-.markdown-preview :deep(ul),
-.markdown-preview :deep(ol),
-.markdown-preview :deep(blockquote) {
-  margin: 0 0 0.9em;
-}
-
-.markdown-preview :deep(ul),
-.markdown-preview :deep(ol) {
-  padding-left: 1.4em;
-}
-
-.markdown-preview :deep(code) {
-  padding: 0.15em 0.4em;
-  border-radius: 4px;
-  background: #f5f7fa;
-  font-size: 0.92em;
-}
-
-.markdown-preview :deep(pre) {
-  padding: 12px 14px;
-  border-radius: 8px;
-  background: #0f172a;
-  color: #e2e8f0;
-  overflow: auto;
-}
-
-.markdown-preview :deep(pre code) {
-  padding: 0;
-  background: transparent;
-  color: inherit;
-}
-
-.markdown-preview :deep(blockquote) {
-  margin-left: 0;
-  padding-left: 12px;
-  border-left: 4px solid #cbd5e1;
-  color: #475569;
-}
-
-.markdown-preview :deep(img) {
-  display: block;
-  max-width: 100%;
-  height: auto;
-  margin: 14px auto;
-  border-radius: 6px;
-}
-
-.markdown-preview :deep(table) {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 1em;
-}
-
-.markdown-preview :deep(th),
-.markdown-preview :deep(td) {
-  padding: 8px 10px;
-  border: 1px solid #e5e7eb;
-  text-align: left;
-}
-
-.editor-wrap {
-  width: 100%;
-  padding: 12px;
-  border: 1px solid #dbeafe;
-  border-radius: 14px;
-  background: #f8fbff;
-}
-
-.revision-title-field :deep(.el-textarea__inner) {
-  font-size: 15px;
-  line-height: 1.6;
-}
-
-.editor-header {
-  margin-bottom: 8px;
-}
-
-.editor-title {
-  font-size: 13px;
-  color: var(--el-text-color-regular);
-}
-
-.editor-preview {
-  min-height: 360px;
-  margin: 0;
-}
-
 .distribution-channel-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5146,468 +4518,6 @@ function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'dange
 .authority-footer-actions .el-button {
   margin-left: 0;
   white-space: nowrap;
-}
-
-.media-distribute-dialog :deep(.el-dialog) {
-  overflow: hidden;
-  border-radius: 18px;
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.99), rgba(248, 251, 255, 0.98));
-  box-shadow: 0 28px 72px rgba(15, 23, 42, 0.18);
-}
-
-.media-distribute-dialog :deep(.el-dialog__header) {
-  margin: 0;
-  padding: 20px 24px 14px;
-  border-bottom: 1px solid #e2e8f0;
-  background:
-    linear-gradient(135deg, #ffffff, #eff6ff 62%, #ecfdf5);
-}
-
-.media-distribute-dialog :deep(.el-dialog__title) {
-  color: #0f172a;
-  font-size: 20px;
-  font-weight: 800;
-}
-
-.media-distribute-dialog :deep(.el-dialog__body) {
-  padding: 18px 20px 20px;
-}
-
-.media-distribute-dialog :deep(.el-dialog__footer) {
-  padding: 14px 20px 18px;
-  border-top: 1px solid #e2e8f0;
-  background: #f8fafc;
-}
-
-.media-distribute {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.media-capability-alert {
-  border: 1px solid #fed7aa;
-  border-radius: 12px;
-  background: #fff7ed;
-}
-
-.media-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.media-platform {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 128px;
-  padding: 16px 12px;
-  overflow: hidden;
-  border: 1px solid #dbeafe;
-  border-radius: 16px;
-  background:
-    linear-gradient(135deg, #ffffff 0%, #ffffff 68%, #f8fbff 100%);
-  color: #0f172a;
-  cursor: pointer;
-  flex-direction: column;
-  gap: 9px;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
-  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
-}
-
-.media-platform::after {
-  content: "";
-  position: absolute;
-  right: -34px;
-  bottom: -42px;
-  width: 110px;
-  height: 110px;
-  border-radius: 999px;
-  background: rgba(37, 99, 235, 0.06);
-  pointer-events: none;
-}
-
-.media-platform:hover {
-  transform: translateY(-2px);
-  border-color: #93c5fd;
-  box-shadow: 0 18px 40px rgba(37, 99, 235, 0.1);
-}
-
-.media-platform.active {
-  border-color: #22c55e;
-  background:
-    linear-gradient(135deg, #ffffff 0%, #f0fdf4 100%);
-  box-shadow:
-    0 18px 42px rgba(34, 197, 94, 0.13),
-    inset 0 0 0 1px rgba(34, 197, 94, 0.28);
-}
-
-.media-platform.disabled {
-  cursor: not-allowed;
-  background:
-    linear-gradient(135deg, #ffffff, #f8fafc);
-  color: #94a3b8;
-  opacity: 0.78;
-}
-
-.wechat-mark,
-.douyin-mark,
-.toutiao-mark,
-.zhihu-mark,
-.xiaohongshu-mark {
-  position: relative;
-  z-index: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 52px;
-  height: 52px;
-  border-radius: 16px;
-  color: #fff;
-  font-size: 23px;
-  font-weight: 800;
-  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
-}
-
-.wechat-mark {
-  background: linear-gradient(135deg, #16a34a, #22c55e);
-}
-
-.douyin-mark {
-  background: linear-gradient(135deg, #020617, #1e293b);
-}
-
-.toutiao-mark {
-  background: linear-gradient(135deg, #dc2626, #ef4444);
-}
-
-.zhihu-mark {
-  background: linear-gradient(135deg, #2563eb, #3b82f6);
-}
-
-.xiaohongshu-mark {
-  background: linear-gradient(135deg, #be123c, #f43f5e);
-}
-
-.media-name {
-  position: relative;
-  z-index: 1;
-  color: #0f172a;
-  font-size: 15px;
-  font-weight: 800;
-}
-
-.self-media-account-list {
-  overflow: hidden;
-  border: 1px solid #dbeafe;
-  border-radius: 14px;
-  background: #ffffff;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
-}
-
-.self-media-account-row {
-  display: grid;
-  align-items: center;
-  min-height: 64px;
-  padding: 12px 14px;
-  border-bottom: 1px solid #e2e8f0;
-  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
-  gap: 12px;
-}
-
-.self-media-account-row:last-child {
-  border-bottom: 0;
-}
-
-.self-media-account-row:hover {
-  background: #f8fbff;
-}
-
-.self-media-account-title {
-  color: #0f172a;
-  font-size: 15px;
-  font-weight: 800;
-}
-
-.self-media-account-meta {
-  margin-top: 3px;
-  color: #64748b;
-  font-size: 12px;
-}
-
-.extension-bind-guide {
-  margin-top: 12px;
-}
-
-.extension-bind-content {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 12px;
-  line-height: 1.7;
-}
-
-.bind-code {
-  font-family: "JetBrains Mono", Consolas, monospace;
-  letter-spacing: 0;
-}
-
-.cover-picker {
-  border: 1px solid #dbeafe;
-  border-radius: 14px;
-  padding: 14px;
-  background:
-    linear-gradient(180deg, #ffffff, #f8fbff);
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
-}
-
-.cover-picker-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--el-text-color-primary);
-}
-
-.folder-toolbar {
-  display: flex;
-  justify-content: flex-start;
-  margin-bottom: 10px;
-}
-
-.folder-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.folder-item {
-  min-height: 34px;
-  border: 1px solid #dcdfe6;
-  border-radius: 6px;
-  padding: 6px 10px;
-  background: #fff;
-  color: var(--el-text-color-primary);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-}
-
-.folder-item.selected {
-  border-color: var(--el-color-primary);
-  color: var(--el-color-primary);
-  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
-}
-
-.cover-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
-  gap: 10px;
-  max-height: 260px;
-  overflow: auto;
-}
-
-.cover-item {
-  border: 1px solid #dcdfe6;
-  border-radius: 6px;
-  padding: 6px;
-  background: #fff;
-  cursor: pointer;
-  text-align: left;
-}
-
-.cover-item.selected {
-  border-color: var(--el-color-primary);
-  box-shadow: 0 0 0 1px var(--el-color-primary) inset;
-}
-
-.cover-item img {
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  object-fit: cover;
-  border-radius: 4px;
-  background: #f2f3f5;
-  display: block;
-}
-
-.cover-item span {
-  display: block;
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--el-text-color-regular);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.douyin-selected-list {
-  margin-top: 12px;
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
-  overflow: hidden;
-  background: #fff;
-}
-
-.douyin-selected-row {
-  min-height: 44px;
-  padding: 8px 10px;
-  display: grid;
-  grid-template-columns: 32px 1fr auto auto;
-  align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid #ebeef5;
-}
-
-.douyin-selected-row:last-child {
-  border-bottom: 0;
-}
-
-.douyin-selected-index {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: #f2f3f5;
-  color: var(--el-text-color-secondary);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-}
-
-.douyin-selected-name {
-  min-width: 0;
-  font-size: 13px;
-  color: var(--el-text-color-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.douyin-text-editor,
-.distribution-history {
-  margin-top: 12px;
-}
-
-.environment-binding-body {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.environment-binding-summary {
-  margin-top: 2px;
-}
-
-.environment-binding-form {
-  margin-top: 0;
-}
-
-.environment-binding-select {
-  width: 100%;
-}
-
-.environment-binding-option-sub {
-  float: right;
-  margin-left: 16px;
-  color: var(--el-text-color-secondary);
-  font-size: 12px;
-}
-
-.distribution-history {
-  padding: 14px;
-  border: 1px solid #dbeafe;
-  border-radius: 14px;
-  background:
-    linear-gradient(180deg, #ffffff, #f8fbff);
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.055);
-}
-
-.distribution-history-table {
-  overflow: hidden;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
-}
-
-.distribution-history-table :deep(.el-table__header th) {
-  border-right-color: transparent;
-  background: #eff6ff;
-  color: #334155;
-  font-weight: 800;
-}
-
-.distribution-history-table :deep(.el-table__body td) {
-  border-right-color: transparent;
-  border-bottom-color: #edf2f7;
-}
-
-.distribution-history-table :deep(.el-table__row:hover > td) {
-  background: #f8fbff !important;
-}
-
-.distribution-target-cell {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.distribution-target-avatar {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #2563eb, #06b6d4);
-  color: #ffffff;
-  font-weight: 800;
-  flex-shrink: 0;
-}
-
-.distribution-target-main,
-.distribution-feedback {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.distribution-target-title,
-.distribution-feedback-main {
-  overflow: hidden;
-  color: #0f172a;
-  font-size: 14px;
-  font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.distribution-target-sub,
-.distribution-feedback-muted {
-  overflow: hidden;
-  color: #64748b;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.distribution-feedback-error {
-  overflow: hidden;
-  color: #ef4444;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.distribution-actions {
-  grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));
 }
 
 .site-cell {
