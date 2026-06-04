@@ -10,6 +10,7 @@ import type {
   R,
   SelfMediaAccount,
   SelfMediaCookieStatusBatchResponse,
+  SelfMediaPublishSchedule,
   DouyinAuthUrl,
   DouyinCapability,
   DouyinPlatformOptions,
@@ -999,4 +1000,28 @@ export function distributeContentArticleToSelfMediaAccount(articleId: number, da
   requestId: string
 }) {
   return request.post<R<DistributionTask>>(`/content/articles/${articleId}/distribute-to-self-media`, data)
+}
+
+export function getSelfMediaPublishSchedules(params?: {
+  brandId?: number
+  platform?: string
+  status?: string
+  articleId?: number
+  selfMediaAccountId?: number
+  current?: number
+  size?: number
+}) {
+  return request.get<R<PageResult<SelfMediaPublishSchedule>>>('/content/self-media-schedules', { params })
+}
+
+export function cancelSelfMediaPublishSchedule(id: number, data?: { reason?: string }) {
+  return request.post<R<SelfMediaPublishSchedule>>(`/content/self-media-schedules/${id}/cancel`, data ?? {})
+}
+
+export function confirmSelfMediaPublishSchedulePublished(id: number, data?: { platformPublishedUrl?: string }) {
+  return request.post<R<SelfMediaPublishSchedule>>(`/content/self-media-schedules/${id}/confirm-published`, data ?? {})
+}
+
+export function confirmSelfMediaPublishScheduleFailed(id: number, data?: { failureCode?: string; failureMessage?: string }) {
+  return request.post<R<SelfMediaPublishSchedule>>(`/content/self-media-schedules/${id}/confirm-publish-failed`, data ?? {})
 }

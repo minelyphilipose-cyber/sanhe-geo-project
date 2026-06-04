@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.extension.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
@@ -97,7 +98,8 @@ class ExtensionTaskStateServiceHeartbeatAuditDbTest extends AbstractAuditDbInteg
                 mock(SelfMediaPublishScheduleService.class),
                 redisStore,
                 new ExtensionAuditSupport(auditService),
-                auditService
+                auditService,
+                new ObjectMapper()
         );
     }
 

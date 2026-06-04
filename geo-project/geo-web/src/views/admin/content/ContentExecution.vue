@@ -86,6 +86,7 @@
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="jobs">批量任务列表</el-dropdown-item>
+                  <el-dropdown-item v-if="canViewSelfMediaSchedules" command="schedules">发布排期</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePromptTemplates" command="templates">文章提示词模板</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePublishPlatforms" command="platforms">发布平台管理</el-dropdown-item>
                 </el-dropdown-menu>
@@ -977,6 +978,12 @@
       </template>
     </el-dialog>
 
+    <SelfMediaScheduleDrawer
+      v-model="scheduleDrawerVisible"
+      :can-publish="canPublish"
+      @open-article="openDetail"
+    />
+
   </div>
 </template>
 
@@ -987,6 +994,7 @@ import MarkdownIt from 'markdown-it'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, ArrowUp, Calendar, Refresh, Search } from '@element-plus/icons-vue'
 import DataState from '@/components/ui/DataState.vue'
+import SelfMediaScheduleDrawer from './components/SelfMediaScheduleDrawer.vue'
 import { useUserStore } from '@/stores/user'
 import type { ArticleDetailResponse, ArticleDraft, AuthorityMediaResource, BrandImageFolder, BrandMaterial, DistributionTask, DouyinCapability, PublishSite, SelfMediaAccount, WechatMpCapability } from '@/types'
 import {
@@ -1076,14 +1084,16 @@ const canPublish = computed(() => userStore.hasPermission('content.publish.opera
 const canManagePromptTemplates = computed(() => userStore.hasPermission('content.prompt_template.manage'))
 const canManagePublishPlatforms = computed(() => userStore.hasPermission('user.manage'))
 const canViewBatchPublishJobs = computed(() => userStore.hasPermission('content.read'))
+const canViewSelfMediaSchedules = computed(() => userStore.hasPermission('content.read'))
 const hasToolbarMoreActions = computed(() =>
-  canViewBatchPublishJobs.value || canManagePromptTemplates.value || canManagePublishPlatforms.value,
+  canViewBatchPublishJobs.value || canViewSelfMediaSchedules.value || canManagePromptTemplates.value || canManagePublishPlatforms.value,
 )
 const hasToolbarActions = computed(() =>
   canArticleWrite.value
   || canAiGenerate.value
   || canPublish.value
   || canViewBatchPublishJobs.value
+  || canViewSelfMediaSchedules.value
   || canManagePromptTemplates.value
   || canManagePublishPlatforms.value,
 )
@@ -1107,6 +1117,7 @@ const publishedCount = computed(() => rows.value.filter((row) => row.status === 
 const distributableCount = computed(() => rows.value.filter((row) => canDistribute(row.status)).length)
 const showAdvancedFilters = ref(false)
 const blockedCount = computed(() => rows.value.filter((row) => ['failed', 'risk_blocked'].includes(row.status)).length)
+const scheduleDrawerVisible = ref(false)
 
 const detailVisible = ref(false)
 const detailData = ref<ArticleDetailResponse | null>(null)
@@ -1789,9 +1800,15 @@ function openBatchPublishJobs() {
   })
 }
 
+function openScheduleDrawer() {
+  scheduleDrawerVisible.value = true
+}
+
 function handleToolbarMoreCommand(command: string) {
   if (command === 'jobs') {
     openBatchPublishJobs()
+  } else if (command === 'schedules') {
+    openScheduleDrawer()
   } else if (command === 'templates') {
     openPromptTemplateManagement()
   } else if (command === 'platforms') {

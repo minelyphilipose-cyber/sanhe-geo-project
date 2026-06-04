@@ -175,17 +175,27 @@ public class SelfMediaPublishScheduleService {
                                                           Long selfMediaAccountId,
                                                           Long current,
                                                           Long size) {
-        if (brandId == null || brandId <= 0) {
+        if (brandId != null && brandId <= 0) {
             fail("INVALID_BRAND", "brandId must be a positive number");
         }
         SysUser operator = currentUserService.requireCurrentUser();
-        brandAccessService.requireBrandAccess(brandId, operator.getId(), BrandAccessAction.OPERATE);
 
         long pageNo = current == null || current <= 0 ? 1 : current;
         long pageSize = size == null || size <= 0 ? 20 : Math.min(size, 100);
-        LambdaQueryWrapper<SelfMediaPublishSchedule> wrapper = new LambdaQueryWrapper<SelfMediaPublishSchedule>()
-                .eq(SelfMediaPublishSchedule::getBrandId, brandId)
-                .orderByAsc(SelfMediaPublishSchedule::getPlannedPublishAt)
+        LambdaQueryWrapper<SelfMediaPublishSchedule> wrapper = new LambdaQueryWrapper<>();
+        if (brandId != null) {
+            brandAccessService.requireBrandAccess(brandId, operator.getId(), BrandAccessAction.OPERATE);
+            wrapper.eq(SelfMediaPublishSchedule::getBrandId, brandId);
+        } else {
+            List<Long> accessibleBrandIds = brandAccessService.listAccessibleBrandIds(operator.getId(), BrandAccessAction.OPERATE);
+            if (accessibleBrandIds == null || accessibleBrandIds.isEmpty()) {
+                Page<SelfMediaPublishScheduleVO> empty = new Page<>(pageNo, pageSize, 0);
+                empty.setRecords(List.of());
+                return empty;
+            }
+            wrapper.in(SelfMediaPublishSchedule::getBrandId, accessibleBrandIds);
+        }
+        wrapper.orderByAsc(SelfMediaPublishSchedule::getPlannedPublishAt)
                 .orderByDesc(SelfMediaPublishSchedule::getId);
         if (StringUtils.hasText(platform)) {
             wrapper.eq(SelfMediaPublishSchedule::getPlatform, platform.trim());

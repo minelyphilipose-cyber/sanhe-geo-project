@@ -1208,6 +1208,45 @@ export interface SelfMediaAccount {
   cookieCredentialIdentityMessage?: string | null
 }
 
+export interface SelfMediaPublishSchedule {
+  id: number
+  requestId?: number | null
+  requestIdempotencyKey?: string | null
+  articleId: number
+  brandId: number
+  selfMediaAccountId: number
+  browserEnvironmentId?: number | null
+  browserEnvironmentAccountId?: number | null
+  platform: string
+  scheduleStrategy: string
+  plannedPublishAt?: string | null
+  platformScheduledAt?: string | null
+  scheduleDriftSeconds?: number | null
+  scheduleDriftReason?: string | null
+  status: string
+  queueKind?: string | null
+  queuePriority?: number | null
+  platformScheduleId?: string | null
+  platformPublishId?: string | null
+  platformPublishedUrl?: string | null
+  baseIdempotencyKey?: string | null
+  generationNo?: number | null
+  attemptCount?: number | null
+  maxAttempts?: number | null
+  lastAttemptAt?: string | null
+  nextAttemptAt?: string | null
+  lockedUntil?: string | null
+  failureCode?: string | null
+  failureMessage?: string | null
+  diagnosticsJson?: string | null
+  createdAt?: string | null
+  updatedAt?: string | null
+  scheduledAt?: string | null
+  cancelledAt?: string | null
+  cancelRequestedAt?: string | null
+  publishedConfirmedAt?: string | null
+}
+
 export interface PublishQuota {
   month: string
   monthUsed: number

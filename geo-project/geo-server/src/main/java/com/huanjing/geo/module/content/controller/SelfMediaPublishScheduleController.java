@@ -35,7 +35,7 @@ public class SelfMediaPublishScheduleController {
     }
 
     @GetMapping("/self-media-schedules")
-    public R<Page<SelfMediaPublishScheduleVO>> pageSchedules(@RequestParam Long brandId,
+    public R<Page<SelfMediaPublishScheduleVO>> pageSchedules(@RequestParam(required = false) Long brandId,
                                                              @RequestParam(required = false) String platform,
                                                              @RequestParam(required = false) String status,
                                                              @RequestParam(required = false) Long articleId,

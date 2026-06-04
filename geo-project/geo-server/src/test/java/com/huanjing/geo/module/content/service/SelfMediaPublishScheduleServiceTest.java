@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.content.service;
 
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
@@ -14,6 +15,7 @@ import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMapper;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
+import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
@@ -48,6 +50,7 @@ class SelfMediaPublishScheduleServiceTest {
     private BrowserEnvironmentService browserEnvironmentService;
     private SelfMediaScheduleCapabilityService scheduleCapabilityService;
     private SelfMediaPublishScheduleEnvironmentLockService environmentLockService;
+    private BrandAccessService brandAccessService;
     private SelfMediaPublishScheduleService service;
 
     @BeforeEach
@@ -60,6 +63,7 @@ class SelfMediaPublishScheduleServiceTest {
         browserEnvironmentService = mock(BrowserEnvironmentService.class);
         scheduleCapabilityService = mock(SelfMediaScheduleCapabilityService.class);
         environmentLockService = mock(SelfMediaPublishScheduleEnvironmentLockService.class);
+        brandAccessService = mock(BrandAccessService.class);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
         SysUser user = new SysUser();
         user.setId(99L);
@@ -75,7 +79,7 @@ class SelfMediaPublishScheduleServiceTest {
                 scheduleCapabilityService,
                 environmentLockService,
                 mock(ContentDistributionService.class),
-                mock(BrandAccessService.class),
+                brandAccessService,
                 currentUserService,
                 new ObjectMapper()
         );
@@ -206,6 +210,41 @@ class SelfMediaPublishScheduleServiceTest {
 
         verify(scheduleCapabilityService, never()).readiness(anyString());
         verify(scheduleMapper, never()).insert(any());
+    }
+
+    @Test
+    void pageSchedulesWithoutBrandScopesToAccessibleBrands() {
+        when(brandAccessService.listAccessibleBrandIds(99L, BrandAccessAction.OPERATE)).thenReturn(List.of(8L, 9L));
+        SelfMediaPublishSchedule row = new SelfMediaPublishSchedule();
+        row.setId(30L);
+        row.setBrandId(8L);
+        row.setArticleId(10L);
+        row.setSelfMediaAccountId(20L);
+        row.setPlatform("toutiao");
+        row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        Page<SelfMediaPublishSchedule> mapperPage = new Page<>(1, 20, 1);
+        mapperPage.setRecords(List.of(row));
+        when(scheduleMapper.selectPage(any(), any())).thenReturn(mapperPage);
+
+        Page<SelfMediaPublishScheduleVO> response = service.pageSchedules(
+                null, "toutiao", SelfMediaPublishScheduleConstants.STATUS_PENDING, null, null, 1L, 20L);
+
+        assertEquals(1, response.getTotal());
+        assertEquals(30L, response.getRecords().get(0).getId());
+        verify(brandAccessService).listAccessibleBrandIds(99L, BrandAccessAction.OPERATE);
+        verify(brandAccessService, never()).requireBrandAccess(anyLong(), anyLong(), any());
+        verify(scheduleMapper).selectPage(any(), any());
+    }
+
+    @Test
+    void pageSchedulesWithoutAccessibleBrandReturnsEmptyPage() {
+        when(brandAccessService.listAccessibleBrandIds(99L, BrandAccessAction.OPERATE)).thenReturn(List.of());
+
+        Page<SelfMediaPublishScheduleVO> response = service.pageSchedules(null, null, null, null, null, 1L, 20L);
+
+        assertEquals(0, response.getTotal());
+        assertTrue(response.getRecords().isEmpty());
+        verify(scheduleMapper, never()).selectPage(any(), any());
     }
 
     @Test
