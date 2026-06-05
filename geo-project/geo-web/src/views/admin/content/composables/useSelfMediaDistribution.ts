@@ -1,0 +1,1270 @@
+import { computed, onBeforeUnmount, reactive, ref, type Ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { useUserStore } from '@/stores/user'
+import type {
+  ArticleDraft,
+  BrandImageFolder,
+  BrandMaterial,
+  DistributionTask,
+  DouyinCapability,
+  SelfMediaAccount,
+  WechatMpCapability,
+} from '@/types'
+import {
+  abandonSemiAutoDistribution,
+  checkSelfMediaAccountAuth,
+  confirmSemiAutoDistribution,
+  distributeContentArticleToSelfMediaAccount,
+  getArticleDistribution,
+  getContentArticleDetail,
+  getDouyinAuthUrl,
+  getDouyinCapability,
+  getSelfMediaAccountsByBrand,
+  getWechatMpAuthUrl,
+  getWechatMpCapability,
+  refreshDistributionTaskReviewStatus,
+} from '@/api/content'
+import { getBrandImageFolders, getBrandMaterialPreviewUrl } from '@/api/customer'
+import {
+  getBrowserEnvironmentAccountBySelfMedia,
+  updateBrowserEnvironmentAccount,
+  type BrowserEnvironmentAccount,
+} from '@/api/browserEnvironment'
+import {
+  listLocalAgentSessions,
+  type LocalAgentSession,
+} from '@/api/localAgent'
+import { getLocalHelperHealth, launchLocalHelperTask, openLocalHelperEnvironment } from '@/api/localHelper'
+
+type MediaPlatform = 'wechat_mp' | 'douyin' | 'toutiao' | 'zhihu' | 'xiaohongshu'
+type SemiAutoPlatform = 'toutiao' | 'zhihu' | 'xiaohongshu'
+
+type UseSelfMediaDistributionOptions = {
+  rows: Ref<ArticleDraft[]>
+  load: () => Promise<void>
+}
+
+type SetupPromptTarget = 'localAgent' | 'brandEnvironment' | 'selfMediaAccounts'
+
+interface SetupPromptOptions {
+  title: string
+  issue: string
+  location: string
+  action: string
+  target?: SetupPromptTarget
+}
+
+function localAgentSessionTimeValue(session: LocalAgentSession) {
+  const value = session.lastSeenAt || session.boundAt || session.expiresAt || ''
+  const timestamp = value ? new Date(value).getTime() : 0
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function createRequestId(prefix = 'self_media') {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID()
+  }
+  return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2)}`
+}
+
+function isImageFileType(fileType?: string | null) {
+  return ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes((fileType || '').toLowerCase())
+}
+
+export function useSelfMediaDistribution(options: UseSelfMediaDistributionOptions) {
+  const userStore = useUserStore()
+  const router = useRouter()
+
+  const mediaDistributeVisible = ref(false)
+  const mediaDistributeArticleId = ref<number | null>(null)
+  const mediaDistributeBrandId = ref<number | null>(null)
+  const wechatCapability = ref<WechatMpCapability | null>(null)
+  const douyinCapability = ref<DouyinCapability | null>(null)
+  const wechatAccounts = ref<SelfMediaAccount[]>([])
+  const douyinAccounts = ref<SelfMediaAccount[]>([])
+  const toutiaoAccounts = ref<SelfMediaAccount[]>([])
+  const zhihuAccounts = ref<SelfMediaAccount[]>([])
+  const xiaohongshuAccounts = ref<SelfMediaAccount[]>([])
+  const checkingSelfMediaAccountId = ref<number | null>(null)
+  const brandImageFolders = ref<BrandImageFolder[]>([])
+  const materialThumbUrls = ref<Record<number, string | null>>({})
+  const imageFolderScope = ref<'project' | 'all'>('project')
+  const selectedImageFolderId = ref<number | null>(null)
+  const selectedMediaPlatform = ref<MediaPlatform>('wechat_mp')
+  const selectedSelfMediaAccountId = ref<number | null>(null)
+  const selectedCoverMaterialId = ref<number | null>(null)
+  const selectedDouyinImageMaterialIds = ref<number[]>([])
+  const douyinText = ref('')
+  const distributionAttempts = ref<DistributionTask[]>([])
+  const refreshingReviewTaskId = ref<number | null>(null)
+  const semiAutoConfirmingTaskId = ref<number | null>(null)
+  const semiAutoAbandoningTaskId = ref<number | null>(null)
+  const semiAutoLoginOpeningAccountId = ref<number | null>(null)
+  const selfMediaSubmitting = ref(false)
+  const browserEnvironmentAccounts = ref<Record<number, BrowserEnvironmentAccount | null>>({})
+  const localAgentSessions = ref<LocalAgentSession[]>([])
+  const environmentAccountResettingId = ref<number | null>(null)
+  const localHelperConfig = reactive({
+    helperBase: 'http://127.0.0.1:17891',
+    localAgentSessionId: null as number | null,
+  })
+
+  let browserEnvironmentStatusPollTimer: number | null = null
+  let browserEnvironmentStatusPollingInFlight = false
+
+  const activeLocalAgentSessions = computed(() =>
+    localAgentSessions.value
+      .filter((session) => session.status === 'active')
+      .slice()
+      .sort((left, right) => {
+        const timeDelta = localAgentSessionTimeValue(right) - localAgentSessionTimeValue(left)
+        if (timeDelta !== 0) return timeDelta
+        return right.id - left.id
+      }),
+  )
+  const wechatActive = computed(() => wechatAccounts.value.some((account) => account.status === 'active'))
+  const wechatDistributionAvailable = computed(() =>
+    !!wechatCapability.value?.draftDistributionEnabled || !!wechatCapability.value?.autoPublishEnabled,
+  )
+  const wechatStatusLabel = computed(() => {
+    if (!wechatDistributionAvailable.value) return '审核中'
+    if (wechatActive.value) return '已登录'
+    return '未登录'
+  })
+  const wechatStatusTagType = computed<'success' | 'warning' | 'info'>(() => {
+    if (!wechatDistributionAvailable.value) return 'warning'
+    return wechatActive.value ? 'success' : 'info'
+  })
+  const douyinActive = computed(() => douyinAccounts.value.some((account) => account.status === 'active'))
+  const douyinLiveVerificationBlocked = computed(() => !!douyinCapability.value?.liveVerificationBlocked)
+  const douyinDistributionAvailable = computed(() =>
+    !!douyinCapability.value?.enabled && !douyinLiveVerificationBlocked.value,
+  )
+  const douyinStatusLabel = computed(() => {
+    if (!douyinCapability.value?.enabled) return '未开启'
+    if (douyinLiveVerificationBlocked.value) return '待联调'
+    if (douyinActive.value) return '已登录'
+    return '未登录'
+  })
+  const douyinStatusTagType = computed<'success' | 'warning' | 'info'>(() => {
+    if (!douyinCapability.value?.enabled || douyinLiveVerificationBlocked.value) return 'warning'
+    return douyinActive.value ? 'success' : 'info'
+  })
+  const douyinSubmitButtonText = computed(() =>
+    douyinLiveVerificationBlocked.value ? '抖音图文待联调' : '发布抖音图文',
+  )
+  const currentPlatformAccounts = computed(() => {
+    switch (selectedMediaPlatform.value) {
+      case 'douyin':
+        return douyinAccounts.value
+      case 'toutiao':
+        return toutiaoAccounts.value
+      case 'zhihu':
+        return zhihuAccounts.value
+      case 'xiaohongshu':
+        return xiaohongshuAccounts.value
+      default:
+        return wechatAccounts.value
+    }
+  })
+  const projectImageFolders = computed(() => brandImageFolders.value.filter((folder) => folder.projectRelated))
+  const displayImageFolders = computed(() => {
+    if (imageFolderScope.value === 'project' && projectImageFolders.value.length) {
+      return projectImageFolders.value
+    }
+    return brandImageFolders.value
+  })
+  const selectedImageFolder = computed(() => displayImageFolders.value.find((folder) => folder.id === selectedImageFolderId.value) || null)
+  const currentFolderMaterials = computed(() => selectedImageFolder.value?.materials || [])
+  const imageMaterials = computed(() => currentFolderMaterials.value.filter((item) => {
+    const type = (item.fileType || '').toLowerCase()
+    return ['jpg', 'jpeg', 'png', 'gif', 'bmp'].includes(type)
+  }))
+  const douyinImageMaterials = computed(() => currentFolderMaterials.value.filter((item) => {
+    const type = (item.fileType || '').toLowerCase()
+    return ['jpg', 'jpeg', 'png'].includes(type)
+  }))
+  const selectedDouyinMaterials = computed(() => selectedDouyinImageMaterialIds.value
+    .map((id) => douyinImageMaterials.value.find((item) => item.id === id))
+    .filter((item): item is BrandMaterial => !!item))
+
+  async function openMediaDistribute(row: ArticleDraft) {
+    stopBrowserEnvironmentStatusPolling()
+    mediaDistributeArticleId.value = row.id
+    mediaDistributeBrandId.value = null
+    selectedMediaPlatform.value = 'wechat_mp'
+    wechatAccounts.value = []
+    douyinAccounts.value = []
+    toutiaoAccounts.value = []
+    zhihuAccounts.value = []
+    xiaohongshuAccounts.value = []
+    brandImageFolders.value = []
+    imageFolderScope.value = 'project'
+    selectedImageFolderId.value = null
+    selectedSelfMediaAccountId.value = null
+    selectedCoverMaterialId.value = null
+    selectedDouyinImageMaterialIds.value = []
+    douyinText.value = row.title || ''
+    distributionAttempts.value = []
+    browserEnvironmentAccounts.value = {}
+    localAgentSessions.value = []
+    try {
+      const [detailRes, wechatCapabilityRes, douyinCapabilityRes, distributionRes] = await Promise.all([
+        getContentArticleDetail(row.id),
+        getWechatMpCapability(),
+        getDouyinCapability(),
+        getArticleDistribution(row.id, { targetKind: 'mp_account' }),
+      ])
+      const brandId = detailRes.data.data.project?.brandId
+      if (!brandId) {
+        ElMessage.error('当前文章未绑定品牌，无法分发到自媒体')
+        return
+      }
+      mediaDistributeBrandId.value = brandId
+      wechatCapability.value = wechatCapabilityRes.data.data
+      douyinCapability.value = douyinCapabilityRes.data.data
+      distributionAttempts.value = distributionRes.data.data.attempts || []
+      const [accountRes, folderRes] = await Promise.all([
+        getSelfMediaAccountsByBrand(brandId),
+        getBrandImageFolders(brandId, {
+          projectId: row.projectId,
+          activeOnly: true,
+          includeMaterials: true,
+        }),
+      ])
+      applySelfMediaAccounts(accountRes.data.data || [])
+      await Promise.all([
+        loadBrowserEnvironmentAccountStatuses(accountRes.data.data || []),
+        refreshLocalAgentSessions(),
+      ])
+      brandImageFolders.value = folderRes.data.data || []
+      ensureSelectedImageFolder()
+      await loadMaterialThumbs()
+      mediaDistributeVisible.value = true
+      startBrowserEnvironmentStatusPolling()
+    } catch {
+      ElMessage.error('加载自媒体账号失败')
+    }
+  }
+
+  function applySelfMediaAccounts(accounts: SelfMediaAccount[]) {
+    wechatAccounts.value = accounts.filter((account) => account.platform === 'wechat_mp')
+    douyinAccounts.value = accounts.filter((account) => account.platform === 'douyin')
+    toutiaoAccounts.value = accounts.filter((account) => account.platform === 'toutiao')
+    zhihuAccounts.value = accounts.filter((account) => account.platform === 'zhihu')
+    xiaohongshuAccounts.value = accounts.filter((account) => account.platform === 'xiaohongshu')
+  }
+
+  async function loadBrowserEnvironmentAccountStatuses(accounts: SelfMediaAccount[]) {
+    const semiAutoAccounts = accounts.filter((account) => isSemiAutoPlatform(account.platform as MediaPlatform))
+    if (!semiAutoAccounts.length) {
+      browserEnvironmentAccounts.value = {}
+      return
+    }
+    const entries = await Promise.all(semiAutoAccounts.map(async (account) => {
+      try {
+        const { data } = await getBrowserEnvironmentAccountBySelfMedia(account.id)
+        return [account.id, data.data || null] as const
+      } catch {
+        return [account.id, null] as const
+      }
+    }))
+    browserEnvironmentAccounts.value = Object.fromEntries(entries)
+  }
+
+  async function refreshBrowserEnvironmentAccountStatuses() {
+    await loadBrowserEnvironmentAccountStatuses([
+      ...toutiaoAccounts.value,
+      ...zhihuAccounts.value,
+      ...xiaohongshuAccounts.value,
+    ])
+  }
+
+  async function pollBrowserEnvironmentAccountStatusesOnce() {
+    if (!mediaDistributeVisible.value || browserEnvironmentStatusPollingInFlight) return
+    browserEnvironmentStatusPollingInFlight = true
+    try {
+      await refreshBrowserEnvironmentAccountStatuses()
+    } finally {
+      browserEnvironmentStatusPollingInFlight = false
+    }
+  }
+
+  function startBrowserEnvironmentStatusPolling() {
+    stopBrowserEnvironmentStatusPolling()
+    void pollBrowserEnvironmentAccountStatusesOnce()
+    browserEnvironmentStatusPollTimer = window.setInterval(() => {
+      void pollBrowserEnvironmentAccountStatusesOnce()
+    }, 3000)
+  }
+
+  function stopBrowserEnvironmentStatusPolling() {
+    if (browserEnvironmentStatusPollTimer !== null) {
+      window.clearInterval(browserEnvironmentStatusPollTimer)
+      browserEnvironmentStatusPollTimer = null
+    }
+    browserEnvironmentStatusPollingInFlight = false
+  }
+
+  async function refreshLocalAgentSessions() {
+    try {
+      const { data } = await listLocalAgentSessions()
+      localAgentSessions.value = data.data || []
+      const activeIds = new Set(activeLocalAgentSessions.value.map((session) => session.id))
+      if (!localHelperConfig.localAgentSessionId || !activeIds.has(localHelperConfig.localAgentSessionId)) {
+        localHelperConfig.localAgentSessionId = activeLocalAgentSessions.value[0]?.id || null
+      }
+    } catch {
+      localAgentSessions.value = []
+      localHelperConfig.localAgentSessionId = null
+    }
+  }
+
+  async function refreshSelfMediaAccounts() {
+    if (!mediaDistributeBrandId.value) return
+    const { data } = await getSelfMediaAccountsByBrand(mediaDistributeBrandId.value)
+    const accounts = data.data || []
+    applySelfMediaAccounts(accounts)
+    await loadBrowserEnvironmentAccountStatuses(accounts)
+  }
+
+  async function handleWechatPlatformClick() {
+    if (!wechatDistributionAvailable.value) {
+      ElMessage.info(wechatCapability.value?.description || '微信公众号能力审核中，暂未开放授权')
+      return
+    }
+    if (!wechatActive.value) {
+      if (!mediaDistributeBrandId.value) {
+        ElMessage.error('当前文章未绑定品牌，无法授权公众号')
+        return
+      }
+      const { data } = await getWechatMpAuthUrl({
+        brandId: mediaDistributeBrandId.value,
+        redirectArticleId: mediaDistributeArticleId.value || undefined,
+      })
+      window.location.href = data.data.authUrl
+      return
+    }
+    const account = wechatAccounts.value.find((item) => item.status === 'active')
+    if (account) {
+      startWechatDraft(account)
+    }
+  }
+
+  function startWechatDraft(account: SelfMediaAccount) {
+    selectedMediaPlatform.value = 'wechat_mp'
+    selectedSelfMediaAccountId.value = account.id
+    ensureSelectedImageFolder()
+    selectedCoverMaterialId.value = imageMaterials.value[0]?.id || null
+  }
+
+  async function handleDouyinPlatformClick() {
+    selectedMediaPlatform.value = 'douyin'
+    selectedSelfMediaAccountId.value = null
+    selectedCoverMaterialId.value = null
+    if (!douyinCapability.value?.enabled) {
+      ElMessage.info(douyinCapability.value?.disabledReason || '抖音图文暂未开启')
+      return
+    }
+    if (douyinLiveVerificationBlocked.value) {
+      ElMessage.info(douyinCapability.value?.description || '当前域名备案及开放平台审核未完成，暂不可真实联调抖音图文')
+      return
+    }
+    if (!douyinActive.value) {
+      if (!mediaDistributeBrandId.value) {
+        ElMessage.error('当前文章未绑定品牌，无法授权抖音')
+        return
+      }
+      const { data } = await getDouyinAuthUrl({
+        brandId: mediaDistributeBrandId.value,
+        redirectArticleId: mediaDistributeArticleId.value || undefined,
+      })
+      window.location.href = data.data.authUrl
+      return
+    }
+    const account = douyinAccounts.value.find((item) => item.status === 'active')
+    if (account) {
+      startDouyinImageText(account)
+    }
+  }
+
+  function startDouyinImageText(account: SelfMediaAccount) {
+    selectedMediaPlatform.value = 'douyin'
+    selectedSelfMediaAccountId.value = account.id
+    ensureSelectedImageFolder()
+  }
+
+  function isSemiAutoPlatform(platform: MediaPlatform): platform is SemiAutoPlatform {
+    return platform === 'toutiao' || platform === 'zhihu' || platform === 'xiaohongshu'
+  }
+
+  function semiAutoPlatformLabel(platform: string) {
+    if (platform === 'toutiao') return '头条'
+    if (platform === 'zhihu') return '知乎'
+    return '小红书'
+  }
+
+  function semiAutoStatusLabel(accounts: SelfMediaAccount[]) {
+    if (!accounts.length) return '未配置'
+    if (!accounts.some((account) => account.status === 'active')) return '不可用'
+    return '可打开环境'
+  }
+
+  function semiAutoStatusTagType(accounts: SelfMediaAccount[]): 'success' | 'warning' | 'info' {
+    if (!accounts.length) return 'info'
+    return accounts.some((account) => account.status === 'active') ? 'success' : 'warning'
+  }
+
+  function environmentAccountOf(account: SelfMediaAccount) {
+    return browserEnvironmentAccounts.value[account.id] || null
+  }
+
+  function semiAutoCredentialLabel(account: SelfMediaAccount) {
+    return account.status === 'active' ? '环境内校验' : '不可用'
+  }
+
+  function semiAutoCredentialTagType(account: SelfMediaAccount): 'success' | 'warning' | 'info' {
+    return account.status === 'active' ? 'info' : 'warning'
+  }
+
+  function environmentAccountLabel(account: SelfMediaAccount) {
+    const binding = environmentAccountOf(account)
+    if (!binding) return '未配置环境'
+    if (binding.loginStatus === 'logged_in') return '环境已就绪'
+    if (binding.loginStatus === 'unknown') return '需登录'
+    if (binding.loginStatus === 'mismatch') return '账号不一致'
+    if (binding.loginStatus === 'expired') return '需重新登录'
+    if (binding.loginStatus === 'login_required') return '需重新登录'
+    if (binding.loginStatus === 'error') return '环境异常'
+    return '环境状态未知'
+  }
+
+  function environmentAccountActionHint(account: SelfMediaAccount) {
+    const binding = environmentAccountOf(account)
+    if (!binding) return '该账号未配置指纹浏览器环境，请到「品牌详情 > 自媒体账号 > 指纹浏览器环境」完成绑定'
+    if (binding.loginStatus === 'logged_in') return '环境已就绪，可以打开环境并填充'
+    if (binding.loginStatus === 'unknown') return '请点击「打开环境登录」，在 AdsPower 浏览器环境完成登录；扩展会自动上报登录状态'
+    if (binding.loginStatus === 'login_required') return '请点击「打开环境登录」，在 AdsPower 浏览器环境重新登录；扩展会自动上报登录状态'
+    if (binding.loginStatus === 'expired') return '登录状态已过期，请点击「打开环境登录」重新登录，扩展会自动上报登录状态'
+    if (binding.loginStatus === 'mismatch') return '当前环境登录账号与系统绑定账号不一致，请在本页面点击「重置账号校验」后重新打开环境登录，扩展会自动上报登录状态'
+    if (binding.loginStatus === 'error') return '环境状态异常，请到「品牌详情 > 自媒体账号 > 指纹浏览器环境」检查绑定，或重新打开环境登录'
+    return '环境状态未知，请打开环境确认登录状态'
+  }
+
+  function browserEnvironmentProviderProfileIdOf(binding: BrowserEnvironmentAccount | null | undefined) {
+    return String(binding?.providerProfileId || '').trim()
+  }
+
+  function environmentAccountTagType(account: SelfMediaAccount): 'success' | 'warning' | 'danger' | 'info' {
+    const binding = environmentAccountOf(account)
+    if (!binding) return 'info'
+    if (binding.loginStatus === 'logged_in') return 'success'
+    if (binding.loginStatus === 'mismatch' || binding.loginStatus === 'error') return 'danger'
+    return 'warning'
+  }
+
+  function canSubmitSemiAutoEnvironmentTask(account: SelfMediaAccount) {
+    const binding = environmentAccountOf(account)
+    return account.status === 'active' && !!binding && binding.loginStatus === 'logged_in'
+  }
+
+  function semiAutoAccountActionLoading(account: SelfMediaAccount) {
+    return selfMediaSubmitting.value && selectedSelfMediaAccountId.value === account.id
+  }
+
+  function setupPromptPath(target?: SetupPromptTarget) {
+    if (target === 'localAgent') return userStore.isPartner ? '/partner/profile' : '/admin/profile'
+    if (target === 'brandEnvironment' || target === 'selfMediaAccounts') {
+      return mediaDistributeBrandId.value ? `/admin/brands/${mediaDistributeBrandId.value}` : '/admin/brands'
+    }
+    return ''
+  }
+
+  async function showSetupPrompt(options: SetupPromptOptions) {
+    const targetPath = setupPromptPath(options.target)
+    const message = [
+      options.issue,
+      '',
+      `设置位置：${options.location}`,
+      `处理方式：${options.action}`,
+    ].join('\n')
+
+    try {
+      await ElMessageBox.confirm(message, options.title, {
+        confirmButtonText: targetPath ? '前往设置' : '我知道了',
+        cancelButtonText: '取消',
+        type: 'warning',
+      })
+    } catch {
+      return
+    }
+
+    if (targetPath) {
+      await router.push(targetPath)
+    }
+  }
+
+  function showLocalAgentSetupPrompt(issue = '当前电脑尚未完成本地助手配对，系统无法打开 AdsPower 浏览器环境。') {
+    const isAdspowerConfigIssue = /AdsPower|API Key/i.test(issue)
+    return showSetupPrompt({
+      title: isAdspowerConfigIssue ? 'AdsPower 连接未配置' : '本地助手未就绪',
+      issue,
+      location: '右上角头像 > 个人中心 > 本地助手',
+      action: isAdspowerConfigIssue
+        ? '先启动本地助手，在个人中心填写 AdsPower API 地址和 API Key，保存后回到当前分发页面继续操作。'
+        : '先启动本地助手，在助手页面生成一次性配对码，再回到个人中心完成绑定。绑定成功后回到当前分发页面继续操作。',
+      target: 'localAgent',
+    })
+  }
+
+  function showBrandEnvironmentSetupPrompt(issue: string) {
+    return showSetupPrompt({
+      title: 'AdsPower 浏览器环境未配置',
+      issue,
+      location: '品牌详情 > 自媒体账号 > 指纹浏览器环境',
+      action: '为该品牌配置 AdsPower 浏览器环境，并确认该平台账号已绑定到品牌环境。',
+      target: 'brandEnvironment',
+    })
+  }
+
+  function showSelfMediaAccountSetupPrompt(platform: SemiAutoPlatform, issue: string) {
+    return showSetupPrompt({
+      title: `${semiAutoPlatformLabel(platform)}账号未就绪`,
+      issue,
+      location: '品牌详情 > 自媒体账号',
+      action: `新增或启用${semiAutoPlatformLabel(platform)}账号后，确认该账号已绑定品牌的 AdsPower 浏览器环境。`,
+      target: 'selfMediaAccounts',
+    })
+  }
+
+  function isLocalAgentSetupError(error: unknown) {
+    if (!(error instanceof Error)) return false
+    return /本地助手|local agent|helper/i.test(error.message)
+  }
+
+  async function openSemiAutoEnvironmentForLogin(account: SelfMediaAccount) {
+    const binding = environmentAccountOf(account)
+    if (!binding) {
+      await showBrandEnvironmentSetupPrompt('当前自媒体账号未绑定 AdsPower 浏览器环境，无法打开对应环境进行登录。')
+      return
+    }
+    const environmentKey = binding.environmentKey || ''
+    if (!environmentKey) {
+      await showBrandEnvironmentSetupPrompt('当前账号的浏览器环境配置不完整，请到品牌详情重新保存或重新绑定。')
+      return
+    }
+    const providerProfileId = browserEnvironmentProviderProfileIdOf(binding)
+    if (!providerProfileId) {
+      await showBrandEnvironmentSetupPrompt('当前账号的 AdsPower 浏览器编号缺失，请到品牌详情补全环境配置。')
+      return
+    }
+    semiAutoLoginOpeningAccountId.value = account.id
+    try {
+      await openLocalHelperEnvironment(
+        await currentLocalHelperAuthConfig(),
+        {
+          environmentKey,
+          providerProfileId,
+          environmentName: binding.environmentKey || account.accountName || null,
+          url: defaultSemiAutoLoginReportUrl(account.platform),
+        },
+      )
+      ElMessage.success('已打开对应 AdsPower 浏览器环境。登录完成后，环境内扩展会自动上报登录状态')
+    } catch (error) {
+      if (isLocalAgentSetupError(error)) {
+        await showLocalAgentSetupPrompt(error instanceof Error ? error.message : undefined)
+      } else {
+        ElMessage.error(error instanceof Error ? error.message : '打开指纹浏览器环境失败')
+      }
+    } finally {
+      semiAutoLoginOpeningAccountId.value = null
+    }
+  }
+
+  async function resetEnvironmentAccountIdentity(account: SelfMediaAccount) {
+    const binding = environmentAccountOf(account)
+    if (!binding) {
+      ElMessage.warning('当前账号未绑定指纹浏览器环境')
+      return
+    }
+    try {
+      await ElMessageBox.confirm(
+        `确认重置账号「${account.accountName}」的环境账号校验？这会清除当前已登记的平台身份，状态回到待首次登录。重置后请重新打开环境登录，扩展会自动上报登录状态。`,
+        '重置账号校验',
+        {
+          confirmButtonText: '确认重置',
+          cancelButtonText: '取消',
+          type: 'warning',
+        },
+      )
+    } catch {
+      return
+    }
+
+    environmentAccountResettingId.value = account.id
+    try {
+      const { data } = await updateBrowserEnvironmentAccount(binding.id, {
+        expectedPlatformAccountId: '',
+        expectedAccountName: '',
+        loginStatus: 'unknown',
+      })
+      browserEnvironmentAccounts.value = {
+        ...browserEnvironmentAccounts.value,
+        [account.id]: data.data,
+      }
+      ElMessage.success('已重置账号校验，请重新打开环境登录，扩展会自动上报登录状态')
+    } catch (error) {
+      ElMessage.error(error instanceof Error ? error.message : '重置账号校验失败')
+    } finally {
+      environmentAccountResettingId.value = null
+    }
+  }
+
+  async function handleSemiAutoPlatformClick(platform: SemiAutoPlatform) {
+    if (selfMediaSubmitting.value) {
+      ElMessage.info('已有分发任务正在处理，请稍候')
+      return
+    }
+    selectedMediaPlatform.value = platform
+    selectedSelfMediaAccountId.value = null
+    selectedCoverMaterialId.value = null
+    selectedDouyinImageMaterialIds.value = []
+    const accounts = semiAutoAccountsByPlatform(platform)
+    if (!accounts.length) {
+      await showSelfMediaAccountSetupPrompt(platform, `当前品牌暂无${semiAutoPlatformLabel(platform)}账号，无法创建分发任务。`)
+      return
+    }
+    await refreshBrowserEnvironmentAccountStatuses()
+    const activeAccounts = accounts.filter((account) => account.status === 'active')
+    const fillableAccount = activeAccounts.find((account) => canSubmitSemiAutoEnvironmentTask(account))
+    if (fillableAccount) {
+      void submitSemiAutoEnvironmentTask(fillableAccount)
+      return
+    }
+
+    const loginRequiredAccount = activeAccounts.find((account) => environmentAccountOf(account))
+    if (loginRequiredAccount) {
+      ElMessage.warning(`${semiAutoPlatformLabel(platform)}当前不能填充：${environmentAccountActionHint(loginRequiredAccount)}`)
+      void openSemiAutoEnvironmentForLogin(loginRequiredAccount)
+      return
+    }
+
+    const activeAccount = activeAccounts[0]
+    if (activeAccount) {
+      await showBrandEnvironmentSetupPrompt(`${semiAutoPlatformLabel(platform)}账号尚未绑定指纹浏览器环境，当前不能打开环境并填充。`)
+      return
+    }
+    await showSelfMediaAccountSetupPrompt(platform, `${semiAutoPlatformLabel(platform)}账号当前不可用，无法创建分发任务。`)
+  }
+
+  function semiAutoAccountsByPlatform(platform: SemiAutoPlatform) {
+    if (platform === 'toutiao') return toutiaoAccounts.value
+    if (platform === 'zhihu') return zhihuAccounts.value
+    return xiaohongshuAccounts.value
+  }
+
+  function handleFolderScopeChange() {
+    ensureSelectedImageFolder()
+    selectedCoverMaterialId.value = selectedMediaPlatform.value === 'wechat_mp' ? imageMaterials.value[0]?.id || null : null
+    selectedDouyinImageMaterialIds.value = selectedDouyinImageMaterialIds.value.filter((id) => douyinImageMaterials.value.some((item) => item.id === id))
+  }
+
+  function selectImageFolder(folderId: number) {
+    selectedImageFolderId.value = folderId
+    selectedCoverMaterialId.value = selectedMediaPlatform.value === 'wechat_mp' ? imageMaterials.value[0]?.id || null : null
+    selectedDouyinImageMaterialIds.value = selectedDouyinImageMaterialIds.value.filter((id) => douyinImageMaterials.value.some((item) => item.id === id))
+  }
+
+  function ensureSelectedImageFolder() {
+    const folders = displayImageFolders.value
+    if (!folders.length) {
+      selectedImageFolderId.value = null
+      return
+    }
+    if (!folders.some((folder) => folder.id === selectedImageFolderId.value)) {
+      selectedImageFolderId.value = folders[0].id
+    }
+  }
+
+  function materialThumbUrl(material: BrandMaterial) {
+    return materialThumbUrls.value[material.id] || material.fileUrl
+  }
+
+  async function loadMaterialThumbs() {
+    const brandId = mediaDistributeBrandId.value
+    if (!brandId) {
+      cleanupMaterialThumbs()
+      return
+    }
+    cleanupMaterialThumbs()
+    const seen = new Set<number>()
+    const targets = brandImageFolders.value
+      .flatMap((folder) => folder.materials || [])
+      .filter((material) => {
+        if (!isImageFileType(material.fileType) || seen.has(material.id)) return false
+        seen.add(material.id)
+        return true
+      })
+    const concurrency = Math.min(6, targets.length)
+    let cursor = 0
+
+    const worker = async () => {
+      while (cursor < targets.length) {
+        const material = targets[cursor++]
+        try {
+          const { data } = await getBrandMaterialPreviewUrl(brandId, material.id)
+          const url = data.data.url
+          materialThumbUrls.value = { ...materialThumbUrls.value, [material.id]: url }
+        } catch {
+          materialThumbUrls.value = { ...materialThumbUrls.value, [material.id]: null }
+        }
+      }
+    }
+
+    await Promise.all(Array.from({ length: concurrency }, () => worker()))
+  }
+
+  function cleanupMaterialThumbs() {
+    materialThumbUrls.value = {}
+  }
+
+  function toggleDouyinImage(materialId: number) {
+    const index = selectedDouyinImageMaterialIds.value.indexOf(materialId)
+    if (index >= 0) {
+      selectedDouyinImageMaterialIds.value.splice(index, 1)
+      return
+    }
+    if (selectedDouyinImageMaterialIds.value.length >= 30) {
+      ElMessage.warning('抖音图文最多选择 30 张图片')
+      return
+    }
+    selectedDouyinImageMaterialIds.value.push(materialId)
+  }
+
+  function moveDouyinImage(index: number, offset: number) {
+    const nextIndex = index + offset
+    if (nextIndex < 0 || nextIndex >= selectedDouyinImageMaterialIds.value.length) {
+      return
+    }
+    const next = [...selectedDouyinImageMaterialIds.value]
+    const [item] = next.splice(index, 1)
+    next.splice(nextIndex, 0, item)
+    selectedDouyinImageMaterialIds.value = next
+  }
+
+  async function submitWechatDraft() {
+    if (!mediaDistributeArticleId.value || !selectedSelfMediaAccountId.value || !selectedCoverMaterialId.value) {
+      ElMessage.warning('请选择公众号和封面图片')
+      return
+    }
+    selfMediaSubmitting.value = true
+    try {
+      const result = await distributeContentArticleToSelfMediaAccount(mediaDistributeArticleId.value, {
+        selfMediaAccountId: selectedSelfMediaAccountId.value,
+        coverMaterialId: selectedCoverMaterialId.value,
+        requestId: createRequestId(),
+      })
+      const task = result.data.data
+      if (task.status === 'submitted') {
+        mediaDistributeVisible.value = false
+        ElMessage.success('已保存至公众号草稿箱')
+        await options.load()
+        return
+      }
+      ElMessage.error(task.errorMessage || '保存公众号草稿失败')
+    } finally {
+      selfMediaSubmitting.value = false
+    }
+  }
+
+  async function submitDouyinImageText() {
+    if (!mediaDistributeArticleId.value || !selectedSelfMediaAccountId.value) {
+      ElMessage.warning('请选择抖音账号')
+      return
+    }
+    if (!selectedDouyinImageMaterialIds.value.length) {
+      ElMessage.warning('请选择至少 1 张抖音图文图片')
+      return
+    }
+    if (douyinText.value.length > 1000) {
+      ElMessage.warning('抖音文案不能超过 1000 字')
+      return
+    }
+    selfMediaSubmitting.value = true
+    try {
+      const result = await distributeContentArticleToSelfMediaAccount(mediaDistributeArticleId.value, {
+        selfMediaAccountId: selectedSelfMediaAccountId.value,
+        imageMaterialIds: selectedDouyinImageMaterialIds.value,
+        platformOptions: {
+          text: douyinText.value.trim() || undefined,
+        },
+        requestId: createRequestId('douyin'),
+      })
+      const task = result.data.data
+      if (task.status === 'submitted') {
+        ElMessage.success('抖音图文提交成功')
+        await refreshDistributionHistory()
+        await options.load()
+        return
+      }
+      ElMessage.error(task.errorMessage || '抖音图文提交失败')
+    } finally {
+      selfMediaSubmitting.value = false
+    }
+  }
+
+  function defaultSemiAutoPublishUrl(platform: string) {
+    if (platform === 'toutiao') return 'https://mp.toutiao.com/profile_v4/graphic/publish'
+    if (platform === 'zhihu') return 'https://zhuanlan.zhihu.com/write'
+    if (platform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/publish/publish'
+    return undefined
+  }
+
+  function defaultSemiAutoLoginReportUrl(platform: string) {
+    if (platform === 'toutiao') return 'https://mp.toutiao.com/profile_v4'
+    if (platform === 'zhihu') return 'https://www.zhihu.com/'
+    if (platform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/'
+    return defaultSemiAutoPublishUrl(platform)
+  }
+
+  async function syncLocalAgentSessionFromHelper() {
+    const helperBase = localHelperConfig.helperBase.trim()
+    if (!helperBase) return
+    const health = await getLocalHelperHealth(helperBase)
+    const helperSessionId = Number(health.session?.sessionId)
+    if (!health.paired || !Number.isFinite(helperSessionId) || helperSessionId <= 0) return
+
+    if (localHelperConfig.localAgentSessionId !== helperSessionId) {
+      localHelperConfig.localAgentSessionId = helperSessionId
+    }
+
+    const knownActiveIds = new Set(activeLocalAgentSessions.value.map((session) => session.id))
+    if (!knownActiveIds.has(helperSessionId)) {
+      await refreshLocalAgentSessions()
+      if (localHelperConfig.localAgentSessionId !== helperSessionId) {
+        localHelperConfig.localAgentSessionId = helperSessionId
+      }
+    }
+    return health
+  }
+
+  async function currentLocalHelperAuthConfig() {
+    const health = await syncLocalAgentSessionFromHelper()
+    const helperBase = localHelperConfig.helperBase.trim()
+    const localAgentSessionId = localHelperConfig.localAgentSessionId || activeLocalAgentSessions.value[0]?.id || null
+    if (!helperBase) {
+      throw new Error('请先到「个人中心 > 本地助手」完成本机配对')
+    }
+    if (!localAgentSessionId) {
+      throw new Error('请先完成本地助手配对')
+    }
+    if (health && !health.adspower?.apiKeyConfigured) {
+      throw new Error('请先到「个人中心 > 本地助手」配置 AdsPower API Key')
+    }
+    return {
+      helperBase,
+      localAgentSessionId,
+    }
+  }
+
+  async function submitSemiAutoEnvironmentTask(account: SelfMediaAccount) {
+    if (selfMediaSubmitting.value) {
+      ElMessage.info('已有分发任务正在处理，请稍候')
+      return
+    }
+    if (!mediaDistributeArticleId.value) {
+      ElMessage.warning('请选择要分发的文章')
+      return
+    }
+    if (!mediaDistributeBrandId.value) {
+      await showSetupPrompt({
+        title: '文章品牌缺失',
+        issue: '当前文章未绑定品牌，系统无法判断要使用哪个品牌的自媒体账号和 AdsPower 浏览器环境。',
+        location: '内容管理 > 文章详情',
+        action: '先为文章选择所属品牌，再回到自媒体分发继续操作。',
+      })
+      return
+    }
+    await refreshBrowserEnvironmentAccountStatuses()
+    const binding = environmentAccountOf(account)
+    if (!binding) {
+      await showBrandEnvironmentSetupPrompt('当前自媒体账号未绑定 AdsPower 浏览器环境，无法打开对应环境并填充。')
+      return
+    }
+    if (binding.loginStatus !== 'logged_in') {
+      ElMessage.warning(environmentAccountActionHint(account))
+      return
+    }
+    const backendBase = window.location.origin
+    const environmentKey = binding.environmentKey || ''
+    if (!environmentKey) {
+      await showBrandEnvironmentSetupPrompt('当前账号的浏览器环境配置不完整，请到品牌详情重新保存或重新绑定。')
+      return
+    }
+    const providerProfileId = browserEnvironmentProviderProfileIdOf(binding)
+    if (!providerProfileId) {
+      await showBrandEnvironmentSetupPrompt('当前账号的 AdsPower 浏览器编号缺失，请到品牌详情补全环境配置。')
+      return
+    }
+    let helperAuthConfig: Awaited<ReturnType<typeof currentLocalHelperAuthConfig>>
+    try {
+      helperAuthConfig = await currentLocalHelperAuthConfig()
+    } catch (error) {
+      await showLocalAgentSetupPrompt(error instanceof Error ? error.message : undefined)
+      return
+    }
+    selectedSelfMediaAccountId.value = account.id
+    selfMediaSubmitting.value = true
+    try {
+      const requestId = createRequestId(`env_${account.platform}`)
+      const taskResult = await distributeContentArticleToSelfMediaAccount(mediaDistributeArticleId.value, {
+        selfMediaAccountId: account.id,
+        requestId,
+      })
+      const backendTask = taskResult.data.data
+      if (!backendTask?.id) {
+        throw new Error('后台未返回分发任务')
+      }
+      const taskEnvironmentKey = backendTask.environmentKey || environmentKey
+      const taskProviderProfileId = backendTask.providerProfileId || providerProfileId
+      const taskBrowserEnvironmentAccountId = backendTask.browserEnvironmentAccountId || binding.id
+      if (!taskEnvironmentKey || !taskProviderProfileId) {
+        throw new Error('后台分发任务未返回浏览器环境信息，请刷新品牌环境绑定后重试')
+      }
+      await launchLocalHelperTask(
+        helperAuthConfig,
+        {
+          environmentKey: taskEnvironmentKey,
+          providerProfileId: taskProviderProfileId,
+          environmentName: taskEnvironmentKey || account.accountName || null,
+          backendBase,
+          taskId: backendTask.id,
+          selfMediaAccountId: account.id,
+          browserEnvironmentAccountId: taskBrowserEnvironmentAccountId,
+          platform: account.platform,
+          url: defaultSemiAutoPublishUrl(account.platform),
+          expectedPlatformAccountId: binding.expectedPlatformAccountId || account.platformAccountId || null,
+          expectedAccountName: binding.expectedAccountName || account.accountName || null,
+          backendTask,
+        },
+      )
+      ElMessage.success('已启动 AdsPower 浏览器环境，环境内扩展将领取任务并填充草稿')
+      await refreshDistributionHistory()
+      await options.load()
+    } catch (error) {
+      if (isLocalAgentSetupError(error)) {
+        await showLocalAgentSetupPrompt(error instanceof Error ? error.message : undefined)
+      } else {
+        ElMessage.error(error instanceof Error ? error.message : '启动本地助手任务失败')
+      }
+    } finally {
+      selfMediaSubmitting.value = false
+    }
+  }
+
+  async function refreshDistributionHistory() {
+    if (!mediaDistributeArticleId.value) return
+    const { data } = await getArticleDistribution(mediaDistributeArticleId.value, { targetKind: 'mp_account' })
+    distributionAttempts.value = data.data.attempts || []
+  }
+
+  async function refreshReviewStatus(task: DistributionTask) {
+    refreshingReviewTaskId.value = task.id
+    try {
+      await refreshDistributionTaskReviewStatus(task.id)
+      await refreshDistributionHistory()
+      ElMessage.success('审核状态已刷新')
+    } finally {
+      refreshingReviewTaskId.value = null
+    }
+  }
+
+  function canRefreshReviewStatus(task: DistributionTask) {
+    return task.targetKind === 'mp_account'
+      && (task.reviewStatus === 'under_review' || task.reviewStatus === 'unknown')
+  }
+
+  function canOperateSemiAutoDistributionTask(task: DistributionTask) {
+    return task.targetKind === 'mp_account'
+      && task.dispatchMode === 'SEMI_AUTO'
+      && ['token_issued', 'filling', 'filled'].includes(task.status)
+  }
+
+  async function confirmSemiAutoPublished(task: DistributionTask) {
+    try {
+      const { value } = await ElMessageBox.prompt(
+        '请填写平台发布后的文章链接；若暂时没有链接，可填写确认备注，系统会记录为“链接待补充”。',
+        '确认半自动发布',
+        {
+          confirmButtonText: '确认发布',
+          cancelButtonText: '取消',
+          inputPlaceholder: '发布链接或确认备注',
+          inputValidator: (input: string) => Boolean(input?.trim()) || '请填写发布链接或确认备注',
+        },
+      )
+      const input = value.trim()
+      const isUrl = /^https?:\/\/.+/i.test(input)
+      semiAutoConfirmingTaskId.value = task.id
+      await confirmSemiAutoDistribution(task.id, {
+        publishedUrl: isUrl ? input : null,
+        responsePayload: JSON.stringify({
+          source: 'admin_console',
+          confirmedAt: new Date().toISOString(),
+          confirmMode: isUrl ? 'published_url' : 'operator_note',
+          operatorNote: isUrl ? null : input,
+        }),
+      })
+      await refreshDistributionHistory()
+      await options.load()
+      ElMessage.success('已确认半自动发布')
+    } catch (error) {
+      if (error instanceof Error) {
+        ElMessage.error(error.message || '确认发布失败')
+      }
+    } finally {
+      semiAutoConfirmingTaskId.value = null
+    }
+  }
+
+  async function abandonSemiAutoPublished(task: DistributionTask) {
+    try {
+      const { value } = await ElMessageBox.prompt(
+        '确认放弃本次半自动分发？系统会将该任务标记为失败并退回本次分发占用，文章可重新发起分发。',
+        '放弃半自动发布',
+        {
+          confirmButtonText: '确认放弃',
+          cancelButtonText: '取消',
+          inputPlaceholder: '请填写放弃原因',
+          inputValidator: (input: string) => Boolean(input?.trim()) || '请填写放弃原因',
+          type: 'warning',
+        },
+      )
+      semiAutoAbandoningTaskId.value = task.id
+      await abandonSemiAutoDistribution(task.id, {
+        reason: value.trim(),
+      })
+      await refreshDistributionHistory()
+      await options.load()
+      ElMessage.success('已放弃本次半自动分发')
+    } catch (error) {
+      if (error instanceof Error) {
+        ElMessage.error(error.message || '放弃发布失败')
+      }
+    } finally {
+      semiAutoAbandoningTaskId.value = null
+    }
+  }
+
+  async function checkWechatAccount(id: number) {
+    checkingSelfMediaAccountId.value = id
+    try {
+      const { data } = await checkSelfMediaAccountAuth(id)
+      const next = data.data
+      wechatAccounts.value = wechatAccounts.value.map((account) => account.id === id ? next : account)
+      ElMessage.success(next.status === 'active' ? '登录状态有效' : '登录状态已更新')
+    } finally {
+      checkingSelfMediaAccountId.value = null
+    }
+  }
+
+  function selfMediaAccountStatusLabel(account: SelfMediaAccount) {
+    if (isSemiAutoPlatform(account.platform as MediaPlatform)) {
+      return account.status === 'active' ? '启用' : '停用'
+    }
+    const map: Record<string, string> = {
+      active: '已登录',
+      expired: '已过期',
+      revoked: '已取消',
+      disabled: '不可用',
+    }
+    return map[account.status] || account.status
+  }
+
+  function selfMediaAccountStatusTag(account: SelfMediaAccount): 'success' | 'warning' | 'danger' | 'info' {
+    if (isSemiAutoPlatform(account.platform as MediaPlatform)) {
+      return account.status === 'active' ? 'info' : 'danger'
+    }
+    if (account.status === 'active') return 'success'
+    if (account.status === 'expired') return 'warning'
+    if (account.status === 'revoked' || account.status === 'disabled') return 'danger'
+    return 'info'
+  }
+
+  function distributionPlatformLabel(v?: string | null) {
+    const map: Record<string, string> = {
+      wechat_mp: '微信公众号',
+      douyin: '抖音图文',
+      toutiao: '今日头条',
+      zhihu: '知乎',
+      xiaohongshu: '小红书',
+    }
+    if (!v) return '自媒体平台'
+    return map[v] || v
+  }
+
+  function distributionPlatformInitial(v?: string | null) {
+    const label = distributionPlatformLabel(v)
+    return label.slice(0, 1)
+  }
+
+  function distributionStatusLabel(v?: string | null) {
+    const map: Record<string, string> = {
+      pending: '待处理',
+      submitted: '已提交',
+      token_issued: '待扩展处理',
+      filling: '填充中',
+      filled: '已填充',
+      published: '已发布',
+      failed: '失败',
+      review_rejected: '审核拒绝',
+    }
+    return v ? map[v] || v : '-'
+  }
+
+  function distributionTaskStatusLabel(task: DistributionTask) {
+    return distributionStatusLabel(task.status)
+  }
+
+  function distributionStatusTag(v?: string | null): 'success' | 'warning' | 'danger' | 'info' {
+    if (v === 'submitted' || v === 'published') return 'success'
+    if (v === 'failed' || v === 'review_rejected') return 'danger'
+    if (v === 'pending' || v === 'token_issued' || v === 'filling' || v === 'filled') return 'warning'
+    return 'info'
+  }
+
+  function reviewStatusLabel(status?: string | null) {
+    const map: Record<string, string> = {
+      under_review: '审核中',
+      published: '平台审核通过',
+      rejected: '已拒审',
+      offline: '已下线',
+      unknown: '未知',
+    }
+    return status ? map[status] || status : '-'
+  }
+
+  function reviewStatusTag(status?: string | null): 'success' | 'warning' | 'danger' | 'info' {
+    if (status === 'published') return 'success'
+    if (status === 'rejected' || status === 'offline') return 'danger'
+    if (status === 'under_review') return 'warning'
+    return 'info'
+  }
+
+  function scheduleDistributionStatusRefresh() {
+    if (!options.rows.value.some(row => row.status === 'distributing')) return
+    window.setTimeout(() => {
+      void options.load()
+    }, 800)
+  }
+
+  function handleWindowFocusForDistribution() {
+    scheduleDistributionStatusRefresh()
+  }
+
+  function handleVisibilityChangeForDistribution() {
+    if (document.visibilityState === 'visible') {
+      scheduleDistributionStatusRefresh()
+    }
+  }
+
+  watch(mediaDistributeVisible, (visible) => {
+    if (!visible) {
+      stopBrowserEnvironmentStatusPolling()
+      cleanupMaterialThumbs()
+    }
+  })
+
+  window.addEventListener('focus', handleWindowFocusForDistribution)
+  document.addEventListener('visibilitychange', handleVisibilityChangeForDistribution)
+
+  onBeforeUnmount(() => {
+    window.removeEventListener('focus', handleWindowFocusForDistribution)
+    document.removeEventListener('visibilitychange', handleVisibilityChangeForDistribution)
+    stopBrowserEnvironmentStatusPolling()
+    cleanupMaterialThumbs()
+  })
+
+  const selfMediaDistributeActions = {
+    semiAutoStatusTagType,
+    semiAutoStatusLabel,
+    handleWechatPlatformClick,
+    handleDouyinPlatformClick,
+    handleSemiAutoPlatformClick,
+    selfMediaAccountStatusTag,
+    selfMediaAccountStatusLabel,
+    isSemiAutoPlatform,
+    semiAutoCredentialTagType,
+    semiAutoCredentialLabel,
+    environmentAccountTagType,
+    environmentAccountLabel,
+    checkWechatAccount,
+    startWechatDraft,
+    startDouyinImageText,
+    environmentAccountOf,
+    canSubmitSemiAutoEnvironmentTask,
+    openSemiAutoEnvironmentForLogin,
+    resetEnvironmentAccountIdentity,
+    semiAutoAccountActionLoading,
+    submitSemiAutoEnvironmentTask,
+    semiAutoPlatformLabel,
+    handleFolderScopeChange,
+    selectImageFolder,
+    materialThumbUrl,
+    toggleDouyinImage,
+    moveDouyinImage,
+    distributionPlatformInitial,
+    distributionPlatformLabel,
+    distributionStatusTag,
+    distributionTaskStatusLabel,
+    reviewStatusTag,
+    reviewStatusLabel,
+    canRefreshReviewStatus,
+    refreshReviewStatus,
+    canOperateSemiAutoDistributionTask,
+    confirmSemiAutoPublished,
+    abandonSemiAutoPublished,
+    submitWechatDraft,
+    submitDouyinImageText,
+  }
+
+  return {
+    mediaDistributeVisible,
+    mediaDistributeArticleId,
+    mediaDistributeBrandId,
+    wechatCapability,
+    douyinCapability,
+    toutiaoAccounts,
+    zhihuAccounts,
+    xiaohongshuAccounts,
+    checkingSelfMediaAccountId,
+    imageFolderScope,
+    selectedImageFolderId,
+    selectedMediaPlatform,
+    selectedSelfMediaAccountId,
+    selectedCoverMaterialId,
+    selectedDouyinImageMaterialIds,
+    douyinText,
+    distributionAttempts,
+    refreshingReviewTaskId,
+    semiAutoConfirmingTaskId,
+    semiAutoAbandoningTaskId,
+    semiAutoLoginOpeningAccountId,
+    environmentAccountResettingId,
+    selfMediaSubmitting,
+    wechatDistributionAvailable,
+    wechatStatusLabel,
+    wechatStatusTagType,
+    douyinDistributionAvailable,
+    douyinStatusLabel,
+    douyinStatusTagType,
+    douyinSubmitButtonText,
+    currentPlatformAccounts,
+    displayImageFolders,
+    imageMaterials,
+    douyinImageMaterials,
+    selectedDouyinMaterials,
+    selfMediaDistributeActions,
+    openMediaDistribute,
+  }
+}
