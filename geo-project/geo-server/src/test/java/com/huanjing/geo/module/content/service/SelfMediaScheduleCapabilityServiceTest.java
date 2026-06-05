@@ -4,6 +4,8 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.dto.SelfMediaScheduleCapabilityUpsertRequest;
 import com.huanjing.geo.module.content.entity.SelfMediaScheduleCapability;
 import com.huanjing.geo.module.content.mapper.SelfMediaScheduleCapabilityMapper;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapter;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.content.vo.SelfMediaScheduleCapabilityVO;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
@@ -11,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -24,16 +27,18 @@ import static org.mockito.Mockito.when;
 
 class SelfMediaScheduleCapabilityServiceTest {
     private SelfMediaScheduleCapabilityMapper mapper;
+    private SelfMediaPlatformScheduleAdapterRouter adapterRouter;
     private SelfMediaScheduleCapabilityService service;
 
     @BeforeEach
     void setUp() {
         mapper = mock(SelfMediaScheduleCapabilityMapper.class);
+        adapterRouter = mock(SelfMediaPlatformScheduleAdapterRouter.class);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
         SysUser user = new SysUser();
         user.setId(99L);
         when(currentUserService.requireCurrentUser()).thenReturn(user);
-        service = new SelfMediaScheduleCapabilityService(mapper, currentUserService);
+        service = new SelfMediaScheduleCapabilityService(mapper, currentUserService, adapterRouter);
     }
 
     @Test
@@ -64,10 +69,22 @@ class SelfMediaScheduleCapabilityServiceTest {
     @Test
     void readinessRequiresVerifiedPlatformScheduleStrategy() {
         when(mapper.selectByPlatform("zhihu")).thenReturn(capability("zhihu", "verified", true, "platform_schedule"));
+        when(adapterRouter.find("zhihu")).thenReturn(Optional.of(mock(SelfMediaPlatformScheduleAdapter.class)));
 
         SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness = service.readiness("zhihu");
 
         assertTrue(readiness.ready());
+    }
+
+    @Test
+    void readinessRejectsWhenScheduleAdapterMissing() {
+        when(mapper.selectByPlatform("zhihu")).thenReturn(capability("zhihu", "verified", true, "platform_schedule"));
+        when(adapterRouter.find("zhihu")).thenReturn(Optional.empty());
+
+        SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness = service.readiness("zhihu");
+
+        assertFalse(readiness.ready());
+        assertEquals("PLATFORM_SCHEDULE_ADAPTER_MISSING", readiness.code());
     }
 
     @Test

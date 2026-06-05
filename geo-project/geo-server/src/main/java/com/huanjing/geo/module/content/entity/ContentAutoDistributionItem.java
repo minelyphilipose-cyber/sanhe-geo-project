@@ -34,6 +34,7 @@ public class ContentAutoDistributionItem {
     private Long articleId;
     private Long publishJobId;
     private Long publishItemId;
+    private Long selfMediaScheduleId;
     private LocalDateTime plannedPublishAt;
     private String status;
     private String failureReason;

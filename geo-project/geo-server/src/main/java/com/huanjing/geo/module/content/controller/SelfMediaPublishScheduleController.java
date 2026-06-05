@@ -75,4 +75,9 @@ public class SelfMediaPublishScheduleController {
         String failureMessage = request == null ? null : request.getFailureMessage();
         return R.ok(scheduleService.confirmPublishFailed(id, failureCode, failureMessage));
     }
+
+    @PostMapping("/self-media-schedules/{id}/recheck-publish-result")
+    public R<SelfMediaPublishScheduleVO> recheckPublishResult(@PathVariable Long id) {
+        return R.ok(scheduleService.recheckPublishResult(id));
+    }
 }

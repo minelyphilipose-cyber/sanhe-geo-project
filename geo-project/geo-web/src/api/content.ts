@@ -10,7 +10,9 @@ import type {
   R,
   SelfMediaAccount,
   SelfMediaCookieStatusBatchResponse,
+  SelfMediaScheduleCapability,
   SelfMediaPublishSchedule,
+  SelfMediaPublishScheduleCreateResponse,
   DouyinAuthUrl,
   DouyinCapability,
   DouyinPlatformOptions,
@@ -964,6 +966,10 @@ export function getSelfMediaAccountsByBrand(brandId: number) {
   return request.get<R<SelfMediaAccount[]>>(`/content/brands/${brandId}/self-media-accounts`)
 }
 
+export function getSelfMediaScheduleCapabilities() {
+  return request.get<R<SelfMediaScheduleCapability[]>>('/content/self-media-schedule-capabilities')
+}
+
 export function createSelfMediaAccount(brandId: number, data: {
   platform: 'toutiao' | 'zhihu' | 'xiaohongshu'
   accountName: string
@@ -1014,6 +1020,22 @@ export function getSelfMediaPublishSchedules(params?: {
   return request.get<R<PageResult<SelfMediaPublishSchedule>>>('/content/self-media-schedules', { params })
 }
 
+export function createSelfMediaPublishSchedules(data: {
+  brandId: number
+  articleIds: number[]
+  selfMediaAccountIds: number[]
+  windowStart: string
+  windowEnd: string
+  scheduleStrategy?: string
+  minIntervalMinutes?: number
+}) {
+  return request.post<R<SelfMediaPublishScheduleCreateResponse>>('/content/self-media-schedules', data, {
+    headers: {
+      'Idempotency-Key': `manual-schedule-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    },
+  })
+}
+
 export function cancelSelfMediaPublishSchedule(id: number, data?: { reason?: string }) {
   return request.post<R<SelfMediaPublishSchedule>>(`/content/self-media-schedules/${id}/cancel`, data ?? {})
 }
@@ -1024,4 +1046,8 @@ export function confirmSelfMediaPublishSchedulePublished(id: number, data?: { pl
 
 export function confirmSelfMediaPublishScheduleFailed(id: number, data?: { failureCode?: string; failureMessage?: string }) {
   return request.post<R<SelfMediaPublishSchedule>>(`/content/self-media-schedules/${id}/confirm-publish-failed`, data ?? {})
+}
+
+export function recheckSelfMediaPublishScheduleResult(id: number) {
+  return request.post<R<SelfMediaPublishSchedule>>(`/content/self-media-schedules/${id}/recheck-publish-result`)
 }

@@ -1229,6 +1229,10 @@ export interface SelfMediaPublishSchedule {
   platformScheduleId?: string | null
   platformPublishId?: string | null
   platformPublishedUrl?: string | null
+  publishCheckTitle?: string | null
+  publishCheckCoverUrl?: string | null
+  publishCheckLocationName?: string | null
+  publishCheckFingerprint?: string | null
   baseIdempotencyKey?: string | null
   generationNo?: number | null
   attemptCount?: number | null
@@ -1245,6 +1249,44 @@ export interface SelfMediaPublishSchedule {
   cancelledAt?: string | null
   cancelRequestedAt?: string | null
   publishedConfirmedAt?: string | null
+}
+
+export interface SelfMediaPublishScheduleRejectedItem {
+  articleId?: number | null
+  selfMediaAccountId?: number | null
+  platform?: string | null
+  code?: string | null
+  message?: string | null
+  settingPath?: string | null
+}
+
+export interface SelfMediaPublishScheduleCreateResponse {
+  requestId?: number | null
+  requestIdempotencyKey?: string | null
+  createdSchedules: SelfMediaPublishSchedule[]
+  existingSchedules: SelfMediaPublishSchedule[]
+  rejectedItems: SelfMediaPublishScheduleRejectedItem[]
+}
+
+export interface SelfMediaScheduleCapability {
+  id?: number | null
+  platform: string
+  verificationStatus: 'unverified' | 'verified' | 'failed' | string
+  supportsSchedule: boolean
+  minDelayMinutes?: number | null
+  maxDelayMinutes?: number | null
+  saveCreatesSchedule?: boolean | null
+  supportsCancel?: boolean | null
+  supportsModify?: boolean | null
+  supportsPublishCheck?: boolean | null
+  v1Strategy?: 'pending' | 'platform_schedule' | 'semi_auto' | string | null
+  selectorStatus?: string | null
+  evidenceJson?: string | null
+  notes?: string | null
+  verifiedAt?: string | null
+  verifiedBy?: number | null
+  createdAt?: string | null
+  updatedAt?: string | null
 }
 
 export interface PublishQuota {

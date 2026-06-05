@@ -35,6 +35,10 @@ public class SelfMediaPublishSchedule {
     private String platformScheduleId;
     private String platformPublishId;
     private String platformPublishedUrl;
+    private String publishCheckTitle;
+    private String publishCheckCoverUrl;
+    private String publishCheckLocationName;
+    private String publishCheckFingerprint;
 
     private String baseIdempotencyKey;
     private Integer generationNo;

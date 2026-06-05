@@ -13,10 +13,14 @@ import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMapper;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleRules;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
+import com.huanjing.geo.module.customer.entity.Brand;
+import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -47,8 +51,10 @@ class SelfMediaPublishScheduleServiceTest {
     private ArticleDraftMapper articleDraftMapper;
     private SelfMediaAccountMapper accountMapper;
     private ProjectMapper projectMapper;
+    private BrandMapper brandMapper;
     private BrowserEnvironmentService browserEnvironmentService;
     private SelfMediaScheduleCapabilityService scheduleCapabilityService;
+    private SelfMediaPlatformScheduleAdapterRouter scheduleAdapterRouter;
     private SelfMediaPublishScheduleEnvironmentLockService environmentLockService;
     private BrandAccessService brandAccessService;
     private SelfMediaPublishScheduleService service;
@@ -60,8 +66,12 @@ class SelfMediaPublishScheduleServiceTest {
         articleDraftMapper = mock(ArticleDraftMapper.class);
         accountMapper = mock(SelfMediaAccountMapper.class);
         projectMapper = mock(ProjectMapper.class);
+        brandMapper = mock(BrandMapper.class);
         browserEnvironmentService = mock(BrowserEnvironmentService.class);
         scheduleCapabilityService = mock(SelfMediaScheduleCapabilityService.class);
+        scheduleAdapterRouter = mock(SelfMediaPlatformScheduleAdapterRouter.class);
+        when(scheduleAdapterRouter.rules(anyString(), anyString()))
+                .thenReturn(new SelfMediaPlatformScheduleRules(130, 120, 4));
         environmentLockService = mock(SelfMediaPublishScheduleEnvironmentLockService.class);
         brandAccessService = mock(BrandAccessService.class);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
@@ -75,8 +85,10 @@ class SelfMediaPublishScheduleServiceTest {
                 articleDraftMapper,
                 accountMapper,
                 projectMapper,
+                brandMapper,
                 browserEnvironmentService,
                 scheduleCapabilityService,
+                scheduleAdapterRouter,
                 environmentLockService,
                 mock(ContentDistributionService.class),
                 brandAccessService,
@@ -198,7 +210,32 @@ class SelfMediaPublishScheduleServiceTest {
         ArgumentCaptor<SelfMediaPublishSchedule> captor = ArgumentCaptor.forClass(SelfMediaPublishSchedule.class);
         verify(scheduleMapper).insert(captor.capture());
         assertEquals(plannedAt.minusMinutes(130), captor.getValue().getNextAttemptAt());
-        assertEquals(2, captor.getValue().getMaxAttempts());
+        assertEquals(4, captor.getValue().getMaxAttempts());
+        assertEquals("article title for check", captor.getValue().getPublishCheckTitle());
+        assertEquals("https://cdn.example.test/cover.png", captor.getValue().getPublishCheckCoverUrl());
+        assertEquals("阜阳", captor.getValue().getPublishCheckLocationName());
+        assertTrue(captor.getValue().getPublishCheckFingerprint().matches("[0-9a-f]{64}"));
+    }
+
+    @Test
+    void createSystemSchedulesUsesProvidedOperatorWithoutBrandAccessCheck() {
+        prepareValidArticleAndAccount();
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class))).thenReturn(binding());
+        stubRequestInsert();
+        when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule row = invocation.getArgument(0);
+            row.setId(52L);
+            return 1;
+        });
+
+        SelfMediaPublishScheduleCreateResponse response = service.createSystemSchedules(validRequest(), "system-key", 66L);
+
+        assertEquals(1, response.getCreatedSchedules().size());
+        ArgumentCaptor<SelfMediaPublishSchedule> captor = ArgumentCaptor.forClass(SelfMediaPublishSchedule.class);
+        verify(scheduleMapper).insert(captor.capture());
+        assertEquals(66L, captor.getValue().getCreatedBy());
+        assertEquals(66L, captor.getValue().getUpdatedBy());
+        verify(brandAccessService, never()).requireBrandAccess(anyLong(), anyLong(), any());
     }
 
     @Test
@@ -352,6 +389,103 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void claimNextPublishCheckForLocalAgentClaimsScheduledPublishCheckQueue() {
+        SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULED);
+        candidate.setId(103L);
+        candidate.setCreatedBy(99L);
+        candidate.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+        SelfMediaPublishSchedule claimed = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT);
+        claimed.setId(103L);
+        claimed.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+        when(scheduleMapper.selectDueQueueCandidatesForOperator(
+                eq(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK),
+                eq(List.of(
+                        SelfMediaPublishScheduleConstants.STATUS_SCHEDULED,
+                        SelfMediaPublishScheduleConstants.STATUS_PUBLISH_DUE,
+                        SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN
+                )),
+                any(),
+                eq(10),
+                eq(99L),
+                eq("toutiao")
+        )).thenReturn(List.of(candidate));
+        when(environmentLockService.tryAcquire(eq(15L), eq(103L), any(), any())).thenReturn(true);
+        when(scheduleMapper.claimQueueSchedule(
+                eq(103L),
+                eq(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK),
+                eq(List.of(
+                        SelfMediaPublishScheduleConstants.STATUS_SCHEDULED,
+                        SelfMediaPublishScheduleConstants.STATUS_PUBLISH_DUE,
+                        SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN
+                )),
+                eq(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT),
+                any(),
+                any()
+        )).thenReturn(1);
+        when(scheduleMapper.selectById(103L)).thenReturn(claimed);
+
+        SelfMediaPublishScheduleVO response = service.claimNextPublishCheckForLocalAgent(99L, "toutiao", 10);
+
+        assertEquals(103L, response.getId());
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT, response.getStatus());
+        verify(environmentLockService).tryAcquire(eq(15L), eq(103L), any(), any());
+    }
+
+    @Test
+    void markClaimedPublishCheckUnknownSchedulesDelayedRetryWhenAttemptsRemain() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT);
+        row.setId(104L);
+        row.setAttemptCount(2);
+        row.setMaxAttempts(4);
+        when(scheduleMapper.selectById(104L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO response = service.markClaimedPublishCheckUnknown(104L, "{\"found\":false}");
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN, response.getStatus());
+        assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
+        assertEquals("PUBLISH_RESULT_NOT_MATCHED_RETRYING", response.getFailureCode());
+        assertTrue(response.getNextAttemptAt().isAfter(LocalDateTime.now()));
+        verify(environmentLockService).release(104L);
+    }
+
+    @Test
+    void markClaimedPublishCheckUnknownExtendsLegacyAttemptLimit() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT);
+        row.setId(106L);
+        row.setAttemptCount(2);
+        row.setMaxAttempts(2);
+        when(scheduleMapper.selectById(106L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO response = service.markClaimedPublishCheckUnknown(106L, "{\"found\":false}");
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN, response.getStatus());
+        assertEquals(4, response.getMaxAttempts());
+        assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
+        assertEquals("PUBLISH_RESULT_NOT_MATCHED_RETRYING", response.getFailureCode());
+        assertTrue(response.getNextAttemptAt().isAfter(LocalDateTime.now()));
+        verify(environmentLockService).release(106L);
+    }
+
+    @Test
+    void recheckPublishResultQueuesImmediatePublishCheck() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN);
+        row.setId(105L);
+        row.setAttemptCount(4);
+        row.setMaxAttempts(4);
+        when(scheduleMapper.selectById(105L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO response = service.recheckPublishResult(105L);
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN, response.getStatus());
+        assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
+        assertEquals("PUBLISH_RESULT_RECHECK_REQUESTED", response.getFailureCode());
+        assertEquals(5, response.getMaxAttempts());
+        assertTrue(response.getNextAttemptAt().isBefore(LocalDateTime.now().plusSeconds(5)));
+        verify(scheduleMapper).updateById(row);
+        verify(environmentLockService).release(105L);
+    }
+
+    @Test
     void claimNext_returnsNullWhenAtomicUpdateMisses() {
         SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
         candidate.setId(96L);
@@ -406,12 +540,16 @@ class SelfMediaPublishScheduleServiceTest {
     void markClaimedScheduledReleasesEnvironmentLockAtSuccessTerminalState() {
         SelfMediaPublishSchedule scheduling = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULING);
         scheduling.setId(102L);
+        LocalDateTime publishAt = LocalDateTime.of(2026, 6, 1, 18, 30);
+        scheduling.setPlatformScheduledAt(publishAt);
         when(scheduleMapper.selectById(102L)).thenReturn(scheduling);
 
         SelfMediaPublishScheduleVO response = service.markClaimedScheduled(102L, "platform-schedule-1", "{\"ok\":true}");
 
         assertEquals(SelfMediaPublishScheduleConstants.STATUS_SCHEDULED, response.getStatus());
         assertEquals("platform-schedule-1", response.getPlatformScheduleId());
+        assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
+        assertEquals(publishAt, response.getNextAttemptAt());
         verify(scheduleMapper).updateById(scheduling);
         verify(environmentLockService).release(102L);
     }
@@ -489,6 +627,7 @@ class SelfMediaPublishScheduleServiceTest {
     private void prepareValidArticleAndAccount() {
         when(articleDraftMapper.selectById(10L)).thenReturn(article());
         when(projectMapper.selectById(7L)).thenReturn(project());
+        when(brandMapper.selectById(8L)).thenReturn(brand());
         when(accountMapper.selectById(20L)).thenReturn(account());
         when(scheduleCapabilityService.readiness("toutiao"))
                 .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null));
@@ -517,6 +656,16 @@ class SelfMediaPublishScheduleServiceTest {
         row.setId(10L);
         row.setProjectId(7L);
         row.setStatus("approved");
+        row.setTitle("article title for check");
+        row.setCoverImageUrl("https://cdn.example.test/cover.png");
+        return row;
+    }
+
+    private Brand brand() {
+        Brand row = new Brand();
+        row.setId(8L);
+        row.setSelfMediaPublishLocationName("阜阳");
+        row.setCityName("西安");
         return row;
     }
 

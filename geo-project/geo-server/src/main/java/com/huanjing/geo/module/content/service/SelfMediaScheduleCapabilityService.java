@@ -5,6 +5,7 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.dto.SelfMediaScheduleCapabilityUpsertRequest;
 import com.huanjing.geo.module.content.entity.SelfMediaScheduleCapability;
 import com.huanjing.geo.module.content.mapper.SelfMediaScheduleCapabilityMapper;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.content.vo.SelfMediaScheduleCapabilityVO;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
@@ -31,6 +32,7 @@ public class SelfMediaScheduleCapabilityService {
 
     private final SelfMediaScheduleCapabilityMapper mapper;
     private final CurrentUserService currentUserService;
+    private final SelfMediaPlatformScheduleAdapterRouter scheduleAdapterRouter;
 
     public List<SelfMediaScheduleCapabilityVO> list() {
         currentUserService.requireCurrentUser();
@@ -60,6 +62,9 @@ public class SelfMediaScheduleCapabilityService {
         }
         if (!STRATEGY_PLATFORM_SCHEDULE.equals(normalize(row.getV1Strategy()))) {
             return PlatformScheduleReadiness.rejected("PLATFORM_SCHEDULE_STRATEGY_DISABLED", "平台 v1 策略未启用自动定时发布");
+        }
+        if (scheduleAdapterRouter.find(normalized).isEmpty()) {
+            return PlatformScheduleReadiness.rejected("PLATFORM_SCHEDULE_ADAPTER_MISSING", "平台自动定时发布适配器尚未接入");
         }
         return PlatformScheduleReadiness.ready(row);
     }

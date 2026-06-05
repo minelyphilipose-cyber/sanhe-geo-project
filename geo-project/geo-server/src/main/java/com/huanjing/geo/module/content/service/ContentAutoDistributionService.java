@@ -2,18 +2,28 @@ package com.huanjing.geo.module.content.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
+import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
+import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
 import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.content.entity.BatchArticlePublishItem;
+import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.ContentAutoDistributionBatch;
 import com.huanjing.geo.module.content.entity.ContentAutoDistributionItem;
+import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
 import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
 import com.huanjing.geo.module.content.mapper.BatchArticlePublishItemMapper;
 import com.huanjing.geo.module.content.mapper.ContentAutoDistributionBatchMapper;
 import com.huanjing.geo.module.content.mapper.ContentAutoDistributionItemMapper;
+import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
+import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
+import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
+import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
@@ -66,6 +76,7 @@ public class ContentAutoDistributionService {
     private static final Map<String, String> QUOTA_TO_GENERATION_GROUP = Map.of(
             "official_site", ArticlePromptChannels.AGENT_SITE,
             "industry_site", ArticlePromptChannels.INDUSTRY_SITE,
+            "self_media", ArticlePromptChannels.SELF_MEDIA,
             "forum", ArticlePromptChannels.FORUM
     );
 
@@ -80,8 +91,13 @@ public class ContentAutoDistributionService {
     private final ContentAutoDistributionItemMapper itemMapper;
     private final BatchArticleGenerationTaskMapper generationTaskMapper;
     private final BatchArticlePublishItemMapper publishItemMapper;
+    private final SelfMediaAccountMapper selfMediaAccountMapper;
+    private final SelfMediaPublishScheduleMapper selfMediaPublishScheduleMapper;
     private final BatchArticleGenerationService generationService;
     private final BatchArticlePublishService publishService;
+    private final SelfMediaPublishScheduleService selfMediaPublishScheduleService;
+    private final SelfMediaScheduleCapabilityService selfMediaScheduleCapabilityService;
+    private final BrowserEnvironmentService browserEnvironmentService;
     private final SystemAlertService systemAlertService;
     private final ForumBoardRoutingService forumBoardRoutingService;
     private final StringRedisTemplate redisTemplate;
@@ -302,6 +318,7 @@ public class ContentAutoDistributionService {
         for (ContentAutoDistributionBatch batch : batches) {
             scheduleGeneratedItems(batch);
             refreshPublishedItems(batch.getId());
+            refreshSelfMediaScheduledItems(batch.getId());
             refreshBatchCounters(batch.getId());
         }
     }
@@ -318,8 +335,21 @@ public class ContentAutoDistributionService {
             return;
         }
         List<ContentAutoDistributionItem> publishable = generated.stream()
-                .filter(this::markFailedIfIndustrySiteTargetStale)
+                .filter(this::markFailedIfTargetStale)
                 .toList();
+        if (publishable.isEmpty()) {
+            return;
+        }
+        scheduleSelfMediaGeneratedItems(batch, publishable.stream()
+                .filter(item -> DistributionTargetKind.MP_ACCOUNT.equals(item.getTargetKind()))
+                .toList());
+        scheduleSiteGeneratedItems(batch, publishable.stream()
+                .filter(item -> !DistributionTargetKind.MP_ACCOUNT.equals(item.getTargetKind()))
+                .toList());
+    }
+
+    private void scheduleSiteGeneratedItems(ContentAutoDistributionBatch batch,
+                                            List<ContentAutoDistributionItem> publishable) {
         if (publishable.isEmpty()) {
             return;
         }
@@ -347,8 +377,52 @@ public class ContentAutoDistributionService {
         }
     }
 
-    private boolean markFailedIfIndustrySiteTargetStale(ContentAutoDistributionItem item) {
+    private void scheduleSelfMediaGeneratedItems(ContentAutoDistributionBatch batch,
+                                                 List<ContentAutoDistributionItem> publishable) {
+        if (publishable.isEmpty()) {
+            return;
+        }
+        Long operatorId = resolveOperatorUserId(batch.getProjectId());
+        for (ContentAutoDistributionItem item : publishable) {
+            SelfMediaPublishScheduleCreateRequest request = new SelfMediaPublishScheduleCreateRequest();
+            request.setBrandId(item.getBrandId());
+            request.setArticleIds(List.of(item.getArticleId()));
+            request.setSelfMediaAccountIds(List.of(item.getTargetId()));
+            request.setWindowStart(item.getPlannedPublishAt());
+            request.setWindowEnd(item.getPlannedPublishAt().plusMinutes(1));
+            request.setScheduleStrategy("platform_schedule");
+            request.setMinIntervalMinutes(1);
+            String requestKey = "auto-distribution-self-media-" + item.getId();
+            SelfMediaPublishScheduleCreateResponse response =
+                    selfMediaPublishScheduleService.createSystemSchedules(request, requestKey, operatorId);
+            if (!response.getCreatedSchedules().isEmpty()) {
+                SelfMediaPublishScheduleVO schedule = response.getCreatedSchedules().get(0);
+                itemMapper.update(null, new LambdaUpdateWrapper<ContentAutoDistributionItem>()
+                        .eq(ContentAutoDistributionItem::getId, item.getId())
+                        .set(ContentAutoDistributionItem::getSelfMediaScheduleId, schedule.getId())
+                        .set(ContentAutoDistributionItem::getStatus, "publish_scheduled")
+                        .set(ContentAutoDistributionItem::getFailureReason, null));
+            } else if (!response.getExistingSchedules().isEmpty()) {
+                SelfMediaPublishScheduleVO schedule = response.getExistingSchedules().get(0);
+                itemMapper.update(null, new LambdaUpdateWrapper<ContentAutoDistributionItem>()
+                        .eq(ContentAutoDistributionItem::getId, item.getId())
+                        .set(ContentAutoDistributionItem::getSelfMediaScheduleId, schedule.getId())
+                        .set(ContentAutoDistributionItem::getStatus, "publish_scheduled")
+                        .set(ContentAutoDistributionItem::getFailureReason, null));
+            } else {
+                String reason = response.getRejectedItems().isEmpty()
+                        ? "自媒体自动排期创建失败"
+                        : response.getRejectedItems().get(0).getCode() + "：" + response.getRejectedItems().get(0).getMessage();
+                markItemFailed(item.getId(), reason);
+            }
+        }
+    }
+
+    private boolean markFailedIfTargetStale(ContentAutoDistributionItem item) {
         if (!DistributionTargetKind.INDUSTRY_SITE.equals(item.getTargetKind())) {
+            if (DistributionTargetKind.MP_ACCOUNT.equals(item.getTargetKind())) {
+                return markFailedIfSelfMediaTargetStale(item);
+            }
             return true;
         }
         Project project = projectMapper.selectById(item.getProjectId());
@@ -358,6 +432,39 @@ public class ContentAutoDistributionService {
         }
         markItemFailed(item.getId(), "品牌行业资讯站配置已取消或变更，跳过旧自动分发计划");
         return false;
+    }
+
+    private boolean markFailedIfSelfMediaTargetStale(ContentAutoDistributionItem item) {
+        SelfMediaAccount account = item.getTargetId() == null ? null : selfMediaAccountMapper.selectById(item.getTargetId());
+        if (account == null || account.getDeletedAt() != null) {
+            markItemFailed(item.getId(), "自媒体账号不存在或已删除，跳过旧自动分发计划");
+            return false;
+        }
+        if (!Objects.equals(account.getBrandId(), item.getBrandId())) {
+            markItemFailed(item.getId(), "自媒体账号品牌已变更，跳过旧自动分发计划");
+            return false;
+        }
+        if (!"active".equalsIgnoreCase(String.valueOf(account.getStatus()))) {
+            markItemFailed(item.getId(), "自媒体账号未启用，跳过旧自动分发计划");
+            return false;
+        }
+        SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness =
+                selfMediaScheduleCapabilityService.readiness(account.getPlatform());
+        if (!readiness.ready()) {
+            markItemFailed(item.getId(), readiness.message());
+            return false;
+        }
+        try {
+            BrowserEnvironmentAccount binding = browserEnvironmentService.validateForTaskCreation(account);
+            if (binding == null) {
+                markItemFailed(item.getId(), "自媒体账号未绑定可用指纹浏览器环境");
+                return false;
+            }
+            return true;
+        } catch (BizException ex) {
+            markItemFailed(item.getId(), ex.getMessage());
+            return false;
+        }
     }
 
     private void refreshPublishedItems(Long batchId) {
@@ -382,6 +489,40 @@ public class ContentAutoDistributionService {
                         .eq(ContentAutoDistributionItem::getId, item.getId())
                         .set(ContentAutoDistributionItem::getStatus, "failed")
                         .set(ContentAutoDistributionItem::getFailureReason, publishItem.getErrorMessage()));
+            }
+        }
+    }
+
+    private void refreshSelfMediaScheduledItems(Long batchId) {
+        List<ContentAutoDistributionItem> items = itemMapper.selectList(
+                new LambdaQueryWrapper<ContentAutoDistributionItem>()
+                        .eq(ContentAutoDistributionItem::getBatchId, batchId)
+                        .eq(ContentAutoDistributionItem::getStatus, "publish_scheduled")
+                        .isNotNull(ContentAutoDistributionItem::getSelfMediaScheduleId)
+        );
+        for (ContentAutoDistributionItem item : items) {
+            SelfMediaPublishSchedule schedule = selfMediaPublishScheduleMapper.selectById(item.getSelfMediaScheduleId());
+            if (schedule == null) {
+                markItemFailed(item.getId(), "自媒体排期不存在");
+                continue;
+            }
+            String status = schedule.getStatus();
+            if (SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED.equals(status)) {
+                itemMapper.update(null, new LambdaUpdateWrapper<ContentAutoDistributionItem>()
+                        .eq(ContentAutoDistributionItem::getId, item.getId())
+                        .set(ContentAutoDistributionItem::getStatus, "published")
+                        .set(ContentAutoDistributionItem::getFailureReason, null));
+            } else if (Set.of(
+                    SelfMediaPublishScheduleConstants.STATUS_SCHEDULE_FAILED,
+                    SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED,
+                    SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED,
+                    SelfMediaPublishScheduleConstants.STATUS_ROUTED_TO_SEMI_AUTO,
+                    SelfMediaPublishScheduleConstants.STATUS_CANCELLED
+            ).contains(status)) {
+                String reason = StringUtils.hasText(schedule.getFailureMessage())
+                        ? schedule.getFailureMessage()
+                        : "自媒体排期状态异常：" + status;
+                markItemFailed(item.getId(), reason);
             }
         }
     }
@@ -411,7 +552,9 @@ public class ContentAutoDistributionService {
                 new LambdaQueryWrapper<ContentAutoDistributionItem>().eq(ContentAutoDistributionItem::getBatchId, batchId)
         );
         int generated = (int) items.stream().filter(item -> item.getArticleId() != null).count();
-        int scheduled = (int) items.stream().filter(item -> item.getPublishItemId() != null).count();
+        int scheduled = (int) items.stream()
+                .filter(item -> item.getPublishItemId() != null || item.getSelfMediaScheduleId() != null)
+                .count();
         int failed = (int) items.stream().filter(item -> "failed".equals(item.getStatus())).count();
         boolean done = items.stream().allMatch(item -> Set.of("published", "failed").contains(item.getStatus()));
         String status;
@@ -452,10 +595,13 @@ public class ContentAutoDistributionService {
                 continue;
             }
             TargetRef target = shuffled.get(i);
+            String groupCode = QUOTA_TO_GENERATION_GROUP.get(channelCode);
             result.add(new PlannedTarget(
                     channelCode,
-                    QUOTA_TO_GENERATION_GROUP.get(channelCode),
-                    ArticlePromptChannels.contentStyle(QUOTA_TO_GENERATION_GROUP.get(channelCode), null),
+                    groupCode,
+                    StringUtils.hasText(target.contentStyle())
+                            ? target.contentStyle()
+                            : ArticlePromptChannels.contentStyle(groupCode, null),
                     target.targetKind(),
                     target.targetId(),
                     target.targetName(),
@@ -477,11 +623,11 @@ public class ContentAutoDistributionService {
                     || (StringUtils.hasText(brand.getGeoSiteStatus()) && !"active".equalsIgnoreCase(brand.getGeoSiteStatus()))) {
                 return List.of();
             }
-            return List.of(new TargetRef(DistributionTargetKind.BRAND_GEO_SITE, brand.getId(), "Agent 官网", brand.getId(), null));
+            return List.of(new TargetRef(DistributionTargetKind.BRAND_GEO_SITE, brand.getId(), "Agent 官网", brand.getId(), null, null));
         }
         if ("industry_site".equals(channelCode)) {
             PublishSite site = resolveBrandIndustrySite(project);
-            return site == null ? List.of() : List.of(new TargetRef(DistributionTargetKind.INDUSTRY_SITE, site.getId(), site.getSiteName(), null, null));
+            return site == null ? List.of() : List.of(new TargetRef(DistributionTargetKind.INDUSTRY_SITE, site.getId(), site.getSiteName(), null, null, null));
         }
         if ("forum".equals(channelCode)) {
             List<PublishSite> sites = publishSiteMapper.selectList(new LambdaQueryWrapper<PublishSite>()
@@ -496,11 +642,57 @@ public class ContentAutoDistributionService {
                     continue;
                 }
                 Integer fid = forumBoardRoutingService.resolveForumFid(site, project, brand, null);
-                result.add(new TargetRef(DistributionTargetKind.FORUM_SITE, site.getId(), site.getSiteName(), null, fid));
+                result.add(new TargetRef(DistributionTargetKind.FORUM_SITE, site.getId(), site.getSiteName(), null, fid, null));
             }
             return result;
         }
+        if ("self_media".equals(channelCode)) {
+            return resolveSelfMediaTargets(project);
+        }
         return List.of();
+    }
+
+    private List<TargetRef> resolveSelfMediaTargets(Project project) {
+        if (project.getBrandId() == null) {
+            return List.of();
+        }
+        List<SelfMediaAccount> accounts = selfMediaAccountMapper.selectList(new LambdaQueryWrapper<SelfMediaAccount>()
+                .eq(SelfMediaAccount::getBrandId, project.getBrandId())
+                .eq(SelfMediaAccount::getStatus, "active")
+                .isNull(SelfMediaAccount::getDeletedAt)
+                .orderByAsc(SelfMediaAccount::getPlatform)
+                .orderByAsc(SelfMediaAccount::getId));
+        List<TargetRef> result = new ArrayList<>();
+        for (SelfMediaAccount account : accounts) {
+            String platform = account.getPlatform();
+            if (!ArticlePromptChannels.SELF_MEDIA_SUBS.contains(platform)) {
+                continue;
+            }
+            SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness =
+                    selfMediaScheduleCapabilityService.readiness(platform);
+            if (!readiness.ready()) {
+                continue;
+            }
+            try {
+                BrowserEnvironmentAccount binding = browserEnvironmentService.validateForTaskCreation(account);
+                if (binding == null) {
+                    continue;
+                }
+            } catch (BizException ex) {
+                continue;
+            }
+            String targetName = ArticlePromptChannels.channelName(ArticlePromptChannels.SELF_MEDIA, platform)
+                    + " / " + (StringUtils.hasText(account.getAccountName()) ? account.getAccountName() : account.getId());
+            result.add(new TargetRef(
+                    DistributionTargetKind.MP_ACCOUNT,
+                    account.getId(),
+                    targetName,
+                    account.getBrandId(),
+                    null,
+                    ArticlePromptChannels.contentStyle(ArticlePromptChannels.SELF_MEDIA, platform)
+            ));
+        }
+        return result;
     }
 
     private PublishSite resolveBrandIndustrySite(Project project) {
@@ -789,7 +981,12 @@ public class ContentAutoDistributionService {
         return value.length() > 1000 ? value.substring(0, 1000) : value;
     }
 
-    private record TargetRef(String targetKind, Long targetId, String targetName, Long targetBrandId, Integer targetForumFid) {
+    private record TargetRef(String targetKind,
+                             Long targetId,
+                             String targetName,
+                             Long targetBrandId,
+                             Integer targetForumFid,
+                             String contentStyle) {
     }
 
     private record PlannedTarget(String channelCode,

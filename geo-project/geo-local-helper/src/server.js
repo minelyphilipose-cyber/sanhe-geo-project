@@ -777,10 +777,152 @@ async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
   return { ok: true, claimed: true, task, schedule: claim.schedule }
 }
 
+async function claimAndCheckPublishResult(config, platform = 'toutiao') {
+  const path = `/api/v1/local-agent/self-media-schedules/publish-checks/claim-next?platform=${encodeURIComponent(platform)}`
+  const claim = await signedTrustedBackendRequest(config, path, { method: 'GET' })
+  if (!claim?.schedule || !claim?.launch) {
+    return { ok: true, claimed: false }
+  }
+  const scheduleId = Number(claim.launch.scheduleId || claim.schedule.id)
+  const environment = normalizeProviderEnvironment(
+    config,
+    claim.launch.environmentKey,
+    claim.launch.providerProfileId,
+    claim.launch.environmentName,
+  )
+  const profileId = encodeURIComponent(environment.providerProfileId)
+  const data = await adspowerGet(
+    config,
+    `/api/v1/browser/start?user_id=${profileId}&open_tabs=1&ip_tab=0`,
+  )
+  try {
+    const result = await checkPublishResultInAdspowerPage(
+      data?.ws?.puppeteer,
+      claim.launch.url || defaultWorksListUrlForPlatform(claim.launch.platform || claim.schedule.platform),
+      claim.schedule,
+    )
+    if (result.found) {
+      await reportPublishCheckPublished(config, scheduleId, result)
+      return { ok: true, claimed: true, scheduleId, outcome: 'published', result }
+    }
+    await reportPublishCheckUnknown(config, scheduleId, result)
+    return { ok: true, claimed: true, scheduleId, outcome: 'unknown', result }
+  } catch (error) {
+    await reportPublishCheckFailed(config, scheduleId, {
+      failureCode: 'PUBLISH_RESULT_CHECK_HELPER_FAILED',
+      failureMessage: error instanceof Error ? error.message : String(error),
+    })
+    throw error
+  }
+}
+
+async function checkPublishResultInAdspowerPage(wsEndpoint, targetUrl, schedule) {
+  if (!wsEndpoint || !targetUrl) {
+    throw new Error('publish result check requires active AdsPower browser and works list url')
+  }
+  const { default: puppeteer } = await import('puppeteer-core')
+  const browser = await puppeteer.connect({ browserWSEndpoint: wsEndpoint })
+  try {
+    const page = await browser.newPage()
+    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 })
+    await delay(3_000)
+    const deadline = Date.now() + 20_000
+    let latest = null
+    while (Date.now() < deadline) {
+      latest = await evaluateToutiaoPublishResult(page, schedule)
+      if (latest.found) return latest
+      await delay(2_000)
+    }
+    return latest || {
+      found: false,
+      reason: 'works list not evaluated',
+      targetTitle: schedule?.publishCheckTitle || '',
+      url: page.url(),
+    }
+  } finally {
+    await browser.disconnect()
+  }
+}
+
+async function evaluateToutiaoPublishResult(page, schedule) {
+  const target = {
+    title: schedule?.publishCheckTitle || '',
+    locationName: schedule?.publishCheckLocationName || '',
+    platformScheduledAt: schedule?.platformScheduledAt || schedule?.plannedPublishAt || '',
+  }
+  return page.evaluate((input) => {
+    const normalize = (value) => String(value || '').replace(/\s+/g, '').trim()
+    const text = document.body?.innerText || ''
+    const normalizedText = normalize(text)
+    const normalizedTitle = normalize(input.title)
+    const titleProbe = normalizedTitle.length > 24 ? normalizedTitle.slice(0, 24) : normalizedTitle
+    const locationProbe = normalize(input.locationName)
+    const hasTitle = Boolean(titleProbe && normalizedText.includes(titleProbe))
+    const hasLocation = !locationProbe || normalizedText.includes(locationProbe)
+    const hasPublishedSignal = /定时发布中|已发布|审核中|将于\d{1,2}[-月]\d{1,2}/.test(text)
+    let matchedUrl = ''
+    if (hasTitle) {
+      const anchors = Array.from(document.querySelectorAll('a[href]'))
+      const anchor = anchors.find((item) => normalize(item.textContent).includes(titleProbe))
+      matchedUrl = anchor?.href || ''
+    }
+    return {
+      found: hasTitle && hasLocation && hasPublishedSignal,
+      hasTitle,
+      hasLocation,
+      hasPublishedSignal,
+      targetTitle: input.title,
+      locationName: input.locationName,
+      platformScheduledAt: input.platformScheduledAt,
+      url: matchedUrl || location.href,
+      pageTitle: document.title,
+      textSample: text.slice(0, 1200),
+    }
+  }, target)
+}
+
+async function reportPublishCheckPublished(config, scheduleId, result) {
+  const query = new URLSearchParams()
+  if (result?.url) query.set('platformPublishedUrl', result.url)
+  query.set('diagnosticsJson', shortDiagnosticsJson(result))
+  const path = `/api/v1/local-agent/self-media-schedules/${encodeURIComponent(scheduleId)}/publish-checks/published?${query}`
+  return signedTrustedBackendRequest(config, path, { method: 'POST' })
+}
+
+async function reportPublishCheckUnknown(config, scheduleId, result) {
+  const query = new URLSearchParams()
+  query.set('diagnosticsJson', shortDiagnosticsJson(result))
+  const path = `/api/v1/local-agent/self-media-schedules/${encodeURIComponent(scheduleId)}/publish-checks/unknown?${query}`
+  return signedTrustedBackendRequest(config, path, { method: 'POST' })
+}
+
+async function reportPublishCheckFailed(config, scheduleId, result) {
+  const query = new URLSearchParams()
+  query.set('failureCode', result?.failureCode || 'PUBLISH_RESULT_CHECK_HELPER_FAILED')
+  query.set('failureMessage', String(result?.failureMessage || 'publish result check failed').slice(0, 480))
+  query.set('diagnosticsJson', shortDiagnosticsJson(result))
+  const path = `/api/v1/local-agent/self-media-schedules/${encodeURIComponent(scheduleId)}/publish-checks/failed?${query}`
+  return signedTrustedBackendRequest(config, path, { method: 'POST' })
+}
+
+function shortDiagnosticsJson(value) {
+  const normalized = {
+    ...value,
+    textSample: typeof value?.textSample === 'string' ? value.textSample.slice(0, 800) : value?.textSample,
+    checkedAt: nowIso(),
+  }
+  return JSON.stringify(normalized).slice(0, 1800)
+}
+
 async function handleSchedulePollOnce(req, res, config) {
   await requireHelperAccess(req, config)
   const body = req.method === 'POST' ? await readJson(req) : {}
   const platform = String(body.platform || 'toutiao').trim() || 'toutiao'
+  const publishCheck = await claimAndCheckPublishResult(config, platform)
+  if (publishCheck.claimed) {
+    sendJson(req, res, config, 200, { ...publishCheck, kind: 'publish_result_check' })
+    return
+  }
   const result = await claimAndLaunchScheduledTask(config, platform)
   sendJson(req, res, config, 200, result)
 }
@@ -791,6 +933,12 @@ function defaultPublishUrlForPlatform(platform) {
   if (normalized === 'zhihu') return 'https://www.zhihu.com/'
   if (normalized === 'xiaohongshu') return 'https://www.xiaohongshu.com/'
   return null
+}
+
+function defaultWorksListUrlForPlatform(platform) {
+  const normalized = String(platform || '').trim().toLowerCase()
+  if (normalized === 'toutiao') return 'https://mp.toutiao.com/profile_v4/manage/content/all'
+  return defaultPublishUrlForPlatform(platform)
 }
 
 async function handleOpenEnvironment(req, res, config) {
@@ -1464,9 +1612,14 @@ function startSchedulePoller(config) {
   if (!Number.isFinite(intervalMs) || intervalMs <= 0) return
   setInterval(() => {
     if (!runtimeSession?.sessionId || !runtimeSession?.hmacSecret) return
-    claimAndLaunchScheduledTask(config, 'toutiao').catch((error) => {
-      console.error('GEO self-media schedule poll failed:', error.message)
-    })
+    claimAndCheckPublishResult(config, 'toutiao')
+      .then((result) => {
+        if (result.claimed) return result
+        return claimAndLaunchScheduledTask(config, 'toutiao')
+      })
+      .catch((error) => {
+        console.error('GEO self-media schedule poll failed:', error.message)
+      })
   }, Math.max(intervalMs, 10_000)).unref?.()
 }
 

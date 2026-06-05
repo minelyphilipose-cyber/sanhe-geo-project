@@ -169,12 +169,13 @@
           <el-table-column label="创建时间" width="180">
             <template #default="scope">{{ formatDateTime(scope.row.createdAt) }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="300" fixed="right">
+          <el-table-column label="操作" width="360" fixed="right">
             <template #default="scope">
               <div class="admin-row-actions">
                 <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
                 <el-button v-if="canArticleWrite && canEdit(scope.row.status)" class="content-neutral-action" link @click="openRevision(scope.row)">修订</el-button>
                 <el-button v-if="canDistributeOperate && canDistribute(scope.row.status)" link type="success" @click="openDistributionChannel(scope.row)">分发</el-button>
+                <el-button v-if="canPublish && canDistribute(scope.row.status)" link type="primary" @click="openManualSchedule(scope.row)">定时分发</el-button>
                 <el-button v-if="canArticleWrite && canDeleteArticle(scope.row.status)" link type="danger" @click="deleteArticle(scope.row)">删除</el-button>
               </div>
             </template>
@@ -254,6 +255,55 @@
       </div>
       <template #footer>
         <el-button @click="distributionChannelVisible = false">取消</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="manualScheduleVisible" title="手动定时分发" width="680px" class="manual-schedule-dialog">
+      <DataState :loading="manualScheduleLoading" :empty="false">
+        <el-form label-width="96px" class="manual-schedule-form">
+          <el-form-item label="文章">
+            <div class="manual-schedule-title">{{ manualScheduleArticle?.title || '-' }}</div>
+          </el-form-item>
+          <el-form-item label="平台账号">
+            <el-select
+              v-model="manualScheduleForm.selfMediaAccountId"
+              class="manual-schedule-field"
+              placeholder="选择已验证定时能力的账号"
+              :disabled="manualScheduleSubmitting"
+            >
+              <el-option
+                v-for="account in manualScheduleAccounts"
+                :key="account.id"
+                :label="`${platformLabel(account.platform)} / ${account.accountName}`"
+                :value="account.id"
+              >
+                <span>{{ platformLabel(account.platform) }} / {{ account.accountName }}</span>
+                <span class="manual-schedule-account-meta">{{ account.platformAccountId || account.id }}</span>
+              </el-option>
+            </el-select>
+            <div v-if="!manualScheduleAccounts.length && !manualScheduleLoading" class="manual-schedule-tip">
+              当前品牌暂无已启用且通过自动定时能力验证的平台账号。
+            </div>
+          </el-form-item>
+          <el-form-item label="发布时间">
+            <el-date-picker
+              v-model="manualScheduleForm.plannedPublishAt"
+              class="manual-schedule-field"
+              type="datetime"
+              value-format="YYYY-MM-DDTHH:mm:ss"
+              format="YYYY-MM-DD HH:mm"
+              placeholder="选择平台发布时间"
+              :disabled="manualScheduleSubmitting"
+            />
+            <div class="manual-schedule-tip">头条会提前约 130 分钟打开环境并设置平台定时，发布时间仍需满足平台至少提前 2 小时规则。</div>
+          </el-form-item>
+        </el-form>
+      </DataState>
+      <template #footer>
+        <el-button :disabled="manualScheduleSubmitting" @click="manualScheduleVisible = false">取消</el-button>
+        <el-button type="primary" :loading="manualScheduleSubmitting" :disabled="!canSubmitManualSchedule" @click="submitManualSchedule">
+          创建排期
+        </el-button>
       </template>
     </el-dialog>
 
@@ -583,11 +633,14 @@ import { useArticleDetailRevision } from './composables/useArticleDetailRevision
 import { useArticleDistributionChannels } from './composables/useArticleDistributionChannels'
 import { useSelfMediaDistribution } from './composables/useSelfMediaDistribution'
 import { useUserStore } from '@/stores/user'
-import type { ArticleDetailResponse, ArticleDraft } from '@/types'
+import type { ArticleDetailResponse, ArticleDraft, SelfMediaAccount, SelfMediaScheduleCapability } from '@/types'
 import {
+  createSelfMediaPublishSchedules,
   deleteContentArticle,
   getContentArticleDetail,
   getContentArticles,
+  getSelfMediaAccountsByBrand,
+  getSelfMediaScheduleCapabilities,
 } from '@/api/content'
 import { getProjectDetail } from '@/api/project'
 import { formatDateTime } from '@/utils/format'
@@ -646,6 +699,24 @@ const distributableCount = computed(() => rows.value.filter((row) => canDistribu
 const showAdvancedFilters = ref(false)
 const blockedCount = computed(() => rows.value.filter((row) => ['failed', 'risk_blocked'].includes(row.status)).length)
 const scheduleDrawerVisible = ref(false)
+const manualScheduleVisible = ref(false)
+const manualScheduleLoading = ref(false)
+const manualScheduleSubmitting = ref(false)
+const manualScheduleArticle = ref<ArticleDraft | null>(null)
+const manualScheduleBrandId = ref<number | null>(null)
+const manualScheduleAccounts = ref<SelfMediaAccount[]>([])
+const manualScheduleCapabilities = ref<SelfMediaScheduleCapability[]>([])
+const manualScheduleForm = reactive({
+  selfMediaAccountId: null as number | null,
+  plannedPublishAt: '',
+})
+const canSubmitManualSchedule = computed(() =>
+  !!manualScheduleArticle.value
+  && !!manualScheduleBrandId.value
+  && !!manualScheduleForm.selfMediaAccountId
+  && !!manualScheduleForm.plannedPublishAt
+  && !manualScheduleSubmitting.value,
+)
 
 const {
   detailVisible,
@@ -906,6 +977,20 @@ function channelSubLabel(v?: string | null) {
   return v ? map[v] || v : ''
 }
 
+function platformLabel(v?: string | null) {
+  const map: Record<string, string> = {
+    toutiao: '今日头条',
+    wechat: '公众号',
+    wechat_mp: '微信公众号',
+    zhihu: '知乎',
+    douyin: '抖音图文',
+    xiaohongshu: '小红书',
+    baijiahao: '百家号',
+    netease: '网易',
+  }
+  return v ? map[v] || v : '-'
+}
+
 function articleChannelLabel(row: ArticleDraft) {
   if (row.channelGroupCode) {
     const group = channelGroupLabel(row.channelGroupCode)
@@ -1151,6 +1236,99 @@ function openBatchPublishJobs() {
 
 function openScheduleDrawer() {
   scheduleDrawerVisible.value = true
+}
+
+async function openManualSchedule(row: ArticleDraft) {
+  if (!canPublish.value) {
+    ElMessage.warning('当前账号没有发布排期权限')
+    return
+  }
+  manualScheduleVisible.value = true
+  manualScheduleLoading.value = true
+  manualScheduleArticle.value = row
+  manualScheduleBrandId.value = null
+  manualScheduleAccounts.value = []
+  manualScheduleForm.selfMediaAccountId = null
+  manualScheduleForm.plannedPublishAt = defaultManualScheduleTime()
+  try {
+    const detail = await getContentArticleDetail(row.id).then((res) => res.data.data)
+    const brandId = detail.project?.brandId
+    if (!brandId) {
+      ElMessage.warning('当前文章未绑定品牌，无法创建自媒体排期')
+      return
+    }
+    manualScheduleArticle.value = detail.article
+    manualScheduleBrandId.value = brandId
+    const [accountsRes, capabilitiesRes] = await Promise.all([
+      getSelfMediaAccountsByBrand(brandId),
+      getSelfMediaScheduleCapabilities(),
+    ])
+    manualScheduleCapabilities.value = capabilitiesRes.data.data || []
+    manualScheduleAccounts.value = (accountsRes.data.data || [])
+      .filter((account) => account.status === 'active')
+      .filter((account) => isManualSchedulePlatformReady(account.platform))
+    manualScheduleForm.selfMediaAccountId = manualScheduleAccounts.value[0]?.id || null
+  } catch {
+    manualScheduleVisible.value = false
+    ElMessage.error('加载定时分发配置失败')
+  } finally {
+    manualScheduleLoading.value = false
+  }
+}
+
+async function submitManualSchedule() {
+  if (!canSubmitManualSchedule.value || !manualScheduleArticle.value || !manualScheduleBrandId.value || !manualScheduleForm.selfMediaAccountId) {
+    return
+  }
+  manualScheduleSubmitting.value = true
+  try {
+    const response = await createSelfMediaPublishSchedules({
+      brandId: manualScheduleBrandId.value,
+      articleIds: [manualScheduleArticle.value.id],
+      selfMediaAccountIds: [manualScheduleForm.selfMediaAccountId],
+      windowStart: manualScheduleForm.plannedPublishAt,
+      windowEnd: manualScheduleForm.plannedPublishAt,
+      scheduleStrategy: 'platform_schedule',
+      minIntervalMinutes: 1,
+    }).then((res) => res.data.data)
+    const created = response.createdSchedules?.length || 0
+    const rejected = response.rejectedItems?.length || 0
+    if (created > 0) {
+      ElMessage.success('自媒体定时分发排期已创建')
+      manualScheduleVisible.value = false
+      scheduleDrawerVisible.value = true
+    } else if (rejected > 0) {
+      const first = response.rejectedItems[0]
+      ElMessage.warning(first?.message || '排期创建被拒绝')
+    } else {
+      ElMessage.info('未创建新排期，可能已存在相同排期')
+    }
+  } catch {
+    ElMessage.error('创建自媒体排期失败')
+  } finally {
+    manualScheduleSubmitting.value = false
+  }
+}
+
+function isManualSchedulePlatformReady(platform?: string | null) {
+  const normalized = (platform || '').trim().toLowerCase()
+  return manualScheduleCapabilities.value.some((item) =>
+    item.platform?.toLowerCase() === normalized
+    && item.verificationStatus === 'verified'
+    && item.supportsSchedule
+    && item.v1Strategy === 'platform_schedule',
+  )
+}
+
+function defaultManualScheduleTime() {
+  const value = new Date(Date.now() + 3 * 60 * 60 * 1000)
+  value.setSeconds(0, 0)
+  return toLocalDateTimeValue(value)
+}
+
+function toLocalDateTimeValue(value: Date) {
+  const pad = (n: number) => `${n}`.padStart(2, '0')
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}T${pad(value.getHours())}:${pad(value.getMinutes())}:00`
 }
 
 function openBrandConfig(brandId?: number | null) {
@@ -2457,6 +2635,35 @@ function handleDouyinAuthResult() {
   border-color: #3b6df5;
   border-radius: 9px;
   font-weight: 600;
+}
+
+.manual-schedule-form {
+  padding: 4px 4px 0;
+}
+
+.manual-schedule-title {
+  color: #15223a;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.7;
+}
+
+.manual-schedule-field {
+  width: 100%;
+}
+
+.manual-schedule-account-meta {
+  float: right;
+  margin-left: 16px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
+.manual-schedule-tip {
+  margin-top: 6px;
+  color: #8492a6;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 </style>

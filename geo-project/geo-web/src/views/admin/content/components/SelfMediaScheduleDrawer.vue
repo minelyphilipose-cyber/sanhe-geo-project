@@ -95,6 +95,7 @@
           <template #default="scope">
             <div class="schedule-actions">
               <el-button link type="primary" @click="showDiagnostics(scope.row)">诊断</el-button>
+              <el-button v-if="canRecheck(scope.row)" link type="primary" @click="recheck(scope.row)">重新校验</el-button>
               <el-button v-if="canConfirmPublished(scope.row)" link type="success" @click="confirmPublished(scope.row)">确认发布</el-button>
               <el-button v-if="canConfirmFailed(scope.row)" link type="warning" @click="confirmFailed(scope.row)">确认失败</el-button>
               <el-button v-if="canCancel(scope.row)" link type="danger" @click="cancel(scope.row)">取消</el-button>
@@ -128,11 +129,12 @@ import {
   confirmSelfMediaPublishScheduleFailed,
   confirmSelfMediaPublishSchedulePublished,
   getSelfMediaPublishSchedules,
+  recheckSelfMediaPublishScheduleResult,
 } from '@/api/content'
 import type { SelfMediaPublishSchedule } from '@/types'
 import { formatDateTime } from '@/utils/format'
 
-type ScheduleHealth = 'failed' | 'overdue' | 'locked' | 'waiting' | 'scheduled' | 'done' | 'cancelled'
+type ScheduleHealth = 'failed' | 'manual' | 'overdue' | 'running' | 'waiting' | 'scheduled' | 'checking' | 'done' | 'cancelled'
 
 const props = defineProps<{
   modelValue: boolean
@@ -162,24 +164,31 @@ const query = reactive({
 })
 
 const scheduleStatusOptions = [
-  { label: '待处理', value: 'pending' },
-  { label: '已领取', value: 'claimed' },
-  { label: '已填充待核验', value: 'filled_pending_verify' },
-  { label: '排期中', value: 'scheduling' },
+  { label: '待领取', value: 'pending' },
+  { label: '助手填充中', value: 'filling' },
+  { label: '填充已核验', value: 'filled_verified' },
+  { label: '平台定时中', value: 'scheduling' },
   { label: '已定时', value: 'scheduled' },
-  { label: '发布待确认', value: 'publish_check_unknown' },
+  { label: '到点待核验', value: 'publish_due' },
+  { label: '发布结果核验中', value: 'checking_publish_result' },
+  { label: '发布待确认', value: 'publish_unknown' },
   { label: '已确认发布', value: 'published_confirmed' },
-  { label: '失败', value: 'failed' },
+  { label: '定时失败', value: 'schedule_failed' },
+  { label: '发布失败', value: 'publish_failed' },
+  { label: '需人工处理', value: 'manual_required' },
+  { label: '已转半自动', value: 'routed_to_semi_auto' },
+  { label: '取消待平台处理', value: 'cancel_pending_platform' },
   { label: '已取消', value: 'cancelled' },
-  { label: '平台已取消', value: 'platform_cancelled' },
 ]
 
 const scheduleHealthOptions: Array<{ label: string; value: ScheduleHealth }> = [
   { label: '失败', value: 'failed' },
+  { label: '人工处理', value: 'manual' },
   { label: '超时待处理', value: 'overdue' },
-  { label: '执行中', value: 'locked' },
+  { label: '执行中', value: 'running' },
   { label: '待执行', value: 'waiting' },
   { label: '平台已定时', value: 'scheduled' },
+  { label: '发布待确认', value: 'checking' },
   { label: '已完成', value: 'done' },
   { label: '已取消', value: 'cancelled' },
 ]
@@ -195,19 +204,23 @@ const scheduleHealthCards = computed(() => {
     return acc
   }, {
     failed: 0,
+    manual: 0,
     overdue: 0,
-    locked: 0,
+    running: 0,
     waiting: 0,
     scheduled: 0,
+    checking: 0,
     done: 0,
     cancelled: 0,
   })
   return [
-    { label: '失败', value: 'failed' as ScheduleHealth, count: counts.failed, hint: '需要人工处理', tone: 'danger' },
+    { label: '失败', value: 'failed' as ScheduleHealth, count: counts.failed, hint: '执行或发布失败', tone: 'danger' },
+    { label: '人工', value: 'manual' as ScheduleHealth, count: counts.manual, hint: '需人工介入', tone: 'danger' },
     { label: '超时', value: 'overdue' as ScheduleHealth, count: counts.overdue, hint: '已到处理时间', tone: 'warning' },
-    { label: '执行中', value: 'locked' as ScheduleHealth, count: counts.locked, hint: '助手已领取', tone: 'primary' },
+    { label: '执行中', value: 'running' as ScheduleHealth, count: counts.running, hint: '助手或平台处理中', tone: 'primary' },
     { label: '待执行', value: 'waiting' as ScheduleHealth, count: counts.waiting, hint: '等待下次轮询', tone: 'info' },
     { label: '已定时', value: 'scheduled' as ScheduleHealth, count: counts.scheduled, hint: '等待平台发布', tone: 'success' },
+    { label: '待确认', value: 'checking' as ScheduleHealth, count: counts.checking, hint: '到点后核验发布', tone: 'warning' },
     { label: '完成', value: 'done' as ScheduleHealth, count: counts.done, hint: '已确认发布', tone: 'success' },
     { label: '取消', value: 'cancelled' as ScheduleHealth, count: counts.cancelled, hint: '不再执行', tone: 'muted' },
   ]
@@ -279,8 +292,8 @@ function statusLabel(status?: string | null) {
 
 function statusTag(status?: string | null): 'success' | 'warning' | 'danger' | 'info' {
   if (status === 'scheduled' || status === 'published_confirmed') return 'success'
-  if (status === 'pending' || status === 'claimed' || status === 'filled_pending_verify' || status === 'scheduling' || status === 'publish_check_unknown') return 'warning'
-  if (status === 'failed') return 'danger'
+  if (['pending', 'filling', 'filled_verified', 'scheduling', 'publish_due', 'checking_publish_result', 'publish_unknown', 'cancel_pending_platform'].includes(status || '')) return 'warning'
+  if (['schedule_failed', 'publish_failed', 'manual_required'].includes(status || '')) return 'danger'
   return 'info'
 }
 
@@ -305,18 +318,20 @@ function isLocked(row: SelfMediaPublishSchedule) {
 }
 
 function isOverdue(row: SelfMediaPublishSchedule) {
-  if (['failed', 'cancelled', 'platform_cancelled', 'published_confirmed', 'scheduled'].includes(row.status)) return false
+  if (['schedule_failed', 'publish_failed', 'manual_required', 'routed_to_semi_auto', 'cancelled', 'published_confirmed', 'scheduled'].includes(row.status)) return false
   if (isLocked(row)) return false
   const nextAttemptAt = timeMs(row.nextAttemptAt)
   return nextAttemptAt !== null && nextAttemptAt <= Date.now()
 }
 
 function health(row: SelfMediaPublishSchedule): ScheduleHealth {
-  if (row.status === 'failed') return 'failed'
+  if (row.status === 'schedule_failed' || row.status === 'publish_failed') return 'failed'
+  if (row.status === 'manual_required' || row.status === 'routed_to_semi_auto') return 'manual'
   if (row.status === 'published_confirmed') return 'done'
-  if (row.status === 'cancelled' || row.status === 'platform_cancelled') return 'cancelled'
-  if (row.status === 'scheduled' || row.status === 'publish_check_unknown') return 'scheduled'
-  if (isLocked(row)) return 'locked'
+  if (row.status === 'cancelled') return 'cancelled'
+  if (row.status === 'scheduled') return 'scheduled'
+  if (row.status === 'publish_due' || row.status === 'publish_unknown' || row.status === 'cancel_pending_platform') return 'checking'
+  if (isLocked(row) || row.status === 'filling' || row.status === 'scheduling' || row.status === 'checking_publish_result') return 'running'
   if (isOverdue(row)) return 'overdue'
   return 'waiting'
 }
@@ -327,8 +342,8 @@ function healthLabel(row: SelfMediaPublishSchedule) {
 
 function healthTag(row: SelfMediaPublishSchedule): 'success' | 'warning' | 'danger' | 'info' {
   const value = health(row)
-  if (value === 'failed') return 'danger'
-  if (value === 'overdue') return 'warning'
+  if (value === 'failed' || value === 'manual') return 'danger'
+  if (value === 'overdue' || value === 'checking') return 'warning'
   if (value === 'done' || value === 'scheduled') return 'success'
   return 'info'
 }
@@ -336,15 +351,20 @@ function healthTag(row: SelfMediaPublishSchedule): 'success' | 'warning' | 'dang
 function stageLabel(row: SelfMediaPublishSchedule) {
   const map: Record<string, string> = {
     pending: '等待助手领取',
-    claimed: '助手已领取',
-    filled_pending_verify: '内容填充待核验',
+    filling: '助手填充中',
+    filled_verified: '内容填充已核验',
     scheduling: '平台定时设置中',
     scheduled: '平台已定时',
-    publish_check_unknown: '等待最终发布确认',
+    publish_due: '到点待核验',
+    checking_publish_result: '发布结果核验中',
+    publish_unknown: '等待最终发布确认',
     published_confirmed: '发布已确认',
-    failed: '执行失败',
+    schedule_failed: '定时设置失败',
+    publish_failed: '发布结果失败',
+    manual_required: '需要人工处理',
+    routed_to_semi_auto: '已转半自动',
+    cancel_pending_platform: '等待平台取消确认',
     cancelled: '后台已取消',
-    platform_cancelled: '平台已取消',
   }
   return map[row.status] || row.status || '-'
 }
@@ -369,15 +389,19 @@ function failureText(row: SelfMediaPublishSchedule) {
 }
 
 function canCancel(row: SelfMediaPublishSchedule) {
-  return props.canPublish && !['cancelled', 'platform_cancelled', 'published_confirmed', 'failed'].includes(row.status)
+  return props.canPublish && !['cancelled', 'published_confirmed', 'schedule_failed', 'publish_failed', 'manual_required', 'routed_to_semi_auto'].includes(row.status)
 }
 
 function canConfirmPublished(row: SelfMediaPublishSchedule) {
-  return props.canPublish && ['scheduled', 'publish_check_unknown', 'failed'].includes(row.status)
+  return props.canPublish && ['scheduled', 'publish_due', 'checking_publish_result', 'publish_unknown', 'publish_failed'].includes(row.status)
 }
 
 function canConfirmFailed(row: SelfMediaPublishSchedule) {
-  return props.canPublish && !['cancelled', 'platform_cancelled', 'published_confirmed', 'failed'].includes(row.status)
+  return props.canPublish && !['cancelled', 'published_confirmed', 'schedule_failed', 'publish_failed', 'manual_required', 'routed_to_semi_auto'].includes(row.status)
+}
+
+function canRecheck(row: SelfMediaPublishSchedule) {
+  return props.canPublish && ['scheduled', 'publish_due', 'checking_publish_result', 'publish_unknown', 'publish_failed', 'manual_required'].includes(row.status)
 }
 
 async function cancel(row: SelfMediaPublishSchedule) {
@@ -436,6 +460,23 @@ async function confirmFailed(row: SelfMediaPublishSchedule) {
   }
 }
 
+async function recheck(row: SelfMediaPublishSchedule) {
+  try {
+    await ElMessageBox.confirm(`确认重新校验排期 #${row.id} 的平台发布结果？`, '重新校验发布结果', {
+      confirmButtonText: '重新校验',
+      cancelButtonText: '返回',
+      type: 'warning',
+    })
+    await recheckSelfMediaPublishScheduleResult(row.id)
+    ElMessage.success('已加入发布结果校验队列')
+    await load()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      throw error
+    }
+  }
+}
+
 function showDiagnostics(row: SelfMediaPublishSchedule) {
   const diagnostics = row.diagnosticsJson ? formatDiagnosticsJson(row.diagnosticsJson) : '暂无诊断信息'
   ElMessageBox.alert(diagnosticsText(row, diagnostics), `排期 #${row.id} 诊断`, {
@@ -451,13 +492,31 @@ function diagnosticsText(row: SelfMediaPublishSchedule, diagnostics: string) {
     `状态：${statusLabel(row.status)}（${row.status || '-'}）`,
     `计划发布时间：${timeText(row.plannedPublishAt)}`,
     `平台定时时间：${timeText(row.platformScheduledAt)}`,
+    `队列：${row.queueKind || '-'}`,
+    `请求：${row.requestId || '-'} / ${row.requestIdempotencyKey || '-'}`,
+    `浏览器环境：${row.browserEnvironmentId || '-'} / 绑定 ${row.browserEnvironmentAccountId || '-'}`,
+    `平台排期 ID：${row.platformScheduleId || '-'}`,
+    `平台发布 ID：${row.platformPublishId || '-'}`,
+    `平台发布链接：${row.platformPublishedUrl || '-'}`,
     `下次处理：${timeText(row.nextAttemptAt)}`,
     `锁定至：${timeText(row.lockedUntil)}`,
     `尝试次数：${attemptText(row)}`,
     `异常：${failureText(row)}`,
+    `建议：${recommendationText(row)}`,
     '',
     diagnostics,
   ].join('\n')
+}
+
+function recommendationText(row: SelfMediaPublishSchedule) {
+  if (row.status === 'publish_unknown') return '等待自动复查；若长时间未变化，可点击“重新校验”或人工确认发布。'
+  if (row.status === 'publish_failed') return '检查本地助手、AdsPower 浏览器和头条作品管理页；修复后点击“重新校验”。'
+  if (row.status === 'manual_required') return '按异常信息处理配置或页面问题；处理后可点击“重新校验”或重新创建排期。'
+  if (row.status === 'checking_publish_result') return '本地助手正在校验作品管理页；若锁定超时仍无变化，可重新校验。'
+  if (row.status === 'scheduled') return '等待平台发布时间，到点后本地助手会自动校验发布结果。'
+  if (row.status === 'cancel_pending_platform') return '已提交后台取消，仍需在平台侧确认是否需要人工撤销。'
+  if (row.status === 'published_confirmed') return '无需处理。'
+  return row.failureCode || row.failureMessage ? '根据异常信息修复后重试或人工确认。' : '暂无额外操作建议。'
 }
 
 function formatDiagnosticsJson(value: string) {

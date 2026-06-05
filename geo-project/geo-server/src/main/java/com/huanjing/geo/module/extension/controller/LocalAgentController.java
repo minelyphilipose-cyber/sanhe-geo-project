@@ -1,16 +1,22 @@
 package com.huanjing.geo.module.extension.controller;
 
 import com.huanjing.geo.common.result.R;
+import com.huanjing.geo.module.content.entity.BrowserEnvironment;
+import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.mapper.BrowserEnvironmentAccountMapper;
+import com.huanjing.geo.module.content.mapper.BrowserEnvironmentMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.service.SelfMediaPublishScheduleService;
+import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
 import com.huanjing.geo.module.extension.dto.LocalAgentPairingApproveRequest;
 import com.huanjing.geo.module.extension.dto.LocalAgentPairingApproveResponse;
 import com.huanjing.geo.module.extension.dto.LocalAgentPairingClaimRequest;
 import com.huanjing.geo.module.extension.dto.LocalAgentPairingClaimResponse;
 import com.huanjing.geo.module.extension.dto.LocalAgentPairingIntentRequest;
 import com.huanjing.geo.module.extension.dto.LocalAgentPairingIntentResponse;
+import com.huanjing.geo.module.extension.dto.LocalAgentSelfMediaPublishCheckClaimResponse;
 import com.huanjing.geo.module.extension.dto.LocalAgentSelfMediaScheduleClaimResponse;
 import com.huanjing.geo.module.extension.dto.LocalAgentSessionVO;
 import com.huanjing.geo.module.extension.dto.LocalAgentSignRequest;
@@ -44,6 +50,8 @@ public class LocalAgentController {
     private final LocalAgentSessionService service;
     private final SelfMediaPublishScheduleService scheduleService;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
+    private final BrowserEnvironmentMapper browserEnvironmentMapper;
+    private final BrowserEnvironmentAccountMapper browserEnvironmentAccountMapper;
 
     @PostMapping("/pairing-intents")
     public R<LocalAgentPairingIntentResponse> registerPairingIntent(
@@ -114,6 +122,79 @@ public class LocalAgentController {
         return R.ok(new LocalAgentSelfMediaScheduleClaimResponse(claimed.schedule(), task, launch));
     }
 
+    @GetMapping("/self-media-schedules/publish-checks/claim-next")
+    public R<LocalAgentSelfMediaPublishCheckClaimResponse> claimNextSelfMediaPublishCheck(
+            @RequestParam(required = false) String platform,
+            HttpServletRequest request) {
+        LocalAgentSession session = verifySignedRequest(request);
+        SelfMediaPublishScheduleVO schedule =
+                scheduleService.claimNextPublishCheckForLocalAgent(session.getOperatorId(), platform, 30);
+        if (schedule == null) {
+            return R.ok(null);
+        }
+        SelfMediaAccount account = schedule.getSelfMediaAccountId() == null
+                ? null
+                : selfMediaAccountMapper.selectById(schedule.getSelfMediaAccountId());
+        BrowserEnvironment environment = schedule.getBrowserEnvironmentId() == null
+                ? null
+                : browserEnvironmentMapper.selectById(schedule.getBrowserEnvironmentId());
+        BrowserEnvironmentAccount environmentAccount = schedule.getBrowserEnvironmentAccountId() == null
+                ? null
+                : browserEnvironmentAccountMapper.selectById(schedule.getBrowserEnvironmentAccountId());
+        String taskPlatform = StringUtils.hasText(schedule.getPlatform())
+                ? schedule.getPlatform()
+                : account == null ? null : account.getPlatform();
+        LocalAgentSelfMediaPublishCheckClaimResponse.Launch launch =
+                new LocalAgentSelfMediaPublishCheckClaimResponse.Launch(
+                        schedule.getId(),
+                        taskPlatform,
+                        defaultWorksListUrl(taskPlatform),
+                        schedule.getSelfMediaAccountId(),
+                        schedule.getBrowserEnvironmentAccountId(),
+                        environmentAccount == null ? null : environmentAccount.getExpectedPlatformAccountId(),
+                        environmentAccount == null ? null : environmentAccount.getExpectedAccountName(),
+                        environment == null ? null : environment.getEnvironmentKey(),
+                        environment == null ? null : environment.getName(),
+                        environment == null ? null : environment.getProviderProfileId()
+                );
+        return R.ok(new LocalAgentSelfMediaPublishCheckClaimResponse(schedule, launch));
+    }
+
+    @PostMapping("/self-media-schedules/{scheduleId}/publish-checks/published")
+    public R<SelfMediaPublishScheduleVO> markSelfMediaPublishCheckPublished(
+            @PathVariable Long scheduleId,
+            @RequestParam(required = false) String platformPublishedUrl,
+            @RequestParam(required = false) String diagnosticsJson,
+            HttpServletRequest request) {
+        verifySignedRequest(request);
+        return R.ok(scheduleService.markClaimedPublishedConfirmed(scheduleId, platformPublishedUrl, diagnosticsJson));
+    }
+
+    @PostMapping("/self-media-schedules/{scheduleId}/publish-checks/unknown")
+    public R<SelfMediaPublishScheduleVO> markSelfMediaPublishCheckUnknown(
+            @PathVariable Long scheduleId,
+            @RequestParam(required = false) String diagnosticsJson,
+            HttpServletRequest request) {
+        verifySignedRequest(request);
+        return R.ok(scheduleService.markClaimedPublishCheckUnknown(scheduleId, diagnosticsJson));
+    }
+
+    @PostMapping("/self-media-schedules/{scheduleId}/publish-checks/failed")
+    public R<SelfMediaPublishScheduleVO> markSelfMediaPublishCheckFailed(
+            @PathVariable Long scheduleId,
+            @RequestParam(required = false) String failureCode,
+            @RequestParam(required = false) String failureMessage,
+            @RequestParam(required = false) String diagnosticsJson,
+            HttpServletRequest request) {
+        verifySignedRequest(request);
+        return R.ok(scheduleService.markClaimedPublishFailed(
+                scheduleId,
+                failureCode,
+                failureMessage,
+                diagnosticsJson
+        ));
+    }
+
     private LocalAgentSession verifySignedRequest(HttpServletRequest request) {
         String path = request.getRequestURI();
         if (StringUtils.hasText(request.getQueryString())) {
@@ -142,6 +223,13 @@ public class LocalAgentController {
             return "https://www.xiaohongshu.com/";
         }
         return null;
+    }
+
+    private String defaultWorksListUrl(String platform) {
+        if ("toutiao".equalsIgnoreCase(platform)) {
+            return "https://mp.toutiao.com/profile_v4/manage/content/all";
+        }
+        return defaultPublishUrl(platform);
     }
 
     private String sha256Hex(String value) {

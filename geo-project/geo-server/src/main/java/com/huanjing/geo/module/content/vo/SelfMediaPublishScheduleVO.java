@@ -27,6 +27,10 @@ public class SelfMediaPublishScheduleVO {
     private String platformScheduleId;
     private String platformPublishId;
     private String platformPublishedUrl;
+    private String publishCheckTitle;
+    private String publishCheckCoverUrl;
+    private String publishCheckLocationName;
+    private String publishCheckFingerprint;
     private String baseIdempotencyKey;
     private Integer generationNo;
     private Integer attemptCount;
@@ -69,6 +73,10 @@ public class SelfMediaPublishScheduleVO {
         vo.setPlatformScheduleId(row.getPlatformScheduleId());
         vo.setPlatformPublishId(row.getPlatformPublishId());
         vo.setPlatformPublishedUrl(row.getPlatformPublishedUrl());
+        vo.setPublishCheckTitle(row.getPublishCheckTitle());
+        vo.setPublishCheckCoverUrl(row.getPublishCheckCoverUrl());
+        vo.setPublishCheckLocationName(row.getPublishCheckLocationName());
+        vo.setPublishCheckFingerprint(row.getPublishCheckFingerprint());
         vo.setBaseIdempotencyKey(row.getBaseIdempotencyKey());
         vo.setGenerationNo(row.getGenerationNo());
         vo.setAttemptCount(row.getAttemptCount());
