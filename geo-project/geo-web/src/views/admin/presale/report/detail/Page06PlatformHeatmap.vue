@@ -80,9 +80,9 @@
           </div>
 
           <div class="p06-metric-note">
-            <div class="mono p06-metric-note-label">指标口径说明</div>
+            <div class="mono p06-metric-note-label">怎么看这张图</div>
             <div>
-              注:推荐型、问题型、场景型展示自然问询提及率;认知型与对比型采用裁判 LLM 评估“AI 对品牌的认知质量”与“AI 在竞争中的立场”,展示 judge_score。三类指标统一映射至 0~100,但语义不同。
+              上面三行看“顾客没点名时,AI 会不会主动提到你”;下面两行看“顾客已经点名你时,AI 是否了解你、和竞品比较时是否更偏向你”。所有格子都换算成 0-100,颜色越深代表这类问题上的表现越强。
             </div>
           </div>
 
@@ -470,12 +470,13 @@ function buildCellView(
 function buildTooltip(cell: PlatformIntentCell): string {
   const rate = cellMetricValue(cell) ?? 0
   if (cell.intent_code === 'COGNITIVE' || cell.intent_code === 'COMPARISON') {
-    const scoreLabel = cell.intent_code === 'COMPARISON' ? '净推荐立场评分' : '品牌认知质量评分'
+    const scoreLabel = cell.intent_code === 'COMPARISON' ? '比较时偏向你的程度' : 'AI 对你的了解度'
     const sampleCount = cell.judge_sample_count ?? cell.platform_prompt_count
-    const base = `${scoreLabel} ${rate}（基于 ${sampleCount} 次裁判）`
+    const sampleLabel = cell.intent_code === 'COMPARISON' ? '竞品比较回答' : '品牌了解回答'
+    const base = `${scoreLabel} ${rate}（基于 ${sampleCount} 次${sampleLabel}）`
     if (cell.intent_code !== 'COMPARISON') return base
     const stanceLabel = toStanceLabel(cell.judge_stance ?? cell.stance)
-    return stanceLabel ? `${base}，站队:${stanceLabel}` : base
+    return stanceLabel ? `${base}，倾向:${stanceLabel}` : base
   }
   return `${cell.mention_count}/${cell.platform_prompt_count} 提及(${rate}%)`
 }
@@ -488,9 +489,9 @@ function cellMetricValue(cell: PlatformIntentCell): number | null {
 }
 
 function metricLabel(intentCode: IntentCode): string {
-  if (intentCode === 'COGNITIVE') return '品牌认知质量'
-  if (intentCode === 'COMPARISON') return '净推荐立场'
-  return '主动提及率'
+  if (intentCode === 'COGNITIVE') return 'AI 对你的了解度'
+  if (intentCode === 'COMPARISON') return 'AI 是否偏向你'
+  return '主动提到你的比例'
 }
 
 /**
