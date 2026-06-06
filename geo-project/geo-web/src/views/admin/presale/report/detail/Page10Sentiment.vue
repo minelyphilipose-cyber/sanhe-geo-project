@@ -27,8 +27,8 @@
 
           <div>
             <div class="mono p10-breakdown-label">BRAND MENTION SENTIMENT</div>
-            <div v-if="isSparseSample" class="p10-sparse-note">
-              本次品牌提及样本为 {{ totalCount }} 条,暂不足以形成稳定口碑结论。
+            <div v-if="showImpressionGap" class="p10-sparse-note">
+              {{ sampleWarningText }}
             </div>
 
             <!-- 3 条进度 -->
@@ -70,6 +70,22 @@
             >
               {{ kw.text }}
             </span>
+          </div>
+        </div>
+
+        <!-- 样本不足时的品牌印象缺口 -->
+        <div v-else class="p10-impression-gap">
+          <div class="p10-gap-callout">
+            <div class="mono p10-gap-kicker">{{ impressionGapKicker }}</div>
+            <div class="p10-gap-title">{{ impressionGapTitle }}</div>
+            <div class="p10-gap-copy">{{ impressionGapCopy }}</div>
+          </div>
+          <div class="p10-gap-grid">
+            <div v-for="item in impressionGapCards" :key="item.index" class="p10-gap-card">
+              <div class="mono p10-gap-card-index">{{ item.index }}</div>
+              <div class="p10-gap-card-title">{{ item.title }}</div>
+              <div class="p10-gap-card-copy">{{ item.copy }}</div>
+            </div>
           </div>
         </div>
 
@@ -129,7 +145,20 @@ const totalCount = computed(() => {
   const s = sentiment.value
   return s.positive_count + s.neutral_count + s.negative_count
 })
+const isNoBrandMention = computed(() => totalCount.value === 0)
 const isSparseSample = computed(() => totalCount.value > 0 && totalCount.value < 10)
+const showImpressionGap = computed(() => isNoBrandMention.value || isSparseSample.value)
+const chartCenterLabel = computed(() => {
+  if (isNoBrandMention.value) return '尚未形成印象'
+  if (isSparseSample.value) return '样本偏少'
+  return '品牌提及'
+})
+const sampleWarningText = computed(() => {
+  if (isNoBrandMention.value) {
+    return `本次没有采集到 ${mergedView.value.brand_name} 的明确提及,当前不是口碑稳定,而是 AI 尚未形成可评价的品牌印象。`
+  }
+  return `本次品牌提及样本为 ${totalCount.value} 条,不足以证明 AI 对你有稳定好印象。`
+})
 
 function pct(count: number): number {
   if (totalCount.value === 0) return 0
@@ -227,7 +256,7 @@ const doughnutOption = computed<EChartsOption>(() => {
           show: true,
           position: 'center',
           formatter: () => {
-            return `{num|${totalCount.value}}\n{sub|品牌提及}`
+            return `{num|${totalCount.value}}\n{sub|${chartCenterLabel.value}}`
           },
           rich: {
             num: {
@@ -271,6 +300,7 @@ interface KeywordChip {
  * 字号优先用后端返的 font_size(px);未返则按 frequency 线性映射到 12-20px。
  */
 const positiveKeywords = computed<KeywordChip[]>(() => {
+  if (showImpressionGap.value) return []
   const kws = sentiment.value.top_keywords
   if (!kws || kws.length === 0) return []
 
@@ -301,6 +331,39 @@ const positiveKeywords = computed<KeywordChip[]>(() => {
     }
   })
 })
+
+const impressionGapKicker = computed(() =>
+  isNoBrandMention.value
+    ? 'NO BRAND MENTION · 尚未形成品牌印象'
+    : 'LOW SAMPLE · 品牌印象样本偏少'
+)
+const impressionGapTitle = computed(() =>
+  isNoBrandMention.value
+    ? '当前最大问题不是 AI 说你不好,而是 AI 还没有谈到你。'
+    : 'AI 偶尔提到你,但样本还不足以沉淀稳定好印象。'
+)
+const impressionGapCopy = computed(() =>
+  isNoBrandMention.value
+    ? '在本次测试里,AI 尚未给出足够的品牌描述,目标用户很难从回答中建立对你的具体认知。'
+    : `本次只有 ${totalCount.value} 条品牌提及,正负面比例只能作参考;真正值得关注的是 AI 对你的记忆还不够稳定。`
+)
+const impressionGapCards = computed(() => [
+  {
+    index: '01',
+    title: '可见度不足',
+    copy: 'AI 很少主动提到你,说明品牌还没有稳定进入回答候选。'
+  },
+  {
+    index: '02',
+    title: '好印象未沉淀',
+    copy: '即使线下服务有优势,AI 目前还缺少足够材料形成正向描述。'
+  },
+  {
+    index: '03',
+    title: '内容资产需要补强',
+    copy: '需要让 AI 持续读到你的项目、医生、案例、价格与服务信息。'
+  }
+])
 
 const concernEvidenceNote = computed(() => {
   const count = sentiment.value.negative_count
@@ -428,6 +491,64 @@ function formatEvidenceDate(isoStr: string): string {
   color: #047857;
   padding: 4px 12px;
   background: rgba(4, 120, 87, 0.08);
+}
+
+/* 品牌印象缺口 */
+.p10-impression-gap {
+  margin-bottom: 32px;
+}
+.p10-gap-callout {
+  margin-bottom: 18px;
+  padding: 18px 22px;
+  border-left: 4px solid #b45309;
+  background: #fff4df;
+}
+.p10-gap-kicker {
+  margin-bottom: 8px;
+  color: #b45309;
+  font-size: 10px;
+  letter-spacing: 2.5px;
+}
+.p10-gap-title {
+  color: #0b1426;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.55;
+}
+.p10-gap-copy {
+  max-width: 760px;
+  margin-top: 8px;
+  color: #6b6456;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.p10-gap-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+}
+.p10-gap-card {
+  min-height: 132px;
+  padding: 16px 16px 18px;
+  border-top: 2px solid #c8bfa8;
+  background: #f7f3ea;
+}
+.p10-gap-card-index {
+  margin-bottom: 12px;
+  color: #b45309;
+  font-size: 10px;
+  letter-spacing: 2px;
+}
+.p10-gap-card-title {
+  margin-bottom: 8px;
+  color: #0b1426;
+  font-size: 15px;
+  font-weight: 800;
+}
+.p10-gap-card-copy {
+  color: #6b6456;
+  font-size: 12px;
+  line-height: 1.75;
 }
 
 /* 真实负面证据 */
