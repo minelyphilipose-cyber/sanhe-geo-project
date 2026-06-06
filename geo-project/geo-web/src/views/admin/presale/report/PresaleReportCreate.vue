@@ -100,6 +100,22 @@
             style="max-width: 640px"
           />
         </el-form-item>
+
+        <el-form-item label="指定竞品" prop="specifiedCompetitors">
+          <div class="competitor-inputs">
+            <el-input
+              v-for="(_, index) in form.specifiedCompetitors"
+              :key="index"
+              v-model="form.specifiedCompetitors[index]"
+              :placeholder="`竞品 ${index + 1}`"
+              maxlength="100"
+              show-word-limit
+            />
+            <div class="form-tip">
+              可不填，由系统自动识别 Top3；若填写，必须填满 3 个竞品，并将按这 3 个竞品进行对比诊断。
+            </div>
+          </div>
+        </el-form-item>
       </el-form>
 
       <el-divider />
@@ -426,6 +442,10 @@ interface PromptItem {
   draft: PromptDraftItem
 }
 
+type CreateReportForm = Omit<CreateReportRequest, 'specifiedCompetitors'> & {
+  specifiedCompetitors: string[]
+}
+
 interface LlmQuestionDraftItem extends LlmPromptQuestionDraft {
   id: string
 }
@@ -486,16 +506,44 @@ const llmPlan = reactive<LlmPromptQuestionPlan>({
   categoryCounts: emptyCategoryCounts()
 })
 
-const form = reactive<CreateReportRequest>({
+const form = reactive<CreateReportForm>({
   brandName: '',
   industry: '',
   industryRole: '',
   region: '',
   userDemand: '',
   userType: '',
+  specifiedCompetitors: ['', '', ''],
   promptTemplateVersion: '',
   promptTemplates: []
 })
+
+function validateSpecifiedCompetitors(_: unknown, value: string[] | undefined, callback: (error?: Error) => void) {
+  const values = normalizeSpecifiedCompetitorInputs(value)
+  if (values.length === 0) {
+    callback()
+    return
+  }
+  if (values.length !== 3) {
+    callback(new Error('指定竞品必须为空或填满 3 个'))
+    return
+  }
+  const normalizedBrand = normalizeCompetitorName(form.brandName)
+  const dedup = new Set<string>()
+  for (const item of values) {
+    const normalized = normalizeCompetitorName(item)
+    if (normalized === normalizedBrand) {
+      callback(new Error('指定竞品不能与品牌名称相同'))
+      return
+    }
+    if (dedup.has(normalized)) {
+      callback(new Error('指定竞品不能重复'))
+      return
+    }
+    dedup.add(normalized)
+  }
+  callback()
+}
 
 const rules: FormRules = {
   brandName: [{ required: true, message: '品牌名不能为空', trigger: 'blur' }],
@@ -503,7 +551,8 @@ const rules: FormRules = {
   industryRole: [{ required: true, message: '请选择身份', trigger: 'change' }],
   region: [{ required: true, message: '请输入地区', trigger: 'blur' }],
   userType: [{ max: 50, message: '目标用户最多 50 字', trigger: 'blur' }],
-  userDemand: [{ max: 500, message: '客户诉求最多 500 字', trigger: 'blur' }]
+  userDemand: [{ max: 500, message: '客户诉求最多 500 字', trigger: 'blur' }],
+  specifiedCompetitors: [{ validator: validateSpecifiedCompetitors, trigger: 'blur' }]
 }
 
 const industryOptions = [
@@ -535,6 +584,21 @@ function optionLabel(options: Array<{ value: string; label: string }>, value: st
     return ''
   }
   return options.find((item) => item.value === value)?.label || value
+}
+
+function normalizeSpecifiedCompetitorInputs(value: string[] | undefined): string[] {
+  return (value || [])
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+function normalizeCompetitorName(value: string | undefined): string {
+  return (value || '').trim().replace(/\s+/g, '').toLowerCase()
+}
+
+function specifiedCompetitorsForSubmit(): string[] | undefined {
+  const values = normalizeSpecifiedCompetitorInputs(form.specifiedCompetitors)
+  return values.length === 0 ? undefined : values
 }
 
 const canPreviewPrompts = computed(() => {
@@ -736,6 +800,9 @@ function applyRegenerateDraft(draft: RegenerateDraftVO) {
   form.region = draft.region || ''
   form.userDemand = draft.userDemand || ''
   form.userType = draft.userType || ''
+  form.specifiedCompetitors = draft.specifiedCompetitors?.length
+    ? [...draft.specifiedCompetitors, '', '', ''].slice(0, 3)
+    : ['', '', '']
 
   if (draft.promptSourceMode === 'llm') {
     activePromptTab.value = 'llm'
@@ -1101,6 +1168,7 @@ async function onSubmit() {
 
   submitting.value = true
   try {
+    const specifiedCompetitors = specifiedCompetitorsForSubmit()
     const payload: CreateReportRequest =
       activePromptTab.value === 'llm'
         ? {
@@ -1110,6 +1178,7 @@ async function onSubmit() {
             region: form.region.trim(),
             userDemand: form.userDemand?.trim() || undefined,
             userType: form.userType?.trim() || undefined,
+            specifiedCompetitors,
             promptSourceMode: 'llm',
             llmQuestionPlan: {
               totalCount: Number(llmPlan.totalCount || 0),
@@ -1124,6 +1193,7 @@ async function onSubmit() {
             region: form.region.trim(),
             userDemand: form.userDemand?.trim() || undefined,
             userType: form.userType?.trim() || undefined,
+            specifiedCompetitors,
             promptSourceMode: 'template',
             promptTemplateVersion: promptTemplateVersion.value,
             promptTemplates: buildPromptTemplateDrafts()
@@ -1169,6 +1239,7 @@ async function onCancel() {
     form.region ||
     form.userDemand ||
     form.userType ||
+    normalizeSpecifiedCompetitorInputs(form.specifiedCompetitors).length > 0 ||
     modifiedCount.value > 0 ||
     llmQuestions.value.length > 0
   if (hasInput) {
@@ -1244,6 +1315,16 @@ function formatInt(value: number) {
   margin-left: 12px;
   color: #909399;
   font-size: 12px;
+}
+.competitor-inputs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
+  gap: 10px 12px;
+  width: min(100%, 760px);
+}
+.competitor-inputs .form-tip {
+  grid-column: 1 / -1;
+  margin-left: 0;
 }
 .scope-preview {
   padding: 16px;

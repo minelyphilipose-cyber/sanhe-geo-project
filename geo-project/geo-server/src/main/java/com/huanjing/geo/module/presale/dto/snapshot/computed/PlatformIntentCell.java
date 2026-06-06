@@ -37,9 +37,13 @@ public class PlatformIntentCell {
     @JsonProperty("mention_count")
     private Integer mentionCount;
 
-    /** 提及率(0..100 整数,HALF_UP)。 */
+    /** 提及率(0..100 整数,HALF_UP)。认知/对比不适用。 */
     @JsonProperty("mention_rate")
     private Integer mentionRate;
+
+    /** 裁判评分(0..100 整数,HALF_UP),仅认知/对比适用。 */
+    @JsonProperty("judge_score")
+    private Integer judgeScore;
 
     /** 该意图类别总 prompt 数。 */
     @JsonProperty("total_prompts")
@@ -52,7 +56,15 @@ public class PlatformIntentCell {
     @JsonProperty("platform_prompt_count")
     private Integer platformPromptCount;
 
-    /** 对比型专用站队方向:target|tie|competitor|null。 */
+    /** 裁判有效样本数,仅认知/对比适用。 */
+    @JsonProperty("judge_sample_count")
+    private Integer judgeSampleCount;
+
+    /** 对比型专用站队方向:target|tie|competitor|null。保留旧字段兼容历史前端。 */
     @JsonProperty("stance")
     private String stance;
+
+    /** 对比型专用站队方向:target|tie|competitor|null。 */
+    @JsonProperty("judge_stance")
+    private String judgeStance;
 }

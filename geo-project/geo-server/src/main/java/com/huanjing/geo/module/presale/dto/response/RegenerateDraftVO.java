@@ -17,6 +17,7 @@ public class RegenerateDraftVO {
     private String region;
     private String userDemand;
     private String userType;
+    private List<String> specifiedCompetitors;
     private String promptSourceMode;
     private List<TemplateQuestion> promptTemplates;
     private LlmQuestionPlan llmQuestionPlan;

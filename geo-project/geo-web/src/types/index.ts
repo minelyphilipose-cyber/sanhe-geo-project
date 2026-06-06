@@ -1214,7 +1214,9 @@ export interface SelfMediaPublishSchedule {
   requestIdempotencyKey?: string | null
   articleId: number
   brandId: number
+  brandName?: string | null
   selfMediaAccountId: number
+  selfMediaAccountName?: string | null
   browserEnvironmentId?: number | null
   browserEnvironmentAccountId?: number | null
   platform: string
@@ -1243,12 +1245,26 @@ export interface SelfMediaPublishSchedule {
   failureCode?: string | null
   failureMessage?: string | null
   diagnosticsJson?: string | null
+  activeAlerts?: SelfMediaPublishScheduleAlert[]
   createdAt?: string | null
   updatedAt?: string | null
   scheduledAt?: string | null
   cancelledAt?: string | null
   cancelRequestedAt?: string | null
   publishedConfirmedAt?: string | null
+}
+
+export interface SelfMediaPublishScheduleAlert {
+  id: number
+  scheduleId: number
+  alertType: string
+  severity: 'critical' | 'warning' | 'info' | string
+  status: 'open' | 'resolved' | string
+  message: string
+  evidenceJson?: string | null
+  firstSeenAt?: string | null
+  lastSeenAt?: string | null
+  resolvedAt?: string | null
 }
 
 export interface SelfMediaPublishScheduleRejectedItem {
@@ -1279,10 +1295,17 @@ export interface SelfMediaScheduleCapability {
   supportsCancel?: boolean | null
   supportsModify?: boolean | null
   supportsPublishCheck?: boolean | null
-  v1Strategy?: 'pending' | 'platform_schedule' | 'semi_auto' | string | null
+  v1Strategy?: 'pending' | 'platform_schedule' | 'backend_delayed_publish' | 'semi_auto' | string | null
   selectorStatus?: string | null
   evidenceJson?: string | null
   notes?: string | null
+  displayName?: string | null
+  publishChannel?: 'OFFICIAL_API' | 'ADSPOWER_AUTOMATION' | string | null
+  scheduleMode?: 'PLATFORM_NATIVE' | 'BACKEND_DELAYED' | 'UNSUPPORTED' | string | null
+  contractRequiresCoverUpload?: boolean | null
+  contractSupportsLocation?: boolean | null
+  contractSupportsOneClickFormat?: boolean | null
+  contractSupportsPublishCheck?: boolean | null
   verifiedAt?: string | null
   verifiedBy?: number | null
   createdAt?: string | null

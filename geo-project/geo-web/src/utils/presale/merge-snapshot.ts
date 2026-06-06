@@ -26,15 +26,18 @@ import type {
 } from '../../types/presale/raw';
 import type {
   ComputedSnapshotDTO,
+  NarrativeProfile,
   OptimizationFinding,
   PlatformIntentCell,
   RoiPhase,
+  SceneCompetitorPressure,
 } from '../../types/presale/computed';
 import type {
   CompetitorSceneDescription,
   EditableContentDTO,
   ExecutiveSummary,
   FindingContent,
+  HeatmapSummary,
   KeyTakeaway,
   MarketBattleground,
   PhaseDescription,
@@ -112,6 +115,7 @@ export function mergeSnapshot(
   const platformIntentBreakdown = asArray<PlatformIntentCell>(computed?.platform_intent_breakdown).filter((cell) =>
     effectivePlatformCodes.has(cell.platform_code)
   );
+  const narrativeProfile = normalizeNarrativeProfile(computed?.narrative_profile);
 
   return {
     meta,
@@ -133,12 +137,14 @@ export function mergeSnapshot(
     scores: computed.scores,
     intent_breakdown: computed.intent_breakdown,
     scene_coverage: computed.scene_coverage,
+    scene_competitor_pressure: normalizeSceneCompetitorPressure(computed.scene_competitor_pressure),
     roi_simulation: computed.roi_simulation,
     // β·2·补 新增:平台 × 意图交叉矩阵(P05 热力图消费)。
     // `?? []` 兼容历史报告(spec v3 §7.2):新生成 DONE 报告此字段 required,
     // 历史快照可能缺失,此处归一为空数组,Page05 会显示降级提示。
     // 6 个月后评估是否移除此兜底(见 spec §7.4)。
     platform_intent_breakdown: platformIntentBreakdown,
+    narrative_profile: narrativeProfile,
 
     // L3 文案 + 默认模板回退
     report_title: resolveReportTitle(editable.report_title, raw.client_info),
@@ -149,6 +155,7 @@ export function mergeSnapshot(
     executive_summary: resolveExecutiveSummary(editable.executive_summary),
     market_battleground: resolveMarketBattleground(editable.market_battleground),
     key_takeaways: keyTakeaways,
+    heatmap_summary: resolveHeatmapSummary(editable?.heatmap_summary, narrativeProfile),
     roi_disclaimer: resolveRoiDisclaimer(editable.roi_disclaimer),
 
     // 合并产物
@@ -165,6 +172,39 @@ export function mergeSnapshot(
       l3CompetitorDescriptions
     ),
     group_scene_advantages: raw.group_scene_advantages ?? [],
+  };
+}
+
+function normalizeNarrativeProfile(value: NarrativeProfile | undefined): NarrativeProfile {
+  if (value != null) {
+    return value;
+  }
+  return {
+    profile_version: 'fallback',
+    config_version: 'unknown',
+    band: 'MIDDLE',
+    band_tone: 'neutral',
+    heatmap_pattern: 'RECO_EMERGING',
+    display_flags: {
+      show_negative_box: false,
+      show_advantage_box: false,
+      comparison_metric: 'MENTION_RATE',
+      show_radar_baseline_gap: false,
+      hide_empty_blocks: true,
+      allow_competitor_overtake_claim: false,
+    },
+    lexicon_fallback: true,
+    fallback: true,
+    fallback_reason: 'missing_narrative_profile',
+  };
+}
+
+function normalizeSceneCompetitorPressure(value: SceneCompetitorPressure | undefined): SceneCompetitorPressure {
+  return {
+    hv_reco_total: value?.hv_reco_total ?? 0,
+    suppressed_scene_count: value?.suppressed_scene_count ?? 0,
+    top_suppressing_competitor: value?.top_suppressing_competitor ?? null,
+    items: value?.items ?? [],
   };
 }
 
@@ -330,6 +370,43 @@ function resolveMarketBattleground(l3: MarketBattleground | null | undefined): M
     footnote: '',
     footer_brand: '',
   };
+}
+
+function resolveHeatmapSummary(
+  l3: HeatmapSummary | null | undefined,
+  profile: NarrativeProfile
+): HeatmapSummary {
+  if (l3 != null && l3.summary && l3.color_legend) {
+    return l3;
+  }
+  const pattern = profile.heatmap_pattern ?? 'RECO_EMERGING';
+  switch (pattern) {
+    case 'NEW_CUSTOMER_BLANK':
+      return {
+        heatmap_pattern: pattern,
+        summary: '新顾客入口场景仍存在明显空白,需要优先补齐推荐、咨询和具体场景问题中的品牌出现。',
+        color_legend: '颜色越深表示该场景下品牌越稳定出现;灰色表示该平台未参与或无有效样本。',
+      };
+    case 'RECO_UNSTABLE':
+      return {
+        heatmap_pattern: pattern,
+        summary: '推荐场景已有出现,但平台间波动较大,说明 AI 对品牌的推荐信号还不稳定。',
+        color_legend: '颜色差异体现不同平台的推荐稳定性差异;灰色表示该平台未参与或无有效样本。',
+      };
+    case 'BROAD_PRESENCE':
+      return {
+        heatmap_pattern: pattern,
+        summary: '新老顾客场景均已有品牌出现,当前重点是保持稳定覆盖并补强局部短板。',
+        color_legend: '颜色用于观察平台和场景之间的强弱差异,不是单一好坏判断。',
+      };
+    case 'RECO_EMERGING':
+    default:
+      return {
+        heatmap_pattern: 'RECO_EMERGING',
+        summary: '推荐场景开始出现品牌信号,但覆盖广度和强度仍需要继续放大。',
+        color_legend: '颜色越深表示该场景信号越强;浅色表示仍处在建设初期。',
+      };
+  }
 }
 
 /**
@@ -515,6 +592,14 @@ export function mergeCompetitors(
         avg_ranking: c.avg_ranking,
         scene_advantages: useL3 ? polished! : c.scene_advantages_raw ?? [],
         scene_is_polished: useL3,
+        comparison_verdict_count: c.comparison_verdict_count,
+        target_preferred_count: c.target_preferred_count,
+        competitor_preferred_count: c.competitor_preferred_count,
+        tie_count: c.tie_count,
+        unclear_count: c.unclear_count,
+        target_preferred_rate: c.target_preferred_rate,
+        competitor_preferred_rate: c.competitor_preferred_rate,
+        comparison_advantages: c.comparison_advantages,
       };
     });
 }

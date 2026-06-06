@@ -56,11 +56,6 @@ class SceneCoverageCalculatorTest {
                 row(11L, "p2", 1, 2, "[\"Gemini\"]"),
                 row(12L, "p1", 1, 3, null)
         ));
-        when(competitorAggregator.normalizeName(any())).thenAnswer(inv -> {
-            String s = inv.getArgument(0, String.class);
-            return s == null ? "" : s.trim().replaceAll("\\s+", "").toLowerCase();
-        });
-
         RawSnapshotDTO raw = raw(List.of(), List.of(
                 Competitor.builder().name("Claude").build(),
                 Competitor.builder().name("Gemini").build()
@@ -244,9 +239,10 @@ class SceneCoverageCalculatorTest {
                 row(31L, "p1", 0, null, "[\"Claude\", \"SomeOther\"]"),
                 row(31L, "p2", 0, null, "[\"Unknown\"]")
         ));
-        when(competitorAggregator.normalizeName(any())).thenAnswer(inv -> {
+        when(competitorAggregator.matchCompetitorDisplayName(any(), any())).thenAnswer(inv -> {
             String s = inv.getArgument(0, String.class);
-            return s == null ? "" : s.trim().replaceAll("\\s+", "").toLowerCase();
+            List<String> candidates = inv.getArgument(1);
+            return candidates.stream().filter(s::equals).findFirst();
         });
 
         RawSnapshotDTO raw = raw(List.of(), List.of(
@@ -266,6 +262,41 @@ class SceneCoverageCalculatorTest {
         List<String> coverage = result.sceneCoverage().getHighValue().getMissingQueries().get(0).getTopCompetitorCoverage();
         assertEquals(List.of("Claude"), coverage);
         assertTrue(result.sceneCoverage().getHighValue().getMissingQueries().get(0).getPromptContent().contains("missing"));
+    }
+
+    @Test
+    void missingQueriesWithTopCompetitors_matchesAliasBySharedNormalizer() {
+        PresaleCompetitorAggregator realAggregator = new PresaleCompetitorAggregator(
+                null, new ObjectMapper(), new com.huanjing.geo.module.presale.generate.CompetitorNameNormalizer());
+        SceneCoverageCalculator calculator = new SceneCoverageCalculator(
+                aiPromptResultMapper, versionPromptTemplateMapper, aiPlatformConfigMapper, realAggregator, new ObjectMapper());
+        when(aiPlatformConfigMapper.selectList(any())).thenReturn(List.of(
+                platform("p1"), platform("p2")
+        ));
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(List.of(
+                template(131L, "P131", "推荐型", "missing rec prompt")
+        ));
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of(
+                row(131L, "p1", 0, null, "[\"阜阳美奥口腔医院\"]")
+        ));
+
+        RawSnapshotDTO raw = raw(List.of(), List.of(
+                Competitor.builder().name("阜阳市人民医院口腔科").build(),
+                Competitor.builder().name("美奥口腔").build(),
+                Competitor.builder().name("阜阳市第二人民医院口腔科").build()
+        ));
+        Map<String, Integer> totals = Map.of(
+                "RECOMMENDATION", 1,
+                "COMPARISON", 0,
+                "INQUIRY", 0,
+                "COGNITIVE", 0,
+                "SCENARIO", 0
+        );
+
+        SceneAndIntentResult result = calculator.compute(3002L, raw, totals);
+
+        List<String> coverage = result.sceneCoverage().getHighValue().getMissingQueries().get(0).getTopCompetitorCoverage();
+        assertEquals(List.of("美奥口腔"), coverage);
     }
 
     @Test
@@ -552,10 +583,12 @@ class SceneCoverageCalculatorTest {
                 .platformCode(platformCode)
                 .intentCode(intentCode)
                 .intentLabel("COMPARISON".equals(intentCode) ? "对比型" : "认知型")
-                .mentionRate(score)
+                .judgeScore(score)
                 .totalPrompts(4)
                 .platformPromptCount(4)
+                .judgeSampleCount(4)
                 .stance(stance)
+                .judgeStance(stance)
                 .build();
     }
 

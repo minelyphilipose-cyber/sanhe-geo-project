@@ -9,6 +9,7 @@
       </div>
       <div class="header-right admin-page-actions">
         <el-button v-if="canManagePage03Config" @click="goPage03Config">PAGE03 配置</el-button>
+        <el-button v-if="canManagePage03Config" @click="goNarrativeConfig">诊断文案配置</el-button>
         <el-button v-if="canCreateReportPermission" type="primary" :icon="Plus" @click="goCreate">新建报告</el-button>
       </div>
     </div>
@@ -443,6 +444,10 @@ function goCreate() {
 
 function goPage03Config() {
   router.push('/admin/presale/report/page03-config')
+}
+
+function goNarrativeConfig() {
+  router.push('/admin/presale/report/narrative-config')
 }
 
 function goDetail(row: ReportListItemVO) {

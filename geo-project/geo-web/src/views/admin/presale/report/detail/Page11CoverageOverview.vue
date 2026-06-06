@@ -22,13 +22,19 @@
             <span class="priority-badge priority-high p11-badge-top">
               <span class="priority-dot"></span>高价值
             </span>
-            <div class="metric-hero p11-summary-num p11-summary-num-high">
-              {{ Math.round(mergedView.scene_coverage.high_value.coverage_rate)
-              }}<span class="p11-summary-unit">%</span>
+            <div class="p11-high-split">
+              <div class="p11-high-split-row">
+                <span>顾客主动求推荐时（没报你名字）</span>
+                <strong>{{ highValueNaturalCovered }} / {{ highValueTotal }}</strong>
+              </div>
+              <div class="p11-high-split-row">
+                <span>顾客已点名你来比较/了解时</span>
+                <strong>{{ highValueJudgeCovered }} / {{ highValueTotal }}</strong>
+              </div>
             </div>
             <div class="p11-summary-meta">
-              <strong>{{ mergedView.scene_coverage.high_value.covered }}</strong> /
-              {{ mergedView.scene_coverage.high_value.total }} 已覆盖
+              你已覆盖 <strong>{{ mergedView.scene_coverage.high_value.covered }}</strong> /
+              {{ mergedView.scene_coverage.high_value.total }} 高价值场景
             </div>
             <div class="p11-summary-desc">直接关联购买决策的查询</div>
           </div>
@@ -45,6 +51,10 @@
               <strong>{{ mergedView.scene_coverage.mid_value.covered }}</strong> /
               {{ mergedView.scene_coverage.mid_value.total }} 已覆盖
             </div>
+            <div class="p11-summary-split">
+              自然 {{ coverageSplitText(mergedView.scene_coverage.mid_value.natural_coverage) }} ·
+              裁判 {{ coverageSplitText(mergedView.scene_coverage.mid_value.judge_coverage) }}
+            </div>
             <div class="p11-summary-desc">间接关联决策的查询</div>
           </div>
 
@@ -59,6 +69,10 @@
             <div class="p11-summary-meta">
               <strong>{{ mergedView.scene_coverage.low_value.covered }}</strong> /
               {{ mergedView.scene_coverage.low_value.total }} 已覆盖
+            </div>
+            <div class="p11-summary-split">
+              自然 {{ coverageSplitText(mergedView.scene_coverage.low_value.natural_coverage) }} ·
+              裁判 {{ coverageSplitText(mergedView.scene_coverage.low_value.judge_coverage) }}
             </div>
             <div class="p11-summary-desc">信息获取型查询</div>
           </div>
@@ -109,6 +123,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useMergedView } from '@/composables/presale/useMergedView'
+import type { CoverageStats } from '@/types/presale/common'
 
 /**
  * Page11 覆盖度总览。
@@ -126,6 +141,13 @@ import { useMergedView } from '@/composables/presale/useMergedView'
 const { mergedView: mergedViewRef } = useMergedView()
 const mergedView = computed(() => mergedViewRef.value!)
 const MAX_VISIBLE_HIGH_VALUE_ROWS = 8
+const highValueTotal = computed(() => mergedView.value.scene_coverage.high_value.total)
+const highValueNaturalCovered = computed(() =>
+  mergedView.value.scene_coverage.high_value.natural_coverage?.covered ?? 0
+)
+const highValueJudgeCovered = computed(() =>
+  mergedView.value.scene_coverage.high_value.judge_coverage?.covered ?? 0
+)
 
 // ─── 高价值明细行合成 ──────────────────────────────────
 interface CoverageRow {
@@ -155,6 +177,11 @@ const visibleHighValueRows = computed(() => highValueRows.value.slice(0, MAX_VIS
 const hiddenHighValueCount = computed(
   () => Math.max(0, highValueRows.value.length - visibleHighValueRows.value.length)
 )
+
+function coverageSplitText(stats?: CoverageStats): string {
+  if (!stats || stats.total == null || stats.total <= 0) return '—'
+  return `${Math.round(stats.coverage_rate)}%`
+}
 </script>
 
 <style scoped>
@@ -205,6 +232,12 @@ const hiddenHighValueCount = computed(
   color: #1a2942;
   margin-top: 8px;
 }
+.p11-summary-split {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #6b6456;
+  line-height: 1.5;
+}
 .p11-summary-desc {
   margin-top: 16px;
   padding-top: 16px;
@@ -212,6 +245,25 @@ const hiddenHighValueCount = computed(
   font-size: 11px;
   color: #6b6456;
   line-height: 1.6;
+}
+.p11-high-split {
+  margin-top: 28px;
+  display: grid;
+  gap: 10px;
+}
+.p11-high-split-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: baseline;
+  color: #1a2942;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.p11-high-split-row strong {
+  color: #b91c1c;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
 }
 
 /* 高价值明细表 */

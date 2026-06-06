@@ -37,6 +37,9 @@ public class PresaleReport {
     /** 目标用户/消费群体,可选。 */
     private String userType;
 
+    /** 客户指定竞品 JSON 数组。为空时生成链路自动识别竞品。 */
+    private String specifiedCompetitors;
+
     /** 指向最新版本,初始为 null,第一版创建后更新。 */
     @TableField("current_version_id")
     private Long latestVersionId;

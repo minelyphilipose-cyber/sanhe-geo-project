@@ -22,6 +22,10 @@ export interface RawSnapshotDTO {
   test_summary: TestSummary;
   platform_breakdown: PlatformBreakdown[];
   competitors: Competitor[];
+  /** specified=客户指定, extracted=系统识别。历史报告可能缺失。 */
+  competitor_source?: 'specified' | 'extracted';
+  /** 客户指定竞品冻结副本。未指定时为空或缺失。 */
+  specified_competitors?: string[];
   /** Group comparison mode only: scene advantages aggregated from combined competitor prompts. */
   group_scene_advantages?: string[];
   sentiment_detail: SentimentDetail;
@@ -67,8 +71,21 @@ export interface TestSummary {
   total_platforms: number;
   /** 含两轮测试 + 分析,典型 660。 */
   total_calls: number;
+  /** Prompt 测试总数(batch1 + batch2,不含 analyze/judge)。 */
+  prompt_test_count?: number;
+  /** 样本类意图原始结果行数(不含认知/对比,不乘平台权重)。 */
+  sample_query_count_raw?: number;
+  /** 提及率计算使用的加权分母(样本类意图,豆包权重已计入)。 */
+  mention_rate_weighted_denominator?: number;
+  batch1_prompt_test_count?: number;
+  batch2_prompt_test_count?: number;
+  query_call_count?: number;
+  analyze_call_count?: number;
+  judge_call_count?: number;
   successful_calls: number;
+  success_call_count?: number;
   failed_calls: number;
+  failed_call_count?: number;
   excluded_count: number;
   /** 1 或 2。 */
   rounds: 1 | 2;
@@ -76,6 +93,7 @@ export interface TestSummary {
   is_degraded: boolean;
   /** 降级平台 platform_code 列表(平台级成功率 < 50%)。 */
   degraded_platforms: string[];
+  degraded_platform_count?: number;
 }
 
 /**
@@ -115,6 +133,14 @@ export interface Competitor {
   mention_rate: number;
   avg_ranking: number | null;
   scene_advantages_raw?: string[];
+  comparison_verdict_count?: number;
+  target_preferred_count?: number;
+  competitor_preferred_count?: number;
+  tie_count?: number;
+  unclear_count?: number;
+  target_preferred_rate?: number;
+  competitor_preferred_rate?: number;
+  comparison_advantages?: string[];
 }
 
 /**
@@ -140,6 +166,8 @@ export interface SentimentKeyword {
 }
 
 export interface NegativeEvidence {
+  /** v1.3 起 negative_evidence 只保留 NEGATIVE。 */
+  sentiment?: Sentiment;
   platform_code: string;
   platform_name: string;
   query: string;

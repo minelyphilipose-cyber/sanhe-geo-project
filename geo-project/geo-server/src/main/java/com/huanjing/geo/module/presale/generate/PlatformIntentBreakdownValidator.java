@@ -102,25 +102,44 @@ public class PlatformIntentBreakdownValidator {
         int mentionCount = safeInt(cell.getMentionCount());
         Integer mentionRate = cell.getMentionRate();
         Integer promptCount = cell.getPlatformPromptCount();
+        Integer judgeScore = cell.getJudgeScore();
 
         if (mentionRate != null && (mentionRate < 0 || mentionRate > 100)) {
             throw new BizException(500, "platform_intent_breakdown integrity violated: mention_rate out of range, pair="
                     + pairKey(cell.getPlatformCode(), cell.getIntentCode()));
         }
+        if (judgeScore != null && (judgeScore < 0 || judgeScore > 100)) {
+            throw new BizException(500, "platform_intent_breakdown integrity violated: judge_score out of range, pair="
+                    + pairKey(cell.getPlatformCode(), cell.getIntentCode()));
+        }
 
         if (intentCode == PresaleIntentCode.COMPARISON) {
-            String stance = cell.getStance();
+            String stance = cell.getJudgeStance();
             if (stance != null && !VALID_STANCE.contains(stance)) {
                 throw new BizException(500, "platform_intent_breakdown integrity violated: invalid stance, pair="
                         + pairKey(cell.getPlatformCode(), cell.getIntentCode()));
             }
-        } else if (intentCode == PresaleIntentCode.COGNITIVE && cell.getStance() != null) {
+        } else if (intentCode == PresaleIntentCode.COGNITIVE && cell.getJudgeStance() != null) {
             throw new BizException(500, "platform_intent_breakdown integrity violated: stance must be null for cognitive, pair="
                     + pairKey(cell.getPlatformCode(), cell.getIntentCode()));
         }
 
         if (!MENTION_RATE_INTENTS.contains(intentCode)) {
+            if (mentionCount != 0 || mentionRate != null) {
+                throw new BizException(500, "platform_intent_breakdown integrity violated: judge intent must not reuse mention_rate, pair="
+                        + pairKey(cell.getPlatformCode(), cell.getIntentCode()));
+            }
+            if (cell.getJudgeSampleCount() != null && !cell.getJudgeSampleCount().equals(promptCount)) {
+                throw new BizException(500, "platform_intent_breakdown integrity violated: judge_sample_count mismatch, pair="
+                        + pairKey(cell.getPlatformCode(), cell.getIntentCode()));
+            }
             return;
+        }
+
+        if (judgeScore != null || cell.getJudgeSampleCount() != null
+                || cell.getJudgeStance() != null || cell.getStance() != null) {
+            throw new BizException(500, "platform_intent_breakdown integrity violated: natural intent must not contain judge fields, pair="
+                    + pairKey(cell.getPlatformCode(), cell.getIntentCode()));
         }
 
         if (promptCount == null || promptCount <= 0) {

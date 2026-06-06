@@ -71,7 +71,7 @@
 
             <!-- 格子 2:高价值查询场景覆盖(真实契约) -->
             <div class="p16-impact-item">
-              <div class="p16-impact-caption">决策场景占位</div>
+              <div class="p16-impact-caption">高价值问题你已覆盖</div>
               <div class="p16-impact-value">
                 <span class="mono">{{ highValueCoverage.before }}</span>
                 <span class="p16-impact-arrow">→</span>

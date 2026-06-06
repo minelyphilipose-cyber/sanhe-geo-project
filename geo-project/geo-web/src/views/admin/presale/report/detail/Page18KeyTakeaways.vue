@@ -61,6 +61,12 @@
             <template v-else>
               本报告基于近期 AI 平台测试数据生成。大语言模型持续演进,推荐结果会随时间变化。建议以季度级频率持续监测关键指标。
             </template>
+            <div v-if="showOverallBenchmarkNote" class="p18-methodology-extra">
+              本品牌无排名数据,综合得分按提及/情感/覆盖三维归一加权；行业均值与 Top1 为四维基准,跨维度比较仅供参考。
+            </div>
+            <div class="p18-methodology-extra">
+              提及率计算中,豆包平台权重为其他平台的 2 倍。场景覆盖判定中,某场景在豆包提及或达到半数有效平台提及时即记为已覆盖。
+            </div>
           </div>
         </div>
       </div>
@@ -114,6 +120,8 @@ const ctaBrandPhrase = computed<string>(() => {
   const brandName = mergedView.value.brand_name?.trim()
   return brandName ? `我们已为 ${brandName} 准备了一份` : '我们已为您准备了一份'
 })
+
+const showOverallBenchmarkNote = computed(() => mergedView.value.scores.ranking == null)
 
 /** 1 → "01" / 12 → "12"。 */
 function formatOrder(n: number): string {
@@ -264,5 +272,8 @@ function formatOrder(n: number): string {
   font-size: 12px;
   color: var(--presale-ink-soft);
   line-height: 1.7;
+}
+.p18-methodology-extra {
+  margin-top: 8px;
 }
 </style>

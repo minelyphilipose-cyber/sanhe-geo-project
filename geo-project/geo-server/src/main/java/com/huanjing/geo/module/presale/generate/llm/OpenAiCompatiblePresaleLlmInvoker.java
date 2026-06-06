@@ -20,7 +20,7 @@ import org.springframework.util.StringUtils;
 @Service
 public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
 
-    private static final String DEFAULT_QUERY_SYSTEM_PROMPT = "You are a GEO monitoring assistant.";
+    private static final String DEFAULT_QUERY_SYSTEM_PROMPT = "You are a GEO (Generative Engine Optimization) monitoring assistant.";
     private static final int DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
     private static final String PLATFORM_WENXIN = "wenxin";
     private static final double WENXIN_MIN_JUDGE_TEMPERATURE = 0.1D;
@@ -128,6 +128,19 @@ public class OpenAiCompatiblePresaleLlmInvoker implements PresaleLlmInvoker {
                 normalizeJudgeTemperature(ctx, 0D),
                 true,
                 "presale:NORMALIZE_COMPETITORS"
+        );
+    }
+
+    @Override
+    public LlmCallResult classifyIndustryBucket(PlatformCallContext ctx, String classificationPrompt)
+            throws LlmInvokeException {
+        return invokeWithRetry(
+                ctx,
+                LexiconBucketClassificationPromptTemplates.SYSTEM_INSTRUCTION,
+                safe(classificationPrompt),
+                normalizeJudgeTemperature(ctx, 0D),
+                true,
+                "presale:LEXICON_BUCKET_CLASSIFY"
         );
     }
 

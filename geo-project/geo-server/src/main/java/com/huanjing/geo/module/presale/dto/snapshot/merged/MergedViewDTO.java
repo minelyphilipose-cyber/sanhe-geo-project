@@ -3,11 +3,15 @@ package com.huanjing.geo.module.presale.dto.snapshot.merged;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.IntentBreakdown;
+import com.huanjing.geo.module.presale.dto.snapshot.computed.NarrativeProfile;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.OptimizationFinding;
+import com.huanjing.geo.module.presale.dto.snapshot.computed.PlatformIntentCell;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.RoiSimulation;
+import com.huanjing.geo.module.presale.dto.snapshot.computed.SceneCompetitorPressure;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.Scores;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.ComputedSnapshotDTO.SceneCoverage;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.ExecutiveSummary;
+import com.huanjing.geo.module.presale.dto.snapshot.editable.HeatmapSummary;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.KeyTakeaway;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.BenchmarksFrozen;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.PlatformBreakdown;
@@ -99,6 +103,15 @@ public class MergedViewDTO {
     @JsonProperty("scene_coverage")
     private SceneCoverage sceneCoverage;
 
+    @JsonProperty("scene_competitor_pressure")
+    private SceneCompetitorPressure sceneCompetitorPressure;
+
+    @JsonProperty("platform_intent_breakdown")
+    private List<PlatformIntentCell> platformIntentBreakdown;
+
+    @JsonProperty("narrative_profile")
+    private NarrativeProfile narrativeProfile;
+
     @JsonProperty("roi_simulation")
     private RoiSimulation roiSimulation;
 
@@ -115,6 +128,10 @@ public class MergedViewDTO {
 
     @JsonProperty("key_takeaways")
     private List<KeyTakeaway> keyTakeaways;
+
+    /** 热力图总览句,由 L3 从 presale_heatmap_summary 配置表渲染。 */
+    @JsonProperty("heatmap_summary")
+    private HeatmapSummary heatmapSummary;
 
     @JsonProperty("roi_disclaimer")
     private String roiDisclaimer;

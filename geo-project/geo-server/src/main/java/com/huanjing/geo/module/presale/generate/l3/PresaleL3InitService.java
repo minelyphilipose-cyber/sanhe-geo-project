@@ -5,18 +5,26 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.ComputedSnapshotDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.IntentBreakdown;
+import com.huanjing.geo.module.presale.dto.snapshot.computed.NarrativeProfile;
 import com.huanjing.geo.module.presale.dto.snapshot.computed.OptimizationFinding;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.CompetitorSceneDescription;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.EditableContentDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.ExecutiveSummary;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.FindingContent;
+import com.huanjing.geo.module.presale.dto.snapshot.editable.HeatmapSummary;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.KeyTakeaway;
 import com.huanjing.geo.module.presale.dto.snapshot.editable.PhaseDescription;
+import com.huanjing.geo.module.presale.dto.snapshot.raw.PlatformBreakdown;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
+import com.huanjing.geo.module.presale.generate.narrative.NarrativeConfigService;
+import com.huanjing.geo.module.presale.persist.entity.PresaleHeatmapSummary;
+import com.huanjing.geo.module.presale.persist.entity.PresaleNarrativeFindingCopy;
+import com.huanjing.geo.module.presale.ruleengine.util.PlatformStatUtil;
 import com.huanjing.geo.module.presale.ruleengine.RuleCodes;
 import lombok.extern.slf4j.Slf4j;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -56,6 +64,7 @@ public class PresaleL3InitService {
     private final ObjectMapper objectMapper;
     private final PresaleTextFormatter textFormatter;
     private final PresaleL3Defaults l3Defaults;
+    private final NarrativeConfigService narrativeConfigService;
 
     public String derive(String rawSnapshotJson, String computedSnapshotJson) {
         try {
@@ -69,10 +78,16 @@ public class PresaleL3InitService {
             editable.setReportTitle(brandName + " GEO 可见度诊断报告");
             editable.setReportSubtitle("基于 " + platformCount + " 个 AI 平台 × " + totalPrompts + " 条查询的深度分析");
             editable.setExecutiveSummary(buildExecutiveSummary(raw, computed, brandName, platformCount));
-            editable.setKeyTakeaways(buildKeyTakeaways(computed));
-            editable.setOptimizationFindingsContent(buildFindingContents(computed));
+            List<RenderedNarrativeFinding> narrativeFindings = buildNarrativeFindings(raw, computed);
+            editable.setKeyTakeaways(narrativeFindings == null
+                    ? buildKeyTakeaways(computed)
+                    : buildKeyTakeaways(narrativeFindings));
+            editable.setOptimizationFindingsContent(narrativeFindings == null
+                    ? buildFindingContents(computed)
+                    : buildFindingContents(narrativeFindings));
             editable.setPhaseDescriptions(buildPhaseDescriptions(computed));
             editable.setCompetitorSceneDescriptions(buildCompetitorScenes(raw));
+            editable.setHeatmapSummary(buildHeatmapSummary(computed));
             editable.setRoiDisclaimer(DEFAULT_ROI_DISCLAIMER);
             return objectMapper.writeValueAsString(l3Defaults.normalize(editable, raw, computed));
         } catch (JsonProcessingException e) {
@@ -148,6 +163,349 @@ public class PresaleL3InitService {
         return out;
     }
 
+    private List<KeyTakeaway> buildKeyTakeaways(List<RenderedNarrativeFinding> findings) {
+        List<KeyTakeaway> out = new ArrayList<>();
+        int order = 1;
+        for (RenderedNarrativeFinding finding : findings) {
+            out.add(KeyTakeaway.builder()
+                    .orderNo(order++)
+                    .title(finding.title())
+                    .description(finding.description())
+                    .build());
+        }
+        return out;
+    }
+
+    private List<RenderedNarrativeFinding> buildNarrativeFindings(RawSnapshotDTO raw, ComputedSnapshotDTO computed) {
+        NarrativeProfile profile = computed == null ? null : computed.getNarrativeProfile();
+        if (profile == null || profile.getFindingTiers() == null || profile.getFindingTiers().isEmpty()) {
+            return null;
+        }
+        try {
+            List<NarrativeProfile.FindingTier> tiers = profile.getFindingTiers().stream()
+                    .filter(Objects::nonNull)
+                    .filter(tier -> !"NEGATIVE_PRESSURE".equals(tier.getDedupeKey())
+                            || Boolean.TRUE.equals(profile.getDisplayFlags() == null ? null : profile.getDisplayFlags().getShowNegativeBox()))
+                    .limit(5)
+                    .toList();
+            Map<String, PresaleNarrativeFindingCopy> copyMap = narrativeConfigService.loadFindingCopyMap();
+            Map<String, Object> base = buildNarrativeSlots(raw, computed, profile);
+            List<RenderedNarrativeFinding> rendered = new ArrayList<>();
+            int index = 1;
+            for (NarrativeProfile.FindingTier tier : tiers) {
+                rendered.add(renderNarrativeFinding(tier, profile, copyMap, base, index++));
+            }
+            while (rendered.size() < 3) {
+                String code = nextFillerCode(profile, rendered);
+                NarrativeProfile.FindingTier filler = NarrativeProfile.FindingTier.builder()
+                        .source(NarrativeProfile.FindingSource.STRENGTH)
+                        .code(code)
+                        .dedupeKey(code)
+                        .tier(NarrativeProfile.FindingTierLevel.STRENGTH)
+                        .priority(90 + rendered.size())
+                        .archetype(isHighBand(profile) ? NarrativeProfile.Archetype.LEADER_WITH_HOLES : NarrativeProfile.Archetype.DECISION_GAP)
+                        .primaryArchetypeMatch(false)
+                        .evidence(Map.of())
+                        .build();
+                rendered.add(renderNarrativeFinding(filler, profile, copyMap, base, index++));
+            }
+            rendered = rendered.stream().limit(5).toList();
+            validateNarrativeRender(profile, rendered);
+            return rendered;
+        } catch (RuntimeException e) {
+            log.warn("Narrative L3 render guard fallback: {}", e.getMessage());
+            return fallbackNarrativeFindings(raw, computed);
+        }
+    }
+
+    private String nextFillerCode(NarrativeProfile profile, List<RenderedNarrativeFinding> rendered) {
+        List<String> candidates = isHighBand(profile)
+                ? List.of("COVERAGE_STRENGTH", "RECO_STRENGTH", "DEFEND_GAP")
+                : List.of("HV_COVERAGE_LOW", "RECO_ABSENT", "PLATFORM_BLIND");
+        Set<String> used = rendered.stream()
+                .map(RenderedNarrativeFinding::dedupeKey)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        return candidates.stream()
+                .filter(code -> !used.contains(code))
+                .findFirst()
+                .orElse(candidates.get(Math.min(rendered.size(), candidates.size() - 1)));
+    }
+
+    private boolean isHighBand(NarrativeProfile profile) {
+        return profile != null && (profile.getBand() == NarrativeProfile.Band.STRONG
+                || profile.getBand() == NarrativeProfile.Band.LEADER);
+    }
+
+    private RenderedNarrativeFinding renderNarrativeFinding(NarrativeProfile.FindingTier tier,
+                                                            NarrativeProfile profile,
+                                                            Map<String, PresaleNarrativeFindingCopy> copyMap,
+                                                            Map<String, Object> base,
+                                                            int order) {
+        String code = templateCode(tier);
+        String tierName = tier.getTier() == null ? "" : tier.getTier().name();
+        PresaleNarrativeFindingCopy copy = resolveCopy(copyMap, code, tierName, profile);
+        Map<String, Object> slots = new HashMap<>(base);
+        if (tier.getEvidence() != null) {
+            slots.putAll(tier.getEvidence());
+        }
+        NarrativeCopy fallback = fallbackCopy(code, tierName);
+        String titleTemplate = copy == null || copy.getTitleTemplate() == null ? fallback.title() : copy.getTitleTemplate();
+        String bodyTemplate = copy == null || copy.getBodyTemplate() == null ? fallback.body() : copy.getBodyTemplate();
+        String evidenceTemplate = copy == null || copy.getEvidenceTemplate() == null ? fallback.evidence() : copy.getEvidenceTemplate();
+        String title = renderNarrativeTemplate(code, titleTemplate, slots);
+        String description = renderNarrativeTemplate(code, bodyTemplate, slots);
+        String evidence = renderNarrativeTemplate(code, evidenceTemplate, slots);
+        return new RenderedNarrativeFinding("NF%03d".formatted(order), code, tier.getDedupeKey(), title, description, evidence, order);
+    }
+
+    private PresaleNarrativeFindingCopy resolveCopy(Map<String, PresaleNarrativeFindingCopy> copyMap,
+                                                    String code,
+                                                    String tier,
+                                                    NarrativeProfile profile) {
+        if (copyMap == null || copyMap.isEmpty()) {
+            return null;
+        }
+        String band = profile.getBand() == null ? "" : profile.getBand().name();
+        String archetype = profile.getArchetypePrimary() == null ? "" : profile.getArchetypePrimary().name();
+        PresaleNarrativeFindingCopy exact = copyMap.get(NarrativeConfigService.copyKey(code, tier, band, archetype));
+        if (exact != null) return exact;
+        PresaleNarrativeFindingCopy bandOnly = copyMap.get(NarrativeConfigService.copyKey(code, tier, band, ""));
+        if (bandOnly != null) return bandOnly;
+        PresaleNarrativeFindingCopy archetypeOnly = copyMap.get(NarrativeConfigService.copyKey(code, tier, "", archetype));
+        if (archetypeOnly != null) return archetypeOnly;
+        return copyMap.get(NarrativeConfigService.copyKey(code, tier, "", ""));
+    }
+
+    private String templateCode(NarrativeProfile.FindingTier tier) {
+        if (tier == null) {
+            return "DEFEND_GAP";
+        }
+        String code = tier.getCode();
+        if (code != null && (code.endsWith("_STRONG") || code.endsWith("_SOFT")
+                || code.startsWith("RECO_") || code.endsWith("_STRENGTH"))) {
+            return code;
+        }
+        if (tier.getSource() == NarrativeProfile.FindingSource.RULE && tier.getDedupeKey() != null) {
+            return tier.getDedupeKey();
+        }
+        return code == null || code.isBlank() ? tier.getDedupeKey() : code;
+    }
+
+    private Map<String, Object> buildNarrativeSlots(RawSnapshotDTO raw,
+                                                    ComputedSnapshotDTO computed,
+                                                    NarrativeProfile profile) {
+        Map<String, Object> slots = new HashMap<>();
+        String brandName = raw == null || raw.getClientInfo() == null ? "本品牌" : raw.getClientInfo().getBrandName();
+        slots.put("brand_name", brandName == null || brandName.isBlank() ? "本品牌" : brandName);
+        NarrativeConfigService.IndustryLexicon lexicon = resolveIndustryLexicon(raw);
+        String customerTerm = StringUtils.hasText(lexicon.getCustomerTerm()) ? lexicon.getCustomerTerm() : "客户";
+        String conversionTerm = StringUtils.hasText(lexicon.getConversionTerm()) ? lexicon.getConversionTerm() : "转化";
+        slots.put("customer_term", customerTerm);
+        slots.put("conversion_term", conversionTerm);
+        slots.put("industry_short", StringUtils.hasText(lexicon.getIndustryShort()) ? lexicon.getIndustryShort() : "行业");
+        slots.put("loss_phrase", buildLossPhrase(customerTerm, conversionTerm));
+        slots.put("scene_example", firstMissingScene(computed));
+        slots.put("overall_score", computed == null || computed.getScores() == null ? "—" : textFormatter.formatInt(computed.getScores().getOverall()));
+        slots.put("coverage_score", computed == null || computed.getScores() == null ? "—" : textFormatter.formatInt(computed.getScores().getCoverage()));
+        slots.put("recommendation_rate", extractDiagnostic(profile, "recommendation_rate"));
+        slots.put("neutral_share", percentDiagnostic(profile, "neutral_share"));
+        slots.put("positive_share", percentDiagnostic(profile, "positive_share"));
+        slots.put("competitor_names", firstCompetitorName(raw));
+        slots.put("weak_platforms", weakPlatformNames(raw));
+        slots.put("high_value_covered", highValueCovered(computed));
+        slots.put("high_value_total", highValueTotal(computed));
+        return slots;
+    }
+
+    private NarrativeConfigService.IndustryLexicon resolveIndustryLexicon(RawSnapshotDTO raw) {
+        String industry = raw == null || raw.getClientInfo() == null ? null : raw.getClientInfo().getIndustry();
+        try {
+            NarrativeConfigService.NarrativeConfigSnapshot snapshot = narrativeConfigService.load(industry);
+            if (snapshot != null && snapshot.getLexicon() != null) {
+                return snapshot.getLexicon();
+            }
+        } catch (RuntimeException e) {
+            log.warn("Load narrative lexicon for L3 slots failed, using generic terms: {}", e.getMessage());
+        }
+        return NarrativeConfigService.IndustryLexicon.builder()
+                .customerTerm("客户")
+                .conversionTerm("转化")
+                .industryShort("行业")
+                .fallback(true)
+                .build();
+    }
+
+    private String buildLossPhrase(String customerTerm, String conversionTerm) {
+        if ("患者".equals(customerTerm) && "到诊".equals(conversionTerm)) {
+            return "一位本可到诊的患者被指给了别人";
+        }
+        return "一位本可完成" + conversionTerm + "的" + customerTerm + "被指给了别人";
+    }
+
+    private Object highValueCovered(ComputedSnapshotDTO computed) {
+        SceneCoverageGroupAccess access = highValueCoverage(computed);
+        return access.covered() == null ? "—" : access.covered();
+    }
+
+    private Object highValueTotal(ComputedSnapshotDTO computed) {
+        SceneCoverageGroupAccess access = highValueCoverage(computed);
+        return access.total() == null ? "—" : access.total();
+    }
+
+    private SceneCoverageGroupAccess highValueCoverage(ComputedSnapshotDTO computed) {
+        if (computed == null || computed.getSceneCoverage() == null || computed.getSceneCoverage().getHighValue() == null) {
+            return new SceneCoverageGroupAccess(null, null);
+        }
+        return new SceneCoverageGroupAccess(
+                computed.getSceneCoverage().getHighValue().getCovered(),
+                computed.getSceneCoverage().getHighValue().getTotal()
+        );
+    }
+
+    private String weakPlatformNames(RawSnapshotDTO raw) {
+        if (raw == null || raw.getPlatformBreakdown() == null || raw.getPlatformBreakdown().isEmpty()) {
+            return "待补齐平台";
+        }
+        List<String> names = PlatformStatUtil.uncoveredNames(raw.getPlatformBreakdown()).stream()
+                .filter(StringUtils::hasText)
+                .limit(3)
+                .toList();
+        if (!names.isEmpty()) {
+            return String.join("、", names);
+        }
+        return raw.getPlatformBreakdown().stream()
+                .filter(Objects::nonNull)
+                .sorted(Comparator.comparingDouble(this::safeMentionRate))
+                .map(PlatformBreakdown::getPlatformName)
+                .filter(StringUtils::hasText)
+                .limit(3)
+                .collect(Collectors.joining("、"));
+    }
+
+    private double safeMentionRate(PlatformBreakdown platform) {
+        return platform == null || platform.getMentionRate() == null ? 0D : platform.getMentionRate();
+    }
+
+    private String firstMissingScene(ComputedSnapshotDTO computed) {
+        if (computed != null && computed.getSceneCoverage() != null
+                && computed.getSceneCoverage().getHighValue() != null
+                && computed.getSceneCoverage().getHighValue().getMissingQueries() != null) {
+            return computed.getSceneCoverage().getHighValue().getMissingQueries().stream()
+                    .filter(Objects::nonNull)
+                    .map(item -> item.getPromptContent() == null ? item.getCategory() : item.getPromptContent())
+                    .filter(StringUtils::hasText)
+                    .findFirst()
+                    .orElse("核心决策问题");
+        }
+        return "核心决策问题";
+    }
+
+    private String firstCompetitorName(RawSnapshotDTO raw) {
+        if (raw == null || raw.getCompetitors() == null || raw.getCompetitors().isEmpty()) {
+            return "竞品";
+        }
+        String name = raw.getCompetitors().get(0).getName();
+        return name == null || name.isBlank() ? "竞品" : name;
+    }
+
+    private Object extractDiagnostic(NarrativeProfile profile, String key) {
+        if (profile == null || profile.getDiagnostics() == null) {
+            return "—";
+        }
+        Object value = profile.getDiagnostics().get(key);
+        if (value instanceof Number number) {
+            return textFormatter.formatInt(number);
+        }
+        return value == null ? "—" : value;
+    }
+
+    private Object percentDiagnostic(NarrativeProfile profile, String key) {
+        if (profile == null || profile.getDiagnostics() == null) {
+            return "—";
+        }
+        Object value = profile.getDiagnostics().get(key);
+        if (value instanceof Number number) {
+            return textFormatter.formatInt(number.doubleValue() * 100D);
+        }
+        return value == null ? "—" : value;
+    }
+
+    private void validateNarrativeRender(NarrativeProfile profile, List<RenderedNarrativeFinding> findings) {
+        if (findings.size() < 3 || findings.size() > 5) {
+            throw new IllegalStateException("key finding count out of range: " + findings.size());
+        }
+        for (int i = 0; i < findings.size(); i++) {
+            if (findings.get(i).sortOrder() != i + 1) {
+                throw new IllegalStateException("key finding order mismatch");
+            }
+        }
+        if (profile.getFindingTiers() != null && profile.getFindingTiers().size() >= 3) {
+            int expected = Math.min(5, profile.getFindingTiers().stream()
+                    .filter(tier -> tier != null && (!"NEGATIVE_PRESSURE".equals(tier.getDedupeKey())
+                            || Boolean.TRUE.equals(profile.getDisplayFlags() == null ? null : profile.getDisplayFlags().getShowNegativeBox())))
+                    .toList().size());
+            if (expected >= 3 && expected != findings.size()) {
+                throw new IllegalStateException("finding_tiers/key_takeaways count mismatch");
+            }
+        }
+        String finalText = findings.stream()
+                .map(item -> item.title() + "\n" + item.description() + "\n" + item.evidenceText())
+                .collect(Collectors.joining("\n"));
+        if (PLACEHOLDER_PATTERN.matcher(finalText).find() || Pattern.compile("\\{\\{[a-z_]+}}").matcher(finalText).find()) {
+            throw new IllegalStateException("placeholder remained in final text");
+        }
+        if (profile.getBand() == NarrativeProfile.Band.INVISIBLE || profile.getBand() == NarrativeProfile.Band.BEHIND) {
+            if (finalText.contains("领先") || finalText.contains("标杆") || finalText.contains("优势明显")) {
+                throw new IllegalStateException("forbidden positive words for low band");
+            }
+        }
+        if (!Boolean.TRUE.equals(profile.getDisplayFlags() == null ? null : profile.getDisplayFlags().getShowNegativeBox())
+                && finalText.contains("负面")) {
+            throw new IllegalStateException("negative copy without true negative flag");
+        }
+        if (findings.stream().anyMatch(item -> "COMPETITOR_OVERTAKE_STRONG".equals(item.code()))
+                && !Boolean.TRUE.equals(profile.getDisplayFlags() == null ? null : profile.getDisplayFlags().getAllowCompetitorOvertakeClaim())) {
+            throw new IllegalStateException("strong competitor claim without recommendation evidence flag");
+        }
+    }
+
+    private List<RenderedNarrativeFinding> fallbackNarrativeFindings(RawSnapshotDTO raw, ComputedSnapshotDTO computed) {
+        String brandName = raw == null || raw.getClientInfo() == null || raw.getClientInfo().getBrandName() == null
+                ? "本品牌" : raw.getClientInfo().getBrandName();
+        String overall = computed == null || computed.getScores() == null || computed.getScores().getOverall() == null
+                ? "—" : textFormatter.formatInt(computed.getScores().getOverall());
+        return List.of(
+                new RenderedNarrativeFinding("NF001", "FALLBACK_OVERVIEW", "FALLBACK_OVERVIEW",
+                        "整体可见度需要持续观察",
+                        brandName + " 当前综合得分为 " + overall + " 分,建议结合平台和场景表现做持续优化。",
+                        "综合得分 " + overall, 1),
+                new RenderedNarrativeFinding("NF002", "FALLBACK_COVERAGE", "FALLBACK_COVERAGE",
+                        "核心场景覆盖需要稳定建设",
+                        "建议优先围绕推荐、咨询、对比等核心问题补齐内容资产,提升 AI 回答中的稳定出现。",
+                        "核心场景覆盖待持续观察", 2),
+                new RenderedNarrativeFinding("NF003", "FALLBACK_PLATFORM", "FALLBACK_PLATFORM",
+                        "多平台表现需要均衡维护",
+                        "建议持续跟踪不同 AI 平台上的品牌出现和表达差异,避免单个平台波动影响整体判断。",
+                        "平台表现待持续观察", 3)
+        );
+    }
+
+    private List<FindingContent> buildFindingContents(List<RenderedNarrativeFinding> findings) {
+        List<FindingContent> out = new ArrayList<>();
+        for (RenderedNarrativeFinding finding : findings) {
+            out.add(FindingContent.builder()
+                    .findingId(finding.findingId())
+                    .title(finding.title())
+                    .description(finding.description())
+                    .evidenceText(finding.evidenceText())
+                    .sortOrder(finding.sortOrder())
+                    .isHidden(false)
+                    .build());
+        }
+        return out;
+    }
+
     private List<FindingContent> buildFindingContents(ComputedSnapshotDTO computed) {
         List<FindingContent> out = new ArrayList<>();
         List<OptimizationFinding> findings = computed == null || computed.getOptimizationFindings() == null
@@ -215,6 +573,20 @@ public class PresaleL3InitService {
                     .build());
         });
         return out;
+    }
+
+    private HeatmapSummary buildHeatmapSummary(ComputedSnapshotDTO computed) {
+        NarrativeProfile profile = computed == null ? null : computed.getNarrativeProfile();
+        String pattern = profile == null || profile.getHeatmapPattern() == null
+                ? "RECO_EMERGING"
+                : profile.getHeatmapPattern().name();
+        String band = profile == null || profile.getBand() == null ? null : profile.getBand().name();
+        PresaleHeatmapSummary row = narrativeConfigService.loadHeatmapSummary(pattern, band);
+        return HeatmapSummary.builder()
+                .heatmapPattern(row.getHeatmapPattern())
+                .summary(row.getSummaryTemplate())
+                .colorLegend(row.getColorLegendTemplate())
+                .build();
     }
 
     private String requireBrandName(RawSnapshotDTO raw) {
@@ -361,6 +733,102 @@ public class PresaleL3InitService {
         return buffer.toString();
     }
 
+    private String renderNarrativeTemplate(String code, String template, Map<String, Object> slots) {
+        if (template == null || template.isBlank()) {
+            return "—";
+        }
+        String result = template;
+        if (slots != null && !slots.isEmpty()) {
+            for (Map.Entry<String, Object> entry : slots.entrySet()) {
+                String value = formatValue(entry.getValue());
+                result = result.replace("{{" + entry.getKey() + "}}", value);
+                result = result.replace("{" + entry.getKey() + "}", value);
+            }
+        }
+        result = replaceMissingNarrativePlaceholders(code, result, Pattern.compile("\\{\\{([a-z_]+)}}"));
+        return replaceMissingNarrativePlaceholders(code, result, PLACEHOLDER_PATTERN);
+    }
+
+    private String replaceMissingNarrativePlaceholders(String code, String text, Pattern pattern) {
+        Matcher matcher = pattern.matcher(text);
+        StringBuffer buffer = new StringBuffer();
+        Set<String> missingKeys = new TreeSet<>();
+        while (matcher.find()) {
+            missingKeys.add(matcher.group(1));
+            matcher.appendReplacement(buffer, Matcher.quoteReplacement("—"));
+        }
+        matcher.appendTail(buffer);
+        if (!missingKeys.isEmpty()) {
+            log.warn("Presale narrative template placeholder missing: code={}, missingKeys={}", code, missingKeys);
+        }
+        return buffer.toString();
+    }
+
+    private NarrativeCopy fallbackCopy(String code, String tierName) {
+        return switch (code) {
+            case "HV_COVERAGE_LOW" -> new NarrativeCopy(
+                    "高价值场景覆盖仍有缺口",
+                    "{{brand_name}} 在「{{scene_example}}」等关键问题上尚未形成稳定覆盖,这会影响{{customer_term}}进入决策阶段时看到品牌答案的概率。",
+                    "高价值问题覆盖:{{high_value_covered}}/{{high_value_total}};缺失样例:{{scene_example}}"
+            );
+            case "RECO_ABSENT" -> new NarrativeCopy(
+                    "推荐入口尚未被稳定打开",
+                    "{{brand_name}} 在推荐型问题中的出现率偏低,用户主动询问选择建议时,品牌还没有成为 AI 回答里的稳定选项,{{loss_phrase}}。",
+                    "推荐型出现率:{{recommendation_rate}}%"
+            );
+            case "BRANDED_ONLY" -> new NarrativeCopy(
+                    "品牌认知集中在已知人群",
+                    "{{brand_name}} 在点名查询中更容易出现,但在泛需求和推荐场景中承接不足,说明当前可见度更依赖已有认知。",
+                    "典型缺口:{{scene_example}}"
+            );
+            case "SENTIMENT_THIN" -> new NarrativeCopy(
+                    "AI 讲得出品牌,但讲不出足够优势",
+                    "当前中性表达占比偏高,AI 对 {{brand_name}} 的描述更像基础信息罗列,还缺少能推动{{conversion_term}}的正向理由。",
+                    "中性表达占比:{{neutral_share}}%"
+            );
+            case "NEGATIVE_PRESSURE" -> new NarrativeCopy(
+                    "真实负面信号需要优先处理",
+                    "{{brand_name}} 已出现明确负面表达,需要先处理影响信任的内容源,再用正向证据修复 AI 回答里的判断基础。",
+                    "负面信号已通过二次校验"
+            );
+            case "PLATFORM_BLIND" -> new NarrativeCopy(
+                    "部分平台仍是可见度盲区",
+                    "{{brand_name}} 在不同 AI 平台上的出现不均衡,弱势平台会让一部分{{customer_term}}看不到品牌答案。",
+                    "待强化平台:{{weak_platforms}}"
+            );
+            case "COMPETITOR_OVERTAKE_STRONG" -> new NarrativeCopy(
+                    "推荐场景中竞品正在替代你出现",
+                    "在「{{scene_example}}」这类主动推荐场景中,AI 已推荐 {{competitor_names}} 而没有稳定带出 {{brand_name}},这是需要优先抢回的决策入口。",
+                    "竞品推荐证据:{{competitor_names}}"
+            );
+            case "COMPETITOR_OVERTAKE_SOFT" -> new NarrativeCopy(
+                    "被点名比较时 AI 更倾向竞品",
+                    "当用户把 {{brand_name}} 与 {{competitor_names}} 放在一起比较时,AI 的判断更容易偏向竞品,需要补足可比较的优势证据。",
+                    "比较偏好信号:{{competitor_names}}"
+            );
+            case "COVERAGE_STRENGTH" -> new NarrativeCopy(
+                    "已有覆盖基础可以继续放大",
+                    "{{brand_name}} 已具备一定 AI 可见度基础,接下来应把已有覆盖从点状答案推进到更多高价值问题。",
+                    "当前综合得分:{{overall_score}}"
+            );
+            case "RECO_STRENGTH" -> new NarrativeCopy(
+                    "推荐型入口具备继续建设价值",
+                    "推荐型问题已经出现可运营信号,适合继续围绕{{customer_term}}真实决策问题补充内容资产。",
+                    "推荐型出现率:{{recommendation_rate}}%"
+            );
+            case "DEFEND_GAP" -> new NarrativeCopy(
+                    "领先表现仍需要防守缺口",
+                    "{{brand_name}} 的可见度建设需要持续维护,避免高价值问题、平台覆盖或竞品表达形成新的薄弱点。",
+                    "建议持续监测关键场景"
+            );
+            default -> new NarrativeCopy(
+                    "关键发现需要持续跟进",
+                    "{{brand_name}} 当前可见度表现存在可优化空间,建议结合场景、平台和竞品信号持续推进。",
+                    "建议结合场景、平台和竞品信号持续核查。"
+            );
+        };
+    }
+
     private String formatValue(Object value) {
         if (value == null) {
             return "—";
@@ -390,10 +858,10 @@ public class PresaleL3InitService {
         return Map.of(
                 RuleCodes.RULE_COVERAGE_LOW_RECOMMEND, new RuleFindingTemplate(
                         "高价值场景覆盖待激活",
-                        "在 {total_prompts} 个高价值场景中,品牌已覆盖 {covered_prompts} 个,覆盖率 {coverage_rate}%。" +
+                        "在 {total_prompts} 个高价值问题中,品牌已覆盖 {covered_prompts} 个,覆盖率 {coverage_rate}%。" +
                                 "仍有 {missed_count} 个核心决策场景待激活,每个场景都对应明确的销售机会窗口。" +
                                 "优先动作:针对高价值缺失场景规划专项内容布局,优先补齐对成交影响最大的查询入口。",
-                        "{total_prompts} 个高价值场景中覆盖 {covered_prompts} 个"
+                        "{total_prompts} 个高价值问题中覆盖 {covered_prompts} 个"
                 ),
                 RuleCodes.RULE_BRAND_AWARENESS_LOW, new RuleFindingTemplate(
                         "综合可见度有显著提升空间",
@@ -462,6 +930,21 @@ public class PresaleL3InitService {
                         "{dominant_platform_name} 首推占比 {dominant_ratio}%({dominant_count}/{total_primary})"
                 )
         );
+    }
+
+    private record RenderedNarrativeFinding(String findingId,
+                                            String code,
+                                            String dedupeKey,
+                                            String title,
+                                            String description,
+                                            String evidenceText,
+                                            Integer sortOrder) {
+    }
+
+    private record NarrativeCopy(String title, String body, String evidence) {
+    }
+
+    private record SceneCoverageGroupAccess(Integer covered, Integer total) {
     }
 
     private record RuleFindingTemplate(String title, String description, String evidenceText) {

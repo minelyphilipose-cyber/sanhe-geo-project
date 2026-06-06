@@ -11,6 +11,8 @@
  * 9 个顶层字段全部 required(顶层键必须存在,块内文案字段大多允许 null)。
  */
 
+import type { HeatmapPattern } from './computed';
+
 /**
  * L3 顶层。
  */
@@ -31,6 +33,8 @@ export interface EditableContentDTO {
   phase_descriptions: PhaseDescription[];
   /** 通过 competitor_rank 关联 L1.competitors。 */
   competitor_scene_descriptions: CompetitorSceneDescription[];
+  /** 热力图总览句,后端从 presale_heatmap_summary 配置表渲染。 */
+  heatmap_summary?: HeatmapSummary | null;
   /** null 回退默认免责声明。 */
   roi_disclaimer: string | null;
 }
@@ -162,4 +166,10 @@ export interface CompetitorSceneDescription {
   competitor_rank: 1 | 2 | 3;
   /** null 时前端回退到 L1.competitors[rank-1].scene_advantages_raw。 */
   scene_advantages_polished?: string[] | null;
+}
+
+export interface HeatmapSummary {
+  heatmap_pattern: HeatmapPattern;
+  summary: string;
+  color_legend: string;
 }

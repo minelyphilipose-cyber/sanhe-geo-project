@@ -103,6 +103,7 @@ export interface RegenerateDraftVO {
   region: string
   userDemand?: string | null
   userType?: string | null
+  specifiedCompetitors?: string[]
   promptSourceMode: PromptSourceMode
   promptTemplates?: Array<{
     sourceTemplateId: number
@@ -277,6 +278,7 @@ export interface CreateReportRequest {
   region: string
   userDemand?: string
   userType?: string
+  specifiedCompetitors?: string[]
   promptSourceMode?: PromptSourceMode
   promptTemplateVersion?: string
   promptTemplates?: PromptTemplateDraftRequest[]
@@ -413,7 +415,7 @@ export function generateLlmPromptQuestions(data: LlmPromptQuestionGenerateReques
     request.post<R<LlmPromptQuestionGenerateVO>>(
       '/presale/reports/llm-prompt-questions/generate',
       data,
-      { timeout: 60000 }
+      { timeout: 180000 }
     )
   )
 }

@@ -20,7 +20,7 @@ import java.util.TreeSet;
  *
  * 数据来源:L1.sentimentDetail
  * - negative_count ← sentimentDetail.negativeCount
- * - negative_evidence_count ← negativeEvidence 条数
+ * - negative_evidence_count ← negativeEvidence 中 sentiment=NEGATIVE 的条数
  * - key_topic      ← 简化实现:取 negativeEvidence 中首条 snippet 关联的主题
  *                   (L1 DTO 没有 key_topic 字段,由 Builder 从 evidence 归纳,v1 用占位)
  * - affected_platforms_text ← negativeEvidence 中 platformName 去重拼接
@@ -45,7 +45,7 @@ public class NegativeEvidenceBuilder implements EvidenceDataBuilder {
         Set<String> seen = new TreeSet<>();
         if (sd != null && sd.getNegativeEvidence() != null) {
             for (SentimentDetail.NegativeEvidence ne : sd.getNegativeEvidence()) {
-                if (ne == null || ne.getPlatformName() == null) continue;
+                if (!isTrueNegativeEvidence(ne) || ne.getPlatformName() == null) continue;
                 if (seen.add(ne.getPlatformName())) {
                     platforms.add(ne.getPlatformName());
                 }
@@ -53,13 +53,22 @@ public class NegativeEvidenceBuilder implements EvidenceDataBuilder {
         }
 
         ev.put("key_topic", deriveKeyTopic(sd));
-        int evidenceCount = sd == null || sd.getNegativeEvidence() == null ? 0 : sd.getNegativeEvidence().size();
+        int evidenceCount = sd == null || sd.getNegativeEvidence() == null ? 0 : (int) sd.getNegativeEvidence().stream()
+                .filter(this::isTrueNegativeEvidence)
+                .count();
 
         ev.put("affected_platform_count", platforms.size());
         ev.put("affected_platforms_text", TextFormatUtil.formatPlatformNames(platforms));
         ev.put("negative_count", negativeCount);
         ev.put("negative_evidence_count", evidenceCount);
         return ev;
+    }
+
+    private boolean isTrueNegativeEvidence(SentimentDetail.NegativeEvidence evidence) {
+        return evidence != null
+                && evidence.getSentiment() == SentimentDetail.Sentiment.NEGATIVE
+                && evidence.getSnippet() != null
+                && !evidence.getSnippet().isBlank();
     }
 
     /**

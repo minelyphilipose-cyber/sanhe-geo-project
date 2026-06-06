@@ -241,18 +241,25 @@ public class SceneCoverageCalculator {
     }
 
     private boolean isJudgeCellCovered(PresaleIntentCode intent, PlatformIntentCell cell) {
-        if (cell == null || cell.getMentionRate() == null) {
+        if (cell == null || cell.getJudgeScore() == null) {
             return false;
         }
-        int score = cell.getMentionRate();
+        int score = cell.getJudgeScore();
         if (intent == PresaleIntentCode.COGNITIVE) {
             return score >= COGNITIVE_COVERAGE_THRESHOLD;
         }
         if (intent == PresaleIntentCode.COMPARISON) {
             return score >= COMPARISON_COVERAGE_THRESHOLD
-                    && !COMPARISON_STANCE_COMPETITOR.equals(cell.getStance());
+                    && !COMPARISON_STANCE_COMPETITOR.equals(resolveJudgeStance(cell));
         }
         return false;
+    }
+
+    private String resolveJudgeStance(PlatformIntentCell cell) {
+        if (cell == null) {
+            return null;
+        }
+        return cell.getJudgeStance() == null ? cell.getStance() : cell.getJudgeStance();
     }
 
     private Map<Long, List<PromptJudgeSignalRow>> buildJudgeSignalsByTemplate(List<PromptJudgeSignalRow> rows,
@@ -346,6 +353,13 @@ public class SceneCoverageCalculator {
         int total = prompts.size();
         int covered = (int) prompts.stream().filter(this::isPromptCovered).count();
         double coverageRate = total == 0 ? 0.0 : (covered * 100.0 / total);
+        SceneCoverageGroup.CoverageStats compositeStats = buildCoverageStats(prompts);
+        SceneCoverageGroup.CoverageStats naturalStats = buildCoverageStats(prompts.stream()
+                .filter(prompt -> !isJudgeIntent(prompt.primary().intent()))
+                .toList());
+        SceneCoverageGroup.CoverageStats judgeStats = buildCoverageStats(prompts.stream()
+                .filter(prompt -> isJudgeIntent(prompt.primary().intent()))
+                .toList());
 
         List<SceneQueryItem> coveredQueries = prompts.stream()
                 .filter(this::isPromptCovered)
@@ -374,8 +388,22 @@ public class SceneCoverageCalculator {
                 .total(total)
                 .covered(covered)
                 .coverageRate(coverageRate)
+                .coverage(compositeStats)
+                .naturalCoverage(naturalStats)
+                .judgeCoverage(judgeStats)
                 .coveredQueries(coveredQueries)
                 .missingQueries(missingQueries)
+                .build();
+    }
+
+    private SceneCoverageGroup.CoverageStats buildCoverageStats(List<PromptCoverage> prompts) {
+        int total = prompts == null ? 0 : prompts.size();
+        int covered = prompts == null ? 0 : (int) prompts.stream().filter(this::isPromptCovered).count();
+        double coverageRate = total == 0 ? 0.0 : (covered * 100.0 / total);
+        return SceneCoverageGroup.CoverageStats.builder()
+                .total(total)
+                .covered(covered)
+                .coverageRate(coverageRate)
                 .build();
     }
 
@@ -445,7 +473,7 @@ public class SceneCoverageCalculator {
         if (rows == null || rows.isEmpty() || topDisplayNames == null || topDisplayNames.isEmpty()) {
             return List.of();
         }
-        Set<String> mentionedNormalized = new HashSet<>();
+        Set<String> matchedDisplayNames = new LinkedHashSet<>();
         for (PresaleAiPromptResult row : rows) {
             if (row.getMentionedCompetitors() == null || row.getMentionedCompetitors().isBlank()) {
                 continue;
@@ -457,7 +485,8 @@ public class SceneCoverageCalculator {
                 }
                 for (JsonNode item : array) {
                     if (item.isTextual()) {
-                        mentionedNormalized.add(competitorAggregator.normalizeName(item.asText()));
+                        competitorAggregator.matchCompetitorDisplayName(item.asText(), topDisplayNames)
+                                .ifPresent(matchedDisplayNames::add);
                     }
                 }
             } catch (Exception ex) {
@@ -466,7 +495,7 @@ public class SceneCoverageCalculator {
         }
         Set<String> ordered = new LinkedHashSet<>();
         for (String displayName : topDisplayNames) {
-            if (mentionedNormalized.contains(competitorAggregator.normalizeName(displayName))) {
+            if (matchedDisplayNames.contains(displayName)) {
                 ordered.add(displayName);
             }
         }

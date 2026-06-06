@@ -31,7 +31,10 @@
                 <strong>{{ overallDeltaAbs }}</strong> 分
               </div>
               <div class="p04-overall-avg-note">
-                行业均值 {{ industryAvgOverallRounded }}
+                {{ overallSubtitle }}
+              </div>
+              <div v-if="showOverallBenchmarkNote" class="p04-overall-method-note">
+                本品牌无排名数据,综合得分按提及/情感/覆盖三维归一加权；行业均值与 Top1 为四维基准,跨维度比较仅供参考。
               </div>
             </div>
           </div>
@@ -45,8 +48,9 @@
                 }}<span class="p04-metric-unit">%</span>
               </div>
               <div class="p04-metric-sub">
-                {{ totalPrompts }} 个 prompt 中 {{ totalMentions }} 次
+                {{ mentionSubtitle }}
               </div>
+              <div class="p04-metric-note">提及率按平台加权计算,含豆包 2 倍权重；不等于提及数÷样本数的直除值</div>
             </div>
 
             <div class="p04-metric-card">
@@ -55,18 +59,16 @@
                 {{ avgRankText
                 }}<span class="p04-metric-unit">{{ avgRankText === '—' ? '' : '位' }}</span>
               </div>
-              <div class="p04-metric-sub">主推荐 {{ primaryRecommendationTotal }} 次</div>
+              <div class="p04-metric-sub">{{ recommendationSubtitle }}</div>
             </div>
 
             <div class="p04-metric-card">
               <div class="mono p04-card-label">HIGH-VALUE COVERAGE</div>
               <div class="metric-hero p04-metric-number">
-                {{ highValueCoverageRate
-                }}<span class="p04-metric-unit">%</span>
+                {{ highValueNaturalCovered }}<span class="p04-metric-unit">/{{ highValueTotal }}</span>
               </div>
               <div class="p04-metric-sub">
-                {{ mergedView.scene_coverage.high_value.total }} 个高价值场景覆盖
-                {{ mergedView.scene_coverage.high_value.covered }} 个
+                {{ coverageSubtitle }}
               </div>
             </div>
 
@@ -76,9 +78,15 @@
                 {{ sentimentScore
                 }}<span class="p04-metric-unit">/100</span>
               </div>
-              <div class="p04-metric-sub">情感得分 · 含中性折半计算</div>
+              <div class="p04-metric-sub">{{ sentimentSubtitle }}</div>
             </div>
           </div>
+        </div>
+
+        <div v-if="showAdvantageBox" class="p04-advantage-box">
+          <div class="mono p04-advantage-label">ADVANTAGE SIGNAL · 当前优势</div>
+          <div class="chinese-serif p04-advantage-title">{{ advantageTitle }}</div>
+          <div class="p04-advantage-text">{{ advantageText }}</div>
         </div>
 
         <!-- 关键发现(L3 key_takeaways) -->
@@ -113,6 +121,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useMergedView } from '@/composables/presale/useMergedView'
+import type { NarrativeBand } from '@/types/presale/computed'
 import { toIntRounded } from '@/utils/presale/numberFormat'
 
 /**
@@ -121,7 +130,7 @@ import { toIntRounded } from '@/utils/presale/numberFormat'
  * 数据映射:
  *   - overall 分数 / 行业均值 / 行业排名:scores.overall + benchmarks_frozen.industry_avg.overall + industry_ranking
  *   - mention rate:聚合 platform_breakdown 全部平台的 mention_count / total_tests
- *     (团队决议:"计数直除",与 scores.mention 维度分数无关,这是原始提及频率)
+ *     (按 ScoresCalculator 口径对豆包加 2 倍权重;页面展示真实样本问询数,避免把加权分母当真实条数)
  *   - avg rank:从 platform_breakdown 聚合非 null 的 avg_ranking 做加权平均
  *   - high-value coverage:scene_coverage.high_value 直出
  *   - sentiment:scores.sentiment,口径为 positive + neutral * 0.5
@@ -129,8 +138,7 @@ import { toIntRounded } from '@/utils/presale/numberFormat'
  *
  * 聚合逻辑刻意放本 SFC 的 computed 里,不进 composable:
  *   - 仅本页使用,抽出来会造成 composable 功能堆积
- *   - 未来若后端在 test_summary 里加汇总字段(overall_mention_rate 等),
- *     改本文件一处即可切换
+ *   - 样本类分母优先读取 test_summary 显式字段,历史快照缺字段时回退 platform_breakdown
  */
 
 const { mergedView: mergedViewRef } = useMergedView()
@@ -149,6 +157,42 @@ const industryAvgOverallRounded = computed(() =>
   toIntRounded(mergedView.value.benchmarks_frozen.industry_avg.overall)
 )
 
+type BandGroup = 'low' | 'middle' | 'high'
+
+const band = computed<NarrativeBand>(() => mergedView.value.narrative_profile.band ?? 'MIDDLE')
+const bandGroup = computed<BandGroup>(() => {
+  if (band.value === 'INVISIBLE' || band.value === 'BEHIND') return 'low'
+  if (band.value === 'STRONG' || band.value === 'LEADER') return 'high'
+  return 'middle'
+})
+
+const showAdvantageBox = computed(() => {
+  const profile = mergedView.value.narrative_profile
+  return profile.display_flags?.show_advantage_box === true &&
+    bandGroup.value === 'high' &&
+    profile.archetype_primary !== 'NEGATIVE_PRESSURE'
+})
+
+const advantageTitle = computed(() => {
+  return band.value === 'LEADER'
+    ? 'AI 已经把你视为本行业的优先参考品牌'
+    : 'AI 已经形成较稳定的正向品牌信号'
+})
+
+const advantageText = computed(() => {
+  return `${mergedView.value.brand_name} 当前综合得分 ${overallScoreRounded.value} 分，高价值场景覆盖 ${highValueCovered.value}/${highValueTotal.value}，情感得分 ${sentimentScore.value}/100。接下来应优先守住已形成的推荐入口，再补齐局部薄弱场景。`
+})
+
+const overallSubtitle = computed(() => {
+  if (bandGroup.value === 'low') {
+    return `AI 还没有稳定认识你（行业均值 ${industryAvgOverallRounded.value}）`
+  }
+  if (bandGroup.value === 'high') {
+    return `高于行业平均 ${industryAvgOverallRounded.value}，属 AI 偏好品牌`
+  }
+  return `你在行业平均线附近（${industryAvgOverallRounded.value}）`
+})
+
 // ─── key_takeaways 排序(按 order_no 升序) ─────────────
 /**
  * 后端返回顺序不稳定时避免页面漂移;order_no 相同者按原数组顺序保持(stable sort)。
@@ -158,16 +202,28 @@ const sortedKeyTakeaways = computed(() =>
   mergedView.value.key_takeaways.slice().sort((a, b) => a.order_no - b.order_no)
 )
 
-// ─── mention rate(计数直除) ─────────────────────────────
-const totalPrompts = computed(() =>
+// ─── mention rate(加权计算,展示原始样本数) ─────────────────
+const weightedSampleTestCount = computed(() =>
+  mergedView.value.test_summary.mention_rate_weighted_denominator ??
   mergedView.value.platform_breakdown.reduce((sum, p) => sum + p.total_tests * platformWeight(p.platform_code), 0)
 )
-const totalMentions = computed(() =>
+const weightedMentionCount = computed(() =>
   mergedView.value.platform_breakdown.reduce((sum, p) => sum + p.mention_count * platformWeight(p.platform_code), 0)
 )
+const rawSampleTestCount = computed(() =>
+  mergedView.value.test_summary.sample_query_count_raw ??
+  mergedView.value.platform_breakdown.reduce((sum, p) => sum + p.total_tests, 0)
+)
+const rawMentionCount = computed(() =>
+  mergedView.value.platform_breakdown.reduce((sum, p) => sum + p.mention_count, 0)
+)
 const mentionRatePct = computed(() => {
-  if (totalPrompts.value === 0) return 0
-  return toIntRounded((totalMentions.value / totalPrompts.value) * 100)
+  if (weightedSampleTestCount.value === 0) return 0
+  return toIntRounded((weightedMentionCount.value / weightedSampleTestCount.value) * 100)
+})
+
+const mentionSubtitle = computed(() => {
+  return `${rawMentionCount.value} / ${rawSampleTestCount.value} 次样本类问询中被提及`
 })
 
 // ─── avg rank(按 mention_count 加权) ───────────────────
@@ -195,15 +251,46 @@ const primaryRecommendationTotal = computed(() =>
   )
 )
 
+const recommendationSubtitle = computed(() => {
+  if (bandGroup.value === 'low') {
+    return primaryRecommendationTotal.value === 0
+      ? '最关键的“该选谁”时刻还没有轮到你'
+      : `首选推荐仅 ${primaryRecommendationTotal.value} 次，仍然偏少`
+  }
+  if (bandGroup.value === 'high') {
+    return `常被 AI 列为首选之一（${primaryRecommendationTotal.value} 次）`
+  }
+  return `偶有首选推荐（${primaryRecommendationTotal.value} 次）`
+})
+
 // ─── high-value coverage ─────────────────────────────────
-const highValueCoverageRate = computed(() => {
-  const g = mergedView.value.scene_coverage.high_value
-  // coverage_rate 可能后端给的是 0-100 或 0-1;按 contract 是 0-100
-  return toIntRounded(g.coverage_rate)
+const highValueTotal = computed(() => mergedView.value.scene_coverage.high_value.total)
+const highValueCovered = computed(() => mergedView.value.scene_coverage.high_value.covered)
+const highValueNaturalCovered = computed(() =>
+  mergedView.value.scene_coverage.high_value.natural_coverage?.covered ?? 0
+)
+const highValueJudgeCovered = computed(() =>
+  mergedView.value.scene_coverage.high_value.judge_coverage?.covered ?? 0
+)
+
+const coverageSubtitle = computed(() => {
+  return `主动求推荐 ${highValueNaturalCovered.value}/${highValueTotal.value};已点名比较/了解 ${highValueJudgeCovered.value}/${highValueTotal.value}`
 })
 
 // ─── sentiment ───────────────────────────────────────────
 const sentimentScore = computed(() => toIntRounded(mergedView.value.scores.sentiment))
+
+const sentimentSubtitle = computed(() => {
+  if (bandGroup.value === 'low') {
+    return 'AI 对你态度中性，缺乏好印象'
+  }
+  if (bandGroup.value === 'high') {
+    return 'AI 对你印象正面'
+  }
+  return '印象中性偏正'
+})
+
+const showOverallBenchmarkNote = computed(() => mergedView.value.scores.ranking == null)
 
 // ─── key findings 编号格式化 ────────────────────────────
 function formatFindingNum(n: number): string {
@@ -271,6 +358,12 @@ function platformWeight(platformCode: string): number {
   color: #6b6456;
   margin-top: 6px;
 }
+.p04-overall-method-note {
+  margin-top: 8px;
+  font-size: 10px;
+  color: #9b9486;
+  line-height: 1.5;
+}
 /* 4 维度 metric card grid */
 .p04-metrics-wrap {
   display: grid;
@@ -297,10 +390,40 @@ function platformWeight(platformCode: string): number {
   font-size: 11px;
   color: #6b6456;
 }
+.p04-metric-note {
+  margin-top: 5px;
+  font-size: 10px;
+  color: #9b9486;
+  line-height: 1.5;
+}
 
 /* key findings */
 .p04-key-findings {
   margin-top: 8px;
+}
+.p04-advantage-box {
+  margin: 0 0 36px;
+  padding: 18px 20px;
+  background: rgba(4, 120, 87, 0.08);
+  border-left: 3px solid #047857;
+}
+.p04-advantage-label {
+  margin-bottom: 6px;
+  color: #047857;
+  font-size: 10px;
+  letter-spacing: 2px;
+}
+.p04-advantage-title {
+  color: #0b1426;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+.p04-advantage-text {
+  margin-top: 6px;
+  color: #1a2942;
+  font-size: 12px;
+  line-height: 1.7;
 }
 .p04-findings-label {
   font-size: 11px;

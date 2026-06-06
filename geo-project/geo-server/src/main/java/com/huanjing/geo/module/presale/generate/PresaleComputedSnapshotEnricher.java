@@ -12,8 +12,10 @@ import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.generate.calc.RankingStats;
 import com.huanjing.geo.module.presale.generate.calc.RoiCalculator;
 import com.huanjing.geo.module.presale.generate.calc.SceneAndIntentResult;
+import com.huanjing.geo.module.presale.generate.calc.SceneCompetitorPressureCalculator;
 import com.huanjing.geo.module.presale.generate.calc.SceneCoverageCalculator;
 import com.huanjing.geo.module.presale.generate.calc.ScoresCalculator;
+import com.huanjing.geo.module.presale.generate.narrative.NarrativeProfileCalculator;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
 import com.huanjing.geo.module.presale.ruleengine.PresaleRuleEngineExecutor;
@@ -45,9 +47,11 @@ public class PresaleComputedSnapshotEnricher {
     private final PlatformIntentBreakdownBuilder builder;
     private final PlatformIntentBreakdownValidator validator;
     private final SceneCoverageCalculator sceneCoverageCalculator;
+    private final SceneCompetitorPressureCalculator sceneCompetitorPressureCalculator;
     private final ScoresCalculator scoresCalculator;
     private final PresaleRuleEngineExecutor ruleEngineExecutor;
     private final RoiCalculator roiCalculator;
+    private final NarrativeProfileCalculator narrativeProfileCalculator;
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
 
     public String enrichAndValidate(Long versionId,
@@ -78,6 +82,7 @@ public class PresaleComputedSnapshotEnricher {
                     versionId, rawSnapshot, buildResult.intentTotalPrompts(), cells);
             computedSnapshot.setSceneCoverage(scenes.sceneCoverage());
             computedSnapshot.setIntentBreakdown(scenes.intentBreakdown());
+            computedSnapshot.setSceneCompetitorPressure(sceneCompetitorPressureCalculator.compute(versionId, rawSnapshot));
 
             // 2) Scores (D25)
             RankingStats rankingStats = queryRankingStats(versionId, rawSnapshot);
@@ -98,7 +103,10 @@ public class PresaleComputedSnapshotEnricher {
                     ruleResult.getFindings()
             ));
 
-            // 5) Existing integrity validator
+            // 5) Narrative profile (deterministic, no online LLM)
+            computedSnapshot.setNarrativeProfile(narrativeProfileCalculator.compute(rawSnapshot, computedSnapshot));
+
+            // 6) Existing integrity validator
             validator.validate(rawSnapshot.getPlatformBreakdown(), computedSnapshot.getIntentBreakdown(), cells);
             return objectMapper.writeValueAsString(computedSnapshot);
         } catch (BizException e) {

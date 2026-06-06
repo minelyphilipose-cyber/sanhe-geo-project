@@ -15,11 +15,13 @@ import com.huanjing.geo.module.presale.dto.snapshot.raw.SamplePrompt;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.SentimentDetail;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.TestSummary;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
+import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptJudgeResult;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersionPromptTemplate;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptJudgeResultMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionPromptTemplateMapper;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
@@ -51,12 +53,23 @@ public class PresaleRawSnapshotAssembler {
     private static final String CATEGORY_COMPARISON = "对比型";
     private static final String STATUS_SUCCESS = "SUCCESS";
     private static final String STATUS_SKIPPED_DEGRADED = "SKIPPED_DEGRADED";
+    private static final String STAGE_QUERY = "QUERY";
+    private static final String STAGE_ANALYZE = "ANALYZE";
+    private static final String JUDGE_PREFERRED_TARGET = "target";
+    private static final String JUDGE_PREFERRED_COMPETITOR = "competitor";
+    private static final String JUDGE_PREFERRED_TIE = "tie";
+    private static final String JUDGE_PREFERRED_UNCLEAR = "unclear";
     private static final int MAX_SCENE_ADVANTAGES = 5;
     private static final int MAX_TOP_KEYWORDS = 10;
     private static final int MAX_NEGATIVE_EVIDENCE = 3;
+    private static final String PLATFORM_DOUBAO = "doubao";
+    private static final int DOUBAO_WEIGHT = 2;
+    private static final String COMPETITOR_SOURCE_SPECIFIED = "specified";
+    private static final String COMPETITOR_SOURCE_EXTRACTED = "extracted";
 
     private final PresaleAiCallMapper aiCallMapper;
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
+    private final PresaleAiPromptJudgeResultMapper judgeResultMapper;
     private final AiPlatformConfigMapper aiPlatformConfigMapper;
     private final PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
     private final PresaleBenchmarkResolver benchmarkResolver;
@@ -65,6 +78,7 @@ public class PresaleRawSnapshotAssembler {
 
     public PresaleRawSnapshotAssembler(PresaleAiCallMapper aiCallMapper,
                                        PresaleAiPromptResultMapper aiPromptResultMapper,
+                                       PresaleAiPromptJudgeResultMapper judgeResultMapper,
                                        AiPlatformConfigMapper aiPlatformConfigMapper,
                                        PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper,
                                        PresaleBenchmarkResolver benchmarkResolver,
@@ -72,6 +86,7 @@ public class PresaleRawSnapshotAssembler {
                                        ObjectMapper objectMapper) {
         this.aiCallMapper = aiCallMapper;
         this.aiPromptResultMapper = aiPromptResultMapper;
+        this.judgeResultMapper = judgeResultMapper;
         this.aiPlatformConfigMapper = aiPlatformConfigMapper;
         this.versionPromptTemplateMapper = versionPromptTemplateMapper;
         this.benchmarkResolver = benchmarkResolver;
@@ -102,9 +117,10 @@ public class PresaleRawSnapshotAssembler {
                     .toList();
             RawMeta meta = buildMeta(report, version);
             ClientInfo clientInfo = buildClientInfo(report);
-            TestSummary testSummary = buildTestSummary(versionId, degradedPlatforms, extractedCompetitorDisplayNames);
             List<PlatformBreakdown> platformBreakdown = buildPlatformBreakdown(versionId, degradedPlatforms);
+            TestSummary testSummary = buildTestSummary(versionId, degradedPlatforms, extractedCompetitorDisplayNames, platformBreakdown);
             List<Competitor> competitors = buildCompetitors(versionId, report, extractedCompetitors);
+            List<String> specifiedCompetitors = parseSpecifiedCompetitors(report);
             List<String> groupSceneAdvantages = aggregateGroupSceneAdvantages(versionId, extractedCompetitorDisplayNames);
             List<SamplePrompt> samplePrompts = buildSamplePrompts(versionId);
             SentimentDetail sentimentDetail = buildSentimentDetail(versionId);
@@ -117,6 +133,8 @@ public class PresaleRawSnapshotAssembler {
                     .testSummary(testSummary)
                     .platformBreakdown(platformBreakdown)
                     .competitors(competitors)
+                    .competitorSource(specifiedCompetitors.isEmpty() ? COMPETITOR_SOURCE_EXTRACTED : COMPETITOR_SOURCE_SPECIFIED)
+                    .specifiedCompetitors(specifiedCompetitors)
                     .groupSceneAdvantages(groupSceneAdvantages)
                     .samplePrompts(samplePrompts)
                     .sentimentDetail(sentimentDetail)
@@ -174,7 +192,8 @@ public class PresaleRawSnapshotAssembler {
 
     private TestSummary buildTestSummary(Long versionId,
                                          Set<String> degradedPlatforms,
-                                         List<String> extractedCompetitorDisplayNames) {
+                                         List<String> extractedCompetitorDisplayNames,
+                                         List<PlatformBreakdown> platformBreakdown) {
         Set<String> safeDegradedSet = degradedPlatforms == null ? Set.of() : degradedPlatforms;
         int platformCount = countEffectiveEnabledPlatforms(safeDegradedSet);
         int genericPromptCount = countPromptTemplates(versionId, 0);
@@ -182,21 +201,56 @@ public class PresaleRawSnapshotAssembler {
         int competitorCount = extractedCompetitorDisplayNames == null ? 0 : extractedCompetitorDisplayNames.size();
 
         int totalPrompts = genericPromptCount + (competitorCount > 0 ? competitorPromptCount : 0);
-        int totalCalls = countNonSkippedCalls(versionId, safeDegradedSet);
-        int successfulCalls = countCallsByStatus(versionId, STATUS_SUCCESS, safeDegradedSet);
+        int batch1PromptTestCount = countPromptResults(versionId, 1, safeDegradedSet);
+        int batch2PromptTestCount = countPromptResults(versionId, 2, safeDegradedSet);
+        int promptTestCount = batch1PromptTestCount + batch2PromptTestCount;
+        int sampleQueryCountRaw = platformBreakdown == null ? 0 : platformBreakdown.stream()
+                .mapToInt(p -> p.getTotalTests() == null ? 0 : p.getTotalTests())
+                .sum();
+        int mentionRateWeightedDenominator = platformBreakdown == null ? 0 : platformBreakdown.stream()
+                .mapToInt(p -> (p.getTotalTests() == null ? 0 : p.getTotalTests()) * platformWeight(p.getPlatformCode()))
+                .sum();
+        int queryCallCount = countCallsByStage(versionId, STAGE_QUERY, safeDegradedSet);
+        int analyzeCallCount = countCallsByStage(versionId, STAGE_ANALYZE, safeDegradedSet);
+        int judgeCallCount = countJudgeRows(versionId, safeDegradedSet);
+        int totalCalls = queryCallCount + analyzeCallCount + judgeCallCount;
+        int successfulCalls = countCallsByStageAndStatus(versionId, STAGE_QUERY, STATUS_SUCCESS, safeDegradedSet)
+                + countCallsByStageAndStatus(versionId, STAGE_ANALYZE, STATUS_SUCCESS, safeDegradedSet)
+                + countJudgeRowsByStatus(versionId, STATUS_SUCCESS, safeDegradedSet);
         int failedCalls = Math.max(0, totalCalls - successfulCalls);
 
-        return TestSummary.builder()
-                .totalPrompts(totalPrompts)
-                .totalPlatforms(platformCount)
-                .totalCalls(totalCalls)
-                .successfulCalls(successfulCalls)
-                .failedCalls(failedCalls)
-                .excludedCount(0)
-                .rounds(2)
-                .isDegraded(safeDegradedSet.size() >= 4)
-                .degradedPlatforms(new ArrayList<>(safeDegradedSet))
-                .build();
+        TestSummary out = new TestSummary();
+        out.setTotalPrompts(totalPrompts);
+        out.setTotalPlatforms(platformCount);
+        out.setTotalCalls(totalCalls);
+        out.setPromptTestCount(promptTestCount);
+        setOptionalInteger(out, "setSampleQueryCountRaw", sampleQueryCountRaw);
+        setOptionalInteger(out, "setMentionRateWeightedDenominator", mentionRateWeightedDenominator);
+        out.setBatch1PromptTestCount(batch1PromptTestCount);
+        out.setBatch2PromptTestCount(batch2PromptTestCount);
+        out.setQueryCallCount(queryCallCount);
+        out.setAnalyzeCallCount(analyzeCallCount);
+        out.setJudgeCallCount(judgeCallCount);
+        out.setSuccessfulCalls(successfulCalls);
+        out.setSuccessCallCount(successfulCalls);
+        out.setFailedCalls(failedCalls);
+        out.setFailedCallCount(failedCalls);
+        out.setExcludedCount(0);
+        out.setRounds(2);
+        out.setIsDegraded(safeDegradedSet.size() >= 4);
+        out.setDegradedPlatforms(new ArrayList<>(safeDegradedSet));
+        out.setDegradedPlatformCount(safeDegradedSet.size());
+        return out;
+    }
+
+    private void setOptionalInteger(TestSummary target, String setterName, Integer value) {
+        try {
+            TestSummary.class.getMethod(setterName, Integer.class).invoke(target, value);
+        } catch (NoSuchMethodException ignored) {
+            // 热加载场景下旧 DTO 类可能暂时没有新增口径字段;跳过即可,不影响报告生成主链路。
+        } catch (Exception ex) {
+            log.warn("Skip optional TestSummary field, setter={}", setterName, ex);
+        }
     }
 
     private int countEffectiveEnabledPlatforms(Set<String> degradedPlatforms) {
@@ -226,6 +280,39 @@ public class PresaleRawSnapshotAssembler {
         return count == null ? 0 : count.intValue();
     }
 
+    private int countPromptResults(Long versionId, int batchNo, Set<String> degradedPlatforms) {
+        LambdaQueryWrapper<PresaleAiPromptResult> wrapper = new LambdaQueryWrapper<PresaleAiPromptResult>()
+                .eq(PresaleAiPromptResult::getVersionId, versionId)
+                .eq(PresaleAiPromptResult::getBatchNo, batchNo);
+        if (degradedPlatforms != null && !degradedPlatforms.isEmpty()) {
+            wrapper.notIn(PresaleAiPromptResult::getPlatformCode, degradedPlatforms);
+        }
+        Long count = aiPromptResultMapper.selectCount(wrapper);
+        return count == null ? 0 : count.intValue();
+    }
+
+    private int countCallsByStage(Long versionId, String stage, Set<String> degradedPlatforms) {
+        LambdaQueryWrapper<PresaleAiCall> wrapper = new LambdaQueryWrapper<PresaleAiCall>()
+                .eq(PresaleAiCall::getVersionId, versionId)
+                .in(PresaleAiCall::getBatchNo, 1, 2)
+                .eq(PresaleAiCall::getStage, stage)
+                .ne(PresaleAiCall::getCallStatus, STATUS_SKIPPED_DEGRADED);
+        excludeDegradedCallPlatforms(wrapper, degradedPlatforms);
+        Long count = aiCallMapper.selectCount(wrapper);
+        return count == null ? 0 : count.intValue();
+    }
+
+    private int countCallsByStageAndStatus(Long versionId, String stage, String status, Set<String> degradedPlatforms) {
+        LambdaQueryWrapper<PresaleAiCall> wrapper = new LambdaQueryWrapper<PresaleAiCall>()
+                .eq(PresaleAiCall::getVersionId, versionId)
+                .in(PresaleAiCall::getBatchNo, 1, 2)
+                .eq(PresaleAiCall::getStage, stage)
+                .eq(PresaleAiCall::getCallStatus, status);
+        excludeDegradedCallPlatforms(wrapper, degradedPlatforms);
+        Long count = aiCallMapper.selectCount(wrapper);
+        return count == null ? 0 : count.intValue();
+    }
+
     private int countCallsByStatus(Long versionId, String status, Set<String> degradedPlatforms) {
         LambdaQueryWrapper<PresaleAiCall> wrapper = new LambdaQueryWrapper<PresaleAiCall>()
                 .eq(PresaleAiCall::getVersionId, versionId)
@@ -237,10 +324,34 @@ public class PresaleRawSnapshotAssembler {
         return count == null ? 0 : count.intValue();
     }
 
+    private int countJudgeRows(Long versionId, Set<String> degradedPlatforms) {
+        LambdaQueryWrapper<PresaleAiPromptJudgeResult> wrapper = new LambdaQueryWrapper<PresaleAiPromptJudgeResult>()
+                .eq(PresaleAiPromptJudgeResult::getVersionId, versionId);
+        excludeDegradedJudgePlatforms(wrapper, degradedPlatforms);
+        Long count = judgeResultMapper.selectCount(wrapper);
+        return count == null ? 0 : count.intValue();
+    }
+
+    private int countJudgeRowsByStatus(Long versionId, String status, Set<String> degradedPlatforms) {
+        LambdaQueryWrapper<PresaleAiPromptJudgeResult> wrapper = new LambdaQueryWrapper<PresaleAiPromptJudgeResult>()
+                .eq(PresaleAiPromptJudgeResult::getVersionId, versionId)
+                .eq(PresaleAiPromptJudgeResult::getJudgeStatus, status);
+        excludeDegradedJudgePlatforms(wrapper, degradedPlatforms);
+        Long count = judgeResultMapper.selectCount(wrapper);
+        return count == null ? 0 : count.intValue();
+    }
+
     private void excludeDegradedCallPlatforms(LambdaQueryWrapper<PresaleAiCall> wrapper,
                                               Set<String> degradedPlatforms) {
         if (degradedPlatforms != null && !degradedPlatforms.isEmpty()) {
             wrapper.notIn(PresaleAiCall::getPlatformCode, degradedPlatforms);
+        }
+    }
+
+    private void excludeDegradedJudgePlatforms(LambdaQueryWrapper<PresaleAiPromptJudgeResult> wrapper,
+                                               Set<String> degradedPlatforms) {
+        if (degradedPlatforms != null && !degradedPlatforms.isEmpty()) {
+            wrapper.notIn(PresaleAiPromptJudgeResult::getPlatformCode, degradedPlatforms);
         }
     }
 
@@ -287,6 +398,32 @@ public class PresaleRawSnapshotAssembler {
             }
         }
         return out;
+    }
+
+    private int platformWeight(String platformCode) {
+        return PLATFORM_DOUBAO.equalsIgnoreCase(platformCode) ? DOUBAO_WEIGHT : 1;
+    }
+
+    private List<String> parseSpecifiedCompetitors(PresaleReport report) {
+        if (report == null || report.getSpecifiedCompetitors() == null || report.getSpecifiedCompetitors().isBlank()) {
+            return List.of();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(report.getSpecifiedCompetitors());
+            if (node == null || !node.isArray()) {
+                return List.of();
+            }
+            List<String> out = new ArrayList<>();
+            for (JsonNode item : node) {
+                if (item != null && item.isTextual() && !item.asText().isBlank()) {
+                    out.add(item.asText().trim());
+                }
+            }
+            return out;
+        } catch (Exception ex) {
+            log.warn("Skip invalid specified_competitors json, reportId={}", report.getId(), ex);
+            return List.of();
+        }
     }
 
     private String normalizeSamplePrompt(String value) {
@@ -420,16 +557,59 @@ public class PresaleRawSnapshotAssembler {
             int mentionCount = competitor.mentionCount();
             double mentionRate = stats.denominatorRows() == 0 ? 0.0
                     : (mentionCount * 100.0 / stats.denominatorRows());
+            ComparisonVerdictStats comparisonStats = buildComparisonVerdictStats(versionId, competitorDisplayName);
+            List<String> comparisonAdvantages = aggregateCompetitorSceneAdvantages(versionId, competitorDisplayName);
             out.add(Competitor.builder()
                     .rank(rank++)
                     .name(competitorDisplayName)
                     .mentionCount(mentionCount)
                     .mentionRate(mentionRate)
                     .avgRanking(null)
-                    .sceneAdvantagesRaw(aggregateSceneAdvantages(versionId, competitorDisplayName))
+                    .sceneAdvantagesRaw(comparisonAdvantages)
+                    .comparisonVerdictCount(comparisonStats.comparisonVerdictCount())
+                    .targetPreferredCount(comparisonStats.targetPreferredCount())
+                    .competitorPreferredCount(comparisonStats.competitorPreferredCount())
+                    .tieCount(comparisonStats.tieCount())
+                    .unclearCount(comparisonStats.unclearCount())
+                    .targetPreferredRate(comparisonStats.targetPreferredRate())
+                    .competitorPreferredRate(comparisonStats.competitorPreferredRate())
+                    .comparisonAdvantages(comparisonAdvantages)
                     .build());
         }
         return out;
+    }
+
+    private ComparisonVerdictStats buildComparisonVerdictStats(Long versionId, String competitorDisplayName) {
+        if (competitorDisplayName == null || competitorDisplayName.isBlank()) {
+            return ComparisonVerdictStats.empty();
+        }
+        List<PresaleAiPromptJudgeResult> judgeRows = judgeResultMapper.selectList(
+                new LambdaQueryWrapper<PresaleAiPromptJudgeResult>()
+                        .eq(PresaleAiPromptJudgeResult::getVersionId, versionId)
+                        .eq(PresaleAiPromptJudgeResult::getBatchNo, 2)
+                        .eq(PresaleAiPromptJudgeResult::getCategory, "COMPARISON")
+                        .eq(PresaleAiPromptJudgeResult::getJudgeStatus, STATUS_SUCCESS)
+        );
+        int target = 0;
+        int competitor = 0;
+        int tie = 0;
+        int unclear = 0;
+        for (PresaleAiPromptJudgeResult row : judgeRows == null ? List.<PresaleAiPromptJudgeResult>of() : judgeRows) {
+            if (competitorAggregator.matchCompetitorDisplayName(row.getCompetitorName(), List.of(competitorDisplayName)).isEmpty()) {
+                continue;
+            }
+            String preferredBrand = row.getPreferredBrand();
+            if (JUDGE_PREFERRED_TARGET.equals(preferredBrand)) {
+                target++;
+            } else if (JUDGE_PREFERRED_COMPETITOR.equals(preferredBrand)) {
+                competitor++;
+            } else if (JUDGE_PREFERRED_TIE.equals(preferredBrand)) {
+                tie++;
+            } else if (JUDGE_PREFERRED_UNCLEAR.equals(preferredBrand)) {
+                unclear++;
+            }
+        }
+        return ComparisonVerdictStats.of(target, competitor, tie, unclear);
     }
 
     private List<PresaleCompetitorAggregator.ExtractedCompetitor> buildLegacyExtractedCompetitors(
@@ -459,16 +639,62 @@ public class PresaleRawSnapshotAssembler {
         return aggregateSceneAdvantages(versionId, groupName);
     }
 
+    private List<String> aggregateCompetitorSceneAdvantages(Long versionId, String competitorDisplayName) {
+        if (competitorDisplayName == null || competitorDisplayName.isBlank()) {
+            return List.of();
+        }
+        List<PresaleAiPromptJudgeResult> judgeRows = judgeResultMapper.selectList(
+                new LambdaQueryWrapper<PresaleAiPromptJudgeResult>()
+                        .eq(PresaleAiPromptJudgeResult::getVersionId, versionId)
+                        .eq(PresaleAiPromptJudgeResult::getBatchNo, 2)
+                        .eq(PresaleAiPromptJudgeResult::getCategory, "COMPARISON")
+                        .eq(PresaleAiPromptJudgeResult::getJudgeStatus, "SUCCESS")
+        );
+        Map<String, Integer> freq = new HashMap<>();
+        for (PresaleAiPromptJudgeResult row : judgeRows == null ? List.<PresaleAiPromptJudgeResult>of() : judgeRows) {
+            if (competitorAggregator.matchCompetitorDisplayName(row.getCompetitorName(), List.of(competitorDisplayName)).isEmpty()) {
+                continue;
+            }
+            String advantages = row.getCompetitorAdvantages();
+            if (advantages == null || advantages.isBlank()) {
+                continue;
+            }
+            try {
+                JsonNode arr = objectMapper.readTree(advantages);
+                if (!arr.isArray()) {
+                    continue;
+                }
+                for (JsonNode item : arr) {
+                    if (!item.isTextual()) {
+                        continue;
+                    }
+                    String scene = item.asText().trim();
+                    if (!scene.isEmpty()) {
+                        freq.merge(scene, 1, Integer::sum);
+                    }
+                }
+            } catch (Exception ex) {
+                log.warn("Skip invalid competitor_advantages, versionId={}, judgeRowId={}", versionId, row.getId(), ex);
+            }
+        }
+        if (!freq.isEmpty()) {
+            return topScenes(freq);
+        }
+        return aggregateSceneAdvantages(versionId, competitorDisplayName);
+    }
+
     private List<String> aggregateSceneAdvantages(Long versionId, String competitorDisplayName) {
         List<PresaleAiPromptResult> batch2Rows = aiPromptResultMapper.selectList(
                 new LambdaQueryWrapper<PresaleAiPromptResult>()
                         .eq(PresaleAiPromptResult::getVersionId, versionId)
                         .eq(PresaleAiPromptResult::getBatchNo, 2)
-                        .eq(PresaleAiPromptResult::getCompetitorName, competitorDisplayName)
                         .isNotNull(PresaleAiPromptResult::getIsMentioned)
         );
         Map<String, Integer> freq = new HashMap<>();
         for (PresaleAiPromptResult row : batch2Rows) {
+            if (competitorAggregator.matchCompetitorDisplayName(row.getCompetitorName(), List.of(competitorDisplayName)).isEmpty()) {
+                continue;
+            }
             String sceneAdvantages = row.getSceneAdvantages();
             if (sceneAdvantages == null || sceneAdvantages.isBlank()) {
                 continue;
@@ -492,6 +718,10 @@ public class PresaleRawSnapshotAssembler {
                 log.warn("Skip invalid scene_advantages, versionId={}, rowId={}", versionId, row.getId(), ex);
             }
         }
+        return topScenes(freq);
+    }
+
+    private List<String> topScenes(Map<String, Integer> freq) {
         return freq.entrySet().stream()
                 .sorted(Comparator
                         .comparing(Map.Entry<String, Integer>::getValue, Comparator.reverseOrder())
@@ -617,6 +847,10 @@ public class PresaleRawSnapshotAssembler {
 
         List<SentimentDetail.NegativeEvidence> result = new ArrayList<>();
         for (PresaleAiPromptResult row : rows) {
+            SentimentDetail.Sentiment rowSentiment = parseSentimentEnum(row.getSentiment());
+            if (rowSentiment != SentimentDetail.Sentiment.NEGATIVE) {
+                continue;
+            }
             String raw = row.getNegativeEvidenceJson();
             if (raw == null || raw.isBlank()) {
                 continue;
@@ -645,6 +879,7 @@ public class PresaleRawSnapshotAssembler {
                     testedAt = row.getCreatedAt();
                 }
                 result.add(SentimentDetail.NegativeEvidence.builder()
+                        .sentiment(SentimentDetail.Sentiment.NEGATIVE)
                         .platformCode(platformCode)
                         .platformName(platformName)
                         .query(query)
@@ -684,6 +919,37 @@ public class PresaleRawSnapshotAssembler {
             return SentimentDetail.Sentiment.valueOf(raw);
         } catch (IllegalArgumentException ex) {
             return null;
+        }
+    }
+
+    private record ComparisonVerdictStats(int targetPreferredCount,
+                                          int competitorPreferredCount,
+                                          int tieCount,
+                                          int unclearCount,
+                                          int comparisonVerdictCount,
+                                          double targetPreferredRate,
+                                          double competitorPreferredRate) {
+        static ComparisonVerdictStats empty() {
+            return of(0, 0, 0, 0);
+        }
+
+        static ComparisonVerdictStats of(int targetPreferredCount,
+                                         int competitorPreferredCount,
+                                         int tieCount,
+                                         int unclearCount) {
+            int verdictCount = targetPreferredCount + competitorPreferredCount + tieCount + unclearCount;
+            int rateDenominator = targetPreferredCount + competitorPreferredCount + tieCount;
+            double targetRate = rateDenominator == 0 ? 0.0 : targetPreferredCount * 100.0 / rateDenominator;
+            double competitorRate = rateDenominator == 0 ? 0.0 : competitorPreferredCount * 100.0 / rateDenominator;
+            return new ComparisonVerdictStats(
+                    targetPreferredCount,
+                    competitorPreferredCount,
+                    tieCount,
+                    unclearCount,
+                    verdictCount,
+                    targetRate,
+                    competitorRate
+            );
         }
     }
 

@@ -64,9 +64,12 @@
           </div>
         </div>
 
-        <!-- 负面证据 -->
+        <!-- 真实负面证据池 -->
         <div v-if="negativeEvidenceList.length > 0" class="p10-evidence-wrap">
-          <div class="evidence-tag p10-evidence-tag">⚠ NEGATIVE EVIDENCE · 负面提及证据</div>
+          <div class="evidence-tag p10-evidence-tag">AI NEGATIVE FEEDBACK · AI 提到的负面反馈</div>
+          <div class="p10-evidence-note">
+            {{ concernEvidenceNote }}
+          </div>
           <div
             v-for="(evidence, idx) in negativeEvidenceList"
             :key="`${evidence.platform_code}-${evidence.tested_at}-${idx}`"
@@ -102,7 +105,7 @@ import PresaleChart from './shared/PresaleChart.vue'
  *   - 3 条进度/数字:基于 positive/neutral/negative 三分类
  *   - 正面关键词:sentiment_detail.top_keywords?(可选,undefined 整块不渲染)
  *     字号用 keyword.weight 做视觉分级(1-5,最高 20px,最低 12px)
- *   - 负面证据:sentiment_detail.negative_evidence 最多展示 3 条
+ *   - 真实负面证据池:sentiment_detail.negative_evidence 最多展示 3 条;新报告只保留 sentiment=NEGATIVE
  *
  * 不做:
  *   - 原型"VS. 竞品"块(91% vs 82%):无 competitor_sentiment 契约,去掉
@@ -112,7 +115,6 @@ const { mergedView: mergedViewRef } = useMergedView()
 const mergedView = computed(() => mergedViewRef.value!)
 
 const sentiment = computed(() => mergedView.value.sentiment_detail)
-
 // ─── 计数与百分比 ───────────────────────────────────────
 const totalCount = computed(() => {
   const s = sentiment.value
@@ -291,7 +293,12 @@ const positiveKeywords = computed<KeywordChip[]>(() => {
   })
 })
 
-// ─── 负面证据(最多 3 条) ──────────────────────────────
+const concernEvidenceNote = computed(() => {
+  const count = sentiment.value.negative_count
+  return `按情感分类口径识别真负面 ${count} 条；下方为 AI 回答中需要优先处理的代表性负面片段。`
+})
+
+// ─── 真实负面证据池(最多 3 条) ───────────────────────────
 const negativeEvidenceList = computed(() => {
   const list = sentiment.value.negative_evidence
   if (!list || list.length === 0) return []
@@ -393,12 +400,18 @@ function formatEvidenceDate(isoStr: string): string {
   background: rgba(4, 120, 87, 0.08);
 }
 
-/* 负面证据 */
+/* 真实负面证据 */
 .p10-evidence-wrap {
   /* evidence-tag / evidence-box 来自 report-theme.css */
 }
 .p10-evidence-tag {
   color: #b91c1c !important;
+}
+.p10-evidence-note {
+  margin: 8px 0 12px;
+  color: #6b6456;
+  font-size: 11px;
+  line-height: 1.7;
 }
 .p10-evidence-box {
   border-color: #b91c1c !important;

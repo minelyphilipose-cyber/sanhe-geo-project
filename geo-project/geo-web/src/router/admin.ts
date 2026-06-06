@@ -210,6 +210,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '发布平台管理', hidden: true, permissions: ['user.manage'] },
     },
     {
+      path: 'content/self-media-schedule-capabilities',
+      name: 'SelfMediaScheduleCapabilityManagement',
+      component: () => import('@/views/admin/content/SelfMediaScheduleCapabilityManagement.vue'),
+      meta: { title: '自媒体排期能力', hidden: true, permissions: ['user.manage'] },
+    },
+    {
       path: 'content/publish-platforms/:code',
       name: 'PublishPlatformDetail',
       component: () => import('@/views/admin/content/PublishPlatformDetail.vue'),
@@ -265,6 +271,16 @@ const adminRoutes: RouteRecordRaw = {
       component: () => import('@/views/admin/presale/report/PresalePage03Config.vue'),
       meta: {
         title: 'PAGE03 配置',
+        hidden: true,
+        roles: ['delivery_manager', 'manager', 'super_admin'],
+      },
+    },
+    {
+      path: 'presale/report/narrative-config',
+      name: 'PresaleNarrativeConfig',
+      component: () => import('@/views/admin/presale/report/PresaleNarrativeConfig.vue'),
+      meta: {
+        title: '诊断文案配置',
         hidden: true,
         roles: ['delivery_manager', 'manager', 'super_admin'],
       },

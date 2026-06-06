@@ -23,11 +23,17 @@ class NegativeEvidenceBuilderTest {
     @Test
     void build_dedupesAffectedPlatforms() {
         SentimentDetail.NegativeEvidence e1 = SentimentDetail.NegativeEvidence.builder()
+                .sentiment(SentimentDetail.Sentiment.NEGATIVE)
                 .platformCode("doubao").platformName("豆包").snippet("服务差").build();
         SentimentDetail.NegativeEvidence e2 = SentimentDetail.NegativeEvidence.builder()
+                .sentiment(SentimentDetail.Sentiment.NEGATIVE)
                 .platformCode("doubao").platformName("豆包").snippet("等位久").build();
         SentimentDetail.NegativeEvidence e3 = SentimentDetail.NegativeEvidence.builder()
+                .sentiment(SentimentDetail.Sentiment.NEUTRAL)
                 .platformCode("wenxin").platformName("文心一言").snippet("价格高").build();
+        SentimentDetail.NegativeEvidence e4 = SentimentDetail.NegativeEvidence.builder()
+                .sentiment(SentimentDetail.Sentiment.NEGATIVE)
+                .platformCode("wenxin").platformName("文心一言").snippet("态度差").build();
 
         SentimentDetail.SentimentKeyword kw = SentimentDetail.SentimentKeyword.builder()
                 .keyword("服务质量")
@@ -36,7 +42,7 @@ class NegativeEvidenceBuilderTest {
 
         SentimentDetail sd = new SentimentDetail();
         sd.setNegativeCount(3);
-        sd.setNegativeEvidence(Arrays.asList(e1, e2, e3));
+        sd.setNegativeEvidence(Arrays.asList(e1, e2, e3, e4));
         sd.setTopKeywords(Arrays.asList(kw));
 
         RawSnapshotDTO l1 = new RawSnapshotDTO();

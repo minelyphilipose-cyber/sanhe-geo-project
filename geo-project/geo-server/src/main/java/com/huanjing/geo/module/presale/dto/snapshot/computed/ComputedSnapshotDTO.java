@@ -41,9 +41,17 @@ public class ComputedSnapshotDTO {
     @JsonProperty("platform_intent_breakdown")
     private List<PlatformIntentCell> platformIntentBreakdown;
 
+    /** 报告叙事画像,用于 L3 文案和前端展示策略。 */
+    @JsonProperty("narrative_profile")
+    private NarrativeProfile narrativeProfile;
+
     /** 按业务价值分档的场景覆盖度。 */
     @JsonProperty("scene_coverage")
     private SceneCoverage sceneCoverage;
+
+    /** 推荐型高价值场景中的竞品压制事实源。 */
+    @JsonProperty("scene_competitor_pressure")
+    private SceneCompetitorPressure sceneCompetitorPressure;
 
     /**
      * 规则引擎命中的优化发现。

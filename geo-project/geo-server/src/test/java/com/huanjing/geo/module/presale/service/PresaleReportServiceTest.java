@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.presale.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.export.persist.mapper.PresaleReportExportMapper;
@@ -76,7 +77,8 @@ class PresaleReportServiceTest {
                 promptTemplateMapper,
                 versionPromptTemplateMapper,
                 promptTemplateDraftValidator,
-                llmPromptQuestionDraftValidator
+                llmPromptQuestionDraftValidator,
+                new ObjectMapper()
         );
     }
 
@@ -84,6 +86,7 @@ class PresaleReportServiceTest {
     void deleteReport_marksReportDeletedWhenNoActiveWork() {
         PresaleReport report = report();
         when(accessService.requireReportWithAccess(REPORT_ID)).thenReturn(report);
+        when(accessService.canEditCurrentUser(report)).thenReturn(true);
         when(versionMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L, 0L);
         when(exportMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
         when(currentUserService.requireCurrentUser()).thenReturn(user());
@@ -102,7 +105,9 @@ class PresaleReportServiceTest {
 
     @Test
     void deleteReport_blocksActiveGeneration() {
-        when(accessService.requireReportWithAccess(REPORT_ID)).thenReturn(report());
+        PresaleReport report = report();
+        when(accessService.requireReportWithAccess(REPORT_ID)).thenReturn(report);
+        when(accessService.canEditCurrentUser(report)).thenReturn(true);
         when(versionMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(1L);
 
         BizException ex = assertThrows(BizException.class, () -> service.deleteReport(REPORT_ID));
@@ -114,7 +119,9 @@ class PresaleReportServiceTest {
 
     @Test
     void deleteReport_blocksActiveExport() {
-        when(accessService.requireReportWithAccess(REPORT_ID)).thenReturn(report());
+        PresaleReport report = report();
+        when(accessService.requireReportWithAccess(REPORT_ID)).thenReturn(report);
+        when(accessService.canEditCurrentUser(report)).thenReturn(true);
         when(versionMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
         when(exportMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(1L);
 
@@ -126,7 +133,9 @@ class PresaleReportServiceTest {
 
     @Test
     void deleteReport_blocksFrozenVersion() {
-        when(accessService.requireReportWithAccess(REPORT_ID)).thenReturn(report());
+        PresaleReport report = report();
+        when(accessService.requireReportWithAccess(REPORT_ID)).thenReturn(report);
+        when(accessService.canEditCurrentUser(report)).thenReturn(true);
         when(versionMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L, 1L);
         when(exportMapper.selectCount(any(LambdaQueryWrapper.class))).thenReturn(0L);
 

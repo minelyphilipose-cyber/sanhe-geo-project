@@ -16,7 +16,9 @@ import com.huanjing.geo.module.presale.dto.snapshot.computed.Scores;
 import com.huanjing.geo.module.presale.generate.calc.RoiCalculator;
 import com.huanjing.geo.module.presale.generate.calc.SceneAndIntentResult;
 import com.huanjing.geo.module.presale.generate.calc.SceneCoverageCalculator;
+import com.huanjing.geo.module.presale.generate.calc.SceneCompetitorPressureCalculator;
 import com.huanjing.geo.module.presale.generate.calc.ScoresCalculator;
+import com.huanjing.geo.module.presale.generate.narrative.NarrativeProfileCalculator;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
 import com.huanjing.geo.module.presale.ruleengine.PresaleRuleEngineExecutor;
@@ -54,11 +56,15 @@ class PresaleComputedSnapshotEnricherTest {
     @Mock
     private SceneCoverageCalculator sceneCoverageCalculator;
     @Mock
+    private SceneCompetitorPressureCalculator sceneCompetitorPressureCalculator;
+    @Mock
     private ScoresCalculator scoresCalculator;
     @Mock
     private PresaleRuleEngineExecutor ruleEngineExecutor;
     @Mock
     private RoiCalculator roiCalculator;
+    @Mock
+    private NarrativeProfileCalculator narrativeProfileCalculator;
     @Mock
     private PresaleAiPromptResultMapper aiPromptResultMapper;
 
@@ -158,8 +164,11 @@ class PresaleComputedSnapshotEnricherTest {
         org.mockito.Mockito.when(engine.execute(any(), any())).thenReturn(defaultRuleResult());
         org.mockito.Mockito.when(roiCalc.compute(any(), any())).thenReturn(defaultRoi());
 
+        SceneCompetitorPressureCalculator pressureCalc = org.mockito.Mockito.mock(SceneCompetitorPressureCalculator.class);
+
         PresaleComputedSnapshotEnricher enricher = new PresaleComputedSnapshotEnricher(
-                new ObjectMapper(), realBuilder, realValidator, sceneCalc, scoresCalc, engine, roiCalc, mapper);
+                new ObjectMapper(), realBuilder, realValidator, sceneCalc, pressureCalc, scoresCalc, engine, roiCalc,
+                narrativeProfileCalculator, mapper);
 
         String fixture;
         try (InputStream is = getClass().getClassLoader()
@@ -209,11 +218,13 @@ class PresaleComputedSnapshotEnricherTest {
 
         enricher.enrichAndValidate(1L, minimalWrappedRaw(), "{}", true);
 
-        InOrder inOrder = org.mockito.Mockito.inOrder(sceneCoverageCalculator, scoresCalculator, ruleEngineExecutor, roiCalculator);
+        InOrder inOrder = org.mockito.Mockito.inOrder(sceneCoverageCalculator, scoresCalculator, ruleEngineExecutor,
+                roiCalculator, narrativeProfileCalculator);
         inOrder.verify(sceneCoverageCalculator).compute(anyLong(), any(), any(), any());
         inOrder.verify(scoresCalculator).compute(any(), any(), any());
         inOrder.verify(ruleEngineExecutor).execute(any(), any());
         inOrder.verify(roiCalculator).compute(any(), any());
+        inOrder.verify(narrativeProfileCalculator).compute(any(), any());
     }
 
     @Test
@@ -248,9 +259,11 @@ class PresaleComputedSnapshotEnricherTest {
                 builder,
                 validator,
                 sceneCoverageCalculator,
+                sceneCompetitorPressureCalculator,
                 scoresCalculator,
                 ruleEngineExecutor,
                 roiCalculator,
+                narrativeProfileCalculator,
                 aiPromptResultMapper
         );
 

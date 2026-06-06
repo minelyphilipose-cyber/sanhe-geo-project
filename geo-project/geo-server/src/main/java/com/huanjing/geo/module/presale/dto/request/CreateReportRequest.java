@@ -36,6 +36,9 @@ public class CreateReportRequest {
     @Size(max = 50, message = "目标用户最多 50 字")
     private String userType;
 
+    /** 客户指定竞品。为空时系统自动识别;非空时必须正好 3 个。 */
+    private List<@Size(max = 100, message = "竞品名称最多 100 字") String> specifiedCompetitors;
+
     /** 前端反显时加载到的 Prompt 模板版本,用于防止提交前全局 active version 变化。 */
     private String promptTemplateVersion;
 

@@ -25,7 +25,7 @@ import java.util.Map;
 public class PlatformIntentBreakdownBuilder {
 
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
-    private static final String ALGORITHM_VERSION = "v2";
+    private static final String ALGORITHM_VERSION = "v3";
     private static final String CATEGORY_COGNITIVE = "COGNITIVE";
     private static final String CATEGORY_COMPARISON = "COMPARISON";
 
@@ -147,16 +147,20 @@ public class PlatformIntentBreakdownBuilder {
         }
 
         Integer mentionRate = calculateRate(mentionCount, samplePromptCount);
+        Integer judgeScore = null;
+        Integer judgeSampleCount = null;
         Integer platformPromptCount = samplePromptCount;
         String stance = null;
 
-        if (isJudgeIntent(intent) && judgeStat != null) {
-            // 认知/对比在 PR3 口径切换后由裁判聚合给出 0-100 标量，映射到 mention_rate 字段。
-            mentionRate = mapJudgeCellScore(judgeStat.cellScore);
-            platformPromptCount = judgeStat.sampleCount;
+        if (isJudgeIntent(intent)) {
+            mentionRate = null;
+            // 认知/对比由裁判聚合给出 0-100 标量,不再复用 mention_rate。
+            judgeScore = judgeStat == null ? null : mapJudgeCellScore(judgeStat.cellScore);
+            judgeSampleCount = judgeStat == null ? null : judgeStat.sampleCount;
+            platformPromptCount = judgeSampleCount;
             // 认知/对比下无意义,始终为 0。
             mentionCount = 0;
-            if (PresaleIntentCode.COMPARISON == intent) {
+            if (PresaleIntentCode.COMPARISON == intent && judgeStat != null) {
                 stance = judgeStat.stance;
             }
         }
@@ -167,9 +171,12 @@ public class PlatformIntentBreakdownBuilder {
                 .intentLabel(intent.getLabel())
                 .mentionCount(mentionCount)
                 .mentionRate(mentionRate)
+                .judgeScore(judgeScore)
                 .totalPrompts(totalPrompts)
                 .platformPromptCount(platformPromptCount)
+                .judgeSampleCount(judgeSampleCount)
                 .stance(stance)
+                .judgeStance(stance)
                 .build();
     }
 
@@ -237,7 +244,7 @@ public class PlatformIntentBreakdownBuilder {
             for (PresaleIntentCode intent : PresaleIntentCode.allInOrder()) {
                 int promptCount = intentTotalPrompts.get(intent.getCode());
                 int mentionCount = isJudgeIntent(intent) ? 0 : mentionAllocation.getOrDefault(intent.getCode(), 0);
-                int mentionRate = calculateRate(mentionCount, promptCount);
+                Integer mentionRate = isJudgeIntent(intent) ? null : calculateRate(mentionCount, promptCount);
                 result.add(PlatformIntentCell.builder()
                         .platformCode(platform.getPlatformCode())
                         .intentCode(intent.getCode())

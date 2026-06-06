@@ -18,6 +18,7 @@ export interface ComputedSnapshotDTO {
   scores: Scores;
   intent_breakdown: IntentBreakdown[];
   scene_coverage: SceneCoverage;
+  scene_competitor_pressure?: SceneCompetitorPressure;
   optimization_findings: OptimizationFinding[];
   roi_simulation: RoiSimulation;
   /**
@@ -32,6 +33,10 @@ export interface ComputedSnapshotDTO {
    * 见契约 platform-intent-breakdown-spec-v3.md。
    */
   platform_intent_breakdown?: PlatformIntentCell[];
+  /**
+   * 报告叙事画像。新生成报告由 L2 确定性计算写入;历史报告可能缺失。
+   */
+  narrative_profile?: NarrativeProfile;
 }
 
 export interface ComputedSnapshotMeta {
@@ -78,6 +83,31 @@ export interface SceneCoverage {
   high_value: SceneCoverageGroup;
   mid_value: SceneCoverageGroup;
   low_value: SceneCoverageGroup;
+}
+
+/**
+ * 推荐型高价值场景中的竞品压制事实源。
+ */
+export interface SceneCompetitorPressure {
+  hv_reco_total: number;
+  suppressed_scene_count: number;
+  top_suppressing_competitor?: string | null;
+  items: SceneCompetitorPressureItem[];
+}
+
+export interface SceneCompetitorPressureItem {
+  prompt_code?: string | null;
+  query: string;
+  intent: string;
+  target_mentioned_platform_count: number;
+  platforms_evaluated: number;
+  competitors: SceneCompetitorPressureCompetitor[];
+  suppressed: boolean;
+}
+
+export interface SceneCompetitorPressureCompetitor {
+  name: string;
+  mentioned_platform_count: number;
 }
 
 /**
@@ -164,8 +194,10 @@ export interface PlatformIntentCell {
   intent_label: string;
   /** 该 (平台, 意图) 下被品牌提及的次数,>= 0 整数。 */
   mention_count: number;
-  /** 该 (平台, 意图) 下的提及率,0-100 整数。 */
+  /** 该 (平台, 意图) 下的提及率,0-100 整数。认知/对比不适用。 */
   mention_rate: number | null;
+  /** 裁判评分,仅认知/对比适用。 */
+  judge_score?: number | null;
   /** 该意图类别的总 prompt 数(与同 intent_code 的其他 cell 相同,亦等于 intent_breakdown 对应 category.total_prompts)。 */
   total_prompts: number;
   /**
@@ -176,6 +208,93 @@ export interface PlatformIntentCell {
    * - 正整数:正常样本
    */
   platform_prompt_count: number | null;
-  /** 对比型站队方向:target/tie/competitor/null;本阶段前端暂不消费。 */
+  /** 裁判有效样本数,仅认知/对比适用。 */
+  judge_sample_count?: number | null;
+  /** 对比型站队方向:target/tie/competitor/null;历史字段。 */
   stance?: 'target' | 'tie' | 'competitor' | null;
+  /** 对比型裁判站队方向:target/tie/competitor/null。 */
+  judge_stance?: 'target' | 'tie' | 'competitor' | null;
+}
+
+// ───────────────────────────────────────────────────────────
+// 叙事画像
+// ───────────────────────────────────────────────────────────
+
+export type NarrativeBand = 'INVISIBLE' | 'BEHIND' | 'MIDDLE' | 'STRONG' | 'LEADER';
+
+export type NarrativeArchetype =
+  | 'NEGATIVE_PRESSURE'
+  | 'COMPETITOR_OVERTAKE'
+  | 'BRANDED_ONLY'
+  | 'DECISION_GAP'
+  | 'CHANNEL_BLIND'
+  | 'LEADER_WITH_HOLES';
+
+export type NarrativeFindingSource = 'RULE' | 'DERIVED' | 'STRENGTH';
+
+export type NarrativeFindingTierLevel = 'T1' | 'T2' | 'T3' | 'STRENGTH';
+
+export type HeatmapPattern =
+  | 'NEW_CUSTOMER_BLANK'
+  | 'RECO_UNSTABLE'
+  | 'RECO_EMERGING'
+  | 'BROAD_PRESENCE';
+
+export type NarrativeComparisonMetric =
+  | 'MENTION_RATE'
+  | 'RECOMMENDATION_PRESENCE'
+  | 'COMPARISON_PREFERENCE';
+
+export type CompetitorStoryTier = 'T1' | 'T2' | 'T3' | 'T4';
+
+export interface NarrativeProfile {
+  /** 画像算法版本,仅用于诊断。 */
+  profile_version?: string;
+  /** 配置版本,仅用于诊断"哪版配置产出该报告"。 */
+  config_version?: string;
+  band?: NarrativeBand;
+  band_tone?: string;
+  archetype_primary?: NarrativeArchetype;
+  archetype_secondary?: NarrativeArchetype[];
+  finding_tiers?: NarrativeFindingTier[];
+  heatmap_pattern?: HeatmapPattern;
+  display_flags?: NarrativeDisplayFlags;
+  competitor_story?: NarrativeCompetitorStory;
+  lexicon_fallback?: boolean;
+  fallback?: boolean;
+  fallback_reason?: string;
+  diagnostics?: Record<string, unknown>;
+}
+
+export interface NarrativeFindingTier {
+  source?: NarrativeFindingSource;
+  code?: string;
+  /** 逻辑去重键,如 HV_COVERAGE_LOW。 */
+  dedupe_key?: string;
+  tier?: NarrativeFindingTierLevel;
+  priority?: number;
+  archetype?: NarrativeArchetype;
+  primary_archetype_match?: boolean;
+  evidence?: Record<string, unknown>;
+}
+
+export interface NarrativeDisplayFlags {
+  show_negative_box?: boolean;
+  show_advantage_box?: boolean;
+  comparison_metric?: NarrativeComparisonMetric;
+  show_radar_baseline_gap?: boolean;
+  hide_empty_blocks?: boolean;
+  allow_competitor_overtake_claim?: boolean;
+}
+
+export interface NarrativeCompetitorStory {
+  tier?: CompetitorStoryTier;
+  title?: string;
+  landing_copy?: string;
+  suppressed_scene_count?: number;
+  hv_reco_total?: number;
+  client_absent_count?: number;
+  absence_ratio?: number;
+  top_suppressing_competitor?: string | null;
+  fallback?: boolean;
 }

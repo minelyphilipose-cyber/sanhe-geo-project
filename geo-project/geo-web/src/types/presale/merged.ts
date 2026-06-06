@@ -17,14 +17,16 @@ import type {
 } from './raw';
 import type {
   IntentBreakdown,
+  NarrativeProfile,
   OptimizationFinding,
   PlatformIntentCell,
   RoiPhase,
   RoiSimulation,
   SceneCoverage,
+  SceneCompetitorPressure,
   Scores,
 } from './computed';
-import type { ExecutiveSummary, KeyTakeaway, MarketBattleground } from './editable';
+import type { ExecutiveSummary, HeatmapSummary, KeyTakeaway, MarketBattleground } from './editable';
 
 /**
  * 合并视图元数据(版本、冻结、降级、match_level 等全局信息)。
@@ -94,6 +96,8 @@ export interface MergedViewDTO {
   scores: Scores;
   intent_breakdown: IntentBreakdown[];
   scene_coverage: SceneCoverage;
+  /** 推荐型高价值场景中的竞品压制事实源。 */
+  scene_competitor_pressure: SceneCompetitorPressure;
   roi_simulation: RoiSimulation;
   /**
    * β·2·补 新增:平台 × 意图交叉提及率矩阵(P05 热力图消费)。
@@ -104,6 +108,8 @@ export interface MergedViewDTO {
    * 注:未来 6 个月后,若历史报告基本过期,可考虑改为 required 并移除兜底(见 spec v3 §7.4)。
    */
   platform_intent_breakdown: PlatformIntentCell[];
+  /** L2 叙事画像。历史报告缺失时由 mergeSnapshot 生成保守 fallback。 */
+  narrative_profile: NarrativeProfile;
 
   // ─── L3 文案(已应用默认回退) ───
   report_title: string;
@@ -111,6 +117,7 @@ export interface MergedViewDTO {
   executive_summary: ExecutiveSummary;
   market_battleground: MarketBattleground;
   key_takeaways: KeyTakeaway[];
+  heatmap_summary: HeatmapSummary;
   roi_disclaimer: string;
 
   // ─── 合并产物 ───
@@ -167,4 +174,12 @@ export interface MergedCompetitor {
   scene_advantages: string[];
   /** true=来自 L3 运营润色;false=来自 L1 原始提取回退。 */
   scene_is_polished: boolean;
+  comparison_verdict_count?: number;
+  target_preferred_count?: number;
+  competitor_preferred_count?: number;
+  tie_count?: number;
+  unclear_count?: number;
+  target_preferred_rate?: number;
+  competitor_preferred_rate?: number;
+  comparison_advantages?: string[];
 }

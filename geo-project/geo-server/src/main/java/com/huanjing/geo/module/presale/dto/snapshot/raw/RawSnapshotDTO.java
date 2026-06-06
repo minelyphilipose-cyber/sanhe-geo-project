@@ -44,6 +44,14 @@ public class RawSnapshotDTO {
     /** Top3 竞品识别结果(maxItems=3)。 */
     private List<Competitor> competitors;
 
+    /** 竞品来源: specified=客户指定, extracted=系统识别。 */
+    @JsonProperty("competitor_source")
+    private String competitorSource;
+
+    /** 客户指定竞品冻结副本。未指定时为空数组。 */
+    @JsonProperty("specified_competitors")
+    private List<String> specifiedCompetitors;
+
     /** 竞品组对比模式下,从组合对比回答聚合出的组级优势场景。 */
     @JsonProperty("group_scene_advantages")
     private List<String> groupSceneAdvantages;

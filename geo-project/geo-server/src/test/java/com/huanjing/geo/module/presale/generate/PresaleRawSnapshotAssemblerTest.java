@@ -10,9 +10,11 @@ import com.huanjing.geo.module.presale.persist.entity.PresaleAiCall;
 import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReport;
 import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
+import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersionPromptTemplate;
 import com.huanjing.geo.module.system.entity.AiPlatformConfig;
 import com.huanjing.geo.module.system.mapper.AiPlatformConfigMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiCallMapper;
+import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptJudgeResultMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionPromptTemplateMapper;
 import org.junit.jupiter.api.Test;
@@ -42,6 +44,8 @@ class PresaleRawSnapshotAssemblerTest {
     @Mock
     private PresaleAiPromptResultMapper aiPromptResultMapper;
     @Mock
+    private PresaleAiPromptJudgeResultMapper judgeResultMapper;
+    @Mock
     private AiPlatformConfigMapper aiPlatformConfigMapper;
     @Mock
     private PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
@@ -68,6 +72,11 @@ class PresaleRawSnapshotAssemblerTest {
                         Map.of("claude", 2), Map.of("claude", "Claude"), 4
                 ));
         when(competitorAggregator.normalizeName("Claude")).thenReturn("claude");
+        when(competitorAggregator.matchCompetitorDisplayName(any(), any())).thenAnswer(inv -> {
+            String rawName = inv.getArgument(0, String.class);
+            List<String> candidates = inv.getArgument(1);
+            return candidates.stream().filter(rawName::equals).findFirst();
+        });
         when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
 
         when(aiPromptResultMapper.selectList(any())).thenReturn(
@@ -79,8 +88,8 @@ class PresaleRawSnapshotAssemblerTest {
                         promptResult(3L, 1, 2, "NEGATIVE", null, null)
                 ),
                 List.of(
-                        promptResult(4L, 1, null, null, null, "[\"优势A\", \"优势B\"]"),
-                        promptResult(5L, 1, null, null, null, "[\"优势A\"]")
+                        promptResult(4L, 1, null, null, null, "[\"优势A\", \"优势B\"]", "Claude"),
+                        promptResult(5L, 1, null, null, null, "[\"优势A\"]", "Claude")
                 ),
                 List.of(
                         promptResult(6L, null, null, "POSITIVE", null, null),
@@ -102,9 +111,17 @@ class PresaleRawSnapshotAssemblerTest {
 
         assertEquals(3, raw.getTestSummary().getTotalPrompts());
         assertEquals(2, raw.getTestSummary().getTotalPlatforms());
-        assertEquals(10, raw.getTestSummary().getTotalCalls());
-        assertEquals(7, raw.getTestSummary().getSuccessfulCalls());
+        assertEquals(17, raw.getTestSummary().getTotalCalls());
+        assertEquals(14, raw.getTestSummary().getSuccessfulCalls());
         assertEquals(3, raw.getTestSummary().getFailedCalls());
+        assertEquals(raw.getTestSummary().getBatch1PromptTestCount() + raw.getTestSummary().getBatch2PromptTestCount(),
+                raw.getTestSummary().getPromptTestCount());
+        assertEquals(raw.getTestSummary().getQueryCallCount()
+                        + raw.getTestSummary().getAnalyzeCallCount()
+                        + raw.getTestSummary().getJudgeCallCount(),
+                raw.getTestSummary().getTotalCalls());
+        assertEquals(raw.getTestSummary().getSuccessCallCount() + raw.getTestSummary().getFailedCallCount(),
+                raw.getTestSummary().getTotalCalls());
         assertFalse(raw.getTestSummary().getIsDegraded());
 
         assertEquals(2, raw.getPlatformBreakdown().size());
@@ -135,6 +152,78 @@ class PresaleRawSnapshotAssemblerTest {
 
         assertNotNull(raw.getCompetitors());
         assertEquals(0, raw.getCompetitors().size());
+    }
+
+    @Test
+    void testSummary_exposesRawAndWeightedMentionDenominators() throws Exception {
+        PresaleRawSnapshotAssembler assembler = createAssembler();
+        PresaleReport report = report();
+        PresaleReportVersion version = version();
+
+        mockCommonCounts(3L, 0L, 6L, 6L);
+        mockEnabledPlatforms(platform("doubao", "豆包"), platform("kimi", "Kimi"));
+        when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
+
+        PresaleReportVersionPromptTemplate recommendation = template(101L, "推荐型");
+        PresaleReportVersionPromptTemplate cognitive = template(102L, "认知型");
+        List<PresaleReportVersionPromptTemplate> templates = List.of(recommendation, cognitive);
+
+        PresaleAiPromptResult doubaoMentioned = promptResult(1L, 1, 1, "POSITIVE", null, null);
+        doubaoMentioned.setPromptTemplateId(101L);
+        PresaleAiPromptResult doubaoNotMentioned = promptResult(2L, 0, null, "NEUTRAL", null, null);
+        doubaoNotMentioned.setPromptTemplateId(101L);
+        PresaleAiPromptResult doubaoCognitive = promptResult(3L, 1, null, "POSITIVE", null, null);
+        doubaoCognitive.setPromptTemplateId(102L);
+        PresaleAiPromptResult kimiMentioned = promptResult(4L, 1, 1, "POSITIVE", null, null);
+        kimiMentioned.setPromptTemplateId(101L);
+
+        when(versionPromptTemplateMapper.selectList(any())).thenReturn(templates, templates);
+        when(aiPromptResultMapper.selectList(any())).thenReturn(
+                List.of(doubaoMentioned, doubaoNotMentioned, doubaoCognitive),
+                List.of(kimiMentioned),
+                List.of()
+        );
+
+        String json = assembler.assemble(1001L, report, version, Set.of(), List.of());
+        RawSnapshotDTO raw = new ObjectMapper().readValue(json, RawSnapshotDTO.class);
+
+        assertEquals(3, raw.getTestSummary().getSampleQueryCountRaw());
+        assertEquals(5, raw.getTestSummary().getMentionRateWeightedDenominator());
+    }
+
+    @Test
+    void specifiedCompetitors_areFrozenAndReturnedEvenWithoutMentions() throws Exception {
+        PresaleRawSnapshotAssembler assembler = createAssembler();
+        PresaleReport report = report();
+        report.setSpecifiedCompetitors("[\"竞品A\",\"竞品B\",\"竞品C\"]");
+        PresaleReportVersion version = version();
+
+        mockCommonCounts(2L, 1L, 10L, 10L);
+        mockEnabledPlatforms(platform("kimi", "Kimi"));
+        when(competitorAggregator.aggregateBatch1MentionStats(1001L, "Acme"))
+                .thenReturn(new PresaleCompetitorAggregator.Batch1MentionStats(Map.of(), Map.of(), 4));
+        when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());
+
+        String json = assembler.assembleWithCompetitorStats(
+                1001L,
+                report,
+                version,
+                Set.of(),
+                List.of(
+                        new PresaleCompetitorAggregator.ExtractedCompetitor("竞品A", 0, List.of("竞品A")),
+                        new PresaleCompetitorAggregator.ExtractedCompetitor("竞品B", 0, List.of("竞品B")),
+                        new PresaleCompetitorAggregator.ExtractedCompetitor("竞品C", 0, List.of("竞品C"))
+                )
+        );
+        RawSnapshotDTO raw = new ObjectMapper().readValue(json, RawSnapshotDTO.class);
+
+        assertEquals("specified", raw.getCompetitorSource());
+        assertEquals(List.of("竞品A", "竞品B", "竞品C"), raw.getSpecifiedCompetitors());
+        assertEquals(3, raw.getCompetitors().size());
+        assertEquals(List.of("竞品A", "竞品B", "竞品C"),
+                raw.getCompetitors().stream().map(c -> c.getName()).toList());
+        assertEquals(0, raw.getCompetitors().get(0).getMentionCount());
     }
 
     @Test
@@ -228,16 +317,16 @@ class PresaleRawSnapshotAssemblerTest {
         LocalDateTime t3 = LocalDateTime.of(2026, 4, 23, 10, 10);
         LocalDateTime t4 = LocalDateTime.of(2026, 4, 23, 10, 20);
 
-        PresaleAiPromptResult r1 = promptResultWithSentimentPayload(1L, "POSITIVE",
+        PresaleAiPromptResult r1 = promptResultWithSentimentPayload(1L, "NEUTRAL",
                 "[{\"keyword\":\"性价比高\",\"sentiment\":\"POSITIVE\"},{\"keyword\":\"等位时间长\",\"sentiment\":\"NEGATIVE\"}]",
-                "{\"has_negative\":true,\"snippet\":\"证据A\"}", 11L, 101L, "kimi", "问句1", t1);
+                "{\"has_negative\":true,\"snippet\":\"中性关注点不应进入负面池\"}", 11L, 101L, "kimi", "问句1", t1);
         PresaleAiPromptResult r2 = promptResultWithSentimentPayload(2L, "NEGATIVE",
                 "[{\"keyword\":\"性价比高\",\"sentiment\":\"POSITIVE\"}]",
                 "{\"has_negative\":true,\"snippet\":\"证据B\"}", 12L, 102L, "kimi", "问句2", t2);
         PresaleAiPromptResult r3 = promptResultWithSentimentPayload(3L, "NEUTRAL",
                 "[{\"keyword\":\"服务稳定\",\"sentiment\":\"POSITIVE\"}]",
                 "{\"has_negative\":false,\"snippet\":null}", 13L, 103L, "kimi", "问句3", t3);
-        PresaleAiPromptResult r4 = promptResultWithSentimentPayload(4L, "POSITIVE",
+        PresaleAiPromptResult r4 = promptResultWithSentimentPayload(4L, "NEGATIVE",
                 "[]",
                 "{\"has_negative\":true,\"snippet\":\"证据C\"}", 14L, 104L, "kimi", "问句4", t4);
 
@@ -262,11 +351,12 @@ class PresaleRawSnapshotAssemblerTest {
         assertEquals(2, raw.getSentimentDetail().getTopKeywords().get(0).getFrequency());
         assertEquals(SentimentDetail.Sentiment.POSITIVE, raw.getSentimentDetail().getTopKeywords().get(0).getSentiment());
 
-        assertEquals(3, raw.getSentimentDetail().getNegativeEvidence().size());
+        assertEquals(2, raw.getSentimentDetail().getNegativeEvidence().size());
         assertEquals("证据C", raw.getSentimentDetail().getNegativeEvidence().get(0).getSnippet());
+        assertEquals(SentimentDetail.Sentiment.NEGATIVE, raw.getSentimentDetail().getNegativeEvidence().get(0).getSentiment());
         assertEquals("问句4", raw.getSentimentDetail().getNegativeEvidence().get(0).getQuery());
         assertEquals("证据B", raw.getSentimentDetail().getNegativeEvidence().get(1).getSnippet());
-        assertEquals("证据A", raw.getSentimentDetail().getNegativeEvidence().get(2).getSnippet());
+        assertEquals(SentimentDetail.Sentiment.NEGATIVE, raw.getSentimentDetail().getNegativeEvidence().get(1).getSentiment());
     }
 
     @Test
@@ -299,6 +389,7 @@ class PresaleRawSnapshotAssemblerTest {
         return new PresaleRawSnapshotAssembler(
                 aiCallMapper,
                 aiPromptResultMapper,
+                judgeResultMapper,
                 aiPlatformConfigMapper,
                 versionPromptTemplateMapper,
                 benchmarkResolver,
@@ -338,6 +429,16 @@ class PresaleRawSnapshotAssemblerTest {
         return version;
     }
 
+    private PresaleReportVersionPromptTemplate template(Long id, String category) {
+        PresaleReportVersionPromptTemplate template = new PresaleReportVersionPromptTemplate();
+        template.setId(id);
+        template.setReportVersionId(1001L);
+        template.setCategory(category);
+        template.setHasCompetitorVar(0);
+        template.setPromptContent(category + "问题");
+        return template;
+    }
+
     private BenchmarksFrozen benchmark() {
         return BenchmarksFrozen.builder()
                 .industry("科技")
@@ -358,6 +459,16 @@ class PresaleRawSnapshotAssemblerTest {
                                                String sentiment,
                                                String mentionedCompetitors,
                                                String sceneAdvantages) {
+        return promptResult(id, isMentioned, ranking, sentiment, mentionedCompetitors, sceneAdvantages, null);
+    }
+
+    private PresaleAiPromptResult promptResult(Long id,
+                                               Integer isMentioned,
+                                               Integer ranking,
+                                               String sentiment,
+                                               String mentionedCompetitors,
+                                               String sceneAdvantages,
+                                               String competitorName) {
         PresaleAiPromptResult row = new PresaleAiPromptResult();
         row.setId(id);
         row.setIsMentioned(isMentioned);
@@ -365,6 +476,7 @@ class PresaleRawSnapshotAssemblerTest {
         row.setSentiment(sentiment);
         row.setMentionedCompetitors(mentionedCompetitors);
         row.setSceneAdvantages(sceneAdvantages);
+        row.setCompetitorName(competitorName);
         row.setTopKeywordsJson("[]");
         row.setNegativeEvidenceJson("{}");
         row.setCreatedAt(LocalDateTime.now());

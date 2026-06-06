@@ -52,6 +52,7 @@ public class PresaleLlmPromptQuestionService {
     private String metaPromptOverride;
 
     public LlmPromptQuestionGenerateVO generate(LlmPromptQuestionGenerateRequest req) {
+        long startedAt = System.currentTimeMillis();
         currentUserService.ensurePermission("presale.report.create");
         SysUser user = currentUserService.requireCurrentUser();
 
@@ -66,7 +67,11 @@ public class PresaleLlmPromptQuestionService {
         Map<PresalePromptCategoryCode, Integer> missingBefore = missingCounts(targetCounts, existingCounts);
         int requestedThisCall = missingBefore.values().stream().mapToInt(Integer::intValue).sum();
         if (requestedThisCall <= 0) {
-            return buildResponse(req.getTotalCount(), targetCounts, List.of(), missingBefore, List.of("当前问题数量已满足配置"));
+            LlmPromptQuestionGenerateVO response = buildResponse(req.getTotalCount(), targetCounts, List.of(), missingBefore,
+                    List.of("当前问题数量已满足配置"));
+            log.info("LLM question generation skipped, requestedTotal={}, costMs={}", req.getTotalCount(),
+                    System.currentTimeMillis() - startedAt);
+            return response;
         }
 
         rateLimiter.acquire(user.getId());
@@ -83,7 +88,10 @@ public class PresaleLlmPromptQuestionService {
         if (missingTotal > 0) {
             warnings.add("已生成 " + generated.size() + " 条，还差 " + missingTotal + " 条，请手动补齐或重新生成");
         }
-        return buildResponse(req.getTotalCount(), targetCounts, generated, missingAfter, warnings);
+        LlmPromptQuestionGenerateVO response = buildResponse(req.getTotalCount(), targetCounts, generated, missingAfter, warnings);
+        log.info("LLM question generation completed, requestedTotal={}, generatedTotal={}, missingTotal={}, costMs={}",
+                req.getTotalCount(), generated.size(), missingTotal, System.currentTimeMillis() - startedAt);
+        return response;
     }
 
     private void validateGenerationPlan(LlmPromptQuestionPlanRequest plan, List<LlmPromptQuestionDraftRequest> existing) {

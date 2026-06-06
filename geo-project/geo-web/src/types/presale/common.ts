@@ -20,7 +20,7 @@ export type MatchLevel = 'EXACT' | 'FALLBACK_INDUSTRY';
 export interface ScoreSet {
   overall: number;
   mention: number;
-  ranking: number;
+  ranking: number | null;
   sentiment: number;
   coverage: number;
 }
@@ -34,8 +34,17 @@ export interface SceneCoverageGroup {
   total: number;
   covered: number;
   coverage_rate: number;
+  coverage?: CoverageStats;
+  natural_coverage?: CoverageStats;
+  judge_coverage?: CoverageStats;
   covered_queries?: SceneQueryItem[];
   missing_queries?: SceneQueryMissing[];
+}
+
+export interface CoverageStats {
+  total: number;
+  covered: number;
+  coverage_rate: number;
 }
 
 /**

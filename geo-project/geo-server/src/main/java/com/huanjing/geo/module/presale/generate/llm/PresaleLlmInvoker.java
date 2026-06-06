@@ -30,6 +30,12 @@ public interface PresaleLlmInvoker {
             throws LlmInvokeException;
 
     /**
+     * 阶段 2.7:行业词汇 bucket 分类草稿调用。仅供管理端人工触发。
+     */
+    LlmCallResult classifyIndustryBucket(PlatformCallContext ctx, String classificationPrompt)
+            throws LlmInvokeException;
+
+    /**
      * 阶段 3:Page03 AI 搜索新战场内容生成。
      */
     LlmCallResult marketBattleground(PlatformCallContext ctx, String marketBattlegroundPrompt)

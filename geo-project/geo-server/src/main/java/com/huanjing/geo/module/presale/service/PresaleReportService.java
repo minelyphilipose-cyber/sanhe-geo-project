@@ -2,6 +2,8 @@ package com.huanjing.geo.module.presale.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.presale.export.persist.entity.PresaleReportExport;
 import com.huanjing.geo.module.presale.export.persist.mapper.PresaleReportExportMapper;
@@ -44,9 +46,12 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.EnumMap;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -88,6 +93,7 @@ public class PresaleReportService {
     private final PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper;
     private final PromptTemplateDraftValidator promptTemplateDraftValidator;
     private final LlmPromptQuestionDraftValidator llmPromptQuestionDraftValidator;
+    private final ObjectMapper objectMapper;
     @Value("${presale.prompt.active-version:v2}")
     private String activePromptTemplateVersion;
 
@@ -102,7 +108,8 @@ public class PresaleReportService {
                                 PresalePromptTemplateMapper promptTemplateMapper,
                                 PresaleReportVersionPromptTemplateMapper versionPromptTemplateMapper,
                                 PromptTemplateDraftValidator promptTemplateDraftValidator,
-                                LlmPromptQuestionDraftValidator llmPromptQuestionDraftValidator) {
+                                LlmPromptQuestionDraftValidator llmPromptQuestionDraftValidator,
+                                ObjectMapper objectMapper) {
         this.reportMapper = reportMapper;
         this.versionMapper = versionMapper;
         this.exportMapper = exportMapper;
@@ -115,6 +122,7 @@ public class PresaleReportService {
         this.versionPromptTemplateMapper = versionPromptTemplateMapper;
         this.promptTemplateDraftValidator = promptTemplateDraftValidator;
         this.llmPromptQuestionDraftValidator = llmPromptQuestionDraftValidator;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -127,6 +135,7 @@ public class PresaleReportService {
         currentUserService.ensurePermission(PERM_CREATE);
         Long userId = currentUserService.requireCurrentUser().getId();
         LocalDateTime now = LocalDateTime.now();
+        List<String> specifiedCompetitors = normalizeSpecifiedCompetitors(req.getSpecifiedCompetitors(), req.getBrandName());
 
         PresaleReport report = new PresaleReport();
         report.setBrandName(req.getBrandName());
@@ -135,6 +144,7 @@ public class PresaleReportService {
         report.setRegion(req.getRegion());
         report.setUserDemand(req.getUserDemand());
         report.setUserType(req.getUserType());
+        report.setSpecifiedCompetitors(toJsonArray(specifiedCompetitors));
         report.setCreatedAt(now);
         report.setUpdatedAt(now);
         report.setCreatedBy(userId);
@@ -299,6 +309,7 @@ public class PresaleReportService {
                 .region(report.getRegion())
                 .userDemand(report.getUserDemand())
                 .userType(report.getUserType())
+                .specifiedCompetitors(parseJsonStringArray(report.getSpecifiedCompetitors()))
                 .promptSourceMode(sourceMode);
 
         if (PromptSourceMode.LLM.toJson().equals(sourceMode)) {
@@ -567,6 +578,73 @@ public class PresaleReportService {
             if (!trimmed.isEmpty()) result.add(trimmed);
         }
         return result;
+    }
+
+    private List<String> normalizeSpecifiedCompetitors(List<String> input, String brandName) {
+        if (input == null || input.isEmpty()) {
+            return List.of();
+        }
+        List<String> values = input.stream()
+                .map(value -> value == null ? "" : value.trim())
+                .filter(value -> !value.isEmpty())
+                .toList();
+        if (values.isEmpty()) {
+            return List.of();
+        }
+        if (values.size() != 3) {
+            throw new BizException(400, "指定竞品必须为空或正好 3 个");
+        }
+        Set<String> dedup = new LinkedHashSet<>();
+        String normalizedBrand = normalizeCompetitorName(brandName);
+        for (String value : values) {
+            String normalized = normalizeCompetitorName(value);
+            if (normalized.isEmpty()) {
+                throw new BizException(400, "指定竞品不能为空");
+            }
+            if (normalized.equals(normalizedBrand)) {
+                throw new BizException(400, "指定竞品不能与品牌名称相同");
+            }
+            if (!dedup.add(normalized)) {
+                throw new BizException(400, "指定竞品不能重复");
+            }
+        }
+        return values;
+    }
+
+    private String normalizeCompetitorName(String value) {
+        return value == null ? "" : value.trim().replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+    }
+
+    private String toJsonArray(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(values);
+        } catch (Exception ex) {
+            throw new BizException(500, "指定竞品序列化失败");
+        }
+    }
+
+    private List<String> parseJsonStringArray(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            if (node == null || !node.isArray()) {
+                return List.of();
+            }
+            List<String> out = new ArrayList<>();
+            for (JsonNode item : node) {
+                if (item != null && item.isTextual() && !item.asText().isBlank()) {
+                    out.add(item.asText().trim());
+                }
+            }
+            return out;
+        } catch (Exception ex) {
+            return List.of();
+        }
     }
 
     private int countEnabledPlatforms() {

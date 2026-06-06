@@ -45,4 +45,36 @@ public class Competitor {
     /** 竞品优势场景原始文本(LLM 提取)。 */
     @JsonProperty("scene_advantages_raw")
     private List<String> sceneAdvantagesRaw;
+
+    /** 对比裁判结论数。 */
+    @JsonProperty("comparison_verdict_count")
+    private Integer comparisonVerdictCount;
+
+    /** 裁判偏向当前品牌的次数。 */
+    @JsonProperty("target_preferred_count")
+    private Integer targetPreferredCount;
+
+    /** 裁判偏向该竞品的次数。 */
+    @JsonProperty("competitor_preferred_count")
+    private Integer competitorPreferredCount;
+
+    /** 裁判认为平局的次数。 */
+    @JsonProperty("tie_count")
+    private Integer tieCount;
+
+    /** 裁判无法判断的次数。 */
+    @JsonProperty("unclear_count")
+    private Integer unclearCount;
+
+    /** 当前品牌偏好率,分母排除 unclear。 */
+    @JsonProperty("target_preferred_rate")
+    private Double targetPreferredRate;
+
+    /** 竞品偏好率,分母排除 unclear。 */
+    @JsonProperty("competitor_preferred_rate")
+    private Double competitorPreferredRate;
+
+    /** 对比裁判提取的竞品优势场景。 */
+    @JsonProperty("comparison_advantages")
+    private List<String> comparisonAdvantages;
 }

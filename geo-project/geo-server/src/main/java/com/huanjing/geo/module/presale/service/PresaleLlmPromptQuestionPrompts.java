@@ -4,10 +4,10 @@ public final class PresaleLlmPromptQuestionPrompts {
     private PresaleLlmPromptQuestionPrompts() {
     }
 
-    public static final String SYSTEM_PROMPT = "你是售前 GEO 报告的问题生成助手。请严格根据用户给定的品牌、行业、身份、地区、目标用户和客户诉求生成中文自然问题。";
+    public static final String SYSTEM_PROMPT = "你是售前 GEO（生成式引擎优化）报告的问题生成助手。请严格根据用户给定的品牌、行业、身份、地区、目标用户和客户诉求生成中文自然问题。";
 
     public static final String USER_PROMPT_TEMPLATE = """
-            请为售前 GEO 报告生成问题。
+            请为售前 GEO（生成式引擎优化）报告生成问题。
 
             基础信息:
             - 品牌: %s

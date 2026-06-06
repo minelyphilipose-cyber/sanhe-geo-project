@@ -74,6 +74,10 @@ public class EditableContentDTO {
     @JsonProperty("competitor_scene_descriptions")
     private List<CompetitorSceneDescription> competitorSceneDescriptions;
 
+    /** 热力图总览句,由后端从 presale_heatmap_summary 配置渲染。 */
+    @JsonProperty("heatmap_summary")
+    private HeatmapSummary heatmapSummary;
+
     /**
      * ROI 模拟免责声明。可 null。
      * 默认:"基于行业平均模型的估算,实际效果受多种因素影响,建议结合业务实际情况评估"。

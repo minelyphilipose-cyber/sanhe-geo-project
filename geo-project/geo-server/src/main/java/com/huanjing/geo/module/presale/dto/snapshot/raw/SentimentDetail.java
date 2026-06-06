@@ -41,7 +41,7 @@ public class SentimentDetail {
     @JsonProperty("top_keywords")
     private List<SentimentKeyword> topKeywords;
 
-    /** 负面证据原文,用于 PDF 溯源展示。 */
+    /** 真实负面证据原文,用于 PDF 溯源展示。 */
     @JsonProperty("negative_evidence")
     private List<NegativeEvidence> negativeEvidence;
 
@@ -65,13 +65,15 @@ public class SentimentDetail {
         private Integer fontSize;
     }
 
-    /** 负面证据单条。 */
+    /** 真实负面证据单条。 */
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class NegativeEvidence {
+        /** 证据所属情感。v1.3 起 negative_evidence 只保留 NEGATIVE。 */
+        private Sentiment sentiment;
         @JsonProperty("platform_code")
         private String platformCode;
         @JsonProperty("platform_name")

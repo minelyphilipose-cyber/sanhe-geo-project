@@ -27,10 +27,34 @@ public class SceneCoverageGroup {
     /** 覆盖率(0-100)。 */
     @JsonProperty("coverage_rate")
     private Double coverageRate;
+
+    /** 合成覆盖度,与 total/covered/coverage_rate 同口径。 */
+    private CoverageStats coverage;
+
+    /** 自然问询覆盖度:推荐/问题/场景。 */
+    @JsonProperty("natural_coverage")
+    private CoverageStats naturalCoverage;
+
+    /** 裁判覆盖度:认知/对比。 */
+    @JsonProperty("judge_coverage")
+    private CoverageStats judgeCoverage;
+
     /** 已覆盖的查询明细(可选)。 */
     @JsonProperty("covered_queries")
     private List<SceneQueryItem> coveredQueries;
     /** 未覆盖的查询明细 + 竞品覆盖情况(可选)。 */
     @JsonProperty("missing_queries")
     private List<SceneQueryMissing> missingQueries;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public static class CoverageStats {
+        private Integer total;
+        private Integer covered;
+        @JsonProperty("coverage_rate")
+        private Double coverageRate;
+    }
 }

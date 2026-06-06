@@ -63,18 +63,21 @@
               <div class="metric-hero p02-scope-number">
                 {{ mergedView.test_summary.total_prompts }}
               </div>
-              <div class="p02-scope-text">测试查询<br />5 类意图覆盖</div>
+              <div class="p02-scope-text">测试查询<br />通用模板数</div>
             </div>
             <div>
               <div class="metric-hero p02-scope-number">
-                {{ independentTestCount }}
+                {{ completedPromptResultCount }}
               </div>
-              <div class="p02-scope-text">独立测试<br />平台 × 查询</div>
+              <div class="p02-scope-text">实际完成测试<br />全意图结果数</div>
             </div>
             <div>
-              <div class="metric-hero p02-scope-number">5</div>
-              <div class="p02-scope-text">分析维度<br />提及 / 排名 / 情感 / 覆盖 / 竞品</div>
+              <div class="metric-hero p02-scope-number">{{ judgeCallCount }}</div>
+              <div class="p02-scope-text">裁判执行<br />认知 / 对比评估</div>
             </div>
+          </div>
+          <div class="p02-scope-note">
+            实际完成测试为 batch1 + batch2 的总 prompt 测试结果数；对比类查询包含在测试查询模板内,并会在竞品轮次展开执行。
           </div>
         </div>
 
@@ -105,7 +108,8 @@ import { presaleLabel } from '@/utils/presale/presaleLabel'
  *   - BRAND 副行:若将来后端补 "brand_name_en / legal_entity" 字段再显示,
  *     现阶段留空字符串(不占位,不硬造)
  *   - REGION 副行:同上,不硬造"华北"等
- * 独立测试次数 = total_platforms × total_prompts(原型"336" = 8 × 42)。
+ * 实际完成测试 = test_summary.prompt_test_count。
+ * 这是 batch1 + batch2 的全意图结果行数,不是 total_platforms × total_prompts。
  */
 
 const { mergedView: mergedViewRef, reportCreatedAt } = useMergedView()
@@ -124,9 +128,14 @@ const regionSubText = computed(() => {
   return ''
 })
 
-const independentTestCount = computed(() => {
+const completedPromptResultCount = computed(() => {
   const s = mergedView.value.test_summary
-  return s.total_platforms * s.total_prompts
+  return s.prompt_test_count ?? s.total_platforms * s.total_prompts
+})
+
+const judgeCallCount = computed(() => {
+  const s = mergedView.value.test_summary
+  return s.judge_call_count ?? 0
 })
 
 const issuedText = computed(() => {
@@ -237,6 +246,14 @@ const issuedText = computed(() => {
   color: rgba(255, 255, 255, 0.7);
   margin-top: 8px;
   line-height: 1.5;
+}
+.p02-scope-note {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.58);
+  font-size: 11px;
+  line-height: 1.7;
 }
 
 .p02-quote-wrap {

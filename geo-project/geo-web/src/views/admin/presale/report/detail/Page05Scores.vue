@@ -119,6 +119,9 @@ import { toIntRounded } from '@/utils/presale/numberFormat'
 
 const { mergedView: mergedViewRef } = useMergedView()
 const mergedView = computed(() => mergedViewRef.value!)
+const showRadarBaselineGap = computed(
+  () => mergedView.value.narrative_profile.display_flags?.show_radar_baseline_gap !== false
+)
 
 // ─── 4 维度对比行 ────────────────────────────────────────
 interface DimRow {
@@ -128,6 +131,8 @@ interface DimRow {
   avg: number | string
   delta: number | null
   isGreen: boolean
+  radarScore: number | null
+  radarAvg: number | null
 }
 
 const dimensionRows = computed<DimRow[]>(() => {
@@ -140,15 +145,19 @@ const dimensionRows = computed<DimRow[]>(() => {
       score: toIntRounded(scores.mention),
       avg: toIntRounded(avg.mention),
       delta: toIntRounded(scores.mention - avg.mention),
-      isGreen: false
+      isGreen: false,
+      radarScore: toIntRounded(scores.mention),
+      radarAvg: toIntRounded(avg.mention)
     },
     {
       key: 'ranking',
       label: '排名得分',
       score: scores.ranking == null ? '—' : toIntRounded(scores.ranking),
-      avg: toIntRounded(avg.ranking),
-      delta: scores.ranking == null ? null : toIntRounded(scores.ranking - avg.ranking),
-      isGreen: false
+      avg: avg.ranking == null ? '—' : toIntRounded(avg.ranking),
+      delta: scores.ranking == null || avg.ranking == null ? null : toIntRounded(scores.ranking - avg.ranking),
+      isGreen: false,
+      radarScore: scores.ranking == null || avg.ranking == null ? null : toIntRounded(scores.ranking),
+      radarAvg: scores.ranking == null || avg.ranking == null ? null : toIntRounded(avg.ranking)
     },
     {
       key: 'sentiment',
@@ -157,7 +166,9 @@ const dimensionRows = computed<DimRow[]>(() => {
       avg: toIntRounded(avg.sentiment),
       delta: toIntRounded(scores.sentiment - avg.sentiment),
       // 情感维度视觉上绿色(对齐原型)
-      isGreen: true
+      isGreen: true,
+      radarScore: toIntRounded(scores.sentiment),
+      radarAvg: toIntRounded(avg.sentiment)
     },
     {
       key: 'coverage',
@@ -165,17 +176,38 @@ const dimensionRows = computed<DimRow[]>(() => {
       score: toIntRounded(scores.coverage),
       avg: toIntRounded(avg.coverage),
       delta: toIntRounded(scores.coverage - avg.coverage),
-      isGreen: false
+      isGreen: false,
+      radarScore: toIntRounded(scores.coverage),
+      radarAvg: toIntRounded(avg.coverage)
     }
   ]
 })
 
 // ─── radar chart option ─────────────────────────────────
 const radarOption = computed<EChartsOption>(() => {
-  const rows = dimensionRows.value
+  const rows = dimensionRows.value.filter((d) => d.radarScore != null && d.radarAvg != null)
   const indicator = rows.map((d) => ({ name: d.label, max: 100 }))
-  const selfData = rows.map((d) => (typeof d.score === 'number' ? d.score : 0))
-  const avgData = rows.map((d) => (typeof d.avg === 'number' ? d.avg : 0))
+  const selfData = rows.map((d) => d.radarScore as number)
+  const avgData = rows.map((d) => d.radarAvg as number)
+  const legendData = showRadarBaselineGap.value ? ['您的品牌', '行业均值'] : ['您的品牌']
+  const seriesData: Array<Record<string, unknown>> = [
+    {
+      name: '您的品牌',
+      value: selfData,
+      lineStyle: { color: '#1e3a8a', width: 2 },
+      itemStyle: { color: '#1e3a8a' },
+      areaStyle: { color: 'rgba(30, 58, 138, 0.15)' }
+    }
+  ]
+  if (showRadarBaselineGap.value) {
+    seriesData.push({
+      name: '行业均值',
+      value: avgData,
+      lineStyle: { color: '#d97706', width: 2, type: 'dashed' },
+      itemStyle: { color: '#d97706' },
+      areaStyle: { color: 'rgba(217, 119, 6, 0.08)' }
+    })
+  }
 
   return {
     tooltip: {
@@ -185,7 +217,7 @@ const radarOption = computed<EChartsOption>(() => {
       textStyle: { color: '#fefcf7', fontSize: 12 }
     },
     legend: {
-      data: ['您的品牌', '行业均值'],
+      data: legendData,
       bottom: 0,
       textStyle: { color: '#1a2942', fontSize: 12 }
     },
@@ -214,22 +246,7 @@ const radarOption = computed<EChartsOption>(() => {
     series: [
       {
         type: 'radar',
-        data: [
-          {
-            name: '您的品牌',
-            value: selfData,
-            lineStyle: { color: '#1e3a8a', width: 2 },
-            itemStyle: { color: '#1e3a8a' },
-            areaStyle: { color: 'rgba(30, 58, 138, 0.15)' }
-          },
-          {
-            name: '行业均值',
-            value: avgData,
-            lineStyle: { color: '#d97706', width: 2, type: 'dashed' },
-            itemStyle: { color: '#d97706' },
-            areaStyle: { color: 'rgba(217, 119, 6, 0.08)' }
-          }
-        ]
+        data: seriesData
       }
     ]
   }

@@ -7,6 +7,7 @@ import com.huanjing.geo.module.presale.persist.entity.PresaleAiPromptResult;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleAiPromptResultMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.Collections;
@@ -15,8 +16,8 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -29,11 +30,20 @@ public class PresaleCompetitorAggregator {
 
     private final PresaleAiPromptResultMapper aiPromptResultMapper;
     private final ObjectMapper objectMapper;
+    private final CompetitorNameNormalizer nameNormalizer;
 
+    @Autowired
     public PresaleCompetitorAggregator(PresaleAiPromptResultMapper aiPromptResultMapper,
-                                       ObjectMapper objectMapper) {
+                                       ObjectMapper objectMapper,
+                                       CompetitorNameNormalizer nameNormalizer) {
         this.aiPromptResultMapper = aiPromptResultMapper;
         this.objectMapper = objectMapper;
+        this.nameNormalizer = nameNormalizer;
+    }
+
+    PresaleCompetitorAggregator(PresaleAiPromptResultMapper aiPromptResultMapper,
+                                ObjectMapper objectMapper) {
+        this(aiPromptResultMapper, objectMapper, new CompetitorNameNormalizer());
     }
 
     public Batch1MentionStats aggregateBatch1MentionStats(Long versionId, String brandName) {
@@ -129,10 +139,11 @@ public class PresaleCompetitorAggregator {
      * 语义归并:trim + 去所有空白 + lowercase。
      */
     public String normalizeName(String input) {
-        if (input == null) {
-            return "";
-        }
-        return input.trim().replaceAll("\\s+", "").toLowerCase(Locale.ROOT);
+        return nameNormalizer.normalizeKey(input);
+    }
+
+    public Optional<String> matchCompetitorDisplayName(String rawName, List<String> candidateDisplayNames) {
+        return nameNormalizer.matchDisplayName(rawName, candidateDisplayNames);
     }
 
     public record Batch1MentionStats(

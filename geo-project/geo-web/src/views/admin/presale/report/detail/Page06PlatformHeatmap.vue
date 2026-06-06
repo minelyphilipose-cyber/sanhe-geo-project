@@ -17,7 +17,13 @@
         </div>
 
         <!-- 正常态:有交叉数据 -->
-        <template v-if="hasCrossData">
+        <template v-if="hasRenderableHeatmap">
+          <div class="p06-summary">
+            <div class="mono p06-summary-label">HEATMAP SUMMARY</div>
+            <div class="chinese-serif p06-summary-text">{{ heatmapSummary.summary }}</div>
+            <div class="p06-summary-legend">{{ heatmapSummary.color_legend }}</div>
+          </div>
+
           <!-- 热力图主体 -->
           <div class="p06-heatmap">
             <!-- 列头行(平台) -->
@@ -32,27 +38,32 @@
               </div>
             </div>
 
-            <!-- 5 行 intent -->
-            <div
-              v-for="row in heatRows"
-              :key="row.intent_code"
-              class="p06-row"
-              :style="gridTemplate"
-            >
-              <div class="p06-row-label">
-                <span>{{ row.intent_label }}</span>
-                <span class="p06-row-metric">{{ row.metric_label }}</span>
+            <template v-for="group in groupedHeatRows" :key="group.key">
+              <div class="p06-group-title">
+                <span>{{ group.title }}</span>
+                <span>{{ group.subtitle }}</span>
               </div>
               <div
-                v-for="cell in row.cells"
-                :key="cell.key"
-                class="heat-cell"
-                :class="[cell.heatClass, { 'p06-cell-null': cell.isNull }]"
-                :title="cell.tooltip"
+                v-for="row in group.rows"
+                :key="row.intent_code"
+                class="p06-row"
+                :style="gridTemplate"
               >
-                {{ cell.display }}
+                <div class="p06-row-label">
+                  <span>{{ row.intent_label }}</span>
+                  <span class="p06-row-metric">{{ row.metric_label }}</span>
+                </div>
+                <div
+                  v-for="cell in row.cells"
+                  :key="cell.key"
+                  class="heat-cell"
+                  :class="[cell.heatClass, { 'p06-cell-null': cell.isNull }]"
+                  :title="cell.tooltip"
+                >
+                  {{ cell.display }}
+                </div>
               </div>
-            </div>
+            </template>
 
             <!-- 图例 -->
             <div class="mono p06-legend">
@@ -71,7 +82,7 @@
           <div class="p06-metric-note">
             <div class="mono p06-metric-note-label">指标口径说明</div>
             <div>
-              注:认知型与对比型测试中,问题已包含品牌名,故采用裁判 LLM 评估“AI 对品牌的认知质量”与“AI 在竞争中的立场”,而非主动提及率。三类指标统一映射至 0~100,但语义不同。
+              注:推荐型、问题型、场景型展示自然问询提及率;认知型与对比型采用裁判 LLM 评估“AI 对品牌的认知质量”与“AI 在竞争中的立场”,展示 judge_score。三类指标统一映射至 0~100,但语义不同。
             </div>
           </div>
 
@@ -146,14 +157,30 @@ const mergedView = computed(() => mergedViewRef.value!)
 
 // ─── 静态常量 ──────────────────────────────────────────────
 
-/** 5 意图固定渲染顺序(spec v3 §2.2)。 */
-const INTENT_ORDER: readonly IntentCode[] = [
-  'RECOMMENDATION',
-  'COMPARISON',
-  'INQUIRY',
-  'COGNITIVE',
-  'SCENARIO'
+interface IntentGroupConfig {
+  key: 'new_customer' | 'existing_customer'
+  title: string
+  subtitle: string
+  intents: readonly IntentCode[]
+}
+
+/** 新/老顾客分组渲染顺序。 */
+const INTENT_GROUPS: readonly IntentGroupConfig[] = [
+  {
+    key: 'new_customer',
+    title: '新顾客入口',
+    subtitle: '推荐、咨询、具体场景问题',
+    intents: ['RECOMMENDATION', 'INQUIRY', 'SCENARIO']
+  },
+  {
+    key: 'existing_customer',
+    title: '老顾客决策',
+    subtitle: '品牌认知、竞品比较问题',
+    intents: ['COGNITIVE', 'COMPARISON']
+  }
 ] as const
+
+const INTENT_ORDER: readonly IntentCode[] = INTENT_GROUPS.flatMap((group) => group.intents)
 
 /** 行头中文兜底(正常情况从 cell.intent_label 取;cell 缺失时用这张表)。 */
 /** 图例(不含 null,null 图例单独放,只在有 null cell 时显示)。 */
@@ -185,13 +212,19 @@ const hasCrossData = computed(
     platformCols.value.length > 0
 )
 
+const heatmapSummary = computed(() => mergedView.value.heatmap_summary ?? {
+  heatmap_pattern: mergedView.value.narrative_profile.heatmap_pattern ?? 'RECO_EMERGING',
+  summary: '推荐场景开始出现品牌信号,但覆盖广度和强度仍需要继续放大。',
+  color_legend: '颜色越深表示该场景信号越强;浅色表示仍处在建设初期。'
+})
+
 interface HeatCellView {
   key: string
   display: string
   heatClass: string
   isNull: boolean
   tooltip: string
-  stance: PlatformIntentCell['stance']
+  stance: PlatformIntentCell['judge_stance']
 }
 
 interface HeatRowView {
@@ -217,8 +250,31 @@ const heatRows = computed<HeatRowView[]>(() => {
   })
 })
 
+interface HeatGroupView {
+  key: IntentGroupConfig['key']
+  title: string
+  subtitle: string
+  rows: HeatRowView[]
+}
+
+const groupedHeatRows = computed<HeatGroupView[]>(() => {
+  return INTENT_GROUPS.map((group) => {
+    const rows = heatRows.value
+      .filter((row) => group.intents.includes(row.intent_code))
+      .filter((row) => row.cells.some((cell) => !cell.isNull))
+    return {
+      key: group.key,
+      title: group.title,
+      subtitle: group.subtitle,
+      rows
+    }
+  }).filter((group) => group.rows.length > 0)
+})
+
+const hasRenderableHeatmap = computed(() => hasCrossData.value && groupedHeatRows.value.length > 0)
+
 const hasNullCells = computed(() =>
-  heatRows.value.some((row) => row.cells.some((c) => c.isNull))
+  groupedHeatRows.value.some((group) => group.rows.some((row) => row.cells.some((c) => c.isNull)))
 )
 
 /** grid template:行头 110px 固定 + N 列平台均分。 */
@@ -247,8 +303,8 @@ const platformAvgs = computed<PlatformAvg[]>(() => {
       )
       const validRates = cells
         .filter((c): c is PlatformIntentCell => c != null)
-        .filter((c) => c.platform_prompt_count != null && c.platform_prompt_count > 0 && c.mention_rate != null)
-        .map((c) => c.mention_rate ?? 0)
+        .map((c) => cellMetricValue(c))
+        .filter((value): value is number => value != null)
       if (validRates.length === 0) return null
       const avg = validRates.reduce((sum, x) => sum + x, 0) / validRates.length
       return {
@@ -385,7 +441,7 @@ function buildCellView(
   }
 
   const isNull =
-    cell.platform_prompt_count == null || cell.platform_prompt_count <= 0 || cell.mention_rate == null
+    cell.platform_prompt_count == null || cell.platform_prompt_count <= 0 || cellMetricValue(cell) == null
 
   if (isNull) {
     return {
@@ -394,12 +450,12 @@ function buildCellView(
       heatClass: 'heat-0',
       isNull: true,
       tooltip: `${platform.platform_name} · ${cell.intent_label}:数据不足`,
-      stance: cell.stance ?? null
+      stance: cell.judge_stance ?? cell.stance ?? null
     }
   }
 
   const tooltip = buildTooltip(cell)
-  const rate = cell.mention_rate ?? 0
+  const rate = cellMetricValue(cell) ?? 0
 
   return {
     key,
@@ -407,20 +463,28 @@ function buildCellView(
     heatClass: rateToHeatClass(rate),
     isNull: false,
     tooltip: `${platform.platform_name} · ${cell.intent_label}:${tooltip}`,
-    stance: cell.stance ?? null
+    stance: cell.judge_stance ?? cell.stance ?? null
   }
 }
 
 function buildTooltip(cell: PlatformIntentCell): string {
-  const rate = cell.mention_rate ?? 0
+  const rate = cellMetricValue(cell) ?? 0
   if (cell.intent_code === 'COGNITIVE' || cell.intent_code === 'COMPARISON') {
     const scoreLabel = cell.intent_code === 'COMPARISON' ? '净推荐立场评分' : '品牌认知质量评分'
-    const base = `${scoreLabel} ${rate}（基于 ${cell.platform_prompt_count} 次裁判）`
+    const sampleCount = cell.judge_sample_count ?? cell.platform_prompt_count
+    const base = `${scoreLabel} ${rate}（基于 ${sampleCount} 次裁判）`
     if (cell.intent_code !== 'COMPARISON') return base
-    const stanceLabel = toStanceLabel(cell.stance)
+    const stanceLabel = toStanceLabel(cell.judge_stance ?? cell.stance)
     return stanceLabel ? `${base}，站队:${stanceLabel}` : base
   }
   return `${cell.mention_count}/${cell.platform_prompt_count} 提及(${rate}%)`
+}
+
+function cellMetricValue(cell: PlatformIntentCell): number | null {
+  if (cell.intent_code === 'COGNITIVE' || cell.intent_code === 'COMPARISON') {
+    return cell.judge_score ?? null
+  }
+  return cell.mention_rate ?? null
 }
 
 function metricLabel(intentCode: IntentCode): string {
@@ -456,6 +520,33 @@ function rateToHeatClass(rate: number): string {
   margin-top: 60px;
 }
 
+/* ─── 总览句 ────────────────────────────────────────────── */
+
+.p06-summary {
+  margin-bottom: 24px;
+  padding: 16px 18px;
+  background: var(--presale-paper-alt);
+  border-left: 3px solid var(--presale-primary);
+}
+.p06-summary-label {
+  margin-bottom: 6px;
+  color: var(--presale-muted);
+  font-size: 10px;
+  letter-spacing: 2px;
+}
+.p06-summary-text {
+  color: var(--presale-ink);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+.p06-summary-legend {
+  margin-top: 6px;
+  color: var(--presale-ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 /* ─── 热力图 ────────────────────────────────────────────── */
 
 .p06-heatmap {
@@ -477,6 +568,23 @@ function rateToHeatClass(rate: number): string {
   text-align: center;
   color: var(--presale-muted);
   letter-spacing: 1px;
+}
+
+.p06-group-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 16px 0 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--presale-line);
+  color: var(--presale-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+.p06-group-title span:last-child {
+  color: var(--presale-muted);
+  font-size: 11px;
+  font-weight: 400;
 }
 
 /* 行头(意图名) */

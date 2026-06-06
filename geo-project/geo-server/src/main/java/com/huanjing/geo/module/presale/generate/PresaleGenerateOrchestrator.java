@@ -392,8 +392,11 @@ public class PresaleGenerateOrchestrator {
 
         enterStage(versionId, STAGE_COMPETITOR_EXTRACT, "extract competitors");
 
+        List<String> specifiedCompetitors = parseSpecifiedCompetitors(report);
         PresaleCompetitorNormalizationService.NormalizationOutcome normalizationOutcome =
-                extractTopCompetitorsFromBatch1(versionId, report.getBrandName(), operatorUserId, isManager);
+                specifiedCompetitors.isEmpty()
+                        ? extractTopCompetitorsFromBatch1(versionId, report.getBrandName(), operatorUserId, isManager)
+                        : specifiedCompetitorsFromBatch1Stats(versionId, report.getBrandName(), specifiedCompetitors);
         List<PresaleCompetitorAggregator.ExtractedCompetitor> extractedCompetitorStats =
                 normalizationOutcome.competitors();
         ensureGenerationStillRunning(versionId, STAGE_COMPETITOR_EXTRACT);
@@ -1666,9 +1669,50 @@ public class PresaleGenerateOrchestrator {
         return competitorNormalizationService.normalize(versionId, brandName, rawTop, operatorUserId, isManager);
     }
 
+    private PresaleCompetitorNormalizationService.NormalizationOutcome specifiedCompetitorsFromBatch1Stats(
+            Long versionId,
+            String brandName,
+            List<String> specifiedCompetitors) {
+        PresaleCompetitorAggregator.Batch1MentionStats stats =
+                competitorAggregator.aggregateBatch1MentionStats(versionId, brandName);
+        List<PresaleCompetitorAggregator.ExtractedCompetitor> competitors = specifiedCompetitors.stream()
+                .filter(name -> name != null && !name.isBlank())
+                .map(name -> {
+                    String displayName = name.trim();
+                    int mentionCount = stats.countByNormalized()
+                            .getOrDefault(competitorAggregator.normalizeName(displayName), 0);
+                    return new PresaleCompetitorAggregator.ExtractedCompetitor(
+                            displayName, mentionCount, List.of(displayName));
+                })
+                .toList();
+        return new PresaleCompetitorNormalizationService.NormalizationOutcome(competitors, false);
+    }
+
     private List<String> extractTopCompetitorsFromBatch1(Long versionId, String brandName) {
         List<String> competitors = competitorAggregator.extractTopCompetitorsFromBatch1(versionId, brandName);
         return competitors == null ? List.of() : competitors;
+    }
+
+    private List<String> parseSpecifiedCompetitors(PresaleReport report) {
+        if (report == null || report.getSpecifiedCompetitors() == null || report.getSpecifiedCompetitors().isBlank()) {
+            return List.of();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(report.getSpecifiedCompetitors());
+            if (node == null || !node.isArray()) {
+                return List.of();
+            }
+            List<String> out = new ArrayList<>();
+            for (JsonNode item : node) {
+                if (item != null && item.isTextual() && !item.asText().isBlank()) {
+                    out.add(item.asText().trim());
+                }
+            }
+            return out;
+        } catch (Exception ex) {
+            log.warn("ignore invalid specified_competitors json, reportId={}", report.getId(), ex);
+            return List.of();
+        }
     }
 
     private String assembleRawSnapshot(Long versionId,

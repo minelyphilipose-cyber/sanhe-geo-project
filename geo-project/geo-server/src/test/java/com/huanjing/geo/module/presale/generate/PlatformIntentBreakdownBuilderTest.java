@@ -49,7 +49,7 @@ class PlatformIntentBreakdownBuilderTest {
     }
 
     @Test
-    void build_overridesCognitiveAndComparisonMentionRateFromJudgeRows() {
+    void build_writesCognitiveAndComparisonJudgeScoreSeparatelyFromMentionRate() {
         PresaleAiPromptResultMapper mapper = Mockito.mock(PresaleAiPromptResultMapper.class);
         Mockito.when(mapper.selectIntentSamplesByVersionId(1L)).thenReturn(List.of(
                 row("P1", "认知型", "SUCCESS", 0, 1),
@@ -68,14 +68,18 @@ class PlatformIntentBreakdownBuilderTest {
         PlatformIntentCell cognitive = findCell(cells, "P1", "COGNITIVE");
         PlatformIntentCell comparison = findCell(cells, "P1", "COMPARISON");
 
-        assertThat(cognitive.getMentionRate()).isEqualTo(71);
+        assertThat(cognitive.getMentionRate()).isNull();
+        assertThat(cognitive.getJudgeScore()).isEqualTo(71);
         assertThat(cognitive.getPlatformPromptCount()).isEqualTo(7);
-        assertThat(cognitive.getStance()).isNull();
+        assertThat(cognitive.getJudgeSampleCount()).isEqualTo(7);
+        assertThat(cognitive.getJudgeStance()).isNull();
         assertThat(cognitive.getMentionCount()).isEqualTo(0);
 
-        assertThat(comparison.getMentionRate()).isEqualTo(47);
+        assertThat(comparison.getMentionRate()).isNull();
+        assertThat(comparison.getJudgeScore()).isEqualTo(47);
         assertThat(comparison.getPlatformPromptCount()).isEqualTo(17);
-        assertThat(comparison.getStance()).isEqualTo("target");
+        assertThat(comparison.getJudgeSampleCount()).isEqualTo(17);
+        assertThat(comparison.getJudgeStance()).isEqualTo("target");
         assertThat(comparison.getMentionCount()).isEqualTo(0);
     }
 
@@ -101,7 +105,8 @@ class PlatformIntentBreakdownBuilderTest {
 
         assertThat(comparison.getPlatformPromptCount()).isNull();
         assertThat(comparison.getMentionCount()).isEqualTo(0);
-        assertThat(comparison.getMentionRate()).isEqualTo(0);
+        assertThat(comparison.getMentionRate()).isNull();
+        assertThat(comparison.getJudgeScore()).isNull();
     }
 
     @Test
