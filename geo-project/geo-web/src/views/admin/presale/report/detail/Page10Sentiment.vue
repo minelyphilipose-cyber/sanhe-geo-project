@@ -12,9 +12,9 @@
           <span class="section-number">07</span>
           <div>
             <div class="section-label">SENTIMENT ANALYSIS</div>
-            <div class="section-heading">AI 回答语气分析</div>
+            <div class="section-heading">品牌被提及时的情感倾向</div>
             <div class="p10-scope-note">
-              本页统计全部已分析回答的语气分布,不等同于 {{ mergedView.brand_name }} 自身被提及时的情感结论。
+              本页只统计 AI 明确提到 {{ mergedView.brand_name }} 时的情感判断;样本较少时仅作方向参考。
             </div>
           </div>
         </div>
@@ -26,7 +26,10 @@
           </div>
 
           <div>
-            <div class="mono p10-breakdown-label">ANSWER SENTIMENT BREAKDOWN</div>
+            <div class="mono p10-breakdown-label">BRAND MENTION SENTIMENT</div>
+            <div v-if="isSparseSample" class="p10-sparse-note">
+              本次品牌提及样本为 {{ totalCount }} 条,暂不足以形成稳定口碑结论。
+            </div>
 
             <!-- 3 条进度 -->
             <div v-for="row in breakdownRows" :key="row.key" class="p10-bar-row">
@@ -54,9 +57,9 @@
 
         <!-- 正面关键词云 -->
         <div v-if="positiveKeywords.length > 0" class="p10-keywords-wrap">
-          <div class="mono p10-keywords-label">ANSWER POSITIVE KEYWORDS · 回答正面关键词</div>
+          <div class="mono p10-keywords-label">BRAND POSITIVE KEYWORDS · 品牌正面关键词</div>
           <div class="p10-keywords-note">
-            关键词来自全部回答的情感分析结果,用于观察 AI 讨论该主题时的常见正向表达。
+            关键词来自明确提到 {{ mergedView.brand_name }} 的回答,用于观察 AI 如何描述你的品牌。
           </div>
           <div class="p10-keywords-list">
             <span
@@ -126,6 +129,7 @@ const totalCount = computed(() => {
   const s = sentiment.value
   return s.positive_count + s.neutral_count + s.negative_count
 })
+const isSparseSample = computed(() => totalCount.value > 0 && totalCount.value < 10)
 
 function pct(count: number): number {
   if (totalCount.value === 0) return 0
@@ -223,7 +227,7 @@ const doughnutOption = computed<EChartsOption>(() => {
           show: true,
           position: 'center',
           formatter: () => {
-            return `{num|${totalCount.value}}\n{sub|已分析回答}`
+            return `{num|${totalCount.value}}\n{sub|品牌提及}`
           },
           rich: {
             num: {
@@ -354,6 +358,14 @@ function formatEvidenceDate(isoStr: string): string {
   letter-spacing: 3px;
   color: #6b6456;
   margin-bottom: 20px;
+}
+.p10-sparse-note {
+  margin: -8px 0 18px;
+  padding: 10px 12px;
+  background: #fff4df;
+  color: #8a4b0d;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 /* 3 条进度 */

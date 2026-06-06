@@ -329,10 +329,14 @@ class PresaleRawSnapshotAssemblerTest {
         PresaleAiPromptResult r4 = promptResultWithSentimentPayload(4L, "NEGATIVE",
                 "[]",
                 "{\"has_negative\":true,\"snippet\":\"证据C\"}", 14L, 104L, "kimi", "问句4", t4);
+        PresaleAiPromptResult unmentioned = promptResultWithSentimentPayload(5L, "POSITIVE",
+                "[{\"keyword\":\"行业通用好评\",\"sentiment\":\"POSITIVE\"}]",
+                "{\"has_negative\":true,\"snippet\":\"不应进入品牌情感\"}", 15L, 105L, "kimi", "问句5", t4.plusMinutes(5));
+        unmentioned.setIsMentioned(0);
 
         when(aiPromptResultMapper.selectList(any())).thenReturn(
                 List.of(promptResult(10L, 1, 1, "POSITIVE", null, null)),
-                List.of(r1, r2, r3, r4)
+                List.of(r1, r2, r3, r4, unmentioned)
         );
 
         when(aiCallMapper.selectBatchIds(any())).thenReturn(List.of(
@@ -346,7 +350,12 @@ class PresaleRawSnapshotAssemblerTest {
         RawSnapshotDTO raw = new ObjectMapper().readValue(json, RawSnapshotDTO.class);
 
         assertNotNull(raw.getSentimentDetail());
+        assertEquals(0, raw.getSentimentDetail().getPositiveCount());
+        assertEquals(2, raw.getSentimentDetail().getNeutralCount());
+        assertEquals(2, raw.getSentimentDetail().getNegativeCount());
         assertEquals(3, raw.getSentimentDetail().getTopKeywords().size());
+        assertTrue(raw.getSentimentDetail().getTopKeywords().stream()
+                .noneMatch(item -> "行业通用好评".equals(item.getKeyword())));
         assertEquals("性价比高", raw.getSentimentDetail().getTopKeywords().get(0).getKeyword());
         assertEquals(2, raw.getSentimentDetail().getTopKeywords().get(0).getFrequency());
         assertEquals(SentimentDetail.Sentiment.POSITIVE, raw.getSentimentDetail().getTopKeywords().get(0).getSentiment());
@@ -357,6 +366,8 @@ class PresaleRawSnapshotAssemblerTest {
         assertEquals("问句4", raw.getSentimentDetail().getNegativeEvidence().get(0).getQuery());
         assertEquals("证据B", raw.getSentimentDetail().getNegativeEvidence().get(1).getSnippet());
         assertEquals(SentimentDetail.Sentiment.NEGATIVE, raw.getSentimentDetail().getNegativeEvidence().get(1).getSentiment());
+        assertTrue(raw.getSentimentDetail().getNegativeEvidence().stream()
+                .noneMatch(item -> "不应进入品牌情感".equals(item.getSnippet())));
     }
 
     @Test
@@ -495,6 +506,7 @@ class PresaleRawSnapshotAssemblerTest {
         PresaleAiPromptResult row = new PresaleAiPromptResult();
         row.setId(id);
         row.setSentiment(sentiment);
+        row.setIsMentioned(1);
         row.setTopKeywordsJson(topKeywordsJson);
         row.setNegativeEvidenceJson(negativeEvidenceJson);
         row.setAnalyzeCallId(analyzeCallId);

@@ -735,12 +735,15 @@ public class PresaleRawSnapshotAssembler {
         List<PresaleAiPromptResult> rows = aiPromptResultMapper.selectList(
                 new LambdaQueryWrapper<PresaleAiPromptResult>()
                         .eq(PresaleAiPromptResult::getVersionId, versionId)
+                        .eq(PresaleAiPromptResult::getIsMentioned, 1)
                         .isNotNull(PresaleAiPromptResult::getSentiment)
         );
         if (rows == null) {
             rows = new ArrayList<>();
         } else {
-            rows = new ArrayList<>(rows);
+            rows = rows.stream()
+                    .filter(row -> row != null && Integer.valueOf(1).equals(row.getIsMentioned()))
+                    .collect(Collectors.toCollection(ArrayList::new));
         }
         rows.sort(Comparator.comparing(PresaleAiPromptResult::getId, Comparator.nullsLast(Long::compareTo)));
 

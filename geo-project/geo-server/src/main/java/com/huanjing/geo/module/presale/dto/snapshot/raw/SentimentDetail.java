@@ -17,8 +17,8 @@ import java.util.List;
  * 情感明细(L1)。
  * <p>Schema v1.2 $.raw_snapshot.sentiment_detail</p>
  * <p>
- * 统计口径:两轮(275 + 55 = 330)合计。positive/neutral/negative_count 为 required,
- * top_keywords / negative_evidence 可选。
+ * 统计口径:目标品牌被提及时({@code is_mentioned=1})的情感分布。positive/neutral/negative_count 为 required,
+ * top_keywords / negative_evidence 均来自同一批品牌提及样本。
  * </p>
  */
 @Data

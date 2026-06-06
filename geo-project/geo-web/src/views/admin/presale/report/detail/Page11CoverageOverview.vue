@@ -24,11 +24,11 @@
             </span>
             <div class="p11-high-split">
               <div class="p11-high-split-row">
-                <span>顾客主动求推荐时（没报你名字）</span>
+                <span>主动推荐覆盖（顾客没报你名字）</span>
                 <strong>{{ highValueNaturalCovered }} / {{ highValueTotal }}</strong>
               </div>
               <div class="p11-high-split-row">
-                <span>顾客已点名你来比较/了解时</span>
+                <span>点名比较覆盖（顾客已提到你）</span>
                 <strong>{{ highValueJudgeCovered }} / {{ highValueTotal }}</strong>
               </div>
             </div>
@@ -52,8 +52,8 @@
               {{ mergedView.scene_coverage.mid_value.total }} 已覆盖
             </div>
             <div class="p11-summary-split">
-              自然 {{ coverageSplitText(mergedView.scene_coverage.mid_value.natural_coverage) }} ·
-              裁判 {{ coverageSplitText(mergedView.scene_coverage.mid_value.judge_coverage) }}
+              场景提及 {{ coverageSplitText(mergedView.scene_coverage.mid_value.natural_coverage) }} ·
+              品牌认知 {{ coverageSplitText(mergedView.scene_coverage.mid_value.judge_coverage) }}
             </div>
             <div class="p11-summary-desc">间接关联决策的查询</div>
           </div>
@@ -71,8 +71,7 @@
               {{ mergedView.scene_coverage.low_value.total }} 已覆盖
             </div>
             <div class="p11-summary-split">
-              自然 {{ coverageSplitText(mergedView.scene_coverage.low_value.natural_coverage) }} ·
-              裁判 {{ coverageSplitText(mergedView.scene_coverage.low_value.judge_coverage) }}
+              信息提及 {{ coverageSplitText(mergedView.scene_coverage.low_value.natural_coverage) }}
             </div>
             <div class="p11-summary-desc">信息获取型查询</div>
           </div>
