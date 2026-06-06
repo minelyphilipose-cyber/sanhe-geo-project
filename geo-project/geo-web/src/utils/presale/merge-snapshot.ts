@@ -448,7 +448,7 @@ export function mergeFindings(
       finding: l2,
       title: l3?.title ?? renderDefaultFindingTitle(l2),
       description: l3?.description ?? renderDefaultFindingDescription(l2),
-      evidence_text: l3?.evidence_text ?? '(无证据数据)',
+      evidence_text: l3?.evidence_text ?? renderDefaultFindingEvidence(l2),
       // sort_order 合并后保证非 null:L3.sort_order ?? L2 原序 (idx+1)
       sort_order: l3?.sort_order ?? idx + 1,
     };
@@ -465,15 +465,104 @@ export function mergeFindings(
 }
 
 /**
- * finding 默认标题:基于 rule_code 映射。
- * 真实规则库映射由后端 OptimizationRuleRegistry 提供;前端 mock 期用简化兜底。
+ * finding 默认文案:基于 rule_code 的对客兜底。
+ * 这里主要兜住旧报告或 L3 content 缺失时的展示,避免把 RULE_* 内部编码暴露给客户。
  */
+interface FindingDisplayTemplate {
+  title: string;
+  description: string;
+  evidence?: string;
+}
+
+const FINDING_DISPLAY_TEMPLATES: Record<string, FindingDisplayTemplate> = {
+  RULE_COVERAGE_LOW_RECOMMEND: {
+    title: '高价值问题覆盖不足',
+    description:
+      '在最接近成交决策的高价值问题中,品牌出现比例仍偏低。建议优先补齐推荐、咨询和具体场景问题的内容资产,让 AI 在用户主动询问时有稳定依据可以引用。',
+    evidence: '高价值问题覆盖 {{covered_prompts}} / {{total_prompts}},缺口 {{missed_count}} 个'
+  },
+  RULE_BRAND_AWARENESS_LOW: {
+    title: 'AI 对品牌的整体识别偏弱',
+    description:
+      '综合可见度仍处在偏低区间,说明 AI 对品牌基础信息、服务优势和可信来源的掌握不足。建议先补齐权威信息源、门店资料、服务项目和口碑内容,建立可被 AI 反复引用的品牌基础盘。',
+    evidence: '综合得分 {{overall_score}},行业均值 {{industry_avg_overall}},Top1 {{top1_overall}}'
+  },
+  RULE_COMPARE_GAP: {
+    title: '被点名比较时优势表达不足',
+    description:
+      '当用户把品牌与竞品放在一起比较时,AI 对品牌的判断仍不够充分。建议补齐对比型内容,明确服务差异、专业资质、价格透明度和适用人群,减少用户决策阶段的信息空白。',
+    evidence: '对比型问题覆盖 {{covered_prompts}} / {{total_prompts}},覆盖率 {{coverage_rate}}%'
+  },
+  RULE_PLATFORM_IMBALANCE: {
+    title: '不同 AI 平台上的表现不均衡',
+    description:
+      '品牌在不同 AI 平台上的出现情况存在明显差异。建议复盘表现较好的平台内容来源,并将有效信息同步补齐到弱势平台更容易引用的公开信源中。',
+    evidence: '最高 {{strong_platform_name}} {{strong_mention_rate}}%,最低 {{weak_platform_name}} {{weak_mention_rate}}%,差距 {{gap_pp}} 个百分点'
+  },
+  RULE_SCENE_MISS_HIGH_VALUE: {
+    title: '关键决策场景仍有缺口',
+    description:
+      '部分高价值场景中,AI 还没有稳定提到品牌。这类场景往往对应用户正在选择服务机构的关键时刻,建议围绕缺失问题逐条建设内容,提升品牌进入答案的机会。',
+    evidence: '缺失高价值场景 {{missed_count}} 个:{{missed_scenes_text}}'
+  },
+  RULE_NEGATIVE_EVIDENCE: {
+    title: 'AI 回答中出现负面反馈',
+    description:
+      'AI 已引用与品牌相关的负面表述。建议先核实来源,再用事实说明、服务改进和正向内容进行对冲,避免负面信息在后续回答中持续放大。',
+    evidence: '负面反馈 {{negative_evidence_count}} 条,涉及 {{affected_platform_count}} 个平台'
+  },
+  RULE_LOW_SENTIMENT_SCORE: {
+    title: '品牌正向印象不足',
+    description:
+      'AI 对品牌的表述以中性为主,正向评价不够稳定。建议补充真实案例、专业背书、用户评价和服务优势,让 AI 在回答中形成更清晰的正面认知。',
+    evidence: '情感得分 {{sentiment_score}},正面 {{positive_count}} / 中性 {{neutral_count}} / 负面 {{negative_count}}'
+  },
+  RULE_PLATFORM_COVERAGE_NARROW: {
+    title: '覆盖平台范围偏窄',
+    description:
+      '品牌只在部分 AI 平台中被提及,用户换一个 AI 工具后可能看不到品牌。建议针对未覆盖平台补齐公开内容、百科资料、问答内容和本地服务信息。',
+    evidence: '已覆盖 {{covered_platform_count}} / {{total_platforms}} 个平台,未覆盖 {{uncovered_platform_count}} 个'
+  },
+  RULE_PLATFORM_COUNT_LOW: {
+    title: '本次有效测试平台偏少',
+    description:
+      '本次可用测试平台数量偏少,会影响结果代表性。建议先排查平台接入与降级原因,在平台恢复后重新生成报告,让诊断结论更稳定。',
+    evidence: '有效平台 {{effective_platforms}} 个,降级 {{degraded_count}} 个'
+  },
+  RULE_SINGLE_PLATFORM_DOMINANT: {
+    title: '品牌曝光过度依赖单一平台',
+    description:
+      '品牌的主要出现机会集中在单一平台。一旦该平台答案来源或排序逻辑变化,整体可见度可能波动。建议同步建设其他平台可引用的信息源,降低单点依赖。',
+    evidence: '{{dominant_platform_name}} 首推占比 {{dominant_ratio}}%'
+  }
+};
+
 function renderDefaultFindingTitle(l2: OptimizationFinding): string {
-  return `[${l2.priority}] ${l2.rule_code}`;
+  return FINDING_DISPLAY_TEMPLATES[l2.rule_code]?.title ?? '发现一项可优化机会';
 }
 
 function renderDefaultFindingDescription(l2: OptimizationFinding): string {
-  return `规则 ${l2.rule_code} 触发 ${l2.category} 类优化建议。详细依据见证据数据。`;
+  return renderFindingTemplate(
+    FINDING_DISPLAY_TEMPLATES[l2.rule_code]?.description ??
+      '本项由报告数据自动识别,建议结合前文指标与平台表现制定优化动作。',
+    l2.evidence_data
+  );
+}
+
+function renderDefaultFindingEvidence(l2: OptimizationFinding): string {
+  const template = FINDING_DISPLAY_TEMPLATES[l2.rule_code]?.evidence;
+  if (!template) return '';
+  const rendered = renderFindingTemplate(template, l2.evidence_data);
+  return rendered.includes('{{') ? '' : rendered;
+}
+
+function renderFindingTemplate(template: string, evidence: Record<string, unknown> | null | undefined): string {
+  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_match, key: string) => {
+    const value = evidence?.[key];
+    if (value === null || value === undefined || value === '') return '—';
+    if (Array.isArray(value)) return value.join('、');
+    return String(value);
+  });
 }
 
 // ─────────────────────── phases 合并 ───────────────────────
