@@ -51,33 +51,33 @@
 
         <!-- 诊断范围 dark strip -->
         <div class="p02-scope">
-          <div class="mono p02-scope-label">DIAGNOSTIC SCOPE / 诊断范围</div>
+          <div class="mono p02-scope-label">TEST SCOPE / 本次怎么测</div>
           <div class="p02-scope-grid">
             <div>
               <div class="metric-hero p02-scope-number">
                 {{ mergedView.test_summary.total_platforms }}
               </div>
-              <div class="p02-scope-text">AI 平台<br />主流模型全覆盖</div>
+              <div class="p02-scope-text">AI 平台<br />主流平台都问到</div>
             </div>
             <div>
               <div class="metric-hero p02-scope-number">
                 {{ mergedView.test_summary.total_prompts }}
               </div>
-              <div class="p02-scope-text">测试查询<br />通用模板数</div>
+              <div class="p02-scope-text">测试问题<br />覆盖不同顾客问法</div>
             </div>
             <div>
               <div class="metric-hero p02-scope-number">
                 {{ completedPromptResultCount }}
               </div>
-              <div class="p02-scope-text">实际完成测试<br />全意图结果数</div>
+              <div class="p02-scope-text">AI 回答<br />实际收集到的结果</div>
             </div>
             <div>
               <div class="metric-hero p02-scope-number">{{ judgeCallCount }}</div>
-              <div class="p02-scope-text">裁判执行<br />认知 / 对比评估</div>
+              <div class="p02-scope-text">深入判断<br />品牌了解 / 竞品比较</div>
             </div>
           </div>
           <div class="p02-scope-note">
-            实际完成测试为 batch1 + batch2 的总 prompt 测试结果数；对比类查询包含在测试查询模板内,并会在竞品轮次展开执行。
+            我们把这些问题分别提交给多个 AI 平台,统计 AI 是否提到你、如何描述你,并对品牌了解和竞品比较类回答做进一步判断。
           </div>
         </div>
 
@@ -108,7 +108,7 @@ import { presaleLabel } from '@/utils/presale/presaleLabel'
  *   - BRAND 副行:若将来后端补 "brand_name_en / legal_entity" 字段再显示,
  *     现阶段留空字符串(不占位,不硬造)
  *   - REGION 副行:同上,不硬造"华北"等
- * 实际完成测试 = test_summary.prompt_test_count。
+ * AI 回答 = test_summary.prompt_test_count。
  * 这是 batch1 + batch2 的全意图结果行数,不是 total_platforms × total_prompts。
  */
 
