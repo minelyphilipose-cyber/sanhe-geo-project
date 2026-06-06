@@ -82,7 +82,7 @@
           <div class="p06-metric-note">
             <div class="mono p06-metric-note-label">怎么看这张图</div>
             <div>
-              上面三行看“顾客没点名时,AI 会不会主动提到你”;下面两行看“顾客已经点名你时,AI 是否了解你、和竞品比较时是否更偏向你”。所有格子都换算成 0-100,颜色越深代表这类问题上的表现越强。
+              上面三行看“顾客没点名时,AI 会不会主动提到你”;下面两行看“顾客已经点名你时,AI 是否了解你、和竞品比较时是否更偏向你”。其中“对比型”因为问题里已经出现品牌名,分数通常会更高,它只代表被拿来比较时 AI 的倾向,不等同于 AI 会主动推荐你。所有格子都换算成 0-100,颜色越深代表这类问题上的表现越强。
             </div>
           </div>
 
@@ -473,7 +473,10 @@ function buildTooltip(cell: PlatformIntentCell): string {
     const scoreLabel = cell.intent_code === 'COMPARISON' ? '比较时偏向你的程度' : 'AI 对你的了解度'
     const sampleCount = cell.judge_sample_count ?? cell.platform_prompt_count
     const sampleLabel = cell.intent_code === 'COMPARISON' ? '竞品比较回答' : '品牌了解回答'
-    const base = `${scoreLabel} ${rate}（基于 ${sampleCount} 次${sampleLabel}）`
+    const suffix = cell.intent_code === 'COMPARISON'
+      ? '；题目已点名品牌,不代表 AI 会主动推荐'
+      : ''
+    const base = `${scoreLabel} ${rate}（基于 ${sampleCount} 次${sampleLabel}${suffix}）`
     if (cell.intent_code !== 'COMPARISON') return base
     const stanceLabel = toStanceLabel(cell.judge_stance ?? cell.stance)
     return stanceLabel ? `${base}，倾向:${stanceLabel}` : base
