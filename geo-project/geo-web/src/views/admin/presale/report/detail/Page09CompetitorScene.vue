@@ -12,7 +12,7 @@
           <div class="mono p09-subtitle">RECOMMENDATION PRESSURE · 推荐型高价值场景</div>
           <h3 class="chinese-serif p09-title">求推荐时,竞品在场而您缺席的场景</h3>
           <div class="p09-title-note">
-            本页主口径只统计推荐型高价值场景;Page11 的高价值覆盖为全部高价值意图,两者分母不同。
+            本页只看"推荐型高价值"切片;覆盖度页的"高价值"为全部高价值意图,包含推荐与已点名对比。
           </div>
         </div>
 
@@ -73,12 +73,15 @@
         <!-- 3 张卡片:各价值层的缺口数/总数 -->
         <div class="p09-gap-cards">
           <div class="p09-gap-card p09-gap-high">
-            <div class="mono p09-gap-label p09-gap-label-high">HIGH VALUE GAP</div>
+            <div class="mono p09-gap-label p09-gap-label-high">RECO HIGH VALUE GAP</div>
             <div class="metric-hero p09-gap-number">
               {{ highGapCount
               }}<span class="p09-gap-denominator">/{{ pressure.hv_reco_total }}</span>
             </div>
-            <div class="p09-gap-desc">推荐型高价值场景 · 竞品在场 · 您缺席 / 推荐型总数</div>
+            <div class="p09-gap-desc">推荐型高价值 · 竞品在场 · 您缺席</div>
+            <div class="p09-gap-context">
+              全部高价值已覆盖 {{ highValueCovered }}/{{ highValueTotal }};本卡只取其中推荐型切片。
+            </div>
           </div>
           <div class="p09-gap-card p09-gap-mid">
             <div class="mono p09-gap-label p09-gap-label-mid">MID VALUE GAP</div>
@@ -87,6 +90,7 @@
               }}<span class="p09-gap-denominator">/{{ mergedView.scene_coverage.mid_value.total }}</span>
             </div>
             <div class="p09-gap-desc">覆盖缺口 · 全部中价值场景</div>
+            <div class="p09-gap-context">缺口 = 总数 - 已覆盖;已覆盖 {{ midCovered }}。</div>
           </div>
           <div class="p09-gap-card p09-gap-low">
             <div class="mono p09-gap-label p09-gap-label-low">LOW VALUE GAP</div>
@@ -95,6 +99,7 @@
               }}<span class="p09-gap-denominator">/{{ mergedView.scene_coverage.low_value.total }}</span>
             </div>
             <div class="p09-gap-desc">覆盖缺口 · 全部低价值场景</div>
+            <div class="p09-gap-context">缺口 = 总数 - 已覆盖;已覆盖 {{ lowCovered }}。</div>
           </div>
         </div>
 
@@ -221,6 +226,10 @@ function coverageGapCount(group: typeof mergedView.value.scene_coverage.high_val
 }
 
 const highGapCount = computed(() => missingRows.value.length)
+const highValueTotal = computed(() => mergedView.value.scene_coverage.high_value.total)
+const highValueCovered = computed(() => mergedView.value.scene_coverage.high_value.covered)
+const midCovered = computed(() => mergedView.value.scene_coverage.mid_value.covered)
+const lowCovered = computed(() => mergedView.value.scene_coverage.low_value.covered)
 const midGapCount = computed(
   () => coverageGapCount(mergedView.value.scene_coverage.mid_value)
 )
@@ -383,6 +392,12 @@ const showRawTag = computed(() =>
   font-size: 11px;
   color: #6b6456;
   margin-top: 6px;
+}
+.p09-gap-context {
+  margin-top: 6px;
+  font-size: 10px;
+  line-height: 1.6;
+  color: #8a8272;
 }
 
 /* 底部引用的 "原始提取" 弱标签 */

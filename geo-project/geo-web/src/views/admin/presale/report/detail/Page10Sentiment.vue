@@ -12,7 +12,10 @@
           <span class="section-number">07</span>
           <div>
             <div class="section-label">SENTIMENT ANALYSIS</div>
-            <div class="section-heading">情感倾向分析</div>
+            <div class="section-heading">AI 回答语气分析</div>
+            <div class="p10-scope-note">
+              本页统计全部已分析回答的语气分布,不等同于 {{ mergedView.brand_name }} 自身被提及时的情感结论。
+            </div>
           </div>
         </div>
 
@@ -23,7 +26,7 @@
           </div>
 
           <div>
-            <div class="mono p10-breakdown-label">BREAKDOWN</div>
+            <div class="mono p10-breakdown-label">ANSWER SENTIMENT BREAKDOWN</div>
 
             <!-- 3 条进度 -->
             <div v-for="row in breakdownRows" :key="row.key" class="p10-bar-row">
@@ -51,7 +54,10 @@
 
         <!-- 正面关键词云 -->
         <div v-if="positiveKeywords.length > 0" class="p10-keywords-wrap">
-          <div class="mono p10-keywords-label">POSITIVE KEYWORDS · 正面关键词</div>
+          <div class="mono p10-keywords-label">ANSWER POSITIVE KEYWORDS · 回答正面关键词</div>
+          <div class="p10-keywords-note">
+            关键词来自全部回答的情感分析结果,用于观察 AI 讨论该主题时的常见正向表达。
+          </div>
           <div class="p10-keywords-list">
             <span
               v-for="kw in positiveKeywords"
@@ -217,8 +223,7 @@ const doughnutOption = computed<EChartsOption>(() => {
           show: true,
           position: 'center',
           formatter: () => {
-            // 圆心展示总次数(两轮合计提及数)
-            return `{num|${totalCount.value}}\n{sub|总提及}`
+            return `{num|${totalCount.value}}\n{sub|已分析回答}`
           },
           rich: {
             num: {
@@ -325,6 +330,13 @@ function formatEvidenceDate(isoStr: string): string {
 .p10-body {
   margin-top: 60px;
 }
+.p10-scope-note {
+  margin-top: 6px;
+  max-width: 640px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: #6b6456;
+}
 
 /* 左右布局(280 + 1fr,原型一致) */
 .p10-top-grid {
@@ -387,7 +399,13 @@ function formatEvidenceDate(isoStr: string): string {
   font-size: 11px;
   letter-spacing: 3px;
   color: #6b6456;
-  margin-bottom: 16px;
+  margin-bottom: 6px;
+}
+.p10-keywords-note {
+  margin-bottom: 14px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #8a8272;
 }
 .p10-keywords-list {
   display: flex;
