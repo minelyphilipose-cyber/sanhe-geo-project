@@ -14,18 +14,24 @@ public final class RuleCodes {
     // 基础设施(2)
     public static final String RULE_COVERAGE_LOW_RECOMMEND = "RULE_COVERAGE_LOW_RECOMMEND";
     public static final String RULE_BRAND_AWARENESS_LOW    = "RULE_BRAND_AWARENESS_LOW";
+    public static final String RULE_RECOMMENDATION_ABSENT  = "RULE_RECOMMENDATION_ABSENT";
 
     // 内容建设(3)
     public static final String RULE_COMPARE_GAP            = "RULE_COMPARE_GAP";
     public static final String RULE_PLATFORM_IMBALANCE     = "RULE_PLATFORM_IMBALANCE";
     public static final String RULE_SCENE_MISS_HIGH_VALUE  = "RULE_SCENE_MISS_HIGH_VALUE";
+    public static final String RULE_COMPETITOR_PRESENT_CLIENT_ABSENT = "RULE_COMPETITOR_PRESENT_CLIENT_ABSENT";
+    public static final String RULE_NATURAL_RECO_WEAK_BRAND_KNOWN = "RULE_NATURAL_RECO_WEAK_BRAND_KNOWN";
+    public static final String RULE_HIGH_VALUE_RECO_GAP = "RULE_HIGH_VALUE_RECO_GAP";
 
     // 关系建设(2)
     public static final String RULE_NEGATIVE_EVIDENCE      = "RULE_NEGATIVE_EVIDENCE";
     public static final String RULE_LOW_SENTIMENT_SCORE    = "RULE_LOW_SENTIMENT_SCORE";
+    public static final String RULE_BRAND_SENTIMENT_SAMPLE_THIN = "RULE_BRAND_SENTIMENT_SAMPLE_THIN";
 
     // 平台扩展(3)
     public static final String RULE_PLATFORM_COVERAGE_NARROW = "RULE_PLATFORM_COVERAGE_NARROW";
     public static final String RULE_PLATFORM_COUNT_LOW     = "RULE_PLATFORM_COUNT_LOW";
     public static final String RULE_SINGLE_PLATFORM_DOMINANT = "RULE_SINGLE_PLATFORM_DOMINANT";
+    public static final String RULE_PLATFORM_NEW_CUSTOMER_BLANK = "RULE_PLATFORM_NEW_CUSTOMER_BLANK";
 }

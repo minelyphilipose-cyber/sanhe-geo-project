@@ -487,6 +487,12 @@ const FINDING_DISPLAY_TEMPLATES: Record<string, FindingDisplayTemplate> = {
       '综合可见度仍处在偏低区间,说明 AI 对品牌基础信息、服务优势和可信来源的掌握不足。建议先补齐权威信息源、门店资料、服务项目和口碑内容,建立可被 AI 反复引用的品牌基础盘。',
     evidence: '综合得分 {{overall_score}},行业均值 {{industry_avg_overall}},Top1 {{top1_overall}}'
   },
+  RULE_RECOMMENDATION_ABSENT: {
+    title: '用户求推荐时品牌仍未稳定出现',
+    description:
+      '在推荐型高价值场景中,品牌缺席比例较高。该类问题通常对应用户正在筛选服务机构,建议优先补齐能被 AI 引用的品牌介绍、服务项目、案例和本地信源。',
+    evidence: '推荐型高价值场景缺席 {{client_absent_count}} / {{hv_reco_total}},缺席率 {{absence_rate}}%'
+  },
   RULE_COMPARE_GAP: {
     title: '被点名比较时优势表达不足',
     description:
@@ -505,6 +511,24 @@ const FINDING_DISPLAY_TEMPLATES: Record<string, FindingDisplayTemplate> = {
       '部分高价值场景中,AI 还没有稳定提到品牌。这类场景往往对应用户正在选择服务机构的关键时刻,建议围绕缺失问题逐条建设内容,提升品牌进入答案的机会。',
     evidence: '缺失高价值场景 {{missed_count}} 个:{{missed_scenes_text}}'
   },
+  RULE_COMPETITOR_PRESENT_CLIENT_ABSENT: {
+    title: '竞品在场但品牌缺席',
+    description:
+      '在用户未点名品牌的推荐场景里,已有竞品进入 AI 答案,但品牌尚未稳定出现。建议针对这些场景补齐内容入口,先让品牌进入候选答案,再进一步争取靠前位置。',
+    evidence: '竞品在场且品牌缺席 {{display_gap_count}} / {{hv_reco_total}} 个场景'
+  },
+  RULE_NATURAL_RECO_WEAK_BRAND_KNOWN: {
+    title: '被点名时 AI 知道你,但用户没点名时 AI 几乎不主动推荐你',
+    description:
+      '品牌在被点名了解或比较时已有一定识别度,但在用户主动求推荐的场景中出现比例仍低于 20%。建议把已有品牌信息转化为推荐型内容,让 AI 在用户未点名时也能主动把品牌列入候选。',
+    evidence: '推荐型高价值覆盖率 {{recommendation_rate}}%,认知/对比最高 {{known_rate}}%'
+  },
+  RULE_HIGH_VALUE_RECO_GAP: {
+    title: '推荐型高价值问题仍有缺口',
+    description:
+      '推荐型高价值问题直接对应用户筛选服务机构的时刻。当前仍有较多问题未覆盖,建议按问题逐条补齐内容资产,提升品牌在自然推荐场景中的基础出现率。',
+    evidence: '推荐型高价值覆盖 {{hv_reco_covered}} / {{hv_reco_total}},缺口 {{hv_reco_gap}} 个'
+  },
   RULE_NEGATIVE_EVIDENCE: {
     title: 'AI 回答中出现负面反馈',
     description:
@@ -516,6 +540,12 @@ const FINDING_DISPLAY_TEMPLATES: Record<string, FindingDisplayTemplate> = {
     description:
       'AI 对品牌的表述以中性为主,正向评价不够稳定。建议补充真实案例、专业背书、用户评价和服务优势,让 AI 在回答中形成更清晰的正面认知。',
     evidence: '情感得分 {{sentiment_score}},正面 {{positive_count}} / 中性 {{neutral_count}} / 负面 {{negative_count}}'
+  },
+  RULE_BRAND_SENTIMENT_SAMPLE_THIN: {
+    title: 'AI 还没有形成稳定的品牌情感印象',
+    description:
+      '品牌自身情感样本较少,不足以支撑稳定的正负面判断。建议先提升品牌在回答中的出现次数,再通过案例、评价和专业背书建立更明确的正向印象。',
+    evidence: '品牌情感样本 {{brand_sentiment_sample_count}} 条'
   },
   RULE_PLATFORM_COVERAGE_NARROW: {
     title: '覆盖平台范围偏窄',
@@ -534,6 +564,12 @@ const FINDING_DISPLAY_TEMPLATES: Record<string, FindingDisplayTemplate> = {
     description:
       '品牌的主要出现机会集中在单一平台。一旦该平台答案来源或排序逻辑变化,整体可见度可能波动。建议同步建设其他平台可引用的信息源,降低单点依赖。',
     evidence: '{{dominant_platform_name}} 首推占比 {{dominant_ratio}}%'
+  },
+  RULE_PLATFORM_NEW_CUSTOMER_BLANK: {
+    title: '新顾客入口场景存在空白',
+    description:
+      '推荐、问题和具体场景问题代表新顾客首次寻找服务机构的主要入口。当前三类场景整体出现率偏低,建议围绕新客常问问题建立内容矩阵,优先提升自然进入答案的概率。',
+    evidence: '新顾客入口平均出现率 {{new_customer_avg_rate}}%'
   }
 };
 

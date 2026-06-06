@@ -46,14 +46,20 @@ class PresaleL3InitServiceTest {
     private static final List<String> ALL_RULE_CODES = List.of(
             RuleCodes.RULE_COVERAGE_LOW_RECOMMEND,
             RuleCodes.RULE_BRAND_AWARENESS_LOW,
+            RuleCodes.RULE_RECOMMENDATION_ABSENT,
             RuleCodes.RULE_COMPARE_GAP,
             RuleCodes.RULE_PLATFORM_IMBALANCE,
             RuleCodes.RULE_SCENE_MISS_HIGH_VALUE,
+            RuleCodes.RULE_COMPETITOR_PRESENT_CLIENT_ABSENT,
+            RuleCodes.RULE_NATURAL_RECO_WEAK_BRAND_KNOWN,
+            RuleCodes.RULE_HIGH_VALUE_RECO_GAP,
             RuleCodes.RULE_NEGATIVE_EVIDENCE,
             RuleCodes.RULE_LOW_SENTIMENT_SCORE,
+            RuleCodes.RULE_BRAND_SENTIMENT_SAMPLE_THIN,
             RuleCodes.RULE_PLATFORM_COVERAGE_NARROW,
             RuleCodes.RULE_PLATFORM_COUNT_LOW,
-            RuleCodes.RULE_SINGLE_PLATFORM_DOMINANT
+            RuleCodes.RULE_SINGLE_PLATFORM_DOMINANT,
+            RuleCodes.RULE_PLATFORM_NEW_CUSTOMER_BLANK
     );
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -63,13 +69,13 @@ class PresaleL3InitServiceTest {
     private final PresaleL3InitService service = new PresaleL3InitService(objectMapper, new PresaleTextFormatter(), l3Defaults, narrativeConfigService);
 
     @Test
-    void ruleFindingMap_containsAllTenRuleCodes() throws Exception {
+    void ruleFindingMap_containsAllRuleCodes() throws Exception {
         Field field = PresaleL3InitService.class.getDeclaredField("RULE_FINDING_MAP");
         field.setAccessible(true);
         @SuppressWarnings("unchecked")
         Map<String, ?> map = (Map<String, ?>) field.get(null);
 
-        assertEquals(10, map.size());
+        assertEquals(ALL_RULE_CODES.size(), map.size());
         for (String ruleCode : ALL_RULE_CODES) {
             assertTrue(map.containsKey(ruleCode), "missing rule template: " + ruleCode);
         }
@@ -83,7 +89,7 @@ class PresaleL3InitServiceTest {
         String editableJson = service.derive(rawJson, computedJson);
         EditableContentDTO editable = objectMapper.readValue(editableJson, EditableContentDTO.class);
         assertNotNull(editable.getOptimizationFindingsContent());
-        assertEquals(10, editable.getOptimizationFindingsContent().size());
+        assertEquals(ALL_RULE_CODES.size(), editable.getOptimizationFindingsContent().size());
         for (FindingContent finding : editable.getOptimizationFindingsContent()) {
             assertNotNull(finding.getTitle());
             assertNotNull(finding.getDescription());
@@ -102,7 +108,7 @@ class PresaleL3InitServiceTest {
         String editableJson = service.derive(rawJson, computedJson);
         EditableContentDTO editable = objectMapper.readValue(editableJson, EditableContentDTO.class);
         assertNotNull(editable.getOptimizationFindingsContent());
-        assertEquals(10, editable.getOptimizationFindingsContent().size());
+        assertEquals(ALL_RULE_CODES.size(), editable.getOptimizationFindingsContent().size());
         for (FindingContent finding : editable.getOptimizationFindingsContent()) {
             assertNotNull(finding.getTitle());
             assertNotNull(finding.getDescription());
@@ -665,6 +671,25 @@ class PresaleL3InitServiceTest {
         evidence.put("dominant_count", 13);
         evidence.put("dominant_platform_name", "Kimi");
         evidence.put("dominant_ratio", 72.0D);
+        evidence.put("hv_reco_total", 9);
+        evidence.put("client_absent_count", 7);
+        evidence.put("absence_rate", 78);
+        evidence.put("display_gap_count", 5);
+        evidence.put("top_competitor_name", "阜阳市人民医院口腔科");
+        evidence.put("top_competitor_platform_mentions", 11);
+        evidence.put("recommendation_rate", 12);
+        evidence.put("recommendation_covered", 1);
+        evidence.put("recommendation_total", 9);
+        evidence.put("cognitive_rate", 83);
+        evidence.put("comparison_rate", 67);
+        evidence.put("known_rate", 83);
+        evidence.put("threshold_rate", 20);
+        evidence.put("hv_reco_covered", 1);
+        evidence.put("hv_reco_gap", 8);
+        evidence.put("brand_sentiment_sample_count", 2);
+        evidence.put("new_customer_avg_rate", 6);
+        evidence.put("inquiry_rate", 5);
+        evidence.put("scenario_rate", 0);
         return evidence;
     }
 

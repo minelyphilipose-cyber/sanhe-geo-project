@@ -1,0 +1,80 @@
+-- V217__presale_optimization_rules_business_signals.sql
+-- 目的:补充与新版报告口径一致的优化清单规则。
+-- 约束:只新增规则命中项,不改 scores / roi / scene_coverage 计算输出。
+
+INSERT INTO presale_optimization_rule
+    (rule_code, rule_name, category, default_priority,
+     trigger_expression,
+     title_template, description_template, evidence_template,
+     enabled, sort_order, remark)
+VALUES
+    ('RULE_RECOMMENDATION_ABSENT',
+     '推荐型高价值场景品牌缺席',
+     '基础设施', 'HIGH',
+     '#l2.sceneCompetitorPressure != null && #l2.sceneCompetitorPressure.items != null && #l2.sceneCompetitorPressure.hvRecoTotal > 0 && (#l2.sceneCompetitorPressure.items.?[targetMentionedPlatformCount == null || targetMentionedPlatformCount <= 0].size() * 1.0 / #l2.sceneCompetitorPressure.hvRecoTotal) >= 0.6',
+     '用户主动求推荐时,AI 很少把品牌列入答案',
+     '在推荐型高价值场景中,品牌缺席比例较高。该类问题通常对应用户正在筛选服务机构,建议优先补齐能被 AI 引用的品牌介绍、服务项目、案例和本地信源。',
+     '推荐型高价值场景 {{client_absent_count}}/{{hv_reco_total}} 缺席,缺席率 {{absence_rate}}%',
+     1, 111,
+     '缺席率 >= 60% 时触发;语气看品牌自身缺席,不等同于竞品压制'),
+
+    ('RULE_COMPETITOR_PRESENT_CLIENT_ABSENT',
+     '竞品在场但品牌缺席',
+     '内容建设', 'HIGH',
+     '#l2.sceneCompetitorPressure != null && #l2.sceneCompetitorPressure.items != null && #l2.sceneCompetitorPressure.items.?[(targetMentionedPlatformCount == null || targetMentionedPlatformCount <= 0) && competitors != null && !competitors.isEmpty()].size() >= 1',
+     '部分推荐场景中竞品已出现,但品牌仍缺席',
+     '在用户未点名品牌的推荐场景里,已有竞品进入 AI 答案,但品牌尚未稳定出现。建议针对这些场景补齐内容入口,先让品牌进入候选答案,再进一步争取靠前位置。',
+     '竞品在场且品牌缺席 {{display_gap_count}}/{{hv_reco_total}} 个场景,代表竞品 {{top_competitor_name}}',
+     1, 112,
+     '展示集口径:品牌缺席且至少一个报告竞品出现;不使用强压制话术'),
+
+    ('RULE_NATURAL_RECO_WEAK_BRAND_KNOWN',
+     '被点名认知较强但自然推荐偏弱',
+     '内容建设', 'HIGH',
+     '#l2.intentBreakdown.^[category == ''推荐型'' && businessValue == ''高''].coverageRate < 20 && (#l2.intentBreakdown.^[category == ''认知型''].coverageRate >= 60 || #l2.intentBreakdown.^[category == ''对比型''].coverageRate >= 60)',
+     '被点名时 AI 知道你,但用户没点名时 AI 几乎不主动推荐你',
+     '品牌在被点名了解或比较时已有一定识别度,但在用户主动求推荐的场景中出现比例仍低于 20%。建议把已有品牌信息转化为推荐型内容,让 AI 在用户未点名时也能主动把品牌列入候选。',
+     '推荐型高价值覆盖率 {{recommendation_rate}}%,认知/对比最高 {{known_rate}}%',
+     1, 113,
+     '推荐型高价值覆盖率 <20%,且认知型或对比型覆盖率 >=60% 时触发'),
+
+    ('RULE_HIGH_VALUE_RECO_GAP',
+     '推荐型高价值问题仍有缺口',
+     '内容建设', 'MEDIUM',
+     '#l2.intentBreakdown.^[category == ''推荐型'' && businessValue == ''高''].coverageRate < 30 || (#l2.sceneCompetitorPressure != null && #l2.sceneCompetitorPressure.hvRecoTotal - #l2.intentBreakdown.^[category == ''推荐型'' && businessValue == ''高''].coveredPrompts >= 2)',
+     '推荐型高价值问题仍有明显缺口',
+     '推荐型高价值问题直接对应用户筛选服务机构的时刻。当前仍有较多问题未覆盖,建议按问题逐条补齐内容资产,提升品牌在自然推荐场景中的基础出现率。',
+     '推荐型高价值覆盖 {{hv_reco_covered}}/{{hv_reco_total}},缺口 {{hv_reco_gap}} 个',
+     1, 204,
+     '拆分推荐型高价值口径,避免与全部高价值覆盖混用'),
+
+    ('RULE_BRAND_SENTIMENT_SAMPLE_THIN',
+     '品牌情感样本不足',
+     '关系建设', 'MEDIUM',
+     '#l1.sentimentDetail != null && ((#l1.sentimentDetail.positiveCount ?: 0) + (#l1.sentimentDetail.neutralCount ?: 0) + (#l1.sentimentDetail.negativeCount ?: 0)) < 3',
+     'AI 还没有形成稳定的品牌情感印象',
+     '本次品牌自身被提及时的情感样本较少,不足以支撑稳定的正负面判断。建议先提升品牌在回答中的出现次数,再通过案例、评价和专业背书建立更明确的正向印象。',
+     '品牌情感样本 {{brand_sentiment_sample_count}} 条(正 {{positive_count}} / 中 {{neutral_count}} / 负 {{negative_count}})',
+     1, 303,
+     '品牌自身情感样本 <3 时触发;不使用行业整体情感口径'),
+
+    ('RULE_PLATFORM_NEW_CUSTOMER_BLANK',
+     '新顾客入口场景空白',
+     '平台扩展', 'MEDIUM',
+     '(#l2.intentBreakdown.^[category == ''推荐型'' && businessValue == ''高''].coverageRate + #l2.intentBreakdown.^[category == ''问题型''].coverageRate + #l2.intentBreakdown.^[category == ''场景型''].coverageRate) / 3.0 < 10',
+     '新顾客入口场景仍存在明显空白',
+     '推荐、问题和具体场景问题代表新顾客首次寻找服务机构的主要入口。当前三类场景整体出现率偏低,建议围绕新客常问问题建立内容矩阵,优先提升自然进入答案的概率。',
+     '新顾客入口平均出现率 {{new_customer_avg_rate}}%(推荐 {{recommendation_rate}}% / 问题 {{inquiry_rate}}% / 场景 {{scenario_rate}}%)',
+     1, 404,
+     '推荐型高价值、问题型、场景型平均覆盖率 <10% 时触发')
+ON DUPLICATE KEY UPDATE
+    rule_name = VALUES(rule_name),
+    category = VALUES(category),
+    default_priority = VALUES(default_priority),
+    trigger_expression = VALUES(trigger_expression),
+    title_template = VALUES(title_template),
+    description_template = VALUES(description_template),
+    evidence_template = VALUES(evidence_template),
+    enabled = VALUES(enabled),
+    sort_order = VALUES(sort_order),
+    remark = VALUES(remark);

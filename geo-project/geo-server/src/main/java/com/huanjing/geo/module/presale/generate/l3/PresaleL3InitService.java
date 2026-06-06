@@ -843,92 +843,138 @@ public class PresaleL3InitService {
         Map<String, String> map = new HashMap<>();
         map.put(RuleCodes.RULE_COVERAGE_LOW_RECOMMEND, "高价值场景覆盖待激活");
         map.put(RuleCodes.RULE_BRAND_AWARENESS_LOW, "综合可见度有显著提升空间");
+        map.put(RuleCodes.RULE_RECOMMENDATION_ABSENT, "用户求推荐时品牌仍未稳定出现");
         map.put(RuleCodes.RULE_COMPARE_GAP, "对比型查询待加强");
         map.put(RuleCodes.RULE_PLATFORM_IMBALANCE, "平台表现可进一步均衡");
         map.put(RuleCodes.RULE_SCENE_MISS_HIGH_VALUE, "高价值场景待激活");
+        map.put(RuleCodes.RULE_COMPETITOR_PRESENT_CLIENT_ABSENT, "竞品在场但品牌缺席");
+        map.put(RuleCodes.RULE_NATURAL_RECO_WEAK_BRAND_KNOWN, "被点名认知较强但自然推荐偏弱");
+        map.put(RuleCodes.RULE_HIGH_VALUE_RECO_GAP, "推荐型高价值问题仍有缺口");
         map.put(RuleCodes.RULE_NEGATIVE_EVIDENCE, "检出负面表述,需重点应对");
         map.put(RuleCodes.RULE_LOW_SENTIMENT_SCORE, "情感倾向待优化");
+        map.put(RuleCodes.RULE_BRAND_SENTIMENT_SAMPLE_THIN, "品牌情感样本不足");
         map.put(RuleCodes.RULE_PLATFORM_COVERAGE_NARROW, "平台覆盖面可拓展");
         map.put(RuleCodes.RULE_PLATFORM_COUNT_LOW, "覆盖平台数量可拓展");
         map.put(RuleCodes.RULE_SINGLE_PLATFORM_DOMINANT, "平台来源较为集中");
+        map.put(RuleCodes.RULE_PLATFORM_NEW_CUSTOMER_BLANK, "新顾客入口场景存在空白");
         return map;
     }
 
     private static Map<String, RuleFindingTemplate> buildRuleFindingMap() {
-        return Map.of(
-                RuleCodes.RULE_COVERAGE_LOW_RECOMMEND, new RuleFindingTemplate(
+        return Map.ofEntries(
+                Map.entry(RuleCodes.RULE_COVERAGE_LOW_RECOMMEND, new RuleFindingTemplate(
                         "高价值场景覆盖待激活",
                         "在 {total_prompts} 个高价值问题中,品牌已覆盖 {covered_prompts} 个,覆盖率 {coverage_rate}%。" +
                                 "仍有 {missed_count} 个核心决策场景待激活,每个场景都对应明确的销售机会窗口。" +
                                 "优先动作:针对高价值缺失场景规划专项内容布局,优先补齐对成交影响最大的查询入口。",
                         "{total_prompts} 个高价值问题中覆盖 {covered_prompts} 个"
-                ),
-                RuleCodes.RULE_BRAND_AWARENESS_LOW, new RuleFindingTemplate(
+                )),
+                Map.entry(RuleCodes.RULE_BRAND_AWARENESS_LOW, new RuleFindingTemplate(
                         "综合可见度有显著提升空间",
                         "综合得分 {overall_score} 分,与行业均值 {industry_avg_overall} 分有差距,距离行业 Top1 的 {top1_overall} 分还有可观的提升空间。" +
                                 "综合得分覆盖提及率、排名、情感、场景覆盖四个维度,意味着每个维度都有可优化的具体抓手。" +
                                 "优先动作:从基础认知建设入手,通过内容铺设、平台优化、负面管理三线并行启动可见度提升。",
                         "综合得分 {overall_score} 分(行业均值 {industry_avg_overall} / Top1 {top1_overall})"
-                ),
-                RuleCodes.RULE_COMPARE_GAP, new RuleFindingTemplate(
+                )),
+                Map.entry(RuleCodes.RULE_RECOMMENDATION_ABSENT, new RuleFindingTemplate(
+                        "用户求推荐时品牌仍未稳定出现",
+                        "在推荐型高价值场景中,品牌缺席 {client_absent_count}/{hv_reco_total} 个,缺席率 {absence_rate}%。" +
+                                "这意味着用户主动寻找服务机构时,AI 还没有稳定把品牌列入候选答案。" +
+                                "优先动作:围绕高价值推荐问题补齐品牌介绍、服务项目、案例和本地信源。",
+                        "推荐型高价值场景缺席 {client_absent_count}/{hv_reco_total}"
+                )),
+                Map.entry(RuleCodes.RULE_COMPARE_GAP, new RuleFindingTemplate(
                         "对比型查询待加强",
                         "在 {total_prompts} 个对比型查询中,品牌已形成有效对比判断 {covered_prompts} 个,覆盖率 {coverage_rate}%。" +
                                 "对比型查询是用户在决策阶段的主要信息入口,加强这部分内容可以直接影响用户在最终选择前的判断。" +
                                 "优先动作:补齐\"与竞品 X 相比\"、\"X 类型哪个好\"等典型对比型场景的内容布局,在 AI 主动对比时形成清晰立场。",
                         "对比型查询覆盖率 {coverage_rate}%({covered_prompts}/{total_prompts})"
-                ),
-                RuleCodes.RULE_PLATFORM_IMBALANCE, new RuleFindingTemplate(
+                )),
+                Map.entry(RuleCodes.RULE_PLATFORM_IMBALANCE, new RuleFindingTemplate(
                         "平台表现可进一步均衡",
                         "在 {total_platforms} 个测试平台中,{strong_platform_name} 的提及率为 {strong_mention_rate}%," +
                                 "与 {weak_platform_name} 的 {weak_mention_rate}% 相差 {gap_pp} 个百分点。" +
                                 "优势平台:{strong_platforms_text};待强化平台:{weak_platforms_text}。" +
                                 "当前优势平台已验证内容打法有效——把同样的内容策略复用到弱势平台,可快速放大整体可见度。优先动作:在弱势平台加强内容铺设与 AI 可读性优化。",
                         "最高 {strong_mention_rate}% / 最低 {weak_mention_rate}%(差距 {gap_pp} pp)"
-                ),
-                RuleCodes.RULE_SCENE_MISS_HIGH_VALUE, new RuleFindingTemplate(
+                )),
+                Map.entry(RuleCodes.RULE_SCENE_MISS_HIGH_VALUE, new RuleFindingTemplate(
                         "高价值场景待激活",
                         "共有 {missed_count} 个高价值场景未被覆盖,包括:{missed_scenes_text}。" +
                                 "高价值场景是用户决策路径上的关键触点,每个场景都对应明确的销售机会窗口。" +
                                 "优先动作:针对每个缺失场景规划专项内容建设,持续监测 AI 平台的收录与推荐情况,逐一激活商业价值最高的查询。",
                         "高价值场景缺失 {missed_count} 个"
-                ),
-                RuleCodes.RULE_NEGATIVE_EVIDENCE, new RuleFindingTemplate(
+                )),
+                Map.entry(RuleCodes.RULE_COMPETITOR_PRESENT_CLIENT_ABSENT, new RuleFindingTemplate(
+                        "竞品在场但品牌缺席",
+                        "在 {display_gap_count}/{hv_reco_total} 个推荐型高价值场景中,已有竞品出现但品牌缺席。" +
+                                "代表竞品为 {top_competitor_name},累计被点名平台次数 {top_competitor_platform_mentions}。" +
+                                "优先动作:以这些场景为清单补齐内容入口,先让品牌进入 AI 的候选答案。",
+                        "竞品在场且品牌缺席 {display_gap_count}/{hv_reco_total}"
+                )),
+                Map.entry(RuleCodes.RULE_NATURAL_RECO_WEAK_BRAND_KNOWN, new RuleFindingTemplate(
+                        "被点名时 AI 知道你,但用户没点名时 AI 几乎不主动推荐你",
+                        "被点名了解或比较时,AI 对品牌已有一定识别度,相关覆盖最高达到 {known_rate}%。" +
+                                "但推荐型高价值场景覆盖率只有 {recommendation_rate}%,低于 {threshold_rate}% 阈值。" +
+                                "优先动作:把已有品牌信息转化为推荐型内容,让 AI 在用户未点名时也能主动列入品牌。",
+                        "推荐型高价值覆盖率 {recommendation_rate}%,认知/对比最高 {known_rate}%"
+                )),
+                Map.entry(RuleCodes.RULE_HIGH_VALUE_RECO_GAP, new RuleFindingTemplate(
+                        "推荐型高价值问题仍有缺口",
+                        "推荐型高价值问题覆盖 {hv_reco_covered}/{hv_reco_total},仍有 {hv_reco_gap} 个缺口。" +
+                                "这类问题最接近用户筛选服务机构的时刻,建议按问题逐条建设可被 AI 引用的内容资产。",
+                        "推荐型高价值覆盖 {hv_reco_covered}/{hv_reco_total}"
+                )),
+                Map.entry(RuleCodes.RULE_NEGATIVE_EVIDENCE, new RuleFindingTemplate(
                         "检出负面表述,需重点应对",
                         "本次测试中,品牌出现了 {negative_evidence_count} 条负面评价证据,集中在\"{key_topic}\"相关话题,涉及 {affected_platform_count} 个平台:{affected_platforms_text}。" +
                                 "负面话题集中在单一维度,意味着可以通过定向内容布局精准对冲。" +
                                 "优先动作:对负面话题溯源并制定专项回应内容,通过正面叙事在 AI 平台上形成对冲。",
                         "负面证据 {negative_evidence_count} 条,涉及 {affected_platform_count} 个平台"
-                ),
-                RuleCodes.RULE_LOW_SENTIMENT_SCORE, new RuleFindingTemplate(
+                )),
+                Map.entry(RuleCodes.RULE_LOW_SENTIMENT_SCORE, new RuleFindingTemplate(
                         "情感倾向待优化",
                         "情感维度得分 {sentiment_score} 分,本次共采集到正面 {positive_count} 条、中性 {neutral_count} 条、负面 {negative_count} 条情感标记。" +
                                 "中性占比较高,反映品牌在 AI 平台上的正面叙事仍有强化空间。" +
                                 "优先动作:补齐用户故事、专业背书、产品优势等正向内容,逐步提升情感基线。",
                         "情感得分 {sentiment_score}(正 {positive_count} / 中 {neutral_count} / 负 {negative_count})"
-                ),
-                RuleCodes.RULE_PLATFORM_COVERAGE_NARROW, new RuleFindingTemplate(
+                )),
+                Map.entry(RuleCodes.RULE_BRAND_SENTIMENT_SAMPLE_THIN, new RuleFindingTemplate(
+                        "AI 还没有形成稳定的品牌情感印象",
+                        "本次品牌自身情感样本仅 {brand_sentiment_sample_count} 条,不足以支撑稳定的正负面判断。" +
+                                "建议先提升品牌在回答中的出现次数,再通过案例、评价和专业背书建立更明确的正向印象。",
+                        "品牌情感样本 {brand_sentiment_sample_count} 条"
+                )),
+                Map.entry(RuleCodes.RULE_PLATFORM_COVERAGE_NARROW, new RuleFindingTemplate(
                         "平台覆盖面可拓展",
                         "在 {total_platforms} 个测试平台中,品牌已在 {covered_platform_count} 个平台被提及," +
                                 "另有 {uncovered_platform_count} 个平台尚未覆盖:{uncovered_platforms_text}。" +
                                 "每个未覆盖平台都对应一批增量用户入口,补齐后可显著拓宽品牌在 AI 入口的总曝光面。" +
                                 "优先动作:梳理未覆盖平台的内容适配性,针对性补齐平台级内容资产。",
                         "已覆盖 {covered_platform_count}/{total_platforms} 个平台"
-                ),
-                RuleCodes.RULE_PLATFORM_COUNT_LOW, new RuleFindingTemplate(
+                )),
+                Map.entry(RuleCodes.RULE_PLATFORM_COUNT_LOW, new RuleFindingTemplate(
                         "覆盖平台数量可拓展",
                         "本次有效测试平台为 {effective_platforms} 个,其中 {degraded_count} 个平台因成功率不足降级处理:{degraded_platforms_text}。" +
                                 "有效平台数有限会影响测试数据的代表性,提升后可显著增强报告结论的外推可信度。" +
                                 "优先动作:在下次测试前排查平台接入稳定性,或扩展测试平台列表以建立更扎实的数据基础。",
                         "有效平台 {effective_platforms} 个(降级 {degraded_count} 个)"
-                ),
-                RuleCodes.RULE_SINGLE_PLATFORM_DOMINANT, new RuleFindingTemplate(
+                )),
+                Map.entry(RuleCodes.RULE_SINGLE_PLATFORM_DOMINANT, new RuleFindingTemplate(
                         "平台来源较为集中",
                         "本次测试共产生 {total_primary} 次首推,其中 {dominant_count} 次集中在 {dominant_platform_name}," +
                                 "占比 {dominant_ratio}%。首推集中说明该平台已建立稳定的品牌认知,但单平台路径依赖也意味着策略弹性受限——" +
                                 "一旦该平台算法或收录规则调整,首推规模可能出现波动。" +
                                 "优先动作:在其他主流平台同步加强内容建设,把单平台优势复制为多平台基本盘。",
                         "{dominant_platform_name} 首推占比 {dominant_ratio}%({dominant_count}/{total_primary})"
-                )
+                )),
+                Map.entry(RuleCodes.RULE_PLATFORM_NEW_CUSTOMER_BLANK, new RuleFindingTemplate(
+                        "新顾客入口场景存在空白",
+                        "推荐、问题和具体场景问题代表新顾客首次寻找服务机构的主要入口。" +
+                                "当前三类场景平均出现率为 {new_customer_avg_rate}%,品牌还没有稳定进入新客搜索路径。" +
+                                "优先动作:围绕新客常问问题建立内容矩阵,优先提升自然进入答案的概率。",
+                        "新顾客入口平均出现率 {new_customer_avg_rate}%"
+                ))
         );
     }
 
