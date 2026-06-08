@@ -112,8 +112,9 @@ public class ContentDistributionController {
     @GetMapping("/articles/batch-publish")
     public R<Page<BatchArticlePublishJobSummary>> batchPublishPage(@RequestParam(defaultValue = "1") Long current,
                                                                    @RequestParam(defaultValue = "10") Long size,
-                                                                   @RequestParam(required = false) String status) {
-        return R.ok(batchArticlePublishService.page(current, size, status));
+                                                                   @RequestParam(required = false) String status,
+                                                                   @RequestParam(defaultValue = "manual") String jobSource) {
+        return R.ok(batchArticlePublishService.page(current, size, status, jobSource));
     }
 
     @GetMapping("/articles/batch-publish/{jobId}")

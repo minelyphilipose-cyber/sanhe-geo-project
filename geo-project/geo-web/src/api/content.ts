@@ -440,6 +440,62 @@ export function createBatchContentArticles(data: BatchArticleGenerateRequest) {
   return request.post<R<BatchArticleGenerateResponse>>('/content/articles/batch-generate', data)
 }
 
+export interface BatchArticleGenerationTask {
+  taskId: number
+  articleId?: number | null
+  rowNo: number
+  articleIndexInBatch: number
+  articleType?: string | null
+  articleTypeCode?: string | null
+  channelGroupCode?: string | null
+  channelSubCode?: string | null
+  tone?: string | null
+  contentStyle?: string | null
+  agentSiteModule?: string | null
+  contentAngle?: string | null
+  audiencePerspective?: string | null
+  promptTemplateId?: number | null
+  promptTemplateVersionId?: number | null
+  perspectiveCode?: string | null
+  perspectiveMatchedScope?: string | null
+  perspectiveMatchedConfigId?: number | null
+  allocationMode?: string | null
+  templateSource?: string | null
+  suggestedPlatformCodes?: string | null
+  selectedPlatformCodes?: string | null
+  readinessWarningConfirmed?: boolean | null
+  readinessWarningCodes?: string | null
+  status: string
+  qualityStatus?: string | null
+  errorMessage?: string | null
+  startedAt?: string | null
+  finishedAt?: string | null
+}
+
+export interface BatchArticleGenerationDetailResponse {
+  batchId: number
+  projectId: number
+  topic?: string | null
+  topicAsQuestion?: string | null
+  status: string
+  totalCount: number
+  successCount: number
+  failedCount: number
+  warningCount: number
+  createdAt?: string | null
+  startedAt?: string | null
+  finishedAt?: string | null
+  tasks: BatchArticleGenerationTask[]
+}
+
+export function getBatchArticleGeneration(batchId: number) {
+  return request.get<R<BatchArticleGenerationDetailResponse>>(`/content/articles/batch-generate/${batchId}`)
+}
+
+export function retryFailedBatchArticleGeneration(batchId: number) {
+  return request.post<R<BatchArticleGenerationDetailResponse>>(`/content/articles/batch-generate/${batchId}/retry-failed`)
+}
+
 export interface ArticleGenerationReadinessRequest {
   projectId: number
   questionSceneCodes: string[]
@@ -849,6 +905,7 @@ export interface BatchArticlePublishItem {
 export interface BatchArticlePublishResponse {
   jobId: number
   jobName?: string | null
+  jobSource?: 'manual' | 'auto' | string
   publishMode: 'now' | 'scheduled' | string
   status: string
   scheduledAt?: string | null
@@ -862,6 +919,7 @@ export interface BatchArticlePublishResponse {
 export interface BatchArticlePublishJobSummary {
   jobId: number
   jobName?: string | null
+  jobSource?: 'manual' | 'auto' | string
   publishMode: 'now' | 'scheduled' | string
   status: string
   scheduledAt?: string | null
@@ -879,7 +937,7 @@ export function submitBatchArticlePublish(data: BatchArticlePublishRequest) {
   return request.post<R<BatchArticlePublishResponse>>('/content/articles/batch-publish', data)
 }
 
-export function getBatchArticlePublishJobs(params?: { current?: number; size?: number; status?: string }) {
+export function getBatchArticlePublishJobs(params?: { current?: number; size?: number; status?: string; jobSource?: 'manual' | 'auto' | 'all' }) {
   return request.get<R<PageResult<BatchArticlePublishJobSummary>>>('/content/articles/batch-publish', { params })
 }
 

@@ -392,6 +392,34 @@ public class BatchArticleGenerationService {
         );
     }
 
+    public BatchArticleGenerationDetailResponse retryFailed(Long batchId) {
+        currentUserService.ensurePermissionOrLegacy("content.ai.generate", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
+        BatchArticleGenerationBatch batch = batchMapper.selectById(batchId);
+        if (batch == null) {
+            throw new BizException(404, "Batch not found");
+        }
+        List<BatchArticleGenerationTask> failedTasks = taskMapper.selectList(
+                new LambdaQueryWrapper<BatchArticleGenerationTask>()
+                        .eq(BatchArticleGenerationTask::getBatchId, batchId)
+                        .eq(BatchArticleGenerationTask::getStatus, STATUS_FAILED)
+                        .orderByAsc(BatchArticleGenerationTask::getArticleIndexInBatch)
+        );
+        if (failedTasks.isEmpty()) {
+            throw new BizException(400, "当前批次没有可重试的失败任务");
+        }
+        for (BatchArticleGenerationTask task : failedTasks) {
+            task.setStatus(STATUS_PENDING);
+            task.setArticleId(null);
+            task.setErrorMessage(null);
+            task.setStartedAt(null);
+            task.setFinishedAt(null);
+            taskMapper.updateById(task);
+        }
+        refreshBatchProgress(batchId, false);
+        articleAiDraftExecutor.execute(() -> runBatchTasks(batchId, failedTasks.stream().map(BatchArticleGenerationTask::getId).toList()));
+        return detail(batchId);
+    }
+
     private void runBatch(Long batchId) {
         BatchArticleGenerationBatch batch = batchMapper.selectById(batchId);
         if (batch == null) {
@@ -401,6 +429,27 @@ public class BatchArticleGenerationService {
         List<BatchArticleGenerationTask> tasks = taskMapper.selectList(
                 new LambdaQueryWrapper<BatchArticleGenerationTask>()
                         .eq(BatchArticleGenerationTask::getBatchId, batchId)
+                        .orderByAsc(BatchArticleGenerationTask::getArticleIndexInBatch)
+        );
+        for (BatchArticleGenerationTask task : tasks) {
+            runTask(batch, task);
+        }
+        completeBatch(batchId);
+    }
+
+    private void runBatchTasks(Long batchId, List<Long> taskIds) {
+        if (taskIds == null || taskIds.isEmpty()) {
+            return;
+        }
+        BatchArticleGenerationBatch batch = batchMapper.selectById(batchId);
+        if (batch == null) {
+            return;
+        }
+        markBatchRunning(batch);
+        List<BatchArticleGenerationTask> tasks = taskMapper.selectList(
+                new LambdaQueryWrapper<BatchArticleGenerationTask>()
+                        .eq(BatchArticleGenerationTask::getBatchId, batchId)
+                        .in(BatchArticleGenerationTask::getId, taskIds)
                         .orderByAsc(BatchArticleGenerationTask::getArticleIndexInBatch)
         );
         for (BatchArticleGenerationTask task : tasks) {
@@ -428,14 +477,18 @@ public class BatchArticleGenerationService {
             task.setAudiencePerspective(prompt.audiencePerspective());
 
             List<String> forbiddenPhrases = promptContext.forbiddenPhrases();
+            ArticleModelResolver.ModelSelection selectedModel = articleModelResolver.resolve(null, null, prompt.systemPrompt(), true);
+            task.setModelPlatformCode(selectedModel.platformCode());
+            task.setModelId(selectedModel.modelId());
+            taskMapper.updateById(task);
             ArticleGenerationEngine.GeneratedArticle generated = articleGenerationEngine.generate(
                     new ArticleGenerationEngine.GenerateInput(
                             project,
                             brand,
                             prompt.systemPrompt(),
                             prompt.userPrompt(),
-                            null,
-                            null,
+                            selectedModel.platformCode(),
+                            selectedModel.modelId(),
                             true,
                             true,
                             true,
@@ -534,14 +587,19 @@ public class BatchArticleGenerationService {
 
     private void markBatchRunning(BatchArticleGenerationBatch batch) {
         batch.setStatus(STATUS_RUNNING);
-        batch.setStartedAt(LocalDateTime.now());
+        if (batch.getStartedAt() == null) {
+            batch.setStartedAt(LocalDateTime.now());
+        }
+        batch.setFinishedAt(null);
         batchMapper.updateById(batch);
     }
 
     private void completeBatch(Long batchId) {
-        List<BatchArticleGenerationTask> tasks = taskMapper.selectList(
-                new LambdaQueryWrapper<BatchArticleGenerationTask>().eq(BatchArticleGenerationTask::getBatchId, batchId)
-        );
+        refreshBatchProgress(batchId, true);
+    }
+
+    private void refreshBatchProgress(Long batchId, boolean finishIfDone) {
+        List<BatchArticleGenerationTask> tasks = selectBatchTasks(batchId);
         int success = (int) tasks.stream().filter(task -> STATUS_SUCCESS.equals(task.getStatus())).count();
         int failed = (int) tasks.stream().filter(task -> STATUS_FAILED.equals(task.getStatus())).count();
         int warning = (int) tasks.stream().filter(task -> "warning".equals(task.getQualityStatus())).count();
@@ -552,21 +610,34 @@ public class BatchArticleGenerationService {
         batch.setSuccessCount(success);
         batch.setFailedCount(failed);
         batch.setWarningCount(warning);
-        batch.setFinishedAt(LocalDateTime.now());
-        if (success > 0 && failed > 0) {
-            batch.setStatus(STATUS_PARTIAL_SUCCESS);
-        } else if (success > 0) {
-            batch.setStatus(STATUS_SUCCESS);
-        } else {
-            batch.setStatus(STATUS_FAILED);
+        boolean done = !tasks.isEmpty() && success + failed == tasks.size();
+        if (done && finishIfDone) {
+            batch.setFinishedAt(LocalDateTime.now());
+            if (success > 0 && failed > 0) {
+                batch.setStatus(STATUS_PARTIAL_SUCCESS);
+            } else if (success > 0) {
+                batch.setStatus(STATUS_SUCCESS);
+            } else {
+                batch.setStatus(STATUS_FAILED);
+            }
+        } else if (success > 0 || failed > 0 || tasks.stream().anyMatch(task -> STATUS_RUNNING.equals(task.getStatus()))) {
+            batch.setStatus(STATUS_RUNNING);
         }
         batchMapper.updateById(batch);
+    }
+
+    private List<BatchArticleGenerationTask> selectBatchTasks(Long batchId) {
+        List<BatchArticleGenerationTask> tasks = taskMapper.selectList(
+                new LambdaQueryWrapper<BatchArticleGenerationTask>().eq(BatchArticleGenerationTask::getBatchId, batchId)
+        );
+        return tasks == null ? List.of() : tasks;
     }
 
     private void markTaskRunning(BatchArticleGenerationTask task) {
         task.setStatus(STATUS_RUNNING);
         task.setStartedAt(LocalDateTime.now());
         taskMapper.updateById(task);
+        refreshBatchProgress(task.getBatchId(), false);
     }
 
     private void markTaskSuccess(BatchArticleGenerationTask task,
@@ -590,6 +661,7 @@ public class BatchArticleGenerationService {
         task.setRetryCount(retryCount);
         task.setFinishedAt(LocalDateTime.now());
         taskMapper.updateById(task);
+        refreshBatchProgress(task.getBatchId(), false);
     }
 
     private void markTaskFailed(BatchArticleGenerationTask task, Exception ex) {
@@ -597,6 +669,7 @@ public class BatchArticleGenerationService {
         task.setErrorMessage(errorMessage(ex));
         task.setFinishedAt(LocalDateTime.now());
         taskMapper.updateById(task);
+        refreshBatchProgress(task.getBatchId(), false);
     }
 
     private Project requireActiveProject(Long projectId) {
@@ -1535,9 +1608,26 @@ public class BatchArticleGenerationService {
 
     private String errorMessage(Exception ex) {
         if (ex instanceof LlmInvokeException) {
-            return "AI article generation failed";
+            String reason = rootMessage(ex);
+            return StringUtils.hasText(reason) ? "AI article generation failed: " + reason : "AI article generation failed";
         }
         return StringUtils.hasText(ex.getMessage()) ? ex.getMessage() : ex.getClass().getSimpleName();
+    }
+
+    private String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        String message = null;
+        while (current != null) {
+            if (StringUtils.hasText(current.getMessage())) {
+                message = current.getMessage();
+            }
+            current = current.getCause();
+        }
+        if (!StringUtils.hasText(message)) {
+            return null;
+        }
+        String trimmed = message.trim();
+        return trimmed.length() > 900 ? trimmed.substring(0, 900) : trimmed;
     }
 
     private record ValidatedTopic(String topic,

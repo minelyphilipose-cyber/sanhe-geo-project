@@ -36,6 +36,11 @@
             <el-option label="部分失败" value="partial_failed" />
             <el-option label="失败" value="failed" />
           </el-select>
+          <el-select v-model="query.jobSource" placeholder="任务来源" style="width: 156px">
+            <el-option label="手动批量" value="manual" />
+            <el-option label="自动分发" value="auto" />
+            <el-option label="全部来源" value="all" />
+          </el-select>
           <el-button type="primary" @click="search">查询</el-button>
           <el-button @click="resetQuery">重置</el-button>
         </div>
@@ -54,7 +59,10 @@
             <template #default="{ row }">
               <div class="job-name-cell">
                 <span class="job-name-main">{{ row.jobName || fallbackJobName(row) }}</span>
-                <span class="job-name-sub">{{ publishModeLabel(row.publishMode) }} · {{ row.totalCount || 0 }} 篇文章</span>
+                <span class="job-name-sub">
+                  <span class="job-source-dot" :class="{ 'is-auto': row.jobSource === 'auto' }">{{ jobSourceLabel(row.jobSource) }}</span>
+                  {{ publishModeLabel(row.publishMode) }} · {{ row.totalCount || 0 }} 篇文章
+                </span>
               </div>
             </template>
           </el-table-column>
@@ -251,7 +259,7 @@ const rows = ref<BatchArticlePublishJobSummary[]>([])
 const detail = ref<BatchArticlePublishResponse | null>(null)
 const detailVisible = ref(false)
 const page = reactive({ current: 1, size: 10, total: 0 })
-const query = reactive({ status: '' })
+const query = reactive<{ status: string; jobSource: 'manual' | 'auto' | 'all' }>({ status: '', jobSource: 'manual' })
 let refreshTimer: number | null = null
 
 const jobStats = computed(() => {
@@ -311,6 +319,7 @@ async function load() {
       current: page.current,
       size: page.size,
       status: query.status || undefined,
+      jobSource: query.jobSource,
     })
     rows.value = data.data.records || []
     page.total = data.data.total || 0
@@ -329,6 +338,7 @@ function search() {
 
 function resetQuery() {
   query.status = ''
+  query.jobSource = 'manual'
   search()
 }
 
@@ -372,6 +382,10 @@ function publishModeLabel(v: string) {
 
 function fallbackJobName(row: BatchArticlePublishJobSummary) {
   return `${publishModeLabel(row.publishMode)}任务 · ${row.totalCount || 0} 篇 · ${formatJobScheduledAt(row)}`
+}
+
+function jobSourceLabel(v?: string | null) {
+  return v === 'auto' ? '自动分发' : '手动批量'
 }
 
 function jobStatusLabel(v: string) {
@@ -616,11 +630,31 @@ function goBack() {
 
 .job-name-sub {
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   color: #64748b;
   font-size: 12px;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.job-source-dot {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: #eff6ff;
+  padding: 2px 7px;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.job-source-dot.is-auto {
+  background: #fff7ed;
+  color: #c2410c;
 }
 
 .publish-mode-pill,

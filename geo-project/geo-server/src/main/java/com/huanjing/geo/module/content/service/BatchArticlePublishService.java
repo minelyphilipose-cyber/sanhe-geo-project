@@ -238,11 +238,21 @@ public class BatchArticlePublishService {
     }
 
     public Page<BatchArticlePublishJobSummary> page(long current, long size, String status) {
+        return page(current, size, status, "all");
+    }
+
+    public Page<BatchArticlePublishJobSummary> page(long current, long size, String status, String jobSource) {
         currentUserService.ensurePermission("project.read");
         LambdaQueryWrapper<BatchArticlePublishJob> wrapper = new LambdaQueryWrapper<BatchArticlePublishJob>()
                 .orderByDesc(BatchArticlePublishJob::getCreatedAt);
         if (StringUtils.hasText(status)) {
             wrapper.eq(BatchArticlePublishJob::getStatus, status.trim());
+        }
+        String normalizedSource = normalizeJobSource(jobSource);
+        if ("manual".equals(normalizedSource)) {
+            wrapper.notLikeRight(BatchArticlePublishJob::getJobName, "自动分发_");
+        } else if ("auto".equals(normalizedSource)) {
+            wrapper.likeRight(BatchArticlePublishJob::getJobName, "自动分发_");
         }
         Page<BatchArticlePublishJob> page = jobMapper.selectPage(new Page<>(current, size), wrapper);
         Page<BatchArticlePublishJobSummary> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
@@ -447,6 +457,7 @@ public class BatchArticlePublishService {
         BatchArticlePublishResponse response = new BatchArticlePublishResponse();
         response.setJobId(job.getId());
         response.setJobName(displayJobName(job.getJobName()));
+        response.setJobSource(jobSource(job));
         response.setPublishMode(job.getPublishMode());
         response.setStatus(job.getStatus());
         response.setScheduledAt(job.getScheduledAt());
@@ -462,6 +473,7 @@ public class BatchArticlePublishService {
         BatchArticlePublishJobSummary summary = new BatchArticlePublishJobSummary();
         summary.setJobId(job.getId());
         summary.setJobName(displayJobName(job.getJobName()));
+        summary.setJobSource(jobSource(job));
         summary.setPublishMode(job.getPublishMode());
         summary.setStatus(job.getStatus());
         summary.setScheduledAt(job.getScheduledAt());
@@ -474,6 +486,21 @@ public class BatchArticlePublishService {
         summary.setStartedAt(job.getStartedAt());
         summary.setFinishedAt(job.getFinishedAt());
         return summary;
+    }
+
+    private String normalizeJobSource(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "manual";
+        }
+        String source = value.trim();
+        if (Set.of("manual", "auto", "all").contains(source)) {
+            return source;
+        }
+        throw new BizException(400, "任务来源只能为 manual、auto 或 all");
+    }
+
+    private String jobSource(BatchArticlePublishJob job) {
+        return isAutoDistributionJob(job) ? "auto" : "manual";
     }
 
     private String buildJobName(String publishMode, List<Long> articleIds, LocalDateTime baseTime) {

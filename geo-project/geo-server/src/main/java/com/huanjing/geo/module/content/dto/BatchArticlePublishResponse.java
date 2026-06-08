@@ -10,6 +10,7 @@ import java.util.List;
 public class BatchArticlePublishResponse {
     private Long jobId;
     private String jobName;
+    private String jobSource;
     private String publishMode;
     private String status;
     private LocalDateTime scheduledAt;

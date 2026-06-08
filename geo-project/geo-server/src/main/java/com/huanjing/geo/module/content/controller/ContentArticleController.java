@@ -109,6 +109,11 @@ public class ContentArticleController {
         return R.ok(batchArticleGenerationService.detail(batchId));
     }
 
+    @PostMapping("/batch-generate/{batchId}/retry-failed")
+    public R<BatchArticleGenerationDetailResponse> retryFailedBatchGenerate(@PathVariable Long batchId) {
+        return R.ok(batchArticleGenerationService.retryFailed(batchId));
+    }
+
     @PostMapping("/self-media-cookie-status/batch")
     public R<SelfMediaCookieStatusBatchResponse> selfMediaCookieStatusBatch(
             @Valid @RequestBody SelfMediaCookieStatusBatchRequest req
