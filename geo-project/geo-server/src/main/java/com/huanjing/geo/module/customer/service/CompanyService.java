@@ -5,6 +5,7 @@ import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.util.QuotaPeriodResolver;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.dto.ChannelQuotaSnapshotItem;
 import com.huanjing.geo.module.content.entity.CompanyChannelQuotaUsage;
 import com.huanjing.geo.module.content.mapper.CompanyChannelQuotaUsageMapper;
@@ -74,13 +75,7 @@ public class CompanyService {
     private static final Set<String> STATUSES = Set.of("potential", "signed", "inactive");
     private static final Set<String> DISTRIBUTION_PERIOD_TYPES = Set.of("day", "week", "month", "total");
     private static final ZoneId BUSINESS_ZONE = ZoneId.of("Asia/Shanghai");
-    private static final List<ChannelDefinition> DISTRIBUTION_CHANNELS = List.of(
-            new ChannelDefinition("official_site", "官网"),
-            new ChannelDefinition("industry_site", "行业资讯站"),
-            new ChannelDefinition("forum", "平台网站"),
-            new ChannelDefinition("self_media", "自媒体平台"),
-            new ChannelDefinition("authority_media", "权重媒体平台")
-    );
+    private static final List<ChannelDefinition> DISTRIBUTION_CHANNELS = distributionChannels();
 
     private final CompanyMapper companyMapper;
     private final CompanyAccountMapper companyAccountMapper;
@@ -1030,5 +1025,20 @@ public class CompanyService {
     }
 
     private record ChannelDefinition(String code, String name) {
+    }
+
+    private static List<ChannelDefinition> distributionChannels() {
+        List<ChannelDefinition> channels = new ArrayList<>();
+        channels.add(new ChannelDefinition("official_site", "官网"));
+        channels.add(new ChannelDefinition("industry_site", "行业资讯站"));
+        channels.add(new ChannelDefinition("forum", "平台网站"));
+        for (String platform : ArticlePromptChannels.SELF_MEDIA_SUB_CODES) {
+            channels.add(new ChannelDefinition(
+                    ArticlePromptChannels.SELF_MEDIA + ":" + platform,
+                    ArticlePromptChannels.channelName(ArticlePromptChannels.SELF_MEDIA, platform)
+            ));
+        }
+        channels.add(new ChannelDefinition("authority_media", "权重媒体平台"));
+        return List.copyOf(channels);
     }
 }

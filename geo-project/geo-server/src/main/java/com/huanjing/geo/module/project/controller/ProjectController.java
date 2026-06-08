@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.project.dto.KeywordGroupImportResultVO;
 import com.huanjing.geo.module.project.dto.ProjectChannelAllocationQuotaVO;
+import com.huanjing.geo.module.project.dto.ProjectChannelAllocationUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectCreateRequest;
 import com.huanjing.geo.module.project.dto.ProjectFlowUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectKeywordGroupQuotaVO;
@@ -71,6 +72,11 @@ public class ProjectController {
     @PutMapping("/{id:\\d+}")
     public R<Project> update(@PathVariable Long id, @Valid @RequestBody ProjectUpdateRequest req) {
         return R.ok(projectService.update(id, req));
+    }
+
+    @PutMapping("/{id:\\d+}/channel-allocations")
+    public R<Project> updateChannelAllocations(@PathVariable Long id, @Valid @RequestBody ProjectChannelAllocationUpdateRequest req) {
+        return R.ok(projectService.updateChannelAllocations(id, req));
     }
 
     @PutMapping("/{id:\\d+}/stage")

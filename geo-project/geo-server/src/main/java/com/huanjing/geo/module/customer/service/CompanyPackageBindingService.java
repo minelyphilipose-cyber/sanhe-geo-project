@@ -4,6 +4,7 @@ import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.util.QuotaPeriodResolver;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.dto.ChannelQuotaSnapshotItem;
 import com.huanjing.geo.module.content.entity.CompanyChannelQuotaLedger;
 import com.huanjing.geo.module.content.entity.CompanyChannelQuotaUsage;
@@ -42,6 +43,7 @@ public class CompanyPackageBindingService {
     private static final String BIZ_TYPE_DISTRIBUTION = "distribution";
     private static final Set<String> SUCCESS_TASK_STATUS = Set.of("submitted", "confirmed", "published");
     private static final Set<String> FAILED_TASK_STATUS = Set.of("failed", "cancelled", "canceled");
+    private static final List<String> PROJECT_ALLOCATION_CHANNELS = projectAllocationChannels();
 
     private final CompanyPackageBindingMapper bindingMapper;
     private final CompanyMapper companyMapper;
@@ -282,7 +284,7 @@ public class CompanyPackageBindingService {
                         LinkedHashMap::new
                 ));
         List<Map<String, Object>> exceeded = new java.util.ArrayList<>();
-        for (String channel : List.of("official_site", "industry_site", "forum", "self_media", "authority_media")) {
+        for (String channel : PROJECT_ALLOCATION_CHANNELS) {
             int quotaLimit = quotaByChannel.getOrDefault(channel, 0);
             List<ProjectChannelAllocationProjectRow> activeProjects =
                     projectChannelAllocationMapper.activeProjectRowsForUpdate(companyId, channel, null);
@@ -349,6 +351,18 @@ public class CompanyPackageBindingService {
 
     private int defaultInt(Integer value, Integer fallback) {
         return value == null ? (fallback == null ? 0 : fallback) : value;
+    }
+
+    private static List<String> projectAllocationChannels() {
+        List<String> channels = new java.util.ArrayList<>();
+        channels.add("official_site");
+        channels.add("industry_site");
+        channels.add("forum");
+        for (String platform : ArticlePromptChannels.SELF_MEDIA_SUB_CODES) {
+            channels.add(ArticlePromptChannels.SELF_MEDIA + ":" + platform);
+        }
+        channels.add("authority_media");
+        return List.copyOf(channels);
     }
 
     private List<ChannelQuotaSnapshotItem> toSnapshot(List<PackageChannelQuotaConfig> channelQuotas) {

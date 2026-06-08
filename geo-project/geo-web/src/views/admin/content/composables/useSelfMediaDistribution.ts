@@ -6,6 +6,7 @@ import type {
   ArticleDraft,
   BrandImageFolder,
   BrandMaterial,
+  CompanyDistributionQuotaItem,
   DistributionTask,
   DouyinCapability,
   SelfMediaAccount,
@@ -25,7 +26,7 @@ import {
   getWechatMpCapability,
   refreshDistributionTaskReviewStatus,
 } from '@/api/content'
-import { getBrandImageFolders, getBrandMaterialPreviewUrl } from '@/api/customer'
+import { getBrandImageFolders, getBrandMaterialPreviewUrl, getCompanyDistributionQuotas } from '@/api/customer'
 import {
   getBrowserEnvironmentAccountBySelfMedia,
   resetBrowserEnvironmentAccountLoginIdentity,
@@ -36,8 +37,13 @@ import {
   type LocalAgentSession,
 } from '@/api/localAgent'
 import { getLocalHelperHealth, launchLocalHelperTask, openLocalHelperEnvironment } from '@/api/localHelper'
+import {
+  canonicalSelfMediaPlatform,
+  selfMediaPlatformLabel,
+  selfMediaQuotaChannel,
+} from '@/constants/selfMediaPlatforms'
 
-type MediaPlatform = 'wechat_mp' | 'douyin' | 'toutiao' | 'zhihu' | 'xiaohongshu'
+type MediaPlatform = 'wechat_mp' | 'douyin' | 'baijiahao' | 'toutiao' | 'zhihu' | 'xiaohongshu' | 'netease' | 'sohu'
 type SemiAutoPlatform = 'toutiao' | 'zhihu' | 'xiaohongshu'
 
 type UseSelfMediaDistributionOptions = {
@@ -86,6 +92,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   const toutiaoAccounts = ref<SelfMediaAccount[]>([])
   const zhihuAccounts = ref<SelfMediaAccount[]>([])
   const xiaohongshuAccounts = ref<SelfMediaAccount[]>([])
+  const selfMediaQuotaItems = ref<CompanyDistributionQuotaItem[]>([])
   const checkingSelfMediaAccountId = ref<number | null>(null)
   const brandImageFolders = ref<BrandImageFolder[]>([])
   const materialThumbUrls = ref<Record<number, string | null>>({})
@@ -168,6 +175,28 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
         return wechatAccounts.value
     }
   })
+  const selectedSelfMediaQuotaItem = computed(() => {
+    const channelCode = selfMediaQuotaChannel(selectedMediaPlatform.value)
+    return selfMediaQuotaItems.value.find((item) => item.channelCode === channelCode) || null
+  })
+  const selectedSelfMediaQuotaHint = computed(() => {
+    const label = selfMediaPlatformLabel(selectedMediaPlatform.value)
+    const item = selectedSelfMediaQuotaItem.value
+    if (!item) {
+      return `${label} 未配置套餐额度，发布时将无法扣减平台额度`
+    }
+    if (!item.enabled) {
+      return `套餐未开通 ${label} 额度`
+    }
+    const period = distributionQuotaPeriodLabel(item.periodType)
+    const limitText = item.limitMismatch && item.usageQuotaLimit != null
+      ? `${item.quotaLimit}（本周期 ${item.usageQuotaLimit}）`
+      : String(item.quotaLimit)
+    if (item.status === 'exceeded') {
+      return `${label} 已超额 ${Math.max(item.usedCount - item.quotaLimit, 0)}，已用 ${item.usedCount}/${limitText}（${period}）`
+    }
+    return `${label} 剩余 ${item.remainingCount}，已用 ${item.usedCount}/${limitText}（${period}）`
+  })
   const projectImageFolders = computed(() => brandImageFolders.value.filter((folder) => folder.projectRelated))
   const displayImageFolders = computed(() => {
     if (imageFolderScope.value === 'project' && projectImageFolders.value.length) {
@@ -199,6 +228,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     toutiaoAccounts.value = []
     zhihuAccounts.value = []
     xiaohongshuAccounts.value = []
+    selfMediaQuotaItems.value = []
     brandImageFolders.value = []
     imageFolderScope.value = 'project'
     selectedImageFolderId.value = null
@@ -225,6 +255,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
       wechatCapability.value = wechatCapabilityRes.data.data
       douyinCapability.value = douyinCapabilityRes.data.data
       distributionAttempts.value = distributionRes.data.data.attempts || []
+      const companyId = detailRes.data.data.project?.companyId
       const [accountRes, folderRes] = await Promise.all([
         getSelfMediaAccountsByBrand(brandId),
         getBrandImageFolders(brandId, {
@@ -233,6 +264,9 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
           includeMaterials: true,
         }),
       ])
+      if (companyId) {
+        await loadSelfMediaDistributionQuotas(companyId)
+      }
       applySelfMediaAccounts(accountRes.data.data || [])
       await Promise.all([
         loadBrowserEnvironmentAccountStatuses(accountRes.data.data || []),
@@ -249,11 +283,21 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   }
 
   function applySelfMediaAccounts(accounts: SelfMediaAccount[]) {
-    wechatAccounts.value = accounts.filter((account) => account.platform === 'wechat_mp')
-    douyinAccounts.value = accounts.filter((account) => account.platform === 'douyin')
-    toutiaoAccounts.value = accounts.filter((account) => account.platform === 'toutiao')
-    zhihuAccounts.value = accounts.filter((account) => account.platform === 'zhihu')
-    xiaohongshuAccounts.value = accounts.filter((account) => account.platform === 'xiaohongshu')
+    wechatAccounts.value = accounts.filter((account) => canonicalSelfMediaPlatform(account.platform) === 'wechat')
+    douyinAccounts.value = accounts.filter((account) => canonicalSelfMediaPlatform(account.platform) === 'douyin')
+    toutiaoAccounts.value = accounts.filter((account) => canonicalSelfMediaPlatform(account.platform) === 'toutiao')
+    zhihuAccounts.value = accounts.filter((account) => canonicalSelfMediaPlatform(account.platform) === 'zhihu')
+    xiaohongshuAccounts.value = accounts.filter((account) => canonicalSelfMediaPlatform(account.platform) === 'xiaohongshu')
+  }
+
+  async function loadSelfMediaDistributionQuotas(companyId: number) {
+    try {
+      const { data } = await getCompanyDistributionQuotas(companyId)
+      selfMediaQuotaItems.value = (data.data.items || [])
+        .filter((item) => item.channelCode?.startsWith('self_media:'))
+    } catch {
+      selfMediaQuotaItems.value = []
+    }
   }
 
   async function loadBrowserEnvironmentAccountStatuses(accounts: SelfMediaAccount[]) {
@@ -397,6 +441,16 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
 
   function isSemiAutoPlatform(platform: MediaPlatform): platform is SemiAutoPlatform {
     return platform === 'toutiao' || platform === 'zhihu' || platform === 'xiaohongshu'
+  }
+
+  function distributionQuotaPeriodLabel(value?: string | null) {
+    const labels: Record<string, string> = {
+      day: '日',
+      week: '周',
+      month: '月',
+      total: '总量',
+    }
+    return value ? (labels[value] || value) : '-'
   }
 
   function semiAutoPlatformLabel(platform: string) {
@@ -1256,6 +1310,8 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     douyinStatusTagType,
     douyinSubmitButtonText,
     currentPlatformAccounts,
+    selectedSelfMediaQuotaItem,
+    selectedSelfMediaQuotaHint,
     displayImageFolders,
     imageMaterials,
     douyinImageMaterials,

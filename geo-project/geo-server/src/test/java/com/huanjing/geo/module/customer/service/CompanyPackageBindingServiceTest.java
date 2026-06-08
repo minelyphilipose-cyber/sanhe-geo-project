@@ -232,6 +232,21 @@ class CompanyPackageBindingServiceTest {
     }
 
     @Test
+    void bindValidatesSelfMediaPlatformProjectAllocationsAgainstPackage() {
+        Company company = new Company();
+        company.setId(7L);
+        when(companyMapper.selectById(7L)).thenReturn(company);
+        when(packagePlanMapper.selectById(3L)).thenReturn(enabledPlan());
+        when(channelQuotaConfigMapper.selectList(any())).thenReturn(List.of(quota("self_media:zhihu", 1)));
+        when(projectChannelAllocationMapper.activeProjectRowsForUpdate(7L, "self_media:zhihu", null))
+                .thenReturn(List.of(projectRow(11L, "P1", 2)));
+
+        BizException ex = assertThrows(BizException.class, () -> service.bind(7L, 3L));
+
+        org.junit.jupiter.api.Assertions.assertEquals("PACKAGE_CHANNEL_ALLOCATION_EXCEEDED", ex.getMessage());
+    }
+
+    @Test
     void bindBlocksWhenOneChannelAllocationExceedsNewPackage() {
         Company company = new Company();
         company.setId(7L);

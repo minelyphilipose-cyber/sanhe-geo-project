@@ -6,7 +6,7 @@ import jakarta.validation.constraints.Size;
 
 public record SelfMediaAccountManageRequest(
         @NotBlank
-        @Pattern(regexp = "toutiao|zhihu|xiaohongshu", message = "platform must be toutiao, zhihu or xiaohongshu")
+        @Pattern(regexp = "wechat|douyin|baijiahao|zhihu|xiaohongshu|toutiao|netease|sohu", message = "unsupported self-media platform")
         String platform,
 
         @NotBlank

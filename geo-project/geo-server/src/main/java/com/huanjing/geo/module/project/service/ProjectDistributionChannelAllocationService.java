@@ -4,6 +4,7 @@ import cn.hutool.json.JSONArray;
 import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.dto.ChannelQuotaSnapshotItem;
 import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
@@ -40,16 +41,9 @@ public class ProjectDistributionChannelAllocationService {
     public static final String OFFICIAL_SITE = "official_site";
     public static final String INDUSTRY_SITE = "industry_site";
     public static final String FORUM = "forum";
-    public static final String SELF_MEDIA = "self_media";
     public static final String AUTHORITY_MEDIA = "authority_media";
 
-    private static final List<ChannelDefinition> CHANNELS = List.of(
-            new ChannelDefinition(OFFICIAL_SITE, "官网"),
-            new ChannelDefinition(INDUSTRY_SITE, "行业资讯站"),
-            new ChannelDefinition(FORUM, "平台网站"),
-            new ChannelDefinition(SELF_MEDIA, "自媒体号"),
-            new ChannelDefinition(AUTHORITY_MEDIA, "权威媒体")
-    );
+    private static final List<ChannelDefinition> CHANNELS = channelDefinitions();
     private static final Set<String> CHANNEL_CODES = CHANNELS.stream()
             .map(ChannelDefinition::code)
             .collect(Collectors.toUnmodifiableSet());
@@ -392,5 +386,20 @@ public class ProjectDistributionChannelAllocationService {
     }
 
     private record SnapshotQuota(String periodType, int quotaLimit) {
+    }
+
+    private static List<ChannelDefinition> channelDefinitions() {
+        List<ChannelDefinition> channels = new ArrayList<>();
+        channels.add(new ChannelDefinition(OFFICIAL_SITE, "官网"));
+        channels.add(new ChannelDefinition(INDUSTRY_SITE, "行业资讯站"));
+        channels.add(new ChannelDefinition(FORUM, "平台网站"));
+        for (String platform : ArticlePromptChannels.SELF_MEDIA_SUB_CODES) {
+            channels.add(new ChannelDefinition(
+                    ArticlePromptChannels.SELF_MEDIA + ":" + platform,
+                    ArticlePromptChannels.channelName(ArticlePromptChannels.SELF_MEDIA, platform)
+            ));
+        }
+        channels.add(new ChannelDefinition(AUTHORITY_MEDIA, "权威媒体"));
+        return List.copyOf(channels);
     }
 }

@@ -156,7 +156,10 @@ const staticPlatforms: PlatformDetail[] = [
   staticPlatform('zhihu', '知乎', '知', 'zhihu', '自媒体平台'),
   staticPlatform('wechat', '公众号', '微', 'wechat', '自媒体平台'),
   staticPlatform('douyin', '抖音图文', '抖', 'douyin', '自媒体平台'),
+  staticPlatform('baijiahao', '百家号', '百', 'media', '自媒体平台'),
+  staticPlatform('xiaohongshu', '小红书', '红', 'xiaohongshu', '自媒体平台'),
   staticPlatform('netease', '网易', '网', 'media', '自媒体平台'),
+  staticPlatform('sohu', '搜狐', '狐', 'media', '自媒体平台'),
   {
     ...staticPlatform('agent_site', 'Agent 官网', 'A', 'agent', 'Agent 官网'),
     autoPublish: true,

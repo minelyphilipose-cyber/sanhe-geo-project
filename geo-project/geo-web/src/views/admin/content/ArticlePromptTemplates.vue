@@ -416,6 +416,7 @@ const subOptions: Record<string, Array<{ label: string; value: string }>> = {
     { label: '小红书', value: 'xiaohongshu' },
     { label: '百家号', value: 'baijiahao' },
     { label: '网易', value: 'netease' },
+    { label: '搜狐', value: 'sohu' },
   ],
   authority_media: [
     { label: '行业媒体', value: 'industry_media' },

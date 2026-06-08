@@ -5,14 +5,17 @@ import cn.hutool.json.JSONUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.util.QuotaPeriodResolver;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
 import com.huanjing.geo.module.content.dto.ChannelQuotaSnapshotItem;
 import com.huanjing.geo.module.content.entity.CompanyChannelQuotaUsage;
 import com.huanjing.geo.module.content.entity.CompanyChannelQuotaLedger;
 import com.huanjing.geo.module.content.entity.DistributionTask;
+import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.CompanyChannelQuotaLedgerMapper;
 import com.huanjing.geo.module.content.mapper.CompanyChannelQuotaUsageMapper;
 import com.huanjing.geo.module.content.mapper.DistributionTaskMapper;
+import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.customer.entity.CompanyPackageBinding;
 import com.huanjing.geo.module.customer.service.CompanyPackageBindingService;
 import com.huanjing.geo.module.system.service.SystemAlertService;
@@ -45,6 +48,7 @@ public class CompanyChannelQuotaService {
     private final CompanyChannelQuotaUsageMapper usageMapper;
     private final CompanyChannelQuotaLedgerMapper ledgerMapper;
     private final DistributionTaskMapper distributionTaskMapper;
+    private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final SystemAlertService systemAlertService;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -52,7 +56,26 @@ public class CompanyChannelQuotaService {
         if (distributionTaskId == null) {
             throw new BizException(400, "distribution_task_id is required for quota reservation");
         }
-        String channel = mapTargetKind(targetKind);
+        String channel = resolveDistributionChannel(targetKind, distributionTaskId);
+        return reserveDistributionForChannel(companyId, projectId, channel, distributionTaskId);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public CompanyChannelQuotaLedger reserveSelfMediaDistribution(Long companyId,
+                                                                  Long projectId,
+                                                                  String platform,
+                                                                  Long distributionTaskId) {
+        if (distributionTaskId == null) {
+            throw new BizException(400, "distribution_task_id is required for quota reservation");
+        }
+        String channel = resolveSelfMediaPlatformChannel(platform);
+        return reserveDistributionForChannel(companyId, projectId, channel, distributionTaskId);
+    }
+
+    private CompanyChannelQuotaLedger reserveDistributionForChannel(Long companyId,
+                                                                    Long projectId,
+                                                                    String channel,
+                                                                    Long distributionTaskId) {
         CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(companyId);
         SnapshotQuota quota = resolveSnapshotQuota(binding, channel);
         String periodKey = periodKey(quota.periodType());
@@ -261,11 +284,41 @@ public class CompanyChannelQuotaService {
             case DistributionTargetKind.BRAND_OFFICIAL_SITE, DistributionTargetKind.BRAND_GEO_SITE -> "official_site";
             case DistributionTargetKind.INDUSTRY_SITE -> "industry_site";
             case DistributionTargetKind.FORUM_SITE -> "forum";
-            case DistributionTargetKind.MP_ACCOUNT -> "self_media";
+            case DistributionTargetKind.MP_ACCOUNT -> throw new BizException(400, "Self-media quota requires a concrete platform");
             case DistributionTargetKind.AUTHORITY_MEDIA -> "authority_media";
             case DistributionTargetKind.SITE -> throw new BizException(400, "Legacy site target is not supported by company package channel quota");
             default -> throw new BizException(400, "Unsupported distribution target kind: " + targetKind);
         };
+    }
+
+    private String resolveDistributionChannel(String targetKind, Long distributionTaskId) {
+        String normalizedTargetKind = StringUtils.hasText(targetKind) ? targetKind.trim() : targetKind;
+        if (DistributionTargetKind.MP_ACCOUNT.equals(normalizedTargetKind)) {
+            DistributionTask task = distributionTaskMapper.selectById(distributionTaskId);
+            if (task == null || task.getSelfMediaAccountId() == null) {
+                throw new BizException(400, "Self-media distribution task is missing self-media account");
+            }
+            SelfMediaAccount account = selfMediaAccountMapper.selectById(task.getSelfMediaAccountId());
+            if (account == null || !StringUtils.hasText(account.getPlatform())) {
+                throw new BizException(400, "Self-media account is missing platform");
+            }
+            return resolveSelfMediaPlatformChannel(account.getPlatform());
+        }
+        return mapTargetKind(normalizedTargetKind);
+    }
+
+    private String resolveSelfMediaPlatformChannel(String platformValue) {
+        if (!StringUtils.hasText(platformValue)) {
+            throw new BizException(400, "Self-media account is missing platform");
+        }
+        String platform = ArticlePromptChannels.canonicalSubCode(
+                ArticlePromptChannels.SELF_MEDIA,
+                platformValue.trim().toLowerCase(Locale.ROOT)
+        );
+        if (!ArticlePromptChannels.SELF_MEDIA_SUBS.contains(platform)) {
+            throw new BizException(400, "Unsupported self-media platform for quota: " + platformValue);
+        }
+        return ArticlePromptChannels.SELF_MEDIA + ":" + platform;
     }
 
     private String periodKey(String periodType) {

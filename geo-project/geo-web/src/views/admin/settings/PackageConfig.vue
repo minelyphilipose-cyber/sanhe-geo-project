@@ -171,10 +171,10 @@
           <div class="form-section-head">
             <div>
               <span>分发渠道额度</span>
-              <strong>官网、行业站、平台网站、自媒体和权重媒体额度</strong>
+              <strong>官网、行业站、平台网站、各自媒体平台和权重媒体额度</strong>
             </div>
           </div>
-          <el-table class="quota-editor-table" :data="form.channelQuotaConfigs" border table-layout="fixed">
+          <el-table class="quota-editor-table" :data="baseChannelQuotaConfigs" border table-layout="fixed">
             <el-table-column label="渠道" min-width="180">
               <template #default="scope">{{ channelLabel(scope.row.channelCode) }}</template>
             </el-table-column>
@@ -194,6 +194,36 @@
               <template #default="scope"><el-switch v-model="scope.row.enabled" /></template>
             </el-table-column>
           </el-table>
+          <el-collapse v-if="selfMediaChannelQuotaConfigs.length" class="quota-channel-groups" model-value="self_media">
+            <el-collapse-item name="self_media">
+              <template #title>
+                <div class="quota-group-title">
+                  <span>自媒体平台</span>
+                  <el-tag size="small" type="info">{{ selfMediaChannelQuotaConfigs.length }} 个平台</el-tag>
+                </div>
+              </template>
+              <el-table class="quota-editor-table" :data="selfMediaChannelQuotaConfigs" border table-layout="fixed">
+                <el-table-column label="平台" min-width="180">
+                  <template #default="scope">{{ channelLabel(scope.row.channelCode) }}</template>
+                </el-table-column>
+                <el-table-column label="周期" min-width="160">
+                  <template #default="scope">
+                    <el-select v-model="scope.row.periodType">
+                      <el-option v-for="item in periodOptions(scope.row.channelCode)" :key="item.value" :label="item.label" :value="item.value" />
+                    </el-select>
+                  </template>
+                </el-table-column>
+                <el-table-column label="额度" min-width="160">
+                  <template #default="scope">
+                    <el-input-number v-model="scope.row.quotaLimit" :min="0" />
+                  </template>
+                </el-table-column>
+                <el-table-column label="启用" width="100">
+                  <template #default="scope"><el-switch v-model="scope.row.enabled" /></template>
+                </el-table-column>
+              </el-table>
+            </el-collapse-item>
+          </el-collapse>
         </section>
 
         <section class="form-section">
@@ -237,6 +267,7 @@ import {
 } from '@/api/packagePlan'
 import type { PackageChannelQuotaConfig, PackagePlan } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
+import { DISTRIBUTION_CHANNELS, distributionChannelLabel, isSelfMediaQuotaChannel } from '@/constants/distributionChannels'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -295,26 +326,20 @@ const avgServiceMonths = computed(() => {
   const avg = rows.value.reduce((sum, item) => sum + Number(item.serviceMonths || 0), 0) / rows.value.length
   return `${Math.round(avg)} 月`
 })
+const baseChannelQuotaConfigs = computed(() => form.channelQuotaConfigs.filter((item) => !isSelfMediaQuotaChannel(item.channelCode)))
+const selfMediaChannelQuotaConfigs = computed(() => form.channelQuotaConfigs.filter((item) => isSelfMediaQuotaChannel(item.channelCode)))
 
 function defaultChannelQuotas(): PackageChannelQuotaConfig[] {
-  return [
-    { channelCode: 'official_site', periodType: 'week', quotaLimit: 1, enabled: true },
-    { channelCode: 'industry_site', periodType: 'week', quotaLimit: 1, enabled: true },
-    { channelCode: 'forum', periodType: 'week', quotaLimit: 1, enabled: true },
-    { channelCode: 'self_media', periodType: 'week', quotaLimit: 1, enabled: true },
-    { channelCode: 'authority_media', periodType: 'total', quotaLimit: 0, enabled: true },
-  ]
+  return DISTRIBUTION_CHANNELS.map((item) => ({
+    channelCode: item.code,
+    periodType: item.periodType,
+    quotaLimit: item.quotaLimit,
+    enabled: item.enabled,
+  }))
 }
 
 function channelLabel(code: string) {
-  const map: Record<string, string> = {
-    official_site: '官网',
-    industry_site: '行业资讯站',
-    forum: '平台网站',
-    self_media: '自媒体平台',
-    authority_media: '权重媒体平台',
-  }
-  return map[code] || code
+  return distributionChannelLabel(code)
 }
 
 function periodOptions(channelCode: string) {
@@ -335,7 +360,16 @@ function periodLabel(value: string) {
 function quotaSummary(configs?: PackageChannelQuotaConfig[]) {
   const list = configs?.length ? configs : []
   if (!list.length) return '-'
-  return list.map((item) => `${channelLabel(item.channelCode)} ${item.quotaLimit}/${periodLabel(item.periodType)}`).join('；')
+  const base = list
+    .filter((item) => !isSelfMediaQuotaChannel(item.channelCode))
+    .map((item) => `${channelLabel(item.channelCode)} ${item.quotaLimit}/${periodLabel(item.periodType)}`)
+  const selfMedia = list.filter((item) => isSelfMediaQuotaChannel(item.channelCode))
+  if (selfMedia.length) {
+    const enabled = selfMedia.filter((item) => item.enabled).length
+    const total = selfMedia.reduce((sum, item) => sum + Number(item.quotaLimit || 0), 0)
+    base.push(`自媒体平台 ${total}（${enabled}/${selfMedia.length} 平台）`)
+  }
+  return base.join('；')
 }
 
 function packageInitial(value?: string | null) {
@@ -650,6 +684,17 @@ onMounted(load)
 
 .form-grid .is-full {
   grid-column: 1 / -1;
+}
+
+.quota-channel-groups {
+  margin-top: 12px;
+}
+
+.quota-group-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
 }
 
 .package-config-form :deep(.el-form-item) {

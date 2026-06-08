@@ -47,6 +47,7 @@ import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.dispatch.mapper.ProjectPollRotationMapper;
 import com.huanjing.geo.module.project.dto.ProjectCreateRequest;
 import com.huanjing.geo.module.project.dto.ProjectChannelAllocationQuotaVO;
+import com.huanjing.geo.module.project.dto.ProjectChannelAllocationUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectFlowUpdateRequest;
 import com.huanjing.geo.module.project.dto.ProjectKeywordGroupQuotaVO;
 import com.huanjing.geo.module.project.dto.ProjectStageUpdateRequest;
@@ -345,6 +346,34 @@ public class ProjectService {
                 Map.of("companyId", project.getCompanyId(), "brandId", project.getBrandId())
         );
 
+        return project;
+    }
+
+    @Transactional
+    public Project updateChannelAllocations(Long id, ProjectChannelAllocationUpdateRequest req) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        Project project = requireProject(id);
+        projectStateGuard.ensureCanEditBasicInfo(project, operator);
+        internalScopeService.ensureProjectAccess(operator, project, "project");
+        currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
+        channelAllocationService.attachAllocations(Collections.singletonList(project));
+        Map<String, Object> before = snapshotProject(project);
+
+        channelAllocationService.replaceAllocations(project, req.getChannelAllocations(), req.getAllocationVersion(),
+                operator.getId(), "project.channel_allocations.update");
+        if ("active".equals(project.getStatus())) {
+            channelAllocationService.validateActivation(project);
+        }
+        channelAllocationService.attachAllocations(Collections.singletonList(project));
+        activityLogService.logAction(
+                operator.getId(),
+                "project.channel_allocations.update",
+                "project",
+                project.getId(),
+                before,
+                snapshotProject(project),
+                Map.of("companyId", project.getCompanyId(), "brandId", project.getBrandId())
+        );
         return project;
     }
 

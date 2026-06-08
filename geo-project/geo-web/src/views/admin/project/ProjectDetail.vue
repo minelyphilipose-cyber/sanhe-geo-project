@@ -83,7 +83,7 @@
         class="mb-3"
         title="仅官网、行业资讯站参与文章生成调度；额度为 0 时不会生成文章。"
       />
-      <el-table :data="project.channelAllocations || []" border empty-text="暂无渠道额度">
+      <el-table :data="projectBaseChannelAllocations" border empty-text="暂无渠道额度">
         <el-table-column prop="channelName" label="渠道" min-width="140">
           <template #default="{ row }">
             <div class="channel-name">
@@ -110,6 +110,43 @@
           </template>
         </el-table-column>
       </el-table>
+      <el-collapse v-if="projectSelfMediaChannelAllocations.length" class="quota-channel-groups" model-value="self_media">
+        <el-collapse-item name="self_media">
+          <template #title>
+            <div class="quota-group-title">
+              <span>自媒体平台</span>
+              <el-tag size="small" type="info">{{ projectSelfMediaChannelAllocations.length }} 个平台</el-tag>
+            </div>
+          </template>
+          <el-table :data="projectSelfMediaChannelAllocations" border empty-text="暂无自媒体平台额度">
+            <el-table-column prop="channelName" label="平台" min-width="140">
+              <template #default="{ row }">
+                <div class="channel-name">
+                  <span>{{ row.channelName || row.channelCode }}</span>
+                  <el-tag v-if="isArticleGenerationChannel(row.channelCode)" size="small" type="success">生成文章渠道</el-tag>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="周期" width="100">
+              <template #default="{ row }">{{ periodLabel(row.periodType) }}</template>
+            </el-table-column>
+            <el-table-column label="套餐总额" width="110">
+              <template #default="{ row }">{{ row.quotaLimit || 0 }}</template>
+            </el-table-column>
+            <el-table-column label="已激活占用" width="120">
+              <template #default="{ row }">{{ row.activeAllocatedCount || 0 }}</template>
+            </el-table-column>
+            <el-table-column label="当前项目" width="120">
+              <template #default="{ row }">{{ row.currentProjectAllocatedCount || 0 }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="110">
+              <template #default="{ row }">
+                <el-tag :type="row.enabled ? 'success' : 'info'">{{ row.enabled ? '可用' : '未启用' }}</el-tag>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-collapse-item>
+      </el-collapse>
     </el-card>
 
     <el-card v-if="project" class="admin-rich-card">
@@ -284,22 +321,46 @@
     <el-dialog v-model="channelEditVisible" title="调整分发渠道额度" width="720px" class="admin-editor-dialog">
       <div class="channel-edit-note">官网、行业资讯站额度会参与文章生成调度；可填范围为客户套餐总额度减去当前已激活项目占用，保存时后端会再次校验。</div>
       <div v-loading="channelQuotaLoading" class="channel-allocation-panel">
-        <div v-for="item in channelQuotaItems" :key="item.channelCode" class="channel-row">
-          <div class="channel-meta">
-            <div class="channel-name">
-              <span>{{ item.channelName }}</span>
-              <el-tag v-if="isArticleGenerationChannel(item.channelCode)" size="small" type="success">生成文章渠道</el-tag>
+        <template v-for="group in channelQuotaGroups" :key="group.key">
+          <div v-if="group.key === 'self_media'" class="channel-group-card">
+            <div class="channel-group-header">
+              <span>自媒体平台</span>
+              <el-tag size="small" type="info">{{ group.items.length }} 个平台</el-tag>
             </div>
-            <small>{{ channelQuotaText(item) }}</small>
+            <div v-for="item in group.items" :key="item.channelCode" class="channel-row">
+              <div class="channel-meta">
+                <div class="channel-name">
+                  <span>{{ item.channelName }}</span>
+                  <el-tag v-if="isArticleGenerationChannel(item.channelCode)" size="small" type="success">生成文章渠道</el-tag>
+                </div>
+                <small>{{ channelQuotaText(item) }}</small>
+              </div>
+              <el-input-number
+                v-model="channelAllocationForm[item.channelCode]"
+                :min="0"
+                :max="channelInputMax(item)"
+                :disabled="!item.enabled"
+                controls-position="right"
+              />
+            </div>
           </div>
-          <el-input-number
-            v-model="channelAllocationForm[item.channelCode]"
-            :min="0"
-            :max="channelInputMax(item)"
-            :disabled="!item.enabled"
-            controls-position="right"
-          />
-        </div>
+          <div v-else v-for="item in group.items" :key="item.channelCode" class="channel-row">
+            <div class="channel-meta">
+              <div class="channel-name">
+                <span>{{ item.channelName }}</span>
+                <el-tag v-if="isArticleGenerationChannel(item.channelCode)" size="small" type="success">生成文章渠道</el-tag>
+              </div>
+              <small>{{ channelQuotaText(item) }}</small>
+            </div>
+            <el-input-number
+              v-model="channelAllocationForm[item.channelCode]"
+              :min="0"
+              :max="channelInputMax(item)"
+              :disabled="!item.enabled"
+              controls-position="right"
+            />
+          </div>
+        </template>
       </div>
       <template #footer>
         <el-button @click="channelEditVisible = false">取消</el-button>
@@ -350,10 +411,12 @@ import {
   importProjectKeywordGroup,
   updateKeywordGroupQuestion,
   updateProject,
+  updateProjectChannelAllocations,
   updateProjectStatus,
 } from '@/api/project'
 import type { KeywordGroup, KeywordGroupQuestion, PageResult, Project, ProjectChannelAllocationItem } from '@/types'
 import { regionDisplayFromPayload } from '@/constants/region'
+import { isSelfMediaQuotaChannel } from '@/constants/distributionChannels'
 import { nullableText } from '@/utils/form'
 
 const route = useRoute()
@@ -442,7 +505,30 @@ const channelAllocationSummary = computed(() => {
   const rows = project.value?.channelAllocations || []
   const targets = rows.filter((row) => isArticleGenerationChannel(row.channelCode))
   if (!targets.length) return '-'
-  return targets.map((row) => `${row.channelName || row.channelCode} ${row.currentProjectAllocatedCount || 0}`).join(' / ')
+  const selfMediaTotal = targets
+    .filter((row) => isSelfMediaQuotaChannel(row.channelCode))
+    .reduce((sum, row) => sum + (row.currentProjectAllocatedCount || 0), 0)
+  const baseParts = targets
+    .filter((row) => !isSelfMediaQuotaChannel(row.channelCode))
+    .map((row) => `${row.channelName || row.channelCode} ${row.currentProjectAllocatedCount || 0}`)
+  if (selfMediaTotal > 0) {
+    baseParts.push(`自媒体平台 ${selfMediaTotal}`)
+  }
+  return baseParts.length ? baseParts.join(' / ') : '-'
+})
+const projectBaseChannelAllocations = computed(() =>
+  (project.value?.channelAllocations || []).filter((row) => !isSelfMediaQuotaChannel(row.channelCode)),
+)
+const projectSelfMediaChannelAllocations = computed(() =>
+  (project.value?.channelAllocations || []).filter((row) => isSelfMediaQuotaChannel(row.channelCode)),
+)
+const channelQuotaGroups = computed(() => {
+  const base = channelQuotaItems.value.filter((item) => !isSelfMediaQuotaChannel(item.channelCode))
+  const selfMedia = channelQuotaItems.value.filter((item) => isSelfMediaQuotaChannel(item.channelCode))
+  return [
+    { key: 'base', items: base },
+    ...(selfMedia.length ? [{ key: 'self_media', items: selfMedia }] : []),
+  ]
 })
 const projectBasicInfoItems = computed(() => {
   const current = project.value
@@ -528,7 +614,7 @@ function joinArray(value?: string | string[] | null) {
 }
 
 function isArticleGenerationChannel(channelCode?: string | null) {
-  return channelCode === 'official_site' || channelCode === 'industry_site'
+  return channelCode === 'official_site' || channelCode === 'industry_site' || channelCode?.startsWith('self_media:')
 }
 
 function keywordGroupTypeLabel(row: KeywordGroup) {
@@ -720,7 +806,13 @@ async function saveChannelAllocations() {
   if (!current) return
   channelSaving.value = true
   try {
-    await updateProject(current.id, projectUpdatePayload(current))
+    await updateProjectChannelAllocations(current.id, {
+      allocationVersion: allocationVersion.value ?? current.allocationVersion,
+      channelAllocations: channelQuotaItems.value.map((item) => ({
+        channelCode: item.channelCode,
+        allocatedCount: channelAllocationForm[item.channelCode] || 0,
+      })),
+    })
     ElMessage.success('渠道额度已保存')
     channelEditVisible.value = false
     await load()
@@ -1075,6 +1167,24 @@ onMounted(() => {
 .channel-allocation-panel {
   display: grid;
   gap: 12px;
+}
+.quota-channel-groups {
+  margin-top: 12px;
+}
+.quota-group-title,
+.channel-group-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.channel-group-card {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafafa;
 }
 .channel-row {
   display: flex;

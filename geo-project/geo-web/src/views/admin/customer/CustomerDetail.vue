@@ -129,7 +129,7 @@
             title="额度配置与当前周期扣减上限不一致，实际分发仍以当前周期 usage 上限为准。"
           />
           <el-table
-            :data="distributionQuotaItems"
+            :data="distributionQuotaBaseItems"
             border
             :row-class-name="distributionQuotaRowClassName"
           >
@@ -177,6 +177,65 @@
               <template #default="scope">{{ nextResetText(scope.row) }}</template>
             </el-table-column>
           </el-table>
+          <el-collapse v-if="distributionQuotaSelfMediaItems.length" class="quota-channel-groups" model-value="self_media">
+            <el-collapse-item name="self_media">
+              <template #title>
+                <div class="quota-group-title">
+                  <span>自媒体平台</span>
+                  <el-tag size="small" type="info">{{ distributionQuotaSelfMediaItems.length }} 个平台</el-tag>
+                </div>
+              </template>
+              <el-table
+                :data="distributionQuotaSelfMediaItems"
+                border
+                :row-class-name="distributionQuotaRowClassName"
+              >
+                <el-table-column label="平台" min-width="150">
+                  <template #default="scope">
+                    <div class="quota-channel-cell">
+                      <span>{{ scope.row.channelName || channelLabel(scope.row.channelCode) }}</span>
+                      <el-tag v-if="!scope.row.enabled" size="small" type="info">未开通</el-tag>
+                      <el-tag v-else-if="scope.row.status === 'exceeded'" size="small" type="danger">超额</el-tag>
+                      <el-tag v-else-if="scope.row.status === 'warning'" size="small" type="warning">预警</el-tag>
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="周期" width="110">
+                  <template #default="scope">{{ scope.row.enabled ? periodLabel(scope.row.periodType) : '-' }}</template>
+                </el-table-column>
+                <el-table-column label="已用 / 额度" min-width="180">
+                  <template #default="scope">
+                    <span v-if="!scope.row.enabled">未开通</span>
+                    <div v-else class="quota-used-cell">
+                      <span>
+                        {{ scope.row.usedCount }} / {{ scope.row.quotaLimit }}
+                        <el-tooltip
+                          v-if="scope.row.limitMismatch"
+                          effect="dark"
+                          :content="limitMismatchText(scope.row)"
+                          placement="top"
+                        >
+                          <sup class="quota-limit-mark">*</sup>
+                        </el-tooltip>
+                      </span>
+                      <el-progress
+                        :percentage="distributionQuotaPercentage(scope.row)"
+                        :status="distributionQuotaProgressStatus(scope.row)"
+                        :show-text="false"
+                        :stroke-width="8"
+                      />
+                    </div>
+                  </template>
+                </el-table-column>
+                <el-table-column label="剩余额度" width="120">
+                  <template #default="scope">{{ distributionQuotaRemainingText(scope.row) }}</template>
+                </el-table-column>
+                <el-table-column label="下次重置" width="150">
+                  <template #default="scope">{{ nextResetText(scope.row) }}</template>
+                </el-table-column>
+              </el-table>
+            </el-collapse-item>
+          </el-collapse>
         </div>
       </template>
       <el-empty v-else description="当前客户未绑定套餐" />
@@ -403,6 +462,7 @@ import { getPartnerList, type PartnerItem } from '@/api/partner'
 import type { Brand, Company, CompanyDistributionQuota, CompanyDistributionQuotaItem, CompanyPackageBinding, CompanyKeywordGroupQuota, PackagePlan } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
+import { distributionChannelLabel, isSelfMediaQuotaChannel } from '@/constants/distributionChannels'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
 import { errorMessage } from '@/utils/error'
 import { formatDateTimeSeconds } from '@/utils/format'
@@ -502,14 +562,7 @@ function packageStatusLabel(value?: string | null) {
 }
 
 function channelLabel(value?: string | null) {
-  const mapping: Record<string, string> = {
-    official_site: '官网',
-    industry_site: '行业资讯站',
-    forum: '平台网站',
-    self_media: '自媒体平台',
-    authority_media: '权重媒体平台',
-  }
-  return value ? mapping[value] || value : '-'
+  return distributionChannelLabel(value)
 }
 
 function periodLabel(value?: string | null) {
@@ -518,6 +571,8 @@ function periodLabel(value?: string | null) {
 }
 
 const distributionQuotaItems = computed(() => distributionQuota.value?.items || [])
+const distributionQuotaBaseItems = computed(() => distributionQuotaItems.value.filter((item) => !isSelfMediaQuotaChannel(item.channelCode)))
+const distributionQuotaSelfMediaItems = computed(() => distributionQuotaItems.value.filter((item) => isSelfMediaQuotaChannel(item.channelCode)))
 const distributionQuotaSummary = computed(() => {
   const opened = distributionQuotaItems.value.filter((item) => item.enabled).length
   return `${opened}/${distributionQuotaItems.value.length} 个渠道已开通`
@@ -1280,6 +1335,17 @@ onMounted(async () => {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.quota-channel-groups {
+  margin-top: 12px;
+}
+
+.quota-group-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
 }
 
 .quota-limit-mark {

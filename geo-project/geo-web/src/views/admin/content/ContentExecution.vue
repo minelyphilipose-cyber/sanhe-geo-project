@@ -590,6 +590,7 @@
       :zhihu-accounts="zhihuAccounts"
       :xiaohongshu-accounts="xiaohongshuAccounts"
       :current-platform-accounts="currentPlatformAccounts"
+      :selected-self-media-quota-hint="selectedSelfMediaQuotaHint"
       :selected-self-media-account-id="selectedSelfMediaAccountId"
       :checking-self-media-account-id="checkingSelfMediaAccountId"
       :media-distribute-brand-id="mediaDistributeBrandId"
@@ -784,6 +785,7 @@ const {
   douyinStatusTagType,
   douyinSubmitButtonText,
   currentPlatformAccounts,
+  selectedSelfMediaQuotaHint,
   displayImageFolders,
   imageMaterials,
   douyinImageMaterials,
@@ -864,6 +866,7 @@ const channelFilterOptions = [
   { label: '自媒体平台 / 小红书', value: 'self_media:xiaohongshu' },
   { label: '自媒体平台 / 百家号', value: 'self_media:baijiahao' },
   { label: '自媒体平台 / 网易', value: 'self_media:netease' },
+  { label: '自媒体平台 / 搜狐', value: 'self_media:sohu' },
   { label: '权威媒体 / 行业媒体', value: 'authority_media:industry_media' },
   { label: '权威媒体 / 地方媒体', value: 'authority_media:local_media' },
   { label: '权威媒体 / 财经媒体', value: 'authority_media:finance_media' },
@@ -960,6 +963,7 @@ function contentStyleLabel(v?: string | null) {
     xiaohongshu: '小红书',
     baijiahao: '百家号',
     netease: '网易',
+    sohu: '搜狐',
   }
   return map[v] || v
 }
@@ -984,6 +988,7 @@ function channelSubLabel(v?: string | null) {
     xiaohongshu: '小红书',
     baijiahao: '百家号',
     netease: '网易',
+    sohu: '搜狐',
     industry_media: '行业媒体',
     local_media: '地方媒体',
     finance_media: '财经媒体',
@@ -1004,6 +1009,7 @@ function platformLabel(v?: string | null) {
     xiaohongshu: '小红书',
     baijiahao: '百家号',
     netease: '网易',
+    sohu: '搜狐',
   }
   return v ? map[v] || v : '-'
 }

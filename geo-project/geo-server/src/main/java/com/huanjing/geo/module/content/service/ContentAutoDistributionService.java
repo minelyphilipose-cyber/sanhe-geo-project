@@ -57,6 +57,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,9 +77,9 @@ public class ContentAutoDistributionService {
     private static final Map<String, String> QUOTA_TO_GENERATION_GROUP = Map.of(
             "official_site", ArticlePromptChannels.AGENT_SITE,
             "industry_site", ArticlePromptChannels.INDUSTRY_SITE,
-            "self_media", ArticlePromptChannels.SELF_MEDIA,
             "forum", ArticlePromptChannels.FORUM
     );
+    private static final Set<String> PLANNABLE_CHANNEL_CODES = plannableChannelCodes();
 
     private final ProjectMapper projectMapper;
     private final ProjectChannelAllocationMapper allocationMapper;
@@ -164,7 +165,7 @@ public class ContentAutoDistributionService {
         List<ProjectChannelAllocation> allocations = allocationMapper.selectList(
                 new LambdaQueryWrapper<ProjectChannelAllocation>()
                         .eq(ProjectChannelAllocation::getProjectId, project.getId())
-                        .in(ProjectChannelAllocation::getChannelCode, QUOTA_TO_GENERATION_GROUP.keySet())
+                        .in(ProjectChannelAllocation::getChannelCode, PLANNABLE_CHANNEL_CODES)
                         .gt(ProjectChannelAllocation::getAllocatedCount, 0)
         );
         if (allocations.isEmpty()) {
@@ -177,7 +178,7 @@ public class ContentAutoDistributionService {
         }
         int totalCount = targetPlans.stream().mapToInt(PlannedTarget::count).sum();
         if (totalCount <= 0) {
-            insertSkippedBatch(project, planDate, "no available distribution target");
+            insertSkippedBatch(project, planDate, unavailableDistributionTargetReason(project, allocations));
             return;
         }
 
@@ -595,7 +596,7 @@ public class ContentAutoDistributionService {
                 continue;
             }
             TargetRef target = shuffled.get(i);
-            String groupCode = QUOTA_TO_GENERATION_GROUP.get(channelCode);
+            String groupCode = generationGroup(channelCode);
             result.add(new PlannedTarget(
                     channelCode,
                     groupCode,
@@ -646,13 +647,38 @@ public class ContentAutoDistributionService {
             }
             return result;
         }
-        if ("self_media".equals(channelCode)) {
-            return resolveSelfMediaTargets(project);
+        String selfMediaPlatform = selfMediaPlatform(channelCode);
+        if (selfMediaPlatform != null) {
+            return resolveSelfMediaTargets(project, selfMediaPlatform);
         }
         return List.of();
     }
 
-    private List<TargetRef> resolveSelfMediaTargets(Project project) {
+    private String generationGroup(String channelCode) {
+        if (selfMediaPlatform(channelCode) != null) {
+            return ArticlePromptChannels.SELF_MEDIA;
+        }
+        return QUOTA_TO_GENERATION_GROUP.get(channelCode);
+    }
+
+    private static Set<String> plannableChannelCodes() {
+        Set<String> codes = new HashSet<>(QUOTA_TO_GENERATION_GROUP.keySet());
+        for (String platform : ArticlePromptChannels.SELF_MEDIA_SUB_CODES) {
+            codes.add(ArticlePromptChannels.SELF_MEDIA + ":" + platform);
+        }
+        return Set.copyOf(codes);
+    }
+
+    private String selfMediaPlatform(String channelCode) {
+        if (!StringUtils.hasText(channelCode) || !channelCode.startsWith(ArticlePromptChannels.SELF_MEDIA + ":")) {
+            return null;
+        }
+        return ArticlePromptChannels.canonicalSelfMediaQuotaPlatform(
+                channelCode.substring((ArticlePromptChannels.SELF_MEDIA + ":").length())
+        );
+    }
+
+    private List<TargetRef> resolveSelfMediaTargets(Project project, String quotaPlatform) {
         if (project.getBrandId() == null) {
             return List.of();
         }
@@ -664,8 +690,11 @@ public class ContentAutoDistributionService {
                 .orderByAsc(SelfMediaAccount::getId));
         List<TargetRef> result = new ArrayList<>();
         for (SelfMediaAccount account : accounts) {
-            String platform = account.getPlatform();
-            if (!ArticlePromptChannels.SELF_MEDIA_SUBS.contains(platform)) {
+            String platform = ArticlePromptChannels.canonicalSelfMediaQuotaPlatform(account.getPlatform());
+            if (platform == null) {
+                continue;
+            }
+            if (!quotaPlatform.equals(platform)) {
                 continue;
             }
             SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness =
@@ -693,6 +722,31 @@ public class ContentAutoDistributionService {
             ));
         }
         return result;
+    }
+
+    private String unavailableDistributionTargetReason(Project project, List<ProjectChannelAllocation> allocations) {
+        for (ProjectChannelAllocation allocation : allocations) {
+            String platform = selfMediaPlatform(allocation.getChannelCode());
+            if (platform == null || (allocation.getAllocatedCount() == null || allocation.getAllocatedCount() <= 0)) {
+                continue;
+            }
+            String platformName = ArticlePromptChannels.channelName(ArticlePromptChannels.SELF_MEDIA, platform);
+            if (project.getBrandId() == null) {
+                return "自媒体平台 / " + platformName + " 无法分发：项目未绑定品牌";
+            }
+            long accountCount = selfMediaAccountMapper.selectList(new LambdaQueryWrapper<SelfMediaAccount>()
+                    .eq(SelfMediaAccount::getBrandId, project.getBrandId())
+                    .eq(SelfMediaAccount::getStatus, "active")
+                    .isNull(SelfMediaAccount::getDeletedAt))
+                    .stream()
+                    .filter(account -> platform.equals(ArticlePromptChannels.canonicalSelfMediaQuotaPlatform(account.getPlatform())))
+                    .count();
+            if (accountCount <= 0) {
+                return "自媒体平台 / " + platformName + " 无可用账号，请先在品牌下配置并启用账号";
+            }
+            return "自媒体平台 / " + platformName + " 账号未完成发布能力或浏览器环境配置";
+        }
+        return "no available distribution target";
     }
 
     private PublishSite resolveBrandIndustrySite(Project project) {

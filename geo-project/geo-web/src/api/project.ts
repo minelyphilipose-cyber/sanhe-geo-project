@@ -46,6 +46,13 @@ export function updateProject(id: number, data: Record<string, any>) {
   return request.put<R<Project>>(`/projects/${id}`, data)
 }
 
+export function updateProjectChannelAllocations(id: number, data: {
+  allocationVersion?: number | null
+  channelAllocations: Array<{ channelCode: string; allocatedCount: number }>
+}) {
+  return request.put<R<Project>>(`/projects/${id}/channel-allocations`, data)
+}
+
 export function updateProjectStage(id: number, stage: string) {
   return request.put<R<void>>(`/projects/${id}/stage`, { stage })
 }

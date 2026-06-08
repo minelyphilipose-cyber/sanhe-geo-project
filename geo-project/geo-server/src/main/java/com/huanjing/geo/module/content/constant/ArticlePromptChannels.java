@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.content.constant;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -16,8 +17,12 @@ public final class ArticlePromptChannels {
             AGENT_SITE, INDUSTRY_SITE, SELF_MEDIA, AUTHORITY_MEDIA, FORUM
     );
 
+    public static final List<String> SELF_MEDIA_SUB_CODES = List.of(
+            "wechat", "douyin", "baijiahao", "zhihu", "xiaohongshu", "toutiao", "netease", "sohu"
+    );
+
     public static final Set<String> SELF_MEDIA_SUBS = Set.of(
-            "toutiao", "wechat", "zhihu", "douyin", "xiaohongshu", "baijiahao", "netease"
+            "wechat", "douyin", "baijiahao", "zhihu", "xiaohongshu", "toutiao", "netease", "sohu"
     );
 
     public static final Set<String> AUTHORITY_MEDIA_SUBS = Set.of(
@@ -43,6 +48,7 @@ public final class ArticlePromptChannels {
             Map.entry("xiaohongshu", "小红书"),
             Map.entry("baijiahao", "百家号"),
             Map.entry("netease", "网易"),
+            Map.entry("sohu", "搜狐"),
             Map.entry("industry_media", "行业媒体"),
             Map.entry("local_media", "地方媒体"),
             Map.entry("finance_media", "财经媒体"),
@@ -76,6 +82,7 @@ public final class ArticlePromptChannels {
             Map.entry("self_media:xiaohongshu", "小红书风格。以真实经验、清单建议和轻量种草口吻表达，避免企业自夸和硬广腔。分发能力：半自动填表，需浏览器扩展和 Cookie 凭证。"),
             Map.entry("self_media:baijiahao", "百家号风格。面向搜索收录，标题和前文突出核心关键词，表达专业、信息密度高、事实边界清晰。分发能力：暂未接入。"),
             Map.entry("self_media:netease", "网易风格。媒体感更强，标题和前文突出核心问题，表达专业克制、信息密度高、事实边界清晰，避免营销腔。分发能力：暂未接入。"),
+            Map.entry("self_media:sohu", "搜狐风格。门户资讯感更强，标题和前文突出核心问题，表达清晰克制、适合搜索和泛资讯阅读。分发能力：暂未接入。"),
             Map.entry("authority_media:industry_media", "行业媒体风格。正式审慎，强调行业背景、事实边界和公共信息价值。"),
             Map.entry("authority_media:local_media", "地方媒体风格。关注地域语境、公共信息价值和本地读者关心的问题。"),
             Map.entry("authority_media:finance_media", "财经媒体风格。强调成本结构、经营逻辑、市场变化和决策风险。"),
@@ -89,7 +96,7 @@ public final class ArticlePromptChannels {
 
     public static List<String> subCodes(String groupCode) {
         if (SELF_MEDIA.equals(groupCode)) {
-            return List.of("toutiao", "wechat", "zhihu", "douyin", "xiaohongshu", "baijiahao", "netease");
+            return SELF_MEDIA_SUB_CODES;
         }
         if (AUTHORITY_MEDIA.equals(groupCode)) {
             return List.of("industry_media", "local_media", "finance_media", "tech_media", "news_source", "portal_media");
@@ -129,9 +136,23 @@ public final class ArticlePromptChannels {
     }
 
     public static String canonicalSubCode(String groupCode, String subCode) {
+        if (subCode == null) {
+            return null;
+        }
+        if (SELF_MEDIA.equals(groupCode) && "wechat_mp".equals(subCode)) {
+            return "wechat";
+        }
         if (SELF_MEDIA.equals(groupCode) && "douyin_image_text".equals(subCode)) {
             return "douyin";
         }
         return subCode;
+    }
+
+    public static String canonicalSelfMediaQuotaPlatform(String platform) {
+        if (platform == null) {
+            return null;
+        }
+        String canonical = canonicalSubCode(SELF_MEDIA, platform.trim().toLowerCase(Locale.ROOT));
+        return SELF_MEDIA_SUBS.contains(canonical) ? canonical : null;
     }
 }

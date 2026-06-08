@@ -71,6 +71,15 @@
         </button>
       </div>
 
+      <el-alert
+        v-if="selectedSelfMediaQuotaHint"
+        class="media-quota-alert"
+        type="info"
+        :closable="false"
+        show-icon
+        :title="selectedSelfMediaQuotaHint"
+      />
+
       <div v-if="currentPlatformAccounts.length" class="self-media-account-list">
         <div v-for="account in currentPlatformAccounts" :key="account.id" class="self-media-account-row">
           <div class="self-media-account-main">
@@ -363,7 +372,7 @@ import { computed } from 'vue'
 import type { BrandImageFolder, BrandMaterial, DistributionTask, DouyinCapability, SelfMediaAccount, WechatMpCapability } from '@/types'
 
 type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
-type MediaPlatform = 'wechat_mp' | 'douyin' | 'toutiao' | 'zhihu' | 'xiaohongshu'
+type MediaPlatform = 'wechat_mp' | 'douyin' | 'baijiahao' | 'toutiao' | 'zhihu' | 'xiaohongshu' | 'netease' | 'sohu'
 type ActionMap = Record<string, (...args: any[]) => any>
 
 const props = defineProps<{
@@ -381,6 +390,7 @@ const props = defineProps<{
   zhihuAccounts: SelfMediaAccount[]
   xiaohongshuAccounts: SelfMediaAccount[]
   currentPlatformAccounts: SelfMediaAccount[]
+  selectedSelfMediaQuotaHint: string
   selectedSelfMediaAccountId: number | null
   checkingSelfMediaAccountId: number | null
   mediaDistributeBrandId: number | null
@@ -476,6 +486,12 @@ const douyinTextValue = computed({
   border: 1px solid #fed7aa;
   border-radius: 12px;
   background: #fff7ed;
+}
+
+.media-quota-alert {
+  border: 1px solid #bfdbfe;
+  border-radius: 12px;
+  background: #eff6ff;
 }
 
 .media-grid {

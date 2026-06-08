@@ -469,7 +469,9 @@ const STATIC_PLATFORM_GROUPS: PlatformGroup[] = [
       { value: 'self_media:zhihu', label: '知乎', desc: '问题回答，判断清晰', icon: '知', contentStyle: 'zhihu', channelGroupCode: 'self_media', channelSubCode: 'zhihu' },
       { value: 'self_media:douyin', label: '抖音图文', desc: '图文卡片式阅读', icon: '抖', contentStyle: 'douyin', channelGroupCode: 'self_media', channelSubCode: 'douyin' },
       { value: 'self_media:xiaohongshu', label: '小红书', desc: '经验笔记，清单建议', icon: '红', contentStyle: 'xiaohongshu', channelGroupCode: 'self_media', channelSubCode: 'xiaohongshu' },
+      { value: 'self_media:baijiahao', label: '百家号', desc: '搜索收录，信息密度高', icon: '百', contentStyle: 'baijiahao', channelGroupCode: 'self_media', channelSubCode: 'baijiahao' },
       { value: 'self_media:netease', label: '网易', desc: '门户资讯阅读，媒体感强', icon: '网', contentStyle: 'netease', channelGroupCode: 'self_media', channelSubCode: 'netease' },
+      { value: 'self_media:sohu', label: '搜狐', desc: '门户资讯阅读，清晰克制', icon: '狐', contentStyle: 'sohu', channelGroupCode: 'self_media', channelSubCode: 'sohu' },
     ],
   },
   {
@@ -1182,6 +1184,7 @@ function channelIcon(group: string, sub?: string | null) {
     xiaohongshu: '红',
     baijiahao: '百',
     netease: '网',
+    sohu: '狐',
     industry_media: '行',
     local_media: '地',
     finance_media: '财',

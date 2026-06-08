@@ -3,6 +3,7 @@ package com.huanjing.geo.module.project.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.project.dto.PackageChannelQuotaConfigRequest;
 import com.huanjing.geo.module.project.dto.PackagePlanCreateRequest;
 import com.huanjing.geo.module.project.dto.PackagePlanUpdateRequest;
@@ -26,6 +27,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.Set;
+import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
@@ -33,15 +35,15 @@ public class PackagePlanService {
 
     private static final Pattern PACKAGE_TYPE_PATTERN = Pattern.compile("^[a-z][a-z0-9_]{2,31}$");
     private static final Set<String> INTENSITY_LEVELS = Set.of("L1", "L2", "L3");
-    private static final Set<String> CHANNEL_CODES = Set.of("official_site", "industry_site", "forum", "self_media", "authority_media");
+    private static final List<String> SELF_MEDIA_CHANNEL_CODES = ArticlePromptChannels.SELF_MEDIA_SUB_CODES.stream()
+            .map(PackagePlanService::selfMediaChannelCode)
+            .toList();
+    private static final Set<String> CHANNEL_CODES = Stream.concat(
+            Stream.of("official_site", "industry_site", "forum", "authority_media"),
+            SELF_MEDIA_CHANNEL_CODES.stream()
+    ).collect(Collectors.toUnmodifiableSet());
     private static final Set<String> PERIOD_TYPES = Set.of("day", "week", "month", "total");
-    private static final Map<String, String> DEFAULT_PERIOD_BY_CHANNEL = Map.of(
-            "official_site", "week",
-            "industry_site", "week",
-            "forum", "week",
-            "self_media", "week",
-            "authority_media", "total"
-    );
+    private static final Map<String, String> DEFAULT_PERIOD_BY_CHANNEL = defaultPeriodByChannel();
 
     private final PackagePlanMapper packagePlanMapper;
     private final PackageChannelQuotaConfigMapper packageChannelQuotaConfigMapper;
@@ -323,7 +325,7 @@ public class PackagePlanService {
             if (cfg.getEnabled() == null) {
                 throw new BizException(400, "channel quota enabled is required");
             }
-            String key = channel + ":" + period;
+            String key = channel;
             seen.put(key, seen.getOrDefault(key, 0) + 1);
         }
         for (Map.Entry<String, Integer> entry : seen.entrySet()) {
@@ -429,5 +431,21 @@ public class PackagePlanService {
             throw new BizException(400, "period_type is required");
         }
         return periodType.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static String selfMediaChannelCode(String platform) {
+        return ArticlePromptChannels.SELF_MEDIA + ":" + platform;
+    }
+
+    private static Map<String, String> defaultPeriodByChannel() {
+        Map<String, String> result = new LinkedHashMap<>();
+        result.put("official_site", "week");
+        result.put("industry_site", "week");
+        result.put("forum", "week");
+        for (String channelCode : SELF_MEDIA_CHANNEL_CODES) {
+            result.put(channelCode, "week");
+        }
+        result.put("authority_media", "total");
+        return Map.copyOf(result);
     }
 }

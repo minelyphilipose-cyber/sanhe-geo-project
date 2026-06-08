@@ -204,19 +204,42 @@
         <el-form-item class="is-full" label="分发渠道">
           <div class="channel-allocation-panel">
             <div class="channel-note">官网、行业资讯站额度大于 0 时才会触发文章生成；可填范围为客户套餐总额度减去当前已激活项目占用</div>
-            <div v-for="item in channelQuotaItems" :key="item.channelCode" class="channel-row">
-              <div class="channel-meta">
-                <span>{{ item.channelName }}</span>
-                <small>{{ channelQuotaText(item) }}</small>
+            <template v-for="group in channelQuotaGroups" :key="group.key">
+              <div v-if="group.key === 'self_media'" class="channel-group-card">
+                <div class="channel-group-header">
+                  <span>自媒体平台</span>
+                  <el-tag size="small" type="info">{{ group.items.length }} 个平台</el-tag>
+                </div>
+                <div v-for="item in group.items" :key="item.channelCode" class="channel-row">
+                  <div class="channel-meta">
+                    <span>{{ item.channelName }}</span>
+                    <small>{{ channelQuotaText(item) }}</small>
+                  </div>
+                  <el-input-number
+                    v-model="form.channelAllocations[item.channelCode]"
+                    :min="0"
+                    :max="channelInputMax(item)"
+                    :disabled="!item.enabled"
+                    controls-position="right"
+                  />
+                </div>
               </div>
-              <el-input-number
-                v-model="form.channelAllocations[item.channelCode]"
-                :min="0"
-                :max="channelInputMax(item)"
-                :disabled="!item.enabled"
-                controls-position="right"
-              />
-            </div>
+              <template v-else>
+                <div v-for="item in group.items" :key="item.channelCode" class="channel-row">
+                  <div class="channel-meta">
+                    <span>{{ item.channelName }}</span>
+                    <small>{{ channelQuotaText(item) }}</small>
+                  </div>
+                  <el-input-number
+                    v-model="form.channelAllocations[item.channelCode]"
+                    :min="0"
+                    :max="channelInputMax(item)"
+                    :disabled="!item.enabled"
+                    controls-position="right"
+                  />
+                </div>
+              </template>
+            </template>
           </div>
         </el-form-item>
         <el-form-item label="地区"><RegionCascader v-model="form.regionCodes" /></el-form-item>
@@ -336,6 +359,7 @@ import { getBrandList, getCompanyList } from '@/api/customer'
 import type { Brand, Company, KeywordGroup, Project, ProjectChannelAllocationItem, ProjectKeywordGroupQuota } from '@/types'
 import DataState from '@/components/ui/DataState.vue'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
+import { isSelfMediaQuotaChannel } from '@/constants/distributionChannels'
 import { regionCodesFromPayload, regionDisplayFromPayload, regionPayloadFromCodes } from '@/constants/region'
 import { nullableText } from '@/utils/form'
 
@@ -369,6 +393,14 @@ const pendingCount = computed(() => rows.value.filter((row) => row.status === 'p
 const visibleKeywordTotal = computed(() =>
   rows.value.reduce((total, row) => total + Number(row.selectedKeywordSavedKeywords || 0), 0),
 )
+const channelQuotaGroups = computed(() => {
+  const base = channelQuotaItems.value.filter((item) => !isSelfMediaQuotaChannel(item.channelCode))
+  const selfMedia = channelQuotaItems.value.filter((item) => isSelfMediaQuotaChannel(item.channelCode))
+  return [
+    { key: 'base', items: base },
+    ...(selfMedia.length ? [{ key: 'self_media', items: selfMedia }] : []),
+  ]
+})
 const loading = ref(false)
 const saving = ref(false)
 const rows = ref<Project[]>([])
@@ -981,6 +1013,20 @@ onMounted(async () => {
 .channel-note {
   font-size: 12px;
   color: #909399;
+}
+.channel-group-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.channel-group-card {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fafafa;
 }
 .channel-row {
   display: flex;
