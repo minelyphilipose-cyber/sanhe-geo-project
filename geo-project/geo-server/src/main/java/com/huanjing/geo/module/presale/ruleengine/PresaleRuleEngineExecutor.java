@@ -12,8 +12,10 @@ import org.springframework.stereotype.Service;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 售前优化规则引擎主入口。
@@ -117,6 +119,7 @@ public class PresaleRuleEngineExecutor {
             }
         }
 
+        findings = applyCustomerVisibleFilters(findings);
         findings.sort(buildFindingComparator(rules));
 
         return RuleEngineResult.builder()
@@ -125,6 +128,59 @@ public class PresaleRuleEngineExecutor {
                 .hitCount(findings.size())
                 .errors(errors)
                 .build();
+    }
+
+    /**
+     * 对客 findings 的二次过滤。
+     *
+     * <p>LOW priority 是互斥分区,不是上档问题的重复表达。这里先拿到完整 fired set,
+     * 再移除只适合作为内部可靠性信号或已被 HIGH/MEDIUM 覆盖的 LOW 项。</p>
+     */
+    private List<OptimizationFinding> applyCustomerVisibleFilters(List<OptimizationFinding> findings) {
+        if (findings == null || findings.isEmpty()) {
+            return findings == null ? List.of() : findings;
+        }
+        Set<String> fired = new HashSet<>();
+        for (OptimizationFinding finding : findings) {
+            if (finding != null && finding.getRuleCode() != null) {
+                fired.add(finding.getRuleCode());
+            }
+        }
+
+        List<OptimizationFinding> filtered = new ArrayList<>();
+        for (OptimizationFinding finding : findings) {
+            if (finding == null) continue;
+            String code = finding.getRuleCode();
+            if (RuleCodes.RULE_PLATFORM_COUNT_LOW.equals(code)) {
+                log.info("Rule engine: suppress customer-facing finding {}, kept as internal reliability signal", code);
+                continue;
+            }
+            if (shouldSuppressLowFinding(code, fired)) {
+                log.info("Rule engine: suppress duplicated LOW finding {}, higher-priority firedSet={}", code, fired);
+                continue;
+            }
+            filtered.add(finding);
+        }
+        return filtered;
+    }
+
+    private boolean shouldSuppressLowFinding(String code, Set<String> fired) {
+        if (RuleCodes.RULE_PLATFORM_DEPTH_SHALLOW.equals(code)) {
+            return fired.contains(RuleCodes.RULE_PLATFORM_COVERAGE_NARROW)
+                    || fired.contains(RuleCodes.RULE_PLATFORM_IMBALANCE)
+                    || fired.contains(RuleCodes.RULE_SINGLE_PLATFORM_DOMINANT);
+        }
+        if (RuleCodes.RULE_LONG_TAIL_SCENE_GAP.equals(code)) {
+            return fired.contains(RuleCodes.RULE_COVERAGE_LOW_RECOMMEND)
+                    || fired.contains(RuleCodes.RULE_SCENE_MISS_HIGH_VALUE)
+                    || fired.contains(RuleCodes.RULE_HIGH_VALUE_RECO_GAP);
+        }
+        if (RuleCodes.RULE_CONTENT_CONSISTENCY_CHECK.equals(code)) {
+            return fired.contains(RuleCodes.RULE_PLATFORM_IMBALANCE)
+                    || fired.contains(RuleCodes.RULE_PLATFORM_COVERAGE_NARROW)
+                    || fired.contains(RuleCodes.RULE_SINGLE_PLATFORM_DOMINANT);
+        }
+        return false;
     }
 
     private OptimizationFinding buildFinding(PresaleOptimizationRule rule,

@@ -99,10 +99,14 @@ import FindingCard from './shared/FindingCard.vue'
 
 const { mergedView: mergedViewRef } = useMergedView()
 const mergedView = computed(() => mergedViewRef.value!)
+const CUSTOMER_HIDDEN_RULE_CODES = new Set(['RULE_PLATFORM_COUNT_LOW'])
 
 // ─── 三优先级分组(banner 用) ────────────────────────
 const allFindings = computed(() =>
-  mergedView.value.merged_findings.slice().sort((a, b) => a.sort_order - b.sort_order)
+  mergedView.value.merged_findings
+    .filter((m) => !CUSTOMER_HIDDEN_RULE_CODES.has(m.finding.rule_code))
+    .slice()
+    .sort((a, b) => a.sort_order - b.sort_order)
 )
 const totalCount = computed(() => allFindings.value.length)
 const highFindings = computed(() =>

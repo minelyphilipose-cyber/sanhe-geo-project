@@ -7,10 +7,16 @@ import com.huanjing.geo.module.presale.dto.snapshot.computed.Scores;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.RawSnapshotDTO;
 import com.huanjing.geo.module.presale.dto.snapshot.raw.SentimentDetail;
 import com.huanjing.geo.module.presale.ruleengine.builders.BrandAwarenessLowBuilder;
+import com.huanjing.geo.module.presale.ruleengine.builders.ContentConsistencyCheckBuilder;
 import com.huanjing.geo.module.presale.ruleengine.builders.CompareGapBuilder;
 import com.huanjing.geo.module.presale.ruleengine.builders.CoverageLowRecommendBuilder;
+import com.huanjing.geo.module.presale.ruleengine.builders.LongTailSceneGapBuilder;
 import com.huanjing.geo.module.presale.ruleengine.builders.LowSentimentScoreBuilder;
 import com.huanjing.geo.module.presale.ruleengine.builders.NegativeEvidenceBuilder;
+import com.huanjing.geo.module.presale.ruleengine.builders.PeriodicRetestMonitoringBuilder;
+import com.huanjing.geo.module.presale.ruleengine.builders.PlatformCountLowBuilder;
+import com.huanjing.geo.module.presale.ruleengine.builders.PlatformCoverageNarrowBuilder;
+import com.huanjing.geo.module.presale.ruleengine.builders.PlatformDepthShallowBuilder;
 import com.huanjing.geo.module.presale.ruleengine.persist.PresaleOptimizationRule;
 import com.huanjing.geo.module.presale.ruleengine.persist.PresaleOptimizationRuleService;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,7 +47,13 @@ class PresaleRuleEngineExecutorTest {
                 new BrandAwarenessLowBuilder(),
                 new CompareGapBuilder(),
                 new LowSentimentScoreBuilder(),
-                new NegativeEvidenceBuilder()
+                new NegativeEvidenceBuilder(),
+                new PlatformCountLowBuilder(),
+                new PlatformCoverageNarrowBuilder(),
+                new PlatformDepthShallowBuilder(),
+                new LongTailSceneGapBuilder(),
+                new ContentConsistencyCheckBuilder(),
+                new PeriodicRetestMonitoringBuilder()
         ));
         executor = new PresaleRuleEngineExecutor(ruleService, evaluator, registry);
     }
@@ -172,6 +184,38 @@ class PresaleRuleEngineExecutorTest {
         assertThat(result.getErrors().get(0).getErrorType())
                 .isEqualTo(RuleEvaluationError.ErrorType.BUILDER_MISSING);
         assertThat(result.getEvaluatedRuleCount()).isEqualTo(1);
+    }
+
+    @Test
+    void execute_platformCountLow_isSuppressedFromCustomerFindings() {
+        PresaleOptimizationRule rule = rule(
+                1, RuleCodes.RULE_PLATFORM_COUNT_LOW, "平台扩展", "LOW",
+                "true", 400);
+        Mockito.when(ruleService.loadEnabledRulesOrdered()).thenReturn(List.of(rule));
+
+        RuleEngineResult result = executor.execute(new RawSnapshotDTO(), new ComputedSnapshotDTO());
+
+        assertThat(result.getFindings()).isEmpty();
+        assertThat(result.getHitCount()).isEqualTo(0);
+        assertThat(result.getErrors()).isEmpty();
+    }
+
+    @Test
+    void execute_lowPlatformDepth_isRemovedWhenHigherPlatformRuleFired() {
+        PresaleOptimizationRule higher = rule(
+                1, RuleCodes.RULE_PLATFORM_COVERAGE_NARROW, "平台扩展", "MEDIUM",
+                "true", 300);
+        PresaleOptimizationRule low = rule(
+                2, RuleCodes.RULE_PLATFORM_DEPTH_SHALLOW, "平台扩展", "LOW",
+                "true", 405);
+        Mockito.when(ruleService.loadEnabledRulesOrdered()).thenReturn(List.of(higher, low));
+
+        RuleEngineResult result = executor.execute(new RawSnapshotDTO(), new ComputedSnapshotDTO());
+
+        assertThat(result.getFindings()).hasSize(1);
+        assertThat(result.getFindings().get(0).getRuleCode())
+                .isEqualTo(RuleCodes.RULE_PLATFORM_COVERAGE_NARROW);
+        assertThat(result.getErrors()).isEmpty();
     }
 
     @Test

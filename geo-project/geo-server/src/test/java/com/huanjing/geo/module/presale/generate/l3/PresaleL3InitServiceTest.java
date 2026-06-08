@@ -59,7 +59,11 @@ class PresaleL3InitServiceTest {
             RuleCodes.RULE_PLATFORM_COVERAGE_NARROW,
             RuleCodes.RULE_PLATFORM_COUNT_LOW,
             RuleCodes.RULE_SINGLE_PLATFORM_DOMINANT,
-            RuleCodes.RULE_PLATFORM_NEW_CUSTOMER_BLANK
+            RuleCodes.RULE_PLATFORM_NEW_CUSTOMER_BLANK,
+            RuleCodes.RULE_PLATFORM_DEPTH_SHALLOW,
+            RuleCodes.RULE_LONG_TAIL_SCENE_GAP,
+            RuleCodes.RULE_CONTENT_CONSISTENCY_CHECK,
+            RuleCodes.RULE_PERIODIC_RETEST_MONITORING
     );
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -690,6 +694,19 @@ class PresaleL3InitServiceTest {
         evidence.put("new_customer_avg_rate", 6);
         evidence.put("inquiry_rate", 5);
         evidence.put("scenario_rate", 0);
+        evidence.put("shallow_scene_count", 2);
+        evidence.put("scene_example", "阜阳牙齿矫正哪家靠谱");
+        evidence.put("target_platforms", 2);
+        evidence.put("evaluated_platforms", 10);
+        evidence.put("mid_gap", 3);
+        evidence.put("mid_total", 12);
+        evidence.put("mid_covered", 9);
+        evidence.put("low_gap", 2);
+        evidence.put("low_total", 7);
+        evidence.put("low_covered", 5);
+        evidence.put("long_tail_gap", 5);
+        evidence.put("monitoring_focus", "核心推荐场景、竞品进入与 AI 回答口径变化");
+        evidence.put("service_action", "周期复测与变化预警");
         return evidence;
     }
 
