@@ -95,9 +95,11 @@
             </div>
 
             <div class="p16-impact-item">
-              <div class="p16-impact-caption">AI 主动推荐现状</div>
+              <div class="p16-impact-caption">{{ recommendationMetricCaption }}</div>
               <div class="p16-impact-value">
-                <span class="mono p16-impact-danger">{{ primaryRecommendationDisplay }}</span>
+                <span class="mono" :class="valueFrame === 'improve' ? 'p16-impact-danger' : 'p16-impact-after'">
+                  {{ recommendationMetricDisplay }}
+                </span>
               </div>
             </div>
 
@@ -255,9 +257,12 @@ const plannedHighValueCoverageGain = computed(() => {
 const highValueCoverage = computed<ImpactCell>(() => {
   const hv = mergedView.value.scene_coverage.high_value
   const targetCovered = Math.min(hv.total, hv.covered + plannedHighValueCoverageGain.value)
+  const after = targetCovered === hv.total && hv.covered < hv.total && plannedHighValueCoverageGain.value > 0
+    ? `${Math.max(hv.covered, targetCovered - 1)}-${targetCovered} / ${hv.total}`
+    : `${targetCovered} / ${hv.total}`
   return {
     before: `${hv.covered} / ${hv.total}`,
-    after: `${targetCovered} / ${hv.total}`
+    after
   }
 })
 
@@ -281,6 +286,22 @@ const primaryRecommendationDisplay = computed(() => {
   return `${primaryRecommendationCount.value} 次`
 })
 
+const maxRecommendationDepthGap = computed(() => {
+  return Math.max(0, ...((mergedView.value.scene_competitor_pressure.items ?? []).map((item) => {
+    const maxCompetitorPresence = Math.max(0, ...((item.competitors ?? []).map((c) => c.mentioned_platform_count ?? 0)))
+    return maxCompetitorPresence - Math.max(0, item.target_mentioned_platform_count ?? 0)
+  })))
+})
+
+const recommendationMetricCaption = computed(() => {
+  return valueFrame.value === 'improve' ? 'AI 主动推荐现状' : '推荐平台深度差距'
+})
+
+const recommendationMetricDisplay = computed(() => {
+  if (valueFrame.value === 'improve') return primaryRecommendationDisplay.value
+  return maxRecommendationDepthGap.value > 0 ? `最大差 ${maxRecommendationDepthGap.value} 平台` : '暂无明显差距'
+})
+
 const priorityPlanDisplay = computed(() => {
   const phases = roi.value.phases
   const p1 = phases[0]?.planned_optimization_count ?? phases[0]?.total_optimization_count ?? 0
@@ -297,7 +318,7 @@ const opportunityLabel = computed(() => {
 
 const strengthTitle = computed(() => {
   if (valueFrame.value === 'defend') return '你的可见度资产已经形成,订阅价值在于持续守住'
-  return '你已在部分关键位置出现,下一步要把出现变稳定'
+  return '你已在部分关键位置出现,下一步要把平台深度补满'
 })
 
 const strengthItems = computed(() => {
@@ -309,8 +330,9 @@ const strengthItems = computed(() => {
     .sort((a, b) => (b.mention_count ?? 0) - (a.mention_count ?? 0))[0]
 
   const items: string[] = [
-    `高价值场景已覆盖 ${hv.covered}/${hv.total}`,
-    `中低价值场景已覆盖 ${mid.covered + low.covered}/${mid.total + low.total}`
+    valueFrame.value === 'defend'
+      ? `高价值场景已覆盖 ${hv.covered}/${hv.total}`
+      : `中低价值场景已覆盖 ${mid.covered + low.covered}/${mid.total + low.total}`
   ]
   if (primaryRecommendationCount.value > 0) {
     items.push(`推荐型高价值场景中累计被主动提及 ${primaryRecommendationCount.value} 次`)
@@ -340,7 +362,7 @@ const contestedTitle = computed(() => {
   if (valueFrame.value === 'defend') {
     return count > 0 ? '仍有少数高价值场景值得继续拿下' : '当前争夺场景较少,重点转向持续监测'
   }
-  return count > 0 ? '出现不稳定的场景,是下一轮最直接的机会' : '暂未发现明显争夺场景,优先补齐稳定出现'
+  return count > 0 ? '你已经出现,但部分场景的平台占位还不够满' : '暂未发现明显争夺场景,优先补齐平台深度'
 })
 
 const contestedItems = computed(() => {
@@ -362,7 +384,7 @@ const contestedItems = computed(() => {
 
 const monitorTitle = computed(() => {
   if (valueFrame.value === 'defend') return '订阅价值从一次提升,转为持续守位'
-  if (valueFrame.value === 'consistency') return '用持续监测把间歇出现变成稳定出现'
+  if (valueFrame.value === 'consistency') return '用持续监测把部分平台出现补成多平台稳定出现'
   return '优化后仍需持续跟踪 AI 平台变化'
 })
 
@@ -371,7 +393,7 @@ const monitorCopy = computed(() => {
     return 'AI 回答与排序不是永久固定的结果。订阅期内持续跟踪关键场景、竞品在场与平台变化,可以在优势松动时更早发现并调整。'
   }
   if (valueFrame.value === 'consistency') {
-    return '当前价值不只在提分,还在于把已经出现的位置固化下来,并及时发现哪些场景又被竞品抢先占位。'
+    return '当前价值不只在提分,还在于把已出现的场景做深到更多平台,并及时发现哪些平台又被竞品抢先占位。'
   }
   return '当缺口被补齐后,仍需要观察 AI 平台是否改变回答偏好,避免优化效果只停留在一次报告里。'
 })
@@ -403,12 +425,19 @@ const phaseTeasers = computed<PhaseTeaser[]>(() => {
   return mergedView.value.merged_phases.map((mp) => ({
     phase_no: mp.phase.phase_no,
     duration_label: mp.phase.duration_label,
-    title: mp.title,
+    title: displayPhaseTitle(mp.phase.phase_no, mp.title, mp.phase.planned_optimization_count ?? mp.phase.total_optimization_count ?? 0),
     target_score: mp.phase.target_score,
     target_score_low: mp.phase.target_score_low,
     target_score_high: mp.phase.target_score_high
   }))
 })
+
+function displayPhaseTitle(phaseNo: number, title: string, plannedCount: number): string {
+  if (phaseNo === 3 && plannedCount <= 0 && valueFrame.value !== 'defend') {
+    return '持续优化观察'
+  }
+  return title
+}
 
 function formatScoreRange(
   low: number | null | undefined,
@@ -458,25 +487,27 @@ const roiLineOption = computed<EChartsOption>(() => {
       axisPointer: { type: 'line' },
       backgroundColor: 'rgba(11, 20, 38, 0.9)',
       borderWidth: 0,
+      confine: true,
+      extraCssText: 'line-height:1.7;max-width:260px;white-space:normal;z-index:9999;',
       textStyle: { color: '#fefcf7', fontSize: 12 },
       formatter: (params) => {
         if (!Array.isArray(params) || params.length === 0) return ''
         const p = params[0]
         const idx = p.dataIndex as number
         if (idx === 0) {
-          return `${p.name}<br/>当前分值:${toIntRounded(Number(p.value))}`
+          return `<div>${p.name}</div><div>当前分值:${toIntRounded(Number(p.value))}</div>`
         }
         const mp = phases[idx - 1]
-        if (!mp) return `${p.name}<br/>${toIntRounded(Number(p.value))}`
+        if (!mp) return `<div>${p.name}</div><div>${toIntRounded(Number(p.value))}</div>`
         const planned = mp.phase.planned_optimization_count ?? mp.phase.total_optimization_count ?? 0
         const range = formatScoreRange(mp.phase.target_score_low, mp.phase.target_score_high, mp.phase.target_score)
         const uplift = formatScoreRange(mp.phase.uplift_from_previous_low, mp.phase.uplift_from_previous_high, mp.phase.uplift_from_previous)
         return [
-          `${p.name} · ${mp.title}`,
-          `目标区间:${range}`,
-          planned > 0 ? `较上阶段提升:${uplift}` : '较上阶段提升:不报分',
-          `本阶段计划优化项:${planned} 项`
-        ].join('<br/>')
+          `<div>${p.name} · ${displayPhaseTitle(mp.phase.phase_no, mp.title, planned)}</div>`,
+          `<div>目标区间:${range}</div>`,
+          `<div>${planned > 0 ? `较上阶段提升:${uplift}` : '较上阶段提升:不报分'}</div>`,
+          `<div>本阶段计划优化项:${planned} 项</div>`
+        ].join('')
       }
     },
     xAxis: {
@@ -583,7 +614,7 @@ const roiLineOption = computed<EChartsOption>(() => {
 
 .p16-hero-grid {
   display: grid;
-  grid-template-columns: 1fr 60px 1fr 60px 1fr;
+  grid-template-columns: minmax(0, 1fr) 48px minmax(0, 1fr) minmax(118px, 0.45fr) minmax(0, 1fr);
   gap: 20px;
   align-items: center;
   margin-top: 24px;
@@ -677,6 +708,7 @@ const roiLineOption = computed<EChartsOption>(() => {
 
 .p16-uplift {
   text-align: center;
+  min-width: 0;
 }
 .p16-uplift-label {
   font-size: 10px;
@@ -688,6 +720,8 @@ const roiLineOption = computed<EChartsOption>(() => {
   font-size: 22px;
   font-weight: 700;
   color: var(--presale-accent);
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 /* ─── ROI 曲线图 ──────────────────────────────────────── */

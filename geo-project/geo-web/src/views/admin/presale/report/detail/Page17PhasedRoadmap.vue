@@ -114,7 +114,7 @@ const roadmapFrame = computed(() => {
     return {
       eyebrow: 'CONSISTENCY ROADMAP',
       heading: '改进 + 巩固路线',
-      lead: '你已在部分场景被看到,但出现还不稳定。路径重点是补齐短板,再把有效出现沉淀为稳定资产。',
+      lead: '你已在部分场景被看到,但平台覆盖深度还不够满。路径重点是补齐深度差距,再把有效出现沉淀为稳定资产。',
       footer: '本路线用于统一改进目标与阶段动作,实际节奏建议结合团队资源与平台反馈滚动调整。'
     }
   }
@@ -145,7 +145,7 @@ interface Step {
 const steps = computed<Step[]>(() => {
   return mergedView.value.merged_phases.map<Step>((mp) => ({
     phase_no: mp.phase.phase_no,
-    title: mp.title,
+    title: displayPhaseTitle(mp.phase.phase_no, mp.title, mp.phase.planned_optimization_count ?? mp.phase.total_optimization_count ?? 0),
     description: mp.description,
     duration_label: mp.phase.duration_label,
     target_score: mp.phase.target_score,
@@ -159,6 +159,13 @@ const steps = computed<Step[]>(() => {
     planned_optimization_count: mp.phase.planned_optimization_count
   }))
 })
+
+function displayPhaseTitle(phaseNo: number, title: string, plannedCount: number): string {
+  if (phaseNo === 3 && plannedCount <= 0 && valueFrame.value !== 'defend') {
+    return '持续优化观察'
+  }
+  return title
+}
 
 /**
  * duration_label 形态转换:
@@ -187,7 +194,8 @@ function formatTargetRange(item: Step): string {
 
 function formatUplift(item: Step): string {
   if (!item.projection_enabled) {
-    return item.phase_no === 3 ? '巩固·监测' : '不报分'
+    if (item.phase_no !== 3) return '不报分'
+    return valueFrame.value === 'defend' ? '巩固·监测' : '持续观察'
   }
   const low = item.uplift_from_previous_low ?? item.uplift_from_previous
   const high = item.uplift_from_previous_high ?? item.uplift_from_previous
