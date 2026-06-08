@@ -99,6 +99,10 @@ export function updateBrowserEnvironmentAccount(id: number, payload: BrowserEnvi
   return request.patch<R<BrowserEnvironmentAccount>>(`/v1/browser-environment-accounts/${id}`, payload)
 }
 
+export function resetBrowserEnvironmentAccountLoginIdentity(id: number) {
+  return request.post<R<BrowserEnvironmentAccount>>(`/v1/browser-environment-accounts/${id}/reset-login-identity`)
+}
+
 export function deleteBrowserEnvironmentAccount(id: number) {
   return request.delete<R<void>>(`/v1/browser-environment-accounts/${id}`)
 }

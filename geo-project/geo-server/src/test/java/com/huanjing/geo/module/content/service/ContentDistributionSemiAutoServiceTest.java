@@ -57,6 +57,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -376,7 +377,7 @@ class ContentDistributionSemiAutoServiceTest {
         environment.setEnvironmentKey("geo_huawei");
         environment.setProvider("adspower");
         environment.setProviderProfileId("k1cvxpjx");
-        when(browserEnvironmentService.validateForTaskCreation(any())).thenReturn(binding);
+        when(browserEnvironmentService.validateForTaskCreation(any(), anyBoolean())).thenReturn(binding);
         when(browserEnvironmentService.getEnvironmentForBinding(binding)).thenReturn(environment);
 
         SelfMediaAccount account = cookieAccount();

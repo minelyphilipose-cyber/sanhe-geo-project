@@ -970,6 +970,23 @@ export function getSelfMediaScheduleCapabilities() {
   return request.get<R<SelfMediaScheduleCapability[]>>('/content/self-media-schedule-capabilities')
 }
 
+export function updateSelfMediaScheduleCapability(platform: string, data: {
+  verificationStatus: string
+  supportsSchedule: boolean
+  minDelayMinutes?: number | null
+  maxDelayMinutes?: number | null
+  saveCreatesSchedule?: boolean | null
+  supportsCancel?: boolean | null
+  supportsModify?: boolean | null
+  supportsPublishCheck?: boolean | null
+  v1Strategy?: string | null
+  selectorStatus?: string | null
+  evidenceJson?: string | null
+  notes?: string | null
+}) {
+  return request.put<R<SelfMediaScheduleCapability>>(`/content/self-media-schedule-capabilities/${platform}`, data)
+}
+
 export function createSelfMediaAccount(brandId: number, data: {
   platform: 'toutiao' | 'zhihu' | 'xiaohongshu'
   accountName: string

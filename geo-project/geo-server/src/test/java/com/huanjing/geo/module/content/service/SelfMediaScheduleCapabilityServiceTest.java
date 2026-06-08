@@ -4,8 +4,11 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.dto.SelfMediaScheduleCapabilityUpsertRequest;
 import com.huanjing.geo.module.content.entity.SelfMediaScheduleCapability;
 import com.huanjing.geo.module.content.mapper.SelfMediaScheduleCapabilityMapper;
-import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapter;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformCapabilityContract;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishChannel;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleMode;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleRules;
 import com.huanjing.geo.module.content.vo.SelfMediaScheduleCapabilityVO;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
@@ -14,6 +17,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -44,6 +48,7 @@ class SelfMediaScheduleCapabilityServiceTest {
     @Test
     void upsertVerifiedPlatformScheduleRequiresDelayRangeAndStoresVerifier() {
         SelfMediaScheduleCapabilityUpsertRequest request = verifiedRequest();
+        when(adapterRouter.contract("toutiao")).thenReturn(Optional.of(toutiaoContract()));
 
         SelfMediaScheduleCapabilityVO response = service.upsert(request);
 
@@ -57,9 +62,28 @@ class SelfMediaScheduleCapabilityServiceTest {
     }
 
     @Test
+    void listIncludesContractPlatformsWithoutStoredRows() {
+        when(mapper.selectList(any())).thenReturn(List.of());
+        when(adapterRouter.contracts()).thenReturn(List.of(toutiaoContract()));
+
+        List<SelfMediaScheduleCapabilityVO> capabilities = service.list();
+
+        assertEquals(1, capabilities.size());
+        SelfMediaScheduleCapabilityVO capability = capabilities.get(0);
+        assertEquals("toutiao", capability.getPlatform());
+        assertEquals("今日头条", capability.getDisplayName());
+        assertEquals("unverified", capability.getVerificationStatus());
+        assertFalse(capability.getSupportsSchedule());
+        assertEquals("pending", capability.getV1Strategy());
+        assertTrue(capability.getContractRequiresCoverUpload());
+        assertTrue(capability.getContractSupportsLocation());
+    }
+
+    @Test
     void upsertRejectsVerifiedScheduleWithoutDelayRange() {
         SelfMediaScheduleCapabilityUpsertRequest request = verifiedRequest();
         request.setMinDelayMinutes(null);
+        when(adapterRouter.contract("toutiao")).thenReturn(Optional.of(toutiaoContract()));
 
         BizException error = assertThrows(BizException.class, () -> service.upsert(request));
 
@@ -69,22 +93,66 @@ class SelfMediaScheduleCapabilityServiceTest {
     @Test
     void readinessRequiresVerifiedPlatformScheduleStrategy() {
         when(mapper.selectByPlatform("zhihu")).thenReturn(capability("zhihu", "verified", true, "platform_schedule"));
-        when(adapterRouter.find("zhihu")).thenReturn(Optional.of(mock(SelfMediaPlatformScheduleAdapter.class)));
+        when(adapterRouter.contract("zhihu")).thenReturn(Optional.of(platformScheduleContract("zhihu", "知乎")));
 
         SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness = service.readiness("zhihu");
 
         assertTrue(readiness.ready());
+        assertEquals("知乎", readiness.contract().displayName());
     }
 
     @Test
-    void readinessRejectsWhenScheduleAdapterMissing() {
+    void readinessRejectsWhenPlatformContractMissing() {
         when(mapper.selectByPlatform("zhihu")).thenReturn(capability("zhihu", "verified", true, "platform_schedule"));
-        when(adapterRouter.find("zhihu")).thenReturn(Optional.empty());
+        when(adapterRouter.contract("zhihu")).thenReturn(Optional.empty());
 
         SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness = service.readiness("zhihu");
 
         assertFalse(readiness.ready());
-        assertEquals("PLATFORM_SCHEDULE_ADAPTER_MISSING", readiness.code());
+        assertEquals("PLATFORM_CONTRACT_MISSING", readiness.code());
+    }
+
+    @Test
+    void readinessRejectsNativeScheduleWhenContractDoesNotSupportIt() {
+        when(mapper.selectByPlatform("zhihu")).thenReturn(capability("zhihu", "verified", true, "platform_schedule"));
+        when(adapterRouter.contract("zhihu")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
+                "zhihu",
+                "知乎",
+                SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION,
+                SelfMediaPlatformScheduleMode.UNSUPPORTED,
+                SelfMediaPlatformScheduleRules.defaults(),
+                true,
+                false,
+                false,
+                true
+        )));
+
+        SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness = service.readiness("zhihu");
+
+        assertFalse(readiness.ready());
+        assertEquals("PLATFORM_SCHEDULE_UNSUPPORTED", readiness.code());
+    }
+
+    @Test
+    void readinessRejectsBackendDelayedUntilExecutorIsImplemented() {
+        when(mapper.selectByPlatform("douyin"))
+                .thenReturn(capability("douyin", "verified", true, "backend_delayed_publish"));
+        when(adapterRouter.contract("douyin")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
+                "douyin",
+                "抖音图文",
+                SelfMediaPlatformPublishChannel.OFFICIAL_API,
+                SelfMediaPlatformScheduleMode.BACKEND_DELAYED,
+                SelfMediaPlatformScheduleRules.defaults(),
+                false,
+                false,
+                false,
+                true
+        )));
+
+        SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness = service.readiness("douyin");
+
+        assertFalse(readiness.ready());
+        assertEquals("PLATFORM_BACKEND_DELAYED_EXECUTOR_MISSING", readiness.code());
     }
 
     @Test
@@ -120,5 +188,23 @@ class SelfMediaScheduleCapabilityServiceTest {
         row.setSupportsSchedule(supportsSchedule);
         row.setV1Strategy(strategy);
         return row;
+    }
+
+    private SelfMediaPlatformCapabilityContract toutiaoContract() {
+        return platformScheduleContract("toutiao", "今日头条");
+    }
+
+    private SelfMediaPlatformCapabilityContract platformScheduleContract(String platform, String displayName) {
+        return new SelfMediaPlatformCapabilityContract(
+                platform,
+                displayName,
+                SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION,
+                SelfMediaPlatformScheduleMode.PLATFORM_NATIVE,
+                new SelfMediaPlatformScheduleRules(130, 120, 4),
+                true,
+                true,
+                false,
+                true
+        );
     }
 }

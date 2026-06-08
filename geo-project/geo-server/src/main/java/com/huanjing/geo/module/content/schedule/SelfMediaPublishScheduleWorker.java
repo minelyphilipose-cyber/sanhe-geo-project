@@ -2,6 +2,8 @@ package com.huanjing.geo.module.content.schedule;
 
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.service.SelfMediaPublishScheduleService;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishChannel;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -9,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.List;
+import java.util.Set;
 
 @Slf4j
 @Service
@@ -18,6 +21,7 @@ public class SelfMediaPublishScheduleWorker {
     private static final NoopSelfMediaPublishScheduleAdapter NOOP_ADAPTER = new NoopSelfMediaPublishScheduleAdapter();
 
     private final SelfMediaPublishScheduleService scheduleService;
+    private final SelfMediaPlatformScheduleAdapterRouter platformRouter;
     private final List<SelfMediaPublishScheduleAdapter> adapters;
 
     public int runBatch(int limit) {
@@ -30,9 +34,14 @@ public class SelfMediaPublishScheduleWorker {
     }
 
     public boolean runOnce() {
+        Set<String> officialApiPlatforms = platformRouter.platformsByChannel(SelfMediaPlatformPublishChannel.OFFICIAL_API);
+        if (officialApiPlatforms.isEmpty()) {
+            return false;
+        }
         SelfMediaPublishScheduleVO publishCheck = scheduleService.claimNext(
                 SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK,
-                DEFAULT_LOCK_MINUTES
+                DEFAULT_LOCK_MINUTES,
+                officialApiPlatforms
         );
         if (publishCheck != null) {
             processPublishResultCheck(publishCheck);
@@ -41,7 +50,8 @@ public class SelfMediaPublishScheduleWorker {
 
         SelfMediaPublishScheduleVO scheduleExecution = scheduleService.claimNext(
                 SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION,
-                DEFAULT_LOCK_MINUTES
+                DEFAULT_LOCK_MINUTES,
+                officialApiPlatforms
         );
         if (scheduleExecution != null) {
             processScheduleExecution(scheduleExecution);

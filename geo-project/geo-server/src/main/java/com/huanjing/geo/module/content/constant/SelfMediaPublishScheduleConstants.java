@@ -4,6 +4,7 @@ import java.util.Set;
 
 public final class SelfMediaPublishScheduleConstants {
     public static final String STRATEGY_PLATFORM_SCHEDULE = "platform_schedule";
+    public static final String STRATEGY_BACKEND_DELAYED_PUBLISH = "backend_delayed_publish";
     public static final String STRATEGY_SEMI_AUTO = "semi_auto";
     public static final String STRATEGY_IMMEDIATE_PUBLISH_EXCEPTION = "immediate_publish_exception";
 

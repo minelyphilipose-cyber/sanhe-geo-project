@@ -94,4 +94,9 @@ public class BrowserEnvironmentController {
     public R<BrowserEnvironmentAccountVO> markLoginExpired(@PathVariable Long id) {
         return R.ok(browserEnvironmentService.markLoginExpired(id));
     }
+
+    @PostMapping("/browser-environment-accounts/{id}/reset-login-identity")
+    public R<BrowserEnvironmentAccountVO> resetLoginIdentity(@PathVariable Long id) {
+        return R.ok(browserEnvironmentService.resetLoginIdentity(id));
+    }
 }

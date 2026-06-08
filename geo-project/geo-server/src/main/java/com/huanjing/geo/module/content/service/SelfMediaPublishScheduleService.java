@@ -18,6 +18,7 @@ import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMapper;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishChannel;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleRules;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
@@ -105,6 +106,7 @@ public class SelfMediaPublishScheduleService {
     private final BrowserEnvironmentService browserEnvironmentService;
     private final SelfMediaScheduleCapabilityService scheduleCapabilityService;
     private final SelfMediaPlatformScheduleAdapterRouter scheduleAdapterRouter;
+    private final SelfMediaPublishScheduleAlertService alertService;
     private final SelfMediaPublishScheduleEnvironmentLockService environmentLockService;
     private final ContentDistributionService contentDistributionService;
     private final BrandAccessService brandAccessService;
@@ -164,7 +166,7 @@ public class SelfMediaPublishScheduleService {
         for (Long articleId : validated.articleIds()) {
             ArticleDraft article = articleDraftMapper.selectById(articleId);
             for (Long accountId : validated.accountIds()) {
-                Candidate candidate = validateCandidate(validated.brandId(), article, articleId, accountId);
+                Candidate candidate = validateCandidate(validated.brandId(), article, articleId, accountId, validated.strategy());
                 if (candidate.rejected() != null) {
                     response.getRejectedItems().add(candidate.rejected());
                     continue;
@@ -224,7 +226,7 @@ public class SelfMediaPublishScheduleService {
             }
             wrapper.in(SelfMediaPublishSchedule::getBrandId, accessibleBrandIds);
         }
-        wrapper.orderByAsc(SelfMediaPublishSchedule::getPlannedPublishAt)
+        wrapper.orderByDesc(SelfMediaPublishSchedule::getPlannedPublishAt)
                 .orderByDesc(SelfMediaPublishSchedule::getId);
         if (StringUtils.hasText(platform)) {
             wrapper.eq(SelfMediaPublishSchedule::getPlatform, platform.trim());
@@ -241,17 +243,33 @@ public class SelfMediaPublishScheduleService {
 
         Page<SelfMediaPublishSchedule> data = scheduleMapper.selectPage(new Page<>(pageNo, pageSize), wrapper);
         Page<SelfMediaPublishScheduleVO> result = new Page<>(data.getCurrent(), data.getSize(), data.getTotal());
-        result.setRecords(data.getRecords().stream().map(SelfMediaPublishScheduleVO::from).toList());
+        List<SelfMediaPublishScheduleVO> records = data.getRecords().stream().map(SelfMediaPublishScheduleVO::from).toList();
+        enrichDisplayNames(records);
+        enrichAlerts(records);
+        result.setRecords(records);
         return result;
     }
 
     public SelfMediaPublishScheduleVO detail(Long id) {
-        return SelfMediaPublishScheduleVO.from(requireScheduleWithAccess(id));
+        SelfMediaPublishScheduleVO vo = SelfMediaPublishScheduleVO.from(requireScheduleWithAccess(id));
+        enrichDisplayNames(List.of(vo));
+        enrichAlerts(List.of(vo));
+        return vo;
     }
 
     @Transactional
     public SelfMediaPublishScheduleVO claimNext(String queueKind, int lockMinutes) {
-        SelfMediaPublishSchedule claimed = claimNextRow(queueKind, lockMinutes, null, null);
+        SelfMediaPublishSchedule claimed = claimNextRow(queueKind, lockMinutes, null, null, null);
+        return claimed == null ? null : SelfMediaPublishScheduleVO.from(claimed);
+    }
+
+    @Transactional
+    public SelfMediaPublishScheduleVO claimNext(String queueKind, int lockMinutes, Set<String> platforms) {
+        Set<String> normalizedPlatforms = normalizePlatforms(platforms);
+        if (normalizedPlatforms.isEmpty()) {
+            return null;
+        }
+        SelfMediaPublishSchedule claimed = claimNextRow(queueKind, lockMinutes, null, null, normalizedPlatforms);
         return claimed == null ? null : SelfMediaPublishScheduleVO.from(claimed);
     }
 
@@ -260,11 +278,20 @@ public class SelfMediaPublishScheduleService {
         if (operatorId == null || operatorId <= 0) {
             fail("INVALID_OPERATOR", "operatorId must be a positive number");
         }
+        Set<String> allowedPlatforms = platformsByChannel(SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION);
+        if (allowedPlatforms.isEmpty()) {
+            return null;
+        }
+        String normalizedPlatform = trimToNull(platform);
+        if (normalizedPlatform != null && !allowedPlatforms.contains(normalize(normalizedPlatform))) {
+            return null;
+        }
         SelfMediaPublishSchedule claimed = claimNextRow(
                 SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION,
                 lockMinutes,
                 operatorId,
-                trimToNull(platform)
+                normalizedPlatform,
+                allowedPlatforms
         );
         if (claimed == null) {
             return null;
@@ -294,6 +321,14 @@ public class SelfMediaPublishScheduleService {
         if (operatorId == null || operatorId <= 0) {
             fail("INVALID_OPERATOR", "operatorId must be a positive number");
         }
+        Set<String> allowedPlatforms = platformsByChannel(SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION);
+        if (allowedPlatforms.isEmpty()) {
+            return null;
+        }
+        String normalizedPlatform = trimToNull(platform);
+        if (normalizedPlatform != null && !allowedPlatforms.contains(normalize(normalizedPlatform))) {
+            return null;
+        }
         SelfMediaPublishSchedule claimed = claimNextRow(
                 SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK,
                 List.of(
@@ -304,7 +339,8 @@ public class SelfMediaPublishScheduleService {
                 SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT,
                 lockMinutes,
                 operatorId,
-                trimToNull(platform)
+                normalizedPlatform,
+                allowedPlatforms
         );
         return claimed == null ? null : SelfMediaPublishScheduleVO.from(claimed);
     }
@@ -358,12 +394,53 @@ public class SelfMediaPublishScheduleService {
         return null;
     }
 
+    @Transactional
+    public SelfMediaPublishScheduleVO markDistributionTaskPublishedConfirmed(Long distributionTaskId,
+                                                                            String platformPublishedUrl,
+                                                                            String diagnosticsJson) {
+        if (distributionTaskId == null || distributionTaskId <= 0) {
+            return null;
+        }
+        SelfMediaPublishSchedule row = scheduleMapper.selectActiveByDistributionTaskId(distributionTaskId);
+        if (row == null) {
+            return null;
+        }
+        String status = normalize(row.getStatus());
+        if (SelfMediaPublishScheduleConstants.STATUS_FILLING.equals(status)
+                || SelfMediaPublishScheduleConstants.STATUS_FILLED_VERIFIED.equals(status)
+                || SelfMediaPublishScheduleConstants.STATUS_SCHEDULING.equals(status)
+                || SelfMediaPublishScheduleConstants.STATUS_SCHEDULED.equals(status)
+                || SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT.equals(status)) {
+            row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED);
+            row.setPublishedConfirmedAt(LocalDateTime.now());
+            row.setPlatformPublishedUrl(trimToNull(platformPublishedUrl));
+            row.setLockedUntil(null);
+            row.setNextAttemptAt(null);
+            row.setFailureCode(null);
+            row.setFailureMessage(null);
+            row.setDiagnosticsJson(trimToNull(diagnosticsJson));
+            scheduleMapper.updateById(row);
+            environmentLockService.release(row.getId());
+            return SelfMediaPublishScheduleVO.from(row);
+        }
+        return null;
+    }
+
     private SelfMediaPublishSchedule claimNextRow(String queueKind,
                                                   int lockMinutes,
                                                   Long operatorId,
                                                   String platform) {
+        return claimNextRow(queueKind, lockMinutes, operatorId, platform, null);
+    }
+
+    private SelfMediaPublishSchedule claimNextRow(String queueKind,
+                                                  int lockMinutes,
+                                                  Long operatorId,
+                                                  String platform,
+                                                  Set<String> allowedPlatforms) {
         QueueClaimProfile profile = requireClaimProfile(queueKind);
-        return claimNextRow(queueKind, profile.expectedStatuses(), profile.targetStatus(), lockMinutes, operatorId, platform);
+        return claimNextRow(queueKind, profile.expectedStatuses(), profile.targetStatus(), lockMinutes,
+                operatorId, platform, allowedPlatforms);
     }
 
     private SelfMediaPublishSchedule claimNextRow(String queueKind,
@@ -372,12 +449,27 @@ public class SelfMediaPublishScheduleService {
                                                   int lockMinutes,
                                                   Long operatorId,
                                                   String platform) {
+        return claimNextRow(queueKind, expectedStatuses, targetStatus, lockMinutes, operatorId, platform, null);
+    }
+
+    private SelfMediaPublishSchedule claimNextRow(String queueKind,
+                                                  List<String> expectedStatuses,
+                                                  String targetStatus,
+                                                  int lockMinutes,
+                                                  Long operatorId,
+                                                  String platform,
+                                                  Set<String> allowedPlatforms) {
         LocalDateTime now = LocalDateTime.now();
         LocalDateTime lockedUntil = now.plusMinutes(Math.max(lockMinutes, 1));
-        List<SelfMediaPublishSchedule> candidates = operatorId == null
-                ? scheduleMapper.selectDueQueueCandidates(queueKind, expectedStatuses, now, DEFAULT_CLAIM_LIMIT)
-                : scheduleMapper.selectDueQueueCandidatesForOperator(
-                        queueKind, expectedStatuses, now, DEFAULT_CLAIM_LIMIT, operatorId, platform);
+        Set<String> normalizedAllowedPlatforms = normalizePlatforms(allowedPlatforms);
+        List<SelfMediaPublishSchedule> candidates = selectDueQueueCandidates(
+                queueKind,
+                expectedStatuses,
+                now,
+                operatorId,
+                platform,
+                normalizedAllowedPlatforms
+        );
         for (SelfMediaPublishSchedule candidate : candidates) {
             if (isExpiredPlatformScheduleExecution(candidate, now)) {
                 markExpiredPlatformScheduleExecution(candidate, now);
@@ -401,6 +493,35 @@ public class SelfMediaPublishScheduleService {
             environmentLockService.release(candidate.getId());
         }
         return null;
+    }
+
+    private List<SelfMediaPublishSchedule> selectDueQueueCandidates(String queueKind,
+                                                                    List<String> expectedStatuses,
+                                                                    LocalDateTime now,
+                                                                    Long operatorId,
+                                                                    String platform,
+                                                                    Set<String> allowedPlatforms) {
+        if (operatorId == null) {
+            if (allowedPlatforms == null || allowedPlatforms.isEmpty()) {
+                return scheduleMapper.selectDueQueueCandidates(queueKind, expectedStatuses, now, DEFAULT_CLAIM_LIMIT);
+            }
+            return scheduleMapper.selectDueQueueCandidatesByPlatforms(
+                    queueKind,
+                    expectedStatuses,
+                    now,
+                    DEFAULT_CLAIM_LIMIT,
+                    allowedPlatforms
+            );
+        }
+        return scheduleMapper.selectDueQueueCandidatesForOperator(
+                queueKind,
+                expectedStatuses,
+                now,
+                DEFAULT_CLAIM_LIMIT,
+                operatorId,
+                platform,
+                allowedPlatforms
+        );
     }
 
     @Transactional
@@ -624,6 +745,26 @@ public class SelfMediaPublishScheduleService {
     }
 
     @Transactional
+    public SelfMediaPublishScheduleVO markLocalAgentExecutionFailed(Long id,
+                                                                    String failureCode,
+                                                                    String failureMessage,
+                                                                    String diagnosticsJson) {
+        SelfMediaPublishSchedule row = requireSchedule(id);
+        if (!SelfMediaPublishScheduleConstants.STATUS_FILLING.equals(normalize(row.getStatus()))) {
+            environmentLockService.release(row.getId());
+            return SelfMediaPublishScheduleVO.from(row);
+        }
+        return markClaimFailed(
+                id,
+                SelfMediaPublishScheduleConstants.STATUS_FILLING,
+                failureCode,
+                failureMessage,
+                diagnosticsJson,
+                null
+        );
+    }
+
+    @Transactional
     public SelfMediaPublishScheduleVO cancel(Long id, String reason) {
         SelfMediaPublishSchedule row = requireScheduleWithAccess(id);
         String status = normalize(row.getStatus());
@@ -731,7 +872,7 @@ public class SelfMediaPublishScheduleService {
         List<Long> accountIds = distinctPositive(request.getSelfMediaAccountIds(), "selfMediaAccountIds");
         LocalDateTime windowStart = request.getWindowStart();
         LocalDateTime windowEnd = request.getWindowEnd();
-        if (windowStart == null || windowEnd == null || !windowEnd.isAfter(windowStart)) {
+        if (windowStart == null || windowEnd == null || windowEnd.isBefore(windowStart)) {
             fail("INVALID_SCHEDULE_WINDOW", "排期时间窗口无效");
         }
         String strategy = StringUtils.hasText(request.getScheduleStrategy())
@@ -743,7 +884,10 @@ public class SelfMediaPublishScheduleService {
         if (SelfMediaPublishScheduleConstants.STRATEGY_SEMI_AUTO.equals(strategy)) {
             fail("SEMI_AUTO_STRATEGY_NOT_ACCEPTED", "全自动排期创建接口不接受 semi_auto；不支持定时的平台请继续使用半自动分发");
         }
-        if (!SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE.equals(strategy)) {
+        if (!List.of(
+                SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE,
+                SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH
+        ).contains(strategy)) {
             fail("INVALID_SCHEDULE_STRATEGY", "未知排期策略");
         }
         int interval = request.getMinIntervalMinutes() == null
@@ -806,7 +950,11 @@ public class SelfMediaPublishScheduleService {
         return status;
     }
 
-    private Candidate validateCandidate(Long brandId, ArticleDraft article, Long articleId, Long accountId) {
+    private Candidate validateCandidate(Long brandId,
+                                        ArticleDraft article,
+                                        Long articleId,
+                                        Long accountId,
+                                        String strategy) {
         SelfMediaAccount account = selfMediaAccountMapper.selectById(accountId);
         String platform = account == null ? null : account.getPlatform();
         if (article == null) {
@@ -835,14 +983,21 @@ public class SelfMediaPublishScheduleService {
                     "SELF_MEDIA_ACCOUNT_INACTIVE", "自媒体账号未启用", null));
         }
         SelfMediaScheduleCapabilityService.PlatformScheduleReadiness readiness =
-                scheduleCapabilityService.readiness(platform);
+                scheduleCapabilityService.readiness(platform, strategy);
         if (!readiness.ready()) {
             return Candidate.rejected(rejected(articleId, accountId, platform,
                     readiness.code(), readiness.message(), "全自动排期 > 平台能力验证"));
         }
+        boolean requiresCoverUpload = scheduleAdapterRouter.contract(platform)
+                .map(contract -> contract.requiresCoverUpload())
+                .orElse(false);
+        if (requiresCoverUpload && !StringUtils.hasText(article.getCoverImageUrl())) {
+            return Candidate.rejected(rejected(articleId, accountId, platform,
+                    "ARTICLE_COVER_REQUIRED", "该平台发布需要文章封面，请先为文章选择封面", "文章详情 > 文章封面"));
+        }
         BrowserEnvironmentAccount binding;
         try {
-            binding = browserEnvironmentService.validateForTaskCreation(account);
+            binding = browserEnvironmentService.validateForTaskCreation(account, false);
         } catch (BizException ex) {
             return Candidate.rejected(rejected(articleId, accountId, platform,
                     errorCodeFrom(ex), ex.getMessage(), SETTING_PATH_BROWSER_ENV));
@@ -1099,6 +1254,25 @@ public class SelfMediaPublishScheduleService {
         return "ENVIRONMENT_ACCOUNT_NOT_READY";
     }
 
+    private Set<String> platformsByChannel(SelfMediaPlatformPublishChannel channel) {
+        Set<String> platforms = scheduleAdapterRouter.platformsByChannel(channel);
+        return normalizePlatforms(platforms);
+    }
+
+    private Set<String> normalizePlatforms(Set<String> platforms) {
+        if (platforms == null || platforms.isEmpty()) {
+            return Set.of();
+        }
+        LinkedHashSet<String> normalized = new LinkedHashSet<>();
+        for (String platform : platforms) {
+            String value = normalize(platform);
+            if (StringUtils.hasText(value)) {
+                normalized.add(value);
+            }
+        }
+        return normalized;
+    }
+
     private String normalize(String value) {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
     }
@@ -1140,6 +1314,67 @@ public class SelfMediaPublishScheduleService {
     private void touch(SelfMediaPublishSchedule row) {
         row.setUpdatedBy(currentUserService.requireCurrentUser().getId());
         row.setUpdatedAt(LocalDateTime.now());
+    }
+
+    private void enrichAlerts(List<SelfMediaPublishScheduleVO> records) {
+        if (records == null || records.isEmpty()) {
+            return;
+        }
+        Map<Long, List<com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleAlertVO>> alerts =
+                alertService.listOpenAlertsByScheduleIds(records.stream().map(SelfMediaPublishScheduleVO::getId).toList());
+        for (SelfMediaPublishScheduleVO record : records) {
+            record.setActiveAlerts(alerts.getOrDefault(record.getId(), List.of()));
+        }
+    }
+
+    private void enrichDisplayNames(List<SelfMediaPublishScheduleVO> records) {
+        if (records == null || records.isEmpty()) {
+            return;
+        }
+        List<Long> brandIds = records.stream()
+                .map(SelfMediaPublishScheduleVO::getBrandId)
+                .filter(id -> id != null && id > 0)
+                .distinct()
+                .toList();
+        Map<Long, String> brandNames = new LinkedHashMap<>();
+        if (!brandIds.isEmpty()) {
+            List<Brand> brands = brandMapper.selectBatchIds(brandIds);
+            for (Brand brand : brands == null ? List.<Brand>of() : brands) {
+                if (brand != null && brand.getId() != null) {
+                    brandNames.put(brand.getId(), displayBrandName(brand));
+                }
+            }
+        }
+
+        List<Long> accountIds = records.stream()
+                .map(SelfMediaPublishScheduleVO::getSelfMediaAccountId)
+                .filter(id -> id != null && id > 0)
+                .distinct()
+                .toList();
+        Map<Long, String> accountNames = new LinkedHashMap<>();
+        if (!accountIds.isEmpty()) {
+            List<SelfMediaAccount> accounts = selfMediaAccountMapper.selectBatchIds(accountIds);
+            for (SelfMediaAccount account : accounts == null ? List.<SelfMediaAccount>of() : accounts) {
+                if (account != null && account.getId() != null) {
+                    accountNames.put(account.getId(), account.getAccountName());
+                }
+            }
+        }
+
+        for (SelfMediaPublishScheduleVO record : records) {
+            record.setBrandName(brandNames.get(record.getBrandId()));
+            record.setSelfMediaAccountName(accountNames.get(record.getSelfMediaAccountId()));
+        }
+    }
+
+    private String displayBrandName(Brand brand) {
+        if (brand == null) {
+            return null;
+        }
+        if (StringUtils.hasText(brand.getBrandShortName())) {
+            return brand.getBrandShortName();
+        }
+        return brand.getBrandName();
     }
 
     private String sha256(String value) {

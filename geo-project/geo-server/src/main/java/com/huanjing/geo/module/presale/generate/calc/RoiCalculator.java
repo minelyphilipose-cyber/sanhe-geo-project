@@ -10,15 +10,13 @@ import java.util.List;
 public class RoiCalculator {
 
     private static final double TARGET_SCORE_CAP = 95.0;
-    private static final double FIXED_EXPOSURE_MULTIPLIER = 1.8;
+    private static final double MAX_TOTAL_TARGET_UPLIFT = 30.0;
+    private static final PhaseContribution HIGH_CONTRIBUTION = new PhaseContribution(2.0, 3.0);
+    private static final PhaseContribution MEDIUM_CONTRIBUTION = new PhaseContribution(1.0, 2.0);
+    private static final PhaseContribution LOW_CONTRIBUTION = new PhaseContribution(0.5, 1.0);
 
     public RoiSimulation compute(Double overallScore, List<OptimizationFinding> findings) {
         double current = overallScore == null ? 0.0 : overallScore;
-
-        PhaseUplift uplift = resolvePhaseUplift(current);
-        double t1 = capTargetScore(current + uplift.phase1());
-        double t2 = capTargetScore(current + uplift.phase2());
-        double t3 = capTargetScore(current + uplift.phase3());
 
         int phase1Total = 0;
         int phase2Total = 0;
@@ -35,66 +33,105 @@ public class RoiCalculator {
             }
         }
 
+        PhaseRange phase1Range = phaseRange(current, 0.0, 0.0, phase1Total, HIGH_CONTRIBUTION);
+        PhaseRange phase2Range = phaseRange(current,
+                phase1Range.cumulativeLowUplift(), phase1Range.cumulativeHighUplift(),
+                phase2Total, MEDIUM_CONTRIBUTION);
+        PhaseRange phase3Range = phaseRange(current,
+                phase2Range.cumulativeLowUplift(), phase2Range.cumulativeHighUplift(),
+                phase3Total, LOW_CONTRIBUTION);
+
         List<RoiSimulation.RoiPhase> phases = List.of(
-                RoiSimulation.RoiPhase.builder()
-                        .phaseNo(1)
-                        .durationLabel("M1")
-                        .targetScore(t1)
-                        .upliftFromPrevious(Math.max(0.0, t1 - current))
-                        .completedOptimizationCount(0)
-                        .totalOptimizationCount(phase1Total)
-                        .build(),
-                RoiSimulation.RoiPhase.builder()
-                        .phaseNo(2)
-                        .durationLabel("M2-3")
-                        .targetScore(t2)
-                        .upliftFromPrevious(Math.max(0.0, t2 - t1))
-                        .completedOptimizationCount(0)
-                        .totalOptimizationCount(phase2Total)
-                        .build(),
-                RoiSimulation.RoiPhase.builder()
-                        .phaseNo(3)
-                        .durationLabel("M4-6")
-                        .targetScore(t3)
-                        .upliftFromPrevious(Math.max(0.0, t3 - t2))
-                        .completedOptimizationCount(0)
-                        .totalOptimizationCount(phase3Total)
-                        .build()
+                buildPhase(1, "M1", phase1Range, phase1Total),
+                buildPhase(2, "M2-3", phase2Range, phase2Total),
+                buildPhase(3, "M4-6", phase3Range, phase3Total)
         );
 
-        double upliftPercent = Double.compare(current, 0.0) == 0 ? 0.0 : Math.max(0.0, (t3 - current) / current * 100.0);
+        double targetLow = phase3Range.targetLow();
+        double targetHigh = phase3Range.targetHigh();
+        double targetMid = midpoint(targetLow, targetHigh);
+        double upliftPercentLow = upliftPercent(current, targetLow);
+        double upliftPercentHigh = upliftPercent(current, targetHigh);
+        double upliftPercentMid = upliftPercent(current, targetMid);
         return RoiSimulation.builder()
                 .currentScore(current)
-                .targetScore(t3)
-                .estimatedUpliftPercent(upliftPercent)
-                .estimatedExposureMultiplier(FIXED_EXPOSURE_MULTIPLIER)
+                .targetScore(targetMid)
+                .targetScoreLow(targetLow)
+                .targetScoreHigh(targetHigh)
+                .estimatedUpliftPercent(upliftPercentMid)
+                .estimatedUpliftPercentLow(upliftPercentLow)
+                .estimatedUpliftPercentHigh(upliftPercentHigh)
+                .estimatedExposureMultiplier(null)
+                .caseStudyRange(null)
                 .phases(phases)
                 .build();
     }
 
-    private PhaseUplift resolvePhaseUplift(double current) {
-        if (current >= 95.0) {
-            return new PhaseUplift(0.0, 0.0, 0.0);
+    private RoiSimulation.RoiPhase buildPhase(int phaseNo, String durationLabel, PhaseRange range, int plannedCount) {
+        return RoiSimulation.RoiPhase.builder()
+                .phaseNo(phaseNo)
+                .durationLabel(durationLabel)
+                .targetScore(midpoint(range.targetLow(), range.targetHigh()))
+                .targetScoreLow(range.targetLow())
+                .targetScoreHigh(range.targetHigh())
+                .upliftFromPrevious(midpoint(range.phaseLowUplift(), range.phaseHighUplift()))
+                .upliftFromPreviousLow(range.phaseLowUplift())
+                .upliftFromPreviousHigh(range.phaseHighUplift())
+                .projectionEnabled(plannedCount > 0)
+                .completedOptimizationCount(0)
+                .totalOptimizationCount(plannedCount)
+                .plannedOptimizationCount(plannedCount)
+                .build();
+    }
+
+    private PhaseRange phaseRange(double current,
+                                  double previousLowUplift,
+                                  double previousHighUplift,
+                                  int plannedCount,
+                                  PhaseContribution contribution) {
+        double phaseLow = plannedCount <= 0 ? 0.0 : plannedCount * contribution.low();
+        double phaseHigh = plannedCount <= 0 ? 0.0 : plannedCount * contribution.high();
+        double cumulativeLow = capUplift(previousLowUplift + phaseLow);
+        double cumulativeHigh = capUplift(previousHighUplift + phaseHigh);
+        double targetLow = capTargetScore(current + cumulativeLow);
+        double targetHigh = capTargetScore(current + cumulativeHigh);
+        if (targetHigh < targetLow) {
+            targetHigh = targetLow;
         }
-        if (current >= 90.0) {
-            return new PhaseUplift(1.0, 2.0, 3.0);
-        }
-        if (current >= 85.0) {
-            return new PhaseUplift(2.0, 4.0, 6.0);
-        }
-        if (current >= 75.0) {
-            return new PhaseUplift(3.0, 7.0, 10.0);
-        }
-        if (current >= 60.0) {
-            return new PhaseUplift(4.0, 9.0, 15.0);
-        }
-        return new PhaseUplift(5.0, 12.0, 20.0);
+        return new PhaseRange(
+                targetLow,
+                targetHigh,
+                Math.max(0.0, cumulativeLow - previousLowUplift),
+                Math.max(0.0, cumulativeHigh - previousHighUplift),
+                cumulativeLow,
+                cumulativeHigh
+        );
     }
 
     private double capTargetScore(double score) {
         return Math.min(score, TARGET_SCORE_CAP);
     }
 
-    private record PhaseUplift(double phase1, double phase2, double phase3) {
+    private double capUplift(double uplift) {
+        return Math.min(uplift, MAX_TOTAL_TARGET_UPLIFT);
+    }
+
+    private double midpoint(double low, double high) {
+        return (low + high) / 2.0;
+    }
+
+    private double upliftPercent(double current, double target) {
+        return Double.compare(current, 0.0) == 0 ? 0.0 : Math.max(0.0, (target - current) / current * 100.0);
+    }
+
+    private record PhaseContribution(double low, double high) {
+    }
+
+    private record PhaseRange(double targetLow,
+                              double targetHigh,
+                              double phaseLowUplift,
+                              double phaseHighUplift,
+                              double cumulativeLowUplift,
+                              double cumulativeHighUplift) {
     }
 }

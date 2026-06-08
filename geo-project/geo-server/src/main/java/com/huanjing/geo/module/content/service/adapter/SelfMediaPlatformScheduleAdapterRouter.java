@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -30,7 +31,30 @@ public class SelfMediaPlatformScheduleAdapterRouter {
     public SelfMediaPlatformScheduleRules rules(String platform, String strategy) {
         return find(platform)
                 .map(adapter -> adapter.scheduleRules(strategy))
-                .orElseGet(() -> new SelfMediaPlatformScheduleRules(10, 0, 1));
+                .orElseGet(SelfMediaPlatformScheduleRules::defaults);
+    }
+
+    public Optional<SelfMediaPlatformCapabilityContract> contract(String platform) {
+        return find(platform).map(SelfMediaPlatformScheduleAdapter::capabilityContract);
+    }
+
+    public List<SelfMediaPlatformCapabilityContract> contracts() {
+        return adapters.values().stream()
+                .map(SelfMediaPlatformScheduleAdapter::capabilityContract)
+                .toList();
+    }
+
+    public Set<String> platformsByChannel(SelfMediaPlatformPublishChannel channel) {
+        if (channel == null) {
+            return Set.of();
+        }
+        return adapters.values().stream()
+                .map(SelfMediaPlatformScheduleAdapter::capabilityContract)
+                .filter(contract -> channel.equals(contract.publishChannel()))
+                .map(SelfMediaPlatformCapabilityContract::platform)
+                .filter(StringUtils::hasText)
+                .map(SelfMediaPlatformScheduleAdapterRouter::normalize)
+                .collect(Collectors.toUnmodifiableSet());
     }
 
     private static String normalize(String value) {

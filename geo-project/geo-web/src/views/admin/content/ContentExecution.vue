@@ -89,6 +89,7 @@
                   <el-dropdown-item v-if="canViewSelfMediaSchedules" command="schedules">发布排期</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePromptTemplates" command="templates">文章提示词模板</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePublishPlatforms" command="platforms">发布平台管理</el-dropdown-item>
+                  <el-dropdown-item v-if="canManagePublishPlatforms" command="schedule-capabilities">排期能力管理</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
@@ -295,7 +296,7 @@
               placeholder="选择平台发布时间"
               :disabled="manualScheduleSubmitting"
             />
-            <div class="manual-schedule-tip">头条会提前约 130 分钟打开环境并设置平台定时，发布时间仍需满足平台至少提前 2 小时规则。</div>
+            <div class="manual-schedule-tip">{{ manualScheduleStrategyTip }}</div>
           </el-form-item>
         </el-form>
       </DataState>
@@ -717,6 +718,22 @@ const canSubmitManualSchedule = computed(() =>
   && !!manualScheduleForm.plannedPublishAt
   && !manualScheduleSubmitting.value,
 )
+const selectedManualScheduleAccount = computed(() =>
+  manualScheduleAccounts.value.find((item) => item.id === manualScheduleForm.selfMediaAccountId) || null,
+)
+const selectedManualScheduleCapability = computed(() =>
+  findManualScheduleCapability(selectedManualScheduleAccount.value?.platform),
+)
+const manualScheduleStrategyTip = computed(() => {
+  const strategy = selectedManualScheduleCapability.value?.v1Strategy
+  if (strategy === 'backend_delayed_publish') {
+    return '该平台不支持原生定时。系统会在计划时间附近打开 AdsPower 环境，填充内容并立即发布。'
+  }
+  if (strategy === 'platform_schedule') {
+    return '该平台会提前打开环境并设置平台定时；发布时间仍需满足平台自身的最小提前量规则。'
+  }
+  return '仅展示已通过自动排期能力验证的平台账号。'
+})
 
 const {
   detailVisible,
@@ -1282,13 +1299,14 @@ async function submitManualSchedule() {
   }
   manualScheduleSubmitting.value = true
   try {
+    const scheduleStrategy = selectedManualScheduleCapability.value?.v1Strategy || 'platform_schedule'
     const response = await createSelfMediaPublishSchedules({
       brandId: manualScheduleBrandId.value,
       articleIds: [manualScheduleArticle.value.id],
       selfMediaAccountIds: [manualScheduleForm.selfMediaAccountId],
       windowStart: manualScheduleForm.plannedPublishAt,
       windowEnd: manualScheduleForm.plannedPublishAt,
-      scheduleStrategy: 'platform_schedule',
+      scheduleStrategy,
       minIntervalMinutes: 1,
     }).then((res) => res.data.data)
     const created = response.createdSchedules?.length || 0
@@ -1311,13 +1329,21 @@ async function submitManualSchedule() {
 }
 
 function isManualSchedulePlatformReady(platform?: string | null) {
+  const capability = findManualScheduleCapability(platform)
+  return Boolean(capability
+    && capability.verificationStatus === 'verified'
+    && capability.supportsSchedule
+    && ['platform_schedule', 'backend_delayed_publish'].includes(String(capability.v1Strategy || '')),
+  )
+}
+
+function findManualScheduleCapability(platform?: string | null) {
   const normalized = (platform || '').trim().toLowerCase()
-  return manualScheduleCapabilities.value.some((item) =>
+  return manualScheduleCapabilities.value.find((item) =>
     item.platform?.toLowerCase() === normalized
     && item.verificationStatus === 'verified'
     && item.supportsSchedule
-    && item.v1Strategy === 'platform_schedule',
-  )
+  ) || null
 }
 
 function defaultManualScheduleTime() {
@@ -1345,6 +1371,8 @@ function handleToolbarMoreCommand(command: string) {
     openPromptTemplateManagement()
   } else if (command === 'platforms') {
     openPublishPlatformManagement()
+  } else if (command === 'schedule-capabilities') {
+    router.push('/admin/content/self-media-schedule-capabilities')
   }
 }
 

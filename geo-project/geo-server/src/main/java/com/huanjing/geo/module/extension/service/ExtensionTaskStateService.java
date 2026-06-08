@@ -103,7 +103,13 @@ public class ExtensionTaskStateService {
         }
         auditSuccess("SEMI_AUTO_TASK_FILLED", context, operatorId, extensionSessionId, detail("filledAt", now));
         String diagnosticsJson = diagnosticsJson(request);
-        if (hasVerifiedScheduledPublishResult(request)) {
+        if (hasVerifiedImmediatePublishResult(request)) {
+            selfMediaPublishScheduleService.markDistributionTaskPublishedConfirmed(
+                    taskId,
+                    extractPublishVerificationUrl(request),
+                    diagnosticsJson
+            );
+        } else if (hasVerifiedScheduledPublishResult(request)) {
             selfMediaPublishScheduleService.markDistributionTaskScheduled(taskId, diagnosticsJson);
         } else {
             selfMediaPublishScheduleService.markDistributionTaskFilled(taskId, diagnosticsJson);
@@ -433,6 +439,39 @@ public class ExtensionTaskStateService {
             return Boolean.TRUE.equals(verificationMap.get("verified"));
         }
         return false;
+    }
+
+    private boolean hasVerifiedImmediatePublishResult(Map<String, Object> request) {
+        Object fillResult = request == null ? null : request.get("fillResult");
+        if (!(fillResult instanceof Map<?, ?> fillResultMap)) {
+            return false;
+        }
+        Object publishOptions = fillResultMap.get("publishOptions");
+        if (!(publishOptions instanceof Map<?, ?> options) || !Boolean.TRUE.equals(options.get("published"))) {
+            return false;
+        }
+        Object verification = options.get("publishVerification");
+        if (verification instanceof Map<?, ?> verificationMap) {
+            return Boolean.TRUE.equals(verificationMap.get("verified"));
+        }
+        return false;
+    }
+
+    private String extractPublishVerificationUrl(Map<String, Object> request) {
+        Object fillResult = request == null ? null : request.get("fillResult");
+        if (!(fillResult instanceof Map<?, ?> fillResultMap)) {
+            return null;
+        }
+        Object publishOptions = fillResultMap.get("publishOptions");
+        if (!(publishOptions instanceof Map<?, ?> options)) {
+            return null;
+        }
+        Object verification = options.get("publishVerification");
+        if (!(verification instanceof Map<?, ?> verificationMap)) {
+            return null;
+        }
+        Object pageUrl = verificationMap.get("pageUrl");
+        return pageUrl == null ? null : String.valueOf(pageUrl);
     }
 
     private String extractFailureCode(Map<String, Object> request, String message) {

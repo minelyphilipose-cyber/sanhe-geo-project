@@ -80,7 +80,7 @@ public class EditableContentDTO {
 
     /**
      * ROI 模拟免责声明。可 null。
-     * 默认:"基于行业平均模型的估算,实际效果受多种因素影响,建议结合业务实际情况评估"。
+     * 默认:"以上为基于你当前得分与计划优化项设定的改进目标与情景测算,非保证结果;实际效果取决于执行、AI 平台变化与竞争情况。"。
      */
     @JsonProperty("roi_disclaimer")
     private String roiDisclaimer;

@@ -195,6 +195,22 @@ public class LocalAgentController {
         ));
     }
 
+    @PostMapping("/self-media-schedules/{scheduleId}/executions/failed")
+    public R<SelfMediaPublishScheduleVO> markSelfMediaScheduleExecutionFailed(
+            @PathVariable Long scheduleId,
+            @RequestParam(required = false) String failureCode,
+            @RequestParam(required = false) String failureMessage,
+            @RequestParam(required = false) String diagnosticsJson,
+            HttpServletRequest request) {
+        verifySignedRequest(request);
+        return R.ok(scheduleService.markLocalAgentExecutionFailed(
+                scheduleId,
+                failureCode,
+                failureMessage,
+                diagnosticsJson
+        ));
+    }
+
     private LocalAgentSession verifySignedRequest(HttpServletRequest request) {
         String path = request.getRequestURI();
         if (StringUtils.hasText(request.getQueryString())) {
@@ -217,7 +233,7 @@ public class LocalAgentController {
             return "https://mp.toutiao.com/profile_v4/graphic/publish";
         }
         if ("zhihu".equalsIgnoreCase(platform)) {
-            return "https://www.zhihu.com/";
+            return "https://zhuanlan.zhihu.com/write";
         }
         if ("xiaohongshu".equalsIgnoreCase(platform)) {
             return "https://www.xiaohongshu.com/";

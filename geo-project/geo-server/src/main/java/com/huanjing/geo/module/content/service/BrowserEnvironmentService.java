@@ -232,6 +232,38 @@ public class BrowserEnvironmentService {
     }
 
     @Transactional
+    public BrowserEnvironmentAccountVO resetLoginIdentity(Long id) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        BrowserEnvironmentAccount row = requireEnvironmentAccount(id);
+        brandAccessService.requireBrandAccess(row.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
+        LocalDateTime now = LocalDateTime.now();
+
+        row.setExpectedPlatformAccountId(null);
+        row.setExpectedAccountName(null);
+        row.setLoginStatus(BrowserEnvironmentConstants.LOGIN_UNKNOWN);
+        row.setLastVerifiedAt(null);
+        row.setLastLoginSeenAt(null);
+        row.setLastErrorCode(null);
+        row.setLastErrorMessage(null);
+        row.setUpdatedBy(operator.getId());
+        row.setUpdatedAt(now);
+
+        environmentAccountMapper.update(null, new LambdaUpdateWrapper<BrowserEnvironmentAccount>()
+                .eq(BrowserEnvironmentAccount::getId, id)
+                .isNull(BrowserEnvironmentAccount::getDeletedAt)
+                .set(BrowserEnvironmentAccount::getExpectedPlatformAccountId, null)
+                .set(BrowserEnvironmentAccount::getExpectedAccountName, null)
+                .set(BrowserEnvironmentAccount::getLoginStatus, BrowserEnvironmentConstants.LOGIN_UNKNOWN)
+                .set(BrowserEnvironmentAccount::getLastVerifiedAt, null)
+                .set(BrowserEnvironmentAccount::getLastLoginSeenAt, null)
+                .set(BrowserEnvironmentAccount::getLastErrorCode, null)
+                .set(BrowserEnvironmentAccount::getLastErrorMessage, null)
+                .set(BrowserEnvironmentAccount::getUpdatedBy, operator.getId())
+                .set(BrowserEnvironmentAccount::getUpdatedAt, now));
+        return toAccountVO(row);
+    }
+
+    @Transactional
     public BrowserEnvironmentAccountVO reportLoginStatus(Long id, BrowserEnvironmentLoginStatusRequest request) {
         SysUser operator = currentUserService.requireCurrentUser();
         return reportLoginStatusForOperator(id, request, operator.getId());
@@ -342,6 +374,10 @@ public class BrowserEnvironmentService {
     }
 
     public BrowserEnvironmentAccount validateForTaskCreation(SelfMediaAccount account) {
+        return validateForTaskCreation(account, true);
+    }
+
+    public BrowserEnvironmentAccount validateForTaskCreation(SelfMediaAccount account, boolean requireLoggedIn) {
         BrowserEnvironmentAccount binding = getActiveBinding(account.getId());
         if (binding == null) return null;
         BrowserEnvironment environment = requireEnvironment(binding.getBrowserEnvironmentId());
@@ -350,15 +386,29 @@ public class BrowserEnvironmentService {
         }
         if (!StringUtils.hasText(binding.getExpectedPlatformAccountId())
                 && !StringUtils.hasText(binding.getExpectedAccountName())) {
-            fail(BrowserEnvironmentConstants.ERR_IDENTITY_EXPECTATION_MISSING, "自媒体账号缺少环境账号身份预期值");
+            applyAccountIdentityExpectation(binding, account);
         }
         if (BrowserEnvironmentConstants.LOGIN_MISMATCH.equals(binding.getLoginStatus())) {
             fail(BrowserEnvironmentConstants.ERR_ENVIRONMENT_ACCOUNT_MISMATCH, "环境内登录账号与绑定账号不一致");
         }
-        if (!BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(binding.getLoginStatus())) {
+        if (requireLoggedIn && !BrowserEnvironmentConstants.LOGIN_LOGGED_IN.equals(binding.getLoginStatus())) {
             fail(BrowserEnvironmentConstants.ERR_ENVIRONMENT_LOGIN_REQUIRED, "指纹浏览器环境账号未登录或需重新验证");
         }
         return binding;
+    }
+
+    private void applyAccountIdentityExpectation(BrowserEnvironmentAccount binding, SelfMediaAccount account) {
+        String expectedPlatformAccountId = trimToNull(account.getPlatformAccountId());
+        String expectedAccountName = trimToNull(account.getAccountName());
+        if (!StringUtils.hasText(expectedPlatformAccountId) && !StringUtils.hasText(expectedAccountName)) {
+            fail(BrowserEnvironmentConstants.ERR_IDENTITY_EXPECTATION_MISSING, "自媒体账号缺少环境账号身份预期值");
+        }
+        ensureExpectedIdentityNotClaimed(binding.getId(), binding.getBrandId(), binding.getPlatform(),
+                expectedPlatformAccountId, expectedAccountName);
+        binding.setExpectedPlatformAccountId(expectedPlatformAccountId);
+        binding.setExpectedAccountName(expectedAccountName);
+        binding.setUpdatedAt(LocalDateTime.now());
+        environmentAccountMapper.updateById(binding);
     }
 
     private String resolveReportedStatus(BrowserEnvironmentAccount row,

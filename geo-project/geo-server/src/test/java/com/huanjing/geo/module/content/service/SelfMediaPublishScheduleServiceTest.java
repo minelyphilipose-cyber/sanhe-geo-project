@@ -13,7 +13,10 @@ import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaPublishScheduleRequestMapper;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformCapabilityContract;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishChannel;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleMode;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleRules;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
@@ -31,12 +34,16 @@ import org.mockito.ArgumentCaptor;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -55,6 +62,7 @@ class SelfMediaPublishScheduleServiceTest {
     private BrowserEnvironmentService browserEnvironmentService;
     private SelfMediaScheduleCapabilityService scheduleCapabilityService;
     private SelfMediaPlatformScheduleAdapterRouter scheduleAdapterRouter;
+    private SelfMediaPublishScheduleAlertService alertService;
     private SelfMediaPublishScheduleEnvironmentLockService environmentLockService;
     private BrandAccessService brandAccessService;
     private SelfMediaPublishScheduleService service;
@@ -72,6 +80,11 @@ class SelfMediaPublishScheduleServiceTest {
         scheduleAdapterRouter = mock(SelfMediaPlatformScheduleAdapterRouter.class);
         when(scheduleAdapterRouter.rules(anyString(), anyString()))
                 .thenReturn(new SelfMediaPlatformScheduleRules(130, 120, 4));
+        when(scheduleAdapterRouter.contract(anyString())).thenReturn(Optional.empty());
+        when(scheduleAdapterRouter.platformsByChannel(SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION))
+                .thenReturn(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu"));
+        alertService = mock(SelfMediaPublishScheduleAlertService.class);
+        when(alertService.listOpenAlertsByScheduleIds(any())).thenReturn(Map.of());
         environmentLockService = mock(SelfMediaPublishScheduleEnvironmentLockService.class);
         brandAccessService = mock(BrandAccessService.class);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
@@ -89,6 +102,7 @@ class SelfMediaPublishScheduleServiceTest {
                 browserEnvironmentService,
                 scheduleCapabilityService,
                 scheduleAdapterRouter,
+                alertService,
                 environmentLockService,
                 mock(ContentDistributionService.class),
                 brandAccessService,
@@ -125,7 +139,7 @@ class SelfMediaPublishScheduleServiceTest {
     @Test
     void createSchedules_rejectsAccountWithoutBrowserEnvironmentBinding() {
         prepareValidArticleAndAccount();
-        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class))).thenReturn(null);
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(null);
         stubRequestInsert();
 
         SelfMediaPublishScheduleCreateResponse response = service.createSchedules(validRequest(), "new-key");
@@ -139,7 +153,7 @@ class SelfMediaPublishScheduleServiceTest {
     @Test
     void createSchedules_rejectsWhenActiveScheduleAlreadyExists() {
         prepareValidArticleAndAccount();
-        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class))).thenReturn(binding());
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
         when(scheduleMapper.selectActiveByBaseIdempotencyKey(anyString(), any())).thenReturn(existingActiveSchedule());
         stubRequestInsert();
 
@@ -154,11 +168,12 @@ class SelfMediaPublishScheduleServiceTest {
     @Test
     void createSchedules_rejectsWhenPlatformCapabilityNotVerified() {
         prepareValidArticleAndAccount();
-        when(scheduleCapabilityService.readiness("toutiao"))
+        when(scheduleCapabilityService.readiness("toutiao", SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE))
                 .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(
                         false,
                         "PLATFORM_CAPABILITY_UNVERIFIED",
-                        "平台定时发布能力尚未验证"
+                        "平台定时发布能力尚未验证",
+                        null
                 ));
         stubRequestInsert();
 
@@ -168,14 +183,53 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(1, response.getRejectedItems().size());
         assertEquals("PLATFORM_CAPABILITY_UNVERIFIED", response.getRejectedItems().get(0).getCode());
         assertEquals("全自动排期 > 平台能力验证", response.getRejectedItems().get(0).getSettingPath());
-        verify(browserEnvironmentService, never()).validateForTaskCreation(any(SelfMediaAccount.class));
+        verify(browserEnvironmentService, never()).validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean());
+        verify(scheduleMapper, never()).insert(any());
+    }
+
+    @Test
+    void createSchedules_rejectsCoverRequiredPlatformWhenArticleHasNoCover() {
+        ArticleDraft article = article();
+        article.setCoverImageUrl(null);
+        SelfMediaAccount account = account();
+        account.setPlatform("baijiahao");
+        BrowserEnvironmentAccount binding = binding();
+        binding.setPlatform("baijiahao");
+
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+        when(projectMapper.selectById(7L)).thenReturn(project());
+        when(brandMapper.selectById(8L)).thenReturn(brand());
+        when(accountMapper.selectById(20L)).thenReturn(account);
+        when(scheduleCapabilityService.readiness("baijiahao", SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
+        when(scheduleAdapterRouter.contract("baijiahao")).thenReturn(Optional.of(new SelfMediaPlatformCapabilityContract(
+                "baijiahao",
+                "百家号",
+                SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION,
+                SelfMediaPlatformScheduleMode.PLATFORM_NATIVE,
+                new SelfMediaPlatformScheduleRules(0, 0, 2),
+                true,
+                false,
+                false,
+                true
+        )));
+        stubRequestInsert();
+        SelfMediaPublishScheduleCreateRequest request = validRequest();
+
+        SelfMediaPublishScheduleCreateResponse response = service.createSchedules(request, "new-key");
+
+        assertTrue(response.getCreatedSchedules().isEmpty());
+        assertEquals(1, response.getRejectedItems().size());
+        assertEquals("ARTICLE_COVER_REQUIRED", response.getRejectedItems().get(0).getCode());
+        assertEquals("文章详情 > 文章封面", response.getRejectedItems().get(0).getSettingPath());
+        verify(browserEnvironmentService, never()).validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean());
         verify(scheduleMapper, never()).insert(any());
     }
 
     @Test
     void createSchedules_rejectsToutiaoPlatformScheduleWhenTimeTooClose() {
         prepareValidArticleAndAccount();
-        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class))).thenReturn(binding());
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
         stubRequestInsert();
         SelfMediaPublishScheduleCreateRequest request = validRequest();
         request.setWindowStart(LocalDateTime.now().plusMinutes(30));
@@ -192,7 +246,7 @@ class SelfMediaPublishScheduleServiceTest {
     @Test
     void createSchedules_setsToutiaoPlatformScheduleAttemptBeforeTwoHourLimit() {
         prepareValidArticleAndAccount();
-        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class))).thenReturn(binding());
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
         stubRequestInsert();
         SelfMediaPublishScheduleCreateRequest request = validRequest();
         LocalDateTime plannedAt = LocalDateTime.now().plusHours(3).withSecond(0).withNano(0);
@@ -218,9 +272,33 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void createSchedules_acceptsSinglePointScheduleWindow() {
+        prepareValidArticleAndAccount();
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        stubRequestInsert();
+        SelfMediaPublishScheduleCreateRequest request = validRequest();
+        LocalDateTime plannedAt = LocalDateTime.now().plusHours(3).withSecond(0).withNano(0);
+        request.setWindowStart(plannedAt);
+        request.setWindowEnd(plannedAt);
+        when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
+            SelfMediaPublishSchedule row = invocation.getArgument(0);
+            row.setId(53L);
+            return 1;
+        });
+
+        SelfMediaPublishScheduleCreateResponse response = service.createSchedules(request, "new-key");
+
+        assertEquals(1, response.getCreatedSchedules().size());
+        ArgumentCaptor<SelfMediaPublishSchedule> captor = ArgumentCaptor.forClass(SelfMediaPublishSchedule.class);
+        verify(scheduleMapper).insert(captor.capture());
+        assertEquals(plannedAt, captor.getValue().getPlannedPublishAt());
+        assertEquals(plannedAt, captor.getValue().getPlatformScheduledAt());
+    }
+
+    @Test
     void createSystemSchedulesUsesProvidedOperatorWithoutBrandAccessCheck() {
         prepareValidArticleAndAccount();
-        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class))).thenReturn(binding());
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
         stubRequestInsert();
         when(scheduleMapper.insert(any(SelfMediaPublishSchedule.class))).thenAnswer(invocation -> {
             SelfMediaPublishSchedule row = invocation.getArgument(0);
@@ -407,7 +485,8 @@ class SelfMediaPublishScheduleServiceTest {
                 any(),
                 eq(10),
                 eq(99L),
-                eq("toutiao")
+                eq("toutiao"),
+                eq(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu"))
         )).thenReturn(List.of(candidate));
         when(environmentLockService.tryAcquire(eq(15L), eq(103L), any(), any())).thenReturn(true);
         when(scheduleMapper.claimQueueSchedule(
@@ -629,8 +708,8 @@ class SelfMediaPublishScheduleServiceTest {
         when(projectMapper.selectById(7L)).thenReturn(project());
         when(brandMapper.selectById(8L)).thenReturn(brand());
         when(accountMapper.selectById(20L)).thenReturn(account());
-        when(scheduleCapabilityService.readiness("toutiao"))
-                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null));
+        when(scheduleCapabilityService.readiness("toutiao", SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE))
+                .thenReturn(new SelfMediaScheduleCapabilityService.PlatformScheduleReadiness(true, null, null, null));
     }
 
     private void stubRequestInsert() {

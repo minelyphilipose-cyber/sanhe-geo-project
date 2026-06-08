@@ -602,9 +602,21 @@ public class ContentDistributionService {
                         .last("LIMIT 1")
         );
         if (existed != null) {
+            BrowserEnvironmentAccount existedEnvironmentBinding =
+                    browserEnvironmentService.validateForTaskCreation(account, !isScheduleTarget(mpTarget));
+            if (existedEnvironmentBinding != null || AUTH_MODE_COOKIE.equalsIgnoreCase(account.getAuthMode())) {
+                return reissueReusableSemiAutoSelfMediaTask(
+                        article,
+                        project,
+                        operator,
+                        account,
+                        existed,
+                        existedEnvironmentBinding
+                );
+            }
             return existed;
         }
-        BrowserEnvironmentAccount environmentBinding = browserEnvironmentService.validateForTaskCreation(account);
+        BrowserEnvironmentAccount environmentBinding = browserEnvironmentService.validateForTaskCreation(account, !isScheduleTarget(mpTarget));
         if (environmentBinding != null || AUTH_MODE_COOKIE.equalsIgnoreCase(account.getAuthMode())) {
             return createSemiAutoSelfMediaTask(article, project, operator, account, mpTarget, environmentBinding);
         }

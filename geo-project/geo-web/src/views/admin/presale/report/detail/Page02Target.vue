@@ -51,25 +51,25 @@
 
         <!-- 诊断范围 dark strip -->
         <div class="p02-scope">
-          <div class="mono p02-scope-label">TEST SCOPE / 本次怎么测</div>
+          <div class="mono p02-scope-label">DIAGNOSTIC SCOPE / 诊断范围</div>
           <div class="p02-scope-grid">
             <div>
               <div class="metric-hero p02-scope-number">
                 {{ mergedView.test_summary.total_platforms }}
               </div>
-              <div class="p02-scope-text">AI 平台<br />主流平台都问到</div>
+              <div class="p02-scope-text">AI 平台<br />主流模型全覆盖</div>
             </div>
             <div>
               <div class="metric-hero p02-scope-number">
                 {{ mergedView.test_summary.total_prompts }}
               </div>
-              <div class="p02-scope-text">测试问题<br />覆盖不同顾客问法</div>
+              <div class="p02-scope-text">测试问题<br />覆盖不同问法</div>
             </div>
             <div>
               <div class="metric-hero p02-scope-number">
                 {{ completedPromptResultCount }}
               </div>
-              <div class="p02-scope-text">AI 回答<br />实际收集到的结果</div>
+              <div class="p02-scope-text">AI 回答数量<br />意图结果数</div>
             </div>
             <div>
               <div class="metric-hero p02-scope-number">{{ judgeCallCount }}</div>

@@ -2,11 +2,14 @@ package com.huanjing.geo.module.content.schedule;
 
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.service.SelfMediaPublishScheduleService;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishChannel;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,6 +19,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class SelfMediaPublishScheduleWorkerTest {
@@ -23,12 +27,15 @@ class SelfMediaPublishScheduleWorkerTest {
     @Test
     void runOnceProcessesPublishCheckBeforeScheduleExecution() {
         SelfMediaPublishScheduleService service = mock(SelfMediaPublishScheduleService.class);
+        SelfMediaPlatformScheduleAdapterRouter router = mock(SelfMediaPlatformScheduleAdapterRouter.class);
         SelfMediaPublishScheduleAdapter adapter = mock(SelfMediaPublishScheduleAdapter.class);
-        SelfMediaPublishScheduleWorker worker = new SelfMediaPublishScheduleWorker(service, List.of(adapter));
-        SelfMediaPublishScheduleVO publishCheck = schedule(10L, "toutiao");
-        when(service.claimNext(eq(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK), eq(30)))
+        SelfMediaPublishScheduleWorker worker = new SelfMediaPublishScheduleWorker(service, router, List.of(adapter));
+        Set<String> apiPlatforms = Set.of("douyin");
+        SelfMediaPublishScheduleVO publishCheck = schedule(10L, "douyin");
+        when(router.platformsByChannel(SelfMediaPlatformPublishChannel.OFFICIAL_API)).thenReturn(apiPlatforms);
+        when(service.claimNext(eq(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK), eq(30), eq(apiPlatforms)))
                 .thenReturn(publishCheck);
-        when(adapter.supports("toutiao")).thenReturn(true);
+        when(adapter.supports("douyin")).thenReturn(true);
         when(adapter.checkPublishResult(publishCheck))
                 .thenReturn(PublishCheckResult.published("https://example.test/post/10", "{\"ok\":true}"));
 
@@ -36,20 +43,23 @@ class SelfMediaPublishScheduleWorkerTest {
 
         assertTrue(processed);
         verify(service).markClaimedPublishedConfirmed(10L, "https://example.test/post/10", "{\"ok\":true}");
-        verify(service, never()).claimNext(eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION), eq(30));
+        verify(service, never()).claimNext(eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION), eq(30), eq(apiPlatforms));
     }
 
     @Test
     void runOnceMovesSuccessfulScheduleExecutionThroughAllClaimedStates() {
         SelfMediaPublishScheduleService service = mock(SelfMediaPublishScheduleService.class);
+        SelfMediaPlatformScheduleAdapterRouter router = mock(SelfMediaPlatformScheduleAdapterRouter.class);
         SelfMediaPublishScheduleAdapter adapter = mock(SelfMediaPublishScheduleAdapter.class);
-        SelfMediaPublishScheduleWorker worker = new SelfMediaPublishScheduleWorker(service, List.of(adapter));
-        SelfMediaPublishScheduleVO schedule = schedule(20L, "toutiao");
-        when(service.claimNext(eq(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK), eq(30)))
+        SelfMediaPublishScheduleWorker worker = new SelfMediaPublishScheduleWorker(service, router, List.of(adapter));
+        Set<String> apiPlatforms = Set.of("douyin");
+        SelfMediaPublishScheduleVO schedule = schedule(20L, "douyin");
+        when(router.platformsByChannel(SelfMediaPlatformPublishChannel.OFFICIAL_API)).thenReturn(apiPlatforms);
+        when(service.claimNext(eq(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK), eq(30), eq(apiPlatforms)))
                 .thenReturn(null);
-        when(service.claimNext(eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION), eq(30)))
+        when(service.claimNext(eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION), eq(30), eq(apiPlatforms)))
                 .thenReturn(schedule);
-        when(adapter.supports("toutiao")).thenReturn(true);
+        when(adapter.supports("douyin")).thenReturn(true);
         when(adapter.schedule(schedule)).thenReturn(ScheduleExecutionResult.scheduled("platform-20", "{\"ok\":true}"));
 
         boolean processed = worker.runOnce();
@@ -64,11 +74,14 @@ class SelfMediaPublishScheduleWorkerTest {
     @Test
     void runOnceMovesScheduleToManualRequiredWhenAdapterMissing() {
         SelfMediaPublishScheduleService service = mock(SelfMediaPublishScheduleService.class);
-        SelfMediaPublishScheduleWorker worker = new SelfMediaPublishScheduleWorker(service, List.of());
-        SelfMediaPublishScheduleVO schedule = schedule(30L, "xiaohongshu");
-        when(service.claimNext(eq(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK), eq(30)))
+        SelfMediaPlatformScheduleAdapterRouter router = mock(SelfMediaPlatformScheduleAdapterRouter.class);
+        SelfMediaPublishScheduleWorker worker = new SelfMediaPublishScheduleWorker(service, router, List.of());
+        Set<String> apiPlatforms = Set.of("douyin");
+        SelfMediaPublishScheduleVO schedule = schedule(30L, "douyin");
+        when(router.platformsByChannel(SelfMediaPlatformPublishChannel.OFFICIAL_API)).thenReturn(apiPlatforms);
+        when(service.claimNext(eq(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK), eq(30), eq(apiPlatforms)))
                 .thenReturn(null);
-        when(service.claimNext(eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION), eq(30)))
+        when(service.claimNext(eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION), eq(30), eq(apiPlatforms)))
                 .thenReturn(schedule);
 
         boolean processed = worker.runOnce();
@@ -87,12 +100,28 @@ class SelfMediaPublishScheduleWorkerTest {
     @Test
     void runBatchStopsWhenNoMoreWork() {
         SelfMediaPublishScheduleService service = mock(SelfMediaPublishScheduleService.class);
-        SelfMediaPublishScheduleWorker worker = new SelfMediaPublishScheduleWorker(service, List.of());
-        when(service.claimNext(anyString(), eq(30))).thenReturn(null);
+        SelfMediaPlatformScheduleAdapterRouter router = mock(SelfMediaPlatformScheduleAdapterRouter.class);
+        SelfMediaPublishScheduleWorker worker = new SelfMediaPublishScheduleWorker(service, router, List.of());
+        Set<String> apiPlatforms = Set.of("douyin");
+        when(router.platformsByChannel(SelfMediaPlatformPublishChannel.OFFICIAL_API)).thenReturn(apiPlatforms);
+        when(service.claimNext(anyString(), eq(30), eq(apiPlatforms))).thenReturn(null);
 
         int processed = worker.runBatch(5);
 
         assertEquals(0, processed);
+    }
+
+    @Test
+    void runOnceSkipsWhenNoOfficialApiExecutorPlatformExists() {
+        SelfMediaPublishScheduleService service = mock(SelfMediaPublishScheduleService.class);
+        SelfMediaPlatformScheduleAdapterRouter router = mock(SelfMediaPlatformScheduleAdapterRouter.class);
+        SelfMediaPublishScheduleWorker worker = new SelfMediaPublishScheduleWorker(service, router, List.of());
+        when(router.platformsByChannel(SelfMediaPlatformPublishChannel.OFFICIAL_API)).thenReturn(Set.of());
+
+        boolean processed = worker.runOnce();
+
+        assertEquals(false, processed);
+        verifyNoInteractions(service);
     }
 
     private SelfMediaPublishScheduleVO schedule(Long id, String platform) {

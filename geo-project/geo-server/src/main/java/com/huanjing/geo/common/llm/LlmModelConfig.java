@@ -21,6 +21,8 @@ public record LlmModelConfig(String platformCode,
                              Integer concurrencyLimit,
                              boolean useExecutionGateway) {
 
+    private static final String PLATFORM_KIMI = "kimi";
+
     public static final int DEFAULT_CONNECT_TIMEOUT_MS = 10_000;
     public static final int DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
     public static final int MAX_REQUEST_TIMEOUT_MS = 60_000;
@@ -129,7 +131,7 @@ public record LlmModelConfig(String platformCode,
         }
         maxRetry = Math.max(0, positiveOrDefault(maxRetry, 2));
         rateLimitQps = Math.max(1, positiveOrDefault(rateLimitQps, 1));
-        temperature = temperature == null ? 0D : temperature;
+        temperature = normalizeTemperature(platformCode, temperature);
         maxTokens = maxTokens == null || maxTokens <= 0 ? null : maxTokens;
         platformCode = platformCode.trim();
         platformName = trimToNull(platformName);
@@ -146,6 +148,13 @@ public record LlmModelConfig(String platformCode,
 
     private static int positiveOrDefault(Integer value, int fallback) {
         return value == null || value <= 0 ? fallback : value;
+    }
+
+    private static double normalizeTemperature(String platformCode, Double temperature) {
+        if (StringUtils.hasText(platformCode) && PLATFORM_KIMI.equalsIgnoreCase(platformCode.trim())) {
+            return 1D;
+        }
+        return temperature == null ? 0D : temperature;
     }
 
     private static String trimToNull(String value) {

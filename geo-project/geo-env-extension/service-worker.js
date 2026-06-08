@@ -315,6 +315,7 @@ function classifyTaskFailure(message) {
 }
 
 function classifyTaskFailureCode(text) {
+  if (text.includes('fill token used or expired')) return 'FILL_TOKEN_USED_OR_EXPIRED'
   if (text.includes('作品列表') || text.includes('作品管理页') || text.includes('WORKS_LIST_VERIFY_TIMEOUT')) return 'WORKS_LIST_VERIFY_TIMEOUT'
   if (text.includes('账号不一致')) return 'ACCOUNT_MISMATCH'
   if (text.includes('IDENTITY_EXPECTATION_MISSING')) return 'IDENTITY_EXPECTATION_MISSING'
@@ -336,6 +337,7 @@ function isRetryableTaskFailureCode(code) {
     'PREVIEW_PAGE_NOT_READY',
     'WORKS_LIST_VERIFY_TIMEOUT',
     'LOCAL_HELPER_TEMPORARY_ERROR',
+    'FILL_TOKEN_USED_OR_EXPIRED',
   ].includes(code)
 }
 
@@ -346,10 +348,21 @@ async function autoPollOnce(reason, senderTabId) {
     if (!session?.extensionToken) return { ok: true, skipped: true, reason: 'not_bound' }
     const tab = senderTabId ? await chrome.tabs.get(senderTabId).catch(() => null) : null
     const platform = inferPlatformFromUrl(tab?.url)
-    const result = await pollOnce({ identityTabId: senderTabId, platform })
+    let identityTabId = senderTabId
+    let result = await pollOnce({ identityTabId, platform })
+
+    if (!result.taskId) {
+      const fallbackTask = await findPendingHelperTaskForOtherPlatform(config, session, platform)
+      if (fallbackTask?.platform) {
+        const fallbackPlatform = normalizePlatform(fallbackTask.platform)
+        identityTabId = await findPlatformTabId(fallbackPlatform)
+        result = await pollOnce({ identityTabId, platform: fallbackPlatform })
+      }
+    }
+
     if (result.taskId && result.environmentKey) {
-      await autoReportLoginStatusFromTab(config, session, senderTabId, {
-        platform,
+      await autoReportLoginStatusFromTab(config, session, identityTabId, {
+        platform: result.platform || platform,
         environmentKey: result.environmentKey,
         requireTaskEnvironment: true,
       }).catch((error) => appendEventLog({ type: 'login_report', ok: false, reason, platform, error: error.message }))
@@ -372,6 +385,20 @@ async function autoPollOnce(reason, senderTabId) {
     await appendEventLog({ type: 'auto_fill', ok: false, reason, error: error.message })
     throw error
   }
+}
+
+async function findPendingHelperTaskForOtherPlatform(config, session, currentPlatform) {
+  const normalizedCurrent = normalizePlatform(currentPlatform)
+  const tasks = await listHelperTasks(config, session)
+  return tasks.find((task) => {
+    const platform = normalizePlatform(task.platform)
+    if (!platform || platform === normalizedCurrent) return false
+    return isClaimableHelperTaskStatus(task.status)
+  }) || null
+}
+
+function isClaimableHelperTaskStatus(status) {
+  return ['pending', 'requeued'].includes(String(status || '').toLowerCase())
 }
 
 async function autoReportLoginStatusFromTab(config, session, tabId, options = {}) {
@@ -856,7 +883,8 @@ function isAllowedLoginReportUrl(platform, urlValue) {
         && !url.pathname.includes('/graphic/publish')
     }
     if (normalizedPlatform === 'zhihu') {
-      return url.hostname === 'www.zhihu.com'
+      return (url.hostname === 'www.zhihu.com' || url.hostname === 'zhuanlan.zhihu.com')
+        && !url.pathname.startsWith('/write')
     }
     if (normalizedPlatform === 'xiaohongshu') {
       return url.hostname === 'creator.xiaohongshu.com'
@@ -891,6 +919,16 @@ function platformReportPageHint(platform) {
     xiaohongshu: '小红书创作服务平台(creator.xiaohongshu.com)',
   }
   return hints[normalizedPlatform] || `${platform || '对应平台'}后台页`
+}
+
+function platformDisplayName(platform) {
+  const normalizedPlatform = normalizePlatform(platform)
+  const names = {
+    toutiao: '头条',
+    zhihu: '知乎',
+    xiaohongshu: '小红书',
+  }
+  return names[normalizedPlatform] || '平台'
 }
 
 function defaultLoginReportUrl(platform) {
@@ -931,6 +969,14 @@ async function findActivePlatformTabId(platform) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true }).catch(() => [])
   if (tab?.id && tab.url && isAllowedPlatformUrl(platform, tab.url)) return tab.id
   return null
+}
+
+async function findPlatformTabId(platform) {
+  const activeTabId = await findActivePlatformTabId(platform)
+  if (activeTabId) return activeTabId
+  const tabs = await chrome.tabs.query({}).catch(() => [])
+  const existing = tabs.find((tab) => tab.id && tab.url && isAllowedPlatformUrl(platform, tab.url))
+  return existing?.id || null
 }
 
 function waitForTabComplete(tabId, timeoutMs) {
@@ -1047,8 +1093,8 @@ async function dispatchTrustedClick(tabId, click) {
     throw new Error('真实点击参数不完整')
   }
   const tab = await chrome.tabs.get(tabId).catch(() => null)
-  if (!tab?.url || (!isAllowedPlatformUrl('xiaohongshu', tab.url) && !isAllowedPlatformUrl('toutiao', tab.url))) {
-    throw new Error('真实点击仅允许用于小红书或头条页面')
+  if (!tab?.url || (!isAllowedPlatformUrl('xiaohongshu', tab.url) && !isAllowedPlatformUrl('toutiao', tab.url) && !isAllowedPlatformUrl('zhihu', tab.url))) {
+    throw new Error('真实点击仅允许用于小红书、头条或知乎页面')
   }
   const target = { tabId }
   await chrome.debugger.attach(target, '1.3')
@@ -1082,8 +1128,9 @@ async function dispatchTrustedClick(tabId, click) {
 async function setFileInputFromUrl(tabId, urlValue, options = {}) {
   if (!tabId || !urlValue) throw new Error('文件上传参数不完整')
   const tab = await chrome.tabs.get(tabId).catch(() => null)
-  if (!tab?.url || !isAllowedPlatformUrl('toutiao', tab.url)) {
-    throw new Error('本地文件上传仅允许用于头条页面')
+  const platform = normalizePlatform(options.platform || inferPlatformFromUrl(tab?.url || ''))
+  if (!tab?.url || !isAllowedPlatformUrl(platform, tab.url)) {
+    throw new Error(`本地文件上传仅允许用于${platformDisplayName(platform)}页面`)
   }
   const { config, session } = await getConfig()
   const uploaded = await helperRequest(config, '/v1/extension/files/upload-image-to-page', {
@@ -1093,10 +1140,10 @@ async function setFileInputFromUrl(tabId, urlValue, options = {}) {
       backendBase: config.apiBase,
       taskId: options.taskId || null,
       environmentKey: options.environmentKey || config.environmentKey,
-      platform: 'toutiao',
+      platform,
     }),
   }, session)
-  if (!uploaded?.ok) throw new Error('本地助手未完成头条文件上传')
+  if (!uploaded?.ok) throw new Error(`本地助手未完成${platformDisplayName(platform)}文件上传`)
   return {
     ok: true,
     fileName: uploaded?.image?.fileName || '',
@@ -1304,6 +1351,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     if (message?.type === 'GEO_ENV_SET_FILE_INPUT_FROM_URL') {
       return setFileInputFromUrl(sender.tab?.id || null, message.url, {
+        platform: message.platform || null,
         taskId: message.taskId || null,
         environmentKey: message.environmentKey || null,
       })

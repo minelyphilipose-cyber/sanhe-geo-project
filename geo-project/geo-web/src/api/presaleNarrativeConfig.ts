@@ -108,6 +108,15 @@ export type PresaleLexiconBucketPayload = Pick<
   'bucketName' | 'customerTerm' | 'conversionTerm' | 'defaultIndustryShort' | 'enabled' | 'remark'
 >
 
+export type PresaleLexiconBucketCreatePayload = PresaleLexiconBucketPayload & Pick<PresaleLexiconBucket, 'bucketCode'>
+
+export type PresaleIndustryBucketMappingPayload = Pick<
+  PresaleIndustryBucketMapping,
+  'bucketCode' | 'industryShort'
+> & {
+  remark?: string | null
+}
+
 export function getPresaleNarrativeConfig() {
   return request.get<R<PresaleNarrativeConfigAdminResponse>>('/presale/narrative-config')
 }
@@ -136,6 +145,14 @@ export function rejectPresaleIndustryBucketTask(id: number, data: PresaleIndustr
   return request.post<R<PresaleIndustryLexiconReviewTask>>(`/presale/narrative-config/lexicon-task/${id}/reject`, data)
 }
 
+export function createPresaleLexiconBucket(data: PresaleLexiconBucketCreatePayload) {
+  return request.post<R<PresaleLexiconBucket>>('/presale/narrative-config/lexicon-bucket', data)
+}
+
 export function updatePresaleLexiconBucket(id: number, data: PresaleLexiconBucketPayload) {
   return request.put<R<PresaleLexiconBucket>>(`/presale/narrative-config/lexicon-bucket/${id}`, data)
+}
+
+export function updatePresaleIndustryBucketMapping(id: number, data: PresaleIndustryBucketMappingPayload) {
+  return request.put<R<PresaleIndustryBucketMapping>>(`/presale/narrative-config/industry-bucket-mapping/${id}`, data)
 }

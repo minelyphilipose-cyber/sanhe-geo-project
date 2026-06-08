@@ -45,20 +45,38 @@
 ## 6. 发布结果确认
 
 - 计划发布时间到达后，发布结果检查队列应进入 `publish_due` 或 `checking_publish_result`。
-- 平台已发布时，可人工确认到 `published_confirmed`。
+- 平台已发布时，系统应能自动回查并确认到 `published_confirmed`；必要时仍可人工确认。
+- 确认发布后必须回写 `platformPublishedUrl`，诊断中应出现可访问的头条预览链接，例如 `https://mp.toutiao.com/profile_v4/graphic/preview?pgc_id=...`。
+- 回查诊断应至少包含 `found=true`、`hasTitle=true`、`hasPublishedSignal=true`，如有默认位置则 `hasLocation=true` 且 `locationName` 匹配品牌默认发布位置。
 - 平台未找到或状态不确定时，进入 `publish_unknown` 或 `publish_failed`，排期抽屉能显示异常原因。
 - 取消已提交平台定时的排期时，先进入 `cancel_pending_platform`，平台确认后再变为 `cancelled`。
+
+### 今日头条闭环样例
+
+- 排期：`#29`
+- 状态：`published_confirmed`
+- 计划发布时间 / 平台定时时间：`2026-06-05 13:15`
+- 队列：`publish_result_check`
+- 发布链接：`https://mp.toutiao.com/profile_v4/graphic/preview?pgc_id=7647742085897945663`
+- 诊断关键结果：`found=true`、`hasTitle=true`、`hasLocation=true`、`hasPublishedSignal=true`、`locationName=阜阳`
+- 验收口径：活动告警为空，建议为“无需处理”。
 
 ## 7. 排期健康可视化
 
 - `pending` 且未来执行的任务显示为“待执行”。
 - `filling`、`scheduling`、`checking_publish_result` 或锁定中的任务显示为“执行中”。
 - `nextAttemptAt` 已过且未锁定的活跃任务显示为“超时”。
+- `pending` 到达填充时间后仍未领取时，应出现 `SCHEDULE_FILL_OVERDUE` 告警。
+- 需要助手推进的到期排期，如近期没有本地助手心跳，应出现 `HELPER_OFFLINE` 告警。
 - `schedule_failed`、`publish_failed` 显示为“失败”。
 - `manual_required`、`routed_to_semi_auto` 显示为“人工处理”。
 - `scheduled` 显示为“已定时”。
+- `scheduled` 的平台定时时间已过但仍未确认发布时，应出现 `PLATFORM_SCHEDULE_MISSED` 告警。
 - `publish_due`、`publish_unknown`、`cancel_pending_platform` 显示为“发布待确认”。
+- `publish_unknown` 达到最大回查次数后，应出现严重级别 `PUBLISH_RESULT_UNKNOWN` 告警。
+- `published_confirmed` 但 `platformPublishedUrl` 为空时，应出现 `PUBLISH_LINK_MISSING` 告警。
 - 诊断弹窗应包含队列、请求、浏览器环境、平台排期 ID、失败码、失败消息和原始 diagnostics JSON。
+- 诊断弹窗应展示活动告警，排期列表行应展示告警数量标签。
 
 ## 8. 自动分发前置流程
 

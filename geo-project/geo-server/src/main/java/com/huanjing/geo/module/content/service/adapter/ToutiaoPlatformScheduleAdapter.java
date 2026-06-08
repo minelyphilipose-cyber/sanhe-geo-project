@@ -20,12 +20,35 @@ public class ToutiaoPlatformScheduleAdapter implements SelfMediaPlatformSchedule
     @Override
     public SelfMediaPlatformScheduleRules scheduleRules(String strategy) {
         if (SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE.equals(normalize(strategy))) {
-            return new SelfMediaPlatformScheduleRules(
-                    PLATFORM_SCHEDULE_FILL_LEAD_MINUTES,
-                    PLATFORM_SCHEDULE_MIN_REMAINING_MINUTES,
-                    PLATFORM_SCHEDULE_MAX_ATTEMPTS
-            );
+            return platformScheduleRules();
         }
+        return semiAutoRules();
+    }
+
+    @Override
+    public SelfMediaPlatformCapabilityContract capabilityContract() {
+        return new SelfMediaPlatformCapabilityContract(
+                platform(),
+                "今日头条",
+                SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION,
+                SelfMediaPlatformScheduleMode.PLATFORM_NATIVE,
+                platformScheduleRules(),
+                true,
+                true,
+                false,
+                true
+        );
+    }
+
+    private SelfMediaPlatformScheduleRules platformScheduleRules() {
+        return new SelfMediaPlatformScheduleRules(
+                PLATFORM_SCHEDULE_FILL_LEAD_MINUTES,
+                PLATFORM_SCHEDULE_MIN_REMAINING_MINUTES,
+                PLATFORM_SCHEDULE_MAX_ATTEMPTS
+        );
+    }
+
+    private SelfMediaPlatformScheduleRules semiAutoRules() {
         return new SelfMediaPlatformScheduleRules(DEFAULT_FILL_LEAD_MINUTES, 0, 1);
     }
 

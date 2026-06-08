@@ -28,7 +28,7 @@ import {
 import { getBrandImageFolders, getBrandMaterialPreviewUrl } from '@/api/customer'
 import {
   getBrowserEnvironmentAccountBySelfMedia,
-  updateBrowserEnvironmentAccount,
+  resetBrowserEnvironmentAccountLoginIdentity,
   type BrowserEnvironmentAccount,
 } from '@/api/browserEnvironment'
 import {
@@ -604,11 +604,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
 
     environmentAccountResettingId.value = account.id
     try {
-      const { data } = await updateBrowserEnvironmentAccount(binding.id, {
-        expectedPlatformAccountId: '',
-        expectedAccountName: '',
-        loginStatus: 'unknown',
-      })
+      const { data } = await resetBrowserEnvironmentAccountLoginIdentity(binding.id)
       browserEnvironmentAccounts.value = {
         ...browserEnvironmentAccounts.value,
         [account.id]: data.data,

@@ -415,7 +415,7 @@ function resolveHeatmapSummary(
  */
 function resolveRoiDisclaimer(l3: string | null): string {
   if (l3 != null) return l3;
-  return '区间为基于同行业历史优化案例的统计估算,具体效果以实际执行为准。';
+  return '以上为基于你当前得分与计划优化项设定的改进目标与情景测算,非保证结果;实际效果取决于执行、AI 平台变化与竞争情况。';
 }
 
 // ─────────────────────── findings 合并 ───────────────────────
@@ -655,20 +655,25 @@ function synthesizePlaceholderPhase(phaseNo: 1 | 2 | 3): RoiPhase {
 }
 
 function renderDefaultPhaseTitle(phase: RoiPhase): string {
+  const planned = phase.planned_optimization_count ?? phase.total_optimization_count ?? 0;
   switch (phase.phase_no) {
     case 1:
-      return '基础优化阶段';
+      return planned > 0 ? `基础优化阶段,聚焦${planned}项关键改动` : '基础优化阶段';
     case 2:
-      return '内容建设阶段';
+      return planned > 0 ? `内容深化阶段,推进${planned}项优化` : '内容深化阶段';
     case 3:
-      return '持续优化阶段';
+      return planned > 0 ? `持续优化阶段,跟进${planned}项优化` : '巩固·监测阶段';
     default:
       return `阶段 ${phase.phase_no}`;
   }
 }
 
 function renderDefaultPhaseDescription(phase: RoiPhase): string {
-  return `${phase.duration_label}:目标 ${toIntRounded(phase.target_score)} 分,完成 ${phase.completed_optimization_count}/${phase.total_optimization_count} 项优化`;
+  const planned = phase.planned_optimization_count ?? phase.total_optimization_count ?? 0;
+  const target = phase.target_score_low != null && phase.target_score_high != null
+    ? `${toIntRounded(phase.target_score_low)}-${toIntRounded(phase.target_score_high)} 分`
+    : `${toIntRounded(phase.target_score)} 分`;
+  return `${phase.duration_label}:目标 ${target},本阶段计划优化项 ${planned} 项`;
 }
 
 // ─────────────────────── competitors 合并 ───────────────────────

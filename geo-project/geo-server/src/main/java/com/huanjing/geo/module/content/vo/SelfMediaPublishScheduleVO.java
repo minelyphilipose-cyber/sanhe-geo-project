@@ -4,6 +4,8 @@ import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Data
 public class SelfMediaPublishScheduleVO {
@@ -12,7 +14,9 @@ public class SelfMediaPublishScheduleVO {
     private String requestIdempotencyKey;
     private Long articleId;
     private Long brandId;
+    private String brandName;
     private Long selfMediaAccountId;
+    private String selfMediaAccountName;
     private Long browserEnvironmentId;
     private Long browserEnvironmentAccountId;
     private String platform;
@@ -41,6 +45,7 @@ public class SelfMediaPublishScheduleVO {
     private String failureCode;
     private String failureMessage;
     private String diagnosticsJson;
+    private List<SelfMediaPublishScheduleAlertVO> activeAlerts = new ArrayList<>();
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
     private LocalDateTime scheduledAt;

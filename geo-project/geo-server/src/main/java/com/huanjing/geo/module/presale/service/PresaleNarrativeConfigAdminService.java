@@ -6,8 +6,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.llm.pool.LlmPermitUnavailableException;
 import com.huanjing.geo.module.presale.dto.request.PresaleIndustryBucketDraftUpdateRequest;
+import com.huanjing.geo.module.presale.dto.request.PresaleIndustryBucketMappingUpdateRequest;
 import com.huanjing.geo.module.presale.dto.request.PresaleIndustryBucketRejectRequest;
 import com.huanjing.geo.module.presale.dto.request.PresaleHeatmapSummaryUpdateRequest;
+import com.huanjing.geo.module.presale.dto.request.PresaleLexiconBucketCreateRequest;
 import com.huanjing.geo.module.presale.dto.request.PresaleLexiconBucketUpdateRequest;
 import com.huanjing.geo.module.presale.dto.request.PresaleNarrativeFindingCopyUpdateRequest;
 import com.huanjing.geo.module.presale.dto.response.PresaleNarrativeConfigAdminResponse;
@@ -52,7 +54,9 @@ public class PresaleNarrativeConfigAdminService {
     private static final Set<String> MANAGE_ROLES = Set.of("delivery_manager", "manager", "super_admin");
     private static final String DEFAULT_CONFIG_VERSION = "v1";
     private static final Pattern SLOT_PATTERN = Pattern.compile("\\{\\{\\s*([a-z_]+)\\s*}}");
-    private static final Pattern FORBIDDEN_CLAIM_PATTERN = Pattern.compile("保证|保底|必然|排名第?一|第一名|100%|百分百");
+    private static final Pattern FORBIDDEN_CLAIM_PATTERN = Pattern.compile(
+            "保证|保底|必然|排名第?一|第?一名|全市第?一|全城第?一|行业第?一|区域第?一|本地第?一|100%|百分百"
+    );
     private static final Pattern BAD_SHORT_TEXT_PATTERN = Pattern.compile("[0-9０-９%％]|[。！？!?；;]");
     private static final Set<String> ACTIVE_REVIEW_STATUSES = Set.of("PENDING", "DRAFTED");
     private static final Set<String> ALLOWED_FINDING_SLOTS = Set.of(
@@ -271,6 +275,38 @@ public class PresaleNarrativeConfigAdminService {
     }
 
     @Transactional
+    public PresaleLexiconBucket createLexiconBucket(PresaleLexiconBucketCreateRequest req) {
+        SysUser operator = ensureManagerRole();
+        String bucketCode = req.getBucketCode().trim();
+        if (selectBucket(bucketCode).isPresent()) {
+            throw new BizException(400, "Lexicon bucket code already exists");
+        }
+        validateBucketTerms(req.getCustomerTerm(), req.getConversionTerm(), req.getDefaultIndustryShort());
+
+        PresaleLexiconBucket row = new PresaleLexiconBucket();
+        row.setBucketCode(bucketCode);
+        row.setBucketName(req.getBucketName().trim());
+        row.setCustomerTerm(req.getCustomerTerm().trim());
+        row.setConversionTerm(req.getConversionTerm().trim());
+        row.setDefaultIndustryShort(trimToNull(req.getDefaultIndustryShort()));
+        row.setEnabled(req.getEnabled());
+        row.setSource("MANUAL");
+        row.setConfigVersion(DEFAULT_CONFIG_VERSION);
+        row.setRemark(trimToNull(req.getRemark()));
+        lexiconBucketMapper.insert(row);
+        activityLogService.logAction(
+                operator.getId(),
+                "presale.narrative_config.lexicon_bucket.create",
+                "presale_lexicon_bucket",
+                row.getId(),
+                Map.of(),
+                bucketSnapshot(row),
+                null
+        );
+        return row;
+    }
+
+    @Transactional
     public PresaleLexiconBucket updateLexiconBucket(Long id, PresaleLexiconBucketUpdateRequest req) {
         SysUser operator = ensureManagerRole();
         PresaleLexiconBucket row = lexiconBucketMapper.selectById(id);
@@ -297,6 +333,41 @@ public class PresaleNarrativeConfigAdminService {
                 row.getId(),
                 before,
                 bucketSnapshot(row),
+                null
+        );
+        return row;
+    }
+
+    @Transactional
+    public PresaleIndustryBucketMapping updateIndustryBucketMapping(Long id,
+                                                                    PresaleIndustryBucketMappingUpdateRequest req) {
+        SysUser operator = ensureManagerRole();
+        PresaleIndustryBucketMapping row = industryBucketMappingMapper.selectById(id);
+        if (row == null) {
+            throw new BizException(404, "Industry bucket mapping not found");
+        }
+        PresaleLexiconBucket bucket = selectEnabledBucket(req.getBucketCode())
+                .orElseThrow(() -> new BizException(400, "Bucket not found or disabled"));
+        validateShortText("industryShort", req.getIndustryShort(), 50, true);
+        validateNoForbiddenClaim(req.getRemark());
+
+        Map<String, Object> before = industryMappingSnapshot(row);
+        row.setBucketCode(bucket.getBucketCode());
+        row.setIndustryShort(trimToNull(req.getIndustryShort()));
+        row.setApproved(Boolean.TRUE);
+        row.setSource("MANUAL_MAPPING");
+        row.setOriginTaskId(null);
+        row.setApprovedBy(operator.getId());
+        row.setApprovedAt(java.time.LocalDateTime.now());
+        row.setRemark(trimToNull(req.getRemark()));
+        industryBucketMappingMapper.updateById(row);
+        activityLogService.logAction(
+                operator.getId(),
+                "presale.narrative_config.industry_bucket_mapping.update",
+                "presale_industry_bucket_mapping",
+                row.getId(),
+                before,
+                industryMappingSnapshot(row),
                 null
         );
         return row;
@@ -419,6 +490,17 @@ public class PresaleNarrativeConfigAdminService {
         q.eq(PresaleLexiconBucket::getConfigVersion, DEFAULT_CONFIG_VERSION);
         q.eq(PresaleLexiconBucket::getBucketCode, bucketCode.trim());
         q.eq(PresaleLexiconBucket::getEnabled, Boolean.TRUE);
+        q.last("LIMIT 1");
+        return Optional.ofNullable(lexiconBucketMapper.selectOne(q));
+    }
+
+    private Optional<PresaleLexiconBucket> selectBucket(String bucketCode) {
+        if (bucketCode == null || bucketCode.isBlank()) {
+            return Optional.empty();
+        }
+        LambdaQueryWrapper<PresaleLexiconBucket> q = new LambdaQueryWrapper<>();
+        q.eq(PresaleLexiconBucket::getConfigVersion, DEFAULT_CONFIG_VERSION);
+        q.eq(PresaleLexiconBucket::getBucketCode, bucketCode.trim());
         q.last("LIMIT 1");
         return Optional.ofNullable(lexiconBucketMapper.selectOne(q));
     }

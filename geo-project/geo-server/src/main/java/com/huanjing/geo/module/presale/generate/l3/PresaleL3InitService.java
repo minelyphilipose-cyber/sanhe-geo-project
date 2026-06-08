@@ -59,7 +59,7 @@ public class PresaleL3InitService {
      * 缺失占位符会被替换为 "—",并输出 WARN 日志(便于排查规则与文案不一致)。
      */
     static final Map<String, RuleFindingTemplate> RULE_FINDING_MAP = buildRuleFindingMap();
-    private static final String DEFAULT_ROI_DISCLAIMER = "区间为基于同行业历史优化案例的统计估算,具体效果以实际执行为准。";
+    private static final String DEFAULT_ROI_DISCLAIMER = "以上为基于你当前得分与计划优化项设定的改进目标与情景测算,非保证结果;实际效果取决于执行、AI 平台变化与竞争情况。";
 
     private final ObjectMapper objectMapper;
     private final PresaleTextFormatter textFormatter;
@@ -547,14 +547,24 @@ public class PresaleL3InitService {
         if (phase1Total == null) {
             return fallbackPhaseDescriptions();
         }
+        int phase2Total = extractPhaseTotalCount(computed, 2);
+        int phase3Total = extractPhaseTotalCount(computed, 3);
         List<PhaseDescription> out = new ArrayList<>();
         out.add(PhaseDescription.builder()
                 .phaseNo(1)
                 .title("基础优化阶段,聚焦" + phase1Total + "项关键改动")
                 .description(null)
                 .build());
-        out.add(PhaseDescription.builder().phaseNo(2).title("内容深化阶段").description(null).build());
-        out.add(PhaseDescription.builder().phaseNo(3).title("持续运营阶段").description(null).build());
+        out.add(PhaseDescription.builder()
+                .phaseNo(2)
+                .title(phase2Total > 0 ? "内容深化阶段,推进" + phase2Total + "项优化" : "内容深化阶段")
+                .description(null)
+                .build());
+        out.add(PhaseDescription.builder()
+                .phaseNo(3)
+                .title(phase3Total > 0 ? "持续优化阶段,跟进" + phase3Total + "项优化" : "巩固·监测阶段")
+                .description(null)
+                .build());
         return out;
     }
 
@@ -695,12 +705,19 @@ public class PresaleL3InitService {
         if (computed == null || computed.getRoiSimulation() == null || computed.getRoiSimulation().getPhases() == null) {
             return null;
         }
+        return extractPhaseTotalCount(computed, 1);
+    }
+
+    private int extractPhaseTotalCount(ComputedSnapshotDTO computed, int phaseNo) {
+        if (computed == null || computed.getRoiSimulation() == null || computed.getRoiSimulation().getPhases() == null) {
+            return 0;
+        }
         return computed.getRoiSimulation().getPhases().stream()
                 .filter(Objects::nonNull)
-                .filter(phase -> Integer.valueOf(1).equals(phase.getPhaseNo()))
+                .filter(phase -> Integer.valueOf(phaseNo).equals(phase.getPhaseNo()))
                 .map(phase -> phase.getTotalOptimizationCount() == null ? 0 : phase.getTotalOptimizationCount())
                 .findFirst()
-                .orElse(null);
+                .orElse(0);
     }
 
     private List<PhaseDescription> fallbackPhaseDescriptions() {

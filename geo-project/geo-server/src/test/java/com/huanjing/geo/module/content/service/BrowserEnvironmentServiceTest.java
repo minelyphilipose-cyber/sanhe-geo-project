@@ -22,9 +22,11 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -130,12 +132,69 @@ class BrowserEnvironmentServiceTest {
     }
 
     @Test
-    void validateForTaskCreation_rejectsMissingExpectedIdentity() {
+    void resetLoginIdentityClearsExpectedIdentityAndMismatchState() {
+        BrowserEnvironmentAccount row = binding("expected", "三合星链-小编", BrowserEnvironmentConstants.LOGIN_MISMATCH);
+        row.setLastVerifiedAt(LocalDateTime.now().minusHours(1));
+        row.setLastLoginSeenAt(LocalDateTime.now().minusHours(2));
+        row.setLastErrorCode("ENVIRONMENT_ACCOUNT_MISMATCH");
+        row.setLastErrorMessage("账号不一致");
+        when(environmentAccountMapper.selectById(30L)).thenReturn(row);
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+
+        var response = service.resetLoginIdentity(30L);
+
+        verify(environmentAccountMapper).update(any(), any());
+        assertNull(response.expectedPlatformAccountId());
+        assertNull(response.expectedAccountName());
+        assertNull(response.lastVerifiedAt());
+        assertNull(response.lastLoginSeenAt());
+        assertNull(response.lastErrorCode());
+        assertNull(response.lastErrorMessage());
+        assertEquals(BrowserEnvironmentConstants.LOGIN_UNKNOWN, response.loginStatus());
+    }
+
+    @Test
+    void validateForTaskCreation_backfillsMissingExpectedIdentityFromSelfMediaAccount() {
+        when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
+                .thenReturn(binding(null, null, BrowserEnvironmentConstants.LOGIN_LOGGED_IN));
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+        when(environmentAccountMapper.selectOne(any())).thenReturn(null);
+
+        BrowserEnvironmentAccount response = service.validateForTaskCreation(account("三合星链-小编"));
+
+        assertEquals("三合星链-小编", response.getExpectedAccountName());
+        ArgumentCaptor<BrowserEnvironmentAccount> captor = ArgumentCaptor.forClass(BrowserEnvironmentAccount.class);
+        verify(environmentAccountMapper).updateById(captor.capture());
+        assertEquals("三合星链-小编", captor.getValue().getExpectedAccountName());
+    }
+
+    @Test
+    void validateForTaskCreation_rejectsMissingExpectedIdentityWhenAccountHasNoIdentity() {
         when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
                 .thenReturn(binding(null, null, BrowserEnvironmentConstants.LOGIN_LOGGED_IN));
         when(environmentMapper.selectById(20L)).thenReturn(environment());
 
         assertThrows(BizException.class, () -> service.validateForTaskCreation(account()));
+    }
+
+    @Test
+    void validateForTaskCreation_strictModeRejectsUnknownLoginStatus() {
+        when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
+                .thenReturn(binding(null, "三合星链-小编", BrowserEnvironmentConstants.LOGIN_UNKNOWN));
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+
+        assertThrows(BizException.class, () -> service.validateForTaskCreation(account("三合星链-小编")));
+    }
+
+    @Test
+    void validateForTaskCreation_relaxedModeAllowsUnknownLoginStatus() {
+        when(environmentAccountMapper.selectActiveBySelfMediaAccountId(10L))
+                .thenReturn(binding(null, "三合星链-小编", BrowserEnvironmentConstants.LOGIN_UNKNOWN));
+        when(environmentMapper.selectById(20L)).thenReturn(environment());
+
+        BrowserEnvironmentAccount response = service.validateForTaskCreation(account("三合星链-小编"), false);
+
+        assertEquals(BrowserEnvironmentConstants.LOGIN_UNKNOWN, response.getLoginStatus());
     }
 
     @Test
@@ -293,10 +352,15 @@ class BrowserEnvironmentServiceTest {
     }
 
     private SelfMediaAccount account() {
+        return account(null);
+    }
+
+    private SelfMediaAccount account(String accountName) {
         SelfMediaAccount row = new SelfMediaAccount();
         row.setId(10L);
         row.setBrandId(1L);
         row.setPlatform("toutiao");
+        row.setAccountName(accountName);
         return row;
     }
 }

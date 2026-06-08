@@ -141,8 +141,13 @@ export type FindingPriority = 'HIGH' | 'MEDIUM' | 'LOW';
 export interface RoiSimulation {
   current_score: number;
   target_score: number;
+  target_score_low?: number | null;
+  target_score_high?: number | null;
   estimated_uplift_percent: number;
-  estimated_exposure_multiplier: number;
+  estimated_uplift_percent_low?: number | null;
+  estimated_uplift_percent_high?: number | null;
+  estimated_exposure_multiplier?: number | null;
+  case_study_range?: RoiCaseStudyRange | null;
   /** 严格 3 条,phase_no 为 1/2/3。 */
   phases: [RoiPhase, RoiPhase, RoiPhase];
 }
@@ -153,9 +158,24 @@ export interface RoiPhase {
   /** 时长标签,如 "M1" / "M2-3" / "M4-6"。 */
   duration_label: string;
   target_score: number;
+  target_score_low?: number | null;
+  target_score_high?: number | null;
   uplift_from_previous: number;
+  uplift_from_previous_low?: number | null;
+  uplift_from_previous_high?: number | null;
+  projection_enabled?: boolean | null;
   completed_optimization_count: number;
   total_optimization_count: number;
+  planned_optimization_count?: number | null;
+}
+
+export interface RoiCaseStudyRange {
+  label?: string | null;
+  before_score?: number | null;
+  after_score_low?: number | null;
+  after_score_high?: number | null;
+  source?: string | null;
+  sample_period?: string | null;
 }
 
 // ───────────────────────────────────────────────────────────

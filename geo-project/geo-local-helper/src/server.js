@@ -1,4 +1,5 @@
 import http from 'node:http'
+import { Worker } from 'node:worker_threads'
 import { existsSync } from 'node:fs'
 import fs from 'node:fs/promises'
 import path from 'node:path'
@@ -19,11 +20,20 @@ const CLAIM_TIMEOUT_MS = 30_000
 const CLAIMABLE_STATUSES = new Set(['pending', 'requeued'])
 const SIGNATURE_MAX_SKEW_SECONDS = 300
 const NONCE_FLUSH_DELAY_MS = 1_000
+const DEFAULT_FETCH_TIMEOUT_MS = 15_000
+const ADSPOWER_FETCH_TIMEOUT_MS = 20_000
+const BACKEND_FETCH_TIMEOUT_MS = 20_000
+const SCHEDULE_POLL_STEP_TIMEOUT_MS = 60_000
+const EVENT_LOOP_WATCHDOG_INTERVAL_MS = 5_000
+const EVENT_LOOP_WATCHDOG_THRESHOLD_MS = 90_000
+const FAILED_SCHEDULE_REPORT_MAX_ATTEMPTS = 3
 const nonceCache = new Map()
 let nonceFlushTimer = null
 let runtimeSession = null
 let runtimeSettings = { adspower: {} }
 let pendingPairing = null
+let schedulePollInFlight = false
+let lastSchedulePollStatus = null
 
 function nowIso() {
   return new Date().toISOString()
@@ -35,6 +45,19 @@ function sha256Hex(value) {
 
 function hmacSha256Base64Url(secret, value) {
   return crypto.createHmac('sha256', secret).update(value, 'utf8').digest('base64url')
+}
+
+function withTimeout(promise, timeoutMs, label) {
+  let timer = null
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} timeout after ${timeoutMs}ms`)), timeoutMs)
+      timer.unref?.()
+    }),
+  ]).finally(() => {
+    if (timer) clearTimeout(timer)
+  })
 }
 
 function randomPairingCode() {
@@ -540,7 +563,7 @@ async function adspowerGet(config, path) {
   const headers = {}
   if (adspower.apiKey) headers.Authorization = `Bearer ${adspower.apiKey}`
 
-  const response = await fetch(url, { headers })
+  const response = await fetchWithTimeout(url, { headers }, ADSPOWER_FETCH_TIMEOUT_MS)
   const body = await response.json().catch(() => ({}))
   if (!response.ok || body.code !== 0) {
     const message = body.msg || body.message || `AdsPower request failed: ${response.status}`
@@ -588,10 +611,10 @@ async function backendRequest(backendBase, accessToken, path, init = {}) {
   headers.set('Content-Type', 'application/json')
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`)
 
-  const response = await fetch(`${String(backendBase).replace(/\/+$/, '')}${path}`, {
+  const response = await fetchWithTimeout(`${String(backendBase).replace(/\/+$/, '')}${path}`, {
     ...init,
     headers,
-  })
+  }, BACKEND_FETCH_TIMEOUT_MS)
   const body = await response.json().catch(() => ({}))
   if (!response.ok || (body.code !== undefined && body.code !== 0)) {
     const error = new Error(body.message || `backend request failed: ${response.status}`)
@@ -603,13 +626,13 @@ async function backendRequest(backendBase, accessToken, path, init = {}) {
 }
 
 async function trustedBackendRequest(config, path, init = {}) {
-  const response = await fetch(`${String(config.trustedBackendBase).replace(/\/+$/, '')}${path}`, {
+  const response = await fetchWithTimeout(`${String(config.trustedBackendBase).replace(/\/+$/, '')}${path}`, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
       ...(init.headers || {}),
     },
-  })
+  }, BACKEND_FETCH_TIMEOUT_MS)
   const body = await response.json().catch(() => ({}))
   if (!response.ok || (body.code !== undefined && body.code !== 0)) {
     const error = new Error(body.message || `trusted backend request failed: ${response.status}`)
@@ -657,7 +680,7 @@ async function openUrlWithPuppeteer(wsEndpoint, targetUrl) {
   if (!wsEndpoint || !targetUrl) return { opened: false, reason: 'missing_ws_or_url' }
 
   const { default: puppeteer } = await import('puppeteer-core')
-  const browser = await puppeteer.connect({ browserWSEndpoint: wsEndpoint })
+  const browser = await puppeteer.connect({ browserWSEndpoint: wsEndpoint, protocolTimeout: 30_000 })
   try {
     const page = await browser.newPage()
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 })
@@ -732,6 +755,7 @@ async function handleLaunch(req, res, config) {
 }
 
 async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
+  await flushPendingScheduleFailureReports(config, platform)
   const path = `/api/v1/local-agent/self-media-schedules/claim-next?platform=${encodeURIComponent(platform)}`
   const claim = await signedTrustedBackendRequest(config, path, { method: 'GET' })
   if (!claim?.task || !claim?.launch) {
@@ -739,7 +763,7 @@ async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
   }
   const taskId = Number(claim.launch.taskId || claim.task.id)
   const existing = tasksById.get(taskId)
-  if (existing && !isTerminalStatus(existing.status) && existing.adspower?.puppeteerWs) {
+  if (isReusableActiveTask(existing)) {
     return { ok: true, claimed: true, reused: true, task: existing, schedule: claim.schedule }
   }
   const environment = normalizeProviderEnvironment(
@@ -821,7 +845,7 @@ async function checkPublishResultInAdspowerPage(wsEndpoint, targetUrl, schedule)
     throw new Error('publish result check requires active AdsPower browser and works list url')
   }
   const { default: puppeteer } = await import('puppeteer-core')
-  const browser = await puppeteer.connect({ browserWSEndpoint: wsEndpoint })
+  const browser = await puppeteer.connect({ browserWSEndpoint: wsEndpoint, protocolTimeout: 30_000 })
   try {
     const page = await browser.newPage()
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 })
@@ -829,7 +853,7 @@ async function checkPublishResultInAdspowerPage(wsEndpoint, targetUrl, schedule)
     const deadline = Date.now() + 20_000
     let latest = null
     while (Date.now() < deadline) {
-      latest = await evaluateToutiaoPublishResult(page, schedule)
+      latest = await evaluatePublishResult(page, schedule)
       if (latest.found) return latest
       await delay(2_000)
     }
@@ -842,6 +866,14 @@ async function checkPublishResultInAdspowerPage(wsEndpoint, targetUrl, schedule)
   } finally {
     await browser.disconnect()
   }
+}
+
+async function evaluatePublishResult(page, schedule) {
+  const platform = String(schedule?.platform || '').trim().toLowerCase()
+  if (platform === 'zhihu') {
+    return evaluateZhihuPublishResult(page, schedule)
+  }
+  return evaluateToutiaoPublishResult(page, schedule)
 }
 
 async function evaluateToutiaoPublishResult(page, schedule) {
@@ -881,6 +913,54 @@ async function evaluateToutiaoPublishResult(page, schedule) {
   }, target)
 }
 
+async function evaluateZhihuPublishResult(page, schedule) {
+  const target = {
+    title: schedule?.publishCheckTitle || '',
+    platformScheduledAt: schedule?.platformScheduledAt || schedule?.plannedPublishAt || '',
+  }
+  return page.evaluate((input) => {
+    const normalize = (value) => String(value || '').replace(/\s+/g, '').trim()
+    const text = document.body?.innerText || ''
+    const normalizedText = normalize(text)
+    const normalizedTitle = normalize(input.title)
+    const titleProbe = normalizedTitle.length > 24 ? normalizedTitle.slice(0, 24) : normalizedTitle
+    const hasTitle = Boolean(titleProbe && normalizedText.includes(titleProbe))
+    const hasPublishedSignal = /发布成功|已发布|审核中|发布于\d{4}[-年]\d{1,2}[-月]\d{1,2}/.test(text)
+      || /\/p\/|\/article\//.test(location.href)
+    const normalizeZhihuUrl = (value) => {
+      try {
+        const url = new URL(value || location.href, location.href)
+        const match = url.pathname.match(/^\/p\/([^/]+)/)
+        if (match) {
+          url.pathname = `/p/${match[1]}`
+          url.search = ''
+          url.hash = ''
+          return url.toString()
+        }
+        return url.toString()
+      } catch (_) {
+        return String(value || '')
+      }
+    }
+    let matchedUrl = ''
+    if (hasTitle) {
+      const anchors = Array.from(document.querySelectorAll('a[href]'))
+      const anchor = anchors.find((item) => normalize(item.textContent).includes(titleProbe))
+      matchedUrl = anchor?.href || ''
+    }
+    return {
+      found: hasTitle && hasPublishedSignal,
+      hasTitle,
+      hasPublishedSignal,
+      targetTitle: input.title,
+      platformScheduledAt: input.platformScheduledAt,
+      url: normalizeZhihuUrl(matchedUrl || location.href),
+      pageTitle: document.title,
+      textSample: text.slice(0, 1200),
+    }
+  }, target)
+}
+
 async function reportPublishCheckPublished(config, scheduleId, result) {
   const query = new URLSearchParams()
   if (result?.url) query.set('platformPublishedUrl', result.url)
@@ -903,6 +983,61 @@ async function reportPublishCheckFailed(config, scheduleId, result) {
   query.set('diagnosticsJson', shortDiagnosticsJson(result))
   const path = `/api/v1/local-agent/self-media-schedules/${encodeURIComponent(scheduleId)}/publish-checks/failed?${query}`
   return signedTrustedBackendRequest(config, path, { method: 'POST' })
+}
+
+async function reportScheduleExecutionFailed(config, task, result) {
+  const scheduleId = task?.schedule?.id || task?.backendTask?.platformOptions?.scheduleId
+  if (!scheduleId) return null
+  const query = new URLSearchParams()
+  query.set('failureCode', result?.failureCode || task?.lastError?.code || task?.failureCode || 'FILL_FAILED')
+  query.set('failureMessage', String(result?.failureMessage || task?.lastError?.message || 'schedule execution failed').slice(0, 480))
+  query.set('diagnosticsJson', shortDiagnosticsJson({
+    ...result,
+    taskId: task?.taskId,
+    platform: task?.platform,
+    error: task?.lastError || null,
+  }))
+  const path = `/api/v1/local-agent/self-media-schedules/${encodeURIComponent(scheduleId)}/executions/failed?${query}`
+  return signedTrustedBackendRequest(config, path, { method: 'POST' })
+}
+
+function scheduleIdOfTask(task) {
+  return task?.schedule?.id || task?.backendTask?.platformOptions?.scheduleId || task?.backendTask?.scheduleId
+}
+
+function shouldFlushScheduleFailure(task, platform) {
+  if (!task || task.status !== 'failed') return false
+  if (platform && task.platform !== platform) return false
+  if (!scheduleIdOfTask(task)) return false
+  if (task.backendFailureReportedAt) return false
+  return Number(task.backendFailureReportAttempts || 0) < FAILED_SCHEDULE_REPORT_MAX_ATTEMPTS
+}
+
+async function flushPendingScheduleFailureReports(config, platform = '') {
+  let changed = false
+  for (const task of tasksById.values()) {
+    if (!shouldFlushScheduleFailure(task, platform)) continue
+    task.backendFailureReportAttempts = Number(task.backendFailureReportAttempts || 0) + 1
+    try {
+      await reportScheduleExecutionFailed(config, task, {
+        failureCode: task.lastError?.code || task.failureCode || 'FILL_FAILED',
+        failureMessage: task.lastError?.message || String(task.lastError || '任务填充失败'),
+      })
+      task.backendFailureReportedAt = nowIso()
+      task.backendFailureReportLastError = null
+    } catch (error) {
+      task.backendFailureReportLastError = formatBackendError(error)
+      console.error('Failed to report pending schedule execution failure:', task.backendFailureReportLastError)
+    }
+    changed = true
+  }
+  if (changed) await saveRuntimeTasks()
+}
+
+function formatBackendError(error) {
+  const details = error?.details ? `; details=${JSON.stringify(error.details).slice(0, 600)}` : ''
+  const status = error?.statusCode ? `; status=${error.statusCode}` : ''
+  return `${error?.message || error}${status}${details}`
 }
 
 function shortDiagnosticsJson(value) {
@@ -930,7 +1065,7 @@ async function handleSchedulePollOnce(req, res, config) {
 function defaultPublishUrlForPlatform(platform) {
   const normalized = String(platform || '').trim().toLowerCase()
   if (normalized === 'toutiao') return 'https://mp.toutiao.com/profile_v4/graphic/publish'
-  if (normalized === 'zhihu') return 'https://www.zhihu.com/'
+  if (normalized === 'zhihu') return 'https://zhuanlan.zhihu.com/write'
   if (normalized === 'xiaohongshu') return 'https://www.xiaohongshu.com/'
   return null
 }
@@ -1193,7 +1328,15 @@ function findNextClaimableTask(environmentKey, platform = '') {
 }
 
 function isTerminalStatus(status) {
-  return status === 'completed' || status === 'cancelled'
+  return status === 'completed' || status === 'cancelled' || status === 'failed'
+}
+
+function isReusableActiveTask(task) {
+  return Boolean(
+    task
+    && task.adspower?.puppeteerWs
+    && (CLAIMABLE_STATUSES.has(task.status) || task.status === 'claimed')
+  )
 }
 
 async function handleTaskComplete(req, res, config, taskId, status) {
@@ -1227,8 +1370,22 @@ async function handleTaskComplete(req, res, config, taskId, status) {
     task.failedAt = nowIso()
     task.failureCode = classifyFailureStatus(body.error)
     task.lastError = body.error || null
+    task.backendFailureReportedAt = null
+    task.backendFailureReportLastError = null
+    task.backendFailureReportAttempts = Number(task.backendFailureReportAttempts || 0)
     task.claimedAt = null
     task.claimOwner = null
+    await reportScheduleExecutionFailed(config, task, {
+      failureCode: task.lastError?.code || task.failureCode || 'FILL_FAILED',
+      failureMessage: task.lastError?.message || String(task.lastError || '任务填充失败'),
+    }).then(() => {
+      task.backendFailureReportedAt = nowIso()
+      task.backendFailureReportLastError = null
+    }).catch((error) => {
+      task.backendFailureReportAttempts += 1
+      task.backendFailureReportLastError = formatBackendError(error)
+      console.error('Failed to report schedule execution failure:', task.backendFailureReportLastError)
+    })
   }
   await saveRuntimeTasks()
   sendJson(req, res, config, 200, { ok: true, task })
@@ -1236,6 +1393,7 @@ async function handleTaskComplete(req, res, config, taskId, status) {
 
 function classifyFailureStatus(error) {
   const message = String(error?.message || error || '')
+  if (message.includes('fill token used or expired')) return 'token_expired'
   if (message.includes('平台账号未登录') || message.includes('需登录')) return 'login_required'
   if (message.includes('账号一致性校验失败') || message.includes('账号不一致')) return 'account_mismatch'
   if (message.includes('等待编辑器超时') || message.includes('未找到')) return 'editor_not_found'
@@ -1323,27 +1481,27 @@ async function uploadImageFileToAdsPowerPage(body, filePath) {
   if (!task?.adspower?.puppeteerWs) {
     throw new Error(`no active AdsPower puppeteer session for environmentKey=${body.environmentKey || '-'}`)
   }
+  const platform = String(body.platform || task.platform || 'toutiao').trim().toLowerCase()
   const { default: puppeteer } = await import('puppeteer-core')
-  const browser = await puppeteer.connect({ browserWSEndpoint: task.adspower.puppeteerWs })
+  const browser = await puppeteer.connect({ browserWSEndpoint: task.adspower.puppeteerWs, protocolTimeout: 30_000 })
   try {
     const pages = await browser.pages()
-    const page = pages.find((item) => {
-      const pageUrl = item.url()
-      return pageUrl.includes('mp.toutiao.com') && pageUrl.includes('/graphic/publish')
-    }) || pages.find((item) => item.url().includes('mp.toutiao.com'))
+    const page = findUploadTargetPage(pages, platform)
     if (!page) {
-      throw new Error('AdsPower browser has no active Toutiao page')
+      throw new Error(`AdsPower browser has no active ${platform || 'target'} page`)
     }
     await page.bringToFront().catch(() => {})
-    await page.waitForSelector('input[type="file"]', { timeout: 8_000 })
-    const chooserState = await acceptToutiaoFileChooser(page, filePath)
+    await page.waitForSelector('input[type="file"]', { timeout: 3_000 }).catch(() => null)
+    const chooserState = await acceptPlatformFileChooser(page, filePath, platform)
     if (chooserState?.accepted) {
       return chooserState
     }
     const inputs = await page.$$('input[type="file"]')
-    const targets = await choosePuppeteerImageInputs(inputs)
+    const targets = platform === 'zhihu'
+      ? await chooseZhihuCoverImageInputs(inputs)
+      : await choosePuppeteerImageInputs(inputs)
     if (!targets.length) {
-      throw new Error('Toutiao file input not found')
+      throw new Error(`${platform || 'platform'} image file input not found`)
     }
     const states = []
     for (const target of targets) {
@@ -1361,26 +1519,45 @@ async function uploadImageFileToAdsPowerPage(body, filePath) {
   }
 }
 
-async function acceptToutiaoFileChooser(page, filePath) {
+function findUploadTargetPage(pages, platform) {
+  const normalized = String(platform || '').trim().toLowerCase()
+  if (normalized === 'zhihu') {
+    return pages.find((item) => {
+      const pageUrl = item.url()
+      return pageUrl.includes('zhihu.com') && pageUrl.includes('/write')
+    }) || pages.find((item) => item.url().includes('zhihu.com'))
+  }
+  if (normalized === 'toutiao') {
+    return pages.find((item) => {
+      const pageUrl = item.url()
+      return pageUrl.includes('mp.toutiao.com') && pageUrl.includes('/graphic/publish')
+    }) || pages.find((item) => item.url().includes('mp.toutiao.com'))
+  }
+  return pages.find((item) => item.url().includes(normalized))
+}
+
+async function acceptPlatformFileChooser(page, filePath, platform) {
+  const labels = uploadChooserLabels(platform)
   const chooserPromise = page.waitForFileChooser({ timeout: 3_000 }).catch(() => null)
-  const clicked = await page.evaluate(() => {
+  const clicked = await page.evaluate((inputLabels) => {
     function visible(el) {
       const style = window.getComputedStyle(el)
       const rect = el.getBoundingClientRect()
       return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 0 && rect.height > 0
     }
+    const labels = Array.isArray(inputLabels) ? inputLabels : []
     const candidates = Array.from(document.querySelectorAll('button, [role="button"], div, span, label'))
       .filter(visible)
       .filter((el) => {
         const text = String(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '').replace(/\s+/g, '')
-        return text === '本地上传' || text === '上传图片' || text === '选择图片'
+        return labels.some((label) => text === label || text.includes(label))
       })
-    const target = candidates.find((el) => String(el.textContent || '').replace(/\s+/g, '') === '本地上传') || candidates[0]
+    const target = candidates[0]
     if (!target) return false
     const clickable = target.closest('button, label, [role="button"]') || target
     clickable.click()
     return true
-  }).catch(() => false)
+  }, labels).catch(() => false)
   if (!clicked) return null
 
   const chooser = await chooserPromise
@@ -1401,6 +1578,14 @@ async function acceptToutiaoFileChooser(page, filePath) {
   }
 }
 
+function uploadChooserLabels(platform) {
+  const normalized = String(platform || '').trim().toLowerCase()
+  if (normalized === 'zhihu') {
+    return ['添加文章封面', '添加封面', '上传封面', '上传图片', '选择图片']
+  }
+  return ['本地上传', '上传图片', '选择图片']
+}
+
 async function choosePuppeteerImageInputs(inputs) {
   const preferred = []
   const fallback = []
@@ -1418,6 +1603,45 @@ async function choosePuppeteerImageInputs(inputs) {
     }
   }
   return preferred.concat(fallback).length ? preferred.concat(fallback) : inputs.slice().reverse()
+}
+
+async function chooseZhihuCoverImageInputs(inputs) {
+  const candidates = []
+  for (const input of inputs) {
+    const meta = await input.evaluate((el) => {
+      const rect = el.getBoundingClientRect()
+      const accept = el.getAttribute('accept') || ''
+      const id = el.id || ''
+      const name = el.name || ''
+      const className = String(el.className || '')
+      const nearbyText = (() => {
+        let current = el.parentElement
+        for (let depth = 0; current && depth < 5; depth += 1) {
+          const text = String(current.textContent || '').replace(/\s+/g, '')
+          if (/添加封面|添加文章封面|发布设置/.test(text)) return text.slice(0, 120)
+          current = current.parentElement
+        }
+        return ''
+      })()
+      return { accept, id, name, className, visible: rect.width > 0 && rect.height > 0, nearbyText }
+    }).catch(() => ({}))
+    const accept = String(meta.accept || '').toLowerCase()
+    const descriptor = `${meta.accept || ''} ${meta.id || ''} ${meta.name || ''} ${meta.className || ''} ${meta.nearbyText || ''}`.toLowerCase()
+    if (!/(image|jpg|jpeg|png|webp|avif|heic)/.test(accept + descriptor)) continue
+    candidates.push({ input, score: scoreZhihuCoverInput(descriptor, meta) })
+  }
+  candidates.sort((left, right) => right.score - left.score)
+  return candidates.length ? [candidates[0].input] : []
+}
+
+function scoreZhihuCoverInput(descriptor, meta) {
+  let score = 0
+  if (/添加封面|添加文章封面|发布设置/.test(descriptor)) score += 100
+  if (/cover|avatar|image/.test(descriptor)) score += 20
+  if (meta?.visible) score += 5
+  if (/\.pdf|\.doc|\.ppt|\.xls|mobi|epub|csv|azw3/.test(descriptor)) score -= 80
+  if (/toolbar|editor|content|article|正文/.test(descriptor)) score -= 30
+  return score
 }
 
 async function readAndDispatchFileInputState(input) {
@@ -1462,7 +1686,7 @@ async function downloadImageToTempFile(config, urlValue, depth = 0, backendBase 
     error.statusCode = 400
     throw error
   }
-  const response = await fetch(url.href)
+  const response = await fetchWithTimeout(url.href, {}, DEFAULT_FETCH_TIMEOUT_MS)
   if (!response.ok) {
     throw new Error(`image download failed: HTTP ${response.status}`)
   }
@@ -1537,6 +1761,25 @@ function firstText(...values) {
   return ''
 }
 
+async function fetchWithTimeout(url, init = {}, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), Math.max(Number(timeoutMs) || DEFAULT_FETCH_TIMEOUT_MS, 1_000))
+  timer.unref?.()
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: init.signal || controller.signal,
+    })
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error(`request timeout after ${timeoutMs}ms: ${url}`)
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function route(req, res, config) {
   if (req.method === 'OPTIONS') {
     sendJson(req, res, config, 204, {})
@@ -1556,6 +1799,12 @@ async function route(req, res, config) {
       paired: Boolean(runtimeSession?.sessionId && runtimeSession?.hmacSecret),
       session: publicSession(),
       adspower: publicAdspowerSettings(config),
+      schedulePoll: {
+        inFlight: schedulePollInFlight,
+        last: lastSchedulePollStatus,
+        platforms: selfMediaSchedulePlatforms(config),
+        intervalMs: Number(config.selfMediaSchedulePollIntervalMs || 30_000),
+      },
     })
     return
   }
@@ -1610,20 +1859,104 @@ server.listen(config.port, config.host, () => {
 function startSchedulePoller(config) {
   const intervalMs = Number(config.selfMediaSchedulePollIntervalMs || 30_000)
   if (!Number.isFinite(intervalMs) || intervalMs <= 0) return
-  setInterval(() => {
+  const tick = () => {
     if (!runtimeSession?.sessionId || !runtimeSession?.hmacSecret) return
-    claimAndCheckPublishResult(config, 'toutiao')
+    if (schedulePollInFlight) {
+      lastSchedulePollStatus = {
+        at: nowIso(),
+        ok: false,
+        skipped: true,
+        reason: 'previous poll still running',
+      }
+      return
+    }
+    schedulePollInFlight = true
+    pollSelfMediaSchedules(config)
       .then((result) => {
-        if (result.claimed) return result
-        return claimAndLaunchScheduledTask(config, 'toutiao')
+        lastSchedulePollStatus = {
+          at: nowIso(),
+          ok: true,
+          claimed: Boolean(result?.claimed),
+          platform: result?.platform || null,
+          kind: result?.kind || null,
+          outcome: result?.outcome || null,
+        }
       })
       .catch((error) => {
+        lastSchedulePollStatus = {
+          at: nowIso(),
+          ok: false,
+          error: error.message,
+        }
         console.error('GEO self-media schedule poll failed:', error.message)
       })
-  }, Math.max(intervalMs, 10_000)).unref?.()
+      .finally(() => {
+        schedulePollInFlight = false
+      })
+  }
+  setTimeout(tick, 1_000).unref?.()
+  setInterval(tick, Math.max(intervalMs, 10_000)).unref?.()
+}
+
+async function pollSelfMediaSchedules(config) {
+  const timeoutMs = Number(config.selfMediaSchedulePollStepTimeoutMs || SCHEDULE_POLL_STEP_TIMEOUT_MS)
+  for (const platform of selfMediaSchedulePlatforms(config)) {
+    const publishCheck = await withTimeout(
+      claimAndCheckPublishResult(config, platform),
+      timeoutMs,
+      `self-media publish check poll ${platform}`,
+    )
+    if (publishCheck.claimed) return { ...publishCheck, platform, kind: 'publish_result_check' }
+    const launch = await withTimeout(
+      claimAndLaunchScheduledTask(config, platform),
+      timeoutMs,
+      `self-media schedule execution poll ${platform}`,
+    )
+    if (launch.claimed) return { ...launch, platform, kind: 'schedule_execution' }
+  }
+  return { ok: true, claimed: false }
+}
+
+function selfMediaSchedulePlatforms(config) {
+  const value = config.selfMediaSchedulePlatforms
+  const raw = Array.isArray(value)
+    ? value
+    : String(value || 'toutiao,zhihu').split(',')
+  const platforms = raw
+    .map((item) => String(item || '').trim().toLowerCase())
+    .filter(Boolean)
+  return Array.from(new Set(platforms.length ? platforms : ['toutiao', 'zhihu']))
 }
 
 startSchedulePoller(config)
+startEventLoopWatchdog(config)
+
+function startEventLoopWatchdog(config) {
+  if (config.enableEventLoopWatchdog === false) return
+  const thresholdMs = Number(config.eventLoopWatchdogThresholdMs || EVENT_LOOP_WATCHDOG_THRESHOLD_MS)
+  if (!Number.isFinite(thresholdMs) || thresholdMs <= 0) return
+
+  const worker = new Worker(`
+    const { parentPort } = require('node:worker_threads')
+    let lastBeat = Date.now()
+    parentPort.on('message', (message) => {
+      if (message && message.type === 'beat') lastBeat = Date.now()
+    })
+    setInterval(() => {
+      const thresholdMs = ${JSON.stringify(thresholdMs)}
+      if (Date.now() - lastBeat > thresholdMs) {
+        console.error('GEO local helper event loop watchdog terminating stalled process')
+        process.kill(process.pid, 'SIGKILL')
+      }
+    }, ${JSON.stringify(EVENT_LOOP_WATCHDOG_INTERVAL_MS)}).unref()
+  `, { eval: true })
+
+  const beat = () => {
+    worker.postMessage({ type: 'beat' })
+  }
+  beat()
+  setInterval(beat, EVENT_LOOP_WATCHDOG_INTERVAL_MS).unref?.()
+}
 
 async function shutdown() {
   try {

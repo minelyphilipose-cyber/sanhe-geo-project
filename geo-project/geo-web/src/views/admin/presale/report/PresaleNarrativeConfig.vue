@@ -104,8 +104,11 @@
       </el-tab-pane>
 
       <el-tab-pane label="词汇 Bucket" name="bucket">
-        <div class="section-note">
-          customer/conversion 只来自这里。编辑 bucket 会影响所有映射到它的行业的后续报告。
+        <div class="section-toolbar">
+          <div class="section-note inline-note">
+            customer/conversion 只来自这里。新增或编辑 bucket 会影响后续映射到它的行业报告。
+          </div>
+          <el-button type="primary" @click="createBucket">新增 Bucket</el-button>
         </div>
         <el-table :data="lexiconBuckets" border class="config-table">
           <el-table-column prop="bucketCode" label="Bucket" min-width="150" fixed />
@@ -136,6 +139,11 @@
           <el-table-column prop="source" label="来源" width="140" />
           <el-table-column prop="approvedAt" label="审批时间" min-width="180">
             <template #default="{ row }">{{ row.approvedAt || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="110" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="editMapping(row)">编辑</el-button>
+            </template>
           </el-table-column>
         </el-table>
       </el-tab-pane>
@@ -237,12 +245,16 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="bucketDialogVisible" title="编辑词汇 Bucket" width="620px">
+    <el-dialog v-model="bucketDialogVisible" :title="editingBucket ? '编辑词汇 Bucket' : '新增词汇 Bucket'" width="620px">
       <el-form ref="bucketFormRef" :model="bucketForm" :rules="bucketRules" label-position="top">
         <div class="readonly-row">
-          <span>{{ editingBucket?.bucketCode }}</span>
+          <span>{{ editingBucket?.bucketCode || '新 Bucket' }}</span>
           <span>bucket 改动会影响后续所有映射行业</span>
         </div>
+        <el-form-item v-if="!editingBucket" label="Bucket Code" prop="bucketCode">
+          <el-input v-model="bucketForm.bucketCode" maxlength="50" show-word-limit placeholder="如 LEGAL_SERVICE" />
+          <div class="muted">仅支持大写字母、数字和下划线；保存后不可修改。</div>
+        </el-form-item>
         <el-form-item label="名称" prop="bucketName">
           <el-input v-model="bucketForm.bucketName" maxlength="100" show-word-limit />
         </el-form-item>
@@ -271,6 +283,35 @@
         <el-button type="primary" :loading="saving" @click="saveBucket">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="mappingDialogVisible" title="编辑行业映射" width="560px">
+      <el-form ref="mappingFormRef" :model="mappingForm" :rules="mappingRules" label-position="top">
+        <div class="readonly-row">
+          <span>{{ editingMapping?.industry }}</span>
+          <span>{{ editingMapping?.industryKey }}</span>
+        </div>
+        <el-form-item label="Bucket" prop="bucketCode">
+          <el-select v-model="mappingForm.bucketCode" filterable class="full-width">
+            <el-option
+              v-for="bucket in enabledBuckets"
+              :key="bucket.bucketCode"
+              :label="`${bucket.bucketCode} · ${bucket.bucketName} (${bucket.customerTerm}/${bucket.conversionTerm})`"
+              :value="bucket.bucketCode"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="短行业名">
+          <el-input v-model="mappingForm.industryShort" maxlength="50" show-word-limit />
+        </el-form-item>
+        <el-form-item label="调整原因">
+          <el-input v-model="mappingForm.remark" type="textarea" :rows="3" maxlength="500" show-word-limit />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="mappingDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveMapping">保存映射</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -280,23 +321,30 @@ import { useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import {
   approvePresaleIndustryBucketTask,
+  createPresaleLexiconBucket,
   draftPresaleIndustryBucket,
   getPresaleNarrativeConfig,
   rejectPresaleIndustryBucketTask,
   updatePresaleIndustryBucketDraft,
+  updatePresaleIndustryBucketMapping,
   updatePresaleHeatmapSummary,
   updatePresaleLexiconBucket,
   updatePresaleNarrativeFindingCopy,
   type PresaleIndustryBucketDraftPayload,
+  type PresaleIndustryBucketMappingPayload,
   type PresaleIndustryBucketMapping,
   type PresaleHeatmapSummaryConfig,
   type PresaleHeatmapSummaryPayload,
   type PresaleIndustryLexiconReviewTask,
   type PresaleLexiconBucket,
+  type PresaleLexiconBucketCreatePayload,
   type PresaleLexiconBucketPayload,
   type PresaleNarrativeFindingCopy,
   type PresaleNarrativeFindingCopyPayload,
 } from '@/api/presaleNarrativeConfig'
+
+type BucketForm = PresaleLexiconBucketPayload & { bucketCode: string }
+type MappingForm = PresaleIndustryBucketMappingPayload
 
 const router = useRouter()
 const loading = ref(false)
@@ -314,14 +362,17 @@ const findingDialogVisible = ref(false)
 const heatmapDialogVisible = ref(false)
 const lexiconDialogVisible = ref(false)
 const bucketDialogVisible = ref(false)
+const mappingDialogVisible = ref(false)
 const editingFinding = ref<PresaleNarrativeFindingCopy | null>(null)
 const editingHeatmap = ref<PresaleHeatmapSummaryConfig | null>(null)
 const editingLexiconTask = ref<PresaleIndustryLexiconReviewTask | null>(null)
 const editingBucket = ref<PresaleLexiconBucket | null>(null)
+const editingMapping = ref<PresaleIndustryBucketMapping | null>(null)
 const findingFormRef = ref<FormInstance>()
 const heatmapFormRef = ref<FormInstance>()
 const lexiconFormRef = ref<FormInstance>()
 const bucketFormRef = ref<FormInstance>()
+const mappingFormRef = ref<FormInstance>()
 
 const findingForm = reactive<PresaleNarrativeFindingCopyPayload>({
   titleTemplate: '',
@@ -347,12 +398,19 @@ const lexiconForm = reactive<PresaleIndustryBucketDraftPayload>({
   reason: '',
 })
 
-const bucketForm = reactive<PresaleLexiconBucketPayload>({
+const bucketForm = reactive<BucketForm>({
+  bucketCode: '',
   bucketName: '',
   customerTerm: '',
   conversionTerm: '',
   defaultIndustryShort: '',
   enabled: true,
+  remark: '',
+})
+
+const mappingForm = reactive<MappingForm>({
+  bucketCode: '',
+  industryShort: '',
   remark: '',
 })
 
@@ -374,10 +432,17 @@ const lexiconRules: FormRules = {
   bucketCode: required,
 }
 const bucketRules: FormRules = {
+  bucketCode: [
+    { required: true, message: '必填', trigger: 'blur' },
+    { pattern: /^[A-Z0-9_]+$/, message: '仅支持大写字母、数字和下划线', trigger: 'blur' },
+  ],
   bucketName: required,
   customerTerm: required,
   conversionTerm: required,
   enabled: [{ required: true, type: 'boolean', message: '必填', trigger: 'change' }],
+}
+const mappingRules: FormRules = {
+  bucketCode: required,
 }
 
 const enabledBuckets = computed(() => lexiconBuckets.value.filter(item => item.enabled))
@@ -512,9 +577,24 @@ async function rejectTask(row: PresaleIndustryLexiconReviewTask) {
   ElMessage.success('已驳回')
 }
 
+function createBucket() {
+  editingBucket.value = null
+  Object.assign(bucketForm, {
+    bucketCode: '',
+    bucketName: '',
+    customerTerm: '',
+    conversionTerm: '',
+    defaultIndustryShort: '',
+    enabled: true,
+    remark: '',
+  })
+  bucketDialogVisible.value = true
+}
+
 function editBucket(row: PresaleLexiconBucket) {
   editingBucket.value = row
   Object.assign(bucketForm, {
+    bucketCode: row.bucketCode,
     bucketName: row.bucketName,
     customerTerm: row.customerTerm,
     conversionTerm: row.conversionTerm,
@@ -527,16 +607,56 @@ function editBucket(row: PresaleLexiconBucket) {
 
 async function saveBucket() {
   const row = editingBucket.value
-  if (!row) return
   const valid = await bucketFormRef.value?.validate().catch(() => false)
   if (!valid) return
   saving.value = true
   try {
-    const payload = trimPayload(bucketForm) as PresaleLexiconBucketPayload
-    const { data } = await updatePresaleLexiconBucket(row.id, payload)
-    replaceRow(lexiconBuckets.value, data.data)
+    const payload = trimPayload(bucketForm) as BucketForm
+    if (row) {
+      const updatePayload: PresaleLexiconBucketPayload = {
+        bucketName: payload.bucketName,
+        customerTerm: payload.customerTerm,
+        conversionTerm: payload.conversionTerm,
+        defaultIndustryShort: payload.defaultIndustryShort,
+        enabled: payload.enabled,
+        remark: payload.remark,
+      }
+      const { data } = await updatePresaleLexiconBucket(row.id, updatePayload)
+      replaceRow(lexiconBuckets.value, data.data)
+    } else {
+      const { data } = await createPresaleLexiconBucket(payload as PresaleLexiconBucketCreatePayload)
+      lexiconBuckets.value.push(data.data)
+      sortBuckets()
+    }
     bucketDialogVisible.value = false
     ElMessage.success('Bucket 已保存')
+  } finally {
+    saving.value = false
+  }
+}
+
+function editMapping(row: PresaleIndustryBucketMapping) {
+  editingMapping.value = row
+  Object.assign(mappingForm, {
+    bucketCode: row.bucketCode,
+    industryShort: row.industryShort ?? '',
+    remark: '',
+  })
+  mappingDialogVisible.value = true
+}
+
+async function saveMapping() {
+  const row = editingMapping.value
+  if (!row) return
+  const valid = await mappingFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+  saving.value = true
+  try {
+    const payload = trimPayload(mappingForm) as PresaleIndustryBucketMappingPayload
+    const { data } = await updatePresaleIndustryBucketMapping(row.id, payload)
+    replaceRow(industryBucketMappings.value, data.data)
+    mappingDialogVisible.value = false
+    ElMessage.success('行业映射已保存')
   } finally {
     saving.value = false
   }
@@ -581,6 +701,13 @@ function replaceRow<T extends { id: number }>(rows: T[], row: T) {
   if (index >= 0) {
     rows.splice(index, 1, row)
   }
+}
+
+function sortBuckets() {
+  lexiconBuckets.value.sort((a, b) => {
+    if (a.enabled !== b.enabled) return a.enabled ? -1 : 1
+    return a.bucketCode.localeCompare(b.bucketCode)
+  })
 }
 
 function goBack() {
@@ -650,6 +777,19 @@ function goBack() {
   background: #f9fafb;
   color: #475467;
   font-size: 13px;
+}
+
+.section-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.inline-note {
+  flex: 1;
+  margin-bottom: 0;
 }
 
 .full-width {

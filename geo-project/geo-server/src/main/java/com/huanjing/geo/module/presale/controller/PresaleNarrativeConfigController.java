@@ -2,12 +2,15 @@ package com.huanjing.geo.module.presale.controller;
 
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.presale.dto.request.PresaleIndustryBucketDraftUpdateRequest;
+import com.huanjing.geo.module.presale.dto.request.PresaleIndustryBucketMappingUpdateRequest;
 import com.huanjing.geo.module.presale.dto.request.PresaleIndustryBucketRejectRequest;
 import com.huanjing.geo.module.presale.dto.request.PresaleHeatmapSummaryUpdateRequest;
+import com.huanjing.geo.module.presale.dto.request.PresaleLexiconBucketCreateRequest;
 import com.huanjing.geo.module.presale.dto.request.PresaleLexiconBucketUpdateRequest;
 import com.huanjing.geo.module.presale.dto.request.PresaleNarrativeFindingCopyUpdateRequest;
 import com.huanjing.geo.module.presale.dto.response.PresaleNarrativeConfigAdminResponse;
 import com.huanjing.geo.module.presale.persist.entity.PresaleHeatmapSummary;
+import com.huanjing.geo.module.presale.persist.entity.PresaleIndustryBucketMapping;
 import com.huanjing.geo.module.presale.persist.entity.PresaleIndustryBucketReviewTask;
 import com.huanjing.geo.module.presale.persist.entity.PresaleLexiconBucket;
 import com.huanjing.geo.module.presale.persist.entity.PresaleNarrativeFindingCopy;
@@ -68,9 +71,20 @@ public class PresaleNarrativeConfigController {
         return R.ok(service.rejectIndustryBucketTask(id, req));
     }
 
+    @PostMapping("/lexicon-bucket")
+    public R<PresaleLexiconBucket> createLexiconBucket(@Valid @RequestBody PresaleLexiconBucketCreateRequest req) {
+        return R.ok(service.createLexiconBucket(req));
+    }
+
     @PutMapping("/lexicon-bucket/{id}")
     public R<PresaleLexiconBucket> updateLexiconBucket(@PathVariable Long id,
                                                        @Valid @RequestBody PresaleLexiconBucketUpdateRequest req) {
         return R.ok(service.updateLexiconBucket(id, req));
+    }
+
+    @PutMapping("/industry-bucket-mapping/{id}")
+    public R<PresaleIndustryBucketMapping> updateIndustryBucketMapping(@PathVariable Long id,
+                                                                       @Valid @RequestBody PresaleIndustryBucketMappingUpdateRequest req) {
+        return R.ok(service.updateIndustryBucketMapping(id, req));
     }
 }

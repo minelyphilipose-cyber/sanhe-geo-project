@@ -5,6 +5,9 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.dto.SelfMediaScheduleCapabilityUpsertRequest;
 import com.huanjing.geo.module.content.entity.SelfMediaScheduleCapability;
 import com.huanjing.geo.module.content.mapper.SelfMediaScheduleCapabilityMapper;
+import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformCapabilityContract;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformPublishChannel;
 import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformScheduleAdapterRouter;
 import com.huanjing.geo.module.content.vo.SelfMediaScheduleCapabilityVO;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -15,9 +18,13 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -27,8 +34,9 @@ public class SelfMediaScheduleCapabilityService {
     public static final String STATUS_VERIFIED = "verified";
     public static final String STATUS_FAILED = "failed";
     public static final String STRATEGY_PENDING = "pending";
-    public static final String STRATEGY_PLATFORM_SCHEDULE = "platform_schedule";
-    public static final String STRATEGY_SEMI_AUTO = "semi_auto";
+    public static final String STRATEGY_PLATFORM_SCHEDULE = SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE;
+    public static final String STRATEGY_BACKEND_DELAYED_PUBLISH = SelfMediaPublishScheduleConstants.STRATEGY_BACKEND_DELAYED_PUBLISH;
+    public static final String STRATEGY_SEMI_AUTO = SelfMediaPublishScheduleConstants.STRATEGY_SEMI_AUTO;
 
     private final SelfMediaScheduleCapabilityMapper mapper;
     private final CurrentUserService currentUserService;
@@ -36,19 +44,46 @@ public class SelfMediaScheduleCapabilityService {
 
     public List<SelfMediaScheduleCapabilityVO> list() {
         currentUserService.requireCurrentUser();
-        return mapper.selectList(new LambdaQueryWrapper<SelfMediaScheduleCapability>()
-                        .orderByAsc(SelfMediaScheduleCapability::getPlatform))
+        Map<String, SelfMediaScheduleCapability> rowsByPlatform = mapper.selectList(
+                        new LambdaQueryWrapper<SelfMediaScheduleCapability>()
+                                .orderByAsc(SelfMediaScheduleCapability::getPlatform))
                 .stream()
-                .map(SelfMediaScheduleCapabilityVO::from)
+                .collect(Collectors.toMap(
+                        row -> normalize(row.getPlatform()),
+                        Function.identity(),
+                        (left, right) -> left,
+                        LinkedHashMap::new
+                ));
+        Map<String, SelfMediaScheduleCapabilityVO> capabilities = new LinkedHashMap<>();
+        scheduleAdapterRouter.contracts().stream()
+                .sorted(Comparator.comparing(SelfMediaPlatformCapabilityContract::platform))
+                .forEach(contract -> {
+                    String platform = normalize(contract.platform());
+                    SelfMediaScheduleCapability row = rowsByPlatform.remove(platform);
+                    SelfMediaScheduleCapabilityVO vo = row == null ? defaultVo(contract) : SelfMediaScheduleCapabilityVO.from(row);
+                    vo.applyContract(contract);
+                    capabilities.put(platform, vo);
+                });
+        rowsByPlatform.values().stream()
+                .map(this::toVo)
+                .filter(vo -> vo != null && StringUtils.hasText(vo.getPlatform()))
+                .forEach(vo -> capabilities.putIfAbsent(normalize(vo.getPlatform()), vo));
+        return capabilities.values()
+                .stream()
+                .sorted(Comparator.comparing(vo -> normalize(vo.getPlatform())))
                 .toList();
     }
 
     public SelfMediaScheduleCapabilityVO detail(String platform) {
         currentUserService.requireCurrentUser();
-        return SelfMediaScheduleCapabilityVO.from(mapper.selectByPlatform(normalizePlatform(platform)));
+        return toVo(mapper.selectByPlatform(normalizePlatform(platform)));
     }
 
     public PlatformScheduleReadiness readiness(String platform) {
+        return readiness(platform, null);
+    }
+
+    public PlatformScheduleReadiness readiness(String platform, String requestedStrategy) {
         String normalized = normalizePlatform(platform);
         SelfMediaScheduleCapability row = mapper.selectByPlatform(normalized);
         if (row == null) {
@@ -60,13 +95,34 @@ public class SelfMediaScheduleCapabilityService {
         if (!Boolean.TRUE.equals(row.getSupportsSchedule())) {
             return PlatformScheduleReadiness.rejected("PLATFORM_SCHEDULE_UNSUPPORTED", "平台不支持稳定的原生定时发布，当前只能走半自动");
         }
-        if (!STRATEGY_PLATFORM_SCHEDULE.equals(normalize(row.getV1Strategy()))) {
+        SelfMediaPlatformCapabilityContract contract = scheduleAdapterRouter.contract(normalized).orElse(null);
+        if (contract == null) {
+            return PlatformScheduleReadiness.rejected("PLATFORM_CONTRACT_MISSING", "平台发布能力契约尚未接入");
+        }
+        String strategy = StringUtils.hasText(requestedStrategy) ? normalize(requestedStrategy) : normalize(row.getV1Strategy());
+        if (!strategy.equals(normalize(row.getV1Strategy()))) {
+            return PlatformScheduleReadiness.rejected(
+                    "PLATFORM_SCHEDULE_STRATEGY_MISMATCH",
+                    "请求排期策略与平台已验证策略不一致"
+            );
+        }
+        if (STRATEGY_PLATFORM_SCHEDULE.equals(strategy) && !contract.supportsPlatformSchedule()) {
+            return PlatformScheduleReadiness.rejected("PLATFORM_SCHEDULE_UNSUPPORTED", "平台契约声明不支持原生定时发布");
+        }
+        if (STRATEGY_BACKEND_DELAYED_PUBLISH.equals(strategy) && !contract.supportsBackendDelayedPublish()) {
+            return PlatformScheduleReadiness.rejected("PLATFORM_BACKEND_DELAYED_UNSUPPORTED", "平台契约声明不支持后台延迟发布");
+        }
+        if (STRATEGY_BACKEND_DELAYED_PUBLISH.equals(strategy)
+                && SelfMediaPlatformPublishChannel.OFFICIAL_API.equals(contract.publishChannel())) {
+            return PlatformScheduleReadiness.rejected(
+                    "PLATFORM_BACKEND_DELAYED_EXECUTOR_MISSING",
+                    "官方 API 后台延迟发布执行器尚未接入"
+            );
+        }
+        if (!List.of(STRATEGY_PLATFORM_SCHEDULE, STRATEGY_BACKEND_DELAYED_PUBLISH).contains(strategy)) {
             return PlatformScheduleReadiness.rejected("PLATFORM_SCHEDULE_STRATEGY_DISABLED", "平台 v1 策略未启用自动定时发布");
         }
-        if (scheduleAdapterRouter.find(normalized).isEmpty()) {
-            return PlatformScheduleReadiness.rejected("PLATFORM_SCHEDULE_ADAPTER_MISSING", "平台自动定时发布适配器尚未接入");
-        }
-        return PlatformScheduleReadiness.ready(row);
+        return PlatformScheduleReadiness.ready(row, contract);
     }
 
     @Transactional
@@ -101,7 +157,29 @@ public class SelfMediaScheduleCapabilityService {
         } else {
             mapper.updateById(row);
         }
-        return SelfMediaScheduleCapabilityVO.from(row);
+        return toVo(row);
+    }
+
+    private SelfMediaScheduleCapabilityVO toVo(SelfMediaScheduleCapability row) {
+        SelfMediaScheduleCapabilityVO vo = SelfMediaScheduleCapabilityVO.from(row);
+        if (vo != null) {
+            scheduleAdapterRouter.contract(vo.getPlatform()).ifPresent(vo::applyContract);
+        }
+        return vo;
+    }
+
+    private SelfMediaScheduleCapabilityVO defaultVo(SelfMediaPlatformCapabilityContract contract) {
+        SelfMediaScheduleCapabilityVO vo = new SelfMediaScheduleCapabilityVO();
+        vo.setPlatform(normalize(contract.platform()));
+        vo.setVerificationStatus(STATUS_UNVERIFIED);
+        vo.setSupportsSchedule(false);
+        vo.setSaveCreatesSchedule(true);
+        vo.setSupportsCancel(false);
+        vo.setSupportsModify(false);
+        vo.setSupportsPublishCheck(contract.supportsPublishCheck());
+        vo.setV1Strategy(STRATEGY_PENDING);
+        vo.applyContract(contract);
+        return vo;
     }
 
     private ValidatedCapability validate(SelfMediaScheduleCapabilityUpsertRequest request) {
@@ -120,7 +198,8 @@ public class SelfMediaScheduleCapabilityService {
         String strategy = StringUtils.hasText(request.getV1Strategy())
                 ? normalize(request.getV1Strategy())
                 : (Boolean.TRUE.equals(supportsSchedule) ? STRATEGY_PLATFORM_SCHEDULE : STRATEGY_SEMI_AUTO);
-        if (!List.of(STRATEGY_PENDING, STRATEGY_PLATFORM_SCHEDULE, STRATEGY_SEMI_AUTO).contains(strategy)) {
+        if (!List.of(STRATEGY_PENDING, STRATEGY_PLATFORM_SCHEDULE, STRATEGY_BACKEND_DELAYED_PUBLISH, STRATEGY_SEMI_AUTO)
+                .contains(strategy)) {
             fail("INVALID_V1_STRATEGY", "未知 v1 策略");
         }
         if (request.getMinDelayMinutes() != null && request.getMinDelayMinutes() < 0) {
@@ -134,12 +213,24 @@ public class SelfMediaScheduleCapabilityService {
                 && request.getMaxDelayMinutes() < request.getMinDelayMinutes()) {
             fail("INVALID_DELAY_RANGE", "最大可定时延迟不能小于最小延迟");
         }
+        SelfMediaPlatformCapabilityContract contract = scheduleAdapterRouter.contract(platform).orElse(null);
+        if (STATUS_VERIFIED.equals(status) && contract == null) {
+            fail("PLATFORM_CONTRACT_MISSING", "平台发布能力契约尚未接入");
+        }
         if (STATUS_VERIFIED.equals(status) && Boolean.TRUE.equals(supportsSchedule)) {
             if (request.getMinDelayMinutes() == null || request.getMaxDelayMinutes() == null) {
                 fail("DELAY_RANGE_REQUIRED", "支持定时发布的平台必须填写最小和最大可定时延迟");
             }
-            if (!STRATEGY_PLATFORM_SCHEDULE.equals(strategy)) {
-                fail("INVALID_VERIFIED_STRATEGY", "支持定时发布且验证通过的平台，v1 策略必须为 platform_schedule");
+            if (!List.of(STRATEGY_PLATFORM_SCHEDULE, STRATEGY_BACKEND_DELAYED_PUBLISH).contains(strategy)) {
+                fail("INVALID_VERIFIED_STRATEGY", "支持定时发布且验证通过的平台，v1 策略必须为自动定时策略");
+            }
+            if (STRATEGY_PLATFORM_SCHEDULE.equals(strategy) && contract != null && !contract.supportsPlatformSchedule()) {
+                fail("PLATFORM_SCHEDULE_UNSUPPORTED", "平台契约声明不支持原生定时发布");
+            }
+            if (STRATEGY_BACKEND_DELAYED_PUBLISH.equals(strategy)
+                    && contract != null
+                    && !contract.supportsBackendDelayedPublish()) {
+                fail("PLATFORM_BACKEND_DELAYED_UNSUPPORTED", "平台契约声明不支持后台延迟发布");
             }
         }
         return new ValidatedCapability(platform, status, supportsSchedule, strategy);
@@ -170,13 +261,17 @@ public class SelfMediaScheduleCapabilityService {
                                        String v1Strategy) {
     }
 
-    public record PlatformScheduleReadiness(boolean ready, String code, String message) {
-        static PlatformScheduleReadiness ready(SelfMediaScheduleCapability row) {
-            return new PlatformScheduleReadiness(true, null, null);
+    public record PlatformScheduleReadiness(boolean ready,
+                                            String code,
+                                            String message,
+                                            SelfMediaPlatformCapabilityContract contract) {
+        static PlatformScheduleReadiness ready(SelfMediaScheduleCapability row,
+                                               SelfMediaPlatformCapabilityContract contract) {
+            return new PlatformScheduleReadiness(true, null, null, contract);
         }
 
         static PlatformScheduleReadiness rejected(String code, String message) {
-            return new PlatformScheduleReadiness(false, code, message);
+            return new PlatformScheduleReadiness(false, code, message, null);
         }
     }
 }

@@ -34,6 +34,13 @@
       </button>
     </div>
 
+    <div v-if="alertOverview.total" class="schedule-alert-overview">
+      <span class="schedule-alert-overview-title">异常概览</span>
+      <el-tag v-if="alertOverview.critical" type="danger" size="small">严重 {{ alertOverview.critical }}</el-tag>
+      <el-tag v-if="alertOverview.warning" type="warning" size="small">警告 {{ alertOverview.warning }}</el-tag>
+      <el-tag v-if="alertOverview.info" type="info" size="small">提示 {{ alertOverview.info }}</el-tag>
+    </div>
+
     <DataState :loading="loading" :empty="!filteredRows.length" empty-text="暂无发布排期">
       <el-table :data="filteredRows" border table-layout="fixed" class="schedule-table">
         <el-table-column label="排期" width="90">
@@ -43,7 +50,7 @@
           <template #default="scope">
             <div class="schedule-stack">
               <button type="button" class="schedule-link" @click="emit('openArticle', scope.row.articleId)">文章 #{{ scope.row.articleId }}</button>
-              <span>品牌 #{{ scope.row.brandId }}</span>
+              <span>{{ brandDisplay(scope.row) }}</span>
             </div>
           </template>
         </el-table-column>
@@ -51,7 +58,7 @@
           <template #default="scope">
             <div class="schedule-stack">
               <span>{{ platformLabel(scope.row.platform) }}</span>
-              <span>账号 #{{ scope.row.selfMediaAccountId }}</span>
+              <span>{{ accountDisplay(scope.row) }}</span>
             </div>
           </template>
         </el-table-column>
@@ -59,7 +66,7 @@
           <template #default="scope">
             <div class="schedule-stack">
               <span>计划 {{ timeText(scope.row.plannedPublishAt) }}</span>
-              <span>平台 {{ timeText(scope.row.platformScheduledAt) }}</span>
+              <span>{{ platformTimeLine(scope.row) }}</span>
             </div>
           </template>
         </el-table-column>
@@ -74,7 +81,12 @@
         <el-table-column label="健康/阶段" min-width="170">
           <template #default="scope">
             <div class="schedule-stack">
-              <el-tag size="small" :type="healthTag(scope.row)">{{ healthLabel(scope.row) }}</el-tag>
+              <div class="schedule-tag-row">
+                <el-tag size="small" :type="healthTag(scope.row)">{{ healthLabel(scope.row) }}</el-tag>
+                <el-tag v-if="activeAlertCount(scope.row)" size="small" :type="alertTag(scope.row)">
+                  告警 {{ activeAlertCount(scope.row) }}
+                </el-tag>
+              </div>
               <span>{{ stageLabel(scope.row) }}</span>
             </div>
           </template>
@@ -116,6 +128,47 @@
         />
       </div>
     </DataState>
+
+    <el-dialog
+      v-model="diagnosticsVisible"
+      :title="diagnosticsRow ? `排期 #${diagnosticsRow.id} 诊断` : '排期诊断'"
+      width="680px"
+      class="schedule-diagnostics-dialog"
+    >
+      <div v-if="diagnosticsRow" class="schedule-diagnostics">
+        <section class="schedule-diagnostics-section">
+          <h4>基础状态</h4>
+          <dl class="schedule-diagnostics-grid">
+            <template v-for="item in diagnosticsFields" :key="item.label">
+              <dt>{{ item.label }}</dt>
+              <dd>{{ item.value }}</dd>
+            </template>
+          </dl>
+        </section>
+
+        <section v-if="diagnosticsRow.activeAlerts?.length" class="schedule-diagnostics-section">
+          <h4>活动告警</h4>
+          <div class="schedule-diagnostics-alerts">
+            <div v-for="alert in diagnosticsRow.activeAlerts" :key="alert.id" class="schedule-diagnostics-alert">
+              <el-tag size="small" :type="alert.severity === 'critical' ? 'danger' : alert.severity === 'warning' ? 'warning' : 'info'">
+                {{ alertSeverityLabel(alert.severity) }}
+              </el-tag>
+              <span>{{ alertTypeLabel(alert.alertType) }}：{{ alert.message }}</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="schedule-diagnostics-section">
+          <h4>处理建议</h4>
+          <p class="schedule-diagnostics-advice">{{ recommendationText(diagnosticsRow) }}</p>
+        </section>
+
+        <section class="schedule-diagnostics-section">
+          <h4>原始诊断</h4>
+          <pre class="schedule-diagnostics-json">{{ diagnosticsJsonText }}</pre>
+        </section>
+      </div>
+    </el-dialog>
   </el-drawer>
 </template>
 
@@ -153,6 +206,9 @@ const visible = computed({
 
 const loading = ref(false)
 const rows = ref<SelfMediaPublishSchedule[]>([])
+const diagnosticsVisible = ref(false)
+const diagnosticsRow = ref<SelfMediaPublishSchedule | null>(null)
+const diagnosticsJsonText = ref('暂无诊断信息')
 const page = reactive({ current: 1, size: 20, total: 0 })
 const query = reactive({
   brandId: '',
@@ -223,6 +279,38 @@ const scheduleHealthCards = computed(() => {
     { label: '待确认', value: 'checking' as ScheduleHealth, count: counts.checking, hint: '到点后核验发布', tone: 'warning' },
     { label: '完成', value: 'done' as ScheduleHealth, count: counts.done, hint: '已确认发布', tone: 'success' },
     { label: '取消', value: 'cancelled' as ScheduleHealth, count: counts.cancelled, hint: '不再执行', tone: 'muted' },
+  ]
+})
+
+const alertOverview = computed(() => {
+  return rows.value.flatMap((row) => row.activeAlerts || []).reduce((acc, alert) => {
+    acc.total += 1
+    if (alert.severity === 'critical') acc.critical += 1
+    else if (alert.severity === 'warning') acc.warning += 1
+    else acc.info += 1
+    return acc
+  }, { total: 0, critical: 0, warning: 0, info: 0 })
+})
+
+const diagnosticsFields = computed(() => {
+  const row = diagnosticsRow.value
+  if (!row) return []
+  return [
+    { label: '健康', value: healthLabel(row) },
+    { label: '阶段', value: stageLabel(row) },
+    { label: '状态', value: `${statusLabel(row.status)}（${row.status || '-'}）` },
+    { label: '计划发布时间', value: timeText(row.plannedPublishAt) },
+    { label: platformTimeFieldLabel(row), value: platformTimeFieldValue(row) },
+    { label: '队列', value: row.queueKind || '-' },
+    { label: '请求', value: `${row.requestId || '-'} / ${row.requestIdempotencyKey || '-'}` },
+    { label: '浏览器环境', value: `${row.browserEnvironmentId || '-'} / 绑定 ${row.browserEnvironmentAccountId || '-'}` },
+    { label: '平台排期 ID', value: platformScheduleIdFieldValue(row) },
+    { label: '平台发布 ID', value: row.platformPublishId || '-' },
+    { label: '平台发布链接', value: row.platformPublishedUrl || '-' },
+    { label: '下次处理', value: timeText(row.nextAttemptAt) },
+    { label: '锁定至', value: timeText(row.lockedUntil) },
+    { label: '尝试次数', value: attemptText(row) },
+    { label: '异常', value: failureText(row) },
   ]
 })
 
@@ -348,6 +436,17 @@ function healthTag(row: SelfMediaPublishSchedule): 'success' | 'warning' | 'dang
   return 'info'
 }
 
+function activeAlertCount(row: SelfMediaPublishSchedule) {
+  return row.activeAlerts?.length || 0
+}
+
+function alertTag(row: SelfMediaPublishSchedule): 'danger' | 'warning' | 'info' {
+  const alerts = row.activeAlerts || []
+  if (alerts.some((item) => item.severity === 'critical')) return 'danger'
+  if (alerts.some((item) => item.severity === 'warning')) return 'warning'
+  return 'info'
+}
+
 function stageLabel(row: SelfMediaPublishSchedule) {
   const map: Record<string, string> = {
     pending: '等待助手领取',
@@ -366,7 +465,52 @@ function stageLabel(row: SelfMediaPublishSchedule) {
     cancel_pending_platform: '等待平台取消确认',
     cancelled: '后台已取消',
   }
+  if (isBackendDelayedPlatform(row.platform)) {
+    const backendDelayedMap: Record<string, string> = {
+      pending: '等待助手领取',
+      filling: '助手即时发布中',
+      filled_verified: '内容填充已核验',
+      scheduling: '发布提交中',
+      scheduled: '已提交平台',
+      publish_due: '待确认发布结果',
+      checking_publish_result: '发布结果核验中',
+      publish_unknown: '等待最终发布确认',
+      published_confirmed: '发布已确认',
+      schedule_failed: '发布提交失败',
+      publish_failed: '发布结果失败',
+      manual_required: '需要人工处理',
+      routed_to_semi_auto: '已转半自动',
+      cancel_pending_platform: '等待平台取消确认',
+      cancelled: '后台已取消',
+    }
+    return backendDelayedMap[row.status] || row.status || '-'
+  }
   return map[row.status] || row.status || '-'
+}
+
+function isBackendDelayedPlatform(platform?: string | null) {
+  return platform === 'zhihu'
+}
+
+function platformTimeLine(row: SelfMediaPublishSchedule) {
+  if (isBackendDelayedPlatform(row.platform)) {
+    return `触发 ${timeText(row.nextAttemptAt || row.plannedPublishAt)}`
+  }
+  return `平台 ${timeText(row.platformScheduledAt)}`
+}
+
+function platformTimeFieldLabel(row: SelfMediaPublishSchedule) {
+  return isBackendDelayedPlatform(row.platform) ? '后台触发时间' : '平台定时时间'
+}
+
+function platformTimeFieldValue(row: SelfMediaPublishSchedule) {
+  if (isBackendDelayedPlatform(row.platform)) return timeText(row.plannedPublishAt)
+  return timeText(row.platformScheduledAt)
+}
+
+function platformScheduleIdFieldValue(row: SelfMediaPublishSchedule) {
+  if (isBackendDelayedPlatform(row.platform)) return '不适用'
+  return row.platformScheduleId || '-'
 }
 
 function delayText(row: SelfMediaPublishSchedule) {
@@ -386,6 +530,14 @@ function attemptText(row: SelfMediaPublishSchedule) {
 function failureText(row: SelfMediaPublishSchedule) {
   if (row.failureCode && row.failureMessage) return `${row.failureCode}：${row.failureMessage}`
   return row.failureMessage || row.failureCode || row.scheduleDriftReason || '-'
+}
+
+function brandDisplay(row: SelfMediaPublishSchedule) {
+  return row.brandName || '未命名品牌'
+}
+
+function accountDisplay(row: SelfMediaPublishSchedule) {
+  return row.selfMediaAccountName || '未命名账号'
 }
 
 function canCancel(row: SelfMediaPublishSchedule) {
@@ -478,37 +630,39 @@ async function recheck(row: SelfMediaPublishSchedule) {
 }
 
 function showDiagnostics(row: SelfMediaPublishSchedule) {
-  const diagnostics = row.diagnosticsJson ? formatDiagnosticsJson(row.diagnosticsJson) : '暂无诊断信息'
-  ElMessageBox.alert(diagnosticsText(row, diagnostics), `排期 #${row.id} 诊断`, {
-    confirmButtonText: '关闭',
-    customClass: 'schedule-diagnostics-dialog',
-  })
+  diagnosticsRow.value = row
+  diagnosticsJsonText.value = row.diagnosticsJson ? formatDiagnosticsJson(row.diagnosticsJson) : '暂无诊断信息'
+  diagnosticsVisible.value = true
 }
 
-function diagnosticsText(row: SelfMediaPublishSchedule, diagnostics: string) {
-  return [
-    `健康：${healthLabel(row)}`,
-    `阶段：${stageLabel(row)}`,
-    `状态：${statusLabel(row.status)}（${row.status || '-'}）`,
-    `计划发布时间：${timeText(row.plannedPublishAt)}`,
-    `平台定时时间：${timeText(row.platformScheduledAt)}`,
-    `队列：${row.queueKind || '-'}`,
-    `请求：${row.requestId || '-'} / ${row.requestIdempotencyKey || '-'}`,
-    `浏览器环境：${row.browserEnvironmentId || '-'} / 绑定 ${row.browserEnvironmentAccountId || '-'}`,
-    `平台排期 ID：${row.platformScheduleId || '-'}`,
-    `平台发布 ID：${row.platformPublishId || '-'}`,
-    `平台发布链接：${row.platformPublishedUrl || '-'}`,
-    `下次处理：${timeText(row.nextAttemptAt)}`,
-    `锁定至：${timeText(row.lockedUntil)}`,
-    `尝试次数：${attemptText(row)}`,
-    `异常：${failureText(row)}`,
-    `建议：${recommendationText(row)}`,
-    '',
-    diagnostics,
-  ].join('\n')
+function alertSeverityLabel(value?: string | null) {
+  if (value === 'critical') return '严重'
+  if (value === 'warning') return '警告'
+  return '提示'
+}
+
+function alertTypeLabel(value?: string | null) {
+  const map: Record<string, string> = {
+    HELPER_OFFLINE: '助手离线',
+    SCHEDULE_FILL_OVERDUE: '填充超时',
+    TASK_STUCK_RUNNING: '执行卡住',
+    PLATFORM_SCHEDULE_MISSED: '平台发布时间已过',
+    PUBLISH_RESULT_UNKNOWN: '发布待确认',
+    PUBLISH_LINK_MISSING: '发布链接缺失',
+    MANUAL_REQUIRED: '人工处理',
+    SCHEDULE_FAILED: '定时失败',
+    PUBLISH_FAILED: '发布失败',
+  }
+  return value ? map[value] || value : '-'
 }
 
 function recommendationText(row: SelfMediaPublishSchedule) {
+  if (isBackendDelayedPlatform(row.platform)) {
+    if (row.status === 'pending') return '等待本地助手到点领取；该平台不支持平台内定时，计划时间即后台触发发布时间。'
+    if (row.status === 'filling') return '本地助手正在填充并提交发布；若长时间不变化，请检查 AdsPower 页面和扩展日志。'
+    if (row.status === 'published_confirmed') return '已确认发布，无需处理。'
+    if (row.status === 'manual_required') return '按异常信息处理页面或配置问题；处理后重新创建排期。'
+  }
   if (row.status === 'publish_unknown') return '等待自动复查；若长时间未变化，可点击“重新校验”或人工确认发布。'
   if (row.status === 'publish_failed') return '检查本地助手、AdsPower 浏览器和头条作品管理页；修复后点击“重新校验”。'
   if (row.status === 'manual_required') return '按异常信息处理配置或页面问题；处理后可点击“重新校验”或重新创建排期。'
@@ -557,6 +711,23 @@ function platformLabel(value?: string | null) {
   grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
   gap: 10px;
   margin-bottom: 14px;
+}
+
+.schedule-alert-overview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px 0 14px;
+  padding: 10px 12px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+}
+
+.schedule-alert-overview-title {
+  color: #9a3412;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .schedule-health-card {
@@ -630,6 +801,12 @@ function platformLabel(value?: string | null) {
   font-weight: 650;
 }
 
+.schedule-tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .schedule-link {
   display: inline;
   width: fit-content;
@@ -665,17 +842,80 @@ function platformLabel(value?: string | null) {
   margin-top: 14px;
 }
 
-:global(.schedule-diagnostics-dialog) {
-  width: min(680px, calc(100vw - 40px));
+.schedule-diagnostics {
+  display: grid;
+  gap: 14px;
+  color: #1f2937;
 }
 
-:global(.schedule-diagnostics-dialog .el-message-box__message) {
-  max-height: 420px;
+.schedule-diagnostics-section {
+  padding: 14px 16px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+}
+
+.schedule-diagnostics-section h4 {
+  margin: 0 0 12px;
+  color: #111827;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.schedule-diagnostics-grid {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr);
+  gap: 8px 14px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.schedule-diagnostics-grid dt {
+  color: #6b7280;
+}
+
+.schedule-diagnostics-grid dd {
+  min-width: 0;
+  margin: 0;
+  color: #111827;
+  overflow-wrap: anywhere;
+}
+
+.schedule-diagnostics-alerts {
+  display: grid;
+  gap: 8px;
+}
+
+.schedule-diagnostics-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #374151;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.schedule-diagnostics-advice {
+  margin: 0;
+  color: #374151;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.schedule-diagnostics-json {
+  max-height: 280px;
+  margin: 0;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
+  color: #374151;
   font-family: "JetBrains Mono", "Consolas", monospace;
   font-size: 12px;
   line-height: 1.6;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 12px;
 }
 </style>

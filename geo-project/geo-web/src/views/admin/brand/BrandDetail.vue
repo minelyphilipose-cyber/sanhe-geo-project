@@ -602,8 +602,8 @@ import {
   deleteBrowserEnvironmentAccount,
   getBrowserEnvironmentAccountBySelfMedia,
   listBrowserEnvironments,
+  resetBrowserEnvironmentAccountLoginIdentity,
   updateBrowserEnvironment,
-  updateBrowserEnvironmentAccount,
   type BrowserEnvironment,
   type BrowserEnvironmentAccount,
 } from '@/api/browserEnvironment'
@@ -1054,11 +1054,7 @@ async function resetEnvironmentAccountIdentity(account: SemiAutoSelfMediaAccount
         cancelButtonText: '取消',
       },
     )
-    const { data } = await updateBrowserEnvironmentAccount(binding.id, {
-      expectedPlatformAccountId: '',
-      expectedAccountName: '',
-      loginStatus: 'unknown',
-    })
+    const { data } = await resetBrowserEnvironmentAccountLoginIdentity(binding.id)
     browserEnvironmentAccounts.value = {
       ...browserEnvironmentAccounts.value,
       [account.id]: data.data,

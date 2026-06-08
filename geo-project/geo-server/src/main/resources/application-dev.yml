@@ -7,7 +7,7 @@ spring:
 
   data:
     redis:
-      host: 192.168.3.123
+      host: 192.168.112.175
       port: 6379
       password: 123456
       database: 0
@@ -17,6 +17,7 @@ geo:
   brand-geo-site:
     endpoint: https://www.fyhuaweizhijia.com/api/v1/content
 
+  public-base-url: http://localhost:8080
   wechat:
     client:
       mode: mock
@@ -78,8 +79,8 @@ geo:
 
   # MinIO
   minio:
-    endpoint: http://192.168.3.123:9000
-    public-endpoint: ${MINIO_PUBLIC_ENDPOINT:http://192.168.3.123:9000}
+    endpoint: http://192.168.112.175:9000
+    public-endpoint: ${MINIO_PUBLIC_ENDPOINT:http://192.168.112.175:9000}
     access-key: admin
     secret-key: admin123
     bucket: geo-files

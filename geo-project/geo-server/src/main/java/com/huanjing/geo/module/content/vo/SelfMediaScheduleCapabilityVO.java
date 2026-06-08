@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.content.vo;
 
 import com.huanjing.geo.module.content.entity.SelfMediaScheduleCapability;
+import com.huanjing.geo.module.content.service.adapter.SelfMediaPlatformCapabilityContract;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -21,6 +22,13 @@ public class SelfMediaScheduleCapabilityVO {
     private String selectorStatus;
     private String evidenceJson;
     private String notes;
+    private String displayName;
+    private String publishChannel;
+    private String scheduleMode;
+    private Boolean contractRequiresCoverUpload;
+    private Boolean contractSupportsLocation;
+    private Boolean contractSupportsOneClickFormat;
+    private Boolean contractSupportsPublishCheck;
     private LocalDateTime verifiedAt;
     private Long verifiedBy;
     private LocalDateTime createdAt;
@@ -50,5 +58,18 @@ public class SelfMediaScheduleCapabilityVO {
         vo.setCreatedAt(row.getCreatedAt());
         vo.setUpdatedAt(row.getUpdatedAt());
         return vo;
+    }
+
+    public void applyContract(SelfMediaPlatformCapabilityContract contract) {
+        if (contract == null) {
+            return;
+        }
+        setDisplayName(contract.displayName());
+        setPublishChannel(contract.publishChannel().name());
+        setScheduleMode(contract.scheduleMode().name());
+        setContractRequiresCoverUpload(contract.requiresCoverUpload());
+        setContractSupportsLocation(contract.supportsLocation());
+        setContractSupportsOneClickFormat(contract.supportsOneClickFormat());
+        setContractSupportsPublishCheck(contract.supportsPublishCheck());
     }
 }

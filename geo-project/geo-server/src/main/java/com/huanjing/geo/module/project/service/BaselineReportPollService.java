@@ -159,7 +159,7 @@ public class BaselineReportPollService {
         try {
             LlmRouteResult routeResult = llmPlatformRouter.invoke(new LlmRouteRequest(
                     LlmFeature.GENERIC,
-                    "You are a GEO baseline report polling assistant. Answer the user's question directly.",
+                    "You are a GEO (Generative Engine Optimization) baseline report polling assistant. Answer the user's question directly.",
                     question.getKeywordText(),
                     0D,
                     null,
