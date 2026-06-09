@@ -108,7 +108,7 @@ export function mergeSnapshot(
   const l3CompetitorDescriptions = asArray<CompetitorSceneDescription>(
     editable?.competitor_scene_descriptions
   );
-  const keyTakeaways = asArray<KeyTakeaway>(editable?.key_takeaways);
+  const keyTakeaways = normalizeKeyTakeaways(asArray<KeyTakeaway>(editable?.key_takeaways));
   const platformBreakdown = filterEffectivePlatforms(raw);
   const effectivePlatformCodes = new Set(platformBreakdown.map((p) => p.platform_code));
   const effectiveTestSummary = normalizeTestSummary(raw.test_summary, platformBreakdown);
@@ -173,6 +173,30 @@ export function mergeSnapshot(
     ),
     group_scene_advantages: raw.group_scene_advantages ?? [],
   };
+}
+
+function normalizeKeyTakeaways(source: KeyTakeaway[]): KeyTakeaway[] {
+  const seen = new Set<string>();
+  return [...source]
+    .sort((a, b) => a.order_no - b.order_no)
+    .filter((item) => {
+      const key = displayKey(item.title, item.description);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((item, index) => ({
+      ...item,
+      order_no: index + 1,
+    }));
+}
+
+function displayKey(title: string | null | undefined, description: string | null | undefined): string {
+  return `${normalizeDisplayText(title)}\n${normalizeDisplayText(description)}`;
+}
+
+function normalizeDisplayText(text: string | null | undefined): string {
+  return (text ?? '').trim().replace(/\s+/g, ' ');
 }
 
 function normalizeNarrativeProfile(value: NarrativeProfile | undefined): NarrativeProfile {

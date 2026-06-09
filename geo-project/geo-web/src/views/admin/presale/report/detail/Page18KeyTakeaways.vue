@@ -99,8 +99,16 @@ const { mergedView: mergedViewRef, reportCreatedAt } = useMergedView()
 const mergedView = computed(() => mergedViewRef.value!)
 
 const takeaways = computed<KeyTakeaway[]>(() => {
-  const arr = [...mergedView.value.key_takeaways]
-  return arr.sort((a, b) => a.order_no - b.order_no)
+  const seen = new Set<string>()
+  return mergedView.value.key_takeaways
+    .slice()
+    .sort((a, b) => a.order_no - b.order_no)
+    .filter((item) => {
+      const key = normalizeDisplayKey(item.title, item.description)
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
 })
 
 const methodologyDate = computed<string>(() => {
@@ -126,6 +134,10 @@ const showOverallBenchmarkNote = computed(() => mergedView.value.scores.ranking 
 /** 1 → "01" / 12 → "12"。 */
 function formatOrder(n: number): string {
   return n.toString().padStart(2, '0')
+}
+
+function normalizeDisplayKey(title: string, description: string): string {
+  return `${title}|${description}`.replace(/\s+/g, '').toLowerCase()
 }
 </script>
 
