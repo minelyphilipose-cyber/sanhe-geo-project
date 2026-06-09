@@ -2,9 +2,11 @@ package com.huanjing.geo.module.content.controller;
 
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.content.dto.SelfMediaAccountManageRequest;
+import com.huanjing.geo.module.content.service.SelfMediaAccountPlatformEligibilityService;
 import com.huanjing.geo.module.content.service.SelfMediaAccountService;
 import com.huanjing.geo.module.content.vo.DouyinAuthUrlVO;
 import com.huanjing.geo.module.content.vo.DouyinCapabilityVO;
+import com.huanjing.geo.module.content.vo.SelfMediaAccountPlatformOptionVO;
 import com.huanjing.geo.module.content.vo.SelfMediaAccountVO;
 import com.huanjing.geo.module.content.vo.WechatMpAuthUrlVO;
 import com.huanjing.geo.module.content.vo.WechatMpCapabilityVO;
@@ -25,6 +27,7 @@ import java.util.List;
 public class SelfMediaAccountController {
     private final SelfMediaAccountService selfMediaAccountService;
     private final BrandService brandService;
+    private final SelfMediaAccountPlatformEligibilityService platformEligibilityService;
     private final WechatMpAuthorizationService authorizationService;
     private final DouyinAuthorizationService douyinAuthorizationService;
 
@@ -56,6 +59,12 @@ public class SelfMediaAccountController {
     public R<List<SelfMediaAccountVO>> listByBrand(@PathVariable Long brandId) {
         brandService.requireBrandWithAccess(brandId, true);
         return R.ok(selfMediaAccountService.listByBrand(brandId));
+    }
+
+    @GetMapping("/brands/{brandId}/self-media-account-platforms")
+    public R<List<SelfMediaAccountPlatformOptionVO>> listAvailablePlatforms(@PathVariable Long brandId) {
+        brandService.requireBrandWithAccess(brandId, true);
+        return R.ok(platformEligibilityService.listByBrand(brandId));
     }
 
     @PostMapping("/brands/{brandId}/self-media-accounts")

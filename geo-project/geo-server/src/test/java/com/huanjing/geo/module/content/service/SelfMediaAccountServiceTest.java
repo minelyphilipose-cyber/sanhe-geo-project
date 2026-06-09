@@ -23,9 +23,11 @@ import org.mockito.ArgumentCaptor;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -37,6 +39,7 @@ class SelfMediaAccountServiceTest {
     private CredentialVaultService credentialVaultService;
     private BrandAccessService brandAccessService;
     private CurrentUserService currentUserService;
+    private SelfMediaAccountPlatformEligibilityService platformEligibilityService;
     private SelfMediaAccountService service;
 
     @BeforeEach
@@ -45,6 +48,7 @@ class SelfMediaAccountServiceTest {
         credentialVaultService = mock(CredentialVaultService.class);
         brandAccessService = mock(BrandAccessService.class);
         currentUserService = mock(CurrentUserService.class);
+        platformEligibilityService = mock(SelfMediaAccountPlatformEligibilityService.class);
 
         service = new SelfMediaAccountService(
                 selfMediaAccountMapper,
@@ -56,7 +60,8 @@ class SelfMediaAccountServiceTest {
                 mock(WechatComponentTicketService.class),
                 credentialVaultService,
                 brandAccessService,
-                currentUserService
+                currentUserService,
+                platformEligibilityService
         );
 
         SysUser operator = new SysUser();
@@ -84,6 +89,21 @@ class SelfMediaAccountServiceTest {
         assertTrue(saved.getPlatformAccountId().startsWith("geo-toutiao-10-"));
         assertEquals(31, saved.getPlatformAccountId().length());
         verify(brandAccessService).requireBrandAccess(10L, 99L, BrandAccessAction.MANAGE);
+        verify(platformEligibilityService).requireEligible(10L, "toutiao");
+    }
+
+    @Test
+    void createCookieAccountRejectsPlatformOutsidePackageAndScheduleIntersection() {
+        SelfMediaAccountManageRequest request = new SelfMediaAccountManageRequest(
+                "baijiahao",
+                "百家号运营号",
+                null,
+                "active"
+        );
+        doThrow(new com.huanjing.geo.common.exception.BizException(400, "当前客户套餐未开通该自媒体平台"))
+                .when(platformEligibilityService).requireEligible(10L, "baijiahao");
+
+        assertThrows(com.huanjing.geo.common.exception.BizException.class, () -> service.createCookieAccount(10L, request));
     }
 
     @Test
@@ -144,7 +164,8 @@ class SelfMediaAccountServiceTest {
                 ticketService,
                 mock(CredentialVaultService.class),
                 brandAccessService,
-                currentUserService
+                currentUserService,
+                mock(SelfMediaAccountPlatformEligibilityService.class)
         );
 
         WechatMpCapabilityVO capability = capabilityService.capability();

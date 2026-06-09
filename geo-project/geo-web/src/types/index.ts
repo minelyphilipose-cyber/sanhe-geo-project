@@ -192,6 +192,22 @@ export interface BrandMaterial {
   updatedAt: string
 }
 
+export interface BrandOffering {
+  id: number
+  brandId: number
+  offeringName: string
+  offeringAliases: string[]
+  targetUsers?: string | null
+  offeringIntro?: string | null
+  qualificationDescription?: string | null
+  remark?: string | null
+  status: 'active' | 'disabled' | string
+  priority: number
+  useScenarios?: string | null
+  createdAt?: string
+  updatedAt?: string
+}
+
 export interface BrandImageFolder {
   id: number
   brandId: number
@@ -1229,6 +1245,7 @@ export interface SelfMediaPublishSchedule {
   requestId?: number | null
   requestIdempotencyKey?: string | null
   articleId: number
+  articleTitle?: string | null
   brandId: number
   brandName?: string | null
   selfMediaAccountId: number
@@ -1326,6 +1343,18 @@ export interface SelfMediaScheduleCapability {
   verifiedBy?: number | null
   createdAt?: string | null
   updatedAt?: string | null
+}
+
+export interface SelfMediaAccountPlatformOption {
+  platform: string
+  label: string
+  eligible: boolean
+  quotaEnabled: boolean
+  quotaLimit: number
+  quotaStatus: 'no_active_package' | 'not_enabled' | 'quota_zero' | 'enabled' | string
+  scheduleReady: boolean
+  scheduleCode?: string | null
+  reason?: string | null
 }
 
 export interface PublishQuota {
@@ -1429,7 +1458,7 @@ export interface PackagePlan {
 export interface PackageChannelQuotaConfig {
   id?: number
   packagePlanId?: number
-  channelCode: 'official_site' | 'industry_site' | 'forum' | 'self_media' | 'authority_media' | string
+  channelCode: 'official_site' | 'industry_site' | 'forum' | 'authority_media' | `self_media:${string}` | string
   periodType: 'day' | 'week' | 'month' | 'total' | string
   quotaLimit: number
   enabled: boolean
@@ -1464,7 +1493,7 @@ export interface CompanyDistributionQuota {
 }
 
 export interface CompanyDistributionQuotaItem {
-  channelCode: 'official_site' | 'industry_site' | 'forum' | 'self_media' | 'authority_media' | string
+  channelCode: 'official_site' | 'industry_site' | 'forum' | 'authority_media' | `self_media:${string}` | string
   channelName: string
   enabled: boolean
   periodType?: 'day' | 'week' | 'month' | 'total' | string | null

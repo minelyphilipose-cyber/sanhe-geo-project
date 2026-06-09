@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.content.controller;
 
 import com.huanjing.geo.module.content.douyin.DouyinAuthorizationService;
+import com.huanjing.geo.module.content.service.SelfMediaAccountPlatformEligibilityService;
 import com.huanjing.geo.module.content.service.SelfMediaAccountService;
 import com.huanjing.geo.module.content.vo.DouyinCapabilityVO;
 import com.huanjing.geo.module.content.wechat.WechatMpAuthorizationService;
@@ -20,6 +21,7 @@ class SelfMediaAccountControllerTest {
     @Test
     void douyinCapability_returnsServiceCapability() {
         SelfMediaAccountService selfMediaAccountService = mock(SelfMediaAccountService.class);
+        SelfMediaAccountPlatformEligibilityService platformEligibilityService = mock(SelfMediaAccountPlatformEligibilityService.class);
         BrandService brandService = mock(BrandService.class);
         WechatMpAuthorizationService wechatAuthorizationService = mock(WechatMpAuthorizationService.class);
         DouyinAuthorizationService douyinAuthorizationService = mock(DouyinAuthorizationService.class);
@@ -28,6 +30,7 @@ class SelfMediaAccountControllerTest {
         SelfMediaAccountController controller = new SelfMediaAccountController(
                 selfMediaAccountService,
                 brandService,
+                platformEligibilityService,
                 wechatAuthorizationService,
                 douyinAuthorizationService
         );

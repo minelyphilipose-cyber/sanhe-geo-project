@@ -48,6 +48,7 @@ public class SelfMediaAccountService {
     private final CredentialVaultService credentialVaultService;
     private final BrandAccessService brandAccessService;
     private final CurrentUserService currentUserService;
+    private final SelfMediaAccountPlatformEligibilityService platformEligibilityService;
 
     public WechatMpCapabilityVO capability() {
         String reason = openPlatformProperties.isDraftDistributionEnabled()
@@ -178,6 +179,7 @@ public class SelfMediaAccountService {
     public SelfMediaAccountVO createCookieAccount(Long brandId, SelfMediaAccountManageRequest request) {
         SysUser operator = currentUserService.requireCurrentUser();
         brandAccessService.requireBrandAccess(brandId, operator.getId(), BrandAccessAction.MANAGE);
+        platformEligibilityService.requireEligible(brandId, request.platform());
         String platformAccountId = generatedPlatformAccountId(request.platform(), brandId);
         LocalDateTime now = LocalDateTime.now();
         SelfMediaAccount account = new SelfMediaAccount();
@@ -202,6 +204,9 @@ public class SelfMediaAccountService {
             throw new BizException(400, "Only cookie self-media accounts can be managed here");
         }
         brandAccessService.requireBrandAccess(account.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
+        if (!request.platform().equals(account.getPlatform())) {
+            platformEligibilityService.requireEligible(account.getBrandId(), request.platform());
+        }
         if (!StringUtils.hasText(account.getPlatformAccountId())) {
             account.setPlatformAccountId(generatedPlatformAccountId(request.platform(), account.getBrandId()));
         } else if (!request.platform().equals(account.getPlatform())

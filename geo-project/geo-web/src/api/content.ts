@@ -9,6 +9,7 @@ import type {
   RecommendedSitesResponse,
   R,
   SelfMediaAccount,
+  SelfMediaAccountPlatformOption,
   SelfMediaCookieStatusBatchResponse,
   SelfMediaScheduleCapability,
   SelfMediaPublishSchedule,
@@ -1024,6 +1025,10 @@ export function getSelfMediaAccountsByBrand(brandId: number) {
   return request.get<R<SelfMediaAccount[]>>(`/content/brands/${brandId}/self-media-accounts`)
 }
 
+export function getSelfMediaAccountPlatformOptions(brandId: number) {
+  return request.get<R<SelfMediaAccountPlatformOption[]>>(`/content/brands/${brandId}/self-media-account-platforms`)
+}
+
 export function getSelfMediaScheduleCapabilities() {
   return request.get<R<SelfMediaScheduleCapability[]>>('/content/self-media-schedule-capabilities')
 }
@@ -1046,7 +1051,7 @@ export function updateSelfMediaScheduleCapability(platform: string, data: {
 }
 
 export function createSelfMediaAccount(brandId: number, data: {
-  platform: 'toutiao' | 'zhihu' | 'xiaohongshu'
+  platform: string
   accountName: string
   platformAccountId?: string
   status?: 'active' | 'disabled'
@@ -1055,7 +1060,7 @@ export function createSelfMediaAccount(brandId: number, data: {
 }
 
 export function updateSelfMediaAccount(id: number, data: {
-  platform: 'toutiao' | 'zhihu' | 'xiaohongshu'
+  platform: string
   accountName: string
   platformAccountId?: string
   status?: 'active' | 'disabled'

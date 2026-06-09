@@ -81,6 +81,54 @@
       <template #header>
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
+            <span>产品信息</span>
+            <el-tag type="info">产品 / 服务项目 / 特色业务项</el-tag>
+          </div>
+          <el-button v-if="canUpdateBrand" type="primary" link @click="openOfferingCreate">新增产品</el-button>
+        </div>
+      </template>
+      <el-alert
+        class="mb-3"
+        type="info"
+        show-icon
+        :closable="false"
+        title="维护品牌下可公开引用的业务产品、服务项目或特色业务项。文章生成时会按主题先选中少量相关条目，再把精简资料注入提示词。"
+      />
+      <el-table v-loading="offeringsLoading" :data="offerings" border empty-text="暂无产品信息">
+        <el-table-column prop="offeringName" label="产品名称" min-width="160" />
+        <el-table-column label="产品简称" min-width="160">
+          <template #default="{ row }">{{ offeringAliasesText(row) }}</template>
+        </el-table-column>
+        <el-table-column prop="targetUsers" label="目标人群" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.targetUsers || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="useScenarios" label="适用场景" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.useScenarios || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">
+              {{ row.status === 'active' ? '启用' : '停用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="priority" label="优先级" width="90" />
+        <el-table-column label="更新时间" min-width="170">
+          <template #default="{ row }">{{ row.updatedAt || '-' }}</template>
+        </el-table-column>
+        <el-table-column v-if="canUpdateBrand" label="操作" width="130" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click="openOfferingEdit(row)">编辑</el-button>
+            <el-button link type="danger" @click="removeOffering(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+    </el-card>
+
+    <el-card class="admin-table-card">
+      <template #header>
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
             <span>指纹浏览器环境</span>
             <el-tag type="info">AdsPower</el-tag>
           </div>
@@ -94,7 +142,7 @@
         type="info"
         show-icon
         :closable="false"
-        title="同一品牌默认使用一个 AdsPower 浏览器环境。新增头条、知乎、小红书账号时会自动绑定当前启用环境；AdsPower API Key 在「个人中心 > 本地助手」配置。"
+        title="同一品牌默认使用一个 AdsPower 浏览器环境。新增头条、百家号、知乎、小红书账号时会自动绑定当前启用环境；AdsPower API Key 在「个人中心 > 本地助手」配置。"
       />
       <el-table v-loading="browserEnvironmentsLoading" :data="browserEnvironments" border empty-text="暂无指纹浏览器环境">
         <el-table-column prop="name" label="环境名称" min-width="160">
@@ -173,7 +221,7 @@
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2">
             <span>自媒体账号</span>
-            <el-tag type="info">头条 / 知乎 / 小红书</el-tag>
+            <el-tag type="info">头条 / 百家号 / 知乎 / 小红书</el-tag>
           </div>
           <div class="flex items-center gap-2">
             <el-button
@@ -186,7 +234,23 @@
             >
               补齐环境绑定
             </el-button>
-            <el-button v-if="canUpdateBrand" type="primary" link @click="openSelfMediaAccountCreate">新增账号</el-button>
+            <el-tooltip
+              v-if="canUpdateBrand"
+              :disabled="eligibleSelfMediaPlatformOptions.length > 0"
+              content="当前客户套餐与排期能力暂无可新增的自媒体平台"
+              placement="top"
+            >
+              <span>
+                <el-button
+                  type="primary"
+                  link
+                  :disabled="eligibleSelfMediaPlatformOptions.length === 0"
+                  @click="openSelfMediaAccountCreate"
+                >
+                  新增账号
+                </el-button>
+              </span>
+            </el-tooltip>
           </div>
         </div>
       </template>
@@ -491,6 +555,70 @@
     </el-dialog>
 
     <el-dialog
+      v-model="offeringVisible"
+      :title="editingOffering ? '编辑产品信息' : '新增产品信息'"
+      width="760px"
+      class="admin-editor-dialog brand-editor-dialog"
+    >
+      <el-form ref="offeringFormRef" class="brand-form" :model="offeringForm" :rules="offeringRules" label-position="top">
+        <div class="brand-section-bar"><span />基础信息<i /></div>
+        <div class="brand-form-grid">
+          <el-form-item label="产品名称" prop="offeringName" required>
+            <el-input v-model="offeringForm.offeringName" maxlength="128" show-word-limit placeholder="请输入产品名称" />
+          </el-form-item>
+          <el-form-item label="产品简称">
+            <el-input v-model="offeringForm.offeringAliases" maxlength="300" show-word-limit placeholder="多个简称以逗号隔开" />
+          </el-form-item>
+          <el-form-item label="状态" prop="status" required>
+            <el-select v-model="offeringForm.status" style="width: 100%">
+              <el-option label="启用" value="active" />
+              <el-option label="停用" value="disabled" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="优先级" prop="priority">
+            <el-input-number v-model="offeringForm.priority" :min="0" :max="999" :step="1" style="width: 100%" />
+          </el-form-item>
+        </div>
+
+        <div class="brand-section-bar"><span />内容资料<i /></div>
+        <div class="brand-form-grid">
+          <el-form-item class="is-wide" label="目标人群">
+            <el-input v-model="offeringForm.targetUsers" type="textarea" :rows="2" maxlength="500" show-word-limit />
+          </el-form-item>
+          <el-form-item class="is-wide" label="适用场景">
+            <el-input v-model="offeringForm.useScenarios" type="textarea" :rows="2" maxlength="800" show-word-limit />
+          </el-form-item>
+          <el-form-item class="is-wide" label="产品介绍">
+            <el-input
+              v-model="offeringForm.offeringIntro"
+              type="textarea"
+              :rows="4"
+              placeholder="说明该产品、服务项目或特色业务项解决的问题、适合的人群、主要流程或特点。"
+            />
+          </el-form-item>
+          <el-form-item class="is-wide" label="产品资质描述">
+            <el-input
+              v-model="offeringForm.qualificationDescription"
+              type="textarea"
+              :rows="3"
+              maxlength="1000"
+              show-word-limit
+              placeholder="填写可公开、可核验的资质、认证、标准或设备信息；没有可留空。"
+            />
+          </el-form-item>
+          <el-form-item class="is-wide" label="备注">
+            <el-input v-model="offeringForm.remark" type="textarea" :rows="2" maxlength="500" show-word-limit />
+            <div class="brand-field-help">内部备注默认不进入文章生成提示词。</div>
+          </el-form-item>
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="offeringVisible = false">取消</el-button>
+        <el-button type="primary" :loading="offeringSaving" @click="submitOffering">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
       v-model="selfMediaAccountVisible"
       :title="editingSelfMediaAccount ? '编辑自媒体账号' : '新增自媒体账号'"
       width="520px"
@@ -504,9 +632,13 @@
       >
         <el-form-item label="平台" prop="platform" required>
           <el-select v-model="selfMediaAccountForm.platform" style="width: 100%">
-            <el-option label="头条" value="toutiao" />
-            <el-option label="知乎" value="zhihu" />
-            <el-option label="小红书" value="xiaohongshu" />
+            <el-option
+              v-for="option in selfMediaAccountFormPlatformOptions"
+              :key="option.platform"
+              :label="optionLabel(option)"
+              :value="option.platform"
+              :disabled="!option.eligible && option.platform !== editingSelfMediaAccount?.platform"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="账号名称" prop="accountName" required>
@@ -583,6 +715,7 @@ import {
   deleteBrandTemplatePerspectiveConfig,
   getBrandTemplatePerspectiveConfigs,
   createSelfMediaAccount,
+  getSelfMediaAccountPlatformOptions,
   saveBrandTemplatePerspectiveConfig,
   getSelfMediaAccountsByBrand,
   updateSelfMediaAccount,
@@ -590,10 +723,14 @@ import {
   type TemplatePerspective,
 } from '@/api/content'
 import {
+  createBrandOffering,
+  deleteBrandOffering,
   getBrandDetail,
+  getBrandOfferings,
   updateBrand,
   deleteBrand,
   getCompanyDetail,
+  updateBrandOffering,
 } from '@/api/customer'
 import {
   createBrowserEnvironment,
@@ -615,7 +752,7 @@ import {
   type ExtensionSession,
 } from '@/api/extension'
 import { getPublishSites } from '@/api/publishSite'
-import type { Brand, PublishSite, SelfMediaAccount } from '@/types'
+import type { Brand, BrandOffering, PublishSite, SelfMediaAccount, SelfMediaAccountPlatformOption } from '@/types'
 import { useUserStore } from '@/stores/user'
 import { useDictStore } from '@/stores/dict'
 import RegionCascader from '@/components/ui/RegionCascader.vue'
@@ -634,7 +771,7 @@ const canUpdateBrand = computed(() => userStore.hasPermission('brand.update'))
 const canDeleteBrand = computed(() => userStore.hasPermission('brand.delete'))
 const canCreateProject = computed(() => userStore.hasPermission('project.create'))
 
-type SemiAutoPlatform = 'toutiao' | 'zhihu' | 'xiaohongshu'
+type SemiAutoPlatform = string
 type SemiAutoSelfMediaAccount = SelfMediaAccount & {
   platform: SemiAutoPlatform | string
   cookieCredentialStatus?: string | null
@@ -648,6 +785,12 @@ const editVisible = ref(false)
 const selfMediaAccountsLoading = ref(false)
 const selfMediaAccountSaving = ref(false)
 const selfMediaAccountVisible = ref(false)
+const selfMediaAccountPlatformOptions = ref<SelfMediaAccountPlatformOption[]>([])
+const offerings = ref<BrandOffering[]>([])
+const offeringsLoading = ref(false)
+const offeringSaving = ref(false)
+const offeringVisible = ref(false)
+const editingOffering = ref<BrandOffering | null>(null)
 const perspectiveConfigLoading = ref(false)
 const perspectiveConfigSaving = ref(false)
 const perspectiveConfigVisible = ref(false)
@@ -674,6 +817,7 @@ const editingSelfMediaAccount = ref<SemiAutoSelfMediaAccount | null>(null)
 const companyName = ref('')
 const companyIndustryTags = ref<string[]>([])
 const brandFormRef = ref<FormInstance>()
+const offeringFormRef = ref<FormInstance>()
 const selfMediaAccountFormRef = ref<FormInstance>()
 const perspectiveConfigFormRef = ref<FormInstance>()
 
@@ -704,9 +848,21 @@ const brandForm = reactive({
 })
 
 const selfMediaAccountForm = reactive({
-  platform: 'toutiao' as SemiAutoPlatform,
+  platform: '',
   accountName: '',
   status: 'active' as 'active' | 'disabled',
+})
+
+const offeringForm = reactive({
+  offeringName: '',
+  offeringAliases: '',
+  targetUsers: '',
+  offeringIntro: '',
+  qualificationDescription: '',
+  remark: '',
+  status: 'active' as 'active' | 'disabled',
+  priority: 50,
+  useScenarios: '',
 })
 
 const perspectiveConfigForm = reactive({
@@ -741,6 +897,11 @@ const caseDescriptionPlaceholder = '请填写可公开引用的品牌案例素�
 const selfMediaAccountRules: FormRules = {
   platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
   accountName: [{ required: true, message: '请输入账号名称', trigger: 'blur' }],
+  status: [{ required: true, message: '请选择状态', trigger: 'change' }],
+}
+
+const offeringRules: FormRules = {
+  offeringName: [{ required: true, message: '请输入产品名称', trigger: 'blur' }],
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
 }
 
@@ -779,8 +940,34 @@ const subOptions: Record<string, Array<{ label: string; value: string }>> = {
 }
 
 const semiAutoSelfMediaAccounts = computed(() =>
-  selfMediaAccounts.value.filter((item) => item.platform === 'toutiao' || item.platform === 'zhihu' || item.platform === 'xiaohongshu'),
+  selfMediaAccounts.value.filter((item) => isSemiAutoPlatform(item.platform)),
 )
+const eligibleSelfMediaPlatformOptions = computed(() =>
+  selfMediaAccountPlatformOptions.value.filter((item) => item.eligible),
+)
+const selfMediaAccountFormPlatformOptions = computed(() => {
+  if (!editingSelfMediaAccount.value) {
+    return selfMediaAccountPlatformOptions.value
+  }
+  const currentPlatform = editingSelfMediaAccount.value.platform
+  const options = selfMediaAccountPlatformOptions.value
+  if (!currentPlatform || options.some((item) => item.platform === currentPlatform)) {
+    return options
+  }
+  return [
+    {
+      platform: currentPlatform,
+      label: selfMediaPlatformLabel(currentPlatform),
+      eligible: false,
+      quotaEnabled: false,
+      quotaLimit: 0,
+      quotaStatus: 'legacy',
+      scheduleReady: false,
+      reason: '历史账号平台当前不在可选范围内',
+    },
+    ...options,
+  ] as SelfMediaAccountPlatformOption[]
+})
 
 const activeBrowserEnvironments = computed(() => browserEnvironments.value.filter((item) => item.status === 'active'))
 const defaultBrowserEnvironment = computed(() => activeBrowserEnvironments.value[0] || null)
@@ -843,9 +1030,19 @@ function industryLabel(value?: string | null) {
 
 function selfMediaPlatformLabel(value?: string | null) {
   if (value === 'toutiao') return '头条'
+  if (value === 'baijiahao') return '百家号'
   if (value === 'zhihu') return '知乎'
   if (value === 'xiaohongshu') return '小红书'
   return value || '-'
+}
+
+function optionLabel(option: SelfMediaAccountPlatformOption) {
+  if (option.eligible) return option.label
+  return option.reason ? `${option.label}（${option.reason}）` : `${option.label}（不可选）`
+}
+
+function offeringAliasesText(row: BrandOffering) {
+  return row.offeringAliases?.filter(Boolean).join('、') || '-'
 }
 
 function browserEnvironmentAccountOf(account: SemiAutoSelfMediaAccount) {
@@ -1023,7 +1220,7 @@ async function bindAllUnboundSemiAutoAccounts() {
   }
   const targets = semiAutoSelfMediaAccounts.value.filter((account) => !browserEnvironmentAccountOf(account))
   if (!targets.length) {
-    ElMessage.success('所有头条/知乎/小红书账号均已绑定浏览器环境')
+    ElMessage.success('所有头条/百家号/知乎/小红书账号均已绑定浏览器环境')
     return
   }
   environmentBindingSaving.value = true
@@ -1201,16 +1398,34 @@ async function load() {
       companyName.value = ''
       companyIndustryTags.value = []
     }
-    await Promise.all([loadBrowserEnvironments(), loadSelfMediaAccounts(), loadPerspectiveConfigs(), loadExtensionSessions()])
+    await Promise.all([
+      loadOfferings(),
+      loadBrowserEnvironments(),
+      loadSelfMediaAccountContext(),
+      loadPerspectiveConfigs(),
+      loadExtensionSessions(),
+    ])
   } catch {
     brand.value = null
     companyName.value = ''
+    offerings.value = []
     selfMediaAccounts.value = []
+    selfMediaAccountPlatformOptions.value = []
     browserEnvironments.value = []
     browserEnvironmentAccounts.value = {}
     extensionSessions.value = []
   } finally {
     loading.value = false
+  }
+}
+
+async function loadOfferings() {
+  offeringsLoading.value = true
+  try {
+    const { data } = await getBrandOfferings(brandId)
+    offerings.value = data.data || []
+  } finally {
+    offeringsLoading.value = false
   }
 }
 
@@ -1306,6 +1521,20 @@ async function loadSelfMediaAccounts() {
   }
 }
 
+async function loadSelfMediaAccountContext() {
+  await loadSelfMediaAccountPlatformOptions()
+  await loadSelfMediaAccounts()
+}
+
+async function loadSelfMediaAccountPlatformOptions() {
+  try {
+    const { data } = await getSelfMediaAccountPlatformOptions(brandId)
+    selfMediaAccountPlatformOptions.value = data.data || []
+  } catch {
+    selfMediaAccountPlatformOptions.value = []
+  }
+}
+
 async function loadBrowserEnvironmentAccounts(accounts: SemiAutoSelfMediaAccount[]) {
   const targets = accounts.filter((item) => isSemiAutoPlatform(item.platform))
   if (!targets.length) {
@@ -1334,9 +1563,95 @@ async function loadPerspectiveConfigs() {
   }
 }
 
+function resetOfferingForm() {
+  offeringForm.offeringName = ''
+  offeringForm.offeringAliases = ''
+  offeringForm.targetUsers = ''
+  offeringForm.offeringIntro = ''
+  offeringForm.qualificationDescription = ''
+  offeringForm.remark = ''
+  offeringForm.status = 'active'
+  offeringForm.priority = 50
+  offeringForm.useScenarios = ''
+}
+
+function openOfferingCreate() {
+  editingOffering.value = null
+  resetOfferingForm()
+  offeringVisible.value = true
+}
+
+function openOfferingEdit(offering: BrandOffering) {
+  editingOffering.value = offering
+  offeringForm.offeringName = offering.offeringName || ''
+  offeringForm.offeringAliases = offering.offeringAliases?.join('，') || ''
+  offeringForm.targetUsers = offering.targetUsers || ''
+  offeringForm.offeringIntro = offering.offeringIntro || ''
+  offeringForm.qualificationDescription = offering.qualificationDescription || ''
+  offeringForm.remark = offering.remark || ''
+  offeringForm.status = offering.status === 'disabled' ? 'disabled' : 'active'
+  offeringForm.priority = offering.priority ?? 50
+  offeringForm.useScenarios = offering.useScenarios || ''
+  offeringVisible.value = true
+}
+
+async function submitOffering() {
+  const valid = await offeringFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+  offeringSaving.value = true
+  try {
+    const payload = {
+      offeringName: offeringForm.offeringName.trim(),
+      offeringAliases: nullableText(offeringForm.offeringAliases),
+      targetUsers: nullableText(offeringForm.targetUsers),
+      offeringIntro: nullableText(offeringForm.offeringIntro),
+      qualificationDescription: nullableText(offeringForm.qualificationDescription),
+      remark: nullableText(offeringForm.remark),
+      status: offeringForm.status,
+      priority: Number(offeringForm.priority) || 50,
+      useScenarios: nullableText(offeringForm.useScenarios),
+    }
+    if (editingOffering.value) {
+      await updateBrandOffering(brandId, editingOffering.value.id, payload)
+    } else {
+      await createBrandOffering(brandId, payload)
+    }
+    ElMessage.success('产品信息已保存')
+    offeringVisible.value = false
+    await loadOfferings()
+  } finally {
+    offeringSaving.value = false
+  }
+}
+
+async function removeOffering(offering: BrandOffering) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除产品信息「${offering.offeringName}」？删除后文章生成不会再引用该条资料。`,
+      '删除确认',
+      {
+        type: 'warning',
+        confirmButtonText: '确认删除',
+        cancelButtonText: '取消',
+      },
+    )
+    await deleteBrandOffering(brandId, offering.id)
+    ElMessage.success('产品信息已删除')
+    await loadOfferings()
+  } catch (err: any) {
+    if (err === 'cancel' || err === 'close') return
+    ElMessage.error(err instanceof Error ? err.message : '删除产品信息失败')
+  }
+}
+
 function openSelfMediaAccountCreate() {
+  const firstPlatform = eligibleSelfMediaPlatformOptions.value[0]?.platform
+  if (!firstPlatform) {
+    ElMessage.warning('当前客户套餐与排期能力暂无可新增的自媒体平台')
+    return
+  }
   editingSelfMediaAccount.value = null
-  selfMediaAccountForm.platform = 'toutiao'
+  selfMediaAccountForm.platform = firstPlatform
   selfMediaAccountForm.accountName = ''
   selfMediaAccountForm.status = 'active'
   selfMediaAccountVisible.value = true
@@ -1344,14 +1659,19 @@ function openSelfMediaAccountCreate() {
 
 function openSelfMediaAccountEdit(account: SemiAutoSelfMediaAccount) {
   editingSelfMediaAccount.value = account
-  selfMediaAccountForm.platform = isSemiAutoPlatform(account.platform) ? account.platform : 'toutiao'
+  selfMediaAccountForm.platform = account.platform || eligibleSelfMediaPlatformOptions.value[0]?.platform || ''
   selfMediaAccountForm.accountName = account.accountName || ''
   selfMediaAccountForm.status = account.status === 'disabled' ? 'disabled' : 'active'
   selfMediaAccountVisible.value = true
 }
 
 function isSemiAutoPlatform(platform?: string | null): platform is SemiAutoPlatform {
-  return platform === 'toutiao' || platform === 'zhihu' || platform === 'xiaohongshu'
+  if (!platform) return false
+  const normalized = platform.trim().toLowerCase()
+  if (selfMediaAccountPlatformOptions.value.some((item) => item.platform === normalized && (item.eligible || item.scheduleReady))) {
+    return true
+  }
+  return normalized === 'toutiao' || normalized === 'baijiahao' || normalized === 'zhihu' || normalized === 'xiaohongshu'
 }
 
 async function submitSelfMediaAccount() {
