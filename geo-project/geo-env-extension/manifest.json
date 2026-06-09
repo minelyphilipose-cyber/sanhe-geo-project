@@ -23,7 +23,8 @@
     "https://zhuanlan.zhihu.com/*",
     "https://www.zhihu.com/*",
     "https://creator.xiaohongshu.com/*",
-    "https://www.xiaohongshu.com/*"
+    "https://www.xiaohongshu.com/*",
+    "https://baijiahao.baidu.com/*"
   ],
   "content_scripts": [
     {
@@ -32,9 +33,13 @@
         "https://zhuanlan.zhihu.com/*",
         "https://www.zhihu.com/*",
         "https://creator.xiaohongshu.com/*",
-        "https://www.xiaohongshu.com/*"
+        "https://www.xiaohongshu.com/*",
+        "https://baijiahao.baidu.com/*"
       ],
       "js": [
+        "platform-baijiahao.js",
+        "platform-xiaohongshu.js",
+        "platform-zhihu.js",
         "content-script.js"
       ],
       "run_at": "document_idle",

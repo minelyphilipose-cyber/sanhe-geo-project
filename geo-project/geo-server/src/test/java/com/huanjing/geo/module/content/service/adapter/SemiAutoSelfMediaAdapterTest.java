@@ -137,6 +137,32 @@ class SemiAutoSelfMediaAdapterTest {
     }
 
     @Test
+    void baijiahaoProfileComesFromConfiguration() {
+        SemiAutoPlatformProperties properties = new SemiAutoPlatformProperties();
+        SemiAutoPlatformProperties.Platform profile = new SemiAutoPlatformProperties.Platform();
+        profile.setPublishUrl("https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1");
+        profile.setCookieDomains(List.of(".baidu.com", ".baijiahao.baidu.com"));
+        profile.setRequiredCookieNames(List.of("BDUSS", "STOKEN"));
+        profile.setEditorSelectors(Map.of("title", "textarea[placeholder*='标题']"));
+        profile.setAllowedHtmlTags(List.of("p", "strong", "ul", "li"));
+        properties.setProfiles(Map.of(BaijiahaoSemiAutoAdapter.PLATFORM, profile));
+        BaijiahaoSemiAutoAdapter adapter = new BaijiahaoSemiAutoAdapter(properties, new MarkdownToHtmlRenderer());
+
+        PlatformFillProfile fillProfile = adapter.fillProfile();
+        ArticleDraft article = new ArticleDraft();
+        article.setTitle("百家号标题");
+        SemiAutoFillTask task = adapter.prepareFillTask(article, "**内容**", fillProfile);
+
+        assertEquals("baijiahao", adapter.platform());
+        assertEquals("https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1", fillProfile.publishUrl());
+        assertEquals(List.of(".baidu.com", ".baijiahao.baidu.com"), fillProfile.cookieDomains());
+        assertEquals(List.of("BDUSS", "STOKEN"), fillProfile.requiredCookieNames());
+        assertEquals("baijiahao", task.platform());
+        assertEquals("百家号标题", task.title());
+        assertTrue(task.renderedHtml().contains("<strong>内容</strong>"));
+    }
+
+    @Test
     void missingProfileFailsFast() {
         SemiAutoPlatformProperties properties = new SemiAutoPlatformProperties();
         ToutiaoSemiAutoAdapter adapter = new ToutiaoSemiAutoAdapter(properties, new MarkdownToHtmlRenderer());

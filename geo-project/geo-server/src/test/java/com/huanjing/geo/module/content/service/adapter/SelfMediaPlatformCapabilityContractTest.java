@@ -26,7 +26,11 @@ class SelfMediaPlatformCapabilityContractTest {
         assertTrue(contract.supportsPlatformSchedule());
         assertTrue(contract.supportsLocation());
         assertTrue(contract.supportsOneClickFormat());
+        assertTrue(contract.supportsPublishCheck());
         assertFalse(contract.requiresCoverUpload());
+        assertTrue(contract.scheduleRules().minRemainingMinutes() >= 60);
+        assertTrue(contract.scheduleRules().fillLeadMinutes() >= contract.scheduleRules().minRemainingMinutes() + 30);
+        assertTrue(contract.scheduleRules().maxRemainingMinutes() >= 14 * 24 * 60);
     }
 
     @Test
@@ -36,6 +40,10 @@ class SelfMediaPlatformCapabilityContractTest {
         assertTrue(contract.supportsPlatformSchedule());
         assertTrue(contract.requiresCoverUpload());
         assertFalse(contract.supportsLocation());
+        assertTrue(contract.supportsPublishCheck());
+        assertTrue(contract.scheduleRules().minRemainingMinutes() >= 60);
+        assertTrue(contract.scheduleRules().fillLeadMinutes() > contract.scheduleRules().minRemainingMinutes());
+        assertTrue(contract.scheduleRules().maxRemainingMinutes() >= 7 * 24 * 60);
     }
 
     @Test

@@ -1,7 +1,9 @@
+importScripts('platform-baijiahao.js', 'platform-xiaohongshu.js', 'platform-zhihu.js')
+
 const EXTENSION_VERSION = '0.1.0'
 const INSTALL_ID_KEY = 'geoEnvInstallId'
 const EVENT_LOG_KEY = 'geoEnvEventLog'
-const IDENTITY_PRECHECK_PLATFORMS = new Set(['toutiao', 'zhihu', 'xiaohongshu'])
+const IDENTITY_PRECHECK_PLATFORMS = new Set(['toutiao', 'zhihu', 'xiaohongshu', 'baijiahao'])
 const autoLoginReportAtByKey = new Map()
 const MAX_IMAGE_FETCH_BYTES = 20 * 1024 * 1024
 
@@ -91,7 +93,12 @@ function isExtensionUnauthorized(error) {
   return error?.status === 401 || error?.code === 70002 || String(error?.message || '').toLowerCase() === 'unauthorized'
 }
 
-async function clearExtensionSession() {
+async function clearExtensionSession(expectedToken = null) {
+  if (expectedToken) {
+    const current = await storageGet(['geoEnvSession'])
+    const currentToken = current.geoEnvSession?.extensionToken || ''
+    if (currentToken && currentToken !== expectedToken) return
+  }
   await storageSet({ geoEnvSession: null })
 }
 
@@ -118,7 +125,7 @@ async function refreshExtensionSession(config, session, options = {}) {
     return nextSession
   } catch (error) {
     if (isExtensionUnauthorized(error)) {
-      await clearExtensionSession()
+      await clearExtensionSession(session.extensionToken)
       throw new Error('扩展后台绑定已失效，请在扩展弹窗重新绑定后台')
     }
     throw error
@@ -286,7 +293,7 @@ async function pollOnce(options = {}) {
       environmentKey: activeConfig.environmentKey,
     }
   } catch (error) {
-    const failure = classifyTaskFailure(error.message)
+    const failure = classifyTaskFailure(error)
     await apiRequest(activeConfig, `/api/v1/extension/tasks/${next.task.taskId}/fail`, {
       method: 'POST',
       body: JSON.stringify({
@@ -304,9 +311,11 @@ async function pollOnce(options = {}) {
   }
 }
 
-function classifyTaskFailure(message) {
-  const text = String(message || '')
-  const code = text.match(/^([A-Z0-9_]{3,80})[：:]/)?.[1] || classifyTaskFailureCode(text)
+function classifyTaskFailure(errorOrMessage) {
+  const text = String(errorOrMessage?.message || errorOrMessage || '')
+  const code = errorOrMessage?.code
+    || text.match(/^([A-Z0-9_]{3,80})[：:]/)?.[1]
+    || classifyTaskFailureCode(text)
   return {
     code,
     message: text || '页面填充失败',
@@ -322,6 +331,29 @@ function classifyTaskFailureCode(text) {
   if (text.includes('平台定时发布能力')) return 'PLATFORM_CAPABILITY_UNVERIFIED'
   if (text.includes('Material not found') || text.includes('素材不存在')) return 'COVER_MATERIAL_NOT_FOUND'
   if (text.includes('封面图片类型不支持') || text.includes('图片类型不支持')) return 'COVER_IMAGE_UNSUPPORTED'
+  const zhihuCode = globalThis.__GEO_ZHIHU_PLATFORM__?.classifyFailureCode?.(text, 'zhihu')
+  if (zhihuCode) return zhihuCode
+  if (text.includes('知乎发布被草稿加载阻塞') || text.includes('知乎草稿加载未完成') || text.includes('草稿加载中')) return 'ZHIHU_DRAFT_LOADING'
+  if (text.includes('知乎发布后未检测到完成状态')) return 'ZHIHU_PUBLISH_NOT_SUBMITTED'
+  const xiaohongshuCode = globalThis.__GEO_XIAOHONGSHU_PLATFORM__?.classifyFailureCode?.(text, 'xiaohongshu')
+  if (xiaohongshuCode) return xiaohongshuCode
+  const baijiahaoCode = globalThis.__GEO_BAIJIAHAO_PLATFORM__?.classifyFailureCode?.(text, 'baijiahao')
+  if (baijiahaoCode) return baijiahaoCode
+  if (text.includes('小红书一键排版按钮未找到')) return 'XIAOHONGSHU_FORMAT_BUTTON_NOT_FOUND'
+  if (text.includes('小红书一键排版后未进入排版页') || text.includes('小红书排版页未就绪')) return 'XIAOHONGSHU_FORMAT_NOT_READY'
+  if (text.includes('小红书下一步按钮未找到')) return 'XIAOHONGSHU_NEXT_BUTTON_NOT_FOUND'
+  if (text.includes('小红书点击下一步后未进入发布设置页') || text.includes('小红书发布设置页未加载完成') || text.includes('小红书发布设置页未就绪')) {
+    return 'XIAOHONGSHU_PUBLISH_SETTINGS_NOT_READY'
+  }
+  if (text.includes('小红书笔记图片生成') || text.includes('小红书图片生成')) return 'XIAOHONGSHU_IMAGE_GENERATION_TIMEOUT'
+  if (text.includes('小红书定时发布时间过近')) return 'XIAOHONGSHU_SCHEDULE_TIME_TOO_SOON'
+  if (text.includes('小红书定时发布时间过远')) return 'XIAOHONGSHU_SCHEDULE_TIME_TOO_LATE'
+  if (text.includes('小红书定时发布时间无效')) return 'XIAOHONGSHU_SCHEDULE_TIME_INVALID'
+  if (text.includes('小红书定时发布开关')) return 'XIAOHONGSHU_SCHEDULE_SWITCH_NOT_FOUND'
+  if (text.includes('小红书定时发布时间输入框')) return 'XIAOHONGSHU_SCHEDULE_TIME_INPUT_NOT_FOUND'
+  if (text.includes('小红书定时发布时间未保持目标值')) return 'XIAOHONGSHU_SCHEDULE_TIME_NOT_APPLIED'
+  if (text.includes('小红书定时发布按钮未找到') || text.includes('小红书发布按钮未找到')) return 'XIAOHONGSHU_PUBLISH_BUTTON_NOT_FOUND'
+  if (text.includes('小红书发布后未检测到成功状态')) return 'XIAOHONGSHU_PUBLISH_NOT_CONFIRMED'
   if (text.includes('定时发布时间已过期') || text.includes('定时发布时间无效')) return 'SCHEDULE_TIME_INVALID'
   if (text.includes('页面填充执行超时') || text.includes('超时')) return 'PAGE_LOAD_TIMEOUT'
   if (text.includes('未找到') || text.includes('编辑器')) return 'EDITOR_NOT_READY'
@@ -329,6 +361,8 @@ function classifyTaskFailureCode(text) {
 }
 
 function isRetryableTaskFailureCode(code) {
+  if (globalThis.__GEO_ZHIHU_PLATFORM__?.isRetryableFailureCode?.(code)) return true
+  if (globalThis.__GEO_XIAOHONGSHU_PLATFORM__?.isRetryableFailureCode?.(code)) return true
   return [
     'PAGE_LOAD_TIMEOUT',
     'EDITOR_NOT_READY',
@@ -336,6 +370,8 @@ function isRetryableTaskFailureCode(code) {
     'SCHEDULE_DIALOG_NOT_READY',
     'PREVIEW_PAGE_NOT_READY',
     'WORKS_LIST_VERIFY_TIMEOUT',
+    'ZHIHU_DRAFT_LOADING',
+    'ZHIHU_PUBLISH_NOT_SUBMITTED',
     'LOCAL_HELPER_TEMPORARY_ERROR',
     'FILL_TOKEN_USED_OR_EXPIRED',
   ].includes(code)
@@ -345,7 +381,11 @@ async function autoPollOnce(reason, senderTabId) {
   try {
     const { config, session } = await getConfig()
     if (config.autoRun === false) return { ok: true, skipped: true, reason: 'auto_run_disabled' }
-    if (!session?.extensionToken) return { ok: true, skipped: true, reason: 'not_bound' }
+    if (!session?.extensionToken) {
+      await setBadge('ERR')
+      await appendEventLog({ type: 'auto_fill', ok: false, reason, error: '扩展未绑定后台，无法向本地助手签名领取任务' })
+      return { ok: true, skipped: true, reason: 'not_bound' }
+    }
     const tab = senderTabId ? await chrome.tabs.get(senderTabId).catch(() => null) : null
     const platform = inferPlatformFromUrl(tab?.url)
     let identityTabId = senderTabId
@@ -510,17 +550,297 @@ async function handleTask(config, session, task, options = {}) {
   const tab = await resolveFillTab(options.identityTabId, task.platform, payload.publishUrl)
   await waitForTabComplete(tab.id, 30_000)
   await waitForContentScript(tab.id, 8, 500)
-  const fillResponse = await sendFillMessageOnce(tab.id, {
-    type: 'GEO_ENV_FILL_TASK',
-    payload,
-  })
-  const fillResult = fillResponse?.result || fillResponse
+  let fillResult
+  try {
+    const fillResponse = await sendFillMessageOnce(tab.id, {
+      type: 'GEO_ENV_FILL_TASK',
+      payload,
+    })
+    fillResult = fillResponse?.result || fillResponse
+  } catch (error) {
+    fillResult = await recoverZhihuPublishAfterMessageChannelClosed(tab.id, task, payload, error)
+  }
 
   await apiRequest(taskApiConfig, `/api/v1/extension/tasks/${task.taskId}/ack`, {
     method: 'POST',
     body: JSON.stringify({ fillResult }),
   }, session.extensionToken)
   return fillResult
+}
+
+async function recoverZhihuPublishAfterMessageChannelClosed(tabId, task, payload, error) {
+  const message = error?.message || String(error || '')
+  if (normalizePlatform(task?.platform || payload?.platform) !== 'zhihu' || !isMessageChannelClosedError(message)) {
+    throw error
+  }
+  const verification = await waitForZhihuPublishedTab(tabId, 15000, {
+    expectedTitle: payload?.title || payload?.articleTitle || '',
+    expectedAccountName: payload?.expectedAccountName || '',
+    expectedPlatformAccountId: payload?.expectedPlatformAccountId || '',
+  })
+  if (!verification?.verified) {
+    throw error
+  }
+  return {
+    titleFilled: true,
+    contentFilled: true,
+    tagsFilled: false,
+    publishOptions: {
+      filled: true,
+      published: true,
+      publishVerification: verification,
+      message: '知乎发布后页面跳转，已通过标签页状态确认发布',
+    },
+    recoveredAfterMessageChannelClosed: true,
+    messageChannelClosedError: message,
+  }
+}
+
+function isMessageChannelClosedError(message) {
+  const text = String(message || '')
+  return text.includes('message channel closed')
+    || text.includes('receiving end does not exist')
+    || text.includes('Extension context invalidated')
+}
+
+async function waitForZhihuPublishedTab(tabId, timeoutMs, context = {}) {
+  const deadline = Date.now() + timeoutMs
+  let latest = null
+  while (Date.now() < deadline) {
+    latest = await inspectZhihuPublishedTab(tabId, context)
+    if (latest?.verified) return latest
+    await delay(500)
+  }
+  return latest
+}
+
+async function inspectZhihuPublishedTab(tabId, context = {}) {
+  const tab = await chrome.tabs.get(tabId).catch(() => null)
+  const url = tab?.url || ''
+  const publishedUrl = normalizeZhihuPublishedUrl(url)
+  if (isZhihuPublishedArticleUrl(url)) {
+    const pageTitle = normalizeZhihuTitleText(tab?.title || '')
+    return {
+      verified: true,
+      pageUrl: publishedUrl,
+      pageTitle,
+      expectedTitle: context.expectedTitle || '',
+      titleMatch: matchZhihuPublishedTitle(context.expectedTitle || '', pageTitle, ''),
+      account: {
+        expectedAccountName: context.expectedAccountName || '',
+        expectedPlatformAccountId: context.expectedPlatformAccountId || '',
+        accountIds: [],
+        accountNames: [],
+        profileUrls: [],
+        diagnostics: 'recovered from tab url; page script not inspected',
+      },
+      publishUi: {
+        editorStillOpen: false,
+        publishButtonVisible: false,
+        draftLoadingDialogVisible: false,
+      },
+      successSignal: {
+        publishedUrl: true,
+        successText: false,
+        reviewText: false,
+        publishedAtText: false,
+      },
+      recoveredFrom: 'tab_url',
+    }
+  }
+  if (!isAllowedPlatformUrl('zhihu', url)) {
+    return { verified: false, pageUrl: url, reason: 'not_zhihu_tab' }
+  }
+  const [state] = await chrome.scripting.executeScript({
+    target: { tabId },
+    args: [context],
+    func: (context) => {
+      const normalize = (value) => String(value || '').replace(/\s+/g, '')
+      const normalizeTitle = (value) => normalize(value)
+        .replace(/[-_—|].*知乎.*/i, '')
+        .replace(/^写文章/, '')
+        .trim()
+      const matchTitle = (expectedTitle, pageTitle, pageText) => {
+        const expected = normalizeTitle(expectedTitle || '')
+        const actual = normalizeTitle(pageTitle || '')
+        if (!expected) return { expected: '', actual, matched: true, method: 'no_expected_title' }
+        if (actual && (actual === expected || actual.includes(expected) || expected.includes(actual))) {
+          return { expected, actual, matched: true, method: 'page_title' }
+        }
+        const text = normalizeTitle(pageText || '')
+        return { expected, actual, matched: Boolean(text && text.includes(expected)), method: 'page_text' }
+      }
+      const extractPublishedAt = (value) => {
+        const text = String(value || '')
+        return text.match(/发布于\d{4}[-年]\d{1,2}[-月]\d{1,2}[^\s。；;，,]{0,16}/)?.[0]
+          || text.match(/\d{4}[-年]\d{1,2}[-月]\d{1,2}[^\s。；;，,]{0,16}发布/)?.[0]
+          || ''
+      }
+      const collectIdentity = () => {
+        const ids = new Set()
+        const names = new Set()
+        const profileUrls = new Set()
+        const collectProfileHref = (href) => {
+          try {
+            const url = new URL(href || '', location.href)
+            const token = url.pathname.match(/^\/(?:people|org)\/([^/?#]+)/)?.[1]
+            if (!token) return
+            ids.add(decodeURIComponent(token))
+            url.pathname = url.pathname.startsWith('/org/') ? `/org/${token}` : `/people/${token}`
+            url.search = ''
+            url.hash = ''
+            profileUrls.add(url.toString())
+          } catch (_) {
+            const token = String(href || '').match(/\/(?:people|org)\/([^/?#]+)/)?.[1]
+            if (token) ids.add(decodeURIComponent(token))
+          }
+        }
+        for (const link of Array.from(document.querySelectorAll('a[href*="/people/"],a[href*="/org/"]')).slice(0, 80)) {
+          collectProfileHref(link.getAttribute('href') || '')
+          const imgAlt = link.querySelector('img[alt]')?.getAttribute('alt') || ''
+          if (imgAlt && !/^(写文章|发布文章|创作|开始写作|首页|会员|消息|私信|设置|退出|退出登录|知乎|知乎创作助手)$/.test(imgAlt)) names.add(imgAlt)
+        }
+        const scriptText = Array.from(document.scripts)
+          .slice(0, 80)
+          .map((script) => script.textContent || '')
+          .filter((text) => /(currentUser|viewer|loginUser|urlToken)/i.test(text))
+          .join('\n')
+          .slice(0, 200000)
+        for (const match of scriptText.matchAll(/"urlToken"\s*:\s*"([^"]{2,80})"|"url_token"\s*:\s*"([^"]{2,80})"|"username"\s*:\s*"([^"]{2,80})"/g)) {
+          const value = match[1] || match[2] || match[3]
+          if (value) ids.add(value)
+        }
+        for (const match of scriptText.matchAll(/"name"\s*:\s*"([^"]{2,80})"|"nickname"\s*:\s*"([^"]{2,80})"/g)) {
+          const value = match[1] || match[2]
+          if (value && !/^(写文章|发布文章|创作|开始写作|首页|会员|消息|私信|设置|退出|退出登录|知乎|知乎创作助手)$/.test(value)) names.add(value)
+        }
+        return {
+          expectedAccountName: context.expectedAccountName || '',
+          expectedPlatformAccountId: context.expectedPlatformAccountId || '',
+          accountIds: Array.from(ids),
+          accountNames: Array.from(names),
+          profileUrls: Array.from(profileUrls),
+          diagnostics: `href=${location.href}; accountIds=${Array.from(ids).join(',') || '-'}; accountNames=${Array.from(names).join(',') || '-'}; profileUrls=${Array.from(profileUrls).join(',') || '-'}`,
+        }
+      }
+      const text = normalize(document.body?.innerText || document.body?.textContent || '')
+      const rawText = document.body?.innerText || document.body?.textContent || ''
+      const pageTitle = normalizeTitle(document.querySelector('h1')?.textContent || document.title)
+      const publishedAtText = extractPublishedAt(rawText)
+      const editorStillOpen = location.pathname.startsWith('/write')
+        || text.includes('发布设置')
+        || text.includes('添加文章封面')
+        || text.includes('Markdown语法输入中')
+      return {
+        href: location.href,
+        title: pageTitle,
+        expectedTitle: context.expectedTitle || '',
+        titleMatch: matchTitle(context.expectedTitle || '', pageTitle, rawText),
+        publishedAtText,
+        account: collectIdentity(),
+        publishUi: {
+          editorStillOpen,
+          publishButtonVisible: Boolean(Array.from(document.querySelectorAll('button,[role="button"]')).find((el) => normalize(el.textContent) === '发布')),
+          draftLoadingDialogVisible: text.includes('草稿加载中'),
+        },
+        textSample: text.slice(0, 500),
+        successText: text.includes('发布成功') || text.includes('审核中') || text.includes('已发布'),
+        editorStillOpen,
+      }
+    },
+  }).catch(() => [])
+  const result = state?.result || {}
+  if (result.successText && !result.editorStillOpen) {
+    return {
+      verified: true,
+      pageUrl: normalizeZhihuPublishedUrl(result.href || url),
+      pageTitle: result.title || tab?.title || '',
+      expectedTitle: result.expectedTitle || context.expectedTitle || '',
+      titleMatch: result.titleMatch || null,
+      publishedAtText: result.publishedAtText || '',
+      account: result.account || null,
+      publishUi: result.publishUi || null,
+      successSignal: {
+        successText: Boolean(result.textSample?.includes?.('发布成功')),
+        reviewText: Boolean(result.textSample?.includes?.('审核中')),
+        publishedUrl: Boolean(normalizeZhihuPublishedUrl(result.href || url)),
+        publishedAtText: Boolean(result.publishedAtText),
+      },
+      textSample: result.textSample || '',
+      recoveredFrom: 'page_text',
+    }
+  }
+  return {
+    verified: false,
+    pageUrl: result.href || url,
+    pageTitle: result.title || tab?.title || '',
+    textSample: result.textSample || '',
+    reason: result.editorStillOpen ? 'editor_still_open' : 'publish_signal_not_found',
+  }
+}
+
+function isZhihuPublishedArticleUrl(value) {
+  const shared = globalThis.__GEO_ZHIHU_PLATFORM__?.isPublishedArticleUrl?.(value)
+  if (typeof shared === 'boolean') return shared
+  try {
+    const url = new URL(value)
+    return (url.hostname === 'zhuanlan.zhihu.com' || url.hostname === 'www.zhihu.com')
+      && (/^\/p\/[^/]+/.test(url.pathname) || /^\/article\/[^/]+/.test(url.pathname))
+      && !url.pathname.includes('/write')
+      && !url.pathname.endsWith('/edit')
+  } catch {
+    return false
+  }
+}
+
+function normalizeZhihuPublishedUrl(value) {
+  const shared = globalThis.__GEO_ZHIHU_PLATFORM__?.normalizePublishedUrl?.(value)
+  if (shared) return shared
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  try {
+    const url = new URL(raw)
+    const match = url.pathname.match(/^\/p\/([^/]+)/)
+    if (match) {
+      url.pathname = `/p/${match[1]}`
+      url.search = ''
+      url.hash = ''
+      return url.toString()
+    }
+    const articleMatch = url.pathname.match(/^\/article\/([^/]+)/)
+    if (articleMatch) {
+      url.pathname = `/article/${articleMatch[1]}`
+      url.search = ''
+      url.hash = ''
+      return url.toString()
+    }
+    return url.toString()
+  } catch {
+    return raw.replace(/\/edit(?:[?#].*)?$/, '')
+  }
+}
+
+function matchZhihuPublishedTitle(expectedTitle, pageTitle, pageText) {
+  const shared = globalThis.__GEO_ZHIHU_PLATFORM__?.matchPublishedTitle?.(expectedTitle, pageTitle, pageText)
+  if (shared) return shared
+  const expected = normalizeZhihuTitleText(expectedTitle)
+  const actual = normalizeZhihuTitleText(pageTitle)
+  if (!expected) return { expected: '', actual, matched: true, method: 'no_expected_title' }
+  if (actual && (actual === expected || actual.includes(expected) || expected.includes(actual))) {
+    return { expected, actual, matched: true, method: 'page_title' }
+  }
+  const text = normalizeZhihuTitleText(pageText || '')
+  return { expected, actual, matched: Boolean(text && text.includes(expected)), method: 'page_text' }
+}
+
+function normalizeZhihuTitleText(value) {
+  const shared = globalThis.__GEO_ZHIHU_PLATFORM__?.normalizeTitleText?.(value)
+  if (shared) return shared
+  return String(value || '')
+    .replace(/\s+/g, '')
+    .replace(/[-_—|].*知乎.*/i, '')
+    .replace(/^写文章/, '')
+    .trim()
 }
 
 async function reportTaskLoginStatus(config, session, task, identityCheck) {
@@ -597,7 +917,7 @@ async function ensureContentScript(tabId) {
   if (ping?.ok) return
   await chrome.scripting.executeScript({
     target: { tabId, allFrames: true },
-    files: ['content-script.js'],
+    files: ['platform-baijiahao.js', 'platform-xiaohongshu.js', 'platform-zhihu.js', 'content-script.js'],
   })
   await delay(200)
 }
@@ -867,6 +1187,9 @@ function isAutoPollReadyUrl(urlValue) {
     if (platform === 'xiaohongshu') {
       return url.hostname === 'creator.xiaohongshu.com' && url.pathname.includes('/publish/publish')
     }
+    if (platform === 'baijiahao') {
+      return url.hostname === 'baijiahao.baidu.com' && url.pathname.includes('/builder/rc/edit')
+    }
     return false
   } catch {
     return false
@@ -889,6 +1212,9 @@ function isAllowedLoginReportUrl(platform, urlValue) {
     if (normalizedPlatform === 'xiaohongshu') {
       return url.hostname === 'creator.xiaohongshu.com'
     }
+    if (normalizedPlatform === 'baijiahao') {
+      return url.hostname === 'baijiahao.baidu.com'
+    }
     return false
   } catch {
     return false
@@ -905,6 +1231,7 @@ function inferPlatformFromUrl(urlValue) {
     if (url.hostname === 'mp.toutiao.com') return 'toutiao'
     if (url.hostname === 'www.zhihu.com' || url.hostname === 'zhuanlan.zhihu.com') return 'zhihu'
     if (url.hostname === 'creator.xiaohongshu.com' || url.hostname === 'www.xiaohongshu.com') return 'xiaohongshu'
+    if (url.hostname === 'baijiahao.baidu.com') return 'baijiahao'
     return ''
   } catch {
     return ''
@@ -917,6 +1244,7 @@ function platformReportPageHint(platform) {
     toutiao: '头条后台页(mp.toutiao.com)',
     zhihu: '知乎首页(www.zhihu.com)',
     xiaohongshu: '小红书创作服务平台(creator.xiaohongshu.com)',
+    baijiahao: '百家号后台页(baijiahao.baidu.com)',
   }
   return hints[normalizedPlatform] || `${platform || '对应平台'}后台页`
 }
@@ -927,6 +1255,7 @@ function platformDisplayName(platform) {
     toutiao: '头条',
     zhihu: '知乎',
     xiaohongshu: '小红书',
+    baijiahao: '百家号',
   }
   return names[normalizedPlatform] || '平台'
 }
@@ -934,8 +1263,9 @@ function platformDisplayName(platform) {
 function defaultLoginReportUrl(platform) {
   const normalizedPlatform = normalizePlatform(platform)
   if (normalizedPlatform === 'toutiao') return 'https://mp.toutiao.com/profile_v4'
-  if (normalizedPlatform === 'zhihu') return 'https://www.zhihu.com/'
+  if (normalizedPlatform === 'zhihu') return globalThis.__GEO_ZHIHU_PLATFORM__?.HOME_URL || 'https://www.zhihu.com/'
   if (normalizedPlatform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/'
+  if (normalizedPlatform === 'baijiahao') return 'https://baijiahao.baidu.com/'
   return null
 }
 
@@ -945,6 +1275,7 @@ function isAllowedPlatformHost(platform, host) {
     toutiao: ['mp.toutiao.com'],
     zhihu: ['zhuanlan.zhihu.com', 'www.zhihu.com'],
     xiaohongshu: ['creator.xiaohongshu.com', 'www.xiaohongshu.com'],
+    baijiahao: ['baijiahao.baidu.com'],
   }
   const hosts = allowed[normalizedPlatform] || []
   return hosts.includes(host)
@@ -961,6 +1292,8 @@ function normalizePlatform(value) {
     '小红书': 'xiaohongshu',
     'xiaohongshu': 'xiaohongshu',
     'xhs': 'xiaohongshu',
+    '百家号': 'baijiahao',
+    'baijiahao': 'baijiahao',
   }
   return aliases[text] || text
 }
@@ -1029,7 +1362,11 @@ async function sendFillMessageOnce(tabId, message) {
     90_000,
     '页面填充执行超时，请检查定时发布弹窗或平台页面是否阻塞',
   )
-  if (!response?.ok) throw new Error(response?.error || '页面填充失败')
+  if (!response?.ok) {
+    const error = new Error(response?.error || '页面填充失败')
+    if (response?.failureCode) error.code = response.failureCode
+    throw error
+  }
   return response
 }
 
@@ -1038,7 +1375,7 @@ async function fillToutiaoScheduleAcrossFrames(tabId, value, platform) {
   await ensureContentScript(tabId)
   await chrome.scripting.executeScript({
     target: { tabId, allFrames: true },
-    files: ['content-script.js'],
+    files: ['platform-baijiahao.js', 'platform-xiaohongshu.js', 'platform-zhihu.js', 'content-script.js'],
   }).catch(() => {})
   await delay(200)
 
@@ -1093,8 +1430,12 @@ async function dispatchTrustedClick(tabId, click) {
     throw new Error('真实点击参数不完整')
   }
   const tab = await chrome.tabs.get(tabId).catch(() => null)
-  if (!tab?.url || (!isAllowedPlatformUrl('xiaohongshu', tab.url) && !isAllowedPlatformUrl('toutiao', tab.url) && !isAllowedPlatformUrl('zhihu', tab.url))) {
-    throw new Error('真实点击仅允许用于小红书、头条或知乎页面')
+  if (!tab?.url
+      || (!isAllowedPlatformUrl('xiaohongshu', tab.url)
+        && !isAllowedPlatformUrl('toutiao', tab.url)
+        && !isAllowedPlatformUrl('zhihu', tab.url)
+        && !isAllowedPlatformUrl('baijiahao', tab.url))) {
+    throw new Error('真实点击仅允许用于小红书、头条、知乎或百家号页面')
   }
   const target = { tabId }
   await chrome.debugger.attach(target, '1.3')

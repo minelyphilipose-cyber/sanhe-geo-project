@@ -10,8 +10,9 @@ public class BaijiahaoPlatformScheduleAdapter implements SelfMediaPlatformSchedu
     public static final String PLATFORM = "baijiahao";
 
     private static final int DEFAULT_FILL_LEAD_MINUTES = 10;
-    private static final int PLATFORM_SCHEDULE_FILL_LEAD_MINUTES = 30;
-    private static final int PLATFORM_SCHEDULE_MIN_REMAINING_MINUTES = 0;
+    private static final int PLATFORM_SCHEDULE_FILL_LEAD_MINUTES = 75;
+    private static final int PLATFORM_SCHEDULE_MIN_REMAINING_MINUTES = 60;
+    private static final int PLATFORM_SCHEDULE_MAX_REMAINING_MINUTES = 7 * 24 * 60;
     private static final int PLATFORM_SCHEDULE_MAX_ATTEMPTS = 3;
 
     @Override
@@ -46,7 +47,8 @@ public class BaijiahaoPlatformScheduleAdapter implements SelfMediaPlatformSchedu
         return new SelfMediaPlatformScheduleRules(
                 PLATFORM_SCHEDULE_FILL_LEAD_MINUTES,
                 PLATFORM_SCHEDULE_MIN_REMAINING_MINUTES,
-                PLATFORM_SCHEDULE_MAX_ATTEMPTS
+                PLATFORM_SCHEDULE_MAX_ATTEMPTS,
+                PLATFORM_SCHEDULE_MAX_REMAINING_MINUTES
         );
     }
 

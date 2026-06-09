@@ -13,6 +13,7 @@ public class SelfMediaPublishScheduleVO {
     private Long requestId;
     private String requestIdempotencyKey;
     private Long articleId;
+    private String articleTitle;
     private Long brandId;
     private String brandName;
     private Long selfMediaAccountId;

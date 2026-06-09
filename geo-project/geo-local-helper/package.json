@@ -4,8 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node src/server.js",
-    "check": "node --check src/server.js",
+    "start": "node src/supervisor.js",
+    "start:server": "node src/server.js",
+    "check": "node --check src/server.js && node --check src/supervisor.js",
+    "test": "node --test test/*.test.mjs",
     "security:c2": "node scripts/c2-security-check.mjs",
     "package:delivery": "powershell -ExecutionPolicy Bypass -File scripts/package-delivery.ps1"
   },

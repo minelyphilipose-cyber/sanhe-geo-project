@@ -5,6 +5,7 @@ import com.huanjing.geo.module.content.entity.BrowserEnvironment;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.config.SemiAutoPlatformProperties;
 import com.huanjing.geo.module.content.mapper.BrowserEnvironmentAccountMapper;
 import com.huanjing.geo.module.content.mapper.BrowserEnvironmentMapper;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
@@ -18,6 +19,7 @@ import com.huanjing.geo.module.extension.dto.LocalAgentPairingIntentRequest;
 import com.huanjing.geo.module.extension.dto.LocalAgentPairingIntentResponse;
 import com.huanjing.geo.module.extension.dto.LocalAgentSelfMediaPublishCheckClaimResponse;
 import com.huanjing.geo.module.extension.dto.LocalAgentSelfMediaScheduleClaimResponse;
+import com.huanjing.geo.module.extension.dto.LocalAgentSelfMediaSchedulePlatformsResponse;
 import com.huanjing.geo.module.extension.dto.LocalAgentSessionVO;
 import com.huanjing.geo.module.extension.dto.LocalAgentSignRequest;
 import com.huanjing.geo.module.extension.dto.LocalAgentSignResponse;
@@ -47,11 +49,15 @@ import java.util.List;
 @RequestMapping("/api/v1/local-agent")
 @RequiredArgsConstructor
 public class LocalAgentController {
+    private static final int SELF_MEDIA_SCHEDULE_LOCK_MINUTES = 3;
+    private static final int SELF_MEDIA_PUBLISH_CHECK_LOCK_MINUTES = 3;
+
     private final LocalAgentSessionService service;
     private final SelfMediaPublishScheduleService scheduleService;
     private final SelfMediaAccountMapper selfMediaAccountMapper;
     private final BrowserEnvironmentMapper browserEnvironmentMapper;
     private final BrowserEnvironmentAccountMapper browserEnvironmentAccountMapper;
+    private final SemiAutoPlatformProperties semiAutoPlatformProperties;
 
     @PostMapping("/pairing-intents")
     public R<LocalAgentPairingIntentResponse> registerPairingIntent(
@@ -89,13 +95,23 @@ public class LocalAgentController {
         return R.ok();
     }
 
+    @GetMapping("/self-media-schedules/platforms")
+    public R<LocalAgentSelfMediaSchedulePlatformsResponse> selfMediaSchedulePlatforms(HttpServletRequest request) {
+        verifySignedRequest(request);
+        return R.ok(new LocalAgentSelfMediaSchedulePlatformsResponse(scheduleService.localAgentAutomationPlatforms()));
+    }
+
     @GetMapping("/self-media-schedules/claim-next")
     public R<LocalAgentSelfMediaScheduleClaimResponse> claimNextSelfMediaSchedule(
             @RequestParam(required = false) String platform,
             HttpServletRequest request) {
         LocalAgentSession session = verifySignedRequest(request);
         SelfMediaPublishScheduleService.ClaimedScheduleTask claimed =
-                scheduleService.claimNextTaskForLocalAgent(session.getOperatorId(), platform, 30);
+                scheduleService.claimNextTaskForLocalAgent(
+                        session.getOperatorId(),
+                        platform,
+                        SELF_MEDIA_SCHEDULE_LOCK_MINUTES
+                );
         if (claimed == null) {
             return R.ok(null);
         }
@@ -128,7 +144,11 @@ public class LocalAgentController {
             HttpServletRequest request) {
         LocalAgentSession session = verifySignedRequest(request);
         SelfMediaPublishScheduleVO schedule =
-                scheduleService.claimNextPublishCheckForLocalAgent(session.getOperatorId(), platform, 30);
+                scheduleService.claimNextPublishCheckForLocalAgent(
+                        session.getOperatorId(),
+                        platform,
+                        SELF_MEDIA_PUBLISH_CHECK_LOCK_MINUTES
+                );
         if (schedule == null) {
             return R.ok(null);
         }
@@ -229,14 +249,15 @@ public class LocalAgentController {
     }
 
     private String defaultPublishUrl(String platform) {
-        if ("toutiao".equalsIgnoreCase(platform)) {
-            return "https://mp.toutiao.com/profile_v4/graphic/publish";
+        if ("baijiahao".equalsIgnoreCase(platform)) {
+            return "https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1";
         }
-        if ("zhihu".equalsIgnoreCase(platform)) {
-            return "https://zhuanlan.zhihu.com/write";
-        }
-        if ("xiaohongshu".equalsIgnoreCase(platform)) {
-            return "https://www.xiaohongshu.com/";
+        if (StringUtils.hasText(platform)) {
+            try {
+                return semiAutoPlatformProperties.profile(platform.toLowerCase()).publishUrl();
+            } catch (IllegalStateException ignored) {
+                return null;
+            }
         }
         return null;
     }
@@ -244,6 +265,12 @@ public class LocalAgentController {
     private String defaultWorksListUrl(String platform) {
         if ("toutiao".equalsIgnoreCase(platform)) {
             return "https://mp.toutiao.com/profile_v4/manage/content/all";
+        }
+        if ("xiaohongshu".equalsIgnoreCase(platform)) {
+            return "https://creator.xiaohongshu.com/new/note-manager";
+        }
+        if ("baijiahao".equalsIgnoreCase(platform)) {
+            return "https://baijiahao.baidu.com/builder/rc/content?type=news";
         }
         return defaultPublishUrl(platform);
     }

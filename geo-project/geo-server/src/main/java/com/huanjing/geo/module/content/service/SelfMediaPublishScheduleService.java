@@ -3,6 +3,7 @@ package com.huanjing.geo.module.content.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
@@ -60,6 +61,18 @@ public class SelfMediaPublishScheduleService {
     private static final int DEFAULT_CLAIM_LIMIT = 10;
     private static final int PUBLISH_CHECK_TOTAL_ATTEMPTS = 4;
     private static final int[] PUBLISH_CHECK_RETRY_DELAYS_MINUTES = {5, 15};
+    private static final int[] SCHEDULE_EXECUTION_RETRY_DELAYS_MINUTES = {3, 8};
+    private static final Set<String> SCHEDULE_EXECUTION_RETRYABLE_FAILURE_CODES = Set.of(
+            "PAGE_LOAD_TIMEOUT",
+            "EDITOR_NOT_READY",
+            "XIAOHONGSHU_FORMAT_NOT_READY",
+            "XIAOHONGSHU_PUBLISH_SETTINGS_NOT_READY",
+            "XIAOHONGSHU_IMAGE_GENERATION_TIMEOUT",
+            "XIAOHONGSHU_PUBLISH_NOT_CONFIRMED",
+            "ZHIHU_DRAFT_LOADING",
+            "ZHIHU_PUBLISH_NOT_SUBMITTED",
+            "ZHIHU_COVER_UPLOAD_TIMEOUT"
+    );
     private static final Set<String> ACTIVE_ARTICLE_STATUS = Set.of("approved", "unpublished");
     private static final String SETTING_PATH_BROWSER_ENV = "品牌详情 > 自媒体账号 > 指纹浏览器环境";
     private static final Set<String> PLATFORM_SUBMITTED_STATUSES = Set.of(
@@ -176,9 +189,26 @@ public class SelfMediaPublishScheduleService {
                             "SCHEDULE_WINDOW_FULL", "排期时间窗口已满，请扩大时间窗口或减少排期数量", null));
                     continue;
                 }
+                int requiredLeadMinutes = requiredPlatformScheduleCreateLeadMinutes(
+                        validated.strategy(),
+                        candidate.account().getPlatform()
+                );
                 if (isPlatformScheduleTooClose(validated.strategy(), plannedCursor, candidate.account().getPlatform())) {
                     response.getRejectedItems().add(rejected(articleId, accountId, candidate.account().getPlatform(),
-                            "PLATFORM_SCHEDULE_TIME_TOO_CLOSE", "平台定时发布时间需至少晚于当前时间 2 小时", null));
+                            "PLATFORM_SCHEDULE_TIME_TOO_CLOSE",
+                            "平台定时发布时间需至少晚于当前时间 " + minutesText(requiredLeadMinutes),
+                            null));
+                    continue;
+                }
+                int maxRemainingMinutes = maxPlatformScheduleRemainingMinutes(
+                        validated.strategy(),
+                        candidate.account().getPlatform()
+                );
+                if (isPlatformScheduleTooFar(validated.strategy(), plannedCursor, candidate.account().getPlatform())) {
+                    response.getRejectedItems().add(rejected(articleId, accountId, candidate.account().getPlatform(),
+                            "PLATFORM_SCHEDULE_TIME_TOO_FAR",
+                            "平台定时发布时间最多支持当前时间后 " + minutesText(maxRemainingMinutes),
+                            null));
                     continue;
                 }
                 SelfMediaPublishSchedule inserted = createScheduleRow(requestRow, operatorId, candidate,
@@ -273,7 +303,14 @@ public class SelfMediaPublishScheduleService {
         return claimed == null ? null : SelfMediaPublishScheduleVO.from(claimed);
     }
 
-    @Transactional
+    public List<String> localAgentAutomationPlatforms() {
+        return platformsByChannel(SelfMediaPlatformPublishChannel.ADSPOWER_AUTOMATION).stream()
+                .filter(platform -> scheduleCapabilityService.readiness(platform).ready())
+                .sorted()
+                .toList();
+    }
+
+    @Transactional(noRollbackFor = BizException.class)
     public ClaimedScheduleTask claimNextTaskForLocalAgent(Long operatorId, String platform, int lockMinutes) {
         if (operatorId == null || operatorId <= 0) {
             fail("INVALID_OPERATOR", "operatorId must be a positive number");
@@ -303,16 +340,27 @@ public class SelfMediaPublishScheduleService {
                     SelfMediaPublishScheduleVO.from(latest == null ? claimed : latest),
                     task
             );
-        } catch (RuntimeException ex) {
+        } catch (BizException ex) {
             markClaimFailed(
                     claimed.getId(),
                     SelfMediaPublishScheduleConstants.STATUS_FILLING,
-                    "DISTRIBUTION_TASK_PREPARE_FAILED",
+                    distributionTaskPrepareFailureCode(ex),
                     trimError(ex.getMessage()),
                     null,
                     null
             );
             throw ex;
+        } catch (RuntimeException ex) {
+            String message = trimError(ex.getMessage());
+            markClaimFailed(
+                    claimed.getId(),
+                    SelfMediaPublishScheduleConstants.STATUS_FILLING,
+                    "DISTRIBUTION_TASK_PREPARE_FAILED",
+                    message,
+                    null,
+                    null
+            );
+            throw new BizException(500, "Prepare self-media distribution task failed: " + message, ex);
         }
     }
 
@@ -421,6 +469,7 @@ public class SelfMediaPublishScheduleService {
             row.setDiagnosticsJson(trimToNull(diagnosticsJson));
             scheduleMapper.updateById(row);
             environmentLockService.release(row.getId());
+            reconcileAlerts(row);
             return SelfMediaPublishScheduleVO.from(row);
         }
         return null;
@@ -562,6 +611,7 @@ public class SelfMediaPublishScheduleService {
             }
             scheduleMapper.updateById(row);
             environmentLockService.release(row.getId());
+            reconcileAlerts(row);
             return SelfMediaPublishScheduleVO.from(row);
         }
         return null;
@@ -622,6 +672,7 @@ public class SelfMediaPublishScheduleService {
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
         scheduleMapper.updateById(row);
         environmentLockService.release(row.getId());
+        reconcileAlerts(row);
         return SelfMediaPublishScheduleVO.from(row);
     }
 
@@ -660,6 +711,16 @@ public class SelfMediaPublishScheduleService {
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN);
         row.setLockedUntil(null);
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
+        if (isPendingPlatformScheduledDiagnostics(diagnosticsJson)) {
+            row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+            row.setNextAttemptAt(nextPendingPlatformScheduleCheckAt(row));
+            row.setFailureCode("PLATFORM_SCHEDULED_WAITING");
+            row.setFailureMessage("平台已定时，等待发布时间后复查");
+            scheduleMapper.updateById(row);
+            environmentLockService.release(row.getId());
+            reconcileAlerts(row);
+            return SelfMediaPublishScheduleVO.from(row);
+        }
         int publishCheckMaxAttempts = Math.max(row.getMaxAttempts() == null ? 0 : row.getMaxAttempts(),
                 PUBLISH_CHECK_TOTAL_ATTEMPTS);
         LocalDateTime retryAt = nextPublishCheckRetryAt(row, publishCheckMaxAttempts);
@@ -676,7 +737,30 @@ public class SelfMediaPublishScheduleService {
         }
         scheduleMapper.updateById(row);
         environmentLockService.release(row.getId());
+        reconcileAlerts(row);
         return SelfMediaPublishScheduleVO.from(row);
+    }
+
+    private boolean isPendingPlatformScheduledDiagnostics(String diagnosticsJson) {
+        if (!StringUtils.hasText(diagnosticsJson)) {
+            return false;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(diagnosticsJson);
+            return root.path("pendingScheduled").asBoolean(false)
+                    || "platform schedule time not due".equals(root.path("reason").asText(null));
+        } catch (JsonProcessingException ignored) {
+            return false;
+        }
+    }
+
+    private LocalDateTime nextPendingPlatformScheduleCheckAt(SelfMediaPublishSchedule row) {
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime platformScheduledAt = row.getPlatformScheduledAt();
+        if (platformScheduledAt != null && platformScheduledAt.isAfter(now)) {
+            return platformScheduledAt.plusMinutes(3);
+        }
+        return now.plusMinutes(5);
     }
 
     @Transactional
@@ -696,6 +780,7 @@ public class SelfMediaPublishScheduleService {
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
         scheduleMapper.updateById(row);
         environmentLockService.release(row.getId());
+        reconcileAlerts(row);
         return SelfMediaPublishScheduleVO.from(row);
     }
 
@@ -715,6 +800,7 @@ public class SelfMediaPublishScheduleService {
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
         scheduleMapper.updateById(row);
         environmentLockService.release(row.getId());
+        reconcileAlerts(row);
         return SelfMediaPublishScheduleVO.from(row);
     }
 
@@ -741,6 +827,7 @@ public class SelfMediaPublishScheduleService {
         }
         scheduleMapper.updateById(row);
         environmentLockService.release(row.getId());
+        reconcileAlerts(row);
         return SelfMediaPublishScheduleVO.from(row);
     }
 
@@ -760,7 +847,7 @@ public class SelfMediaPublishScheduleService {
                 failureCode,
                 failureMessage,
                 diagnosticsJson,
-                null
+                nextScheduleExecutionRetryAt(row, failureCode)
         );
     }
 
@@ -1118,6 +1205,37 @@ public class SelfMediaPublishScheduleService {
         return LocalDateTime.now().plusMinutes(delayMinutes);
     }
 
+    private void reconcileAlerts(SelfMediaPublishSchedule row) {
+        if (row != null && row.getId() != null) {
+            alertService.reconcile(row, LocalDateTime.now());
+        }
+    }
+
+    private LocalDateTime nextScheduleExecutionRetryAt(SelfMediaPublishSchedule row, String failureCode) {
+        if (!isScheduleExecutionRetryableFailure(failureCode)) {
+            return null;
+        }
+        int attempts = row == null || row.getAttemptCount() == null ? 0 : row.getAttemptCount();
+        int retryIndex = Math.max(0, attempts - 1);
+        int delayMinutes = SCHEDULE_EXECUTION_RETRY_DELAYS_MINUTES[
+                Math.min(retryIndex, SCHEDULE_EXECUTION_RETRY_DELAYS_MINUTES.length - 1)
+        ];
+        return LocalDateTime.now().plusMinutes(delayMinutes);
+    }
+
+    private boolean isScheduleExecutionRetryableFailure(String failureCode) {
+        return StringUtils.hasText(failureCode)
+                && SCHEDULE_EXECUTION_RETRYABLE_FAILURE_CODES.contains(failureCode.trim());
+    }
+
+    private String distributionTaskPrepareFailureCode(BizException ex) {
+        String message = ex == null ? "" : String.valueOf(ex.getMessage());
+        if (message.contains("Distribution quota exhausted")) {
+            return "DISTRIBUTION_QUOTA_EXHAUSTED";
+        }
+        return "DISTRIBUTION_TASK_PREPARE_FAILED";
+    }
+
     private String resolvePublishCheckLocationName(Long brandId) {
         if (brandId == null) {
             return null;
@@ -1167,11 +1285,44 @@ public class SelfMediaPublishScheduleService {
     }
 
     private boolean isPlatformScheduleTooClose(String strategy, LocalDateTime plannedAt, String platform) {
-        SelfMediaPlatformScheduleRules rules = scheduleAdapterRouter.rules(platform, strategy);
+        int requiredLeadMinutes = requiredPlatformScheduleCreateLeadMinutes(strategy, platform);
         return SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE.equals(normalize(strategy))
                 && plannedAt != null
-                && rules.minRemainingMinutes() > 0
-                && !plannedAt.isAfter(LocalDateTime.now().plusMinutes(rules.minRemainingMinutes()));
+                && requiredLeadMinutes > 0
+                && !plannedAt.isAfter(LocalDateTime.now().plusMinutes(requiredLeadMinutes));
+    }
+
+    private boolean isPlatformScheduleTooFar(String strategy, LocalDateTime plannedAt, String platform) {
+        int maxRemainingMinutes = maxPlatformScheduleRemainingMinutes(strategy, platform);
+        return SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE.equals(normalize(strategy))
+                && plannedAt != null
+                && maxRemainingMinutes > 0
+                && plannedAt.isAfter(LocalDateTime.now().plusMinutes(maxRemainingMinutes));
+    }
+
+    private int requiredPlatformScheduleCreateLeadMinutes(String strategy, String platform) {
+        SelfMediaPlatformScheduleRules rules = scheduleAdapterRouter.rules(platform, strategy);
+        if (!SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE.equals(normalize(strategy))) {
+            return 0;
+        }
+        return Math.max(rules.minRemainingMinutes(), rules.fillLeadMinutes());
+    }
+
+    private int maxPlatformScheduleRemainingMinutes(String strategy, String platform) {
+        if (!SelfMediaPublishScheduleConstants.STRATEGY_PLATFORM_SCHEDULE.equals(normalize(strategy))) {
+            return 0;
+        }
+        return scheduleAdapterRouter.rules(platform, strategy).maxRemainingMinutes();
+    }
+
+    private String minutesText(int minutes) {
+        if (minutes > 0 && minutes % (24 * 60) == 0) {
+            return (minutes / (24 * 60)) + " 天";
+        }
+        if (minutes > 0 && minutes % 60 == 0) {
+            return (minutes / 60) + " 小时";
+        }
+        return minutes + " 分钟";
     }
 
     private void markExpiredPlatformScheduleExecution(SelfMediaPublishSchedule row, LocalDateTime now) {
@@ -1361,7 +1512,23 @@ public class SelfMediaPublishScheduleService {
             }
         }
 
+        List<Long> articleIds = records.stream()
+                .map(SelfMediaPublishScheduleVO::getArticleId)
+                .filter(id -> id != null && id > 0)
+                .distinct()
+                .toList();
+        Map<Long, String> articleTitles = new LinkedHashMap<>();
+        if (!articleIds.isEmpty()) {
+            List<ArticleDraft> articles = articleDraftMapper.selectBatchIds(articleIds);
+            for (ArticleDraft article : articles == null ? List.<ArticleDraft>of() : articles) {
+                if (article != null && article.getId() != null) {
+                    articleTitles.put(article.getId(), article.getTitle());
+                }
+            }
+        }
+
         for (SelfMediaPublishScheduleVO record : records) {
+            record.setArticleTitle(articleTitles.get(record.getArticleId()));
             record.setBrandName(brandNames.get(record.getBrandId()));
             record.setSelfMediaAccountName(accountNames.get(record.getSelfMediaAccountId()));
         }

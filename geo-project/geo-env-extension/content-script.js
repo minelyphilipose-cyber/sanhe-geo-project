@@ -54,8 +54,10 @@ if (!globalThis.__GEO_ENV_FILL_CONTENT_SCRIPT_INSTALLED__) {
         const errorPrefix = message?.type === 'GEO_ENV_CHECK_IDENTITY' || message?.type === 'GEO_ENV_READ_IDENTITY'
           ? '登录状态读取失败'
           : '填充失败'
-        showStatus(`${errorPrefix}：${error.message}`, 'error')
-        sendResponse({ ok: false, error: error.message })
+        const errorMessage = error?.message || String(error || '未知错误')
+        const failureCode = classifyGeoFillFailureCode(errorMessage, message?.payload?.platform)
+        showStatus(`${errorPrefix}：${errorMessage}`, 'error')
+        sendResponse({ ok: false, error: errorMessage, failureCode })
       })
     return true
   })
@@ -68,7 +70,44 @@ function isEditorReadyReportLocation() {
     return location.pathname.startsWith('/write')
   }
   if (location.hostname === 'creator.xiaohongshu.com') return href.includes('/publish/publish')
+  if (location.hostname === 'baijiahao.baidu.com') return href.includes('/builder/rc/edit')
   return false
+}
+
+function classifyGeoFillFailureCode(message, platform) {
+  const text = String(message || '')
+  const explicit = text.match(/^([A-Z0-9_]{3,80})[：:]/)?.[1]
+  if (explicit) return explicit
+  if (normalizePlatform(platform) === 'xiaohongshu' || text.includes('小红书')) {
+    return globalThis.__GEO_XIAOHONGSHU_PLATFORM__?.classifyFailureCode?.(text, 'xiaohongshu')
+      || 'XIAOHONGSHU_FILL_FAILED'
+  }
+  if (normalizePlatform(platform) === 'baijiahao' || text.includes('百家号')) {
+    return globalThis.__GEO_BAIJIAHAO_PLATFORM__?.classifyFailureCode?.(text, 'baijiahao')
+      || 'BAIJIAHAO_FILL_FAILED'
+  }
+  if (normalizePlatform(platform) === 'zhihu' || text.includes('知乎') || text.includes('草稿加载中')) {
+    return globalThis.__GEO_ZHIHU_PLATFORM__?.classifyFailureCode?.(text, 'zhihu')
+      || classifyZhihuFailureCode(text)
+  }
+  if (text.includes('账号一致性校验失败')) return 'ACCOUNT_MISMATCH'
+  if (text.includes('填充令牌已使用') || text.includes('fill token used or expired')) return 'FILL_TOKEN_USED_OR_EXPIRED'
+  return 'FILL_FAILED'
+}
+
+function classifyZhihuFailureCode(message) {
+  const text = String(message || '')
+  if (text.includes('知乎平台适配器未加载')) return 'ZHIHU_ADAPTER_NOT_LOADED'
+  if (text.includes('草稿加载中') || text.includes('草稿加载未完成') || text.includes('发布被草稿加载阻塞')) return 'ZHIHU_DRAFT_LOADING'
+  if (text.includes('发布后未检测到完成状态')) return 'ZHIHU_PUBLISH_NOT_SUBMITTED'
+  if (text.includes('封面填充后未检测到封面图片')) return 'ZHIHU_COVER_UPLOAD_NOT_CONFIRMED'
+  if (text.includes('封面上传入口未找到')) return 'ZHIHU_COVER_UPLOAD_ENTRY_NOT_FOUND'
+  if (text.includes('封面图片上传完成超时')) return 'ZHIHU_COVER_UPLOAD_TIMEOUT'
+  if (text.includes('封面文件选项未找到')) return 'ZHIHU_COVER_SELECTION_FAILED'
+  if (text.includes('封面文件确认按钮未可用')) return 'ZHIHU_COVER_DIALOG_NOT_READY'
+  if (text.includes('发布按钮未找到')) return 'ZHIHU_PUBLISH_BUTTON_NOT_FOUND'
+  if (text.includes('账号一致性校验失败')) return 'ACCOUNT_MISMATCH'
+  return 'ZHIHU_FILL_FAILED'
 }
 
 async function fillPayload(payload) {
@@ -127,12 +166,64 @@ async function fillPayload(payload) {
 }
 
 async function fillPlatformPublishOptions(payload, fillProfile) {
-  if (fillProfile.platform === 'zhihu') {
-    return fillZhihuPublishOptions(payload, fillProfile)
-  }
-  if (fillProfile.platform !== 'toutiao') {
+  const adapter = resolvePublishOptionsAdapter(fillProfile.platform)
+  if (!adapter?.fillPublishOptions) {
     return { filled: false, message: '' }
   }
+  return adapter.fillPublishOptions(payload, fillProfile)
+}
+
+function resolvePublishOptionsAdapter(platform) {
+  const normalized = normalizePlatform(platform)
+  if (normalized === 'zhihu') return ZHIHU_PUBLISH_OPTIONS_ADAPTER
+  if (normalized === 'xiaohongshu') return XIAOHONGSHU_PUBLISH_OPTIONS_ADAPTER
+  if (normalized === 'baijiahao') return BAIJIAHAO_PUBLISH_OPTIONS_ADAPTER
+  if (normalized === 'toutiao') return TOUTIAO_PUBLISH_OPTIONS_ADAPTER
+  return null
+}
+
+var ZHIHU_PUBLISH_OPTIONS_ADAPTER = globalThis.__GEO_ZHIHU_PLATFORM__?.createPublishOptionsAdapter?.({
+  fillCover: fillZhihuCover,
+  hasCoverImage: hasZhihuCoverImage,
+  publishArticle: publishZhihuArticle,
+  describeSettings: describeZhihuPublishSettings,
+}) || {
+  platform: 'zhihu',
+  fillPublishOptions: async () => {
+    throw new Error('ZHIHU_ADAPTER_NOT_LOADED：知乎平台适配器未加载，请重新加载扩展')
+  },
+}
+
+var TOUTIAO_PUBLISH_OPTIONS_ADAPTER = {
+  platform: 'toutiao',
+  fillPublishOptions: fillToutiaoPublishOptions,
+}
+
+var XIAOHONGSHU_PUBLISH_OPTIONS_ADAPTER = globalThis.__GEO_XIAOHONGSHU_PLATFORM__?.createPublishOptionsAdapter?.() || {
+  platform: 'xiaohongshu',
+  fillPublishOptions: async () => {
+    throw new Error('XIAOHONGSHU_ADAPTER_NOT_LOADED：小红书平台适配器未加载，请重新加载扩展')
+  },
+}
+
+var BAIJIAHAO_PUBLISH_OPTIONS_ADAPTER = globalThis.__GEO_BAIJIAHAO_PLATFORM__?.createPublishOptionsAdapter?.({
+  waitForCondition,
+  uploadCoverImageFromLocalHelper,
+  delay,
+  clickTrustedActionOnce,
+  findVisibleTextElement,
+  nearestLargeContainer,
+  normalizeText,
+  isVisibleElement,
+  collectVisibleActionElements,
+}) || {
+  platform: 'baijiahao',
+  fillPublishOptions: async () => {
+    throw new Error('BAIJIAHAO_ADAPTER_NOT_LOADED：百家号平台适配器未加载，请重新加载扩展')
+  },
+}
+
+async function fillToutiaoPublishOptions(payload, fillProfile) {
   const options = resolveToutiaoPublishOptions(payload)
   const actions = []
   let scheduled = false
@@ -168,27 +259,6 @@ async function fillPlatformPublishOptions(payload, fillProfile) {
   }
 }
 
-async function fillZhihuPublishOptions(payload, fillProfile) {
-  const options = resolveZhihuPublishOptions(payload)
-  const actions = []
-  if (options.coverImageUrl) {
-    const cover = await fillZhihuCover(options.coverImageUrl, fillProfile.platform)
-    if (cover.filled) actions.push(cover.message)
-    if (!hasZhihuCoverImage()) {
-      throw new Error(`知乎封面填充后未检测到封面图片；${describeZhihuPublishSettings()}`)
-    }
-  }
-
-  const publish = await publishZhihuArticle(fillProfile.platform)
-  if (publish.message) actions.push(publish.message)
-  return {
-    filled: actions.length > 0,
-    published: Boolean(publish.published),
-    publishVerification: publish.publishVerification,
-    message: actions.join('，'),
-  }
-}
-
 function resolveToutiaoPublishOptions(payload) {
   const profileOptions = payload.profile?.platformOptions || {}
   const platformOptions = payload.platformOptions || {}
@@ -207,7 +277,7 @@ function resolveToutiaoPublishOptions(payload) {
   ))
   return {
     coverImageUrl,
-    coverMode: coverImageUrl ? 'single' : explicitCoverMode,
+    coverMode: coverImageUrl ? 'single' : (explicitCoverMode || 'none'),
     locationName: firstText(
       payload.locationName,
       payload.location,
@@ -227,20 +297,6 @@ function resolveToutiaoPublishOptions(payload) {
       profileOptions.platformScheduledAt,
       toutiaoOptions.scheduledAt,
       toutiaoOptions.platformScheduledAt,
-    ),
-  }
-}
-
-function resolveZhihuPublishOptions(payload) {
-  const profileOptions = payload.profile?.platformOptions || {}
-  const platformOptions = payload.platformOptions || {}
-  const zhihuOptions = payload.zhihuOptions || platformOptions.zhihu || profileOptions.zhihu || {}
-  return {
-    coverImageUrl: firstText(
-      payload.coverImageUrl,
-      platformOptions.coverImageUrl,
-      profileOptions.coverImageUrl,
-      zhihuOptions.coverImageUrl,
     ),
   }
 }
@@ -275,6 +331,8 @@ function normalizePlatform(value) {
     '小红书': 'xiaohongshu',
     'xiaohongshu': 'xiaohongshu',
     'xhs': 'xiaohongshu',
+    '百家号': 'baijiahao',
+    'baijiahao': 'baijiahao',
   }
   return aliases[text] || text
 }
@@ -288,91 +346,49 @@ function normalizeCoverMode(value) {
   return ''
 }
 
+function zhihuDomAdapter() {
+  if (globalThis.__GEO_ZHIHU_DOM_ADAPTER__) return globalThis.__GEO_ZHIHU_DOM_ADAPTER__
+  const factory = globalThis.__GEO_ZHIHU_PLATFORM__?.createDomAdapter
+  if (typeof factory !== 'function') {
+    throw new Error('ZHIHU_ADAPTER_NOT_LOADED：知乎平台 DOM 适配器未加载，请重新加载扩展')
+  }
+  globalThis.__GEO_ZHIHU_DOM_ADAPTER__ = factory({
+    waitForCondition,
+    uploadCoverImageFromLocalHelper,
+    delay,
+    clickTrustedActionOnce,
+    requestTrustedClickAt,
+    firePointerClick,
+    requestTrustedClick,
+    findVisibleTextElement,
+    findTextElementInRoot,
+    nearestLargeContainer,
+    normalizeText,
+    findLatestFileInput,
+    isVisibleElement,
+    findFirst,
+    collectVisibleActionElements,
+    clearEditableTextWithSelection,
+    focusEditableElement,
+    dispatchPasteIntoEditable,
+    dispatchEditEvents,
+    readIdentity: readZhihuIdentity,
+    describeLastTrustedClick,
+    describeSettings: describeZhihuPublishSettings,
+  })
+  return globalThis.__GEO_ZHIHU_DOM_ADAPTER__
+}
+
 async function fillZhihuCover(coverImageUrl, platform) {
-  await scrollToZhihuSection('添加封面')
-  if (!hasZhihuCoverImage()) {
-    await waitForCondition(
-      () => findZhihuCoverUploadEntry(),
-      8000,
-      `知乎封面上传入口未找到；${describeZhihuPublishSettings()}`,
-    )
-  }
-  await uploadCoverImageFromLocalHelper(coverImageUrl, platform, '知乎')
-  const uploaded = await waitForZhihuCoverUploadedOrChooser()
-  if (uploaded?.image) {
-    await closeZhihuCoverFileChooserIfOpen(platform)
-    return { filled: true, message: '已上传知乎封面' }
-  }
-  if (uploaded?.dialog) {
-    if (hasZhihuCoverImage()) {
-      await closeZhihuCoverFileChooserIfOpen(platform)
-      return { filled: true, message: '已上传知乎封面' }
-    }
-    await confirmZhihuCoverFileChooser(uploaded.dialog, platform)
-  }
-  await waitForCondition(
-    () => hasZhihuCoverImage(),
-    20000,
-    `等待知乎封面图片上传完成超时；${describeZhihuPublishSettings()}`,
-  )
-  await closeZhihuCoverFileChooserIfOpen(platform)
-  return { filled: true, message: '已上传知乎封面' }
+  return zhihuDomAdapter().fillCover(coverImageUrl, platform)
 }
 
 async function waitForZhihuCoverUploadedOrChooser() {
-  const deadline = Date.now() + 20000
-  let latestDialog = null
-  while (Date.now() < deadline) {
-    if (hasZhihuCoverImage()) return { image: true }
-    const dialog = findZhihuCoverFileChooserDialog()
-    if (dialog) latestDialog = dialog
-    await delay(300)
-  }
-  return latestDialog ? { dialog: latestDialog } : null
+  return zhihuDomAdapter().waitForCoverUploadedOrChooser()
 }
 
 async function closeZhihuCoverFileChooserIfOpen(platform) {
-  const dialog = findZhihuCoverFileChooserDialog()
-  if (!dialog) return false
-  const closeTarget = findZhihuCoverFileChooserCloseTarget(dialog)
-  if (closeTarget) {
-    await clickTrustedActionOnce(closeTarget, { platform })
-    await delay(500)
-  }
-  if (findZhihuCoverFileChooserDialog()) {
-    await clickZhihuCoverFileChooserClosePoint(dialog, platform)
-    await delay(500)
-  }
-  if (findZhihuCoverFileChooserDialog()) {
-    dispatchEscapeKey(document)
-    dispatchEscapeKey(window)
-    document.body?.focus?.()
-    dispatchEscapeKey(document.body || document)
-    await delay(500)
-  }
-  return !findZhihuCoverFileChooserDialog()
-}
-
-async function clickZhihuCoverFileChooserClosePoint(dialog, platform) {
-  const rect = dialog?.getBoundingClientRect?.()
-  if (!rect) return
-  const points = [
-    { clientX: Math.round(rect.right + 64), clientY: Math.round(rect.top + 42) },
-    { clientX: Math.round(rect.right + 32), clientY: Math.round(rect.top + 32) },
-    { clientX: Math.round(rect.right - 18), clientY: Math.round(rect.top + 18) },
-  ]
-  for (const point of points) {
-    const target = document.elementFromPoint(point.clientX, point.clientY)
-    if (target) {
-      firePointerClick(target, { absoluteClientX: point.clientX, absoluteClientY: point.clientY })
-      target.click?.()
-      await delay(120)
-    }
-    if (!findZhihuCoverFileChooserDialog()) return
-    await requestTrustedClickAt(point, platform, '关闭知乎文件弹窗')
-    await delay(250)
-    if (!findZhihuCoverFileChooserDialog()) return
-  }
+  return zhihuDomAdapter().closeCoverFileChooserIfOpen(platform)
 }
 
 function dispatchEscapeKey(target) {
@@ -389,306 +405,72 @@ function dispatchEscapeKey(target) {
   }
 }
 
-function findZhihuCoverFileChooserCloseTarget(dialog) {
-  const rect = dialog?.getBoundingClientRect?.()
-  if (!rect) return null
-  const candidates = Array.from(document.querySelectorAll('button, [role="button"], div, span, svg'))
-    .filter(isVisibleElement)
-    .map((el) => {
-      const itemRect = el.getBoundingClientRect()
-      const text = normalizeText(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '')
-      return { el, rect: itemRect, text }
-    })
-    .filter((item) => {
-      const centerX = item.rect.left + item.rect.width / 2
-      const centerY = item.rect.top + item.rect.height / 2
-      return centerX >= rect.right - 8
-        && centerX <= rect.right + 120
-        && centerY >= rect.top - 30
-        && centerY <= rect.top + 80
-        && item.rect.width >= 12
-        && item.rect.width <= 80
-        && item.rect.height >= 12
-        && item.rect.height <= 80
-    })
-    .sort((left, right) => {
-      const leftDistance = Math.abs((left.rect.left + left.rect.width / 2) - (rect.right + 24))
-        + Math.abs((left.rect.top + left.rect.height / 2) - (rect.top + 30))
-      const rightDistance = Math.abs((right.rect.left + right.rect.width / 2) - (rect.right + 24))
-        + Math.abs((right.rect.top + right.rect.height / 2) - (rect.top + 30))
-      return leftDistance - rightDistance
-    })
-  return candidates[0]?.el || null
-}
-
-async function confirmZhihuCoverFileChooser(dialog, platform) {
-  const row = await waitForCondition(
-    () => findZhihuUploadedCoverFileRow(dialog),
-    45000,
-    `知乎封面文件选项未找到；${describeZhihuPublishSettings()}`,
-  )
-  await clickZhihuCoverFileRow(row, platform)
-  await delay(500)
-
-  const confirm = await waitForCondition(
-    () => findZhihuCoverFileChooserConfirm(dialog),
-    45000,
-    `知乎封面文件确认按钮未可用；${describeZhihuPublishSettings()}`,
-  )
-  await clickTrustedActionOnce(confirm, { platform })
-  await delay(1000)
-}
-
 function findZhihuCoverFileChooserDialog() {
-  const title = findVisibleTextElement('选择文件', { exact: true, maxLength: 8 })
-  const confirm = findVisibleTextElement('请选择文件', { exact: true, maxLength: 8 })
-  const storageHint = findVisibleTextElement('默认储存在', { exact: false, maxLength: 80 })
-  const marker = title || confirm || storageHint
-  if (!marker) return null
-  const dialog = nearestLargeContainer(marker)
-  const text = normalizeText(dialog?.textContent || '')
-  return text.includes('选择文件') && text.includes('请选择文件') ? dialog : null
+  return zhihuDomAdapter().findCoverFileChooserDialog()
 }
 
 function findZhihuUploadedCoverFileRow(dialog) {
-  const root = dialog || findZhihuCoverFileChooserDialog()
-  if (!root) return null
-  const candidates = Array.from(root.querySelectorAll('label, button, [role="button"], [role="option"], div, li'))
-    .filter(isVisibleElement)
-    .map((el) => {
-      const rect = el.getBoundingClientRect()
-      const text = normalizeText(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '')
-      return { el, rect, text, area: rect.width * rect.height }
-    })
-    .filter((item) => /geo-cover|\.png|\.jpg|\.jpeg|PNG|JPG|JPEG/i.test(item.text))
-    .filter((item) => item.rect.width >= 120 && item.rect.height >= 24)
-    .sort((left, right) => right.area - left.area)
-  for (const candidate of candidates) {
-    const row = findZhihuFileCardContainer(candidate.el, root)
-    if (row) return row
-  }
-  return null
-}
-
-function findZhihuFileCardContainer(el, root) {
-  const rootRect = root?.getBoundingClientRect?.() || { width: window.innerWidth, height: window.innerHeight }
-  let current = el
-  let best = null
-  while (current && current !== root && current !== document.body) {
-    if (isVisibleElement(current)) {
-      const rect = current.getBoundingClientRect()
-      const text = normalizeText(current.textContent || '')
-      if (/geo-cover|\.png|\.jpg|\.jpeg/i.test(text)
-        && rect.width >= 280
-        && rect.height >= 50
-        && rect.height <= 140
-        && rect.width <= rootRect.width + 20) {
-        best = current
-      }
-    }
-    current = current.parentElement
-  }
-  return best
-}
-
-async function clickZhihuCoverFileRow(row, platform) {
-  const target = findZhihuFileRowSelectionTarget(row) || row
-  await clickZhihuCoverSelectionTarget(target, row, platform)
-  await delay(300)
-  if (!isZhihuCoverFileRowSelected(row)) {
-    await clickZhihuCoverSelectionAtRowRight(row, platform)
-    await delay(300)
-  }
-  if (!isZhihuCoverFileRowSelected(row)) {
-    await requestTrustedClickAt(zhihuCoverRowRightClickPoint(row), platform, '知乎封面文件')
-    await delay(300)
-  }
-}
-
-async function clickZhihuCoverSelectionTarget(target, row, platform) {
-  firePointerClick(target, { clickRatioX: target === row ? 0.94 : 0.5, clickRatioY: 0.5 })
-  target.click?.()
-  await delay(120)
-  if (!isZhihuCoverFileRowSelected(row)) {
-    await clickTrustedActionOnce(target, { platform, clickRatioX: target === row ? 0.94 : 0.5, clickRatioY: 0.5 })
-  }
-}
-
-async function clickZhihuCoverSelectionAtRowRight(row, platform) {
-  const point = zhihuCoverRowRightClickPoint(row)
-  const target = document.elementFromPoint(point.clientX, point.clientY) || row
-  firePointerClick(target, { absoluteClientX: point.clientX, absoluteClientY: point.clientY })
-  target.click?.()
-  await delay(120)
-  if (!isZhihuCoverFileRowSelected(row)) {
-    await requestTrustedClickAt(point, platform, '知乎封面文件')
-  }
-}
-
-function zhihuCoverRowRightClickPoint(row) {
-  const rect = row.getBoundingClientRect()
-  return {
-    clientX: Math.round(rect.right - Math.min(Math.max(rect.width * 0.08, 18), 32)),
-    clientY: Math.round(rect.top + rect.height / 2),
-  }
-}
-
-function findZhihuFileRowSelectionTarget(row) {
-  const rowRect = row.getBoundingClientRect()
-  const controls = Array.from(row.querySelectorAll('input, button, [role="radio"], [role="checkbox"], [aria-checked], span, div'))
-    .filter(isVisibleElement)
-    .map((el) => ({ el, rect: el.getBoundingClientRect() }))
-    .filter((item) => item.rect.left >= rowRect.left + rowRect.width * 0.72)
-    .filter((item) => item.rect.width >= 10 && item.rect.width <= 36 && item.rect.height >= 10 && item.rect.height <= 36)
-    .sort((left, right) => {
-      const leftCenter = left.rect.left + left.rect.width / 2
-      const rightCenter = right.rect.left + right.rect.width / 2
-      return rightCenter - leftCenter
-    })
-  return controls[0]?.el || row
-}
-
-function isZhihuCoverFileRowSelected(row) {
-  if (!row) return false
-  if (row.querySelector?.('input:checked')) return true
-  if (row.querySelector?.('[aria-checked="true"], [data-checked="true"]')) return true
-  const text = normalizeText(row.textContent || '')
-  return /已选择|选中/.test(text)
+  return zhihuDomAdapter().findUploadedCoverFileRow(dialog)
 }
 
 function findZhihuCoverFileChooserConfirm(dialog) {
-  const root = dialog || findZhihuCoverFileChooserDialog()
-  if (!root) return null
-  const candidates = Array.from(root.querySelectorAll('button, [role="button"], div, span'))
-    .filter(isVisibleElement)
-    .map((el) => {
-      const clickable = el.closest?.('button, [role="button"]') || el
-      const rect = clickable.getBoundingClientRect()
-      const text = normalizeText(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '')
-      const style = window.getComputedStyle(clickable)
-      const disabled = clickable.disabled
-        || clickable.getAttribute?.('aria-disabled') === 'true'
-        || /disabled/i.test(String(clickable.className || ''))
-        || style.pointerEvents === 'none'
-      return { el: clickable, rect, text, disabled, area: rect.width * rect.height }
-    })
-    .filter((item) => item.text === '请选择文件')
-    .filter((item) => !item.disabled)
-    .filter((item) => item.rect.width >= 80 && item.rect.height >= 28)
-    .sort((left, right) => right.area - left.area)
-  return candidates[0]?.el || null
+  return zhihuDomAdapter().findCoverFileChooserConfirm(dialog)
 }
 
-async function publishZhihuArticle(platform) {
-  await closeZhihuCoverFileChooserIfOpen(platform)
-  window.scrollTo(0, document.body.scrollHeight)
-  await delay(600)
-  const button = await waitForCondition(
-    () => findZhihuPublishButton(),
-    10000,
-    `知乎发布按钮未找到；${describeZhihuPublishSettings()}`,
-  )
-  await clickTrustedActionOnce(button, { platform })
-  await delay(1200)
-
-  const confirm = findZhihuPublishConfirmButton(button)
-  if (confirm) {
-    await clickTrustedActionOnce(confirm, { platform })
-    await delay(1200)
-  }
-
-  const verification = await waitForCondition(
-    () => verifyZhihuPublishSubmitted(),
-    20000,
-    `知乎发布后未检测到完成状态；${describeZhihuPublishSettings()}`,
-  )
-  return {
-    published: Boolean(verification?.verified),
-    publishVerification: verification,
-    message: '已点击知乎发布',
-  }
+async function publishZhihuArticle(platform, context = {}) {
+  return zhihuDomAdapter().publishArticle(platform, context)
 }
 
-function scrollToZhihuSection(labelText) {
-  const label = findVisibleTextElement(labelText, { exact: false, maxLength: 20 })
-  if (label) {
-    label.scrollIntoView({ block: 'center', inline: 'nearest' })
-  } else {
-    window.scrollTo(0, document.body.scrollHeight)
-  }
+async function waitForZhihuDraftReadyBeforePublish(platform) {
+  return zhihuDomAdapter().waitForDraftReadyBeforePublish(platform)
+}
+
+async function waitForZhihuPublishAttemptOutcome(platform, context = {}) {
+  return zhihuDomAdapter().waitForPublishAttemptOutcome(platform, context)
 }
 
 function findZhihuCoverUploadEntry() {
-  const labels = ['添加文章封面', '添加封面', '上传封面']
-  for (const text of labels) {
-    const el = findVisibleTextElement(text, { exact: false, maxLength: 30 })
-    const target = el?.closest?.('button, label, [role="button"], div, span') || el
-    if (target && isVisibleElement(target)) return target
-  }
-  const fileInput = findLatestFileInput()
-  if (fileInput) return fileInput
-  return null
+  return zhihuDomAdapter().findCoverUploadEntry()
 }
 
 function hasZhihuCoverImage() {
-  const label = findVisibleTextElement('添加封面', { exact: false, maxLength: 20 })
-  const scope = label ? nearestLargeContainer(label) : document.body
-  const images = Array.from((scope || document).querySelectorAll('img'))
-    .filter((img) => isVisibleElement(img))
-    .filter((img) => {
-      const rect = img.getBoundingClientRect()
-      const src = img.currentSrc || img.src || ''
-      return rect.width >= 40 && rect.height >= 40 && !/avatar|profile|logo/i.test(src)
-    })
-  return images.length > 0
+  return zhihuDomAdapter().hasCoverImage()
 }
 
 function findZhihuPublishButton() {
-  return collectVisibleActionElements()
-    .filter((item) => item.text === '发布')
-    .filter((item) => !item.disabled)
-    .sort((left, right) => right.rect.top - left.rect.top || right.rect.left - left.rect.left)[0]?.el || null
+  return zhihuDomAdapter().findPublishButton()
+}
+
+async function clickZhihuPublishAction(el, platform) {
+  return zhihuDomAdapter().clickPublishAction(el, platform)
+}
+
+function hasZhihuPublishProgressSignal() {
+  return zhihuDomAdapter().hasPublishProgressSignal()
 }
 
 function findZhihuPublishConfirmButton(initialButton) {
-  const buttons = collectVisibleActionElements()
-    .filter((item) => item.el !== initialButton)
-    .filter((item) => item.text === '发布' || item.text === '确认发布' || item.text === '继续发布')
-    .sort((left, right) => right.rect.top - left.rect.top)
-  return buttons[0]?.el || null
+  return zhihuDomAdapter().findPublishConfirmButton(initialButton)
 }
 
-function verifyZhihuPublishSubmitted() {
-  const text = normalizeText(document.body?.innerText || '')
-  const url = normalizeZhihuPublishedUrl(location.href)
-  const success = text.includes('发布成功')
-    || /\/p\/|\/article\//.test(location.href)
-    || (/发布于\d{4}[-年]\d{1,2}[-月]\d{1,2}/.test(text) && !/Markdown语法输入中|添加文章封面|发布设置/.test(text))
-  if (!success) return null
-  return {
-    verified: true,
-    pageUrl: url,
-    pageTitle: document.title,
-    textSample: text.slice(0, 500),
-  }
+function verifyZhihuPublishSubmitted(context = {}) {
+  return zhihuDomAdapter().verifyPublishSubmitted(context)
 }
 
-function normalizeZhihuPublishedUrl(value) {
-  const raw = String(value || '').trim()
-  if (!raw) return ''
-  try {
-    const url = new URL(raw, location.href)
-    const match = url.pathname.match(/^\/p\/([^/]+)/)
-    if (match) {
-      url.pathname = `/p/${match[1]}`
-      url.search = ''
-      url.hash = ''
-      return url.toString()
-    }
-  } catch (_) {
-    return raw.replace(/\/edit(?:[?#].*)?$/, '')
-  }
-  return raw
+function isZhihuEditorStillOpen(text = normalizeText(document.body?.innerText || '')) {
+  return zhihuDomAdapter().isEditorStillOpen(text)
+}
+
+function findZhihuDraftLoadingDialog() {
+  return zhihuDomAdapter().findDraftLoadingDialog()
+}
+
+async function closeZhihuDraftLoadingDialog(dialog, platform) {
+  return zhihuDomAdapter().closeDraftLoadingDialog(dialog, platform)
+}
+
+async function setZhihuEditablePlainText(contentElement, text) {
+  return zhihuDomAdapter().setEditablePlainText(contentElement, text)
 }
 
 function describeZhihuPublishSettings() {
@@ -1706,8 +1488,28 @@ async function clickToutiaoOptionNearLabel(labelText, optionText, platform) {
   if (!option) {
     throw new Error(`头条${labelText}选项未找到：${optionText}`)
   }
-  await clickClosestAction(option, { platform })
+  await clickToutiaoRadioText(option, platform, optionText)
   await delay(300)
+}
+
+async function clickToutiaoRadioText(option, platform, optionText) {
+  option.scrollIntoView?.({ block: 'center', inline: 'nearest' })
+  await delay(100)
+  const rect = option.getBoundingClientRect()
+  firePointerClick(option)
+  option.click?.()
+  if (requiresTrustedClick(platform)) {
+    const radioClientX = rect.width <= 42 ? rect.left - 18 : rect.left + 14
+    await requestTrustedClickAt(
+      {
+        clientX: Math.round(Math.max(0, radioClientX)),
+        clientY: Math.round(rect.top + rect.height / 2),
+      },
+      platform,
+      optionText,
+      rect,
+    )
+  }
 }
 
 function findToutiaoInputNearLabel(labelText) {
@@ -2167,13 +1969,14 @@ async function uploadCoverImageFromLocalHelper(imageUrl, platform, platformName)
 }
 
 function supportsLocalHelperUploadPlatform(platform) {
-  return ['toutiao', 'zhihu'].includes(normalizePlatform(platform))
+  return ['toutiao', 'zhihu', 'baijiahao'].includes(normalizePlatform(platform))
 }
 
 function platformDisplayName(platform) {
   const normalized = normalizePlatform(platform)
   if (normalized === 'zhihu') return '知乎'
   if (normalized === 'toutiao') return '头条'
+  if (normalized === 'baijiahao') return '百家号'
   return normalized || '平台'
 }
 
@@ -2603,18 +2406,10 @@ function defaultTitleSelectors(platform) {
     ].concat(common)
   }
   if (platform === 'xiaohongshu') {
-    return [
-      'input[placeholder*="请输入标题"]',
-      'textarea[placeholder*="请输入标题"]',
-      'input[placeholder*="输入标题"]',
-      'textarea[placeholder*="输入标题"]',
-      'input[placeholder*="添加标题"]',
-      'textarea[placeholder*="添加标题"]',
-      'input[placeholder*="填写标题"]',
-      'textarea[placeholder*="填写标题"]',
-      'input[placeholder*="标题"]',
-      'textarea[placeholder*="标题"]',
-    ].concat(common)
+    return xiaohongshuEditorSelectors().title.concat(common)
+  }
+  if (platform === 'baijiahao') {
+    return baijiahaoEditorSelectors().title.concat(common)
   }
   return [
     '.byte-editor-title textarea',
@@ -2641,18 +2436,10 @@ function defaultContentSelectors(platform) {
     ].concat(common)
   }
   if (platform === 'xiaohongshu') {
-    return [
-      '.ql-editor',
-      '.ProseMirror',
-      '[data-placeholder*="正文"]',
-      '[data-placeholder*="内容"]',
-      'textarea[placeholder*="输入正文"]',
-      'textarea[placeholder*="请输入正文"]',
-      'textarea[placeholder*="添加正文"]',
-      'textarea[placeholder*="分享"]',
-      'div[contenteditable="true"]',
-      'div[role="textbox"]',
-    ].concat(common)
+    return xiaohongshuEditorSelectors().content.concat(common)
+  }
+  if (platform === 'baijiahao') {
+    return baijiahaoEditorSelectors().content.concat(common)
   }
   return [
     '.ProseMirror',
@@ -2665,18 +2452,32 @@ function defaultContentSelectors(platform) {
 
 function defaultTagSelectors(platform) {
   if (platform === 'xiaohongshu') {
-    return [
-      'input[placeholder*="话题"]',
-      'input[placeholder*="标签"]',
-      'textarea[placeholder*="话题"]',
-      'textarea[placeholder*="标签"]',
-    ]
+    return xiaohongshuEditorSelectors().tags
+  }
+  if (platform === 'baijiahao') {
+    return baijiahaoEditorSelectors().tags
   }
   return [
     '[data-geo-fill="tags"]',
     'input[placeholder*="标签"]',
     'textarea[placeholder*="标签"]',
   ]
+}
+
+function xiaohongshuEditorSelectors() {
+  const selectors = globalThis.__GEO_XIAOHONGSHU_PLATFORM__?.editorSelectors?.()
+  if (!selectors) {
+    throw new Error('XIAOHONGSHU_ADAPTER_NOT_LOADED：小红书平台选择器适配器未加载，请重新加载扩展')
+  }
+  return selectors
+}
+
+function baijiahaoEditorSelectors() {
+  const selectors = globalThis.__GEO_BAIJIAHAO_PLATFORM__?.editorSelectors?.()
+  if (!selectors) {
+    throw new Error('BAIJIAHAO_ADAPTER_NOT_LOADED：百家号平台选择器适配器未加载，请重新加载扩展')
+  }
+  return selectors
 }
 
 function verifyExpectedPlatformIdentity(payload, platform) {
@@ -2739,6 +2540,7 @@ function inferPlatformFromLocation() {
   if (location.hostname === 'mp.toutiao.com') return 'toutiao'
   if (location.hostname.endsWith('zhihu.com')) return 'zhihu'
   if (location.hostname.endsWith('xiaohongshu.com')) return 'xiaohongshu'
+  if (location.hostname === 'baijiahao.baidu.com') return 'baijiahao'
   return null
 }
 
@@ -2746,6 +2548,7 @@ function readPlatformIdentity(platform) {
   if (platform === 'toutiao') return readToutiaoIdentity()
   if (platform === 'zhihu') return readZhihuIdentity()
   if (platform === 'xiaohongshu') return readXiaohongshuIdentity()
+  if (platform === 'baijiahao') return readBaijiahaoIdentity()
   return {
     implemented: false,
     accountIds: [],
@@ -2754,166 +2557,12 @@ function readPlatformIdentity(platform) {
   }
 }
 
-function readZhihuIdentity() {
-  const accountIds = new Set()
+function readBaijiahaoIdentity() {
   const accountNames = new Set()
-  const visibleText = normalizeText(document.body?.innerText || document.body?.textContent || '')
-  collectZhihuIdentityFromVisibleDom(accountIds, accountNames)
-  collectZhihuIdentityFromScripts(accountIds, accountNames)
-  collectZhihuIdentityFromStorage(accountIds, accountNames)
-  return {
-    implemented: true,
-    accountIds: Array.from(accountIds),
-    accountNames: Array.from(accountNames),
-    diagnostics: `href=${location.href}; visibleTextLength=${visibleText.length}; accountIds=${Array.from(accountIds).join(',') || '-'}; accountNames=${Array.from(accountNames).join(',') || '-'}`,
-  }
-}
-
-function collectZhihuIdentityFromVisibleDom(accountIds, accountNames) {
-  const avatarSelectors = [
-    '.AppHeader-profile img[alt]',
-    '.AppHeader [class*="profile"] img[alt]',
-  ]
-  for (const selector of avatarSelectors) {
-    for (const el of Array.from(document.querySelectorAll(selector))) {
-      if (!isVisibleElement(el)) continue
-      if (!isTopRightAccountElement(el)) continue
-      const alt = normalizeZhihuAccountName(el.getAttribute('alt') || '')
-      if (isLikelyZhihuAccountName(alt)) accountNames.add(alt)
-    }
-  }
-
-  const accountLinks = Array.from(document.querySelectorAll([
-    '.AppHeader a[href*="/people/"]',
-    '.AppHeader-profile a[href*="/people/"]',
-    'a.AppHeader-profile[href*="/people/"]',
-  ].join(',')))
-  for (const el of accountLinks) {
-    if (!isVisibleElement(el) && !hasVisibleAncestor(el)) continue
-    if (!isTopRightAccountElement(el)) continue
-    const href = el.getAttribute('href') || ''
-    const token = href.match(/\/people\/([^/?#]+)/)?.[1]
-    if (token) accountIds.add(decodeURIComponent(token))
-    const text = normalizeZhihuAccountName(el.textContent || el.getAttribute('aria-label') || '')
-    if (isLikelyZhihuAccountName(text)) accountNames.add(text)
-  }
-}
-
-function collectZhihuIdentityFromText(text, accountIds, accountNames) {
-  const currentUserBlocks = []
-  const blockPatterns = [
-    /"currentUser"\s*:\s*\{[\s\S]{0,12000}?\}/g,
-    /"viewer"\s*:\s*\{[\s\S]{0,12000}?\}/g,
-    /"me"\s*:\s*\{[\s\S]{0,12000}?\}/g,
-  ]
-  for (const pattern of blockPatterns) {
-    for (const match of text.matchAll(pattern)) currentUserBlocks.push(match[0])
-  }
-  for (const block of currentUserBlocks) {
-    collectZhihuIdsFromText(block, accountIds)
-    collectZhihuNamesFromText(block, accountNames)
-  }
-}
-
-function collectZhihuIdsFromText(text, accountIds) {
-  const patterns = [
-    /"urlToken"\s*:\s*"([^"]{2,80})"/g,
-    /"url_token"\s*:\s*"([^"]{2,80})"/g,
-    /"username"\s*:\s*"([^"]{2,80})"/g,
-    /"id"\s*:\s*"([^"]{6,120})"/g,
-  ]
-  for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) {
-      const value = normalizeZhihuAccountId(match[1])
-      if (value) accountIds.add(value)
-    }
-  }
-}
-
-function collectZhihuNamesFromText(text, accountNames) {
-  const patterns = [
-    /"name"\s*:\s*"([^"]{2,80})"/g,
-    /"nickname"\s*:\s*"([^"]{2,80})"/g,
-  ]
-  for (const pattern of patterns) {
-    for (const match of text.matchAll(pattern)) {
-      const value = normalizeZhihuAccountName(match[1])
-      if (isLikelyZhihuAccountName(value)) accountNames.add(value)
-    }
-  }
-}
-
-function collectZhihuIdentityFromStorage(accountIds, accountNames) {
-  for (const storage of safeBrowserStorages()) {
-    for (let index = 0; index < storage.length; index += 1) {
-      const key = storage.key(index)
-      if (!key) continue
-      let value = ''
-      try {
-        value = storage.getItem(key) || ''
-      } catch {
-        continue
-      }
-      if (!value) continue
-      if (!/(current|login|viewer|me|profile|user|account)/i.test(key)) continue
-      collectZhihuIdentityFromText(`${key}:${value}`, accountIds, accountNames)
-    }
-  }
-}
-
-function safeBrowserStorages() {
-  const storages = []
-  try {
-    if (window.localStorage) storages.push(window.localStorage)
-  } catch {
-    // ignore storage access failures on restricted pages
-  }
-  try {
-    if (window.sessionStorage) storages.push(window.sessionStorage)
-  } catch {
-    // ignore storage access failures on restricted pages
-  }
-  return storages
-}
-
-function collectZhihuIdentityFromScripts(accountIds, accountNames) {
-  const scripts = Array.from(document.scripts).slice(0, 80)
-  for (const script of scripts) {
-    const text = script.textContent || ''
-    if (!text || !/(currentUser|viewer|loginUser|urlToken)/i.test(text)) continue
-    collectZhihuIdentityFromText(text.slice(0, 200_000), accountIds, accountNames)
-  }
-}
-
-function normalizeZhihuAccountId(value) {
-  const text = String(value || '').trim()
-  if (!text) return ''
-  try {
-    return decodeURIComponent(text)
-  } catch {
-    return text
-  }
-}
-
-function isLikelyZhihuAccountName(value) {
-  const text = normalizeZhihuAccountName(value)
-  if (text.length < 2 || text.length > 60) return false
-  if (/^(写文章|发布文章|创作|开始写作|首页|会员|消息|私信|设置|退出|退出登录|知乎|知乎创作助手)$/.test(text)) return false
-  if (/^[\w.-]{2,60}$/.test(text)) return true
-  return /[\u4e00-\u9fa5]/.test(text) && !/[，。！？、]/.test(text)
-}
-
-function normalizeZhihuAccountName(value) {
-  let text = normalizeAccountName(value)
-  const homepageMatch = text.match(/^点击打开(.+?)的主页$/)
-  if (homepageMatch?.[1]) text = homepageMatch[1]
-  return text
-}
-
-function readXiaohongshuIdentity() {
-  const accountNames = new Set()
-  const visibleText = normalizeText(document.body?.innerText || document.body?.textContent || '')
-  collectXiaohongshuAccountNamesFromAccountDom(accountNames)
+  const rawVisibleText = document.body?.innerText || document.body?.textContent || ''
+  const visibleText = normalizeText(rawVisibleText)
+  collectBaijiahaoAccountNamesFromDom(accountNames)
+  collectBaijiahaoAccountNamesFromText(collectStorageAndScriptIdentityText(), accountNames)
   return {
     implemented: true,
     accountIds: [],
@@ -2922,67 +2571,146 @@ function readXiaohongshuIdentity() {
   }
 }
 
-function collectXiaohongshuAccountNamesFromAccountDom(accountNames) {
-  const preciseSelectors = [
-    '.d-topbar-default .user-info .name-box',
-    '.user-info .name-box',
+function collectBaijiahaoAccountNamesFromDom(accountNames) {
+  const selectors = [
+    '[class*="user"] [class*="name"]',
+    '[class*="User"] [class*="Name"]',
+    '[class*="account"] [class*="name"]',
+    '[class*="Account"] [class*="Name"]',
+    '[class*="avatar"] + *',
+    '[class*="Avatar"] + *',
   ]
-  for (const selector of preciseSelectors) {
-    const elements = Array.from(document.querySelectorAll(selector))
-    for (const el of elements) {
+  for (const selector of selectors) {
+    for (const el of Array.from(document.querySelectorAll(selector))) {
       if (!isVisibleElement(el) && !hasVisibleAncestor(el)) continue
       if (!isTopRightAccountElement(el)) continue
       const text = normalizeAccountName(el.textContent || el.getAttribute('aria-label') || '')
-      if (isLikelyXiaohongshuAccountName(text)) accountNames.add(text)
+      if (isLikelyBaijiahaoAccountName(text)) accountNames.add(text)
     }
   }
 }
 
-function collectXiaohongshuAccountNamesFromText(text, accountNames) {
+function collectBaijiahaoAccountNamesFromText(text, accountNames) {
   const patterns = [
     /"nickname"\s*:\s*"([^"]{2,80})"/g,
     /"nickName"\s*:\s*"([^"]{2,80})"/g,
     /"userName"\s*:\s*"([^"]{2,80})"/g,
-    /"user_name"\s*:\s*"([^"]{2,80})"/g,
-    /"creatorName"\s*:\s*"([^"]{2,80})"/g,
+    /"accountName"\s*:\s*"([^"]{2,80})"/g,
     /"name"\s*:\s*"([^"]{2,80})"/g,
   ]
   for (const pattern of patterns) {
     for (const match of text.matchAll(pattern)) {
       const value = normalizeAccountName(match[1])
-      if (isLikelyXiaohongshuAccountName(value)) accountNames.add(value)
+      if (isLikelyBaijiahaoAccountName(value)) accountNames.add(value)
     }
   }
 }
 
-function collectXiaohongshuAccountNamesFromStorage(accountNames) {
-  for (const storage of [localStorage, sessionStorage]) {
+function collectStorageAndScriptIdentityText() {
+  const parts = []
+  for (const storage of safeBrowserStorages()) {
     for (let index = 0; index < storage.length; index += 1) {
       const key = storage.key(index)
-      if (!key) continue
-      const value = storage.getItem(key)
-      if (!value) continue
-      if (!/(current|login|session|profile|user|account|creator|author|self|me|mine)/i.test(key)) continue
-      collectXiaohongshuAccountNamesFromText(`${key}:${value}`, accountNames)
+      if (!key || !/(current|login|session|profile|user|account|author|self|me)/i.test(key)) continue
+      try {
+        parts.push(`${key}:${storage.getItem(key) || ''}`)
+      } catch {
+        // ignore storage access failures
+      }
     }
   }
-}
-
-function collectXiaohongshuAccountNamesFromScripts(accountNames) {
-  const scripts = Array.from(document.scripts).slice(0, 80)
-  for (const script of scripts) {
+  for (const script of Array.from(document.scripts).slice(0, 80)) {
     const text = script.textContent || ''
-    if (!text || !/(currentUser|loginUser|userInfo|userProfile|creatorInfo|nickname)/i.test(text)) continue
-    collectXiaohongshuAccountNamesFromText(text.slice(0, 200_000), accountNames)
+    if (/(currentUser|loginUser|userInfo|account|nickname|userName)/i.test(text)) {
+      parts.push(text.slice(0, 120_000))
+    }
   }
+  return parts.join('\n')
 }
 
-function isLikelyXiaohongshuAccountName(value) {
+function safeBrowserStorages() {
+  const storages = []
+  try {
+    if (window.localStorage) storages.push(window.localStorage)
+  } catch {
+    // ignore storage access failures
+  }
+  try {
+    if (window.sessionStorage) storages.push(window.sessionStorage)
+  } catch {
+    // ignore storage access failures
+  }
+  return storages
+}
+
+function isLikelyBaijiahaoAccountName(value) {
   const text = normalizeAccountName(value)
   if (text.length < 2 || text.length > 40) return false
-  if (/^(首页|发布笔记|笔记管理|数据看板|活动中心|笔记灵感|创作学院|创作百科|上传视频|上传图文|写长文|发播客|新的创作|导入链接|创建|保存|返回)$/.test(text)) return false
+  if (/^(首页|图文|视频|动态|直播|合集|图集|AI成片|基础信息|活动投稿|智能创作|创作声明|发布|预览|存草稿|定时发布|取消|确定|登录)$/.test(text)) return false
   if (/^[\w.-]{2,40}$/.test(text)) return true
   return /[\u4e00-\u9fa5]/.test(text) && !/[，。！？、]/.test(text)
+}
+
+function readZhihuIdentity() {
+  return zhihuIdentityReader().readIdentity()
+}
+
+function zhihuIdentityReader() {
+  if (globalThis.__GEO_ZHIHU_IDENTITY_READER__) return globalThis.__GEO_ZHIHU_IDENTITY_READER__
+  const factory = globalThis.__GEO_ZHIHU_PLATFORM__?.createIdentityReader
+  if (typeof factory !== 'function') {
+    throw new Error('ZHIHU_ADAPTER_NOT_LOADED：知乎平台身份读取适配器未加载，请重新加载扩展')
+  }
+  globalThis.__GEO_ZHIHU_IDENTITY_READER__ = factory({
+    normalizeText,
+    isVisibleElement,
+    hasVisibleAncestor,
+    isTopRightAccountElement,
+  })
+  return globalThis.__GEO_ZHIHU_IDENTITY_READER__
+}
+
+function readXiaohongshuIdentity() {
+  return xiaohongshuIdentityReader().readIdentity()
+}
+
+function xiaohongshuIdentityReader() {
+  if (globalThis.__GEO_XIAOHONGSHU_IDENTITY_READER__) return globalThis.__GEO_XIAOHONGSHU_IDENTITY_READER__
+  const factory = globalThis.__GEO_XIAOHONGSHU_PLATFORM__?.createIdentityReader
+  if (typeof factory !== 'function') {
+    throw new Error('XIAOHONGSHU_ADAPTER_NOT_LOADED：小红书平台身份读取适配器未加载，请重新加载扩展')
+  }
+  globalThis.__GEO_XIAOHONGSHU_IDENTITY_READER__ = factory({
+    normalizeText,
+    normalizeAccountName,
+    isVisibleElement,
+    hasVisibleAncestor,
+    isTopRightAccountElement,
+  })
+  return globalThis.__GEO_XIAOHONGSHU_IDENTITY_READER__
+}
+
+function xiaohongshuEntryNavigator() {
+  if (globalThis.__GEO_XIAOHONGSHU_ENTRY_NAVIGATOR__) return globalThis.__GEO_XIAOHONGSHU_ENTRY_NAVIGATOR__
+  const factory = globalThis.__GEO_XIAOHONGSHU_PLATFORM__?.createEntryNavigator
+  if (typeof factory !== 'function') {
+    throw new Error('XIAOHONGSHU_ADAPTER_NOT_LOADED：小红书平台入口导航适配器未加载，请重新加载扩展')
+  }
+  globalThis.__GEO_XIAOHONGSHU_ENTRY_NAVIGATOR__ = factory({
+    normalizeText,
+    findTitleElement,
+    findContentElement,
+    buildFillProfile,
+    findClickableByExactText,
+    findClickableByShortText,
+    clickClosestAction,
+    showStatus,
+    delay,
+    collectDiagnostics,
+    isVisibleElement,
+    isInteractiveElement,
+  })
+  return globalThis.__GEO_XIAOHONGSHU_ENTRY_NAVIGATOR__
 }
 
 function readToutiaoIdentity() {
@@ -3141,6 +2869,10 @@ function fillTitle(title, titleElement) {
   if (!title) return false
   const el = titleElement
   if (!el) return false
+  if (el.isContentEditable || el.getAttribute?.('contenteditable') === 'true') {
+    setEditablePlainText(el, title)
+    return true
+  }
   setTextValue(el, title)
   return true
 }
@@ -3159,39 +2891,6 @@ async function fillContent(html, contentElement, fillProfile) {
     setTextValue(el, htmlToPlainText(html))
   }
   return true
-}
-
-async function setZhihuEditablePlainText(contentElement, text) {
-  const el = resolveZhihuEditableContentElement(contentElement)
-  if (!el || !text) return false
-  const before = normalizeText(el.textContent || '')
-  clearEditableTextWithSelection(el)
-  focusEditableElement(el)
-
-  dispatchPasteIntoEditable(el, text)
-  if (await waitForZhihuEditorAcceptedContent(el, text, before, 1800)) return true
-
-  clearEditableTextWithSelection(el)
-  focusEditableElement(el)
-  document.execCommand?.('insertText', false, text)
-  if (await waitForZhihuEditorAcceptedContent(el, text, before, 1800)) return true
-
-  return false
-}
-
-function resolveZhihuEditableContentElement(contentElement) {
-  const direct = contentElement?.matches?.('[contenteditable="true"]')
-    ? contentElement
-    : contentElement?.querySelector?.('[contenteditable="true"]')
-  if (direct && isVisibleElement(direct)) return direct
-
-  const candidates = [
-    '.DraftEditor-editorContainer [contenteditable="true"]',
-    '.public-DraftEditor-content[contenteditable="true"]',
-    '[role="textbox"][contenteditable="true"]',
-    'div[contenteditable="true"]',
-  ]
-  return findFirst(candidates, { rejectTitleLike: true })
 }
 
 function clearEditableTextWithSelection(el) {
@@ -3236,29 +2935,6 @@ function dispatchPasteIntoEditable(el, text) {
       return false
     }
   }
-}
-
-async function waitForZhihuEditorAcceptedContent(el, text, before, timeoutMs) {
-  const expected = normalizeText(text).slice(0, 40)
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    dispatchEditEvents(el)
-    const current = normalizeText(el.textContent || '')
-    const wordCount = readZhihuEditorWordCount()
-    const hasExpectedText = expected && current.includes(expected)
-    const changed = current && current !== before && current.length >= Math.min(20, normalizeText(text).length)
-    if ((hasExpectedText || changed) && (wordCount === null || wordCount > 0)) return true
-    await delay(120)
-  }
-  return false
-}
-
-function readZhihuEditorWordCount() {
-  const text = document.body?.innerText || document.body?.textContent || ''
-  const match = text.match(/字数\s*[:：]\s*(\d+)/)
-  if (!match) return null
-  const value = Number(match[1])
-  return Number.isFinite(value) ? value : null
 }
 
 function plainTextToHtml(text) {
@@ -3328,7 +3004,7 @@ function detectLoginState(fillProfile) {
   if (/login|signin|passport|account\/login|sso/i.test(href)) {
     return { requiresLogin: true, reason: `当前地址疑似登录页 ${href}` }
   }
-  if (fillProfile.platform === 'xiaohongshu' && isXiaohongshuCreatorShellVisible()) {
+  if (fillProfile.platform === 'xiaohongshu' && xiaohongshuEntryNavigator().isCreatorShellVisible()) {
     return { requiresLogin: false, reason: 'xiaohongshu_creator_shell' }
   }
   if (findTitleElement(fillProfile) || findContentElement(null, fillProfile)) {
@@ -3353,7 +3029,13 @@ async function maybeOpenPlatformEditor(fillProfile) {
   if (findTitleElement(fillProfile) && findContentElement(null, fillProfile)) return
 
   if (fillProfile.platform === 'xiaohongshu') {
-    await maybeSelectXiaohongshuEditorMode(fillProfile)
+    if (location.hostname === 'www.xiaohongshu.com') {
+      showStatus('小红书当前处于用户端页面，切换到创作服务平台', 'info')
+      location.href = 'https://creator.xiaohongshu.com/publish/publish'
+      await delay(2200)
+      return
+    }
+    await xiaohongshuEntryNavigator().maybeSelectEditorMode(fillProfile)
     if (findTitleElement(fillProfile) && findContentElement(null, fillProfile)) return
     if (location.hostname.endsWith('xiaohongshu.com') && location.pathname.includes('/publish/publish')) return
   }
@@ -3385,72 +3067,6 @@ async function maybeOpenPlatformEditor(fillProfile) {
   }
 }
 
-async function maybeSelectXiaohongshuEditorMode(fillProfile) {
-  if (!location.hostname.endsWith('xiaohongshu.com')) return
-  await ensureXiaohongshuEntryPageReady()
-  const modes = ['写长文', '上传图文']
-  for (const mode of modes) {
-    if (await clickXiaohongshuMode(mode, fillProfile)) return
-  }
-  const menu = findClickableByExactText(['发布笔记']) || findClickableByShortText(['发布笔记'])
-  if (menu) {
-    await clickClosestAction(menu, { platform: fillProfile.platform })
-    showStatus('已展开小红书发布菜单', 'info')
-    await delay(800)
-    for (const mode of modes) {
-      if (await clickXiaohongshuMode(mode, fillProfile)) return
-    }
-  }
-  await maybeStartXiaohongshuLongFormCreation(fillProfile)
-  if (findTitleElement(fillProfile) && findContentElement(null, fillProfile)) return
-  const diagnostics = collectDiagnostics()
-  showStatus(`小红书发布页未找到图文/长文编辑器；${diagnostics}`, 'info')
-}
-
-async function ensureXiaohongshuEntryPageReady() {
-  if (!location.hostname.endsWith('xiaohongshu.com')) return
-  const deadline = Date.now() + 6000
-  while (Date.now() < deadline) {
-    if (findXiaohongshuEntryElement()) return
-    if (findTitleElement(buildFillProfile({ platform: 'xiaohongshu' })) && findContentElement(null, buildFillProfile({ platform: 'xiaohongshu' }))) return
-    await delay(300)
-  }
-  if (location.pathname.includes('/publish/publish') && !findXiaohongshuEntryElement()) {
-    showStatus('小红书发布入口未渲染，切换到创作首页重试', 'info')
-    location.href = 'https://creator.xiaohongshu.com/new/home'
-    await delay(2200)
-  }
-}
-
-function findXiaohongshuEntryElement() {
-  return findClickableByExactText(['发布笔记', '写长文', '上传图文', '新的创作', '新建长文', '新建创作', '发布图文笔记'])
-    || findClickableByShortText(['发布笔记', '写长文', '上传图文', '新的创作', '新建长文', '新建创作', '发布图文笔记'])
-    || findXiaohongshuCreateButton()?.element
-}
-
-async function clickXiaohongshuMode(mode, fillProfile) {
-  if (findTitleElement(fillProfile) && findContentElement(null, fillProfile)) return true
-  const tab = findClickableByExactText([mode]) || findClickableByShortText([mode])
-  if (!tab) return false
-  await clickClosestAction(tab, { platform: fillProfile.platform })
-  showStatus(`已切换小红书发布模式：${mode}`, 'info')
-  await delay(1800)
-  await maybeStartXiaohongshuLongFormCreation(fillProfile)
-  return Boolean(findTitleElement(fillProfile) && findContentElement(null, fillProfile))
-}
-
-async function maybeStartXiaohongshuLongFormCreation(fillProfile) {
-  if (findTitleElement(fillProfile) && findContentElement(null, fillProfile)) return
-  const createButton = findXiaohongshuCreateButton()
-  if (createButton) {
-    await clickClosestAction(createButton.element, { ...createButton.options, platform: fillProfile.platform })
-    showStatus(`已点击小红书入口：${createButton.label}`, 'info')
-    await waitForEditorCandidate(fillProfile, 8000)
-  }
-  if (findTitleElement(fillProfile) && findContentElement(null, fillProfile)) return
-  await maybeConfirmXiaohongshuLongFormCreation(fillProfile)
-}
-
 async function waitForEditorCandidate(fillProfile, timeoutMs) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -3458,50 +3074,6 @@ async function waitForEditorCandidate(fillProfile, timeoutMs) {
     await delay(300)
   }
   return false
-}
-
-async function maybeConfirmXiaohongshuLongFormCreation(fillProfile) {
-  const confirmButton = findClickableByExactText(['创建']) || findClickableByShortText(['创建'])
-  if (!confirmButton) return
-  await clickClosestAction(confirmButton, { platform: fillProfile.platform })
-  showStatus('已点击小红书长文创建确认', 'info')
-  await waitForEditorCandidate(fillProfile, 10_000)
-}
-
-function findXiaohongshuCreateButton() {
-  const exact = findClickableByExactText(['新的创作', '新建长文', '新建创作', '发布图文笔记'])
-  if (exact) {
-    return { element: exact, label: normalizeText(exact.textContent || exact.getAttribute('aria-label') || '').slice(0, 20) }
-  }
-
-  const candidates = Array.from(document.querySelectorAll('button, a, [role="button"], [role="tab"], [role="menuitem"], div, span, p'))
-    .map((el) => ({
-      el,
-      text: normalizeText(el.textContent || el.getAttribute('aria-label') || ''),
-      rect: el.getBoundingClientRect(),
-    }))
-    .filter(({ el, text, rect }) => {
-      if (!isVisibleElement(el) || rect.width <= 0 || rect.height <= 0) return false
-      if (rect.width * rect.height > 240_000) return false
-      if (text.includes('新的创作')
-        || text.includes('新建长文')
-        || text.includes('新建创作')
-        || text.includes('发布图文笔记')
-        || text.includes('去写长文')) return true
-      return false
-    })
-    .sort((left, right) => {
-      const leftInteractive = isInteractiveElement(left.el) ? 0 : 1
-      const rightInteractive = isInteractiveElement(right.el) ? 0 : 1
-      return leftInteractive - rightInteractive
-        || left.text.length - right.text.length
-        || (left.rect.width * left.rect.height) - (right.rect.width * right.rect.height)
-    })
-
-  const candidate = candidates[0]
-  if (!candidate) return null
-  const options = candidate.text.includes('导入链接') ? { clickRatioX: 0.22 } : {}
-  return { element: candidate.el, label: '新的创作', options }
 }
 
 async function clickClosestAction(el, options = {}) {
@@ -3575,7 +3147,7 @@ function firePointerClick(el, options = {}) {
 }
 
 function requiresTrustedClick(platform) {
-  return ['xiaohongshu', 'toutiao', 'zhihu'].includes(normalizePlatform(platform))
+  return ['xiaohongshu', 'toutiao', 'zhihu', 'baijiahao'].includes(normalizePlatform(platform))
 }
 
 async function requestTrustedClick(el, options = {}) {
@@ -3681,18 +3253,6 @@ function isLoginEntryText(text) {
   if (text === '登录' || text === '注册登录') return true
   if (text.length > 20) return false
   return false
-}
-
-function isXiaohongshuCreatorShellVisible() {
-  const text = normalizeText(document.body?.innerText || document.body?.textContent || '')
-  if (!text.includes('创作服务平台')) return false
-  return [
-    '发布笔记',
-    '笔记管理',
-    '数据看板',
-    '草稿箱',
-    '退出登录',
-  ].some((marker) => text.includes(marker))
 }
 
 function fillTags(tags, fillProfile) {

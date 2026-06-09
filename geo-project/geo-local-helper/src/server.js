@@ -5,6 +5,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 import crypto from 'node:crypto'
+import { evaluateXiaohongshuPublishSignals } from './publish-check.js'
 
 const CONFIG_PATH = new URL('../config.local.json', import.meta.url)
 const EXAMPLE_CONFIG_PATH = new URL('../config.example.json', import.meta.url)
@@ -27,6 +28,8 @@ const SCHEDULE_POLL_STEP_TIMEOUT_MS = 60_000
 const EVENT_LOOP_WATCHDOG_INTERVAL_MS = 5_000
 const EVENT_LOOP_WATCHDOG_THRESHOLD_MS = 90_000
 const FAILED_SCHEDULE_REPORT_MAX_ATTEMPTS = 3
+const SELF_MEDIA_SCHEDULE_PLATFORMS_CACHE_MS = 60_000
+const EXIT_CODE_PORT_IN_USE = 2
 const nonceCache = new Map()
 let nonceFlushTimer = null
 let runtimeSession = null
@@ -34,6 +37,20 @@ let runtimeSettings = { adspower: {} }
 let pendingPairing = null
 let schedulePollInFlight = false
 let lastSchedulePollStatus = null
+let cachedSelfMediaSchedulePlatforms = null
+let cachedSelfMediaSchedulePlatformsAt = 0
+let lastSelfMediaSchedulePlatformsError = null
+
+process.on('uncaughtException', (error) => {
+  console.error('GEO local helper uncaught exception:', error?.stack || error?.message || error)
+  if (process.env.GEO_HELPER_SUPERVISED === '1') process.exit(1)
+})
+
+process.on('unhandledRejection', (reason) => {
+  const message = reason?.stack || reason?.message || reason
+  console.error('GEO local helper unhandled rejection:', message)
+  if (process.env.GEO_HELPER_SUPERVISED === '1') process.exit(1)
+})
 
 function nowIso() {
   return new Date().toISOString()
@@ -820,9 +837,13 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
     `/api/v1/browser/start?user_id=${profileId}&open_tabs=1&ip_tab=0`,
   )
   try {
+    const checkUrl = worksListUrlForPublishCheck(
+      claim.launch.platform || claim.schedule.platform,
+      claim.launch.url,
+    )
     const result = await checkPublishResultInAdspowerPage(
       data?.ws?.puppeteer,
-      claim.launch.url || defaultWorksListUrlForPlatform(claim.launch.platform || claim.schedule.platform),
+      checkUrl,
       claim.schedule,
     )
     if (result.found) {
@@ -872,6 +893,12 @@ async function evaluatePublishResult(page, schedule) {
   const platform = String(schedule?.platform || '').trim().toLowerCase()
   if (platform === 'zhihu') {
     return evaluateZhihuPublishResult(page, schedule)
+  }
+  if (platform === 'xiaohongshu') {
+    return evaluateXiaohongshuPublishResult(page, schedule)
+  }
+  if (platform === 'baijiahao') {
+    return evaluateBaijiahaoPublishResult(page, schedule)
   }
   return evaluateToutiaoPublishResult(page, schedule)
 }
@@ -937,6 +964,13 @@ async function evaluateZhihuPublishResult(page, schedule) {
           url.hash = ''
           return url.toString()
         }
+        const articleMatch = url.pathname.match(/^\/article\/([^/]+)/)
+        if (articleMatch) {
+          url.pathname = `/article/${articleMatch[1]}`
+          url.search = ''
+          url.hash = ''
+          return url.toString()
+        }
         return url.toString()
       } catch (_) {
         return String(value || '')
@@ -955,6 +989,67 @@ async function evaluateZhihuPublishResult(page, schedule) {
       targetTitle: input.title,
       platformScheduledAt: input.platformScheduledAt,
       url: normalizeZhihuUrl(matchedUrl || location.href),
+      pageTitle: document.title,
+      textSample: text.slice(0, 1200),
+    }
+  }, target)
+}
+
+async function evaluateXiaohongshuPublishResult(page, schedule) {
+  const target = {
+    title: schedule?.publishCheckTitle || '',
+    platformScheduledAt: schedule?.platformScheduledAt || schedule?.plannedPublishAt || '',
+  }
+  const pageState = await page.evaluate(() => {
+    const text = document.body?.innerText || ''
+    return {
+      text,
+      url: location.href,
+      pageTitle: document.title,
+      anchors: Array.from(document.querySelectorAll('a[href]'))
+        .map((item) => ({ text: item.textContent || '', href: item.href || '' }))
+        .slice(0, 80),
+    }
+  })
+  return evaluateXiaohongshuPublishSignals(target, pageState)
+}
+
+async function evaluateBaijiahaoPublishResult(page, schedule) {
+  const target = {
+    title: schedule?.publishCheckTitle || '',
+    platformScheduledAt: schedule?.platformScheduledAt || schedule?.plannedPublishAt || '',
+  }
+  return page.evaluate((input) => {
+    const normalize = (value) => String(value || '').replace(/\s+/g, '').trim()
+    const normalizeTime = (value) => normalize(String(value || '')
+      .replace('T', ' ')
+      .replace(/[年月/]/g, '-')
+      .replace(/日/g, ' ')
+      .replace(/:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/, ''))
+    const text = document.body?.innerText || ''
+    const normalizedText = normalize(text)
+    const normalizedTitle = normalize(input.title)
+    const titleProbe = normalizedTitle.length > 20 ? normalizedTitle.slice(0, 20) : normalizedTitle
+    const hasTitle = Boolean(titleProbe && normalizedText.includes(titleProbe))
+    const scheduleProbe = normalizeTime(input.platformScheduledAt)
+    const hasScheduleTime = !scheduleProbe || normalizedText.includes(scheduleProbe)
+    const hasPublishedSignal = /定时发布|已发布|审核中|待审核|发布成功|已定时|发布时间|将于/.test(text)
+      || /\/content|\/manage/.test(location.href)
+    let matchedUrl = ''
+    if (hasTitle) {
+      const anchors = Array.from(document.querySelectorAll('a[href]'))
+      const anchor = anchors.find((item) => normalize(item.textContent).includes(titleProbe))
+      matchedUrl = anchor?.href || ''
+    }
+    return {
+      found: hasTitle && hasScheduleTime && hasPublishedSignal,
+      hasTitle,
+      hasScheduleTime,
+      hasPublishedSignal,
+      targetTitle: input.title,
+      platformScheduledAt: input.platformScheduledAt,
+      scheduleProbe,
+      url: matchedUrl || location.href,
       pageTitle: document.title,
       textSample: text.slice(0, 1200),
     }
@@ -1010,6 +1105,7 @@ function shouldFlushScheduleFailure(task, platform) {
   if (platform && task.platform !== platform) return false
   if (!scheduleIdOfTask(task)) return false
   if (task.backendFailureReportedAt) return false
+  if (task.backendFailureReportRejectedAt) return false
   return Number(task.backendFailureReportAttempts || 0) < FAILED_SCHEDULE_REPORT_MAX_ATTEMPTS
 }
 
@@ -1027,6 +1123,9 @@ async function flushPendingScheduleFailureReports(config, platform = '') {
       task.backendFailureReportLastError = null
     } catch (error) {
       task.backendFailureReportLastError = formatBackendError(error)
+      if (error?.statusCode === 400) {
+        task.backendFailureReportRejectedAt = nowIso()
+      }
       console.error('Failed to report pending schedule execution failure:', task.backendFailureReportLastError)
     }
     changed = true
@@ -1066,14 +1165,25 @@ function defaultPublishUrlForPlatform(platform) {
   const normalized = String(platform || '').trim().toLowerCase()
   if (normalized === 'toutiao') return 'https://mp.toutiao.com/profile_v4/graphic/publish'
   if (normalized === 'zhihu') return 'https://zhuanlan.zhihu.com/write'
-  if (normalized === 'xiaohongshu') return 'https://www.xiaohongshu.com/'
+  if (normalized === 'xiaohongshu') return 'https://creator.xiaohongshu.com/publish/publish'
+  if (normalized === 'baijiahao') return 'https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1'
   return null
 }
 
 function defaultWorksListUrlForPlatform(platform) {
   const normalized = String(platform || '').trim().toLowerCase()
   if (normalized === 'toutiao') return 'https://mp.toutiao.com/profile_v4/manage/content/all'
+  if (normalized === 'xiaohongshu') return 'https://creator.xiaohongshu.com/new/note-manager'
+  if (normalized === 'baijiahao') return 'https://baijiahao.baidu.com/builder/rc/content?type=news'
   return defaultPublishUrlForPlatform(platform)
+}
+
+function worksListUrlForPublishCheck(platform, launchUrl) {
+  const normalized = String(platform || '').trim().toLowerCase()
+  if (normalized === 'xiaohongshu' || normalized === 'toutiao' || normalized === 'baijiahao') {
+    return defaultWorksListUrlForPlatform(normalized)
+  }
+  return launchUrl || defaultWorksListUrlForPlatform(normalized)
 }
 
 async function handleOpenEnvironment(req, res, config) {
@@ -1320,11 +1430,18 @@ async function requeueTimedOutClaimsByPlatform(platform) {
 }
 
 function findNextClaimableTask(environmentKey, platform = '') {
-  return listTasks().find((task) => (
+  const claimable = listTasks().filter((task) => (
     (!environmentKey || task.environmentKey === environmentKey)
     && (!platform || task.platform === platform)
     && CLAIMABLE_STATUSES.has(task.status)
-  )) || null
+  ))
+  claimable.sort((left, right) => {
+    const leftScheduleId = Number(left.schedule?.id || 0)
+    const rightScheduleId = Number(right.schedule?.id || 0)
+    if (leftScheduleId || rightScheduleId) return rightScheduleId - leftScheduleId
+    return 0
+  })
+  return claimable[0] || null
 }
 
 function isTerminalStatus(status) {
@@ -1384,6 +1501,9 @@ async function handleTaskComplete(req, res, config, taskId, status) {
     }).catch((error) => {
       task.backendFailureReportAttempts += 1
       task.backendFailureReportLastError = formatBackendError(error)
+      if (error?.statusCode === 400) {
+        task.backendFailureReportRejectedAt = nowIso()
+      }
       console.error('Failed to report schedule execution failure:', task.backendFailureReportLastError)
     })
   }
@@ -1392,6 +1512,7 @@ async function handleTaskComplete(req, res, config, taskId, status) {
 }
 
 function classifyFailureStatus(error) {
+  if (error?.code) return String(error.code)
   const message = String(error?.message || error || '')
   if (message.includes('fill token used or expired')) return 'token_expired'
   if (message.includes('平台账号未登录') || message.includes('需登录')) return 'login_required'
@@ -1802,7 +1923,9 @@ async function route(req, res, config) {
       schedulePoll: {
         inFlight: schedulePollInFlight,
         last: lastSchedulePollStatus,
-        platforms: selfMediaSchedulePlatforms(config),
+        platforms: cachedSelfMediaSchedulePlatforms || [],
+        platformSource: 'backend',
+        platformFetchError: lastSelfMediaSchedulePlatformsError,
         intervalMs: Number(config.selfMediaSchedulePollIntervalMs || 30_000),
       },
     })
@@ -1850,6 +1973,16 @@ const server = http.createServer((req, res) => {
       details: error.details,
     })
   })
+})
+
+server.once('error', (error) => {
+  if (error?.code === 'EADDRINUSE') {
+    console.error(`GEO local helper port already in use: http://${config.host}:${config.port}`)
+    if (process.env.GEO_HELPER_SUPERVISED === '1') process.exit(EXIT_CODE_PORT_IN_USE)
+    process.exitCode = EXIT_CODE_PORT_IN_USE
+    return
+  }
+  throw error
 })
 
 server.listen(config.port, config.host, () => {
@@ -1900,7 +2033,8 @@ function startSchedulePoller(config) {
 
 async function pollSelfMediaSchedules(config) {
   const timeoutMs = Number(config.selfMediaSchedulePollStepTimeoutMs || SCHEDULE_POLL_STEP_TIMEOUT_MS)
-  for (const platform of selfMediaSchedulePlatforms(config)) {
+  const platforms = await selfMediaSchedulePlatforms(config)
+  for (const platform of platforms) {
     const publishCheck = await withTimeout(
       claimAndCheckPublishResult(config, platform),
       timeoutMs,
@@ -1917,15 +2051,36 @@ async function pollSelfMediaSchedules(config) {
   return { ok: true, claimed: false }
 }
 
-function selfMediaSchedulePlatforms(config) {
-  const value = config.selfMediaSchedulePlatforms
-  const raw = Array.isArray(value)
-    ? value
-    : String(value || 'toutiao,zhihu').split(',')
-  const platforms = raw
+async function selfMediaSchedulePlatforms(config) {
+  const now = Date.now()
+  if (cachedSelfMediaSchedulePlatforms
+    && now - cachedSelfMediaSchedulePlatformsAt < SELF_MEDIA_SCHEDULE_PLATFORMS_CACHE_MS) {
+    return cachedSelfMediaSchedulePlatforms
+  }
+  try {
+    const result = await signedTrustedBackendRequest(config, '/api/v1/local-agent/self-media-schedules/platforms', { method: 'GET' })
+    const platforms = normalizePlatformList(result?.platforms)
+    if (!platforms.length) {
+      const error = new Error('backend returned no self-media schedule platforms')
+      error.details = result
+      throw error
+    }
+    cachedSelfMediaSchedulePlatforms = platforms
+    cachedSelfMediaSchedulePlatformsAt = now
+    lastSelfMediaSchedulePlatformsError = null
+    return platforms
+  } catch (error) {
+    lastSelfMediaSchedulePlatformsError = formatBackendError(error)
+    throw error
+  }
+}
+
+function normalizePlatformList(raw) {
+  const values = Array.isArray(raw) ? raw : []
+  const platforms = values
     .map((item) => String(item || '').trim().toLowerCase())
     .filter(Boolean)
-  return Array.from(new Set(platforms.length ? platforms : ['toutiao', 'zhihu']))
+  return Array.from(new Set(platforms))
 }
 
 startSchedulePoller(config)
@@ -1935,18 +2090,32 @@ function startEventLoopWatchdog(config) {
   if (config.enableEventLoopWatchdog === false) return
   const thresholdMs = Number(config.eventLoopWatchdogThresholdMs || EVENT_LOOP_WATCHDOG_THRESHOLD_MS)
   if (!Number.isFinite(thresholdMs) || thresholdMs <= 0) return
+  const supervised = process.env.GEO_HELPER_SUPERVISED === '1'
+  const killOnStall = config.eventLoopWatchdogKillOnStall === true
+    || (supervised && config.eventLoopWatchdogKillOnStall !== false)
 
   const worker = new Worker(`
     const { parentPort } = require('node:worker_threads')
     let lastBeat = Date.now()
+    let warned = false
     parentPort.on('message', (message) => {
-      if (message && message.type === 'beat') lastBeat = Date.now()
+      if (message && message.type === 'beat') {
+        lastBeat = Date.now()
+        warned = false
+      }
     })
     setInterval(() => {
       const thresholdMs = ${JSON.stringify(thresholdMs)}
+      const killOnStall = ${JSON.stringify(killOnStall)}
       if (Date.now() - lastBeat > thresholdMs) {
-        console.error('GEO local helper event loop watchdog terminating stalled process')
-        process.kill(process.pid, 'SIGKILL')
+        if (!warned) {
+          warned = true
+          console.error('GEO local helper event loop watchdog detected stalled process')
+        }
+        if (killOnStall) {
+          console.error('GEO local helper event loop watchdog terminating stalled process')
+          process.kill(process.pid, 'SIGKILL')
+        }
       }
     }, ${JSON.stringify(EVENT_LOOP_WATCHDOG_INTERVAL_MS)}).unref()
   `, { eval: true })

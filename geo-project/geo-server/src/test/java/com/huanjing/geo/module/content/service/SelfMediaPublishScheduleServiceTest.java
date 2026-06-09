@@ -2,6 +2,7 @@ package com.huanjing.geo.module.content.service;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
@@ -64,6 +65,7 @@ class SelfMediaPublishScheduleServiceTest {
     private SelfMediaPlatformScheduleAdapterRouter scheduleAdapterRouter;
     private SelfMediaPublishScheduleAlertService alertService;
     private SelfMediaPublishScheduleEnvironmentLockService environmentLockService;
+    private ContentDistributionService contentDistributionService;
     private BrandAccessService brandAccessService;
     private SelfMediaPublishScheduleService service;
 
@@ -86,6 +88,7 @@ class SelfMediaPublishScheduleServiceTest {
         alertService = mock(SelfMediaPublishScheduleAlertService.class);
         when(alertService.listOpenAlertsByScheduleIds(any())).thenReturn(Map.of());
         environmentLockService = mock(SelfMediaPublishScheduleEnvironmentLockService.class);
+        contentDistributionService = mock(ContentDistributionService.class);
         brandAccessService = mock(BrandAccessService.class);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
         SysUser user = new SysUser();
@@ -104,7 +107,7 @@ class SelfMediaPublishScheduleServiceTest {
                 scheduleAdapterRouter,
                 alertService,
                 environmentLockService,
-                mock(ContentDistributionService.class),
+                contentDistributionService,
                 brandAccessService,
                 currentUserService,
                 new ObjectMapper()
@@ -467,6 +470,50 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void claimNextTaskForLocalAgentPersistsQuotaFailureWhenDistributionTaskPrepareFails() {
+        SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        candidate.setId(104L);
+        candidate.setPlatform("xiaohongshu");
+        candidate.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        SelfMediaPublishSchedule claimed = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
+        claimed.setId(104L);
+        claimed.setPlatform("xiaohongshu");
+        claimed.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        SelfMediaAccount account = new SelfMediaAccount();
+        account.setId(20L);
+        account.setPlatform("xiaohongshu");
+        when(scheduleMapper.selectDueQueueCandidatesForOperator(
+                eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
+                eq(List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING)),
+                any(),
+                eq(10),
+                eq(99L),
+                eq("xiaohongshu"),
+                eq(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu"))
+        )).thenReturn(List.of(candidate));
+        when(environmentLockService.tryAcquire(eq(15L), eq(104L), any(), any())).thenReturn(true);
+        when(scheduleMapper.claimQueueSchedule(
+                eq(104L),
+                eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
+                eq(List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING)),
+                eq(SelfMediaPublishScheduleConstants.STATUS_FILLING),
+                any(),
+                any()
+        )).thenReturn(1);
+        when(scheduleMapper.selectById(104L)).thenReturn(claimed);
+        when(accountMapper.selectById(20L)).thenReturn(account);
+        when(contentDistributionService.distributeToAsOperator(eq(10L), any(), eq(99L)))
+                .thenThrow(new BizException(400, "Distribution quota exhausted for channel self_media:xiaohongshu"));
+
+        assertThrows(BizException.class, () -> service.claimNextTaskForLocalAgent(99L, "xiaohongshu", 3));
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED, claimed.getStatus());
+        assertEquals("DISTRIBUTION_QUOTA_EXHAUSTED", claimed.getFailureCode());
+        verify(scheduleMapper).updateById(claimed);
+        verify(environmentLockService).release(104L);
+    }
+
+    @Test
     void claimNextPublishCheckForLocalAgentClaimsScheduledPublishCheckQueue() {
         SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULED);
         candidate.setId(103L);
@@ -528,6 +575,30 @@ class SelfMediaPublishScheduleServiceTest {
     }
 
     @Test
+    void markClaimedPublishCheckUnknownKeepsPendingPlatformScheduleAsWaiting() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT);
+        row.setId(108L);
+        row.setPlatform("xiaohongshu");
+        row.setPlatformScheduledAt(LocalDateTime.now().plusHours(2));
+        row.setAttemptCount(4);
+        row.setMaxAttempts(4);
+        when(scheduleMapper.selectById(108L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO response = service.markClaimedPublishCheckUnknown(
+                108L,
+                "{\"pendingScheduled\":true,\"reason\":\"platform schedule time not due\"}"
+        );
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN, response.getStatus());
+        assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
+        assertEquals("PLATFORM_SCHEDULED_WAITING", response.getFailureCode());
+        assertEquals("平台已定时，等待发布时间后复查", response.getFailureMessage());
+        assertTrue(response.getNextAttemptAt().isAfter(row.getPlatformScheduledAt()));
+        verify(scheduleMapper).updateById(row);
+        verify(environmentLockService).release(108L);
+    }
+
+    @Test
     void markClaimedPublishCheckUnknownExtendsLegacyAttemptLimit() {
         SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT);
         row.setId(106L);
@@ -543,6 +614,26 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("PUBLISH_RESULT_NOT_MATCHED_RETRYING", response.getFailureCode());
         assertTrue(response.getNextAttemptAt().isAfter(LocalDateTime.now()));
         verify(environmentLockService).release(106L);
+    }
+
+    @Test
+    void markLocalAgentExecutionFailedIsIdempotentAfterPublishConfirmed() {
+        SelfMediaPublishSchedule row = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED);
+        row.setId(107L);
+        row.setDiagnosticsJson("{\"verified\":true}");
+        when(scheduleMapper.selectById(107L)).thenReturn(row);
+
+        SelfMediaPublishScheduleVO response = service.markLocalAgentExecutionFailed(
+                107L,
+                "ZHIHU_PUBLISH_NOT_SUBMITTED",
+                "late failure report",
+                "{\"failure\":true}"
+        );
+
+        assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED, response.getStatus());
+        assertEquals("{\"verified\":true}", response.getDiagnosticsJson());
+        verify(scheduleMapper, never()).updateById(any());
+        verify(environmentLockService).release(107L);
     }
 
     @Test

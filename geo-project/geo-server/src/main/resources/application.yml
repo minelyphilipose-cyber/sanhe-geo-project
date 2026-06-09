@@ -156,6 +156,33 @@ semi-auto:
           - blockquote
           - a
           - img
+      baijiahao:
+        publish-url: ${SEMI_AUTO_BAIJIAHAO_PUBLISH_URL:https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1}
+        cookie-domains:
+          - ".baidu.com"
+          - ".baijiahao.baidu.com"
+        required-cookie-names:
+          - BDUSS
+          - STOKEN
+        editor-selectors:
+          title: "textarea[placeholder*='标题'], input[placeholder*='标题']"
+          content: ".ProseMirror, [contenteditable='true']"
+          cover: "input[type='file']"
+        allowed-html-tags:
+          - p
+          - br
+          - strong
+          - em
+          - u
+          - h1
+          - h2
+          - h3
+          - ul
+          - ol
+          - li
+          - blockquote
+          - a
+          - img
 
 geo:
   security:
