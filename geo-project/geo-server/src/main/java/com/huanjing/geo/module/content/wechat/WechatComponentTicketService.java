@@ -67,6 +67,14 @@ public class WechatComponentTicketService {
         return cipherService.decrypt(row.getComponentVerifyTicketCipher());
     }
 
+    public LocalDateTime getLatestReceivedAt(String componentAppid) {
+        String appid = StringUtils.hasText(componentAppid) ? componentAppid : properties.getComponentAppid();
+        WechatComponentTicket row = ticketMapper.selectOne(new LambdaQueryWrapper<WechatComponentTicket>()
+                .eq(WechatComponentTicket::getComponentAppid, appid)
+                .last("LIMIT 1"));
+        return row == null ? null : row.getReceivedAt();
+    }
+
     private String redisKey(String componentAppid) {
         return KEY_PREFIX + componentAppid;
     }

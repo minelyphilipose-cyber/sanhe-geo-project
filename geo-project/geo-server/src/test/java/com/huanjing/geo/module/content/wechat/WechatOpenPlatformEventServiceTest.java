@@ -2,11 +2,14 @@ package com.huanjing.geo.module.content.wechat;
 
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
+import com.huanjing.geo.module.content.entity.WechatCallbackEvent;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
+import com.huanjing.geo.module.content.mapper.WechatCallbackEventMapper;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.apache.ibatis.session.Configuration;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -19,6 +22,7 @@ class WechatOpenPlatformEventServiceTest {
     private WechatComponentTicketService ticketService;
     private SelfMediaAccountMapper accountMapper;
     private WechatMpAuthorizationService authorizationService;
+    private WechatCallbackEventMapper callbackEventMapper;
     private WechatOpenPlatformEventService service;
 
     @BeforeEach
@@ -27,7 +31,8 @@ class WechatOpenPlatformEventServiceTest {
         ticketService = mock(WechatComponentTicketService.class);
         accountMapper = mock(SelfMediaAccountMapper.class);
         authorizationService = mock(WechatMpAuthorizationService.class);
-        service = new WechatOpenPlatformEventService(ticketService, accountMapper, authorizationService);
+        callbackEventMapper = mock(WechatCallbackEventMapper.class);
+        service = new WechatOpenPlatformEventService(ticketService, accountMapper, authorizationService, callbackEventMapper);
     }
 
     @Test
@@ -42,6 +47,11 @@ class WechatOpenPlatformEventServiceTest {
 
         assertThat(response).isEqualTo("success");
         verify(authorizationService).saveOrUpdateAuthorization("component-appid", "auth-code");
+        ArgumentCaptor<WechatCallbackEvent> captor = ArgumentCaptor.forClass(WechatCallbackEvent.class);
+        verify(callbackEventMapper).insert(captor.capture());
+        assertThat(captor.getValue().getCallbackType()).isEqualTo("component_event");
+        assertThat(captor.getValue().getEventType()).isEqualTo("authorized");
+        assertThat(captor.getValue().getProcessStatus()).isEqualTo("success");
     }
 
     @Test

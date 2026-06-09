@@ -13,6 +13,7 @@ import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.vo.DouyinCapabilityVO;
 import com.huanjing.geo.module.content.vo.DouyinAuthUrlVO;
+import com.huanjing.geo.module.content.vo.DouyinReadinessCheckVO;
 import com.huanjing.geo.module.system.service.MpCredentialCipherService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -26,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -77,8 +79,63 @@ public class DouyinAuthorizationService {
                 enabled ? null : "feature flag disabled",
                 liveVerificationBlocked,
                 liveVerificationBlocked ? featureProperties.getImageText().getLiveVerificationReason() : null,
-                douyinCapabilityDescription(liveVerificationBlocked)
+                douyinCapabilityDescription(liveVerificationBlocked),
+                readinessChecks(enabled, realMode, liveVerificationBlocked)
         );
+    }
+
+    private List<DouyinReadinessCheckVO> readinessChecks(boolean enabled, boolean realMode, boolean liveVerificationBlocked) {
+        List<DouyinReadinessCheckVO> checks = new ArrayList<>();
+        checks.add(configCheck("client_key", "Client Key", properties.getClientKey(), "请在 .env 配置 DOUYIN_CLIENT_KEY"));
+        checks.add(configCheck("client_secret", "Client Secret", properties.getClientSecret(), "请在 .env 配置 DOUYIN_CLIENT_SECRET"));
+        checks.add(httpsCheck("auth_callback_url", "授权回调 URL", properties.getAuthCallbackUrl(), "请配置 HTTPS 授权回调 URL"));
+        checks.add(httpsCheck("frontend_callback_url", "前端回跳 URL", properties.getFrontendCallbackUrl(), "请配置 HTTPS 前端回跳 URL"));
+        checks.add(httpsCheck("webhook_url", "Webhook URL", properties.getWebhookUrl(), "请配置 DOUYIN_WEBHOOK_URL=https://域名/api/douyin/open-platform/webhooks"));
+        checks.add(scopeCheck());
+        checks.add(new DouyinReadinessCheckVO(
+                "client_mode",
+                "客户端模式",
+                realMode ? "ok" : "warning",
+                realMode ? "当前使用真实抖音 Open API" : "当前仍为 mock 模式，认证通过后需设置 DOUYIN_CLIENT_MODE=real"
+        ));
+        checks.add(new DouyinReadinessCheckVO(
+                "image_text_enabled",
+                "图文发布开关",
+                enabled ? "ok" : "warning",
+                enabled ? "图文发布开关已开启" : "认证通过后需设置 DOUYIN_IMAGE_TEXT_ENABLED=true"
+        ));
+        checks.add(new DouyinReadinessCheckVO(
+                "live_verification",
+                "上线联调阻断",
+                liveVerificationBlocked ? "warning" : "ok",
+                liveVerificationBlocked ? "当前仍阻断真实联调，认证通过后需设置 DOUYIN_IMAGE_TEXT_LIVE_VERIFICATION_BLOCKED=false" : "真实联调阻断已关闭"
+        ));
+        return checks;
+    }
+
+    private DouyinReadinessCheckVO configCheck(String code, String label, String value, String missingMessage) {
+        if (StringUtils.hasText(value)) {
+            return new DouyinReadinessCheckVO(code, label, "ok", label + " 已配置");
+        }
+        return new DouyinReadinessCheckVO(code, label, "missing", missingMessage);
+    }
+
+    private DouyinReadinessCheckVO httpsCheck(String code, String label, String value, String missingMessage) {
+        if (!StringUtils.hasText(value)) {
+            return new DouyinReadinessCheckVO(code, label, "missing", missingMessage);
+        }
+        if (!value.startsWith("https://")) {
+            return new DouyinReadinessCheckVO(code, label, "warning", label + " 必须使用 HTTPS");
+        }
+        return new DouyinReadinessCheckVO(code, label, "ok", label + " 已配置 HTTPS");
+    }
+
+    private DouyinReadinessCheckVO scopeCheck() {
+        List<String> scopes = properties.getRequiredScopes() == null ? List.of() : properties.getRequiredScopes();
+        if (scopes.contains("video.create.bind")) {
+            return new DouyinReadinessCheckVO("required_scopes", "授权 Scope", "ok", "已包含 video.create.bind");
+        }
+        return new DouyinReadinessCheckVO("required_scopes", "授权 Scope", "missing", "请确认 required-scopes 包含 video.create.bind");
     }
 
     private String douyinCapabilityDescription(boolean liveVerificationBlocked) {

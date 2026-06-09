@@ -16,5 +16,6 @@ public class DouyinOpenPlatformProperties {
     private String authPageUrl = "https://open.douyin.com/platform/oauth/connect/";
     private String authCallbackUrl;
     private String frontendCallbackUrl;
+    private String webhookUrl;
     private List<String> requiredScopes = new ArrayList<>(List.of("video.create.bind"));
 }

@@ -1,7 +1,10 @@
 package com.huanjing.geo.module.content.wechat;
 
+import com.huanjing.geo.module.content.entity.WechatCallbackEvent;
+import com.huanjing.geo.module.content.mapper.WechatCallbackEventMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.Map;
 
@@ -13,12 +16,14 @@ import static org.mockito.Mockito.verify;
 class WechatOpenPlatformMessageServiceTest {
 
     private WechatQueryAuthCodeAsyncService queryAuthCodeAsyncService;
+    private WechatCallbackEventMapper callbackEventMapper;
     private WechatOpenPlatformMessageService service;
 
     @BeforeEach
     void setUp() {
         queryAuthCodeAsyncService = mock(WechatQueryAuthCodeAsyncService.class);
-        service = new WechatOpenPlatformMessageService(queryAuthCodeAsyncService);
+        callbackEventMapper = mock(WechatCallbackEventMapper.class);
+        service = new WechatOpenPlatformMessageService(queryAuthCodeAsyncService, callbackEventMapper);
     }
 
     @Test
@@ -31,6 +36,11 @@ class WechatOpenPlatformMessageServiceTest {
         assertThat(reply.get("MsgType")).isEqualTo("text");
         assertThat(reply.get("Content")).isEqualTo("TESTCOMPONENT_MSG_TYPE_TEXT_callback");
         assertThat(reply.get("CreateTime")).isNotBlank();
+        ArgumentCaptor<WechatCallbackEvent> captor = ArgumentCaptor.forClass(WechatCallbackEvent.class);
+        verify(callbackEventMapper).insert(captor.capture());
+        assertThat(captor.getValue().getCallbackType()).isEqualTo("authorizer_message");
+        assertThat(captor.getValue().getAuthorizerAppid()).isEqualTo("wx-authorizer");
+        assertThat(captor.getValue().getMsgType()).isEqualTo("text");
     }
 
     @Test

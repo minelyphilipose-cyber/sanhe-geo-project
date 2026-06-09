@@ -1164,6 +1164,14 @@ export interface WechatMpCapability {
   liveVerificationBlocked?: boolean
   liveVerificationReason?: string | null
   description?: string | null
+  readinessChecks?: WechatReadinessCheck[]
+}
+
+export interface WechatReadinessCheck {
+  code: string
+  label: string
+  status: 'ok' | 'warning' | 'missing' | string
+  message: string
 }
 
 export interface WechatMpAuthUrl {
@@ -1178,6 +1186,14 @@ export interface DouyinCapability {
   liveVerificationBlocked?: boolean
   liveVerificationReason?: string | null
   description?: string | null
+  readinessChecks?: DouyinReadinessCheck[]
+}
+
+export interface DouyinReadinessCheck {
+  code: string
+  label: string
+  status: 'ok' | 'warning' | 'missing' | string
+  message: string
 }
 
 export interface DouyinAuthUrl {

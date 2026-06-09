@@ -10,6 +10,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.MediaType;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 @Slf4j
@@ -40,8 +41,12 @@ public class WechatOpenPlatformCallbackController {
     }
 
     @GetMapping(value = "/events", produces = MediaType.TEXT_PLAIN_VALUE)
-    public String verifyEventUrl(@RequestParam(required = false) String echostr) {
-        return echostr == null ? "" : echostr;
+    public String verifyEventUrl(@RequestParam(required = false) String signature,
+                                 @RequestParam(required = false, name = "msg_signature") String msgSignature,
+                                 @RequestParam(required = false) String timestamp,
+                                 @RequestParam(required = false) String nonce,
+                                 @RequestParam(required = false) String echostr) {
+        return verifyUrl(signature, msgSignature, timestamp, nonce, echostr);
     }
 
     @PostMapping(value = "/events", consumes = MediaType.ALL_VALUE, produces = MediaType.TEXT_PLAIN_VALUE)
@@ -62,8 +67,12 @@ public class WechatOpenPlatformCallbackController {
 
     @GetMapping(value = "/messages/{authorizerAppid}", produces = MediaType.TEXT_PLAIN_VALUE)
     public String verifyMessageUrl(@PathVariable String authorizerAppid,
+                                   @RequestParam(required = false) String signature,
+                                   @RequestParam(required = false, name = "msg_signature") String msgSignature,
+                                   @RequestParam(required = false) String timestamp,
+                                   @RequestParam(required = false) String nonce,
                                    @RequestParam(required = false) String echostr) {
-        return echostr == null ? "" : echostr;
+        return verifyUrl(signature, msgSignature, timestamp, nonce, echostr);
     }
 
     @PostMapping(value = "/messages/{authorizerAppid}", consumes = MediaType.ALL_VALUE, produces = MediaType.TEXT_PLAIN_VALUE)
@@ -82,6 +91,20 @@ public class WechatOpenPlatformCallbackController {
             log.error("WeChat authorizer message callback failed authorizerAppid={} rawXml={} decryptedXml={}",
                     authorizerAppid, rawXml, decrypted, ex);
             return "success";
+        }
+    }
+
+    private String verifyUrl(String signature,
+                             String msgSignature,
+                             String timestamp,
+                             String nonce,
+                             String echostr) {
+        try {
+            cryptoService.verifyUrlSignature(StringUtils.hasText(signature) ? signature : msgSignature, timestamp, nonce, echostr);
+            return echostr == null ? "" : echostr;
+        } catch (Exception ex) {
+            log.warn("WeChat callback url verification failed", ex);
+            return "";
         }
     }
 }

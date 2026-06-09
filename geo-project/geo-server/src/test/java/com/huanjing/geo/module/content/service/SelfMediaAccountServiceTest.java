@@ -9,6 +9,7 @@ import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.vo.WechatMpCapabilityVO;
 import com.huanjing.geo.module.content.wechat.WechatAuthorizerTokenService;
+import com.huanjing.geo.module.content.wechat.WechatComponentTicketService;
 import com.huanjing.geo.module.content.wechat.WechatMpClient;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
@@ -52,6 +53,7 @@ class SelfMediaAccountServiceTest {
                 mock(WechatMpClientProperties.class),
                 mock(MpCredentialCipherService.class),
                 mock(WechatAuthorizerTokenService.class),
+                mock(WechatComponentTicketService.class),
                 credentialVaultService,
                 brandAccessService,
                 currentUserService
@@ -120,8 +122,18 @@ class SelfMediaAccountServiceTest {
         openProperties.setAutoPublishEnabled(false);
         openProperties.setLiveVerificationBlocked(true);
         openProperties.setLiveVerificationReason("domain_icp_filing_pending");
+        openProperties.setComponentAppid("component-appid");
+        openProperties.setComponentAppSecret("secret");
+        openProperties.setToken("token");
+        openProperties.setEncodingAesKey("abcdefghijklmnopqrstuvwxyzABCDEFGH123456789");
+        openProperties.setBackendAuthCallbackUrl("https://www.example.com/api/wechat/open-platform/auth/callback");
+        openProperties.setFrontendCallbackUrl("https://www.example.com/admin/content/execution");
+        openProperties.setComponentEventUrl("https://www.example.com/api/wechat/open-platform/events");
+        openProperties.setAuthorizerMessageUrl("https://www.example.com/api/wechat/open-platform/messages/$APPID");
         WechatMpClientProperties clientProperties = new WechatMpClientProperties();
         clientProperties.setMode("mock");
+        WechatComponentTicketService ticketService = mock(WechatComponentTicketService.class);
+        when(ticketService.getLatestReceivedAt("component-appid")).thenReturn(LocalDateTime.of(2026, 6, 9, 10, 0));
         SelfMediaAccountService capabilityService = new SelfMediaAccountService(
                 selfMediaAccountMapper,
                 mock(WechatMpClient.class),
@@ -129,6 +141,7 @@ class SelfMediaAccountServiceTest {
                 clientProperties,
                 mock(MpCredentialCipherService.class),
                 mock(WechatAuthorizerTokenService.class),
+                ticketService,
                 mock(CredentialVaultService.class),
                 brandAccessService,
                 currentUserService
@@ -141,6 +154,8 @@ class SelfMediaAccountServiceTest {
         assertTrue(capability.isLiveVerificationBlocked());
         assertEquals("domain_icp_filing_pending", capability.getLiveVerificationReason());
         assertTrue(capability.getDescription().contains("草稿箱接口可继续用于测试"));
+        assertTrue(capability.getReadinessChecks().stream().anyMatch(item ->
+                "component_verify_ticket".equals(item.getCode()) && "ok".equals(item.getStatus())));
     }
 
     @Test

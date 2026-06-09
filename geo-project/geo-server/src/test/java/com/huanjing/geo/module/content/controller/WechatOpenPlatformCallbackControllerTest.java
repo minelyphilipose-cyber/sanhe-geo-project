@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class WechatOpenPlatformCallbackControllerTest {
@@ -40,6 +41,24 @@ class WechatOpenPlatformCallbackControllerTest {
         String response = controller.receiveEvent("sig", "ts", "nonce", "<xml/>");
 
         assertThat(response).isEqualTo("success");
+    }
+
+    @Test
+    void verifyEventUrlReturnsEchoStringWhenSignatureIsValid() {
+        String response = controller.verifyEventUrl("sig", null, "ts", "nonce", "echo");
+
+        assertThat(response).isEqualTo("echo");
+        verify(cryptoService).verifyUrlSignature("sig", "ts", "nonce", "echo");
+    }
+
+    @Test
+    void verifyMessageUrlReturnsBlankWhenSignatureIsInvalid() {
+        org.mockito.Mockito.doThrow(new BizException(400, "bad signature"))
+                .when(cryptoService).verifyUrlSignature("bad", "ts", "nonce", "echo");
+
+        String response = controller.verifyMessageUrl("wx-authorizer", "bad", null, "ts", "nonce", "echo");
+
+        assertThat(response).isBlank();
     }
 
     @Test

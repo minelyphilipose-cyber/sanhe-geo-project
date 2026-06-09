@@ -40,7 +40,6 @@ public class DouyinImageTextAdapter implements AutoSelfMediaAdapter {
     public static final String PLATFORM = "douyin";
     private static final int MAX_TEXT_LENGTH = 1000;
     private static final int MAX_IMAGE_COUNT = 30;
-    private static final String EXTERNAL_STATUS_ACCEPTED = "accepted";
 
     private final DouyinFeatureProperties featureProperties;
     private final DouyinTokenService douyinTokenService;
@@ -192,7 +191,7 @@ public class DouyinImageTextAdapter implements AutoSelfMediaAdapter {
                                             String requestPayload,
                                             String responseBody) {
         SubmitResult result = SubmitResult.success(200, requestPayload, responseBody, null, response.getItemId());
-        result.setExternalStatus(EXTERNAL_STATUS_ACCEPTED);
+        result.setExternalStatus(DouyinPublishStatuses.EXTERNAL_ACCEPTED);
         result.setReviewStatus(mapMockOutcomeToReviewStatus(response.getMockReviewOutcome()));
         return result;
     }

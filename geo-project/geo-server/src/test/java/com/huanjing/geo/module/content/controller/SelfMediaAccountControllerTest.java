@@ -7,6 +7,8 @@ import com.huanjing.geo.module.content.wechat.WechatMpAuthorizationService;
 import com.huanjing.geo.module.customer.service.BrandService;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -22,7 +24,7 @@ class SelfMediaAccountControllerTest {
         WechatMpAuthorizationService wechatAuthorizationService = mock(WechatMpAuthorizationService.class);
         DouyinAuthorizationService douyinAuthorizationService = mock(DouyinAuthorizationService.class);
         when(douyinAuthorizationService.capability())
-                .thenReturn(new DouyinCapabilityVO(true, "mock", null, false, null, "desc"));
+                .thenReturn(new DouyinCapabilityVO(true, "mock", null, false, null, "desc", List.of()));
         SelfMediaAccountController controller = new SelfMediaAccountController(
                 selfMediaAccountService,
                 brandService,

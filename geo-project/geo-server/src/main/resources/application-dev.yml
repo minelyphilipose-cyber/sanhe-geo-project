@@ -36,6 +36,8 @@ geo:
       auth-type: 1
       backend-auth-callback-url: http://localhost:8080/api/wechat/open-platform/auth/callback
       frontend-callback-url: http://localhost:5173/admin/content/execution
+      component-event-url: http://localhost:8080/api/wechat/open-platform/events
+      authorizer-message-url: http://localhost:8080/api/wechat/open-platform/messages/$APPID
 
   douyin:
     client:
@@ -53,6 +55,7 @@ geo:
       auth-page-url: ${DOUYIN_AUTH_PAGE_URL:https://open.douyin.com/platform/oauth/connect/}
       auth-callback-url: http://localhost:8080/api/douyin/open-platform/auth/callback
       frontend-callback-url: http://localhost:5173/admin/content/execution
+      webhook-url: http://localhost:8080/api/douyin/open-platform/webhooks
       required-scopes: [video.create.bind]
     feature:
       image-text:

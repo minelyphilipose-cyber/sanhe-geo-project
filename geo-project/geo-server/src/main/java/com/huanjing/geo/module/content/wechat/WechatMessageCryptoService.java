@@ -94,6 +94,20 @@ public class WechatMessageCryptoService {
         }
     }
 
+    public void verifyUrlSignature(String signature, String timestamp, String nonce, String echostr) {
+        if (!StringUtils.hasText(properties.getToken())) {
+            throw new BizException(500, "wechat token not configured");
+        }
+        if (!StringUtils.hasText(signature) || !StringUtils.hasText(timestamp)
+                || !StringUtils.hasText(nonce) || !StringUtils.hasText(echostr)) {
+            throw new BizException(400, "wechat url signature params missing");
+        }
+        String expected = plainSignature(timestamp, nonce, echostr);
+        if (!expected.equalsIgnoreCase(signature)) {
+            throw new BizException(400, "wechat url signature invalid");
+        }
+    }
+
     private void verifySignature(String encrypted, String msgSignature, String timestamp, String nonce) {
         if (!StringUtils.hasText(properties.getToken())) {
             throw new BizException(500, "wechat token not configured");
@@ -108,8 +122,16 @@ public class WechatMessageCryptoService {
     }
 
     private String signature(String encrypted, String timestamp, String nonce) {
+        return sha1Sorted(properties.getToken(), timestamp, nonce, encrypted);
+    }
+
+    private String plainSignature(String timestamp, String nonce, String echostr) {
+        return sha1Sorted(properties.getToken(), timestamp, nonce, echostr);
+    }
+
+    private String sha1Sorted(String... values) {
         try {
-            String[] parts = {properties.getToken(), timestamp, nonce, encrypted};
+            String[] parts = values;
             Arrays.sort(parts);
             MessageDigest digest = MessageDigest.getInstance("SHA-1");
             byte[] bytes = digest.digest(String.join("", parts).getBytes(StandardCharsets.UTF_8));

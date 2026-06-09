@@ -14,10 +14,12 @@ import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.mapper.SelfMediaAccountMapper;
 import com.huanjing.geo.module.content.vo.SelfMediaAccountVO;
 import com.huanjing.geo.module.content.vo.WechatMpCapabilityVO;
+import com.huanjing.geo.module.content.vo.WechatReadinessCheckVO;
 import com.huanjing.geo.module.customer.access.BrandAccessAction;
 import com.huanjing.geo.module.customer.access.BrandAccessService;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.content.wechat.WechatAuthorizerTokenService;
+import com.huanjing.geo.module.content.wechat.WechatComponentTicketService;
 import com.huanjing.geo.module.content.wechat.WechatMpClient;
 import com.huanjing.geo.module.system.service.MpCredentialCipherService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
@@ -28,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -41,6 +44,7 @@ public class SelfMediaAccountService {
     private final WechatMpClientProperties clientProperties;
     private final MpCredentialCipherService cipherService;
     private final WechatAuthorizerTokenService authorizerTokenService;
+    private final WechatComponentTicketService componentTicketService;
     private final CredentialVaultService credentialVaultService;
     private final BrandAccessService brandAccessService;
     private final CurrentUserService currentUserService;
@@ -57,8 +61,76 @@ public class SelfMediaAccountService {
                 reason,
                 liveVerificationBlocked,
                 liveVerificationBlocked ? openPlatformProperties.getLiveVerificationReason() : null,
-                wechatCapabilityDescription(liveVerificationBlocked)
+                wechatCapabilityDescription(liveVerificationBlocked),
+                readinessChecks(liveVerificationBlocked)
         );
+    }
+
+    private List<WechatReadinessCheckVO> readinessChecks(boolean liveVerificationBlocked) {
+        List<WechatReadinessCheckVO> checks = new ArrayList<>();
+        checks.add(configCheck("component_appid", "Component AppID", openPlatformProperties.getComponentAppid(), "请配置 WECHAT_COMPONENT_APPID"));
+        checks.add(configCheck("component_secret", "Component Secret", openPlatformProperties.getComponentAppSecret(), "请配置 WECHAT_COMPONENT_SECRET"));
+        checks.add(configCheck("token", "消息校验 Token", openPlatformProperties.getToken(), "请配置 WECHAT_TOKEN，并与微信开放平台后台一致"));
+        checks.add(configCheck("encoding_aes_key", "消息加解密 Key", openPlatformProperties.getEncodingAesKey(), "请配置 43 位 WECHAT_ENCODING_AES_KEY"));
+        checks.add(httpsCheck("auth_callback_url", "授权回调 URL", openPlatformProperties.getBackendAuthCallbackUrl(), "请配置 HTTPS 授权回调 URL"));
+        checks.add(httpsCheck("frontend_callback_url", "前端回跳 URL", openPlatformProperties.getFrontendCallbackUrl(), "请配置 HTTPS 前端回跳 URL"));
+        checks.add(httpsCheck("component_event_url", "授权事件接收 URL", openPlatformProperties.getComponentEventUrl(), "请配置 WECHAT_COMPONENT_EVENT_URL=https://域名/api/wechat/open-platform/events"));
+        checks.add(httpsCheck("authorizer_message_url", "公众号消息事件 URL", openPlatformProperties.getAuthorizerMessageUrl(), "请配置 WECHAT_AUTHORIZER_MESSAGE_URL=https://域名/api/wechat/open-platform/messages/$APPID"));
+        checks.add(ticketCheck());
+        checks.add(new WechatReadinessCheckVO(
+                "client_mode",
+                "客户端模式",
+                "real".equalsIgnoreCase(clientProperties.getMode()) ? "ok" : "warning",
+                "real".equalsIgnoreCase(clientProperties.getMode()) ? "当前使用真实微信 Open API" : "当前仍为 mock 模式，联调前需设置 WECHAT_CLIENT_MODE=real"
+        ));
+        checks.add(new WechatReadinessCheckVO(
+                "draft_distribution",
+                "草稿箱分发开关",
+                openPlatformProperties.isDraftDistributionEnabled() ? "ok" : "warning",
+                openPlatformProperties.isDraftDistributionEnabled() ? "草稿箱分发已开启" : "认证通过并完成联调后设置 WECHAT_DRAFT_DISTRIBUTION_ENABLED=true"
+        ));
+        checks.add(new WechatReadinessCheckVO(
+                "auto_publish",
+                "自动发布开关",
+                openPlatformProperties.isAutoPublishEnabled() ? "warning" : "ok",
+                openPlatformProperties.isAutoPublishEnabled() ? "自动提交发布已开启，请确认微信权限和审核链路已完成" : "自动提交发布保持关闭，当前优先保存到草稿箱"
+        ));
+        checks.add(new WechatReadinessCheckVO(
+                "live_verification",
+                "上线联调阻断",
+                liveVerificationBlocked ? "warning" : "ok",
+                liveVerificationBlocked ? "当前仍阻断真实联调，认证通过后设置 WECHAT_LIVE_VERIFICATION_BLOCKED=false" : "真实联调阻断已关闭"
+        ));
+        return checks;
+    }
+
+    private WechatReadinessCheckVO configCheck(String code, String label, String value, String missingMessage) {
+        if (StringUtils.hasText(value)) {
+            return new WechatReadinessCheckVO(code, label, "ok", label + " 已配置");
+        }
+        return new WechatReadinessCheckVO(code, label, "missing", missingMessage);
+    }
+
+    private WechatReadinessCheckVO httpsCheck(String code, String label, String value, String missingMessage) {
+        if (!StringUtils.hasText(value)) {
+            return new WechatReadinessCheckVO(code, label, "missing", missingMessage);
+        }
+        if (!value.startsWith("https://")) {
+            return new WechatReadinessCheckVO(code, label, "warning", label + " 必须使用 HTTPS");
+        }
+        return new WechatReadinessCheckVO(code, label, "ok", label + " 已配置 HTTPS");
+    }
+
+    private WechatReadinessCheckVO ticketCheck() {
+        try {
+            LocalDateTime receivedAt = componentTicketService.getLatestReceivedAt(openPlatformProperties.getComponentAppid());
+            if (receivedAt == null) {
+                return new WechatReadinessCheckVO("component_verify_ticket", "Component Verify Ticket", "missing", "尚未收到微信 component_verify_ticket，请确认授权事件接收 URL 已配置并可公网访问");
+            }
+            return new WechatReadinessCheckVO("component_verify_ticket", "Component Verify Ticket", "ok", "最近接收时间：" + receivedAt);
+        } catch (Exception ex) {
+            return new WechatReadinessCheckVO("component_verify_ticket", "Component Verify Ticket", "warning", "读取 ticket 状态失败：" + (StringUtils.hasText(ex.getMessage()) ? ex.getMessage() : ex.getClass().getSimpleName()));
+        }
     }
 
     private String wechatCapabilityDescription(boolean liveVerificationBlocked) {

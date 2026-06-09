@@ -24,4 +24,6 @@ public class WechatOpenPlatformProperties {
     private int authType = 1;
     private String backendAuthCallbackUrl;
     private String frontendCallbackUrl;
+    private String componentEventUrl;
+    private String authorizerMessageUrl;
 }

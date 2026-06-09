@@ -71,6 +71,7 @@ geo:
       auth-page-url: ${DOUYIN_AUTH_PAGE_URL:https://open.douyin.com/platform/oauth/connect/}
       auth-callback-url: ${DOUYIN_BACKEND_AUTH_CALLBACK_URL}
       frontend-callback-url: ${DOUYIN_FRONTEND_CALLBACK_URL}
+      webhook-url: ${DOUYIN_WEBHOOK_URL:}
       required-scopes: [video.create.bind]
     feature:
       image-text:
@@ -114,6 +115,8 @@ geo:
       auth-type: ${WECHAT_AUTH_TYPE:1}
       backend-auth-callback-url: ${WECHAT_BACKEND_AUTH_CALLBACK_URL}
       frontend-callback-url: ${WECHAT_FRONTEND_CALLBACK_URL}
+      component-event-url: ${WECHAT_COMPONENT_EVENT_URL}
+      authorizer-message-url: ${WECHAT_AUTHORIZER_MESSAGE_URL}
 
 presale:
   security:

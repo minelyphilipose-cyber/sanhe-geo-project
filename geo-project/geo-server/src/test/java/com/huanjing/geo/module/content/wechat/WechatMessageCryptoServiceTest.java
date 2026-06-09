@@ -4,6 +4,9 @@ import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.config.WechatOpenPlatformProperties;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Map;
 
@@ -70,6 +73,22 @@ class WechatMessageCryptoServiceTest {
                 .hasMessageContaining("wechat appid mismatch");
     }
 
+    @Test
+    void verifyUrlSignatureAcceptsValidSignature() {
+        WechatMessageCryptoService service = new WechatMessageCryptoService(properties());
+
+        service.verifyUrlSignature(plainSignature("test-token", "1710000000", "nonce-1", "echo"), "1710000000", "nonce-1", "echo");
+    }
+
+    @Test
+    void verifyUrlSignatureRejectsInvalidSignature() {
+        WechatMessageCryptoService service = new WechatMessageCryptoService(properties());
+
+        assertThatThrownBy(() -> service.verifyUrlSignature("bad-signature", "1710000000", "nonce-1", "echo"))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("wechat url signature invalid");
+    }
+
     private WechatOpenPlatformProperties properties() {
         WechatOpenPlatformProperties properties = new WechatOpenPlatformProperties();
         byte[] key = new byte[32];
@@ -80,5 +99,20 @@ class WechatMessageCryptoServiceTest {
         properties.setToken("test-token");
         properties.setEncodingAesKey(Base64.getEncoder().encodeToString(key).replace("=", ""));
         return properties;
+    }
+
+    private String plainSignature(String... values) {
+        try {
+            Arrays.sort(values);
+            byte[] bytes = MessageDigest.getInstance("SHA-1")
+                    .digest(String.join("", values).getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (byte b : bytes) {
+                hex.append(String.format("%02x", b));
+            }
+            return hex.toString();
+        } catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
     }
 }

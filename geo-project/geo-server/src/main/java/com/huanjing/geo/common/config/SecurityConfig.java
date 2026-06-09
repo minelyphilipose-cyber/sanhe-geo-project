@@ -63,6 +63,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/wechat/open-platform/events/**").permitAll()
                 .requestMatchers("/api/wechat/open-platform/messages/**").permitAll()
                 .requestMatchers("/api/douyin/open-platform/auth/callback").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/douyin/open-platform/webhooks").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/extension/version-check").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/extension/bind").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/extension/token/refresh").permitAll()
