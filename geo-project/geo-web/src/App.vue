@@ -1,8 +1,16 @@
 <template>
   <router-view />
+  <SiteFilingFooter v-if="showFilingFooter" />
 </template>
 
 <script setup lang="ts">
-// 根组件，仅负责挂载路由视图
-// 布局由 AdminLayout / PartnerLayout / PublicLayout 负责
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
+import SiteFilingFooter from '@/components/common/SiteFilingFooter.vue'
+
+const route = useRoute()
+
+const hideFilingPathPrefixes = ['/presale-print/', '/presale-print-poc/']
+
+const showFilingFooter = computed(() => !hideFilingPathPrefixes.some((prefix) => route.path.startsWith(prefix)))
 </script>
