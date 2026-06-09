@@ -79,12 +79,14 @@ public class PresaleL3InitService {
             editable.setReportSubtitle("基于 " + platformCount + " 个 AI 平台 × " + totalPrompts + " 条查询的深度分析");
             editable.setExecutiveSummary(buildExecutiveSummary(raw, computed, brandName, platformCount));
             List<RenderedNarrativeFinding> narrativeFindings = buildNarrativeFindings(raw, computed);
-            editable.setKeyTakeaways(narrativeFindings == null
+            List<KeyTakeaway> keyTakeaways = narrativeFindings == null
                     ? buildKeyTakeaways(computed)
-                    : buildKeyTakeaways(narrativeFindings));
-            editable.setOptimizationFindingsContent(narrativeFindings == null
+                    : buildKeyTakeaways(narrativeFindings);
+            List<FindingContent> findingContents = narrativeFindings == null
                     ? buildFindingContents(computed)
-                    : buildFindingContents(narrativeFindings));
+                    : buildFindingContents(narrativeFindings);
+            editable.setKeyTakeaways(deduplicateKeyTakeaways(keyTakeaways));
+            editable.setOptimizationFindingsContent(hideDuplicateFindingContents(findingContents));
             editable.setPhaseDescriptions(buildPhaseDescriptions(computed));
             editable.setCompetitorSceneDescriptions(buildCompetitorScenes(raw));
             editable.setHeatmapSummary(buildHeatmapSummary(computed));
@@ -174,6 +176,61 @@ public class PresaleL3InitService {
                     .build());
         }
         return out;
+    }
+
+    private List<KeyTakeaway> deduplicateKeyTakeaways(List<KeyTakeaway> source) {
+        if (source == null || source.isEmpty()) {
+            return List.of();
+        }
+        List<KeyTakeaway> out = new ArrayList<>();
+        Set<String> seen = new TreeSet<>();
+        for (KeyTakeaway item : source) {
+            if (item == null) {
+                continue;
+            }
+            String signature = displaySignature(item.getTitle(), item.getDescription());
+            if (!StringUtils.hasText(signature) || seen.add(signature)) {
+                out.add(KeyTakeaway.builder()
+                        .orderNo(out.size() + 1)
+                        .title(item.getTitle())
+                        .description(item.getDescription())
+                        .build());
+            }
+        }
+        return out;
+    }
+
+    private List<FindingContent> hideDuplicateFindingContents(List<FindingContent> source) {
+        if (source == null || source.isEmpty()) {
+            return List.of();
+        }
+        List<FindingContent> out = new ArrayList<>();
+        Set<String> seenVisible = new TreeSet<>();
+        for (FindingContent item : source) {
+            if (item == null) {
+                continue;
+            }
+            boolean hidden = Boolean.TRUE.equals(item.getIsHidden());
+            String signature = displaySignature(item.getTitle(), item.getDescription());
+            boolean duplicateVisible = !hidden && StringUtils.hasText(signature) && !seenVisible.add(signature);
+            out.add(FindingContent.builder()
+                    .findingId(item.getFindingId())
+                    .title(item.getTitle())
+                    .description(item.getDescription())
+                    .evidenceText(item.getEvidenceText())
+                    .sortOrder(item.getSortOrder())
+                    .isHidden(hidden || duplicateVisible)
+                    .build());
+        }
+        return out;
+    }
+
+    private String displaySignature(String title, String description) {
+        return normalizeDisplayText(title) + "\n" + normalizeDisplayText(description);
+    }
+
+    private String normalizeDisplayText(String text) {
+        return text == null ? "" : text.trim().replaceAll("\\s+", " ");
     }
 
     private List<RenderedNarrativeFinding> buildNarrativeFindings(RawSnapshotDTO raw, ComputedSnapshotDTO computed) {
@@ -515,20 +572,20 @@ public class PresaleL3InitService {
             if (finding == null || finding.getFindingId() == null) {
                 continue;
             }
-            RuleFindingTemplate template = RULE_FINDING_MAP.get(finding.getRuleCode());
+            String ruleCode = finding.getRuleCode();
+            RuleFindingTemplate template = ruleCode == null ? null : RULE_FINDING_MAP.get(ruleCode);
             String title;
             String description;
             String evidenceText;
             if (template == null) {
-                log.warn("Finding rule code {} not in RULE_FINDING_MAP, fallback to legacy render", finding.getRuleCode());
-                title = RULE_TITLE_MAP.getOrDefault(finding.getRuleCode(),
-                        finding.getRuleCode() == null ? "未命名规则" : finding.getRuleCode());
+                log.warn("Finding rule code {} not in RULE_FINDING_MAP, fallback to legacy render", ruleCode);
+                title = ruleCode == null ? "未命名规则" : RULE_TITLE_MAP.getOrDefault(ruleCode, ruleCode);
                 description = renderEvidence(finding.getEvidenceData(), finding.getCategory());
                 evidenceText = renderEvidence(finding.getEvidenceData(), finding.getCategory());
             } else {
-                title = render(finding.getRuleCode(), template.title(), finding.getEvidenceData());
-                description = render(finding.getRuleCode(), template.description(), finding.getEvidenceData());
-                evidenceText = render(finding.getRuleCode(), template.evidenceText(), finding.getEvidenceData());
+                title = render(ruleCode, template.title(), finding.getEvidenceData());
+                description = render(ruleCode, template.description(), finding.getEvidenceData());
+                evidenceText = render(ruleCode, template.evidenceText(), finding.getEvidenceData());
             }
             out.add(FindingContent.builder()
                     .findingId(finding.getFindingId())

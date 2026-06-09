@@ -1,5 +1,5 @@
 <template>
-  <section class="report-page page-08">
+  <section id="page-08" class="page-anchor page-08">
     <div class="page">
       <div class="page-topbar">
         <span>GEO 诊断报告 · {{ mergedView.brand_name }}</span>
@@ -85,6 +85,8 @@
         </div>
       </div>
 
+      <div class="page-footer-brand">GEO · CONFIDENTIAL</div>
+      <div class="page-label">08</div>
     </div>
   </section>
 </template>
@@ -258,13 +260,18 @@ const comparisonCallout = computed(() => {
 </script>
 
 <style scoped>
+.page-anchor {
+  display: flex;
+  justify-content: center;
+}
+
 .page-08 .page {
   background: #f7f4ec;
 }
 
 .p08-panel {
   box-sizing: border-box;
-  width: 844px;
+  width: 100%;
   margin: 70px auto 0;
   color: #1a2942;
 }
@@ -277,18 +284,18 @@ const comparisonCallout = computed(() => {
 }
 
 .p08-headline {
-  width: 760px;
+  max-width: 100%;
   margin: 10px 0 24px;
   color: #0f1d3a;
-  font-size: 34px;
-  line-height: 1.45;
+  font-size: 30px;
+  line-height: 1.38;
   font-weight: 600;
 }
 
 .p08-answer-card {
   box-sizing: border-box;
   width: 100%;
-  padding: 20px 22px;
+  padding: 18px 20px;
   border-radius: 10px;
   background: #fff;
   border: 1px solid #e3ddcd;
@@ -310,7 +317,7 @@ const comparisonCallout = computed(() => {
 .p08-query {
   margin-top: 7px;
   color: #0f1d3a;
-  font-size: 22px;
+  font-size: 20px;
   line-height: 1.6;
   font-weight: 700;
 }
@@ -392,9 +399,9 @@ const comparisonCallout = computed(() => {
 
 .p08-bar-row {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr) 72px;
+  grid-template-columns: 160px minmax(0, 1fr) 64px;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .p08-bar-name {
@@ -490,7 +497,7 @@ const comparisonCallout = computed(() => {
 .p08-comparison-callout {
   box-sizing: border-box;
   width: 100%;
-  margin-top: 24px;
+  margin-top: 20px;
   padding: 4px 0 4px 16px;
   border-radius: 0;
   border-left: 3px solid #c0841e;
@@ -504,7 +511,7 @@ const comparisonCallout = computed(() => {
 .p08-comparison-callout p {
   margin: 0;
   color: #1a2942;
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1.7;
   font-weight: 700;
 }
@@ -539,12 +546,12 @@ const comparisonCallout = computed(() => {
 .p08-landing-copy {
   box-sizing: border-box;
   width: 100%;
-  margin-top: 22px;
-  padding: 15px 20px;
+  margin-top: 20px;
+  padding: 14px 18px;
   border-radius: 8px;
   background: #fbeede;
   color: #0f1d3a;
-  font-size: 18px;
+  font-size: 16px;
   line-height: 1.7;
   font-weight: 700;
 }

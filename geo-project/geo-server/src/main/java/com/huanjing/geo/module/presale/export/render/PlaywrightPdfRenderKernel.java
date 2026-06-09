@@ -83,9 +83,14 @@ public class PlaywrightPdfRenderKernel implements ExportRenderKernel {
                     page.navigate(request.getRenderUrl(), new Page.NavigateOptions()
                             .setTimeout((double) profile.getPageLoadTimeoutMs())
                             .setWaitUntil(WaitUntilState.NETWORKIDLE));
-                    page.waitForFunction("() => window.__PRESALE_PRINT_READY__ === true",
+                    page.waitForFunction(
+                            "() => window.__PRESALE_PRINT_READY__ === true || Boolean(window.__PRESALE_PRINT_ERROR__)",
                             null,
                             new Page.WaitForFunctionOptions().setTimeout((double) profile.getReadyTimeoutMs()));
+                    Object renderError = page.evaluate("() => window.__PRESALE_PRINT_ERROR__ || null");
+                    if (renderError != null) {
+                        throw new IllegalStateException("Presale print page failed before ready: " + renderError);
+                    }
 
                     Object metrics = page.evaluate("() => window.__PRESALE_PRINT_METRICS__ || {}");
                     ObjectNode metricsRoot = objectMapper.valueToTree(metrics);

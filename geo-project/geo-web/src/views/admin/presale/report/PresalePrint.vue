@@ -25,6 +25,7 @@ import ReportViewer from './detail/ReportViewer.vue'
 declare global {
   interface Window {
     __PRESALE_PRINT_READY__?: boolean
+    __PRESALE_PRINT_ERROR__?: string | null
     __PRESALE_PRINT_METRICS__?: PrintMetrics
   }
 }
@@ -96,6 +97,7 @@ provideMergedViewContext({
 
 onBeforeMount(() => {
   window.__PRESALE_PRINT_READY__ = false
+  window.__PRESALE_PRINT_ERROR__ = null
   installPrintResizeGuard()
 })
 
@@ -106,10 +108,13 @@ onMounted(() => {
 async function load(): Promise<void> {
   if (!renderToken.value) {
     error.value = 'Invalid renderToken'
+    window.__PRESALE_PRINT_ERROR__ = error.value
     return
   }
   loading.value = true
   error.value = null
+  window.__PRESALE_PRINT_READY__ = false
+  window.__PRESALE_PRINT_ERROR__ = null
   try {
     const payload = await getPresalePrintRenderDetail(renderToken.value)
     readyStartedAt.value = performance.now()
@@ -123,6 +128,7 @@ async function load(): Promise<void> {
   } catch (e: unknown) {
     error.value = (e as Error).message || 'Load print failed'
     window.__PRESALE_PRINT_READY__ = false
+    window.__PRESALE_PRINT_ERROR__ = error.value
     loading.value = false
   }
 }
@@ -258,7 +264,7 @@ function waitUntil(predicate: () => boolean, timeoutMs: number): Promise<void> {
         return
       }
       if (performance.now() - started > timeoutMs) {
-    reject(new Error('Print waitUntil timeout'))
+        reject(new Error(`Print waitUntil timeout after ${timeoutMs}ms`))
         return
       }
       requestAnimationFrame(tick)

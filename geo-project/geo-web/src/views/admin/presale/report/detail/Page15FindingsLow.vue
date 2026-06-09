@@ -108,8 +108,17 @@ const allFindings = computed(() =>
     .slice()
     .sort((a, b) => a.sort_order - b.sort_order)
 )
+const visibleFindings = computed(() => {
+  const seen = new Set<string>()
+  return allFindings.value.filter((item) => {
+    const key = normalizeDisplayKey(item.title, item.description)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+})
 const lowFindings = computed(() =>
-  allFindings.value.filter((m) => m.finding.priority === 'LOW')
+  visibleFindings.value.filter((m) => m.finding.priority === 'LOW')
 )
 const diagnosticLowFindings = computed(() =>
   lowFindings.value.filter((m) => !OPERATIONAL_VALUE_RULE_CODES.has(m.finding.rule_code))
@@ -170,9 +179,13 @@ interface CategoryCount {
 const categoryCounts = computed<CategoryCount[]>(() => {
   return CATEGORY_ORDER.map((name) => ({
     name,
-    count: allFindings.value.filter((m) => m.finding.category === name).length
+    count: visibleFindings.value.filter((m) => m.finding.category === name).length
   }))
 })
+
+function normalizeDisplayKey(title: string, description: string): string {
+  return `${title}|${description}`.replace(/\s+/g, '').toLowerCase()
+}
 </script>
 
 <style scoped>

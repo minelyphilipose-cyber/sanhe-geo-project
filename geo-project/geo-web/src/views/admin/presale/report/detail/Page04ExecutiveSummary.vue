@@ -93,14 +93,14 @@
         <div class="p04-key-findings">
           <div class="mono p04-findings-label">KEY FINDINGS · 关键发现</div>
 
-          <template v-if="sortedKeyTakeaways.length > 0">
+          <template v-if="visibleKeyTakeaways.length > 0">
             <div
-              v-for="(t, idx) in sortedKeyTakeaways"
+              v-for="(t, idx) in visibleKeyTakeaways"
               :key="`${t.order_no}-${idx}`"
               class="p04-finding-row"
-              :class="{ 'p04-finding-row-last': idx === sortedKeyTakeaways.length - 1 }"
+              :class="{ 'p04-finding-row-last': idx === visibleKeyTakeaways.length - 1 }"
             >
-              <div class="display-serif p04-finding-num">{{ formatFindingNum(t.order_no) }}</div>
+              <div class="display-serif p04-finding-num">{{ formatFindingNum(idx + 1) }}</div>
               <div class="p04-finding-content">
                 <div class="chinese-serif p04-finding-title">{{ t.title }}</div>
                 <div class="p04-finding-desc">{{ t.description }}</div>
@@ -201,6 +201,15 @@ const overallSubtitle = computed(() => {
 const sortedKeyTakeaways = computed(() =>
   mergedView.value.key_takeaways.slice().sort((a, b) => a.order_no - b.order_no)
 )
+const visibleKeyTakeaways = computed(() => {
+  const seen = new Set<string>()
+  return sortedKeyTakeaways.value.filter((item) => {
+    const key = normalizeDisplayKey(item.title, item.description)
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+})
 
 // ─── mention rate(加权计算,展示原始样本数) ─────────────────
 const weightedSampleTestCount = computed(() =>
@@ -299,6 +308,10 @@ function formatFindingNum(n: number): string {
 
 function platformWeight(platformCode: string): number {
   return platformCode?.toLowerCase() === DOUBAO_PLATFORM_CODE ? DOUBAO_WEIGHT : 1
+}
+
+function normalizeDisplayKey(title: string, description: string): string {
+  return `${title}|${description}`.replace(/\s+/g, '').toLowerCase()
 }
 </script>
 

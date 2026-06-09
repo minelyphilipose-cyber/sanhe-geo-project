@@ -614,8 +614,8 @@ const roiLineOption = computed<EChartsOption>(() => {
 
 .p16-hero-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 48px minmax(0, 1fr) minmax(118px, 0.45fr) minmax(0, 1fr);
-  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) 40px minmax(0, 1fr) minmax(144px, 0.65fr) minmax(0, 1fr);
+  gap: 16px;
   align-items: center;
   margin-top: 24px;
   margin-bottom: 40px;
@@ -640,7 +640,7 @@ const roiLineOption = computed<EChartsOption>(() => {
 
 .p16-hero-card {
   text-align: center;
-  padding: 32px 20px;
+  padding: 30px 16px;
 }
 
 .p16-hero-current {
@@ -671,10 +671,11 @@ const roiLineOption = computed<EChartsOption>(() => {
 
 .p16-hero-value {
   font-family: 'Playfair Display', serif;
-  font-size: 64px;
+  font-size: 58px;
   font-weight: 900;
   line-height: 1;
-  letter-spacing: -1px;
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 .p16-hero-value-muted {
   color: var(--presale-muted);
@@ -694,6 +695,7 @@ const roiLineOption = computed<EChartsOption>(() => {
   font-size: 13px;
   color: var(--presale-muted);
   margin-top: 8px;
+  white-space: nowrap;
 }
 .p16-hero-caption-dim {
   color: rgba(255, 255, 255, 0.7);
@@ -717,11 +719,11 @@ const roiLineOption = computed<EChartsOption>(() => {
   margin-bottom: 4px;
 }
 .p16-uplift-value {
-  font-size: 22px;
+  font-size: 18px;
   font-weight: 700;
   color: var(--presale-accent);
   line-height: 1.25;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
 }
 
 /* ─── ROI 曲线图 ──────────────────────────────────────── */

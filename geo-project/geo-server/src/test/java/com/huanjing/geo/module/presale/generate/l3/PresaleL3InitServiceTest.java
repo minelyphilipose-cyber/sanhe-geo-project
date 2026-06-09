@@ -193,6 +193,53 @@ class PresaleL3InitServiceTest {
     }
 
     @Test
+    void derive_deduplicatesRepeatedNarrativeFallbackCopies() throws Exception {
+        NarrativeProfile profile = profile(List.of(
+                tier(NarrativeProfile.FindingSource.DERIVED, "UNKNOWN_ALPHA", "UNKNOWN_ALPHA",
+                        NarrativeProfile.FindingTierLevel.T1, 1, Map.of()),
+                tier(NarrativeProfile.FindingSource.DERIVED, "UNKNOWN_BETA", "UNKNOWN_BETA",
+                        NarrativeProfile.FindingTierLevel.T2, 2, Map.of()),
+                tier(NarrativeProfile.FindingSource.DERIVED, "UNKNOWN_GAMMA", "UNKNOWN_GAMMA",
+                        NarrativeProfile.FindingTierLevel.T2, 3, Map.of())
+        ), false, NarrativeProfile.Band.MIDDLE);
+
+        String editableJson = service.derive(buildRawJson(), buildComputedJson(List.of(), profile));
+        EditableContentDTO editable = objectMapper.readValue(editableJson, EditableContentDTO.class);
+
+        assertEquals(1, editable.getKeyTakeaways().size());
+        assertEquals(Integer.valueOf(1), editable.getKeyTakeaways().get(0).getOrderNo());
+        assertEquals(3, editable.getOptimizationFindingsContent().size());
+        assertFalse(Boolean.TRUE.equals(editable.getOptimizationFindingsContent().get(0).getIsHidden()));
+        assertTrue(Boolean.TRUE.equals(editable.getOptimizationFindingsContent().get(1).getIsHidden()));
+        assertTrue(Boolean.TRUE.equals(editable.getOptimizationFindingsContent().get(2).getIsHidden()));
+    }
+
+    @Test
+    void derive_withoutNarrativeProfile_hidesDuplicateFindingContentCopies() throws Exception {
+        String editableJson = service.derive(buildRawJson(), buildComputedJson(List.of(
+                OptimizationFinding.builder()
+                        .findingId("F001")
+                        .ruleCode(null)
+                        .priority(OptimizationFinding.Priority.HIGH)
+                        .category(null)
+                        .evidenceData(Map.of())
+                        .build(),
+                OptimizationFinding.builder()
+                        .findingId("F002")
+                        .ruleCode(null)
+                        .priority(OptimizationFinding.Priority.MEDIUM)
+                        .category(null)
+                        .evidenceData(Map.of())
+                        .build()
+        )));
+        EditableContentDTO editable = objectMapper.readValue(editableJson, EditableContentDTO.class);
+
+        assertEquals(2, editable.getOptimizationFindingsContent().size());
+        assertFalse(Boolean.TRUE.equals(editable.getOptimizationFindingsContent().get(0).getIsHidden()));
+        assertTrue(Boolean.TRUE.equals(editable.getOptimizationFindingsContent().get(1).getIsHidden()));
+    }
+
+    @Test
     void derive_withoutTrueNegative_suppressesNegativePressureAndFillsToThree() throws Exception {
         NarrativeProfile profile = profile(List.of(
                 tier(NarrativeProfile.FindingSource.RULE, "RULE_NEGATIVE_EVIDENCE", "NEGATIVE_PRESSURE",
