@@ -3,6 +3,8 @@ package com.huanjing.geo.module.system.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.image.CompressedImage;
+import com.huanjing.geo.common.image.ImageCompressionService;
 import com.huanjing.geo.common.storage.MinioStorageService;
 import com.huanjing.geo.module.system.dto.AiPlatformConfigCreateRequest;
 import com.huanjing.geo.module.system.dto.AiPlatformConfigUpdateRequest;
@@ -39,6 +41,7 @@ public class AiPlatformConfigService {
     private final ActivityLogService activityLogService;
     private final PlatformCredentialService platformCredentialService;
     private final MinioStorageService minioStorageService;
+    private final ImageCompressionService imageCompressionService;
 
     public Page<AiPlatformConfig> page(long current, long size, String keyword, String priorityLevel, Boolean enabled) {
         currentUserService.ensureUserManageOperator();
@@ -181,9 +184,9 @@ public class AiPlatformConfigService {
 
         AiPlatformConfig entity = requireById(id);
         Map<String, Object> before = snapshot(entity);
-        String originalName = StringUtils.hasText(file.getOriginalFilename()) ? file.getOriginalFilename() : "logo.png";
-        String objectKey = buildLogoObjectKey(entity.getId(), originalName);
-        String logoUrl = minioStorageService.upload(file, objectKey, file.getContentType());
+        CompressedImage image = imageCompressionService.compressToLimit(file);
+        String objectKey = buildLogoObjectKey(entity.getId(), image.fileName());
+        String logoUrl = minioStorageService.uploadBytes(image.bytes(), objectKey, image.contentType());
 
         entity.setPlatformLogoUrl(logoUrl);
         aiPlatformConfigMapper.updateById(entity);

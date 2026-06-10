@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.system.service;
 
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.image.CompressedImage;
+import com.huanjing.geo.common.image.ImageCompressionService;
 import com.huanjing.geo.common.storage.MinioStorageService;
 import com.huanjing.geo.module.system.dto.CurrentUserPasswordChangeRequest;
 import com.huanjing.geo.module.system.dto.CurrentUserProfileUpdateRequest;
@@ -32,6 +34,7 @@ public class CurrentUserProfileService {
     private final PasswordEncoder passwordEncoder;
     private final RedisTemplate<String, Object> redisTemplate;
     private final MinioStorageService minioStorageService;
+    private final ImageCompressionService imageCompressionService;
     private final ActivityLogService activityLogService;
 
     public CurrentUserProfileVO me() {
@@ -66,9 +69,9 @@ public class CurrentUserProfileService {
         SysUser user = currentUserService.requireCurrentUser();
         validateAvatarFile(file);
 
-        String originalName = StringUtils.hasText(file.getOriginalFilename()) ? file.getOriginalFilename() : "avatar.png";
-        String objectKey = buildAvatarObjectKey(user.getId(), originalName);
-        String avatarUrl = minioStorageService.upload(file, objectKey, file.getContentType());
+        CompressedImage image = imageCompressionService.compressToLimit(file);
+        String objectKey = buildAvatarObjectKey(user.getId(), image.fileName());
+        String avatarUrl = minioStorageService.uploadBytes(image.bytes(), objectKey, image.contentType());
         String oldObjectKey = user.getAvatarObjectKey();
 
         user.setAvatarUrl(avatarUrl);

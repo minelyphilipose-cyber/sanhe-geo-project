@@ -125,12 +125,36 @@
                 <el-icon><List /></el-icon>
               </el-radio-button>
             </el-radio-group>
-            <el-button v-if="canUploadMaterial" type="primary" size="small" @click="handleImageUpload">上传图片</el-button>
+            <el-button
+              v-if="canUploadMaterial"
+              type="primary"
+              size="small"
+              :loading="uploadInProgress"
+              :disabled="uploadInProgress"
+              @click="handleImageUpload"
+            >
+              上传图片
+            </el-button>
           </div>
         </div>
       </template>
 
-      <input ref="fileInputRef" type="file" multiple class="hidden" :accept="uploadAccept" @change="onFileSelected" />
+      <input ref="fileInputRef" type="file" multiple class="hidden" :accept="uploadAccept" :disabled="uploadInProgress" @change="onFileSelected" />
+
+      <div v-if="uploadInProgress" class="upload-progress-panel">
+        <div class="upload-progress-panel__header">
+          <div>
+            <div class="upload-progress-panel__title">{{ uploadProgressTitle }}</div>
+            <div class="upload-progress-panel__desc">{{ uploadProgressDescription }}</div>
+          </div>
+          <el-tag size="small" type="warning">{{ uploadCompleted }}/{{ uploadTotal }}</el-tag>
+        </div>
+        <el-progress
+          :percentage="uploadPercent"
+          :stroke-width="8"
+          :indeterminate="uploadInProgress && uploadPercent < 100"
+        />
+      </div>
 
       <DataState :loading="materialsLoading" :empty="!materialsLoading && visibleMaterials.length === 0" empty-text="暂无图片">
         <div v-if="viewMode === 'grid'" class="grid grid-cols-5 gap-4">
@@ -236,8 +260,8 @@
             <span class="text-sm font-medium">案例与资质资料</span>
             <span class="ml-2 text-xs text-gray-400">共 {{ documentMaterials.length }} 个</span>
           </div>
-          <el-dropdown v-if="canUploadMaterial" @command="handleDocumentUploadCategory">
-            <el-button type="primary" size="small">
+          <el-dropdown v-if="canUploadMaterial" :disabled="uploadInProgress" @command="handleDocumentUploadCategory">
+            <el-button type="primary" size="small" :loading="uploadInProgress" :disabled="uploadInProgress">
               上传资料
               <el-icon class="el-icon--right"><ArrowDown /></el-icon>
             </el-button>
@@ -403,6 +427,12 @@ const searchKeyword = ref('')
 const viewMode = ref<'grid' | 'list'>('grid')
 const uploadingCategory = ref('')
 const uploadMode = ref<'image' | 'document'>('image')
+const uploadInProgress = ref(false)
+const uploadTotal = ref(0)
+const uploadCompleted = ref(0)
+const uploadFailed = ref(0)
+const uploadCurrentFileName = ref('')
+const uploadPhase = ref<'uploading' | 'refreshing'>('uploading')
 const fileInputRef = ref<HTMLInputElement>()
 const versionsTotal = ref(0)
 const folderDialogVisible = ref(false)
@@ -439,6 +469,30 @@ const materialCategories = [
 ]
 
 const documentCategories = materialCategories.filter((cat) => cat.value !== 'brand_image')
+
+const uploadPercent = computed(() => {
+  if (uploadTotal.value <= 0) return 0
+  return Math.min(100, Math.round((uploadCompleted.value / uploadTotal.value) * 100))
+})
+
+const uploadProgressTitle = computed(() => (
+  uploadPhase.value === 'refreshing'
+    ? '上传完成，正在刷新图库'
+    : uploadMode.value === 'image'
+      ? '正在上传图片并压缩'
+      : '正在上传资料'
+))
+
+const uploadProgressDescription = computed(() => {
+  if (uploadPhase.value === 'refreshing') {
+    return '正在同步最新素材列表和缩略图，请稍候'
+  }
+  const fileName = uploadCurrentFileName.value || '当前文件'
+  const suffix = uploadMode.value === 'image'
+    ? '服务端会自动压缩到 500KB 以内，较大的图片可能需要一些时间'
+    : '正在保存到素材库'
+  return `${fileName} · ${suffix}`
+})
 
 // ────────── 仪表盘计算 ──────────
 const imageCount = computed(() => materials.value.filter((m) => isImageType(m.fileType)).length)
@@ -712,6 +766,7 @@ async function loadVersionsCount() {
 
 // ────────── 上传 ──────────
 function handleImageUpload() {
+  if (uploadInProgress.value) return
   uploadMode.value = 'image'
   uploadingCategory.value = 'brand_image'
   if (!selectedFolderId.value) {
@@ -729,6 +784,7 @@ function handleImageUpload() {
 }
 
 function handleDocumentUploadCategory(category: string) {
+  if (uploadInProgress.value) return
   uploadMode.value = 'document'
   uploadingCategory.value = category
   fileInputRef.value?.click()
@@ -738,13 +794,19 @@ async function onFileSelected(e: Event) {
   const input = e.target as HTMLInputElement
   const files = input.files
   if (!files || files.length === 0) return
+  if (uploadInProgress.value) {
+    input.value = ''
+    return
+  }
   if (!uploadingCategory.value) {
     ElMessage.warning('请先选择素材分类')
     input.value = ''
     return
   }
-  let successCount = 0
-  for (const file of Array.from(files)) {
+
+  const acceptedFiles: File[] = []
+  const selectedFiles = Array.from(files)
+  for (const file of selectedFiles) {
     if (file.size > MAX_UPLOAD_SIZE) {
       ElMessage.error(`文件「${file.name}」超过 10MB，已跳过`)
       continue
@@ -753,18 +815,51 @@ async function onFileSelected(e: Event) {
       ElMessage.error(`文件「${file.name}」不是图片，已跳过`)
       continue
     }
+    acceptedFiles.push(file)
+  }
+
+  if (acceptedFiles.length === 0) {
+    input.value = ''
+    return
+  }
+
+  let successCount = 0
+  uploadInProgress.value = true
+  uploadTotal.value = acceptedFiles.length
+  uploadCompleted.value = 0
+  uploadFailed.value = 0
+  uploadPhase.value = 'uploading'
+
+  for (const file of acceptedFiles) {
+    uploadCurrentFileName.value = file.name
     try {
       const folderId = uploadMode.value === 'image' ? selectedFolderId.value || undefined : undefined
       await uploadBrandMaterial(brandId.value, uploadingCategory.value, file, folderId)
       successCount++
     } catch (err: any) {
+      uploadFailed.value++
       ElMessage.error(`「${file.name}」上传失败：${err?.response?.data?.message || '未知错误'}`)
+    } finally {
+      uploadCompleted.value++
     }
   }
+
   input.value = ''
-  if (successCount > 0) {
-    ElMessage.success(`成功上传 ${successCount} 个文件`)
-    await Promise.all([loadFolders(), loadMaterials()])
+  try {
+    if (successCount > 0) {
+      uploadPhase.value = 'refreshing'
+      uploadCurrentFileName.value = ''
+      await Promise.all([loadFolders(), loadMaterials()])
+      const failedText = uploadFailed.value > 0 ? `，失败 ${uploadFailed.value} 个` : ''
+      ElMessage.success(`成功上传 ${successCount} 个文件${failedText}`)
+    }
+  } finally {
+    uploadInProgress.value = false
+    uploadTotal.value = 0
+    uploadCompleted.value = 0
+    uploadFailed.value = 0
+    uploadCurrentFileName.value = ''
+    uploadPhase.value = 'uploading'
   }
 }
 
@@ -1095,5 +1190,35 @@ export default {}
 
 .folder-toggle-chevrons-up :deep(.el-icon) {
   transform: rotate(180deg);
+}
+
+.upload-progress-panel {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+}
+
+.upload-progress-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.upload-progress-panel__title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: #9a3412;
+}
+
+.upload-progress-panel__desc {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 18px;
+  color: #9a3412;
 }
 </style>

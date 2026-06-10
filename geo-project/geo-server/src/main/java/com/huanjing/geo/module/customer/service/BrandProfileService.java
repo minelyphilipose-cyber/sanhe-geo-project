@@ -4,6 +4,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.common.image.CompressedImage;
+import com.huanjing.geo.common.image.ImageCompressionService;
 import com.huanjing.geo.common.storage.MinioStorageService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
@@ -40,6 +42,7 @@ public class BrandProfileService {
     private final CurrentUserService currentUserService;
     private final ActivityLogService activityLogService;
     private final MinioStorageService minioStorageService;
+    private final ImageCompressionService imageCompressionService;
     private final BrandImageFolderService brandImageFolderService;
     private final BrandMaterialPublicUrlService publicUrlService;
     private final ObjectMapper objectMapper;
@@ -137,11 +140,31 @@ public class BrandProfileService {
             throw new BizException(400, "Upload file exceeds 10MB limit");
         }
 
-        String originalName = StringUtils.hasText(file.getOriginalFilename()) ? file.getOriginalFilename() : "unknown";
-        String safeFileName = trimToLength(originalName, 255);
-        String safeFileType = trimToLength(resolveFileTypeBySuffix(originalName), 64);
-        String objectKey = buildObjectKey(brandId, originalName);
-        String fileUrl = minioStorageService.upload(file, objectKey, file.getContentType());
+        boolean imageUpload = isImageUpload(file, originalName(file));
+        if ("brand_image".equals(category) && !imageUpload) {
+            throw new BizException(400, "品牌形象素材必须是图片文件");
+        }
+
+        String originalName = originalName(file);
+        String safeFileName;
+        String safeFileType;
+        String objectKey;
+        String fileUrl;
+        long fileSize;
+        if (imageUpload) {
+            CompressedImage image = imageCompressionService.compressToLimit(file);
+            safeFileName = trimToLength(image.fileName(), 255);
+            safeFileType = trimToLength(image.fileType(), 64);
+            objectKey = buildObjectKey(brandId, image.fileName());
+            fileUrl = minioStorageService.uploadBytes(image.bytes(), objectKey, image.contentType());
+            fileSize = image.size();
+        } else {
+            safeFileName = trimToLength(originalName, 255);
+            safeFileType = trimToLength(resolveFileTypeBySuffix(originalName), 64);
+            objectKey = buildObjectKey(brandId, originalName);
+            fileUrl = minioStorageService.upload(file, objectKey, file.getContentType());
+            fileSize = file.getSize();
+        }
 
         BrandMaterial material = new BrandMaterial();
         material.setBrandId(brandId);
@@ -151,7 +174,7 @@ public class BrandProfileService {
         material.setFileType(safeFileType);
         material.setFileUrl(fileUrl);
         material.setObjectKey(objectKey);
-        material.setFileSize(file.getSize());
+        material.setFileSize(fileSize);
         material.setCreatedBy(operator.getId());
         brandMaterialMapper.insert(material);
         createProfileVersionSnapshot(brand, operator.getId(), "material.upload");
@@ -275,6 +298,18 @@ public class BrandProfileService {
         return "brand/" + brandId + "/" + date + "/" + random + ext;
     }
 
+    private String originalName(MultipartFile file) {
+        return StringUtils.hasText(file.getOriginalFilename()) ? file.getOriginalFilename() : "unknown";
+    }
+
+    private boolean isImageUpload(MultipartFile file, String fileName) {
+        String contentType = file.getContentType();
+        if (StringUtils.hasText(contentType) && contentType.toLowerCase(Locale.ROOT).startsWith("image/")) {
+            return true;
+        }
+        String suffix = resolveFileTypeBySuffix(fileName);
+        return Set.of("jpg", "jpeg", "png", "gif", "webp", "bmp", "svg").contains(suffix);
+    }
     private String resolveFileTypeBySuffix(String fileName) {
         if (!StringUtils.hasText(fileName)) {
             return "unknown";
