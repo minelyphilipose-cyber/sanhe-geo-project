@@ -26,6 +26,7 @@ const DEFAULT_FETCH_TIMEOUT_MS = 15_000
 const ADSPOWER_FETCH_TIMEOUT_MS = 20_000
 const BACKEND_FETCH_TIMEOUT_MS = 20_000
 const SCHEDULE_POLL_STEP_TIMEOUT_MS = 60_000
+const SCHEDULE_HEARTBEAT_INTERVAL_MS = 60_000
 const EVENT_LOOP_WATCHDOG_INTERVAL_MS = 5_000
 const EVENT_LOOP_WATCHDOG_THRESHOLD_MS = 90_000
 const FAILED_SCHEDULE_REPORT_MAX_ATTEMPTS = 3
@@ -39,7 +40,9 @@ let runtimeSettings = { adspower: {} }
 let packageInfoCache = null
 let pendingPairing = null
 let schedulePollInFlight = false
+let scheduleHeartbeatInFlight = false
 let lastSchedulePollStatus = null
+let lastScheduleHeartbeatStatus = null
 let cachedSelfMediaSchedulePlatforms = null
 let cachedSelfMediaSchedulePlatformsAt = 0
 let lastSelfMediaSchedulePlatformsError = null
@@ -794,6 +797,7 @@ async function handleLaunch(req, res, config) {
 
 async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
   await flushPendingScheduleFailureReports(config, platform)
+  await flushPendingScheduleSuccessReports(config, platform)
   const path = `/api/v1/local-agent/self-media-schedules/claim-next?platform=${encodeURIComponent(platform)}`
   const claim = await signedTrustedBackendRequest(config, path, { method: 'GET' })
   if (!claim?.task || !claim?.launch) {
@@ -1103,7 +1107,7 @@ async function reportPublishCheckFailed(config, scheduleId, result) {
 }
 
 async function reportScheduleExecutionFailed(config, task, result) {
-  const scheduleId = task?.schedule?.id || task?.backendTask?.platformOptions?.scheduleId
+  const scheduleId = scheduleIdOfTask(task)
   if (!scheduleId) return null
   const query = new URLSearchParams()
   query.set('failureCode', result?.failureCode || task?.lastError?.code || task?.failureCode || 'FILL_FAILED')
@@ -1118,8 +1122,83 @@ async function reportScheduleExecutionFailed(config, task, result) {
   return signedTrustedBackendRequest(config, path, { method: 'POST' })
 }
 
+async function reportScheduleExecutionSuccess(config, task, fillResult) {
+  const scheduleId = scheduleIdOfTask(task)
+  if (!scheduleId) return null
+  const outcome = resolveScheduleExecutionOutcome(fillResult)
+  const query = new URLSearchParams()
+  const publishedUrl = extractPublishedUrl(fillResult)
+  if (outcome === 'published' && publishedUrl) query.set('platformPublishedUrl', publishedUrl)
+  query.set('diagnosticsJson', shortDiagnosticsJson({
+    fillResult,
+    taskId: task?.taskId,
+    platform: task?.platform,
+    scheduleId,
+  }))
+  const path = `/api/v1/local-agent/self-media-schedules/${encodeURIComponent(scheduleId)}/executions/${outcome}?${query}`
+  return signedTrustedBackendRequest(config, path, { method: 'POST' })
+}
+
+function resolveScheduleExecutionOutcome(fillResult) {
+  const publishOptions = fillResult?.publishOptions || {}
+  const verification = publishOptions.publishVerification || {}
+  const verified = verification.verified === true || verification.verified === 'true'
+  if (verified && publishOptions.published === true) return 'published'
+  if (verified && publishOptions.scheduled === true) return 'scheduled'
+  return 'filled'
+}
+
+function extractPublishedUrl(fillResult) {
+  const publishOptions = fillResult?.publishOptions || {}
+  const verification = publishOptions.publishVerification || {}
+  return publishOptions.platformPublishedUrl
+    || publishOptions.publishedUrl
+    || verification.platformPublishedUrl
+    || verification.publishedUrl
+    || fillResult?.platformPublishedUrl
+    || fillResult?.url
+    || ''
+}
+
+async function reportScheduleHeartbeat(config, scheduleId) {
+  if (!scheduleId) return null
+  const path = `/api/v1/local-agent/self-media-schedules/${encodeURIComponent(scheduleId)}/heartbeat`
+  return signedTrustedBackendRequest(config, path, { method: 'POST' })
+}
+
 function scheduleIdOfTask(task) {
   return task?.schedule?.id || task?.backendTask?.platformOptions?.scheduleId || task?.backendTask?.scheduleId
+}
+
+function shouldHeartbeatScheduleTask(task) {
+  if (!task || isTerminalStatus(task.status)) return false
+  if (!scheduleIdOfTask(task)) return false
+  return Boolean(task.backendTask || task.schedule)
+}
+
+async function heartbeatActiveScheduleTasks(config) {
+  let sent = 0
+  let failed = 0
+  let changed = false
+  for (const task of tasksById.values()) {
+    if (!shouldHeartbeatScheduleTask(task)) continue
+    const scheduleId = scheduleIdOfTask(task)
+    try {
+      const schedule = await reportScheduleHeartbeat(config, scheduleId)
+      task.schedule = schedule || task.schedule || null
+      task.backendHeartbeatAt = nowIso()
+      task.backendHeartbeatLastError = null
+      sent += 1
+      changed = true
+    } catch (error) {
+      task.backendHeartbeatLastError = formatBackendError(error)
+      failed += 1
+      changed = true
+      console.error('Failed to heartbeat self-media schedule:', task.backendHeartbeatLastError)
+    }
+  }
+  if (changed) await saveRuntimeTasks()
+  return { sent, failed }
 }
 
 function shouldFlushScheduleFailure(task, platform) {
@@ -1149,6 +1228,36 @@ async function flushPendingScheduleFailureReports(config, platform = '') {
         task.backendFailureReportRejectedAt = nowIso()
       }
       console.error('Failed to report pending schedule execution failure:', task.backendFailureReportLastError)
+    }
+    changed = true
+  }
+  if (changed) await saveRuntimeTasks()
+}
+
+function shouldFlushScheduleSuccess(task, platform) {
+  if (!task || task.status !== 'completed') return false
+  if (platform && task.platform !== platform) return false
+  if (!scheduleIdOfTask(task)) return false
+  if (task.backendSuccessReportedAt) return false
+  if (task.backendSuccessReportRejectedAt) return false
+  return Number(task.backendSuccessReportAttempts || 0) < FAILED_SCHEDULE_REPORT_MAX_ATTEMPTS
+}
+
+async function flushPendingScheduleSuccessReports(config, platform = '') {
+  let changed = false
+  for (const task of tasksById.values()) {
+    if (!shouldFlushScheduleSuccess(task, platform)) continue
+    task.backendSuccessReportAttempts = Number(task.backendSuccessReportAttempts || 0) + 1
+    try {
+      task.schedule = await reportScheduleExecutionSuccess(config, task, task.fillResult) || task.schedule || null
+      task.backendSuccessReportedAt = nowIso()
+      task.backendSuccessReportLastError = null
+    } catch (error) {
+      task.backendSuccessReportLastError = formatBackendError(error)
+      if (error?.statusCode === 400) {
+        task.backendSuccessReportRejectedAt = nowIso()
+      }
+      console.error('Failed to report pending schedule execution success:', task.backendSuccessReportLastError)
     }
     changed = true
   }
@@ -1549,8 +1658,23 @@ async function handleTaskComplete(req, res, config, taskId, status) {
     task.status = 'completed'
     task.completedAt = nowIso()
     task.fillResult = body.fillResult || null
+    task.backendSuccessReportedAt = null
+    task.backendSuccessReportLastError = null
+    task.backendSuccessReportAttempts = Number(task.backendSuccessReportAttempts || 0)
     task.claimedAt = null
     task.claimOwner = null
+    await reportScheduleExecutionSuccess(config, task, task.fillResult).then((schedule) => {
+      task.schedule = schedule || task.schedule || null
+      task.backendSuccessReportedAt = nowIso()
+      task.backendSuccessReportLastError = null
+    }).catch((error) => {
+      task.backendSuccessReportAttempts += 1
+      task.backendSuccessReportLastError = formatBackendError(error)
+      if (error?.statusCode === 400) {
+        task.backendSuccessReportRejectedAt = nowIso()
+      }
+      console.error('Failed to report schedule execution success:', task.backendSuccessReportLastError)
+    })
   } else {
     task.status = 'failed'
     task.failedAt = nowIso()
@@ -2070,6 +2194,11 @@ async function route(req, res, config) {
         platformFetchError: lastSelfMediaSchedulePlatformsError,
         intervalMs: Number(config.selfMediaSchedulePollIntervalMs || 30_000),
       },
+      scheduleHeartbeat: {
+        inFlight: scheduleHeartbeatInFlight,
+        last: lastScheduleHeartbeatStatus,
+        intervalMs: Number(config.selfMediaScheduleHeartbeatIntervalMs || SCHEDULE_HEARTBEAT_INTERVAL_MS),
+      },
       config: {
         host: config.host,
         port: config.port,
@@ -2179,6 +2308,46 @@ function startSchedulePoller(config) {
   setInterval(tick, Math.max(intervalMs, 10_000)).unref?.()
 }
 
+function startScheduleHeartbeat(config) {
+  const intervalMs = Number(config.selfMediaScheduleHeartbeatIntervalMs || SCHEDULE_HEARTBEAT_INTERVAL_MS)
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0) return
+  const tick = () => {
+    if (!runtimeSession?.sessionId || !runtimeSession?.hmacSecret) return
+    if (scheduleHeartbeatInFlight) {
+      lastScheduleHeartbeatStatus = {
+        at: nowIso(),
+        ok: false,
+        skipped: true,
+        reason: 'previous heartbeat still running',
+      }
+      return
+    }
+    scheduleHeartbeatInFlight = true
+    heartbeatActiveScheduleTasks(config)
+      .then((result) => {
+        lastScheduleHeartbeatStatus = {
+          at: nowIso(),
+          ok: result.failed === 0,
+          sent: result.sent,
+          failed: result.failed,
+        }
+      })
+      .catch((error) => {
+        lastScheduleHeartbeatStatus = {
+          at: nowIso(),
+          ok: false,
+          error: error.message,
+        }
+        console.error('GEO self-media schedule heartbeat failed:', error.message)
+      })
+      .finally(() => {
+        scheduleHeartbeatInFlight = false
+      })
+  }
+  setTimeout(tick, 5_000).unref?.()
+  setInterval(tick, Math.max(intervalMs, 15_000)).unref?.()
+}
+
 async function pollSelfMediaSchedules(config) {
   const timeoutMs = Number(config.selfMediaSchedulePollStepTimeoutMs || SCHEDULE_POLL_STEP_TIMEOUT_MS)
   const platforms = await selfMediaSchedulePlatforms(config)
@@ -2235,6 +2404,7 @@ function normalizePlatformList(raw) {
 }
 
 startSchedulePoller(config)
+startScheduleHeartbeat(config)
 startEventLoopWatchdog(config)
 
 function startEventLoopWatchdog(config) {

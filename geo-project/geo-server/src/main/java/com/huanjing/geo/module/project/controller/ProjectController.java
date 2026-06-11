@@ -6,6 +6,7 @@ import com.huanjing.geo.module.content.dto.ProjectSelfMediaAutoScheduleRequest;
 import com.huanjing.geo.module.content.dto.ProjectSelfMediaScheduleConfigRequest;
 import com.huanjing.geo.module.content.service.ProjectSelfMediaScheduleService;
 import com.huanjing.geo.module.content.vo.ProjectSelfMediaScheduleBatchVO;
+import com.huanjing.geo.module.content.vo.ProjectSelfMediaScheduleBatchDetailVO;
 import com.huanjing.geo.module.content.vo.ProjectSelfMediaScheduleConfigVO;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishAutoScheduleResponse;
 import com.huanjing.geo.module.project.dto.KeywordGroupImportResultVO;
@@ -83,6 +84,12 @@ public class ProjectController {
     public R<ProjectSelfMediaScheduleBatchVO> selfMediaScheduleBatch(@PathVariable Long id,
                                                                      @PathVariable String targetMonth) {
         return R.ok(projectSelfMediaScheduleService.getBatch(id, targetMonth));
+    }
+
+    @GetMapping("/{id:\\d+}/self-media-schedule-batches/{targetMonth}/detail")
+    public R<ProjectSelfMediaScheduleBatchDetailVO> selfMediaScheduleBatchDetail(@PathVariable Long id,
+                                                                                 @PathVariable String targetMonth) {
+        return R.ok(projectSelfMediaScheduleService.getBatchDetail(id, targetMonth));
     }
 
     @PostMapping("/{id:\\d+}/self-media-schedules/auto-preview")

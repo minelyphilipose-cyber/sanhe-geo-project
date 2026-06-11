@@ -42,7 +42,7 @@ class MedicalArticleComplianceCheckerTest {
         rule.setSeverity("block");
         when(ruleMapper.selectList(any())).thenReturn(List.of(rule));
 
-        MedicalArticleComplianceChecker.CheckInput input = input("标题", "这个项目可以根治问题，适合所有人。", false, 2);
+        MedicalArticleComplianceChecker.CheckInput input = input("标题", "这个项目可以根治问题，适合所有人，但仍需了解风险。", false, 2);
         MedicalArticleComplianceChecker.CheckResult result = checker.check(input);
 
         assertThat(result.passed()).isFalse();
@@ -68,6 +68,114 @@ class MedicalArticleComplianceCheckerTest {
         assertThat(result.passed()).isFalse();
         assertThat(result.issues()).extracting(MedicalArticleComplianceChecker.ComplianceIssue::ruleType)
                 .contains("risk_disclosure_missing", "rational_decision_missing");
+    }
+
+    @Test
+    void everyMedicalArticleRequiresRiskHintEvenWhenChannelIsNotHighRisk() {
+        when(ruleMapper.selectList(any())).thenReturn(List.of());
+
+        MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                input("种植牙术前评估", "术前需要了解基本原理和正规机构资质。", false, 2)
+        );
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.issues()).extracting(MedicalArticleComplianceChecker.ComplianceIssue::ruleType)
+                .contains("risk_disclosure_missing")
+                .doesNotContain("rational_decision_missing");
+    }
+
+    @Test
+    void containsRuleMatchesFullWidthAndSpacedVariants() {
+        MedicalComplianceRule rule = new MedicalComplianceRule();
+        rule.setId(8L);
+        rule.setRuleType("absolute_claim");
+        rule.setPattern("100%安全");
+        rule.setMatchMode("contains");
+        rule.setSeverity("block");
+        when(ruleMapper.selectList(any())).thenReturn(List.of(rule));
+
+        MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                input("项目安全吗", "宣传写成１ ００％ 安 全，但实际还需要说明风险。", false, 2)
+        );
+
+        assertThat(result.passed()).isFalse();
+        assertThat(result.issues()).extracting(MedicalArticleComplianceChecker.ComplianceIssue::ruleType)
+                .contains("absolute_claim");
+    }
+
+    @Test
+    void regexRankingClaimsBlockOnlyInvalidCombinations() {
+        when(ruleMapper.selectList(any())).thenReturn(rankingClaimRules());
+
+        List<String> invalidContents = List.of(
+                "我们排名第一，但仍需了解风险和个体差异",
+                "效果第一的选择，需结合自身风险评估",
+                "本地第一品牌，使用前请评估禁忌",
+                "这是最好的医院，但需个体评估风险",
+                "效果最好，仍需关注风险禁忌",
+                "最专业的团队，使用前需医生评估",
+                "技术领先同行，仍存在个体差异风险",
+                "通过权威认证，使用前请评估风险"
+        );
+
+        for (String content : invalidContents) {
+            MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                    input("医疗内容合规测试", content, false, 2)
+            );
+
+            assertThat(result.passed()).as(content).isFalse();
+            assertThat(result.issues()).as(content)
+                    .extracting(MedicalArticleComplianceChecker.ComplianceIssue::ruleType)
+                    .contains("ranking_claim");
+        }
+    }
+
+    @Test
+    void regexRankingClaimsAllowNormalFirstAndMostExpressions() {
+        when(ruleMapper.selectList(any())).thenReturn(rankingClaimRules());
+
+        List<String> allowedContents = List.of(
+                "第一步要做口腔检查，注意个体差异和风险",
+                "第一类适应症的风险评估",
+                "第一次就诊需了解禁忌和风险",
+                "第一时间就医，注意个体差异",
+                "最常见的误区，需结合风险评估",
+                "最需要注意的禁忌和风险",
+                "最容易被忽略的个体差异",
+                "最好提前做风险评估"
+        );
+
+        for (String content : allowedContents) {
+            MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                    input("医疗内容合规测试", content, false, 2)
+            );
+
+            assertThat(result.issues()).as(content)
+                    .extracting(MedicalArticleComplianceChecker.ComplianceIssue::ruleType)
+                    .doesNotContain("ranking_claim");
+            assertThat(result.passed()).as(content).isTrue();
+        }
+    }
+
+    @Test
+    void regexRankingClaimsUseNormalizedContentForFullWidthAndSpacedVariants() {
+        when(ruleMapper.selectList(any())).thenReturn(rankingClaimRules());
+
+        List<String> variantContents = List.of(
+                "排 名 第 一，但仍需了解风险和个体差异",
+                "效果 第一的选择，仍需关注风险禁忌"
+        );
+
+        for (String content : variantContents) {
+            MedicalArticleComplianceChecker.CheckResult result = checker.check(
+                    input("医疗内容合规测试", content, false, 2)
+            );
+
+            assertThat(result.passed()).as(content).isFalse();
+            assertThat(result.issues()).as(content)
+                    .extracting(MedicalArticleComplianceChecker.ComplianceIssue::ruleType)
+                    .contains("ranking_claim");
+        }
     }
 
     @Test
@@ -122,5 +230,29 @@ class MedicalArticleComplianceCheckerTest {
                 brand,
                 context
         );
+    }
+
+    private List<MedicalComplianceRule> rankingClaimRules() {
+        return List.of(
+                rule(21L, "ranking_claim", "排名第一", "regex"),
+                rule(22L, "ranking_claim", "效果第一", "regex"),
+                rule(23L, "ranking_claim", "本地第一(品牌|医院|机构|选择)", "regex"),
+                rule(24L, "ranking_claim", "第一(品牌|医院|机构|选择|团队|技术|项目)", "regex"),
+                rule(25L, "ranking_claim", "(效果|技术|服务|方案|项目|医生|专家|团队|医院|机构)最好", "regex"),
+                rule(26L, "ranking_claim", "最好(的)?(医院|机构|品牌|医生|专家|团队|选择|项目|技术|方案)", "regex"),
+                rule(27L, "ranking_claim", "最专业(的)?(团队|医生|专家|机构|医院)", "regex"),
+                rule(28L, "ranking_claim", "(技术|设备|水平|实力|团队|服务)领先(同行|行业|本地|区域)", "regex"),
+                rule(29L, "ranking_claim", "权威(认证|背书|推荐|机构|专家)", "regex")
+        );
+    }
+
+    private MedicalComplianceRule rule(Long id, String ruleType, String pattern, String matchMode) {
+        MedicalComplianceRule rule = new MedicalComplianceRule();
+        rule.setId(id);
+        rule.setRuleType(ruleType);
+        rule.setPattern(pattern);
+        rule.setMatchMode(matchMode);
+        rule.setSeverity("block");
+        return rule;
     }
 }

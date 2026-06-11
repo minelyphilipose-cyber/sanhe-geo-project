@@ -56,12 +56,18 @@ public class ContentArticleController {
                                       @RequestParam(required = false) String channelGroupCode,
                                       @RequestParam(required = false) String channelSubCode,
                                       @RequestParam(required = false) String generationMode,
+                                      @RequestParam(required = false) String complianceStatus,
+                                      @RequestParam(required = false) String publishReviewStatus,
+                                      @RequestParam(required = false) String medicalIndustryCode,
+                                      @RequestParam(required = false) String medicalChannelTier,
+                                      @RequestParam(required = false) Boolean specialIndustryOnly,
                                       @RequestParam(required = false) String createdStartDate,
                                       @RequestParam(required = false) String createdEndDate,
                                       @RequestParam(defaultValue = "1") Long current,
                                       @RequestParam(defaultValue = "10") Long size) {
         return R.ok(contentArticleService.page(projectName, status, articleType, articleTypeCode,
-                channelGroupCode, channelSubCode, generationMode, createdStartDate, createdEndDate, current, size));
+                channelGroupCode, channelSubCode, generationMode, complianceStatus, publishReviewStatus,
+                medicalIndustryCode, medicalChannelTier, specialIndustryOnly, createdStartDate, createdEndDate, current, size));
     }
 
     @PostMapping("/manual")

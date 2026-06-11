@@ -268,8 +268,39 @@ UNIQUE KEY uk_article_publish_source (source_type, source_id)
 - `distribution_tasks.payload_purged_at`
 - `batch_article_generation_task.snapshot_purged_at`
 - `presale_ai_call.payload_purged_at`
-- `presale_ai_prompt_judge_result.raw_purged_at`
-- `self_media_publish_schedule.diagnostics_purged_at`
+
+### V237__article_publish_record_url_quality.sql
+
+`V236` 已由其它分支占用，本迁移给 `article_publish_record` 增加发布链接分级字段：
+
+- `url_quality VARCHAR(32) NOT NULL DEFAULT 'missing'`：`public_url/preview_url/manage_url/missing`。
+- `url_source VARCHAR(64) NULL`：记录证据来源字段，例如 `distribution_tasks.published_url`、`self_media_publish_schedule.platform_publish_id`。
+- `verified_at DATETIME NULL`：发布交付证据被确认的时间。
+
+补偿任务覆盖：
+
+- `distribution_tasks`：发布成功/提交完成/平台审核已发布或下线的任务；有公网链接写 `public_url`，无公网链接但有平台文章 ID/发布 ID 或终态证据时写 `missing`。
+- `self_media_publish_schedule`：`published_confirmed` 的自媒体定时发布；有 `platform_published_url` 写 `public_url`，只有 `platform_publish_id` 或确认时间时写 `missing`。
+- 以上补偿只补 `article_publish_record`，不触发正文归档、不置空正文。
+
+### V240__repair_data_lifecycle_v228_remaining_delta.sql
+
+`V235` 已在本地库应用，不再编辑。该迁移补早期 `V228` + 已应用 `V235` 之后仍可能遗留的真实结构差异：
+
+- 条件补 `poll_results.idx_poll_result_date_project_tier(batch_date, project_id, question_tier)`，已存在则 no-op。
+- `poll_keyword_daily_summary.contact_mention_total` 改为 `BIGINT`。
+- `poll_platform_daily_summary.contact_mention_total` 改为 `BIGINT`。
+- `article_generation_daily_summary.dim_hash` 注释修正为最终版口径：`generation_date,project_id,article_type,target_channel,status`。
+
+对已经跑过最终版 `V228` 的全新库，本迁移只会执行等价 `MODIFY` 和索引 no-op。
+
+### V241__repair_article_generation_checksum_contract.sql
+
+`V240` 已在本地库应用，不再编辑。该迁移重申 `article_generation_daily_summary.source_checksum` 为最终版 `CHAR(64) CHARACTER SET ascii COLLATE ascii_bin`，对最终版新库和已修复旧库均为等价 `MODIFY`。
+
+### V242__presale_judge_raw_purge_marker.sql
+
+给 `presale_ai_prompt_judge_result` 增加 `raw_purged_at` 和 `idx_presale_judge_raw_purge`，作为裁判 raw slim 的重复候选过滤 marker。该迁移只补 marker，不执行任何置空。
 
 ## 5. P0-1：日聚合必须 recompute-SET
 
@@ -585,6 +616,7 @@ archive/article/{projectId}/{articleId}/v{versionNo}.md
 多渠道发布终态：
 
 - 单篇文章只要存在任一渠道 `published/success` 且形成 `article_publish_record`，该版本正文就属于交付物，必须先归档。
+- 无公网链接渠道也必须形成 `article_publish_record`；没有公网 URL 但存在平台文章 ID、发布 ID 或发布确认时间时，`url_quality='missing'`，仍可作为正文归档前置交付记录。
 - 若 A 渠道已发布、B 渠道失败、C 渠道待发，该版本可以归档，但不得置空到会阻断 C 渠道继续发布；只有 rehydration 路径已上线并覆盖发布流程后才允许置空。
 - 若所有渠道均失败或取消，且没有公网/客户交付记录，该版本按过程草稿处理，进入短窗口 slim/delete。
 - 渠道终态集合第一版按：`published/success/completed/failed/cancelled/dead_letter`；`pending/running/token_issued/filled` 不算文章版本可置空终态。
@@ -638,6 +670,7 @@ content_markdown 为空且 content_object_key 非空 -> 从对象存储读取 ->
 
 - 结构化裁判字段已存在。
 - 需要的汇总/报告快照已存在。
+- 由 `presale_ai_prompt_judge_result.raw_purged_at` 防重复；本轮仅 dry-run，不写 marker、不置空。
 
 ### 发布 payload
 
@@ -646,12 +679,15 @@ content_markdown 为空且 content_object_key 非空 -> 从对象存储读取 ->
 - `article_publish_record` 已生成。
 - 发布 URL、平台文章 ID、平台发布 ID、状态、发布时间等轻字段已长期保存。
 
-### 自媒体 diagnostics
+### 本轮 slim dry-run 入口
 
-`self_media_publish_schedule.diagnostics_json` 置空前必须满足：
+`POST /api/data-retention/slim/dry-run`，参数：
 
-- 终态。
-- `article_publish_record` 已生成或 publish failed 信息已轻量化保存。
+- `domain`：`all/presale_ai_call/presale_judge_raw/article_generation_task/distribution_payload`，默认 `all`。
+- `startDate/endDate`：按各域候选的创建/完成时间过滤，可空。
+- `limitPerDomain`：默认 100，上限 1000。
+
+dry-run 输出候选、可 slim 数、blocked 数、blocked reasons、候选字段列表，并写入 `data_retention_run(domain='slim_payload', mode='dry_run')`。本轮不提供 execute 入口，不置空任何字段。
 
 ## 11. 发布链接质量分级
 
@@ -720,6 +756,8 @@ dry-run 到 execute 晋级标准：
 - 这些表涉及安全审计、登录态、凭证加密和合规追踪，应单独设计安全生命周期策略，不能混在业务大字段 slim 中处理。
 
 ### 对象 key 引用登记
+
+文章正文归档不是唯一展示依赖。被已归档文章正文引用的图片、附件、封面和其它资源，其生命周期不得短于正文展示需求：要么不清理，要么随正文一起归档并纳入引用登记。后续任何归档/清理服务不得删除仍被已发布正文、归档正文或报告快照引用的资源。
 
 `ObjectStorageRetentionHandler` 的“无活引用”检查必须来自一份集中清单，新增归档类型时同步登记，避免误删仍被业务引用的对象。
 

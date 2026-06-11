@@ -6,6 +6,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,56 +31,124 @@ public class ArticlePublishRecordCompensationService {
             return new CompensationResult(dryRun, candidates.size(), 0, candidates.size(), List.of());
         }
         int inserted = 0;
-        List<Long> failedTaskIds = new ArrayList<>();
+        List<String> failedSources = new ArrayList<>();
         for (PublishTaskRow row : candidates) {
             try {
                 inserted += insertRecord(row);
             } catch (RuntimeException ex) {
-                failedTaskIds.add(row.distributionTaskId());
+                failedSources.add(row.sourceType() + ":" + row.sourceId());
             }
         }
-        return new CompensationResult(false, candidates.size(), inserted, candidates.size() - inserted, failedTaskIds);
+        return new CompensationResult(false, candidates.size(), inserted, candidates.size() - inserted, failedSources);
     }
 
     private List<PublishTaskRow> loadCandidates(int limit) {
         return jdbcTemplate.query("""
-                SELECT t.id AS distribution_task_id,
-                       t.article_id,
-                       t.project_id,
-                       t.target_kind,
-                       COALESCE(sma.platform, t.integration_method, t.target_kind) AS target_channel,
-                       t.published_url,
-                       t.platform_article_id,
-                       t.platform_publish_id,
-                       t.status AS publish_status,
-                       COALESCE(t.published_at, t.finished_at, t.created_at) AS published_at
-                FROM distribution_tasks t
-                LEFT JOIN self_media_account sma ON sma.id = t.self_media_account_id
-                LEFT JOIN article_publish_record r
-                       ON r.source_type = 'distribution_task'
-                      AND r.source_id = t.id
-                WHERE r.id IS NULL
-                  AND t.published_url IS NOT NULL
-                  AND TRIM(t.published_url) <> ''
-                  AND (
-                        t.status = 'published'
-                     OR (t.status = 'submitted' AND t.finished_at IS NOT NULL)
-                     OR (t.review_status IN ('published', 'offline') AND t.finished_at IS NOT NULL)
-                  )
-                ORDER BY COALESCE(t.published_at, t.finished_at, t.created_at), t.id
+                SELECT *
+                  FROM (
+                        SELECT 'distribution_task' AS source_type,
+                               t.id AS source_id,
+                               t.id AS distribution_task_id,
+                               t.article_id,
+                               t.project_id,
+                               t.target_kind,
+                               COALESCE(sma.platform, t.integration_method, t.target_kind) AS target_channel,
+                               NULLIF(TRIM(t.published_url), '') AS published_url,
+                               CASE
+                                 WHEN NULLIF(TRIM(t.published_url), '') REGEXP '^https?://' THEN 'public_url'
+                                 WHEN NULLIF(TRIM(t.published_url), '') IS NOT NULL THEN 'manage_url'
+                                 ELSE 'missing'
+                               END AS url_quality,
+                               CASE
+                                 WHEN NULLIF(TRIM(t.published_url), '') IS NOT NULL THEN 'distribution_tasks.published_url'
+                                 WHEN NULLIF(TRIM(t.platform_article_id), '') IS NOT NULL THEN 'distribution_tasks.platform_article_id'
+                                 WHEN NULLIF(TRIM(t.platform_publish_id), '') IS NOT NULL THEN 'distribution_tasks.platform_publish_id'
+                                 ELSE 'distribution_tasks.status'
+                               END AS url_source,
+                               t.platform_article_id,
+                               t.platform_publish_id,
+                               t.status AS publish_status,
+                               COALESCE(t.published_at, t.finished_at, t.created_at) AS published_at,
+                               COALESCE(t.published_at, t.finished_at, t.created_at) AS verified_at
+                          FROM distribution_tasks t
+                          LEFT JOIN self_media_account sma ON sma.id = t.self_media_account_id
+                          LEFT JOIN article_publish_record r
+                                 ON r.source_type = 'distribution_task'
+                                AND r.source_id = t.id
+                         WHERE r.id IS NULL
+                           AND (
+                                 t.status = 'published'
+                              OR (t.status = 'submitted' AND t.finished_at IS NOT NULL)
+                              OR (t.review_status IN ('published', 'offline') AND t.finished_at IS NOT NULL)
+                           )
+                           AND (
+                                 NULLIF(TRIM(t.published_url), '') IS NOT NULL
+                              OR NULLIF(TRIM(t.platform_article_id), '') IS NOT NULL
+                              OR NULLIF(TRIM(t.platform_publish_id), '') IS NOT NULL
+                              OR t.status = 'published'
+                              OR t.review_status IN ('published', 'offline')
+                           )
+                        UNION ALL
+                        SELECT 'self_media_publish_schedule' AS source_type,
+                               s.id AS source_id,
+                               s.distribution_task_id,
+                               s.article_id,
+                               d.project_id,
+                               'self_media' AS target_kind,
+                               s.platform AS target_channel,
+                               NULLIF(TRIM(s.platform_published_url), '') AS published_url,
+                               CASE
+                                 WHEN NULLIF(TRIM(s.platform_published_url), '') REGEXP '^https?://' THEN 'public_url'
+                                 WHEN NULLIF(TRIM(s.platform_published_url), '') IS NOT NULL THEN 'manage_url'
+                                 ELSE 'missing'
+                               END AS url_quality,
+                               CASE
+                                 WHEN NULLIF(TRIM(s.platform_published_url), '') IS NOT NULL THEN 'self_media_publish_schedule.platform_published_url'
+                                 WHEN NULLIF(TRIM(s.platform_publish_id), '') IS NOT NULL THEN 'self_media_publish_schedule.platform_publish_id'
+                                 ELSE 'self_media_publish_schedule.status'
+                               END AS url_source,
+                               NULL AS platform_article_id,
+                               s.platform_publish_id,
+                               s.status AS publish_status,
+                               COALESCE(s.published_confirmed_at, s.updated_at, s.created_at) AS published_at,
+                               COALESCE(s.published_confirmed_at, s.updated_at, s.created_at) AS verified_at
+                          FROM self_media_publish_schedule s
+                          LEFT JOIN distribution_tasks d ON d.id = s.distribution_task_id
+                          LEFT JOIN article_publish_record r
+                                 ON r.source_type = 'self_media_publish_schedule'
+                                AND r.source_id = s.id
+                         WHERE r.id IS NULL
+                           AND s.status = 'published_confirmed'
+                           AND (
+                                 NULLIF(TRIM(s.platform_published_url), '') IS NOT NULL
+                              OR NULLIF(TRIM(s.platform_publish_id), '') IS NOT NULL
+                              OR s.published_confirmed_at IS NOT NULL
+                           )
+                       ) candidate
+                 ORDER BY COALESCE(verified_at, published_at), source_type, source_id
                 LIMIT ?
                 """, (rs, rowNum) -> new PublishTaskRow(
-                rs.getLong("distribution_task_id"),
-                rs.getLong("article_id"),
-                rs.getLong("project_id"),
+                rs.getString("source_type"),
+                nullableLong(rs, "source_id"),
+                nullableLong(rs, "distribution_task_id"),
+                nullableLong(rs, "article_id"),
+                nullableLong(rs, "project_id"),
                 rs.getString("target_kind"),
                 rs.getString("target_channel"),
                 rs.getString("published_url"),
+                rs.getString("url_quality"),
+                rs.getString("url_source"),
                 rs.getString("platform_article_id"),
                 rs.getString("platform_publish_id"),
                 rs.getString("publish_status"),
-                rs.getTimestamp("published_at") == null ? null : rs.getTimestamp("published_at").toLocalDateTime()
+                rs.getTimestamp("published_at") == null ? null : rs.getTimestamp("published_at").toLocalDateTime(),
+                rs.getTimestamp("verified_at") == null ? null : rs.getTimestamp("verified_at").toLocalDateTime()
         ), limit);
+    }
+
+    private static Long nullableLong(ResultSet rs, String column) throws SQLException {
+        long value = rs.getLong(column);
+        return rs.wasNull() ? null : value;
     }
 
     private int insertRecord(PublishTaskRow row) {
@@ -92,42 +162,54 @@ public class ArticlePublishRecordCompensationService {
                     target_kind,
                     target_channel,
                     published_url,
+                    url_quality,
+                    url_source,
                     platform_article_id,
                     platform_publish_id,
                     publish_status,
-                    published_at
-                ) VALUES (?, ?, ?, 'distribution_task', ?, ?, ?, ?, ?, ?, ?)
+                    published_at,
+                    verified_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 row.articleId(),
                 row.distributionTaskId(),
                 row.projectId(),
-                row.distributionTaskId(),
+                row.sourceType(),
+                row.sourceId(),
                 row.targetKind(),
                 row.targetChannel(),
                 row.publishedUrl(),
+                row.urlQuality(),
+                row.urlSource(),
                 row.platformArticleId(),
                 row.platformPublishId(),
                 row.publishStatus(),
-                row.publishedAt()
+                row.publishedAt(),
+                row.verifiedAt()
         );
     }
 
-    private record PublishTaskRow(Long distributionTaskId,
+    private record PublishTaskRow(String sourceType,
+                                  Long sourceId,
+                                  Long distributionTaskId,
                                   Long articleId,
                                   Long projectId,
                                   String targetKind,
                                   String targetChannel,
                                   String publishedUrl,
+                                  String urlQuality,
+                                  String urlSource,
                                   String platformArticleId,
                                   String platformPublishId,
                                   String publishStatus,
-                                  LocalDateTime publishedAt) {
+                                  LocalDateTime publishedAt,
+                                  LocalDateTime verifiedAt) {
     }
 
     public record CompensationResult(boolean dryRun,
                                      int candidates,
                                      int inserted,
                                      int skipped,
-                                     List<Long> failedTaskIds) {
+                                     List<String> failedSources) {
     }
 }

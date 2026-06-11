@@ -10,18 +10,26 @@ import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceKernelSa
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceKernelVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleSaveRequest;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleVO;
+import com.huanjing.geo.module.content.dto.MedicalArticleDtos.GenerationHistoryVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleSaveRequest;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleVO;
 import com.huanjing.geo.module.content.entity.MedicalChannelStyleModule;
 import com.huanjing.geo.module.content.entity.MedicalComplianceHitLog;
 import com.huanjing.geo.module.content.entity.MedicalComplianceKernel;
 import com.huanjing.geo.module.content.entity.MedicalComplianceRule;
+import com.huanjing.geo.module.content.entity.MedicalGenerationHistory;
 import com.huanjing.geo.module.content.entity.MedicalTopicAngle;
+import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
 import com.huanjing.geo.module.content.mapper.MedicalChannelStyleModuleMapper;
 import com.huanjing.geo.module.content.mapper.MedicalComplianceHitLogMapper;
 import com.huanjing.geo.module.content.mapper.MedicalComplianceKernelMapper;
 import com.huanjing.geo.module.content.mapper.MedicalComplianceRuleMapper;
+import com.huanjing.geo.module.content.mapper.MedicalGenerationHistoryMapper;
 import com.huanjing.geo.module.content.mapper.MedicalTopicAngleMapper;
+import com.huanjing.geo.module.customer.entity.Brand;
+import com.huanjing.geo.module.customer.mapper.BrandMapper;
+import com.huanjing.geo.module.project.entity.Project;
+import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
@@ -29,7 +37,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -40,6 +55,10 @@ public class MedicalArticleConfigService {
     private final MedicalComplianceKernelMapper kernelMapper;
     private final MedicalChannelStyleModuleMapper channelStyleMapper;
     private final MedicalComplianceHitLogMapper hitLogMapper;
+    private final MedicalGenerationHistoryMapper generationHistoryMapper;
+    private final ProjectMapper projectMapper;
+    private final BrandMapper brandMapper;
+    private final ArticleDraftMapper articleDraftMapper;
     private final CurrentUserService currentUserService;
 
     public Page<TopicAngleVO> pageTopicAngles(String industryCode,
@@ -195,16 +214,57 @@ public class MedicalArticleConfigService {
         return toVO(row);
     }
 
-    public Page<ComplianceHitLogVO> pageHitLogs(Long articleId, Long batchId, Long taskId, long current, long size) {
+    public Page<ComplianceHitLogVO> pageHitLogs(Long articleId,
+                                                Long batchId,
+                                                Long taskId,
+                                                Long projectId,
+                                                Long brandId,
+                                                String ruleType,
+                                                String action,
+                                                String createdStartDate,
+                                                String createdEndDate,
+                                                long current,
+                                                long size) {
         currentUserService.ensurePermission("project.read");
         LambdaQueryWrapper<MedicalComplianceHitLog> wrapper = new LambdaQueryWrapper<MedicalComplianceHitLog>()
                 .eq(articleId != null, MedicalComplianceHitLog::getArticleId, articleId)
                 .eq(batchId != null, MedicalComplianceHitLog::getBatchId, batchId)
                 .eq(taskId != null, MedicalComplianceHitLog::getTaskId, taskId)
+                .eq(projectId != null, MedicalComplianceHitLog::getProjectId, projectId)
+                .eq(brandId != null, MedicalComplianceHitLog::getBrandId, brandId)
+                .eq(StringUtils.hasText(ruleType), MedicalComplianceHitLog::getRuleType, trim(ruleType))
+                .eq(StringUtils.hasText(action), MedicalComplianceHitLog::getAction, trim(action))
                 .orderByDesc(MedicalComplianceHitLog::getCreatedAt, MedicalComplianceHitLog::getId);
+        applyCreatedDateFilter(wrapper, MedicalComplianceHitLog::getCreatedAt, createdStartDate, createdEndDate);
         Page<MedicalComplianceHitLog> page = hitLogMapper.selectPage(new Page<>(current, size), wrapper);
         Page<ComplianceHitLogVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
-        result.setRecords(page.getRecords().stream().map(this::toVO).toList());
+        Map<Long, String> projectNames = projectNames(page.getRecords().stream().map(MedicalComplianceHitLog::getProjectId).toList());
+        Map<Long, String> brandNames = brandNames(page.getRecords().stream().map(MedicalComplianceHitLog::getBrandId).toList());
+        result.setRecords(page.getRecords().stream().map(row -> toVO(row, projectNames, brandNames)).toList());
+        return result;
+    }
+
+    public Page<GenerationHistoryVO> pageGenerationHistory(Long projectId,
+                                                           Long brandId,
+                                                           Long articleId,
+                                                           Long topicAngleId,
+                                                           long current,
+                                                           long size) {
+        currentUserService.ensurePermission("project.read");
+        LambdaQueryWrapper<MedicalGenerationHistory> wrapper = new LambdaQueryWrapper<MedicalGenerationHistory>()
+                .eq(projectId != null, MedicalGenerationHistory::getProjectId, projectId)
+                .eq(brandId != null, MedicalGenerationHistory::getBrandId, brandId)
+                .eq(articleId != null, MedicalGenerationHistory::getArticleId, articleId)
+                .eq(topicAngleId != null, MedicalGenerationHistory::getTopicAngleId, topicAngleId)
+                .orderByDesc(MedicalGenerationHistory::getCreatedAt, MedicalGenerationHistory::getId);
+        Page<MedicalGenerationHistory> page = generationHistoryMapper.selectPage(new Page<>(current, size), wrapper);
+        Page<GenerationHistoryVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        List<MedicalGenerationHistory> records = page.getRecords();
+        Map<Long, String> projectNames = projectNames(records.stream().map(MedicalGenerationHistory::getProjectId).toList());
+        Map<Long, String> brandNames = brandNames(records.stream().map(MedicalGenerationHistory::getBrandId).toList());
+        Map<Long, String> topicAngles = topicAngles(records.stream().map(MedicalGenerationHistory::getTopicAngleId).toList());
+        Map<Long, String> articleTitles = articleTitles(records.stream().map(MedicalGenerationHistory::getArticleId).toList());
+        result.setRecords(records.stream().map(row -> toVO(row, projectNames, brandNames, topicAngles, articleTitles)).toList());
         return result;
     }
 
@@ -281,10 +341,70 @@ public class MedicalArticleConfigService {
                 row.getCreatedAt(), row.getUpdatedAt());
     }
 
-    private ComplianceHitLogVO toVO(MedicalComplianceHitLog row) {
+    private ComplianceHitLogVO toVO(MedicalComplianceHitLog row, Map<Long, String> projectNames, Map<Long, String> brandNames) {
         return new ComplianceHitLogVO(row.getId(), row.getArticleId(), row.getBatchId(), row.getTaskId(),
-                row.getProjectId(), row.getBrandId(), row.getRuleId(), row.getRuleType(), row.getMatchedText(),
+                row.getProjectId(), projectNames.get(row.getProjectId()), row.getBrandId(), brandNames.get(row.getBrandId()),
+                row.getRuleId(), row.getRuleType(), row.getMatchedText(),
                 row.getCheckStage(), row.getAction(), row.getCreatedAt());
+    }
+
+    private GenerationHistoryVO toVO(MedicalGenerationHistory row,
+                                     Map<Long, String> projectNames,
+                                     Map<Long, String> brandNames,
+                                     Map<Long, String> topicAngles,
+                                     Map<Long, String> articleTitles) {
+        return new GenerationHistoryVO(row.getId(), row.getProjectId(), projectNames.get(row.getProjectId()),
+                row.getBrandId(), brandNames.get(row.getBrandId()), row.getTopicAngleId(),
+                topicAngles.get(row.getTopicAngleId()), row.getStructureSkeleton(), row.getFocus(),
+                row.getArticleId(), articleTitles.get(row.getArticleId()), row.getCreatedAt());
+    }
+
+    private <T> void applyCreatedDateFilter(LambdaQueryWrapper<T> wrapper,
+                                            com.baomidou.mybatisplus.core.toolkit.support.SFunction<T, LocalDateTime> column,
+                                            String createdStartDate,
+                                            String createdEndDate) {
+        LocalDate startDate = parseDate(createdStartDate);
+        LocalDate endDate = parseDate(createdEndDate);
+        if (startDate != null) {
+            wrapper.ge(column, startDate.atStartOfDay());
+        }
+        if (endDate != null) {
+            wrapper.lt(column, endDate.plusDays(1).atStartOfDay());
+        }
+    }
+
+    private LocalDate parseDate(String value) {
+        String text = trimToNull(value);
+        return text == null ? null : LocalDate.parse(text);
+    }
+
+    private Map<Long, String> projectNames(List<Long> ids) {
+        return entityMap(ids, projectMapper::selectBatchIds, Project::getId, Project::getProjectName);
+    }
+
+    private Map<Long, String> brandNames(List<Long> ids) {
+        return entityMap(ids, brandMapper::selectBatchIds, Brand::getId, Brand::getBrandName);
+    }
+
+    private Map<Long, String> topicAngles(List<Long> ids) {
+        return entityMap(ids, topicAngleMapper::selectBatchIds, MedicalTopicAngle::getId, MedicalTopicAngle::getTopicAngle);
+    }
+
+    private Map<Long, String> articleTitles(List<Long> ids) {
+        return entityMap(ids, articleDraftMapper::selectBatchIds, com.huanjing.geo.module.content.entity.ArticleDraft::getId,
+                com.huanjing.geo.module.content.entity.ArticleDraft::getTitle);
+    }
+
+    private <T> Map<Long, String> entityMap(List<Long> ids,
+                                           Function<List<Long>, List<T>> loader,
+                                           Function<T, Long> idGetter,
+                                           Function<T, String> labelGetter) {
+        List<Long> safeIds = ids == null ? List.of() : ids.stream().filter(Objects::nonNull).distinct().toList();
+        if (safeIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return loader.apply(safeIds).stream()
+                .collect(Collectors.toMap(idGetter, labelGetter, (left, right) -> left));
     }
 
     private String trim(String value) {

@@ -88,7 +88,7 @@
                   <el-dropdown-item command="jobs">批量任务列表</el-dropdown-item>
                   <el-dropdown-item v-if="canViewSelfMediaSchedules" command="schedules">发布排期</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePromptTemplates" command="templates">文章提示词模板</el-dropdown-item>
-                  <el-dropdown-item v-if="canManagePromptTemplates" command="medical-config">医疗文章配置</el-dropdown-item>
+                  <el-dropdown-item v-if="canManagePromptTemplates" command="special-compliance">特殊行业合规</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePublishPlatforms" command="platforms">发布平台管理</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePublishPlatforms" command="schedule-capabilities">排期能力管理</el-dropdown-item>
                 </el-dropdown-menu>
@@ -1371,6 +1371,12 @@ function openMedicalArticleConfig() {
   })
 }
 
+function openSpecialIndustryComplianceWorkbench() {
+  router.push({
+    path: '/admin/content/special-industry-compliance',
+  })
+}
+
 function openBatchPublishJobs() {
   router.push({
     path: '/admin/content/articles/batch-publish-jobs',
@@ -1513,8 +1519,8 @@ function handleToolbarMoreCommand(command: string) {
     openScheduleDrawer()
   } else if (command === 'templates') {
     openPromptTemplateManagement()
-  } else if (command === 'medical-config') {
-    openMedicalArticleConfig()
+  } else if (command === 'special-compliance') {
+    openSpecialIndustryComplianceWorkbench()
   } else if (command === 'platforms') {
     openPublishPlatformManagement()
   } else if (command === 'schedule-capabilities') {

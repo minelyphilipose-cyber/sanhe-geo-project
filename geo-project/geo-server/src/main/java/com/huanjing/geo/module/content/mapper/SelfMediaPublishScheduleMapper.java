@@ -56,9 +56,16 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
               <foreach collection="statuses" item="status" open="(" separator="," close=")">
                 #{status}
               </foreach>
-              AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now})
+              AND (
+                (#{queueKind} != 'publish_result_check' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now}))
+                OR (#{queueKind} = 'publish_result_check' AND (
+                  next_attempt_at &lt;= #{now}
+                  OR (next_attempt_at IS NULL AND status IN ('publish_due', 'publish_unknown'))
+                  OR (next_attempt_at IS NULL AND status = 'scheduled' AND COALESCE(platform_scheduled_at, planned_publish_at) &lt;= #{now})
+                ))
+              )
               AND (locked_until IS NULL OR locked_until &lt; #{now})
-            ORDER BY queue_priority ASC, COALESCE(next_attempt_at, planned_publish_at), id ASC
+            ORDER BY queue_priority ASC, COALESCE(next_attempt_at, platform_scheduled_at, planned_publish_at), id ASC
             LIMIT #{limit}
             </script>
             """)
@@ -80,9 +87,16 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
               <foreach collection="statuses" item="status" open="(" separator="," close=")">
                 #{status}
               </foreach>
-              AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now})
+              AND (
+                (#{queueKind} != 'publish_result_check' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now}))
+                OR (#{queueKind} = 'publish_result_check' AND (
+                  next_attempt_at &lt;= #{now}
+                  OR (next_attempt_at IS NULL AND status IN ('publish_due', 'publish_unknown'))
+                  OR (next_attempt_at IS NULL AND status = 'scheduled' AND COALESCE(platform_scheduled_at, planned_publish_at) &lt;= #{now})
+                ))
+              )
               AND (locked_until IS NULL OR locked_until &lt; #{now})
-            ORDER BY queue_priority ASC, COALESCE(next_attempt_at, planned_publish_at), id ASC
+            ORDER BY queue_priority ASC, COALESCE(next_attempt_at, platform_scheduled_at, planned_publish_at), id ASC
             LIMIT #{limit}
             </script>
             """)
@@ -111,9 +125,16 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
               <foreach collection="statuses" item="status" open="(" separator="," close=")">
                 #{status}
               </foreach>
-              AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now})
+              AND (
+                (#{queueKind} != 'publish_result_check' AND (next_attempt_at IS NULL OR next_attempt_at &lt;= #{now}))
+                OR (#{queueKind} = 'publish_result_check' AND (
+                  next_attempt_at &lt;= #{now}
+                  OR (next_attempt_at IS NULL AND status IN ('publish_due', 'publish_unknown'))
+                  OR (next_attempt_at IS NULL AND status = 'scheduled' AND COALESCE(platform_scheduled_at, planned_publish_at) &lt;= #{now})
+                ))
+              )
               AND (locked_until IS NULL OR locked_until &lt; #{now})
-            ORDER BY queue_priority ASC, COALESCE(next_attempt_at, planned_publish_at), id ASC
+            ORDER BY queue_priority ASC, COALESCE(next_attempt_at, platform_scheduled_at, planned_publish_at), id ASC
             LIMIT #{limit}
             </script>
             """)
@@ -171,6 +192,24 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
 
     @Select("""
             <script>
+            SELECT *
+            FROM self_media_publish_schedule
+            WHERE status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+              AND locked_until IS NOT NULL
+              AND locked_until &lt; #{now}
+            ORDER BY locked_until ASC, id ASC
+            LIMIT #{limit}
+            </script>
+            """)
+    List<SelfMediaPublishSchedule> selectTimedOutRunning(@Param("statuses") List<String> statuses,
+                                                         @Param("now") LocalDateTime now,
+                                                         @Param("limit") int limit);
+
+    @Select("""
+            <script>
             SELECT COUNT(1)
             FROM self_media_publish_schedule
             WHERE brand_id = #{brandId}
@@ -213,4 +252,23 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                            @Param("targetStatus") String targetStatus,
                            @Param("now") LocalDateTime now,
                            @Param("lockedUntil") LocalDateTime lockedUntil);
+
+    @Update("""
+            <script>
+            UPDATE self_media_publish_schedule
+            SET locked_until = #{lockedUntil},
+                updated_at = #{now}
+            WHERE id = #{scheduleId}
+              AND created_by = #{operatorId}
+              AND status IN
+              <foreach collection="runningStatuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
+            """)
+    int renewLocalAgentLock(@Param("scheduleId") Long scheduleId,
+                            @Param("operatorId") Long operatorId,
+                            @Param("runningStatuses") List<String> runningStatuses,
+                            @Param("lockedUntil") LocalDateTime lockedUntil,
+                            @Param("now") LocalDateTime now);
 }

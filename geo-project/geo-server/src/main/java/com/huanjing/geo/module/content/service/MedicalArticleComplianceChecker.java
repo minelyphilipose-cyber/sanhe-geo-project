@@ -106,8 +106,8 @@ public class MedicalArticleComplianceChecker {
 
     private void collectBuiltInIssues(CheckInput input, String content, List<ComplianceIssue> issues) {
         MedicalArticleGenerationService.MedicalPromptContext context = input.medicalContext();
-        if (context.highRiskChannel() && lacksAny(content, RISK_HINTS)) {
-            issues.add(new ComplianceIssue(null, "risk_disclosure_missing", "block", null, "高风险渠道内容缺少风险、禁忌或个体差异提示"));
+        if (lacksAny(content, RISK_HINTS)) {
+            issues.add(new ComplianceIssue(null, "risk_disclosure_missing", "block", null, "医疗内容缺少风险、禁忌或个体差异提示"));
         }
         if (context.highRiskChannel() && lacksAny(content, RATIONAL_HINTS)) {
             issues.add(new ComplianceIssue(null, "rational_decision_missing", "block", null, "高风险渠道内容缺少理性决策提示"));
@@ -123,8 +123,9 @@ public class MedicalArticleComplianceChecker {
     }
 
     private boolean lacksAny(String content, List<String> hints) {
+        String normalizedContent = normalizeForMatch(content);
         for (String hint : hints) {
-            if (content.contains(hint)) {
+            if (normalizedContent.contains(normalizeForMatch(hint))) {
                 return false;
             }
         }
@@ -134,12 +135,14 @@ public class MedicalArticleComplianceChecker {
     private boolean matches(String content, String pattern, String matchMode) {
         if ("regex".equalsIgnoreCase(matchMode)) {
             try {
-                return Pattern.compile(pattern, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE).matcher(content).find();
+                return Pattern.compile(normalizeForMatch(pattern), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)
+                        .matcher(normalizeForMatch(content))
+                        .find();
             } catch (PatternSyntaxException ex) {
                 return false;
             }
         }
-        return content.toLowerCase(Locale.ROOT).contains(pattern.toLowerCase(Locale.ROOT));
+        return normalizeForMatch(content).contains(normalizeForMatch(pattern));
     }
 
     private int countOccurrences(String content, String needle) {
@@ -157,6 +160,24 @@ public class MedicalArticleComplianceChecker {
 
     private String normalize(String value) {
         return StringUtils.hasText(value) ? value.trim() : "";
+    }
+
+    private String normalizeForMatch(String value) {
+        if (!StringUtils.hasText(value)) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            if (Character.isWhitespace(ch) || ch == '\u3000') {
+                continue;
+            }
+            if (ch >= '\uFF01' && ch <= '\uFF5E') {
+                ch = (char) (ch - 0xFEE0);
+            }
+            builder.append(Character.toLowerCase(ch));
+        }
+        return builder.toString().toLowerCase(Locale.ROOT);
     }
 
     private String limit(String value, int maxLength) {

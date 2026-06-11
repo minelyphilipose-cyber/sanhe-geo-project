@@ -88,6 +88,32 @@ public class SelfMediaPublishScheduleService {
             SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED,
             SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED
     );
+    private static final Set<String> SCHEDULE_EXECUTION_RETRYABLE_STATUSES = Set.of(
+            SelfMediaPublishScheduleConstants.STATUS_PENDING,
+            SelfMediaPublishScheduleConstants.STATUS_FILLING,
+            SelfMediaPublishScheduleConstants.STATUS_FILLED_VERIFIED,
+            SelfMediaPublishScheduleConstants.STATUS_SCHEDULING,
+            SelfMediaPublishScheduleConstants.STATUS_SCHEDULE_FAILED,
+            SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED
+    );
+    private static final Set<String> MANUAL_MARKABLE_STATUSES = Set.of(
+            SelfMediaPublishScheduleConstants.STATUS_PENDING,
+            SelfMediaPublishScheduleConstants.STATUS_FILLING,
+            SelfMediaPublishScheduleConstants.STATUS_FILLED_VERIFIED,
+            SelfMediaPublishScheduleConstants.STATUS_SCHEDULING,
+            SelfMediaPublishScheduleConstants.STATUS_SCHEDULED,
+            SelfMediaPublishScheduleConstants.STATUS_PUBLISH_DUE,
+            SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT,
+            SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN,
+            SelfMediaPublishScheduleConstants.STATUS_SCHEDULE_FAILED,
+            SelfMediaPublishScheduleConstants.STATUS_PUBLISH_FAILED
+    );
+    private static final List<String> LOCAL_AGENT_RUNNING_STATUSES = List.of(
+            SelfMediaPublishScheduleConstants.STATUS_FILLING,
+            SelfMediaPublishScheduleConstants.STATUS_FILLED_VERIFIED,
+            SelfMediaPublishScheduleConstants.STATUS_SCHEDULING,
+            SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT
+    );
     private static final Map<String, QueueClaimProfile> CLAIM_PROFILES = Map.of(
             SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION,
             new QueueClaimProfile(
@@ -311,6 +337,64 @@ public class SelfMediaPublishScheduleService {
                 .toList();
     }
 
+    @Transactional
+    public SelfMediaPublishScheduleVO heartbeatLocalAgentSchedule(Long operatorId, Long scheduleId, int lockMinutes) {
+        if (operatorId == null || operatorId <= 0) {
+            fail("INVALID_OPERATOR", "operatorId must be a positive number");
+        }
+        if (scheduleId == null || scheduleId <= 0) {
+            fail("INVALID_SCHEDULE", "scheduleId must be a positive number");
+        }
+        SelfMediaPublishSchedule row = requireSchedule(scheduleId);
+        if (!operatorId.equals(row.getCreatedBy())) {
+            fail("SCHEDULE_OPERATOR_MISMATCH", "当前本地助手不能续租该排期");
+        }
+        String status = normalize(row.getStatus());
+        if (!LOCAL_AGENT_RUNNING_STATUSES.contains(status)) {
+            fail("SCHEDULE_STATUS_NOT_RUNNING", "当前排期不处于本地助手执行状态");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime lockedUntil = now.plusMinutes(Math.max(lockMinutes, 1));
+        int updated = scheduleMapper.renewLocalAgentLock(
+                scheduleId,
+                operatorId,
+                LOCAL_AGENT_RUNNING_STATUSES,
+                lockedUntil,
+                now
+        );
+        if (updated <= 0) {
+            fail("SCHEDULE_LOCK_RENEW_FAILED", "排期锁续租失败");
+        }
+        boolean environmentRenewed = environmentLockService.renew(
+                row.getBrowserEnvironmentId(),
+                row.getId(),
+                lockedUntil,
+                now
+        );
+        if (!environmentRenewed) {
+            environmentLockService.tryAcquire(row.getBrowserEnvironmentId(), row.getId(), lockedUntil, now);
+        }
+        SelfMediaPublishSchedule latest = scheduleMapper.selectById(scheduleId);
+        return SelfMediaPublishScheduleVO.from(latest == null ? row : latest);
+    }
+
+    @Transactional
+    public int recoverTimedOutLocalAgentSchedules(int limit) {
+        LocalDateTime now = LocalDateTime.now();
+        int recovered = 0;
+        List<SelfMediaPublishSchedule> rows = scheduleMapper.selectTimedOutRunning(
+                LOCAL_AGENT_RUNNING_STATUSES,
+                now,
+                Math.max(limit, 1)
+        );
+        for (SelfMediaPublishSchedule row : rows) {
+            if (recoverTimedOutLocalAgentSchedule(row, now)) {
+                recovered++;
+            }
+        }
+        return recovered;
+    }
+
     @Transactional(noRollbackFor = BizException.class)
     public ClaimedScheduleTask claimNextTaskForLocalAgent(Long operatorId, String platform, int lockMinutes) {
         if (operatorId == null || operatorId <= 0) {
@@ -479,6 +563,83 @@ public class SelfMediaPublishScheduleService {
         return null;
     }
 
+    @Transactional
+    public SelfMediaPublishScheduleVO markLocalAgentExecutionFilled(Long id, String diagnosticsJson) {
+        SelfMediaPublishSchedule row = requireSchedule(id);
+        String status = normalize(row.getStatus());
+        if (SelfMediaPublishScheduleConstants.STATUS_FILLING.equals(status)) {
+            return markClaimedFilledVerified(row.getId(), diagnosticsJson);
+        }
+        if (SelfMediaPublishScheduleConstants.STATUS_FILLED_VERIFIED.equals(status)
+                || SelfMediaPublishScheduleConstants.STATUS_SCHEDULING.equals(status)
+                || SelfMediaPublishScheduleConstants.STATUS_SCHEDULED.equals(status)
+                || SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT.equals(status)
+                || SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED.equals(status)) {
+            return SelfMediaPublishScheduleVO.from(row);
+        }
+        fail("SCHEDULE_STATUS_NOT_FILLING", "当前排期未处于填充执行中");
+        return null;
+    }
+
+    @Transactional
+    public SelfMediaPublishScheduleVO markLocalAgentExecutionScheduled(Long id, String diagnosticsJson) {
+        SelfMediaPublishSchedule row = requireSchedule(id);
+        String status = normalize(row.getStatus());
+        if (SelfMediaPublishScheduleConstants.STATUS_FILLING.equals(status)) {
+            markClaimedFilledVerified(row.getId(), diagnosticsJson);
+            markClaimedScheduling(row.getId(), diagnosticsJson);
+            return markClaimedScheduled(row.getId(), null, diagnosticsJson);
+        }
+        if (SelfMediaPublishScheduleConstants.STATUS_FILLED_VERIFIED.equals(status)) {
+            markClaimedScheduling(row.getId(), diagnosticsJson);
+            return markClaimedScheduled(row.getId(), null, diagnosticsJson);
+        }
+        if (SelfMediaPublishScheduleConstants.STATUS_SCHEDULING.equals(status)) {
+            return markClaimedScheduled(row.getId(), null, diagnosticsJson);
+        }
+        if (SelfMediaPublishScheduleConstants.STATUS_SCHEDULED.equals(status)
+                || SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT.equals(status)
+                || SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED.equals(status)) {
+            return SelfMediaPublishScheduleVO.from(row);
+        }
+        fail("SCHEDULE_STATUS_NOT_SCHEDULABLE", "当前排期状态不允许确认平台定时成功");
+        return null;
+    }
+
+    @Transactional
+    public SelfMediaPublishScheduleVO markLocalAgentExecutionPublishedConfirmed(Long id,
+                                                                               String platformPublishedUrl,
+                                                                               String diagnosticsJson) {
+        SelfMediaPublishSchedule row = requireSchedule(id);
+        String status = normalize(row.getStatus());
+        if (SelfMediaPublishScheduleConstants.STATUS_FILLING.equals(status)
+                || SelfMediaPublishScheduleConstants.STATUS_FILLED_VERIFIED.equals(status)
+                || SelfMediaPublishScheduleConstants.STATUS_SCHEDULING.equals(status)
+                || SelfMediaPublishScheduleConstants.STATUS_SCHEDULED.equals(status)
+                || SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT.equals(status)
+                || SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN.equals(status)) {
+            row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED);
+            row.setPublishedConfirmedAt(LocalDateTime.now());
+            row.setPlatformPublishedUrl(trimToNull(platformPublishedUrl));
+            row.setLockedUntil(null);
+            row.setNextAttemptAt(null);
+            row.setFailureCode(null);
+            row.setFailureMessage(null);
+            row.setDiagnosticsJson(trimToNull(diagnosticsJson));
+            scheduleMapper.updateById(row);
+            confirmScheduleQuotaIfPresent(row);
+            confirmDistributionQuotaIfPresent(row);
+            environmentLockService.release(row.getId());
+            reconcileAlerts(row);
+            return SelfMediaPublishScheduleVO.from(row);
+        }
+        if (SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED.equals(status)) {
+            return SelfMediaPublishScheduleVO.from(row);
+        }
+        fail("SCHEDULE_STATUS_NOT_PUBLISH_CONFIRMABLE", "当前排期状态不允许确认已发布");
+        return null;
+    }
+
     private SelfMediaPublishSchedule claimNextRow(String queueKind,
                                                   int lockMinutes,
                                                   Long operatorId,
@@ -546,6 +707,74 @@ public class SelfMediaPublishScheduleService {
             environmentLockService.release(candidate.getId());
         }
         return null;
+    }
+
+    private boolean recoverTimedOutLocalAgentSchedule(SelfMediaPublishSchedule row, LocalDateTime now) {
+        if (row == null || row.getId() == null || row.getLockedUntil() == null || row.getLockedUntil().isAfter(now)) {
+            return false;
+        }
+        SelfMediaPublishSchedule latest = scheduleMapper.selectById(row.getId());
+        if (latest == null || latest.getLockedUntil() == null || latest.getLockedUntil().isAfter(now)) {
+            return false;
+        }
+        String status = normalize(latest.getStatus());
+        if (!LOCAL_AGENT_RUNNING_STATUSES.contains(status)) {
+            return false;
+        }
+        if (SelfMediaPublishScheduleConstants.STATUS_CHECKING_PUBLISH_RESULT.equals(status)) {
+            recoverTimedOutPublishCheck(latest);
+        } else {
+            recoverTimedOutScheduleExecution(latest);
+        }
+        environmentLockService.release(latest.getId());
+        reconcileAlerts(latest);
+        return true;
+    }
+
+    private void recoverTimedOutScheduleExecution(SelfMediaPublishSchedule row) {
+        String failureCode = "LOCAL_AGENT_HEARTBEAT_TIMEOUT";
+        LocalDateTime nextAttemptAt = nextScheduleExecutionRetryAt(row, failureCode);
+        row.setLockedUntil(null);
+        row.setFailureCode(failureCode);
+        row.setFailureMessage("本地助手执行心跳超时，系统已释放浏览器环境锁");
+        row.setDiagnosticsJson(diagnosticsJson("recoveredAt", LocalDateTime.now(), "reason", failureCode));
+        if (canRetry(row, nextAttemptAt)) {
+            row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+            row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+            row.setNextAttemptAt(nextAttemptAt);
+        } else {
+            row.setStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
+            row.setNextAttemptAt(null);
+        }
+        scheduleMapper.updateById(row);
+        refundDistributionQuotaIfPresent(row);
+        if (SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED.equals(normalize(row.getStatus()))) {
+            refundScheduleQuotaIfPresent(row);
+        }
+    }
+
+    private void recoverTimedOutPublishCheck(SelfMediaPublishSchedule row) {
+        int maxAttempts = Math.max(
+                row.getMaxAttempts() == null ? PUBLISH_CHECK_TOTAL_ATTEMPTS : row.getMaxAttempts(),
+                PUBLISH_CHECK_TOTAL_ATTEMPTS
+        );
+        LocalDateTime nextAttemptAt = nextPublishCheckRetryAt(row, maxAttempts);
+        row.setMaxAttempts(maxAttempts);
+        row.setLockedUntil(null);
+        row.setDiagnosticsJson(diagnosticsJson("recoveredAt", LocalDateTime.now(), "reason", "PUBLISH_RESULT_CHECK_HEARTBEAT_TIMEOUT"));
+        if (nextAttemptAt != null) {
+            row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN);
+            row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
+            row.setNextAttemptAt(nextAttemptAt);
+            row.setFailureCode("PUBLISH_RESULT_NOT_MATCHED_RETRYING");
+            row.setFailureMessage("发布结果回查心跳超时，等待系统自动复查");
+        } else {
+            row.setStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
+            row.setNextAttemptAt(null);
+            row.setFailureCode("PUBLISH_RESULT_NOT_MATCHED");
+            row.setFailureMessage("发布结果回查心跳超时且已达到最大复查次数，请人工确认");
+        }
+        scheduleMapper.updateById(row);
     }
 
     private List<SelfMediaPublishSchedule> selectDueQueueCandidates(String queueKind,
@@ -1035,6 +1264,65 @@ public class SelfMediaPublishScheduleService {
         if (!PUBLISH_RESULT_RECHECKABLE_STATUSES.contains(normalize(row.getStatus()))) {
             fail("SCHEDULE_STATUS_NOT_RECHECKABLE", "当前排期状态不允许重新校验发布结果");
         }
+        queuePublishResultRecheck(row);
+        return SelfMediaPublishScheduleVO.from(row);
+    }
+
+    @Transactional
+    public SelfMediaPublishScheduleVO retryNow(Long id) {
+        SelfMediaPublishSchedule row = requireScheduleWithAccess(id);
+        String status = normalize(row.getStatus());
+        String queueKind = normalize(row.getQueueKind());
+        if (SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK.equals(queueKind)
+                || PUBLISH_RESULT_RECHECKABLE_STATUSES.contains(status)
+                && !SCHEDULE_EXECUTION_RETRYABLE_STATUSES.contains(status)) {
+            if (!PUBLISH_RESULT_RECHECKABLE_STATUSES.contains(status)) {
+                fail("SCHEDULE_STATUS_NOT_RETRYABLE", "当前排期状态不允许立即重试");
+            }
+            queuePublishResultRecheck(row);
+            return SelfMediaPublishScheduleVO.from(row);
+        }
+        if (!SCHEDULE_EXECUTION_RETRYABLE_STATUSES.contains(status)) {
+            fail("SCHEDULE_STATUS_NOT_RETRYABLE", "当前排期状态不允许立即重试");
+        }
+        if (isStillLocked(row)) {
+            fail("SCHEDULE_LOCK_STILL_ACTIVE", "当前排期仍被本地助手锁定，请等待心跳超时或先转人工处理");
+        }
+        row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        row.setNextAttemptAt(LocalDateTime.now());
+        row.setLockedUntil(null);
+        row.setFailureCode("MANUAL_RETRY_REQUESTED");
+        row.setFailureMessage("已人工触发立即重试");
+        row.setMaxAttempts(Math.max(row.getMaxAttempts() == null ? 0 : row.getMaxAttempts(),
+                (row.getAttemptCount() == null ? 0 : row.getAttemptCount()) + 1));
+        touch(row);
+        scheduleMapper.updateById(row);
+        environmentLockService.release(row.getId());
+        reconcileAlerts(row);
+        return SelfMediaPublishScheduleVO.from(row);
+    }
+
+    @Transactional
+    public SelfMediaPublishScheduleVO markManualRequired(Long id, String reason) {
+        SelfMediaPublishSchedule row = requireScheduleWithAccess(id);
+        String status = normalize(row.getStatus());
+        if (!MANUAL_MARKABLE_STATUSES.contains(status)) {
+            fail("SCHEDULE_STATUS_NOT_MANUAL_MARKABLE", "当前排期状态不允许转人工处理");
+        }
+        row.setStatus(SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED);
+        row.setLockedUntil(null);
+        row.setNextAttemptAt(null);
+        row.setFailureCode("MANUAL_REQUIRED_BY_OPERATOR");
+        row.setFailureMessage(trimToNull(reason));
+        touch(row);
+        scheduleMapper.updateById(row);
+        environmentLockService.release(row.getId());
+        reconcileAlerts(row);
+        return SelfMediaPublishScheduleVO.from(row);
+    }
+
+    private void queuePublishResultRecheck(SelfMediaPublishSchedule row) {
         row.setStatus(SelfMediaPublishScheduleConstants.STATUS_PUBLISH_UNKNOWN);
         row.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK);
         row.setNextAttemptAt(LocalDateTime.now());
@@ -1046,7 +1334,11 @@ public class SelfMediaPublishScheduleService {
         touch(row);
         scheduleMapper.updateById(row);
         environmentLockService.release(row.getId());
-        return SelfMediaPublishScheduleVO.from(row);
+        reconcileAlerts(row);
+    }
+
+    private boolean isStillLocked(SelfMediaPublishSchedule row) {
+        return row.getLockedUntil() != null && row.getLockedUntil().isAfter(LocalDateTime.now());
     }
 
     private ValidatedRequest validateRequest(SelfMediaPublishScheduleCreateRequest request) {

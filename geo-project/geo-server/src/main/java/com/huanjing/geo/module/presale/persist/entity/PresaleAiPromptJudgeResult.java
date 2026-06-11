@@ -40,6 +40,7 @@ public class PresaleAiPromptJudgeResult {
     private String competitorAdvantages;
     private String judgePayloadJson;
     private String rawJudgeResponse;
+    private LocalDateTime rawPurgedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

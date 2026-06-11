@@ -24,6 +24,7 @@ public class ProjectSelfMediaScheduleBatch {
     private Integer plannedCount;
     private Integer createdCount;
     private Integer rejectedCount;
+    private String generationBatchIds;
     private String requestPayload;
     private String resultSnapshot;
     private String failureMessage;

@@ -29,12 +29,31 @@ export function getContentArticles(params: {
   channelGroupCode?: string
   channelSubCode?: string
   generationMode?: 'batch' | 'single'
+  complianceStatus?: string
+  publishReviewStatus?: string
+  medicalIndustryCode?: string
+  medicalChannelTier?: string
+  specialIndustryOnly?: boolean
   createdStartDate?: string
   createdEndDate?: string
   current?: number
   size?: number
 }) {
   return request.get<R<PageResult<ArticleDraft>>>('/content/articles', { params })
+}
+
+export function getSpecialIndustryArticles(params: {
+  projectName?: string
+  status?: string
+  complianceStatus?: string
+  publishReviewStatus?: string
+  medicalIndustryCode?: string
+  medicalChannelTier?: string
+  specialIndustryOnly?: boolean
+  current?: number
+  size?: number
+}) {
+  return getContentArticles(params)
 }
 
 export function getContentArticleDetail(articleId: number) {
@@ -468,6 +487,16 @@ export interface BatchArticleGenerationTask {
   readinessWarningCodes?: string | null
   status: string
   qualityStatus?: string | null
+  complianceStatus?: string | null
+  complianceIssuesJson?: string | null
+  discardedArticleId?: number | null
+  retryCount?: number | null
+  medicalIndustryCode?: string | null
+  medicalCategoryCode?: string | null
+  medicalCategoryName?: string | null
+  topicAngleId?: number | null
+  structureSkeleton?: string | null
+  focus?: string | null
   errorMessage?: string | null
   startedAt?: string | null
   finishedAt?: string | null
@@ -855,12 +884,29 @@ export interface MedicalComplianceHitLog {
   batchId?: number | null
   taskId?: number | null
   projectId?: number | null
+  projectName?: string | null
   brandId?: number | null
+  brandName?: string | null
   ruleId?: number | null
   ruleType?: string | null
   matchedText?: string | null
   checkStage?: string | null
   action?: string | null
+  createdAt?: string | null
+}
+
+export interface MedicalGenerationHistory {
+  id: number
+  projectId?: number | null
+  projectName?: string | null
+  brandId?: number | null
+  brandName?: string | null
+  topicAngleId?: number | null
+  topicAngle?: string | null
+  structureSkeleton?: string | null
+  focus?: string | null
+  articleId?: number | null
+  articleTitle?: string | null
   createdAt?: string | null
 }
 
@@ -914,6 +960,10 @@ export function updateMedicalChannelStyleModule(id: number, data: Partial<Medica
 
 export function getMedicalComplianceHitLogs(params?: Record<string, any>) {
   return request.get<R<PageResult<MedicalComplianceHitLog>>>('/content/medical-articles/hit-logs', { params })
+}
+
+export function getMedicalGenerationHistory(params?: Record<string, any>) {
+  return request.get<R<PageResult<MedicalGenerationHistory>>>('/content/medical-articles/generation-history', { params })
 }
 
 export function getArticleGenerationOptions() {
@@ -1247,6 +1297,14 @@ export function confirmSelfMediaPublishSchedulePublished(id: number, data?: { pl
 
 export function confirmSelfMediaPublishScheduleFailed(id: number, data?: { failureCode?: string; failureMessage?: string }) {
   return request.post<R<SelfMediaPublishSchedule>>(`/content/self-media-schedules/${id}/confirm-publish-failed`, data ?? {})
+}
+
+export function retrySelfMediaPublishScheduleNow(id: number) {
+  return request.post<R<SelfMediaPublishSchedule>>(`/content/self-media-schedules/${id}/retry-now`)
+}
+
+export function markSelfMediaPublishScheduleManualRequired(id: number, data?: { reason?: string }) {
+  return request.post<R<SelfMediaPublishSchedule>>(`/content/self-media-schedules/${id}/mark-manual-required`, data ?? {})
 }
 
 export function recheckSelfMediaPublishScheduleResult(id: number) {

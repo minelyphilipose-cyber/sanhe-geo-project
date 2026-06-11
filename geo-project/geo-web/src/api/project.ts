@@ -30,6 +30,113 @@ export function getProjectDetail(id: number) {
   return request.get<R<Project>>(`/projects/${id}`)
 }
 
+export interface ProjectSelfMediaScheduleConfig {
+  id?: number
+  projectId: number
+  brandId?: number
+  companyId?: number
+  autoScheduleEnabled: boolean
+  defaultScheduleStrategy: string
+  includeAdjustedWorkdays: boolean
+  remark?: string | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface ProjectSelfMediaScheduleBatch {
+  id: number
+  projectId: number
+  brandId: number
+  companyId: number
+  targetMonth: string
+  triggerMode: string
+  status: string
+  scheduleStrategy: string
+  articleCount: number
+  accountCount: number
+  plannedCount: number
+  createdCount: number
+  rejectedCount: number
+  generationBatchIds?: string | null
+  failureMessage?: string | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+export interface ProjectSelfMediaScheduleBatchDetailItem {
+  generationBatchId?: number
+  generationTaskId?: number
+  generationStatus?: string | null
+  generationErrorMessage?: string | null
+  articleId?: number | null
+  articleTitle?: string | null
+  selfMediaAccountId?: number
+  selfMediaAccountName?: string | null
+  platform?: string | null
+  scheduleId?: number | null
+  scheduleStatus?: string | null
+  plannedPublishAt?: string | null
+  queueKind?: string | null
+  attemptCount?: number | null
+  maxAttempts?: number | null
+  lastAttemptAt?: string | null
+  nextAttemptAt?: string | null
+  lockedUntil?: string | null
+  scheduleFailureCode?: string | null
+  scheduleFailureMessage?: string | null
+}
+
+export interface ProjectSelfMediaScheduleBatchDetail {
+  batch?: ProjectSelfMediaScheduleBatch | null
+  items: ProjectSelfMediaScheduleBatchDetailItem[]
+}
+
+export interface ProjectSelfMediaAutoScheduleResponse {
+  brandId: number
+  targetMonth: string
+  scheduleStrategy: string
+  requestedCount: number
+  plannedCount: number
+  rejectedCount: number
+  created: boolean
+}
+
+export interface ProjectSelfMediaAutoSchedulePayload {
+  targetMonth: string
+  selfMediaAccountIds?: number[]
+  scheduleStrategy?: string
+  includeAdjustedWorkdays?: boolean
+}
+
+export function getProjectSelfMediaScheduleConfig(id: number) {
+  return request.get<R<ProjectSelfMediaScheduleConfig>>(`/projects/${id}/self-media-schedule-config`)
+}
+
+export function updateProjectSelfMediaScheduleConfig(id: number, data: {
+  autoScheduleEnabled?: boolean
+  defaultScheduleStrategy?: string
+  includeAdjustedWorkdays?: boolean
+  remark?: string | null
+}) {
+  return request.put<R<ProjectSelfMediaScheduleConfig>>(`/projects/${id}/self-media-schedule-config`, data)
+}
+
+export function getProjectSelfMediaScheduleBatch(id: number, targetMonth: string) {
+  return request.get<R<ProjectSelfMediaScheduleBatch | null>>(`/projects/${id}/self-media-schedule-batches/${targetMonth}`)
+}
+
+export function getProjectSelfMediaScheduleBatchDetail(id: number, targetMonth: string) {
+  return request.get<R<ProjectSelfMediaScheduleBatchDetail | null>>(`/projects/${id}/self-media-schedule-batches/${targetMonth}/detail`)
+}
+
+export function previewProjectSelfMediaAutoSchedule(id: number, data: ProjectSelfMediaAutoSchedulePayload) {
+  return request.post<R<ProjectSelfMediaAutoScheduleResponse>>(`/projects/${id}/self-media-schedules/auto-preview`, data)
+}
+
+export function createProjectSelfMediaAutoSchedule(id: number, data: ProjectSelfMediaAutoSchedulePayload) {
+  return request.post<R<ProjectSelfMediaAutoScheduleResponse>>(`/projects/${id}/self-media-schedules/auto-create`, data)
+}
+
 export function getProjectChannelAllocationQuota(params: { companyId: number; excludeProjectId?: number }) {
   return request.get<R<ProjectChannelAllocationQuota>>('/projects/channel-allocation-quota', { params })
 }

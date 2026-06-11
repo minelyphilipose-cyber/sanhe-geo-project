@@ -92,6 +92,17 @@ public class SelfMediaPublishScheduleController {
         return R.ok(scheduleService.confirmPublishFailed(id, failureCode, failureMessage));
     }
 
+    @PostMapping("/self-media-schedules/{id}/retry-now")
+    public R<SelfMediaPublishScheduleVO> retryNow(@PathVariable Long id) {
+        return R.ok(scheduleService.retryNow(id));
+    }
+
+    @PostMapping("/self-media-schedules/{id}/mark-manual-required")
+    public R<SelfMediaPublishScheduleVO> markManualRequired(@PathVariable Long id,
+                                                            @RequestBody(required = false) SelfMediaPublishScheduleCancelRequest request) {
+        return R.ok(scheduleService.markManualRequired(id, request == null ? null : request.getReason()));
+    }
+
     @PostMapping("/self-media-schedules/{id}/recheck-publish-result")
     public R<SelfMediaPublishScheduleVO> recheckPublishResult(@PathVariable Long id) {
         return R.ok(scheduleService.recheckPublishResult(id));

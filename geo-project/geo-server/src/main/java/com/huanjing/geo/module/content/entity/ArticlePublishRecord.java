@@ -20,10 +20,13 @@ public class ArticlePublishRecord {
     private String targetKind;
     private String targetChannel;
     private String publishedUrl;
+    private String urlQuality;
+    private String urlSource;
     private String platformArticleId;
     private String platformPublishId;
     private String publishStatus;
     private LocalDateTime publishedAt;
+    private LocalDateTime verifiedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

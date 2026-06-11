@@ -75,6 +75,7 @@ const sidebarGroups: MenuGroup[] = [
       { path: '/admin/projects', name: 'ProjectList', title: '项目管理', icon: 'Folder', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['project.read'] },
       { path: '/admin/layered-keyword-groups', name: 'LayeredKeywordGroupManage', title: '拓词管理', icon: 'Collection', roles: ['sales', 'operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['keyword_group.read'] },
       { path: '/admin/content/execution', name: 'ContentExecution', title: '内容与执行', icon: 'Memo', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['content.read'] },
+      { path: '/admin/content/special-industry-compliance', name: 'SpecialIndustryComplianceWorkbench', title: '特殊行业合规', icon: 'Files', roles: ['operator', 'delivery_manager', 'manager', 'super_admin'], permissions: ['content.read'] },
     ],
   },
   {

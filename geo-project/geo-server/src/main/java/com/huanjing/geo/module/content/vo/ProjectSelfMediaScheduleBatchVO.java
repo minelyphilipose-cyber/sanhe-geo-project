@@ -20,6 +20,7 @@ public class ProjectSelfMediaScheduleBatchVO {
     private Integer plannedCount;
     private Integer createdCount;
     private Integer rejectedCount;
+    private String generationBatchIds;
     private String failureMessage;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -42,6 +43,7 @@ public class ProjectSelfMediaScheduleBatchVO {
         vo.setPlannedCount(row.getPlannedCount());
         vo.setCreatedCount(row.getCreatedCount());
         vo.setRejectedCount(row.getRejectedCount());
+        vo.setGenerationBatchIds(row.getGenerationBatchIds());
         vo.setFailureMessage(row.getFailureMessage());
         vo.setCreatedAt(row.getCreatedAt());
         vo.setUpdatedAt(row.getUpdatedAt());

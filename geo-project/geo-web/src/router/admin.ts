@@ -150,6 +150,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '内容与执行', icon: 'Memo', permissions: ['content.read'] },
     },
     {
+      path: 'content/special-industry-compliance',
+      name: 'SpecialIndustryComplianceWorkbench',
+      component: () => import('@/views/admin/content/SpecialIndustryComplianceWorkbench.vue'),
+      meta: { title: '特殊行业合规工作台', icon: 'Files', permissions: ['content.read'] },
+    },
+    {
       path: 'content/articles/manual-create',
       name: 'ManualArticleCreate',
       component: () => import('@/views/admin/content/ManualArticleCreate.vue'),

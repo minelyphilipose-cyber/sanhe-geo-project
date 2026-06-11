@@ -84,6 +84,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/api/v1/local-agent/self-media-schedules/platforms").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/local-agent/self-media-schedules/claim-next").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/v1/local-agent/self-media-schedules/publish-checks/claim-next").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/v1/local-agent/self-media-schedules/*/heartbeat").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/local-agent/self-media-schedules/*/executions/failed").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/local-agent/self-media-schedules/*/publish-checks/published").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/v1/local-agent/self-media-schedules/*/publish-checks/unknown").permitAll()

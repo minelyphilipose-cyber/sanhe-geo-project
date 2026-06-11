@@ -1080,6 +1080,17 @@ export interface BatchArticleGenerationTaskDetail {
   extraPrompt?: string | null
   status?: string | null
   qualityStatus?: string | null
+  complianceStatus?: string | null
+  complianceIssuesJson?: string | null
+  discardedArticleId?: number | null
+  retryCount?: number | null
+  medicalIndustryCode?: string | null
+  medicalCategoryCode?: string | null
+  medicalCategoryName?: string | null
+  topicAngleId?: number | null
+  structureSkeleton?: string | null
+  focus?: string | null
+  errorMessage?: string | null
 }
 
 export interface ArticleDetailResponse {

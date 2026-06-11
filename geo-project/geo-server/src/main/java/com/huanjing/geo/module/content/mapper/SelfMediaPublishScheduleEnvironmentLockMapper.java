@@ -7,6 +7,7 @@ import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
 import java.time.LocalDateTime;
 
@@ -36,6 +37,18 @@ public interface SelfMediaPublishScheduleEnvironmentLockMapper
             LIMIT 1
             """)
     SelfMediaPublishScheduleEnvironmentLock selectByEnvironmentId(@Param("browserEnvironmentId") Long browserEnvironmentId);
+
+    @Update("""
+            UPDATE self_media_publish_schedule_environment_lock
+            SET locked_until = #{lockedUntil},
+                updated_at = #{now}
+            WHERE browser_environment_id = #{browserEnvironmentId}
+              AND schedule_id = #{scheduleId}
+            """)
+    int renew(@Param("browserEnvironmentId") Long browserEnvironmentId,
+              @Param("scheduleId") Long scheduleId,
+              @Param("lockedUntil") LocalDateTime lockedUntil,
+              @Param("now") LocalDateTime now);
 
     @Delete("""
             DELETE FROM self_media_publish_schedule_environment_lock

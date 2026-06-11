@@ -9,6 +9,7 @@ import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceKernelSa
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceKernelVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleSaveRequest;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleVO;
+import com.huanjing.geo.module.content.dto.MedicalArticleDtos.GenerationHistoryVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleSaveRequest;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleVO;
 import com.huanjing.geo.module.content.service.MedicalArticleConfigService;
@@ -114,8 +115,25 @@ public class MedicalArticleConfigController {
     public R<Page<ComplianceHitLogVO>> hitLogs(@RequestParam(required = false) Long articleId,
                                                @RequestParam(required = false) Long batchId,
                                                @RequestParam(required = false) Long taskId,
+                                               @RequestParam(required = false) Long projectId,
+                                               @RequestParam(required = false) Long brandId,
+                                               @RequestParam(required = false) String ruleType,
+                                               @RequestParam(required = false) String action,
+                                               @RequestParam(required = false) String createdStartDate,
+                                               @RequestParam(required = false) String createdEndDate,
                                                @RequestParam(defaultValue = "1") long current,
                                                @RequestParam(defaultValue = "10") long size) {
-        return R.ok(service.pageHitLogs(articleId, batchId, taskId, current, size));
+        return R.ok(service.pageHitLogs(articleId, batchId, taskId, projectId, brandId, ruleType, action,
+                createdStartDate, createdEndDate, current, size));
+    }
+
+    @GetMapping("/generation-history")
+    public R<Page<GenerationHistoryVO>> generationHistory(@RequestParam(required = false) Long projectId,
+                                                          @RequestParam(required = false) Long brandId,
+                                                          @RequestParam(required = false) Long articleId,
+                                                          @RequestParam(required = false) Long topicAngleId,
+                                                          @RequestParam(defaultValue = "1") long current,
+                                                          @RequestParam(defaultValue = "10") long size) {
+        return R.ok(service.pageGenerationHistory(projectId, brandId, articleId, topicAngleId, current, size));
     }
 }

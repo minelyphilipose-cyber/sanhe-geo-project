@@ -108,7 +108,9 @@
           <template #default="scope">
             <div class="schedule-actions">
               <el-button link type="primary" @click="showDiagnostics(scope.row)">诊断</el-button>
+              <el-button v-if="canRetryNow(scope.row)" link type="primary" @click="retryNow(scope.row)">立即重试</el-button>
               <el-button v-if="canRecheck(scope.row)" link type="primary" @click="recheck(scope.row)">重新校验</el-button>
+              <el-button v-if="canMarkManual(scope.row)" link type="warning" @click="markManual(scope.row)">转人工</el-button>
               <el-button v-if="canConfirmPublished(scope.row)" link type="success" @click="confirmPublished(scope.row)">确认发布</el-button>
               <el-button v-if="canConfirmFailed(scope.row)" link type="warning" @click="confirmFailed(scope.row)">确认失败</el-button>
               <el-button v-if="canCancel(scope.row)" link type="danger" @click="cancel(scope.row)">取消</el-button>
@@ -193,7 +195,9 @@ import {
   confirmSelfMediaPublishScheduleFailed,
   confirmSelfMediaPublishSchedulePublished,
   getSelfMediaPublishSchedules,
+  markSelfMediaPublishScheduleManualRequired,
   recheckSelfMediaPublishScheduleResult,
+  retrySelfMediaPublishScheduleNow,
 } from '@/api/content'
 import type { SelfMediaPublishSchedule } from '@/types'
 import { formatDateTime } from '@/utils/format'
@@ -642,6 +646,8 @@ function failureCodeLabel(code?: string | null) {
     PUBLISH_RESULT_RECHECK_REQUESTED: '已人工触发重新校验',
     PUBLISH_CHECK_FAILED: '发布结果校验失败',
     PUBLISH_RESULT_CHECK_FAILED: '发布结果校验失败',
+    MANUAL_RETRY_REQUESTED: '操作员已请求立即重试',
+    MANUAL_REQUIRED_BY_OPERATOR: '操作员已转人工处理',
     FILL_FAILED: '页面填充失败',
     PUBLISH_BUTTON_NOT_FOUND: '发布按钮未找到',
     TASK_EXPIRED: '任务已过期',
@@ -787,7 +793,19 @@ function canConfirmFailed(row: SelfMediaPublishSchedule) {
 }
 
 function canRecheck(row: SelfMediaPublishSchedule) {
-  return props.canPublish && ['scheduled', 'publish_due', 'checking_publish_result', 'publish_unknown', 'publish_failed', 'manual_required'].includes(row.status)
+  return props.canPublish && ['scheduled', 'publish_due', 'checking_publish_result', 'publish_unknown', 'publish_failed'].includes(row.status)
+}
+
+function canRetryNow(row: SelfMediaPublishSchedule) {
+  if (!props.canPublish) return false
+  if (['cancelled', 'published_confirmed', 'cancel_pending_platform', 'routed_to_semi_auto'].includes(row.status)) return false
+  if (row.queueKind === 'publish_result_check') return ['scheduled', 'publish_due', 'checking_publish_result', 'publish_unknown', 'publish_failed', 'manual_required'].includes(row.status)
+  return ['pending', 'filling', 'filled_verified', 'scheduling', 'schedule_failed', 'manual_required'].includes(row.status) && !isLocked(row)
+}
+
+function canMarkManual(row: SelfMediaPublishSchedule) {
+  if (!props.canPublish) return false
+  return ['pending', 'filling', 'filled_verified', 'scheduling', 'scheduled', 'publish_due', 'checking_publish_result', 'publish_unknown', 'schedule_failed', 'publish_failed'].includes(row.status)
 }
 
 async function cancel(row: SelfMediaPublishSchedule) {
@@ -838,6 +856,41 @@ async function confirmFailed(row: SelfMediaPublishSchedule) {
       failureMessage: result.value.trim(),
     })
     ElMessage.success('已确认失败')
+    await load()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      throw error
+    }
+  }
+}
+
+async function retryNow(row: SelfMediaPublishSchedule) {
+  try {
+    await ElMessageBox.confirm(`确认立即重试排期 #${row.id}？`, '立即重试', {
+      confirmButtonText: '立即重试',
+      cancelButtonText: '返回',
+      type: 'warning',
+    })
+    await retrySelfMediaPublishScheduleNow(row.id)
+    ElMessage.success(row.queueKind === 'publish_result_check' ? '已加入发布结果校验队列' : '已加入自动执行队列')
+    await load()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      throw error
+    }
+  }
+}
+
+async function markManual(row: SelfMediaPublishSchedule) {
+  try {
+    const result = await ElMessageBox.prompt(`确认将排期 #${row.id} 转为人工处理？`, '转人工处理', {
+      confirmButtonText: '转人工',
+      cancelButtonText: '返回',
+      inputPlaceholder: '处理原因，可选',
+      type: 'warning',
+    })
+    await markSelfMediaPublishScheduleManualRequired(row.id, { reason: result.value || undefined })
+    ElMessage.success('已转为人工处理')
     await load()
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') {
@@ -899,6 +952,7 @@ function alertTypeLabel(value?: string | null) {
 
 function recommendationText(row: SelfMediaPublishSchedule) {
   if (row.failureActionHint) return row.failureActionHint
+  if (row.failureCode === 'LOCAL_AGENT_HEARTBEAT_TIMEOUT') return '本地助手执行心跳超时；确认本地助手、AdsPower 和平台页面正常后，可点击“立即重试”。'
   if (isBackendDelayedPlatform(row.platform)) {
     if (row.status === 'pending') return '等待本地助手到点领取；该平台不支持平台内定时，计划时间即后台触发发布时间。'
     if (row.status === 'filling') return '本地助手正在填充并提交发布；若长时间不变化，请检查 AdsPower 页面和扩展日志。'

@@ -1,20 +1,17 @@
 package com.huanjing.geo.module.content.dto;
 
-import jakarta.validation.constraints.NotEmpty;
-import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 import java.util.List;
 
 @Data
 public class ProjectSelfMediaAutoScheduleRequest {
-    @NotEmpty
     private List<Long> articleIds;
 
-    @NotEmpty
     private List<Long> selfMediaAccountIds;
 
-    @NotNull
+    @NotBlank
     private String targetMonth;
 
     private String scheduleStrategy;

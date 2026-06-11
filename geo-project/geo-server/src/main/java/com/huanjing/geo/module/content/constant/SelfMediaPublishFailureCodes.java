@@ -31,6 +31,7 @@ public final class SelfMediaPublishFailureCodes {
             "BAIJIAHAO_SCHEDULE_DIALOG_NOT_READY",
             "BAIJIAHAO_SCHEDULE_OPTION_NOT_FOUND",
             "BAIJIAHAO_PUBLISH_NOT_CONFIRMED",
+            "LOCAL_AGENT_HEARTBEAT_TIMEOUT",
             BAIJIAHAO_PLATFORM_RATE_LIMITED
     );
 
@@ -44,6 +45,7 @@ public final class SelfMediaPublishFailureCodes {
             entry("PLATFORM_CAPABILITY_DISABLED", "平台排期能力未启用", false, "在排期能力管理中启用并验证该平台后重新创建排期。"),
             entry("BACKEND_CLAIM_BLOCKED", "后台领取被阻塞", true, "检查本地助手领取状态和后台日志，等待自动重试。"),
             entry("LOCAL_AGENT_OFFLINE", "本地助手离线", true, "确认本地助手和浏览器扩展在线后等待自动重试。"),
+            entry("LOCAL_AGENT_HEARTBEAT_TIMEOUT", "本地助手执行心跳超时", true, "确认本地助手和 AdsPower 正常运行，系统会自动重试。"),
             entry("LOCAL_HELPER_TEMPORARY_ERROR", "本地助手临时异常", true, "检查助手运行状态，等待自动重试。"),
             entry("PAGE_LOAD_TIMEOUT", "页面加载或执行超时", true, "检查平台页面是否可访问，等待自动重试。"),
             entry("SCHEDULE_DIALOG_NOT_READY", "定时发布弹窗未就绪", true, "等待页面稳定后自动重试。"),
@@ -66,6 +68,8 @@ public final class SelfMediaPublishFailureCodes {
             entry("PUBLISH_RESULT_NOT_MATCHED_RETRYING", "发布结果暂未匹配，等待复查", true, "等待下一次自动回查。"),
             entry("PUBLISH_RESULT_CHECK_FAILED", "发布结果校验失败", true, "检查本地助手和平台作品管理页后重新校验。"),
             entry("PUBLISH_CHECK_FAILED", "发布结果校验失败", true, "检查本地助手和平台作品管理页后重新校验。"),
+            entry("MANUAL_RETRY_REQUESTED", "操作员已请求立即重试", true, "已重新放回自动处理队列，等待本地助手领取。"),
+            entry("MANUAL_REQUIRED_BY_OPERATOR", "操作员已转人工处理", false, "由操作员人工处理，修复后可重新触发自动处理。"),
             entry("MANUAL_CONFIRMED_FAILED", "人工确认失败", false, "已由操作员确认失败。"),
             entry("CANCELLED_BY_OPERATOR", "操作员已取消", false, "已取消，无需继续处理。"),
             entry("BAIJIAHAO_APP_ID_REQUIRED", "百家号 ID/app_id 未填写", false, "在品牌详情的百家号账号中填写百家号 ID/app_id。"),

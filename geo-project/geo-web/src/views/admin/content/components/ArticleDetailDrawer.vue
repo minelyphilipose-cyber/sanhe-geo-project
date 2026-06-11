@@ -104,6 +104,75 @@
         </div>
       </div>
 
+      <div v-if="detailData.batchGenerationTask" class="detail-section-panel">
+        <div class="detail-header trace-header">
+          <h4 class="detail-title">批量生成追溯</h4>
+          <el-tag size="small" :type="batchTaskStatusTag(detailData.batchGenerationTask.status)">
+            {{ batchTaskStatusLabel(detailData.batchGenerationTask.status) }}
+          </el-tag>
+        </div>
+        <div class="trace-body">
+          <el-descriptions :column="3" border>
+            <el-descriptions-item label="任务ID">{{ detailData.batchGenerationTask.id }}</el-descriptions-item>
+            <el-descriptions-item label="批次ID">{{ detailData.batchGenerationTask.batchId }}</el-descriptions-item>
+            <el-descriptions-item label="批次序号">{{ detailData.batchGenerationTask.articleIndexInBatch || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="生成状态">{{ batchTaskStatusLabel(detailData.batchGenerationTask.status) }}</el-descriptions-item>
+            <el-descriptions-item label="质量状态">{{ detailData.batchGenerationTask.qualityStatus || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="重试次数">{{ detailData.batchGenerationTask.retryCount ?? 0 }}</el-descriptions-item>
+            <el-descriptions-item v-if="detailData.batchGenerationTask.complianceStatus" label="合规状态">
+              <el-tag size="small" :type="medicalComplianceTag(detailData.batchGenerationTask.complianceStatus)">
+                {{ medicalComplianceLabel(detailData.batchGenerationTask.complianceStatus) }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailData.batchGenerationTask.discardedArticleId" label="废弃文章ID">
+              {{ detailData.batchGenerationTask.discardedArticleId }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailData.batchGenerationTask.errorMessage" label="失败原因" :span="3">
+              {{ detailData.batchGenerationTask.errorMessage }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailData.batchGenerationTask.medicalIndustryCode" label="特殊行业">
+              {{ detailData.batchGenerationTask.medicalIndustryCode }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailData.batchGenerationTask.medicalCategoryCode || detailData.batchGenerationTask.medicalCategoryName" label="医疗品类">
+              {{ detailData.batchGenerationTask.medicalCategoryName || detailData.batchGenerationTask.medicalCategoryCode }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailData.batchGenerationTask.topicAngleId" label="选题角度ID">
+              {{ detailData.batchGenerationTask.topicAngleId }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailData.batchGenerationTask.structureSkeleton" label="结构骨架" :span="3">
+              {{ detailData.batchGenerationTask.structureSkeleton }}
+            </el-descriptions-item>
+            <el-descriptions-item v-if="detailData.batchGenerationTask.focus" label="重点方向" :span="3">
+              {{ detailData.batchGenerationTask.focus }}
+            </el-descriptions-item>
+          </el-descriptions>
+          <div v-if="batchComplianceIssues(detailData.batchGenerationTask).length" class="trace-issue-list">
+            <div class="trace-subtitle">命中规则</div>
+            <el-table :data="batchComplianceIssues(detailData.batchGenerationTask)" border>
+              <el-table-column label="规则" min-width="160">
+                <template #default="scope">{{ scope.row.ruleCode || scope.row.code || '-' }}</template>
+              </el-table-column>
+              <el-table-column label="类型" min-width="120">
+                <template #default="scope">{{ scope.row.ruleType || scope.row.type || '-' }}</template>
+              </el-table-column>
+              <el-table-column label="命中内容" min-width="160">
+                <template #default="scope">{{ scope.row.matchedText || scope.row.keyword || scope.row.word || '-' }}</template>
+              </el-table-column>
+              <el-table-column label="说明" min-width="220">
+                <template #default="scope">{{ scope.row.reason || scope.row.message || scope.row.description || '-' }}</template>
+              </el-table-column>
+            </el-table>
+          </div>
+          <el-alert
+            v-else-if="detailData.batchGenerationTask.complianceIssuesJson"
+            type="warning"
+            :closable="false"
+            show-icon
+            title="命中规则数据暂无法解析，可在合规命中日志中按文章或任务继续追溯。"
+          />
+        </div>
+      </div>
+
       <div class="detail-section-panel">
         <h4 class="detail-title">版本记录</h4>
         <el-table :data="detailData.versions" border>
@@ -136,7 +205,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { ArrowDown } from '@element-plus/icons-vue'
-import type { ArticleDetailResponse, ArticleDraft } from '@/types'
+import type { ArticleDetailResponse, ArticleDraft, BatchArticleGenerationTaskDetail } from '@/types'
 import { formatDateTime } from '@/utils/format'
 
 type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
@@ -145,6 +214,18 @@ type RiskWordHit = {
   word: string
   severity: string
   source: string
+}
+type ComplianceIssueRow = {
+  ruleCode?: string
+  code?: string
+  ruleType?: string
+  type?: string
+  matchedText?: string
+  keyword?: string
+  word?: string
+  reason?: string
+  message?: string
+  description?: string
 }
 
 const props = defineProps<{
@@ -191,6 +272,38 @@ const viewMode = computed({
   get: () => props.viewMode,
   set: (value) => emit('update:viewMode', value),
 })
+
+function batchTaskStatusLabel(value?: string | null) {
+  const labels: Record<string, string> = {
+    pending: '待生成',
+    running: '生成中',
+    success: '成功',
+    failed: '失败',
+    skipped: '已跳过',
+    discarded_compliance_failed: '合规失败已废弃',
+  }
+  return value ? (labels[value] || value) : '-'
+}
+
+function batchTaskStatusTag(value?: string | null): TagType {
+  if (value === 'success') return 'success'
+  if (value === 'running' || value === 'pending') return 'warning'
+  if (value === 'failed' || value === 'discarded_compliance_failed') return 'danger'
+  return 'info'
+}
+
+function batchComplianceIssues(task?: BatchArticleGenerationTaskDetail | null): ComplianceIssueRow[] {
+  if (!task?.complianceIssuesJson) return []
+  try {
+    const parsed = JSON.parse(task.complianceIssuesJson)
+    if (Array.isArray(parsed)) return parsed.filter((item) => item && typeof item === 'object')
+    if (Array.isArray(parsed?.issues)) return parsed.issues.filter((item: unknown) => item && typeof item === 'object')
+    if (Array.isArray(parsed?.hits)) return parsed.hits.filter((item: unknown) => item && typeof item === 'object')
+  } catch (err) {
+    console.warn('Failed to parse compliance issues json', err)
+  }
+  return []
+}
 </script>
 
 <style scoped>
@@ -350,6 +463,30 @@ const viewMode = computed({
 .detail-preview-panel .detail-header {
   padding-right: 16px;
   border-bottom: 1px solid #e2e8f0;
+}
+
+.trace-header {
+  padding-right: 16px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.trace-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+
+.trace-issue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.trace-subtitle {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .markdown-preview {

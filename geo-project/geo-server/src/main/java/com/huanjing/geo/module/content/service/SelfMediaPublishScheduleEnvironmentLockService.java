@@ -32,4 +32,14 @@ public class SelfMediaPublishScheduleEnvironmentLockService {
             mapper.deleteByScheduleId(scheduleId);
         }
     }
+
+    public boolean renew(Long browserEnvironmentId,
+                         Long scheduleId,
+                         LocalDateTime lockedUntil,
+                         LocalDateTime now) {
+        if (browserEnvironmentId == null || scheduleId == null) {
+            return false;
+        }
+        return mapper.renew(browserEnvironmentId, scheduleId, lockedUntil, now) > 0;
+    }
 }

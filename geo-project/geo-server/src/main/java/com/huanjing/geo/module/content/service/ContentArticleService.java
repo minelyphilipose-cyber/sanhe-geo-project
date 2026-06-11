@@ -73,7 +73,7 @@ public class ContentArticleService {
     private final AuditService auditService;
 
     public Page<ArticleDraft> page(String projectName, String status, String articleType, long current, long size) {
-        return page(projectName, status, articleType, null, null, null, null, null, null, current, size);
+        return page(projectName, status, articleType, null, null, null, null, null, null, null, null, null, null, null, current, size);
     }
 
     public Page<ArticleDraft> page(String projectName,
@@ -83,6 +83,26 @@ public class ContentArticleService {
                                    String channelGroupCode,
                                    String channelSubCode,
                                    String generationMode,
+                                   String createdStartDate,
+                                   String createdEndDate,
+                                   long current,
+                                   long size) {
+        return page(projectName, status, articleType, articleTypeCode, channelGroupCode, channelSubCode,
+                generationMode, null, null, null, null, null, createdStartDate, createdEndDate, current, size);
+    }
+
+    public Page<ArticleDraft> page(String projectName,
+                                   String status,
+                                   String articleType,
+                                   String articleTypeCode,
+                                   String channelGroupCode,
+                                   String channelSubCode,
+                                   String generationMode,
+                                   String complianceStatus,
+                                   String publishReviewStatus,
+                                   String medicalIndustryCode,
+                                   String medicalChannelTier,
+                                   Boolean specialIndustryOnly,
                                    String createdStartDate,
                                    String createdEndDate,
                                    long current,
@@ -108,6 +128,7 @@ public class ContentArticleService {
         applyArticleTypeCodeFilter(wrapper, articleTypeCode);
         applyChannelFilter(wrapper, channelGroupCode, channelSubCode);
         applyGenerationModeFilter(wrapper, generationMode);
+        applyMedicalComplianceFilter(wrapper, complianceStatus, publishReviewStatus, medicalIndustryCode, medicalChannelTier, specialIndustryOnly);
         applyCreatedDateFilter(wrapper, createdStartDate, createdEndDate);
         Page<ArticleDraft> pageData = articleDraftMapper.selectPage(new Page<>(current, size), wrapper);
         fillProjectNames(pageData.getRecords());
@@ -155,6 +176,33 @@ public class ContentArticleService {
             wrapper.inSql(ArticleDraft::getId, batchGeneratedSql);
         } else if ("single".equals(mode)) {
             wrapper.notInSql(ArticleDraft::getId, batchGeneratedSql);
+        }
+    }
+
+    private void applyMedicalComplianceFilter(LambdaQueryWrapper<ArticleDraft> wrapper,
+                                              String complianceStatus,
+                                              String publishReviewStatus,
+                                              String medicalIndustryCode,
+                                              String medicalChannelTier,
+                                              Boolean specialIndustryOnly) {
+        String compliance = trimToNull(complianceStatus);
+        if (compliance != null) {
+            wrapper.eq(ArticleDraft::getComplianceStatus, compliance);
+        }
+        String review = trimToNull(publishReviewStatus);
+        if (review != null) {
+            wrapper.eq(ArticleDraft::getPublishReviewStatus, review);
+        }
+        String industry = trimToNull(medicalIndustryCode);
+        if (industry != null) {
+            wrapper.eq(ArticleDraft::getMedicalIndustryCode, industry);
+        }
+        String tier = trimToNull(medicalChannelTier);
+        if (tier != null) {
+            wrapper.eq(ArticleDraft::getMedicalChannelTier, tier);
+        }
+        if (Boolean.TRUE.equals(specialIndustryOnly)) {
+            wrapper.isNotNull(ArticleDraft::getMedicalIndustryCode);
         }
     }
 

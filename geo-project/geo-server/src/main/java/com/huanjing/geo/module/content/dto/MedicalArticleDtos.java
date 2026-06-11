@@ -122,12 +122,30 @@ public class MedicalArticleDtos {
             Long batchId,
             Long taskId,
             Long projectId,
+            String projectName,
             Long brandId,
+            String brandName,
             Long ruleId,
             String ruleType,
             String matchedText,
             String checkStage,
             String action,
+            LocalDateTime createdAt
+    ) {
+    }
+
+    public record GenerationHistoryVO(
+            Long id,
+            Long projectId,
+            String projectName,
+            Long brandId,
+            String brandName,
+            Long topicAngleId,
+            String topicAngle,
+            String structureSkeleton,
+            String focus,
+            Long articleId,
+            String articleTitle,
             LocalDateTime createdAt
     ) {
     }

@@ -202,6 +202,17 @@ public class LocalAgentController {
         return R.ok(new LocalAgentSelfMediaPublishCheckClaimResponse(schedule, launch, null));
     }
 
+    @PostMapping("/self-media-schedules/{scheduleId}/heartbeat")
+    public R<SelfMediaPublishScheduleVO> heartbeatSelfMediaSchedule(@PathVariable Long scheduleId,
+                                                                    HttpServletRequest request) {
+        LocalAgentSession session = verifySignedRequest(request);
+        return R.ok(scheduleService.heartbeatLocalAgentSchedule(
+                session.getOperatorId(),
+                scheduleId,
+                SELF_MEDIA_SCHEDULE_LOCK_MINUTES
+        ));
+    }
+
     private String claimBlockedReason(String platform) {
         Set<String> enabledPlatforms = Set.copyOf(scheduleService.localAgentAutomationPlatforms());
         String normalizedPlatform = normalizePlatform(platform);
@@ -284,6 +295,38 @@ public class LocalAgentController {
                 scheduleId,
                 failureCode,
                 failureMessage,
+                diagnosticsJson
+        ));
+    }
+
+    @PostMapping("/self-media-schedules/{scheduleId}/executions/filled")
+    public R<SelfMediaPublishScheduleVO> markSelfMediaScheduleExecutionFilled(
+            @PathVariable Long scheduleId,
+            @RequestParam(required = false) String diagnosticsJson,
+            HttpServletRequest request) {
+        verifySignedRequest(request);
+        return R.ok(scheduleService.markLocalAgentExecutionFilled(scheduleId, diagnosticsJson));
+    }
+
+    @PostMapping("/self-media-schedules/{scheduleId}/executions/scheduled")
+    public R<SelfMediaPublishScheduleVO> markSelfMediaScheduleExecutionScheduled(
+            @PathVariable Long scheduleId,
+            @RequestParam(required = false) String diagnosticsJson,
+            HttpServletRequest request) {
+        verifySignedRequest(request);
+        return R.ok(scheduleService.markLocalAgentExecutionScheduled(scheduleId, diagnosticsJson));
+    }
+
+    @PostMapping("/self-media-schedules/{scheduleId}/executions/published")
+    public R<SelfMediaPublishScheduleVO> markSelfMediaScheduleExecutionPublished(
+            @PathVariable Long scheduleId,
+            @RequestParam(required = false) String platformPublishedUrl,
+            @RequestParam(required = false) String diagnosticsJson,
+            HttpServletRequest request) {
+        verifySignedRequest(request);
+        return R.ok(scheduleService.markLocalAgentExecutionPublishedConfirmed(
+                scheduleId,
+                platformPublishedUrl,
                 diagnosticsJson
         ));
     }
