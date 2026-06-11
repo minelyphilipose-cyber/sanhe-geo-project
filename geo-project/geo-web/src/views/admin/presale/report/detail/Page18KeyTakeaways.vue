@@ -64,9 +64,9 @@
             <div v-if="showOverallBenchmarkNote" class="p18-methodology-extra">
               本品牌无排名数据,综合得分按提及/情感/覆盖三维归一加权；行业均值与 Top1 为四维基准,跨维度比较仅供参考。
             </div>
-            <div class="p18-methodology-extra">
+            <!-- <div class="p18-methodology-extra">
               提及率计算中,豆包平台权重为其他平台的 2 倍。场景覆盖判定中,某场景在豆包提及或达到半数有效平台提及时即记为已覆盖。
-            </div>
+            </div> -->
           </div>
         </div>
       </div>

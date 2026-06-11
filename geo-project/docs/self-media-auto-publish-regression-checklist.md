@@ -86,3 +86,26 @@
 - 自动生成文章后，自媒体目标应创建 `self_media_publish_schedule`，不是普通站点发布任务。
 - 不同平台或账号有多个可用目标时，应尽量均匀分配。
 - 无可用自媒体目标时，自动分发 item 应失败并记录明确原因，不影响其他渠道。
+
+## 9. 百家号专项回归
+
+- 账号配置需维护百家号 ID / `app_id`，发布结果回查 URL 必须包含对应账号的 `app_id`，不能复用固定 URL。
+- 填充成功后，扩展侧 `publishVerification` 应至少包含 `platformStatus`、`plannedScheduledAt`、`platformScheduledAt`、`scheduleAdjusted`、`successSignal`。
+- 若百家号将计划时间校正到平台最早可选时间，后端应以 `platformScheduledAt` 更新排期的平台定时时间，同时保留原计划时间用于诊断。
+- 作品管理页出现“审核中”和“预计 YYYY-MM-DD HH:mm 发布”时，计划时间未到前应保持 `pendingScheduled=true`，不能提前确认 `published_confirmed`。
+- 计划时间到达后，作品管理页命中文章标题、审核/已发布信号、预计发布时间时，发布结果回查可确认平台状态并推进排期。
+- 本地助手无任务可领取时，响应应返回明确 `claimBlockedReason`：`NO_DUE_TASK`、`NO_AVAILABLE_ACCOUNT`、`PLATFORM_CAPABILITY_DISABLED`；渠道额度类失败应归类为 `CHANNEL_QUOTA_EXHAUSTED`。
+- 百家号时间选择失败诊断需包含当前三个控件值、当前可见下拉列表、目标时间和最终平台时间，便于复现虚拟下拉偏移。
+- 百家号确认发布前需要等待草稿保存稳定，并对“点击速度太快”做重试和间隔保护。
+- `BAIJIAHAO_PLATFORM_RATE_LIMITED`、`BAIJIAHAO_SCHEDULE_OPTION_NOT_FOUND`、`BAIJIAHAO_SCHEDULE_DIALOG_NOT_READY`、`BAIJIAHAO_PUBLISH_NOT_CONFIRMED` 应视为可重试失败。
+- 固定异常码应覆盖封面弹窗未打开、封面上传入口/文件框缺失、封面上传超时、正文 UEditor 不可见、正文误入标题、时间下拉失败、平台频控、提交后未检测到审核中。
+
+### 百家号人工验收样例
+
+- 正常定时发布：标题、正文、封面均填充成功，平台返回“提交成功，正在审核中...”，作品管理页显示“审核中”和预计发布时间。
+- 平台时间校正：输入距离当前不足 1 小时的计划时间，最终选择平台可用时间，排期记录中能看到平台实际时间。
+- 封面上传：文件选择窗口关闭后，封面区域显示缩略图，后续定时发布按钮可点击。
+- 时间下拉：分钟目标不在首屏可见选项时，助手能滚动或键盘选择到目标分钟。
+- 平台频控：出现“点击速度太快”时任务不立即失败，应按百家号节流配置重试。
+- 账号不可用：无 active 百家号账号、平台能力未启用、无到期任务三类场景应返回不同领取阻塞原因。
+- 发布回查：计划时间前不确认发布，计划时间后以作品管理页的标题、状态、预计发布时间作为最终可信结果。

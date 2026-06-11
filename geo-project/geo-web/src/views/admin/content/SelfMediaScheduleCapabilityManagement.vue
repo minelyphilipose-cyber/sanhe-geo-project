@@ -25,11 +25,25 @@
               <el-tag :type="verificationTag(row.verificationStatus)">{{ verificationLabel(row.verificationStatus) }}</el-tag>
             </template>
           </el-table-column>
+          <el-table-column label="选择器状态" width="150">
+            <template #default="{ row }">
+              <el-tag :type="selectorStatusTag(row.selectorStatus)">
+                {{ selectorStatusLabel(row.selectorStatus) }}
+              </el-tag>
+            </template>
+          </el-table-column>
           <el-table-column label="策略" min-width="190">
             <template #default="{ row }">
               <div class="strategy-cell">
                 <strong>{{ strategyLabel(row.v1Strategy) }}</strong>
                 <span>契约：{{ scheduleModeLabel(row.scheduleMode) }} / {{ publishChannelLabel(row.publishChannel) }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="配置摘要" min-width="240">
+            <template #default="{ row }">
+              <div class="summary-cell">
+                <span v-for="item in capabilitySummary(row)" :key="item">{{ item }}</span>
               </div>
             </template>
           </el-table-column>
@@ -61,60 +75,103 @@
       </DataState>
     </el-card>
 
-    <el-drawer v-model="editorVisible" title="编辑平台能力" size="520px" append-to-body>
-      <el-form v-if="editingRow" label-width="116px" class="capability-form">
-        <el-form-item label="平台">
-          <div class="readonly-field">
-            {{ editingRow.displayName || platformLabel(editingRow.platform) }}
-            <span>{{ editingRow.platform }}</span>
+    <el-drawer v-model="editorVisible" title="编辑平台能力" size="680px" append-to-body>
+      <el-form v-if="editingRow" label-width="120px" class="capability-form">
+        <section class="form-section">
+          <div class="section-title">基础能力</div>
+          <el-form-item label="平台">
+            <div class="readonly-field">
+              {{ editingRow.displayName || platformLabel(editingRow.platform) }}
+              <span>{{ editingRow.platform }}</span>
+            </div>
+          </el-form-item>
+          <el-form-item label="验证状态">
+            <el-select v-model="form.verificationStatus" class="form-control">
+              <el-option label="未验证" value="unverified" />
+              <el-option label="已验证" value="verified" />
+              <el-option label="验证失败" value="failed" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="允许排期">
+            <el-switch v-model="form.supportsSchedule" active-text="允许" inactive-text="关闭" inline-prompt />
+          </el-form-item>
+          <el-form-item label="排期策略">
+            <el-select v-model="form.v1Strategy" class="form-control">
+              <el-option label="待定" value="pending" />
+              <el-option label="平台原生定时" value="platform_schedule" />
+              <el-option label="后台延迟发布" value="backend_delayed_publish" />
+              <el-option label="半自动" value="semi_auto" />
+            </el-select>
+            <div class="form-tip">知乎使用后台延迟发布；头条、小红书、百家号使用平台原生定时。</div>
+          </el-form-item>
+          <el-form-item label="延迟范围">
+            <div class="range-row">
+              <el-input-number v-model="form.minDelayMinutes" :min="0" :step="10" controls-position="right" />
+              <span>至</span>
+              <el-input-number v-model="form.maxDelayMinutes" :min="0" :step="60" controls-position="right" />
+              <span>分钟</span>
+            </div>
+          </el-form-item>
+        </section>
+
+        <section class="form-section">
+          <div class="section-title">执行与校验</div>
+          <div class="config-summary-box">
+            <div v-for="item in editingSummaryItems" :key="item.label" class="config-summary-item">
+              <span>{{ item.label }}</span>
+              <strong>{{ item.value }}</strong>
+            </div>
           </div>
-        </el-form-item>
-        <el-form-item label="验证状态">
-          <el-select v-model="form.verificationStatus" class="form-control">
-            <el-option label="未验证" value="unverified" />
-            <el-option label="已验证" value="verified" />
-            <el-option label="验证失败" value="failed" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="允许排期">
-          <el-switch v-model="form.supportsSchedule" />
-        </el-form-item>
-        <el-form-item label="排期策略">
-          <el-select v-model="form.v1Strategy" class="form-control">
-            <el-option label="待定" value="pending" />
-            <el-option label="平台原生定时" value="platform_schedule" />
-            <el-option label="后台延迟发布" value="backend_delayed_publish" />
-            <el-option label="半自动" value="semi_auto" />
-          </el-select>
-          <div class="form-tip">知乎使用后台延迟发布；头条、小红书、百家号使用平台原生定时。</div>
-        </el-form-item>
-        <el-form-item label="延迟范围">
-          <div class="range-row">
-            <el-input-number v-model="form.minDelayMinutes" :min="0" :step="10" controls-position="right" />
-            <span>至</span>
-            <el-input-number v-model="form.maxDelayMinutes" :min="0" :step="60" controls-position="right" />
-            <span>分钟</span>
+          <el-form-item label="保存即排期">
+            <el-switch v-model="form.saveCreatesSchedule" active-text="启用" inactive-text="关闭" inline-prompt />
+          </el-form-item>
+          <el-form-item label="支持能力">
+            <div class="switch-list">
+              <el-checkbox v-model="form.supportsCancel">取消</el-checkbox>
+              <el-checkbox v-model="form.supportsModify">修改</el-checkbox>
+              <el-checkbox v-model="form.supportsPublishCheck">发布结果校验</el-checkbox>
+            </div>
+          </el-form-item>
+          <el-form-item label="选择器状态">
+            <el-select v-model="form.selectorStatus" class="form-control">
+              <el-option
+                v-for="option in selectorStatusOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+          </el-form-item>
+        </section>
+
+        <section v-if="editingRow.platform === 'baijiahao'" class="form-section">
+          <div class="section-title">百家号专项配置</div>
+          <div class="config-grid">
+            <el-form-item label="确认前等待">
+              <el-input-number v-model="baijiahaoThrottle.beforeConfirmDelayMs" :min="0" :step="250" controls-position="right" />
+            </el-form-item>
+            <el-form-item label="重试间隔">
+              <el-input-number v-model="baijiahaoThrottle.confirmRetryDelayMs" :min="0" :step="250" controls-position="right" />
+            </el-form-item>
+            <el-form-item label="点击后等待">
+              <el-input-number v-model="baijiahaoThrottle.afterConfirmClickDelayMs" :min="0" :step="250" controls-position="right" />
+            </el-form-item>
+            <el-form-item label="确认重试">
+              <el-input-number v-model="baijiahaoThrottle.maxConfirmAttempts" :min="1" :max="10" :step="1" controls-position="right" />
+            </el-form-item>
           </div>
-        </el-form-item>
-        <el-form-item label="保存即排期">
-          <el-switch v-model="form.saveCreatesSchedule" />
-        </el-form-item>
-        <el-form-item label="支持能力">
-          <div class="switch-list">
-            <el-checkbox v-model="form.supportsCancel">取消</el-checkbox>
-            <el-checkbox v-model="form.supportsModify">修改</el-checkbox>
-            <el-checkbox v-model="form.supportsPublishCheck">发布结果校验</el-checkbox>
-          </div>
-        </el-form-item>
-        <el-form-item label="选择器状态">
-          <el-input v-model="form.selectorStatus" class="form-control" placeholder="如 stable / needs_review" />
-        </el-form-item>
-        <el-form-item label="验证说明">
-          <el-input v-model="form.notes" type="textarea" :rows="3" placeholder="记录当前平台验证结论、页面限制或注意事项" />
-        </el-form-item>
-        <el-form-item label="证据 JSON">
-          <el-input v-model="form.evidenceJson" type="textarea" :rows="5" placeholder="可选，保存截图说明、选择器证据等 JSON 文本" />
-        </el-form-item>
+          <div class="form-tip section-tip">单位为毫秒，用于限制定时发布确认链路的点击节奏，降低平台“点击速度太快”的风险。</div>
+        </section>
+
+        <section class="form-section">
+          <div class="section-title">验证记录</div>
+          <el-form-item label="验证说明">
+            <el-input v-model="form.notes" type="textarea" :rows="3" placeholder="记录当前平台验证结论、页面限制或注意事项" />
+          </el-form-item>
+          <el-form-item label="证据 JSON">
+            <el-input v-model="form.evidenceJson" type="textarea" :rows="5" placeholder="可选，保存截图说明、选择器证据等 JSON 文本" />
+          </el-form-item>
+        </section>
       </el-form>
       <template #footer>
         <el-button @click="editorVisible = false">取消</el-button>
@@ -125,7 +182,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import DataState from '@/components/ui/DataState.vue'
@@ -154,6 +211,32 @@ const form = reactive({
   notes: '',
 })
 
+const selectorStatusOptions = [
+  { label: '稳定', value: 'stable' },
+  { label: '需运行时校验', value: 'needs_runtime_verification' },
+  { label: '需复核', value: 'needs_review' },
+  { label: '已失效', value: 'broken' },
+  { label: '未记录', value: 'unknown' },
+]
+
+const baijiahaoThrottle = reactive({
+  beforeConfirmDelayMs: 1200,
+  confirmRetryDelayMs: 1200,
+  afterConfirmClickDelayMs: 2500,
+  maxConfirmAttempts: 3,
+})
+
+const editingSummaryItems = computed(() => {
+  const row = editingRow.value
+  if (!row) return []
+  return [
+    { label: '账号要求', value: accountRequirementText(row) },
+    { label: '回查地址', value: worksListUrlText(row) },
+    { label: '选择器状态', value: selectorStatusLabel(form.selectorStatus) },
+    { label: '点击节流', value: throttleSummaryText(row.platform) },
+  ]
+})
+
 onMounted(loadCapabilities)
 
 async function loadCapabilities() {
@@ -179,14 +262,19 @@ function openEditor(row: SelfMediaScheduleCapability) {
   form.supportsModify = Boolean(row.supportsModify)
   form.supportsPublishCheck = row.supportsPublishCheck ?? row.contractSupportsPublishCheck ?? true
   form.v1Strategy = row.v1Strategy || defaultStrategy(row)
-  form.selectorStatus = row.selectorStatus || ''
+  form.selectorStatus = row.selectorStatus || 'needs_runtime_verification'
   form.evidenceJson = row.evidenceJson || ''
   form.notes = row.notes || ''
+  Object.assign(baijiahaoThrottle, readBaijiahaoThrottle(row.evidenceJson))
   editorVisible.value = true
 }
 
 async function saveCapability() {
   if (!editingRow.value) return
+  if (form.evidenceJson.trim() && !parseEvidenceJson(form.evidenceJson)) {
+    ElMessage.error('证据 JSON 格式不正确')
+    return
+  }
   saving.value = true
   try {
     await updateSelfMediaScheduleCapability(editingRow.value.platform, {
@@ -200,7 +288,7 @@ async function saveCapability() {
       supportsPublishCheck: form.supportsPublishCheck,
       v1Strategy: form.v1Strategy,
       selectorStatus: form.selectorStatus || null,
-      evidenceJson: form.evidenceJson || null,
+      evidenceJson: buildEvidenceJson(),
       notes: form.notes || null,
     })
     ElMessage.success('平台能力已保存')
@@ -211,6 +299,87 @@ async function saveCapability() {
   } finally {
     saving.value = false
   }
+}
+
+function readBaijiahaoThrottle(raw?: string | null) {
+  const root = parseEvidenceJson(raw)
+  const throttle = root?.automationOptions?.throttle || {}
+  return {
+    beforeConfirmDelayMs: numberOrDefault(throttle.beforeConfirmDelayMs, 1200),
+    confirmRetryDelayMs: numberOrDefault(throttle.confirmRetryDelayMs, 1200),
+    afterConfirmClickDelayMs: numberOrDefault(throttle.afterConfirmClickDelayMs, 2500),
+    maxConfirmAttempts: numberOrDefault(throttle.maxConfirmAttempts, 3),
+  }
+}
+
+function buildEvidenceJson() {
+  const root = parseEvidenceJson(form.evidenceJson) || {}
+  if (editingRow.value?.platform === 'baijiahao') {
+    root.automationOptions = {
+      ...(isPlainRecord(root.automationOptions) ? root.automationOptions : {}),
+      throttle: {
+        beforeConfirmDelayMs: baijiahaoThrottle.beforeConfirmDelayMs,
+        confirmRetryDelayMs: baijiahaoThrottle.confirmRetryDelayMs,
+        afterConfirmClickDelayMs: baijiahaoThrottle.afterConfirmClickDelayMs,
+        maxConfirmAttempts: baijiahaoThrottle.maxConfirmAttempts,
+      },
+    }
+  }
+  const text = JSON.stringify(root, null, 2)
+  return text === '{}' ? null : text
+}
+
+function parseEvidenceJson(raw?: string | null): Record<string, any> | null {
+  if (!raw?.trim()) return null
+  try {
+    const value = JSON.parse(raw)
+    return isPlainRecord(value) ? value : null
+  } catch {
+    return null
+  }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function numberOrDefault(value: unknown, fallback: number) {
+  const number = Number(value)
+  return Number.isFinite(number) ? number : fallback
+}
+
+function capabilitySummary(row: SelfMediaScheduleCapability) {
+  const items = [
+    accountRequirementText(row),
+    row.supportsPublishCheck ? '发布后回查' : '不回查',
+    selectorStatusLabel(row.selectorStatus),
+  ]
+  if (row.platform === 'baijiahao') {
+    items.push(`节流 ${readBaijiahaoThrottle(row.evidenceJson).afterConfirmClickDelayMs}ms`)
+  }
+  return items
+}
+
+function accountRequirementText(row: SelfMediaScheduleCapability) {
+  if (row.platform === 'baijiahao') return '账号必填 app_id'
+  if (['toutiao', 'zhihu', 'xiaohongshu'].includes(row.platform)) return '建议填平台账号 ID'
+  return '无额外账号字段'
+}
+
+function worksListUrlText(row: SelfMediaScheduleCapability) {
+  if (row.platform === 'baijiahao') return '作品管理 URL 需要 app_id'
+  if (row.supportsPublishCheck) return '使用平台作品管理页'
+  return '未启用结果回查'
+}
+
+function throttleSummaryText(platform?: string | null) {
+  if (platform !== 'baijiahao') return '默认节奏'
+  return [
+    `确认前 ${baijiahaoThrottle.beforeConfirmDelayMs}ms`,
+    `重试 ${baijiahaoThrottle.confirmRetryDelayMs}ms`,
+    `点击后 ${baijiahaoThrottle.afterConfirmClickDelayMs}ms`,
+    `${baijiahaoThrottle.maxConfirmAttempts} 次`,
+  ].join(' / ')
 }
 
 function defaultStrategy(row: SelfMediaScheduleCapability) {
@@ -251,6 +420,18 @@ function verificationLabel(value?: string | null) {
 function verificationTag(value?: string | null) {
   if (value === 'verified') return 'success'
   if (value === 'failed') return 'danger'
+  return 'info'
+}
+
+function selectorStatusLabel(value?: string | null) {
+  return selectorStatusOptions.find((option) => option.value === value)?.label || '未记录'
+}
+
+function selectorStatusTag(value?: string | null) {
+  if (value === 'stable') return 'success'
+  if (value === 'broken') return 'danger'
+  if (value === 'needs_review') return 'warning'
+  if (value === 'needs_runtime_verification') return 'primary'
   return 'info'
 }
 
@@ -302,12 +483,73 @@ function publishChannelLabel(value?: string | null) {
   gap: 6px;
 }
 
+.summary-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .capability-form {
-  padding-right: 16px;
+  padding: 0 18px 18px 0;
+}
+
+.form-section {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 18px 18px 8px;
+  margin-bottom: 16px;
+  background: #ffffff;
+}
+
+.section-title {
+  margin-bottom: 16px;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.section-tip {
+  margin: -2px 0 10px 120px;
+  line-height: 1.7;
 }
 
 .form-control {
   width: 100%;
+}
+
+.config-summary-box {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.config-summary-item {
+  min-width: 0;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f8fbff;
+}
+
+.config-summary-item span {
+  display: block;
+  margin-bottom: 4px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.config-summary-item strong {
+  display: block;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .readonly-field {
@@ -331,9 +573,23 @@ function publishChannelLabel(value?: string | null) {
   gap: 10px;
 }
 
+.range-row :deep(.el-input-number) {
+  width: 170px;
+}
+
 .switch-list {
   display: flex;
   flex-wrap: wrap;
   gap: 10px 16px;
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 14px;
+}
+
+.config-grid :deep(.el-input-number) {
+  width: 100%;
 }
 </style>

@@ -42,6 +42,42 @@
           <el-descriptions-item label="文章类型">{{ articleTypeLabel(detailData.article.articleTypeCode) }}</el-descriptions-item>
           <el-descriptions-item label="发布渠道">{{ detailChannelLabel(detailData) }}</el-descriptions-item>
           <el-descriptions-item label="文章模板">{{ detailTemplateUsageLabel(detailData) }}</el-descriptions-item>
+          <el-descriptions-item v-if="detailData.article.medicalIndustryCode" label="医疗行业">{{ detailData.article.medicalIndustryCode }}</el-descriptions-item>
+          <el-descriptions-item v-if="detailData.article.medicalCategoryCode" label="医疗品类">{{ detailData.article.medicalCategoryCode }}</el-descriptions-item>
+          <el-descriptions-item v-if="detailData.article.medicalChannelTier" label="医疗档位">
+            {{ detailData.article.medicalChannelTier }}
+          </el-descriptions-item>
+          <el-descriptions-item v-if="detailData.article.complianceStatus" label="合规状态">
+            <el-tag size="small" :type="medicalComplianceTag(detailData.article.complianceStatus)">
+              {{ medicalComplianceLabel(detailData.article.complianceStatus) }}
+            </el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="detailData.article.medicalChannelTier === 'official_site'" label="发布确认">
+            <div class="medical-review-line">
+              <el-tag size="small" :type="medicalReviewTag(detailData.article.publishReviewStatus)">
+                {{ medicalReviewLabel(detailData.article.publishReviewStatus) }}
+              </el-tag>
+              <el-button
+                v-if="canReviewMedicalPublish(detailData.article)"
+                link
+                type="warning"
+                @click="emit('medicalPublishReview', 'approve')"
+              >
+                法务通过
+              </el-button>
+              <el-button
+                v-if="canReviewMedicalPublish(detailData.article)"
+                link
+                type="danger"
+                @click="emit('medicalPublishReview', 'reject')"
+              >
+                驳回
+              </el-button>
+            </div>
+          </el-descriptions-item>
+          <el-descriptions-item v-if="detailData.article.medicalAdReviewNo" label="广告审查号" :span="2">
+            {{ detailData.article.medicalAdReviewNo }}
+          </el-descriptions-item>
           <el-descriptions-item label="文章主题" :span="2">{{ detailTopic(detailData) || '-' }}</el-descriptions-item>
           <el-descriptions-item v-if="riskWordHits(detailData.article).length" label="风险词" :span="2">
             <div class="risk-word-list">
@@ -131,6 +167,11 @@ const props = defineProps<{
   riskSeverityLabel: (severity?: string | null) => string
   riskSourceLabel: (source?: string | null) => string
   generatedByLabel: (value?: string | null) => string
+  medicalComplianceLabel: (value?: string | null) => string
+  medicalComplianceTag: (value?: string | null) => TagType
+  medicalReviewLabel: (value?: string | null) => string
+  medicalReviewTag: (value?: string | null) => TagType
+  canReviewMedicalPublish: (article?: ArticleDraft | null) => boolean
 }>()
 
 const emit = defineEmits<{
@@ -138,6 +179,7 @@ const emit = defineEmits<{
   'update:viewMode': [value: ViewMode]
   revision: []
   styleRender: [command: string]
+  medicalPublishReview: [action: 'approve' | 'reject']
 }>()
 
 const visible = computed({
@@ -260,6 +302,13 @@ const viewMode = computed({
   overflow: hidden;
   border-radius: 10px;
   background: #e2e8f0;
+}
+
+.medical-review-line {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .detail-cover-panel img {

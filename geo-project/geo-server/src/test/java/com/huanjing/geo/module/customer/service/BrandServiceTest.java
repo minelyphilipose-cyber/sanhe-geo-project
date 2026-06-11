@@ -13,6 +13,7 @@ import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
 import com.huanjing.geo.module.customer.mapper.BrandProfileVersionMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
+import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
@@ -46,6 +47,7 @@ class BrandServiceTest {
                 mock(BrandProfileVersionMapper.class),
                 companyMapper,
                 mock(ProjectMapper.class),
+                mock(SysDictItemMapper.class),
                 currentUserService,
                 internalScopeService,
                 mock(ActivityLogService.class),

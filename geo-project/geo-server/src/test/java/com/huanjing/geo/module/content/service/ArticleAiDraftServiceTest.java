@@ -49,6 +49,7 @@ class ArticleAiDraftServiceTest {
     private ArticleAiDraftRateLimiter rateLimiter;
     private AuditService auditService;
     private ArticleGenerationPromptContextFactory promptContextFactory;
+    private BrandOfferingPromptSelector offeringPromptSelector;
     private ArticleAiDraftService service;
 
     @BeforeEach
@@ -67,6 +68,7 @@ class ArticleAiDraftServiceTest {
         PlatformCredentialService credentialService = mock(PlatformCredentialService.class);
         llmInvoker = mock(LlmInvoker.class);
         ArticleAiDraftPromptFilter promptFilter = mock(ArticleAiDraftPromptFilter.class);
+        offeringPromptSelector = mock(BrandOfferingPromptSelector.class);
         rateLimiter = mock(ArticleAiDraftRateLimiter.class);
         auditService = mock(AuditService.class);
         SysDictItemMapper sysDictItemMapper = mock(SysDictItemMapper.class);
@@ -83,6 +85,9 @@ class ArticleAiDraftServiceTest {
         when(promptFilter.filterOutboundPrompt(any(), any(), any(), anyBoolean())).thenAnswer(i -> i.getArgument(0));
         when(promptFilter.filterGeneratedContent(any(), any(), any())).thenAnswer(i -> i.getArgument(0));
         when(promptFilter.filterGeneratedContent(any(), any(), any(), anyBoolean())).thenAnswer(i -> i.getArgument(0));
+        when(offeringPromptSelector.select(any(), any(), any(), any(), any()))
+                .thenReturn(new BrandOfferingPromptSelector.SelectionResult(
+                        List.<BrandOfferingPromptSelector.SelectedOffering>of()));
         ArticleModelResolver modelResolver = new ArticleModelResolver(configMapper, credentialService);
         ArticleGenerationEngine generationEngine = new ArticleGenerationEngine(
                 llmInvoker,
@@ -101,7 +106,8 @@ class ArticleAiDraftServiceTest {
 
         service = new ArticleAiDraftService(projectMapper, brandMapper, articleMapper, versionMapper,
                 currentUserService, brandAccessService, promptBuilder, promptContextFactory,
-                generationEngine, mock(ArticleCoverSelectionService.class), rateLimiter, auditService,
+                offeringPromptSelector, generationEngine, mock(MedicalArticleComplianceChecker.class),
+                mock(ArticleCoverSelectionService.class), rateLimiter, auditService,
                 objectMapper, txManager(), Runnable::run);
     }
 
@@ -464,7 +470,8 @@ class ArticleAiDraftServiceTest {
                 "title guide",
                 "customer",
                 TemplatePerspectiveService.MATCH_SCOPE_DEFAULT,
-                null
+                null,
+                List.<BrandOfferingPromptSelector.SelectedOffering>of()
         );
         BatchArticlePromptBuilder.PromptBuildResult prompt = new BatchArticlePromptBuilder.PromptBuildResult(
                 "system prompt",

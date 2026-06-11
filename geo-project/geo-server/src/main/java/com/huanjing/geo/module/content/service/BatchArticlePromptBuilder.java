@@ -175,6 +175,7 @@ public class BatchArticlePromptBuilder {
         promptSnapshot.put("perspectiveCode", input.perspectiveCode());
         promptSnapshot.put("perspectiveMatchedScope", input.perspectiveMatchedScope());
         promptSnapshot.put("perspectiveMatchedConfigId", input.perspectiveMatchedConfigId());
+        promptSnapshot.put("selectedOfferings", input.selectedOfferings());
 
         Map<String, Object> inputSnapshot = new LinkedHashMap<>();
         inputSnapshot.put("promptVersion", PROMPT_VERSION);
@@ -196,6 +197,7 @@ public class BatchArticlePromptBuilder {
         inputSnapshot.put("perspectiveCode", input.perspectiveCode());
         inputSnapshot.put("perspectiveMatchedScope", input.perspectiveMatchedScope());
         inputSnapshot.put("perspectiveMatchedConfigId", input.perspectiveMatchedConfigId());
+        inputSnapshot.put("selectedOfferings", input.selectedOfferings());
 
         return new PromptBuildResult(
                 systemPrompt,
@@ -245,6 +247,7 @@ public class BatchArticlePromptBuilder {
         promptSnapshot.put("perspectiveCode", input.perspectiveCode());
         promptSnapshot.put("perspectiveMatchedScope", input.perspectiveMatchedScope());
         promptSnapshot.put("perspectiveMatchedConfigId", input.perspectiveMatchedConfigId());
+        promptSnapshot.put("selectedOfferings", input.selectedOfferings());
 
         Map<String, Object> inputSnapshot = new LinkedHashMap<>();
         inputSnapshot.put("promptVersion", "template_v" + version.getVersionNo());
@@ -274,6 +277,7 @@ public class BatchArticlePromptBuilder {
         inputSnapshot.put("contactBlock", contactBlock);
         inputSnapshot.put("brandFacts", brandFacts);
         inputSnapshot.put("titleGuide", input.titleGuide());
+        inputSnapshot.put("selectedOfferings", input.selectedOfferings());
 
         return new PromptBuildResult(systemPrompt, systemPrompt + "\n\n" + userPrompt, contentAngle, audiencePerspective,
                 json(promptSnapshot), json(inputSnapshot));
@@ -333,6 +337,7 @@ public class BatchArticlePromptBuilder {
         appendLine(sb, "读者画像参考", project.getTargetAudience());
         appendLine(sb, "项目内容方向", project.getContentTone());
         appendBrandBackground(sb, brand, businessFocus);
+        appendSelectedOfferings(sb, input.selectedOfferings());
 
         sb.append("\n# 写作配置\n\n");
         appendLine(sb, "文章类型", label(ArticlePromptChannels.ARTICLE_TYPE_LABELS, input.articleType(), input.articleType()));
@@ -445,6 +450,25 @@ public class BatchArticlePromptBuilder {
         values.put("titleElements", input.titleGuide() == null ? "" : input.titleGuide());
         values.putAll(brandFacts);
         return variableRegistry.render(rendered, values);
+    }
+
+    private void appendSelectedOfferings(StringBuilder sb, List<BrandOfferingPromptSelector.SelectedOffering> offerings) {
+        if (offerings == null || offerings.isEmpty()) {
+            return;
+        }
+        sb.append("\n本篇可引用的产品/服务项目/特色业务项：\n");
+        for (BrandOfferingPromptSelector.SelectedOffering offering : offerings) {
+            sb.append("- ").append(trimToDash(offering.name()));
+            if (offering.aliases() != null && !offering.aliases().isEmpty()) {
+                sb.append("（简称：").append(String.join("、", offering.aliases())).append("）");
+            }
+            sb.append("\n");
+            appendNestedLine(sb, "目标人群", offering.targetUsers());
+            appendNestedLine(sb, "适用场景", offering.useScenarios());
+            appendNestedLine(sb, "介绍", offering.intro());
+            appendNestedLine(sb, "资质描述", offering.qualificationDescription());
+        }
+        sb.append("以上资料只作为解释用户问题时的事实素材，不得编造价格、效果、认证、案例或承诺。\n");
     }
 
     private Map<String, String> buildBrandFacts(PromptBuildInput input) {
@@ -680,6 +704,12 @@ public class BatchArticlePromptBuilder {
         }
     }
 
+    private void appendNestedLine(StringBuilder sb, String label, String value) {
+        if (StringUtils.hasText(value)) {
+            sb.append("  - ").append(label).append("：").append(value.trim()).append("\n");
+        }
+    }
+
     private String trimToNull(String value) {
         return StringUtils.hasText(value) ? value.trim() : null;
     }
@@ -743,7 +773,8 @@ public class BatchArticlePromptBuilder {
                                    String titleGuide,
                                    String perspectiveCode,
                                    String perspectiveMatchedScope,
-                                   Long perspectiveMatchedConfigId) {
+                                   Long perspectiveMatchedConfigId,
+                                   List<BrandOfferingPromptSelector.SelectedOffering> selectedOfferings) {
     }
 
     public record PromptBuildResult(String systemPrompt,

@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -49,6 +50,8 @@ class ArticleGenerationPromptContextFactoryTest {
     private final ArticleDraftMapper articleDraftMapper = mock(ArticleDraftMapper.class);
     private final SysDictItemMapper sysDictItemMapper = mock(SysDictItemMapper.class);
     private final TemplatePerspectiveService perspectiveService = mock(TemplatePerspectiveService.class);
+    private final BrandOfferingPromptSelector offeringPromptSelector = mock(BrandOfferingPromptSelector.class);
+    private final MedicalArticleGenerationService medicalArticleGenerationService = mock(MedicalArticleGenerationService.class);
 
     private ArticleGenerationPromptContextFactory factory;
 
@@ -80,7 +83,9 @@ class ArticleGenerationPromptContextFactoryTest {
                 promptTemplateMapper,
                 promptTemplateVersionMapper,
                 promptBuilder,
-                perspectiveService
+                perspectiveService,
+                offeringPromptSelector,
+                medicalArticleGenerationService
         );
 
         when(projectMapper.selectById(10L)).thenReturn(project());
@@ -92,6 +97,10 @@ class ArticleGenerationPromptContextFactoryTest {
         when(promptTemplateVersionMapper.selectById(200L)).thenReturn(version());
         when(perspectiveService.resolve(any(), any(), any()))
                 .thenReturn(TemplatePerspectiveService.ResolvedPerspective.customer());
+        when(offeringPromptSelector.select(any(), any(), any(), any(), any()))
+                .thenReturn(new BrandOfferingPromptSelector.SelectionResult(
+                        List.<BrandOfferingPromptSelector.SelectedOffering>of()));
+        when(medicalArticleGenerationService.resolveContext(any(), any(), any(), any(), any())).thenReturn(Optional.empty());
     }
 
     @Test

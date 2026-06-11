@@ -4,9 +4,11 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.constant.SelfMediaPublishScheduleConstants;
+import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
+import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.entity.SelfMediaAccount;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishScheduleRequest;
@@ -66,6 +68,7 @@ class SelfMediaPublishScheduleServiceTest {
     private SelfMediaPublishScheduleAlertService alertService;
     private SelfMediaPublishScheduleEnvironmentLockService environmentLockService;
     private ContentDistributionService contentDistributionService;
+    private CompanyChannelQuotaService companyChannelQuotaService;
     private BrandAccessService brandAccessService;
     private SelfMediaPublishScheduleService service;
 
@@ -89,6 +92,9 @@ class SelfMediaPublishScheduleServiceTest {
         when(alertService.listOpenAlertsByScheduleIds(any())).thenReturn(Map.of());
         environmentLockService = mock(SelfMediaPublishScheduleEnvironmentLockService.class);
         contentDistributionService = mock(ContentDistributionService.class);
+        companyChannelQuotaService = mock(CompanyChannelQuotaService.class);
+        when(companyChannelQuotaService.selfMediaDistributionQuota(anyLong(), anyString()))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 0, 100));
         brandAccessService = mock(BrandAccessService.class);
         CurrentUserService currentUserService = mock(CurrentUserService.class);
         SysUser user = new SysUser();
@@ -108,6 +114,7 @@ class SelfMediaPublishScheduleServiceTest {
                 alertService,
                 environmentLockService,
                 contentDistributionService,
+                companyChannelQuotaService,
                 brandAccessService,
                 currentUserService,
                 new ObjectMapper()
@@ -196,6 +203,7 @@ class SelfMediaPublishScheduleServiceTest {
         article.setCoverImageUrl(null);
         SelfMediaAccount account = account();
         account.setPlatform("baijiahao");
+        account.setPlatformAccountId("1867055852901021");
         BrowserEnvironmentAccount binding = binding();
         binding.setPlatform("baijiahao");
 
@@ -226,6 +234,46 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("ARTICLE_COVER_REQUIRED", response.getRejectedItems().get(0).getCode());
         assertEquals("文章详情 > 文章封面", response.getRejectedItems().get(0).getSettingPath());
         verify(browserEnvironmentService, never()).validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean());
+        verify(scheduleMapper, never()).insert(any());
+    }
+
+    @Test
+    void createSchedules_rejectsBaijiahaoAccountWithoutAppId() {
+        ArticleDraft article = article();
+        SelfMediaAccount account = account();
+        account.setPlatform("baijiahao");
+        account.setPlatformAccountId(null);
+
+        when(articleDraftMapper.selectById(10L)).thenReturn(article);
+        when(projectMapper.selectById(7L)).thenReturn(project());
+        when(brandMapper.selectById(8L)).thenReturn(brand());
+        when(accountMapper.selectById(20L)).thenReturn(account);
+        stubRequestInsert();
+
+        SelfMediaPublishScheduleCreateResponse response = service.createSchedules(validRequest(), "new-key");
+
+        assertTrue(response.getCreatedSchedules().isEmpty());
+        assertEquals(1, response.getRejectedItems().size());
+        assertEquals("BAIJIAHAO_APP_ID_REQUIRED", response.getRejectedItems().get(0).getCode());
+        assertEquals("品牌详情 > 自媒体账号 > 百家号 ID", response.getRejectedItems().get(0).getSettingPath());
+        verify(scheduleCapabilityService, never()).readiness(anyString(), anyString());
+        verify(scheduleMapper, never()).insert(any());
+    }
+
+    @Test
+    void createSchedules_rejectsWhenSelfMediaChannelQuotaExhausted() {
+        prepareValidArticleAndAccount();
+        when(browserEnvironmentService.validateForTaskCreation(any(SelfMediaAccount.class), anyBoolean())).thenReturn(binding());
+        when(companyChannelQuotaService.selfMediaDistributionQuota(6L, "toutiao"))
+                .thenReturn(new CompanyChannelQuotaService.DistributionQuotaView("self_media:toutiao", "month", "2026-06", 3, 3));
+        stubRequestInsert();
+
+        SelfMediaPublishScheduleCreateResponse response = service.createSchedules(validRequest(), "new-key");
+
+        assertTrue(response.getCreatedSchedules().isEmpty());
+        assertEquals(1, response.getRejectedItems().size());
+        assertEquals("CHANNEL_QUOTA_EXHAUSTED", response.getRejectedItems().get(0).getCode());
+        assertEquals("客户套餐 > 渠道额度", response.getRejectedItems().get(0).getSettingPath());
         verify(scheduleMapper, never()).insert(any());
     }
 
@@ -710,6 +758,7 @@ class SelfMediaPublishScheduleServiceTest {
     void markClaimedScheduledReleasesEnvironmentLockAtSuccessTerminalState() {
         SelfMediaPublishSchedule scheduling = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_SCHEDULING);
         scheduling.setId(102L);
+        scheduling.setDistributionTaskId(302L);
         LocalDateTime publishAt = LocalDateTime.of(2026, 6, 1, 18, 30);
         scheduling.setPlatformScheduledAt(publishAt);
         when(scheduleMapper.selectById(102L)).thenReturn(scheduling);
@@ -721,7 +770,57 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(SelfMediaPublishScheduleConstants.QUEUE_PUBLISH_RESULT_CHECK, response.getQueueKind());
         assertEquals(publishAt, response.getNextAttemptAt());
         verify(scheduleMapper).updateById(scheduling);
+        verify(companyChannelQuotaService).confirmDistribution(302L);
         verify(environmentLockService).release(102L);
+    }
+
+    @Test
+    void claimNextTaskForLocalAgentUsesAttemptScopedDistributionRequestId() {
+        SelfMediaPublishSchedule candidate = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_PENDING);
+        candidate.setId(109L);
+        candidate.setPlatform("baijiahao");
+        candidate.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        SelfMediaPublishSchedule claimed = scheduleWithStatus(SelfMediaPublishScheduleConstants.STATUS_FILLING);
+        claimed.setId(109L);
+        claimed.setPlatform("baijiahao");
+        claimed.setGenerationNo(2);
+        claimed.setAttemptCount(3);
+        claimed.setQueueKind(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION);
+        SelfMediaAccount account = new SelfMediaAccount();
+        account.setId(20L);
+        account.setPlatform("baijiahao");
+        when(scheduleMapper.selectDueQueueCandidatesForOperator(
+                eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
+                eq(List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING)),
+                any(),
+                eq(10),
+                eq(99L),
+                eq("baijiahao"),
+                eq(Set.of("toutiao", "baijiahao", "xiaohongshu", "zhihu"))
+        )).thenReturn(List.of(candidate));
+        when(environmentLockService.tryAcquire(eq(15L), eq(109L), any(), any())).thenReturn(true);
+        when(scheduleMapper.claimQueueSchedule(
+                eq(109L),
+                eq(SelfMediaPublishScheduleConstants.QUEUE_SCHEDULE_EXECUTION),
+                eq(List.of(SelfMediaPublishScheduleConstants.STATUS_PENDING)),
+                eq(SelfMediaPublishScheduleConstants.STATUS_FILLING),
+                any(),
+                any()
+        )).thenReturn(1);
+        when(scheduleMapper.selectById(109L)).thenReturn(claimed);
+        when(accountMapper.selectById(20L)).thenReturn(account);
+        DistributionTask task = new DistributionTask();
+        task.setId(409L);
+        when(contentDistributionService.distributeToAsOperator(eq(10L), any(TargetContext.class), eq(99L)))
+                .thenReturn(task);
+
+        SelfMediaPublishScheduleVO response = service.claimNextTaskForLocalAgent(99L, "baijiahao", 3).schedule();
+
+        assertEquals(109L, response.getId());
+        ArgumentCaptor<TargetContext> targetCaptor = ArgumentCaptor.forClass(TargetContext.class);
+        verify(contentDistributionService).distributeToAsOperator(eq(10L), targetCaptor.capture(), eq(99L));
+        TargetContext.SelfMediaTarget target = (TargetContext.SelfMediaTarget) targetCaptor.getValue();
+        assertEquals("schedule-109-gen-2-attempt-3", target.requestId());
     }
 
     @Test
@@ -791,6 +890,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(SelfMediaPublishScheduleConstants.STATUS_PENDING, response.getStatus());
         assertEquals(nextAttemptAt, response.getNextAttemptAt());
         assertEquals("WORKS_LIST_VERIFY_TIMEOUT", response.getFailureCode());
+        verify(companyChannelQuotaService).refundDistribution(300L);
         verify(environmentLockService).release(100L);
     }
 
@@ -834,6 +934,7 @@ class SelfMediaPublishScheduleServiceTest {
     private Brand brand() {
         Brand row = new Brand();
         row.setId(8L);
+        row.setCompanyId(6L);
         row.setSelfMediaPublishLocationName("阜阳");
         row.setCityName("西安");
         return row;

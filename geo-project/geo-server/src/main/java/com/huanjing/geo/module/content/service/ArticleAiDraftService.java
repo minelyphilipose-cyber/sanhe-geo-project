@@ -11,6 +11,7 @@ import com.huanjing.geo.module.audit.service.AuditService;
 import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
+import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
 import com.huanjing.geo.module.content.dto.*;
 import com.huanjing.geo.module.content.entity.*;
 import com.huanjing.geo.module.content.mapper.*;
@@ -78,7 +79,9 @@ public class ArticleAiDraftService {
     private final BrandAccessService brandAccessService;
     private final BatchArticlePromptBuilder promptBuilder;
     private final ArticleGenerationPromptContextFactory promptContextFactory;
+    private final BrandOfferingPromptSelector offeringPromptSelector;
     private final ArticleGenerationEngine articleGenerationEngine;
+    private final MedicalArticleComplianceChecker medicalComplianceChecker;
     private final ArticleCoverSelectionService coverSelectionService;
     private final ArticleAiDraftRateLimiter rateLimiter;
     private final AuditService auditService;
@@ -92,7 +95,9 @@ public class ArticleAiDraftService {
                                  BrandAccessService brandAccessService,
                                  BatchArticlePromptBuilder promptBuilder,
                                  ArticleGenerationPromptContextFactory promptContextFactory,
+                                 BrandOfferingPromptSelector offeringPromptSelector,
                                  ArticleGenerationEngine articleGenerationEngine,
+                                 MedicalArticleComplianceChecker medicalComplianceChecker,
                                  ArticleCoverSelectionService coverSelectionService,
                                  ArticleAiDraftRateLimiter rateLimiter,
                                  AuditService auditService, ObjectMapper objectMapper,
@@ -104,7 +109,9 @@ public class ArticleAiDraftService {
         this.brandAccessService = brandAccessService;
         this.promptBuilder = promptBuilder;
         this.promptContextFactory = promptContextFactory;
+        this.offeringPromptSelector = offeringPromptSelector;
         this.articleGenerationEngine = articleGenerationEngine;
+        this.medicalComplianceChecker = medicalComplianceChecker;
         this.coverSelectionService = coverSelectionService;
         this.rateLimiter = rateLimiter;
         this.auditService = auditService; this.objectMapper = objectMapper;
@@ -199,6 +206,12 @@ public class ArticleAiDraftService {
                 req.getExtraPrompt(),
                 req.getPromptTemplateId(),
                 req.getPromptTemplateVersionId(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -303,6 +316,7 @@ public class ArticleAiDraftService {
                     )
             );
             model = generated.model();
+            ensureMedicalCompliancePassed(context, generated);
             ArticleDraft draft = persistTemplateDraft(context, operator, generated, model);
             auditGenerated(AuditResult.SUCCESS, operator, context.project(), draft.getId(), context.prompt().userPrompt().length(),
                     model.platformCode(), model.modelId(), elapsedMs(started), "template_generation_generated", null);
@@ -515,6 +529,7 @@ public class ArticleAiDraftService {
             draft.setTopic(input.topic());
             draft.setTopicAsQuestion(context.topicAsQuestion());
             draft.setTitle(title);
+            applyMedicalDraftFields(draft, context.medicalContext());
             if (ArticlePromptChannels.SELF_MEDIA.equals(context.channelGroupCode())) {
                 draft.setCoverImageUrl(coverSelectionService.selectRandomCoverUrl(context.project().getBrandId()));
             }
@@ -539,6 +554,66 @@ public class ArticleAiDraftService {
             articleDraftVersionMapper.insert(version);
             return draft;
         }));
+    }
+
+    private void ensureMedicalCompliancePassed(ArticleGenerationPromptContextFactory.PromptContextResult context,
+                                               ArticleGenerationEngine.GeneratedArticle generated) {
+        if (context.medicalContext() == null) {
+            return;
+        }
+        MedicalArticleComplianceChecker.CheckResult result = medicalComplianceChecker.check(
+                new MedicalArticleComplianceChecker.CheckInput(
+                        null,
+                        null,
+                        context.project().getId(),
+                        context.project().getBrandId(),
+                        context.channelGroupCode(),
+                        context.channelSubCode(),
+                        generated.title(),
+                        generated.content(),
+                        context.brand(),
+                        context.medicalContext()
+                )
+        );
+        if (!result.passed()) {
+            medicalComplianceChecker.logHits(
+                    new MedicalArticleComplianceChecker.CheckInput(
+                            null,
+                            null,
+                            context.project().getId(),
+                            context.project().getBrandId(),
+                            context.channelGroupCode(),
+                            context.channelSubCode(),
+                            generated.title(),
+                            generated.content(),
+                            context.brand(),
+                            context.medicalContext()
+                    ),
+                    result,
+                    null,
+                    "block"
+            );
+            throw new BizException(ContentErrorCodes.ARTICLE_AI_DRAFT_GENERATE_FAILED, "医疗合规校验未通过：" + medicalComplianceChecker.toJson(result));
+        }
+    }
+
+    private void applyMedicalDraftFields(ArticleDraft draft,
+                                         MedicalArticleGenerationService.MedicalPromptContext context) {
+        if (context == null) {
+            return;
+        }
+        draft.setComplianceStatus(MedicalArticleConstants.COMPLIANCE_PASSED);
+        draft.setMedicalAdReviewNo(context.medicalAdReviewNo());
+        draft.setMedicalChannelTier(context.channelTier());
+        draft.setMedicalIndustryCode(context.industryCode());
+        draft.setMedicalCategoryCode(context.categoryCode());
+        if (MedicalArticleConstants.TIER_OFFICIAL_SITE.equals(context.channelTier())) {
+            draft.setPublishReviewStatus(StringUtils.hasText(context.medicalAdReviewNo())
+                    ? MedicalArticleConstants.REVIEW_PASSED
+                    : MedicalArticleConstants.REVIEW_PENDING);
+        } else {
+            draft.setPublishReviewStatus(MedicalArticleConstants.REVIEW_NOT_REQUIRED);
+        }
     }
 
     private Project requireProject(Long projectId) {
@@ -682,13 +757,21 @@ public class ArticleAiDraftService {
                                                                            Project project,
                                                                            Brand brand) {
         String topic = trim(req.getTopic());
+        String topicAsQuestion = promptBuilder.topicAsQuestion(topic, articleType, 1);
+        BrandOfferingPromptSelector.SelectionResult selectedOfferings = offeringPromptSelector.select(
+                project.getBrandId(),
+                topic,
+                topicAsQuestion,
+                articleType,
+                defaultOption(req.getContentStyle(), DEFAULT_CONTENT_STYLE)
+        );
         return promptBuilder.build(new BatchArticlePromptBuilder.PromptBuildInput(
                 project,
                 brand,
                 resolveBrandStatement(project, brand),
                 "manual_preview",
                 topic,
-                promptBuilder.topicAsQuestion(topic, articleType, 1),
+                topicAsQuestion,
                 null,
                 null,
                 List.of(),
@@ -701,7 +784,8 @@ public class ArticleAiDraftService {
                 null,
                 com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes.CUSTOMER,
                 TemplatePerspectiveService.MATCH_SCOPE_DEFAULT,
-                null
+                null,
+                selectedOfferings.offerings()
         ), buildContactBlock(articleType, req.getTopic(), brand));
     }
 

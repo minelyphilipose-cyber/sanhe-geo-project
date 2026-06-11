@@ -2,7 +2,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8">
-    <title>GEO Env Fill PoC</title>
+    <title>GEO 自媒体助手</title>
     <style>
       body {
         width: 360px;
@@ -84,57 +84,76 @@
         color: #64748b;
         font-size: 12px;
       }
+      details {
+        margin-top: 10px;
+        padding: 10px;
+        border: 1px solid #dce2ee;
+        border-radius: 8px;
+        background: #fff;
+      }
+      summary {
+        cursor: pointer;
+        font-weight: 700;
+      }
     </style>
   </head>
   <body>
-    <h1>GEO 环境填充 PoC</h1>
+    <h1>GEO 自媒体助手</h1>
 
-    <label for="apiBase">后台地址</label>
-    <input id="apiBase" placeholder="http://119.45.154.127">
+    <div class="status" id="status">未加载配置</div>
 
-    <label for="helperBase">本地助手地址</label>
-    <input id="helperBase" placeholder="http://127.0.0.1:17891">
-    <p class="hint">本地助手请求只使用后台签发的 C2 签名，不再使用静态 Token。</p>
-
-    <label for="environmentKey">环境标识</label>
-    <input id="environmentKey" placeholder="geo_b">
-
-    <div class="row">
-      <div>
-        <label for="environmentAccountId">环境账号ID（兼容）</label>
-        <input id="environmentAccountId" placeholder="可留空，按环境+平台识别">
-      </div>
-      <div>
-        <label for="selfMediaAccountId">自媒体账号ID（可选）</label>
-        <input id="selfMediaAccountId" placeholder="可留空，后端按环境账号绑定识别">
-      </div>
-    </div>
-
-    <label for="platform">平台</label>
-    <input id="platform" placeholder="toutiao / zhihu / xiaohongshu">
-
-    <div class="row">
-      <div>
-        <label for="brandId">品牌 ID</label>
-        <input id="brandId" placeholder="可选">
-      </div>
-      <div>
-        <label for="bindCode">绑定码</label>
-        <input id="bindCode" placeholder="ABCD-EFGH">
-      </div>
-    </div>
-
-    <button id="saveBtn">保存配置</button>
     <label class="check">
       <input id="autoRun" type="checkbox">
       打开平台页后自动领取并填充
     </label>
-    <button id="bindBtn" class="secondary">绑定后台</button>
-    <button id="reportLoginBtn" class="secondary">上报当前页登录状态</button>
-    <button id="pollBtn">领取任务并填充一次</button>
-    <button id="selfTestBtn" class="secondary">运行安全自检</button>
 
-    <div class="status" id="status">未加载配置</div>
+    <label for="bindCode">后台绑定码</label>
+    <input id="bindCode" placeholder="首次绑定时填写">
+
+    <div class="row">
+      <button id="bindBtn" class="secondary">绑定后台</button>
+      <button id="reportLoginBtn" class="secondary">上报登录状态</button>
+    </div>
+    <button id="pollBtn">领取任务并填充一次</button>
+
+    <details>
+      <summary>高级配置</summary>
+
+      <label for="apiBase">后台地址</label>
+      <input id="apiBase" placeholder="http://119.45.154.127">
+
+      <label for="helperBase">本地助手地址</label>
+      <input id="helperBase" placeholder="http://127.0.0.1:17891">
+      <p class="hint">通常无需修改；只有联调或迁移环境时由技术人员调整。</p>
+
+      <label for="environmentKey">环境标识</label>
+      <input id="environmentKey" placeholder="geo_b">
+
+      <div class="row">
+        <div>
+          <label for="environmentAccountId">环境账号 ID</label>
+          <input id="environmentAccountId" placeholder="可留空">
+        </div>
+        <div>
+          <label for="selfMediaAccountId">自媒体账号 ID</label>
+          <input id="selfMediaAccountId" placeholder="可留空">
+        </div>
+      </div>
+
+      <label for="platform">平台</label>
+      <input id="platform" placeholder="toutiao / zhihu / xiaohongshu / baijiahao">
+
+      <div class="row">
+        <div>
+          <label for="brandId">品牌 ID</label>
+          <input id="brandId" placeholder="可选">
+        </div>
+      </div>
+
+      <button id="saveBtn">保存配置</button>
+      <button id="selfTestBtn" class="secondary">运行安全自检</button>
+    </details>
+
     <pre id="log"></pre>
 
     <script src="popup.js"></script>

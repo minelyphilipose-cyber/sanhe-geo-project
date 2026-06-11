@@ -42,9 +42,111 @@ export function evaluateXiaohongshuPublishSignals(target = {}, pageState = {}, o
   }
 }
 
-function titleProbeOf(value) {
+export function evaluateBaijiahaoPublishSignals(target = {}, pageState = {}, options = {}) {
+  const text = String(pageState.text || '')
+  const normalizedText = normalizeCompact(text)
+  const titleProbe = titleProbeOf(target.title, 20)
+  const hasTitle = Boolean(titleProbe && normalizedText.includes(titleProbe))
+  const scheduleProbe = normalizeScheduleProbe(target.platformScheduledAt)
+  const hasScheduleTime = !scheduleProbe || normalizedText.includes(scheduleProbe)
+  const scheduledAtMs = parseLocalDateTimeMs(target.platformScheduledAt)
+  const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now()
+  const isBeforeScheduledAt = Number.isFinite(scheduledAtMs) && scheduledAtMs > nowMs
+  const url = String(pageState.url || '')
+  const matchedUrl = Array.isArray(pageState.anchors)
+    ? pageState.anchors.find((item) => normalizeCompact(item.text).includes(titleProbe))?.href || ''
+    : ''
+  const hasRejectedSignal = /审核未通过|未通过|审核失败|发布失败|不通过/.test(text)
+  const hasWithdrawnSignal = /已撤回|已删除|已下线|已撤销/.test(text)
+  const hasReviewSignal = /审核中|待审核|提交成功|已提交/.test(text)
+  const hasScheduledSignal = /预计\d{4}[-年]\d{1,2}[-月]\d{1,2}|预计\s*\d{4}|定时发布|发布时间|待发布|将于/.test(text)
+  const hasPublishedSignal = /已发布|已推荐|发布成功/.test(text)
+  const platformScheduledText = extractBaijiahaoScheduledText(text)
+
+  const pendingScheduled = hasTitle && isBeforeScheduledAt && (hasScheduleTime || hasScheduledSignal || hasReviewSignal)
+  const failed = hasTitle && (hasRejectedSignal || hasWithdrawnSignal)
+  const reviewing = hasTitle && hasReviewSignal && !hasPublishedSignal && !failed
+  const scheduled = hasTitle && hasScheduledSignal && !hasPublishedSignal && !failed
+  const found = hasTitle && !isBeforeScheduledAt && hasPublishedSignal
+    && (hasScheduleTime || hasReviewSignal || !target.platformScheduledAt)
+  const platformStatus = failed
+    ? (hasRejectedSignal ? 'rejected' : 'withdrawn')
+    : hasPublishedSignal
+      ? 'published'
+      : reviewing
+        ? 'reviewing'
+        : scheduled
+          ? 'scheduled'
+          : 'unknown'
+  const reason = baijiahaoPublishCheckReason({
+    pendingScheduled,
+    failed,
+    found,
+    reviewing,
+    scheduled,
+    hasTitle,
+    hasPublishedSignal,
+    platformStatus,
+  })
+
+  return {
+    found,
+    failed,
+    pendingScheduled,
+    platformStatus,
+    failureCode: failed
+      ? (hasRejectedSignal ? 'BAIJIAHAO_REVIEW_REJECTED' : 'BAIJIAHAO_WORK_WITHDRAWN')
+      : undefined,
+    failureMessage: failed
+      ? (hasRejectedSignal ? '百家号作品审核未通过或发布失败' : '百家号作品已撤回、删除或下线')
+      : undefined,
+    reason,
+    hasTitle,
+    hasScheduleTime,
+    hasScheduledSignal,
+    hasPublishedSignal,
+    hasReviewSignal,
+    hasRejectedSignal,
+    hasWithdrawnSignal,
+    isBeforeScheduledAt,
+    targetTitle: target.title || '',
+    platformScheduledAt: target.platformScheduledAt || '',
+    platformScheduledText,
+    scheduleProbe,
+    url: matchedUrl || url,
+    pageTitle: pageState.pageTitle || '',
+    textSample: text.slice(0, 1200),
+  }
+}
+
+function extractBaijiahaoScheduledText(text) {
+  const value = String(text || '')
+  const patterns = [
+    /预计\s*\d{4}[-年]\d{1,2}[-月]\d{1,2}[日\s]+\d{1,2}:\d{2}\s*发布/,
+    /预计\s*\d{4}[-年]\d{1,2}[-月]\d{1,2}[日\s]+\d{1,2}点\d{1,2}分?\s*发布/,
+    /将于\s*\d{4}[-年]\d{1,2}[-月]\d{1,2}[日\s]+\d{1,2}:\d{2}\s*发布/,
+    /发布时间[:：]?\s*\d{4}[-年]\d{1,2}[-月]\d{1,2}[日\s]+\d{1,2}:\d{2}/,
+  ]
+  for (const pattern of patterns) {
+    const match = value.match(pattern)
+    if (match) return match[0].replace(/\s+/g, ' ').trim()
+  }
+  return ''
+}
+
+function baijiahaoPublishCheckReason(state) {
+  if (state.pendingScheduled) return 'platform schedule time not due'
+  if (state.failed) return state.platformStatus
+  if (state.found) return 'matched title and platform status'
+  if (state.reviewing) return 'title matched and platform is still reviewing'
+  if (state.scheduled) return 'title matched and platform schedule is still pending'
+  if (state.hasTitle && !state.hasPublishedSignal) return 'title matched but final published signal missing'
+  return 'title not matched'
+}
+
+function titleProbeOf(value, maxLength = 18) {
   const normalizedTitle = normalizeCompact(value)
-  return normalizedTitle.length > 18 ? normalizedTitle.slice(0, 18) : normalizedTitle
+  return normalizedTitle.length > maxLength ? normalizedTitle.slice(0, maxLength) : normalizedTitle
 }
 
 function normalizeScheduleProbe(value) {

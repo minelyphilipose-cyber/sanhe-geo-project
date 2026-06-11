@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.content.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.dto.SelfMediaScheduleCapabilityUpsertRequest;
 import com.huanjing.geo.module.content.entity.SelfMediaScheduleCapability;
@@ -42,7 +43,7 @@ class SelfMediaScheduleCapabilityServiceTest {
         SysUser user = new SysUser();
         user.setId(99L);
         when(currentUserService.requireCurrentUser()).thenReturn(user);
-        service = new SelfMediaScheduleCapabilityService(mapper, currentUserService, adapterRouter);
+        service = new SelfMediaScheduleCapabilityService(mapper, currentUserService, adapterRouter, new ObjectMapper());
     }
 
     @Test

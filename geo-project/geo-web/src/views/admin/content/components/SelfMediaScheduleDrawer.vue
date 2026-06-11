@@ -6,6 +6,7 @@
       <el-input v-model="query.selfMediaAccountId" class="schedule-filter" clearable placeholder="账号 ID" @keyup.enter="search" />
       <el-select v-model="query.platform" class="schedule-filter" clearable placeholder="平台">
         <el-option label="今日头条" value="toutiao" />
+        <el-option label="百家号" value="baijiahao" />
         <el-option label="知乎" value="zhihu" />
         <el-option label="小红书" value="xiaohongshu" />
       </el-select>
@@ -49,7 +50,7 @@
         <el-table-column label="文章/品牌" min-width="150">
           <template #default="scope">
             <div class="schedule-stack">
-              <button type="button" class="schedule-link" @click="emit('openArticle', scope.row.articleId)">文章 #{{ scope.row.articleId }}</button>
+              <button type="button" class="schedule-link" @click="emit('openArticle', scope.row.articleId)">{{ articleDisplay(scope.row) }}</button>
               <span>{{ brandDisplay(scope.row) }}</span>
             </div>
           </template>
@@ -161,6 +162,16 @@
         <section class="schedule-diagnostics-section">
           <h4>处理建议</h4>
           <p class="schedule-diagnostics-advice">{{ recommendationText(diagnosticsRow) }}</p>
+        </section>
+
+        <section v-if="platformDiagnosticsFields.length" class="schedule-diagnostics-section">
+          <h4>平台诊断摘要</h4>
+          <dl class="schedule-diagnostics-grid">
+            <template v-for="item in platformDiagnosticsFields" :key="item.label">
+              <dt>{{ item.label }}</dt>
+              <dd>{{ item.value }}</dd>
+            </template>
+          </dl>
         </section>
 
         <section class="schedule-diagnostics-section">
@@ -312,6 +323,57 @@ const diagnosticsFields = computed(() => {
     { label: '尝试次数', value: attemptText(row) },
     { label: '异常', value: failureText(row) },
   ]
+})
+
+const diagnosticsPayload = computed<Record<string, any> | null>(() => {
+  const raw = diagnosticsRow.value?.diagnosticsJson
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? parsed : null
+  } catch {
+    return null
+  }
+})
+
+const platformDiagnosticsFields = computed(() => {
+  const row = diagnosticsRow.value
+  const payload = diagnosticsPayload.value
+  if (!row || !payload) return []
+  const values: Array<{ label: string; value: string }> = []
+  const add = (label: string, value: unknown) => {
+    const text = diagnosticValueText(value)
+    if (text) values.push({ label, value: text })
+  }
+
+  add('页面 URL', payload.pageUrl || payload.url)
+  add('页面标题', payload.pageTitle)
+  add('目标标题', payload.expectedTitle || payload.targetTitle)
+  add('计划时间', payload.scheduledAtText || payload.platformScheduledAt || payload.scheduleProbe)
+  add('平台状态', platformPublishStatusLabel(payload.platformStatus))
+  add('回查原因', payload.reason)
+  add('回查失败码', failureCodeLabel(payload.failureCode) || payload.failureLabel)
+  add('匹配标题', payload.hasTitle === undefined ? undefined : (payload.hasTitle ? '已匹配' : '未匹配'))
+  add('匹配时间', payload.hasScheduleTime === undefined ? undefined : (payload.hasScheduleTime ? '已匹配' : '未匹配'))
+  add('发布信号', payload.hasPublishedSignal === undefined ? undefined : (payload.hasPublishedSignal ? '已检测到' : '未检测到'))
+  add('审核信号', payload.hasReviewSignal === undefined ? undefined : (payload.hasReviewSignal ? '已检测到' : '未检测到'))
+  add('定时信号', payload.hasScheduledSignal === undefined ? undefined : (payload.hasScheduledSignal ? '已检测到' : '未检测到'))
+
+  const account = payload.account || {}
+  add('账号', account.accountNames || account.expectedAccountName)
+  add('账号诊断', account.diagnostics)
+
+  const publishUi = payload.publishUi || {}
+  add('发布设置页', publishUi.publishSettingsVisible === undefined ? undefined : (publishUi.publishSettingsVisible ? '可见' : '不可见'))
+  add('定时控件', publishUi.scheduleEnabled === undefined ? undefined : (publishUi.scheduleEnabled ? '已开启/已填写' : '未开启'))
+  add('底部按钮', publishUi.bottomButtons)
+  add('最后点击', publishUi.lastTrustedClick || payload.lastTrustedClick)
+
+  add('图片生成', payload.xhsImageGenerating === undefined ? undefined : (payload.xhsImageGenerating ? '生成中' : '已结束'))
+  add('缩略图数', payload.xhsThumbnailCount)
+  add('可见图片数', payload.xhsVisibleImageCount)
+  add('预览页数', payload.xhsPreviewPages)
+  return values.slice(0, 18)
 })
 
 watch(() => props.modelValue, (opened) => {
@@ -528,8 +590,180 @@ function attemptText(row: SelfMediaPublishSchedule) {
 }
 
 function failureText(row: SelfMediaPublishSchedule) {
-  if (row.failureCode && row.failureMessage) return `${row.failureCode}：${row.failureMessage}`
-  return row.failureMessage || row.failureCode || row.scheduleDriftReason || '-'
+  const code = row.failureLabel || failureCodeLabel(row.failureCode)
+  const drift = scheduleDriftReasonLabel(row.scheduleDriftReason)
+  if (code && row.failureMessage) return `${code}：${row.failureMessage}`
+  return row.failureMessage || code || drift || '-'
+}
+
+function articleDisplay(row: SelfMediaPublishSchedule) {
+  return row.articleTitle || '未命名文章'
+}
+
+function failureCodeLabel(code?: string | null) {
+  if (!code) return ''
+  const labels: Record<string, string> = {
+    CANCELLED_BY_OPERATOR: '操作员已取消',
+    MANUAL_CONFIRMED_FAILED: '人工确认失败',
+    PUBLISH_RESULT_MANUAL_FAILED: '人工确认发布失败',
+    PLATFORM_CAPABILITY_UNVERIFIED: '平台能力未验证',
+    PLATFORM_SCHEDULE_UNSUPPORTED: '平台不支持定时',
+    PLATFORM_SCHEDULE_STRATEGY_MISMATCH: '排期策略不匹配',
+    PLATFORM_SCHEDULE_TIME_EXPIRED: '定时时间过近或已过期',
+    PLATFORM_SCHEDULE_TIME_TOO_CLOSE: '平台定时时间过近',
+    PLATFORM_SCHEDULE_TIME_TOO_FAR: '平台定时时间超过可选范围',
+    ARTICLE_NOT_FOUND: '文章不存在',
+    ARTICLE_NOT_READY: '文章未就绪',
+    ARTICLE_BRAND_MISMATCH: '文章品牌不匹配',
+    ARTICLE_COVER_REQUIRED: '文章缺少封面',
+    SELF_MEDIA_ACCOUNT_NOT_FOUND: '自媒体账号不存在',
+    SELF_MEDIA_ACCOUNT_BRAND_MISMATCH: '自媒体账号品牌不匹配',
+    SELF_MEDIA_ACCOUNT_INACTIVE: '自媒体账号未启用',
+    ENVIRONMENT_ACCOUNT_BINDING_NOT_FOUND: '未绑定浏览器环境账号',
+    BROWSER_ENVIRONMENT_LOCKED: '浏览器环境被锁定',
+    LOCAL_AGENT_OFFLINE: '本地助手离线',
+    EXTENSION_TASK_FAILED: '扩展任务失败',
+    SCHEDULE_EXECUTION_FAILED: '排期执行失败',
+    DISTRIBUTION_TASK_PREPARE_FAILED: '分发任务准备失败',
+    DISTRIBUTION_QUOTA_EXHAUSTED: '分发额度已用尽',
+    CHANNEL_QUOTA_EXHAUSTED: '渠道额度已用完',
+    CHANNEL_QUOTA_UNAVAILABLE: '渠道额度配置不可用',
+    ACCOUNT_MISMATCH: '平台账号不一致',
+    IDENTITY_EXPECTATION_MISSING: '缺少账号校验信息',
+    COVER_MATERIAL_NOT_FOUND: '封面素材不存在',
+    COVER_IMAGE_UNSUPPORTED: '封面图片类型不支持',
+    WORKS_LIST_VERIFY_TIMEOUT: '作品列表回查超时',
+    PAGE_LOAD_TIMEOUT: '页面加载或执行超时',
+    EDITOR_NOT_READY: '编辑器未就绪',
+    PUBLISH_RESULT_CHECK_HELPER_FAILED: '发布结果回查失败',
+    PLATFORM_SCHEDULED_WAITING: '平台已定时，等待发布时间后复查',
+    PUBLISH_RESULT_NOT_MATCHED_RETRYING: '发布结果暂未匹配，等待复查',
+    PUBLISH_RESULT_NOT_MATCHED: '发布结果多次未匹配',
+    PUBLISH_RESULT_RECHECK_REQUESTED: '已人工触发重新校验',
+    PUBLISH_CHECK_FAILED: '发布结果校验失败',
+    PUBLISH_RESULT_CHECK_FAILED: '发布结果校验失败',
+    FILL_FAILED: '页面填充失败',
+    PUBLISH_BUTTON_NOT_FOUND: '发布按钮未找到',
+    TASK_EXPIRED: '任务已过期',
+    PAGE_CHANGED: '页面结构已变化',
+    COOKIE_MISSING: '登录凭证缺失',
+    LOGIN_REQUIRED: '平台登录失效',
+    UNKNOWN: '未知异常',
+    FILL_TOKEN_INVALID: '填充令牌无效',
+    FILL_TOKEN_USED_OR_EXPIRED: '填充令牌已使用或过期',
+    FILL_TOKEN_OPERATOR_MISMATCH: '填充令牌操作员不匹配',
+    FILL_TOKEN_BINDING_MISMATCH: '填充令牌账号绑定不匹配',
+    token_expired: '填充令牌已使用或过期',
+    login_required: '平台登录失效',
+    account_mismatch: '平台账号不一致',
+    editor_not_found: '编辑器未就绪',
+    failed: '执行失败',
+    '70006': '填充令牌无效',
+    '70007': '填充令牌已使用或过期',
+    '70017': '填充令牌操作员不匹配',
+    '70018': '填充令牌账号绑定不匹配',
+    ZHIHU_DRAFT_LOADING: '知乎草稿仍在加载',
+    ZHIHU_ADAPTER_NOT_LOADED: '知乎平台适配器未加载',
+    ZHIHU_PUBLISH_NOT_SUBMITTED: '知乎发布未完成',
+    ZHIHU_EDITOR_STATE_NOT_ACTIVE: '知乎编辑器未就绪',
+    ZHIHU_COVER_UPLOAD_NOT_CONFIRMED: '知乎封面上传未确认',
+    ZHIHU_COVER_UPLOAD_ENTRY_NOT_FOUND: '知乎封面上传入口未找到',
+    ZHIHU_COVER_UPLOAD_TIMEOUT: '知乎封面上传超时',
+    ZHIHU_COVER_DIALOG_NOT_READY: '知乎封面弹窗未就绪',
+    ZHIHU_COVER_SELECTION_FAILED: '知乎封面选择失败',
+    ZHIHU_PUBLISH_BUTTON_NOT_FOUND: '知乎发布按钮未找到',
+    ZHIHU_FILL_FAILED: '知乎页面填充失败',
+    ZHIFU_EDITOR_STATE_NOT_ACTIVE: '知乎编辑器未就绪',
+    ZHIFU_COVER_DIALOG_NOT_READY: '知乎封面弹窗未就绪',
+    ZHIFU_COVER_SELECTION_FAILED: '知乎封面选择失败',
+    XIAOHONGSHU_FORMAT_BUTTON_NOT_FOUND: '小红书一键排版按钮未找到',
+    XIAOHONGSHU_FORMAT_NOT_READY: '小红书排版页未就绪',
+    XIAOHONGSHU_IMAGE_GENERATION_TIMEOUT: '小红书笔记图片生成超时',
+    XIAOHONGSHU_NEXT_BUTTON_NOT_FOUND: '小红书下一步按钮未找到',
+    XIAOHONGSHU_PUBLISH_SETTINGS_NOT_READY: '小红书发布设置页未就绪',
+    XIAOHONGSHU_SCHEDULE_SWITCH_NOT_FOUND: '小红书定时发布开关未找到',
+    XIAOHONGSHU_SCHEDULE_TIME_INPUT_NOT_FOUND: '小红书定时时间输入框未找到',
+    XIAOHONGSHU_SCHEDULE_TIME_INVALID: '小红书定时时间无效',
+    XIAOHONGSHU_SCHEDULE_TIME_NOT_APPLIED: '小红书定时时间未生效',
+    XIAOHONGSHU_SCHEDULE_TIME_TOO_SOON: '小红书定时时间过近',
+    XIAOHONGSHU_SCHEDULE_TIME_TOO_LATE: '小红书定时时间超过平台范围',
+    XIAOHONGSHU_PUBLISH_BUTTON_NOT_FOUND: '小红书发布按钮未找到',
+    XIAOHONGSHU_PUBLISH_NOT_CONFIRMED: '小红书发布成功状态未确认',
+    XIAOHONGSHU_FILL_FAILED: '小红书页面填充失败',
+    BAIJIAHAO_COVER_REQUIRED: '百家号缺少文章封面',
+    BAIJIAHAO_APP_ID_REQUIRED: '百家号 ID/app_id 未填写',
+    BAIJIAHAO_COVER_UPLOAD_ENTRY_NOT_FOUND: '百家号封面上传入口未找到',
+    BAIJIAHAO_COVER_PICKER_NOT_OPEN: '百家号封面选择弹窗未打开',
+    BAIJIAHAO_COVER_UPLOAD_INPUT_NOT_FOUND: '百家号封面本地上传入口未找到',
+    BAIJIAHAO_COVER_UPLOAD_TIMEOUT: '百家号封面上传超时',
+    BAIJIAHAO_COVER_CONFIRM_NOT_FOUND: '百家号封面确认按钮未找到',
+    BAIJIAHAO_CONTENT_WRITTEN_TO_TITLE: '百家号正文误入标题区域',
+    BAIJIAHAO_UEDITOR_FILL_NOT_VISIBLE: '百家号正文编辑器未显示内容',
+    BAIJIAHAO_SCHEDULE_TIME_TOO_SOON: '百家号定时时间过近',
+    BAIJIAHAO_SCHEDULE_TIME_TOO_LATE: '百家号定时时间超过平台范围',
+    BAIJIAHAO_SCHEDULE_TIME_INVALID: '百家号定时时间无效',
+    BAIJIAHAO_SCHEDULE_BUTTON_NOT_FOUND: '百家号定时发布按钮未找到',
+    BAIJIAHAO_SCHEDULE_DIALOG_NOT_READY: '百家号定时发布弹窗未就绪',
+    BAIJIAHAO_SCHEDULE_OPTION_NOT_FOUND: '百家号定时时间选项未找到',
+    BAIJIAHAO_PLATFORM_RATE_LIMITED: '百家号平台频控/点击过快',
+    BAIJIAHAO_PUBLISH_NOT_CONFIRMED: '百家号发布成功状态未确认',
+    BAIJIAHAO_REVIEW_REJECTED: '百家号审核未通过',
+    BAIJIAHAO_WORK_WITHDRAWN: '百家号作品已撤回或删除',
+    BAIJIAHAO_FILL_FAILED: '百家号页面填充失败',
+    TOUTIAO_SCHEDULE_DIALOG_NOT_READY: '头条定时发布弹窗未就绪',
+    TOUTIAO_SCHEDULE_TIME_INPUT_NOT_FOUND: '头条定时时间输入框未找到',
+    TOUTIAO_COVER_SELECTION_FAILED: '头条封面选择失败',
+  }
+  return labels[code] || readableFailureCode(code)
+}
+
+function platformPublishStatusLabel(status?: string | null) {
+  if (!status) return ''
+  const labels: Record<string, string> = {
+    published: '已发布',
+    reviewing: '审核中',
+    scheduled: '已定时/待发布',
+    rejected: '审核未通过',
+    withdrawn: '已撤回/删除',
+    unknown: '未知',
+  }
+  return labels[status] || status
+}
+
+function readableFailureCode(code: string) {
+  const normalized = code.trim()
+  if (!normalized) return ''
+  const platformPrefixes: Record<string, string> = {
+    ZHIHU: '知乎',
+    ZHIFU: '知乎',
+    XIAOHONGSHU: '小红书',
+    BAIJIAHAO: '百家号',
+    TOUTIAO: '头条',
+    FILL: '填充',
+    PUBLISH: '发布',
+    SCHEDULE: '排期',
+    PLATFORM: '平台',
+    ARTICLE: '文章',
+    SELF_MEDIA_ACCOUNT: '自媒体账号',
+    ENVIRONMENT: '浏览器环境',
+    BROWSER_ENVIRONMENT: '浏览器环境',
+    LOCAL_AGENT: '本地助手',
+  }
+  const matchedPrefix = Object.keys(platformPrefixes)
+    .sort((left, right) => right.length - left.length)
+    .find((prefix) => normalized.startsWith(`${prefix}_`))
+  if (!matchedPrefix) return `未识别异常（${normalized}）`
+  return `${platformPrefixes[matchedPrefix]}异常（${normalized}）`
+}
+
+function scheduleDriftReasonLabel(reason?: string | null) {
+  if (!reason) return ''
+  const labels: Record<string, string> = {
+    delayed_by_platform_min_remaining: '已按平台最小提前量顺延',
+    shifted_by_interval: '已按发布间隔顺延',
+    window_exceeded: '发布时间超出窗口',
+  }
+  return labels[reason] || reason
 }
 
 function brandDisplay(row: SelfMediaPublishSchedule) {
@@ -635,6 +869,13 @@ function showDiagnostics(row: SelfMediaPublishSchedule) {
   diagnosticsVisible.value = true
 }
 
+function diagnosticValueText(value: unknown) {
+  if (value === null || value === undefined || value === '') return ''
+  if (Array.isArray(value)) return value.filter((item) => item !== null && item !== undefined && item !== '').join('，')
+  if (typeof value === 'object') return JSON.stringify(value).slice(0, 300)
+  return String(value)
+}
+
 function alertSeverityLabel(value?: string | null) {
   if (value === 'critical') return '严重'
   if (value === 'warning') return '警告'
@@ -657,6 +898,7 @@ function alertTypeLabel(value?: string | null) {
 }
 
 function recommendationText(row: SelfMediaPublishSchedule) {
+  if (row.failureActionHint) return row.failureActionHint
   if (isBackendDelayedPlatform(row.platform)) {
     if (row.status === 'pending') return '等待本地助手到点领取；该平台不支持平台内定时，计划时间即后台触发发布时间。'
     if (row.status === 'filling') return '本地助手正在填充并提交发布；若长时间不变化，请检查 AdsPower 页面和扩展日志。'
@@ -686,6 +928,7 @@ function platformLabel(value?: string | null) {
     wechat_mp: '微信公众号',
     douyin: '抖音图文',
     toutiao: '今日头条',
+    baijiahao: '百家号',
     zhihu: '知乎',
     xiaohongshu: '小红书',
   }

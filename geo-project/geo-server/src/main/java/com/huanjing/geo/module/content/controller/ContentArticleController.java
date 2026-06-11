@@ -18,6 +18,7 @@ import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerationDetailResponse;
 import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
+import com.huanjing.geo.module.content.dto.MedicalPublishReviewRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaCookieStatusBatchRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaCookieStatusBatchResponse;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
@@ -141,6 +142,13 @@ public class ContentArticleController {
     @PostMapping("/{articleId}/review")
     public R<Void> review(@PathVariable Long articleId, @Valid @RequestBody ArticleReviewRequest req) {
         contentArticleService.review(articleId, req);
+        return R.ok();
+    }
+
+    @PostMapping("/{articleId}/medical-publish-review")
+    public R<Void> reviewMedicalPublish(@PathVariable Long articleId,
+                                        @Valid @RequestBody MedicalPublishReviewRequest req) {
+        contentArticleService.reviewMedicalPublish(articleId, req);
         return R.ok();
     }
 

@@ -27,6 +27,7 @@ public class PresaleAiCall {
     private String callStatus;
     private Integer retryCount;
     private String rawResponse;
+    private LocalDateTime payloadPurgedAt;
     private String failureReason;
     private Integer promptTokens;
     private Integer completionTokens;

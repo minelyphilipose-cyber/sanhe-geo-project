@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.content.vo;
 
+import com.huanjing.geo.module.content.constant.SelfMediaPublishFailureCodes;
 import com.huanjing.geo.module.content.entity.SelfMediaPublishSchedule;
 import lombok.Data;
 
@@ -44,6 +45,9 @@ public class SelfMediaPublishScheduleVO {
     private LocalDateTime nextAttemptAt;
     private LocalDateTime lockedUntil;
     private String failureCode;
+    private String failureLabel;
+    private Boolean failureRetryable;
+    private String failureActionHint;
     private String failureMessage;
     private String diagnosticsJson;
     private List<SelfMediaPublishScheduleAlertVO> activeAlerts = new ArrayList<>();
@@ -91,6 +95,9 @@ public class SelfMediaPublishScheduleVO {
         vo.setNextAttemptAt(row.getNextAttemptAt());
         vo.setLockedUntil(row.getLockedUntil());
         vo.setFailureCode(row.getFailureCode());
+        vo.setFailureLabel(SelfMediaPublishFailureCodes.label(row.getFailureCode()));
+        vo.setFailureRetryable(SelfMediaPublishFailureCodes.retryable(row.getFailureCode()));
+        vo.setFailureActionHint(SelfMediaPublishFailureCodes.actionHint(row.getFailureCode()));
         vo.setFailureMessage(row.getFailureMessage());
         vo.setDiagnosticsJson(row.getDiagnosticsJson());
         vo.setCreatedAt(row.getCreatedAt());

@@ -344,7 +344,7 @@
                 v-else
                 type="warning"
                 :closable="false"
-                title="当前文章将分发到自媒体平台，保存前必须从品牌素材库选择封面。"
+                title="当前平台发布需要封面，保存前必须从品牌素材库选择封面。"
               />
             </div>
 
@@ -886,7 +886,7 @@ const previewContentStyleLabel = computed(() => {
 })
 const draftContentStyle = computed(() => createMode.value === 'auto' ? aiForm.contentStyle : manualForm.contentStyle)
 const draftTopic = computed(() => createMode.value === 'auto' ? aiForm.topic.trim() : manualForm.topic.trim())
-const requiresCover = computed(() => isSelfMediaStyle(draftContentStyle.value))
+const requiresCover = computed(() => isCoverRequiredStyle(draftContentStyle.value))
 const templateChannelGroups = computed(() => generationOptions.value?.groups || [])
 const selectedTemplateChannel = computed(() => findTemplateChannel(templateForm.channelKey))
 const availableTemplateOptions = computed(() => {
@@ -1679,8 +1679,8 @@ function isImageType(fileType?: string | null) {
   return ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'].includes(fileType.toLowerCase())
 }
 
-function isSelfMediaStyle(style?: string | null) {
-  return ['wechat', 'toutiao', 'douyin', 'zhihu', 'xiaohongshu', 'baijiahao', 'netease'].includes((style || '').trim())
+function isCoverRequiredStyle(style?: string | null) {
+  return ['toutiao', 'baijiahao', 'netease'].includes((style || '').trim())
 }
 
 function clearStillGeneratingTimer() {
@@ -2043,7 +2043,7 @@ async function submitManualCreate() {
     return
   }
   if (requiresCover.value && createMode.value !== 'auto' && !selectedCoverMaterialId.value) {
-    ElMessage.warning('自媒体文章必须选择封面')
+    ElMessage.warning('当前平台发布需要选择封面')
     return
   }
   submitting.value = true

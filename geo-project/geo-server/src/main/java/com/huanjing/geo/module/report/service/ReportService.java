@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.storage.MinioStorageService;
+import com.huanjing.geo.common.storage.ObjectStorageService;
 import com.huanjing.geo.module.content.entity.ArticleBatch;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.mapper.ArticleBatchMapper;
@@ -28,6 +29,7 @@ import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import com.huanjing.geo.module.system.service.PermissionService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -37,9 +39,11 @@ import org.springframework.util.StringUtils;
 import jakarta.servlet.http.HttpServletRequest;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.YearMonth;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -51,6 +55,7 @@ public class ReportService {
     private static final Set<String> DISABLED_POSTSALE_TYPES = Set.of("biweekly", "monthly", "quarterly");
     private static final Set<String> LEGACY_PRESALE_TYPES = Set.of("presale", "presale_diagnosis");
     private static final String REPORT_DISABLED_MESSAGE = "report generation disabled by product policy";
+    private static final int POLL_DETAIL_HOT_DAYS = 120;
 
     private final ReportMapper reportMapper;
     private final ReportAccessLogMapper reportAccessLogMapper;
@@ -63,6 +68,8 @@ public class ReportService {
     private final StringRedisTemplate stringRedisTemplate;
     private final ReportPdfService reportPdfService;
     private final MinioStorageService minioStorageService;
+    private final ObjectStorageService objectStorageService;
+    private final JdbcTemplate jdbcTemplate;
     private final PostsaleReportSnapshotMapper postsaleSnapshotMapper;
     private final PollDailyStatMapper pollDailyStatMapper;
     private final PollResultMapper pollResultMapper;
@@ -466,7 +473,7 @@ public class ReportService {
         ));
 
         Map<String, Object> trend = buildTrendData(report.getProjectId(), start, end);
-        Map<String, Object> detail = buildDetailData(report.getProjectId(), start, end, internal);
+        Map<String, Object> detail = buildDetailData(report.getProjectId(), report.getReportType(), start, end, internal);
         Map<String, Object> platformBreakdown = buildPlatformBreakdown(report.getProjectId(), start, end);
         Map<String, Object> comparison = buildComparisonData(start, end, current, previous);
         Map<String, Object> targetEval = buildTargetEvaluation(report, project, current, internal);
@@ -523,12 +530,6 @@ public class ReportService {
                 .distinct()
                 .count();
 
-        List<PollResult> results = pollResultMapper.selectList(
-                new LambdaQueryWrapper<PollResult>()
-                        .eq(PollResult::getProjectId, projectId)
-                        .between(PollResult::getBatchDate, start, end)
-                        .eq(PollResult::getStatus, "completed")
-        );
         return pack;
     }
 
@@ -556,7 +557,23 @@ public class ReportService {
         return Map.of("daily_points", points);
     }
 
-    private Map<String, Object> buildDetailData(Long projectId, LocalDate start, LocalDate end, boolean internal) {
+    private Map<String, Object> buildDetailData(Long projectId, String reportType, LocalDate start, LocalDate end, boolean internal) {
+        if ("quarterly".equals(reportType)) {
+            Optional<String> freezeObjectKey = findFrozenReportObjectKey(projectId, reportType, start, end);
+            if (freezeObjectKey.isPresent()) {
+                return buildDetailDataFromFreeze(freezeObjectKey.get(), internal);
+            }
+            if (isBeyondPollDetailHotWindow(end)) {
+                return Map.of(
+                        "items", List.of(),
+                        "status", "freeze_missing",
+                        "message", "冻结缺失",
+                        "report_type", reportType,
+                        "period_key", quarterKey(start, end)
+                );
+            }
+        }
+
         List<PollResult> rows = pollResultMapper.selectList(
                 new LambdaQueryWrapper<PollResult>()
                         .eq(PollResult::getProjectId, projectId)
@@ -593,6 +610,80 @@ public class ReportService {
             items.add(row);
         }
         return Map.of("items", items);
+    }
+
+    private Optional<String> findFrozenReportObjectKey(Long projectId, String reportType, LocalDate start, LocalDate end) {
+        String periodKey = quarterKey(start, end);
+        if (!StringUtils.hasText(periodKey)) {
+            return Optional.empty();
+        }
+        List<String> keys = jdbcTemplate.query("""
+                SELECT snapshot_object_key
+                  FROM report_period_freeze
+                 WHERE project_id = ?
+                   AND report_type = ?
+                   AND period_key = ?
+                   AND status = 'FROZEN'
+                   AND snapshot_object_key IS NOT NULL
+                 ORDER BY version_no DESC
+                 LIMIT 1
+                """, (rs, rowNum) -> rs.getString("snapshot_object_key"), projectId, reportType, periodKey);
+        return keys.stream().filter(StringUtils::hasText).findFirst();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> buildDetailDataFromFreeze(String objectKey, boolean internal) {
+        byte[] bytes = objectStorageService.readBytes(objectKey);
+        Map<String, Object> root = JSONUtil.parseObj(new String(bytes, StandardCharsets.UTF_8));
+        Object rawRows = root.get("rows");
+        List<Map<String, Object>> rows = rawRows instanceof List<?> list
+                ? list.stream()
+                .filter(Map.class::isInstance)
+                .map(row -> (Map<String, Object>) row)
+                .toList()
+                : List.of();
+        Map<String, List<Map<String, Object>>> grouped = rows.stream()
+                .collect(Collectors.groupingBy(row -> nvlStr(stringValue(row.get("keyword_identity_value"))),
+                        LinkedHashMap::new, Collectors.toList()));
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (Map.Entry<String, List<Map<String, Object>>> e : grouped.entrySet()) {
+            List<Map<String, Object>> list = e.getValue();
+            long hitPlatforms = list.stream().filter(row -> boolValue(row.get("is_hit")))
+                    .map(row -> row.get("platform_id")).filter(Objects::nonNull).distinct().count();
+            long allPlatforms = list.stream().map(row -> row.get("platform_id")).filter(Objects::nonNull).distinct().count();
+            String keyword = list.stream()
+                    .map(row -> stringValue(row.get("keyword_text_snapshot")))
+                    .filter(StringUtils::hasText)
+                    .findFirst()
+                    .orElse("-");
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("keyword", keyword);
+            row.put("question_content", keyword);
+            row.put("question_type", null);
+            row.put("platforms_hit", hitPlatforms);
+            row.put("platforms_total", allPlatforms);
+            row.put("site_mentioned", list.stream().anyMatch(item -> boolValue(item.get("site_mentioned"))));
+            row.put("contact_mentioned", list.stream().anyMatch(item -> boolValue(item.get("contact_mentioned"))));
+            if (internal) {
+                List<Map<String, Object>> details = list.stream().map(item -> {
+                    Map<String, Object> detail = new LinkedHashMap<>();
+                    detail.put("platform_id", item.get("platform_id"));
+                    detail.put("platform_code", nvlStr(stringValue(item.get("platform_code"))));
+                    detail.put("status", nvlStr(stringValue(item.get("status"))));
+                    detail.put("is_hit", boolValue(item.get("is_hit")));
+                    detail.put("site_mentioned", boolValue(item.get("site_mentioned")));
+                    detail.put("contact_mentioned", boolValue(item.get("contact_mentioned")));
+                    return detail;
+                }).collect(Collectors.toList());
+                row.put("platform_details", details);
+            }
+            items.add(row);
+        }
+        return Map.of(
+                "items", items,
+                "source", "report_period_freeze",
+                "snapshot_object_key", objectKey
+        );
     }
 
     private Map<String, Object> buildPlatformBreakdown(Long projectId, LocalDate start, LocalDate end) {
@@ -738,6 +829,40 @@ public class ReportService {
 
     private String nvlStr(String v) {
         return v == null ? "" : v;
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private boolean boolValue(Object value) {
+        if (value == null) {
+            return false;
+        }
+        if (value instanceof Boolean booleanValue) {
+            return booleanValue;
+        }
+        if (value instanceof Number number) {
+            return number.intValue() != 0;
+        }
+        return Boolean.parseBoolean(String.valueOf(value));
+    }
+
+    private boolean isBeyondPollDetailHotWindow(LocalDate end) {
+        return end != null && end.isBefore(LocalDate.now().minusDays(POLL_DETAIL_HOT_DAYS - 1L));
+    }
+
+    private String quarterKey(LocalDate start, LocalDate end) {
+        if (start == null || end == null) {
+            return "";
+        }
+        int quarter = ((start.getMonthValue() - 1) / 3) + 1;
+        LocalDate expectedStart = LocalDate.of(start.getYear(), (quarter - 1) * 3 + 1, 1);
+        LocalDate expectedEnd = YearMonth.from(expectedStart.plusMonths(2)).atEndOfMonth();
+        if (!expectedStart.equals(start) || !expectedEnd.equals(end)) {
+            return "";
+        }
+        return start.getYear() + "Q" + quarter;
     }
 
     private BigDecimal percent(long numerator, long denominator) {

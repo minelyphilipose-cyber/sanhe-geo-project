@@ -49,6 +49,17 @@
               />
             </el-select>
           </el-form-item>
+          <el-form-item label="行业合规类型">
+            <el-select v-model="form.complianceIndustryCode" clearable filterable placeholder="非特殊合规行业" style="width: 100%">
+              <el-option label="非特殊合规行业" value="none" />
+              <el-option
+                v-for="item in dictStore.options('compliance_industry')"
+                :key="item.dictKey"
+                :label="item.dictValue"
+                :value="item.dictKey"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item label="主营业务方向"><el-input v-model="form.mainBusiness" /></el-form-item>
           <el-form-item label="核心产品">
             <el-input v-model="form.coreProducts" maxlength="500" show-word-limit placeholder="多个产品以逗号隔开" />
@@ -128,6 +139,26 @@
           <el-form-item class="is-wide" label="禁用词"><el-input v-model="form.forbiddenPhrases" type="textarea" :rows="3" /></el-form-item>
           <el-form-item class="is-wide" label="版本变更原因"><el-input v-model="form.versionChangeReason" placeholder="用于版本记录，建议填写" /></el-form-item>
         </div>
+
+        <template v-if="isMedicalComplianceIndustry">
+          <div class="brand-section-bar"><span />医疗合规信息<i /></div>
+          <div class="brand-form-grid">
+            <el-form-item label="机构类型"><el-input v-model="form.institutionType" maxlength="128" /></el-form-item>
+            <el-form-item label="医疗广告审查证明编号"><el-input v-model="form.medicalAdReviewNo" maxlength="128" /></el-form-item>
+            <el-form-item class="is-wide" label="医疗机构执业许可">
+              <el-input v-model="form.medicalLicense" type="textarea" :rows="2" maxlength="500" show-word-limit />
+            </el-form-item>
+            <el-form-item class="is-wide" label="诊疗科目范围">
+              <el-input v-model="form.diagnosisScope" type="textarea" :rows="2" maxlength="1000" show-word-limit />
+            </el-form-item>
+            <el-form-item class="is-wide" label="医师/执业人员可公示信息">
+              <el-input v-model="form.practitionerInfoPublic" type="textarea" :rows="2" />
+            </el-form-item>
+            <el-form-item class="is-wide" label="医疗合规备注">
+              <el-input v-model="form.complianceNotesMedical" type="textarea" :rows="2" />
+            </el-form-item>
+          </div>
+        </template>
       </el-form>
     </section>
 
@@ -250,6 +281,7 @@ const form = reactive({
   brandSlug: '',
   status: 'active',
   industry: '',
+  complianceIndustryCode: 'none',
   mainBusiness: '',
   coreProducts: '',
   brandPositioning: '',
@@ -272,6 +304,12 @@ const form = reactive({
   brandQualificationDescription: '',
   brandCaseDescription: '',
   forbiddenPhrases: '',
+  medicalLicense: '',
+  diagnosisScope: '',
+  institutionType: '',
+  practitionerInfoPublic: '',
+  medicalAdReviewNo: '',
+  complianceNotesMedical: '',
   versionChangeReason: '',
 })
 
@@ -285,6 +323,9 @@ const qualificationDescriptionPlaceholder = '请填写品牌可公开引用的�
 const caseDescriptionPlaceholder = '请填写可公开引用的品牌案例素材，包括客户类型或客户名称、项目背景、服务内容、项目规模、交付周期、合作结果、复购或长期合作情况等。如客户名称不可公开，请使用“某行业客户/某区域客户”表述，不要编造客户名或效果数据。'
 
 const availableBrandIndustries = computed(() => companyIndustryTags.value)
+const isMedicalComplianceIndustry = computed(() =>
+  ['medical_beauty', 'oral'].includes(form.complianceIndustryCode),
+)
 
 const materials = ref<BrandMaterial[]>([])
 const versions = ref<BrandProfileVersion[]>([])
@@ -459,6 +500,7 @@ async function submitBrand() {
       brandShortName: nullableText(form.brandShortName),
       status: form.status,
       industry: form.industry,
+      complianceIndustryCode: form.complianceIndustryCode === 'none' ? null : form.complianceIndustryCode,
       mainBusiness: nullableText(form.mainBusiness),
       coreProducts: nullableText(form.coreProducts),
       brandPositioning: nullableText(form.brandPositioning),
@@ -484,6 +526,12 @@ async function submitBrand() {
       brandCaseDescription: nullableText(form.brandCaseDescription),
       description: nullableText(form.businessIntro),
       forbiddenPhrases: nullableText(form.forbiddenPhrases),
+      medicalLicense: isMedicalComplianceIndustry.value ? nullableText(form.medicalLicense) : null,
+      diagnosisScope: isMedicalComplianceIndustry.value ? nullableText(form.diagnosisScope) : null,
+      institutionType: isMedicalComplianceIndustry.value ? nullableText(form.institutionType) : null,
+      practitionerInfoPublic: isMedicalComplianceIndustry.value ? nullableText(form.practitionerInfoPublic) : null,
+      medicalAdReviewNo: isMedicalComplianceIndustry.value ? nullableText(form.medicalAdReviewNo) : null,
+      complianceNotesMedical: isMedicalComplianceIndustry.value ? nullableText(form.complianceNotesMedical) : null,
       versionChangeReason: nullableText(form.versionChangeReason),
     }
 

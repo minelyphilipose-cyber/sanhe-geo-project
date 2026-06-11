@@ -88,6 +88,7 @@
                   <el-dropdown-item command="jobs">批量任务列表</el-dropdown-item>
                   <el-dropdown-item v-if="canViewSelfMediaSchedules" command="schedules">发布排期</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePromptTemplates" command="templates">文章提示词模板</el-dropdown-item>
+                  <el-dropdown-item v-if="canManagePromptTemplates" command="medical-config">医疗文章配置</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePublishPlatforms" command="platforms">发布平台管理</el-dropdown-item>
                   <el-dropdown-item v-if="canManagePublishPlatforms" command="schedule-capabilities">排期能力管理</el-dropdown-item>
                 </el-dropdown-menu>
@@ -167,6 +168,19 @@
               </span>
             </template>
           </el-table-column>
+          <el-table-column label="医疗合规" width="150">
+            <template #default="scope">
+              <div v-if="isMedicalArticle(scope.row)" class="medical-status-cell">
+                <el-tag size="small" :type="medicalComplianceTag(scope.row.complianceStatus)">
+                  {{ medicalComplianceLabel(scope.row.complianceStatus) }}
+                </el-tag>
+                <el-tag v-if="scope.row.medicalChannelTier === 'official_site'" size="small" :type="medicalReviewTag(scope.row.publishReviewStatus)">
+                  {{ medicalReviewLabel(scope.row.publishReviewStatus) }}
+                </el-tag>
+              </div>
+              <span v-else class="admin-cell-sub">-</span>
+            </template>
+          </el-table-column>
           <el-table-column label="创建时间" width="180">
             <template #default="scope">{{ formatDateTime(scope.row.createdAt) }}</template>
           </el-table-column>
@@ -175,6 +189,8 @@
               <div class="admin-row-actions">
                 <el-button link type="primary" @click="openDetail(scope.row.id)">详情</el-button>
                 <el-button v-if="canArticleWrite && canEdit(scope.row.status)" class="content-neutral-action" link @click="openRevision(scope.row)">修订</el-button>
+                <el-button v-if="canReviewMedicalPublish(scope.row)" link type="warning" @click="reviewMedicalPublish(scope.row, 'approve')">法务通过</el-button>
+                <el-button v-if="canReviewMedicalPublish(scope.row)" link type="danger" @click="reviewMedicalPublish(scope.row, 'reject')">驳回</el-button>
                 <el-button v-if="canDistributeOperate && canDistribute(scope.row.status)" link type="success" @click="openDistributionChannel(scope.row)">分发</el-button>
                 <el-button v-if="canPublish && canDistribute(scope.row.status)" link type="primary" @click="openManualSchedule(scope.row)">定时分发</el-button>
                 <el-button v-if="canArticleWrite && canDeleteArticle(scope.row.status)" link type="danger" @click="deleteArticle(scope.row)">删除</el-button>
@@ -216,8 +232,14 @@
       :risk-severity-label="riskSeverityLabel"
       :risk-source-label="riskSourceLabel"
       :generated-by-label="generatedByLabel"
+      :medical-compliance-label="medicalComplianceLabel"
+      :medical-compliance-tag="medicalComplianceTag"
+      :medical-review-label="medicalReviewLabel"
+      :medical-review-tag="medicalReviewTag"
+      :can-review-medical-publish="canReviewMedicalPublish"
       @revision="openRevisionFromDetail"
       @style-render="handleDetailStyleRenderCommand"
+      @medical-publish-review="handleDetailMedicalPublishReview"
     />
 
     <ArticleRevisionDialog
@@ -578,6 +600,7 @@
       v-model:selected-cover-material-id="selectedCoverMaterialId"
       v-model:douyin-text="douyinText"
       :selected-media-platform="selectedMediaPlatform"
+      :local-helper-health="lastLocalHelperHealth"
       :wechat-capability="wechatCapability"
       :wechat-distribution-available="wechatDistributionAvailable"
       :wechat-status-tag-type="wechatStatusTagType"
@@ -587,6 +610,7 @@
       :douyin-status-tag-type="douyinStatusTagType"
       :douyin-status-label="douyinStatusLabel"
       :toutiao-accounts="toutiaoAccounts"
+      :baijiahao-accounts="baijiahaoAccounts"
       :zhihu-accounts="zhihuAccounts"
       :xiaohongshu-accounts="xiaohongshuAccounts"
       :current-platform-accounts="currentPlatformAccounts"
@@ -643,6 +667,7 @@ import {
   getContentArticles,
   getSelfMediaAccountsByBrand,
   getSelfMediaScheduleCapabilities,
+  reviewMedicalPublishArticle,
 } from '@/api/content'
 import { getProjectDetail } from '@/api/project'
 import { formatDateTime } from '@/utils/format'
@@ -699,7 +724,11 @@ const query = reactive({
 const publishedCount = computed(() => rows.value.filter((row) => row.status === 'published').length)
 const distributableCount = computed(() => rows.value.filter((row) => canDistribute(row.status)).length)
 const showAdvancedFilters = ref(false)
-const blockedCount = computed(() => rows.value.filter((row) => ['failed', 'risk_blocked'].includes(row.status)).length)
+const blockedCount = computed(() => rows.value.filter((row) =>
+  ['failed', 'risk_blocked'].includes(row.status)
+  || row.complianceStatus === 'discarded_compliance_failed'
+  || row.publishReviewStatus === 'rejected',
+).length)
 const scheduleDrawerVisible = ref(false)
 const manualScheduleVisible = ref(false)
 const manualScheduleLoading = ref(false)
@@ -757,9 +786,11 @@ const {
 const {
   mediaDistributeVisible,
   mediaDistributeBrandId,
+  lastLocalHelperHealth,
   wechatCapability,
   douyinCapability,
   toutiaoAccounts,
+  baijiahaoAccounts,
   zhihuAccounts,
   xiaohongshuAccounts,
   checkingSelfMediaAccountId,
@@ -1093,6 +1124,85 @@ function statusLabel(v: string) {
   return statusOptions.find((s) => s.value === v)?.label || v
 }
 
+function isMedicalArticle(row?: ArticleDraft | null) {
+  return !!row?.medicalIndustryCode || !!row?.medicalChannelTier || !!row?.complianceStatus
+}
+
+function medicalComplianceLabel(v?: string | null) {
+  const map: Record<string, string> = {
+    pending: '待校验',
+    passed: '合规通过',
+    failed: '合规失败',
+    discarded_compliance_failed: '已废弃',
+  }
+  return v ? map[v] || v : '未校验'
+}
+
+function medicalComplianceTag(v?: string | null): 'success' | 'warning' | 'danger' | 'info' {
+  if (v === 'passed') return 'success'
+  if (v === 'pending') return 'warning'
+  if (v === 'failed' || v === 'discarded_compliance_failed') return 'danger'
+  return 'info'
+}
+
+function medicalReviewLabel(v?: string | null) {
+  const map: Record<string, string> = {
+    not_required: '无需法务',
+    pending: '待法务确认',
+    passed: '法务通过',
+    rejected: '法务驳回',
+  }
+  return v ? map[v] || v : '未确认'
+}
+
+function medicalReviewTag(v?: string | null): 'success' | 'warning' | 'danger' | 'info' {
+  if (v === 'passed' || v === 'not_required') return 'success'
+  if (v === 'pending') return 'warning'
+  if (v === 'rejected') return 'danger'
+  return 'info'
+}
+
+function canReviewMedicalPublish(row?: ArticleDraft | null) {
+  return canArticleWrite.value
+    && row?.medicalChannelTier === 'official_site'
+    && row?.complianceStatus === 'passed'
+    && row?.publishReviewStatus !== 'passed'
+}
+
+async function reviewMedicalPublish(row: ArticleDraft, action: 'approve' | 'reject') {
+  const verb = action === 'approve' ? '通过' : '驳回'
+  let comment = ''
+  try {
+    const result = await ElMessageBox.prompt(`请输入医疗官网发布法务${verb}说明`, `医疗发布${verb}`, {
+      confirmButtonText: verb,
+      cancelButtonText: '取消',
+      inputType: 'textarea',
+      inputPlaceholder: action === 'approve' ? '例如：已核对广告审查编号/资质信息' : '例如：缺少审查证明或内容需调整',
+      inputValidator: (value) => action === 'approve' || !!value.trim() || '驳回时需填写原因',
+    })
+    comment = result.value || ''
+  } catch {
+    return
+  }
+  try {
+    await reviewMedicalPublishArticle(row.id, { action, comment })
+    ElMessage.success(`医疗发布已${verb}`)
+    await load()
+    if (detailData.value?.article?.id === row.id) {
+      await openDetail(row.id)
+    }
+  } catch {
+    // Global request handler displays the backend error.
+  }
+}
+
+function handleDetailMedicalPublishReview(action: 'approve' | 'reject') {
+  const article = detailData.value?.article
+  if (article) {
+    void reviewMedicalPublish(article, action)
+  }
+}
+
 function distributionPlatformLabel(v?: string | null) {
   const map: Record<string, string> = {
     wechat_mp: '微信公众号',
@@ -1140,6 +1250,10 @@ function canEditFromDetail(status: string) {
 
 function canDistribute(status: string) {
   return status === 'approved' || status === 'unpublished'
+}
+
+function isPublishedLockedStatus(status?: string | null) {
+  return ['published', 'distributed'].includes(String(status || '').toLowerCase())
 }
 
 function canDeleteArticle(status: string) {
@@ -1251,6 +1365,12 @@ function openPromptTemplateManagement() {
   })
 }
 
+function openMedicalArticleConfig() {
+  router.push({
+    path: '/admin/content/medical-article-config',
+  })
+}
+
 function openBatchPublishJobs() {
   router.push({
     path: '/admin/content/articles/batch-publish-jobs',
@@ -1266,6 +1386,14 @@ async function openManualSchedule(row: ArticleDraft) {
     ElMessage.warning('当前账号没有发布排期权限')
     return
   }
+  if (isPublishedLockedStatus(row.status)) {
+    ElMessage.warning('文章已发布或已分发，不能再次创建自媒体排期')
+    return
+  }
+  if (!canDistribute(row.status)) {
+    ElMessage.warning('仅已就绪或未发布文章可创建自媒体排期')
+    return
+  }
   manualScheduleVisible.value = true
   manualScheduleLoading.value = true
   manualScheduleArticle.value = row
@@ -1278,6 +1406,16 @@ async function openManualSchedule(row: ArticleDraft) {
     const brandId = detail.project?.brandId
     if (!brandId) {
       ElMessage.warning('当前文章未绑定品牌，无法创建自媒体排期')
+      return
+    }
+    if (isPublishedLockedStatus(detail.article?.status)) {
+      manualScheduleVisible.value = false
+      ElMessage.warning('文章已发布或已分发，不能再次创建自媒体排期')
+      return
+    }
+    if (!canDistribute(detail.article?.status || '')) {
+      manualScheduleVisible.value = false
+      ElMessage.warning('仅已就绪或未发布文章可创建自媒体排期')
       return
     }
     manualScheduleArticle.value = detail.article
@@ -1375,6 +1513,8 @@ function handleToolbarMoreCommand(command: string) {
     openScheduleDrawer()
   } else if (command === 'templates') {
     openPromptTemplateManagement()
+  } else if (command === 'medical-config') {
+    openMedicalArticleConfig()
   } else if (command === 'platforms') {
     openPublishPlatformManagement()
   } else if (command === 'schedule-capabilities') {
@@ -1398,7 +1538,7 @@ async function openBatchPublish() {
     const blocked = details
       .map((detail) => {
         const style = detailContentStyle(detail) || ''
-        const reason = batchPublishBlockReason(style)
+        const reason = batchPublishBlockReason(style) || medicalBatchPublishBlockReason(detail)
         return reason
           ? {
               title: detail.article.title || '未命名文章',
@@ -1454,6 +1594,20 @@ function batchPublishBlockReason(contentStyle?: string | null) {
   if (contentStyle === 'douyin') return '抖音图文暂不纳入批量发布'
   if (contentStyle === 'authority_media') return '权威媒体不允许自动发布'
   return '文章未绑定可自动发布的平台风格'
+}
+
+function medicalBatchPublishBlockReason(detail: ArticleDetailResponse) {
+  const article = detail.article
+  if (article.medicalChannelTier !== 'official_site') {
+    return ''
+  }
+  if (article.complianceStatus !== 'passed') {
+    return '医疗合规未通过，不能发布官网档'
+  }
+  if (article.medicalAdReviewNo || article.publishReviewStatus === 'passed') {
+    return ''
+  }
+  return '医疗官网档缺少广告审查号或人工法务确认'
 }
 
 function riskWordHits(article?: Pick<ArticleDraft, 'riskWordsJson'> | null): RiskWordHit[] {
@@ -1897,6 +2051,12 @@ function handleDouyinAuthResult() {
 
 .content-neutral-action:hover {
   color: #334155;
+}
+
+.medical-status-cell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .distribution-channel-grid {

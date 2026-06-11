@@ -8,6 +8,7 @@ import com.huanjing.geo.module.audit.AuditMode;
 import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.service.AuditService;
+import com.huanjing.geo.module.content.constant.SelfMediaPublishFailureCodes;
 import com.huanjing.geo.module.content.entity.ArticleDraft;
 import com.huanjing.geo.module.content.entity.DistributionTask;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
@@ -30,7 +31,6 @@ import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import static com.huanjing.geo.module.extension.ExtensionErrorCodes.TASK_NOT_FOUND;
 import static com.huanjing.geo.module.extension.ExtensionErrorCodes.TASK_RATE_LIMITED;
@@ -53,15 +53,6 @@ public class ExtensionTaskStateService {
     private static final Duration STALE_THRESHOLD = Duration.ofMinutes(10);
     private static final Duration SCHEDULE_RETRY_BACKOFF = Duration.ofMinutes(3);
     private static final int RECLAIM_BATCH_LIMIT = 100;
-    private static final Set<String> SCHEDULE_RETRYABLE_FAILURE_CODES = Set.of(
-            "PAGE_LOAD_TIMEOUT",
-            "EDITOR_NOT_READY",
-            "COVER_UPLOAD_TIMEOUT",
-            "SCHEDULE_DIALOG_NOT_READY",
-            "PREVIEW_PAGE_NOT_READY",
-            "WORKS_LIST_VERIFY_TIMEOUT",
-            "LOCAL_HELPER_TEMPORARY_ERROR"
-    );
 
     private final DistributionTaskMapper taskMapper;
     private final ArticleDraftMapper articleDraftMapper;
@@ -501,24 +492,11 @@ public class ExtensionTaskStateService {
     }
 
     private String classifyFailureKind(String message) {
-        String text = message == null ? "" : message;
-        if (text.contains("定时发布时间") || text.contains("定时发布")) {
-            return "SCHEDULE_TIME_OR_SELECTOR_FAILED";
-        }
-        if (text.contains("账号不一致")) {
-            return "ACCOUNT_MISMATCH";
-        }
-        if (text.contains("未登录") || text.contains("需登录")) {
-            return "LOGIN_REQUIRED";
-        }
-        if (text.contains("未找到") || text.contains("超时")) {
-            return "EDITOR_NOT_FOUND";
-        }
-        return "FILL_FAILED";
+        return SelfMediaPublishFailureCodes.classifyByMessage(message);
     }
 
     private boolean isScheduleRetryableFailure(String code) {
-        return SCHEDULE_RETRYABLE_FAILURE_CODES.contains(code);
+        return SelfMediaPublishFailureCodes.isScheduleExecutionRetryable(code);
     }
 
     private String diagnosticsJson(Map<String, Object> request) {

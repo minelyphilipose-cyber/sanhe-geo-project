@@ -127,19 +127,19 @@ async function fillPayload(payload) {
   const rawHtml = payload.renderedHtml || payload.html || payload.content || ''
   const coverImageCleanup = removeCoverImageFromContent(rawHtml, resolvePayloadCoverImageUrl(payload))
   const normalizedContent = removeDuplicateLeadingTitle(coverImageCleanup.html, expectedTitle)
-  const titleFilled = fillTitle(payload.title || payload.articleTitle || '', titleElement)
+  const titleFilled = await fillTitle(payload.title || payload.articleTitle || '', titleElement, fillProfile)
   const contentElement = findContentElement(titleElement, fillProfile)
-  if (titleElement && contentElement && titleElement === contentElement) {
+  if (titleElement && contentElement && titleElement === contentElement && normalizePlatform(fillProfile.platform) !== 'baijiahao') {
     throw new Error(`标题和正文命中同一元素：${describeElement(titleElement)}`)
   }
-  const contentFilled = await fillContent(normalizedContent.html, contentElement, fillProfile)
+  const contentFilled = await fillContent(normalizedContent.html, contentElement, fillProfile, { titleElement })
   const tagsFilled = fillTags(payload.tags || [], fillProfile)
   if (!titleFilled || !contentFilled) {
     const diagnostics = collectDiagnostics()
     throw new Error(`未找到${!titleFilled ? '标题' : ''}${!titleFilled && !contentFilled ? '和' : ''}${!contentFilled ? '正文' : ''}输入框；${diagnostics}`)
   }
   await delay(500)
-  verifyFilled(titleElement, contentElement, expectedTitle, normalizedContent.html)
+  verifyFilled(titleElement, contentElement, expectedTitle, normalizedContent.html, fillProfile)
   const publishOptions = await fillPlatformPublishOptions(payload, fillProfile)
   normalizeEditorViewport(fillProfile)
   const draftState = detectDraftState()
@@ -211,6 +211,8 @@ var BAIJIAHAO_PUBLISH_OPTIONS_ADAPTER = globalThis.__GEO_BAIJIAHAO_PLATFORM__?.c
   uploadCoverImageFromLocalHelper,
   delay,
   clickTrustedActionOnce,
+  requestTrustedClickAt,
+  firePointerClick,
   findVisibleTextElement,
   nearestLargeContainer,
   normalizeText,
@@ -2374,11 +2376,16 @@ function isMeaningfulContentBlock(el) {
 function buildFillProfile(payload) {
   const platform = payload.platform || inferPlatformFromLocation()
   const editorSelectors = payload.profile?.editorSelectors || {}
+  const titleSelectors = selectorList(editorSelectors.title)
+  const contentSelectors = selectorList(editorSelectors.content)
+  const tagSelectors = selectorList(editorSelectors.tags)
   return {
     platform,
-    titleSelectors: selectorList(editorSelectors.title).concat(defaultTitleSelectors(platform)),
-    contentSelectors: selectorList(editorSelectors.content).concat(defaultContentSelectors(platform)),
-    tagSelectors: selectorList(editorSelectors.tags).concat(defaultTagSelectors(platform)),
+    titleSelectors: titleSelectors.concat(defaultTitleSelectors(platform)),
+    contentSelectors: normalizePlatform(platform) === 'baijiahao'
+      ? defaultContentSelectors(platform).concat(contentSelectors)
+      : contentSelectors.concat(defaultContentSelectors(platform)),
+    tagSelectors: tagSelectors.concat(defaultTagSelectors(platform)),
   }
 }
 
@@ -2865,10 +2872,14 @@ function normalizeAccountName(value) {
     .trim()
 }
 
-function fillTitle(title, titleElement) {
+async function fillTitle(title, titleElement, fillProfile = null) {
   if (!title) return false
   const el = titleElement
   if (!el) return false
+  if (normalizePlatform(fillProfile?.platform) === 'baijiahao') {
+    await setBaijiahaoTitleContent(el, title)
+    return true
+  }
   if (el.isContentEditable || el.getAttribute?.('contenteditable') === 'true') {
     setEditablePlainText(el, title)
     return true
@@ -2877,12 +2888,52 @@ function fillTitle(title, titleElement) {
   return true
 }
 
-async function fillContent(html, contentElement, fillProfile) {
+async function setBaijiahaoTitleContent(el, title) {
+  const input = el.matches?.('input, textarea, [contenteditable="true"]')
+    ? el
+    : el.querySelector?.('input, textarea, [contenteditable="true"]')
+  if (input instanceof HTMLInputElement || input instanceof HTMLTextAreaElement) {
+    setTextValue(input, title)
+    return
+  }
+  if (input?.isContentEditable || input?.getAttribute?.('contenteditable') === 'true') {
+    setEditablePlainText(input, title)
+    return
+  }
+  await setBaijiahaoSharedEditorTitle(el, title)
+}
+
+async function setBaijiahaoSharedEditorTitle(el, title) {
+  focusEditableElement(el)
+  const placeholder = findVisibleTextElement('请输入标题', { exact: false, maxLength: 24 })
+  if (placeholder) {
+    firePointerClick(placeholder, { clickRatioX: 0.08, clickRatioY: 0.5 })
+    await delay(60)
+    placeCaretNearElement(placeholder)
+  } else {
+    firePointerClick(el, { clickRatioX: 0.08, clickRatioY: 0.18 })
+    await delay(60)
+    placeCaretAtPointFromElement(el, 0.08, 0.18)
+  }
+  document.execCommand?.('insertText', false, title)
+  dispatchEditEvents(el)
+  await delay(120)
+}
+
+async function fillContent(html, contentElement, fillProfile, context = {}) {
   if (!html) return false
   const el = contentElement
   if (!el) return false
   if (fillProfile?.platform === 'zhihu') {
     return setZhihuEditablePlainText(el, htmlToPlainText(html))
+  }
+  if (normalizePlatform(fillProfile?.platform) === 'baijiahao' && isBaijiahaoUeditorFrame(el)) {
+    setBaijiahaoUeditorContent(el, html)
+    return true
+  }
+  if (normalizePlatform(fillProfile?.platform) === 'baijiahao' && (el.isContentEditable || el.getAttribute('contenteditable') === 'true')) {
+    await setBaijiahaoEditableContent(el, html, { preserveExisting: context.titleElement === el })
+    return true
   }
   if (el.isContentEditable || el.getAttribute('contenteditable') === 'true') {
     setEditableHtml(el, html)
@@ -2891,6 +2942,42 @@ async function fillContent(html, contentElement, fillProfile) {
     setTextValue(el, htmlToPlainText(html))
   }
   return true
+}
+
+function setBaijiahaoUeditorContent(frame, html) {
+  const doc = baijiahaoUeditorDocument(frame)
+  const body = doc?.body
+  if (!body) throw new Error(`百家号 UEditor iframe 未就绪：${describeElement(frame)}`)
+  const normalized = normalizeEditorHtmlForUeditor(html)
+  const editorApi = findBaijiahaoUeditorApi(frame)
+  if (editorApi?.setContent) {
+    editorApi.setContent(normalized)
+    editorApi.fireEvent?.('contentchange')
+    editorApi.fireEvent?.('selectionchange')
+  }
+  body.focus?.()
+  body.innerHTML = normalized
+  body.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertHTML' }))
+  body.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, inputType: 'insertHTML' }))
+  body.dispatchEvent(new Event('change', { bubbles: true }))
+  frame.dispatchEvent(new Event('load', { bubbles: false }))
+}
+
+function findBaijiahaoUeditorApi(frame) {
+  const id = frame?.id || 'ueditor_0'
+  const candidates = [
+    globalThis.UE?.getEditor?.(id),
+    globalThis.UE?.instants?.[id],
+    globalThis.UE?.instances?.[id],
+  ]
+  return candidates.find((item) => item && typeof item.setContent === 'function') || null
+}
+
+function normalizeEditorHtmlForUeditor(html) {
+  const raw = String(html || '').trim()
+  if (!raw) return ''
+  if (/<\s*(p|div|section|article|h[1-6]|ul|ol|blockquote|table|figure|br)\b/i.test(raw)) return raw
+  return plainTextToHtml(htmlToPlainText(raw))
 }
 
 function clearEditableTextWithSelection(el) {
@@ -2965,6 +3052,141 @@ function setEditablePlainText(el, text) {
     el.textContent = text
     dispatchEditEvents(el)
   }
+}
+
+async function setBaijiahaoEditableContent(el, html, options = {}) {
+  const text = htmlToPlainText(html).trim()
+  const probe = normalizeArticleText(text).slice(0, 24)
+  if (options.preserveExisting) {
+    await insertBaijiahaoBodyIntoSharedEditor(el, text)
+    if (editableContainsProbe(el, probe)) return
+  }
+
+  focusEditableElement(el)
+  firePointerClick(el, { clickRatioX: 0.08, clickRatioY: 0.12 })
+  await delay(80)
+  clearEditableTextWithSelection(el)
+  dispatchPasteIntoEditable(el, text)
+  dispatchEditEvents(el)
+  await delay(120)
+  if (editableContainsProbe(el, probe)) return
+
+  clearEditableTextWithSelection(el)
+  const inserted = document.execCommand?.('insertText', false, text)
+  dispatchEditEvents(el)
+  await delay(120)
+  if (inserted && editableContainsProbe(el, probe)) return
+
+  clearEditableTextWithSelection(el)
+  setEditableHtml(el, plainTextToHtml(text))
+  dispatchEditEvents(el)
+  await delay(120)
+  if (editableContainsProbe(el, probe)) return
+
+  el.innerHTML = plainTextToHtml(text)
+  dispatchEditEvents(el)
+  await delay(80)
+}
+
+async function insertBaijiahaoBodyIntoSharedEditor(el, text) {
+  focusEditableElement(el)
+  const placeholder = findVisibleTextElement('请输入正文', { exact: false, maxLength: 12 })
+  if (placeholder) {
+    await clickBaijiahaoBodyPlaceholder(placeholder)
+  } else {
+    await clickBaijiahaoEditorBody(el)
+  }
+  const activeEditable = currentEditableFromSelection() || currentEditableFromActiveElement() || el
+  dispatchPasteIntoEditable(activeEditable, text)
+  dispatchEditEvents(activeEditable)
+  await delay(120)
+  if (editableContainsProbe(el, normalizeArticleText(text).slice(0, 24))) return
+
+  document.execCommand?.('insertText', false, text)
+  dispatchEditEvents(activeEditable)
+  await delay(120)
+}
+
+async function clickBaijiahaoBodyPlaceholder(placeholder) {
+  const point = elementPoint(placeholder, 0.08, 0.5)
+  if (point) {
+    await requestTrustedClickAt(point, 'baijiahao', '请输入正文', placeholder.getBoundingClientRect())
+    await delay(180)
+  }
+  firePointerClick(placeholder, { clickRatioX: 0.08, clickRatioY: 0.5 })
+  await delay(80)
+  placeCaretNearElement(placeholder)
+}
+
+async function clickBaijiahaoEditorBody(el) {
+  const point = elementPoint(el, 0.08, 0.58)
+  if (point) {
+    await requestTrustedClickAt(point, 'baijiahao', '正文编辑区', el.getBoundingClientRect())
+    await delay(180)
+  }
+  firePointerClick(el, { clickRatioX: 0.08, clickRatioY: 0.58 })
+  await delay(80)
+  placeCaretAtEditorBodyPosition(el)
+}
+
+function currentEditableFromSelection() {
+  const node = window.getSelection?.()?.anchorNode
+  const el = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement
+  return el?.closest?.('[contenteditable="true"], textarea') || null
+}
+
+function currentEditableFromActiveElement() {
+  const active = document.activeElement
+  if (!active) return null
+  if (active.matches?.('[contenteditable="true"], textarea')) return active
+  return active.closest?.('[contenteditable="true"], textarea') || null
+}
+
+function placeCaretNearElement(el) {
+  const rect = el?.getBoundingClientRect?.()
+  if (!rect) return false
+  return placeCaretAtPoint(rect.left + 6, rect.top + rect.height / 2)
+}
+
+function placeCaretAtEditorBodyPosition(el) {
+  const rect = el?.getBoundingClientRect?.()
+  if (!rect) return false
+  return placeCaretAtPoint(rect.left + 24, rect.top + Math.max(120, rect.height * 0.55))
+}
+
+function placeCaretAtPointFromElement(el, ratioX, ratioY) {
+  const point = elementPoint(el, ratioX, ratioY)
+  if (!point) return false
+  return placeCaretAtPoint(point.clientX, point.clientY)
+}
+
+function elementPoint(el, ratioX = 0.5, ratioY = 0.5) {
+  const rect = el?.getBoundingClientRect?.()
+  if (!rect) return null
+  return {
+    clientX: Math.round(rect.left + rect.width * ratioX),
+    clientY: Math.round(rect.top + rect.height * ratioY),
+  }
+}
+
+function placeCaretAtPoint(clientX, clientY) {
+  const selection = window.getSelection()
+  if (!selection) return false
+  let range = null
+  if (document.caretRangeFromPoint) {
+    range = document.caretRangeFromPoint(clientX, clientY)
+  } else if (document.caretPositionFromPoint) {
+    const position = document.caretPositionFromPoint(clientX, clientY)
+    if (position) {
+      range = document.createRange()
+      range.setStart(position.offsetNode, position.offset)
+      range.collapse(true)
+    }
+  }
+  if (!range) return false
+  selection.removeAllRanges()
+  selection.addRange(range)
+  return true
 }
 
 async function ensureEditorVisible(fillProfile) {
@@ -3182,11 +3404,188 @@ async function requestTrustedClickAt(point, platform, label = '', rect = null) {
 }
 
 function findTitleElement(fillProfile) {
+  if (normalizePlatform(fillProfile?.platform) === 'baijiahao') {
+    return findBaijiahaoTitleElement(fillProfile)
+  }
   return findFirst(fillProfile.titleSelectors, { rejectTitleLike: false })
 }
 
+function findBaijiahaoTitleElement(fillProfile) {
+  const titleRoot = document.querySelector('#bjhNewsTitle')
+  const titleCandidate = resolveBaijiahaoTitleCandidate(titleRoot)
+  if (titleCandidate) return titleCandidate
+
+  for (const selector of fillProfile.titleSelectors) {
+    let elements = []
+    try {
+      elements = Array.from(document.querySelectorAll(selector))
+    } catch (_) {
+      elements = []
+    }
+    const matched = elements
+      .map((item) => resolveBaijiahaoTitleCandidate(item))
+      .find(Boolean)
+    if (matched) return matched
+  }
+  return null
+}
+
+function resolveBaijiahaoTitleCandidate(candidate) {
+  if (!candidate || !isVisibleElement(candidate)) return null
+  if (containsBaijiahaoUeditor(candidate)) return null
+  const editable = candidate.matches?.('input, textarea, [contenteditable="true"]')
+    ? candidate
+    : candidate.querySelector?.('input, textarea, [contenteditable="true"]')
+  if (editable && isVisibleElement(editable) && !containsBaijiahaoUeditor(editable)) return editable
+  const text = normalizeText(candidate.textContent || candidate.getAttribute?.('aria-label') || candidate.getAttribute?.('placeholder') || '')
+  if (candidate.id === 'bjhNewsTitle' || /请输入标题|标题/.test(text)) return candidate
+  return null
+}
+
+function containsBaijiahaoUeditor(el) {
+  return Boolean(el?.querySelector?.('iframe[id*="ueditor"], iframe[name*="ueditor"], [id*="iframeholder"], [class*="iframeholder"]'))
+}
+
 function findContentElement(titleElement, fillProfile) {
+  if (normalizePlatform(fillProfile?.platform) === 'baijiahao') {
+    return findBaijiahaoContentElement(titleElement, fillProfile)
+  }
   return findFirst(fillProfile.contentSelectors, { excludeElement: titleElement, rejectTitleLike: true })
+}
+
+function findBaijiahaoContentElement(titleElement, fillProfile) {
+  const ueditor = findBaijiahaoUeditorFrame()
+  if (ueditor) return ueditor
+
+  const placeholderCandidate = resolveBaijiahaoBodyPlaceholderCandidate(titleElement)
+  if (placeholderCandidate) return placeholderCandidate
+
+  const selectorCandidates = fillProfile.contentSelectors.flatMap((selector) => {
+    try {
+      return Array.from(document.querySelectorAll(selector))
+    } catch (_) {
+      return []
+    }
+  })
+  const fallbackCandidates = Array.from(document.querySelectorAll('[contenteditable="true"], textarea, div[role="textbox"]'))
+  const seen = new Set()
+  const titleRect = titleElement?.getBoundingClientRect?.() || null
+  const titleText = normalizeText(readElementText(titleElement)).slice(0, 80)
+  const candidates = selectorCandidates.concat(fallbackCandidates)
+    .map((candidate) => resolveBaijiahaoEditableCandidate(candidate))
+    .filter((candidate) => {
+      if (!candidate || seen.has(candidate)) return false
+      seen.add(candidate)
+      if (titleElement && candidate === titleElement) return false
+      if (titleElement && candidate.contains(titleElement)) return false
+      if (titleElement && titleElement.contains(candidate)) return false
+      if (!isVisibleElement(candidate)) return false
+      return scoreBaijiahaoContentCandidate(candidate, titleRect, titleText) > 0
+    })
+    .map((candidate) => ({
+      candidate,
+      score: scoreBaijiahaoContentCandidate(candidate, titleRect, titleText),
+    }))
+    .sort((left, right) => right.score - left.score)
+  return candidates[0]?.candidate || null
+}
+
+function findBaijiahaoUeditorFrame() {
+  return Array.from(document.querySelectorAll('iframe'))
+    .filter(isVisibleElement)
+    .find((frame) => isBaijiahaoUeditorFrame(frame)) || null
+}
+
+function isBaijiahaoUeditorFrame(el) {
+  if (!(el instanceof HTMLIFrameElement)) return false
+  const descriptor = `${el.id || ''} ${el.name || ''} ${String(el.className || '')} ${el.src || ''}`.toLowerCase()
+  if (/ueditor/.test(descriptor)) return true
+  const parentDescriptor = `${el.parentElement?.id || ''} ${String(el.parentElement?.className || '')}`.toLowerCase()
+  if (/edui.*iframeholder|iframeholder/.test(parentDescriptor)) return true
+  return false
+}
+
+function baijiahaoUeditorDocument(frame) {
+  try {
+    return frame.contentDocument || frame.contentWindow?.document || null
+  } catch (_) {
+    return null
+  }
+}
+
+function resolveBaijiahaoEditableCandidate(candidate) {
+  if (!candidate) return null
+  if (candidate.isContentEditable || candidate.getAttribute?.('contenteditable') === 'true') return candidate
+  if (candidate instanceof HTMLTextAreaElement) return candidate
+  const closestEditable = candidate.closest?.('[contenteditable="true"], textarea')
+  if (closestEditable) return closestEditable
+  return candidate.querySelector?.('[contenteditable="true"], textarea') || null
+}
+
+function resolveBaijiahaoBodyPlaceholderCandidate(titleElement) {
+  const placeholder = findVisibleTextElement('请输入正文', { exact: false, maxLength: 12 })
+  if (!placeholder) return null
+  const titleRect = titleElement?.getBoundingClientRect?.() || null
+  const rect = placeholder.getBoundingClientRect?.()
+  if (titleRect && rect && rect.top <= titleRect.bottom) return null
+
+  let current = placeholder
+  let best = null
+  let bestScore = Number.NEGATIVE_INFINITY
+  for (let depth = 0; current && current !== document.body && depth < 8; depth += 1) {
+    const editable = resolveBaijiahaoEditableCandidate(current)
+    if (editable && isVisibleElement(editable)) {
+      const score = scoreBaijiahaoContentCandidate(editable, titleRect, normalizeText(readElementText(titleElement)).slice(0, 80))
+      if (score > bestScore) {
+        best = editable
+        bestScore = score
+      }
+    }
+    current = current.parentElement
+  }
+  return bestScore > -100 ? best : null
+}
+
+function scoreBaijiahaoContentCandidate(candidate, titleRect, titleText = '') {
+  if (isBaijiahaoUeditorFrame(candidate)) return 500
+  const rect = candidate.getBoundingClientRect()
+  const attrs = [
+    candidate.getAttribute?.('placeholder') || '',
+    candidate.getAttribute?.('aria-label') || '',
+    candidate.getAttribute?.('data-placeholder') || '',
+    candidate.getAttribute?.('role') || '',
+    String(candidate.className || ''),
+  ].join(' ')
+  const text = normalizeText(candidate.textContent || '')
+  const descriptor = `${attrs} ${text.slice(0, 80)}`
+  if (isBaijiahaoAssistantInput(candidate, descriptor)) return -500
+  if (titleText && text.includes(titleText) && text.includes('请输入正文')) return -200
+  let score = 0
+  if (/请输入正文|正文|内容/.test(attrs)) score += 160
+  if (/请输入正文/.test(text)) score += 120
+  if (/FeEditorApp|ProseMirror|DraftEditor|public-DraftEditor|textbox/i.test(attrs)) score += 100
+  if (candidate.isContentEditable || candidate.getAttribute?.('contenteditable') === 'true') score += 35
+  if (candidate instanceof HTMLTextAreaElement) score += 25
+  if (rect.width >= 300 && rect.height >= 80) score += 20
+  if (titleRect && rect.top > titleRect.bottom - 8) score += 45
+  if (/标题|请输入标题/.test(descriptor)) score -= 220
+  if (/图文视频动态直播合集图集|AI成片|设置封面|选择封面|定时发布|发布/.test(text)) score -= 120
+  if (titleRect && rect.bottom <= titleRect.bottom) score -= 120
+  if (rect.height < 24 || rect.width < 160) score -= 40
+  return score
+}
+
+function isBaijiahaoAssistantInput(candidate, descriptor) {
+  const normalized = normalizeText(descriptor)
+  if (/cheetah-input|AI助手|热点创作|检测建议|素材推荐|一键生成内容|关键词\/事件观点|输入关键词/.test(normalized)) return true
+  const rect = candidate.getBoundingClientRect?.()
+  if (rect && rect.left > window.innerWidth * 0.55 && /生成|关键词|观点|素材|检测/.test(normalized)) return true
+  return false
+}
+
+function editableContainsProbe(el, probe) {
+  if (!probe) return true
+  return normalizeArticleText(readElementText(el)).includes(probe)
 }
 
 async function waitUntil(predicate, timeoutMs) {
@@ -3359,7 +3758,7 @@ function htmlToPlainText(html) {
   return template.content.textContent || ''
 }
 
-function verifyFilled(titleElement, contentElement, expectedTitle, expectedHtml) {
+function verifyFilled(titleElement, contentElement, expectedTitle, expectedHtml, fillProfile = null) {
   const titleText = readElementText(titleElement)
   const contentText = readElementText(contentElement)
   const expectedContent = htmlToPlainText(expectedHtml).replace(/\s+/g, '')
@@ -3368,13 +3767,47 @@ function verifyFilled(titleElement, contentElement, expectedTitle, expectedHtml)
   if (expectedTitle && !titleText.includes(expectedTitle.trim())) {
     throw new Error(`标题填充后校验失败：命中=${describeElement(titleElement)}，当前="${titleText.slice(0, 60)}"`)
   }
+  if (normalizePlatform(fillProfile?.platform) === 'baijiahao' && contentProbe && normalizeArticleText(titleText).includes(normalizeArticleText(contentProbe))) {
+    throw new Error(`百家号正文误入标题区域：标题命中=${describeElement(titleElement)}，标题="${titleText.slice(0, 120)}"；${describeBaijiahaoContentDiagnostics(titleElement)}`)
+  }
   if (contentProbe && !contentText.replace(/\s+/g, '').includes(contentProbe)) {
     throw new Error(`正文填充后校验失败：命中=${describeElement(contentElement)}，当前="${contentText.slice(0, 80)}"`)
   }
+  if (normalizePlatform(fillProfile?.platform) === 'baijiahao' && contentProbe) {
+    const visibleText = normalizeArticleText(`${document.body?.innerText || ''}${isBaijiahaoUeditorFrame(contentElement) ? readElementText(contentElement) : ''}`)
+    const visibleProbe = normalizeArticleText(contentProbe)
+    if (!visibleText.includes(visibleProbe)) {
+      throw new Error(`百家号正文填充后页面未显示正文：命中=${describeElement(contentElement)}，当前="${contentText.slice(0, 80)}"；${describeBaijiahaoContentDiagnostics(titleElement)}`)
+    }
+  }
+}
+
+function describeBaijiahaoContentDiagnostics(titleElement) {
+  const titleRect = titleElement?.getBoundingClientRect?.() || null
+  const titleText = normalizeText(readElementText(titleElement)).slice(0, 80)
+  const details = Array.from(document.querySelectorAll('[contenteditable="true"], textarea, div[role="textbox"], iframe'))
+    .filter(isVisibleElement)
+    .map((el) => {
+      const rect = el.getBoundingClientRect()
+      const attrs = [
+        el.getAttribute?.('placeholder') || '',
+        el.getAttribute?.('aria-label') || '',
+        el.getAttribute?.('data-placeholder') || '',
+        el.getAttribute?.('role') || '',
+        String(el.className || ''),
+      ].join(' ')
+      return `${describeElement(el)}@${Math.round(rect.left)},${Math.round(rect.top)},${Math.round(rect.width)}x${Math.round(rect.height)}#${scoreBaijiahaoContentCandidate(el, titleRect, titleText)}:${normalizeText(attrs || el.textContent || '').slice(0, 40)}`
+    })
+    .slice(0, 8)
+  return `baijiahaoContentCandidates=${details.join('|') || '-'}`
 }
 
 function readElementText(el) {
   if (!el) return ''
+  if (isBaijiahaoUeditorFrame(el)) {
+    const doc = baijiahaoUeditorDocument(el)
+    return doc?.body?.innerText || doc?.body?.textContent || ''
+  }
   if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return el.value || ''
   return el.textContent || ''
 }
@@ -3406,6 +3839,11 @@ function collectDiagnostics() {
 
 function describeElement(el) {
   if (!el) return '未命中'
+  if (el instanceof HTMLIFrameElement) {
+    const id = el.id ? `#${el.id}` : ''
+    const name = el.name ? `[name="${el.name}"]` : ''
+    return `iframe${id}${name}`
+  }
   const tag = el.tagName.toLowerCase()
   const className = String(el.className || '').trim().replace(/\s+/g, '.')
   const placeholder = el.getAttribute('placeholder')

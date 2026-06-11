@@ -16,6 +16,10 @@ public class ArticleDraftVersion {
     private Integer versionNo;
     private String title;
     private String contentMarkdown;
+    private String contentObjectKey;
+    private String contentChecksum;
+    private LocalDateTime contentArchivedAt;
+    private LocalDateTime contentPurgedAt;
     private String promptSnapshot;
     private String inputSnapshot;
     private String modelPlatformCode;
@@ -24,4 +28,3 @@ public class ArticleDraftVersion {
     private Long createdBy;
     private LocalDateTime createdAt;
 }
-

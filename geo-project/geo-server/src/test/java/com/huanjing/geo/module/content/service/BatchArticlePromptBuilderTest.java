@@ -109,7 +109,8 @@ class BatchArticlePromptBuilderTest {
                 "",
                 "customer",
                 TemplatePerspectiveService.MATCH_SCOPE_DEFAULT,
-                null
+                null,
+                List.<BrandOfferingPromptSelector.SelectedOffering>of()
         );
     }
 

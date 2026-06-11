@@ -36,7 +36,7 @@ import {
   listLocalAgentSessions,
   type LocalAgentSession,
 } from '@/api/localAgent'
-import { getLocalHelperHealth, launchLocalHelperTask, openLocalHelperEnvironment } from '@/api/localHelper'
+import { getLocalHelperHealth, launchLocalHelperTask, openLocalHelperEnvironment, type LocalHelperHealthResponse } from '@/api/localHelper'
 import {
   canonicalSelfMediaPlatform,
   selfMediaPlatformLabel,
@@ -44,7 +44,7 @@ import {
 } from '@/constants/selfMediaPlatforms'
 
 type MediaPlatform = 'wechat_mp' | 'douyin' | 'baijiahao' | 'toutiao' | 'zhihu' | 'xiaohongshu' | 'netease' | 'sohu'
-type SemiAutoPlatform = 'toutiao' | 'zhihu' | 'xiaohongshu'
+type SemiAutoPlatform = 'toutiao' | 'baijiahao' | 'zhihu' | 'xiaohongshu'
 
 type UseSelfMediaDistributionOptions = {
   rows: Ref<ArticleDraft[]>
@@ -78,6 +78,10 @@ function isImageFileType(fileType?: string | null) {
   return ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'].includes((fileType || '').toLowerCase())
 }
 
+function isPublishedLockedArticle(status?: string | null) {
+  return ['published', 'distributed'].includes(String(status || '').toLowerCase())
+}
+
 export function useSelfMediaDistribution(options: UseSelfMediaDistributionOptions) {
   const userStore = useUserStore()
   const router = useRouter()
@@ -85,11 +89,13 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   const mediaDistributeVisible = ref(false)
   const mediaDistributeArticleId = ref<number | null>(null)
   const mediaDistributeBrandId = ref<number | null>(null)
+  const lastLocalHelperHealth = ref<LocalHelperHealthResponse | null>(null)
   const wechatCapability = ref<WechatMpCapability | null>(null)
   const douyinCapability = ref<DouyinCapability | null>(null)
   const wechatAccounts = ref<SelfMediaAccount[]>([])
   const douyinAccounts = ref<SelfMediaAccount[]>([])
   const toutiaoAccounts = ref<SelfMediaAccount[]>([])
+  const baijiahaoAccounts = ref<SelfMediaAccount[]>([])
   const zhihuAccounts = ref<SelfMediaAccount[]>([])
   const xiaohongshuAccounts = ref<SelfMediaAccount[]>([])
   const selfMediaQuotaItems = ref<CompanyDistributionQuotaItem[]>([])
@@ -167,6 +173,8 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
         return douyinAccounts.value
       case 'toutiao':
         return toutiaoAccounts.value
+      case 'baijiahao':
+        return baijiahaoAccounts.value
       case 'zhihu':
         return zhihuAccounts.value
       case 'xiaohongshu':
@@ -219,6 +227,10 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     .filter((item): item is BrandMaterial => !!item))
 
   async function openMediaDistribute(row: ArticleDraft) {
+    if (isPublishedLockedArticle(row.status)) {
+      ElMessage.warning('文章已发布或已分发，不能再次发起自媒体分发')
+      return
+    }
     stopBrowserEnvironmentStatusPolling()
     mediaDistributeArticleId.value = row.id
     mediaDistributeBrandId.value = null
@@ -226,6 +238,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     wechatAccounts.value = []
     douyinAccounts.value = []
     toutiaoAccounts.value = []
+    baijiahaoAccounts.value = []
     zhihuAccounts.value = []
     xiaohongshuAccounts.value = []
     selfMediaQuotaItems.value = []
@@ -249,6 +262,10 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
       const brandId = detailRes.data.data.project?.brandId
       if (!brandId) {
         ElMessage.error('当前文章未绑定品牌，无法分发到自媒体')
+        return
+      }
+      if (isPublishedLockedArticle(detailRes.data.data.article?.status)) {
+        ElMessage.warning('文章已发布或已分发，不能再次发起自媒体分发')
         return
       }
       mediaDistributeBrandId.value = brandId
@@ -286,6 +303,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     wechatAccounts.value = accounts.filter((account) => canonicalSelfMediaPlatform(account.platform) === 'wechat')
     douyinAccounts.value = accounts.filter((account) => canonicalSelfMediaPlatform(account.platform) === 'douyin')
     toutiaoAccounts.value = accounts.filter((account) => canonicalSelfMediaPlatform(account.platform) === 'toutiao')
+    baijiahaoAccounts.value = accounts.filter((account) => canonicalSelfMediaPlatform(account.platform) === 'baijiahao')
     zhihuAccounts.value = accounts.filter((account) => canonicalSelfMediaPlatform(account.platform) === 'zhihu')
     xiaohongshuAccounts.value = accounts.filter((account) => canonicalSelfMediaPlatform(account.platform) === 'xiaohongshu')
   }
@@ -320,6 +338,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   async function refreshBrowserEnvironmentAccountStatuses() {
     await loadBrowserEnvironmentAccountStatuses([
       ...toutiaoAccounts.value,
+      ...baijiahaoAccounts.value,
       ...zhihuAccounts.value,
       ...xiaohongshuAccounts.value,
     ])
@@ -440,7 +459,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   }
 
   function isSemiAutoPlatform(platform: MediaPlatform): platform is SemiAutoPlatform {
-    return platform === 'toutiao' || platform === 'zhihu' || platform === 'xiaohongshu'
+    return platform === 'toutiao' || platform === 'baijiahao' || platform === 'zhihu' || platform === 'xiaohongshu'
   }
 
   function distributionQuotaPeriodLabel(value?: string | null) {
@@ -455,6 +474,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
 
   function semiAutoPlatformLabel(platform: string) {
     if (platform === 'toutiao') return '头条'
+    if (platform === 'baijiahao') return '百家号'
     if (platform === 'zhihu') return '知乎'
     return '小红书'
   }
@@ -710,6 +730,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
 
   function semiAutoAccountsByPlatform(platform: SemiAutoPlatform) {
     if (platform === 'toutiao') return toutiaoAccounts.value
+    if (platform === 'baijiahao') return baijiahaoAccounts.value
     if (platform === 'zhihu') return zhihuAccounts.value
     return xiaohongshuAccounts.value
   }
@@ -866,6 +887,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
 
   function defaultSemiAutoPublishUrl(platform: string) {
     if (platform === 'toutiao') return 'https://mp.toutiao.com/profile_v4/graphic/publish'
+    if (platform === 'baijiahao') return 'https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1'
     if (platform === 'zhihu') return 'https://zhuanlan.zhihu.com/write'
     if (platform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/publish/publish'
     return undefined
@@ -873,6 +895,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
 
   function defaultSemiAutoLoginReportUrl(platform: string) {
     if (platform === 'toutiao') return 'https://mp.toutiao.com/profile_v4'
+    if (platform === 'baijiahao') return 'https://baijiahao.baidu.com/'
     if (platform === 'zhihu') return 'https://www.zhihu.com/'
     if (platform === 'xiaohongshu') return 'https://creator.xiaohongshu.com/'
     return defaultSemiAutoPublishUrl(platform)
@@ -882,6 +905,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     const helperBase = localHelperConfig.helperBase.trim()
     if (!helperBase) return
     const health = await getLocalHelperHealth(helperBase)
+    lastLocalHelperHealth.value = health
     const helperSessionId = Number(health.session?.sessionId)
     if (!health.paired || !Number.isFinite(helperSessionId) || helperSessionId <= 0) return
 
@@ -1146,6 +1170,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
       wechat_mp: '微信公众号',
       douyin: '抖音图文',
       toutiao: '今日头条',
+      baijiahao: '百家号',
       zhihu: '知乎',
       xiaohongshu: '小红书',
     }
@@ -1282,9 +1307,11 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
     mediaDistributeVisible,
     mediaDistributeArticleId,
     mediaDistributeBrandId,
+    lastLocalHelperHealth,
     wechatCapability,
     douyinCapability,
     toutiaoAccounts,
+    baijiahaoAccounts,
     zhihuAccounts,
     xiaohongshuAccounts,
     checkingSelfMediaAccountId,

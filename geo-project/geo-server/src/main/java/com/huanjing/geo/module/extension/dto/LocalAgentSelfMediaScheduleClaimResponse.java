@@ -6,7 +6,8 @@ import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
 public record LocalAgentSelfMediaScheduleClaimResponse(
         SelfMediaPublishScheduleVO schedule,
         DistributionTask task,
-        Launch launch
+        Launch launch,
+        String claimBlockedReason
 ) {
     public record Launch(
             Long taskId,

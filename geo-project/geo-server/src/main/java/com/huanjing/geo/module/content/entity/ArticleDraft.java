@@ -31,6 +31,12 @@ public class ArticleDraft {
     private String perspectiveCode;
     private String allocationMode;
     private String templateSource;
+    private String complianceStatus;
+    private String publishReviewStatus;
+    private String medicalAdReviewNo;
+    private String medicalChannelTier;
+    private String medicalIndustryCode;
+    private String medicalCategoryCode;
     private String topic;
     private String topicAsQuestion;
     private String title;

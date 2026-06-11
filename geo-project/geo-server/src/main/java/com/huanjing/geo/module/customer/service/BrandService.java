@@ -18,6 +18,8 @@ import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
+import com.huanjing.geo.module.system.entity.SysDictItem;
+import com.huanjing.geo.module.system.mapper.SysDictItemMapper;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +44,7 @@ public class BrandService {
 
     private static final Set<String> BRAND_STATUS = Set.of("draft", "active", "archived");
     private static final Set<String> GEO_SITE_STATUS = Set.of("active", "disabled");
+    private static final String DICT_TYPE_COMPLIANCE_INDUSTRY = "compliance_industry";
     private static final Pattern GEO_SITE_CODE_PATTERN =
             Pattern.compile("^[a-z0-9](?:[a-z0-9_-]{0,62}[a-z0-9])?$");
 
@@ -50,6 +53,7 @@ public class BrandService {
     private final BrandProfileVersionMapper brandProfileVersionMapper;
     private final CompanyMapper companyMapper;
     private final ProjectMapper projectMapper;
+    private final SysDictItemMapper sysDictItemMapper;
     private final CurrentUserService currentUserService;
     private final InternalScopeService internalScopeService;
     private final ActivityLogService activityLogService;
@@ -115,6 +119,7 @@ public class BrandService {
         String industry = normalizeIndustry(req.getIndustry());
         validateBrandIndustry(industry, company);
         brand.setIndustry(industry);
+        brand.setComplianceIndustryCode(normalizeComplianceIndustryCode(req.getComplianceIndustryCode()));
         brand.setBrandName(req.getBrandName());
         brand.setBrandShortName(req.getBrandShortName());
         brand.setBrandSlug(generateBrandSlug(req.getCompanyId()));
@@ -138,6 +143,12 @@ public class BrandService {
         brand.setBusinessIntro(req.getBusinessIntro());
         brand.setBrandQualificationDescription(req.getBrandQualificationDescription());
         brand.setBrandCaseDescription(req.getBrandCaseDescription());
+        brand.setMedicalLicense(req.getMedicalLicense());
+        brand.setDiagnosisScope(req.getDiagnosisScope());
+        brand.setInstitutionType(req.getInstitutionType());
+        brand.setPractitionerInfoPublic(req.getPractitionerInfoPublic());
+        brand.setMedicalAdReviewNo(req.getMedicalAdReviewNo());
+        brand.setComplianceNotesMedical(req.getComplianceNotesMedical());
         brand.setForbiddenPhrases(normalizeForbiddenPhrases(req.getForbiddenPhrases()));
         applyGeoSiteFields(brand, req.getGeoSiteCode(), req.getGeoSiteStatus(), null);
         applyIndustrySiteFields(brand, req.getIndustrySiteName(), req.getIndustrySiteCode());
@@ -185,6 +196,7 @@ public class BrandService {
         String industry = normalizeIndustry(req.getIndustry());
         validateBrandIndustry(industry, company);
         brand.setIndustry(industry);
+        brand.setComplianceIndustryCode(normalizeComplianceIndustryCode(req.getComplianceIndustryCode()));
         brand.setMainBusiness(req.getMainBusiness());
         brand.setCoreProducts(req.getCoreProducts());
         brand.setBrandPositioning(req.getBrandPositioning());
@@ -205,6 +217,12 @@ public class BrandService {
         brand.setBusinessIntro(req.getBusinessIntro());
         brand.setBrandQualificationDescription(req.getBrandQualificationDescription());
         brand.setBrandCaseDescription(req.getBrandCaseDescription());
+        brand.setMedicalLicense(req.getMedicalLicense());
+        brand.setDiagnosisScope(req.getDiagnosisScope());
+        brand.setInstitutionType(req.getInstitutionType());
+        brand.setPractitionerInfoPublic(req.getPractitionerInfoPublic());
+        brand.setMedicalAdReviewNo(req.getMedicalAdReviewNo());
+        brand.setComplianceNotesMedical(req.getComplianceNotesMedical());
         brand.setForbiddenPhrases(normalizeForbiddenPhrases(req.getForbiddenPhrases()));
         applyGeoSiteFields(brand, req.getGeoSiteCode(), req.getGeoSiteStatus(), id);
         applyIndustrySiteFields(brand, req.getIndustrySiteName(), req.getIndustrySiteCode());
@@ -360,6 +378,7 @@ public class BrandService {
         snapshot.put("id", brand.getId());
         snapshot.put("companyId", brand.getCompanyId());
         snapshot.put("industry", brand.getIndustry());
+        snapshot.put("complianceIndustryCode", brand.getComplianceIndustryCode());
         snapshot.put("brandName", brand.getBrandName());
         snapshot.put("brandShortName", brand.getBrandShortName());
         snapshot.put("brandSlug", brand.getBrandSlug());
@@ -376,6 +395,12 @@ public class BrandService {
         snapshot.put("businessIntro", brand.getBusinessIntro());
         snapshot.put("brandQualificationDescription", brand.getBrandQualificationDescription());
         snapshot.put("brandCaseDescription", brand.getBrandCaseDescription());
+        snapshot.put("medicalLicense", brand.getMedicalLicense());
+        snapshot.put("diagnosisScope", brand.getDiagnosisScope());
+        snapshot.put("institutionType", brand.getInstitutionType());
+        snapshot.put("practitionerInfoPublic", brand.getPractitionerInfoPublic());
+        snapshot.put("medicalAdReviewNo", brand.getMedicalAdReviewNo());
+        snapshot.put("complianceNotesMedical", brand.getComplianceNotesMedical());
         snapshot.put("geoSiteCode", brand.getGeoSiteCode());
         snapshot.put("geoSiteStatus", brand.getGeoSiteStatus());
         snapshot.put("industrySiteName", brand.getIndustrySiteName());
@@ -442,6 +467,23 @@ public class BrandService {
             throw new BizException(400, "品牌行业不能为空");
         }
         return value.trim();
+    }
+
+    private String normalizeComplianceIndustryCode(String value) {
+        String normalized = trimToNull(value);
+        if (normalized == null || "none".equalsIgnoreCase(normalized)) {
+            return null;
+        }
+        normalized = normalized.toLowerCase(Locale.ROOT);
+        SysDictItem item = sysDictItemMapper.selectOne(new LambdaQueryWrapper<SysDictItem>()
+                .eq(SysDictItem::getDictType, DICT_TYPE_COMPLIANCE_INDUSTRY)
+                .eq(SysDictItem::getDictKey, normalized)
+                .eq(SysDictItem::getEnabled, true)
+                .last("LIMIT 1"));
+        if (item == null) {
+            throw new BizException(400, "行业合规类型无效或未启用");
+        }
+        return normalized;
     }
 
     private String normalizeForbiddenPhrases(String raw) {

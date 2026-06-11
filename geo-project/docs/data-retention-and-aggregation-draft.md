@@ -86,13 +86,13 @@
 7. `V229` 建报告周期 freeze 表；实现异步 freeze job、周期结束触发和堆积监控。
 8. 完成季报 freeze SELECT：`report_type=quarterly`、日历季度、全量、每 `问题身份 × 平台` 最新一条。
 9. 看板/报告读路径切换。
-10. `V230` 建发布记录与文章归档字段；实现正文归档 dry-run。
-11. `V231` 补 payload purge marker；实现 publish record 补偿任务。
+10. `V232` 建发布记录与文章归档字段；实现正文归档 dry-run。
+11. `V233` 补 payload purge marker；实现 publish record 补偿任务。
 12. retention scheduler 上线，默认 dry-run；满足 dry-run 晋级标准后再开启 execute。
 
 ## 4. Flyway 迁移规划
 
-当前真实迁移已到 `V227__verify_baijiahao_schedule_capability.sql`，生命周期治理从 `V228` 开始。多人多分支并行时，落地前必须先在团队内占用 `V228` 到 `V231`，避免合并时版本号再次冲突。
+当前真实迁移已到 `V227__verify_baijiahao_schedule_capability.sql`，生命周期治理从 `V228` 开始；因并行分支已占用 `V230/V231`，文章归档与 purge marker 使用 `V232/V233`。
 
 ### V228__data_lifecycle_summary_and_run.sql
 
@@ -208,7 +208,7 @@ report_period_freeze (
 - v1 freeze 内容为季度内全部 `问题身份 × 平台`；每组只取最新一条，排序为 `COALESCE(poll_results.updated_at, poll_results.created_at) DESC, poll_results.id DESC`，禁止用 `batch_no` 近似最新。
 - 问题身份与日汇总一致：`keyword_result_id` 非空用 `ID:{keyword_result_id}`；为空时用 `TEXT:{lower(trim(keyword_text_snapshot))}`，不得漏掉未匹配关键词。
 
-### V230__article_publish_record_and_archive_columns.sql
+### V232__article_publish_record_and_archive_columns.sql
 
 新增：
 
@@ -217,7 +217,7 @@ report_period_freeze (
 修改：
 
 - `article_draft_version` 增加：
-  - `content_object_key VARCHAR(500) NULL`
+  - `content_object_key VARCHAR(512) NULL`
   - `content_checksum CHAR(64) NULL`
   - `content_archived_at DATETIME NULL`
   - `content_purged_at DATETIME NULL`
@@ -261,7 +261,7 @@ UNIQUE KEY uk_article_publish_source (source_type, source_id)
 
 并发约束：`PollRetentionHandler` execute 删除 `poll_results` 前，必须先获取与 `PollSummaryRecomputeService` 相同的 `data_retention_recompute_slice_lock`（`domain='poll_results' + project_id + batch_date + question_tier`），并在锁内完成最终门控复查、子表删除、明细删除和 `data_retention_purged_slice` 写入。purge 与 recompute 必须通过同一把 slice 锁互斥，避免 recompute 通过 purged 复查后又与 purge 并发读写同一 slice。
 
-### V231__payload_purge_marker_columns.sql
+### V233__data_lifecycle_purge_marker_columns.sql
 
 给以下表增加 purge marker，避免重复 slim：
 

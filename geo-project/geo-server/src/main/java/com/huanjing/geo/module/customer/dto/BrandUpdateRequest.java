@@ -8,6 +8,8 @@ import lombok.Data;
 public class BrandUpdateRequest {
     @NotBlank
     private String industry;
+    @Size(max = 32)
+    private String complianceIndustryCode;
     @NotBlank
     private String brandName;
     @Size(max = 128)
@@ -42,6 +44,16 @@ public class BrandUpdateRequest {
     private String brandQualificationDescription;
     @Size(max = 300)
     private String brandCaseDescription;
+    @Size(max = 500)
+    private String medicalLicense;
+    @Size(max = 1000)
+    private String diagnosisScope;
+    @Size(max = 128)
+    private String institutionType;
+    private String practitionerInfoPublic;
+    @Size(max = 128)
+    private String medicalAdReviewNo;
+    private String complianceNotesMedical;
     private String forbiddenPhrases;
     private String geoSiteCode;
     private String geoSiteStatus;

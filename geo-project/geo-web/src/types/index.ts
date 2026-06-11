@@ -129,6 +129,7 @@ export interface Brand {
   id: number
   companyId: number
   industry: string
+  complianceIndustryCode?: string | null
   brandName: string
   brandShortName?: string | null
   brandSlug: string
@@ -168,6 +169,12 @@ export interface Brand {
   statementVersion?: number | null
   statementHistory?: any[] | null
   forbiddenPhrases: string | string[] | null
+  medicalLicense?: string | null
+  diagnosisScope?: string | null
+  institutionType?: string | null
+  practitionerInfoPublic?: string | null
+  medicalAdReviewNo?: string | null
+  complianceNotesMedical?: string | null
   geoSiteCode?: string | null
   geoSiteStatus?: 'active' | 'disabled' | string | null
   industrySiteName?: string | null
@@ -204,6 +211,11 @@ export interface BrandOffering {
   status: 'active' | 'disabled' | string
   priority: number
   useScenarios?: string | null
+  medicalIndustryCode?: string | null
+  medicalCategoryCode?: string | null
+  medicalCategoryName?: string | null
+  qualificationRef?: string | null
+  medicalProjectEnabled?: boolean
   createdAt?: string
   updatedAt?: string
 }
@@ -973,6 +985,12 @@ export interface ArticleDraft {
   channelSubCode?: string | null
   allocationMode?: string | null
   templateSource?: 'smart' | 'weighted' | 'custom' | 'fallback_default_prompt' | string | null
+  complianceStatus?: 'pending' | 'passed' | 'failed' | 'discarded_compliance_failed' | string | null
+  publishReviewStatus?: 'not_required' | 'pending' | 'passed' | 'rejected' | string | null
+  medicalAdReviewNo?: string | null
+  medicalChannelTier?: 'education' | 'source_site' | 'official_site' | string | null
+  medicalIndustryCode?: 'medical_beauty' | 'oral' | string | null
+  medicalCategoryCode?: string | null
   promptTemplateId?: number | null
   promptTemplateVersionId?: number | null
   promptTemplateName?: string | null
@@ -1276,6 +1294,9 @@ export interface SelfMediaPublishSchedule {
   nextAttemptAt?: string | null
   lockedUntil?: string | null
   failureCode?: string | null
+  failureLabel?: string | null
+  failureRetryable?: boolean | null
+  failureActionHint?: string | null
   failureMessage?: string | null
   diagnosticsJson?: string | null
   activeAlerts?: SelfMediaPublishScheduleAlert[]

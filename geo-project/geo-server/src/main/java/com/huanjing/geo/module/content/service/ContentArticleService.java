@@ -12,11 +12,13 @@ import com.huanjing.geo.module.audit.service.AuditService;
 import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
+import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
 import com.huanjing.geo.module.content.dto.ArticlePublishRequest;
 import com.huanjing.geo.module.content.dto.ArticleResubmitRequest;
 import com.huanjing.geo.module.content.dto.ArticleReviewRequest;
 import com.huanjing.geo.module.content.dto.ArticleRevisionSaveRequest;
 import com.huanjing.geo.module.content.dto.ManualArticleCreateRequest;
+import com.huanjing.geo.module.content.dto.MedicalPublishReviewRequest;
 import com.huanjing.geo.module.content.entity.*;
 import com.huanjing.geo.module.content.mapper.*;
 import com.huanjing.geo.module.content.service.render.wechat.WechatArticleRenderService;
@@ -49,6 +51,8 @@ public class ContentArticleService {
     private static final Set<String> AUTO_APPROVED_GENERATED_BY = Set.of("ai", "system", "batch_ai", "ai_preview", "template_ai");
     private static final Set<String> LEGACY_PROJECT_UPDATE_ROLES =
             Set.of("operator", "delivery_manager", "partner", "partner_staff");
+    private static final Set<String> MANUAL_CREATE_COVER_REQUIRED_SELF_MEDIA_SUBS =
+            Set.of("toutiao", "baijiahao", "netease");
 
     private final ArticleDraftMapper articleDraftMapper;
     private final ArticleDraftVersionMapper articleDraftVersionMapper;
@@ -384,10 +388,35 @@ public class ContentArticleService {
         if (!isSelfMediaChannel(channelGroupCode, channelSubCode, contentStyle)) {
             return null;
         }
+        boolean coverRequired = requiresManualCreateCover(channelSubCode, contentStyle);
         if ("ai_preview".equals(createSource) && req.getCoverMaterialId() == null) {
-            return coverSelectionService.selectRandomCoverUrl(project.getBrandId());
+            return coverRequired ? coverSelectionService.selectRandomCoverUrl(project.getBrandId()) : null;
+        }
+        if (req.getCoverMaterialId() == null && !coverRequired) {
+            return null;
         }
         return coverSelectionService.requireManualCoverUrl(project.getBrandId(), req.getCoverMaterialId());
+    }
+
+    private boolean requiresManualCreateCover(String channelSubCode, String contentStyle) {
+        String subCode = normalizeSelfMediaSubCode(channelSubCode);
+        if (subCode == null) {
+            subCode = normalizeSelfMediaSubCode(contentStyle);
+        }
+        return subCode == null || MANUAL_CREATE_COVER_REQUIRED_SELF_MEDIA_SUBS.contains(subCode);
+    }
+
+    private String normalizeSelfMediaSubCode(String value) {
+        String text = trimToNull(value);
+        if (text == null) {
+            return null;
+        }
+        String prefix = ArticlePromptChannels.SELF_MEDIA + ":";
+        if (text.startsWith(prefix)) {
+            text = text.substring(prefix.length());
+        }
+        text = ArticlePromptChannels.canonicalSubCode(ArticlePromptChannels.SELF_MEDIA, text);
+        return ArticlePromptChannels.SELF_MEDIA_SUBS.contains(text) ? text : null;
     }
 
     private String normalizeCreateSource(String source) {
@@ -506,6 +535,41 @@ public class ContentArticleService {
         ensureProjectAccess(operator, project, true);
         brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
         throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Article review workflow is disabled");
+    }
+
+    @Transactional
+    public void reviewMedicalPublish(Long articleId, MedicalPublishReviewRequest req) {
+        SysUser operator = currentUserService.requireCurrentUser();
+        currentUserService.ensurePermissionOrLegacy("content.article.write", "project.update", LEGACY_PROJECT_UPDATE_ROLES);
+        ArticleDraft article = requireArticle(articleId);
+        Project project = requireProject(article.getProjectId());
+        ensureProjectAccess(operator, project, true);
+        brandAccessService.requireBrandAccess(project.getBrandId(), operator.getId(), BrandAccessAction.MANAGE);
+        if (!MedicalArticleConstants.TIER_OFFICIAL_SITE.equals(article.getMedicalChannelTier())) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Only medical official-site articles require publish review");
+        }
+        if (!MedicalArticleConstants.COMPLIANCE_PASSED.equals(article.getComplianceStatus())) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Medical compliance must pass before publish review");
+        }
+        String action = trimToNull(req.getAction());
+        action = action == null ? null : action.toLowerCase(Locale.ROOT);
+        if (action == null || !Set.of("approve", "reject").contains(action)) {
+            throw new BizException(ContentErrorCodes.ARTICLE_BAD_REQUEST, "Invalid medical publish review action");
+        }
+        String oldStatus = article.getPublishReviewStatus();
+        String newStatus = "approve".equals(action)
+                ? MedicalArticleConstants.REVIEW_PASSED
+                : MedicalArticleConstants.REVIEW_REJECTED;
+        int updated = articleDraftMapper.update(null, new LambdaUpdateWrapper<ArticleDraft>()
+                .eq(ArticleDraft::getId, articleId)
+                .set(ArticleDraft::getPublishReviewStatus, newStatus));
+        if (updated != 1) {
+            auditArticleTransition("MEDICAL_PUBLISH_REVIEW", AuditResult.DENIED, operator, project, article,
+                    oldStatus, newStatus, "STALE_STATE", ContentErrorCodes.ARTICLE_STATE_CONFLICT);
+            throw new BizException(ContentErrorCodes.ARTICLE_STATE_CONFLICT, "Article state conflict");
+        }
+        auditArticleTransition("MEDICAL_PUBLISH_REVIEW", AuditResult.SUCCESS, operator, project, article,
+                oldStatus, newStatus, req.getComment(), null);
     }
 
     @Transactional

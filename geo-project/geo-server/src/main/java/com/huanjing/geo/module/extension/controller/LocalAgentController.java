@@ -1,5 +1,6 @@
 package com.huanjing.geo.module.extension.controller;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.content.entity.BrowserEnvironment;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
@@ -38,11 +39,14 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 @Tag(name = "LocalAgent")
 @RestController
@@ -113,7 +117,12 @@ public class LocalAgentController {
                         SELF_MEDIA_SCHEDULE_LOCK_MINUTES
                 );
         if (claimed == null) {
-            return R.ok(null);
+            return R.ok(new LocalAgentSelfMediaScheduleClaimResponse(
+                    null,
+                    null,
+                    null,
+                    claimBlockedReason(platform)
+            ));
         }
         DistributionTask task = claimed.task();
         SelfMediaAccount account = task.getSelfMediaAccountId() == null
@@ -135,7 +144,7 @@ public class LocalAgentController {
                         task.getEnvironmentKey(),
                         task.getProviderProfileId()
                 );
-        return R.ok(new LocalAgentSelfMediaScheduleClaimResponse(claimed.schedule(), task, launch));
+        return R.ok(new LocalAgentSelfMediaScheduleClaimResponse(claimed.schedule(), task, launch, null));
     }
 
     @GetMapping("/self-media-schedules/publish-checks/claim-next")
@@ -150,7 +159,11 @@ public class LocalAgentController {
                         SELF_MEDIA_PUBLISH_CHECK_LOCK_MINUTES
                 );
         if (schedule == null) {
-            return R.ok(null);
+            return R.ok(new LocalAgentSelfMediaPublishCheckClaimResponse(
+                    null,
+                    null,
+                    claimBlockedReason(platform)
+            ));
         }
         SelfMediaAccount account = schedule.getSelfMediaAccountId() == null
                 ? null
@@ -168,16 +181,57 @@ public class LocalAgentController {
                 new LocalAgentSelfMediaPublishCheckClaimResponse.Launch(
                         schedule.getId(),
                         taskPlatform,
-                        defaultWorksListUrl(taskPlatform),
+                        defaultWorksListUrl(taskPlatform, account),
                         schedule.getSelfMediaAccountId(),
                         schedule.getBrowserEnvironmentAccountId(),
-                        environmentAccount == null ? null : environmentAccount.getExpectedPlatformAccountId(),
-                        environmentAccount == null ? null : environmentAccount.getExpectedAccountName(),
+                        firstText(
+                                environmentAccount == null ? null : environmentAccount.getExpectedPlatformAccountId(),
+                                account == null ? null : account.getPlatformAccountId()
+                        ),
+                        firstText(
+                                environmentAccount == null ? null : environmentAccount.getExpectedAccountName(),
+                                account == null ? null : account.getAccountName()
+                        ),
                         environment == null ? null : environment.getEnvironmentKey(),
                         environment == null ? null : environment.getName(),
                         environment == null ? null : environment.getProviderProfileId()
                 );
-        return R.ok(new LocalAgentSelfMediaPublishCheckClaimResponse(schedule, launch));
+        return R.ok(new LocalAgentSelfMediaPublishCheckClaimResponse(schedule, launch, null));
+    }
+
+    private String claimBlockedReason(String platform) {
+        Set<String> enabledPlatforms = Set.copyOf(scheduleService.localAgentAutomationPlatforms());
+        String normalizedPlatform = normalizePlatform(platform);
+        if (enabledPlatforms.isEmpty()) {
+            return "PLATFORM_CAPABILITY_DISABLED";
+        }
+        if (StringUtils.hasText(normalizedPlatform) && !enabledPlatforms.contains(normalizedPlatform)) {
+            return "PLATFORM_CAPABILITY_DISABLED";
+        }
+        String accountPlatform = StringUtils.hasText(normalizedPlatform) && enabledPlatforms.contains(normalizedPlatform)
+                ? normalizedPlatform
+                : null;
+        if (!hasAvailableSelfMediaAccount(accountPlatform, enabledPlatforms)) {
+            return "NO_AVAILABLE_ACCOUNT";
+        }
+        return "NO_DUE_TASK";
+    }
+
+    private boolean hasAvailableSelfMediaAccount(String platform, Set<String> enabledPlatforms) {
+        LambdaQueryWrapper<SelfMediaAccount> query = new LambdaQueryWrapper<SelfMediaAccount>()
+                .eq(SelfMediaAccount::getStatus, "active")
+                .isNull(SelfMediaAccount::getDeletedAt)
+                .last("LIMIT 1");
+        if (StringUtils.hasText(platform)) {
+            query.eq(SelfMediaAccount::getPlatform, platform);
+        } else if (enabledPlatforms != null && !enabledPlatforms.isEmpty()) {
+            query.in(SelfMediaAccount::getPlatform, enabledPlatforms);
+        }
+        return selfMediaAccountMapper.selectOne(query) != null;
+    }
+
+    private String normalizePlatform(String platform) {
+        return StringUtils.hasText(platform) ? platform.trim().toLowerCase(Locale.ROOT) : null;
     }
 
     @PostMapping("/self-media-schedules/{scheduleId}/publish-checks/published")
@@ -270,9 +324,35 @@ public class LocalAgentController {
             return "https://creator.xiaohongshu.com/new/note-manager";
         }
         if ("baijiahao".equalsIgnoreCase(platform)) {
-            return "https://baijiahao.baidu.com/builder/rc/content?type=news";
+            return null;
         }
         return defaultPublishUrl(platform);
+    }
+
+    private String defaultWorksListUrl(String platform, SelfMediaAccount account) {
+        if (!"baijiahao".equalsIgnoreCase(platform)) {
+            return defaultWorksListUrl(platform);
+        }
+        String appId = account == null ? null : account.getPlatformAccountId();
+        if (!StringUtils.hasText(appId)) {
+            return null;
+        }
+        return "https://baijiahao.baidu.com/builder/rc/content"
+                + "?currentPage=1&pageSize=10&search=&type=&collection=&app_id="
+                + URLEncoder.encode(appId.trim(), StandardCharsets.UTF_8)
+                + "&startDate=&endDate=";
+    }
+
+    private String firstText(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 
     private String sha256Hex(String value) {

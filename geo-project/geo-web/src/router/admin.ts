@@ -168,6 +168,12 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '文章提示词模板', hidden: true, permissions: ['content.prompt_template.manage'] },
     },
     {
+      path: 'content/medical-article-config',
+      name: 'MedicalArticleConfig',
+      component: () => import('@/views/admin/content/MedicalArticleConfig.vue'),
+      meta: { title: '医疗文章配置', hidden: true, permissions: ['content.prompt_template.manage'] },
+    },
+    {
       path: 'content/wechat-templates',
       name: 'WechatRenderTemplates',
       component: () => import('@/views/admin/content/wechat-template/TemplateList.vue'),

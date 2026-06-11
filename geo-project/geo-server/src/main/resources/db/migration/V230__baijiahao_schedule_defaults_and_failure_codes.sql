@@ -1,0 +1,87 @@
+-- Refresh Baijiahao schedule capability defaults after full AdsPower automation validation.
+
+INSERT INTO self_media_schedule_capability (
+  platform,
+  verification_status,
+  supports_schedule,
+  min_delay_minutes,
+  max_delay_minutes,
+  save_creates_schedule,
+  supports_cancel,
+  supports_modify,
+  supports_publish_check,
+  v1_strategy,
+  selector_status,
+  evidence_json,
+  notes,
+  verified_at,
+  verified_by,
+  created_at,
+  updated_at
+) VALUES (
+  'baijiahao',
+  'verified',
+  1,
+  60,
+  10080,
+  1,
+  0,
+  0,
+  1,
+  'platform_schedule',
+  'verified',
+  JSON_OBJECT(
+    'source', 'ads_power_automation',
+    'flow', JSON_ARRAY('fill_title_content', 'upload_single_cover', 'schedule_publish', 'publish_result_check'),
+    'publishUrl', 'https://baijiahao.baidu.com/builder/rc/edit?type=news&is_from_cms=1',
+    'worksListUrlTemplate', 'https://baijiahao.baidu.com/builder/rc/content?currentPage=1&pageSize=10&search=&type=&collection=&app_id={appId}&startDate=&endDate=',
+    'minDelayMinutes', 60,
+    'maxDelayMinutes', 10080,
+    'locationRequired', false,
+    'coverRequired', true,
+    'requiredAccountFields', JSON_ARRAY('platformAccountId'),
+    'failureCodes', JSON_ARRAY(
+      'BAIJIAHAO_APP_ID_REQUIRED',
+      'BAIJIAHAO_COVER_REQUIRED',
+      'BAIJIAHAO_COVER_PICKER_NOT_OPEN',
+      'BAIJIAHAO_COVER_UPLOAD_INPUT_NOT_FOUND',
+      'BAIJIAHAO_COVER_UPLOAD_TIMEOUT',
+      'BAIJIAHAO_COVER_CONFIRM_NOT_FOUND',
+      'BAIJIAHAO_CONTENT_WRITTEN_TO_TITLE',
+      'BAIJIAHAO_UEDITOR_FILL_NOT_VISIBLE',
+      'BAIJIAHAO_SCHEDULE_DIALOG_NOT_READY',
+      'BAIJIAHAO_SCHEDULE_OPTION_NOT_FOUND',
+      'BAIJIAHAO_PLATFORM_RATE_LIMITED',
+      'BAIJIAHAO_PUBLISH_NOT_CONFIRMED',
+      'BAIJIAHAO_REVIEW_REJECTED',
+      'BAIJIAHAO_WORK_WITHDRAWN'
+    ),
+    'automationOptions', JSON_OBJECT(
+      'throttle', JSON_OBJECT(
+        'beforeConfirmDelayMs', 4500,
+        'confirmRetryDelayMs', 8000,
+        'afterConfirmClickDelayMs', 3000,
+        'maxConfirmAttempts', 4
+      )
+    )
+  ),
+  '百家号 AdsPower 自动化已验证：标题正文填充、单图封面上传、平台原生定时发布、作品列表按 app_id 回查；账号需维护百家号 ID/app_id。',
+  CURRENT_TIMESTAMP,
+  NULL,
+  CURRENT_TIMESTAMP,
+  CURRENT_TIMESTAMP
+) ON DUPLICATE KEY UPDATE
+  verification_status = VALUES(verification_status),
+  supports_schedule = VALUES(supports_schedule),
+  min_delay_minutes = VALUES(min_delay_minutes),
+  max_delay_minutes = VALUES(max_delay_minutes),
+  save_creates_schedule = VALUES(save_creates_schedule),
+  supports_cancel = VALUES(supports_cancel),
+  supports_modify = VALUES(supports_modify),
+  supports_publish_check = VALUES(supports_publish_check),
+  v1_strategy = VALUES(v1_strategy),
+  selector_status = VALUES(selector_status),
+  evidence_json = VALUES(evidence_json),
+  notes = VALUES(notes),
+  verified_at = VALUES(verified_at),
+  updated_at = CURRENT_TIMESTAMP;

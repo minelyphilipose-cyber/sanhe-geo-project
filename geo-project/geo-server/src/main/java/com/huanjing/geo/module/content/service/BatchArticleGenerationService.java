@@ -11,6 +11,7 @@ import com.huanjing.geo.common.llm.LlmInvoker;
 import com.huanjing.geo.module.content.ContentErrorCodes;
 import com.huanjing.geo.module.content.constant.ArticlePromptChannels;
 import com.huanjing.geo.module.content.constant.ArticleTypes;
+import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
 import com.huanjing.geo.module.content.constant.TemplatePerspectiveCodes;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateRequest;
 import com.huanjing.geo.module.content.dto.BatchArticleGenerateResponse;
@@ -135,6 +136,8 @@ public class BatchArticleGenerationService {
     private final ArticleCoverSelectionService coverSelectionService;
     private final BatchArticlePromptBuilder promptBuilder;
     private final ArticleGenerationPromptContextFactory promptContextFactory;
+    private final MedicalArticleGenerationService medicalArticleGenerationService;
+    private final MedicalArticleComplianceChecker medicalComplianceChecker;
     private final BatchArticleQualityChecker qualityChecker;
     private final ArticleTemplateAllocationService allocationService;
     private final TemplatePerspectiveService perspectiveService;
@@ -168,6 +171,8 @@ public class BatchArticleGenerationService {
                                          ArticleCoverSelectionService coverSelectionService,
                                          BatchArticlePromptBuilder promptBuilder,
                                          ArticleGenerationPromptContextFactory promptContextFactory,
+                                         MedicalArticleGenerationService medicalArticleGenerationService,
+                                         MedicalArticleComplianceChecker medicalComplianceChecker,
                                          BatchArticleQualityChecker qualityChecker,
                                          ArticleTemplateAllocationService allocationService,
                                          TemplatePerspectiveService perspectiveService,
@@ -200,6 +205,8 @@ public class BatchArticleGenerationService {
         this.coverSelectionService = coverSelectionService;
         this.promptBuilder = promptBuilder;
         this.promptContextFactory = promptContextFactory;
+        this.medicalArticleGenerationService = medicalArticleGenerationService;
+        this.medicalComplianceChecker = medicalComplianceChecker;
         this.qualityChecker = qualityChecker;
         this.allocationService = allocationService;
         this.perspectiveService = perspectiveService;
@@ -271,6 +278,7 @@ public class BatchArticleGenerationService {
             batch.setFailedCount(0);
             batch.setWarningCount(0);
             batch.setStatus(STATUS_PENDING);
+            batch.setMedicalIndustryCode(topics.stream().map(ValidatedTopic::medicalIndustryCode).filter(StringUtils::hasText).findFirst().orElse(null));
             batch.setCreatedBy(operator == null ? null : operator.getId());
             batchMapper.insert(batch);
 
@@ -312,6 +320,12 @@ public class BatchArticleGenerationService {
                         task.setLength(DEFAULT_LENGTH);
                         task.setTopic(topic.topic());
                         task.setTopicAsQuestion(topic.topicAsQuestion());
+                        task.setMedicalIndustryCode(topic.medicalIndustryCode());
+                        task.setMedicalCategoryCode(topic.medicalCategoryCode());
+                        task.setMedicalCategoryName(topic.medicalCategoryName());
+                        task.setTopicAngleId(topic.topicAngleId());
+                        task.setStructureSkeleton(topic.structureSkeleton());
+                        task.setFocus(topic.focus());
                         task.setKeywordGroupId(topic.keywordGroupId());
                         task.setKeywordGroupName(topic.keywordGroupName());
                         task.setExtraPrompt(platform.extraPrompt());
@@ -468,6 +482,7 @@ public class BatchArticleGenerationService {
             }
             ArticleGenerationPromptContextFactory.PromptContextResult promptContext =
                     promptContextFactory.buildForBatch(batch, task);
+            applyMedicalContext(batch, task, promptContext.medicalContext());
             task.setTopicAsQuestion(promptContext.topicAsQuestion());
             if (promptContext.fallbackToDefaultPrompt()) {
                 task.setTemplateSource(TEMPLATE_SOURCE_FALLBACK_DEFAULT_PROMPT);
@@ -481,23 +496,71 @@ public class BatchArticleGenerationService {
             task.setModelPlatformCode(selectedModel.platformCode());
             task.setModelId(selectedModel.modelId());
             taskMapper.updateById(task);
-            ArticleGenerationEngine.GeneratedArticle generated = articleGenerationEngine.generate(
-                    new ArticleGenerationEngine.GenerateInput(
-                            project,
-                            brand,
-                            prompt.systemPrompt(),
-                            prompt.userPrompt(),
-                            selectedModel.platformCode(),
-                            selectedModel.modelId(),
-                            true,
-                            true,
-                            true,
-                            forbiddenPhrases
-                    )
-            );
+            ArticleGenerationEngine.GeneratedArticle generated = null;
+            MedicalArticleComplianceChecker.CheckResult complianceResult = MedicalArticleComplianceChecker.CheckResult.pass();
             int retryCount = 0;
+            int maxAttempts = promptContext.medicalContext() == null ? 1 : MedicalArticleConstants.MAX_COMPLIANCE_GENERATION_ATTEMPTS;
+            BatchArticlePromptBuilder.PromptBuildResult attemptPrompt = prompt;
+            for (int attemptNo = 1; attemptNo <= maxAttempts; attemptNo++) {
+                generated = articleGenerationEngine.generate(
+                        new ArticleGenerationEngine.GenerateInput(
+                                project,
+                                brand,
+                                attemptPrompt.systemPrompt(),
+                                attemptPrompt.userPrompt(),
+                                selectedModel.platformCode(),
+                                selectedModel.modelId(),
+                                true,
+                                true,
+                                true,
+                                forbiddenPhrases
+                        )
+                );
+                complianceResult = medicalComplianceChecker.check(new MedicalArticleComplianceChecker.CheckInput(
+                        batch.getId(),
+                        task.getId(),
+                        project.getId(),
+                        project.getBrandId(),
+                        task.getChannelGroupCode(),
+                        task.getChannelSubCode(),
+                        generated.title(),
+                        generated.content(),
+                        brand,
+                        promptContext.medicalContext()
+                ));
+                if (complianceResult.passed()) {
+                    break;
+                }
+                medicalComplianceChecker.logHits(new MedicalArticleComplianceChecker.CheckInput(
+                                batch.getId(),
+                                task.getId(),
+                                project.getId(),
+                                project.getBrandId(),
+                                task.getChannelGroupCode(),
+                                task.getChannelSubCode(),
+                                generated.title(),
+                                generated.content(),
+                                brand,
+                                promptContext.medicalContext()
+                        ),
+                        complianceResult,
+                        null,
+                        attemptNo >= maxAttempts ? "discard" : "retry");
+                if (attemptNo < maxAttempts) {
+                    retryCount++;
+                    attemptPrompt = appendComplianceRetryGuidance(prompt, complianceResult);
+                }
+            }
+            if (!complianceResult.passed()) {
+                Long discardedArticleId = persistDiscardedArticle(project, task, generated, prompt, selectedModel, complianceResult,
+                        promptContext.medicalContext());
+                markTaskComplianceDiscarded(task, discardedArticleId, prompt, selectedModel, generated, complianceResult, retryCount);
+                return;
+            }
 
-            Long articleId = persistArticle(project, task, generated.title(), generated.content(), prompt, generated.model(), generated.result());
+            Long articleId = persistArticle(project, task, generated.title(), generated.content(), prompt, generated.model(), generated.result(),
+                    promptContext.medicalContext(), MedicalArticleConstants.COMPLIANCE_PASSED);
+            medicalArticleGenerationService.recordHistory(project, brand, promptContext.medicalContext(), articleId);
             markTaskSuccess(task, articleId, prompt, generated.model(), generated.result(), generated.quality(), retryCount);
         } catch (Exception ex) {
             log.warn("Batch article generation task failed batchId={} taskId={}", batch.getId(), task.getId(), ex);
@@ -511,7 +574,9 @@ public class BatchArticleGenerationService {
                                 String content,
                                 BatchArticlePromptBuilder.PromptBuildResult prompt,
                                 ArticleModelResolver.ModelSelection model,
-                                LlmInvokeResult result) {
+                                LlmInvokeResult result,
+                                MedicalArticleGenerationService.MedicalPromptContext medicalContext,
+                                String complianceStatus) {
         return Objects.requireNonNull(transactionTemplate.execute(status -> {
             ArticleDraft draft = new ArticleDraft();
             draft.setBatchId(null);
@@ -530,6 +595,7 @@ public class BatchArticleGenerationService {
             draft.setTopic(task.getTopic());
             draft.setTopicAsQuestion(task.getTopicAsQuestion());
             draft.setTitle(title);
+            applyMedicalDraftFields(draft, medicalContext, complianceStatus);
             if (ArticlePromptChannels.SELF_MEDIA.equals(task.getChannelGroupCode())) {
                 draft.setCoverImageUrl(coverSelectionService.selectRandomCoverUrl(project.getBrandId()));
             }
@@ -562,6 +628,141 @@ public class BatchArticleGenerationService {
             articleGenerationLogMapper.insert(logRow);
             return draft.getId();
         }));
+    }
+
+    private Long persistDiscardedArticle(Project project,
+                                         BatchArticleGenerationTask task,
+                                         ArticleGenerationEngine.GeneratedArticle generated,
+                                         BatchArticlePromptBuilder.PromptBuildResult prompt,
+                                         ArticleModelResolver.ModelSelection model,
+                                         MedicalArticleComplianceChecker.CheckResult complianceResult,
+                                         MedicalArticleGenerationService.MedicalPromptContext medicalContext) {
+        return Objects.requireNonNull(transactionTemplate.execute(status -> {
+            ArticleDraft draft = new ArticleDraft();
+            draft.setBatchId(null);
+            draft.setProjectId(project.getId());
+            draft.setArticleType(task.getArticleType());
+            draft.setContentStyle(task.getContentStyle());
+            draft.setChannelGroupCode(task.getChannelGroupCode());
+            draft.setChannelSubCode(task.getChannelSubCode());
+            draft.setAgentSiteModule(task.getAgentSiteModule());
+            draft.setArticleTypeCode(task.getArticleTypeCode());
+            draft.setPromptTemplateId(task.getPromptTemplateId());
+            draft.setPromptTemplateVersionId(task.getPromptTemplateVersionId());
+            draft.setPerspectiveCode(TemplatePerspectiveCodes.normalize(task.getPerspectiveCode()));
+            draft.setAllocationMode(task.getAllocationMode());
+            draft.setTemplateSource(task.getTemplateSource());
+            draft.setTopic(task.getTopic());
+            draft.setTopicAsQuestion(task.getTopicAsQuestion());
+            String title = generated == null ? task.getTopic() : generated.title();
+            draft.setTitle(title);
+            applyMedicalDraftFields(draft, medicalContext, MedicalArticleConstants.COMPLIANCE_DISCARDED);
+            draft.setMedicalIndustryCode(task.getMedicalIndustryCode());
+            draft.setMedicalCategoryCode(task.getMedicalCategoryCode());
+            draft.setStatus(MedicalArticleConstants.COMPLIANCE_DISCARDED);
+            draft.setCurrentVersionNo(1);
+            draft.setHasRisk(true);
+            draft.setRiskSeverity("high");
+            draft.setIsDuplicateTitle(false);
+            articleDraftMapper.insert(draft);
+
+            ArticleDraftVersion version = new ArticleDraftVersion();
+            version.setArticleId(draft.getId());
+            version.setVersionNo(1);
+            version.setTitle(title);
+            version.setContentMarkdown(generated == null ? "" : generated.content());
+            version.setPromptSnapshot(enrichPromptSnapshot(prompt.promptSnapshot(), generated == null ? null : generated.result()));
+            version.setInputSnapshot(enrichComplianceInputSnapshot(prompt.inputSnapshot(), complianceResult));
+            version.setModelPlatformCode(model.platformCode());
+            version.setModelId(model.modelId());
+            version.setGeneratedBy(GENERATED_BY_BATCH_AI);
+            version.setCreatedBy(null);
+            articleDraftVersionMapper.insert(version);
+            medicalComplianceChecker.logHits(new MedicalArticleComplianceChecker.CheckInput(
+                            task.getBatchId(),
+                            task.getId(),
+                            project.getId(),
+                            project.getBrandId(),
+                            task.getChannelGroupCode(),
+                            task.getChannelSubCode(),
+                            title,
+                            generated == null ? "" : generated.content(),
+                            null,
+                            null
+                    ),
+                    complianceResult,
+                    draft.getId(),
+                    "discard");
+            return draft.getId();
+        }));
+    }
+
+    private void applyMedicalContext(BatchArticleGenerationBatch batch,
+                                     BatchArticleGenerationTask task,
+                                     MedicalArticleGenerationService.MedicalPromptContext context) {
+        if (context == null) {
+            return;
+        }
+        task.setTopic(context.topicAngle());
+        task.setMedicalIndustryCode(context.industryCode());
+        task.setMedicalCategoryCode(context.categoryCode());
+        task.setMedicalCategoryName(context.categoryName());
+        task.setTopicAngleId(context.topicAngleId());
+        task.setStructureSkeleton(context.structureSkeleton());
+        task.setFocus(context.focus());
+        task.setComplianceStatus(MedicalArticleConstants.COMPLIANCE_PENDING);
+        if (batch.getMedicalIndustryCode() == null || batch.getMedicalChannelTier() == null) {
+            batch.setMedicalIndustryCode(context.industryCode());
+            batch.setMedicalChannelTier(context.channelTier());
+            batchMapper.updateById(batch);
+        }
+    }
+
+    private BatchArticlePromptBuilder.PromptBuildResult appendComplianceRetryGuidance(
+            BatchArticlePromptBuilder.PromptBuildResult prompt,
+            MedicalArticleComplianceChecker.CheckResult complianceResult) {
+        String retryBlock = """
+
+                # 上一次医疗合规校验未通过
+                必须重写正文，避开以下命中项；不要解释校验结果，只输出修正后的完整 Markdown 文章。
+                %s
+                """.formatted(medicalComplianceChecker.toJson(complianceResult));
+        return new BatchArticlePromptBuilder.PromptBuildResult(
+                prompt.systemPrompt(),
+                prompt.userPrompt() + retryBlock,
+                prompt.contentAngle(),
+                prompt.audiencePerspective(),
+                prompt.promptSnapshot(),
+                prompt.inputSnapshot()
+        );
+    }
+
+    private void applyMedicalDraftFields(ArticleDraft draft,
+                                         MedicalArticleGenerationService.MedicalPromptContext context,
+                                         String complianceStatus) {
+        if (context == null) {
+            draft.setComplianceStatus(complianceStatus);
+            return;
+        }
+        draft.setComplianceStatus(complianceStatus);
+        draft.setMedicalAdReviewNo(context.medicalAdReviewNo());
+        draft.setMedicalChannelTier(context.channelTier());
+        draft.setMedicalIndustryCode(context.industryCode());
+        draft.setMedicalCategoryCode(context.categoryCode());
+        if (MedicalArticleConstants.TIER_OFFICIAL_SITE.equals(context.channelTier())) {
+            draft.setPublishReviewStatus(StringUtils.hasText(context.medicalAdReviewNo())
+                    ? MedicalArticleConstants.REVIEW_PASSED
+                    : MedicalArticleConstants.REVIEW_PENDING);
+        } else {
+            draft.setPublishReviewStatus(MedicalArticleConstants.REVIEW_NOT_REQUIRED);
+        }
+    }
+
+    private String enrichComplianceInputSnapshot(String inputSnapshot,
+                                                 MedicalArticleComplianceChecker.CheckResult complianceResult) {
+        Map<String, Object> snapshot = readJson(inputSnapshot);
+        snapshot.put("medicalComplianceResult", complianceResult);
+        return writeJson(snapshot);
     }
 
     private BatchArticlePromptBuilder.PromptBuildResult buildPrompt(BatchArticleGenerationTask task,
@@ -659,6 +860,37 @@ public class BatchArticleGenerationService {
         task.setModelPlatformCode(model.platformCode());
         task.setModelId(model.modelId());
         task.setRetryCount(retryCount);
+        if (StringUtils.hasText(task.getMedicalIndustryCode())) {
+            task.setComplianceStatus(MedicalArticleConstants.COMPLIANCE_PASSED);
+            task.setComplianceIssuesJson(null);
+        }
+        task.setFinishedAt(LocalDateTime.now());
+        taskMapper.updateById(task);
+        refreshBatchProgress(task.getBatchId(), false);
+    }
+
+    private void markTaskComplianceDiscarded(BatchArticleGenerationTask task,
+                                             Long discardedArticleId,
+                                             BatchArticlePromptBuilder.PromptBuildResult prompt,
+                                             ArticleModelResolver.ModelSelection model,
+                                             ArticleGenerationEngine.GeneratedArticle generated,
+                                             MedicalArticleComplianceChecker.CheckResult complianceResult,
+                                             int retryCount) {
+        task.setStatus(STATUS_FAILED);
+        task.setDiscardedArticleId(discardedArticleId);
+        task.setComplianceStatus(MedicalArticleConstants.COMPLIANCE_DISCARDED);
+        task.setComplianceIssuesJson(medicalComplianceChecker.toJson(complianceResult));
+        task.setErrorMessage("医疗合规校验失败，已废弃生成结果");
+        task.setContentAngle(prompt.contentAngle());
+        task.setAudiencePerspective(prompt.audiencePerspective());
+        task.setPromptSnapshot(enrichPromptSnapshot(prompt.promptSnapshot(), generated == null ? null : generated.result()));
+        task.setInputSnapshot(enrichComplianceInputSnapshot(prompt.inputSnapshot(), complianceResult));
+        if (generated != null) {
+            task.setResponseSnapshot(responseSnapshot(generated.result()));
+        }
+        task.setModelPlatformCode(model.platformCode());
+        task.setModelId(model.modelId());
+        task.setRetryCount(retryCount);
         task.setFinishedAt(LocalDateTime.now());
         taskMapper.updateById(task);
         refreshBatchProgress(task.getBatchId(), false);
@@ -740,6 +972,12 @@ public class BatchArticleGenerationService {
                     suggestedPlatformCodes,
                     selectedPlatformCodes,
                     confirmedReadinessWarningCodes,
+                    trimToNull(topicConfig.getMedicalIndustryCode()),
+                    trimToNull(topicConfig.getMedicalCategoryCode()),
+                    trimToNull(topicConfig.getMedicalCategoryName()),
+                    topicConfig.getTopicAngleId(),
+                    trimToNull(topicConfig.getStructureSkeleton()),
+                    trimToNull(topicConfig.getFocus()),
                     platforms
             ));
         }
@@ -1487,13 +1725,18 @@ public class BatchArticleGenerationService {
     private String enrichPromptSnapshot(String promptSnapshot, LlmInvokeResult result) {
         Map<String, Object> snapshot = readJson(promptSnapshot);
         snapshot.put("contentSource", "BATCH_AI");
-        snapshot.put("promptTokens", result.promptTokens());
-        snapshot.put("completionTokens", result.completionTokens());
+        if (result != null) {
+            snapshot.put("promptTokens", result.promptTokens());
+            snapshot.put("completionTokens", result.completionTokens());
+        }
         return writeJson(snapshot);
     }
 
     private String responseSnapshot(LlmInvokeResult result) {
         Map<String, Object> snapshot = new LinkedHashMap<>();
+        if (result == null) {
+            return writeJson(snapshot);
+        }
         snapshot.put("responseText", result.responseText());
         snapshot.put("promptTokens", result.promptTokens());
         snapshot.put("completionTokens", result.completionTokens());
@@ -1638,6 +1881,12 @@ public class BatchArticleGenerationService {
                                   List<String> suggestedPlatformCodes,
                                   List<String> selectedPlatformCodes,
                                   List<String> confirmedReadinessWarningCodes,
+                                  String medicalIndustryCode,
+                                  String medicalCategoryCode,
+                                  String medicalCategoryName,
+                                  Long topicAngleId,
+                                  String structureSkeleton,
+                                  String focus,
                                   List<ValidatedPlatform> platforms) {
     }
 

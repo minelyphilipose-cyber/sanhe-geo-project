@@ -4,6 +4,7 @@ import type {
   PageResult,
   Company,
   Brand,
+  BrandOffering,
   BrandImageFolder,
   BrandMaterial,
   BrandProfileVersion,
@@ -131,6 +132,22 @@ export function updateBrand(id: number, data: Record<string, any>) {
 
 export function deleteBrand(id: number) {
   return request.delete<R<void>>(`/brands/${id}`)
+}
+
+export function getBrandOfferings(brandId: number, status?: string) {
+  return request.get<R<BrandOffering[]>>(`/brands/${brandId}/offerings`, { params: { status } })
+}
+
+export function createBrandOffering(brandId: number, data: Record<string, any>) {
+  return request.post<R<BrandOffering>>(`/brands/${brandId}/offerings`, data)
+}
+
+export function updateBrandOffering(brandId: number, offeringId: number, data: Record<string, any>) {
+  return request.put<R<BrandOffering>>(`/brands/${brandId}/offerings/${offeringId}`, data)
+}
+
+export function deleteBrandOffering(brandId: number, offeringId: number) {
+  return request.delete<R<void>>(`/brands/${brandId}/offerings/${offeringId}`)
 }
 
 export function uploadBrandMaterial(brandId: number, category: string, file: File, folderId?: number) {

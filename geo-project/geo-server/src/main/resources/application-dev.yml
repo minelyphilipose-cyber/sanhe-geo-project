@@ -32,7 +32,7 @@ geo:
       live-verification-blocked: ${WECHAT_LIVE_VERIFICATION_BLOCKED:true}
       live-verification-reason: ${WECHAT_LIVE_VERIFICATION_REASON:domain_icp_filing_pending}
       func-scope-strict-mode: false
-      required-draft-func-scopes: [1, 13]
+      required-draft-func-scopes: [1, 7, 11]
       auth-type: 1
       backend-auth-callback-url: http://localhost:8080/api/wechat/open-platform/auth/callback
       frontend-callback-url: http://localhost:5173/admin/content/execution

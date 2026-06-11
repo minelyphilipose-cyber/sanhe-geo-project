@@ -7,7 +7,7 @@
         <div>
           <h1 class="admin-object-title">{{ brand.brandName }}</h1>
           <div class="admin-object-meta">
-            {{ companyName || '-' }} · {{ industryLabel(brand.industry) }}
+            {{ companyName || '-' }} · {{ industryLabel(brand.industry) }} · {{ complianceIndustryLabel(brand.complianceIndustryCode) }}
           </div>
         </div>
         <span class="admin-status-tag" :class="brand?.status === 'active' ? 'is-success' : 'is-muted'">
@@ -18,6 +18,10 @@
         <div class="admin-object-kpi">
           <span>品牌行业</span>
           <strong>{{ industryLabel(brand.industry) }}</strong>
+        </div>
+        <div class="admin-object-kpi">
+          <span>行业合规类型</span>
+          <strong>{{ complianceIndustryLabel(brand.complianceIndustryCode) }}</strong>
         </div>
         <div class="admin-object-kpi">
           <span>自媒体账号</span>
@@ -104,6 +108,14 @@
         </el-table-column>
         <el-table-column prop="useScenarios" label="适用场景" min-width="200" show-overflow-tooltip>
           <template #default="{ row }">{{ row.useScenarios || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="医疗项目" min-width="160">
+          <template #default="{ row }">
+            <el-tag v-if="row.medicalProjectEnabled" size="small" type="warning">
+              {{ row.medicalCategoryName || row.medicalCategoryCode || '已启用' }}
+            </el-tag>
+            <span v-else>-</span>
+          </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
@@ -267,7 +279,14 @@
         <el-table-column prop="platform" label="平台" width="110">
           <template #default="{ row }">{{ selfMediaPlatformLabel(row.platform) }}</template>
         </el-table-column>
-        <el-table-column prop="accountName" label="账号名称" min-width="180" />
+        <el-table-column prop="accountName" label="账号名称" min-width="180">
+          <template #default="{ row }">
+            <div>{{ row.accountName }}</div>
+            <div v-if="row.platformAccountId" class="table-subtext">
+              {{ row.platform === 'baijiahao' ? '百家号 ID / app_id' : '平台账号 ID' }}：{{ row.platformAccountId }}
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" label="状态" width="100">
           <template #default="{ row }">
             <el-tag size="small" :type="row.status === 'active' ? 'success' : 'info'">
@@ -468,6 +487,17 @@
               />
             </el-select>
           </el-form-item>
+          <el-form-item label="行业合规类型">
+            <el-select v-model="brandForm.complianceIndustryCode" clearable filterable placeholder="非特殊合规行业" style="width: 100%">
+              <el-option label="非特殊合规行业" value="none" />
+              <el-option
+                v-for="item in dictStore.options('compliance_industry')"
+                :key="item.dictKey"
+                :label="item.dictValue"
+                :value="item.dictKey"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item label="状态" prop="status" required>
             <el-select v-model="brandForm.status" style="width: 100%">
               <el-option
@@ -547,6 +577,26 @@
           </el-form-item>
           <el-form-item class="is-wide" label="禁用词"><el-input v-model="brandForm.forbiddenPhrases" type="textarea" :rows="3" /></el-form-item>
         </div>
+
+        <template v-if="isMedicalComplianceIndustry">
+          <div class="brand-section-bar"><span />医疗合规信息<i /></div>
+          <div class="brand-form-grid">
+          <el-form-item label="机构类型"><el-input v-model="brandForm.institutionType" maxlength="128" /></el-form-item>
+          <el-form-item label="医疗广告审查证明编号"><el-input v-model="brandForm.medicalAdReviewNo" maxlength="128" /></el-form-item>
+          <el-form-item class="is-wide" label="医疗机构执业许可">
+            <el-input v-model="brandForm.medicalLicense" type="textarea" :rows="2" maxlength="500" show-word-limit />
+          </el-form-item>
+          <el-form-item class="is-wide" label="诊疗科目范围">
+            <el-input v-model="brandForm.diagnosisScope" type="textarea" :rows="2" maxlength="1000" show-word-limit />
+          </el-form-item>
+          <el-form-item class="is-wide" label="医师/执业人员可公示信息">
+            <el-input v-model="brandForm.practitionerInfoPublic" type="textarea" :rows="2" />
+          </el-form-item>
+          <el-form-item class="is-wide" label="医疗合规备注">
+            <el-input v-model="brandForm.complianceNotesMedical" type="textarea" :rows="2" />
+          </el-form-item>
+          </div>
+        </template>
       </el-form>
       <template #footer>
         <el-button @click="editVisible = false">取消</el-button>
@@ -582,6 +632,28 @@
 
         <div class="brand-section-bar"><span />内容资料<i /></div>
         <div class="brand-form-grid">
+          <el-form-item v-if="isMedicalComplianceIndustry" label="医疗项目闸门">
+            <el-switch v-model="offeringForm.medicalProjectEnabled" active-text="启用" inactive-text="关闭" />
+          </el-form-item>
+          <el-form-item v-if="isMedicalComplianceIndustry" label="医疗行业">
+            <el-select v-model="offeringForm.medicalIndustryCode" clearable style="width: 100%">
+              <el-option
+                v-for="item in dictStore.options('compliance_industry')"
+                :key="item.dictKey"
+                :label="item.dictValue"
+                :value="item.dictKey"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item v-if="isMedicalComplianceIndustry" label="医疗品类编码">
+            <el-input v-model="offeringForm.medicalCategoryCode" maxlength="64" placeholder="如 skin_laser" />
+          </el-form-item>
+          <el-form-item v-if="isMedicalComplianceIndustry" label="医疗品类名称">
+            <el-input v-model="offeringForm.medicalCategoryName" maxlength="128" placeholder="如 皮肤光电" />
+          </el-form-item>
+          <el-form-item v-if="isMedicalComplianceIndustry" class="is-wide" label="项目资质引用">
+            <el-input v-model="offeringForm.qualificationRef" type="textarea" :rows="2" maxlength="500" show-word-limit />
+          </el-form-item>
           <el-form-item class="is-wide" label="目标人群">
             <el-input v-model="offeringForm.targetUsers" type="textarea" :rows="2" maxlength="500" show-word-limit />
           </el-form-item>
@@ -631,7 +703,7 @@
         label-width="100px"
       >
         <el-form-item label="平台" prop="platform" required>
-          <el-select v-model="selfMediaAccountForm.platform" style="width: 100%">
+          <el-select v-model="selfMediaAccountForm.platform" style="width: 100%" @change="handleSelfMediaPlatformChange">
             <el-option
               v-for="option in selfMediaAccountFormPlatformOptions"
               :key="option.platform"
@@ -641,8 +713,27 @@
             />
           </el-select>
         </el-form-item>
+        <el-alert
+          v-if="selfMediaAccountRequirement"
+          class="account-requirement-alert"
+          type="info"
+          show-icon
+          :closable="false"
+          :title="selfMediaAccountRequirement.title"
+          :description="selfMediaAccountRequirement.description"
+        />
         <el-form-item label="账号名称" prop="accountName" required>
           <el-input v-model="selfMediaAccountForm.accountName" placeholder="运营可识别的账号名称" maxlength="128" />
+        </el-form-item>
+        <el-form-item :label="selfMediaPlatformAccountIdLabel" prop="platformAccountId">
+          <el-input
+            v-model="selfMediaAccountForm.platformAccountId"
+            :placeholder="selfMediaPlatformAccountIdPlaceholder"
+            maxlength="128"
+          />
+          <div v-if="selfMediaAccountForm.platform === 'baijiahao'" class="form-tip">
+            百家号发布状态回查需要该 ID 作为 app_id，可在百家号个人中心 > 账号信息 > 百家号 ID 中查看。
+          </div>
         </el-form-item>
         <el-form-item label="状态" prop="status" required>
           <el-select v-model="selfMediaAccountForm.status" style="width: 100%">
@@ -826,6 +917,7 @@ const brandForm = reactive({
   brandShortName: '',
   brandSlug: '',
   industry: '',
+  complianceIndustryCode: 'none',
   mainBusiness: '',
   coreProducts: '',
   brandPositioning: '',
@@ -841,6 +933,12 @@ const brandForm = reactive({
   brandQualificationDescription: '',
   brandCaseDescription: '',
   forbiddenPhrases: '',
+  medicalLicense: '',
+  diagnosisScope: '',
+  institutionType: '',
+  practitionerInfoPublic: '',
+  medicalAdReviewNo: '',
+  complianceNotesMedical: '',
   geoSiteCode: '',
   geoSiteStatus: '',
   industrySiteName: '',
@@ -850,6 +948,7 @@ const brandForm = reactive({
 const selfMediaAccountForm = reactive({
   platform: '',
   accountName: '',
+  platformAccountId: '',
   status: 'active' as 'active' | 'disabled',
 })
 
@@ -863,6 +962,11 @@ const offeringForm = reactive({
   status: 'active' as 'active' | 'disabled',
   priority: 50,
   useScenarios: '',
+  medicalProjectEnabled: false,
+  medicalIndustryCode: '',
+  medicalCategoryCode: '',
+  medicalCategoryName: '',
+  qualificationRef: '',
 })
 
 const perspectiveConfigForm = reactive({
@@ -894,9 +998,25 @@ const brandRules: FormRules = {
 const qualificationDescriptionPlaceholder = '请填写品牌可公开引用的资质与背书信息，包括认证资质、检测报告、执行标准、专利/软著、荣誉奖项、协会或平台背书、生产/服务能力证明等。请写清楚名称、编号、发证机构、适用范围、有效期等可核验信息。没有真实依据的内容不要填写。'
 const caseDescriptionPlaceholder = '请填写可公开引用的品牌案例素材，包括客户类型或客户名称、项目背景、服务内容、项目规模、交付周期、合作结果、复购或长期合作情况等。如客户名称不可公开，请使用“某行业客户/某区域客户”表述，不要编造客户名或效果数据。'
 
+function validateSelfMediaPlatformAccountId(_rule: unknown, value: string, callback: (error?: Error) => void) {
+  if (selfMediaAccountForm.platform === 'baijiahao') {
+    const normalized = String(value || '').trim()
+    if (!normalized) {
+      callback(new Error('请输入百家号 ID / app_id'))
+      return
+    }
+    if (!/^\d{6,}$/.test(normalized)) {
+      callback(new Error('百家号 ID / app_id 应为数字'))
+      return
+    }
+  }
+  callback()
+}
+
 const selfMediaAccountRules: FormRules = {
   platform: [{ required: true, message: '请选择平台', trigger: 'change' }],
   accountName: [{ required: true, message: '请输入账号名称', trigger: 'blur' }],
+  platformAccountId: [{ validator: validateSelfMediaPlatformAccountId, trigger: ['blur', 'change'] }],
   status: [{ required: true, message: '请选择状态', trigger: 'change' }],
 }
 
@@ -968,6 +1088,29 @@ const selfMediaAccountFormPlatformOptions = computed(() => {
     ...options,
   ] as SelfMediaAccountPlatformOption[]
 })
+const selfMediaPlatformAccountIdLabel = computed(() =>
+  selfMediaAccountForm.platform === 'baijiahao' ? '百家号 ID / app_id' : '平台账号 ID',
+)
+const selfMediaPlatformAccountIdPlaceholder = computed(() =>
+  selfMediaAccountForm.platform === 'baijiahao'
+    ? '请输入百家号 ID / app_id，例如 1867055852901021'
+    : '可填写平台侧账号 ID，便于身份识别与状态回查',
+)
+const selfMediaAccountRequirement = computed(() => {
+  if (selfMediaAccountForm.platform === 'baijiahao') {
+    return {
+      title: '百家号必须填写 app_id',
+      description: '发布结果回查会拼接 app_id 进入百家号作品管理页。请从百家号个人中心 > 账号信息 > 百家号 ID 复制填写。',
+    }
+  }
+  if (['toutiao', 'zhihu', 'xiaohongshu'].includes(selfMediaAccountForm.platform)) {
+    return {
+      title: '建议填写平台账号标识',
+      description: '平台账号 ID 或账号主页标识可用于环境登录校验和发布结果诊断；没有明确 ID 时可先填写账号名称。',
+    }
+  }
+  return null
+})
 
 const activeBrowserEnvironments = computed(() => browserEnvironments.value.filter((item) => item.status === 'active'))
 const defaultBrowserEnvironment = computed(() => activeBrowserEnvironments.value[0] || null)
@@ -983,6 +1126,9 @@ const regionText = computed(() => {
 })
 
 const availableBrandIndustries = computed(() => companyIndustryTags.value)
+const isMedicalComplianceIndustry = computed(() =>
+  ['medical_beauty', 'oral'].includes(brandForm.complianceIndustryCode),
+)
 const agentSiteOptions = computed(() => publishSites.value.filter((site) =>
   isValidGeoSiteCode(site.siteCode)
   && (site.integrationMethod === 'brand_geo_site' || site.siteCode === 'agent_official_site'),
@@ -999,6 +1145,7 @@ const brandCoreInfoItems = computed(() => [
   { label: '状态', value: dictStore.label('brand_status', brand.value?.status) || '-' },
   { label: '所属客户', value: companyName.value || '-' },
   { label: '品牌行业', value: industryLabel(brand.value?.industry) },
+  { label: '行业合规类型', value: complianceIndustryLabel(brand.value?.complianceIndustryCode) },
   { label: '主营业务', value: brand.value?.mainBusiness || '-' },
   { label: '核心产品', value: brand.value?.coreProducts || '-' },
   { label: '品牌定位', value: brand.value?.brandPositioning || '-' },
@@ -1026,6 +1173,11 @@ const brandTextInfoItems = computed(() => [
 function industryLabel(value?: string | null) {
   if (!value) return '-'
   return dictStore.label('industry_tag', value) || value
+}
+
+function complianceIndustryLabel(value?: string | null) {
+  if (!value || value === 'none') return '非特殊合规行业'
+  return dictStore.label('compliance_industry', value) || value
 }
 
 function selfMediaPlatformLabel(value?: string | null) {
@@ -1348,6 +1500,7 @@ function fillForm(data: Brand) {
   brandForm.brandShortName = data.brandShortName || ''
   brandForm.brandSlug = data.brandSlug
   brandForm.industry = data.industry || availableBrandIndustries.value[0] || ''
+  brandForm.complianceIndustryCode = data.complianceIndustryCode || 'none'
   brandForm.mainBusiness = data.mainBusiness || ''
   brandForm.coreProducts = data.coreProducts || ''
   brandForm.brandPositioning = data.brandPositioning || ''
@@ -1365,6 +1518,12 @@ function fillForm(data: Brand) {
   brandForm.forbiddenPhrases = Array.isArray(data.forbiddenPhrases)
     ? data.forbiddenPhrases.join('，')
     : (data.forbiddenPhrases || '')
+  brandForm.medicalLicense = data.medicalLicense || ''
+  brandForm.diagnosisScope = data.diagnosisScope || ''
+  brandForm.institutionType = data.institutionType || ''
+  brandForm.practitionerInfoPublic = data.practitionerInfoPublic || ''
+  brandForm.medicalAdReviewNo = data.medicalAdReviewNo || ''
+  brandForm.complianceNotesMedical = data.complianceNotesMedical || ''
   brandForm.geoSiteCode = data.geoSiteCode || ''
   brandForm.geoSiteStatus = data.geoSiteStatus || ''
   brandForm.industrySiteName = data.industrySiteName || ''
@@ -1573,6 +1732,11 @@ function resetOfferingForm() {
   offeringForm.status = 'active'
   offeringForm.priority = 50
   offeringForm.useScenarios = ''
+  offeringForm.medicalProjectEnabled = false
+  offeringForm.medicalIndustryCode = isMedicalComplianceIndustry.value ? brandForm.complianceIndustryCode : ''
+  offeringForm.medicalCategoryCode = ''
+  offeringForm.medicalCategoryName = ''
+  offeringForm.qualificationRef = ''
 }
 
 function openOfferingCreate() {
@@ -1592,6 +1756,11 @@ function openOfferingEdit(offering: BrandOffering) {
   offeringForm.status = offering.status === 'disabled' ? 'disabled' : 'active'
   offeringForm.priority = offering.priority ?? 50
   offeringForm.useScenarios = offering.useScenarios || ''
+  offeringForm.medicalProjectEnabled = !!offering.medicalProjectEnabled
+  offeringForm.medicalIndustryCode = offering.medicalIndustryCode || ''
+  offeringForm.medicalCategoryCode = offering.medicalCategoryCode || ''
+  offeringForm.medicalCategoryName = offering.medicalCategoryName || ''
+  offeringForm.qualificationRef = offering.qualificationRef || ''
   offeringVisible.value = true
 }
 
@@ -1610,6 +1779,11 @@ async function submitOffering() {
       status: offeringForm.status,
       priority: Number(offeringForm.priority) || 50,
       useScenarios: nullableText(offeringForm.useScenarios),
+      medicalProjectEnabled: isMedicalComplianceIndustry.value && offeringForm.medicalProjectEnabled,
+      medicalIndustryCode: isMedicalComplianceIndustry.value ? nullableText(offeringForm.medicalIndustryCode) : null,
+      medicalCategoryCode: isMedicalComplianceIndustry.value ? nullableText(offeringForm.medicalCategoryCode) : null,
+      medicalCategoryName: isMedicalComplianceIndustry.value ? nullableText(offeringForm.medicalCategoryName) : null,
+      qualificationRef: isMedicalComplianceIndustry.value ? nullableText(offeringForm.qualificationRef) : null,
     }
     if (editingOffering.value) {
       await updateBrandOffering(brandId, editingOffering.value.id, payload)
@@ -1653,6 +1827,7 @@ function openSelfMediaAccountCreate() {
   editingSelfMediaAccount.value = null
   selfMediaAccountForm.platform = firstPlatform
   selfMediaAccountForm.accountName = ''
+  selfMediaAccountForm.platformAccountId = ''
   selfMediaAccountForm.status = 'active'
   selfMediaAccountVisible.value = true
 }
@@ -1661,8 +1836,13 @@ function openSelfMediaAccountEdit(account: SemiAutoSelfMediaAccount) {
   editingSelfMediaAccount.value = account
   selfMediaAccountForm.platform = account.platform || eligibleSelfMediaPlatformOptions.value[0]?.platform || ''
   selfMediaAccountForm.accountName = account.accountName || ''
+  selfMediaAccountForm.platformAccountId = account.platformAccountId || ''
   selfMediaAccountForm.status = account.status === 'disabled' ? 'disabled' : 'active'
   selfMediaAccountVisible.value = true
+}
+
+function handleSelfMediaPlatformChange() {
+  selfMediaAccountFormRef.value?.validateField('platformAccountId').catch(() => undefined)
 }
 
 function isSemiAutoPlatform(platform?: string | null): platform is SemiAutoPlatform {
@@ -1682,6 +1862,7 @@ async function submitSelfMediaAccount() {
     const payload = {
       platform: selfMediaAccountForm.platform,
       accountName: selfMediaAccountForm.accountName.trim(),
+      platformAccountId: selfMediaAccountForm.platformAccountId.trim() || undefined,
       status: selfMediaAccountForm.status,
     }
     if (editingSelfMediaAccount.value) {
@@ -1780,6 +1961,7 @@ async function submitBrand() {
       brandShortName: nullableText(brandForm.brandShortName),
       brandSlug: brandForm.brandSlug,
       industry: brandForm.industry,
+      complianceIndustryCode: brandForm.complianceIndustryCode === 'none' ? null : brandForm.complianceIndustryCode,
       mainBusiness: nullableText(brandForm.mainBusiness),
       coreProducts: nullableText(brandForm.coreProducts),
       brandPositioning: nullableText(brandForm.brandPositioning),
@@ -1805,6 +1987,12 @@ async function submitBrand() {
       brandQualificationDescription: nullableText(brandForm.brandQualificationDescription),
       brandCaseDescription: nullableText(brandForm.brandCaseDescription),
       forbiddenPhrases: nullableText(brandForm.forbiddenPhrases),
+      medicalLicense: isMedicalComplianceIndustry.value ? nullableText(brandForm.medicalLicense) : null,
+      diagnosisScope: isMedicalComplianceIndustry.value ? nullableText(brandForm.diagnosisScope) : null,
+      institutionType: isMedicalComplianceIndustry.value ? nullableText(brandForm.institutionType) : null,
+      practitionerInfoPublic: isMedicalComplianceIndustry.value ? nullableText(brandForm.practitionerInfoPublic) : null,
+      medicalAdReviewNo: isMedicalComplianceIndustry.value ? nullableText(brandForm.medicalAdReviewNo) : null,
+      complianceNotesMedical: isMedicalComplianceIndustry.value ? nullableText(brandForm.complianceNotesMedical) : null,
       geoSiteCode: normalizeGeoSiteCode(brandForm.geoSiteCode) || null,
       geoSiteStatus: normalizeGeoSiteCode(brandForm.geoSiteCode) ? brandForm.geoSiteStatus || 'active' : null,
       industrySiteName: nullableText(brandForm.industrySiteName),
@@ -1997,6 +2185,11 @@ onMounted(async () => {
   color: #64748b;
   font-size: 12px;
   line-height: 1.55;
+}
+
+.account-requirement-alert {
+  margin: -2px 0 18px 100px;
+  width: calc(100% - 100px);
 }
 
 .table-subtext {

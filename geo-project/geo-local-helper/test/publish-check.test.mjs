@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { evaluateXiaohongshuPublishSignals } from '../src/publish-check.js'
+import { evaluateBaijiahaoPublishSignals, evaluateXiaohongshuPublishSignals } from '../src/publish-check.js'
 
 test('xiaohongshu publish check keeps future scheduled note pending', () => {
   const result = evaluateXiaohongshuPublishSignals(
@@ -66,4 +66,101 @@ test('xiaohongshu publish check does not treat note manager route as published s
   assert.equal(result.found, false)
   assert.equal(result.pendingScheduled, false)
   assert.equal(result.reason, 'title matched but published signal missing')
+})
+
+test('baijiahao publish check keeps future scheduled article pending', () => {
+  const result = evaluateBaijiahaoPublishSignals(
+    {
+      title: '装修前根本没想过这事，阜阳一业主在水电进场时才慌了',
+      platformScheduledAt: '2026-06-10T12:58:00',
+    },
+    {
+      url: 'https://baijiahao.baidu.com/builder/rc/content?app_id=1867055852901021',
+      text: '作品管理\n装修前根本没想过这事，阜阳一业主在水电进场时才慌了\n审核中\n预计 2026-06-10 12:58 发布',
+    },
+    {
+      nowMs: new Date(2026, 5, 10, 11, 50, 0).getTime(),
+    },
+  )
+
+  assert.equal(result.found, false)
+  assert.equal(result.pendingScheduled, true)
+  assert.equal(result.platformStatus, 'reviewing')
+  assert.equal(result.platformScheduledText, '预计 2026-06-10 12:58 发布')
+})
+
+test('baijiahao publish check keeps reviewing article non-final after scheduled time', () => {
+  const result = evaluateBaijiahaoPublishSignals(
+    {
+      title: '装修前根本没想过这事，阜阳一业主在水电进场时才慌了',
+      platformScheduledAt: '2026-06-10T12:58:00',
+    },
+    {
+      url: 'https://baijiahao.baidu.com/builder/rc/content?app_id=1867055852901021',
+      text: '作品管理\n装修前根本没想过这事，阜阳一业主在水电进场时才慌了\n审核中\n预计 2026-06-10 12:58 发布',
+      anchors: [
+        {
+          text: '装修前根本没想过这事，阜阳一业主在水电进场时才慌了',
+          href: 'https://baijiahao.baidu.com/builder/rc/content/detail?id=abc',
+        },
+      ],
+    },
+    {
+      nowMs: new Date(2026, 5, 10, 13, 10, 0).getTime(),
+    },
+  )
+
+  assert.equal(result.found, false)
+  assert.equal(result.pendingScheduled, false)
+  assert.equal(result.platformStatus, 'reviewing')
+  assert.equal(result.reason, 'title matched and platform is still reviewing')
+  assert.equal(result.url, 'https://baijiahao.baidu.com/builder/rc/content/detail?id=abc')
+})
+
+test('baijiahao publish check confirms published article on works list', () => {
+  const result = evaluateBaijiahaoPublishSignals(
+    {
+      title: '装修前根本没想过这事，阜阳一业主在水电进场时才慌了',
+      platformScheduledAt: '2026-06-10T12:58:00',
+    },
+    {
+      url: 'https://baijiahao.baidu.com/builder/rc/content?app_id=1867055852901021',
+      text: '作品管理\n装修前根本没想过这事，阜阳一业主在水电进场时才慌了\n已发布\n预计 2026-06-10 12:58 发布',
+      anchors: [
+        {
+          text: '装修前根本没想过这事，阜阳一业主在水电进场时才慌了',
+          href: 'https://baijiahao.baidu.com/builder/rc/content/detail?id=abc',
+        },
+      ],
+    },
+    {
+      nowMs: new Date(2026, 5, 10, 13, 10, 0).getTime(),
+    },
+  )
+
+  assert.equal(result.found, true)
+  assert.equal(result.pendingScheduled, false)
+  assert.equal(result.platformStatus, 'published')
+  assert.equal(result.url, 'https://baijiahao.baidu.com/builder/rc/content/detail?id=abc')
+})
+
+test('baijiahao publish check reports rejected article as failed', () => {
+  const result = evaluateBaijiahaoPublishSignals(
+    {
+      title: '装修前根本没想过这事，阜阳一业主在水电进场时才慌了',
+      platformScheduledAt: '2026-06-10T12:58:00',
+    },
+    {
+      url: 'https://baijiahao.baidu.com/builder/rc/content?app_id=1867055852901021',
+      text: '作品管理\n装修前根本没想过这事，阜阳一业主在水电进场时才慌了\n审核未通过',
+    },
+    {
+      nowMs: new Date(2026, 5, 10, 13, 10, 0).getTime(),
+    },
+  )
+
+  assert.equal(result.found, false)
+  assert.equal(result.failed, true)
+  assert.equal(result.platformStatus, 'rejected')
+  assert.equal(result.failureCode, 'BAIJIAHAO_REVIEW_REJECTED')
 })

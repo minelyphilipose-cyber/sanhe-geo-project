@@ -802,6 +802,120 @@ export function publishArticlePromptTemplateVersion(id: number, versionId: numbe
   return request.post<R<ArticlePromptTemplateDetailResponse>>(`/content/article-prompt-templates/${id}/versions/${versionId}/publish`)
 }
 
+export interface MedicalTopicAngle {
+  id: number
+  industryCode: string
+  categoryCode: string
+  categoryName: string
+  topicAngle: string
+  recommendedFocus?: string | null
+  enabled: boolean
+  sortOrder: number
+}
+
+export interface MedicalComplianceRule {
+  id: number
+  ruleType: string
+  industryCode?: string | null
+  channelTier?: string | null
+  channelGroupCode?: string | null
+  channelSubCode?: string | null
+  pattern: string
+  matchMode: 'contains' | 'regex' | string
+  severity: 'block' | 'warn' | string
+  enabled: boolean
+  remark?: string | null
+}
+
+export interface MedicalComplianceKernel {
+  id: number
+  industryCode: string
+  channelTier: string
+  kernelName: string
+  systemPrompt: string
+  brandExposureLimit?: number | null
+  requireManualPublishReview: boolean
+  enabled: boolean
+  versionNo: number
+}
+
+export interface MedicalChannelStyleModule {
+  id: number
+  channelGroupCode: string
+  channelSubCode?: string | null
+  channelTier: string
+  stylePrompt: string
+  highRisk: boolean
+  enabled: boolean
+}
+
+export interface MedicalComplianceHitLog {
+  id: number
+  articleId?: number | null
+  batchId?: number | null
+  taskId?: number | null
+  projectId?: number | null
+  brandId?: number | null
+  ruleId?: number | null
+  ruleType?: string | null
+  matchedText?: string | null
+  checkStage?: string | null
+  action?: string | null
+  createdAt?: string | null
+}
+
+export function getMedicalTopicAngles(params?: Record<string, any>) {
+  return request.get<R<PageResult<MedicalTopicAngle>>>('/content/medical-articles/topic-angles', { params })
+}
+
+export function createMedicalTopicAngle(data: Partial<MedicalTopicAngle>) {
+  return request.post<R<MedicalTopicAngle>>('/content/medical-articles/topic-angles', data)
+}
+
+export function updateMedicalTopicAngle(id: number, data: Partial<MedicalTopicAngle>) {
+  return request.put<R<MedicalTopicAngle>>(`/content/medical-articles/topic-angles/${id}`, data)
+}
+
+export function deleteMedicalTopicAngle(id: number) {
+  return request.delete<R<void>>(`/content/medical-articles/topic-angles/${id}`)
+}
+
+export function getMedicalComplianceRules(params?: Record<string, any>) {
+  return request.get<R<PageResult<MedicalComplianceRule>>>('/content/medical-articles/rules', { params })
+}
+
+export function createMedicalComplianceRule(data: Partial<MedicalComplianceRule>) {
+  return request.post<R<MedicalComplianceRule>>('/content/medical-articles/rules', data)
+}
+
+export function updateMedicalComplianceRule(id: number, data: Partial<MedicalComplianceRule>) {
+  return request.put<R<MedicalComplianceRule>>(`/content/medical-articles/rules/${id}`, data)
+}
+
+export function getMedicalComplianceKernels(params?: Record<string, any>) {
+  return request.get<R<PageResult<MedicalComplianceKernel>>>('/content/medical-articles/kernels', { params })
+}
+
+export function createMedicalComplianceKernel(data: Partial<MedicalComplianceKernel>) {
+  return request.post<R<MedicalComplianceKernel>>('/content/medical-articles/kernels', data)
+}
+
+export function getMedicalChannelStyleModules(params?: Record<string, any>) {
+  return request.get<R<PageResult<MedicalChannelStyleModule>>>('/content/medical-articles/channel-styles', { params })
+}
+
+export function createMedicalChannelStyleModule(data: Partial<MedicalChannelStyleModule>) {
+  return request.post<R<MedicalChannelStyleModule>>('/content/medical-articles/channel-styles', data)
+}
+
+export function updateMedicalChannelStyleModule(id: number, data: Partial<MedicalChannelStyleModule>) {
+  return request.put<R<MedicalChannelStyleModule>>(`/content/medical-articles/channel-styles/${id}`, data)
+}
+
+export function getMedicalComplianceHitLogs(params?: Record<string, any>) {
+  return request.get<R<PageResult<MedicalComplianceHitLog>>>('/content/medical-articles/hit-logs', { params })
+}
+
 export function getArticleGenerationOptions() {
   return request.get<R<ArticleGenerationOptions>>('/content/article-prompt-templates/generation-options')
 }
@@ -838,6 +952,13 @@ export function reviewContentArticle(articleId: number, data: {
   riskOverride?: boolean
 }) {
   return request.post<R<void>>(`/content/articles/${articleId}/review`, data)
+}
+
+export function reviewMedicalPublishArticle(articleId: number, data: {
+  action: 'approve' | 'reject'
+  comment?: string
+}) {
+  return request.post<R<void>>(`/content/articles/${articleId}/medical-publish-review`, data)
 }
 
 export function publishContentArticle(articleId: number, data: {

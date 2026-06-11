@@ -1,6 +1,10 @@
 package com.huanjing.geo.module.content.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.dto.SelfMediaScheduleCapabilityUpsertRequest;
 import com.huanjing.geo.module.content.entity.SelfMediaScheduleCapability;
@@ -41,6 +45,7 @@ public class SelfMediaScheduleCapabilityService {
     private final SelfMediaScheduleCapabilityMapper mapper;
     private final CurrentUserService currentUserService;
     private final SelfMediaPlatformScheduleAdapterRouter scheduleAdapterRouter;
+    private final ObjectMapper objectMapper;
 
     public List<SelfMediaScheduleCapabilityVO> list() {
         currentUserService.requireCurrentUser();
@@ -123,6 +128,25 @@ public class SelfMediaScheduleCapabilityService {
             return PlatformScheduleReadiness.rejected("PLATFORM_SCHEDULE_STRATEGY_DISABLED", "平台 v1 策略未启用自动定时发布");
         }
         return PlatformScheduleReadiness.ready(row, contract);
+    }
+
+    public Map<String, Object> automationOptions(String platform) {
+        String normalized = normalizePlatform(platform);
+        SelfMediaScheduleCapability row = mapper.selectByPlatform(normalized);
+        if (row == null || !StringUtils.hasText(row.getEvidenceJson())) {
+            return Map.of();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(row.getEvidenceJson());
+            JsonNode options = root.path("automationOptions");
+            if (!options.isObject()) {
+                return Map.of();
+            }
+            return objectMapper.convertValue(options, new TypeReference<>() {
+            });
+        } catch (JsonProcessingException | IllegalArgumentException ex) {
+            return Map.of();
+        }
     }
 
     @Transactional

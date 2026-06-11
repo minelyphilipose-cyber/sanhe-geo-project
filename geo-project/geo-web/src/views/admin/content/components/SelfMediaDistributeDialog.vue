@@ -77,6 +77,16 @@
         </button>
         <button
           class="media-platform"
+          :class="{ active: selectedMediaPlatform === 'baijiahao', disabled: !baijiahaoAccounts.length }"
+          type="button"
+          @click="actions.handleSemiAutoPlatformClick('baijiahao')"
+        >
+          <span class="baijiahao-mark">百</span>
+          <span class="media-name">百家号</span>
+          <el-tag size="small" :type="actions.semiAutoStatusTagType(baijiahaoAccounts)">{{ actions.semiAutoStatusLabel(baijiahaoAccounts) }}</el-tag>
+        </button>
+        <button
+          class="media-platform"
           :class="{ active: selectedMediaPlatform === 'zhihu', disabled: !zhihuAccounts.length }"
           type="button"
           @click="actions.handleSemiAutoPlatformClick('zhihu')"
@@ -105,6 +115,20 @@
         show-icon
         :title="selectedSelfMediaQuotaHint"
       />
+
+      <div v-if="localHelperHealth" class="helper-health-panel">
+        <div class="helper-health-main">
+          <strong>本地助手</strong>
+          <span>{{ helperHealthSummary }}</span>
+        </div>
+        <div class="helper-health-meta">
+          <el-tag size="small" :type="localHelperHealth.paired ? 'success' : 'warning'">
+            {{ localHelperHealth.paired ? '已配对' : '未配对' }}
+          </el-tag>
+          <el-tag size="small" type="info">v{{ localHelperHealth.version || '未知' }}</el-tag>
+          <el-tag v-if="localHelperHealth.schedulePoll?.inFlight" size="small" type="primary">轮询中</el-tag>
+        </div>
+      </div>
 
       <div v-if="currentPlatformAccounts.length" class="self-media-account-list">
         <div v-for="account in currentPlatformAccounts" :key="account.id" class="self-media-account-row">
@@ -395,6 +419,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
+import type { LocalHelperHealthResponse } from '@/api/localHelper'
 import type { BrandImageFolder, BrandMaterial, DistributionTask, DouyinCapability, SelfMediaAccount, WechatMpCapability } from '@/types'
 
 type TagType = 'success' | 'warning' | 'danger' | 'info' | 'primary'
@@ -404,6 +429,7 @@ type ActionMap = Record<string, (...args: any[]) => any>
 const props = defineProps<{
   modelValue: boolean
   selectedMediaPlatform: MediaPlatform
+  localHelperHealth: LocalHelperHealthResponse | null
   wechatCapability: WechatMpCapability | null
   wechatDistributionAvailable: boolean
   wechatStatusTagType: TagType
@@ -413,6 +439,7 @@ const props = defineProps<{
   douyinStatusTagType: TagType
   douyinStatusLabel: string
   toutiaoAccounts: SelfMediaAccount[]
+  baijiahaoAccounts: SelfMediaAccount[]
   zhihuAccounts: SelfMediaAccount[]
   xiaohongshuAccounts: SelfMediaAccount[]
   currentPlatformAccounts: SelfMediaAccount[]
@@ -470,6 +497,14 @@ const douyinTextValue = computed({
 
 const wechatReadinessSummary = computed(() => readinessSummary(props.wechatCapability?.readinessChecks || []))
 const douyinReadinessSummary = computed(() => readinessSummary(props.douyinCapability?.readinessChecks || []))
+const helperHealthSummary = computed(() => {
+  const health = props.localHelperHealth
+  if (!health) return ''
+  const pid = health.runtime?.pid ? `PID ${health.runtime.pid}` : 'PID 未知'
+  const startedAt = health.runtime?.startedAt ? `启动 ${formatShortTime(health.runtime.startedAt)}` : '启动时间未知'
+  const supervised = health.runtime?.supervised ? 'supervisor 托管' : '直接运行'
+  return `${pid} · ${startedAt} · ${supervised}`
+})
 
 function readinessSummary(checks: Array<{ status?: string | null }>) {
   if (checks.some((item) => item.status === 'missing')) {
@@ -495,6 +530,14 @@ function readinessStatusLabel(status?: string | null) {
     missing: '缺失',
   }
   return status ? (map[status] || status) : '-'
+}
+
+function formatShortTime(value?: string | null) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return value
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 </script>
 
@@ -547,6 +590,44 @@ function readinessStatusLabel(status?: string | null) {
   border: 1px solid #bfdbfe;
   border-radius: 12px;
   background: #eff6ff;
+}
+
+.helper-health-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: #f8fbff;
+}
+
+.helper-health-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.helper-health-main strong {
+  color: #0f172a;
+  font-size: 13px;
+}
+
+.helper-health-main span {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.helper-health-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .platform-readiness-panel {
@@ -653,6 +734,7 @@ function readinessStatusLabel(status?: string | null) {
 .wechat-mark,
 .douyin-mark,
 .toutiao-mark,
+.baijiahao-mark,
 .zhihu-mark,
 .xiaohongshu-mark {
   position: relative;
@@ -679,6 +761,10 @@ function readinessStatusLabel(status?: string | null) {
 
 .toutiao-mark {
   background: linear-gradient(135deg, #dc2626, #ef4444);
+}
+
+.baijiahao-mark {
+  background: linear-gradient(135deg, #1d4ed8, #2563eb);
 }
 
 .zhihu-mark {

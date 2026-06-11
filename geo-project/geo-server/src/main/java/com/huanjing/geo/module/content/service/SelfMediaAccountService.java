@@ -180,7 +180,12 @@ public class SelfMediaAccountService {
         SysUser operator = currentUserService.requireCurrentUser();
         brandAccessService.requireBrandAccess(brandId, operator.getId(), BrandAccessAction.MANAGE);
         platformEligibilityService.requireEligible(brandId, request.platform());
-        String platformAccountId = generatedPlatformAccountId(request.platform(), brandId);
+        String platformAccountId = resolvePlatformAccountId(
+                request.platform(),
+                request.platformAccountId(),
+                brandId,
+                null
+        );
         LocalDateTime now = LocalDateTime.now();
         SelfMediaAccount account = new SelfMediaAccount();
         account.setBrandId(brandId);
@@ -207,13 +212,17 @@ public class SelfMediaAccountService {
         if (!request.platform().equals(account.getPlatform())) {
             platformEligibilityService.requireEligible(account.getBrandId(), request.platform());
         }
-        if (!StringUtils.hasText(account.getPlatformAccountId())) {
-            account.setPlatformAccountId(generatedPlatformAccountId(request.platform(), account.getBrandId()));
-        } else if (!request.platform().equals(account.getPlatform())
-                && platformAccountIdExists(request.platform(), account.getPlatformAccountId())) {
+        String platformAccountId = resolvePlatformAccountId(
+                request.platform(),
+                request.platformAccountId(),
+                account.getBrandId(),
+                account
+        );
+        if (platformAccountIdExistsForOther(request.platform(), platformAccountId, account.getId())) {
             throw new BizException(400, "self media account already exists");
         }
         account.setPlatform(request.platform());
+        account.setPlatformAccountId(platformAccountId);
         account.setAccountName(request.accountName().trim());
         account.setStatus(normalizeStatus(request.status()));
         account.setUpdatedAt(LocalDateTime.now());
@@ -347,10 +356,45 @@ public class SelfMediaAccountService {
         throw new BizException(500, "self media account identifier generation failed");
     }
 
+    private String resolvePlatformAccountId(String platform,
+                                            String requestedPlatformAccountId,
+                                            Long brandId,
+                                            SelfMediaAccount currentAccount) {
+        String requested = normalizeText(requestedPlatformAccountId);
+        if (StringUtils.hasText(requested)) {
+            if ("baijiahao".equals(platform) && !requested.matches("\\d{6,}")) {
+                throw new BizException(400, "百家号 ID / app_id 应为数字");
+            }
+            return requested;
+        }
+        if ("baijiahao".equals(platform)) {
+            throw new BizException(400, "百家号账号必须填写百家号 ID / app_id");
+        }
+        if (currentAccount != null
+                && platform.equals(currentAccount.getPlatform())
+                && StringUtils.hasText(currentAccount.getPlatformAccountId())) {
+            return currentAccount.getPlatformAccountId();
+        }
+        return generatedPlatformAccountId(platform, brandId);
+    }
+
+    private String normalizeText(String value) {
+        return StringUtils.hasText(value) ? value.trim() : null;
+    }
+
     private boolean platformAccountIdExists(String platform, String platformAccountId) {
         SelfMediaAccount existing = selfMediaAccountMapper.selectOne(new LambdaQueryWrapper<SelfMediaAccount>()
                 .eq(SelfMediaAccount::getPlatform, platform)
                 .eq(SelfMediaAccount::getPlatformAccountId, platformAccountId)
+                .last("LIMIT 1"));
+        return existing != null;
+    }
+
+    private boolean platformAccountIdExistsForOther(String platform, String platformAccountId, Long currentAccountId) {
+        SelfMediaAccount existing = selfMediaAccountMapper.selectOne(new LambdaQueryWrapper<SelfMediaAccount>()
+                .eq(SelfMediaAccount::getPlatform, platform)
+                .eq(SelfMediaAccount::getPlatformAccountId, platformAccountId)
+                .ne(currentAccountId != null, SelfMediaAccount::getId, currentAccountId)
                 .last("LIMIT 1"));
         return existing != null;
     }

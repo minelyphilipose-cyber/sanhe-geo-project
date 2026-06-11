@@ -41,6 +41,7 @@ public class DistributionTask {
     private String requestPayload;
     private String fillPayload;
     private String responsePayload;
+    private LocalDateTime payloadPurgedAt;
     private String publishedUrl;
     // V93: post-publish identifier returned by external platform
     private String platformArticleId;

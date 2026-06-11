@@ -45,6 +45,23 @@ public class BatchArticleGenerateRequest {
         @Pattern(regexp = "^[a-z][a-z0-9_]{1,63}$")
         private String questionSceneCode;
 
+        @Size(max = 32)
+        private String medicalIndustryCode;
+
+        @Size(max = 64)
+        private String medicalCategoryCode;
+
+        @Size(max = 128)
+        private String medicalCategoryName;
+
+        private Long topicAngleId;
+
+        @Size(max = 64)
+        private String structureSkeleton;
+
+        @Size(max = 64)
+        private String focus;
+
         private Boolean readinessWarningConfirmed;
 
         @Size(max = 16)

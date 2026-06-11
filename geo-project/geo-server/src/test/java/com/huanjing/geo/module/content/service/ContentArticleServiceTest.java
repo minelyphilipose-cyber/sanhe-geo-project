@@ -153,6 +153,33 @@ class ContentArticleServiceTest {
     }
 
     @Test
+    void createManualAllowsZhihuWithoutCover() {
+        doAnswer(invocation -> {
+            ArticleDraft draft = invocation.getArgument(0);
+            draft.setId(99L);
+            return 1;
+        }).when(articleDraftMapper).insert(any(ArticleDraft.class));
+        when(articleDraftMapper.selectList(any())).thenReturn(List.of());
+
+        ManualArticleCreateRequest request = new ManualArticleCreateRequest();
+        request.setProjectId(10L);
+        request.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
+        request.setContentStyle("zhihu");
+        request.setTopic("Manual topic");
+        request.setTitle("Manual title");
+        request.setContentMarkdown("## Heading\n\nbody");
+
+        service.createManual(request);
+
+        ArgumentCaptor<ArticleDraft> draftCaptor = ArgumentCaptor.forClass(ArticleDraft.class);
+        verify(articleDraftMapper, times(1)).insert(draftCaptor.capture());
+        assertEquals("zhihu", draftCaptor.getValue().getContentStyle());
+        assertNull(draftCaptor.getValue().getCoverImageUrl());
+        verify(coverSelectionService, never()).requireManualCoverUrl(any(), any());
+        verify(coverSelectionService, never()).selectRandomCoverUrl(any());
+    }
+
+    @Test
     void createManualStoresAiPreviewMetadataWhenProvided() {
         doAnswer(invocation -> {
             ArticleDraft draft = invocation.getArgument(0);
@@ -164,7 +191,7 @@ class ContentArticleServiceTest {
         ManualArticleCreateRequest request = new ManualArticleCreateRequest();
         request.setProjectId(10L);
         request.setArticleType(ArticleTypes.INDUSTRY_ARTICLE);
-        request.setContentStyle("wechat");
+        request.setContentStyle("toutiao");
         request.setTopic("AI topic");
         request.setTopicAsQuestion("AI question");
         request.setTitle("AI edited title");
@@ -184,7 +211,7 @@ class ContentArticleServiceTest {
 
         ArgumentCaptor<ArticleDraft> draftCaptor = ArgumentCaptor.forClass(ArticleDraft.class);
         verify(articleDraftMapper, times(1)).insert(draftCaptor.capture());
-        assertEquals("wechat", draftCaptor.getValue().getContentStyle());
+        assertEquals("toutiao", draftCaptor.getValue().getContentStyle());
         assertEquals("AI topic", draftCaptor.getValue().getTopic());
         assertEquals("AI question", draftCaptor.getValue().getTopicAsQuestion());
         assertEquals("https://example.test/random-cover.jpg", draftCaptor.getValue().getCoverImageUrl());

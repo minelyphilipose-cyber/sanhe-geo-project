@@ -41,8 +41,10 @@ public class ProjectDashboardService {
 
     private static final int MAX_VIEWABLE = 5000;
     private static final int DEFAULT_DAYS = 30;
+    private static final int DETAIL_RETENTION_DAYS = 90;
     private static final int MAX_ADVICE_ITEMS = 8;
     private static final int MAX_ADVICE_SUMMARY_LENGTH = 2000;
+    private static final String DETAIL_WINDOW_MESSAGE = "明细仅保留90天，历史数据请查看趋势或报告";
 
     private final ProjectDashboardAdviceMapper adviceMapper;
     private final ProjectDashboardShareMapper shareMapper;
@@ -210,6 +212,12 @@ public class ProjectDashboardService {
         long safeSize = size <= 0 ? 20 : Math.min(size, 100);
         long safeCurrent = current <= 0 ? 1 : current;
         long offset = (safeCurrent - 1) * safeSize;
+        LocalDate detailRetentionStart = LocalDate.now().minusDays(DETAIL_RETENTION_DAYS - 1L);
+        boolean detailWindowLimited = startDate == null || startDate.isBefore(detailRetentionStart);
+        LocalDate effectiveStartDate = detailWindowLimited ? detailRetentionStart : startDate;
+        if (endDate != null && endDate.isBefore(detailRetentionStart)) {
+            return emptyDetailResult(safeCurrent, safeSize, 0, true, detailRetentionStart);
+        }
 
         QueryWrapper<PollResult> wrapper = new QueryWrapper<>();
         wrapper.eq("project_id", share.getProjectId())
@@ -219,9 +227,7 @@ public class ProjectDashboardService {
         if (StringUtils.hasText(platformCode)) {
             wrapper.eq("platform_code", platformCode.trim());
         }
-        if (startDate != null) {
-            wrapper.ge("batch_date", startDate);
-        }
+        wrapper.ge("batch_date", effectiveStartDate);
         if (endDate != null) {
             wrapper.le("batch_date", endDate);
         }
@@ -233,7 +239,7 @@ public class ProjectDashboardService {
         long total = pollResultMapper.selectCount(wrapper);
         long visibleTotal = Math.min(total, MAX_VIEWABLE);
         if (offset >= MAX_VIEWABLE) {
-            return emptyDetailResult(safeCurrent, safeSize, visibleTotal);
+            return emptyDetailResult(safeCurrent, safeSize, visibleTotal, detailWindowLimited, detailRetentionStart);
         }
 
         long pageSize = Math.min(safeSize, MAX_VIEWABLE - offset);
@@ -272,13 +278,7 @@ public class ProjectDashboardService {
             return row;
         }).toList();
 
-        return Map.of(
-                "total", visibleTotal,
-                "page", safeCurrent,
-                "size", safeSize,
-                "maxViewable", MAX_VIEWABLE,
-                "items", items
-        );
+        return detailResult(visibleTotal, safeCurrent, safeSize, items, detailWindowLimited, detailRetentionStart);
     }
 
     private Map<String, Object> emptyDetailResult(long current, long size) {
@@ -286,13 +286,34 @@ public class ProjectDashboardService {
     }
 
     private Map<String, Object> emptyDetailResult(long current, long size, long total) {
-        return Map.of(
-                "total", total,
-                "page", current,
-                "size", size,
-                "maxViewable", MAX_VIEWABLE,
-                "items", List.of()
-        );
+        return emptyDetailResult(current, size, total, false, LocalDate.now().minusDays(DETAIL_RETENTION_DAYS - 1L));
+    }
+
+    private Map<String, Object> emptyDetailResult(long current,
+                                                  long size,
+                                                  long total,
+                                                  boolean detailWindowLimited,
+                                                  LocalDate detailRetentionStart) {
+        return detailResult(total, current, size, List.of(), detailWindowLimited, detailRetentionStart);
+    }
+
+    private Map<String, Object> detailResult(long total,
+                                             long current,
+                                             long size,
+                                             List<Map<String, Object>> items,
+                                             boolean detailWindowLimited,
+                                             LocalDate detailRetentionStart) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("total", total);
+        payload.put("page", current);
+        payload.put("size", size);
+        payload.put("maxViewable", MAX_VIEWABLE);
+        payload.put("items", items);
+        payload.put("detailRetentionDays", DETAIL_RETENTION_DAYS);
+        payload.put("detailRetentionStart", detailRetentionStart);
+        payload.put("detailWindowLimited", detailWindowLimited);
+        payload.put("detailWindowMessage", detailWindowLimited ? DETAIL_WINDOW_MESSAGE : "");
+        return payload;
     }
 
     private void ensureSnapshotsReady(Long projectId) {

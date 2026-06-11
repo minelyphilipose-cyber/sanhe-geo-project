@@ -42,6 +42,9 @@ export interface LocalHelperOpenEnvironmentPayload {
 
 export interface LocalHelperHealthResponse {
   ok: boolean
+  service?: string | null
+  version?: string | null
+  time?: string | null
   paired?: boolean
   session?: {
     sessionId?: number | null
@@ -51,6 +54,29 @@ export interface LocalHelperHealthResponse {
     expiresAt?: string | null
   } | null
   adspower?: LocalHelperAdspowerSettings | null
+  runtime?: {
+    pid?: number | null
+    ppid?: number | null
+    node?: string | null
+    startedAt?: string | null
+    uptimeSeconds?: number | null
+    supervised?: boolean | null
+    cwd?: string | null
+  } | null
+  schedulePoll?: {
+    inFlight?: boolean
+    last?: unknown
+    platforms?: string[]
+    platformSource?: string | null
+    platformFetchError?: string | null
+    intervalMs?: number | null
+  } | null
+  config?: {
+    host?: string | null
+    port?: number | null
+    backendBase?: string | null
+    trustedBackendBase?: string | null
+  } | null
   error?: string
 }
 

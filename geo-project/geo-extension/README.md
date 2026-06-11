@@ -17,7 +17,7 @@ Load `dist/` as an unpacked extension after `npm run build`.
 ## Build Profiles
 
 - `npm run build:test`: uses local backend `http://127.0.0.1:8080` and local admin origins.
-- `npm run build:prod`: uses the temporary production backend and admin origin `http://119.45.154.127`.
+- `npm run build:prod`: uses the temporary production backend and admin origin `https://www.huanjingaigeo.com`.
 
 The profile switch is `VITE_GEO_EXTENSION_PROFILE=test|production`; `npm run build` defaults to the production profile because Vite build mode is production.
 

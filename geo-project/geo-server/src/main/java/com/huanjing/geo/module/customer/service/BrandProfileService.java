@@ -9,10 +9,12 @@ import com.huanjing.geo.common.image.ImageCompressionService;
 import com.huanjing.geo.common.storage.MinioStorageService;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.BrandMaterial;
+import com.huanjing.geo.module.customer.entity.BrandOffering;
 import com.huanjing.geo.module.customer.entity.BrandProfileVersion;
 import com.huanjing.geo.module.customer.entity.Company;
 import com.huanjing.geo.module.customer.mapper.BrandMapper;
 import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
+import com.huanjing.geo.module.customer.mapper.BrandOfferingMapper;
 import com.huanjing.geo.module.customer.mapper.BrandProfileVersionMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
 import com.huanjing.geo.module.system.entity.SysUser;
@@ -38,6 +40,7 @@ public class BrandProfileService {
     private final BrandMapper brandMapper;
     private final CompanyMapper companyMapper;
     private final BrandMaterialMapper brandMaterialMapper;
+    private final BrandOfferingMapper brandOfferingMapper;
     private final BrandProfileVersionMapper brandProfileVersionMapper;
     private final CurrentUserService currentUserService;
     private final ActivityLogService activityLogService;
@@ -253,10 +256,17 @@ public class BrandProfileService {
                             .eq(BrandMaterial::getBrandId, brand.getId())
                             .orderByDesc(BrandMaterial::getCreatedAt)
             );
+            List<BrandOffering> offerings = brandOfferingMapper.selectList(
+                    new LambdaQueryWrapper<BrandOffering>()
+                            .eq(BrandOffering::getBrandId, brand.getId())
+                            .isNull(BrandOffering::getDeletedAt)
+                            .orderByAsc(BrandOffering::getPriority, BrandOffering::getId)
+            );
 
             Map<String, Object> snapshot = new LinkedHashMap<>();
             snapshot.put("brand", snapshotBrand(brand));
             snapshot.put("materials", materials);
+            snapshot.put("offerings", offerings);
             String snapshotJson = objectMapper.writeValueAsString(snapshot);
 
             BrandProfileVersion version = new BrandProfileVersion();
@@ -310,6 +320,7 @@ public class BrandProfileService {
         String suffix = resolveFileTypeBySuffix(fileName);
         return Set.of("jpg", "jpeg", "png", "gif", "webp", "bmp", "svg").contains(suffix);
     }
+
     private String resolveFileTypeBySuffix(String fileName) {
         if (!StringUtils.hasText(fileName)) {
             return "unknown";

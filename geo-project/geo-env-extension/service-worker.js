@@ -363,6 +363,7 @@ function classifyTaskFailureCode(text) {
 function isRetryableTaskFailureCode(code) {
   if (globalThis.__GEO_ZHIHU_PLATFORM__?.isRetryableFailureCode?.(code)) return true
   if (globalThis.__GEO_XIAOHONGSHU_PLATFORM__?.isRetryableFailureCode?.(code)) return true
+  if (globalThis.__GEO_BAIJIAHAO_PLATFORM__?.isRetryableFailureCode?.(code)) return true
   return [
     'PAGE_LOAD_TIMEOUT',
     'EDITOR_NOT_READY',

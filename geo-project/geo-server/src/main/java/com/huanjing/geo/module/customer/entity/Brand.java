@@ -16,6 +16,8 @@ public class Brand {
     private Long id;
     private Long companyId;
     private String industry;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String complianceIndustryCode;
     private String brandName;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String brandShortName;
@@ -66,6 +68,18 @@ public class Brand {
     private String brandQualificationDescription;
     @TableField(updateStrategy = FieldStrategy.ALWAYS)
     private String brandCaseDescription;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String medicalLicense;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String diagnosisScope;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String institutionType;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String practitionerInfoPublic;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String medicalAdReviewNo;
+    @TableField(updateStrategy = FieldStrategy.ALWAYS)
+    private String complianceNotesMedical;
     private String standardStatement;
     private String statementStatus;
     private LocalDateTime statementGeneratedAt;

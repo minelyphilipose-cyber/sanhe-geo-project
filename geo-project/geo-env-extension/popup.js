@@ -96,6 +96,8 @@ function normalizePlatform(value) {
     '小红书': 'xiaohongshu',
     'xiaohongshu': 'xiaohongshu',
     'xhs': 'xiaohongshu',
+    '百家号': 'baijiahao',
+    'baijiahao': 'baijiahao',
   }
   return aliases[text] || text
 }

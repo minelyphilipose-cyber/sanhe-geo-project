@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
+import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
 import com.huanjing.geo.module.content.distribution.TargetContext;
 import com.huanjing.geo.module.content.dto.BatchArticlePublishRequest;
 import com.huanjing.geo.module.content.dto.BatchArticlePublishJobSummary;
@@ -167,6 +168,7 @@ public class BatchArticlePublishService {
             if (!ACTIVE_ARTICLE_STATUS.contains(article.getStatus())) {
                 throw new BizException(400, "article " + plan.articleId() + " is not approved or unpublished");
             }
+            ensureMedicalOfficialPublishAllowed(article, plan.platformKey());
             BatchArticlePublishItem item = new BatchArticlePublishItem();
             item.setJobId(job.getId());
             item.setArticleId(plan.articleId());
@@ -282,6 +284,7 @@ public class BatchArticlePublishService {
         if ("agent_site".equals(platform.platformKey()) && project.getBrandId() == null) {
             throw new BizException(400, "article " + articleId + " project has no brand for Agent official site publish");
         }
+        ensureMedicalOfficialPublishAllowed(article, platform.platformKey());
         PublishSite resolvedIndustrySite = industrySite;
         if ("industry_site".equals(platform.platformKey()) && resolvedIndustrySite == null) {
             resolvedIndustrySite = resolveBrandIndustrySite(project);
@@ -642,6 +645,23 @@ public class BatchArticlePublishService {
             throw new BizException(404, "文章不存在：" + articleId);
         }
         return article;
+    }
+
+    private void ensureMedicalOfficialPublishAllowed(ArticleDraft article, String platformKey) {
+        if (!"agent_site".equals(platformKey)) {
+            return;
+        }
+        if (!MedicalArticleConstants.TIER_OFFICIAL_SITE.equals(article.getMedicalChannelTier())) {
+            return;
+        }
+        if (!MedicalArticleConstants.COMPLIANCE_PASSED.equals(article.getComplianceStatus())) {
+            throw new BizException(400, "article " + article.getId() + " medical compliance is not passed");
+        }
+        boolean hasAdReviewNo = StringUtils.hasText(article.getMedicalAdReviewNo());
+        boolean manualPassed = MedicalArticleConstants.REVIEW_PASSED.equals(article.getPublishReviewStatus());
+        if (!hasAdReviewNo && !manualPassed) {
+            throw new BizException(400, "article " + article.getId() + " requires medical ad review number or manual legal review before official site publish");
+        }
     }
 
     private Project requireProject(Long projectId) {

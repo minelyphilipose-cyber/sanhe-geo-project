@@ -13,6 +13,7 @@ import com.huanjing.geo.module.audit.AuditResult;
 import com.huanjing.geo.module.audit.dto.AuditEvent;
 import com.huanjing.geo.module.audit.service.AuditService;
 import com.huanjing.geo.module.content.ContentErrorCodes;
+import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
 import com.huanjing.geo.module.content.authoritymedia.AuthorityMediaDistributionAdapter;
 import com.huanjing.geo.module.content.distribution.DistributionTargetKind;
 import com.huanjing.geo.module.content.distribution.TargetContext;
@@ -70,6 +71,7 @@ public class ContentDistributionService {
     private static final ZoneId SH_ZONE = ZoneId.of("Asia/Shanghai");
     private static final Set<String> SUCCESS_TASK_STATUS = Set.of("submitted", "confirmed", "published");
     private static final Set<String> ACTIVE_ARTICLE_STATUS = Set.of("approved", "unpublished");
+    private static final Set<String> LOCKED_ARTICLE_STATUS = Set.of("published", "distributed");
     private static final Set<String> DISTRIBUTE_ALLOWED_ROLES = Set.of("super_admin", "delivery_manager", "operator");
     private static final Set<String> LEGACY_PROJECT_WRITE_ROLES =
             Set.of("operator", "delivery_manager", "partner", "partner_staff");
@@ -148,6 +150,9 @@ public class ContentDistributionService {
         Project project = requireProject(article.getProjectId());
         currentUserService.ensurePartnerResourceAccess(operator, project.getPartnerId(), "project");
         requireDistributionAccess(operator, project.getBrandId());
+        if (LOCKED_ARTICLE_STATUS.contains(String.valueOf(article.getStatus()).toLowerCase(Locale.ROOT))) {
+            throw new BizException(400, "Article has already been published/distributed and cannot distribute again");
+        }
         if (!ACTIVE_ARTICLE_STATUS.contains(article.getStatus())) {
             if (target instanceof TargetContext.SelfMediaTarget selfMediaTarget
                     && "distributing".equals(article.getStatus())) {
@@ -488,6 +493,7 @@ public class ContentDistributionService {
         if (!"active".equalsIgnoreCase(site.getStatus())) {
             throw new BizException(400, "Brand official site is not active");
         }
+        ensureMedicalOfficialPublishAllowed(article);
         currentUserService.ensureBrandAccess(operator, site.getBrandId(), "official_site");
         requireDistributionAccess(operator, site.getBrandId());
 
@@ -525,6 +531,20 @@ public class ContentDistributionService {
             companyChannelQuotaService.refundDistribution(task.getId());
         }
         return distributionTaskMapper.selectById(task.getId());
+    }
+
+    private void ensureMedicalOfficialPublishAllowed(ArticleDraft article) {
+        if (!MedicalArticleConstants.TIER_OFFICIAL_SITE.equals(article.getMedicalChannelTier())) {
+            return;
+        }
+        if (!MedicalArticleConstants.COMPLIANCE_PASSED.equals(article.getComplianceStatus())) {
+            throw new BizException(400, "医疗文章合规状态未通过，不能发布官网");
+        }
+        boolean hasAdReviewNo = StringUtils.hasText(article.getMedicalAdReviewNo());
+        boolean manualPassed = MedicalArticleConstants.REVIEW_PASSED.equals(article.getPublishReviewStatus());
+        if (!hasAdReviewNo && !manualPassed) {
+            throw new BizException(400, "医疗官网发布前需要医疗广告审查证明编号或人工法务确认");
+        }
     }
 
     private DistributionTask distributeToBrandGeoSite(ArticleDraft article,

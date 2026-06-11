@@ -5,10 +5,11 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 import crypto from 'node:crypto'
-import { evaluateXiaohongshuPublishSignals } from './publish-check.js'
+import { evaluateBaijiahaoPublishSignals, evaluateXiaohongshuPublishSignals } from './publish-check.js'
 
 const CONFIG_PATH = new URL('../config.local.json', import.meta.url)
 const EXAMPLE_CONFIG_PATH = new URL('../config.example.json', import.meta.url)
+const PACKAGE_JSON_PATH = new URL('../package.json', import.meta.url)
 const PUBLIC_DIR = new URL('../public/', import.meta.url)
 const RUNTIME_DIR = new URL('../runtime/', import.meta.url)
 const TASKS_PATH = new URL('tasks.json', RUNTIME_DIR)
@@ -30,10 +31,12 @@ const EVENT_LOOP_WATCHDOG_THRESHOLD_MS = 90_000
 const FAILED_SCHEDULE_REPORT_MAX_ATTEMPTS = 3
 const SELF_MEDIA_SCHEDULE_PLATFORMS_CACHE_MS = 60_000
 const EXIT_CODE_PORT_IN_USE = 2
+const STARTED_AT = new Date().toISOString()
 const nonceCache = new Map()
 let nonceFlushTimer = null
 let runtimeSession = null
 let runtimeSettings = { adspower: {} }
+let packageInfoCache = null
 let pendingPairing = null
 let schedulePollInFlight = false
 let lastSchedulePollStatus = null
@@ -54,6 +57,24 @@ process.on('unhandledRejection', (reason) => {
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+async function readPackageInfo() {
+  if (packageInfoCache) return packageInfoCache
+  try {
+    const raw = await fs.readFile(PACKAGE_JSON_PATH, 'utf8')
+    const pkg = JSON.parse(raw)
+    packageInfoCache = {
+      name: String(pkg.name || 'geo-local-helper'),
+      version: pkg.version ? String(pkg.version) : null,
+    }
+  } catch {
+    packageInfoCache = {
+      name: 'geo-local-helper',
+      version: null,
+    }
+  }
+  return packageInfoCache
 }
 
 function sha256Hex(value) {
@@ -127,7 +148,7 @@ async function loadConfig() {
     'http://localhost:8080',
     'http://119.45.154.127',
   ]
-  config.trustedBackendBase ||= config.backendBase || 'http://119.45.154.127'
+  config.trustedBackendBase ||= config.backendBase || ''
   config.enableLegacyBackendTokenRoutes = config.enableLegacyBackendTokenRoutes === true
   config.enableStaticHelperToken = config.enableStaticHelperToken === true
   const trustedBackendOrigin = safeOrigin(config.trustedBackendBase)
@@ -776,7 +797,7 @@ async function claimAndLaunchScheduledTask(config, platform = 'toutiao') {
   const path = `/api/v1/local-agent/self-media-schedules/claim-next?platform=${encodeURIComponent(platform)}`
   const claim = await signedTrustedBackendRequest(config, path, { method: 'GET' })
   if (!claim?.task || !claim?.launch) {
-    return { ok: true, claimed: false }
+    return { ok: true, claimed: false, claimBlockedReason: claim?.claimBlockedReason || 'NO_DUE_TASK' }
   }
   const taskId = Number(claim.launch.taskId || claim.task.id)
   const existing = tasksById.get(taskId)
@@ -822,7 +843,7 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
   const path = `/api/v1/local-agent/self-media-schedules/publish-checks/claim-next?platform=${encodeURIComponent(platform)}`
   const claim = await signedTrustedBackendRequest(config, path, { method: 'GET' })
   if (!claim?.schedule || !claim?.launch) {
-    return { ok: true, claimed: false }
+    return { ok: true, claimed: false, claimBlockedReason: claim?.claimBlockedReason || 'NO_DUE_TASK' }
   }
   const scheduleId = Number(claim.launch.scheduleId || claim.schedule.id)
   const environment = normalizeProviderEnvironment(
@@ -837,15 +858,28 @@ async function claimAndCheckPublishResult(config, platform = 'toutiao') {
     `/api/v1/browser/start?user_id=${profileId}&open_tabs=1&ip_tab=0`,
   )
   try {
+    const checkSchedule = {
+      ...claim.schedule,
+      expectedPlatformAccountId: claim.launch.expectedPlatformAccountId || claim.schedule.expectedPlatformAccountId || '',
+      expectedAccountName: claim.launch.expectedAccountName || claim.schedule.expectedAccountName || '',
+    }
     const checkUrl = worksListUrlForPublishCheck(
       claim.launch.platform || claim.schedule.platform,
       claim.launch.url,
+      {
+        launch: claim.launch,
+        schedule: checkSchedule,
+      },
     )
     const result = await checkPublishResultInAdspowerPage(
       data?.ws?.puppeteer,
       checkUrl,
-      claim.schedule,
+      checkSchedule,
     )
+    if (result.failed) {
+      await reportPublishCheckFailed(config, scheduleId, result)
+      return { ok: true, claimed: true, scheduleId, outcome: 'failed', result }
+    }
     if (result.found) {
       await reportPublishCheckPublished(config, scheduleId, result)
       return { ok: true, claimed: true, scheduleId, outcome: 'published', result }
@@ -869,7 +903,18 @@ async function checkPublishResultInAdspowerPage(wsEndpoint, targetUrl, schedule)
   const browser = await puppeteer.connect({ browserWSEndpoint: wsEndpoint, protocolTimeout: 30_000 })
   try {
     const page = await browser.newPage()
-    await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 })
+    let effectiveTargetUrl = targetUrl
+    const platform = String(schedule?.platform || '').trim().toLowerCase()
+    if (platform === 'baijiahao' && !baijiahaoWorksListHasAppId(effectiveTargetUrl)) {
+      const appId = baijiahaoAppIdFromContext(schedule)
+      if (appId) {
+        effectiveTargetUrl = buildBaijiahaoWorksListUrl(appId)
+        schedule.expectedPlatformAccountId = schedule.expectedPlatformAccountId || appId
+      } else {
+        throw new Error('baijiahao publish check requires app_id from self media account platformAccountId')
+      }
+    }
+    await page.goto(effectiveTargetUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 })
     await delay(3_000)
     const deadline = Date.now() + 20_000
     let latest = null
@@ -1019,41 +1064,18 @@ async function evaluateBaijiahaoPublishResult(page, schedule) {
     title: schedule?.publishCheckTitle || '',
     platformScheduledAt: schedule?.platformScheduledAt || schedule?.plannedPublishAt || '',
   }
-  return page.evaluate((input) => {
-    const normalize = (value) => String(value || '').replace(/\s+/g, '').trim()
-    const normalizeTime = (value) => normalize(String(value || '')
-      .replace('T', ' ')
-      .replace(/[年月/]/g, '-')
-      .replace(/日/g, ' ')
-      .replace(/:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/, ''))
+  const pageState = await page.evaluate(() => {
     const text = document.body?.innerText || ''
-    const normalizedText = normalize(text)
-    const normalizedTitle = normalize(input.title)
-    const titleProbe = normalizedTitle.length > 20 ? normalizedTitle.slice(0, 20) : normalizedTitle
-    const hasTitle = Boolean(titleProbe && normalizedText.includes(titleProbe))
-    const scheduleProbe = normalizeTime(input.platformScheduledAt)
-    const hasScheduleTime = !scheduleProbe || normalizedText.includes(scheduleProbe)
-    const hasPublishedSignal = /定时发布|已发布|审核中|待审核|发布成功|已定时|发布时间|将于/.test(text)
-      || /\/content|\/manage/.test(location.href)
-    let matchedUrl = ''
-    if (hasTitle) {
-      const anchors = Array.from(document.querySelectorAll('a[href]'))
-      const anchor = anchors.find((item) => normalize(item.textContent).includes(titleProbe))
-      matchedUrl = anchor?.href || ''
-    }
     return {
-      found: hasTitle && hasScheduleTime && hasPublishedSignal,
-      hasTitle,
-      hasScheduleTime,
-      hasPublishedSignal,
-      targetTitle: input.title,
-      platformScheduledAt: input.platformScheduledAt,
-      scheduleProbe,
-      url: matchedUrl || location.href,
+      text,
+      url: location.href,
       pageTitle: document.title,
-      textSample: text.slice(0, 1200),
+      anchors: Array.from(document.querySelectorAll('a[href]'))
+        .map((item) => ({ text: item.textContent || '', href: item.href || '' }))
+        .slice(0, 80),
     }
-  }, target)
+  })
+  return evaluateBaijiahaoPublishSignals(target, pageState)
 }
 
 async function reportPublishCheckPublished(config, scheduleId, result) {
@@ -1174,16 +1196,62 @@ function defaultWorksListUrlForPlatform(platform) {
   const normalized = String(platform || '').trim().toLowerCase()
   if (normalized === 'toutiao') return 'https://mp.toutiao.com/profile_v4/manage/content/all'
   if (normalized === 'xiaohongshu') return 'https://creator.xiaohongshu.com/new/note-manager'
-  if (normalized === 'baijiahao') return 'https://baijiahao.baidu.com/builder/rc/content?type=news'
+  if (normalized === 'baijiahao') return null
   return defaultPublishUrlForPlatform(platform)
 }
 
-function worksListUrlForPublishCheck(platform, launchUrl) {
+function worksListUrlForPublishCheck(platform, launchUrl, context = {}) {
   const normalized = String(platform || '').trim().toLowerCase()
-  if (normalized === 'xiaohongshu' || normalized === 'toutiao' || normalized === 'baijiahao') {
+  if (normalized === 'baijiahao') {
+    const appId = baijiahaoAppIdFromContext(context)
+    if (appId) return buildBaijiahaoWorksListUrl(appId)
+    if (baijiahaoWorksListHasAppId(launchUrl)) return launchUrl
+    return null
+  }
+  if (normalized === 'xiaohongshu' || normalized === 'toutiao') {
     return defaultWorksListUrlForPlatform(normalized)
   }
   return launchUrl || defaultWorksListUrlForPlatform(normalized)
+}
+
+function buildBaijiahaoWorksListUrl(appId = '') {
+  const url = new URL('https://baijiahao.baidu.com/builder/rc/content')
+  url.searchParams.set('currentPage', '1')
+  url.searchParams.set('pageSize', '10')
+  url.searchParams.set('search', '')
+  url.searchParams.set('type', '')
+  url.searchParams.set('collection', '')
+  if (appId) url.searchParams.set('app_id', String(appId).trim())
+  url.searchParams.set('startDate', '')
+  url.searchParams.set('endDate', '')
+  return url.toString()
+}
+
+function baijiahaoWorksListHasAppId(value) {
+  try {
+    const url = new URL(value)
+    return url.hostname.includes('baijiahao.baidu.com') && Boolean(url.searchParams.get('app_id'))
+  } catch (_) {
+    return false
+  }
+}
+
+function baijiahaoAppIdFromContext(context = {}) {
+  const candidates = [
+    context.baijiahaoAppId,
+    context.appId,
+    context.expectedPlatformAccountId,
+    context.platformAccountId,
+    context.launch?.expectedPlatformAccountId,
+    context.launch?.platformAccountId,
+    context.schedule?.expectedPlatformAccountId,
+    context.schedule?.platformAccountId,
+  ]
+  for (const candidate of candidates) {
+    const appId = String(candidate || '').trim()
+    if (/^\d{6,}$/.test(appId)) return appId
+  }
+  return ''
 }
 
 async function handleOpenEnvironment(req, res, config) {
@@ -1514,6 +1582,11 @@ async function handleTaskComplete(req, res, config, taskId, status) {
 function classifyFailureStatus(error) {
   if (error?.code) return String(error.code)
   const message = String(error?.message || error || '')
+  const explicitCode = message.match(/^([A-Z0-9_]{3,80})[：:]/)?.[1]
+  if (explicitCode) return explicitCode
+  if (message.includes('触发过快') || message.includes('点击速度太快') || message.includes('操作频繁') || message.includes('稍后再试')) {
+    return 'BAIJIAHAO_PLATFORM_RATE_LIMITED'
+  }
   if (message.includes('fill token used or expired')) return 'token_expired'
   if (message.includes('平台账号未登录') || message.includes('需登录')) return 'login_required'
   if (message.includes('账号一致性校验失败') || message.includes('账号不一致')) return 'account_mismatch'
@@ -1620,7 +1693,9 @@ async function uploadImageFileToAdsPowerPage(body, filePath) {
     const inputs = await page.$$('input[type="file"]')
     const targets = platform === 'zhihu'
       ? await chooseZhihuCoverImageInputs(inputs)
-      : await choosePuppeteerImageInputs(inputs)
+      : platform === 'baijiahao'
+        ? await chooseBaijiahaoCoverImageInputs(inputs)
+        : await choosePuppeteerImageInputs(inputs)
     if (!targets.length) {
       throw new Error(`${platform || 'platform'} image file input not found`)
     }
@@ -1653,6 +1728,12 @@ function findUploadTargetPage(pages, platform) {
       const pageUrl = item.url()
       return pageUrl.includes('mp.toutiao.com') && pageUrl.includes('/graphic/publish')
     }) || pages.find((item) => item.url().includes('mp.toutiao.com'))
+  }
+  if (normalized === 'baijiahao') {
+    return pages.find((item) => {
+      const pageUrl = item.url()
+      return pageUrl.includes('baijiahao.baidu.com') && pageUrl.includes('/builder/rc/edit')
+    }) || pages.find((item) => item.url().includes('baijiahao.baidu.com'))
   }
   return pages.find((item) => item.url().includes(normalized))
 }
@@ -1704,6 +1785,9 @@ function uploadChooserLabels(platform) {
   if (normalized === 'zhihu') {
     return ['添加文章封面', '添加封面', '上传封面', '上传图片', '选择图片']
   }
+  if (normalized === 'baijiahao') {
+    return ['点击本地上传', '本地上传', '上传图片', '选择图片']
+  }
   return ['本地上传', '上传图片', '选择图片']
 }
 
@@ -1753,6 +1837,47 @@ async function chooseZhihuCoverImageInputs(inputs) {
   }
   candidates.sort((left, right) => right.score - left.score)
   return candidates.length ? [candidates[0].input] : []
+}
+
+async function chooseBaijiahaoCoverImageInputs(inputs) {
+  const candidates = []
+  for (const input of inputs) {
+    const meta = await input.evaluate((el) => {
+      const rect = el.getBoundingClientRect()
+      const accept = el.getAttribute('accept') || ''
+      const id = el.id || ''
+      const name = el.name || ''
+      const className = String(el.className || '')
+      const nearbyText = (() => {
+        let current = el.parentElement
+        for (let depth = 0; current && depth < 7; depth += 1) {
+          const text = String(current.textContent || '').replace(/\s+/g, '')
+          if (/正文\/本地上传|本地上传|AI封图|免费正版图库|封面预览|确定\(\d+\)/.test(text)) {
+            return text.slice(0, 180)
+          }
+          current = current.parentElement
+        }
+        return ''
+      })()
+      return { accept, id, name, className, visible: rect.width > 0 && rect.height > 0, nearbyText }
+    }).catch(() => ({}))
+    const accept = String(meta.accept || '').toLowerCase()
+    const descriptor = `${meta.accept || ''} ${meta.id || ''} ${meta.name || ''} ${meta.className || ''} ${meta.nearbyText || ''}`.toLowerCase()
+    if (!/(image|jpg|jpeg|png|webp|avif|heic)/.test(accept + descriptor)) continue
+    candidates.push({ input, score: scoreBaijiahaoCoverInput(descriptor, meta) })
+  }
+  candidates.sort((left, right) => right.score - left.score)
+  return candidates.length ? [candidates[0].input] : []
+}
+
+function scoreBaijiahaoCoverInput(descriptor, meta) {
+  let score = 0
+  if (/正文\/本地上传|本地上传|ai封图|免费正版图库|封面预览|确定\(\d+\)/.test(descriptor)) score += 120
+  if (/cover|image|upload|file|封面|图片/.test(descriptor)) score += 20
+  if (meta?.visible) score += 5
+  if (/toolbar|editor|content|article|正文输入|请输入正文|插入/.test(descriptor)) score -= 60
+  if (/\.pdf|\.doc|\.ppt|\.xls|mobi|epub|csv|azw3/.test(descriptor)) score -= 80
+  return score
 }
 
 function scoreZhihuCoverInput(descriptor, meta) {
@@ -1859,10 +1984,15 @@ function rewritePublicMaterialUrlToTrustedBackend(config, urlValue, backendBase 
   try {
     const url = new URL(urlValue)
     if (!url.pathname.startsWith('/api/public/brand-materials/')) return ''
-    const backend = new URL(firstText(backendBase, config.trustedBackendBase, config.backendBase))
+    const backendBaseValue = firstText(backendBase, config.trustedBackendBase, config.backendBase)
+    if (!backendBaseValue) {
+      throw new Error('trusted backend base is not configured for public material url')
+    }
+    const backend = new URL(backendBaseValue)
     if (backend.origin === url.origin) return ''
     return `${backend.origin}${url.pathname}${url.search}`
-  } catch {
+  } catch (error) {
+    if (error?.message === 'trusted backend base is not configured for public material url') throw error
     return ''
   }
 }
@@ -1913,13 +2043,24 @@ async function route(req, res, config) {
     return
   }
   if (req.method === 'GET' && url.pathname === '/health') {
+    const packageInfo = await readPackageInfo()
     sendJson(req, res, config, 200, {
       ok: true,
-      service: 'geo-local-helper',
+      service: packageInfo.name,
+      version: packageInfo.version,
       time: nowIso(),
       paired: Boolean(runtimeSession?.sessionId && runtimeSession?.hmacSecret),
       session: publicSession(),
       adspower: publicAdspowerSettings(config),
+      runtime: {
+        pid: process.pid,
+        ppid: process.ppid,
+        node: process.version,
+        startedAt: STARTED_AT,
+        uptimeSeconds: Math.floor(process.uptime()),
+        supervised: process.env.GEO_HELPER_SUPERVISED === '1',
+        cwd: process.cwd(),
+      },
       schedulePoll: {
         inFlight: schedulePollInFlight,
         last: lastSchedulePollStatus,
@@ -1927,6 +2068,12 @@ async function route(req, res, config) {
         platformSource: 'backend',
         platformFetchError: lastSelfMediaSchedulePlatformsError,
         intervalMs: Number(config.selfMediaSchedulePollIntervalMs || 30_000),
+      },
+      config: {
+        host: config.host,
+        port: config.port,
+        backendBase: config.backendBase || null,
+        trustedBackendBase: config.trustedBackendBase || null,
       },
     })
     return
@@ -2034,6 +2181,7 @@ function startSchedulePoller(config) {
 async function pollSelfMediaSchedules(config) {
   const timeoutMs = Number(config.selfMediaSchedulePollStepTimeoutMs || SCHEDULE_POLL_STEP_TIMEOUT_MS)
   const platforms = await selfMediaSchedulePlatforms(config)
+  let lastNoClaimReason = ''
   for (const platform of platforms) {
     const publishCheck = await withTimeout(
       claimAndCheckPublishResult(config, platform),
@@ -2041,14 +2189,16 @@ async function pollSelfMediaSchedules(config) {
       `self-media publish check poll ${platform}`,
     )
     if (publishCheck.claimed) return { ...publishCheck, platform, kind: 'publish_result_check' }
+    lastNoClaimReason = publishCheck.claimBlockedReason || lastNoClaimReason
     const launch = await withTimeout(
       claimAndLaunchScheduledTask(config, platform),
       timeoutMs,
       `self-media schedule execution poll ${platform}`,
     )
     if (launch.claimed) return { ...launch, platform, kind: 'schedule_execution' }
+    lastNoClaimReason = launch.claimBlockedReason || lastNoClaimReason
   }
-  return { ok: true, claimed: false }
+  return { ok: true, claimed: false, claimBlockedReason: lastNoClaimReason || 'NO_DUE_TASK' }
 }
 
 async function selfMediaSchedulePlatforms(config) {

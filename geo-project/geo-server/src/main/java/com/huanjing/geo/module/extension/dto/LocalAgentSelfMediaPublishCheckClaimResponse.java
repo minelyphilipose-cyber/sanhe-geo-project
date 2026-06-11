@@ -4,7 +4,8 @@ import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
 
 public record LocalAgentSelfMediaPublishCheckClaimResponse(
         SelfMediaPublishScheduleVO schedule,
-        Launch launch
+        Launch launch,
+        String claimBlockedReason
 ) {
     public record Launch(
             Long scheduleId,

@@ -142,6 +142,15 @@ public class CompanyChannelQuotaService {
 
     public DistributionQuotaView distributionQuota(Long companyId, String targetKind) {
         String channel = mapTargetKind(targetKind);
+        return distributionQuotaForChannel(companyId, channel);
+    }
+
+    public DistributionQuotaView selfMediaDistributionQuota(Long companyId, String platform) {
+        String channel = resolveSelfMediaPlatformChannel(platform);
+        return distributionQuotaForChannel(companyId, channel);
+    }
+
+    private DistributionQuotaView distributionQuotaForChannel(Long companyId, String channel) {
         CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(companyId);
         SnapshotQuota quota = resolveSnapshotQuota(binding, channel);
         String periodKey = periodKey(quota.periodType());

@@ -95,6 +95,8 @@ class BatchArticleGenerationServiceTest {
                 mock(ArticleCoverSelectionService.class),
                 promptBuilder,
                 promptContextFactory,
+                mock(MedicalArticleGenerationService.class),
+                mock(MedicalArticleComplianceChecker.class),
                 mock(BatchArticleQualityChecker.class),
                 allocationService,
                 perspectiveService,
@@ -284,7 +286,8 @@ class BatchArticleGenerationServiceTest {
                 null,
                 "customer",
                 TemplatePerspectiveService.MATCH_SCOPE_DEFAULT,
-                null
+                null,
+                List.<BrandOfferingPromptSelector.SelectedOffering>of()
         );
     }
 

@@ -267,6 +267,9 @@
           <el-table-column label="行业" min-width="140">
             <template #default="scope">{{ dictStore.label('industry_tag', scope.row.industry) || scope.row.industry || '-' }}</template>
           </el-table-column>
+          <el-table-column label="合规类型" min-width="140">
+            <template #default="scope">{{ complianceIndustryLabel(scope.row.complianceIndustryCode) }}</template>
+          </el-table-column>
           <el-table-column prop="mainBusiness" label="主营业务" min-width="180" />
           <el-table-column prop="brandPositioning" label="品牌定位" min-width="180" />
           <el-table-column prop="serviceArea" label="地区" min-width="220">
@@ -369,6 +372,17 @@
               :key="tag"
               :label="dictStore.label('industry_tag', tag) || tag"
               :value="tag"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="行业合规类型">
+          <el-select v-model="brandForm.complianceIndustryCode" clearable filterable placeholder="非特殊合规行业" style="width: 100%">
+            <el-option label="非特殊合规行业" value="none" />
+            <el-option
+              v-for="item in dictStore.options('compliance_industry')"
+              :key="item.dictKey"
+              :label="item.dictValue"
+              :value="item.dictKey"
             />
           </el-select>
         </el-form-item>
@@ -535,6 +549,7 @@ const brandForm = reactive({
   brandShortName: '',
   brandSlug: '',
   industry: '',
+  complianceIndustryCode: 'none',
   mainBusiness: '',
   coreProducts: '',
   brandPositioning: '',
@@ -724,6 +739,11 @@ function brandRegion(value: Brand) {
   return regionDisplayFromPayload(value) || value.serviceArea || '-'
 }
 
+function complianceIndustryLabel(value?: string | null) {
+  if (!value || value === 'none') return '非特殊合规行业'
+  return dictStore.label('compliance_industry', value) || value
+}
+
 function parseIndustryTags(value?: string | string[] | null) {
   if (Array.isArray(value)) return value
   if (!value) return []
@@ -768,6 +788,7 @@ function resetBrandForm() {
   brandForm.brandShortName = ''
   brandForm.brandSlug = ''
   brandForm.industry = availableBrandIndustries.value[0] || ''
+  brandForm.complianceIndustryCode = 'none'
   brandForm.mainBusiness = ''
   brandForm.coreProducts = ''
   brandForm.brandPositioning = ''
@@ -993,6 +1014,7 @@ function openBrandEdit(row: Brand) {
   brandForm.brandShortName = row.brandShortName || ''
   brandForm.brandSlug = row.brandSlug
   brandForm.industry = row.industry || availableBrandIndustries.value[0] || ''
+  brandForm.complianceIndustryCode = row.complianceIndustryCode || 'none'
   brandForm.mainBusiness = row.mainBusiness || ''
   brandForm.coreProducts = row.coreProducts || ''
   brandForm.brandPositioning = row.brandPositioning || ''
@@ -1021,6 +1043,7 @@ async function submitBrand() {
       brandName: brandForm.brandName,
       brandShortName: nullableText(brandForm.brandShortName),
       industry: brandForm.industry,
+      complianceIndustryCode: brandForm.complianceIndustryCode === 'none' ? null : brandForm.complianceIndustryCode,
       mainBusiness: nullableText(brandForm.mainBusiness),
       coreProducts: nullableText(brandForm.coreProducts),
       brandPositioning: nullableText(brandForm.brandPositioning),

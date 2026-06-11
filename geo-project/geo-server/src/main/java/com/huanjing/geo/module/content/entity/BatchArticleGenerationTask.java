@@ -26,6 +26,12 @@ public class BatchArticleGenerationTask {
     private String channelSubCode;
     private String agentSiteModule;
     private String articleTypeCode;
+    private String medicalIndustryCode;
+    private String medicalCategoryCode;
+    private String medicalCategoryName;
+    private Long topicAngleId;
+    private String structureSkeleton;
+    private String focus;
     private Long promptTemplateId;
     private Long promptTemplateVersionId;
     private String perspectiveCode;
@@ -48,9 +54,13 @@ public class BatchArticleGenerationTask {
     private String status;
     private String qualityStatus;
     private String qualityIssuesJson;
+    private String complianceStatus;
+    private String complianceIssuesJson;
+    private Long discardedArticleId;
     private String promptSnapshot;
     private String inputSnapshot;
     private String responseSnapshot;
+    private LocalDateTime snapshotPurgedAt;
     private String modelPlatformCode;
     private String modelId;
     private String errorMessage;

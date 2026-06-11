@@ -14,6 +14,8 @@
   "permissions": ["alarms", "cookies", "storage", "tabs", "scripting"],
   "host_permissions": [
     "http://119.45.154.127/*",
+    "https://www.huanjingaigeo.com/*",
+    "https://huanjingaigeo.com/*",
     "https://*.toutiao.com/*",
     "https://*.zhihu.com/*",
     "https://*.xiaohongshu.com/*"
@@ -25,7 +27,7 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["http://119.45.154.127/*"],
+      "matches": ["http://119.45.154.127/*","https://www.huanjingaigeo.com/*","https://huanjingaigeo.com/*"],
       "js": ["assets/admin-bridge-content-script.js"],
       "run_at": "document_start"
     }

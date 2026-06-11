@@ -3,6 +3,8 @@ package com.huanjing.geo.module.customer.controller;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.customer.dto.BrandCreateRequest;
+import com.huanjing.geo.module.customer.dto.BrandOfferingRequest;
+import com.huanjing.geo.module.customer.dto.BrandOfferingVO;
 import com.huanjing.geo.module.customer.dto.BrandImageFolderRequest;
 import com.huanjing.geo.module.customer.dto.BrandImageFolderVO;
 import com.huanjing.geo.module.customer.dto.BrandStatementRegenerateRequest;
@@ -14,6 +16,7 @@ import com.huanjing.geo.module.customer.entity.BrandProfileVersion;
 import com.huanjing.geo.module.dispatch.entity.DispatchTask;
 import com.huanjing.geo.module.dispatch.service.BrandStatementDispatchService;
 import com.huanjing.geo.module.customer.service.BrandService;
+import com.huanjing.geo.module.customer.service.BrandOfferingService;
 import com.huanjing.geo.module.customer.service.BrandImageFolderService;
 import com.huanjing.geo.module.customer.service.BrandProfileService;
 import com.huanjing.geo.module.customer.service.BrandStatementService;
@@ -40,6 +43,7 @@ import java.nio.charset.StandardCharsets;
 public class BrandController {
 
     private final BrandService brandService;
+    private final BrandOfferingService brandOfferingService;
     private final BrandImageFolderService brandImageFolderService;
     private final BrandProfileService brandProfileService;
     private final BrandStatementService brandStatementService;
@@ -73,6 +77,31 @@ public class BrandController {
     @DeleteMapping("/{id}")
     public R<Void> delete(@PathVariable Long id) {
         brandService.delete(id);
+        return R.ok();
+    }
+
+    @GetMapping("/{id}/offerings")
+    public R<List<BrandOfferingVO>> listOfferings(@PathVariable Long id,
+                                                  @RequestParam(required = false) String status) {
+        return R.ok(brandOfferingService.list(id, status));
+    }
+
+    @PostMapping("/{id}/offerings")
+    public R<BrandOfferingVO> createOffering(@PathVariable Long id,
+                                             @Valid @RequestBody BrandOfferingRequest req) {
+        return R.ok(brandOfferingService.create(id, req));
+    }
+
+    @PutMapping("/{id}/offerings/{offeringId}")
+    public R<BrandOfferingVO> updateOffering(@PathVariable Long id,
+                                             @PathVariable Long offeringId,
+                                             @Valid @RequestBody BrandOfferingRequest req) {
+        return R.ok(brandOfferingService.update(id, offeringId, req));
+    }
+
+    @DeleteMapping("/{id}/offerings/{offeringId}")
+    public R<Void> deleteOffering(@PathVariable Long id, @PathVariable Long offeringId) {
+        brandOfferingService.delete(id, offeringId);
         return R.ok();
     }
 

@@ -15,6 +15,8 @@ public class BatchArticleGenerationBatch {
     private Long projectId;
     private Long companyId;
     private Long brandId;
+    private String medicalIndustryCode;
+    private String medicalChannelTier;
     private String topicSource;
     private String topic;
     private String topicAsQuestion;

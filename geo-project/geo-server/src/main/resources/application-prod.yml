@@ -111,7 +111,7 @@ geo:
       live-verification-blocked: ${WECHAT_LIVE_VERIFICATION_BLOCKED:true}
       live-verification-reason: ${WECHAT_LIVE_VERIFICATION_REASON:domain_icp_filing_pending}
       func-scope-strict-mode: ${WECHAT_FUNC_SCOPE_STRICT_MODE:true}
-      required-draft-func-scopes: [1, 13]
+      required-draft-func-scopes: [1, 7, 11]
       auth-type: ${WECHAT_AUTH_TYPE:1}
       backend-auth-callback-url: ${WECHAT_BACKEND_AUTH_CALLBACK_URL}
       frontend-callback-url: ${WECHAT_FRONTEND_CALLBACK_URL}

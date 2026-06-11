@@ -27,6 +27,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentCaptor.forClass;
@@ -120,6 +121,46 @@ class ExtensionTaskStateServiceTest {
         assertEquals("filled", service.ackFilled(30L, 99L, 7L, request).status());
 
         verify(selfMediaPublishScheduleService).markDistributionTaskScheduled(eq(30L), any(String.class));
+        verify(selfMediaPublishScheduleService, never()).markDistributionTaskFilled(any(), any());
+    }
+
+    @Test
+    void ackFilledMarksZhihuImmediatePublishConfirmedWithDiagnosticsJson() {
+        stubTask("filling");
+        when(taskMapper.markSemiAutoFilled(eq(30L), any())).thenReturn(1);
+        Map<String, Object> request = Map.of(
+                "fillResult", Map.of(
+                        "publishOptions", Map.of(
+                                "published", true,
+                                "publishVerification", Map.of(
+                                        "verified", true,
+                                        "pageUrl", "https://zhuanlan.zhihu.com/p/123",
+                                        "pageTitle", "Expected title",
+                                        "titleMatch", Map.of("matched", true, "method", "page_title"),
+                                        "account", Map.of(
+                                                "expectedAccountName", "jn hbdxh",
+                                                "accountNames", List.of("jn hbdxh"),
+                                                "accountIds", List.of("zhihu-token")
+                                        ),
+                                        "publishedAtText", "发布于2026-06-08"
+                                )
+                        )
+                )
+        );
+
+        assertEquals("filled", service.ackFilled(30L, 99L, 7L, request).status());
+
+        ArgumentCaptor<String> diagnosticsCaptor = ArgumentCaptor.forClass(String.class);
+        verify(selfMediaPublishScheduleService).markDistributionTaskPublishedConfirmed(
+                eq(30L),
+                eq("https://zhuanlan.zhihu.com/p/123"),
+                diagnosticsCaptor.capture()
+        );
+        String diagnosticsJson = diagnosticsCaptor.getValue();
+        assertTrue(diagnosticsJson.contains("\"published\":true"));
+        assertTrue(diagnosticsJson.contains("\"pageTitle\":\"Expected title\""));
+        assertTrue(diagnosticsJson.contains("\"accountNames\":[\"jn hbdxh\"]"));
+        verify(selfMediaPublishScheduleService, never()).markDistributionTaskScheduled(any(), any());
         verify(selfMediaPublishScheduleService, never()).markDistributionTaskFilled(any(), any());
     }
 
@@ -440,6 +481,52 @@ class ExtensionTaskStateServiceTest {
                 eq(30L),
                 eq("WORKS_LIST_VERIFY_TIMEOUT"),
                 eq("作品列表未匹配到定时文章"),
+                any(String.class),
+                any(LocalDateTime.class)
+        );
+    }
+
+    @Test
+    void failZhihuDraftLoadingPassesNextAttemptToScheduleService() {
+        stubTask("filling");
+        when(taskMapper.markSemiAutoFailed(eq(30L), eq("ZHIHU_DRAFT_LOADING"), any(), any())).thenReturn(1);
+        when(articleDraftMapper.update(any(), any())).thenReturn(1);
+        Map<String, Object> request = Map.of(
+                "error", Map.of(
+                        "code", "ZHIHU_DRAFT_LOADING",
+                        "message", "知乎发布被草稿加载阻塞"
+                )
+        );
+
+        assertEquals("failed", service.fail(30L, 99L, 7L, request).status());
+
+        verify(selfMediaPublishScheduleService).markDistributionTaskScheduleFailed(
+                eq(30L),
+                eq("ZHIHU_DRAFT_LOADING"),
+                eq("知乎发布被草稿加载阻塞"),
+                any(String.class),
+                any(LocalDateTime.class)
+        );
+    }
+
+    @Test
+    void failZhihuPublishNotSubmittedPassesNextAttemptToScheduleService() {
+        stubTask("filling");
+        when(taskMapper.markSemiAutoFailed(eq(30L), eq("ZHIHU_PUBLISH_NOT_SUBMITTED"), any(), any())).thenReturn(1);
+        when(articleDraftMapper.update(any(), any())).thenReturn(1);
+        Map<String, Object> request = Map.of(
+                "error", Map.of(
+                        "code", "ZHIHU_PUBLISH_NOT_SUBMITTED",
+                        "message", "知乎发布后未检测到完成状态"
+                )
+        );
+
+        assertEquals("failed", service.fail(30L, 99L, 7L, request).status());
+
+        verify(selfMediaPublishScheduleService).markDistributionTaskScheduleFailed(
+                eq(30L),
+                eq("ZHIHU_PUBLISH_NOT_SUBMITTED"),
+                eq("知乎发布后未检测到完成状态"),
                 any(String.class),
                 any(LocalDateTime.class)
         );

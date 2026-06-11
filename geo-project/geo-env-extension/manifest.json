@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "GEO Env Fill PoC",
-  "description": "Independent PoC extension for AdsPower environment task filling.",
+  "name": "GEO 自媒体助手",
+  "description": "GEO AdsPower environment task filling extension.",
   "version": "0.1.0",
   "action": {
     "default_popup": "popup.html"
