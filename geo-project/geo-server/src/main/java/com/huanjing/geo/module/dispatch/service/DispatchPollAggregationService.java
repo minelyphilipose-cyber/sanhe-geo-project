@@ -12,13 +12,17 @@ import com.huanjing.geo.module.dispatch.mapper.PollResultMapper;
 import com.huanjing.geo.module.project.entity.Project;
 import com.huanjing.geo.module.project.mapper.ProjectMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -28,6 +32,7 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class DispatchPollAggregationService {
 
     private static final String BATCH_STATUS_READY = "ready";
@@ -42,6 +47,7 @@ public class DispatchPollAggregationService {
     private final PollDailyStatMapper pollDailyStatMapper;
     private final StringRedisTemplate redisTemplate;
     private final ProjectMapper projectMapper;
+    private final PollSummaryRecomputeService pollSummaryRecomputeService;
 
     public void tryAggregateBatch(Long batchId) {
         if (batchId == null) {
@@ -197,6 +203,36 @@ public class DispatchPollAggregationService {
         batch.setStatus(hasFailedShard || finalFailedCount > 0 ? BATCH_STATUS_FINISHED_WITH_FAILURES : BATCH_STATUS_FINISHED);
         batch.setFinishedAt(LocalDateTime.now());
         pollBatchMapper.updateById(batch);
+        recomputeSummaryAfterCommit(batch.getProjectId(), batch.getBatchDate(), batch.getQuestionTier());
+    }
+
+    private void recomputeSummaryAfterCommit(Long projectId, LocalDate batchDate, String questionTier) {
+        if (projectId == null || batchDate == null) {
+            return;
+        }
+        Runnable recompute = () -> {
+            try {
+                PollSummaryRecomputeService.RecomputeResult result =
+                        pollSummaryRecomputeService.recomputeSlice(projectId, batchDate, questionTier);
+                if (result.skipped()) {
+                    log.info("Skip poll summary recompute, projectId={}, batchDate={}, tier={}, reason={}",
+                            projectId, batchDate, questionTier, result.skipReason());
+                }
+            } catch (Exception ex) {
+                log.warn("Poll summary recompute failed after batch aggregation, projectId={}, batchDate={}, tier={}",
+                        projectId, batchDate, questionTier, ex);
+            }
+        };
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            recompute.run();
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                recompute.run();
+            }
+        });
     }
 
     private void upsertPollStat(PollDailyStat stat) {
