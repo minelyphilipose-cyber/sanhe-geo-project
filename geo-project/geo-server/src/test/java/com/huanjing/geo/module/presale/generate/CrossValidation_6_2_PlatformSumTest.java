@@ -32,7 +32,7 @@ class CrossValidation_6_2_PlatformSumTest {
         PlatformIntentBreakdownValidator validator = new PlatformIntentBreakdownValidator();
         List<PlatformBreakdown> platforms = List.of(platform("P1", 2));
         List<IntentBreakdown> intents = intents();
-        List<PlatformIntentCell> cells = cells("P1", 2, 9, 8); // judge intents 任意值不参与守恒
+        List<PlatformIntentCell> cells = cells("P1", 2, 71, 47); // judge intents 用判分口径,不参与 mention 守恒
 
         assertThatCode(() -> validator.validate(platforms, intents, cells)).doesNotThrowAnyException();
     }
@@ -52,27 +52,34 @@ class CrossValidation_6_2_PlatformSumTest {
         List<PlatformIntentCell> list = new ArrayList<>();
         int left = sampleMentionTotal;
         for (PresaleIntentCode code : PresaleIntentCode.allInOrder()) {
+            boolean judgeIntent = code == PresaleIntentCode.COGNITIVE || code == PresaleIntentCode.COMPARISON;
             int mention;
             if (code == PresaleIntentCode.COGNITIVE) {
-                mention = cognitiveMention;
+                mention = 0;
             } else if (code == PresaleIntentCode.COMPARISON) {
-                mention = comparisonMention;
+                mention = 0;
             } else {
                 mention = left > 0 ? 1 : 0;
                 left -= mention;
             }
             int promptCount = code == PresaleIntentCode.COGNITIVE ? 7 : (code == PresaleIntentCode.COMPARISON ? 17 : 10);
-            int rate = code == PresaleIntentCode.COGNITIVE ? 71
-                    : (code == PresaleIntentCode.COMPARISON ? 47 : (mention > 0 ? 10 : 0));
+            Integer judgeScore = null;
+            if (code == PresaleIntentCode.COGNITIVE) {
+                judgeScore = cognitiveMention;
+            } else if (code == PresaleIntentCode.COMPARISON) {
+                judgeScore = comparisonMention;
+            }
             list.add(PlatformIntentCell.builder()
                     .platformCode(platformCode)
                     .intentCode(code.getCode())
                     .intentLabel(code.getLabel())
                     .mentionCount(mention)
-                    .mentionRate(rate)
+                    .mentionRate(judgeIntent ? null : (mention > 0 ? 10 : 0))
+                    .judgeScore(judgeScore)
                     .totalPrompts(10)
                     .platformPromptCount(promptCount)
-                    .stance(code == PresaleIntentCode.COMPARISON ? "target" : null)
+                    .judgeSampleCount(judgeIntent ? promptCount : null)
+                    .judgeStance(code == PresaleIntentCode.COMPARISON ? "target" : null)
                     .build());
         }
         return list;

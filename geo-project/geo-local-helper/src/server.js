@@ -1230,7 +1230,8 @@ function buildBaijiahaoWorksListUrl(appId = '') {
 function baijiahaoWorksListHasAppId(value) {
   try {
     const url = new URL(value)
-    return url.hostname.includes('baijiahao.baidu.com') && Boolean(url.searchParams.get('app_id'))
+    const appId = String(url.searchParams.get('app_id') || '').trim()
+    return url.hostname.includes('baijiahao.baidu.com') && /^\d{6,}$/.test(appId)
   } catch (_) {
     return false
   }

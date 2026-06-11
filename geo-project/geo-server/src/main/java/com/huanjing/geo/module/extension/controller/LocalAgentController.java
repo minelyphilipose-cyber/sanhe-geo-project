@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.extension.controller;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.content.entity.BrowserEnvironment;
 import com.huanjing.geo.module.content.entity.BrowserEnvironmentAccount;
@@ -62,6 +64,7 @@ public class LocalAgentController {
     private final BrowserEnvironmentMapper browserEnvironmentMapper;
     private final BrowserEnvironmentAccountMapper browserEnvironmentAccountMapper;
     private final SemiAutoPlatformProperties semiAutoPlatformProperties;
+    private final ObjectMapper objectMapper;
 
     @PostMapping("/pairing-intents")
     public R<LocalAgentPairingIntentResponse> registerPairingIntent(
@@ -333,14 +336,52 @@ public class LocalAgentController {
         if (!"baijiahao".equalsIgnoreCase(platform)) {
             return defaultWorksListUrl(platform);
         }
-        String appId = account == null ? null : account.getPlatformAccountId();
+        String appId = resolveBaijiahaoAppId(account);
         if (!StringUtils.hasText(appId)) {
             return null;
         }
         return "https://baijiahao.baidu.com/builder/rc/content"
                 + "?currentPage=1&pageSize=10&search=&type=&collection=&app_id="
-                + URLEncoder.encode(appId.trim(), StandardCharsets.UTF_8)
+                + URLEncoder.encode(appId, StandardCharsets.UTF_8)
                 + "&startDate=&endDate=";
+    }
+
+    private String resolveBaijiahaoAppId(SelfMediaAccount account) {
+        if (account == null) {
+            return null;
+        }
+        String fromExtra = baijiahaoAppIdFromExtraJson(account.getExtraJson());
+        if (isValidBaijiahaoAppId(fromExtra)) {
+            return fromExtra.trim();
+        }
+        String platformAccountId = account.getPlatformAccountId();
+        if (isValidBaijiahaoAppId(platformAccountId)) {
+            return platformAccountId.trim();
+        }
+        return null;
+    }
+
+    private String baijiahaoAppIdFromExtraJson(String extraJson) {
+        if (!StringUtils.hasText(extraJson)) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(extraJson);
+            return firstText(
+                    root.path("appId").asText(null),
+                    root.path("app_id").asText(null),
+                    root.path("baijiahaoAppId").asText(null),
+                    root.path("baijiahao_app_id").asText(null),
+                    root.path("baijiahao").path("appId").asText(null),
+                    root.path("baijiahao").path("app_id").asText(null)
+            );
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private boolean isValidBaijiahaoAppId(String value) {
+        return StringUtils.hasText(value) && value.trim().matches("\\d{6,}");
     }
 
     private String firstText(String... values) {

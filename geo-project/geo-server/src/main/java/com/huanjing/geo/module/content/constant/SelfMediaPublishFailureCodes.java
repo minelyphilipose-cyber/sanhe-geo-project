@@ -26,6 +26,7 @@ public final class SelfMediaPublishFailureCodes {
             "ZHIHU_DRAFT_LOADING",
             "ZHIHU_PUBLISH_NOT_SUBMITTED",
             "ZHIHU_COVER_UPLOAD_TIMEOUT",
+            "WORKS_LIST_VERIFY_TIMEOUT",
             "BAIJIAHAO_COVER_UPLOAD_TIMEOUT",
             "BAIJIAHAO_SCHEDULE_DIALOG_NOT_READY",
             "BAIJIAHAO_SCHEDULE_OPTION_NOT_FOUND",

@@ -41,19 +41,18 @@ class CrossValidation_6_4_MentionRateTest {
                 .filter(it -> "COGNITIVE".equals(it.getIntentCode()))
                 .findFirst()
                 .orElseThrow();
-        cognitive.setMentionCount(1);
         cognitive.setPlatformPromptCount(7);
-        cognitive.setMentionRate(71);
-        cognitive.setStance(null);
+        cognitive.setJudgeSampleCount(7);
+        cognitive.setJudgeScore(71);
 
         PlatformIntentCell comparison = cells.stream()
                 .filter(it -> "COMPARISON".equals(it.getIntentCode()))
                 .findFirst()
                 .orElseThrow();
-        comparison.setMentionCount(1);
         comparison.setPlatformPromptCount(17);
-        comparison.setMentionRate(47);
-        comparison.setStance("target");
+        comparison.setJudgeSampleCount(17);
+        comparison.setJudgeScore(47);
+        comparison.setJudgeStance("target");
 
         assertThatCode(() -> validator.validate(platforms, intents, cells)).doesNotThrowAnyException();
     }
@@ -72,14 +71,18 @@ class CrossValidation_6_4_MentionRateTest {
     private List<PlatformIntentCell> validCells(String platformCode) {
         List<PlatformIntentCell> list = new ArrayList<>();
         for (PresaleIntentCode code : PresaleIntentCode.allInOrder()) {
+            boolean judgeIntent = code == PresaleIntentCode.COGNITIVE || code == PresaleIntentCode.COMPARISON;
             list.add(PlatformIntentCell.builder()
                     .platformCode(platformCode)
                     .intentCode(code.getCode())
                     .intentLabel(code.getLabel())
                     .mentionCount(0)
-                    .mentionRate(0)
+                    .mentionRate(judgeIntent ? null : 0)
                     .totalPrompts(10)
                     .platformPromptCount(10)
+                    .judgeSampleCount(judgeIntent ? 10 : null)
+                    .judgeScore(judgeIntent ? 0 : null)
+                    .judgeStance(code == PresaleIntentCode.COMPARISON ? "tie" : null)
                     .build());
         }
         return list;

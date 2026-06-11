@@ -499,6 +499,9 @@ async function fillToutiaoCover(options, platform) {
   const optionText = coverMode === 'none' ? '无封面' : coverMode === 'triple' ? '三图' : '单图'
   await scrollToToutiaoSection('展示封面')
   await clickToutiaoOptionNearLabel('展示封面', optionText, platform)
+  if (coverMode === 'single') {
+    await ensureToutiaoCoverModeSelected('单图', platform)
+  }
 
   if (coverMode === 'none') {
     return { filled: true, message: '已选择无封面' }
@@ -1824,6 +1827,7 @@ function hasToutiaoCoverThumbnail() {
 async function openToutiaoCoverDrawer(platform) {
   if (findLatestFileInput()) return
   const label = findVisibleTextElement('展示封面')
+  await ensureToutiaoCoverModeSelected('单图', platform)
   const entries = findToutiaoCoverUploadEntries(label)
   if (!entries.length) {
     throw new Error(`头条封面上传入口未找到；${describeToutiaoCoverArea(label)}`)
@@ -1850,15 +1854,59 @@ function findToutiaoCoverUploadEntries(label) {
   const keywords = ['替换', '编辑', '添加封面', '上传封面', '上传图片', '本地上传', '选择图片', '重新上传']
   const entries = []
   const add = (el) => {
-    if (el && !entries.includes(el)) entries.push(el)
+    if (el && isToutiaoCoverAreaCandidate(el, label) && !entries.includes(el)) entries.push(el)
   }
   for (const keyword of keywords) {
     add(label ? findTextElementNear(label, keyword, 720) : null)
-    add(findVisibleTextElement(keyword, { exact: false, maxLength: 16 }))
   }
   add(findTextElementNear(label, '+', 720))
   for (const box of findCoverUploadBoxesNear(label)) add(box)
   return entries
+}
+
+async function ensureToutiaoCoverModeSelected(optionText, platform) {
+  const label = findVisibleTextElement('展示封面')
+  if (!label) return false
+  const selected = findToutiaoSelectedCoverMode(label)
+  if (selected === optionText) return true
+  const option = findTextElementNear(label, optionText, 420)
+  if (!option) return false
+  await clickToutiaoRadioText(option, platform, optionText)
+  await delay(300)
+  return true
+}
+
+function findToutiaoSelectedCoverMode(label) {
+  const modes = ['单图', '三图', '无封面']
+  for (const mode of modes) {
+    const option = findTextElementNear(label, mode, 420)
+    const radio = option ? findToutiaoRadioControlNear(option) : null
+    if (radio?.checked || radio?.getAttribute?.('aria-checked') === 'true'
+        || String(radio?.className || '').includes('checked')) {
+      return mode
+    }
+  }
+  return null
+}
+
+function findToutiaoRadioControlNear(option) {
+  const scope = option.closest?.('label, [role="radio"], [class*="radio"]')
+    || option.parentElement
+    || option
+  return scope.querySelector?.('input[type="radio"], [role="radio"], [aria-checked]')
+    || scope.closest?.('input[type="radio"], [role="radio"], [aria-checked]')
+    || null
+}
+
+function isToutiaoCoverAreaCandidate(el, label) {
+  if (!el || !label) return false
+  if (elementDistance(label, el) > 760) return false
+  const text = normalizeText(el.textContent || el.getAttribute?.('aria-label') || el.getAttribute?.('title') || '')
+  const rect = el.getBoundingClientRect()
+  const labelRect = label.getBoundingClientRect()
+  if (rect.top < labelRect.top - 120) return false
+  if (/正文|搜图|扩写|润色|修改语气|对齐方式|快捷键/.test(text)) return false
+  return true
 }
 
 function findCoverUploadBoxNear(label) {
@@ -2447,6 +2495,16 @@ function defaultContentSelectors(platform) {
   }
   if (platform === 'baijiahao') {
     return baijiahaoEditorSelectors().content.concat(common)
+  }
+  if (platform === 'toutiao') {
+    return [
+      '.ProseMirror[contenteditable="true"]',
+      '[data-slate-editor="true"][contenteditable="true"]',
+      '.DraftEditor-editorContainer [contenteditable="true"]',
+      '.public-DraftEditor-content',
+      '.notranslate[contenteditable="true"]',
+      'div[role="textbox"][contenteditable="true"]',
+    ]
   }
   return [
     '.ProseMirror',
@@ -3450,7 +3508,64 @@ function findContentElement(titleElement, fillProfile) {
   if (normalizePlatform(fillProfile?.platform) === 'baijiahao') {
     return findBaijiahaoContentElement(titleElement, fillProfile)
   }
+  if (normalizePlatform(fillProfile?.platform) === 'toutiao') {
+    return findToutiaoContentElement(titleElement, fillProfile)
+  }
   return findFirst(fillProfile.contentSelectors, { excludeElement: titleElement, rejectTitleLike: true })
+}
+
+function findToutiaoContentElement(titleElement, fillProfile) {
+  const selectorCandidates = fillProfile.contentSelectors.flatMap((selector) => {
+    try {
+      return Array.from(document.querySelectorAll(selector))
+    } catch (_) {
+      return []
+    }
+  })
+  const fallbackCandidates = Array.from(document.querySelectorAll('[contenteditable="true"], div[role="textbox"]'))
+  const titleRect = titleElement?.getBoundingClientRect?.() || null
+  const seen = new Set()
+  const candidates = selectorCandidates.concat(fallbackCandidates)
+    .filter((candidate) => {
+      if (!candidate || seen.has(candidate)) return false
+      seen.add(candidate)
+      if (titleElement && candidate === titleElement) return false
+      if (titleElement && candidate.contains(titleElement)) return false
+      if (titleElement && titleElement.contains(candidate)) return false
+      return isVisibleElement(candidate)
+    })
+    .map((candidate) => ({
+      candidate,
+      score: scoreToutiaoContentCandidate(candidate, titleRect),
+    }))
+    .filter((item) => item.score > 0)
+    .sort((left, right) => right.score - left.score)
+  return candidates[0]?.candidate || null
+}
+
+function scoreToutiaoContentCandidate(candidate, titleRect) {
+  const rect = candidate.getBoundingClientRect()
+  const attrs = [
+    candidate.getAttribute?.('placeholder') || '',
+    candidate.getAttribute?.('aria-label') || '',
+    candidate.getAttribute?.('data-placeholder') || '',
+    candidate.getAttribute?.('role') || '',
+    String(candidate.className || ''),
+  ].join(' ')
+  const text = normalizeText(candidate.textContent || '')
+  const descriptor = `${attrs} ${text.slice(0, 120)}`
+  let score = 0
+  if (/ProseMirror|DraftEditor|public-DraftEditor|notranslate|slate|textbox/i.test(attrs)) score += 160
+  if (/正文|内容|请输入正文/.test(attrs)) score += 120
+  if (candidate.isContentEditable || candidate.getAttribute?.('contenteditable') === 'true') score += 45
+  if (rect.width >= 420 && rect.height >= 120) score += 45
+  if (titleRect && rect.top > titleRect.bottom - 12) score += 80
+  if (titleRect && rect.bottom <= titleRect.bottom) score -= 180
+  if (/标题|请输入文章标题|请输入标题/.test(descriptor)) score -= 240
+  if (/展示封面|单图|三图|无封面|编辑搜图|图片描述|预览|定时发布|预览并发布|投放广告|声明首发|合集|发布得更多收益|作品声明/.test(text)) score -= 260
+  if (/扩写|润色|修改语气|对齐方式|快捷键|搜图/.test(text) && text.length < 120) score -= 180
+  if (rect.height < 40 || rect.width < 220) score -= 90
+  return score
 }
 
 function findBaijiahaoContentElement(titleElement, fillProfile) {
