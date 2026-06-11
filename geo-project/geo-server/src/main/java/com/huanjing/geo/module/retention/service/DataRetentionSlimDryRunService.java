@@ -153,6 +153,7 @@ public class DataRetentionSlimDryRunService {
                        j.version_id,
                        j.prompt_result_id,
                        j.judge_status,
+                       j.category,
                        j.updated_at,
                        v.generation_status,
                        EXISTS (
@@ -161,6 +162,18 @@ public class DataRetentionSlimDryRunService {
                           WHERE s.report_id = v.report_id
                             AND s.usage_date = DATE(j.created_at)
                        ) AS summary_covered,
+                       CASE
+                         WHEN UPPER(j.judge_status) = 'SUCCESS'
+                          AND (
+                               NULLIF(TRIM(COALESCE(CAST(j.judge_payload_json AS CHAR), '')), '') IS NOT NULL
+                            OR (UPPER(j.category) = 'COGNITIVE'
+                                AND j.sentiment_score IS NOT NULL
+                                AND j.attribute_hit_rate IS NOT NULL)
+                            OR (UPPER(j.category) = 'COMPARISON'
+                                AND j.preferred_brand IN ('target', 'competitor', 'tie', 'unclear'))
+                          )
+                         THEN 1 ELSE 0
+                       END AS structured_present,
                        CHAR_LENGTH(COALESCE(j.raw_judge_response, '')) AS raw_len
                   FROM presale_ai_prompt_judge_result j
                   JOIN presale_report_version v ON v.id = j.version_id
@@ -174,11 +187,12 @@ public class DataRetentionSlimDryRunService {
             List<String> blocked = new ArrayList<>();
             String generationStatus = rs.getString("generation_status");
             boolean summaryCovered = rs.getBoolean("summary_covered");
-            if (!summaryCovered) {
-                blocked.add("llm_usage_daily_summary_not_covered");
-            }
+            boolean structuredPresent = rs.getBoolean("structured_present");
             if (!isPresaleTerminal(generationStatus)) {
                 blocked.add("presale_report_version_not_terminal");
+            }
+            if (!structuredPresent) {
+                blocked.add("structured_judge_fields_missing");
             }
             DataRetentionSlimItemVO item = item(DOMAIN_PRESALE_JUDGE_RAW, "presale_ai_prompt_judge_result",
                     rs.getLong("id"), rs.getLong("prompt_result_id"), rs.getString("judge_status"),
@@ -186,8 +200,10 @@ public class DataRetentionSlimDryRunService {
             item.setFields(List.of("raw_judge_response"));
             item.setMetrics(Map.of(
                     "versionId", rs.getLong("version_id"),
+                    "category", nullToEmpty(rs.getString("category")),
                     "generationStatus", nullToEmpty(generationStatus),
-                    "summaryCovered", summaryCovered,
+                    "llmSummaryCoveredReference", summaryCovered,
+                    "structuredPresent", structuredPresent,
                     "rawLength", rs.getInt("raw_len")
             ));
             return item;

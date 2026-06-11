@@ -621,6 +621,15 @@ archive/article/{projectId}/{articleId}/v{versionNo}.md
 - 若所有渠道均失败或取消，且没有公网/客户交付记录，该版本按过程草稿处理，进入短窗口 slim/delete。
 - 渠道终态集合第一版按：`published/success/completed/failed/cancelled/dead_letter`；`pending/running/token_issued/filled` 不算文章版本可置空终态。
 
+本轮正文归档 dry-run：
+
+- 入口：`POST /api/data-retention/articles/archive/dry-run`。
+- 参数：`projectId` 可选；`publishedStartDate/publishedEndDate` 可选；`minPublishedAgeDays` 默认 30；`limit` 默认 100、上限 1000。
+- 候选门控：`article_draft.status IN ('published','distributed')`、`article_draft_version.version_no = article_draft.current_version_no`、存在 `article_publish_record`、已过热保留窗口、`content_markdown` 非空且 `content_purged_at IS NULL`。
+- 输出：预计 object key、正文 checksum、预计字节数、blocked reason。
+- 审计：写 `data_retention_run(domain='article_body_archive', mode='dry_run')`。
+- 本轮不写对象、不回写 `content_object_key/content_checksum/content_archived_at`，也不置空 `content_markdown`。
+
 ### 重发布回灌
 
 发布/改稿流程必须支持：
@@ -631,6 +640,8 @@ content_markdown 为空且 content_object_key 非空 -> 从对象存储读取 ->
 ```
 
 这必须是实际代码路径，不能只停留在注释或人工操作。
+
+本轮先落服务层正文提供器 `ArticleBodyProvider.getArticleBody(versionId)`：DB 正文优先；DB 为空时通过 `ObjectStorageService` 读取归档对象并校验 `content_checksum`；对象缺失、读取失败或 checksum 不一致时返回明确错误，不得静默返回空正文。
 
 ## 9. poll_results 删除顺序
 
@@ -653,6 +664,26 @@ content_markdown 为空且 content_object_key 非空 -> 从对象存储读取 ->
 
 短期先小批量 delete + 审计；稳定后再评估冷热表拆分或去 FK 化后分区。
 
+本轮 `PollRetentionHandler` 只实现 dry-run：
+
+- 入口：`POST /api/data-retention/poll-results/dry-run`。
+- 参数：`projectId/startDate/endDate/questionTier` 可选；`cursorBatchDate/cursorProjectId/cursorQuestionTier` 用于 keyset 续扫；`hotRetentionDays` 默认 120；`stuckBatchSealDays` 默认 7；`limit` 默认 100、上限 1000。
+- 候选：`poll_results` 中 `batch_date <= today(Asia/Shanghai) - hotRetentionDays` 的 `(project_id,batch_date,question_tier)` slice。
+- 分页：按 `(batch_date, project_id, question_tier)` keyset 游标推进，返回 `hasMore/nextCursor*`，避免大范围 dry-run 静默截断。
+- 每个候选 slice 必须先获取与 `PollSummaryRecomputeService` 相同的 `data_retention_recompute_slice_lock(domain='poll_results',project_id,batch_date,question_tier)`，并在锁内复查所有门控。
+- 输出预计删除影响：`poll_batch_shard_items`、`poll_batch_shards`、`poll_results` 行数；不删除 `poll_batches`。
+- 审计：写 `data_retention_run(domain='poll_results', mode='dry_run')`。
+- 本轮不提供 execute 入口，不删除任何行，不写 `data_retention_purged_slice`。
+
+dry-run 门控：
+
+- 已过热保留窗口。
+- 未命中 `data_retention_purged_slice`。
+- 封口：`poll_batches.status IN ('finished','finished_with_failures','failed')`；若 `planning/ready/running` 且 `batch_date <= today - 7`，dry-run 标记 warning `stale_batch_would_be_failed_by_safety_valve`，代表 execute 前需按安全阀失败封口。
+- 对账：`poll_keyword_daily_summary.source_row_count` 汇总必须精确等于存活 `poll_results` 行数；`poll_platform_daily_summary.source_row_count` 也必须精确等于存活 `poll_results` 行数。不一致则 blocked，execute 前必须重算后再评估。
+- 报告 freeze：覆盖该 `batch_date` 的所有已启用且消费明细的报告类型都必须 `FROZEN`。当前启用集合为 `quarterly`，但实现按 report type 列表循环判定，后续启用月报/自定义报告时扩展列表即可。
+- 读路径已切、客户可见口径已记录：当前作为代码级 rollout gate 在 dry-run 输出中显式展示；execute 前需配置化。
+
 ## 10. slim 门控
 
 ### 售前 LLM
@@ -668,8 +699,9 @@ content_markdown 为空且 content_object_key 非空 -> 从对象存储读取 ->
 
 `presale_ai_prompt_judge_result.raw_judge_response` 置空前必须满足：
 
-- 结构化裁判字段已存在。
-- 需要的汇总/报告快照已存在。
+- `judge_status='SUCCESS'` 且结构化裁判字段已存在：认知类至少已有 `sentiment_score/attribute_hit_rate` 或 `judge_payload_json`，对比类至少已有 `preferred_brand` 或 `judge_payload_json`。
+- 裁判调用当前不可靠写入 `presale_ai_call`，因此 `llm_usage_daily_summary` 对裁判 raw 只作为参考指标，不作为置空硬门控。
+- 售前报告版本已终态：`presale_report_version.generation_status IN ('DONE','FAILED')`。
 - 由 `presale_ai_prompt_judge_result.raw_purged_at` 防重复；本轮仅 dry-run，不写 marker、不置空。
 
 ### 发布 payload
@@ -742,6 +774,13 @@ dry-run 到 execute 晋级标准：
 - 首次开启 execute 必须由技术负责人和业务负责人双确认，记录 `approved_by/approved_at`。
 - execute 第一周按小批量限流执行；任一 P0 告警出现即自动降回 dry-run。
 
+本轮 `DataRetentionScheduler` 只编排 dry-run，默认关闭：
+
+- 配置：`geo.retention.scheduler.enabled=false`，开启后按 `geo.retention.scheduler.cron` 运行。
+- 编排 domain：`slim_payload`、`article_body_archive`、`poll_results`、`object_storage_orphan`。
+- 每个 domain 调用对应 dry-run service，异常只记录告警并继续其它 domain；各 dry-run service 自己写 `data_retention_run` 审计。
+- `geo.retention.execute-promotion.*` 仅作为晋级条件配置占位：连续 7 天 dry-run 成功、100% 对账、无 P0 告警、双负责人审批。本轮不调度、不暴露任何 execute。
+
 `poll_results` 域 execute 必须额外检查：
 
 - P0-2 freeze 已完成。
@@ -768,6 +807,16 @@ dry-run 到 execute 晋级标准：
 | `article_draft_version` | `content_object_key` | 文章正文归档 |
 | `report_period_freeze` | `snapshot_object_key` | 报告周期 freeze |
 | 待新增售前归档表/列 | 原始 prompt、raw response、导出包 object key | 售前大字段/交付物归档 |
+
+本轮对象存储 orphan dry-run：
+
+- 入口：`POST /api/data-retention/object-storage/orphans/dry-run`。
+- 扫描范围只限生命周期治理自己管理的前缀：`archive/article/`、`retention/freeze/report-period/`；禁止默认全桶扫描。
+- 参数：`prefix` 可选，但必须落在上述托管前缀内；`safetyAgeHours` 默认 24；`limitPerPrefix` 默认 100、上限 1000。
+- orphan 定义：对象 key 位于托管前缀、对象最后修改时间早于安全宽限期、且集中登记清单里的所有 key 列均无引用。
+- 宽限期用于保护 in-flight 归档：写对象与回写 DB key 之间存在时间差，刚写入对象不得被判为 orphan。
+- 审计：写 `data_retention_run(domain='object_storage_orphan', mode='dry_run')`。
+- 本轮只输出无活引用候选和预计字节数，不执行对象删除；合规尾巴期后续接配置门控。
 
 对象真删前必须同时满足：
 

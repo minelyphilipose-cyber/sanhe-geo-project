@@ -8,6 +8,11 @@ public interface ObjectStorageService {
 
     ObjectStat stat(String objectKey);
 
+    java.util.List<ObjectItem> listObjects(String prefix, int limit);
+
     record ObjectStat(String objectKey, long size, String etag) {
+    }
+
+    record ObjectItem(String objectKey, long size, java.time.OffsetDateTime lastModified) {
     }
 }
