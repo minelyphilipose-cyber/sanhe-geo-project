@@ -644,7 +644,9 @@ public class ContentDistributionService {
         String content = articleImagePublicUrlRewriter.rewrite(project, requireLatestContent(article.getId()));
         AutoSelfMediaAdapter adapter = resolveSelfMediaAdapter(account.getPlatform());
         DistributionTask task = createAttemptForSelfMedia(article, account, operator.getId(), mpTarget.requestId().trim());
-        companyChannelQuotaService.reserveSelfMediaDistribution(project.getCompanyId(), project.getId(), account.getPlatform(), task.getId());
+        if (!isScheduleTarget(mpTarget)) {
+            companyChannelQuotaService.reserveSelfMediaDistribution(project.getCompanyId(), project.getId(), account.getPlatform(), task.getId());
+        }
         try {
             transitionArticleStatus(article, article.getStatus(), "distributing", false);
         } catch (BizException ex) {
@@ -937,7 +939,9 @@ public class ContentDistributionService {
         DistributionTask task = createAttemptForSelfMedia(article, account, operator.getId(), mpTarget.requestId().trim());
         updateSemiAutoTaskPrepared(task.getId(), fillPayload);
 
-        companyChannelQuotaService.reserveSelfMediaDistribution(project.getCompanyId(), project.getId(), account.getPlatform(), task.getId());
+        if (!isScheduleTarget(mpTarget)) {
+            companyChannelQuotaService.reserveSelfMediaDistribution(project.getCompanyId(), project.getId(), account.getPlatform(), task.getId());
+        }
         FillTokenIssueResponse token;
         try {
             token = fillTokenService.issueInternalWithoutVersionCheck(

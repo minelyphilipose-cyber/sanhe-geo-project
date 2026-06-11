@@ -39,6 +39,7 @@ public class CompanyChannelQuotaService {
 
     private static final java.time.ZoneId BUSINESS_ZONE = QuotaPeriodResolver.BUSINESS_ZONE;
     private static final String BIZ_TYPE_DISTRIBUTION = "distribution";
+    private static final String BIZ_TYPE_SELF_MEDIA_SCHEDULE = "self_media_schedule";
     private static final int RESERVED_TIMEOUT_MINUTES = 30;
     private static final int RESERVED_SCAN_BATCH_SIZE = 200;
     private static final Set<String> SUCCESS_TASK_STATUS = Set.of("submitted", "confirmed", "published");
@@ -72,20 +73,35 @@ public class CompanyChannelQuotaService {
         return reserveDistributionForChannel(companyId, projectId, channel, distributionTaskId);
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public CompanyChannelQuotaLedger reserveSelfMediaSchedule(Long companyId,
+                                                              Long projectId,
+                                                              String platform,
+                                                              Long scheduleId) {
+        if (scheduleId == null) {
+            throw new BizException(400, "schedule_id is required for quota reservation");
+        }
+        String channel = resolveSelfMediaPlatformChannel(platform);
+        return reserveForBiz(companyId, projectId, channel, BIZ_TYPE_SELF_MEDIA_SCHEDULE, String.valueOf(scheduleId));
+    }
+
     private CompanyChannelQuotaLedger reserveDistributionForChannel(Long companyId,
                                                                     Long projectId,
                                                                     String channel,
                                                                     Long distributionTaskId) {
+        return reserveForBiz(companyId, projectId, channel, BIZ_TYPE_DISTRIBUTION, String.valueOf(distributionTaskId));
+    }
+
+    private CompanyChannelQuotaLedger reserveForBiz(Long companyId,
+                                                    Long projectId,
+                                                    String channel,
+                                                    String bizType,
+                                                    String bizId) {
         CompanyPackageBinding binding = companyPackageBindingService.requireActiveBinding(companyId);
         SnapshotQuota quota = resolveSnapshotQuota(binding, channel);
         String periodKey = periodKey(quota.periodType());
 
-        CompanyChannelQuotaLedger existed = ledgerMapper.selectOne(
-                new LambdaQueryWrapper<CompanyChannelQuotaLedger>()
-                        .eq(CompanyChannelQuotaLedger::getBizType, BIZ_TYPE_DISTRIBUTION)
-                        .eq(CompanyChannelQuotaLedger::getBizId, String.valueOf(distributionTaskId))
-                        .last("LIMIT 1")
-        );
+        CompanyChannelQuotaLedger existed = ledgerMapper.selectByBiz(bizType, bizId);
         if (existed != null) {
             return existed;
         }
@@ -105,8 +121,8 @@ public class CompanyChannelQuotaService {
         ledger.setPeriodKey(periodKey);
         ledger.setDeltaCount(1);
         ledger.setStatus("reserved");
-        ledger.setBizType(BIZ_TYPE_DISTRIBUTION);
-        ledger.setBizId(String.valueOf(distributionTaskId));
+        ledger.setBizType(bizType);
+        ledger.setBizId(bizId);
         ledger.setReservedAt(LocalDateTime.now(BUSINESS_ZONE));
         ledgerMapper.insert(ledger);
         return ledger;
@@ -118,8 +134,22 @@ public class CompanyChannelQuotaService {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void confirmSelfMediaSchedule(Long scheduleId) {
+        updateReservedLedger(BIZ_TYPE_SELF_MEDIA_SCHEDULE, scheduleId, "confirmed");
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void refundDistribution(Long distributionTaskId) {
         CompanyChannelQuotaLedger ledger = updateReservedLedger(distributionTaskId, "refunded");
+        if (ledger == null) {
+            return;
+        }
+        releaseUsage(ledger);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void refundSelfMediaSchedule(Long scheduleId) {
+        CompanyChannelQuotaLedger ledger = updateReservedLedger(BIZ_TYPE_SELF_MEDIA_SCHEDULE, scheduleId, "refunded");
         if (ledger == null) {
             return;
         }
@@ -201,7 +231,7 @@ public class CompanyChannelQuotaService {
     }
 
     private CompanyChannelQuotaLedger updateReservedLedger(Long distributionTaskId, String targetStatus) {
-        CompanyChannelQuotaLedger ledger = findDistributionLedger(distributionTaskId);
+        CompanyChannelQuotaLedger ledger = findLedger(BIZ_TYPE_DISTRIBUTION, distributionTaskId);
         if (ledger == null) {
             return null;
         }
@@ -209,15 +239,22 @@ public class CompanyChannelQuotaService {
     }
 
     private CompanyChannelQuotaLedger findDistributionLedger(Long distributionTaskId) {
-        if (distributionTaskId == null) {
+        return findLedger(BIZ_TYPE_DISTRIBUTION, distributionTaskId);
+    }
+
+    private CompanyChannelQuotaLedger updateReservedLedger(String bizType, Long bizId, String targetStatus) {
+        CompanyChannelQuotaLedger ledger = findLedger(bizType, bizId);
+        if (ledger == null) {
             return null;
         }
-        return ledgerMapper.selectOne(
-                new LambdaQueryWrapper<CompanyChannelQuotaLedger>()
-                        .eq(CompanyChannelQuotaLedger::getBizType, BIZ_TYPE_DISTRIBUTION)
-                        .eq(CompanyChannelQuotaLedger::getBizId, String.valueOf(distributionTaskId))
-                        .last("LIMIT 1")
-        );
+        return updateLedgerStatusFromReserved(ledger, targetStatus);
+    }
+
+    private CompanyChannelQuotaLedger findLedger(String bizType, Long bizId) {
+        if (bizId == null || !StringUtils.hasText(bizType)) {
+            return null;
+        }
+        return ledgerMapper.selectByBiz(bizType, String.valueOf(bizId));
     }
 
     private CompanyChannelQuotaLedger updateLedgerStatusFromReserved(CompanyChannelQuotaLedger ledger, String targetStatus) {

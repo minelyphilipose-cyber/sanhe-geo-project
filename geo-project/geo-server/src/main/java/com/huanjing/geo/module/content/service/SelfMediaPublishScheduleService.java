@@ -127,6 +127,7 @@ public class SelfMediaPublishScheduleService {
         return createSchedulesInternal(validated, operator.getId(), idempotencyKeyHeader);
     }
 
+    @Transactional
     public SelfMediaPublishScheduleCreateResponse createSystemSchedules(SelfMediaPublishScheduleCreateRequest request,
                                                                         String idempotencyKeyHeader,
                                                                         Long operatorId) {
@@ -211,7 +212,7 @@ public class SelfMediaPublishScheduleService {
                     continue;
                 }
                 SelfMediaPublishSchedule inserted = createScheduleRow(requestRow, operatorId, candidate,
-                        plannedCursor, validated.strategy());
+                        plannedCursor, validated.strategy(), quotaPrecheck.companyId);
                 if (inserted != null) {
                     quotaPrecheck.consume(candidate.account().getPlatform());
                     response.getCreatedSchedules().add(SelfMediaPublishScheduleVO.from(inserted));
@@ -469,6 +470,7 @@ public class SelfMediaPublishScheduleService {
             row.setFailureMessage(null);
             row.setDiagnosticsJson(trimToNull(diagnosticsJson));
             scheduleMapper.updateById(row);
+            confirmScheduleQuotaIfPresent(row);
             confirmDistributionQuotaIfPresent(row);
             environmentLockService.release(row.getId());
             reconcileAlerts(row);
@@ -612,6 +614,9 @@ public class SelfMediaPublishScheduleService {
                 row.setNextAttemptAt(null);
             }
             scheduleMapper.updateById(row);
+            if (SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED.equals(normalize(row.getStatus()))) {
+                refundScheduleQuotaIfPresent(row);
+            }
             refundDistributionQuotaIfPresent(row);
             environmentLockService.release(row.getId());
             reconcileAlerts(row);
@@ -685,6 +690,7 @@ public class SelfMediaPublishScheduleService {
         row.setFailureMessage(null);
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
         scheduleMapper.updateById(row);
+        confirmScheduleQuotaIfPresent(row);
         confirmDistributionQuotaIfPresent(row);
         environmentLockService.release(row.getId());
         reconcileAlerts(row);
@@ -876,6 +882,7 @@ public class SelfMediaPublishScheduleService {
         row.setFailureMessage(trimToNull(failureMessage));
         row.setDiagnosticsJson(trimToNull(diagnosticsJson));
         scheduleMapper.updateById(row);
+        refundScheduleQuotaIfPresent(row);
         environmentLockService.release(row.getId());
         reconcileAlerts(row);
         return SelfMediaPublishScheduleVO.from(row);
@@ -905,6 +912,9 @@ public class SelfMediaPublishScheduleService {
         scheduleMapper.updateById(row);
         if (SelfMediaPublishScheduleConstants.STATUS_FILLING.equals(normalize(expectedRunningStatus))) {
             refundDistributionQuotaIfPresent(row);
+        }
+        if (SelfMediaPublishScheduleConstants.STATUS_MANUAL_REQUIRED.equals(normalize(row.getStatus()))) {
+            refundScheduleQuotaIfPresent(row);
         }
         environmentLockService.release(row.getId());
         reconcileAlerts(row);
@@ -956,6 +966,7 @@ public class SelfMediaPublishScheduleService {
         touch(row);
         scheduleMapper.updateById(row);
         if (!PLATFORM_SUBMITTED_STATUSES.contains(status)) {
+            refundScheduleQuotaIfPresent(row);
             refundDistributionQuotaIfPresent(row);
         }
         environmentLockService.release(row.getId());
@@ -978,6 +989,7 @@ public class SelfMediaPublishScheduleService {
         row.setFailureMessage(trimToNull(reason));
         touch(row);
         scheduleMapper.updateById(row);
+        refundScheduleQuotaIfPresent(row);
         environmentLockService.release(row.getId());
         return SelfMediaPublishScheduleVO.from(row);
     }
@@ -995,6 +1007,7 @@ public class SelfMediaPublishScheduleService {
         row.setFailureMessage(null);
         touch(row);
         scheduleMapper.updateById(row);
+        confirmScheduleQuotaIfPresent(row);
         confirmDistributionQuotaIfPresent(row);
         environmentLockService.release(row.getId());
         return SelfMediaPublishScheduleVO.from(row);
@@ -1011,6 +1024,7 @@ public class SelfMediaPublishScheduleService {
         row.setFailureMessage(trimToNull(failureMessage));
         touch(row);
         scheduleMapper.updateById(row);
+        refundScheduleQuotaIfPresent(row);
         environmentLockService.release(row.getId());
         return SelfMediaPublishScheduleVO.from(row);
     }
@@ -1195,7 +1209,8 @@ public class SelfMediaPublishScheduleService {
                                                        Long operatorId,
                                                        Candidate candidate,
                                                        LocalDateTime plannedAt,
-                                                       String strategy) {
+                                                       String strategy,
+                                                       Long companyId) {
         String baseKey = baseIdempotencyKey(candidate.article().getId(), candidate.account().getId(), plannedAt, strategy);
         SelfMediaPublishSchedule active = scheduleMapper.selectActiveByBaseIdempotencyKey(
                 baseKey, new ArrayList<>(SelfMediaPublishScheduleConstants.ACTIVE_STATUSES));
@@ -1233,6 +1248,7 @@ public class SelfMediaPublishScheduleService {
 
         try {
             scheduleMapper.insert(row);
+            reserveScheduleQuota(row, candidate.article().getProjectId(), companyId);
             return row;
         } catch (DuplicateKeyException duplicate) {
             return null;
@@ -1331,6 +1347,30 @@ public class SelfMediaPublishScheduleService {
     private void refundDistributionQuotaIfPresent(SelfMediaPublishSchedule row) {
         if (row != null && row.getDistributionTaskId() != null) {
             companyChannelQuotaService.refundDistribution(row.getDistributionTaskId());
+        }
+    }
+
+    private void reserveScheduleQuota(SelfMediaPublishSchedule row, Long projectId, Long companyId) {
+        if (row == null || row.getId() == null || companyId == null || companyId <= 0) {
+            return;
+        }
+        companyChannelQuotaService.reserveSelfMediaSchedule(
+                companyId,
+                projectId,
+                row.getPlatform(),
+                row.getId()
+        );
+    }
+
+    private void confirmScheduleQuotaIfPresent(SelfMediaPublishSchedule row) {
+        if (row != null && row.getId() != null) {
+            companyChannelQuotaService.confirmSelfMediaSchedule(row.getId());
+        }
+    }
+
+    private void refundScheduleQuotaIfPresent(SelfMediaPublishSchedule row) {
+        if (row != null && row.getId() != null) {
+            companyChannelQuotaService.refundSelfMediaSchedule(row.getId());
         }
     }
 

@@ -2,10 +2,13 @@ package com.huanjing.geo.module.content.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
+import com.huanjing.geo.module.content.dto.SelfMediaPublishAutoScheduleRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCancelRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleCreateRequest;
 import com.huanjing.geo.module.content.dto.SelfMediaPublishScheduleManualResultRequest;
+import com.huanjing.geo.module.content.service.SelfMediaPublishAutoScheduleService;
 import com.huanjing.geo.module.content.service.SelfMediaPublishScheduleService;
+import com.huanjing.geo.module.content.vo.SelfMediaPublishAutoScheduleResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleCreateResponse;
 import com.huanjing.geo.module.content.vo.SelfMediaPublishScheduleVO;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -26,12 +29,25 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class SelfMediaPublishScheduleController {
     private final SelfMediaPublishScheduleService scheduleService;
+    private final SelfMediaPublishAutoScheduleService autoScheduleService;
 
     @PostMapping("/self-media-schedules")
     public R<SelfMediaPublishScheduleCreateResponse> createSchedules(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
             @Valid @RequestBody SelfMediaPublishScheduleCreateRequest request) {
         return R.ok(scheduleService.createSchedules(request, idempotencyKey));
+    }
+
+    @PostMapping("/self-media-schedules/auto-preview")
+    public R<SelfMediaPublishAutoScheduleResponse> previewAutoSchedules(
+            @Valid @RequestBody SelfMediaPublishAutoScheduleRequest request) {
+        return R.ok(autoScheduleService.preview(request));
+    }
+
+    @PostMapping("/self-media-schedules/auto-create")
+    public R<SelfMediaPublishAutoScheduleResponse> createAutoSchedules(
+            @Valid @RequestBody SelfMediaPublishAutoScheduleRequest request) {
+        return R.ok(autoScheduleService.create(request));
     }
 
     @GetMapping("/self-media-schedules")

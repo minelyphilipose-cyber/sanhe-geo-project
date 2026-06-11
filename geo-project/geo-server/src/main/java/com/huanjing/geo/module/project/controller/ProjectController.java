@@ -2,6 +2,12 @@ package com.huanjing.geo.module.project.controller;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.result.R;
+import com.huanjing.geo.module.content.dto.ProjectSelfMediaAutoScheduleRequest;
+import com.huanjing.geo.module.content.dto.ProjectSelfMediaScheduleConfigRequest;
+import com.huanjing.geo.module.content.service.ProjectSelfMediaScheduleService;
+import com.huanjing.geo.module.content.vo.ProjectSelfMediaScheduleBatchVO;
+import com.huanjing.geo.module.content.vo.ProjectSelfMediaScheduleConfigVO;
+import com.huanjing.geo.module.content.vo.SelfMediaPublishAutoScheduleResponse;
 import com.huanjing.geo.module.project.dto.KeywordGroupImportResultVO;
 import com.huanjing.geo.module.project.dto.ProjectChannelAllocationQuotaVO;
 import com.huanjing.geo.module.project.dto.ProjectChannelAllocationUpdateRequest;
@@ -28,6 +34,8 @@ public class ProjectController {
     private final ProjectService projectService;
 
     private final com.huanjing.geo.module.project.service.KeywordGroupService keywordGroupService;
+
+    private final ProjectSelfMediaScheduleService projectSelfMediaScheduleService;
 
     @GetMapping
     public R<Page<Project>> page(
@@ -57,6 +65,42 @@ public class ProjectController {
     @GetMapping("/{id:\\d+}")
     public R<Project> detail(@PathVariable Long id) {
         return R.ok(projectService.detail(id));
+    }
+
+    @GetMapping("/{id:\\d+}/self-media-schedule-config")
+    public R<ProjectSelfMediaScheduleConfigVO> selfMediaScheduleConfig(@PathVariable Long id) {
+        return R.ok(projectSelfMediaScheduleService.getConfig(id));
+    }
+
+    @PutMapping("/{id:\\d+}/self-media-schedule-config")
+    public R<ProjectSelfMediaScheduleConfigVO> updateSelfMediaScheduleConfig(
+            @PathVariable Long id,
+            @RequestBody(required = false) ProjectSelfMediaScheduleConfigRequest request) {
+        return R.ok(projectSelfMediaScheduleService.updateConfig(id, request));
+    }
+
+    @GetMapping("/{id:\\d+}/self-media-schedule-batches/{targetMonth}")
+    public R<ProjectSelfMediaScheduleBatchVO> selfMediaScheduleBatch(@PathVariable Long id,
+                                                                     @PathVariable String targetMonth) {
+        return R.ok(projectSelfMediaScheduleService.getBatch(id, targetMonth));
+    }
+
+    @PostMapping("/{id:\\d+}/self-media-schedules/auto-preview")
+    public R<SelfMediaPublishAutoScheduleResponse> previewSelfMediaAutoSchedules(
+            @PathVariable Long id,
+            @Valid @RequestBody ProjectSelfMediaAutoScheduleRequest request) {
+        return R.ok(projectSelfMediaScheduleService.previewForProject(id, request));
+    }
+
+    @PostMapping("/{id:\\d+}/self-media-schedules/auto-create")
+    public R<SelfMediaPublishAutoScheduleResponse> createSelfMediaAutoSchedules(
+            @PathVariable Long id,
+            @Valid @RequestBody ProjectSelfMediaAutoScheduleRequest request) {
+        return R.ok(projectSelfMediaScheduleService.createForProject(
+                id,
+                request,
+                ProjectSelfMediaScheduleService.TRIGGER_MANUAL
+        ));
     }
 
     @PostMapping

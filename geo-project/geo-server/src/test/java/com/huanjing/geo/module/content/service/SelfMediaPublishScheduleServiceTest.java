@@ -320,6 +320,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("https://cdn.example.test/cover.png", captor.getValue().getPublishCheckCoverUrl());
         assertEquals("阜阳", captor.getValue().getPublishCheckLocationName());
         assertTrue(captor.getValue().getPublishCheckFingerprint().matches("[0-9a-f]{64}"));
+        verify(companyChannelQuotaService).reserveSelfMediaSchedule(6L, 7L, "toutiao", 51L);
     }
 
     @Test
@@ -466,6 +467,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals(SelfMediaPublishScheduleConstants.STATUS_PUBLISHED_CONFIRMED, response.getStatus());
         assertEquals("https://example.test/post/1", response.getPlatformPublishedUrl());
         verify(scheduleMapper).updateById(row);
+        verify(companyChannelQuotaService).confirmSelfMediaSchedule(93L);
         verify(environmentLockService).release(93L);
     }
 
@@ -481,6 +483,7 @@ class SelfMediaPublishScheduleServiceTest {
         assertEquals("PUBLISH_RESULT_MANUAL_FAILED", response.getFailureCode());
         assertEquals("not found on platform", response.getFailureMessage());
         verify(scheduleMapper).updateById(row);
+        verify(companyChannelQuotaService).refundSelfMediaSchedule(94L);
         verify(environmentLockService).release(94L);
     }
 

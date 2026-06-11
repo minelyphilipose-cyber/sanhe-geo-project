@@ -169,6 +169,26 @@ public interface SelfMediaPublishScheduleMapper extends BaseMapper<SelfMediaPubl
                                                            @Param("monitorUntil") LocalDateTime monitorUntil,
                                                            @Param("limit") int limit);
 
+    @Select("""
+            <script>
+            SELECT COUNT(1)
+            FROM self_media_publish_schedule
+            WHERE brand_id = #{brandId}
+              AND platform = #{platform}
+              AND planned_publish_at &gt;= #{periodStart}
+              AND planned_publish_at &lt; #{periodEnd}
+              AND status IN
+              <foreach collection="statuses" item="status" open="(" separator="," close=")">
+                #{status}
+              </foreach>
+            </script>
+            """)
+    long countActiveByBrandPlatformAndPeriod(@Param("brandId") Long brandId,
+                                             @Param("platform") String platform,
+                                             @Param("periodStart") LocalDateTime periodStart,
+                                             @Param("periodEnd") LocalDateTime periodEnd,
+                                             @Param("statuses") List<String> statuses);
+
     @Update("""
             <script>
             UPDATE self_media_publish_schedule

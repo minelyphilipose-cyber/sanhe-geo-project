@@ -35,7 +35,7 @@ public interface CompanyChannelQuotaLedgerMapper extends BaseMapper<CompanyChann
                              @Param("now") LocalDateTime now);
 
     @Select("SELECT * FROM company_channel_quota_ledger " +
-            "WHERE status = 'reserved' AND reserved_at < #{before} " +
+            "WHERE biz_type = 'distribution' AND status = 'reserved' AND reserved_at < #{before} " +
             "ORDER BY reserved_at ASC LIMIT #{limit}")
     List<CompanyChannelQuotaLedger> selectTimedOutReserved(@Param("before") LocalDateTime before,
                                                            @Param("limit") int limit);
@@ -43,6 +43,11 @@ public interface CompanyChannelQuotaLedgerMapper extends BaseMapper<CompanyChann
     @Select("SELECT * FROM company_channel_quota_ledger " +
             "WHERE company_id = #{companyId} AND status = 'reserved'")
     List<CompanyChannelQuotaLedger> selectReservedByCompany(@Param("companyId") Long companyId);
+
+    @Select("SELECT * FROM company_channel_quota_ledger " +
+            "WHERE biz_type = #{bizType} AND biz_id = #{bizId} LIMIT 1")
+    CompanyChannelQuotaLedger selectByBiz(@Param("bizType") String bizType,
+                                          @Param("bizId") String bizId);
 
     @Select("SELECT COUNT(1) FROM company_channel_quota_ledger " +
             "WHERE company_id = #{companyId} AND status = 'reserved'")
