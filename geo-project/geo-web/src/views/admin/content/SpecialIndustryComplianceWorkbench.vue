@@ -6,37 +6,76 @@
         <h1 class="admin-page-title">特殊行业合规工作台</h1>
         <div class="admin-page-subtitle">集中处理医疗等强监管行业的法务确认、合规失败、命中日志和生成历史。</div>
       </div>
-      <el-button @click="openMedicalConfig">规则配置</el-button>
+      <el-button @click="openSpecialIndustryConfig">规则配置</el-button>
     </div>
 
     <div class="admin-metric-grid">
       <div class="admin-metric-card" style="--metric-accent: #f59e0b; --metric-tone: #fffbeb">
         <span class="admin-metric-label">待法务确认</span>
-        <strong class="admin-metric-value">{{ pendingReviewCount }}</strong>
-        <span class="admin-metric-hint">当前筛选结果</span>
+        <strong class="admin-metric-value">{{ overview?.pendingReviewCount ?? 0 }}</strong>
+        <span class="admin-metric-hint">全局待处理</span>
       </div>
       <div class="admin-metric-card" style="--metric-accent: #ef4444; --metric-tone: #fef2f2">
         <span class="admin-metric-label">合规失败/废弃</span>
-        <strong class="admin-metric-value">{{ failedComplianceCount }}</strong>
-        <span class="admin-metric-hint">当前筛选结果</span>
+        <strong class="admin-metric-value">{{ overview?.complianceFailedCount ?? 0 }}</strong>
+        <span class="admin-metric-hint">需排查文章</span>
       </div>
       <div class="admin-metric-card" style="--metric-accent: #2563eb; --metric-tone: #eff6ff">
-        <span class="admin-metric-label">命中日志</span>
-        <strong class="admin-metric-value">{{ logPage.total }}</strong>
+        <span class="admin-metric-label">近 7 日命中</span>
+        <strong class="admin-metric-value">{{ overview?.sevenDayHitCount ?? 0 }}</strong>
         <span class="admin-metric-hint">规则触发记录</span>
       </div>
       <div class="admin-metric-card" style="--metric-accent: #059669; --metric-tone: #ecfdf5">
-        <span class="admin-metric-label">生成历史</span>
-        <strong class="admin-metric-value">{{ historyPage.total }}</strong>
-        <span class="admin-metric-hint">选题与结构留痕</span>
+        <span class="admin-metric-label">近 7 日废弃</span>
+        <strong class="admin-metric-value">{{ overview?.sevenDayDiscardedCount ?? 0 }}</strong>
+        <span class="admin-metric-hint">3 次失败后留痕</span>
       </div>
     </div>
 
     <el-tabs v-model="activeTab" class="workbench-tabs" @tab-change="handleTabChange">
+      <el-tab-pane label="概览" name="overview" />
       <el-tab-pane label="待处理文章" name="articles" />
+      <el-tab-pane label="批次追溯" name="batches" />
       <el-tab-pane label="命中日志" name="logs" />
       <el-tab-pane label="生成历史" name="history" />
     </el-tabs>
+
+    <el-card v-show="activeTab === 'overview'" v-loading="overviewLoading" shadow="never" class="admin-table-card">
+      <div class="overview-grid">
+        <section class="overview-panel">
+          <div class="overview-panel-head">
+            <strong>规则命中 Top</strong>
+            <span>近 7 日</span>
+          </div>
+          <el-table :data="overview?.topRuleHits || []" border>
+            <el-table-column prop="ruleType" label="规则类型" min-width="180" />
+            <el-table-column prop="hitCount" label="命中次数" width="120" />
+          </el-table>
+        </section>
+        <section class="overview-panel">
+          <div class="overview-panel-head">
+            <strong>问题批次</strong>
+            <span>最近 5 条</span>
+          </div>
+          <el-table :data="overview?.recentProblemBatches || []" border>
+            <el-table-column label="批次" width="110">
+              <template #default="{ row }">#{{ row.batchId }}</template>
+            </el-table-column>
+            <el-table-column label="项目/品牌" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.projectName || row.projectId || '-' }} / {{ row.brandName || row.brandId || '-' }}</template>
+            </el-table-column>
+            <el-table-column label="失败/废弃" width="120">
+              <template #default="{ row }">{{ row.failedCount || 0 }} / {{ row.discardedCount || 0 }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="100">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="openBatchLogs(row.batchId)">日志</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </section>
+      </div>
+    </el-card>
 
     <el-card v-show="activeTab === 'articles'" shadow="never" class="admin-table-card">
       <div class="preset-bar">
@@ -45,6 +84,7 @@
         </el-button>
       </div>
       <div class="filter-bar">
+        <el-input-number v-model="articleQuery.articleId" :min="1" :controls="false" placeholder="文章ID" class="filter-number" />
         <el-input v-model="articleQuery.projectName" clearable placeholder="搜索项目名称" class="filter-control is-wide" @keyup.enter="loadArticles" />
         <el-select v-model="articleQuery.medicalIndustryCode" clearable placeholder="行业类型" class="filter-control">
           <el-option v-for="item in industryOptions" :key="item.value" :label="item.label" :value="item.value" />
@@ -111,6 +151,61 @@
         </el-table>
         <div class="admin-table-footer">
           <el-pagination background layout="prev, pager, next, total" :current-page="articlePage.current" :page-size="articlePage.size" :total="articlePage.total" @current-change="onArticlePageChange" />
+        </div>
+      </DataState>
+    </el-card>
+
+    <el-card v-show="activeTab === 'batches'" shadow="never" class="admin-table-card">
+      <div class="filter-bar">
+        <el-select v-model="batchQuery.status" clearable placeholder="批次状态" class="filter-control">
+          <el-option label="运行中" value="running" />
+          <el-option label="成功" value="success" />
+          <el-option label="部分成功" value="partial_success" />
+          <el-option label="失败" value="failed" />
+        </el-select>
+        <el-select v-model="batchQuery.industryCode" clearable placeholder="行业类型" class="filter-control">
+          <el-option v-for="item in industryOptions" :key="item.value" :label="item.label" :value="item.value" />
+        </el-select>
+        <el-button type="primary" @click="searchBatches">查询</el-button>
+        <el-button @click="resetBatchQuery">重置</el-button>
+      </div>
+      <DataState :loading="batchLoading" :empty="!batchLoading && batchRows.length === 0" empty-text="暂无特殊行业批次">
+        <el-table :data="batchRows" border table-layout="fixed">
+          <el-table-column label="批次" width="110">
+            <template #default="{ row }">#{{ row.batchId }}</template>
+          </el-table-column>
+          <el-table-column label="项目/品牌" min-width="220" show-overflow-tooltip>
+            <template #default="{ row }">{{ row.projectName || row.projectId || '-' }} / {{ row.brandName || row.brandId || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="行业/档位" width="170">
+            <template #default="{ row }">
+              <div class="tag-stack">
+                <el-tag size="small" type="info">{{ industryLabel(row.medicalIndustryCode) }}</el-tag>
+                <el-tag size="small">{{ tierLabel(row.medicalChannelTier) }}</el-tag>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="topic" label="主题" min-width="220" show-overflow-tooltip />
+          <el-table-column label="进度" width="150">
+            <template #default="{ row }">{{ row.successCount || 0 }}/{{ row.totalCount || 0 }} 成功，{{ row.failedCount || 0 }} 失败</template>
+          </el-table-column>
+          <el-table-column label="废弃/重试" width="130">
+            <template #default="{ row }">{{ row.discardedCount || 0 }} / {{ row.retryTaskCount || 0 }}</template>
+          </el-table-column>
+          <el-table-column label="状态" width="120">
+            <template #default="{ row }"><el-tag size="small" :type="batchStatusTag(row.status)">{{ batchStatusLabel(row.status) }}</el-tag></template>
+          </el-table-column>
+          <el-table-column label="创建时间" width="170">
+            <template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="160" fixed="right">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="openBatchLogs(row.batchId)">命中日志</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="admin-table-footer">
+          <el-pagination background layout="prev, pager, next, total" :current-page="batchPage.current" :page-size="batchPage.size" :total="batchPage.total" @current-change="onBatchPageChange" />
         </div>
       </DataState>
     </el-card>
@@ -198,41 +293,52 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import DataState from '@/components/ui/DataState.vue'
 import {
-  getMedicalComplianceHitLogs,
-  getMedicalGenerationHistory,
+  getSpecialIndustryBatches,
+  getSpecialIndustryComplianceHitLogs,
+  getSpecialIndustryGenerationHistory,
+  getSpecialIndustryOverview,
   getSpecialIndustryArticles,
   reviewMedicalPublishArticle,
   type MedicalComplianceHitLog,
   type MedicalGenerationHistory,
+  type SpecialIndustryBatchTrace,
+  type SpecialIndustryOverview,
 } from '@/api/content'
 import type { ArticleDraft } from '@/types'
 import { useDictStore } from '@/stores/dict'
 import { useUserStore } from '@/stores/user'
 import { formatDateTime } from '@/utils/format'
 
-type TabName = 'articles' | 'logs' | 'history'
+type TabName = 'overview' | 'articles' | 'batches' | 'logs' | 'history'
 type ArticlePresetKey = 'pending_review' | 'review_rejected' | 'compliance_discarded' | 'official_pending'
 
 const router = useRouter()
+const route = useRoute()
 const dictStore = useDictStore()
 const userStore = useUserStore()
-const activeTab = ref<TabName>('articles')
+const activeTab = ref<TabName>('overview')
 
+const overviewLoading = ref(false)
 const articleLoading = ref(false)
+const batchLoading = ref(false)
 const logLoading = ref(false)
 const historyLoading = ref(false)
+const overview = ref<SpecialIndustryOverview | null>(null)
 const articleRows = ref<ArticleDraft[]>([])
+const batchRows = ref<SpecialIndustryBatchTrace[]>([])
 const logRows = ref<MedicalComplianceHitLog[]>([])
 const historyRows = ref<MedicalGenerationHistory[]>([])
 const articlePage = reactive({ current: 1, size: 10, total: 0 })
+const batchPage = reactive({ current: 1, size: 10, total: 0 })
 const logPage = reactive({ current: 1, size: 10, total: 0 })
 const historyPage = reactive({ current: 1, size: 10, total: 0 })
 const articleQuery = reactive({
+  articleId: undefined as number | undefined,
   projectName: '',
   medicalIndustryCode: '',
   medicalChannelTier: '',
@@ -254,6 +360,10 @@ const logQuery = reactive<{
   createdRange: [],
 })
 const historyQuery = reactive<{ projectId?: number, brandId?: number, articleId?: number, topicAngleId?: number }>({})
+const batchQuery = reactive({
+  status: '',
+  industryCode: '',
+})
 const articlePresets: Array<{ key: ArticlePresetKey, label: string }> = [
   { key: 'pending_review', label: '待法务确认' },
   { key: 'review_rejected', label: '法务驳回' },
@@ -266,11 +376,20 @@ const industryOptions = computed(() =>
     .filter((item) => item.dictKey && item.dictKey !== 'none')
     .map((item) => ({ label: item.dictValue, value: item.dictKey })),
 )
-const pendingReviewCount = computed(() => articleRows.value.filter((row) => row.publishReviewStatus === 'pending').length)
-const failedComplianceCount = computed(() => articleRows.value.filter((row) =>
-  row.complianceStatus === 'failed' || row.complianceStatus === 'discarded_compliance_failed',
-).length)
 const canArticleWrite = computed(() => userStore.hasPermission(['content.article.write', 'project.update']))
+
+async function loadOverview() {
+  overviewLoading.value = true
+  try {
+    const { data } = await getSpecialIndustryOverview()
+    overview.value = data.data
+  } catch {
+    overview.value = null
+    ElMessage.error('加载特殊行业概览失败')
+  } finally {
+    overviewLoading.value = false
+  }
+}
 
 async function loadArticles() {
   articleLoading.value = true
@@ -278,6 +397,7 @@ async function loadArticles() {
     const { data } = await getSpecialIndustryArticles({
       current: articlePage.current,
       size: articlePage.size,
+      articleId: articleQuery.articleId || undefined,
       projectName: articleQuery.projectName.trim() || undefined,
       medicalIndustryCode: articleQuery.medicalIndustryCode || undefined,
       medicalChannelTier: articleQuery.medicalChannelTier || undefined,
@@ -299,7 +419,7 @@ async function loadArticles() {
 async function loadLogs() {
   logLoading.value = true
   try {
-    const { data } = await getMedicalComplianceHitLogs({
+    const { data } = await getSpecialIndustryComplianceHitLogs({
       current: logPage.current,
       size: logPage.size,
       articleId: logQuery.articleId || undefined,
@@ -326,7 +446,7 @@ async function loadLogs() {
 async function loadHistory() {
   historyLoading.value = true
   try {
-    const { data } = await getMedicalGenerationHistory({
+    const { data } = await getSpecialIndustryGenerationHistory({
       current: historyPage.current,
       size: historyPage.size,
       projectId: historyQuery.projectId || undefined,
@@ -345,12 +465,33 @@ async function loadHistory() {
   }
 }
 
+async function loadBatches() {
+  batchLoading.value = true
+  try {
+    const { data } = await getSpecialIndustryBatches({
+      current: batchPage.current,
+      size: batchPage.size,
+      status: batchQuery.status || undefined,
+      industryCode: batchQuery.industryCode || undefined,
+    })
+    batchRows.value = data.data.records || []
+    batchPage.total = data.data.total || 0
+  } catch {
+    batchRows.value = []
+    batchPage.total = 0
+    ElMessage.error('加载特殊行业批次失败')
+  } finally {
+    batchLoading.value = false
+  }
+}
+
 function searchArticles() {
   articlePage.current = 1
   void loadArticles()
 }
 
 function resetArticleQuery() {
+  articleQuery.articleId = undefined
   articleQuery.projectName = ''
   articleQuery.medicalIndustryCode = ''
   articleQuery.medicalChannelTier = ''
@@ -360,6 +501,7 @@ function resetArticleQuery() {
 }
 
 function applyArticlePreset(key: ArticlePresetKey) {
+  articleQuery.articleId = undefined
   articleQuery.projectName = ''
   articleQuery.medicalIndustryCode = ''
   articleQuery.medicalChannelTier = ''
@@ -395,6 +537,17 @@ function resetLogQuery() {
   searchLogs()
 }
 
+function searchBatches() {
+  batchPage.current = 1
+  void loadBatches()
+}
+
+function resetBatchQuery() {
+  batchQuery.status = ''
+  batchQuery.industryCode = ''
+  searchBatches()
+}
+
 function searchHistory() {
   historyPage.current = 1
   void loadHistory()
@@ -418,12 +571,19 @@ function onLogPageChange(page: number) {
   void loadLogs()
 }
 
+function onBatchPageChange(page: number) {
+  batchPage.current = page
+  void loadBatches()
+}
+
 function onHistoryPageChange(page: number) {
   historyPage.current = page
   void loadHistory()
 }
 
 function handleTabChange(name: string | number) {
+  if (name === 'overview') void loadOverview()
+  if (name === 'batches' && !batchRows.value.length) void loadBatches()
   if (name === 'logs' && !logRows.value.length) void loadLogs()
   if (name === 'history' && !historyRows.value.length) void loadHistory()
 }
@@ -437,8 +597,59 @@ function openLogsForArticle(articleId: number) {
   void loadLogs()
 }
 
-function openMedicalConfig() {
-  router.push('/admin/content/medical-article-config')
+function openBatchLogs(batchId: number) {
+  logQuery.articleId = undefined
+  logQuery.batchId = batchId
+  logQuery.taskId = undefined
+  logPage.current = 1
+  activeTab.value = 'logs'
+  void loadLogs()
+}
+
+function parsePositiveNumber(value: unknown) {
+  const raw = Array.isArray(value) ? value[0] : value
+  const number = Number(raw)
+  return Number.isFinite(number) && number > 0 ? number : undefined
+}
+
+function clearLogFocus() {
+  logQuery.articleId = undefined
+  logQuery.batchId = undefined
+  logQuery.taskId = undefined
+}
+
+function applyRouteFocus() {
+  const action = String(Array.isArray(route.query.action) ? route.query.action[0] : route.query.action || '')
+  const articleId = parsePositiveNumber(route.query.articleId)
+  const batchId = parsePositiveNumber(route.query.batchId)
+  const taskId = parsePositiveNumber(route.query.taskId)
+
+  if (action === 'publish_review_pending' || action === 'publish_review_rejected') {
+    articleQuery.articleId = articleId
+    articleQuery.projectName = ''
+    articleQuery.medicalIndustryCode = ''
+    articleQuery.medicalChannelTier = ''
+    articleQuery.complianceStatus = ''
+    articleQuery.publishReviewStatus = action === 'publish_review_pending' ? 'pending' : 'rejected'
+    articlePage.current = 1
+    activeTab.value = 'articles'
+    void loadArticles()
+    return
+  }
+
+  if (articleId || batchId || taskId) {
+    clearLogFocus()
+    logQuery.articleId = articleId
+    logQuery.batchId = batchId
+    logQuery.taskId = taskId
+    logPage.current = 1
+    activeTab.value = 'logs'
+    void loadLogs()
+  }
+}
+
+function openSpecialIndustryConfig() {
+  router.push('/admin/content/special-industry-config')
 }
 
 function openContentExecution() {
@@ -469,7 +680,7 @@ async function reviewMedicalPublish(row: ArticleDraft, action: 'approve' | 'reje
   }
   await reviewMedicalPublishArticle(row.id, { action, comment })
   ElMessage.success(`医疗发布已${verb}`)
-  await loadArticles()
+  await Promise.all([loadArticles(), loadOverview()])
 }
 
 function industryLabel(value?: string | null) {
@@ -520,14 +731,40 @@ function reviewTag(value?: string | null): 'success' | 'warning' | 'danger' | 'i
   return 'info'
 }
 
+function batchStatusLabel(value?: string | null) {
+  const map: Record<string, string> = {
+    pending: '待生成',
+    running: '运行中',
+    success: '成功',
+    partial_success: '部分成功',
+    failed: '失败',
+  }
+  return value ? map[value] || value : '-'
+}
+
+function batchStatusTag(value?: string | null): 'success' | 'warning' | 'danger' | 'info' {
+  if (value === 'success') return 'success'
+  if (value === 'running' || value === 'pending' || value === 'partial_success') return 'warning'
+  if (value === 'failed') return 'danger'
+  return 'info'
+}
+
 function channelLabel(row: ArticleDraft) {
   return [row.channelGroupCode, row.channelSubCode].filter(Boolean).join(' / ') || '-'
 }
 
 onMounted(async () => {
   await dictStore.ensureLoaded()
-  await Promise.all([loadArticles(), loadLogs(), loadHistory()])
+  await Promise.all([loadOverview(), loadArticles(), loadBatches(), loadLogs(), loadHistory()])
+  applyRouteFocus()
 })
+
+watch(
+  () => route.fullPath,
+  () => {
+    applyRouteFocus()
+  },
+)
 </script>
 
 <style scoped>
@@ -570,6 +807,34 @@ onMounted(async () => {
   width: 260px;
 }
 
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.overview-panel {
+  min-width: 0;
+}
+
+.overview-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.overview-panel-head strong {
+  color: #0f172a;
+  font-size: 15px;
+}
+
+.overview-panel-head span {
+  color: #64748b;
+  font-size: 12px;
+}
+
 .article-cell,
 .tag-stack {
   display: flex;
@@ -592,5 +857,11 @@ onMounted(async () => {
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+@media (max-width: 960px) {
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

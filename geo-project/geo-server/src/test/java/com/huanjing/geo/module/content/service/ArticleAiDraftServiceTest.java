@@ -107,6 +107,7 @@ class ArticleAiDraftServiceTest {
         service = new ArticleAiDraftService(projectMapper, brandMapper, articleMapper, versionMapper,
                 currentUserService, brandAccessService, promptBuilder, promptContextFactory,
                 offeringPromptSelector, generationEngine, mock(MedicalArticleComplianceChecker.class),
+                mock(SpecialIndustryComplianceAlertService.class),
                 mock(ArticleCoverSelectionService.class), rateLimiter, auditService,
                 objectMapper, txManager(), Runnable::run);
     }
@@ -366,7 +367,7 @@ class ArticleAiDraftServiceTest {
                 mock(MarkdownImageReferenceValidator.class), mock(com.huanjing.geo.module.content.service.render.wechat.WechatArticleRenderService.class),
                 mock(ArticleImagePublicUrlRewriter.class), mock(ArticleAutoImageInsertionService.class),
                 mock(ArticleCoverSelectionService.class),
-                brandAccessService, mock(AuditService.class));
+                brandAccessService, mock(AuditService.class), mock(SpecialIndustryComplianceAlertService.class));
     }
 
     private void verifyAudit(AuditResult result, String status) {

@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 public class MedicalArticleDtos {
 
@@ -147,6 +148,75 @@ public class MedicalArticleDtos {
             Long articleId,
             String articleTitle,
             LocalDateTime createdAt
+    ) {
+    }
+
+    public record WorkbenchOverviewVO(
+            Long pendingReviewCount,
+            Long rejectedReviewCount,
+            Long complianceFailedCount,
+            Long discardedCount,
+            Long officialPendingCount,
+            Long todayHitCount,
+            Long sevenDayHitCount,
+            Long sevenDayDiscardedCount,
+            List<RuleHitSummaryVO> topRuleHits,
+            List<BatchTraceVO> recentProblemBatches
+    ) {
+    }
+
+    public record RuleHitSummaryVO(
+            String ruleType,
+            Long hitCount
+    ) {
+    }
+
+    public record BatchTraceVO(
+            Long batchId,
+            Long projectId,
+            String projectName,
+            Long brandId,
+            String brandName,
+            String medicalIndustryCode,
+            String medicalChannelTier,
+            String topic,
+            String status,
+            Integer totalCount,
+            Integer successCount,
+            Integer failedCount,
+            Integer discardedCount,
+            Integer retryTaskCount,
+            LocalDateTime createdAt,
+            LocalDateTime finishedAt,
+            String errorMessage
+    ) {
+    }
+
+    public record ComplianceRuleTestRequest(
+            @Size(max = 32) String industryCode,
+            @Size(max = 32) String channelTier,
+            @Size(max = 64) String channelGroupCode,
+            @Size(max = 64) String channelSubCode,
+            @Size(max = 128) String brandName,
+            Integer brandExposureLimit,
+            Boolean highRiskChannel,
+            @Size(max = 200) String title,
+            @NotBlank String content
+    ) {
+    }
+
+    public record ComplianceRuleTestResultVO(
+            Boolean passed,
+            List<ComplianceIssueVO> issues
+    ) {
+    }
+
+    public record ComplianceIssueVO(
+            Long ruleId,
+            String ruleType,
+            String severity,
+            String matchedText,
+            String message
     ) {
     }
 }

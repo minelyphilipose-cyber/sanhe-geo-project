@@ -30,9 +30,9 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping("/api/content/medical-articles")
+@RequestMapping("/api/content/special-industry")
 @RequiredArgsConstructor
-public class MedicalArticleConfigController {
+public class SpecialIndustryConfigController {
 
     private final MedicalArticleConfigService service;
 

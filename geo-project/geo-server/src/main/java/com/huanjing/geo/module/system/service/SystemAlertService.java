@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -90,6 +91,38 @@ public class SystemAlertService {
         alert.setResolvedBy(user.getId());
         alert.setResolvedAt(LocalDateTime.now());
         systemAlertMapper.updateById(alert);
+    }
+
+    public void resolveOpenByDedupeKey(String dedupeKey, Long resolvedBy) {
+        if (!StringUtils.hasText(dedupeKey)) {
+            return;
+        }
+        SystemAlert alert = systemAlertMapper.selectOne(new LambdaQueryWrapper<SystemAlert>()
+                .eq(SystemAlert::getDedupeKey, dedupeKey.trim())
+                .eq(SystemAlert::getIsResolved, false)
+                .last("LIMIT 1"));
+        if (alert == null) {
+            return;
+        }
+        alert.setIsResolved(true);
+        alert.setResolvedBy(resolvedBy);
+        alert.setResolvedAt(LocalDateTime.now());
+        systemAlertMapper.updateById(alert);
+    }
+
+    public void resolveOpenByDedupeKeyPrefix(String dedupeKeyPrefix, Long resolvedBy) {
+        if (!StringUtils.hasText(dedupeKeyPrefix)) {
+            return;
+        }
+        List<SystemAlert> alerts = systemAlertMapper.selectList(new LambdaQueryWrapper<SystemAlert>()
+                .likeRight(SystemAlert::getDedupeKey, dedupeKeyPrefix.trim())
+                .eq(SystemAlert::getIsResolved, false));
+        for (SystemAlert alert : alerts) {
+            alert.setIsResolved(true);
+            alert.setResolvedBy(resolvedBy);
+            alert.setResolvedAt(LocalDateTime.now());
+            systemAlertMapper.updateById(alert);
+        }
     }
 
     private LambdaQueryWrapper<SystemAlert> visibleAlertWrapper(SysUser user) {

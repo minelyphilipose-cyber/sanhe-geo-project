@@ -98,6 +98,14 @@
         :closable="false"
         title="维护品牌下可公开引用的业务产品、服务项目或特色业务项。文章生成时会按主题先选中少量相关条目，再把精简资料注入提示词。"
       />
+      <el-alert
+        v-if="isMedicalComplianceIndustry && !hasEnabledMedicalProject"
+        class="mb-3"
+        type="warning"
+        show-icon
+        :closable="false"
+        title="当前品牌已标记为特殊医疗行业，但尚未启用匹配的医疗项目。医疗文章生成会被项目资质闸门拦截，请至少维护一个启用状态的医疗项目。"
+      />
       <el-table v-loading="offeringsLoading" :data="offerings" border empty-text="暂无产品信息">
         <el-table-column prop="offeringName" label="产品名称" min-width="160" />
         <el-table-column label="产品简称" min-width="160">
@@ -1128,6 +1136,9 @@ const regionText = computed(() => {
 const availableBrandIndustries = computed(() => companyIndustryTags.value)
 const isMedicalComplianceIndustry = computed(() =>
   ['medical_beauty', 'oral'].includes(brandForm.complianceIndustryCode),
+)
+const hasEnabledMedicalProject = computed(() =>
+  offerings.value.some((item) => item.status === 'active' && item.medicalProjectEnabled),
 )
 const agentSiteOptions = computed(() => publishSites.value.filter((site) =>
   isValidGeoSiteCode(site.siteCode)

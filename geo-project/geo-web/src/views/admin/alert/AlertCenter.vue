@@ -205,7 +205,10 @@
                 </div>
                 <div class="min-w-0">
                   <div class="admin-entity-main">{{ scope.row.message }}</div>
-                  <div class="admin-entity-sub">{{ scope.row.source || scope.row.alertType }}</div>
+                  <div class="admin-entity-sub">
+                    <span>{{ scope.row.source || scope.row.alertType }}</span>
+                    <el-tag v-if="isSpecialIndustryTodo(scope.row)" size="small" type="warning" effect="plain">特殊行业</el-tag>
+                  </div>
                 </div>
               </div>
             </template>
@@ -224,10 +227,36 @@
             <template #default="scope">
               <el-popover trigger="click" width="520" placement="top">
                 <template #reference>
-                  <el-button link type="primary">{{ shortText(scope.row.contextJson || '-') }}</el-button>
+                  <el-button link type="primary">{{ systemTodoDetailPreview(scope.row) }}</el-button>
                 </template>
                 <div class="detail-wrap">
-                  <pre>{{ scope.row.contextJson || '-' }}</pre>
+                  <div v-if="isSpecialIndustryTodo(scope.row)" class="special-alert-detail">
+                    <div>
+                      <strong>处理类型</strong>
+                      <span>{{ specialIndustryActionLabel(systemTodoContext(scope.row).action) }}</span>
+                    </div>
+                    <div>
+                      <strong>项目</strong>
+                      <span>{{ contextValue(systemTodoContext(scope.row), 'projectName') || contextValue(systemTodoContext(scope.row), 'projectId') || '-' }}</span>
+                    </div>
+                    <div>
+                      <strong>品牌</strong>
+                      <span>{{ contextValue(systemTodoContext(scope.row), 'brandName') || contextValue(systemTodoContext(scope.row), 'brandId') || '-' }}</span>
+                    </div>
+                    <div>
+                      <strong>文章</strong>
+                      <span>{{ formatObjectId('文章', systemTodoContext(scope.row).articleId) }}</span>
+                    </div>
+                    <div>
+                      <strong>批次/任务</strong>
+                      <span>{{ formatTraceIds(systemTodoContext(scope.row)) }}</span>
+                    </div>
+                    <div v-if="formatHitRules(systemTodoContext(scope.row).hitRuleTypes)">
+                      <strong>命中规则</strong>
+                      <span>{{ formatHitRules(systemTodoContext(scope.row).hitRuleTypes) }}</span>
+                    </div>
+                  </div>
+                  <pre v-else>{{ scope.row.contextJson || '-' }}</pre>
                 </div>
               </el-popover>
             </template>
@@ -268,7 +297,7 @@ import { useUserStore } from '@/stores/user'
 const userStore = useUserStore()
 const router = useRouter()
 const canViewDispatchAlerts = userStore.hasPermission(['content.distribution.retry', 'dispatch.alert.resolve'])
-const canViewSystemAlerts = userStore.hasPermission('system.alert.resolve')
+const canViewSystemAlerts = userStore.hasPermission(['system.alert.resolve', 'content.read'])
 const canResolveDispatchAlert = userStore.hasPermission('dispatch.alert.resolve')
 const canResolveSystemAlert = userStore.hasPermission('system.alert.resolve')
 
@@ -462,9 +491,78 @@ function parseSystemTodoContext(row: SystemAlertTodoItem) {
   }
 }
 
+function systemTodoContext(row: SystemAlertTodoItem) {
+  return parseSystemTodoContext(row)
+}
+
+function contextValue(context: Record<string, unknown>, key: string) {
+  const value = context[key]
+  if (value === null || value === undefined || value === '') return ''
+  return String(value)
+}
+
+function isSpecialIndustryTodo(row: SystemAlertTodoItem) {
+  return row.source === 'special_industry_compliance' || String(row.alertType || '').startsWith('special_industry_')
+}
+
+function specialIndustryActionLabel(action: unknown) {
+  const map: Record<string, string> = {
+    discarded_compliance_failed: '合规失败已废弃',
+    publish_review_pending: '官网发布待确认',
+    publish_review_rejected: '官网发布被驳回',
+  }
+  const key = String(action || '')
+  return map[key] || key || '-'
+}
+
+function formatObjectId(label: string, value: unknown) {
+  const text = value === null || value === undefined || value === '' ? '' : String(value)
+  return text ? `${label} #${text}` : '-'
+}
+
+function formatTraceIds(context: Record<string, unknown>) {
+  const values = [
+    formatObjectId('批次', context.batchId),
+    formatObjectId('任务', context.taskId),
+  ].filter((item) => item !== '-')
+  return values.length ? values.join(' / ') : '-'
+}
+
+function formatHitRules(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.filter(Boolean).map(String).join('、')
+  }
+  return value === null || value === undefined ? '' : String(value)
+}
+
+function systemTodoDetailPreview(row: SystemAlertTodoItem) {
+  if (!isSpecialIndustryTodo(row)) return shortText(row.contextJson || '-')
+  const context = systemTodoContext(row)
+  const actionLabel = specialIndustryActionLabel(context.action)
+  const project = contextValue(context, 'projectName') || contextValue(context, 'projectId')
+  const article = contextValue(context, 'articleId')
+  return shortText([actionLabel, project ? `项目 ${project}` : '', article ? `文章 #${article}` : ''].filter(Boolean).join(' · ') || '-')
+}
+
+function normalizedSystemTodoRoute(row: SystemAlertTodoItem) {
+  const context = systemTodoContext(row)
+  const path = typeof context.route === 'string' ? context.route : ''
+  if (!path) return null
+  if (!isSpecialIndustryTodo(row) || path !== '/admin/content/special-industry-compliance') {
+    return { path }
+  }
+  const query: Record<string, string> = {}
+  ;['articleId', 'batchId', 'taskId', 'action'].forEach((key) => {
+    const value = context[key]
+    if (value !== null && value !== undefined && value !== '') {
+      query[key] = String(value)
+    }
+  })
+  return { path, query }
+}
+
 function openSystemTodo(row: SystemAlertTodoItem) {
-  const context = parseSystemTodoContext(row)
-  const route = typeof context.route === 'string' ? context.route : ''
+  const route = normalizedSystemTodoRoute(row)
   if (!route) {
     ElMessage.warning('该待办未配置跳转地址')
     return
@@ -688,6 +786,37 @@ onBeforeUnmount(() => {
   font-family: Consolas, Monaco, monospace;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.admin-entity-sub {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.special-alert-detail {
+  display: grid;
+  gap: 10px;
+}
+
+.special-alert-detail div {
+  display: grid;
+  grid-template-columns: 82px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.special-alert-detail strong {
+  color: #475569;
+  font-size: 12px;
+}
+
+.special-alert-detail span {
+  color: #0f172a;
+  font-size: 13px;
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 @media (max-width: 900px) {

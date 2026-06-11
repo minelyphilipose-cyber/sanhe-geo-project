@@ -138,6 +138,7 @@ public class BatchArticleGenerationService {
     private final ArticleGenerationPromptContextFactory promptContextFactory;
     private final MedicalArticleGenerationService medicalArticleGenerationService;
     private final MedicalArticleComplianceChecker medicalComplianceChecker;
+    private final SpecialIndustryComplianceAlertService specialIndustryComplianceAlertService;
     private final BatchArticleQualityChecker qualityChecker;
     private final ArticleTemplateAllocationService allocationService;
     private final TemplatePerspectiveService perspectiveService;
@@ -173,6 +174,7 @@ public class BatchArticleGenerationService {
                                          ArticleGenerationPromptContextFactory promptContextFactory,
                                          MedicalArticleGenerationService medicalArticleGenerationService,
                                          MedicalArticleComplianceChecker medicalComplianceChecker,
+                                         SpecialIndustryComplianceAlertService specialIndustryComplianceAlertService,
                                          BatchArticleQualityChecker qualityChecker,
                                          ArticleTemplateAllocationService allocationService,
                                          TemplatePerspectiveService perspectiveService,
@@ -207,6 +209,7 @@ public class BatchArticleGenerationService {
         this.promptContextFactory = promptContextFactory;
         this.medicalArticleGenerationService = medicalArticleGenerationService;
         this.medicalComplianceChecker = medicalComplianceChecker;
+        this.specialIndustryComplianceAlertService = specialIndustryComplianceAlertService;
         this.qualityChecker = qualityChecker;
         this.allocationService = allocationService;
         this.perspectiveService = perspectiveService;
@@ -565,12 +568,14 @@ public class BatchArticleGenerationService {
                 Long discardedArticleId = persistDiscardedArticle(project, task, generated, prompt, selectedModel, complianceResult,
                         promptContext.medicalContext());
                 markTaskComplianceDiscarded(task, discardedArticleId, prompt, selectedModel, generated, complianceResult, retryCount);
+                specialIndustryComplianceAlertService.notifyComplianceDiscarded(project, brand, task, discardedArticleId, complianceResult);
                 return;
             }
 
             Long articleId = persistArticle(project, task, generated.title(), generated.content(), prompt, generated.model(), generated.result(),
                     promptContext.medicalContext(), MedicalArticleConstants.COMPLIANCE_PASSED);
             medicalArticleGenerationService.recordHistory(project, brand, promptContext.medicalContext(), articleId);
+            specialIndustryComplianceAlertService.notifyPublishReviewPending(project, brand, task, articleId, promptContext.medicalContext());
             markTaskSuccess(task, articleId, prompt, generated.model(), generated.result(), generated.quality(), retryCount);
         } catch (Exception ex) {
             log.warn("Batch article generation task failed batchId={} taskId={}", batch.getId(), task.getId(), ex);

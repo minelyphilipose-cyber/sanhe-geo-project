@@ -22,6 +22,7 @@ import type {
 } from '@/types'
 
 export function getContentArticles(params: {
+  articleId?: number
   projectName?: string
   status?: string
   articleType?: string
@@ -43,6 +44,7 @@ export function getContentArticles(params: {
 }
 
 export function getSpecialIndustryArticles(params: {
+  articleId?: number
   projectName?: string
   status?: string
   complianceStatus?: string
@@ -910,60 +912,164 @@ export interface MedicalGenerationHistory {
   createdAt?: string | null
 }
 
-export function getMedicalTopicAngles(params?: Record<string, any>) {
+export interface SpecialIndustryRuleHitSummary {
+  ruleType: string
+  hitCount: number
+}
+
+export interface SpecialIndustryBatchTrace {
+  batchId: number
+  projectId?: number | null
+  projectName?: string | null
+  brandId?: number | null
+  brandName?: string | null
+  medicalIndustryCode?: string | null
+  medicalChannelTier?: string | null
+  topic?: string | null
+  status?: string | null
+  totalCount?: number | null
+  successCount?: number | null
+  failedCount?: number | null
+  discardedCount?: number | null
+  retryTaskCount?: number | null
+  createdAt?: string | null
+  finishedAt?: string | null
+  errorMessage?: string | null
+}
+
+export interface SpecialIndustryOverview {
+  pendingReviewCount: number
+  rejectedReviewCount: number
+  complianceFailedCount: number
+  discardedCount: number
+  officialPendingCount: number
+  todayHitCount: number
+  sevenDayHitCount: number
+  sevenDayDiscardedCount: number
+  topRuleHits: SpecialIndustryRuleHitSummary[]
+  recentProblemBatches: SpecialIndustryBatchTrace[]
+}
+
+export interface SpecialIndustryRuleTestRequest {
+  industryCode?: string | null
+  channelTier?: string | null
+  channelGroupCode?: string | null
+  channelSubCode?: string | null
+  brandName?: string | null
+  brandExposureLimit?: number | null
+  highRiskChannel?: boolean | null
+  title?: string | null
+  content: string
+}
+
+export interface SpecialIndustryRuleTestIssue {
+  ruleId?: number | null
+  ruleType?: string | null
+  severity?: string | null
+  matchedText?: string | null
+  message?: string | null
+}
+
+export interface SpecialIndustryRuleTestResult {
+  passed: boolean
+  issues: SpecialIndustryRuleTestIssue[]
+}
+
+export type SpecialIndustryTopicAngle = MedicalTopicAngle
+export type SpecialIndustryComplianceRule = MedicalComplianceRule
+export type SpecialIndustryComplianceKernel = MedicalComplianceKernel
+export type SpecialIndustryChannelStyleModule = MedicalChannelStyleModule
+export type SpecialIndustryComplianceHitLog = MedicalComplianceHitLog
+export type SpecialIndustryGenerationHistory = MedicalGenerationHistory
+
+export function getSpecialIndustryTopicAngles(params?: Record<string, any>) {
+  return request.get<R<PageResult<SpecialIndustryTopicAngle>>>('/content/special-industry/topic-angles', { params })
+}
+
+export function createSpecialIndustryTopicAngle(data: Partial<SpecialIndustryTopicAngle>) {
+  return request.post<R<SpecialIndustryTopicAngle>>('/content/special-industry/topic-angles', data)
+}
+
+export function updateSpecialIndustryTopicAngle(id: number, data: Partial<SpecialIndustryTopicAngle>) {
+  return request.put<R<SpecialIndustryTopicAngle>>(`/content/special-industry/topic-angles/${id}`, data)
+}
+
+export function deleteSpecialIndustryTopicAngle(id: number) {
+  return request.delete<R<void>>(`/content/special-industry/topic-angles/${id}`)
+}
+
+export function getSpecialIndustryComplianceRules(params?: Record<string, any>) {
+  return request.get<R<PageResult<SpecialIndustryComplianceRule>>>('/content/special-industry/rules', { params })
+}
+
+export function createSpecialIndustryComplianceRule(data: Partial<SpecialIndustryComplianceRule>) {
+  return request.post<R<SpecialIndustryComplianceRule>>('/content/special-industry/rules', data)
+}
+
+export function updateSpecialIndustryComplianceRule(id: number, data: Partial<SpecialIndustryComplianceRule>) {
+  return request.put<R<SpecialIndustryComplianceRule>>(`/content/special-industry/rules/${id}`, data)
+}
+
+export function getSpecialIndustryComplianceKernels(params?: Record<string, any>) {
+  return request.get<R<PageResult<SpecialIndustryComplianceKernel>>>('/content/special-industry/kernels', { params })
+}
+
+export function createSpecialIndustryComplianceKernel(data: Partial<SpecialIndustryComplianceKernel>) {
+  return request.post<R<SpecialIndustryComplianceKernel>>('/content/special-industry/kernels', data)
+}
+
+export function getSpecialIndustryChannelStyleModules(params?: Record<string, any>) {
+  return request.get<R<PageResult<SpecialIndustryChannelStyleModule>>>('/content/special-industry/channel-styles', { params })
+}
+
+export function createSpecialIndustryChannelStyleModule(data: Partial<SpecialIndustryChannelStyleModule>) {
+  return request.post<R<SpecialIndustryChannelStyleModule>>('/content/special-industry/channel-styles', data)
+}
+
+export function updateSpecialIndustryChannelStyleModule(id: number, data: Partial<SpecialIndustryChannelStyleModule>) {
+  return request.put<R<SpecialIndustryChannelStyleModule>>(`/content/special-industry/channel-styles/${id}`, data)
+}
+
+export function getSpecialIndustryComplianceHitLogs(params?: Record<string, any>) {
+  return request.get<R<PageResult<SpecialIndustryComplianceHitLog>>>('/content/special-industry/hit-logs', { params })
+}
+
+export function getSpecialIndustryGenerationHistory(params?: Record<string, any>) {
+  return request.get<R<PageResult<SpecialIndustryGenerationHistory>>>('/content/special-industry/generation-history', { params })
+}
+
+export const getMedicalTopicAngles = getSpecialIndustryTopicAngles
+export const createMedicalTopicAngle = createSpecialIndustryTopicAngle
+export const updateMedicalTopicAngle = updateSpecialIndustryTopicAngle
+export const deleteMedicalTopicAngle = deleteSpecialIndustryTopicAngle
+export const getMedicalComplianceRules = getSpecialIndustryComplianceRules
+export const createMedicalComplianceRule = createSpecialIndustryComplianceRule
+export const updateMedicalComplianceRule = updateSpecialIndustryComplianceRule
+export const getMedicalComplianceKernels = getSpecialIndustryComplianceKernels
+export const createMedicalComplianceKernel = createSpecialIndustryComplianceKernel
+export const getMedicalChannelStyleModules = getSpecialIndustryChannelStyleModules
+export const createMedicalChannelStyleModule = createSpecialIndustryChannelStyleModule
+export const updateMedicalChannelStyleModule = updateSpecialIndustryChannelStyleModule
+export const getMedicalComplianceHitLogs = getSpecialIndustryComplianceHitLogs
+export const getMedicalGenerationHistory = getSpecialIndustryGenerationHistory
+export function getMedicalTopicAnglesLegacy(params?: Record<string, any>) {
   return request.get<R<PageResult<MedicalTopicAngle>>>('/content/medical-articles/topic-angles', { params })
 }
 
-export function createMedicalTopicAngle(data: Partial<MedicalTopicAngle>) {
-  return request.post<R<MedicalTopicAngle>>('/content/medical-articles/topic-angles', data)
-}
-
-export function updateMedicalTopicAngle(id: number, data: Partial<MedicalTopicAngle>) {
-  return request.put<R<MedicalTopicAngle>>(`/content/medical-articles/topic-angles/${id}`, data)
-}
-
-export function deleteMedicalTopicAngle(id: number) {
-  return request.delete<R<void>>(`/content/medical-articles/topic-angles/${id}`)
-}
-
-export function getMedicalComplianceRules(params?: Record<string, any>) {
+export function getMedicalComplianceRulesLegacy(params?: Record<string, any>) {
   return request.get<R<PageResult<MedicalComplianceRule>>>('/content/medical-articles/rules', { params })
 }
 
-export function createMedicalComplianceRule(data: Partial<MedicalComplianceRule>) {
-  return request.post<R<MedicalComplianceRule>>('/content/medical-articles/rules', data)
+export function getSpecialIndustryOverview() {
+  return request.get<R<SpecialIndustryOverview>>('/content/special-industry/overview')
 }
 
-export function updateMedicalComplianceRule(id: number, data: Partial<MedicalComplianceRule>) {
-  return request.put<R<MedicalComplianceRule>>(`/content/medical-articles/rules/${id}`, data)
+export function getSpecialIndustryBatches(params?: Record<string, any>) {
+  return request.get<R<PageResult<SpecialIndustryBatchTrace>>>('/content/special-industry/batches', { params })
 }
 
-export function getMedicalComplianceKernels(params?: Record<string, any>) {
-  return request.get<R<PageResult<MedicalComplianceKernel>>>('/content/medical-articles/kernels', { params })
-}
-
-export function createMedicalComplianceKernel(data: Partial<MedicalComplianceKernel>) {
-  return request.post<R<MedicalComplianceKernel>>('/content/medical-articles/kernels', data)
-}
-
-export function getMedicalChannelStyleModules(params?: Record<string, any>) {
-  return request.get<R<PageResult<MedicalChannelStyleModule>>>('/content/medical-articles/channel-styles', { params })
-}
-
-export function createMedicalChannelStyleModule(data: Partial<MedicalChannelStyleModule>) {
-  return request.post<R<MedicalChannelStyleModule>>('/content/medical-articles/channel-styles', data)
-}
-
-export function updateMedicalChannelStyleModule(id: number, data: Partial<MedicalChannelStyleModule>) {
-  return request.put<R<MedicalChannelStyleModule>>(`/content/medical-articles/channel-styles/${id}`, data)
-}
-
-export function getMedicalComplianceHitLogs(params?: Record<string, any>) {
-  return request.get<R<PageResult<MedicalComplianceHitLog>>>('/content/medical-articles/hit-logs', { params })
-}
-
-export function getMedicalGenerationHistory(params?: Record<string, any>) {
-  return request.get<R<PageResult<MedicalGenerationHistory>>>('/content/medical-articles/generation-history', { params })
+export function testSpecialIndustryRules(data: SpecialIndustryRuleTestRequest) {
+  return request.post<R<SpecialIndustryRuleTestResult>>('/content/special-industry/rules/test', data)
 }
 
 export function getArticleGenerationOptions() {

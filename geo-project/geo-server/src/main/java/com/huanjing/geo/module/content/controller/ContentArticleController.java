@@ -49,7 +49,8 @@ public class ContentArticleController {
     private final ArticleGenerationReadinessService articleGenerationReadinessService;
 
     @GetMapping
-    public R<Page<ArticleDraft>> page(@RequestParam(required = false) String projectName,
+    public R<Page<ArticleDraft>> page(@RequestParam(required = false) Long articleId,
+                                      @RequestParam(required = false) String projectName,
                                       @RequestParam(required = false) String status,
                                       @RequestParam(required = false) String articleType,
                                       @RequestParam(required = false) String articleTypeCode,
@@ -65,7 +66,7 @@ public class ContentArticleController {
                                       @RequestParam(required = false) String createdEndDate,
                                       @RequestParam(defaultValue = "1") Long current,
                                       @RequestParam(defaultValue = "10") Long size) {
-        return R.ok(contentArticleService.page(projectName, status, articleType, articleTypeCode,
+        return R.ok(contentArticleService.page(articleId, projectName, status, articleType, articleTypeCode,
                 channelGroupCode, channelSubCode, generationMode, complianceStatus, publishReviewStatus,
                 medicalIndustryCode, medicalChannelTier, specialIndustryOnly, createdStartDate, createdEndDate, current, size));
     }

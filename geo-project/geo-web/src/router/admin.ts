@@ -174,10 +174,16 @@ const adminRoutes: RouteRecordRaw = {
       meta: { title: '文章提示词模板', hidden: true, permissions: ['content.prompt_template.manage'] },
     },
     {
+      path: 'content/special-industry-config',
+      name: 'SpecialIndustryConfig',
+      component: () => import('@/views/admin/content/SpecialIndustryConfig.vue'),
+      meta: { title: '特殊行业文章配置', hidden: true, permissions: ['content.prompt_template.manage'] },
+    },
+    {
       path: 'content/medical-article-config',
       name: 'MedicalArticleConfig',
-      component: () => import('@/views/admin/content/MedicalArticleConfig.vue'),
-      meta: { title: '医疗文章配置', hidden: true, permissions: ['content.prompt_template.manage'] },
+      redirect: '/admin/content/special-industry-config',
+      meta: { title: '特殊行业文章配置', hidden: true, permissions: ['content.prompt_template.manage'] },
     },
     {
       path: 'content/wechat-templates',
@@ -367,7 +373,7 @@ const adminRoutes: RouteRecordRaw = {
       path: 'alerts',
       name: 'AlertCenter',
       component: () => import('@/views/admin/alert/AlertCenter.vue'),
-      meta: { title: '告警中心', icon: 'Bell', permissions: ['content.distribution.retry', 'dispatch.alert.resolve', 'system.alert.resolve'] },
+      meta: { title: '告警中心', icon: 'Bell', permissions: ['content.read', 'content.distribution.retry', 'dispatch.alert.resolve', 'system.alert.resolve'] },
     },
     {
       path: 'activity-logs',

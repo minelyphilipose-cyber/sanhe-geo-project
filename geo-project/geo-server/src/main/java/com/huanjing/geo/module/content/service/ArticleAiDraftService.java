@@ -82,6 +82,7 @@ public class ArticleAiDraftService {
     private final BrandOfferingPromptSelector offeringPromptSelector;
     private final ArticleGenerationEngine articleGenerationEngine;
     private final MedicalArticleComplianceChecker medicalComplianceChecker;
+    private final SpecialIndustryComplianceAlertService specialIndustryComplianceAlertService;
     private final ArticleCoverSelectionService coverSelectionService;
     private final ArticleAiDraftRateLimiter rateLimiter;
     private final AuditService auditService;
@@ -98,6 +99,7 @@ public class ArticleAiDraftService {
                                  BrandOfferingPromptSelector offeringPromptSelector,
                                  ArticleGenerationEngine articleGenerationEngine,
                                  MedicalArticleComplianceChecker medicalComplianceChecker,
+                                 SpecialIndustryComplianceAlertService specialIndustryComplianceAlertService,
                                  ArticleCoverSelectionService coverSelectionService,
                                  ArticleAiDraftRateLimiter rateLimiter,
                                  AuditService auditService, ObjectMapper objectMapper,
@@ -112,6 +114,7 @@ public class ArticleAiDraftService {
         this.offeringPromptSelector = offeringPromptSelector;
         this.articleGenerationEngine = articleGenerationEngine;
         this.medicalComplianceChecker = medicalComplianceChecker;
+        this.specialIndustryComplianceAlertService = specialIndustryComplianceAlertService;
         this.coverSelectionService = coverSelectionService;
         this.rateLimiter = rateLimiter;
         this.auditService = auditService; this.objectMapper = objectMapper;
@@ -318,6 +321,13 @@ public class ArticleAiDraftService {
             model = generated.model();
             ensureMedicalCompliancePassed(context, generated);
             ArticleDraft draft = persistTemplateDraft(context, operator, generated, model);
+            specialIndustryComplianceAlertService.notifyPublishReviewPending(
+                    context.project(),
+                    context.brand(),
+                    null,
+                    draft.getId(),
+                    context.medicalContext()
+            );
             auditGenerated(AuditResult.SUCCESS, operator, context.project(), draft.getId(), context.prompt().userPrompt().length(),
                     model.platformCode(), model.modelId(), elapsedMs(started), "template_generation_generated", null);
             return new ArticleAiDraftResponse(draft.getId(), STATUS_APPROVED);

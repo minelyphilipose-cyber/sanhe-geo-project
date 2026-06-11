@@ -125,6 +125,7 @@ class BatchArticleGenerationServiceTest {
                 promptContextFactory,
                 medicalArticleGenerationService,
                 medicalComplianceChecker,
+                mock(SpecialIndustryComplianceAlertService.class),
                 qualityChecker,
                 allocationService,
                 perspectiveService,

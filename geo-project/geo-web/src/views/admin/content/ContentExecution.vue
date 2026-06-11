@@ -1365,12 +1365,6 @@ function openPromptTemplateManagement() {
   })
 }
 
-function openMedicalArticleConfig() {
-  router.push({
-    path: '/admin/content/medical-article-config',
-  })
-}
-
 function openSpecialIndustryComplianceWorkbench() {
   router.push({
     path: '/admin/content/special-industry-compliance',

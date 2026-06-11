@@ -5,14 +5,24 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ChannelStyleSaveRequest;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ChannelStyleVO;
+import com.huanjing.geo.module.content.dto.MedicalArticleDtos.BatchTraceVO;
+import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceIssueVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceHitLogVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceKernelSaveRequest;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceKernelVO;
+import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleTestRequest;
+import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleTestResultVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleSaveRequest;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.ComplianceRuleVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.GenerationHistoryVO;
+import com.huanjing.geo.module.content.dto.MedicalArticleDtos.RuleHitSummaryVO;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleSaveRequest;
 import com.huanjing.geo.module.content.dto.MedicalArticleDtos.TopicAngleVO;
+import com.huanjing.geo.module.content.dto.MedicalArticleDtos.WorkbenchOverviewVO;
+import com.huanjing.geo.module.content.constant.MedicalArticleConstants;
+import com.huanjing.geo.module.content.entity.ArticleDraft;
+import com.huanjing.geo.module.content.entity.BatchArticleGenerationBatch;
+import com.huanjing.geo.module.content.entity.BatchArticleGenerationTask;
 import com.huanjing.geo.module.content.entity.MedicalChannelStyleModule;
 import com.huanjing.geo.module.content.entity.MedicalComplianceHitLog;
 import com.huanjing.geo.module.content.entity.MedicalComplianceKernel;
@@ -20,6 +30,8 @@ import com.huanjing.geo.module.content.entity.MedicalComplianceRule;
 import com.huanjing.geo.module.content.entity.MedicalGenerationHistory;
 import com.huanjing.geo.module.content.entity.MedicalTopicAngle;
 import com.huanjing.geo.module.content.mapper.ArticleDraftMapper;
+import com.huanjing.geo.module.content.mapper.BatchArticleGenerationBatchMapper;
+import com.huanjing.geo.module.content.mapper.BatchArticleGenerationTaskMapper;
 import com.huanjing.geo.module.content.mapper.MedicalChannelStyleModuleMapper;
 import com.huanjing.geo.module.content.mapper.MedicalComplianceHitLogMapper;
 import com.huanjing.geo.module.content.mapper.MedicalComplianceKernelMapper;
@@ -59,7 +71,40 @@ public class MedicalArticleConfigService {
     private final ProjectMapper projectMapper;
     private final BrandMapper brandMapper;
     private final ArticleDraftMapper articleDraftMapper;
+    private final BatchArticleGenerationBatchMapper batchMapper;
+    private final BatchArticleGenerationTaskMapper taskMapper;
+    private final MedicalArticleComplianceChecker complianceChecker;
     private final CurrentUserService currentUserService;
+
+    public WorkbenchOverviewVO overview() {
+        currentUserService.ensurePermission("project.read");
+        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime todayStart = LocalDate.now().atStartOfDay();
+        LocalDateTime sevenDaysAgo = now.minusDays(7);
+        List<MedicalComplianceHitLog> recentHits = hitLogMapper.selectList(new LambdaQueryWrapper<MedicalComplianceHitLog>()
+                .ge(MedicalComplianceHitLog::getCreatedAt, sevenDaysAgo)
+                .orderByDesc(MedicalComplianceHitLog::getCreatedAt, MedicalComplianceHitLog::getId));
+        List<RuleHitSummaryVO> topRuleHits = recentHits.stream()
+                .collect(Collectors.groupingBy(row -> StringUtils.hasText(row.getRuleType()) ? row.getRuleType() : "unknown", Collectors.counting()))
+                .entrySet()
+                .stream()
+                .sorted(Map.Entry.<String, Long>comparingByValue().reversed())
+                .limit(8)
+                .map(entry -> new RuleHitSummaryVO(entry.getKey(), entry.getValue()))
+                .toList();
+        return new WorkbenchOverviewVO(
+                countArticlesByReviewStatus("pending"),
+                countArticlesByReviewStatus("rejected"),
+                countArticlesByComplianceStatuses(List.of("failed", MedicalArticleConstants.COMPLIANCE_DISCARDED)),
+                countArticlesByComplianceStatuses(List.of(MedicalArticleConstants.COMPLIANCE_DISCARDED)),
+                countOfficialPendingArticles(),
+                recentHits.stream().filter(row -> row.getCreatedAt() != null && !row.getCreatedAt().isBefore(todayStart)).count(),
+                (long) recentHits.size(),
+                countDiscardedTasksSince(sevenDaysAgo),
+                topRuleHits,
+                recentProblemBatches()
+        );
+    }
 
     public Page<TopicAngleVO> pageTopicAngles(String industryCode,
                                               String categoryCode,
@@ -268,6 +313,71 @@ public class MedicalArticleConfigService {
         return result;
     }
 
+    public Page<BatchTraceVO> pageBatches(String status, String industryCode, long current, long size) {
+        currentUserService.ensurePermission("project.read");
+        LambdaQueryWrapper<BatchArticleGenerationBatch> wrapper = new LambdaQueryWrapper<BatchArticleGenerationBatch>()
+                .isNotNull(BatchArticleGenerationBatch::getMedicalIndustryCode)
+                .eq(StringUtils.hasText(status), BatchArticleGenerationBatch::getStatus, trim(status))
+                .eq(StringUtils.hasText(industryCode), BatchArticleGenerationBatch::getMedicalIndustryCode, trim(industryCode))
+                .orderByDesc(BatchArticleGenerationBatch::getCreatedAt, BatchArticleGenerationBatch::getId);
+        Page<BatchArticleGenerationBatch> page = batchMapper.selectPage(new Page<>(current, size), wrapper);
+        List<BatchArticleGenerationBatch> records = page.getRecords();
+        Map<Long, String> projectNames = projectNames(records.stream().map(BatchArticleGenerationBatch::getProjectId).toList());
+        Map<Long, String> brandNames = brandNames(records.stream().map(BatchArticleGenerationBatch::getBrandId).toList());
+        Map<Long, List<BatchArticleGenerationTask>> taskMap = records.isEmpty()
+                ? Collections.emptyMap()
+                : taskMapper.selectList(new LambdaQueryWrapper<BatchArticleGenerationTask>()
+                        .in(BatchArticleGenerationTask::getBatchId, records.stream().map(BatchArticleGenerationBatch::getId).toList()))
+                .stream()
+                .collect(Collectors.groupingBy(BatchArticleGenerationTask::getBatchId));
+        Page<BatchTraceVO> result = new Page<>(page.getCurrent(), page.getSize(), page.getTotal());
+        result.setRecords(records.stream().map(row -> toBatchTrace(row, projectNames, brandNames, taskMap)).toList());
+        return result;
+    }
+
+    public ComplianceRuleTestResultVO testRules(ComplianceRuleTestRequest req) {
+        currentUserService.ensurePermission("content.prompt_template.manage");
+        Brand brand = null;
+        if (StringUtils.hasText(req.brandName())) {
+            brand = new Brand();
+            brand.setBrandName(trim(req.brandName()));
+        }
+        MedicalArticleGenerationService.MedicalPromptContext context = new MedicalArticleGenerationService.MedicalPromptContext(
+                StringUtils.hasText(req.industryCode()) ? trim(req.industryCode()) : "medical_beauty",
+                StringUtils.hasText(req.channelTier()) ? trim(req.channelTier()) : "education",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                "",
+                req.brandExposureLimit() == null ? 2 : Math.max(0, req.brandExposureLimit()),
+                false,
+                "",
+                Boolean.TRUE.equals(req.highRiskChannel()),
+                null,
+                null,
+                null,
+                null
+        );
+        MedicalArticleComplianceChecker.CheckResult result = complianceChecker.check(new MedicalArticleComplianceChecker.CheckInput(
+                null,
+                null,
+                null,
+                null,
+                trimToNull(req.channelGroupCode()),
+                trimToNull(req.channelSubCode()),
+                req.title(),
+                req.content(),
+                brand,
+                context
+        ));
+        return new ComplianceRuleTestResultVO(result.passed(), result.issues().stream()
+                .map(issue -> new ComplianceIssueVO(issue.ruleId(), issue.ruleType(), issue.severity(), issue.matchedText(), issue.message()))
+                .toList());
+    }
+
     private MedicalTopicAngle requireTopicAngle(Long id) {
         MedicalTopicAngle row = topicAngleMapper.selectById(id);
         if (row == null || row.getDeletedAt() != null) {
@@ -357,6 +467,75 @@ public class MedicalArticleConfigService {
                 row.getBrandId(), brandNames.get(row.getBrandId()), row.getTopicAngleId(),
                 topicAngles.get(row.getTopicAngleId()), row.getStructureSkeleton(), row.getFocus(),
                 row.getArticleId(), articleTitles.get(row.getArticleId()), row.getCreatedAt());
+    }
+
+    private BatchTraceVO toBatchTrace(BatchArticleGenerationBatch row,
+                                      Map<Long, String> projectNames,
+                                      Map<Long, String> brandNames,
+                                      Map<Long, List<BatchArticleGenerationTask>> taskMap) {
+        List<BatchArticleGenerationTask> tasks = taskMap.getOrDefault(row.getId(), List.of());
+        int discarded = (int) tasks.stream()
+                .filter(task -> MedicalArticleConstants.COMPLIANCE_DISCARDED.equals(task.getComplianceStatus()))
+                .count();
+        int retried = (int) tasks.stream()
+                .filter(task -> task.getRetryCount() != null && task.getRetryCount() > 0)
+                .count();
+        return new BatchTraceVO(row.getId(), row.getProjectId(), projectNames.get(row.getProjectId()),
+                row.getBrandId(), brandNames.get(row.getBrandId()), row.getMedicalIndustryCode(),
+                row.getMedicalChannelTier(), row.getTopic(), row.getStatus(), row.getTotalCount(),
+                row.getSuccessCount(), row.getFailedCount(), discarded, retried, row.getCreatedAt(),
+                row.getFinishedAt(), row.getErrorMessage());
+    }
+
+    private Long countArticlesByReviewStatus(String status) {
+        return articleDraftMapper.selectCount(new LambdaQueryWrapper<ArticleDraft>()
+                .isNotNull(ArticleDraft::getMedicalIndustryCode)
+                .eq(ArticleDraft::getPublishReviewStatus, status));
+    }
+
+    private Long countArticlesByComplianceStatuses(List<String> statuses) {
+        if (statuses == null || statuses.isEmpty()) {
+            return 0L;
+        }
+        return articleDraftMapper.selectCount(new LambdaQueryWrapper<ArticleDraft>()
+                .isNotNull(ArticleDraft::getMedicalIndustryCode)
+                .in(ArticleDraft::getComplianceStatus, statuses));
+    }
+
+    private Long countOfficialPendingArticles() {
+        return articleDraftMapper.selectCount(new LambdaQueryWrapper<ArticleDraft>()
+                .isNotNull(ArticleDraft::getMedicalIndustryCode)
+                .eq(ArticleDraft::getMedicalChannelTier, "official_site")
+                .eq(ArticleDraft::getPublishReviewStatus, "pending"));
+    }
+
+    private Long countDiscardedTasksSince(LocalDateTime since) {
+        return taskMapper.selectCount(new LambdaQueryWrapper<BatchArticleGenerationTask>()
+                .eq(BatchArticleGenerationTask::getComplianceStatus, MedicalArticleConstants.COMPLIANCE_DISCARDED)
+                .ge(BatchArticleGenerationTask::getUpdatedAt, since));
+    }
+
+    private List<BatchTraceVO> recentProblemBatches() {
+        List<BatchArticleGenerationBatch> batches = batchMapper.selectList(new LambdaQueryWrapper<BatchArticleGenerationBatch>()
+                .isNotNull(BatchArticleGenerationBatch::getMedicalIndustryCode)
+                .and(wrapper -> wrapper
+                        .gt(BatchArticleGenerationBatch::getFailedCount, 0)
+                        .or()
+                        .eq(BatchArticleGenerationBatch::getStatus, "failed")
+                        .or()
+                        .eq(BatchArticleGenerationBatch::getStatus, "partial_success"))
+                .orderByDesc(BatchArticleGenerationBatch::getUpdatedAt, BatchArticleGenerationBatch::getId)
+                .last("limit 5"));
+        if (batches.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, String> projectNames = projectNames(batches.stream().map(BatchArticleGenerationBatch::getProjectId).toList());
+        Map<Long, String> brandNames = brandNames(batches.stream().map(BatchArticleGenerationBatch::getBrandId).toList());
+        Map<Long, List<BatchArticleGenerationTask>> taskMap = taskMapper.selectList(new LambdaQueryWrapper<BatchArticleGenerationTask>()
+                        .in(BatchArticleGenerationTask::getBatchId, batches.stream().map(BatchArticleGenerationBatch::getId).toList()))
+                .stream()
+                .collect(Collectors.groupingBy(BatchArticleGenerationTask::getBatchId));
+        return batches.stream().map(row -> toBatchTrace(row, projectNames, brandNames, taskMap)).toList();
     }
 
     private <T> void applyCreatedDateFilter(LambdaQueryWrapper<T> wrapper,

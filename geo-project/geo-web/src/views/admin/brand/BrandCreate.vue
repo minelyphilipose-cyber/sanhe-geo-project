@@ -142,6 +142,13 @@
 
         <template v-if="isMedicalComplianceIndustry">
           <div class="brand-section-bar"><span />医疗合规信息<i /></div>
+          <el-alert
+            class="is-wide"
+            type="warning"
+            show-icon
+            :closable="false"
+            title="保存品牌后，请在品牌详情的产品信息中至少启用一个医疗项目；否则医疗文章生成会被项目资质闸门拦截。"
+          />
           <div class="brand-form-grid">
             <el-form-item label="机构类型"><el-input v-model="form.institutionType" maxlength="128" /></el-form-item>
             <el-form-item label="医疗广告审查证明编号"><el-input v-model="form.medicalAdReviewNo" maxlength="128" /></el-form-item>

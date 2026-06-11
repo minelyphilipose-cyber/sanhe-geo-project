@@ -71,6 +71,7 @@ public class ContentArticleService {
     private final ArticleCoverSelectionService coverSelectionService;
     private final BrandAccessService brandAccessService;
     private final AuditService auditService;
+    private final SpecialIndustryComplianceAlertService specialIndustryComplianceAlertService;
 
     public Page<ArticleDraft> page(String projectName, String status, String articleType, long current, long size) {
         return page(projectName, status, articleType, null, null, null, null, null, null, null, null, null, null, null, current, size);
@@ -91,6 +92,28 @@ public class ContentArticleService {
                 generationMode, null, null, null, null, null, createdStartDate, createdEndDate, current, size);
     }
 
+    public Page<ArticleDraft> page(Long articleId,
+                                   String projectName,
+                                   String status,
+                                   String articleType,
+                                   String articleTypeCode,
+                                   String channelGroupCode,
+                                   String channelSubCode,
+                                   String generationMode,
+                                   String complianceStatus,
+                                   String publishReviewStatus,
+                                   String medicalIndustryCode,
+                                   String medicalChannelTier,
+                                   Boolean specialIndustryOnly,
+                                   String createdStartDate,
+                                   String createdEndDate,
+                                   long current,
+                                   long size) {
+        return pageInternal(articleId, projectName, status, articleType, articleTypeCode, channelGroupCode, channelSubCode,
+                generationMode, complianceStatus, publishReviewStatus, medicalIndustryCode, medicalChannelTier,
+                specialIndustryOnly, createdStartDate, createdEndDate, current, size);
+    }
+
     public Page<ArticleDraft> page(String projectName,
                                    String status,
                                    String articleType,
@@ -107,11 +130,36 @@ public class ContentArticleService {
                                    String createdEndDate,
                                    long current,
                                    long size) {
+        return pageInternal(null, projectName, status, articleType, articleTypeCode, channelGroupCode, channelSubCode,
+                generationMode, complianceStatus, publishReviewStatus, medicalIndustryCode, medicalChannelTier,
+                specialIndustryOnly, createdStartDate, createdEndDate, current, size);
+    }
+
+    private Page<ArticleDraft> pageInternal(Long articleId,
+                                            String projectName,
+                                            String status,
+                                            String articleType,
+                                            String articleTypeCode,
+                                            String channelGroupCode,
+                                            String channelSubCode,
+                                            String generationMode,
+                                            String complianceStatus,
+                                            String publishReviewStatus,
+                                            String medicalIndustryCode,
+                                            String medicalChannelTier,
+                                            Boolean specialIndustryOnly,
+                                            String createdStartDate,
+                                            String createdEndDate,
+                                            long current,
+                                            long size) {
         SysUser operator = currentUserService.requireCurrentUser();
         currentUserService.ensurePermission("project.read");
         LambdaQueryWrapper<ArticleDraft> wrapper = new LambdaQueryWrapper<ArticleDraft>()
                 .ne(ArticleDraft::getStatus, "deleted")
                 .orderByDesc(ArticleDraft::getCreatedAt);
+        if (articleId != null && articleId > 0) {
+            wrapper.eq(ArticleDraft::getId, articleId);
+        }
         if (StringUtils.hasText(projectName) || currentUserService.isPartnerUser(operator)) {
             List<Long> projectIds = resolveReadableProjectIds(operator, projectName);
             if (projectIds.isEmpty()) {
@@ -618,6 +666,12 @@ public class ContentArticleService {
         }
         auditArticleTransition("MEDICAL_PUBLISH_REVIEW", AuditResult.SUCCESS, operator, project, article,
                 oldStatus, newStatus, req.getComment(), null);
+        specialIndustryComplianceAlertService.closePublishReviewPending(article, project, operator.getId());
+        if (MedicalArticleConstants.REVIEW_REJECTED.equals(newStatus)) {
+            specialIndustryComplianceAlertService.notifyPublishReviewRejected(article, project, operator.getId(), req.getComment());
+        } else {
+            specialIndustryComplianceAlertService.closePublishReviewRejected(article, operator.getId());
+        }
     }
 
     @Transactional
