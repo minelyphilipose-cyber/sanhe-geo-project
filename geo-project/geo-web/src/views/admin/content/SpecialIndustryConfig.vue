@@ -19,9 +19,26 @@
       <el-tab-pane label="命中日志" name="logs" />
     </el-tabs>
 
+    <section class="tab-guide">
+      <div>
+        <strong>{{ currentGuide.title }}</strong>
+        <p>{{ currentGuide.description }}</p>
+      </div>
+      <ul>
+        <li v-for="item in currentGuide.tips" :key="item">{{ item }}</li>
+      </ul>
+    </section>
+
     <el-card class="admin-table-card">
       <el-table v-loading="loading" :data="records" border>
-        <el-table-column v-for="column in columns" :key="column.prop" :prop="column.prop" :label="column.label" :min-width="column.width || 120" show-overflow-tooltip />
+        <el-table-column v-for="column in columns" :key="column.prop" :label="column.label" :min-width="column.width || 120" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-tag v-if="column.tag" size="small" :type="columnTagType(column.prop, row[column.prop])">
+              {{ formatColumnValue(row, column) }}
+            </el-tag>
+            <span v-else>{{ formatColumnValue(row, column) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column v-if="activeTab !== 'logs'" label="操作" width="120" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
@@ -43,44 +60,44 @@
       <el-form class="special-industry-form" :model="form" label-position="top">
         <template v-if="activeTab === 'angles'">
           <el-form-item label="行业"><MedicalIndustrySelect v-model="form.industryCode" /></el-form-item>
-          <el-form-item label="品类编码"><el-input v-model="form.categoryCode" /></el-form-item>
-          <el-form-item label="品类名称"><el-input v-model="form.categoryName" /></el-form-item>
-          <el-form-item label="选题角度"><el-input v-model="form.topicAngle" type="textarea" :rows="3" /></el-form-item>
-          <el-form-item label="推荐侧重"><el-select v-model="form.recommendedFocus" clearable><el-option v-for="item in focuses" :key="item" :label="item" :value="item" /></el-select></el-form-item>
+          <el-form-item label="品类编码"><el-input v-model="form.categoryCode" placeholder="如 skin_laser、implant_tooth；需与客户项目资质品类一致" /></el-form-item>
+          <el-form-item label="品类名称"><el-input v-model="form.categoryName" placeholder="运营可读名称，如 皮肤光电、种植牙" /></el-form-item>
+          <el-form-item label="选题角度"><el-input v-model="form.topicAngle" type="textarea" :rows="3" placeholder="写成可直接进入文章生成的选题方向，避免营销承诺和疗效暗示" /></el-form-item>
+          <el-form-item label="推荐侧重"><el-select v-model="form.recommendedFocus" clearable><el-option v-for="item in focuses" :key="item" :label="focusLabel(item)" :value="item" /></el-select></el-form-item>
           <el-form-item label="排序"><el-input-number v-model="form.sortOrder" :min="0" /></el-form-item>
           <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
         </template>
 
         <template v-else-if="activeTab === 'rules'">
-          <el-form-item label="规则类型"><el-input v-model="form.ruleType" /></el-form-item>
+          <el-form-item label="规则类型"><el-input v-model="form.ruleType" placeholder="如 efficacy_claim、ranking_claim、patient_testimonial" /></el-form-item>
           <el-form-item label="行业"><MedicalIndustrySelect v-model="form.industryCode" clearable /></el-form-item>
           <el-form-item label="渠道档位"><MedicalTierSelect v-model="form.channelTier" clearable /></el-form-item>
-          <el-form-item label="渠道组"><el-input v-model="form.channelGroupCode" placeholder="可留空表示通用" /></el-form-item>
-          <el-form-item label="渠道子类"><el-input v-model="form.channelSubCode" placeholder="可留空表示通用" /></el-form-item>
+          <el-form-item label="渠道组"><el-input v-model="form.channelGroupCode" placeholder="可留空表示通用；如 self_media、forum、official_site" /></el-form-item>
+          <el-form-item label="渠道子类"><el-input v-model="form.channelSubCode" placeholder="可留空表示通用；如 wechat、douyin、xiaohongshu" /></el-form-item>
           <el-form-item label="匹配方式"><el-select v-model="form.matchMode"><el-option label="包含" value="contains" /><el-option label="正则" value="regex" /></el-select></el-form-item>
           <el-form-item label="严重级别"><el-select v-model="form.severity"><el-option label="阻断" value="block" /><el-option label="提醒" value="warn" /></el-select></el-form-item>
-          <el-form-item label="规则内容"><el-input v-model="form.pattern" type="textarea" :rows="3" /></el-form-item>
-          <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
+          <el-form-item label="规则内容"><el-input v-model="form.pattern" type="textarea" :rows="3" placeholder="contains 填词或短语；regex 仅用于第一、最、权威等语境依赖表达，避免误杀" /></el-form-item>
+          <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" placeholder="说明这条规则的业务依据、适用范围或排除场景" /></el-form-item>
           <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
         </template>
 
         <template v-else-if="activeTab === 'kernels'">
           <el-form-item label="行业"><MedicalIndustrySelect v-model="form.industryCode" /></el-form-item>
           <el-form-item label="渠道档位"><MedicalTierSelect v-model="form.channelTier" /></el-form-item>
-          <el-form-item label="内核名称"><el-input v-model="form.kernelName" /></el-form-item>
+          <el-form-item label="内核名称"><el-input v-model="form.kernelName" placeholder="如 医美科普合规内核 v1" /></el-form-item>
           <el-form-item label="版本号"><el-input-number v-model="form.versionNo" :min="1" /></el-form-item>
           <el-form-item label="品牌露出上限"><el-input-number v-model="form.brandExposureLimit" :min="0" /></el-form-item>
           <el-form-item label="发布前人工确认"><el-switch v-model="form.requireManualPublishReview" /></el-form-item>
-          <el-form-item label="系统提示词"><el-input v-model="form.systemPrompt" type="textarea" :rows="8" /></el-form-item>
+          <el-form-item label="系统提示词"><el-input v-model="form.systemPrompt" type="textarea" :rows="8" placeholder="维护该行业×档位的硬性合规边界，如风险提示、禁用承诺、品牌露出限制、官网发布闸门" /></el-form-item>
           <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
         </template>
 
         <template v-else-if="activeTab === 'styles'">
-          <el-form-item label="渠道组"><el-input v-model="form.channelGroupCode" /></el-form-item>
-          <el-form-item label="渠道子类"><el-input v-model="form.channelSubCode" placeholder="可留空" /></el-form-item>
+          <el-form-item label="渠道组"><el-input v-model="form.channelGroupCode" placeholder="如 self_media、forum、official_site" /></el-form-item>
+          <el-form-item label="渠道子类"><el-input v-model="form.channelSubCode" placeholder="可留空；如 wechat、douyin、xiaohongshu" /></el-form-item>
           <el-form-item label="渠道档位"><MedicalTierSelect v-model="form.channelTier" /></el-form-item>
           <el-form-item label="高风险渠道"><el-switch v-model="form.highRisk" /></el-form-item>
-          <el-form-item label="文体提示词"><el-input v-model="form.stylePrompt" type="textarea" :rows="8" /></el-form-item>
+          <el-form-item label="文体提示词"><el-input v-model="form.stylePrompt" type="textarea" :rows="8" placeholder="维护该渠道的表达风格和限制，如小红书/抖音禁止体验种草、论坛避免患者证明口吻" /></el-form-item>
           <el-form-item label="启用"><el-switch v-model="form.enabled" /></el-form-item>
         </template>
       </el-form>
@@ -147,10 +164,18 @@ import {
   updateSpecialIndustryTopicAngle,
   type SpecialIndustryRuleTestResult,
 } from '@/api/content'
+import { useDictStore } from '@/stores/dict'
 
 type TabName = 'angles' | 'rules' | 'kernels' | 'styles' | 'logs'
+type ColumnConfig = {
+  prop: string
+  label: string
+  width?: number
+  tag?: boolean
+}
 
 const activeTab = ref<TabName>('angles')
+const dictStore = useDictStore()
 const records = ref<any[]>([])
 const loading = ref(false)
 const saving = ref(false)
@@ -174,44 +199,133 @@ const ruleTestForm = reactive({
   content: '第一步要做基础评估，需结合个体差异和风险判断。',
 })
 
-const columns = computed(() => {
+const guideMap: Record<TabName, { title: string, description: string, tips: string[] }> = {
+  angles: {
+    title: '选题角度用于控制“能写什么”',
+    description: '生成医疗/医美文章前会先按客户项目资质筛选可用选题。这里维护的是合规、克制、可复用的选题方向，不是营销标题库。',
+    tips: ['行业和品类必须与品牌项目资质匹配，否则生成链路不会选用。', '选题角度应强调科普、风险、误区和理性决策，避免承诺效果。', '推荐侧重会影响差异化变量和文章结构倾向。'],
+  },
+  rules: {
+    title: '合规规则用于控制“不能出现什么”',
+    description: '文章生成后、入库前会执行规则校验。阻断级规则命中后会触发重试，连续失败会落废弃记录。',
+    tips: ['行业、档位、渠道留空表示通用规则；填写后只在对应范围生效。', '绝对违禁词优先用“包含”；第一、最、权威等语境词用“正则”降低误杀。', '新增规则后建议先用“规则测试”验证命中和放行场景。'],
+  },
+  kernels: {
+    title: '合规内核用于控制“系统提示词总边界”',
+    description: '内核按行业和渠道档位生效，会在模板提示词之前拼入，约束品牌露出、风险提示、官网发布确认等硬规则。',
+    tips: ['同一行业和档位通常只启用一个主版本。', '品牌露出上限用于约束正文中品牌/机构名称出现次数。', '官网档建议开启发布前人工确认，避免无审查编号自动发布。'],
+  },
+  styles: {
+    title: '渠道模块用于控制“在哪里怎么写”',
+    description: '渠道模块补充公众号、知乎、抖音、小红书、论坛等渠道的文体要求和额外限制。',
+    tips: ['渠道组决定大类，如 self_media、forum、official_site。', '渠道子类用于精确到 wechat、douyin、xiaohongshu 等平台。', '高风险渠道会触发更严格的理性提示和医美表达限制。'],
+  },
+  logs: {
+    title: '命中日志用于追溯“为什么被拦”',
+    description: '每次生成命中合规规则都会记录命中文本、规则类型、处理动作和任务信息，便于运营复盘规则是否过严或模板是否需要调整。',
+    tips: ['action=retry 表示系统尝试重生成；discard 表示三次失败后废弃。', '可结合特殊行业工作台按文章、批次、任务继续定位。', '日志只读，不建议手工修改。'],
+  },
+}
+const currentGuide = computed(() => guideMap[activeTab.value])
+
+const tierLabels: Record<string, string> = {
+  education: '科普',
+  source_site: '信源站',
+  official_site: '官网',
+}
+
+const channelGroupLabels: Record<string, string> = {
+  self_media: '自媒体',
+  forum: '平台网站/论坛',
+  official_site: '官网',
+  agent_site: '品牌官网',
+  industry_site: '行业站',
+  authority_media: '权威媒体',
+}
+
+const channelSubLabels: Record<string, string> = {
+  wechat: '微信公众号',
+  zhihu: '知乎',
+  baijiahao: '百家号',
+  toutiao: '今日头条',
+  netease: '网易号',
+  sohu: '搜狐号',
+  douyin: '抖音图文',
+  xiaohongshu: '小红书',
+}
+
+const focusLabels: Record<string, string> = {
+  principle: '原理科普',
+  misconception: '误区澄清',
+  risk: '风险提示',
+  rational_decision: '理性决策',
+}
+
+const ruleTypeLabels: Record<string, string> = {
+  efficacy_claim: '疗效承诺',
+  safety_absolute: '绝对安全',
+  patient_testimonial: '患者证明',
+  urgency_promotion: '促单诱导',
+  anxiety_inducement: '容貌焦虑',
+  before_after: '前后对比',
+  experience_seeding: '体验种草',
+  ranking_claim: '排名/权威绝对化',
+  brand_exposure: '品牌露出超限',
+  risk_disclosure_missing: '缺少风险提示',
+  rational_hint_missing: '缺少理性提示',
+  oral_absolute: '口腔绝对化',
+}
+
+const severityLabels: Record<string, string> = {
+  block: '阻断',
+  warn: '提醒',
+}
+
+const actionLabels: Record<string, string> = {
+  retry: '重试',
+  discard: '废弃',
+  block: '阻断',
+  rejected: '驳回',
+}
+
+const columns = computed<ColumnConfig[]>(() => {
   if (activeTab.value === 'angles') return [
-    { prop: 'industryCode', label: '行业' },
+    { prop: 'industryCode', label: '行业', tag: true },
     { prop: 'categoryName', label: '品类' },
     { prop: 'topicAngle', label: '选题角度', width: 260 },
-    { prop: 'recommendedFocus', label: '推荐侧重' },
-    { prop: 'enabled', label: '启用' },
+    { prop: 'recommendedFocus', label: '推荐侧重', tag: true },
+    { prop: 'enabled', label: '启用', tag: true },
   ]
   if (activeTab.value === 'rules') return [
-    { prop: 'ruleType', label: '规则类型' },
-    { prop: 'industryCode', label: '行业' },
-    { prop: 'channelTier', label: '档位' },
+    { prop: 'ruleType', label: '规则类型', tag: true },
+    { prop: 'industryCode', label: '行业', tag: true },
+    { prop: 'channelTier', label: '档位', tag: true },
     { prop: 'pattern', label: '规则内容', width: 260 },
-    { prop: 'severity', label: '级别' },
-    { prop: 'enabled', label: '启用' },
+    { prop: 'severity', label: '级别', tag: true },
+    { prop: 'enabled', label: '启用', tag: true },
   ]
   if (activeTab.value === 'kernels') return [
-    { prop: 'industryCode', label: '行业' },
-    { prop: 'channelTier', label: '档位' },
+    { prop: 'industryCode', label: '行业', tag: true },
+    { prop: 'channelTier', label: '档位', tag: true },
     { prop: 'kernelName', label: '名称' },
     { prop: 'versionNo', label: '版本' },
     { prop: 'brandExposureLimit', label: '品牌上限' },
-    { prop: 'enabled', label: '启用' },
+    { prop: 'enabled', label: '启用', tag: true },
   ]
   if (activeTab.value === 'styles') return [
-    { prop: 'channelGroupCode', label: '渠道组' },
-    { prop: 'channelSubCode', label: '子类' },
-    { prop: 'channelTier', label: '档位' },
-    { prop: 'highRisk', label: '高风险' },
-    { prop: 'enabled', label: '启用' },
+    { prop: 'channelGroupCode', label: '渠道组', tag: true },
+    { prop: 'channelSubCode', label: '子类', tag: true },
+    { prop: 'channelTier', label: '档位', tag: true },
+    { prop: 'highRisk', label: '高风险', tag: true },
+    { prop: 'enabled', label: '启用', tag: true },
   ]
   return [
     { prop: 'createdAt', label: '时间', width: 170 },
     { prop: 'projectId', label: '项目' },
     { prop: 'taskId', label: '任务' },
-    { prop: 'ruleType', label: '规则类型' },
+    { prop: 'ruleType', label: '规则类型', tag: true },
     { prop: 'matchedText', label: '命中文本', width: 260 },
-    { prop: 'action', label: '动作' },
+    { prop: 'action', label: '动作', tag: true },
   ]
 })
 
@@ -247,6 +361,78 @@ const MedicalTierSelect = defineComponent({
     ])
   },
 })
+
+function industryLabel(value?: string | null) {
+  if (!value) return '通用'
+  return dictStore.label('compliance_industry', value)
+}
+
+function tierLabel(value?: string | null) {
+  if (!value) return '通用'
+  return tierLabels[value] || value
+}
+
+function channelGroupLabel(value?: string | null) {
+  if (!value) return '通用'
+  return channelGroupLabels[value] || value
+}
+
+function channelSubLabel(value?: string | null) {
+  if (!value) return '通用'
+  return channelSubLabels[value] || value
+}
+
+function focusLabel(value?: string | null) {
+  if (!value) return '-'
+  return focusLabels[value] || value
+}
+
+function ruleTypeLabel(value?: string | null) {
+  if (!value) return '通用'
+  return ruleTypeLabels[value] || value
+}
+
+function severityLabel(value?: string | null) {
+  if (!value) return '-'
+  return severityLabels[value] || value
+}
+
+function actionLabel(value?: string | null) {
+  if (!value) return '-'
+  return actionLabels[value] || value
+}
+
+function booleanLabel(value: unknown) {
+  return value === true || value === 1 || value === '1' || value === 'true' ? '是' : '否'
+}
+
+function formatColumnValue(row: Record<string, any>, column: ColumnConfig) {
+  const value = row[column.prop]
+  if (value === null || value === undefined || value === '') {
+    if (column.prop === 'industryCode' || column.prop === 'channelTier' || column.prop === 'channelGroupCode' || column.prop === 'channelSubCode') {
+      return '通用'
+    }
+    return '-'
+  }
+  if (column.prop === 'industryCode') return industryLabel(value)
+  if (column.prop === 'channelTier') return tierLabel(value)
+  if (column.prop === 'channelGroupCode') return channelGroupLabel(value)
+  if (column.prop === 'channelSubCode') return channelSubLabel(value)
+  if (column.prop === 'recommendedFocus') return focusLabel(value)
+  if (column.prop === 'ruleType') return ruleTypeLabel(value)
+  if (column.prop === 'severity') return severityLabel(value)
+  if (column.prop === 'action') return actionLabel(value)
+  if (column.prop === 'enabled' || column.prop === 'highRisk') return booleanLabel(value)
+  return String(value)
+}
+
+function columnTagType(prop: string, value: unknown): 'success' | 'warning' | 'danger' | 'info' {
+  if (prop === 'enabled') return value === true || value === 1 || value === '1' || value === 'true' ? 'success' : 'info'
+  if (prop === 'highRisk') return value === true || value === 1 || value === '1' || value === 'true' ? 'danger' : 'info'
+  if (prop === 'severity') return value === 'block' ? 'danger' : 'warning'
+  if (prop === 'action') return value === 'discard' || value === 'block' ? 'danger' : 'warning'
+  return 'info'
+}
 
 function resetForm() {
   Object.keys(form).forEach((key) => delete form[key])
@@ -331,7 +517,10 @@ async function submitRuleTest() {
   }
 }
 
-onMounted(loadCurrent)
+onMounted(async () => {
+  await dictStore.ensureLoaded()
+  await loadCurrent()
+})
 </script>
 
 <style scoped>
@@ -361,6 +550,41 @@ onMounted(loadCurrent)
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.tab-guide {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1.2fr);
+  gap: 18px;
+  margin: 12px 0 14px;
+  padding: 14px 16px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.tab-guide strong {
+  display: block;
+  color: #0f172a;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.tab-guide p {
+  margin: 6px 0 0;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.tab-guide ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .table-pagination {
@@ -399,7 +623,8 @@ onMounted(loadCurrent)
 
 @media (max-width: 760px) {
   .special-industry-form,
-  .form-grid {
+  .form-grid,
+  .tab-guide {
     grid-template-columns: 1fr;
   }
 }
