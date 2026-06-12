@@ -759,7 +759,7 @@ export function useSelfMediaDistribution(options: UseSelfMediaDistributionOption
   }
 
   function materialThumbUrl(material: BrandMaterial) {
-    return materialThumbUrls.value[material.id] || material.fileUrl
+    return materialThumbUrls.value[material.id] || material.publicUrl || ''
   }
 
   async function loadMaterialThumbs() {

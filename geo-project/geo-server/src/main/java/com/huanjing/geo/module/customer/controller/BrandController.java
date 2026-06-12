@@ -7,6 +7,7 @@ import com.huanjing.geo.module.customer.dto.BrandOfferingRequest;
 import com.huanjing.geo.module.customer.dto.BrandOfferingVO;
 import com.huanjing.geo.module.customer.dto.BrandImageFolderRequest;
 import com.huanjing.geo.module.customer.dto.BrandImageFolderVO;
+import com.huanjing.geo.module.customer.dto.BrandMaterialVO;
 import com.huanjing.geo.module.customer.dto.BrandStatementRegenerateRequest;
 import com.huanjing.geo.module.customer.dto.BrandStatementUpdateRequest;
 import com.huanjing.geo.module.customer.dto.BrandUpdateRequest;
@@ -134,22 +135,22 @@ public class BrandController {
     }
 
     @PostMapping("/{id}/materials/upload")
-    public R<BrandMaterial> uploadMaterial(
+    public R<BrandMaterialVO> uploadMaterial(
             @PathVariable Long id,
             @RequestParam String category,
             @RequestParam(required = false) Long folderId,
             @RequestPart("file") MultipartFile file
     ) {
-        return R.ok(brandProfileService.uploadMaterial(id, category, folderId, file));
+        return R.ok(brandProfileService.toMaterialVO(brandProfileService.uploadMaterial(id, category, folderId, file)));
     }
 
     @GetMapping("/{id}/materials")
-    public R<List<BrandMaterial>> listMaterials(
+    public R<List<BrandMaterialVO>> listMaterials(
             @PathVariable Long id,
             @RequestParam(required = false) String category,
             @RequestParam(required = false) Long folderId
     ) {
-        return R.ok(brandProfileService.listMaterials(id, category, folderId));
+        return R.ok(brandProfileService.listMaterialViews(id, category, folderId));
     }
 
     @GetMapping("/{id}/image-folders")

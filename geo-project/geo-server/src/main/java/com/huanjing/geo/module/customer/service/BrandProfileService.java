@@ -17,6 +17,7 @@ import com.huanjing.geo.module.customer.mapper.BrandMaterialMapper;
 import com.huanjing.geo.module.customer.mapper.BrandOfferingMapper;
 import com.huanjing.geo.module.customer.mapper.BrandProfileVersionMapper;
 import com.huanjing.geo.module.customer.mapper.CompanyMapper;
+import com.huanjing.geo.module.customer.dto.BrandMaterialVO;
 import com.huanjing.geo.module.system.entity.SysUser;
 import com.huanjing.geo.module.system.service.ActivityLogService;
 import com.huanjing.geo.module.system.service.CurrentUserService;
@@ -67,6 +68,25 @@ public class BrandProfileService {
             wrapper.eq(BrandMaterial::getFolderId, folderId);
         }
         return brandMaterialMapper.selectList(wrapper);
+    }
+
+    public List<BrandMaterialVO> listMaterialViews(Long brandId, String category, Long folderId) {
+        return listMaterials(brandId, category, folderId).stream()
+                .map(this::toMaterialVO)
+                .toList();
+    }
+
+    public BrandMaterialVO toMaterialVO(BrandMaterial material) {
+        return BrandMaterialVO.from(material, buildPublicImageUrl(material));
+    }
+
+    private String buildPublicImageUrl(BrandMaterial material) {
+        if (material == null
+                || !"brand_image".equals(material.getCategory())
+                || !StringUtils.hasText(material.getObjectKey())) {
+            return null;
+        }
+        return publicUrlService.buildPublicStreamUrl(material);
     }
 
     public BrandMaterial materialDetail(Long brandId, Long materialId) {

@@ -191,7 +191,9 @@ export interface BrandMaterial {
   category: string
   fileName: string
   fileType?: string | null
+  /** @deprecated Use publicUrl or preview-url endpoints instead of the stored object URL. */
   fileUrl: string
+  publicUrl?: string | null
   objectKey: string
   fileSize?: number | null
   createdBy: number

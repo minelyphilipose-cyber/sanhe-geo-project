@@ -969,11 +969,11 @@ const todayText = computed(() => {
 })
 const imageMaterials = computed(() => {
   const folder = imageFolders.value.find((item) => item.id === selectedImageFolderId.value)
-  return (folder?.materials || []).filter((material) => material.category === 'brand_image' && isImageType(material.fileType) && Boolean(material.fileUrl))
+  return (folder?.materials || []).filter((material) => material.category === 'brand_image' && isImageType(material.fileType) && Boolean(material.publicUrl))
 })
 const selectedImageMaterial = computed(() => imageMaterials.value.find((item) => item.id === selectedImageMaterialId.value) || null)
 const allImageMaterials = computed(() => imageFolders.value.flatMap((folder) => folder.materials || [])
-  .filter((material) => material.category === 'brand_image' && isImageType(material.fileType) && Boolean(material.fileUrl)))
+  .filter((material) => material.category === 'brand_image' && isImageType(material.fileType) && Boolean(material.publicUrl)))
 const selectedCoverMaterial = computed(() => allImageMaterials.value.find((item) => item.id === selectedCoverMaterialId.value) || null)
 const activePickerMaterialId = computed(() => imagePickerMode.value === 'cover' ? selectedCoverMaterialId.value : selectedImageMaterialId.value)
 const activePickerMaterial = computed(() => imagePickerMode.value === 'cover' ? selectedCoverMaterial.value : selectedImageMaterial.value)
@@ -1549,7 +1549,7 @@ function selectImageMaterial(material: BrandMaterial) {
 }
 
 function materialThumbUrl(material: BrandMaterial) {
-  return imageThumbUrls.value[material.id] || previewImageUrl(material.fileUrl) || material.fileUrl
+  return imageThumbUrls.value[material.id] || material.publicUrl || ''
 }
 
 async function loadImageThumbs(brandId: number) {
@@ -1634,11 +1634,11 @@ function clearSelectedCover() {
 
 function insertSelectedImage() {
   const material = selectedImageMaterial.value
-  if (!material?.fileUrl) {
+  if (!material?.publicUrl) {
     ElMessage.warning('请选择可用图片')
     return
   }
-  const markdownText = `![${escapeMarkdownAlt(imageAltText.value.trim() || filenameWithoutExt(material.fileName))}](${material.fileUrl})`
+  const markdownText = `![${escapeMarkdownAlt(imageAltText.value.trim() || filenameWithoutExt(material.fileName))}](${material.publicUrl})`
   if (markdownOverridden.value) {
     manualMarkdown.value = appendMarkdown(manualMarkdown.value, markdownText)
   } else {

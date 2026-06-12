@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.customer.dto.BrandImageFolderRequest;
 import com.huanjing.geo.module.customer.dto.BrandImageFolderVO;
+import com.huanjing.geo.module.customer.dto.BrandMaterialVO;
 import com.huanjing.geo.module.customer.entity.Brand;
 import com.huanjing.geo.module.customer.entity.BrandImageFolder;
 import com.huanjing.geo.module.customer.entity.BrandImageFolderProject;
@@ -52,6 +53,7 @@ public class BrandImageFolderService {
     private final BrandImageFolderProjectMapper folderProjectMapper;
     private final BrandImageFolderTagMapper folderTagMapper;
     private final CurrentUserService currentUserService;
+    private final BrandMaterialPublicUrlService publicUrlService;
 
     public List<BrandImageFolderVO> listFolders(Long brandId, Long projectId, String tag, boolean activeOnly, boolean includeMaterials) {
         Brand brand = requireAccessibleBrand(brandId, true);
@@ -79,7 +81,7 @@ public class BrandImageFolderService {
         List<Long> folderIds = folders.stream().map(BrandImageFolder::getId).toList();
         Map<Long, List<Long>> projectMap = loadProjectIds(folderIds);
         Map<Long, List<String>> tagMap = loadTags(folderIds);
-        Map<Long, List<BrandMaterial>> materialMap = includeMaterials ? loadMaterials(folderIds) : Map.of();
+        Map<Long, List<BrandMaterialVO>> materialMap = includeMaterials ? loadMaterialViews(folderIds) : Map.of();
         Map<Long, Integer> materialCountMap = loadMaterialCounts(folderIds);
 
         return folders.stream()
@@ -318,12 +320,21 @@ public class BrandImageFolderService {
                 ));
     }
 
-    private Map<Long, List<BrandMaterial>> loadMaterials(List<Long> folderIds) {
+    private Map<Long, List<BrandMaterialVO>> loadMaterialViews(List<Long> folderIds) {
         return brandMaterialMapper.selectList(new LambdaQueryWrapper<BrandMaterial>()
                         .in(BrandMaterial::getFolderId, folderIds)
                         .orderByDesc(BrandMaterial::getCreatedAt))
                 .stream()
-                .collect(Collectors.groupingBy(BrandMaterial::getFolderId, LinkedHashMap::new, Collectors.toList()));
+                .map(this::toMaterialVO)
+                .collect(Collectors.groupingBy(BrandMaterialVO::getFolderId, LinkedHashMap::new, Collectors.toList()));
+    }
+
+    private BrandMaterialVO toMaterialVO(BrandMaterial material) {
+        String publicUrl = null;
+        if ("brand_image".equals(material.getCategory()) && StringUtils.hasText(material.getObjectKey())) {
+            publicUrl = publicUrlService.buildPublicStreamUrl(material);
+        }
+        return BrandMaterialVO.from(material, publicUrl);
     }
 
     private Map<Long, Integer> loadMaterialCounts(List<Long> folderIds) {

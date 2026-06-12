@@ -1,7 +1,6 @@
 package com.huanjing.geo.module.customer.dto;
 
 import com.huanjing.geo.module.customer.entity.BrandImageFolder;
-import com.huanjing.geo.module.customer.entity.BrandMaterial;
 import lombok.Data;
 
 import java.time.LocalDateTime;
@@ -21,7 +20,7 @@ public class BrandImageFolderVO {
     private LocalDateTime updatedAt;
     private List<Long> projectIds = new ArrayList<>();
     private List<String> tags = new ArrayList<>();
-    private List<BrandMaterial> materials = new ArrayList<>();
+    private List<BrandMaterialVO> materials = new ArrayList<>();
     private Integer materialCount;
     private Boolean projectRelated;
 
