@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.presale.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
 import com.huanjing.geo.module.presale.dto.response.ReportDetailVO;
 import com.huanjing.geo.module.presale.dto.response.ReportVersionMetaVO;
@@ -10,6 +12,9 @@ import com.huanjing.geo.module.presale.persist.entity.PresaleReportVersion;
 import com.huanjing.geo.module.presale.persist.mapper.PresaleReportVersionMapper;
 import com.huanjing.geo.module.system.service.CurrentUserService;
 import org.springframework.stereotype.Service;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 版本读取服务。职责单一:取详情 / 取最新版本元信息(进度页轮询)。
@@ -22,15 +27,18 @@ public class PresaleReportVersionService {
     private final PresaleAccessService accessService;
     private final CurrentUserService currentUserService;
     private final PresaleL3Defaults l3Defaults;
+    private final ObjectMapper objectMapper;
 
     public PresaleReportVersionService(PresaleReportVersionMapper versionMapper,
                                        PresaleAccessService accessService,
                                        CurrentUserService currentUserService,
-                                       PresaleL3Defaults l3Defaults) {
+                                       PresaleL3Defaults l3Defaults,
+                                       ObjectMapper objectMapper) {
         this.versionMapper = versionMapper;
         this.accessService = accessService;
         this.currentUserService = currentUserService;
         this.l3Defaults = l3Defaults;
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -58,6 +66,7 @@ public class PresaleReportVersionService {
         return ReportDetailVO.builder()
                 .reportId(report.getId())
                 .brandName(report.getBrandName())
+                .brandFormerNames(parseJsonStringArray(report.getBrandFormerNames()))
                 .industry(report.getIndustry())
                 .industryRole(report.getIndustryRole())
                 .region(report.getRegion())
@@ -72,6 +81,27 @@ public class PresaleReportVersionService {
                         version.getComputedSnapshotJson()))
                 .editableFieldMeta(l3Defaults.fieldMeta())
                 .build();
+    }
+
+    private List<String> parseJsonStringArray(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            if (node == null || !node.isArray()) {
+                return List.of();
+            }
+            List<String> out = new ArrayList<>();
+            for (JsonNode item : node) {
+                if (item != null && item.isTextual() && !item.asText().isBlank()) {
+                    out.add(item.asText().trim());
+                }
+            }
+            return out;
+        } catch (Exception ex) {
+            return List.of();
+        }
     }
 
     /**

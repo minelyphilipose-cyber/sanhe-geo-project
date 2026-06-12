@@ -183,6 +183,7 @@ public class PresaleRawSnapshotAssembler {
     private ClientInfo buildClientInfo(PresaleReport report) {
         return ClientInfo.builder()
                 .brandName(report.getBrandName())
+                .brandFormerNames(parseBrandFormerNames(report))
                 .industry(report.getIndustry())
                 .industryRole(report.getIndustryRole())
                 .region(report.getRegion())
@@ -408,8 +409,15 @@ public class PresaleRawSnapshotAssembler {
         if (report == null || report.getSpecifiedCompetitors() == null || report.getSpecifiedCompetitors().isBlank()) {
             return List.of();
         }
+        return parseJsonStringArray(report.getSpecifiedCompetitors(), "specified_competitors", report.getId());
+    }
+
+    private List<String> parseJsonStringArray(String json, String fieldName, Long reportId) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
         try {
-            JsonNode node = objectMapper.readTree(report.getSpecifiedCompetitors());
+            JsonNode node = objectMapper.readTree(json);
             if (node == null || !node.isArray()) {
                 return List.of();
             }
@@ -421,7 +429,7 @@ public class PresaleRawSnapshotAssembler {
             }
             return out;
         } catch (Exception ex) {
-            log.warn("Skip invalid specified_competitors json, reportId={}", report.getId(), ex);
+            log.warn("Skip invalid {} json, reportId={}", fieldName, reportId, ex);
             return List.of();
         }
     }
@@ -548,7 +556,7 @@ public class PresaleRawSnapshotAssembler {
             return List.of();
         }
         PresaleCompetitorAggregator.Batch1MentionStats stats =
-                competitorAggregator.aggregateBatch1MentionStats(versionId, report.getBrandName());
+                competitorAggregator.aggregateBatch1MentionStats(versionId, selfBrandNames(report));
 
         int rank = 1;
         List<Competitor> out = new ArrayList<>();
@@ -620,7 +628,7 @@ public class PresaleRawSnapshotAssembler {
             return List.of();
         }
         PresaleCompetitorAggregator.Batch1MentionStats stats =
-                competitorAggregator.aggregateBatch1MentionStats(versionId, report.getBrandName());
+                competitorAggregator.aggregateBatch1MentionStats(versionId, selfBrandNames(report));
         List<PresaleCompetitorAggregator.ExtractedCompetitor> out = new ArrayList<>();
         for (String competitorDisplayName : extractedCompetitorDisplayNames) {
             String normalized = competitorAggregator.normalizeName(competitorDisplayName);
@@ -637,6 +645,24 @@ public class PresaleRawSnapshotAssembler {
             return List.of();
         }
         return aggregateSceneAdvantages(versionId, groupName);
+    }
+
+    private List<String> selfBrandNames(PresaleReport report) {
+        if (report == null) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        if (report.getBrandName() != null && !report.getBrandName().isBlank()) {
+            out.add(report.getBrandName().trim());
+        }
+        out.addAll(parseBrandFormerNames(report));
+        return out;
+    }
+
+    private List<String> parseBrandFormerNames(PresaleReport report) {
+        return report == null
+                ? List.of()
+                : parseJsonStringArray(report.getBrandFormerNames(), "brand_former_names", report.getId());
     }
 
     private List<String> aggregateCompetitorSceneAdvantages(Long versionId, String competitorDisplayName) {

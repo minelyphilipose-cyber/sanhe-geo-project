@@ -1,6 +1,8 @@
 package com.huanjing.geo.module.presale.poc;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.common.result.R;
 import com.huanjing.geo.module.presale.dto.response.ReportDetailVO;
@@ -18,6 +20,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * POC ONLY.
  *
@@ -33,6 +38,7 @@ public class PresalePrintPocController {
 
     private final PresaleReportMapper reportMapper;
     private final PresaleReportVersionMapper versionMapper;
+    private final ObjectMapper objectMapper;
 
     @GetMapping("/{reportId}")
     public R<ReportDetailVO> getPrintSnapshot(@PathVariable Long reportId) {
@@ -54,6 +60,7 @@ public class PresalePrintPocController {
         return R.ok(ReportDetailVO.builder()
                 .reportId(report.getId())
                 .brandName(report.getBrandName())
+                .brandFormerNames(parseJsonStringArray(report.getBrandFormerNames()))
                 .industry(report.getIndustry())
                 .industryRole(report.getIndustryRole())
                 .region(report.getRegion())
@@ -64,6 +71,27 @@ public class PresalePrintPocController {
                 .computedSnapshotJson(version.getComputedSnapshotJson())
                 .editableContentJson(version.getEditableContentJson())
                 .build());
+    }
+
+    private List<String> parseJsonStringArray(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            if (node == null || !node.isArray()) {
+                return List.of();
+            }
+            List<String> out = new ArrayList<>();
+            for (JsonNode item : node) {
+                if (item != null && item.isTextual() && !item.asText().isBlank()) {
+                    out.add(item.asText().trim());
+                }
+            }
+            return out;
+        } catch (Exception ex) {
+            return List.of();
+        }
     }
 
     private PresaleReportVersion findPrintableVersion(PresaleReport report) {

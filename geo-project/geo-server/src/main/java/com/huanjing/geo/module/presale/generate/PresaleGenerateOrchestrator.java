@@ -393,10 +393,11 @@ public class PresaleGenerateOrchestrator {
         enterStage(versionId, STAGE_COMPETITOR_EXTRACT, "extract competitors");
 
         List<String> specifiedCompetitors = parseSpecifiedCompetitors(report);
+        List<String> selfBrandNames = selfBrandNames(report);
         PresaleCompetitorNormalizationService.NormalizationOutcome normalizationOutcome =
                 specifiedCompetitors.isEmpty()
-                        ? extractTopCompetitorsFromBatch1(versionId, report.getBrandName(), operatorUserId, isManager)
-                        : specifiedCompetitorsFromBatch1Stats(versionId, report.getBrandName(), specifiedCompetitors);
+                        ? extractTopCompetitorsFromBatch1(versionId, report.getBrandName(), selfBrandNames, operatorUserId, isManager)
+                        : specifiedCompetitorsFromBatch1Stats(versionId, selfBrandNames, specifiedCompetitors);
         List<PresaleCompetitorAggregator.ExtractedCompetitor> extractedCompetitorStats =
                 normalizationOutcome.competitors();
         ensureGenerationStillRunning(versionId, STAGE_COMPETITOR_EXTRACT);
@@ -1648,20 +1649,21 @@ public class PresaleGenerateOrchestrator {
     private PresaleCompetitorNormalizationService.NormalizationOutcome extractTopCompetitorsFromBatch1(
             Long versionId,
             String brandName,
+            List<String> selfBrandNames,
             Long operatorUserId,
             boolean isManager) {
         if (competitorNormalizationService == null) {
             List<PresaleCompetitorAggregator.ExtractedCompetitor> competitors =
-                    extractTopCompetitorsFromBatch1(versionId, brandName).stream()
+                    extractTopCompetitorsFromBatch1(versionId, selfBrandNames).stream()
                             .map(name -> new PresaleCompetitorAggregator.ExtractedCompetitor(name, 0, List.of(name)))
                             .toList();
             return new PresaleCompetitorNormalizationService.NormalizationOutcome(competitors, false);
         }
         List<PresaleCompetitorAggregator.RawCompetitorMention> rawTop =
-                competitorAggregator.extractTopRawCompetitorMentions(versionId, brandName, 10);
+                competitorAggregator.extractTopRawCompetitorMentions(versionId, selfBrandNames, 10);
         if ((rawTop == null || rawTop.isEmpty()) && competitorAggregator != null) {
             List<PresaleCompetitorAggregator.ExtractedCompetitor> competitors =
-                    extractTopCompetitorsFromBatch1(versionId, brandName).stream()
+                    extractTopCompetitorsFromBatch1(versionId, selfBrandNames).stream()
                             .map(name -> new PresaleCompetitorAggregator.ExtractedCompetitor(name, 0, List.of(name)))
                             .toList();
             return new PresaleCompetitorNormalizationService.NormalizationOutcome(competitors, false);
@@ -1671,10 +1673,10 @@ public class PresaleGenerateOrchestrator {
 
     private PresaleCompetitorNormalizationService.NormalizationOutcome specifiedCompetitorsFromBatch1Stats(
             Long versionId,
-            String brandName,
+            List<String> selfBrandNames,
             List<String> specifiedCompetitors) {
         PresaleCompetitorAggregator.Batch1MentionStats stats =
-                competitorAggregator.aggregateBatch1MentionStats(versionId, brandName);
+                competitorAggregator.aggregateBatch1MentionStats(versionId, selfBrandNames);
         List<PresaleCompetitorAggregator.ExtractedCompetitor> competitors = specifiedCompetitors.stream()
                 .filter(name -> name != null && !name.isBlank())
                 .map(name -> {
@@ -1688,8 +1690,8 @@ public class PresaleGenerateOrchestrator {
         return new PresaleCompetitorNormalizationService.NormalizationOutcome(competitors, false);
     }
 
-    private List<String> extractTopCompetitorsFromBatch1(Long versionId, String brandName) {
-        List<String> competitors = competitorAggregator.extractTopCompetitorsFromBatch1(versionId, brandName);
+    private List<String> extractTopCompetitorsFromBatch1(Long versionId, List<String> selfBrandNames) {
+        List<String> competitors = competitorAggregator.extractTopCompetitorsFromBatch1(versionId, selfBrandNames);
         return competitors == null ? List.of() : competitors;
     }
 
@@ -1697,8 +1699,21 @@ public class PresaleGenerateOrchestrator {
         if (report == null || report.getSpecifiedCompetitors() == null || report.getSpecifiedCompetitors().isBlank()) {
             return List.of();
         }
+        return parseJsonStringArray(report.getSpecifiedCompetitors(), "specified_competitors", report.getId());
+    }
+
+    private List<String> parseBrandFormerNames(PresaleReport report) {
+        return report == null
+                ? List.of()
+                : parseJsonStringArray(report.getBrandFormerNames(), "brand_former_names", report.getId());
+    }
+
+    private List<String> parseJsonStringArray(String json, String fieldName, Long reportId) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
         try {
-            JsonNode node = objectMapper.readTree(report.getSpecifiedCompetitors());
+            JsonNode node = objectMapper.readTree(json);
             if (node == null || !node.isArray()) {
                 return List.of();
             }
@@ -1710,9 +1725,21 @@ public class PresaleGenerateOrchestrator {
             }
             return out;
         } catch (Exception ex) {
-            log.warn("ignore invalid specified_competitors json, reportId={}", report.getId(), ex);
+            log.warn("ignore invalid {} json, reportId={}", fieldName, reportId, ex);
             return List.of();
         }
+    }
+
+    private List<String> selfBrandNames(PresaleReport report) {
+        if (report == null) {
+            return List.of();
+        }
+        List<String> out = new ArrayList<>();
+        if (report.getBrandName() != null && !report.getBrandName().isBlank()) {
+            out.add(report.getBrandName().trim());
+        }
+        out.addAll(parseBrandFormerNames(report));
+        return out;
     }
 
     private String assembleRawSnapshot(Long versionId,

@@ -1,199 +1,291 @@
 <template>
-  <div class="presale-report-create admin-page">
-    <div class="page-header admin-page-header">
-      <div>
-        <el-breadcrumb separator="/">
-          <el-breadcrumb-item :to="{ path: '/admin/presale/report' }">AI可见度诊断报告</el-breadcrumb-item>
-          <el-breadcrumb-item>新建报告</el-breadcrumb-item>
-        </el-breadcrumb>
-        <div class="admin-page-kicker">报告生成</div>
-        <h2 class="page-title admin-page-title">新建报告</h2>
-        <div class="admin-page-subtitle">录入品牌基础信息，确认诊断范围与问题模板后提交生成。</div>
+  <div class="presale-report-create">
+    <header class="report-topbar">
+      <div class="report-wrap topbar-inner">
+        <div class="logo-dot">
+          <el-icon><MagicStick /></el-icon>
+        </div>
+        <span class="topbar-title">幻境 AI · GEO 诊断平台</span>
+        <span class="topbar-spacer"></span>
+        <button class="ghost-btn" type="button" @click="onSaveDraft">保存草稿</button>
       </div>
-    </div>
+    </header>
 
-    <el-card shadow="never" class="form-card admin-rich-card">
+    <main class="report-wrap report-main">
+      <div class="page-head">
+        <nav class="breadcrumb-line">
+          <router-link to="/admin/presale/report">AI 可见度诊断报告</router-link>
+          <el-icon><ArrowRight /></el-icon>
+          <span>新建报告</span>
+        </nav>
+        <h1 class="page-title">新建报告</h1>
+        <p class="page-subtitle">录入品牌基础信息，确认诊断范围与问题模板后提交生成。</p>
+      </div>
+
       <el-form
         ref="formRef"
         :model="form"
         :rules="rules"
-        label-width="120px"
-        label-position="right"
+        label-position="top"
+        class="basic-info-form"
       >
-        <el-form-item label="品牌名称" prop="brandName">
-          <el-input
-            v-model="form.brandName"
-            placeholder="如:海底捞"
-            maxlength="100"
-            show-word-limit
-            style="max-width: 480px"
-          />
-        </el-form-item>
-
-        <el-form-item label="行业" prop="industry">
-          <el-select
-            v-model="form.industry"
-            placeholder="选择或输入行业"
-            filterable
-            allow-create
-            default-first-option
-            style="max-width: 320px"
-            @change="onIndustryChange"
-          >
-            <el-option
-              v-for="opt in industryOptions"
-              :key="opt.value"
-              :label="opt.label"
-              :value="opt.value"
-            />
-          </el-select>
-        </el-form-item>
-
-        <el-form-item label="身份" prop="industryRole">
-          <el-select
-            v-model="form.industryRole"
-            placeholder="选择或输入身份"
-            :disabled="!form.industry"
-            filterable
-            allow-create
-            default-first-option
-            style="max-width: 320px"
-          >
-            <el-option
-              v-for="opt in filteredRoleOptions"
-              :key="opt.value"
-              :label="opt.label"
-              :value="opt.value"
-            />
-          </el-select>
-          <span v-if="!form.industry" class="form-tip">请先选择行业</span>
-        </el-form-item>
-
-        <el-form-item label="地区" prop="region">
-          <el-input
-            v-model="form.region"
-            placeholder="如:全国"
-            maxlength="50"
-            show-word-limit
-            style="max-width: 320px"
-          />
-        </el-form-item>
-
-        <el-form-item label="目标用户" prop="userType">
-          <el-input
-            v-model="form.userType"
-            placeholder="可选,如:商务宴请人群、年轻消费者"
-            maxlength="50"
-            show-word-limit
-            style="max-width: 480px"
-          />
-        </el-form-item>
-
-        <el-form-item label="客户诉求" prop="userDemand">
-          <el-input
-            v-model="form.userDemand"
-            type="textarea"
-            :rows="3"
-            placeholder="可选,最多 500 字。例如:了解我们品牌在 AI 推荐中的真实表现。"
-            maxlength="500"
-            show-word-limit
-            style="max-width: 640px"
-          />
-        </el-form-item>
-
-        <el-form-item label="指定竞品" prop="specifiedCompetitors">
-          <div class="competitor-inputs">
-            <el-input
-              v-for="(_, index) in form.specifiedCompetitors"
-              :key="index"
-              v-model="form.specifiedCompetitors[index]"
-              :placeholder="`竞品 ${index + 1}`"
-              maxlength="100"
-              show-word-limit
-            />
-            <div class="form-tip">
-              可不填，由系统自动识别 Top3；若填写，必须填满 3 个竞品，并将按这 3 个竞品进行对比诊断。
+        <section class="report-section">
+          <div class="section-head">
+            <div class="section-ico blue">
+              <el-icon><OfficeBuilding /></el-icon>
+            </div>
+            <div class="section-titles">
+              <h2>品牌基础信息</h2>
+              <p>用于定位诊断主体与所属行业范围</p>
             </div>
           </div>
-        </el-form-item>
+
+          <div class="section-body">
+            <div class="form-grid">
+              <el-form-item class="form-item span-full" prop="brandName">
+                <template #label>
+                  <span class="field-label">品牌名称 <span class="req">*</span></span>
+                </template>
+                <el-input
+                  v-model="form.brandName"
+                  placeholder="请输入品牌全称"
+                  maxlength="100"
+                  show-word-limit
+                />
+              </el-form-item>
+
+              <el-form-item class="form-item span-full" prop="brandFormerNames">
+                <template #label>
+                  <span class="field-label">品牌曾用名 <span class="optional-badge">可选</span></span>
+                </template>
+                <div class="former-name-inputs">
+                  <el-input
+                    v-for="(_, index) in form.brandFormerNames"
+                    :key="index"
+                    v-model="form.brandFormerNames[index]"
+                    :placeholder="`曾用名 ${index + 1}`"
+                    maxlength="100"
+                    show-word-limit
+                  />
+                  <div class="form-tip">
+                    <el-icon><InfoFilled /></el-icon>
+                    <span>最多 3 个；仅用于竞品统计时排除，不计入本品牌提及。</span>
+                  </div>
+                </div>
+              </el-form-item>
+
+              <el-form-item class="form-item span-full" prop="industry">
+                <template #label>
+                  <span class="field-label">行业 <span class="req">*</span></span>
+                </template>
+                <el-select
+                  v-model="form.industry"
+                  placeholder="选择或输入行业"
+                  filterable
+                  allow-create
+                  default-first-option
+                  @change="onIndustryChange"
+                >
+                  <el-option
+                    v-for="opt in industryOptions"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
+              </el-form-item>
+
+              <el-form-item class="form-item span-full" prop="industryRole">
+                <template #label>
+                  <span class="field-label">身份 <span class="req">*</span></span>
+                </template>
+                <el-select
+                  v-model="form.industryRole"
+                  placeholder="选择或输入身份"
+                  :disabled="!form.industry"
+                  filterable
+                  allow-create
+                  default-first-option
+                >
+                  <el-option
+                    v-for="opt in filteredRoleOptions"
+                    :key="opt.value"
+                    :label="opt.label"
+                    :value="opt.value"
+                  />
+                </el-select>
+                <span v-if="!form.industry" class="form-tip inline-tip">请先选择行业</span>
+              </el-form-item>
+
+              <el-form-item class="form-item span-full" prop="region">
+                <template #label>
+                  <span class="field-label">地区 <span class="req">*</span></span>
+                </template>
+                <el-input
+                  v-model="form.region"
+                  placeholder="如:全国"
+                  maxlength="50"
+                  show-word-limit
+                />
+              </el-form-item>
+
+              <el-form-item class="form-item span-full" prop="userType">
+                <template #label>
+                  <span class="field-label">目标用户 <span class="optional-badge">可选</span></span>
+                </template>
+                <el-input
+                  v-model="form.userType"
+                  placeholder="可选，如:商务宴请人群、年轻消费者"
+                  maxlength="50"
+                  show-word-limit
+                />
+              </el-form-item>
+            </div>
+          </div>
+        </section>
+
+        <section class="report-section">
+          <div class="section-head">
+            <div class="section-ico teal">
+              <el-icon><Aim /></el-icon>
+            </div>
+            <div class="section-titles">
+              <h2>诊断目标</h2>
+              <p>明确诉求与对比范围，让结论更贴合需求</p>
+            </div>
+          </div>
+
+          <div class="section-body">
+            <div class="form-grid">
+              <el-form-item class="form-item span-full" prop="userDemand">
+                <template #label>
+                  <span class="field-label">客户诉求 <span class="optional-badge">可选</span></span>
+                </template>
+                <el-input
+                  v-model="form.userDemand"
+                  type="textarea"
+                  :rows="4"
+                  placeholder="可选，最多 500 字"
+                  maxlength="500"
+                  show-word-limit
+                />
+              </el-form-item>
+
+              <el-form-item class="form-item span-full" prop="specifiedCompetitors">
+                <template #label>
+                  <span class="field-label">指定竞品 <span class="optional-badge">可选</span></span>
+                </template>
+                <div class="competitor-inputs">
+                  <el-input
+                    v-for="(_, index) in form.specifiedCompetitors"
+                    :key="index"
+                    v-model="form.specifiedCompetitors[index]"
+                    :placeholder="`竞品 ${index + 1}`"
+                    maxlength="100"
+                    show-word-limit
+                  />
+                  <div class="form-tip">
+                    <el-icon><InfoFilled /></el-icon>
+                    <span>留空将由系统自动识别 Top 3；若填写，需填满 3 个，并按这 3 个竞品进行对比诊断。</span>
+                  </div>
+                </div>
+              </el-form-item>
+            </div>
+          </div>
+        </section>
       </el-form>
 
-      <el-divider />
-      <div class="scope-preview admin-scope-preview">
-        <div class="scope-title">诊断范围预览</div>
-        <div class="scope-grid">
-          <div class="scope-item">
-            <div class="scope-number">{{ scopeNumber(effectiveScopePreview?.platformCount) }}</div>
-            <div class="scope-label">AI 平台</div>
+      <section class="report-section">
+        <div class="section-head">
+          <div class="section-ico amber">
+            <el-icon><TrendCharts /></el-icon>
           </div>
-          <div class="scope-item">
-            <div class="scope-number">{{ scopeNumber(effectiveScopePreview?.promptQueryCount) }}</div>
-            <div class="scope-label">Prompt 查询</div>
-          </div>
-          <div class="scope-item">
-            <div class="scope-number">{{ scopeNumber(effectiveScopePreview?.llmCallUpperBound) }}</div>
-            <div class="scope-label">最多 LLM 调用</div>
-          </div>
-          <div class="scope-item">
-            <div class="scope-number">{{ scopeNumber(effectiveScopePreview?.dimensionCount) }}</div>
-            <div class="scope-label">分析维度</div>
+          <div class="section-titles">
+            <h2>诊断范围预览</h2>
+            <p>按当前配置预估的覆盖规模</p>
           </div>
         </div>
-        <div class="scope-note">{{ scopeNote }}</div>
-      </div>
 
-      <el-divider />
-      <section class="prompt-preview">
-        <button
-          class="prompt-summary"
-          :class="{ 'is-open': promptPanelOpen }"
-          type="button"
-          :aria-expanded="promptPanelOpen"
-          aria-controls="prompt-preview-panel"
-          @click="togglePromptPanel"
-        >
-          <span class="summary-main">问题预览</span>
-          <span class="summary-text">{{ promptSummary }}</span>
-          <span class="summary-action">
-            <span class="action-text">{{ promptPanelOpen ? '收起' : '展开' }}</span>
-            <span class="action-icon-wrap">
-              <el-icon class="action-icon">
-                <ArrowDown />
-              </el-icon>
-            </span>
-          </span>
-        </button>
-
-        <el-alert
-          v-if="!canPreviewPrompts"
-          title="请先填写品牌名称、行业、身份和地区后查看 Prompt 预览。"
-          type="warning"
-          :closable="false"
-          show-icon
-          class="prompt-alert"
-        />
-
-        <div
-          v-if="promptPanelOpen && canPreviewPrompts"
-          id="prompt-preview-panel"
-          class="prompt-panel"
-        >
-          <div v-if="promptLoading" class="prompt-empty">正在读取 Prompt 清单...</div>
-          <div v-else-if="promptLoadFailed" class="prompt-empty">
-            Prompt 清单读取失败,请刷新页面后重试。
-          </div>
-          <template v-else>
-            <div class="prompt-toolbar">
-              <div class="prompt-version">模板版本: {{ promptTemplateVersion || '—' }}</div>
-              <el-button
-                v-if="activePromptTab === 'template'"
-                size="small"
-                :disabled="modifiedCount === 0"
-                @click="restoreAllModified"
-              >
-                全部恢复默认
-              </el-button>
+        <div class="section-body">
+          <div class="scope-grid">
+            <div class="scope-item">
+              <div class="scope-icon"><el-icon><Monitor /></el-icon></div>
+              <div class="scope-number">{{ scopeNumber(effectiveScopePreview?.platformCount) }}</div>
+              <div class="scope-label">AI 平台</div>
             </div>
+            <div class="scope-item">
+              <div class="scope-icon"><el-icon><Search /></el-icon></div>
+              <div class="scope-number">{{ scopeNumber(effectiveScopePreview?.promptQueryCount) }}</div>
+              <div class="scope-label">Prompt 查询</div>
+            </div>
+            <div class="scope-item">
+              <div class="scope-icon"><el-icon><Promotion /></el-icon></div>
+              <div class="scope-number">{{ scopeNumber(effectiveScopePreview?.llmCallUpperBound) }}</div>
+              <div class="scope-label">最多 LLM 调用</div>
+            </div>
+            <div class="scope-item">
+              <div class="scope-icon"><el-icon><Star /></el-icon></div>
+              <div class="scope-number">{{ scopeNumber(effectiveScopePreview?.dimensionCount) }}</div>
+              <div class="scope-label">分析维度</div>
+            </div>
+          </div>
+          <div class="scope-note">
+            <el-icon><InfoFilled /></el-icon>
+            <span>{{ scopeNote }}</span>
+          </div>
+        </div>
+
+        <div class="prompt-preview">
+          <button
+            class="prompt-summary"
+            :class="{ 'is-open': promptPanelOpen }"
+            type="button"
+            :aria-expanded="promptPanelOpen"
+            aria-controls="prompt-preview-panel"
+            @click="togglePromptPanel"
+          >
+            <span class="summary-main">问题预览</span>
+            <span class="summary-text">{{ promptSummary }}</span>
+            <span class="summary-action">
+              <span class="action-text">{{ promptPanelOpen ? '收起' : '展开' }}</span>
+              <span class="action-icon-wrap">
+                <el-icon class="action-icon">
+                  <ArrowDown />
+                </el-icon>
+              </span>
+            </span>
+          </button>
+
+          <el-alert
+            v-if="!canPreviewPrompts"
+            title="请先填写品牌名称、行业、身份和地区后查看 Prompt 预览。"
+            type="warning"
+            :closable="false"
+            show-icon
+            class="prompt-alert"
+          />
+
+          <div
+            v-if="promptPanelOpen && canPreviewPrompts"
+            id="prompt-preview-panel"
+            class="prompt-panel"
+          >
+            <div v-if="promptLoading" class="prompt-empty">正在读取 Prompt 清单...</div>
+            <div v-else-if="promptLoadFailed" class="prompt-empty">
+              Prompt 清单读取失败,请刷新页面后重试。
+            </div>
+            <template v-else>
+              <div class="prompt-toolbar">
+                <div class="prompt-version">模板版本: {{ promptTemplateVersion || '—' }}</div>
+                <el-button
+                  v-if="activePromptTab === 'template'"
+                  size="small"
+                  :disabled="modifiedCount === 0"
+                  @click="restoreAllModified"
+                >
+                  全部恢复默认
+                </el-button>
+              </div>
 
             <el-tabs v-model="activePromptTab" class="prompt-tabs">
               <el-tab-pane label="模板问题预览" name="template">
@@ -396,16 +488,21 @@
             </el-tabs>
           </template>
         </div>
+        </div>
       </section>
+    </main>
 
-      <div class="action-bar">
-        <el-button @click="onCancel">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="onSubmit">
+    <footer class="action-bar">
+      <div class="report-wrap action-inner">
+        <span class="template-version">模板版本 <b>{{ promptTemplateVersion || 'v3' }}</b></span>
+        <span class="action-spacer"></span>
+        <button class="ghost-btn" type="button" @click="onCancel">取消</button>
+        <el-button class="submit-btn" type="primary" :loading="submitting" @click="onSubmit">
+          <el-icon v-if="!submitting"><Check /></el-icon>
           {{ submitting ? '提交中...' : '提交生成' }}
         </el-button>
-        <div class="submit-source-tip">将使用当前 Tab 的问题生成报告：{{ activePromptTab === 'template' ? '模板问题预览' : 'LLM问题预览' }}</div>
       </div>
-    </el-card>
+    </footer>
   </div>
 </template>
 
@@ -413,7 +510,20 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { ArrowDown } from '@element-plus/icons-vue'
+import {
+  Aim,
+  ArrowDown,
+  ArrowRight,
+  Check,
+  InfoFilled,
+  MagicStick,
+  Monitor,
+  OfficeBuilding,
+  Promotion,
+  Search,
+  Star,
+  TrendCharts
+} from '@element-plus/icons-vue'
 import {
   createReport,
   generateLlmPromptQuestions,
@@ -443,6 +553,7 @@ interface PromptItem {
 }
 
 type CreateReportForm = Omit<CreateReportRequest, 'specifiedCompetitors'> & {
+  brandFormerNames: string[]
   specifiedCompetitors: string[]
 }
 
@@ -501,6 +612,7 @@ const llmBaseSnapshot = ref('')
 const llmLastWarning = ref('')
 const llmQuestionSeq = ref(0)
 const llmQuestions = ref<LlmQuestionDraftItem[]>([])
+const DEFAULT_USER_DEMAND = '了解品牌在AI搜索中的真实表现。'
 const llmPlan = reactive<LlmPromptQuestionPlan>({
   totalCount: 0,
   categoryCounts: emptyCategoryCounts()
@@ -508,10 +620,11 @@ const llmPlan = reactive<LlmPromptQuestionPlan>({
 
 const form = reactive<CreateReportForm>({
   brandName: '',
+  brandFormerNames: ['', '', ''],
   industry: '',
   industryRole: '',
   region: '',
-  userDemand: '',
+  userDemand: DEFAULT_USER_DEMAND,
   userType: '',
   specifiedCompetitors: ['', '', ''],
   promptTemplateVersion: '',
@@ -529,11 +642,14 @@ function validateSpecifiedCompetitors(_: unknown, value: string[] | undefined, c
     return
   }
   const normalizedBrand = normalizeCompetitorName(form.brandName)
+  const normalizedFormerNames = new Set(
+    normalizeBrandFormerNameInputs(form.brandFormerNames).map(normalizeCompetitorName)
+  )
   const dedup = new Set<string>()
   for (const item of values) {
     const normalized = normalizeCompetitorName(item)
-    if (normalized === normalizedBrand) {
-      callback(new Error('指定竞品不能与品牌名称相同'))
+    if (normalized === normalizedBrand || normalizedFormerNames.has(normalized)) {
+      callback(new Error('指定竞品不能与品牌名称或曾用名相同'))
       return
     }
     if (dedup.has(normalized)) {
@@ -545,8 +661,32 @@ function validateSpecifiedCompetitors(_: unknown, value: string[] | undefined, c
   callback()
 }
 
+function validateBrandFormerNames(_: unknown, value: string[] | undefined, callback: (error?: Error) => void) {
+  const values = normalizeBrandFormerNameInputs(value)
+  if (values.length > 3) {
+    callback(new Error('品牌曾用名最多 3 个'))
+    return
+  }
+  const normalizedBrand = normalizeCompetitorName(form.brandName)
+  const dedup = new Set<string>()
+  for (const item of values) {
+    const normalized = normalizeCompetitorName(item)
+    if (normalized === normalizedBrand) {
+      callback(new Error('品牌曾用名不能与品牌名称相同'))
+      return
+    }
+    if (dedup.has(normalized)) {
+      callback(new Error('品牌曾用名不能重复'))
+      return
+    }
+    dedup.add(normalized)
+  }
+  callback()
+}
+
 const rules: FormRules = {
   brandName: [{ required: true, message: '品牌名不能为空', trigger: 'blur' }],
+  brandFormerNames: [{ validator: validateBrandFormerNames, trigger: 'blur' }],
   industry: [{ required: true, message: '请选择行业', trigger: 'change' }],
   industryRole: [{ required: true, message: '请选择身份', trigger: 'change' }],
   region: [{ required: true, message: '请输入地区', trigger: 'blur' }],
@@ -592,12 +732,23 @@ function normalizeSpecifiedCompetitorInputs(value: string[] | undefined): string
     .filter(Boolean)
 }
 
+function normalizeBrandFormerNameInputs(value: string[] | undefined): string[] {
+  return (value || [])
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
 function normalizeCompetitorName(value: string | undefined): string {
   return (value || '').trim().replace(/\s+/g, '').toLowerCase()
 }
 
 function specifiedCompetitorsForSubmit(): string[] | undefined {
   const values = normalizeSpecifiedCompetitorInputs(form.specifiedCompetitors)
+  return values.length === 0 ? undefined : values
+}
+
+function brandFormerNamesForSubmit(): string[] | undefined {
+  const values = normalizeBrandFormerNameInputs(form.brandFormerNames)
   return values.length === 0 ? undefined : values
 }
 
@@ -795,10 +946,13 @@ async function applyRegenerateDraftFromRoute() {
 
 function applyRegenerateDraft(draft: RegenerateDraftVO) {
   form.brandName = draft.brandName || ''
+  form.brandFormerNames = draft.brandFormerNames?.length
+    ? [...draft.brandFormerNames, '', '', ''].slice(0, 3)
+    : ['', '', '']
   form.industry = draft.industry || ''
   form.industryRole = draft.industryRole || ''
   form.region = draft.region || ''
-  form.userDemand = draft.userDemand || ''
+  form.userDemand = draft.userDemand || DEFAULT_USER_DEMAND
   form.userType = draft.userType || ''
   form.specifiedCompetitors = draft.specifiedCompetitors?.length
     ? [...draft.specifiedCompetitors, '', '', ''].slice(0, 3)
@@ -1169,10 +1323,12 @@ async function onSubmit() {
   submitting.value = true
   try {
     const specifiedCompetitors = specifiedCompetitorsForSubmit()
+    const brandFormerNames = brandFormerNamesForSubmit()
     const payload: CreateReportRequest =
       activePromptTab.value === 'llm'
         ? {
             brandName: form.brandName.trim(),
+            brandFormerNames,
             industry: form.industry,
             industryRole: form.industryRole,
             region: form.region.trim(),
@@ -1188,6 +1344,7 @@ async function onSubmit() {
           }
         : {
             brandName: form.brandName.trim(),
+            brandFormerNames,
             industry: form.industry,
             industryRole: form.industryRole,
             region: form.region.trim(),
@@ -1231,13 +1388,18 @@ async function handleTemplateVersionChanged() {
   }
 }
 
+function onSaveDraft() {
+  ElMessage.info('保存草稿功能待接入')
+}
+
 async function onCancel() {
   const hasInput =
     form.brandName ||
+    normalizeBrandFormerNameInputs(form.brandFormerNames).length > 0 ||
     form.industry ||
     form.industryRole ||
     form.region ||
-    form.userDemand ||
+    (form.userDemand && form.userDemand !== DEFAULT_USER_DEMAND) ||
     form.userType ||
     normalizeSpecifiedCompetitorInputs(form.specifiedCompetitors).length > 0 ||
     modifiedCount.value > 0 ||
@@ -1300,102 +1462,367 @@ function formatInt(value: number) {
 
 <style scoped>
 .presale-report-create {
-  max-width: 1180px;
+  --brand-1: #2f6df6;
+  --brand-2: #16b8a6;
+  --brand-grad: linear-gradient(120deg, #2f6df6 0%, #16b8a6 100%);
+  --accent-soft: #eaf1ff;
+  --accent-ring: rgba(47, 109, 246, 0.16);
+  --text: #1a2233;
+  --text-2: #5a6478;
+  --text-3: #98a1b3;
+  --border: #e7ebf2;
+  --border-strong: #d7dde8;
+  min-height: calc(100vh - 24px);
+  padding-bottom: 84px;
+  background: #f4f6fb;
+  color: var(--text);
+  font-size: 14px;
 }
-.page-header {
-  margin-bottom: 0;
+.report-wrap {
+  width: min(100%, 980px);
+  margin: 0;
+  padding: 0 18px;
+}
+.report-topbar {
+  position: relative;
+  z-index: 40;
+  background: #ffffff;
+  border-bottom: 1px solid var(--border);
+  border-radius: 10px 10px 0 0;
+}
+.topbar-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+}
+.logo-dot {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: 8px;
+  color: #ffffff;
+  background: var(--brand-grad);
+  box-shadow: 0 2px 8px rgba(47, 109, 246, 0.3);
+}
+.topbar-title {
+  color: #111827;
+  font-size: 15px;
+  font-weight: 800;
+}
+.topbar-spacer,
+.action-spacer {
+  flex: 1;
+}
+.ghost-btn {
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.ghost-btn:hover {
+  border-color: var(--brand-1);
+  background: var(--accent-soft);
+  color: var(--brand-1);
+}
+.report-main {
+  padding-top: 22px;
+}
+.page-head {
+  margin-bottom: 18px;
+}
+.breadcrumb-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 600;
+}
+.breadcrumb-line a {
+  color: var(--text-3);
+  text-decoration: none;
+}
+.breadcrumb-line span {
+  color: var(--text-2);
 }
 .page-title {
-  margin: 8px 0 0 0;
+  margin: 0;
+  color: #101828;
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 1.2;
 }
-.form-card {
-  padding: 0;
+.page-subtitle {
+  margin: 6px 0 0;
+  color: var(--text-2);
+  font-size: 14px;
 }
-.form-tip {
-  margin-left: 12px;
-  color: #909399;
+.report-section {
+  overflow: hidden;
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(20, 30, 55, 0.04), 0 1px 3px rgba(20, 30, 55, 0.05);
+}
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--border);
+  background: #fafbfd;
+}
+.section-ico {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 17px;
+}
+.section-ico.blue {
+  background: linear-gradient(135deg, #3f7bff, #2f6df6);
+}
+.section-ico.teal {
+  background: linear-gradient(135deg, #1fc9b6, #12a594);
+}
+.section-ico.amber {
+  background: linear-gradient(135deg, #ffb245, #f59e0b);
+}
+.section-titles h2 {
+  margin: 0;
+  color: #111827;
+  font-size: 15px;
+  font-weight: 800;
+}
+.section-titles p {
+  margin: 2px 0 0;
+  color: var(--text-3);
   font-size: 12px;
 }
-.competitor-inputs {
+.section-body {
+  padding: 22px 24px 24px;
+}
+.basic-info-form {
+  width: 100%;
+}
+.form-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(140px, 1fr));
-  gap: 10px 12px;
-  width: min(100%, 760px);
+  grid-template-columns: 1fr;
+  gap: 18px;
 }
-.competitor-inputs .form-tip {
+.form-item {
+  min-width: 0;
+  margin-bottom: 0;
+}
+.span-full {
   grid-column: 1 / -1;
-  margin-left: 0;
 }
-.scope-preview {
-  padding: 16px;
-  margin: 4px 0 14px;
-}
-.scope-title {
-  font-size: 15px;
-  color: #0f172a;
+.field-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text);
+  font-size: 13px;
   font-weight: 800;
-  margin-bottom: 12px;
+}
+.req {
+  color: #e5484d;
+  font-weight: 800;
+}
+.optional-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #f1f3f8;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+}
+.basic-info-form :deep(.el-form-item__label) {
+  padding-bottom: 8px;
+  line-height: 1.2;
+}
+.basic-info-form :deep(.el-form-item.is-required:not(.is-no-asterisk).asterisk-left > .el-form-item__label::before) {
+  display: none;
+}
+.basic-info-form :deep(.el-input),
+.basic-info-form :deep(.el-select),
+.basic-info-form :deep(.el-textarea) {
+  width: 100%;
+}
+.basic-info-form :deep(.el-input__wrapper),
+.basic-info-form :deep(.el-select__wrapper) {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 0 0 1.5px var(--border-strong) inset;
+  transition: box-shadow 0.15s ease, background 0.15s ease;
+}
+.basic-info-form :deep(.el-input__wrapper:hover),
+.basic-info-form :deep(.el-select__wrapper:hover) {
+  box-shadow: 0 0 0 1.5px #c2cad8 inset;
+}
+.basic-info-form :deep(.el-input__wrapper.is-focus),
+.basic-info-form :deep(.el-select__wrapper.is-focused) {
+  box-shadow: 0 0 0 1.5px var(--brand-1) inset, 0 0 0 4px var(--accent-ring);
+}
+.basic-info-form :deep(.el-textarea__inner) {
+  min-height: 104px !important;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 0 0 1.5px var(--border-strong) inset;
+  line-height: 1.65;
+  resize: vertical;
+}
+.basic-info-form :deep(.el-textarea__inner:hover) {
+  box-shadow: 0 0 0 1.5px #c2cad8 inset;
+}
+.basic-info-form :deep(.el-textarea__inner:focus) {
+  box-shadow: 0 0 0 1.5px var(--brand-1) inset, 0 0 0 4px var(--accent-ring);
+}
+.basic-info-form :deep(.el-input__count),
+.basic-info-form :deep(.el-textarea .el-input__count) {
+  color: var(--text-3);
+  background: transparent;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.form-tip {
+  grid-column: 1 / -1;
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.form-tip .el-icon {
+  margin-top: 3px;
+  flex: none;
+}
+.inline-tip {
+  display: inline-flex;
+  margin-top: 8px;
+}
+.competitor-inputs,
+.former-name-inputs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
 }
 .scope-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-  max-width: 760px;
-  margin-bottom: 12px;
+  gap: 14px;
 }
 .scope-item {
-  text-align: center;
-  padding: 16px;
-  background: rgba(255, 255, 255, 0.78);
-  border: 1px solid #dbeafe;
-  border-radius: 12px;
+  position: relative;
+  overflow: hidden;
+  min-height: 126px;
+  padding: 16px 16px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fafbfd;
+}
+.scope-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--brand-grad);
+}
+.scope-icon {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--brand-1);
+  font-size: 15px;
 }
 .scope-number {
-  font-size: 28px;
-  font-weight: 800;
-  color: #2563eb;
+  color: #111827;
   font-family: 'JetBrains Mono', Consolas, monospace;
+  font-size: 28px;
+  font-weight: 900;
+  line-height: 1;
 }
 .scope-label {
+  margin-top: 6px;
+  color: var(--text-2);
   font-size: 12px;
-  color: #909399;
-  margin-top: 4px;
 }
 .scope-note {
-  color: #909399;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid #d8e4ff;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: #2a4a8f;
   font-size: 12px;
-  margin-top: 8px;
+  line-height: 1.6;
+}
+.scope-note .el-icon {
+  margin-top: 3px;
+  flex: none;
 }
 .prompt-preview {
-  padding: 8px 0 0;
+  padding: 0 24px 24px;
 }
 .prompt-summary {
   width: 100%;
   min-height: 56px;
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 16px;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 12px;
   align-items: center;
   padding: 14px 16px;
-  border: 1px solid #dbeafe;
-  border-radius: 14px;
-  background: linear-gradient(135deg, #ffffff, #f8fbff);
-  color: #303133;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+  background: #fafbfd;
+  color: var(--text);
   cursor: pointer;
   text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 .prompt-summary:hover {
-  border-color: #93c5fd;
+  border-color: #c2cad8;
+  background: #f2f5fa;
 }
 .prompt-summary:focus-visible {
-  outline: 2px solid #409eff;
+  outline: 2px solid var(--brand-1);
   outline-offset: 2px;
 }
 .summary-main {
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 800;
 }
 .summary-text {
-  color: #606266;
+  color: var(--text-3);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -1403,7 +1830,7 @@ function formatInt(value: number) {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #409eff;
+  color: var(--brand-1);
   font-size: 13px;
   user-select: none;
 }
@@ -1417,19 +1844,19 @@ function formatInt(value: number) {
   width: 24px;
   height: 24px;
   border-radius: 50%;
-  background: rgba(64, 158, 255, 0.08);
+  background: var(--accent-soft);
   transition: background-color 0.2s ease, transform 0.2s ease;
 }
 .action-icon {
   font-size: 14px;
-  color: #409eff;
+  color: var(--brand-1);
   transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 .prompt-summary.is-open .action-icon {
   transform: rotate(180deg);
 }
 .prompt-summary:hover .action-icon-wrap {
-  background: rgba(64, 158, 255, 0.16);
+  background: #dfe9ff;
 }
 .prompt-summary:active .action-icon-wrap {
   transform: scale(0.92);
@@ -1587,18 +2014,49 @@ function formatInt(value: number) {
   margin-top: 8px;
 }
 .action-bar {
-  margin-top: 24px;
-  padding-top: 16px;
-  border-top: 1px solid #e4e7ed;
-  text-align: right;
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  border-top: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 -2px 16px rgba(20, 30, 55, 0.05);
+  backdrop-filter: blur(10px);
 }
-.submit-source-tip {
-  margin-top: 10px;
-  color: #909399;
+.action-inner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 62px;
+}
+.template-version {
+  color: var(--text-3);
   font-size: 12px;
 }
-.action-bar .el-button + .el-button {
-  margin-left: 12px;
+.template-version b {
+  color: var(--text-2);
+  font-weight: 800;
+}
+.submit-btn {
+  min-height: 38px;
+  padding: 0 22px;
+  border: none;
+  border-radius: 8px;
+  background: var(--brand-grad);
+  box-shadow: 0 4px 14px rgba(47, 109, 246, 0.32);
+  font-size: 13px;
+  font-weight: 800;
+}
+.submit-btn:hover,
+.submit-btn:focus {
+  border: none;
+  background: var(--brand-grad);
+  filter: brightness(1.05);
+  box-shadow: 0 6px 20px rgba(47, 109, 246, 0.4);
+}
+.submit-btn :deep(.el-icon) {
+  margin-right: 6px;
 }
 :deep(.missing-var) {
   color: #909399;
@@ -1610,14 +2068,27 @@ function formatInt(value: number) {
 }
 
 @media (max-width: 900px) {
-  .presale-report-create {
-    padding: 12px;
+  .report-main {
+    padding-top: 18px;
+  }
+  .section-head,
+  .section-body,
+  .prompt-preview {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .page-title {
+    font-size: 22px;
+  }
+  .former-name-inputs,
+  .competitor-inputs {
+    grid-template-columns: 1fr;
   }
   .scope-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .prompt-summary {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: auto 1fr auto;
   }
   .summary-text {
     grid-column: 1 / -1;
@@ -1627,6 +2098,26 @@ function formatInt(value: number) {
   }
   .llm-category-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .topbar-title {
+    font-size: 15px;
+  }
+  .scope-grid {
+    grid-template-columns: 1fr;
+  }
+  .action-inner {
+    gap: 10px;
+  }
+  .template-version {
+    display: none;
+  }
+  .ghost-btn,
+  .submit-btn {
+    padding-left: 14px;
+    padding-right: 14px;
   }
 }
 </style>

@@ -12,6 +12,7 @@ import java.util.Map;
 public class RegenerateDraftVO {
     private Long reportId;
     private String brandName;
+    private List<String> brandFormerNames;
     private String industry;
     private String industryRole;
     private String region;

@@ -67,7 +67,7 @@ class PresaleRawSnapshotAssemblerTest {
                 platform("bing_copilot", "Bing Copilot"),
                 platform("kimi", "Kimi")
         );
-        when(competitorAggregator.aggregateBatch1MentionStats(1001L, "Acme"))
+        when(competitorAggregator.aggregateBatch1MentionStats(1001L, List.of("Acme")))
                 .thenReturn(new PresaleCompetitorAggregator.Batch1MentionStats(
                         Map.of("claude", 2), Map.of("claude", "Claude"), 4
                 ));
@@ -200,7 +200,7 @@ class PresaleRawSnapshotAssemblerTest {
 
         mockCommonCounts(2L, 1L, 10L, 10L);
         mockEnabledPlatforms(platform("kimi", "Kimi"));
-        when(competitorAggregator.aggregateBatch1MentionStats(1001L, "Acme"))
+        when(competitorAggregator.aggregateBatch1MentionStats(1001L, List.of("Acme")))
                 .thenReturn(new PresaleCompetitorAggregator.Batch1MentionStats(Map.of(), Map.of(), 4));
         when(benchmarkResolver.resolve("科技", "CTO")).thenReturn(benchmark());
         when(aiPromptResultMapper.selectList(any())).thenReturn(List.of());

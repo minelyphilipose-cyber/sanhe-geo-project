@@ -1,6 +1,7 @@
 package com.huanjing.geo.module.presale.export.service;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.huanjing.geo.common.exception.BizException;
 import com.huanjing.geo.module.presale.access.PresaleAccessService;
@@ -30,6 +31,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -285,6 +288,7 @@ public class PresaleReportExportService {
         return ReportDetailVO.builder()
                 .reportId(report.getId())
                 .brandName(report.getBrandName())
+                .brandFormerNames(parseJsonStringArray(report.getBrandFormerNames()))
                 .industry(report.getIndustry())
                 .industryRole(report.getIndustryRole())
                 .region(report.getRegion())
@@ -299,6 +303,27 @@ public class PresaleReportExportService {
                         version.getComputedSnapshotJson()))
                 .editableFieldMeta(l3Defaults.fieldMeta())
                 .build();
+    }
+
+    private List<String> parseJsonStringArray(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            if (node == null || !node.isArray()) {
+                return List.of();
+            }
+            List<String> out = new ArrayList<>();
+            for (JsonNode item : node) {
+                if (item != null && item.isTextual() && !item.asText().isBlank()) {
+                    out.add(item.asText().trim());
+                }
+            }
+            return out;
+        } catch (Exception ex) {
+            return List.of();
+        }
     }
 
     private ReportVersionMetaVO toVersionMeta(PresaleReportVersion version) {

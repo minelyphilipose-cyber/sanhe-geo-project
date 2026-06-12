@@ -55,6 +55,8 @@ export interface RawMeta {
  */
 export interface ClientInfo {
   brand_name: string;
+  /** 品牌曾用名,仅用于竞品统计排除,不参与本品牌提及判断。 */
+  brand_former_names?: string[];
   industry: string;
   industry_role: string;
   region: string;

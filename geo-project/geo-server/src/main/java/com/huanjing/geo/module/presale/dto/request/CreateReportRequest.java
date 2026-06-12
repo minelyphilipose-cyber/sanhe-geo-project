@@ -16,6 +16,9 @@ public class CreateReportRequest {
     @Size(max = 100, message = "品牌名最多 100 字")
     private String brandName;
 
+    /** 品牌曾用名,可选,最多 3 个。仅用于竞品统计排除,不参与本品牌提及判断。 */
+    private List<@Size(max = 100, message = "品牌曾用名最多 100 字") String> brandFormerNames;
+
     /** 行业字典 key。Service 层校验是否存在于字典。 */
     @NotBlank(message = "行业不能为空")
     private String industry;

@@ -23,6 +23,9 @@ public class PresaleReport {
     /** 品牌名,业务唯一性由上层 Service 校验(不加 DB unique)。 */
     private String brandName;
 
+    /** 品牌曾用名 JSON 数组。仅用于竞品统计排除。 */
+    private String brandFormerNames;
+
     /** 行业字典 key(如 restaurant),值必须存在于 sys_dict_item(presale_industry)。 */
     private String industry;
 

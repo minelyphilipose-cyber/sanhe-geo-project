@@ -63,6 +63,7 @@ export interface ReportListItemVO {
 export interface ReportDetailVO {
   reportId: number
   brandName: string
+  brandFormerNames?: string[]
   industry: string
   industryRole: string
   region: string
@@ -98,6 +99,7 @@ export interface ReportScopePreviewVO {
 export interface RegenerateDraftVO {
   reportId: number
   brandName: string
+  brandFormerNames?: string[]
   industry: string
   industryRole: string
   region: string
@@ -273,6 +275,7 @@ export interface Page<T> {
 
 export interface CreateReportRequest {
   brandName: string
+  brandFormerNames?: string[]
   industry: string
   industryRole: string
   region: string

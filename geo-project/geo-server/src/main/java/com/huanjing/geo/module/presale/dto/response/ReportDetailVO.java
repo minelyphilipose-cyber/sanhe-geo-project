@@ -22,6 +22,7 @@ public class ReportDetailVO {
 
     private Long reportId;
     private String brandName;
+    private List<String> brandFormerNames;
     private String industry;
     private String industryRole;
     private String region;

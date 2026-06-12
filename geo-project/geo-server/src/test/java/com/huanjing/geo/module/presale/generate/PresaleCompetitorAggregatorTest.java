@@ -38,6 +38,22 @@ class PresaleCompetitorAggregatorTest {
     }
 
     @Test
+    void extractTop3_filtersBrandFormerNames() {
+        PresaleCompetitorAggregator aggregator = new PresaleCompetitorAggregator(
+                aiPromptResultMapper, new ObjectMapper());
+        when(aiPromptResultMapper.selectList(any())).thenReturn(List.of(
+                promptResult(1L, "[\"旧Acme\", \"Claude\"]"),
+                promptResult(2L, "[\"Acme旧名\", \"Gemini\"]"),
+                promptResult(3L, "[\"旧Acme\", \"Doubao\"]")
+        ));
+
+        List<String> competitors = aggregator.extractTopCompetitorsFromBatch1(
+                9202L, List.of("Acme", "旧 Acme", "Acme旧名"));
+
+        assertEquals(List.of("Claude", "Doubao", "Gemini"), competitors);
+    }
+
+    @Test
     void lessThan3Candidates_returnsActualSize() {
         PresaleCompetitorAggregator aggregator = new PresaleCompetitorAggregator(
                 aiPromptResultMapper, new ObjectMapper());

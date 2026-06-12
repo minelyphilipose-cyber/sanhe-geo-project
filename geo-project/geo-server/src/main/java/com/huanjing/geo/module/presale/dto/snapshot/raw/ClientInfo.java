@@ -7,6 +7,8 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+
 /**
  * 客户填报信息冻结副本。
  * <p>Schema v1.2 $.raw_snapshot.client_info</p>
@@ -25,6 +27,10 @@ public class ClientInfo {
     /** 品牌名(maxLength 200)。 */
     @JsonProperty("brand_name")
     private String brandName;
+
+    /** 品牌曾用名,仅用于竞品统计排除,不参与本品牌提及判断。 */
+    @JsonProperty("brand_former_names")
+    private List<String> brandFormerNames;
 
     /** 行业枚举值,来源 sys_dict_item(dict_type='presale_industry')。 */
     private String industry;

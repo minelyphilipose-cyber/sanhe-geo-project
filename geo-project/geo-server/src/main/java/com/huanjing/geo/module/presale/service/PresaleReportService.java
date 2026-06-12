@@ -135,10 +135,13 @@ public class PresaleReportService {
         currentUserService.ensurePermission(PERM_CREATE);
         Long userId = currentUserService.requireCurrentUser().getId();
         LocalDateTime now = LocalDateTime.now();
-        List<String> specifiedCompetitors = normalizeSpecifiedCompetitors(req.getSpecifiedCompetitors(), req.getBrandName());
+        List<String> brandFormerNames = normalizeBrandFormerNames(req.getBrandFormerNames(), req.getBrandName());
+        List<String> specifiedCompetitors = normalizeSpecifiedCompetitors(
+                req.getSpecifiedCompetitors(), req.getBrandName(), brandFormerNames);
 
         PresaleReport report = new PresaleReport();
         report.setBrandName(req.getBrandName());
+        report.setBrandFormerNames(toJsonArray(brandFormerNames, "品牌曾用名序列化失败"));
         report.setIndustry(req.getIndustry());
         report.setIndustryRole(req.getIndustryRole());
         report.setRegion(req.getRegion());
@@ -304,6 +307,7 @@ public class PresaleReportService {
         RegenerateDraftVO.RegenerateDraftVOBuilder builder = RegenerateDraftVO.builder()
                 .reportId(report.getId())
                 .brandName(report.getBrandName())
+                .brandFormerNames(parseJsonStringArray(report.getBrandFormerNames()))
                 .industry(report.getIndustry())
                 .industryRole(report.getIndustryRole())
                 .region(report.getRegion())
@@ -580,7 +584,41 @@ public class PresaleReportService {
         return result;
     }
 
-    private List<String> normalizeSpecifiedCompetitors(List<String> input, String brandName) {
+    private List<String> normalizeBrandFormerNames(List<String> input, String brandName) {
+        if (input == null || input.isEmpty()) {
+            return List.of();
+        }
+        List<String> values = input.stream()
+                .map(value -> value == null ? "" : value.trim())
+                .filter(value -> !value.isEmpty())
+                .toList();
+        if (values.isEmpty()) {
+            return List.of();
+        }
+        if (values.size() > 3) {
+            throw new BizException(400, "品牌曾用名最多 3 个");
+        }
+
+        Set<String> dedup = new LinkedHashSet<>();
+        String normalizedBrand = normalizeCompetitorName(brandName);
+        for (String value : values) {
+            String normalized = normalizeCompetitorName(value);
+            if (normalized.isEmpty()) {
+                throw new BizException(400, "品牌曾用名不能为空");
+            }
+            if (normalized.equals(normalizedBrand)) {
+                throw new BizException(400, "品牌曾用名不能与品牌名称相同");
+            }
+            if (!dedup.add(normalized)) {
+                throw new BizException(400, "品牌曾用名不能重复");
+            }
+        }
+        return values;
+    }
+
+    private List<String> normalizeSpecifiedCompetitors(List<String> input,
+                                                       String brandName,
+                                                       List<String> brandFormerNames) {
         if (input == null || input.isEmpty()) {
             return List.of();
         }
@@ -595,14 +633,21 @@ public class PresaleReportService {
             throw new BizException(400, "指定竞品必须为空或正好 3 个");
         }
         Set<String> dedup = new LinkedHashSet<>();
-        String normalizedBrand = normalizeCompetitorName(brandName);
+        Set<String> selfNames = new LinkedHashSet<>();
+        selfNames.add(normalizeCompetitorName(brandName));
+        if (brandFormerNames != null) {
+            brandFormerNames.stream()
+                    .map(this::normalizeCompetitorName)
+                    .filter(value -> !value.isEmpty())
+                    .forEach(selfNames::add);
+        }
         for (String value : values) {
             String normalized = normalizeCompetitorName(value);
             if (normalized.isEmpty()) {
                 throw new BizException(400, "指定竞品不能为空");
             }
-            if (normalized.equals(normalizedBrand)) {
-                throw new BizException(400, "指定竞品不能与品牌名称相同");
+            if (selfNames.contains(normalized)) {
+                throw new BizException(400, "指定竞品不能与品牌名称或曾用名相同");
             }
             if (!dedup.add(normalized)) {
                 throw new BizException(400, "指定竞品不能重复");
@@ -616,13 +661,17 @@ public class PresaleReportService {
     }
 
     private String toJsonArray(List<String> values) {
+        return toJsonArray(values, "指定竞品序列化失败");
+    }
+
+    private String toJsonArray(List<String> values, String errorMessage) {
         if (values == null || values.isEmpty()) {
             return null;
         }
         try {
             return objectMapper.writeValueAsString(values);
         } catch (Exception ex) {
-            throw new BizException(500, "指定竞品序列化失败");
+            throw new BizException(500, errorMessage);
         }
     }
 

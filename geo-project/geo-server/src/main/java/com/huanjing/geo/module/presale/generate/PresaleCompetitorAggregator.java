@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.Collections;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -47,6 +48,10 @@ public class PresaleCompetitorAggregator {
     }
 
     public Batch1MentionStats aggregateBatch1MentionStats(Long versionId, String brandName) {
+        return aggregateBatch1MentionStats(versionId, Collections.singletonList(brandName));
+    }
+
+    public Batch1MentionStats aggregateBatch1MentionStats(Long versionId, Collection<String> selfBrandNames) {
         List<PresaleAiPromptResult> rows = aiPromptResultMapper.selectList(
                 new LambdaQueryWrapper<PresaleAiPromptResult>()
                         .eq(PresaleAiPromptResult::getVersionId, versionId)
@@ -57,7 +62,7 @@ public class PresaleCompetitorAggregator {
             return new Batch1MentionStats(Collections.emptyMap(), Collections.emptyMap(), 0);
         }
 
-        String normalizedBrand = normalizeName(brandName);
+        Set<String> normalizedSelfNames = normalizeSelfNames(selfBrandNames);
         Map<String, Integer> countByNormalized = new HashMap<>();
         Map<String, String> displayByNormalized = new LinkedHashMap<>();
 
@@ -83,7 +88,7 @@ public class PresaleCompetitorAggregator {
                         continue;
                     }
                     String normalized = normalizeName(display);
-                    if (normalized.isEmpty() || normalized.equals(normalizedBrand)) {
+                    if (normalized.isEmpty() || normalizedSelfNames.contains(normalized)) {
                         continue;
                     }
                     if (!rowDedup.add(normalized)) {
@@ -106,16 +111,28 @@ public class PresaleCompetitorAggregator {
     }
 
     public List<String> extractTopCompetitorsFromBatch1(Long versionId, String brandName) {
-        return extractTopCompetitorStatsFromBatch1(versionId, brandName).stream()
+        return extractTopCompetitorStatsFromBatch1(versionId, Collections.singletonList(brandName)).stream()
+                .map(ExtractedCompetitor::name)
+                .toList();
+    }
+
+    public List<String> extractTopCompetitorsFromBatch1(Long versionId, Collection<String> selfBrandNames) {
+        return extractTopCompetitorStatsFromBatch1(versionId, selfBrandNames).stream()
                 .map(ExtractedCompetitor::name)
                 .toList();
     }
 
     public List<RawCompetitorMention> extractTopRawCompetitorMentions(Long versionId, String brandName, int limit) {
+        return extractTopRawCompetitorMentions(versionId, Collections.singletonList(brandName), limit);
+    }
+
+    public List<RawCompetitorMention> extractTopRawCompetitorMentions(Long versionId,
+                                                                      Collection<String> selfBrandNames,
+                                                                      int limit) {
         if (limit <= 0) {
             return List.of();
         }
-        Batch1MentionStats stats = aggregateBatch1MentionStats(versionId, brandName);
+        Batch1MentionStats stats = aggregateBatch1MentionStats(versionId, selfBrandNames);
         return stats.countByNormalized().entrySet().stream()
                 .sorted(Comparator
                         .comparing(Map.Entry<String, Integer>::getValue, Comparator.reverseOrder())
@@ -130,9 +147,28 @@ public class PresaleCompetitorAggregator {
     }
 
     public List<ExtractedCompetitor> extractTopCompetitorStatsFromBatch1(Long versionId, String brandName) {
-        return extractTopRawCompetitorMentions(versionId, brandName, 3).stream()
+        return extractTopCompetitorStatsFromBatch1(versionId, Collections.singletonList(brandName));
+    }
+
+    public List<ExtractedCompetitor> extractTopCompetitorStatsFromBatch1(Long versionId,
+                                                                         Collection<String> selfBrandNames) {
+        return extractTopRawCompetitorMentions(versionId, selfBrandNames, 3).stream()
                 .map(item -> new ExtractedCompetitor(item.name(), item.mentionCount(), List.of(item.name())))
                 .toList();
+    }
+
+    private Set<String> normalizeSelfNames(Collection<String> selfBrandNames) {
+        if (selfBrandNames == null || selfBrandNames.isEmpty()) {
+            return Set.of();
+        }
+        Set<String> out = new HashSet<>();
+        for (String name : selfBrandNames) {
+            String normalized = normalizeName(name);
+            if (!normalized.isEmpty()) {
+                out.add(normalized);
+            }
+        }
+        return out;
     }
 
     /**
