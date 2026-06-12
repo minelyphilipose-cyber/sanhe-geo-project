@@ -17,6 +17,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.net.InetAddress;
+import java.net.URI;
+import java.net.UnknownHostException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -47,6 +50,9 @@ public class PresaleReportExportWorker {
 
     @Value("${geo.report.web-base-url:http://127.0.0.1:3000}")
     private String webBaseUrl;
+
+    @Value("${geo.report.web-fallback-base-url:http://127.0.0.1:3000}")
+    private String webFallbackBaseUrl;
 
     @Scheduled(fixedDelayString = "${geo.presale-export.worker.scan-interval-ms:1000}")
     public void scanAndRun() {
@@ -90,7 +96,7 @@ public class PresaleReportExportWorker {
             Files.createDirectories(workDir);
             Path pdfPath = workDir.resolve("report.pdf");
             debugDir = workDir.resolve("debug");
-            String renderUrl = trimTrailingSlash(webBaseUrl) + "/presale-print/" + token.token();
+            String renderUrl = buildRenderUrl(token.token());
             log.info("Presale export renderUrl: {}", renderUrl);
 
             memorySampler = new ChromiumMemorySampler(ProcessHandle.current());
@@ -311,6 +317,70 @@ public class PresaleReportExportWorker {
 
     private String trimTrailingSlash(String value) {
         return value != null && value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    private String buildRenderUrl(String token) {
+        return resolveRenderBaseUrl() + "/presale-print/" + token;
+    }
+
+    private String resolveRenderBaseUrl() {
+        try {
+            return requireResolvableBaseUrl(webBaseUrl, "geo.report.web-base-url");
+        } catch (IllegalStateException primaryFailure) {
+            if (hasText(webFallbackBaseUrl)) {
+                try {
+                    String fallbackBaseUrl = requireResolvableBaseUrl(
+                            webFallbackBaseUrl, "geo.report.web-fallback-base-url");
+                    log.warn("Presale export render base url is unavailable, fallback applied: primary={}, fallback={}",
+                            webBaseUrl, fallbackBaseUrl);
+                    return fallbackBaseUrl;
+                } catch (IllegalStateException fallbackFailure) {
+                    primaryFailure.addSuppressed(fallbackFailure);
+                }
+            }
+            throw primaryFailure;
+        }
+    }
+
+    private String requireResolvableBaseUrl(String value, String configName) {
+        if (!hasText(value)) {
+            throw new IllegalStateException("Presale export render base url is blank: " + configName);
+        }
+        String baseUrl = trimTrailingSlash(value.trim());
+        URI uri = parseRenderBaseUri(baseUrl, configName);
+        String host = uri.getHost();
+        if (!hasText(host)) {
+            throw new IllegalStateException("Presale export render base url host is blank: "
+                    + configName + "=" + baseUrl);
+        }
+        try {
+            InetAddress.getByName(host);
+            return baseUrl;
+        } catch (UnknownHostException ex) {
+            throw new IllegalStateException("Presale export render host is not resolvable: "
+                    + host + ". Configure REPORT_WEB_BASE_URL to an address reachable from the geo-server process; "
+                    + "Docker Compose can use http://geo-web, local deployments usually use http://127.0.0.1:3000.",
+                    ex);
+        }
+    }
+
+    private URI parseRenderBaseUri(String baseUrl, String configName) {
+        try {
+            URI uri = URI.create(baseUrl);
+            String scheme = uri.getScheme();
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                throw new IllegalStateException("Presale export render base url must use http or https: "
+                        + configName + "=" + baseUrl);
+            }
+            return uri;
+        } catch (IllegalArgumentException ex) {
+            throw new IllegalStateException("Presale export render base url is invalid: "
+                    + configName + "=" + baseUrl, ex);
+        }
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
     }
 
     private ExportRenderProfile buildRenderProfile() {
