@@ -1,8 +1,68 @@
-# COS 迁移与数据生命周期交接记录（2026-06-13）
+# 数据生命周期治理与 COS 迁移交接记录（2026-06-13）
+
+## 主线说明：数据清理才是原始目标
+
+本轮工作的原始目标不是“把 MinIO 换成 COS”，而是建立数据生命周期治理能力，防止数据库和对象存储随时间无限膨胀。核心业务目标包括：
+
+- 轮询明细 `poll_results` 等热数据定期汇总、冻结、对账后再清理；
+- 售前/文章/分发链路中的大字段先有汇总或交付记录，再进入 dry-run slim；
+- 文章正文先归档成可校验对象，再在满足前置条件后置空 DB 正文；
+- 所有清理、归档、置空动作都走 dry-run、审计、门控和可回滚的受控流程。
+
+当前之所以阶段性转向 COS，是因为“文章正文置空”会让对象存储成为正文的唯一在线副本。如果继续依赖单节点 MinIO，一旦置空后 MinIO 丢对象，就会造成客户正文不可恢复。因此 COS 迁移是文章正文置空之前的基础设施前置，不是数据生命周期治理的最终目标。
+
+换句话说：
+
+1. 数据生命周期治理是主线；
+2. COS 迁移是其中“文章正文可安全置空”的前置条件；
+3. COS 迁移完成后，应回到清理主线，继续推进 slim / purge / 置空 execute。
+
+## 数据生命周期当前完成度
+
+### 已完成或已验证
+
+- 汇总/回填基础：
+  - `poll_keyword_daily_summary`、`poll_platform_daily_summary`、`llm_usage_daily_summary`、`article_generation_daily_summary` 已建立；
+  - `PollSummaryRecomputeService` 已按 SET 语义整片重算；
+  - 已加 slice 锁、防 purged slice 被重算抹掉、backfill keyset 分页与审计。
+- 冻结基础：
+  - `report_period_freeze` 和 freeze guard 已建立；
+  - freeze 选择逻辑按季度、按真实落库时间取最新、空 keyword id 回退文本身份。
+- dry-run handler：
+  - slim payload dry-run 已实现；
+  - article body archive dry-run/execute 写入已实现；
+  - poll retention dry-run 已实现完整门控评估；
+  - object storage orphan dry-run 已实现引用登记清单和宽限期。
+- 文章正文归档写入：
+  - 已实现非破坏 execute：写对象、读回校验、条件回写 key/checksum/archived_at；
+  - 不置空 `content_markdown`；
+  - dev 已验证对象写入、checksum、orphan 引用识别。
+- 内容 URL 中立化：
+  - 新 brand material 图片访问已走 provider-neutral public proxy；
+  - dev 存量正文旧 MinIO 直链 rewrite 已验证。
+
+### 尚未完成，下一轮应继续推进
+
+- 文章正文置空 execute：
+  - 当前只完成归档写入，尚未置空 DB 正文；
+  - 置空前必须确认 COS 稳定、`getArticleBody` 对象分支、发布/改稿/retry rehydration 路径、待发渠道阻断。
+- slim execute：
+  - 售前 raw、文章过程快照、distribution payload 目前只到 dry-run；
+  - execute 仍未开启。
+- poll_results 真正 purge：
+  - 当前只到 dry-run；
+  - execute 仍未开启；
+  - purge 侧必须拿同一把 `data_retention_recompute_slice_lock`。
+- object storage 真删：
+  - 当前只到 orphan dry-run；
+  - execute 未开启；
+  - COS/MinIO 切换稳定前不应真删对象。
+- 数据保留策略：
+  - 客户保留下限、解约尾巴期、冷归档周期仍是配置位，待业务/合规拍板。
 
 ## 当前目标
 
-对象存储从单节点 MinIO 迁移到腾讯云 COS。稳定态目标：
+当前这个 workstream 的阶段性目标，是把对象存储从单节点 MinIO 迁移到腾讯云 COS，为后续“文章正文置空”扫清基础设施风险。稳定态目标：
 
 - 本地开发默认 MinIO；
 - 生产环境最终使用 COS；
@@ -213,4 +273,3 @@ GEO_STORAGE_READ_FALLBACK_TO_MINIO=false
 - 生产迁移是时间点快照；迁移后、切 COS 前新增的 MinIO 对象必须靠补迁覆盖。
 - `content_markdown` 存量旧直链在 prod 当前不阻塞，但退役 MinIO 前需要重新评估。
 - `mvn clean compile` 在 Windows 上可能因运行中的 8081 日志文件被锁失败；普通 `mvn compile -DskipTests` 已通过。
-
